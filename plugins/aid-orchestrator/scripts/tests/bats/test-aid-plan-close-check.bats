@@ -562,3 +562,226 @@ BASH
   run grep -c "^Head_note:" "$file"
   [ "$output" -eq 1 ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════
+# D4 / IMP-467 — grouped plan-final freshness (receipt-bound group)
+# ═══════════════════════════════════════════════════════════════════════
+
+# _seal_minimal_receipt <plan_id> <candidate_sha>
+#   A real, immutable sidecar ref at the exact derived path
+#   (refs/heads/aid-evidence/<plan>/<candidate>/R-test-1) containing ONLY
+#   receipt.json, plus the runtime manifest fields _pbm/_check2_receipt_
+#   covers_candidate read to recognise it. Minimal but REAL: same tree
+#   shape and hash-binding _pfsm_verify_plan_final_receipt enforces, not a
+#   loosened test-only shortcut.
+# _seal_minimal_receipt <plan_id> <candidate_sha> [receipt_candidate_override]
+#   A FULLY VALID receipt matching every field _check2_receipt_covers_candidate
+#   (mirroring _pfsm_verify_plan_final_receipt, D1) requires: exact derived
+#   ref path, exact schema keys, review_verdict:accepted, and plan_id/
+#   candidate_sha/run_id/evidence_ref/plan_base_commit/target_branch/
+#   target_head_at_freeze/candidate_frozen_at all bound to what the runtime
+#   manifest itself records. The optional 3rd arg lets a test seal a receipt
+#   whose OWN candidate_sha disagrees with the manifest's, to prove that is
+#   refused (not just "any resolvable ref accepted").
+_seal_minimal_receipt() {
+  local plan_id="$1" candidate="$2" receipt_candidate="${3:-$2}" run_id="R-test-1"
+  local base="0000000000000000000000000000000000000000000000000000000000000000"
+  base="${base:0:40}"
+  local target="main" target_head="1111111111111111111111111111111111111111" frozen_at="2026-01-01T00:00:00Z"
+  local ref="refs/heads/aid-evidence/${plan_id}/${receipt_candidate}/${run_id}"
+  local tmp; tmp=$(mktemp)
+  # D4 round-2 Codex MEDIUM: the manifest-side check now reuses D1's own
+  # exact-review-inventory check, which requires EVERY plan-final required
+  # output name present (not just one) — a receipt with a partial outputs{}
+  # is exactly what that check must reject.
+  local h64="sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  jq -nc --arg p "$plan_id" --arg c "$receipt_candidate" --arg r "$run_id" --arg ref "$ref" \
+        --arg b "$base" --arg t "$target" --arg th "$target_head" --arg fa "$frozen_at" --arg h "$h64" \
+    '{schema_version:"aid-plan-final-evidence-1", artifact_type:"plan_final_evidence_receipt",
+      review_verdict:"accepted", plan_id:$p, plan_base_commit:$b, candidate_sha:$c,
+      candidate_frozen_at:$fa, target_branch:$t, target_head_at_freeze:$th, run_id:$r,
+      evidence_ref:$ref, outputs:{
+        "semantic-review-final.json":$h, "audit-report.json":$h, "curator-report.json":$h,
+        "simplifier-report.md":$h, "delivery-report.json":$h, "review-profile.json":$h,
+        "plan-diff.json":$h, "audit-input-manifest.json":$h, "delivery-gate.json":$h,
+        "acceptance-evidence.json":$h, "dispatch-record.json":$h}}' \
+    > "$tmp"
+  local hash; hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
+  local blob; blob=$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$tmp")
+  rm -f "$tmp"
+  local tree; tree=$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$TEST_PROJECT_ROOT" mktree)
+  local commit; commit=$(git -C "$TEST_PROJECT_ROOT" commit-tree "$tree" -m "aid: seal plan-final evidence ${plan_id} ${run_id}")
+  git -C "$TEST_PROJECT_ROOT" update-ref "$ref" "$commit"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${plan_id}"
+  # The MANIFEST's own binding is what _check2_receipt_covers_candidate reads
+  # to derive the EXPECTED ref/hash — the receipt's ref points at
+  # <receipt_candidate>, but the manifest always claims <candidate> (the
+  # real one), so a mismatched receipt_candidate produces a ref the manifest
+  # itself does NOT expect, exactly like a forged/unrelated receipt would.
+  jq -n --arg ref "$ref" --arg h "$hash" --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" \
+        --arg b "$base" --arg t "$target" --arg th "$target_head" --arg fa "$frozen_at" \
+    '{plan_boundary_manifest: {plan_id:$p, candidate_sha:$c, plan_final_run_id:$r,
+      plan_base_commit:$b, target_branch:$t, target_branch_head_at_candidate_freeze:$th,
+      candidate_frozen_at:$fa, plan_final_evidence_ref:$ref, plan_final_evidence_receipt_sha256:$h}}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${plan_id}/plan-boundary-manifest.json"
+}
+
+# write_passing_boundary_report <plan_id> — same 2-commit pattern as
+# write_passing_delivery_report, for the SIBLING report.
+write_passing_boundary_report() {
+  local plan_id="$1"
+  local file="$TEST_PROJECT_ROOT/.aid-o/reports/${plan_id}-boundary.md"
+  cat > "$file" <<EOF
+---
+Head: PLACEHOLDER
+plan_id: "${plan_id}"
+---
+
+# Boundary Report
+EOF
+  git add "$file"
+  git commit -q -m "docs: add ${plan_id} boundary report"
+  local sha; sha=$(git rev-parse HEAD)
+  sed -i "s/PLACEHOLDER/${sha}/" "$file"
+  git add "$file"
+  git commit -q -m "docs: finalize ${plan_id} boundary report head"
+}
+
+@test "D4: a sibling report's own annotation commit is NOT drift for the other report, when a receipt covers the candidate" {
+  write_passing_delivery_report "P467"
+  write_passing_boundary_report "P467"
+  local candidate; candidate=$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)
+  _seal_minimal_receipt "P467" "$candidate"
+
+  # Simulate the delivery report having been auto-annotated on its own
+  # (a real annotation commit, touching ONLY that file) — the exact scenario
+  # that used to make the BOUNDARY report look stale too.
+  git -C "$TEST_PROJECT_ROOT" checkout -q main 2>/dev/null || true
+  yq -i '.Head_at_generation = "'"$candidate"'" | .Head_note = "re-annotated"' \
+    "$TEST_PROJECT_ROOT/.aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: auto-annotate P467 delivery report"
+
+  run "$SCRIPT" P467 --project-root "$TEST_PROJECT_ROOT" --plan-branch
+  echo "$output"
+  [[ "$output" == *"P467-boundary.md"*"receipt-bound report group"*"fresh"* ]]
+  ! [[ "$output" == *"P467-boundary.md: Head"*"needs"* ]]
+  ! [[ "$output" == *"P467-boundary.md: Head_at_generation/Head_note"* ]]
+}
+
+@test "D4: WITHOUT a receipt, the legacy per-report-only exclusion still applies (a sibling's commit still needs annotation)" {
+  write_passing_delivery_report "P467"
+  write_passing_boundary_report "P467"
+  # No receipt sealed — legacy behavior.
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q main 2>/dev/null || true
+  echo "more" >> "$TEST_PROJECT_ROOT/.aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: unrelated delivery report edit"
+
+  run "$SCRIPT" P467 --project-root "$TEST_PROJECT_ROOT" --plan-branch
+  echo "$output"
+  [[ "$output" == *"P467-boundary.md"*"needs"* || "$output" == *"P467-boundary.md: Head_at_generation/Head_note"* ]]
+}
+
+@test "D4: a FORGED receipt reference (ref does not resolve) does not grant grouped freshness" {
+  write_passing_delivery_report "P467"
+  write_passing_boundary_report "P467"
+  local candidate; candidate=$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P467"
+  jq -n --arg ref "refs/heads/aid-evidence/P467/${candidate}/R-nope" --arg h "sha256:0000000000000000000000000000000000000000000000000000000000000000" \
+    '{plan_boundary_manifest: {plan_final_evidence_ref: $ref, plan_final_evidence_receipt_sha256: $h}}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P467/plan-boundary-manifest.json"
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q main 2>/dev/null || true
+  echo "more" >> "$TEST_PROJECT_ROOT/.aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: unrelated delivery report edit"
+
+  run "$SCRIPT" P467 --project-root "$TEST_PROJECT_ROOT" --plan-branch
+  echo "$output"
+  [[ "$output" == *"P467-boundary.md"*"needs"* || "$output" == *"P467-boundary.md: Head_at_generation/Head_note"* ]]
+}
+
+@test "D4: a VALID, well-formed receipt bound to a DIFFERENT candidate does not grant grouped freshness for THIS candidate" {
+  write_passing_delivery_report "P467"
+  write_passing_boundary_report "P467"
+  local candidate; candidate=$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)
+  # A real, fully schema-correct, hash-consistent receipt — but sealed for a
+  # candidate OTHER than the one the manifest (and these reports) record.
+  local other="2222222222222222222222222222222222222222"
+  _seal_minimal_receipt "P467" "$candidate" "$other"
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q main 2>/dev/null || true
+  echo "more" >> "$TEST_PROJECT_ROOT/.aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: unrelated delivery report edit"
+
+  run "$SCRIPT" P467 --project-root "$TEST_PROJECT_ROOT" --plan-branch
+  echo "$output"
+  [[ "$output" == *"P467-boundary.md"*"needs"* || "$output" == *"P467-boundary.md: Head_at_generation/Head_note"* ]]
+}
+
+@test "D4: a receipt at a resolvable ref but missing required D1 schema keys does not grant grouped freshness" {
+  write_passing_delivery_report "P467"
+  write_passing_boundary_report "P467"
+  local candidate; candidate=$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)
+  local run_id="R-test-1"
+  local ref="refs/heads/aid-evidence/P467/${candidate}/${run_id}"
+  local tmp; tmp=$(mktemp)
+  # Missing review_verdict, plan_base_commit, target_branch, etc. — a
+  # single-file ref with a matching hash, but NOT the D1 receipt schema.
+  printf '{"schema_version":"aid-plan-final-evidence-1","artifact_type":"plan_final_evidence_receipt","plan_id":"P467","candidate_sha":"%s"}\n' \
+    "$candidate" > "$tmp"
+  local hash; hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
+  local blob; blob=$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$tmp")
+  rm -f "$tmp"
+  local tree; tree=$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$TEST_PROJECT_ROOT" mktree)
+  local commit; commit=$(git -C "$TEST_PROJECT_ROOT" commit-tree "$tree" -m "aid: forged minimal receipt")
+  git -C "$TEST_PROJECT_ROOT" update-ref "$ref" "$commit"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P467"
+  jq -n --arg ref "$ref" --arg h "$hash" --arg c "$candidate" --arg r "$run_id" \
+    '{plan_boundary_manifest: {plan_id:"P467", candidate_sha:$c, plan_final_run_id:$r,
+      plan_final_evidence_ref:$ref, plan_final_evidence_receipt_sha256:$h}}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P467/plan-boundary-manifest.json"
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q main 2>/dev/null || true
+  echo "more" >> "$TEST_PROJECT_ROOT/.aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: unrelated delivery report edit"
+
+  run "$SCRIPT" P467 --project-root "$TEST_PROJECT_ROOT" --plan-branch
+  echo "$output"
+  [[ "$output" == *"P467-boundary.md"*"needs"* || "$output" == *"P467-boundary.md: Head_at_generation/Head_note"* ]]
+}
+
+@test "D4: a manifest that internally claims a DIFFERENT plan_id than the CLI-selected plan does not grant grouped freshness (cross-plan replay)" {
+  write_passing_delivery_report "P467"
+  write_passing_boundary_report "P467"
+  local candidate; candidate=$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)
+  # Seal a fully valid, well-formed receipt for a DIFFERENT plan (P123) at
+  # the SAME candidate — then let P467's own manifest internally (falsely)
+  # claim plan_id:"P123" and point at that receipt. Without an explicit
+  # PLAN_ID cross-check, _check2_receipt_covers_candidate would derive
+  # expected_ref from the manifest's own (lying) plan_id, match this real
+  # P123 receipt, and grant P467's reports grouped freshness from evidence
+  # that was never about P467 at all.
+  _seal_minimal_receipt "P123" "$candidate"
+  local run_id="R-test-1"
+  local ref="refs/heads/aid-evidence/P123/${candidate}/${run_id}"
+  local hash; hash="sha256:$(git -C "$TEST_PROJECT_ROOT" show "${ref}:receipt.json" | sha256sum | awk '{print $1}')"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P467"
+  jq -n --arg ref "$ref" --arg h "$hash" --arg c "$candidate" --arg r "$run_id" \
+    '{plan_boundary_manifest: {plan_id:"P123", candidate_sha:$c, plan_final_run_id:$r,
+      plan_final_evidence_ref:$ref, plan_final_evidence_receipt_sha256:$h}}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P467/plan-boundary-manifest.json"
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q main 2>/dev/null || true
+  echo "more" >> "$TEST_PROJECT_ROOT/.aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-o/reports/P467-delivery.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: unrelated delivery report edit"
+
+  run "$SCRIPT" P467 --project-root "$TEST_PROJECT_ROOT" --plan-branch
+  echo "$output"
+  [[ "$output" == *"P467-boundary.md"*"needs"* || "$output" == *"P467-boundary.md: Head_at_generation/Head_note"* ]]
+}

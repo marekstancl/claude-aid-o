@@ -254,7 +254,52 @@
               "type": "null"
             }
           ],
-          "description": "Non-null requires plan_final_run_id non-null and vice versa. Path containment (no ..) is checked by Step 3 (lib/aid-plan-manifest.sh), not here."
+          "description": "Non-null requires the full plan-final durable-receipt tuple. Path containment (no ..) is checked by Step 3 (lib/aid-plan-manifest.sh), not here."
+        },
+        "plan_final_evidence_ref": {
+          "oneOf": [
+            {"type": "string", "pattern": "^refs/heads/aid-evidence/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$"},
+            {"type": "null"}
+          ],
+          "description": "Immutable AID-generated sidecar ref containing the public-safe technical receipt for this reviewed candidate/run."
+        },
+        "plan_final_evidence_receipt_sha256": {
+          "oneOf": [
+            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ],
+          "description": "SHA-256 of receipt.json read from plan_final_evidence_ref."
+        },
+        "plan_final_close_evidence_ref": {
+          "oneOf": [
+            {"type": "string", "pattern": "^refs/heads/aid-evidence-close/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$"},
+            {"type": "null"}
+          ],
+          "description": "Immutable AID-generated sidecar ref containing the public-safe gates/C4/PM/merge receipt sealed at plan-merge-to-main time (IMP-466 item 4)."
+        },
+        "plan_final_close_evidence_receipt_sha256": {
+          "oneOf": [
+            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ],
+          "description": "SHA-256 of receipt.json read from plan_final_close_evidence_ref."
+        },
+        "plan_final_inputs": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "plan_diff_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                "candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                "run_id": {"type": "string", "minLength": 1},
+                "ac_lens_required": {"type": "boolean"},
+                "plan_diff_verdict": {"type": "string", "enum": ["present", "absent", "skipped"]}
+              },
+              "required": ["plan_diff_sha256", "candidate_sha", "run_id", "ac_lens_required", "plan_diff_verdict"]
+            },
+            {"type": "null"}
+          ],
+          "description": "IMP-464 (D2): the C3 plan-AC verdict hash produced by --stage inputs BEFORE review dispatch, atomically bound to this candidate/run. plan_diff_verdict distinguishes an armed AC lens's present/absent from an explicit, non-required skip — never silently read as a pass."
         }
       },
       "required": [
@@ -272,7 +317,11 @@
         "is_plan_final",
         "epic_required_profile",
         "plan_final_required_profile",
-        "epic_runs"
+        "epic_runs",
+        "plan_final_evidence_ref",
+        "plan_final_evidence_receipt_sha256",
+        "plan_final_close_evidence_ref",
+        "plan_final_close_evidence_receipt_sha256"
       ]
     }
   },

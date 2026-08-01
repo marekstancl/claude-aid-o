@@ -356,7 +356,11 @@ _pm_build_init_json() {
         plan_final_required_profile: "standard",
         epic_runs: [],
         plan_final_run_id: null,
-        plan_final_evidence_dir: null
+        plan_final_evidence_dir: null,
+        plan_final_evidence_ref: null,
+        plan_final_evidence_receipt_sha256: null,
+        plan_final_close_evidence_ref: null,
+        plan_final_close_evidence_receipt_sha256: null
       }
     }'
 }
@@ -486,9 +490,56 @@ _pm_check_invariants() {
     return 1
   fi
 
-  # ── plan_final_run_id / plan_final_evidence_dir set together ────────────
-  if ! jq -e '((.plan_boundary_manifest.plan_final_run_id == null) and (.plan_boundary_manifest.plan_final_evidence_dir == null)) or ((.plan_boundary_manifest.plan_final_run_id != null) and (.plan_boundary_manifest.plan_final_evidence_dir != null))' "$file" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_run_id and plan_final_evidence_dir must be null/non-null together" >&2
+  # ── plan-final runtime binding and durable receipt are complete tuples ───
+  # The ignored run directory is only a working projection.  Once review
+  # passes, its technical receipt is sealed in a separate Git ref; keeping a
+  # half-pointer would recreate the exact worktree-loss ambiguity this layer
+  # exists to prevent.
+  if ! jq -e '((.plan_boundary_manifest.plan_final_run_id == null) and (.plan_boundary_manifest.plan_final_evidence_dir == null) and (.plan_boundary_manifest.plan_final_evidence_ref == null) and (.plan_boundary_manifest.plan_final_evidence_receipt_sha256 == null)) or ((.plan_boundary_manifest.plan_final_run_id != null) and (.plan_boundary_manifest.plan_final_evidence_dir != null) and (.plan_boundary_manifest.plan_final_evidence_ref == null) and (.plan_boundary_manifest.plan_final_evidence_receipt_sha256 == null)) or ((.plan_boundary_manifest.plan_final_run_id != null) and (.plan_boundary_manifest.plan_final_evidence_dir != null) and (.plan_boundary_manifest.plan_final_evidence_ref != null) and (.plan_boundary_manifest.plan_final_evidence_receipt_sha256 != null))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — runtime run/directory must be paired; durable receipt ref/hash are either both absent before review or both present after review" >&2
+    return 1
+  fi
+  if ! jq -e '(.plan_boundary_manifest.plan_final_evidence_ref == null) or (.plan_boundary_manifest.plan_final_evidence_ref as $r | ($r | type == "string") and ($r | test("^refs/heads/aid-evidence/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$")))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_evidence_ref is malformed" >&2
+    return 1
+  fi
+  if ! jq -e '(.plan_boundary_manifest.plan_final_evidence_receipt_sha256 == null) or (.plan_boundary_manifest.plan_final_evidence_receipt_sha256 as $r | ($r | type == "string") and ($r | test("^sha256:[0-9a-f]{64}$")))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_evidence_receipt_sha256 is malformed" >&2
+    return 1
+  fi
+  # ── the CLOSE-time durable receipt: paired, well-formed, and never present
+  #    without the review receipt it comes after (IMP-466 item 4) ──────────
+  if ! jq -e '((.plan_boundary_manifest.plan_final_close_evidence_ref == null) and (.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 == null)) or ((.plan_boundary_manifest.plan_final_close_evidence_ref != null) and (.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 != null) and (.plan_boundary_manifest.plan_final_evidence_ref != null))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_close_evidence_ref/receipt_sha256 must be null/non-null together and never present without the review receipt" >&2
+    return 1
+  fi
+  if ! jq -e '(.plan_boundary_manifest.plan_final_close_evidence_ref == null) or (.plan_boundary_manifest.plan_final_close_evidence_ref as $r | ($r | type == "string") and ($r | test("^refs/heads/aid-evidence-close/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$")))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_close_evidence_ref is malformed" >&2
+    return 1
+  fi
+  if ! jq -e '(.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 == null) or (.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 as $r | ($r | type == "string") and ($r | test("^sha256:[0-9a-f]{64}$")))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_close_evidence_receipt_sha256 is malformed" >&2
+    return 1
+  fi
+
+  # ── IMP-464 (D2): the C3 plan-diff input hash, when present, must be
+  # well-formed AND bound to THIS manifest's current candidate — a value left
+  # over from a prior candidate is not a producer/review-time-atomic binding,
+  # it is a stale claim. ────────────────────────────────────────────────────
+  if ! jq -e '
+    (.plan_boundary_manifest.plan_final_inputs == null) or (
+      .plan_boundary_manifest.plan_final_inputs as $pi |
+      ($pi | type == "object") and
+      ($pi.plan_diff_sha256 | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+      ($pi.candidate_sha | type == "string" and test("^[0-9a-f]{40}$")) and
+      ($pi.run_id | type == "string" and length > 0) and
+      (.plan_boundary_manifest.candidate_sha == null or $pi.candidate_sha == .plan_boundary_manifest.candidate_sha) and
+      (.plan_boundary_manifest.plan_final_run_id == null or $pi.run_id == .plan_boundary_manifest.plan_final_run_id) and
+      ($pi.ac_lens_required | type == "boolean") and
+      ($pi.plan_diff_verdict | type == "string" and (. == "present" or . == "absent" or . == "skipped"))
+    )
+  ' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_inputs is malformed or bound to a stale candidate" >&2
     return 1
   fi
 
@@ -1277,6 +1328,11 @@ plan_manifest_clear_candidate() {
     | .plan_boundary_manifest.target_branch_head_at_candidate_freeze = null
     | .plan_boundary_manifest.plan_final_run_id = null
     | .plan_boundary_manifest.plan_final_evidence_dir = null
+    | .plan_boundary_manifest.plan_final_evidence_ref = null
+    | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = null
+    | .plan_boundary_manifest.plan_final_close_evidence_ref = null
+    | .plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 = null
+    | .plan_boundary_manifest.plan_final_inputs = null
     | .plan_boundary_manifest.candidate_invalidation_reason = $reason
     | .plan_boundary_manifest.plan_state = $target_state
   '

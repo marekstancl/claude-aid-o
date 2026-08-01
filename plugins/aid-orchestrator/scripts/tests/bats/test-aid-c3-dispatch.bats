@@ -167,7 +167,8 @@ _build() {
   # not the outer TEST_TMPDIR) — real usage always points at an in-repo plan file
   # (e.g. .aid-o/plans/*.md), and build-manifest's _path_is_within containment
   # check correctly rejects anything outside the repo (CP3 security fix).
-  local plan="$TEST_PROJECT_ROOT/plan-ac.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  local plan="$TEST_PROJECT_ROOT/.aid-o/plans/plan-ac.md"
   printf 'PLAN VERSION A\n' > "$plan"
   export AID_PLAN_AC_FILE="$plan"
   _build high
@@ -1968,4 +1969,125 @@ _jq_edit() {
 @test "step7/usage: unknown flag → exit 2 (fail-closed)" {
   run bash "$DISPATCH" verify --bogus "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 2 ]
+}
+
+# ─── IMP-464 (D2): plan-diff.json as a profile-aware C3 evidence input ───────
+#
+# _write_rp <lenses_json_array> — review-profile.json arming (or not) the AC
+# lens. _write_pd <base> <head> <verdict> — a plan-diff.json bound to a range.
+
+_write_rp() {
+  jq -n --argjson lenses "$1" '{review_profile: {required_lenses: $lenses}}' \
+    > "$TEST_EVIDENCE_DIR/review-profile.json"
+}
+
+_write_pd() {
+  local base="$1" head="$2" verdict="$3"
+  jq -n --arg b "$base" --arg h "$head" --arg v "$verdict" \
+    '{base_commit:$b, head_commit:$h, overall_verdict:$v, results:[], summary:{present_count:0,absent_count:0}}' \
+    > "$TEST_EVIDENCE_DIR/plan-diff.json"
+}
+
+@test "IMP-464: a present plan-diff.json is added to allowlist, evidence_hashes and plan_diff_status" {
+  # A required AC lens ALSO requires the pre-existing IMP-269 AC-bundle gate
+  # to see ac_source=="plan" (AID_PLAN_AC_FILE set+readable) — both gates
+  # share the same required_lenses[] input, and this test isolates plan-diff
+  # specifically by satisfying the other one.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  local plan="$TEST_PROJECT_ROOT/.aid-o/plans/plan-ac.md"
+  printf 'PLAN\n' > "$plan"
+  export AID_PLAN_AC_FILE="$plan"
+  _write_rp '["ac_to_test_identity"]'
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "present"
+  _build high
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.allowlist[] | select(. == "plan-diff.json")' "$MANIFEST"
+  [ "$output" = "plan-diff.json" ]
+  run jq -r '[.audit_input_manifest.evidence_hashes[] | select(.path=="plan-diff.json")] | length' "$MANIFEST"
+  [ "$output" = "1" ]
+  run jq -r '.audit_input_manifest.plan_diff_status' "$MANIFEST"
+  [ "$output" = "present" ]
+}
+
+@test "IMP-464: required AC lens + MISSING plan-diff.json refuses before dispatch" {
+  _write_rp '["ac_to_test_identity"]'
+  _build high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AC lens required"* ]]
+  [ ! -s "$MANIFEST" ]
+}
+
+@test "IMP-464: required AC lens + MALFORMED plan-diff.json refuses before dispatch" {
+  _write_rp '["requirement_test_drift"]'
+  printf 'not json at all\n' > "$TEST_EVIDENCE_DIR/plan-diff.json"
+  _build high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AC lens required"* ]]
+}
+
+@test "IMP-464: required AC lens + WRONG BASE plan-diff.json refuses before dispatch" {
+  _write_rp '["ac_to_test_identity"]'
+  _write_pd "0000000000000000000000000000000000000000" "$HEAD_SHA" "present"
+  _build high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AC lens required"* ]]
+}
+
+@test "IMP-464: required AC lens + WRONG HEAD plan-diff.json refuses before dispatch" {
+  _write_rp '["ac_to_test_identity"]'
+  _write_pd "$BASE_SHA" "0000000000000000000000000000000000000000" "present"
+  _build high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AC lens required"* ]]
+}
+
+@test "IMP-464: required AC lens + a 'skipped' plan-diff.json (bound, but no verdict) refuses before dispatch" {
+  _write_rp '["ac_to_test_identity"]'
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "skipped"
+  _build high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AC lens required"* ]]
+}
+
+@test "IMP-464: NO required AC lens + missing plan-diff.json is an explicit classification, never a pass" {
+  _write_rp '[]'
+  _build high
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.plan_diff_status' "$MANIFEST"
+  [ "$output" = "not_required_absent" ]
+  run jq -r '[.audit_input_manifest.allowlist[] | select(. == "plan-diff.json")] | length' "$MANIFEST"
+  [ "$output" = "0" ]
+}
+
+@test "IMP-464: NO required AC lens + a 'skipped' plan-diff.json is classified, not silently upgraded" {
+  _write_rp '[]'
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "skipped"
+  _build high
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.plan_diff_status' "$MANIFEST"
+  [ "$output" = "not_required_skipped" ]
+}
+
+@test "IMP-464: review-profile.json present but UNPARSEABLE fails closed regardless of plan-diff.json" {
+  printf 'not json\n' > "$TEST_EVIDENCE_DIR/review-profile.json"
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "present"
+  _build high
+  [ "$status" -ne 0 ]
+}
+
+@test "IMP-464: a post-seal tamper of plan-diff.json is detectable — the sealed hash does not follow the file" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  local plan="$TEST_PROJECT_ROOT/.aid-o/plans/plan-ac.md"
+  printf 'PLAN\n' > "$plan"
+  export AID_PLAN_AC_FILE="$plan"
+  _write_rp '["ac_to_test_identity"]'
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "absent"
+  _build high
+  [ "$status" -eq 0 ]
+  local real_pd_sha
+  real_pd_sha="$(jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="plan-diff.json") | .sha256' "$MANIFEST")"
+  printf 'TAMPERED AFTER SEAL\n' > "$TEST_EVIDENCE_DIR/plan-diff.json"
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="plan-diff.json") | .sha256' "$MANIFEST"
+  [ "$output" = "$real_pd_sha" ]
+  [ "$output" != "sha256:$(sha256sum "$TEST_EVIDENCE_DIR/plan-diff.json" | awk '{print $1}')" ]
 }

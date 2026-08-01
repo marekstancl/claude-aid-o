@@ -245,6 +245,14 @@ Write to the NORMAL output file (verifier-output-step-N.md / verifier-output-cp3
 ### Output 2 (NEW): `semantic-review-{mode}.json`
 After writing the .md file, ALSO write `semantic-review-{c2_mode}.json` to the evidence directory (`evidence/{epic_id}/{run_id}/`):
 
+**At the PLAN-FINAL boundary** (`c2_mode == final`, P068 plan-level review):
+AID generates `semantic-review-final.json` for you BEFORE dispatch, with
+every envelope field already filled and `.semantic_review` set to `null`.
+Edit that SAME file and fill only `.semantic_review` — do not touch any
+other key; the generated file at the run's canonical path is the one example
+to follow. Every other `c2_mode` still writes the whole envelope yourself, as
+shown below.
+
 ```json
 {
   "artifact_type": "semantic_review",

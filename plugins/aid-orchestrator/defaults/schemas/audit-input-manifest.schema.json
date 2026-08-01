@@ -84,6 +84,11 @@
           "type": "string",
           "enum": ["plan", "final_report_fallback", "stub"],
           "$comment": "IMP-269 Half 1: which source authored c3/bundle-plan-ac.md — plan (AID_PLAN_AC_FILE set + readable), final_report_fallback (fell back to the implementation's final_report.md — the E-064-1_2 failure mode), or stub (no source). If the run's review-profile.json required_lenses[] includes an AC lens (ac_to_test_identity / requirement_test_drift), build-manifest FAILS CLOSED unless ac_source == plan; otherwise a non-plan source only warns and this classification is preserved through to audit-report.json. Emitted at build-manifest time; formalised here, NOT required."
+        },
+        "plan_diff_status": {
+          "type": "string",
+          "enum": ["present", "absent", "not_required_absent", "not_required_skipped", "malformed_or_unbound"],
+          "$comment": "IMP-464 (D2): classification of plan-diff.json at build-manifest time, bound to base_sha..head_sha. present/absent are the two valid verdicts when an AC lens (ac_to_test_identity / requirement_test_drift) is required by review-profile.json's required_lenses[] — anything else in that case fails closed before dispatch. not_required_absent/not_required_skipped are the honest, non-blocking classifications when no AC lens is required. malformed_or_unbound is reachable only when the file exists but is unparseable or not bound to this run's exact base/head range."
         }
       }
     }

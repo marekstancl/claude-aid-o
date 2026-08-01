@@ -5,7 +5,7 @@ model: sonnet
 
 # Curator Agent
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-08-01
 
 **Role:** Post-run specialist. Collects improvement observations from worker agents,
 deduplicates against backlog, proposes improvements, extracts lessons learned, and
@@ -215,6 +215,17 @@ Do not fabricate observations.
 
 ### curator-report.json (new — protocol-v2)
 
+**At the PLAN-FINAL boundary only** (P068 plan-level review, not the per-EPIC
+CP-loop): AID generates `curator-report.json` for you BEFORE you are
+dispatched, with every envelope field already filled (`schema_version`,
+`artifact_type`, `identity`, `subject`, `revision`, `provenance`) and
+`.curator` set to `null`. Edit that SAME file and fill only `.curator` —
+do not touch any other key. The generated file at the run's canonical path
+IS the one example to follow; do not hand-construct the envelope from the
+schema shown below. If `curator-report.json` does not already exist when you
+are dispatched (the per-EPIC CP-loop path, or a project not yet upgraded to
+generated scaffolds), write the whole envelope yourself exactly as shown.
+
 Payload key is `.curator` (matches `TYPE_PAYLOAD_MAP[curator]="curator"` in
 `aid-protocol-validate.sh` — NOT `.curator_report`).
 
@@ -228,6 +239,17 @@ Payload key is `.curator` (matches `TYPE_PAYLOAD_MAP[curator]="curator"` in
       {
         "id": "IMP-{NNN}",
         "recommended_disposition": "approve"
+      }
+    ],
+    "adjudications": [
+      {
+        "finding_fingerprint": "sha256:<64hex, copied verbatim from the audit-report.json finding>",
+        "finding_occurrence_id": "<copied verbatim from the audit-report.json finding>",
+        "audit_report_sha256": "sha256:<64hex — SAME value as audit_report_ref above>",
+        "candidate_sha": "<40hex — copied from the generated skeleton's top-level revision.head_sha>",
+        "run_id": "<copied from the generated skeleton's top-level identity.run_id>",
+        "disposition": "confirmed",
+        "evidence_ref": "<a commit sha, a file path + line, or a durable receipt ref — never a raw session id, absolute path or transcript>"
       }
     ]
   }
@@ -246,6 +268,48 @@ Payload key is `.curator` (matches `TYPE_PAYLOAD_MAP[curator]="curator"` in
   the Auditor and ingested its real output, not just at the same commit.
 - `proposals[].recommended_disposition` — same enum/values/meaning as the `.md` format's
   `recommended_disposition` (Phase 6) — untouched, just echoed into the JSON payload.
+
+#### `adjudications[]` — REQUIRED at the PLAN-FINAL boundary whenever `audit-report.json`
+carries any finding with `severity: "critical"` or `severity: "high"`
+
+This is a hard gate, not a suggestion: `plan-finalize --stage review` refuses to complete
+the plan-final review — for ANY critical or high finding without a matching entry here, even
+if you set `curator.blocking_findings: false` elsewhere. A bare "no blockers" verdict is never
+accepted as a substitute for a formal, per-finding adjudication.
+
+For EVERY finding in `audit-report.json`'s `findings[]` with `severity: "critical"` or
+`severity: "high"`, add exactly one entry to `adjudications[]`:
+
+- `finding_fingerprint` / `finding_occurrence_id` — copied verbatim from that exact finding in
+  `audit-report.json`. These identify WHICH finding this entry adjudicates.
+- `audit_report_sha256` — must equal `audit_report_ref` above (the same hash, same field
+  format). An adjudication bound to a different audit report's hash is rejected as stale.
+- `candidate_sha` / `run_id` — must equal THIS run's candidate and run id: `revision.head_sha`
+  and `identity.run_id` from the top level of the generated skeleton (NOT `identity.subject` —
+  that field doesn't exist; don't confuse it with the envelope's separate `subject.subject_hash`,
+  which is a different value). An adjudication left over from a previous attempt is rejected,
+  even if the finding fingerprint still matches.
+- `disposition` — exactly one of:
+  - `confirmed` — the finding is real and accepted as-is (e.g. tracked for a later fix, or
+    judged an acceptable trade-off)
+  - `fixed_in_new_candidate` — the finding was real and is already fixed in this candidate
+  - `false_positive` — the finding does not actually apply. **Never legal** when the finding's
+    `severity` is `critical`, or its `action_owner` is `pm` — those two classes can never be
+    self-cleared this way; use `requires_pm` or `confirmed` instead. A non-security `high`
+    finding with a different (or absent) `action_owner` MAY legitimately be `false_positive`.
+  - `requires_pm` — you cannot resolve this yourself; it escalates to the PM decision at
+    `AWAITING_PM` instead of blocking the review outright.
+- `evidence_ref` — a short, public-safe pointer backing your disposition (a commit sha, a
+  `file:line`, or a durable receipt ref). Never a raw session id, absolute local path, or a
+  transcript excerpt.
+
+If `audit-report.json` has zero critical/high findings, omit `adjudications` (or leave it an
+empty array) — it is only enforced when there is something to adjudicate.
+
+**Every entry in `adjudications[]` must be complete and correctly bound.** One malformed,
+stale, duplicate, or extraneous entry invalidates the ENTIRE array — and therefore the whole
+PLAN-FINAL review — even if every OTHER entry is perfectly correct. Never leave a draft,
+half-filled, or leftover entry in the array; remove it instead.
 
 ---
 

@@ -87,6 +87,21 @@ plainly in §3 — a partial honest report beats a clean fabricated one.
 
 ---
 
+## delivery-report.json (PLAN-FINAL boundary only, protocol-v2)
+
+At the plan-level review (P068), AID generates `delivery-report.json` in the
+run directory BEFORE you are dispatched, with every envelope field already
+filled (`schema_version`, `artifact_type: "delivery_report"`, `identity`
+— `plan_id` set, `epic_id: null` — `subject`, `revision.head_sha` bound to
+the frozen candidate, `provenance`) and `.delivery_report` set to `null`.
+Edit that SAME file and fill only `.delivery_report` — do not touch any other
+key; the generated file at the run's canonical path is the one example to
+follow. This is the LAST plan-final output written (the review stage
+requires its mtime to be newest), so write it only after every other output
+in this run directory already exists.
+
+---
+
 ## Output Format
 
 Two writes:

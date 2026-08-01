@@ -150,6 +150,17 @@ if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
     # shellcheck source=/dev/null
     source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
   fi
+  # D4 round-2 Codex MEDIUM: reuse D1's OWN receipt-schema/inventory
+  # validators (aid-plan-fsm.sh) rather than a shorter ad-hoc re-check here —
+  # two independent implementations of "is this receipt well-formed" drift
+  # apart over time, and the ad-hoc version was missing key-set and per-output
+  # hash-shape checks the real D1 verifier enforces. The BASH_SOURCE guard at
+  # the bottom of aid-plan-fsm.sh skips CLI dispatch when sourced, same as
+  # aid-fsm.sh above, so this is side-effect-free.
+  if ! declare -F _pfsm_validate_plan_final_receipt_json >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/aid-plan-fsm.sh"
+  fi
 fi
 
 PLAN_NUM="${PLAN_ID#P}"
@@ -321,8 +332,77 @@ _auto_annotate_report() {
   rm -f "$fm_file"
 }
 
+# D4 / IMP-467: is THIS candidate covered by a durable, verified D1 plan-final
+# evidence receipt? Only then does grouped freshness apply — a plan/mode
+# without a receipt (legacy, or plan_branch before D1 ran) keeps today's
+# exact per-report-only-self-exclusion behavior. This is the FULL binding
+# _pfsm_verify_plan_final_receipt (aid-plan-fsm.sh, D1) enforces at
+# merge/close time — the derived ref path, exact receipt schema/keys,
+# review_verdict, and plan_id/candidate_sha/run_id/evidence_ref all bound to
+# the manifest's OWN recorded candidate/run — not a looser freshness-only
+# shortcut that would accept any resolvable single-file ref.
+_check2_receipt_covers_candidate() {
+  [[ "$PLAN_BRANCH_MODE" -eq 1 ]] || return 1
+  local plan_id candidate run_id ref hash receipt tree expected_ref
+  plan_id="$(_pbm '.plan_boundary_manifest.plan_id')"
+  candidate="$(_pbm '.plan_boundary_manifest.candidate_sha')"
+  run_id="$(_pbm '.plan_boundary_manifest.plan_final_run_id')"
+  [[ "$plan_id" =~ ^P[0-9]{3}$ && "$candidate" =~ ^[0-9a-f]{40}$ && -n "$run_id" ]] || return 1
+  # D4 round-2 Codex HIGH: the manifest's OWN plan_id field is content on
+  # disk, not proof of which plan this check is running for — PLAN_ID (the
+  # CLI-selected plan this whole script invocation is scoped to) is the only
+  # trustworthy anchor. Without this, a manifest under plan-state/P467/ that
+  # internally claims plan_id:"P123" would derive expected_ref from "P123",
+  # match a real old P123 receipt, and grant P467's reports grouped
+  # freshness from evidence that was never about P467 at all.
+  [[ "$plan_id" == "$PLAN_ID" ]] || return 1
+  expected_ref="refs/heads/aid-evidence/${plan_id}/${candidate}/${run_id}"
+  ref="$(_pbm '.plan_boundary_manifest.plan_final_evidence_ref')"
+  hash="$(_pbm '.plan_boundary_manifest.plan_final_evidence_receipt_sha256')"
+  [[ -n "$ref" && "$ref" == "$expected_ref" && -n "$hash" ]] || return 1
+  receipt="$(git show "${ref}:receipt.json" 2>/dev/null)" || return 1
+  tree="$(git ls-tree -r --name-only "${ref}" 2>/dev/null || true)"
+  [[ "$tree" == "receipt.json" ]] || return 1
+  [[ "sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')" == "$hash" ]] || return 1
+  # D4 round-2 Codex MEDIUM: reuse D1's OWN full schema/key-set validator
+  # (aid-plan-fsm.sh) instead of a shorter ad-hoc re-check — the ad-hoc
+  # version accepted extra/renamed keys and malformed per-output hash
+  # shapes that D1's own verifier would reject. D4 round-4 Codex MEDIUM:
+  # also reuse _pfsm_receipt_has_exact_review_inventory again — it is now
+  # schema-version-FROZEN (not derived from the live
+  # _pfsm_review_required_outputs), so it no longer risks retroactively
+  # invalidating a receipt sealed by an older plugin version.
+  _pfsm_validate_plan_final_receipt_json "$receipt" || return 1
+  _pfsm_receipt_has_exact_review_inventory "$receipt" || return 1
+  local base target target_head frozen_at
+  base="$(_pbm '.plan_boundary_manifest.plan_base_commit')"
+  target="$(_pbm '.plan_boundary_manifest.target_branch')"
+  target_head="$(_pbm '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')"
+  frozen_at="$(_pbm '.plan_boundary_manifest.candidate_frozen_at')"
+  jq -e --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" --arg ref "$ref" \
+        --arg b "$base" --arg t "$target" --arg th "$target_head" --arg fa "$frozen_at" '
+    (.plan_id == $p) and (.candidate_sha == $c) and (.run_id == $r) and
+    (.evidence_ref == $ref) and (.plan_base_commit == $b) and
+    (.target_branch == $t) and (.target_head_at_freeze == $th) and
+    (.candidate_frozen_at == $fa)
+  ' <<< "$receipt" >/dev/null 2>&1
+}
+
 check2_head_freshness() {
   local current_head; current_head=$(git rev-parse HEAD)
+  local _grouped=0
+  _check2_receipt_covers_candidate && _grouped=1
+  # D4: the receipt-bound group's own paths, ALL of them — not just "this
+  # report" — are excluded from every group member's delta. A sibling
+  # report's annotation commit touches ONLY that sibling's path, so once the
+  # group is excluded as a whole, no member ever sees another member's
+  # annotation as drift, and the false "the sibling's commit means I am
+  # stale too" oscillation cannot start.
+  local -a _group_excl=()
+  if [[ "$_grouped" -eq 1 ]]; then
+    local _gf
+    for _gf in "${FOUND_REPORTS[@]}"; do _group_excl+=(":(exclude)${_gf}"); done
+  fi
   local f
   for f in "${FOUND_REPORTS[@]}"; do
     local recorded_head head_note head_at_gen
@@ -345,7 +425,8 @@ check2_head_freshness() {
       continue
     fi
 
-    # Exclude the report file itself from the delta. A report necessarily
+    # Exclude the report file itself from the delta (legacy: just itself; D4
+    # grouped: the WHOLE receipt-bound report group). A report necessarily
     # records a head that predates the commit which persists that very
     # value (a commit cannot embed its own SHA) — so the commit that last
     # wrote/annotated this report is always "one commit behind" its own
@@ -354,9 +435,17 @@ check2_head_freshness() {
     # (confirmed against the live WAN P062-delivery.md shape: its recorded
     # Head predates its own `_header_corrected_at` commit).
     local changed
-    changed=$(git diff --name-only "${recorded_head}..${current_head}" -- . ":(exclude)${f}" 2>/dev/null || true)
+    if [[ "$_grouped" -eq 1 ]]; then
+      changed=$(git diff --name-only "${recorded_head}..${current_head}" -- . "${_group_excl[@]}" 2>/dev/null || true)
+    else
+      changed=$(git diff --name-only "${recorded_head}..${current_head}" -- . ":(exclude)${f}" 2>/dev/null || true)
+    fi
     if [[ -z "$changed" ]]; then
-      _pass "check2" "$f: Head (${recorded_head:0:7}) != current HEAD (${current_head:0:7}) but the only delta is this report's own annotation commit — fresh"
+      if [[ "$_grouped" -eq 1 ]]; then
+        _pass "check2" "$f: Head (${recorded_head:0:7}) != current HEAD (${current_head:0:7}) but the only delta is within the receipt-bound report group's own annotation commits — fresh"
+      else
+        _pass "check2" "$f: Head (${recorded_head:0:7}) != current HEAD (${current_head:0:7}) but the only delta is this report's own annotation commit — fresh"
+      fi
       continue
     fi
 
@@ -662,7 +751,32 @@ check5_plan_branch_boundary() {
   # ── 5.3 the plan-final run directory: the gate report + every required
   #        review artifact, still byte-identical to what the review recorded
   #        against candidate_sha ─────────────────────────────────────────
-  if [[ ! -d "$run_dir" ]]; then
+  # IMP-466 item 4: a genuinely lost runtime (deleted .aid-o/work, new
+  # worktree, fresh clone) after a REAL merge has no run_dir left at all —
+  # not a corrupted one, a GONE one. The durable close-evidence receipt
+  # (sealed by plan-merge-to-main from these exact facts) is the ONLY thing
+  # that lets 5.3/5.4/5.5 pass in that case, and only for a merge close: it
+  # is verified in full (ref location, tree shape, hash, schema, plan/
+  # candidate/run binding) before a single PASS is granted on its behalf.
+  local close_evidence_ok=0 ce_receipt=""
+  if [[ ! -d "$run_dir" && "$CLOSE_MODE" != "abort" ]]; then
+    local ce_ref ce_hash ce_tree ce_expected_ref
+    ce_ref="$(_pbm '.plan_boundary_manifest.plan_final_close_evidence_ref')"
+    ce_hash="$(_pbm '.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256')"
+    ce_expected_ref="refs/heads/aid-evidence-close/${PLAN_ID}/${candidate}/${run_id}"
+    if [[ -n "$ce_ref" && -n "$ce_hash" && "$ce_ref" == "$ce_expected_ref" ]] \
+       && ce_receipt="$(git show "${ce_ref}:receipt.json" 2>/dev/null)" \
+       && ce_tree="$(git ls-tree -r --name-only "${ce_ref}" 2>/dev/null)" && [[ "$ce_tree" == "receipt.json" ]] \
+       && [[ "sha256:$(printf '%s\n' "$ce_receipt" | sha256sum | awk '{print $1}')" == "$ce_hash" ]] \
+       && jq -e --arg p "$PLAN_ID" --arg c "$candidate" --arg r "$run_id" --arg tb "$target_branch" \
+            '((keys | sort) == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort)) and (.schema_version == "aid-plan-final-close-evidence-1") and (.artifact_type == "plan_final_close_evidence_receipt") and (.plan_id == $p) and (.candidate_sha == $c) and (.run_id == $r) and (.target_branch == $tb) and (.gates_verdict == "pass") and (.c4_decision.release_ready == true) and (.c4_decision.dual_run_match == true) and (.pm_decision.decision == "MERGE")' \
+            <<< "$ce_receipt" >/dev/null 2>&1; then
+      close_evidence_ok=1
+      _pass "check5" "the plan-final run directory is gone, but a verified durable close-evidence receipt (${ce_ref}) attests gates=pass, C4 release_ready with a matched dual-run, and a PM MERGE decision"
+    else
+      _fail "check5" "the plan-final run directory ${run_dir} does not exist and no valid durable close-evidence receipt covers it — the evidence this close would attest to is gone"
+    fi
+  elif [[ ! -d "$run_dir" ]]; then
     _fail "check5" "the plan-final run directory ${run_dir} does not exist — the evidence this close would attest to is gone"
   else
     local gr="${run_dir}/gates_report.json"
@@ -731,6 +845,8 @@ check5_plan_branch_boundary() {
     else
       _pass "check5" "abort close: the terminal reason is recorded (${terminal_reason})"
     fi
+  elif [[ "$close_evidence_ok" -eq 1 ]]; then
+    _pass "check5" "no run directory, but the verified durable close-evidence receipt already attests a bound PM MERGE decision"
   else
     if [[ ! -f "$pmd" ]]; then
       _fail "check5" "no PM decision recorded at ${pmd} — plan-merge-to-main copies the authorization it validated into the attempt's run directory; without it this close has no proof a PM authorized anything"
@@ -797,6 +913,10 @@ check5_plan_branch_boundary() {
       _fail "check5" "the target branch ${target_branch} does not resolve — ancestry UNKNOWN"
     elif ! git merge-base --is-ancestor "$candidate" "$target_head_now" 2>/dev/null; then
       _fail "check5" "the candidate ${candidate:0:8} is NOT an ancestor of ${target_branch} (${target_head_now:0:8}) — the plan branch is not merged"
+    elif [[ "$close_evidence_ok" -eq 1 ]] \
+         && ! jq -e --arg mc "$merge_commit" --arg mt "$(git rev-parse "${merge_commit}^{tree}" 2>/dev/null)" \
+              '.merge_commit == $mc and .merged_tree == $mt' <<< "$ce_receipt" >/dev/null 2>&1; then
+      _fail "check5" "the durable close-evidence receipt's merge_commit/merged_tree does not match the manifest's recorded plan_final_merge (${merge_commit:0:8}) — refusing a receipt that disagrees with the merge it is supposed to attest to"
     else
       _pass "check5" "the plan merge ${merge_commit:0:8} is published and ${candidate:0:8} is an ancestor of ${target_branch}"
     fi

@@ -1311,8 +1311,29 @@ _write_review_outputs() {
 
   _p2 semantic-review-final.json semantic_review semantic_review \
     ".semantic_review.range = \"${base}..${cand}\""
+  # plan-diff.json is written BEFORE audit-input-manifest.json so the real
+  # producer-sealed hash is known when building the manifest's evidence_hashes[].
+  jq -n --arg b "$base" --arg h "$cand" \
+    '{base_commit:$b, head_commit:$h, overall_verdict:"present", results:[], summary:{present_count:0,absent_count:0}}' \
+    > "${dir}/plan-diff.json"
+  local pd_hash; pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
+  plan_manifest_update "$PLAN_ID" \
+    ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${cand}\", run_id: \"$(_manifest_field "$PLAN_ID" plan_final_run_id)\", ac_lens_required: false, plan_diff_verdict: \"present\"}" >/dev/null
+  # D2 / IMP-464 round-2/3: audit-input-manifest.json is now a required
+  # plan-final output, and audit-report.json's input_manifest_hash must
+  # equal its audit_input_manifest.input_hash exactly (the provenance chain
+  # the manifest's own schema documents). Its evidence_hashes[] plan-diff.json
+  # entry is now MANDATORY (not merely checked-if-present) whenever
+  # plan-diff.json carries a real verdict, which this fixture's does.
+  local aim_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  jq -n --arg h "$aim_hash" --arg pdh "$pd_hash" \
+    '{schema_version:"aid-2.0", artifact_type:"audit_input_manifest",
+      audit_input_manifest:{input_hash:$h,
+        allowlist:[], prior_pass_summaries:"untrusted", required_independence_level:"context_only",
+        evidence_hashes:[{path:"plan-diff.json", sha256:$pdh, size:1}]}}' \
+    > "${dir}/audit-input-manifest.json"
   _p2 audit-report.json audit_report audit_report \
-    ".audit_report.reviewed_head = \"${cand}\" | .audit_report.input_manifest_hash = \"sha256:deadbeef\" | .audit_report.blocking_findings = false | .audit_report.provider = \"test-provider\" | .audit_report.model = \"test-model\" | .audit_report.process_id = \"plan-final-audit\" | .audit_report.required_independence_level = \"context_only\" | .audit_report.independence_level = \"context_only\" | .audit_report.advisory = false"
+    ".audit_report.reviewed_head = \"${cand}\" | .audit_report.input_manifest_hash = \"${aim_hash}\" | .audit_report.blocking_findings = false | .audit_report.provider = \"test-provider\" | .audit_report.model = \"test-model\" | .audit_report.process_id = \"plan-final-audit\" | .audit_report.required_independence_level = \"context_only\" | .audit_report.independence_level = \"context_only\" | .audit_report.advisory = false"
   local ahash; ahash="$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
   _p2 curator-report.json curator curator \
     ".curator.audit_report_ref = \"sha256:${ahash}\""
@@ -1332,6 +1353,21 @@ _write_review_outputs() {
   # The Reporter is dispatched LAST, after the final non-mutating pass.
   sleep 1
   _p2 delivery-report.json delivery_report delivery_report
+  # D3: seal the plan_final_skeletons generation record for the 3 specialist
+  # outputs this fixture hand-writes via _p2 (rather than through the real
+  # `--stage inputs` generator), so _pfsm_verify_plan_final_skeleton_envelope
+  # treats them as legitimately-generated-then-filled specialist outputs.
+  local _sk_kind _sk_fname _sk_pkey _sk_hash
+  for _sk_kind in curator verifier reporter; do
+    case "$_sk_kind" in
+      curator)  _sk_fname="curator-report.json";        _sk_pkey="curator" ;;
+      verifier) _sk_fname="semantic-review-final.json"; _sk_pkey="semantic_review" ;;
+      reporter) _sk_fname="delivery-report.json";        _sk_pkey="delivery_report" ;;
+    esac
+    _sk_hash="sha256:$(jq -S -c --arg pk "$_sk_pkey" '.[$pk] = null' "${dir}/${_sk_fname}" | sha256sum | awk '{print $1}')"
+    plan_manifest_update "$PLAN_ID" \
+      ".plan_boundary_manifest.plan_final_skeletons.${_sk_kind} = {sha256: \"${_sk_hash}\", candidate_sha: \"${cand}\", run_id: \"${drid}\"}" >/dev/null
+  done
 }
 
 # ─── AC3.3: the FSM dispatches nothing — it BLOCKS with exit 7 and names
@@ -1360,7 +1396,7 @@ _write_review_outputs() {
   run jq -r '.review_range' "$req"
   [ "$output" = "${base}..${cand}" ]
   run jq -r '.required_outputs | length' "$req"
-  [ "$output" = "9" ]
+  [ "$output" = "11" ]
 
   # Blocked, not failed: the plan is still PLAN_REVIEW.
   run plan_state_get "$PLAN_ID" "plan_state"
@@ -1385,6 +1421,20 @@ _write_review_outputs() {
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" = "$head_before" ]
   run git -C "$TEST_PROJECT_ROOT" status --porcelain --untracked-files=no
   [ -z "$output" ]
+
+  # IMP-466: review proof survives outside the ignored run directory.  The
+  # sidecar is technical-only and must not smuggle arbitrary evidence files.
+  local ref receipt_hash
+  ref="$(_manifest_field "$PLAN_ID" plan_final_evidence_ref)"
+  receipt_hash="$(_manifest_field "$PLAN_ID" plan_final_evidence_receipt_sha256)"
+  [[ "$ref" == refs/heads/aid-evidence/${PLAN_ID}/${cand_before}/* ]]
+  [[ "$receipt_hash" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run git -C "$TEST_PROJECT_ROOT" ls-tree -r --name-only "$ref"
+  [ "$output" = "receipt.json" ]
+  run git -C "$TEST_PROJECT_ROOT" show "${ref}:receipt.json"
+  [ "sha256:$(printf '%s\n' "$output" | sha256sum | awk '{print $1}')" = "$receipt_hash" ]
+  run jq -r '.outputs | keys | length' <<< "$output"
+  [ "$output" = "11" ]
 }
 
 # ─── AC3.1: the C2 final review's recorded range covers the FIRST EPIC's
@@ -2151,6 +2201,34 @@ _seed_merge_project() {
 
   # The controller keeps the worktree on the candidate across the PM boundary.
   git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
+  _seed_plan_final_evidence
+}
+
+# _seed_merge_project_pre_review — identical to _seed_merge_project up to a
+# frozen candidate in PLAN_REVIEW, WITHOUT sealing a plan-final review. Tests
+# of `--stage inputs`'s OWN production (AC11) must run against a plan that has
+# not yet had its outputs hash-bound by a completed review — `--stage inputs`
+# correctly refuses to re-produce them once review has sealed the candidate's
+# outputs (see "already has a RECORDED plan-final review" in aid-plan-fsm.sh).
+_seed_merge_project_pre_review() {
+  export AID_TEST_SEED_LIFECYCLE=1
+  _bootstrap
+  _commit_on "plan/${PLAN_ID}" epic-work.txt "feat: the EPIC's work"
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _add_epic "$PLAN_ID" "E-068-2_2"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-2_2" "abandoned"
+  plan_manifest_update "$PLAN_ID" \
+    '(.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-2_2") | .terminal_reason) = "PM dropped it"' >/dev/null
+
+  _finalize "$PLAN_ID" sync
+  [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze
+  [ "$status" -eq 0 ]
+  # The controller keeps the worktree ON the candidate for every plan-final
+  # stage (--stage inputs' aid-plan-diff.sh reads HEAD to bind head_commit).
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
 }
 
 # _merge_commit — the published plan merge SHA, read from the RUNTIME manifest.
@@ -2218,6 +2296,17 @@ _merge() {
   _merge "$TEST_TMPDIR/nope.json"
   [ "$status" -eq 1 ]
   [[ "$output" == *"no PM decision"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "IMP-466: failed evidence publication leaves the local target untouched before CAS" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  git -C "$TEST_PROJECT_ROOT" remote add evidence-reject "$TEST_TMPDIR/nonexistent-remote"
+  git -C "$TEST_PROJECT_ROOT" config branch.main.remote evidence-reject
+  _merge "$(_decision_file)" --push
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"evidence ref"* ]]
   [ "$(_main_sha)" = "$before" ]
 }
 
@@ -2593,6 +2682,11 @@ _merge() {
   _poke_manifest ".plan_boundary_manifest.candidate_sha = \"$(_plan_sha)\""
   _commit_on main clash.txt "main side"
   _poke_manifest ".plan_boundary_manifest.target_branch_head_at_candidate_freeze = \"$(_main_sha)\""
+  # The durable receipt is bound to the ORIGINAL candidate/target head; a
+  # hand-poked manifest binding a DIFFERENT candidate must reseal it too, or
+  # merge would (correctly) refuse on a receipt mismatch before ever reaching
+  # the conflict path this test is actually about.
+  _seed_plan_final_evidence
   local before; before="$(_main_sha)"
 
   _merge
@@ -2886,12 +2980,15 @@ _seed_plan_final_evidence() {
   jq -n '{overall:"pass", gates:[]}' > "${dir}/gates_report.json"
 
   local f outputs='{}'
-  for f in semantic-review-final.json audit-report.json curator-report.json \
+  for f in semantic-review-final.json audit-report.json audit-input-manifest.json curator-report.json \
            simplifier-report.md delivery-report.json review-profile.json \
-           delivery-gate.json acceptance-evidence.json dispatch-record.json; do
+           plan-diff.json delivery-gate.json acceptance-evidence.json dispatch-record.json; do
     if [[ ! -f "${dir}/${f}" ]]; then
       if [[ "$f" == *.md ]]; then
         printf 'Head: %s\n' "$cand" > "${dir}/${f}"
+      elif [[ "$f" == "plan-diff.json" ]]; then
+        jq -n --arg b "$base" --arg h "$cand" \
+          '{base_commit:$b, head_commit:$h, overall_verdict:"present", results:[], summary:{present_count:0,absent_count:0}}' > "${dir}/${f}"
       else
         jq -n --arg h "$cand" '{schema_version:"aid-2.0", revision:{head_sha:$h}}' > "${dir}/${f}"
       fi
@@ -2901,10 +2998,29 @@ _seed_plan_final_evidence() {
   done
 
   plan_manifest_update "$PLAN_ID" \
+    ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')\", candidate_sha: \"${cand}\", run_id: \"${run_id}\", ac_lens_required: false, plan_diff_verdict: \"present\"}" >/dev/null
+
+  plan_manifest_update "$PLAN_ID" \
     ".plan_boundary_manifest.plan_final_review = $(jq -nc --arg c "$cand" --arg b "$base" \
       --arg r "$run_id" --argjson o "$outputs" \
       '{candidate_sha:$c, review_range:($b + ".." + $c), run_id:$r, outputs:$o,
         dispatch_counts:{}, utilities_run:[]}')" >/dev/null
+
+  # The production review stage seals its accepted technical output inventory
+  # outside the candidate.  Seeds that model an already-complete review must
+  # do the same; otherwise merge tests would accidentally exercise the legacy
+  # runtime-only path that production now refuses.
+  local sealed ref receipt_commit receipt_hash
+  local target_head
+  target_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  local frozen_at
+  frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
+  sealed="$(bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "$8" "$9"' \
+    _ "$PLAN_FSM_CLI" "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$run_id" "$outputs")"
+  IFS='|' read -r ref receipt_commit receipt_hash <<< "$sealed"
+  [[ -n "$ref" && -n "$receipt_hash" ]] || return 1
+  plan_manifest_update "$PLAN_ID" \
+    ".plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\" | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"" >/dev/null
 
   jq -n --arg c "$cand" '{schema_version:"aid-2.0", artifact_type:"release_decision",
     release_decision:{release_ready:true, blockers:[], candidate_sha:$c}}' \
@@ -2925,6 +3041,854 @@ _seed_plan_final_evidence() {
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/reports"
   printf -- '---\nHead: %s\n---\n\n# %s delivery\n' "$cand" "$PLAN_ID" \
     > "$TEST_PROJECT_ROOT/.aid-o/reports/${PLAN_ID}-delivery.md"
+}
+
+@test "IMP-466: a deleted plan-final runtime projection recovers uniquely from the sealed receipt" {
+  _seed_merge_project
+  local state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  run plan_state_get "$PLAN_ID" plan_state
+  [ "$output" = "AWAITING_PM" ]
+  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/${PLAN_ID}")" ]
+}
+
+@test "IMP-466: receipt recovery refuses an ambiguous sidecar set (two genuinely distinct valid receipts)" {
+  _seed_merge_project
+  local cand base target target_head frozen_at run2 outputs sealed state_dir
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  target_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
+  outputs="$(jq -c '.plan_boundary_manifest.plan_final_review.outputs' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  run2="R-${PLAN_ID}-final-2"
+  # A SECOND, independently valid, correctly-placed receipt for the SAME plan
+  # and candidate under a different run id — real ambiguity, not a relocated
+  # copy of the same object under a foreign name.
+  sealed="$(bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "$8" "$9"' \
+    _ "$PLAN_FSM_CLI" "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$run2" "$outputs")"
+  [[ -n "$sealed" ]]
+  state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"exactly one valid public receipt"* ]]
+}
+
+@test "IMP-466: a receipt whose content disagrees with the ref location it was found at is refused, not silently trusted or relocated" {
+  _seed_merge_project
+  local ref cand forged tmp blob tree commit state_dir
+  ref="$(_manifest_field "$PLAN_ID" plan_final_evidence_ref)"
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  forged="$(git -C "$TEST_PROJECT_ROOT" show "${ref}:receipt.json" | \
+    jq -c --arg r "R-${PLAN_ID}-final-999" --arg ref "refs/heads/aid-evidence/${PLAN_ID}/${cand}/R-${PLAN_ID}-final-999" \
+      '.run_id = $r | .evidence_ref = $ref')"
+  tmp="$TEST_TMPDIR/forged-receipt.json"; printf '%s\n' "$forged" > "$tmp"
+  blob="$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$tmp")"
+  tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$TEST_PROJECT_ROOT" mktree)"
+  commit="$(git -C "$TEST_PROJECT_ROOT" commit-tree "$tree" -m forged)"
+  # Placed at the REAL canonical location for this plan/candidate/run, but its
+  # own content claims a DIFFERENT run — the location/content binding fails.
+  git -C "$TEST_PROJECT_ROOT" update-ref "$ref" "$commit"
+  state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"exactly one valid public receipt"* ]]
+}
+
+@test "IMP-466: an extra file in the sidecar ref tree is refused during recovery" {
+  _seed_merge_project
+  local ref tree blob2 tree2 commit2 state_dir
+  ref="$(_manifest_field "$PLAN_ID" plan_final_evidence_ref)"
+  tree="$(git -C "$TEST_PROJECT_ROOT" rev-parse "${ref}^{tree}")"
+  blob2="$(printf 'extra' | git -C "$TEST_PROJECT_ROOT" hash-object -w --stdin)"
+  tree2="$( { git -C "$TEST_PROJECT_ROOT" ls-tree "$tree"; printf '100644 blob %s\textra.txt\n' "$blob2"; } | git -C "$TEST_PROJECT_ROOT" mktree)"
+  commit2="$(git -C "$TEST_PROJECT_ROOT" commit-tree "$tree2" -m "tampered: extra file")"
+  git -C "$TEST_PROJECT_ROOT" update-ref "$ref" "$commit2"
+  state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"exactly one valid public receipt"* ]]
+}
+
+@test "IMP-466: sealing refuses a receipt whose output inventory is missing a required key" {
+  _seed_merge_project
+  local base cand target_head frozen_at outputs incomplete before_ref
+  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  target_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
+  outputs="$(jq -c '.plan_boundary_manifest.plan_final_review.outputs' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  incomplete="$(jq -c 'del(.["delivery-report.json"])' <<< "$outputs")"
+  before_ref="$(git -C "$TEST_PROJECT_ROOT" for-each-ref --format='%(refname)' "refs/heads/aid-evidence/${PLAN_ID}/" | wc -l)"
+  run bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "R-'"${PLAN_ID}"'-final-incomplete" "$8"' \
+    _ "$PLAN_FSM_CLI" "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$incomplete"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"incomplete or expanded"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" for-each-ref --format='%(refname)' "refs/heads/aid-evidence/${PLAN_ID}/" | wc -l)" -eq "$before_ref" ]
+}
+
+@test "IMP-466: sealing refuses a receipt whose output inventory carries an extra key" {
+  _seed_merge_project
+  local base cand target_head frozen_at outputs extra
+  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  target_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
+  outputs="$(jq -c '.plan_boundary_manifest.plan_final_review.outputs' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  extra="$(jq -c '. + {"unexpected-file.json":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}' <<< "$outputs")"
+  run bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "R-'"${PLAN_ID}"'-final-extra" "$8"' \
+    _ "$PLAN_FSM_CLI" "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$extra"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"incomplete or expanded"* ]]
+}
+
+@test "IMP-466: a FRESH CLONE (remote-tracking refs only, no local branches) recovers the receipt and restores AWAITING_PM" {
+  _seed_merge_project
+  # _seed_merge_project leaves the source worktree checked out on plan/<id>
+  # (the controller keeps the candidate checked out across the PM boundary);
+  # a clone's default/checked-out branch mirrors the SOURCE's HEAD, so it must
+  # be moved to main first or the clone would materialise plan/<id> locally
+  # too — defeating the point of this test.
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  local clone="$TEST_TMPDIR/clone"
+  git clone -q "$TEST_PROJECT_ROOT" "$clone"
+  # A plain clone checks out only the default branch; every other branch this
+  # plan needs (plan/<id>, the evidence ref) exists ONLY as refs/remotes/origin/*.
+  run git -C "$clone" rev-parse --verify --quiet "refs/heads/plan/${PLAN_ID}"
+  [ -z "$output" ]
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$clone"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_state' "$clone/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")" = "AWAITING_PM" ]
+  [ "$(jq -r '.plan_boundary_manifest.candidate_sha' "$clone/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/${PLAN_ID}")" ]
+}
+
+@test "IMP-466: repair from a NEW LINKED WORKTREE (no .aid-o/work of its own) recovers the shared runtime state" {
+  _seed_merge_project
+  local wt="$TEST_TMPDIR/worktree"
+  git -C "$TEST_PROJECT_ROOT" worktree add -q --detach "$wt" main
+  [ ! -d "$wt/.aid-o/work" ]
+  # An ordinary linked worktree with no .aid-o/work of its own shares the
+  # main checkout's runtime state by design (_pfsm_resolve_project_root's
+  # git-common-dir fallback) — so the loss this test proves recovery from is
+  # the SHARED state itself being gone, invoked from the worktree path.
+  local state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$wt"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_state' "$state_dir/plan-boundary-manifest.json")" = "AWAITING_PM" ]
+}
+
+@test "IMP-466: recovery -> merge -> close succeeds end to end after a deleted runtime projection" {
+  _seed_merge_project
+  local state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  _merge
+  [ "$status" -eq 0 ]
+  _close
+  [ "$status" -eq 0 ]
+  [ "$(plan_state_get "$PLAN_ID" plan_state)" = "CLOSED" ]
+}
+
+@test "IMP-466: post-merge loss of the runtime projection recovers into PLAN_MERGING and closes" {
+  _seed_closable
+  local state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(plan_state_get "$PLAN_ID" plan_state)" = "PLAN_MERGING" ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_final_merge.result' "$state_dir/plan-boundary-manifest.json")" = "merged" ]
+  _close
+  [ "$status" -eq 0 ]
+  [ "$(plan_state_get "$PLAN_ID" plan_state)" = "CLOSED" ]
+}
+
+@test "IMP-466 item 4: post-merge recovery closes even with the ENTIRE run directory gone (via the durable close-evidence receipt)" {
+  _seed_closable
+  local run_dir; run_dir="$(_run_dir)"
+  local state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir" "$run_dir"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(plan_state_get "$PLAN_ID" plan_state)" = "PLAN_MERGING" ]
+  [ "$(_manifest_field "$PLAN_ID" plan_final_close_evidence_ref)" != "null" ]
+  _close
+  [ "$status" -eq 0 ]
+  [ "$(plan_state_get "$PLAN_ID" plan_state)" = "CLOSED" ]
+}
+
+@test "D1 fix: --push publishes the close-evidence ref to the remote ALONGSIDE main, not as an afterthought" {
+  _seed_merge_project
+  local bare="$TEST_TMPDIR/bare-d1.git"
+  git init -q --bare "$bare"
+  git -C "$TEST_PROJECT_ROOT" remote add origin "$bare"
+  git -C "$TEST_PROJECT_ROOT" config branch.main.remote origin
+  local cand run_id close_ref
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  run_id="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  close_ref="refs/heads/aid-evidence-close/${PLAN_ID}/${cand}/${run_id}"
+  _merge "$(_decision_file)" --push
+  [ "$status" -eq 0 ]
+  local remote_close_sha; remote_close_sha="$(git --git-dir="$bare" rev-parse --verify --quiet "$close_ref" 2>/dev/null || true)"
+  [ -n "$remote_close_sha" ]
+  [ "$remote_close_sha" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse "$close_ref")" ]
+  # main and the tag (if any) reached the remote too — the close-evidence
+  # push happens BEFORE main's, never instead of it.
+  local remote_main; remote_main="$(git --git-dir="$bare" rev-parse --verify --quiet refs/heads/main 2>/dev/null || true)"
+  [ "$remote_main" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" ]
+}
+
+@test "D1 fix: a FRESH CLONE of the pushed remote, after ALL local runtime evidence is gone, recovers close proof and closes" {
+  _seed_merge_project
+  local bare="$TEST_TMPDIR/bare-d1-fresh.git"
+  git init -q --bare "$bare"
+  git -C "$TEST_PROJECT_ROOT" remote add origin "$bare"
+  git -C "$TEST_PROJECT_ROOT" config branch.main.remote origin
+  _merge "$(_decision_file)" --push
+  [ "$status" -eq 0 ]
+  # A genuinely independent clone of the REMOTE (not of TEST_PROJECT_ROOT) —
+  # this is the auditor's exact scenario: the only durable copy of the
+  # close-evidence ref left in existence is the one on origin.
+  local clone="$TEST_TMPDIR/fresh-clone-d1"
+  git clone -q "$bare" "$clone"
+  run git -C "$clone" rev-parse --verify --quiet "refs/heads/aid-evidence-close/${PLAN_ID}"
+  [ -z "$output" ]
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$clone"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_state' "$clone/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")" = "PLAN_MERGING" ]
+  # The human delivery report is deliberately PRIVATE/gitignored (see
+  # _bootstrap) — by design it is never git-tracked, so a real `git clone`
+  # never carries it over, unlike the durable evidence refs this test is
+  # actually about. Recreate it in the clone's own working tree, exactly as
+  # an operator recovering a plan from a fresh clone would have to.
+  # The clone's default checkout is main (the only branch AID ever pushes),
+  # unlike the source repo where the controller keeps HEAD on the candidate
+  # across the PM boundary — so Check 2's freshness baseline here is main's
+  # ACTUAL post-merge tip (which now also carries the lifecycle-bind
+  # commit), not the pre-merge candidate. Stamp the report against that
+  # real current HEAD, exactly as a regenerated/re-annotated report would
+  # be in a genuine post-clone recovery — this is Check 2 doing its real
+  # job, unrelated to D1's evidence-receipt recovery this test targets.
+  local clone_head; clone_head="$(git -C "$clone" rev-parse HEAD)"
+  mkdir -p "$clone/.aid-o/reports"
+  printf -- '---\nHead: %s\n---\n\n# %s delivery\n' "$clone_head" "$PLAN_ID" \
+    > "$clone/.aid-o/reports/${PLAN_ID}-delivery.md"
+  run bash "$PLAN_FSM_CLI" plan-close "$PLAN_ID" --project-root "$clone"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_state' "$clone/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")" = "CLOSED" ]
+}
+
+@test "D1 fix: a REJECTED close-evidence push (remote already has a DIFFERENT object at that ref) refuses to push main — target unchanged" {
+  _seed_merge_project
+  local bare="$TEST_TMPDIR/bare-d1-reject.git"
+  git init -q --bare "$bare"
+  git -C "$TEST_PROJECT_ROOT" remote add origin "$bare"
+  git -C "$TEST_PROJECT_ROOT" config branch.main.remote origin
+  # Seed the bare remote's main first so we can observe it staying put.
+  git -C "$TEST_PROJECT_ROOT" push -q origin main
+  local before_remote_main; before_remote_main="$(git --git-dir="$bare" rev-parse refs/heads/main)"
+  local cand run_id close_ref
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  run_id="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  close_ref="refs/heads/aid-evidence-close/${PLAN_ID}/${cand}/${run_id}"
+  # A DIFFERENT, unrelated object already sits at the exact ref this attempt
+  # will try to seal and push — the remote push is a plain (non-force)
+  # update, so it is rejected exactly like a forged/relocated evidence ref
+  # would be.
+  local bogus; bogus="$(git -C "$TEST_PROJECT_ROOT" commit-tree "$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD^{tree})" -m "unrelated")"
+  git -C "$TEST_PROJECT_ROOT" push -q origin "${bogus}:${close_ref}"
+  _merge "$(_decision_file)" --push
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"close-evidence ref"* ]]
+  [ "$(git --git-dir="$bare" rev-parse refs/heads/main)" = "$before_remote_main" ]
+}
+
+@test "IMP-466: target advancing past its frozen head with NO discoverable merge of this candidate refuses recovery" {
+  _seed_merge_project
+  local state_dir="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  rm -rf "$state_dir"
+  _commit_on main unrelated.txt "chore: unrelated advance of main"
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"neither the frozen pre-merge state nor a discoverable merge"* ]]
+}
+
+# ─── D3 / IMP-465: generated protocol-v2 scaffolds ─────────────────────────
+
+# _skel_ctx — echoes "root project_id plan_id base candidate run_id run_dir_abs"
+# for the currently frozen candidate, for direct calls into the skeleton
+# generator/verifier functions (sourced, not shelled through the CLI).
+_skel_ctx() {
+  local dir; dir="$(_run_dir)"
+  printf '%s|%s|%s|%s|%s|%s|%s' \
+    "$TEST_PROJECT_ROOT" "$(basename "$TEST_PROJECT_ROOT")" "$PLAN_ID" \
+    "$(_manifest_field "$PLAN_ID" plan_base_commit)" \
+    "$(_manifest_field "$PLAN_ID" candidate_sha)" \
+    "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
+    "$dir"
+}
+
+@test "D3: generating a skeleton produces a schema-valid envelope with a null payload key" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  run bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -eq 0 ]
+  [ -s "${dir}/curator-report.json" ]
+  [ "$(jq -r '.schema_version' "${dir}/curator-report.json")" = "aid-2.0" ]
+  [ "$(jq -r '.artifact_type' "${dir}/curator-report.json")" = "curator" ]
+  [ "$(jq -r '.identity.plan_id' "${dir}/curator-report.json")" = "$plan" ]
+  [ "$(jq -r '.identity.run_id' "${dir}/curator-report.json")" = "$run" ]
+  [ "$(jq -r '.revision.head_sha' "${dir}/curator-report.json")" = "$cand" ]
+  [ "$(jq -r '.revision.base_sha' "${dir}/curator-report.json")" = "$base" ]
+  [ "$(jq -r '.curator' "${dir}/curator-report.json")" = "null" ]
+  # aid-protocol-validate.sh correctly refuses a null payload (missing_type_
+  # payload) — a skeleton is intentionally incomplete until the specialist
+  # fills it; only THAT is the point where full protocol validation applies.
+  run bash "$AID_PLUGIN_PATH/scripts/aid-protocol-validate.sh" "${dir}/curator-report.json"
+  [ "$status" -ne 0 ]
+  jq '.curator = {blocking_findings: false}' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-protocol-validate.sh" "${dir}/curator-report.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "D3: generation is idempotent — an existing file (specialist work in progress) is never overwritten" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  mkdir -p "$dir"
+  printf 'NOT A SKELETON — real specialist work already in progress\n' > "${dir}/curator-report.json"
+  run bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${dir}/curator-report.json")" = "NOT A SKELETON — real specialist work already in progress" ]
+}
+
+@test "D3: an unfilled skeleton (payload still null) is refused, never read as a completed specialist output" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is not an object"* ]]
+}
+
+@test "D3: a payload-filled skeleton with the envelope left exactly as generated is accepted" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton reporter "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
+  jq '.delivery_report = {summary: "done"}' "${dir}/delivery-report.json" > "${dir}/delivery-report.json.tmp" \
+    && mv "${dir}/delivery-report.json.tmp" "${dir}/delivery-report.json"
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope reporter "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -eq 0 ]
+}
+
+@test "D3: an envelope field altered by the specialist (identity.plan_id) is refused, payload edit alone is not enough" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
+  jq '.curator = {blocking_findings: false} | .identity.plan_id = "P999"' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"altered"* ]]
+}
+
+@test "D3: a skeleton copied from a DIFFERENT candidate/run (stale attempt) is refused as a candidate/run mismatch" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
+  jq '.semantic_review = {range: "x"}' "${dir}/semantic-review-final.json" > "${dir}/semantic-review-final.json.tmp" \
+    && mv "${dir}/semantic-review-final.json.tmp" "${dir}/semantic-review-final.json"
+  # A different (stale) run_id claims to have produced this exact file.
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "R-stale-1" "$dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "D3: a falsy non-object payload (false/0/an array) is refused, never read as a completed specialist output" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
+  local bad
+  for bad in 'false' '0' '""' '[]' '"a string"'; do
+    jq --argjson v "$bad" '.curator = $v' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+      && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+    run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+      _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is not an object"* ]]
+  done
+}
+
+@test "D3: no recorded skeleton hash (e.g. a hand-built or legacy file) fails closed with an explicit run-inputs message" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  mkdir -p "$dir"
+  jq -n --arg t "delivery_report" --arg plan "$plan" --arg run "$run" --arg h "$cand" --arg b "$base" \
+    '{schema_version:"aid-2.0", artifact_type:$t, producer:"hand-written", created_at:"2026-01-01T00:00:00Z",
+      control_protocol:"aid-2.0", identity:{project_id:"x", epic_id:null, plan_id:$plan, run_id:$run},
+      subject:{subject_hash:"sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+      revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
+      status:"pass", verdict:{kind:"none", ready:false},
+      provenance:{dispatch_mode:"subagent", generated_by_tool:"hand"},
+      delivery_report:{summary:"hand-built, never generated by --stage inputs"}}' \
+    > "${dir}/delivery-report.json"
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope reporter "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run \"plan-finalize --stage inputs\""* ]]
+}
+
+@test "D3: a crash between writing the skeleton and sealing its hash self-heals on the next generate call" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
+  local ctx root pid plan base cand run dir
+  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
+  # Simulate the crash: generate for real, then WIPE the manifest's record of
+  # it, leaving the file (still with a null payload) but no seal — exactly
+  # what a crash between `mv -f "$tmp" "$out"` and `plan_manifest_update`
+  # would leave behind.
+  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
+  plan_manifest_update "$PLAN_ID" '.plan_boundary_manifest.plan_final_skeletons = {}' >/dev/null
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run \"plan-finalize --stage inputs\""* ]]
+
+  # The next call to the generator (idempotent per file-exists, but must
+  # self-heal the missing record since the payload is still untouched/null).
+  run bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -eq 0 ]
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is not an object"* ]]
+
+  jq '.curator = {blocking_findings: false}' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
+    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
+  [ "$status" -eq 0 ]
+}
+
+# ─── D5 / IMP-468: formal Curator adjudication ─────────────────────────────
+
+# _write_audit_finding <dir> <severity> [action_owner] — echoes "fingerprint occurrence_id"
+_write_audit_finding() {
+  local dir="$1" severity="$2" owner="${3:-}"
+  local fp="sha256:$(printf '%s-%s' "$severity" "$RANDOM" | sha256sum | awk '{print $1}')"
+  local oid="occ-$RANDOM"
+  jq --arg fp "$fp" --arg oid "$oid" --arg sev "$severity" --arg own "$owner" \
+    '.findings = ((.findings // []) + [{fingerprint:$fp, occurrence_id:$oid, severity:$sev}
+      + (if $own != "" then {action_owner:$own} else {} end)])' \
+    "${dir}/audit-report.json" > "${dir}/audit-report.json.tmp" && mv "${dir}/audit-report.json.tmp" "${dir}/audit-report.json"
+  printf '%s %s\n' "$fp" "$oid"
+}
+
+# _write_adjudication <dir> <fingerprint> <occurrence_id> <disposition> [override_jq]
+_write_adjudication() {
+  local dir="$1" fp="$2" oid="$3" disp="$4" override="${5:-.}"
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  local cand run
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  run="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  jq --arg fp "$fp" --arg oid "$oid" --arg disp "$disp" --arg h "$ahash" --arg c "$cand" --arg r "$run" '
+    .curator.adjudications = ((.curator.adjudications // []) + [
+      {finding_fingerprint:$fp, finding_occurrence_id:$oid, disposition:$disp,
+       audit_report_sha256:$h, candidate_sha:$c, run_id:$r, evidence_ref:"commit:deadbeef"}
+      | '"$override"'
+    ])' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+}
+
+@test "D5: a complete, exact, fresh adjudication for a blocking finding allows review to complete" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high implementer)
+  # curator-report.json must be RE-BOUND after audit-report.json changes.
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  _write_adjudication "$dir" "$fp" "$oid" confirmed
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -eq 0 ]
+}
+
+@test "D5: a blocking finding with NO adjudication blocks review" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  _write_audit_finding "$dir" critical >/dev/null
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"never resolved by a bare curator.blocking_findings:false"* ]]
+}
+
+@test "D5: an adjudication bound to a DIFFERENT (stale) candidate/run blocks review" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high)
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  _write_adjudication "$dir" "$fp" "$oid" confirmed '.candidate_sha = "0000000000000000000000000000000000000000"'
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"partial or stale adjudication is refused"* ]]
+}
+
+@test "D5: a security-tier (critical) finding disposed as false_positive is refused — must escalate" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" critical)
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  _write_adjudication "$dir" "$fp" "$oid" false_positive
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can never self-clear"* ]]
+}
+
+@test "D5: a PM-required finding (action_owner=pm) disposed as false_positive is refused" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high pm)
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  _write_adjudication "$dir" "$fp" "$oid" false_positive
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can never self-clear"* ]]
+}
+
+@test "D5: a non-security high finding disposed as false_positive is legitimately allowed (not overly strict)" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high implementer)
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  _write_adjudication "$dir" "$fp" "$oid" false_positive
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -eq 0 ]
+}
+
+# ─── D2 / IMP-464 round-2: audit-input-manifest.json is a required output,
+#     and its provenance chain to audit-report.json is verified ───────────
+
+@test "D2: a missing audit-input-manifest.json blocks with exit 7 and names it" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  rm -f "${dir}/audit-input-manifest.json"
+  _review
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"audit-input-manifest.json"* ]]
+}
+
+@test "D2: audit-report.json's input_manifest_hash NOT matching the real manifest's input_hash blocks review" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  jq '.audit_report.input_manifest_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"' \
+    "${dir}/audit-report.json" > "${dir}/audit-report.json.tmp" && mv "${dir}/audit-report.json.tmp" "${dir}/audit-report.json"
+  # curator-report.json's audit_report_ref must still bind to the (now
+  # modified) audit-report.json bytes, or that check fails first and masks
+  # the one this test targets.
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
+    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
+  sleep 1; touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"does not equal audit-input-manifest.json's own audit_input_manifest.input_hash"* ]]
+}
+
+@test "D2: an unconnected C3 dispatch (manifest's plan-diff.json snapshot disagrees with the producer-sealed hash) blocks review" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  jq '.audit_input_manifest.evidence_hashes = [{path:"plan-diff.json", sha256:"sha256:3333333333333333333333333333333333333333333333333333333333333333", size:1}]' \
+    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 may have dispatched over swapped evidence"* ]]
+}
+
+@test "D2 round-3: a REAL plan-diff.json verdict with NO evidence_hashes[] entry at all is refused, not silently trusted" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  # plan-diff.json's overall_verdict is "present" (a real, meaningful C3 AC
+  # verdict) — the manifest omitting any record of having read it must
+  # block, not be treated the same as a legitimate no-AC-lens "skipped".
+  jq 'del(.audit_input_manifest.evidence_hashes)' \
+    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 must record what it actually read, not omit it"* ]]
+}
+
+@test "D2 round-3: a non-array evidence_hashes despite a real plan-diff.json verdict is refused" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  jq '.audit_input_manifest.evidence_hashes = "not-an-array"' \
+    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is missing or not an array"* ]]
+}
+
+# ─── D5 follow-up: lib/aid-lifecycle.sh's _aid_lc_plan_review_status now
+#     consults the SAME shared resolver (lib/aid-adjudication.sh) the
+#     plan-final review boundary uses, instead of rejecting on a raw Auditor
+#     blocking_findings:true regardless of a legitimate Curator adjudication.
+
+# _lc_git_repo — a throwaway git repo so _aid_lc_plan_final_trusted_candidate
+# has somewhere to seal a real (git-tracked) receipt ref.
+_lc_git_repo() {
+  local d; d="$(mktemp -d "$TEST_TMPDIR/lc-repo.XXXXXX")"
+  git init -q "$d"
+  git -C "$d" config user.email test@test
+  git -C "$d" config user.name test
+  printf 'x' > "$d/x.txt"; git -C "$d" add x.txt; git -C "$d" commit -q -m init >/dev/null
+  printf '%s' "$d"
+}
+
+# _lc_seal_receipt <root> <plan_id> <candidate> <run_id> — a FULL, schema-valid
+# D1 receipt (D5 lifecycle-audit round-2 LOW: conforms to the real
+# _pfsm_validate_plan_final_receipt_json grammar exactly — every required
+# key, not a reduced subset — so these tests prove compatibility with what
+# _pfsm_seal_plan_final_review actually produces, not merely with a looser
+# shape the test-side reader happens to accept) at the ref
+# _aid_lc_plan_final_trusted_candidate discovers.
+_lc_seal_receipt() {
+  local root="$1" plan_id="$2" cand="$3" run="$4"
+  local ref="refs/heads/aid-evidence/${plan_id}/${cand}/${run}"
+  local base="0000000000000000000000000000000000000000"
+  local target_head="1111111111111111111111111111111111111111"
+  local tmp; tmp="$(mktemp)"
+  jq -n --arg p "$plan_id" --arg c "$cand" --arg r "$run" --arg ref "$ref" \
+        --arg b "$base" --arg th "$target_head" \
+    '{schema_version:"aid-plan-final-evidence-1", artifact_type:"plan_final_evidence_receipt",
+      review_verdict:"accepted", plan_id:$p, plan_base_commit:$b, candidate_sha:$c,
+      candidate_frozen_at:"2026-01-01T00:00:00Z", target_branch:"main",
+      target_head_at_freeze:$th, run_id:$r, evidence_ref:$ref,
+      outputs:{"delivery-report.json":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}' \
+    > "$tmp"
+  local blob; blob="$(git -C "$root" hash-object -w "$tmp")"
+  rm -f "$tmp"
+  local tree; tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)"
+  local commit; commit="$(git -C "$root" commit-tree "$tree" -m "seal ${plan_id} ${run}")"
+  git -C "$root" update-ref "$ref" "$commit"
+}
+
+# _lc_write_audit_and_curator <root> <dir> <disposition> [candidate_override] [run_override]
+# — one HIGH finding in audit-report.json, top-level blocking_findings:true
+# (the shape _aid_lc_plan_review_status reads first), and ONE adjudication
+# entry in curator-report.json bound to it. A REAL receipt is sealed for the
+# trusted candidate/run (P999/R-lc-test-1); overrides let a test make the
+# ADJUDICATION stale (bound to a candidate/run the receipt does NOT attest
+# to) without touching the finding or the receipt itself.
+_lc_write_audit_and_curator() {
+  local root="$1" dir="$2" disposition="$3" cand_override="${4:-}" run_override="${5:-}"
+  mkdir -p "$dir"
+  local cand="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" run="R-lc-test-1"
+  _lc_seal_receipt "$root" "P999" "$cand" "$run"
+  jq -n --arg h "$cand" --arg r "$run" \
+    '{revision:{head_sha:$h}, identity:{run_id:$r}, blocking_findings:true,
+      findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 occurrence_id:"occ-1", severity:"high"}]}' \
+    > "${dir}/audit-report.json"
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  local adj_cand="${cand_override:-$cand}" adj_run="${run_override:-$run}"
+  jq -n --arg h "$ahash" --arg c "$adj_cand" --arg r "$adj_run" --arg d "$disposition" \
+    '{curator:{adjudications:[{finding_fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      finding_occurrence_id:"occ-1", audit_report_sha256:$h, candidate_sha:$c, run_id:$r,
+      disposition:$d, evidence_ref:"commit:deadbeef"}]}}' \
+    > "${dir}/curator-report.json"
+}
+
+_lc_review_status() {
+  local root="$1" dir="$2"
+  bash -c 'source "$1"; _AID_LC_PLAN_RUN_DIR="$2"; _aid_lc_plan_review_status "$3" "$4"' \
+    _ "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" "$dir" "$root" "P999"
+}
+
+@test "D5 lifecycle: a HIGH finding disposed as a valid, exactly-bound false_positive is NOT rejected" {
+  local root; root="$(_lc_git_repo)"
+  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
+  _lc_write_audit_and_curator "$root" "$dir" "false_positive"
+  run _lc_review_status "$root" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = "accepted" ]
+}
+
+@test "D5 lifecycle: an adjudication bound to a DIFFERENT (stale) candidate leaves the plan rejected" {
+  local root; root="$(_lc_git_repo)"
+  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
+  _lc_write_audit_and_curator "$root" "$dir" "confirmed" "0000000000000000000000000000000000000000"
+  run _lc_review_status "$root" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = "rejected" ]
+}
+
+@test "D5 lifecycle: no adjudication at all for a raw blocking finding leaves the plan rejected" {
+  local root; root="$(_lc_git_repo)"
+  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
+  mkdir -p "$dir"
+  _lc_seal_receipt "$root" "P999" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "R-lc-test-1"
+  jq -n '{revision:{head_sha:"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}, identity:{run_id:"R-lc-test-1"},
+          blocking_findings:true,
+          findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                     occurrence_id:"occ-1", severity:"high"}]}' \
+    > "${dir}/audit-report.json"
+  jq -n '{curator:{}}' > "${dir}/curator-report.json"
+  run _lc_review_status "$root" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = "rejected" ]
+}
+
+@test "D5 lifecycle: NO discoverable receipt at all (unpublished plan) leaves the plan rejected, never accepted on faith" {
+  local root; root="$(_lc_git_repo)"
+  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
+  mkdir -p "$dir"
+  # No _lc_seal_receipt call — audit-report.json/curator-report.json are
+  # internally self-consistent with each other, but there is no durable
+  # receipt anywhere to anchor trust in their claimed candidate/run.
+  local cand="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" run="R-lc-test-1"
+  jq -n --arg h "$cand" --arg r "$run" \
+    '{revision:{head_sha:$h}, identity:{run_id:$r}, blocking_findings:true,
+      findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 occurrence_id:"occ-1", severity:"high"}]}' \
+    > "${dir}/audit-report.json"
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq -n --arg h "$ahash" --arg c "$cand" --arg r "$run" \
+    '{curator:{adjudications:[{finding_fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      finding_occurrence_id:"occ-1", audit_report_sha256:$h, candidate_sha:$c, run_id:$r,
+      disposition:"confirmed", evidence_ref:"commit:deadbeef"}]}}' \
+    > "${dir}/curator-report.json"
+  run _lc_review_status "$root" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = "rejected" ]
+}
+
+@test "D5 lifecycle: a receipt sealed for a DIFFERENT plan at the same candidate/run does not leak in via a spoofed run-directory path" {
+  local root; root="$(_lc_git_repo)"
+  # P998 has ITS OWN real, unrelated receipt for the SAME candidate/run
+  # shape. The run directory being classified lives under a P998-shaped
+  # path (as if the mutable plan_final_evidence_dir field were pointed
+  # there), but the plan actually being processed — and the ONLY
+  # trustworthy source of plan_id now — is P999 (_lc_review_status's
+  # hardcoded trusted parameter), which has NO receipt at all. Before the
+  # round-2 fix, a path-derived plan_id guess would have resolved to
+  # "P998" here and incorrectly anchored trust in P998's unrelated receipt
+  # for what is actually a P999 classification.
+  _lc_seal_receipt "$root" "P998" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "R-lc-test-1"
+  local dir="${root}/.aid-o/work/evidence/P998/R-lc-test-1"
+  mkdir -p "$dir"
+  local cand="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" run="R-lc-test-1"
+  jq -n --arg h "$cand" --arg r "$run" \
+    '{revision:{head_sha:$h}, identity:{run_id:$r}, blocking_findings:true,
+      findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 occurrence_id:"occ-1", severity:"high"}]}' \
+    > "${dir}/audit-report.json"
+  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
+  jq -n --arg h "$ahash" --arg c "$cand" --arg r "$run" \
+    '{curator:{adjudications:[{finding_fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      finding_occurrence_id:"occ-1", audit_report_sha256:$h, candidate_sha:$c, run_id:$r,
+      disposition:"false_positive", evidence_ref:"commit:deadbeef"}]}}' \
+    > "${dir}/curator-report.json"
+  run _lc_review_status "$root" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = "rejected" ]
 }
 
 # _seed_closable — a plan that has really merged and is therefore closable.
@@ -3862,7 +4826,7 @@ _inputs() {
 }
 
 @test "AC11: --stage inputs produces all three C4 inputs, bound to the plan and the frozen candidate" {
-  _seed_merge_project
+  _seed_merge_project_pre_review
   local dir; dir="$(_run_dir)"
   rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
 
@@ -3893,7 +4857,7 @@ _inputs() {
 }
 
 @test "AC11: an EPIC with no artifact is recorded ABSENT in sources[], not silently dropped" {
-  _seed_merge_project
+  _seed_merge_project_pre_review
   _inputs
   [ "$status" -eq 0 ]
   local dir; dir="$(_run_dir)"
@@ -3917,7 +4881,7 @@ _inputs() {
 }
 
 @test "AC11: --stage inputs REFUSES when no EPIC has merged into the plan" {
-  _seed_merge_project
+  _seed_merge_project_pre_review
   # `merged_to_plan -> abandoned` is not a legal transition, and rightly so — a
   # delivered EPIC cannot be un-delivered. So the subject is a plan whose only
   # EPIC was abandoned from `pending`, which is legal and is exactly the shape
@@ -4149,7 +5113,7 @@ _seed_startable_epic() {
 }
 
 @test "AC11: the delivery-gate aggregate carries the enforcement interpretation" {
-  _seed_merge_project
+  _seed_merge_project_pre_review
   _inputs
   [ "$status" -eq 0 ]
   local dir; dir="$(_run_dir)"

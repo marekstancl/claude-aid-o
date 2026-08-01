@@ -673,12 +673,13 @@ main() {
       echo "aid-release-policy: plan mode: cannot read the plan-boundary manifest at ${manifest#"${PROJECT_ROOT}/"} — plan mode NEVER falls back to EPIC resolution." >&2
       exit 1
     fi
-    local m_plan m_run m_cand m_thead m_evdir
+    local m_plan m_run m_cand m_thead m_evdir PLAN_BASE_SHA
     m_plan="$(jq -r '.plan_boundary_manifest.plan_id // ""' "$manifest")"
     m_run="$(jq -r '.plan_boundary_manifest.plan_final_run_id // ""' "$manifest")"
     m_cand="$(jq -r '.plan_boundary_manifest.candidate_sha // ""' "$manifest")"
     m_thead="$(jq -r '.plan_boundary_manifest.target_branch_head_at_candidate_freeze // ""' "$manifest")"
     m_evdir="$(jq -r '.plan_boundary_manifest.plan_final_evidence_dir // ""' "$manifest")"
+    PLAN_BASE_SHA="$(jq -r '.plan_boundary_manifest.plan_base_commit // ""' "$manifest")"
     local idfail=""
     [[ "$m_plan"  == "$PLAN_ID" ]]         || idfail="${idfail}manifest plan_id '${m_plan}' != --plan '${PLAN_ID}'; "
     [[ "$m_run"   == "$RUN_ID" ]]          || idfail="${idfail}manifest plan_final_run_id '${m_run}' != --run-id '${RUN_ID}'; "
@@ -726,6 +727,54 @@ main() {
   check_required_present delivery_gate         delivery_gate         "${EVIDENCE_DIR}/delivery-gate.json"
   check_required_present semantic_review_final semantic_review_final "${EVIDENCE_DIR}/semantic-review-final.json"
   check_required_present acceptance_evidence   acceptance_evidence   "${EVIDENCE_DIR}/acceptance-evidence.json"
+
+  # IMP-464 (D2): C3 consumes the plan AC command/verdict evidence explicitly.
+  # It is not interchangeable with a green gate aggregate: a missing or
+  # malformed per-criterion record is blocking in plan mode. Whether an
+  # honest "skipped" verdict is acceptable depends on whether an AC lens
+  # (ac_to_test_identity / requirement_test_drift) is ARMED by this run's
+  # review-profile.json required_lenses[] — required_present above already
+  # guarantees review-profile.json exists in plan mode.
+  if [[ "$MODE" == "plan" ]]; then
+    local ac_lens_required_rp="false"
+    jq -e '.review_profile.required_lenses // [] | any(. == "ac_to_test_identity" or . == "requirement_test_drift")' \
+      "${EVIDENCE_DIR}/review-profile.json" >/dev/null 2>&1 && ac_lens_required_rp="true"
+    local pd="${EVIDENCE_DIR}/plan-diff.json" pd_base="" pd_head="" pd_verdict=""
+    if [[ ! -s "$pd" ]] || ! _is_json "$pd"; then
+      add_input plan_diff "plan-diff.json" "blocked" "plan-diff.json missing or invalid" false
+      add_blocker plan_diff "blocking" "plan-diff.json missing or invalid"
+    else
+      pd_base="$(jq -r '.base_commit // ""' "$pd" 2>/dev/null || true)"
+      pd_head="$(jq -r '.head_commit // ""' "$pd" 2>/dev/null || true)"
+      pd_verdict="$(jq -r '.overall_verdict // ""' "$pd" 2>/dev/null || true)"
+      local pd_verdict_ok=0
+      if [[ "$ac_lens_required_rp" == "true" ]]; then
+        [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]] && pd_verdict_ok=1
+      else
+        [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" || "$pd_verdict" == "skipped" ]] && pd_verdict_ok=1
+      fi
+      if [[ "$pd_base" != "$PLAN_BASE_SHA" || "$pd_head" != "$CANDIDATE_SHA" ]] \
+         || [[ "$pd_verdict_ok" -ne 1 ]] \
+         || ! jq -e '(.results | type == "array") and (.summary | type == "object")' "$pd" >/dev/null 2>&1; then
+        add_input plan_diff "plan-diff.json" "blocked" "plan-diff is not a complete verdict for this plan base/candidate" false
+        add_blocker plan_diff "blocking" "plan-diff is not bound to the frozen plan candidate"
+      else
+        # "skipped" is a legitimate, non-blocking classification when no AC
+        # lens is armed — but it is NOT a passed AC check, and recording it as
+        # verdict "pass" is exactly the silent upgrade the contract forbids.
+        # Only a real "present" verdict is reported as a pass; "absent" is
+        # reported as blocked (the blocker below is what actually stops the
+        # release, but the row itself must not claim "pass" either).
+        local pd_row_verdict="pass"
+        case "$pd_verdict" in
+          skipped) pd_row_verdict="not_required_skipped" ;;
+          absent)  pd_row_verdict="blocked" ;;
+        esac
+        add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict} (ac_lens_required=${ac_lens_required_rp})" true
+        [[ "$pd_verdict" == "present" || "$pd_verdict" == "skipped" ]] || add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria"
+      fi
+    fi
+  fi
 
   # --- gates_report (root, fallback gates/) ---
   local gates_report_path=""

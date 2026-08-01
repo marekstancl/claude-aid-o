@@ -1237,8 +1237,24 @@ against the frozen candidate. **The FSM dispatches nothing.** It declares which 
 exist, validates them against `candidate_sha`, and blocks until they do — the same division
 already used for C3, where `aid-fsm.sh` validates a dispatch record the controller produced.
 
-**Before the first invocation, put the worktree ON the candidate and keep it there for
-the whole review boundary:**
+**Before the first `--stage review` invocation, run `--stage inputs` exactly once.** This is
+an FSM-internal producer step — it dispatches nothing — that derives `review-profile.json`,
+`plan-diff.json` (IMP-464/D2's hash-bound C3 AC verdict), `delivery-gate.json` and
+`acceptance-evidence.json`, and (IMP-465/D3) generates the schema-valid protocol-v2 skeletons
+for `curator-report.json`, `semantic-review-final.json` and `delivery-report.json` — every
+envelope field filled, the artifact's own payload key left `null` for the dispatched specialist
+to fill. Skipping this step does not just lose those artifacts: `--stage review`'s
+generated-skeleton immutability check (D3) and its `plan_final_inputs.plan_diff_sha256` binding
+(D2) both assume `--stage inputs` ran first, and specialists dispatched without it must
+construct their entire envelope from prose again, exactly the failure mode D3 exists to remove.
+
+```bash
+git -C {project_root} checkout plan/{plan_id}   # its head IS candidate_sha
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage inputs
+```
+
+**Then put the worktree ON the candidate and keep it there for the whole review boundary**
+(unchanged by `--stage inputs`, which does not move HEAD):
 
 ```bash
 git -C {project_root} checkout plan/{plan_id}   # its head IS candidate_sha
@@ -1271,7 +1287,8 @@ Required outputs, all inside the run directory (never in the candidate tree):
 | Output | Type | Binding checked |
 |---|---|---|
 | `semantic-review-final.json` | `semantic_review` | `revision.head_sha == candidate_sha`; `revision.base_sha == plan_base_commit` |
-| `audit-report.json` | `audit_report` | `audit_report.reviewed_head == candidate_sha`; `input_manifest_hash` present |
+| `audit-report.json` | `audit_report` | `audit_report.reviewed_head == candidate_sha`; `input_manifest_hash` present AND equal to `audit-input-manifest.json`'s own `input_hash` |
+| `audit-input-manifest.json` | `audit_input_manifest` | `audit_input_manifest.input_hash` chains to `audit-report.json` (D2); any `plan-diff.json` entry in `evidence_hashes[]` matches the producer-sealed hash |
 | `curator-report.json` | `curator` | `curator.audit_report_ref` is sha256 of that audit report |
 | `simplifier-report.md` | markdown | a `Head: <candidate_sha>` provenance line |
 | `review-profile.json` | `review_profile` | derived over the plan range; `review_profile.required_lenses[]` present (arms the C3 gate) |
@@ -1303,6 +1320,45 @@ Untracked writes into the run directory are the normal case and never invalidate
 
 C3 applicability is unchanged: the single plan-level Auditor dispatch is always recorded, but
 whether C3 **blocks** stays governed by `defaults/policies/c3-audit-policy.yaml`.
+
+**Dispatching the plan-final Auditor in `c3` mode (IMP-464/D2).** Resolve the mode exactly as
+step 6 does for a per-EPIC dispatch (`aid-audit-mode.sh` against `review-profile.json`, produced
+by `--stage inputs` above). When `c3`, run the SAME bridge, pointed at the plan-final run
+directory, with TWO additions on the `build-manifest` call only — `AID_C3_PLAN_ID` (so the
+bridge's identity is plan-shaped: `identity.plan_id` set, `identity.epic_id` omitted, instead of
+its per-EPIC default of deriving `epic_id` from the evidence directory's parent, which for a
+plan-final run directory resolves to the PLAN id and would make `audit-report.json` fail
+`--stage review`'s `identity.plan_id == plan_id` check forever) and `AID_PLAN_DIFF_SHA256` (so
+`build-manifest` refuses to seal a `plan-diff.json` snapshot that has drifted from what the
+controller produced). Both are scoped to the ONE `build-manifest` invocation, never exported
+into the surrounding shell — `dispatch`/`verify` read identity back out of the manifest
+`build-manifest` already wrote, and a persistent export would leak into a LATER per-EPIC
+`build-manifest` call in the same session and incorrectly pin/plan-scope it:
+
+```bash
+run_dir=".aid-o/work/evidence/{plan_id}/R-{plan_id}-final-{n}"   # from review-requirements.json
+plan_diff_sha256="$(jq -r \
+  '.plan_boundary_manifest.plan_final_inputs.plan_diff_sha256' \
+  .aid-o/work/plan-state/{plan_id}/plan-boundary-manifest.json)"
+AID_C3_PLAN_ID="{plan_id}" AID_PLAN_DIFF_SHA256="$plan_diff_sha256" \
+  bash {plugin_path}/scripts/lib/aid-c3-dispatch.sh build-manifest \
+    "$run_dir" "$base_commit" "$candidate_sha" "$risk_profile"
+AID_C3_ATTEMPT=1 bash {plugin_path}/scripts/lib/aid-c3-dispatch.sh dispatch "$run_dir"
+bash {plugin_path}/scripts/lib/aid-c3-dispatch.sh verify   "$run_dir"
+```
+
+Omitting `AID_PLAN_DIFF_SHA256` does not fail closed — `build-manifest`'s pin check only runs
+when the variable is set — so it is a silent no-op, not a refusal, if forgotten. This is why
+`--stage review` (IMP-464 D2 round-2/3) now ALSO requires `audit-input-manifest.json` itself as
+a required output and independently cross-checks it: `audit-report.json`'s `input_manifest_hash`
+must equal the manifest's own `audit_input_manifest.input_hash`, and whenever `plan-diff.json`
+carries a real verdict (`present`/`absent`, not the honest no-AC-lens `skipped`), the manifest's
+`evidence_hashes[]` MUST record a matching `plan-diff.json` entry — a missing, non-array, or
+mismatched one is refused, not treated as "C3 never read it". A forgotten
+`AID_PLAN_DIFF_SHA256` export is still caught at the review boundary even though
+`build-manifest` itself stayed silent. Omitting `AID_C3_PLAN_ID`, on the other hand, is NOT
+silent — the resulting `audit-report.json` will fail `--stage review`'s plan-identity check
+outright, exactly as it should for evidence that never proved which plan it belongs to.
 
 ### Plan Boundary: Scanner Memory Scan
 

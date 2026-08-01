@@ -31,6 +31,30 @@
         },
         "proposals": {
           "type": "array"
+        },
+        "adjudications": {
+          "type": "array",
+          "$comment": "IMP-468 (D5): formal per-finding adjudication of audit-report.json's findings[]. A bare curator.blocking_findings:false never resolves a raw Auditor blocker on its own — every critical|high finding needs a matching entry here, bound to THIS exact audit report/candidate/run (enforced by aid-plan-fsm.sh _pfsm_finalize_review, plan-final boundary only). Structural shape only here; the exact-binding/completeness/disposition-legality enforcement lives in the runtime check, not this schema.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "finding_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "finding_occurrence_id": {"type": "string"},
+              "audit_report_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+              "run_id": {"type": "string", "minLength": 1},
+              "disposition": {
+                "type": "string",
+                "enum": ["confirmed", "fixed_in_new_candidate", "false_positive", "requires_pm"]
+              },
+              "evidence_ref": {
+                "type": "string",
+                "minLength": 1,
+                "$comment": "public-safe evidence reference (e.g. a commit sha, a file path + line, or a durable receipt ref) — never a raw session id, absolute path or free-text transcript"
+              }
+            },
+            "required": ["finding_fingerprint", "finding_occurrence_id", "audit_report_sha256", "candidate_sha", "run_id", "disposition", "evidence_ref"]
+          }
         }
       }
     }

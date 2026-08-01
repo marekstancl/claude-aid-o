@@ -381,6 +381,20 @@ cmd_build_manifest() {
   fi
   [[ -z "$epic_id" ]] && epic_id="$(basename "$(dirname "$evidence_abs")")"
   [[ -z "$run_id" ]]  && run_id="$(basename "$evidence_abs")"
+  # IMP-464 D2 follow-up: a plan-final caller has no fsm-state.yaml and no
+  # EPIC — the directory-basename fallback above resolves epic_id to the
+  # PLAN id (evidence_dir is .aid-o/work/evidence/{plan_id}/{run_id}/, same
+  # shape as the per-EPIC case), which is wrong and — because
+  # _write_report/_write_unverifiable read identity back out of THIS
+  # manifest rather than re-deriving it — would make audit-report.json fail
+  # the plan-final review boundary's identity.plan_id == plan_id check
+  # forever. AID_C3_PLAN_ID, exported by the controller for a plan-final
+  # dispatch (see skills/pipeline.md), overrides both.
+  local plan_id=""
+  if [[ -n "${AID_C3_PLAN_ID:-}" ]]; then
+    plan_id="$AID_C3_PLAN_ID"
+    epic_id=""
+  fi
 
   # project_id: from .aid-o/config/project.yaml under the repo; fall back to
   # "unknown" (non-empty — the validator rejects an empty identity.project_id).
@@ -622,6 +636,67 @@ cmd_build_manifest() {
     read_path["gates/gates_report.json"]="$evidence_dir/gates/gates_report.json"
   fi
 
+  # IMP-464 (D2): when the plan-final producer supplied per-AC verdict
+  # evidence, make it an evidence-class C3 input rather than leaving it
+  # outside the sealed audit bundle. Whether an AC lens is REQUIRED (the same
+  # ac_lens_required computed above from review-profile.json) decides what a
+  # legitimate plan-diff.json looks like here too:
+  #   - required:     must exist, parse, be bound to base_sha..head_sha, and
+  #                   carry overall_verdict present|absent. Anything else
+  #                   (missing, malformed, wrong range, "skipped") is refused
+  #                   BEFORE dispatch — a required lens's absence is never
+  #                   read as a pass.
+  #   - not required: absence is legitimate and is recorded EXPLICITLY as
+  #                   "not_required_absent", never silently treated as a
+  #                   passed check. Presence (even "skipped") is still bound
+  #                   and sealed as evidence when it exists.
+  #   - review-profile.json present but unparseable (ac_lens_required==2):
+  #                   whether the lens is required cannot be established, so
+  #                   this fails closed exactly like the AC-bundle check above.
+  local plan_diff_status="not_required_absent"
+  if [[ -f "$evidence_dir/plan-diff.json" ]]; then
+    local pd_verdict=""
+    if jq -e . "$evidence_dir/plan-diff.json" >/dev/null 2>&1; then
+      pd_verdict="$(jq -r --arg b "$base_sha" --arg h "$head_sha" \
+        'if (.base_commit == $b and .head_commit == $h) then (.overall_verdict // "") else "" end' \
+        "$evidence_dir/plan-diff.json" 2>/dev/null || true)"
+    fi
+    case "$pd_verdict" in
+      present|absent) plan_diff_status="$pd_verdict" ;;
+      skipped)        plan_diff_status="not_required_skipped" ;;
+      *)              plan_diff_status="malformed_or_unbound" ;;
+    esac
+    if [[ "$ac_lens_required" -eq 1 && "$plan_diff_status" != "present" && "$plan_diff_status" != "absent" ]]; then
+      _fail "AC lens required (review-profile.json required_lenses[] includes ac_to_test_identity / requirement_test_drift) but plan-diff.json at ${evidence_dir}/plan-diff.json is missing, malformed, skipped, or not bound to ${base_sha}..${head_sha} (classified: ${plan_diff_status}) — a required AC lens's absent verdict is never treated as evidence."
+    fi
+    # "malformed_or_unbound" is never one of the two legitimate non-required
+    # states (absent, skipped) either — it means the file EXISTS but is
+    # corrupt or claims a different range, which is suspect regardless of
+    # whether a lens is armed. Only present/absent/skipped are dispatched.
+    if [[ "$plan_diff_status" == "malformed_or_unbound" ]]; then
+      _fail "plan-diff.json at ${evidence_dir}/plan-diff.json exists but is malformed or not bound to ${base_sha}..${head_sha} — refusing to dispatch over it regardless of whether an AC lens is required."
+    fi
+    # IMP-464 (D2) TOCTOU close: when the plan-final producer's sealed hash is
+    # known (threaded in via AID_PLAN_DIFF_SHA256, exactly as AID_PLAN_AC_FILE
+    # threads the AC bundle source), the file build-manifest is about to seal
+    # as evidence MUST be byte-identical to what --stage inputs produced and
+    # plan_final_inputs.plan_diff_sha256 already committed to — otherwise a
+    # swap-dispatch-restore around this call would let C3 review evidence
+    # different from what the plan-final transition accepted.
+    if [[ -n "${AID_PLAN_DIFF_SHA256:-}" ]]; then
+      local pd_live_hash; pd_live_hash="sha256:$(sha256sum "$evidence_dir/plan-diff.json" | awk '{print $1}')"
+      [[ "$pd_live_hash" == "$AID_PLAN_DIFF_SHA256" ]] \
+        || _fail "plan-diff.json at ${evidence_dir}/plan-diff.json (${pd_live_hash}) does not match the producer-sealed hash AID_PLAN_DIFF_SHA256=${AID_PLAN_DIFF_SHA256} — refusing to dispatch over evidence that diverges from what --stage inputs sealed."
+    fi
+    allow_arr+=("plan-diff.json")
+    read_path["plan-diff.json"]="$evidence_dir/plan-diff.json"
+  elif [[ "$ac_lens_required" -eq 1 ]]; then
+    _fail "AC lens required (review-profile.json required_lenses[] includes ac_to_test_identity / requirement_test_drift) but no plan-diff.json evidence exists at ${evidence_dir}/plan-diff.json — refusing to dispatch without the required AC verdict."
+  fi
+  if [[ "$ac_lens_required" -eq 2 ]]; then
+    _fail "review-profile.json exists at ${rp_file} but is unparseable, so whether the AC lens (and therefore plan-diff.json) is required cannot be determined — failing closed rather than silently classifying it as not-required."
+  fi
+
   local vf bn
   shopt -s nullglob
   for vf in "$evidence_dir"/verifier-output-*.md; do
@@ -675,7 +750,7 @@ cmd_build_manifest() {
     # an evidence-class entry too.
     local is_evidence_class=0
     case "$p" in
-      final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
+      final_report.md|gates_report.json|gates/gates_report.json|plan-diff.json|verifier-output-*.md)
         is_evidence_class=1 ;;
     esac
     [[ -n "$test_receipt_rel" && "$p" == "$test_receipt_rel" ]] && is_evidence_class=1
@@ -743,6 +818,7 @@ cmd_build_manifest() {
     --arg project_id "$project_id" \
     --arg epic_id "$epic_id" \
     --arg run_id "$run_id" \
+    --arg plan_id "$plan_id" \
     --arg subject_hash "sha256:$subject_hash_hex" \
     --arg head_sha "$head_sha" \
     --argjson head_is_current "$head_is_current" \
@@ -758,13 +834,16 @@ cmd_build_manifest() {
     --argjson verification_budget "$vbudget_json" \
     --argjson evidence_hashes "$evidence_hashes_json" \
     --arg ac_source "$ac_source" \
+    --arg plan_diff_status "$plan_diff_status" \
     '{
       schema_version: $schema_version,
       artifact_type: $artifact_type,
       producer: $producer,
       created_at: $created_at,
       control_protocol: $control_protocol,
-      identity: {project_id: $project_id, epic_id: $epic_id, run_id: $run_id},
+      identity: ({project_id: $project_id, run_id: $run_id}
+                 + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
+                 + (if $plan_id != "" then {plan_id: $plan_id} else {} end)),
       subject: {subject_hash: $subject_hash},
       revision: {head_sha: $head_sha, head_is_current: $head_is_current, freshness: $freshness},
       status: "pass",
@@ -782,7 +861,8 @@ cmd_build_manifest() {
         allowed_recheck_commands: $allowed_recheck_commands,
         verification_budget: $verification_budget,
         evidence_hashes: $evidence_hashes,
-        ac_source: $ac_source
+        ac_source: $ac_source,
+        plan_diff_status: $plan_diff_status
       }
     }' > "$manifest_tmp" \
     || { rm -f "$manifest_tmp"; _fail "jq failed to render the manifest"; }
@@ -931,14 +1011,16 @@ _write_dispatch_json() {
   iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   tmp="$out.tmp.$$"
 
-  local project_id="unknown" epic_id="" run_id=""
+  local project_id="unknown" epic_id="" run_id="" plan_id=""
   if [[ -n "$manifest_path" && -f "$manifest_path" ]]; then
     project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest_path" 2>/dev/null || echo unknown)"
     [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
     epic_id="$(jq -r '.identity.epic_id // ""' "$manifest_path" 2>/dev/null || echo "")"
     run_id="$(jq -r '.identity.run_id // ""' "$manifest_path" 2>/dev/null || echo "")"
+    plan_id="$(jq -r '.identity.plan_id // ""' "$manifest_path" 2>/dev/null || echo "")"
     [[ "$epic_id" == "null" ]] && epic_id=""
     [[ "$run_id" == "null" ]] && run_id=""
+    [[ "$plan_id" == "null" ]] && plan_id=""
   fi
   local subject_hash="sha256:$(_sha256_str "$head_sha")"
 
@@ -951,6 +1033,7 @@ _write_dispatch_json() {
     --arg project_id "$project_id" \
     --arg epic_id "$epic_id" \
     --arg run_id "$run_id" \
+    --arg plan_id "$plan_id" \
     --arg subject_hash "$subject_hash" \
     --arg generated_by_tool "aid-c3-dispatch.sh#dispatch" \
     --arg project_root "$project_root" \
@@ -980,7 +1063,8 @@ _write_dispatch_json() {
       control_protocol: $control_protocol,
       identity: ({project_id: $project_id}
                  + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
-                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)
+                 + (if $plan_id != "" then {plan_id: $plan_id} else {} end)),
       subject: {subject_hash: $subject_hash, project_root: $project_root, head_sha: $head_sha, codex_brief_hash: $codex_brief_hash},
       revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
       status: "pass",
@@ -1260,11 +1344,12 @@ _write_unverifiable() {
   local report="$evidence_dir/audit-report.json"
   local report_md="$evidence_dir/audit-report.md"
 
-  local project_id epic_id run_id required_level manifest_input_hash
+  local project_id epic_id run_id plan_id required_level manifest_input_hash
   project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest" 2>/dev/null || echo unknown)"
   [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
   epic_id="$(jq -r '.identity.epic_id // ""' "$manifest" 2>/dev/null || echo "")"
   run_id="$(jq -r '.identity.run_id // ""' "$manifest" 2>/dev/null || echo "")"
+  plan_id="$(jq -r '.identity.plan_id // ""' "$manifest" 2>/dev/null || echo "")"
   required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest" 2>/dev/null || echo cross_provider)"
   case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
   manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
@@ -1274,6 +1359,14 @@ _write_unverifiable() {
   local ac_source
   ac_source="$(jq -r '.audit_input_manifest.ac_source // ""' "$manifest" 2>/dev/null || echo "")"
   [[ "$ac_source" == "null" ]] && ac_source=""
+
+  # IMP-464 (D2): carry the sealed plan_diff_status classification through so
+  # a downstream reader (PM summary, release decision) can tell a real
+  # present/absent AC verdict apart from a legitimate non-required
+  # absence/skip, without reopening audit-input-manifest.json itself.
+  local plan_diff_status
+  plan_diff_status="$(jq -r '.audit_input_manifest.plan_diff_status // ""' "$manifest" 2>/dev/null || echo "")"
+  [[ "$plan_diff_status" == "null" ]] && plan_diff_status=""
 
   local raw_head="" raw_brief_hash=""
   if [[ -n "$last_msg" && -f "$last_msg" ]] && jq -e . "$last_msg" >/dev/null 2>&1; then
@@ -1293,6 +1386,7 @@ _write_unverifiable() {
   local tmp="$report.tmp.$$"
   jq -n \
     --arg project_id "$project_id" --arg epic_id "$epic_id" --arg run_id "$run_id" \
+    --arg plan_id "$plan_id" \
     --arg created_at "$iso_now" \
     --arg subject_hash "sha256:$subject_hex" \
     --arg head_sha "$head_sha" \
@@ -1305,6 +1399,7 @@ _write_unverifiable() {
     --arg codex_brief_hash "$raw_brief_hash" \
     --arg outcome "$outcome" \
     --arg ac_source "$ac_source" \
+    --arg plan_diff_status "$plan_diff_status" \
     --argjson reasons "$reasons_json" \
     '{
       schema_version: "aid-2.0",
@@ -1314,7 +1409,8 @@ _write_unverifiable() {
       control_protocol: "aid-2.0",
       identity: ({project_id: $project_id}
                  + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
-                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)
+                 + (if $plan_id != "" then {plan_id: $plan_id} else {} end)),
       subject: {subject_hash: $subject_hash},
       revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
       status: "unverifiable",
@@ -1335,6 +1431,7 @@ _write_unverifiable() {
         + (if $process_id != ""          then {process_id: $process_id}                   else {} end)
         + (if $reviewed_head != ""       then {reviewed_head: $reviewed_head}             else {} end)
         + (if $ac_source != ""           then {ac_source: $ac_source}                     else {} end)
+        + (if $plan_diff_status != ""    then {plan_diff_status: $plan_diff_status}       else {} end)
         + (if $codex_brief_hash != ""    then {codex_brief_hash: $codex_brief_hash}       else {} end))
     }' > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$report" 2>/dev/null || { rm -f "$tmp"; return 1; }
@@ -1354,11 +1451,12 @@ _write_report() {
   local report="$evidence_dir/audit-report.json"
   local report_md="$evidence_dir/audit-report.md"
 
-  local project_id epic_id run_id required_level manifest_input_hash
+  local project_id epic_id run_id plan_id required_level manifest_input_hash
   project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest" 2>/dev/null || echo unknown)"
   [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
   epic_id="$(jq -r '.identity.epic_id // ""' "$manifest" 2>/dev/null || echo "")"
   run_id="$(jq -r '.identity.run_id // ""' "$manifest" 2>/dev/null || echo "")"
+  plan_id="$(jq -r '.identity.plan_id // ""' "$manifest" 2>/dev/null || echo "")"
   required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest" 2>/dev/null || echo cross_provider)"
   case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
   manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
@@ -1367,6 +1465,11 @@ _write_report() {
   local ac_source
   ac_source="$(jq -r '.audit_input_manifest.ac_source // ""' "$manifest" 2>/dev/null || echo "")"
   [[ "$ac_source" == "null" ]] && ac_source=""
+
+  # IMP-464 (D2): preserve the sealed plan_diff_status classification too.
+  local plan_diff_status
+  plan_diff_status="$(jq -r '.audit_input_manifest.plan_diff_status // ""' "$manifest" 2>/dev/null || echo "")"
+  [[ "$plan_diff_status" == "null" ]] && plan_diff_status=""
 
   local raw_head raw_brief_hash raw_blocking
   raw_head="$(jq -r '.reviewed_head' "$last_msg" 2>/dev/null)" || raw_head=""
@@ -1409,6 +1512,7 @@ _write_report() {
   local tmp="$report.tmp.$$"
   jq -n \
     --arg project_id "$project_id" --arg epic_id "$epic_id" --arg run_id "$run_id" \
+    --arg plan_id "$plan_id" \
     --arg created_at "$iso_now" \
     --arg subject_hash "sha256:$subject_hex" \
     --arg head_sha "$head_sha" \
@@ -1424,6 +1528,7 @@ _write_report() {
     --arg codex_brief_hash "$raw_brief_hash" \
     --arg reviewed_head "$raw_head" \
     --arg ac_source "$ac_source" \
+    --arg plan_diff_status "$plan_diff_status" \
     '{
       schema_version: "aid-2.0",
       artifact_type: "audit_report",
@@ -1432,7 +1537,8 @@ _write_report() {
       control_protocol: "aid-2.0",
       identity: ({project_id: $project_id}
                  + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
-                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)
+                 + (if $plan_id != "" then {plan_id: $plan_id} else {} end)),
       subject: {subject_hash: $subject_hash},
       revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
       status: $status,
@@ -1451,7 +1557,8 @@ _write_report() {
         codex_brief_hash: $codex_brief_hash,
         reviewed_head: $reviewed_head,
         outcome: "dispatched"
-      } + (if $ac_source != "" then {ac_source: $ac_source} else {} end))
+      } + (if $ac_source != "" then {ac_source: $ac_source} else {} end)
+        + (if $plan_diff_status != "" then {plan_diff_status: $plan_diff_status} else {} end))
     }' > "$tmp" 2>/dev/null \
     || { rm -f "$tmp"; _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
   mv "$tmp" "$report" 2>/dev/null \
@@ -2020,7 +2127,7 @@ cmd_dispatch() {
   mapfile -t evidence_paths_arr < <(jq -r '.audit_input_manifest.allowlist // [] | .[]' "$manifest")
   for _ep in "${evidence_paths_arr[@]}"; do
     case "$_ep" in
-      final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
+      final_report.md|gates_report.json|gates/gates_report.json|plan-diff.json|verifier-output-*.md)
         evidence_paths_resolved+=("$(realpath -m --relative-to="$project_root" "$evidence_dir/$_ep" 2>/dev/null || echo "$_ep")") ;;
       *)
         evidence_paths_resolved+=("$_ep") ;;
@@ -2130,6 +2237,99 @@ cmd_dispatch() {
   # --- Step 5: codex_version (best effort; slug is NOT in the stream) ---------
   local codex_version
   codex_version="$(codex --version 2>/dev/null || echo "")"
+
+  # IMP-464 (D2) TOCTOU close: build-manifest sealed evidence_hashes[] at
+  # build-manifest time, potentially long before this exact moment. Codex is
+  # about to read every evidence-class path LIVE from disk (it is launched
+  # `--sandbox read-only --cd project_root`, not fed embedded content) — a
+  # swap-then-restore around the gap between sealing and this point would
+  # otherwise go undetected. Re-hash every evidence_hashes[] entry against the
+  # live file, immediately before launch, and fail closed on any divergence.
+  #
+  # RESIDUAL WINDOW (known, pre-existing, NOT introduced by D2, NOT closed by
+  # this check): this proves the bytes immediately before `_run_codex_isolated`
+  # starts, not the bytes Codex actually reads during its own (up to
+  # AID_C3_TIMEOUT_SECONDS, default 900s) live execution — Codex reads these
+  # paths itself from the live filesystem, not from a copy this script
+  # controls. Closing that fully needs C3's evidence delivery to snapshot
+  # every evidence-class file into an immutable per-attempt copy and point
+  # Codex at the copy instead of the live evidence_dir path — a change to
+  # every evidence-class input (final_report.md, gates_report.json,
+  # verifier-output-*.md, the optional receipt too), not a plan-diff.json-
+  # specific fix, and out of D2/IMP-464's scope. This check narrows the
+  # window from "anywhere between build-manifest and dispatch" (unbounded) to
+  # "during one Codex execution" (bounded, auditable via codex_version/
+  # session provenance already captured) — a real, meaningful reduction, not
+  # a full close.
+  #
+  # Before even doing that: an emptied or stripped evidence_hashes[] must not
+  # be read as "nothing to check". Two structural guarantees, checked
+  # together so a jq read failure on either array is "cannot verify", never
+  # "empty, so nothing to check":
+  #   (a) every FIXED-NAME evidence-class entry present in allowlist[]
+  #       (final_report.md / gates_report.json / gates/gates_report.json /
+  #       plan-diff.json — these always use the same literal name, so an
+  #       exact bijection is cheap and precise) has EXACTLY one
+  #       evidence_hashes[] entry — this is what catches evidence_hashes[]
+  #       being wholesale emptied or a specific entry stripped;
+  #   (b) evidence_hashes[] as a whole has no duplicate paths and no path
+  #       outside allowlist[] (dynamic-named entries — verifier outputs, the
+  #       optional targeted-run receipt — are covered by this weaker check).
+  local _eh_bijection_ok=0
+  _eh_bijection_ok="$(jq -r '
+    ([.audit_input_manifest.allowlist[]? // empty]
+      | map(select(. == "final_report.md" or . == "gates_report.json" or . == "gates/gates_report.json" or . == "plan-diff.json"))
+      | sort) as $expected_fixed
+    | ([.audit_input_manifest.evidence_hashes[]?.path // empty]) as $actual_all
+    | ($actual_all | sort) as $actual_sorted
+    | ($actual_all | map(select(. == "final_report.md" or . == "gates_report.json" or . == "gates/gates_report.json" or . == "plan-diff.json")) | sort) as $actual_fixed
+    | if ($expected_fixed != $actual_fixed) then "0"
+      elif (($actual_sorted | length) != ($actual_sorted | unique | length)) then "0"
+      elif (($actual_all - (.audit_input_manifest.allowlist // [])) | length) != 0 then "0"
+      else "1" end
+  ' "$manifest_for_call" 2>/dev/null)" || _eh_bijection_ok=""
+  if [[ "$_eh_bijection_ok" != "1" ]]; then
+    echo "aid-c3-dispatch: audit_input_manifest.evidence_hashes[] does not exactly match the evidence-class entries in allowlist[] (stripped, duplicated, extra, or unreadable) — refusing to dispatch over an unverifiable evidence set." >&2
+    _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+      "$required_level" "" "" "" "" "false" "" "evidence_mismatch" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
+    _write_unverifiable "$work_evidence_dir" "$manifest_for_call" invalid_output "unavailable" "" "" "" || true
+    if [[ "$attempt_explicit" -eq 1 ]]; then
+      _c3_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+        "" "$head_sha" evidence_mismatch || true
+    fi
+    exit 2
+  fi
+
+  local -a _eh_paths=()
+  mapfile -t _eh_paths < <(jq -r '.audit_input_manifest.evidence_hashes[]?.path // empty' "$manifest_for_call" 2>/dev/null)
+  local _eh_p _eh_expected _eh_actual
+  for _eh_p in "${_eh_paths[@]}"; do
+    [[ -n "$_eh_p" ]] || continue
+    _eh_expected="$(jq -r --arg p "$_eh_p" '.audit_input_manifest.evidence_hashes[] | select(.path == $p) | .sha256' "$manifest_for_call" 2>/dev/null | head -1)"
+    if [[ ! -f "$evidence_dir/$_eh_p" ]]; then
+      echo "aid-c3-dispatch: evidence-class input ${_eh_p} sealed at build-manifest time no longer exists — refusing to dispatch Codex over evidence it can no longer read as sealed." >&2
+      _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+        "$required_level" "" "" "" "" "false" "" "evidence_mismatch" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
+      _write_unverifiable "$work_evidence_dir" "$manifest_for_call" invalid_output "unavailable" "" "" "" || true
+      if [[ "$attempt_explicit" -eq 1 ]]; then
+        _c3_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+          "" "$head_sha" evidence_mismatch || true
+      fi
+      exit 2
+    fi
+    _eh_actual="sha256:$(sha256sum "$evidence_dir/$_eh_p" | awk '{print $1}')"
+    if [[ "$_eh_actual" != "$_eh_expected" ]]; then
+      echo "aid-c3-dispatch: evidence-class input ${_eh_p} has changed since build-manifest sealed it (sealed ${_eh_expected}, live ${_eh_actual}) — refusing to dispatch Codex over swapped evidence." >&2
+      _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+        "$required_level" "" "" "" "" "false" "" "evidence_mismatch" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
+      _write_unverifiable "$work_evidence_dir" "$manifest_for_call" invalid_output "unavailable" "" "" "" || true
+      if [[ "$attempt_explicit" -eq 1 ]]; then
+        _c3_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+          "" "$head_sha" evidence_mismatch || true
+      fi
+      exit 2
+    fi
+  done
 
   # --- Step 6: launch codex (fresh, read-only, isolated) and capture ---------
   local events_file="$work_c3_dir/codex-events.jsonl"

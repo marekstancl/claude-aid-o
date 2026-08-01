@@ -2878,10 +2878,169 @@ curator-report.json|curator|curator.audit_report_ref sha256 matches audit-report
 simplifier-report.md|-|a `Head:` provenance line equal to candidate_sha
 delivery-report.json|delivery_report|identity.plan_id set and revision.head_sha == candidate_sha; written LAST (after every other output)
 review-profile.json|review_profile|produced over plan_base_commit..candidate_sha; carries review_profile.required_lenses (arms the C3 gate)
+plan-diff.json|-|C3 plan-AC verdict over plan_base_commit..candidate_sha; hash-bound before review dispatch
+audit-input-manifest.json|-|audit_input_manifest.input_hash matches audit-report.json's input_manifest_hash; its plan-diff.json evidence_hashes[] entry (if any) matches the producer-sealed hash. Not run through generic protocol-v2/plan-identity validation — audit-input-manifest.schema.json's identity block is epic-shaped (project_id/epic_id/run_id, no plan_id) and shared with the per-EPIC C3 path; see IMP-464 D2 follow-up.
 delivery-gate.json|delivery_gate|identity.epic_id == null, identity.plan_id set, sources[] lists every contributing EPIC
 acceptance-evidence.json|acceptance_evidence|identity.epic_id == null, identity.plan_id set, sources[] lists every contributing EPIC
 dispatch-record.json|-|one dispatch per plan-boundary agent and per registered utility, bound to candidate_sha AND this attempt's run_id
 ROWS
+}
+
+# ---------------------------------------------------------------------------
+# D3 / IMP-465 — generated protocol-v2 scaffolds for Curator/Verifier/Reporter.
+#
+# WHY: the three plan-boundary specialists (Curator -> curator-report.json,
+# Verifier -> semantic-review-final.json, Reporter -> delivery-report.json)
+# previously had to infer every envelope field (schema_version, identity,
+# subject, revision, provenance...) from prose instructions, causing avoidable
+# first-output schema failures — a defect class, not a specific bug. AID now
+# writes a schema-valid skeleton at the canonical path BEFORE the specialist
+# is dispatched; the specialist edits that SAME file and adds only its own
+# payload key. No new role, no new review round, no new file/path — the
+# skeleton lives exactly where the specialist's real output belongs.
+#
+# _pfsm_plan_final_skeleton_spec <kind> — echoes "<filename>|<artifact_type>|<payload_key>"
+# for kind in curator|verifier|reporter, or returns 1 for an unknown kind.
+# ---------------------------------------------------------------------------
+_pfsm_plan_final_skeleton_spec() {
+  case "$1" in
+    curator)  printf 'curator-report.json|curator|curator' ;;
+    verifier) printf 'semantic-review-final.json|semantic_review|semantic_review' ;;
+    reporter) printf 'delivery-report.json|delivery_report|delivery_report' ;;
+    *) return 1 ;;
+  esac
+}
+
+# _pfsm_generate_plan_final_skeleton <kind> <root> <project_id> <plan_id>
+#                                     <base_commit> <candidate> <run_id>
+#                                     <run_dir_abs>
+# Idempotent: NEVER overwrites an existing file at the canonical path — once
+# the specialist starts filling it (or a prior run already produced one),
+# regenerating would silently discard real work. Only writes when the file is
+# genuinely absent.
+# _pfsm_render_plan_final_skeleton <atype> <pkey> <project_id> <plan_id> <run_id>
+#                                   <candidate> <base_commit> <fname> <out_file>
+# Renders the canonical skeleton document to <out_file>. Pure — never reads
+# the destination path, never touches the manifest. Deterministic except for
+# `created_at` (wall-clock; the destination is always about to be freshly
+# (re)written by the only two callers, so a fresh timestamp is correct, not a
+# staleness risk).
+_pfsm_render_plan_final_skeleton() {
+  local atype="$1" pkey="$2" project_id="$3" plan_id="$4" run_id="$5" candidate="$6" base_commit="$7" fname="$8" out_file="$9"
+  local now subj
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  subj="$(printf 'plan-final-skeleton:%s:%s:%s' "$plan_id" "$candidate" "$fname" | sha256sum | cut -d' ' -f1)"
+  jq -n --arg t "$atype" --arg pk "$pkey" --arg pid "$project_id" --arg plan "$plan_id" \
+        --arg run "$run_id" --arg h "$candidate" --arg b "$base_commit" \
+        --arg now "$now" --arg subj "sha256:${subj}" \
+    '{schema_version:"aid-2.0", artifact_type:$t, producer:("aid-orchestrator:" + $t + "@generated"),
+      created_at:$now, control_protocol:"aid-2.0",
+      identity:{project_id:$pid, epic_id:null, plan_id:$plan, run_id:$run},
+      subject:{subject_hash:$subj},
+      revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
+      status:"pass", verdict:{kind:"none", ready:false},
+      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-plan-fsm.sh#skeleton"}}
+     | .[$pk] = null' > "$out_file" 2>/dev/null
+}
+
+_pfsm_generate_plan_final_skeleton() {
+  local kind="$1" root="$2" project_id="$3" plan_id="$4" base_commit="$5" candidate="$6" run_id="$7" run_dir_abs="$8"
+  local spec fname atype pkey
+  spec="$(_pfsm_plan_final_skeleton_spec "$kind")" || { echo "PRECONDITION FAIL: unknown plan-final skeleton kind '${kind}'." >&2; return 1; }
+  IFS='|' read -r fname atype pkey <<< "$spec"
+  local out="${run_dir_abs}/${fname}"
+  if [[ -f "$out" ]]; then
+    local existing_hash
+    existing_hash="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.sha256" 2>/dev/null || true)"
+    if [[ -n "$existing_hash" && "$existing_hash" != "null" && "$existing_hash" != "not_found" ]]; then
+      return 0
+    fi
+    # The file exists but its generation was never recorded — either a
+    # specialist is genuinely filling it (payload no longer null: leave it
+    # alone, not our crash to fix — the missing record then blocks review
+    # with an explicit "run inputs" message, a deliberate, diagnosable dead
+    # end rather than trusting an unverifiable file) or generation crashed
+    # between writing the file and sealing its hash (payload STILL null: we
+    # do NOT trust whatever bytes happen to be on disk — a null payload means
+    # there is nothing of the specialist's to preserve, so we REGENERATE and
+    # OVERWRITE with a freshly rendered, provably-AID-authored skeleton and
+    # seal THAT hash, exactly like a first-time generation).
+    local cur_payload_type
+    cur_payload_type="$(jq -r --arg pk "$pkey" '(.[$pk] | type)' "$out" 2>/dev/null || true)"
+    if [[ "$cur_payload_type" == "null" ]]; then
+      local heal_tmp; heal_tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-skeleton.XXXXXX")" || return 1
+      _pfsm_render_plan_final_skeleton "$atype" "$pkey" "$project_id" "$plan_id" "$run_id" "$candidate" "$base_commit" "$fname" "$heal_tmp" \
+        || { rm -f "$heal_tmp"; echo "PRECONDITION FAIL: could not re-render the ${kind} skeleton during crash recovery." >&2; return 1; }
+      local heal_hash; heal_hash="sha256:$(jq -S -c '.' "$heal_tmp" | sha256sum | awk '{print $1}')"
+      mv -f "$heal_tmp" "$out" || { rm -f "$heal_tmp"; echo "PRECONDITION FAIL: could not overwrite ${out} during crash recovery." >&2; return 1; }
+      plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind} = {sha256: \"${heal_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\"}" >/dev/null || {
+        echo "PRECONDITION FAIL: ${out} was re-rendered from a prior interrupted --stage inputs run, but its generation record still could not be sealed." >&2
+        return 1
+      }
+    else
+      echo "WARN: ${out} exists with a non-null .${pkey} payload but no sealed generation record — this is not a crash this producer can safely fix (the payload may be real, in-progress specialist work). '--stage review' will refuse it with 'run plan-finalize --stage inputs' until this is resolved by hand: either restore/complete the specialist's edit over a freshly generated skeleton, or delete ${fname} and re-run '--stage inputs'." >&2
+    fi
+    return 0
+  fi
+  mkdir -p "$run_dir_abs" 2>/dev/null || { echo "PRECONDITION FAIL: cannot create ${run_dir_abs}." >&2; return 1; }
+  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-skeleton.XXXXXX")" || return 1
+  _pfsm_render_plan_final_skeleton "$atype" "$pkey" "$project_id" "$plan_id" "$run_id" "$candidate" "$base_commit" "$fname" "$tmp" \
+    || { rm -f "$tmp"; echo "PRECONDITION FAIL: could not render the ${kind} skeleton." >&2; return 1; }
+  # IMP-465 (D3) hardening: record a canonical (sorted-key) hash of exactly
+  # what was generated — envelope + null payload — keyed to this candidate
+  # and run. Verification recomputes the SAME canonical form (payload
+  # re-nulled) from whatever the specialist leaves behind and requires an
+  # EXACT match, rather than re-deriving a guessed subset of "immutable"
+  # fields — this is what actually proves generation happened, not merely
+  # that a hand-built file coincidentally matches a few expected values, and
+  # it is invariant to harmless re-serialization (key order/whitespace) so a
+  # normal in-place edit of the payload key never false-positives.
+  local skel_hash; skel_hash="sha256:$(jq -S -c '.' "$tmp" | sha256sum | awk '{print $1}')"
+  mv -f "$tmp" "$out" || { rm -f "$tmp"; echo "PRECONDITION FAIL: could not write ${out}." >&2; return 1; }
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind} = {sha256: \"${skel_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\"}" >/dev/null || {
+    echo "PRECONDITION FAIL: ${out} was written, but its generation record could not be sealed in the manifest — review will refuse until this is resolved (re-run --stage inputs; generation is idempotent)." >&2
+    return 1
+  }
+}
+
+# _pfsm_verify_plan_final_skeleton_envelope <kind> <root> <project_id> <plan_id>
+#                                            <base_commit> <candidate> <run_id>
+#                                            <run_dir_abs>
+# Recomputes the canonical (sorted-key, payload-nulled) hash of the actual
+# file and requires it to equal the hash --stage inputs recorded when it
+# generated the skeleton for THIS exact candidate/run — proof of generation,
+# not a guess from a few field values, and immune to reordering/whitespace
+# from a normal in-place payload edit. No recorded hash (or one bound to a
+# different candidate/run) fails closed with an explicit "run inputs" message
+# rather than silently accepting — or silently rejecting — a legacy/
+# hand-built envelope that happens to resemble one.
+# Echoes nothing on success; a nonzero return means the caller should reject
+# via _rassert with the message on stdout.
+_pfsm_verify_plan_final_skeleton_envelope() {
+  local kind="$1" root="$2" project_id="$3" plan_id="$4" base_commit="$5" candidate="$6" run_id="$7" run_dir_abs="$8"
+  local spec fname atype pkey
+  spec="$(_pfsm_plan_final_skeleton_spec "$kind")" || return 1
+  IFS='|' read -r fname atype pkey <<< "$spec"
+  local f="${run_dir_abs}/${fname}"
+  [[ -f "$f" ]] || { printf '%s is missing.' "$fname"; return 1; }
+  local rec_hash rec_cand rec_run
+  rec_hash="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.sha256" 2>/dev/null || true)"
+  rec_cand="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.candidate_sha" 2>/dev/null || true)"
+  rec_run="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.run_id" 2>/dev/null || true)"
+  if [[ -z "$rec_hash" || "$rec_hash" == "null" || "$rec_hash" == "not_found" ]]; then
+    printf '%s has no recorded skeleton-generation hash for this plan — run "plan-finalize --stage inputs" before dispatching the %s specialist.' "$fname" "$kind"
+    return 1
+  fi
+  if [[ "$rec_cand" != "$candidate" || "$rec_run" != "$run_id" ]]; then
+    printf '%s has a recorded skeleton bound to a different candidate/run (stale) — re-run "plan-finalize --stage inputs" against this frozen candidate.' "$fname"
+    return 1
+  fi
+  local payload_type; payload_type="$(jq -r --arg pk "$pkey" '(.[$pk] | type)' "$f" 2>/dev/null || true)"
+  [[ "$payload_type" == "object" ]] || { printf '%s payload key .%s is not an object (got %s) — never read as a filled specialist output.' "$fname" "$pkey" "${payload_type:-<unreadable>}"; return 1; }
+  local actual_hash; actual_hash="sha256:$(jq -S -c --arg pk "$pkey" '.[$pk] = null' "$f" 2>/dev/null | sha256sum | awk '{print $1}')"
+  [[ "$actual_hash" == "$rec_hash" ]] && return 0
+  printf '%s does not carry the exact envelope AID generated for this plan/candidate/run (identity, revision, schema_version/artifact_type/control_protocol, producer or provenance was altered).' "$fname"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -2918,6 +3077,277 @@ _pfsm_review_candidate_drift() {
 # ---------------------------------------------------------------------------
 # _pfsm_finalize_review <root> <plan_id> <execution_yaml>
 # ---------------------------------------------------------------------------
+# _pfsm_plan_final_evidence_ref <plan_id> <candidate_sha> <run_id>
+#
+# A normal, namespaced branch is used deliberately rather than a custom ref:
+# a fresh clone fetches normal heads by default.  It contains no candidate
+# files and no raw agent transcript, only the public-safe technical receipt.
+_pfsm_plan_final_evidence_ref() {
+  local plan_id="$1" candidate="$2" run_id="$3"
+  [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || return 1
+  [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+  printf 'refs/heads/aid-evidence/%s/%s/%s' "$plan_id" "$candidate" "$run_id"
+}
+
+# The evidence ref is remotely fetchable.  This deliberately narrow receipt
+# grammar is enforced here (not merely documented in a schema): no free text,
+# absolute paths, unrecognised keys or raw report bodies can cross the boundary.
+_pfsm_validate_plan_final_receipt_json() {
+  local json="$1"
+  jq -e '
+    (type == "object") and
+    ((keys | sort) == (["artifact_type","candidate_frozen_at","candidate_sha","evidence_ref","outputs","plan_base_commit","plan_id","review_verdict","run_id","schema_version","target_branch","target_head_at_freeze"] | sort)) and
+    (.schema_version == "aid-plan-final-evidence-1") and
+    (.artifact_type == "plan_final_evidence_receipt") and
+    (.review_verdict == "accepted") and
+    (.plan_id | test("^P[0-9]{3}$")) and
+    (.candidate_sha | test("^[0-9a-f]{40}$")) and
+    (.candidate_frozen_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+    (.plan_base_commit | test("^[0-9a-f]{40}$")) and
+    (.run_id | test("^[A-Za-z0-9._-]+$")) and
+    (.evidence_ref | test("^refs/heads/aid-evidence/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$")) and
+    (.target_branch | type == "string" and length > 0 and test("^[A-Za-z0-9._/-]+$")) and
+    (.target_head_at_freeze | test("^[0-9a-f]{40}$")) and
+    (.outputs | type == "object" and length > 0) and
+    ([.outputs | to_entries[] | (.key | type == "string" and test("^[A-Za-z0-9._/-]+$") and (contains("..") | not) and (startswith("/") | not)) and (.value | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
+  ' <<< "$json" >/dev/null 2>&1
+}
+
+# D4 round-4 Codex MEDIUM: the expected inventory is FROZEN per schema_version,
+# never derived from the live _pfsm_review_required_outputs() — that list can
+# change in a later plugin version, and re-deriving "expected" from it would
+# make this check retroactively reject (at seal time, self-consistently
+# fine) or retroactively ACCEPT-TOO-LITTLE (at verify time, if the live list
+# ever shrinks) receipts sealed correctly under an earlier version. A schema
+# version's required inventory is part of its contract and does not drift
+# out from under receipts already sealed against it; a future required-
+# outputs change ships as a NEW schema_version, not a silent redefinition of
+# this one's inventory. Called at BOTH seal time (self-consistent by
+# construction, since aid-plan-fsm.sh's own literal schema_version and the
+# literal list below were updated together) and verify time (this is what
+# makes verify time safe again after round-3's removal of the check there —
+# see the call sites in _pfsm_verify_plan_final_receipt and
+# aid-plan-close-check.sh's _check2_receipt_covers_candidate).
+_pfsm_receipt_has_exact_review_inventory() {
+  local receipt="$1" schema_version expected actual
+  schema_version="$(jq -r '.schema_version // ""' <<< "$receipt" 2>/dev/null || true)"
+  case "$schema_version" in
+    aid-plan-final-evidence-1)
+      expected='["acceptance-evidence.json","audit-input-manifest.json","audit-report.json","curator-report.json","delivery-gate.json","delivery-report.json","dispatch-record.json","plan-diff.json","review-profile.json","semantic-review-final.json","simplifier-report.md"]'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  actual="$(jq -c '.outputs | keys | sort' <<< "$receipt" 2>/dev/null || echo 'null')"
+  [[ "$actual" == "$(jq -c 'sort' <<< "$expected")" ]]
+}
+
+# _pfsm_seal_plan_final_review <root> <plan> <base> <candidate> <target>
+#                                <run> <outputs-json>
+#
+# Seal only deterministic metadata: every required output's already-validated
+# path, type, byte hash and size.  The raw runtime evidence remains private;
+# this receipt is what makes the accepted review durable without changing the
+# frozen candidate.  A repeated call for identical bytes is an idempotent
+# read-back; different bytes for the same plan/candidate/run fail closed.
+_pfsm_seal_plan_final_review() {
+  local root="$1" plan_id="$2" base="$3" candidate="$4" target="$5" target_head="$6" frozen_at="$7" run_id="$8" outputs_json="$9"
+  local ref receipt tmp blob tree commit existing existing_receipt expected_hash actual_hash
+  ref="$(_pfsm_plan_final_evidence_ref "$plan_id" "$candidate" "$run_id")" || return 1
+  tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-receipt.XXXXXX")" || return 1
+  receipt="$(jq -nc --arg plan "$plan_id" --arg base "$base" --arg candidate "$candidate" --arg target "$target" --arg target_head "$target_head" --arg frozen_at "$frozen_at" --arg run "$run_id" --arg ref "$ref" --argjson outputs "$outputs_json" \
+    '{schema_version:"aid-plan-final-evidence-1",artifact_type:"plan_final_evidence_receipt",review_verdict:"accepted",plan_id:$plan,plan_base_commit:$base,candidate_sha:$candidate,candidate_frozen_at:$frozen_at,target_branch:$target,target_head_at_freeze:$target_head,run_id:$run,evidence_ref:$ref,outputs:$outputs}')" || { rm -f "$tmp"; return 1; }
+  _pfsm_validate_plan_final_receipt_json "$receipt" || { echo "PRECONDITION FAIL: refusing to seal a non-public-safe plan-final receipt." >&2; rm -f "$tmp"; return 1; }
+  _pfsm_receipt_has_exact_review_inventory "$receipt" || { echo "PRECONDITION FAIL: refusing to seal an incomplete or expanded plan-final review inventory." >&2; rm -f "$tmp"; return 1; }
+  printf '%s\n' "$receipt" > "$tmp" || { rm -f "$tmp"; return 1; }
+  expected_hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
+
+  existing="$(git -C "$root" rev-parse --verify --quiet "$ref" 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    [[ "$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)" == "receipt.json" ]] || {
+      echo "PRECONDITION FAIL: durable evidence ref ${ref} contains files other than receipt.json — refusing to reuse a non-public sidecar." >&2
+      rm -f "$tmp"; return 1;
+    }
+    existing_receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null || true)"
+    actual_hash="sha256:$(printf '%s\n' "$existing_receipt" | sha256sum | awk '{print $1}')"
+    rm -f "$tmp"
+    [[ "$actual_hash" == "$expected_hash" ]] || { echo "PRECONDITION FAIL: durable evidence ref ${ref} already exists with different receipt bytes — refusing to overwrite an immutable plan-final review." >&2; return 1; }
+    printf '%s|%s|%s' "$ref" "$existing" "$expected_hash"
+    return 0
+  fi
+
+  blob="$(git -C "$root" hash-object -w "$tmp")" || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)" || return 1
+  commit="$(git -C "$root" commit-tree "$tree" -m "aid: seal plan-final evidence ${plan_id} ${run_id}")" || return 1
+  if ! git -C "$root" update-ref "$ref" "$commit" ''; then
+    # A concurrent writer may have won.  Re-enter through the read-back path;
+    # it succeeds only for byte-identical input, never last-writer-wins.
+    _pfsm_seal_plan_final_review "$root" "$plan_id" "$base" "$candidate" "$target" "$target_head" "$frozen_at" "$run_id" "$outputs_json"
+    return $?
+  fi
+  actual_hash="sha256:$(git -C "$root" show "${ref}:receipt.json" | sha256sum | awk '{print $1}')"
+  [[ "$actual_hash" == "$expected_hash" ]] || { echo "PRECONDITION FAIL: durable evidence receipt read-back differs after sealing ${ref}." >&2; return 1; }
+  printf '%s|%s|%s' "$ref" "$commit" "$expected_hash"
+}
+
+_pfsm_verify_plan_final_receipt() {
+  local root="$1" plan_id="$2" candidate="$3" run_id="$4"
+  local ref want_hash got_hash receipt expected_ref
+  ref="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_ref')" || ref=""
+  want_hash="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_receipt_sha256')" || want_hash=""
+  [[ -n "$ref" && "$ref" != "null" && -n "$want_hash" && "$want_hash" != "null" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no durable plan-final evidence receipt — rerun plan-finalize --stage review; merge/close never trust runtime evidence alone." >&2; return 1; }
+  expected_ref="$(_pfsm_plan_final_evidence_ref "$plan_id" "$candidate" "$run_id")" || { echo "PRECONDITION FAIL: invalid plan/candidate/run binding for durable evidence." >&2; return 1; }
+  [[ "$ref" == "$expected_ref" ]] || { echo "PRECONDITION FAIL: durable evidence ref is not the uniquely derived plan/candidate/run ref." >&2; return 1; }
+  receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null)" || { echo "PRECONDITION FAIL: durable plan-final evidence ref ${ref} is missing or unreadable." >&2; return 1; }
+  local tree_paths
+  tree_paths="$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)"
+  [[ "$tree_paths" == "receipt.json" ]] || { echo "PRECONDITION FAIL: durable plan-final evidence ref ${ref} contains files other than receipt.json — refusing a public evidence ref with unsealed content." >&2; return 1; }
+  got_hash="sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')"
+  [[ "$got_hash" == "$want_hash" ]] || { echo "PRECONDITION FAIL: durable plan-final evidence receipt hash mismatch for ${plan_id}." >&2; return 1; }
+  _pfsm_validate_plan_final_receipt_json "$receipt" || { echo "PRECONDITION FAIL: durable plan-final evidence receipt is not public-safe or has an invalid shape." >&2; return 1; }
+  # D4 round-4 Codex MEDIUM (restoring round-3's removed check, now safe):
+  # _pfsm_receipt_has_exact_review_inventory is now schema-version-FROZEN
+  # (see its definition) rather than derived from the live
+  # _pfsm_review_required_outputs, so re-applying it here at verify time no
+  # longer risks retroactively invalidating a receipt sealed by an older
+  # plugin version — it checks against the frozen v1 inventory, not
+  # whatever the CURRENTLY installed code happens to require today.
+  _pfsm_receipt_has_exact_review_inventory "$receipt" || { echo "PRECONDITION FAIL: durable plan-final evidence receipt does not contain exactly its schema version's required review-output inventory." >&2; return 1; }
+  local base target target_head frozen_at
+  base="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base=""
+  target="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target=""
+  target_head="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head=""
+  frozen_at="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_frozen_at')" || frozen_at=""
+  jq -e --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" --arg ref "$ref" --arg b "$base" --arg t "$target" --arg th "$target_head" --arg fa "$frozen_at" '.artifact_type == "plan_final_evidence_receipt" and .review_verdict == "accepted" and .plan_id == $p and .candidate_sha == $c and .run_id == $r and .evidence_ref == $ref and .plan_base_commit == $b and .target_branch == $t and .target_head_at_freeze == $th and .candidate_frozen_at == $fa and (.outputs | type == "object" and length > 0)' <<< "$receipt" >/dev/null || { echo "PRECONDITION FAIL: durable plan-final evidence receipt does not bind this plan/base/candidate/freeze/target/run." >&2; return 1; }
+}
+
+# ---------------------------------------------------------------------------
+# IMP-466 item 4 — the CLOSE-time counterpart of the review receipt.
+#
+# The review receipt (above) durably survives runtime loss for --stage review
+# alone. plan-close also attests to the gates report, the plan-mode C4
+# decision (+ its dual-run corroboration) and the PM merge authorization —
+# all of which normally live ONLY under gitignored `.aid-o/work/`. Without a
+# durable projection of THOSE too, a lost runtime after a real merge can never
+# close again without literally re-running gates/C4/PM — which is not a
+# "recovery", it is redoing already-authorized work. This second immutable
+# sidecar, sealed once at plan-merge-to-main time, closes that gap without
+# weakening what close actually attests to: every field here is exactly what
+# aid-plan-close-check.sh's check5 already independently verifies from disk;
+# this is a durable copy of ITS OWN VERDICT, never a new, weaker one.
+# ---------------------------------------------------------------------------
+_pfsm_plan_final_close_evidence_ref() {
+  local plan_id="$1" candidate="$2" run_id="$3"
+  [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || return 1
+  [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+  printf 'refs/heads/aid-evidence-close/%s/%s/%s' "$plan_id" "$candidate" "$run_id"
+}
+
+_pfsm_validate_plan_final_close_receipt_json() {
+  local json="$1"
+  jq -e '
+    (type == "object") and
+    ((keys | sort) == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort)) and
+    (.schema_version == "aid-plan-final-close-evidence-1") and
+    (.artifact_type == "plan_final_close_evidence_receipt") and
+    (.plan_id | test("^P[0-9]{3}$")) and
+    (.candidate_sha | test("^[0-9a-f]{40}$")) and
+    (.run_id | test("^[A-Za-z0-9._-]+$")) and
+    (.target_branch | type == "string" and length > 0 and test("^[A-Za-z0-9._/-]+$")) and
+    (.target_head_before | test("^[0-9a-f]{40}$")) and
+    (.merge_commit | test("^[0-9a-f]{40}$")) and
+    (.merged_tree | test("^[0-9a-f]{40}$")) and
+    (.tag == "none" or (.tag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) and
+    (.gates_verdict == "pass") and
+    (.c4_decision | type == "object" and (.release_ready == true) and (.blockers_count | type == "number") and (.dual_run_match == true) and ((keys|sort) == (["blockers_count","dual_run_match","release_ready"]|sort))) and
+    (.pm_decision | type == "object" and (.decision == "MERGE") and (.sha256 | test("^sha256:[0-9a-f]{64}$")) and ((keys|sort) == (["decision","sha256"]|sort)))
+  ' <<< "$json" >/dev/null 2>&1
+}
+
+# _pfsm_seal_plan_final_close_evidence <root> <plan> <candidate> <run> <target>
+#   <target_head_before> <merge_commit> <merged_tree> <tag> <gates_report>
+#   <release_decision.json> <release_decision_dual_run.json> <pm_decision_file>
+_pfsm_seal_plan_final_close_evidence() {
+  local root="$1" plan_id="$2" candidate="$3" run_id="$4" target="$5" target_head_before="$6" merge_commit="$7" merged_tree="$8" tag="$9"
+  shift 9
+  local gates_report="$1" c4_decision_file="$2" c4_dual_run_file="$3" pm_decision_file="$4"
+  local ref receipt tmp blob tree commit existing existing_receipt expected_hash actual_hash
+
+  [[ -s "$gates_report" ]] && jq -e '.overall == "pass"' "$gates_report" >/dev/null 2>&1 || { echo "PRECONDITION FAIL: refusing to seal close evidence — gates_report.json is missing or not overall pass." >&2; return 1; }
+  local c4_release_ready c4_blockers c4_dual_match
+  c4_release_ready="$(jq -r '.release_decision.release_ready // false' "$c4_decision_file" 2>/dev/null || echo false)"
+  c4_blockers="$(jq -r '.release_decision.blockers | length' "$c4_decision_file" 2>/dev/null || echo -1)"
+  c4_dual_match="$(jq -r '.match // false' "$c4_dual_run_file" 2>/dev/null || echo false)"
+  [[ "$c4_release_ready" == "true" && "$c4_blockers" =~ ^[0-9]+$ && "$c4_dual_match" == "true" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — the C4 decision is not an unblocked, matched release_ready=true verdict." >&2; return 1; }
+  local pm_decision pm_hash
+  pm_decision="$(jq -r '.decision // ""' "$pm_decision_file" 2>/dev/null || true)"
+  [[ "$pm_decision" == "MERGE" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — no MERGE PM decision at ${pm_decision_file}." >&2; return 1; }
+  pm_hash="sha256:$(sha256sum "$pm_decision_file" | awk '{print $1}')"
+
+  ref="$(_pfsm_plan_final_close_evidence_ref "$plan_id" "$candidate" "$run_id")" || return 1
+  tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-close-receipt.XXXXXX")" || return 1
+  receipt="$(jq -nc --arg plan "$plan_id" --arg candidate "$candidate" --arg run "$run_id" --arg target "$target" \
+    --arg thb "$target_head_before" --arg mc "$merge_commit" --arg mt "$merged_tree" --arg tag "$tag" \
+    --argjson blockers "$c4_blockers" --arg pmh "$pm_hash" \
+    '{schema_version:"aid-plan-final-close-evidence-1",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers,dual_run_match:true},pm_decision:{decision:"MERGE",sha256:$pmh}}')" || { rm -f "$tmp"; return 1; }
+  _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: refusing to seal a non-public-safe plan-final close receipt." >&2; rm -f "$tmp"; return 1; }
+  printf '%s\n' "$receipt" > "$tmp" || { rm -f "$tmp"; return 1; }
+  expected_hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
+
+  existing="$(git -C "$root" rev-parse --verify --quiet "$ref" 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    [[ "$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)" == "receipt.json" ]] || {
+      echo "PRECONDITION FAIL: durable close evidence ref ${ref} contains files other than receipt.json — refusing to reuse a non-public sidecar." >&2
+      rm -f "$tmp"; return 1;
+    }
+    existing_receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null || true)"
+    actual_hash="sha256:$(printf '%s\n' "$existing_receipt" | sha256sum | awk '{print $1}')"
+    rm -f "$tmp"
+    [[ "$actual_hash" == "$expected_hash" ]] || { echo "PRECONDITION FAIL: durable close evidence ref ${ref} already exists with different receipt bytes — refusing to overwrite an immutable plan-final close record." >&2; return 1; }
+    printf '%s|%s|%s' "$ref" "$existing" "$expected_hash"
+    return 0
+  fi
+
+  blob="$(git -C "$root" hash-object -w "$tmp")" || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)" || return 1
+  commit="$(git -C "$root" commit-tree "$tree" -m "aid: seal plan-final close evidence ${plan_id} ${run_id}")" || return 1
+  if ! git -C "$root" update-ref "$ref" "$commit" ''; then
+    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$c4_dual_run_file" "$pm_decision_file"
+    return $?
+  fi
+  actual_hash="sha256:$(git -C "$root" show "${ref}:receipt.json" | sha256sum | awk '{print $1}')"
+  [[ "$actual_hash" == "$expected_hash" ]] || { echo "PRECONDITION FAIL: durable close evidence receipt read-back differs after sealing ${ref}." >&2; return 1; }
+  printf '%s|%s|%s' "$ref" "$commit" "$expected_hash"
+}
+
+# _pfsm_verify_plan_final_close_receipt <root> <plan_id> <candidate> <run_id>
+# Echoes the validated receipt JSON on stdout; PRECONDITION FAIL + return 1 on
+# anything ambiguous, forged, partial, stale or mismatched.
+_pfsm_verify_plan_final_close_receipt() {
+  local root="$1" plan_id="$2" candidate="$3" run_id="$4"
+  local ref want_hash got_hash receipt expected_ref
+  ref="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_close_evidence_ref')" || ref=""
+  want_hash="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256')" || want_hash=""
+  [[ -n "$ref" && "$ref" != "null" && -n "$want_hash" && "$want_hash" != "null" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no durable plan-final CLOSE evidence receipt." >&2; return 1; }
+  expected_ref="$(_pfsm_plan_final_close_evidence_ref "$plan_id" "$candidate" "$run_id")" || { echo "PRECONDITION FAIL: invalid plan/candidate/run binding for durable close evidence." >&2; return 1; }
+  [[ "$ref" == "$expected_ref" ]] || { echo "PRECONDITION FAIL: durable close evidence ref is not the uniquely derived plan/candidate/run ref." >&2; return 1; }
+  receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null)" || { echo "PRECONDITION FAIL: durable plan-final close evidence ref ${ref} is missing or unreadable." >&2; return 1; }
+  local tree_paths
+  tree_paths="$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)"
+  [[ "$tree_paths" == "receipt.json" ]] || { echo "PRECONDITION FAIL: durable plan-final close evidence ref ${ref} contains files other than receipt.json." >&2; return 1; }
+  got_hash="sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')"
+  [[ "$got_hash" == "$want_hash" ]] || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt hash mismatch for ${plan_id}." >&2; return 1; }
+  _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt is not public-safe or has an invalid shape." >&2; return 1; }
+  jq -e --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" '.plan_id == $p and .candidate_sha == $c and .run_id == $r' <<< "$receipt" >/dev/null \
+    || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt does not bind this plan/candidate/run." >&2; return 1; }
+  printf '%s' "$receipt"
+}
+
 _pfsm_finalize_review() {
   local root="$1" plan_id="$2" execution_yaml="$3"
 
@@ -2930,12 +3360,15 @@ _pfsm_finalize_review() {
     return 1
   }
 
-  local candidate base_commit run_id run_dir_rel v
+  local candidate base_commit run_id run_dir_rel target_branch target_head_at_freeze candidate_frozen_at v
   candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
   base_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base_commit=""
   run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
-  for v in candidate base_commit run_id run_dir_rel; do
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  target_head_at_freeze="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head_at_freeze=""
+  candidate_frozen_at="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_frozen_at')" || candidate_frozen_at=""
+  for v in candidate base_commit run_id run_dir_rel target_branch target_head_at_freeze candidate_frozen_at; do
     if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
       echo "PRECONDITION FAIL: plan-finalize --stage review: ${plan_id} has no frozen candidate (${v} is unset) — the plan-level reviews run against ONE immutable candidate. Run '--stage sync', '--stage freeze' and '--stage gates' first." >&2
       return 1
@@ -3023,15 +3456,59 @@ _pfsm_finalize_review() {
     }
 
   # ── Presence: exit 7, listing exactly what the controller must dispatch ──
+  # D3 / IMP-465: for the three generated-skeleton outputs, the FILE existing
+  # is not the same as the SPECIALIST having produced anything — --stage
+  # inputs pre-creates them with a null payload precisely so the specialist
+  # edits them in place. Presence here must mean "payload filled", or the
+  # skeleton's mere existence would silently swallow the exit-7 dispatch
+  # signal pipeline.md tells the controller to act on.
   local -a missing=()
   while IFS='|' read -r fname atype binding; do
     [[ -z "$fname" ]] && continue
-    [[ -f "${run_dir_abs}/${fname}" ]] || missing+=("$fname")
+    local fpath="${run_dir_abs}/${fname}"
+    if [[ ! -f "$fpath" ]]; then
+      missing+=("$fname"); continue
+    fi
+    local skel_pkey=""
+    case "$fname" in
+      curator-report.json)        skel_pkey="curator" ;;
+      semantic-review-final.json) skel_pkey="semantic_review" ;;
+      delivery-report.json)       skel_pkey="delivery_report" ;;
+    esac
+    if [[ -n "$skel_pkey" ]]; then
+      local skel_ptype; skel_ptype="$(jq -r --arg pk "$skel_pkey" '(.[$pk] | type)' "$fpath" 2>/dev/null || echo "null")"
+      [[ "$skel_ptype" == "object" ]] || missing+=("$fname")
+    fi
   done < <(_pfsm_review_required_outputs)
   if (( ${#missing[@]} > 0 )); then
     echo "awaiting_review_outputs: ${plan_id} is blocked in PLAN_REVIEW until the following plan-final outputs exist in ${run_dir_rel}/ — ${missing[*]}. This is a DISPATCH state, not an error: the FSM does not dispatch agents; the controller does, then re-runs '--stage review'. The full contract (expected path, artifact type, subject binding) is in ${run_dir_rel}/review-requirements.json; the review range is ${base_commit}..${candidate}." >&2
     return 7
   fi
+
+  # ── Snapshot every required output BEFORE validating any of them ─────────
+  # Round-3 Codex HIGH: without this, a check could validate version A of a
+  # file and the LATER hash-and-seal loop (near the end of this function)
+  # could hash a since-swapped version B — the durable receipt would then
+  # attest to bytes nothing here ever actually validated. Copying every
+  # required output into a private, never-written-to-again snapshot and
+  # redirecting every subsequent read in this function (validation AND the
+  # final outputs_json hash) at that snapshot closes the window: whatever
+  # gets validated below is byte-identical to whatever gets sealed. The
+  # snapshot directory is removed on every return from this function.
+  local _review_snapshot
+  _review_snapshot="$(mktemp -d "${TMPDIR:-/tmp}/aid-plan-final-review-snapshot.XXXXXX")" || {
+    echo "PRECONDITION FAIL: could not create a private snapshot directory to validate plan-final review outputs atomically." >&2
+    return 1
+  }
+  trap 'rm -rf "$_review_snapshot"' RETURN
+  while IFS='|' read -r fname atype binding; do
+    [[ -z "$fname" ]] && continue
+    cp -p "${run_dir_abs}/${fname}" "${_review_snapshot}/${fname}" 2>/dev/null || {
+      echo "PRECONDITION FAIL: could not snapshot ${run_dir_rel}/${fname} for review validation." >&2
+      return 1
+    }
+  done < <(_pfsm_review_required_outputs)
+  run_dir_abs="$_review_snapshot"
 
   # ── Protocol validation, then per-output subject binding ────────────────
   local fails=0
@@ -3094,6 +3571,20 @@ _pfsm_finalize_review() {
       || _rassert "${f} records identity.plan_id '${p}', expected '${plan_id}' — this output does not belong to this plan (an EPIC evidence pack copied in fails here)."
   done
 
+  # D3 / IMP-465: the three generated-skeleton specialists (Curator, Verifier,
+  # Reporter) must have edited ONLY their payload key — the envelope AID
+  # generated for them (schema_version/artifact_type/control_protocol/
+  # identity/revision) must still be exactly what was sealed at --stage
+  # inputs time, and the payload key must actually be filled (not left as the
+  # generated null placeholder).
+  local _skel_project_id; _skel_project_id="$(basename "$root")"
+  local _skel_kind _skel_err
+  for _skel_kind in curator verifier reporter; do
+    _skel_err="$(_pfsm_verify_plan_final_skeleton_envelope "$_skel_kind" "$root" "$_skel_project_id" \
+      "$plan_id" "$base_commit" "$candidate" "$run_id" "$run_dir_abs")" \
+      || _rassert "$_skel_err"
+  done
+
   # semantic-review-final.json: the RANGE must cover the whole plan.
   local sr_base
   sr_base="$(jq -r '.revision.base_sha // ""' "${run_dir_abs}/semantic-review-final.json")"
@@ -3113,6 +3604,17 @@ _pfsm_finalize_review() {
     || _rassert "audit-report.json records audit_report.reviewed_head '${a_head}', expected the frozen candidate '${candidate}'."
   [[ -n "$a_hash" ]] \
     || _rassert "audit-report.json has no audit_report.input_manifest_hash — the audit's own input set is unproven."
+  # D2 / IMP-464 round-2 (auditor-flagged gap): audit-report.json's claimed
+  # input_manifest_hash was previously only checked for non-emptiness — any
+  # string satisfied it, so a mismatched or stale manifest could sit behind
+  # a report that CLAIMED a hash without that hash ever being checked
+  # against the real audit-input-manifest.json. It now has to equal that
+  # manifest's OWN .audit_input_manifest.input_hash field exactly — the
+  # provenance chain the manifest's own schema documents (D7).
+  local aim_input_hash
+  aim_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "${run_dir_abs}/audit-input-manifest.json" 2>/dev/null || true)"
+  [[ -n "$aim_input_hash" && "$a_hash" == "$aim_input_hash" ]] \
+    || _rassert "audit-report.json's audit_report.input_manifest_hash (${a_hash:-<empty>}) does not equal audit-input-manifest.json's own audit_input_manifest.input_hash (${aim_input_hash:-<empty>}) — the audit report's claimed input set is unproven against the actual manifest."
 
   # curator-report.json: audit_report_ref must be sha256(audit-report.json).
   local c_ref c_actual
@@ -3121,6 +3623,37 @@ _pfsm_finalize_review() {
   c_actual="$(sha256sum "${run_dir_abs}/audit-report.json" | awk '{print $1}')"
   [[ "$c_ref" == "$c_actual" ]] \
     || _rassert "curator-report.json's curator.audit_report_ref (${c_ref:-<absent>}) is not sha256 of the audit report in this run directory (${c_actual}) — the Curator reviewed a DIFFERENT audit report."
+
+  # D5 / IMP-468: a raw Auditor blocker (severity critical|high in
+  # audit-report.json's findings[]) is evidence — a bare
+  # curator.blocking_findings:false NEVER erases it. Every such finding needs
+  # a schema-bound adjudication entry in curator.adjudications[], bound to
+  # THIS exact audit report hash / candidate / run (partial, stale, or
+  # missing adjudication blocks review). Security-tier findings (severity ==
+  # critical) and PM-required findings (action_owner == "pm") can never be
+  # self-cleared via disposition "false_positive" — that always escalates.
+  # Shared with lib/aid-lifecycle.sh's _aid_lc_plan_review_status (D5
+  # follow-up) via lib/aid-adjudication.sh's aid_adjudication_resolve — one
+  # resolver, so the plan-final boundary's verdict and the .aid-lifecycle
+  # classifier's verdict can never silently drift apart.
+  local adjudication_check adj_total adj_valid unadj_count illegal_fp_count unadj_list
+  adjudication_check="$(aid_adjudication_resolve "${run_dir_abs}/audit-report.json" "${run_dir_abs}/curator-report.json" "$candidate" "$run_id")" \
+    || adjudication_check=""
+  if [[ -z "$adjudication_check" ]]; then
+    _rassert "audit-report.json or curator-report.json could not be read to check formal Curator adjudication."
+  else
+    adj_total="$(jq -r '.adj_total' <<<"$adjudication_check")"
+    adj_valid="$(jq -r '.adj_valid' <<<"$adjudication_check")"
+    unadj_count="$(jq -r '.unadj_count' <<<"$adjudication_check")"
+    unadj_list="$(jq -r '.unadj_list | join(", ")' <<<"$adjudication_check")"
+    illegal_fp_count="$(jq -r '.illegal_fp_count' <<<"$adjudication_check")"
+    [[ "$adj_total" == "$adj_valid" ]] \
+      || _rassert "curator-report.json's curator.adjudications[] contains an entry that is malformed or not bound to THIS exact audit report/candidate/run — partial or stale adjudication is refused."
+    [[ "$unadj_count" -eq 0 ]] \
+      || _rassert "audit-report.json has critical|high finding(s) with no matching curator.adjudications[] entry — a raw Auditor blocker is never resolved by a bare curator.blocking_findings:false: ${unadj_list}"
+    [[ "$illegal_fp_count" -eq 0 ]] \
+      || _rassert "curator-report.json disposes a security-tier (severity=critical) or PM-required (action_owner=pm) finding as 'false_positive' — those can never self-clear that way and must be 'requires_pm' or 'confirmed'."
+  fi
 
   # simplifier-report.md: the `Head:` provenance line.
   if ! grep -Eq "^[[:space:]]*[*_]{0,2}Head:?[*_]{0,2}[[:space:]]*:?[[:space:]]*${candidate}[[:space:]]*$" \
@@ -3135,6 +3668,65 @@ _pfsm_finalize_review() {
   rp_base="$(jq -r '.revision.base_sha // ""' "${run_dir_abs}/review-profile.json")"
   [[ "$rp_base" == "$base_commit" ]] \
     || _rassert "review-profile.json records revision.base_sha '${rp_base}', expected plan_base_commit '${base_commit}' — the profile must be derived over the whole plan range."
+
+  # IMP-464 (D2): plan-diff is controller-produced C3 input, not an arbitrary
+  # JSON file that becomes trustworthy merely because its later hash is
+  # sealed. Whether "skipped" is an acceptable verdict here depends on the
+  # SAME required_lenses[] arming check as C3's own build-manifest gate: a
+  # required AC lens's verdict must be present|absent; when no AC lens is
+  # armed, an honest "skipped" is not fabricated evidence, it is the correct
+  # explicit classification, and must not block a legitimate no-AC-lens plan.
+  local ac_lens_required_rv="false"
+  jq -e '.review_profile.required_lenses // [] | any(. == "ac_to_test_identity" or . == "requirement_test_drift")' "${run_dir_abs}/review-profile.json" >/dev/null 2>&1 \
+    && ac_lens_required_rv="true"
+  local pd_base pd_head pd_verdict
+  pd_base="$(jq -r '.base_commit // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
+  pd_head="$(jq -r '.head_commit // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
+  pd_verdict="$(jq -r '.overall_verdict // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
+  [[ "$pd_base" == "$base_commit" && "$pd_head" == "$candidate" ]] \
+    || _rassert "plan-diff.json is not bound to ${base_commit}..${candidate}."
+  if [[ "$ac_lens_required_rv" == "true" ]]; then
+    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]] \
+      || _rassert "an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected present|absent (skipped/unverifiable is not C3 evidence for a required lens)."
+  else
+    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" || "$pd_verdict" == "skipped" ]] \
+      || _rassert "plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected present|absent|skipped."
+  fi
+  jq -e '(.results | type == "array") and (.summary | type == "object")' "${run_dir_abs}/plan-diff.json" >/dev/null 2>&1 \
+    || _rassert "plan-diff.json lacks results[] or summary{}; C3 must not read an underspecified AC verdict."
+  local pd_expected pd_actual
+  pd_expected="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_inputs.plan_diff_sha256' 2>/dev/null || true)"
+  pd_actual="sha256:$(sha256sum "${run_dir_abs}/plan-diff.json" | awk '{print $1}')"
+  [[ "$pd_expected" == "$pd_actual" ]] \
+    || _rassert "plan-diff.json differs from the controller-produced pre-dispatch hash; replacement after inputs is refused."
+  # IMP-464 (D2) TOCTOU close: the LIVE file matching the pre-dispatch hash
+  # only proves the file is back to the sealed bytes NOW — not that C3 read
+  # those same bytes when it actually dispatched. audit-input-manifest.json
+  # is now a REQUIRED output (D2 round-2), so this reads the real file
+  # unconditionally; if C3 sealed its own snapshot of plan-diff.json into
+  # its evidence_hashes[], that snapshot must ALSO equal the producer's
+  # hash, or a swap-dispatch-restore around the dispatch call is caught
+  # here. D2 round-3 Codex MEDIUM: whenever plan-diff.json carries a REAL
+  # verdict (present|absent — pd_verdict "skipped" is the only honest way
+  # to NOT have read it), the evidence_hashes[] entry is now MANDATORY, not
+  # merely checked-if-present — an absent, non-array, or plan-diff.json-less
+  # evidence_hashes[] no longer silently passes as "C3 never read it" when
+  # the producer's own plan-diff.json says otherwise.
+  local c3_manifest="${run_dir_abs}/audit-input-manifest.json"
+  local c3_evidence_hashes_valid c3_pd_hash
+  c3_evidence_hashes_valid="$(jq -e '(.audit_input_manifest.evidence_hashes // []) | type == "array"' "$c3_manifest" >/dev/null 2>&1 && echo true || echo false)"
+  c3_pd_hash="$(jq -r '(.audit_input_manifest.evidence_hashes // [])[]? | select(.path=="plan-diff.json") | .sha256' "$c3_manifest" 2>/dev/null | head -1)"
+  if [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]]; then
+    if [[ "$c3_evidence_hashes_valid" != "true" ]]; then
+      _rassert "audit-input-manifest.json's audit_input_manifest.evidence_hashes is missing or not an array, but plan-diff.json has a real overall_verdict '${pd_verdict}' — C3's own record of what it consumed is unproven."
+    elif [[ -z "$c3_pd_hash" ]]; then
+      _rassert "audit-input-manifest.json's evidence_hashes[] has no plan-diff.json entry, but plan-diff.json has a real overall_verdict '${pd_verdict}' — C3 must record what it actually read, not omit it."
+    elif [[ "$c3_pd_hash" != "$pd_expected" ]]; then
+      _rassert "C3's audit-input-manifest.json sealed plan-diff.json at ${c3_pd_hash}, not the producer-sealed ${pd_expected} — C3 may have dispatched over swapped evidence."
+    fi
+  elif [[ -n "$c3_pd_hash" && "$c3_pd_hash" != "$pd_expected" ]]; then
+    _rassert "C3's audit-input-manifest.json sealed plan-diff.json at ${c3_pd_hash}, not the producer-sealed ${pd_expected} — C3 may have dispatched over swapped evidence."
+  fi
 
   # ── The plan-level aggregates: delivery-gate + acceptance-evidence ──────
   # `identity.epic_id` MUST be null: these are the PLAN's aggregates, and an
@@ -3245,8 +3837,14 @@ _pfsm_finalize_review() {
     --argjson outputs "$outputs_json" --argjson counts "$counts_json" --argjson utils "$utils_json" \
     '{candidate_sha:$cand, review_range:($base + ".." + $cand), run_id:$run,
       outputs:$outputs, dispatch_counts:$counts, utilities_run:$utils}')"
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_review = ${review_json}" >/dev/null || {
-    echo "PRECONDITION FAIL: every plan-final review output for ${plan_id} validated, but the result could not be recorded in the manifest — refusing to transition on an unrecorded pass. Re-run '--stage review'; it re-validates the same durable outputs." >&2
+  local sealed ref receipt_commit receipt_hash
+  sealed="$(_pfsm_seal_plan_final_review "$root" "$plan_id" "$base_commit" "$candidate" "$target_branch" "$target_head_at_freeze" "$candidate_frozen_at" "$run_id" "$outputs_json")" || {
+    echo "PRECONDITION FAIL: every plan-final review output for ${plan_id} validated, but its durable receipt could not be sealed — refusing to transition on runtime-only evidence." >&2
+    return 1
+  }
+  IFS='|' read -r ref receipt_commit receipt_hash <<< "$sealed"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_review = ${review_json} | .plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\" | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"" >/dev/null || {
+    echo "PRECONDITION FAIL: durable plan-final evidence for ${plan_id} was sealed at ${ref}, but its runtime pointer could not be recorded — refusing to transition; retry is idempotent." >&2
     return 1
   }
 
@@ -3544,7 +4142,7 @@ _pfsm_finalize_summary() {
 }
 
 # =============================================================================
-# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>]
+# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>]
 #                    [--execution-yaml <path>] [--substitute-receipt <gate>=<path>]
 #                    [--project-root <path>]
 # =============================================================================
@@ -3581,7 +4179,7 @@ cmd_plan_finalize() {
   done
 
   if [[ -z "$plan_id" || -z "$stage" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -4033,6 +4631,44 @@ cmd_plan_merge_to_main() {
     exit 1
   fi
 
+  # Every specific precondition above (presence, freeze-time format, decision
+  # binding, staleness) has already had its chance to name itself; only now —
+  # immediately before any git mutation — is the durable receipt itself
+  # verified, so a corrupt/missing RECEIPT never masks a more specific and
+  # more actionable manifest-shape error with its own generic message.
+  _pfsm_verify_plan_final_receipt "$root" "$plan_id" "$candidate" "$run_id" || exit 1
+
+  # A requested publish is two ordered publications: immutable evidence first,
+  # then the mutable target.  Do this BEFORE any local target CAS/lifecycle/tag
+  # mutation so an unreachable or rejecting remote cannot leave a half-published
+  # release behind for an operator to clean up.
+  # Evaluated on EVERY --push invocation, resumed or not: whether THIS run
+  # merges fresh or a prior attempt already published the target is orthogonal
+  # to whether the evidence ref has ever reached the remote. Skipping this on
+  # `resume_explains_head` let a first attempt merge locally without --push
+  # and a later `--push` resume publish the target while evidence stayed
+  # local — checked idempotently (ls-remote) so a re-run never pushes twice.
+  if [[ "$do_push" -eq 1 ]]; then
+    local prepush_remote="" prepush_ref="" prepush_rc=0 prepush_remote_sha=""
+    prepush_remote="$(git -C "$root" config --get "branch.${target_branch}.remote" 2>/dev/null || true)"
+    [[ -z "$prepush_remote" ]] && prepush_remote="$(git -C "$root" remote 2>/dev/null | head -1 || true)"
+    prepush_ref="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_ref')" || prepush_ref=""
+    if [[ -z "$prepush_remote" || -z "$prepush_ref" || "$prepush_ref" == "null" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: --push requires a reachable remote and durable evidence ref before any local merge. Target is unchanged." >&2
+      exit 1
+    fi
+    prepush_remote_sha="$(git -C "$root" ls-remote "$prepush_remote" "$prepush_ref" 2>/dev/null | awk '{print $1}' | head -1 || true)"
+    if [[ "$prepush_remote_sha" == "$(git -C "$root" rev-parse "$prepush_ref")" ]]; then
+      echo "PUSH SKIPPED: ${prepush_remote} already has ${prepush_ref}." >&2
+    else
+      git -C "$root" push "$prepush_remote" "${prepush_ref}:${prepush_ref}" >/dev/null 2>&1 || prepush_rc=$?
+      if [[ "$prepush_rc" -ne 0 ]]; then
+        echo "PRECONDITION FAIL: plan-merge-to-main: evidence ref ${prepush_ref} could not be published to ${prepush_remote} (rc=${prepush_rc}); target is unchanged." >&2
+        exit 1
+      fi
+    fi
+  fi
+
   # ─────────────────────────────────────────────────────────────────────────
   # STAGE 1 — build the merge in isolation, publish with a compare-and-swap
   # ─────────────────────────────────────────────────────────────────────────
@@ -4133,36 +4769,6 @@ cmd_plan_merge_to_main() {
     echo "NO TAG: prepare-plan resolved no version bump for ${plan_id} (release-prep.json records 'none'), so no tag is created. A no-bump plan merges and closes without a new tag." >&2
   fi
 
-  # ── Push (opt-in, guarded, at most once) ─────────────────────────────────
-  local push_status="skipped"
-  if [[ "$do_push" -eq 1 ]]; then
-    local remote=""
-    remote="$(git -C "$root" config --get "branch.${target_branch}.remote" 2>/dev/null || true)"
-    [[ -z "$remote" ]] && remote="$(git -C "$root" remote 2>/dev/null | head -1 || true)"
-    if [[ -z "$remote" ]]; then
-      push_status="no_remote"
-      echo "NO PUSH: --push was given but this repository has no remote configured." >&2
-    else
-      local remote_sha=""
-      remote_sha="$(git -C "$root" ls-remote "$remote" "refs/heads/${target_branch}" 2>/dev/null | awk '{print $1}' | head -1 || true)"
-      if [[ -n "$remote_sha" ]] && git -C "$root" merge-base --is-ancestor "$merge_commit" "$remote_sha" 2>/dev/null; then
-        push_status="already_pushed"
-        echo "PUSH SKIPPED: ${remote}/${target_branch} already contains ${merge_commit}." >&2
-      else
-        local push_rc=0
-        git -C "$root" push "$remote" "refs/heads/${target_branch}:refs/heads/${target_branch}" >/dev/null 2>&1 || push_rc=$?
-        if [[ "$push_rc" -ne 0 ]]; then
-          echo "PRECONDITION FAIL: plan-merge-to-main: the merge, bindings and tag are LOCAL and durable, but the push to ${remote} failed (rc=${push_rc}). Re-run with --push once the remote is reachable; the push guard makes it idempotent." >&2
-          exit 1
-        fi
-        push_status="pushed"
-        if [[ "$tag_status" != "none" ]]; then
-          git -C "$root" push "$remote" "refs/tags/${tag_status}" >/dev/null 2>&1 || true
-        fi
-      fi
-    fi
-  fi
-
   # ── The PM authorization, durable in the attempt's own evidence ──────────
   # P068 Step 6: plan-close has to prove a PM authorized THIS merge, and the
   # decision artifact lives wherever the PM happened to write it (a --decision
@@ -4173,6 +4779,99 @@ cmd_plan_merge_to_main() {
   # implies someone must have approved it".
   cp -f -- "$decision_file" "${run_dir_rel:+${root}/${run_dir_rel}}/pm-plan-decision.json" 2>/dev/null || \
     echo "WARN: plan-merge-to-main: could not copy the PM decision into ${run_dir_rel}/ — plan-close will refuse until it is present." >&2
+
+  # IMP-466 item 4 / D1 fix: seal the durable close-evidence sidecar from the
+  # SAME already-verified facts plan-close-check independently re-derives
+  # from disk — a public-safe copy of this attempt's own verdict, not a new
+  # one. Sealed HERE, BEFORE the push block below: a fresh clone that later
+  # loses the runtime evidence directory must be able to recover close proof
+  # from the remote, which requires this ref to be pushed ALONGSIDE (in fact
+  # before) main, never as an afterthought main's push does not depend on.
+  local close_sealed close_ref close_receipt_commit close_receipt_hash
+  close_sealed="$(_pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target_branch" \
+    "$target_head_frozen" "$merge_commit" "$merged_tree" "$tag_status" \
+    "${run_dir_abs}/gates_report.json" "${run_dir_abs}/release-decision.json" \
+    "${run_dir_abs}/release-decision-dual-run.json" "$decision_file")" || {
+    echo "WARN: plan-merge-to-main: the merge ${merge_commit} is published, but its durable close-evidence receipt could not be sealed — plan-close will require the runtime evidence directory until this is resolved (re-run plan-merge-to-main; sealing is idempotent)." >&2
+    close_sealed=""
+  }
+  if [[ -n "$close_sealed" ]]; then
+    IFS='|' read -r close_ref close_receipt_commit close_receipt_hash <<< "$close_sealed"
+    plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_close_evidence_ref = \"${close_ref}\" | .plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 = \"${close_receipt_hash}\"" >/dev/null 2>&1 || \
+      echo "WARN: plan-merge-to-main: close-evidence sealed at ${close_ref}, but the runtime pointer could not be recorded." >&2
+  fi
+
+  # ── Push (opt-in, guarded, at most once) ─────────────────────────────────
+  # D1 fix: close-evidence is published BEFORE main, and a failure to publish
+  # it refuses the push entirely — main is NEVER advanced on the remote
+  # without durable close proof already sitting behind it. This mirrors the
+  # existing review-evidence pre-push guard above (which runs before the
+  # local merge even exists); this one runs after the local merge (close
+  # evidence needs merge_commit) but strictly before target_branch is pushed.
+  # D1 fix round-2 (Codex MEDIUM): the primary path pushes target_branch AND
+  # the close-evidence ref in ONE `--atomic` transaction rather than a
+  # separate ls-remote-then-push check for evidence followed by a separate
+  # push of main — the sequential version left a window where a concurrent
+  # actor could force-update/delete the evidence ref between the check and
+  # the main push, letting main publish while the remote's evidence ref was
+  # no longer (or never) this attempt's. Atomic push succeeds or fails as a
+  # unit: git's own non-force ref-update semantics refuse a relocated/forged
+  # evidence ref (or a non-fast-forward target) and abort BOTH together.
+  local push_status="skipped"
+  if [[ "$do_push" -eq 1 ]]; then
+    local remote=""
+    remote="$(git -C "$root" config --get "branch.${target_branch}.remote" 2>/dev/null || true)"
+    [[ -z "$remote" ]] && remote="$(git -C "$root" remote 2>/dev/null | head -1 || true)"
+    if [[ -z "$remote" ]]; then
+      push_status="no_remote"
+      echo "NO PUSH: --push was given but this repository has no remote configured." >&2
+    else
+      if [[ -z "$close_ref" ]]; then
+        echo "PRECONDITION FAIL: plan-merge-to-main: the merge, bindings and tag are LOCAL and durable, but no durable close-evidence ref was sealed — refusing to push ${target_branch} without close proof behind it. Re-run with --push; sealing is idempotent and will complete on retry." >&2
+        exit 1
+      fi
+      local ce_local_sha=""
+      ce_local_sha="$(git -C "$root" rev-parse --verify --quiet "$close_ref" 2>/dev/null || true)"
+      if [[ -z "$ce_local_sha" ]]; then
+        echo "PRECONDITION FAIL: plan-merge-to-main: close-evidence ref ${close_ref} does not resolve locally — refusing to push ${target_branch} without it. Re-run with --push; sealing is idempotent." >&2
+        exit 1
+      fi
+      local remote_sha=""
+      remote_sha="$(git -C "$root" ls-remote "$remote" "refs/heads/${target_branch}" 2>/dev/null | awk '{print $1}' | head -1 || true)"
+      if [[ -n "$remote_sha" ]] && git -C "$root" merge-base --is-ancestor "$merge_commit" "$remote_sha" 2>/dev/null; then
+        push_status="already_pushed"
+        echo "PUSH SKIPPED: ${remote}/${target_branch} already contains ${merge_commit}." >&2
+        # A RESUMED run: target is already public, but a prior attempt may
+        # have failed after publishing main and before publishing evidence
+        # (or before D1's reordering, in an older attempt). Backfill
+        # evidence if still missing — main is not newly at risk here since
+        # it is already public regardless of what this branch does.
+        local ce_remote_sha=""
+        ce_remote_sha="$(git -C "$root" ls-remote "$remote" "$close_ref" 2>/dev/null | awk '{print $1}' | head -1 || true)"
+        if [[ "$ce_remote_sha" != "$ce_local_sha" ]]; then
+          local ce_push_rc=0
+          git -C "$root" push "$remote" "${close_ref}:${close_ref}" >/dev/null 2>&1 || ce_push_rc=$?
+          if [[ "$ce_push_rc" -ne 0 ]]; then
+            echo "PRECONDITION FAIL: plan-merge-to-main: ${target_branch} is already published, but the close-evidence ref ${close_ref} could not be backfilled to ${remote} (rc=${ce_push_rc}). Re-run with --push once the remote is reachable." >&2
+            exit 1
+          fi
+        fi
+      else
+        local push_rc=0
+        git -C "$root" push --atomic "$remote" \
+          "refs/heads/${target_branch}:refs/heads/${target_branch}" \
+          "${close_ref}:${close_ref}" >/dev/null 2>&1 || push_rc=$?
+        if [[ "$push_rc" -ne 0 ]]; then
+          echo "PRECONDITION FAIL: plan-merge-to-main: the merge, bindings and tag are LOCAL and durable, but the atomic push of ${target_branch} + close-evidence ref ${close_ref} to ${remote} failed (rc=${push_rc}) — neither was published. Re-run with --push once the remote is reachable; the push guard makes it idempotent." >&2
+          exit 1
+        fi
+        push_status="pushed"
+        if [[ "$tag_status" != "none" ]]; then
+          git -C "$root" push "$remote" "refs/tags/${tag_status}" >/dev/null 2>&1 || true
+        fi
+      fi
+    fi
+  fi
 
   # ── Record + transition ──────────────────────────────────────────────────
   local merge_json
@@ -4380,6 +5079,9 @@ cmd_plan_close() {
   candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
   run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  if [[ "$close_mode" == "merge" ]]; then
+    _pfsm_verify_plan_final_receipt "$root" "$plan_id" "$candidate" "$run_id" || exit 1
+  fi
 
   # ── 1. the close lock ─────────────────────────────────────────────────────
   local close_lock; close_lock="$(_pfsm_close_lock_path "$plan_id")"
@@ -4852,13 +5554,336 @@ _pfsm_repair_add_unproven() {
     "$base_commit" "$source_ref" ".aid-o/work/evidence/${eid}/repaired" "unproven" >/dev/null
 }
 
+# Recover only the small runtime projection which the sealed receipt can prove.
+# This is intentionally not a reconstruction of raw reports, dispatch text or
+# session data: their loss is precisely why the receipt is the durable review
+# authority.  More than one usable receipt is ambiguous and therefore refused.
+_pfsm_recover_plan_final_receipt() {
+  local plan_id="$1" root="$2" ref receipt candidate base target target_head run_id expected current current_obj target_now found=0
+  local -A _pfrpr_seen=()
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null || true)"
+    _pfsm_validate_plan_final_receipt_json "$receipt" || continue
+    # D4 round-5 Codex MEDIUM: the schema-version-frozen exact-inventory
+    # check (see _pfsm_receipt_has_exact_review_inventory) applies here too
+    # — without it, a forged receipt with only one arbitrary well-formed
+    # output entry would pass the generic shape validator and could be
+    # recovered as authoritative, advancing the plan on incomplete evidence.
+    _pfsm_receipt_has_exact_review_inventory "$receipt" || continue
+    [[ "$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)" == "receipt.json" ]] || continue
+    [[ "$(jq -r '.plan_id' <<<"$receipt")" == "$plan_id" ]] || continue
+    candidate="$(jq -r '.candidate_sha' <<<"$receipt")"; run_id="$(jq -r '.run_id' <<<"$receipt")"
+    expected="$(_pfsm_plan_final_evidence_ref "$plan_id" "$candidate" "$run_id")" || continue
+    # A remote-tracking source is allowed during fresh-clone recovery, but its
+    # receipt must claim the canonical local ref and is copied with CAS below.
+    [[ "$(jq -r '.evidence_ref' <<<"$receipt")" == "$expected" ]] || continue
+    # The ref THIS OBJECT WAS ACTUALLY FOUND AT must itself be the same
+    # location its own content claims — a self-consistent receipt relocated
+    # (or forged) onto an unrelated ref path is refused, never silently
+    # accepted or copied onto its claimed location.
+    local suffix="${ref#refs/heads/}"
+    [[ "$suffix" == "$ref" ]] && suffix="$(sed -E 's#^refs/remotes/[^/]+/##' <<<"$ref")"
+    [[ "$suffix" == "${expected#refs/heads/}" ]] || continue
+    local obj; obj="$(git -C "$root" rev-parse --verify --quiet "$ref" 2>/dev/null || true)"
+    [[ -n "$obj" ]] || continue
+    # Dedupe strictly by the CANONICAL SUFFIX (aid-evidence/<plan>/<cand>/<run>),
+    # not by object identity: a local branch and its own remote-tracking
+    # mirror for that exact suffix are one logical ref seen twice, not two
+    # receipts. A DIFFERENT derived suffix (e.g. a copy under another run id)
+    # is always a second, ambiguous claim — even if its bytes happen to match
+    # — because a genuine sidecar collision is exactly what must fail closed.
+    if [[ -n "${_pfrpr_seen[$suffix]:-}" ]]; then
+      [[ "${_pfrpr_seen[$suffix]}" == "$obj" ]] || { echo "PRECONDITION FAIL: receipt recovery for ${plan_id}: ${suffix} disagrees between local and remote-tracking refs." >&2; return 1; }
+      continue
+    fi
+    _pfrpr_seen["$suffix"]="$obj"
+    found=$((found + 1)); current="$ref"; current_obj="$obj"
+  done < <(git -C "$root" for-each-ref --format='%(refname)' "refs/heads/aid-evidence/${plan_id}/" "refs/remotes/*/aid-evidence/${plan_id}/**")
+  [[ "$found" -eq 1 ]] || { echo "PRECONDITION FAIL: receipt recovery for ${plan_id} requires exactly one valid public receipt ref (found ${found})." >&2; return 1; }
+
+  receipt="$(git -C "$root" show "${current}:receipt.json")"
+  candidate="$(jq -r '.candidate_sha' <<<"$receipt")"; base="$(jq -r '.plan_base_commit' <<<"$receipt")"
+  target="$(jq -r '.target_branch' <<<"$receipt")"; target_head="$(jq -r '.target_head_at_freeze' <<<"$receipt")"; run_id="$(jq -r '.run_id' <<<"$receipt")"
+  expected="$(_pfsm_plan_final_evidence_ref "$plan_id" "$candidate" "$run_id")"
+
+  # A local target branch is used AS IS (it may legitimately have advanced
+  # past the frozen head via this plan's own merge, or further mainline
+  # history — that is exactly the post-merge recovery case and is never
+  # rewound). Only a WHOLLY MISSING local target is materialised from its
+  # remote-tracking value, and only to whatever that value currently is.
+  # Moved BEFORE the plan/<id> materialisation below: D1 fix — `plan/<id>`
+  # is NEVER pushed by AID's own `--push` (only target_branch, its tag, and
+  # the two durable evidence refs are), so a genuinely fresh clone of a real
+  # pushed remote has no `plan/<id>` ref anywhere once the merge is
+  # complete. target_now is needed FIRST so the merged case can legitimize
+  # the candidate via ancestry instead.
+  target_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target}" 2>/dev/null || true)"
+  if [[ -z "$target_now" ]]; then
+    local target_remote
+    target_remote="$(git -C "$root" for-each-ref --format='%(objectname)' "refs/remotes/*/${target}" | head -1)"
+    [[ -n "$target_remote" ]] && git -C "$root" update-ref "refs/heads/${target}" "$target_remote" '' || true
+    target_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target}" 2>/dev/null || true)"
+  fi
+  [[ -n "$target_now" ]] || { echo "PRECONDITION FAIL: target branch ${target} is unavailable locally or via a remote-tracking ref." >&2; return 1; }
+
+  # A fresh clone normally has this as a remote-tracking ref.  Materialise a
+  # local branch only when the remote-tracking object is the exact receipt
+  # object; this never guesses a branch name or advances an existing branch.
+  # D1 fix, third fallback: when neither exists (the realistic pushed-remote
+  # case above), the candidate is legitimized instead by graph reachability
+  # from the ALREADY-trusted target_now — if it is an ancestor of the target
+  # branch, the merge already happened and the object's legitimacy needs no
+  # separate ref of its own, exactly like the merged-detection check below
+  # independently re-derives the merge shape from git ancestry alone.
+  local plan_now plan_remote
+  plan_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null || true)"
+  if [[ "$plan_now" != "$candidate" ]]; then
+    plan_remote="$(git -C "$root" for-each-ref --format='%(objectname)' "refs/remotes/*/plan/${plan_id}" | awk -v c="$candidate" '$1 == c {print; exit}')"
+    if [[ -n "$plan_remote" ]]; then
+      git -C "$root" update-ref "refs/heads/plan/${plan_id}" "$candidate" '' || true
+    elif git -C "$root" rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null 2>&1 \
+         && git -C "$root" merge-base --is-ancestor "$candidate" "$target_now" 2>/dev/null; then
+      git -C "$root" update-ref "refs/heads/plan/${plan_id}" "$candidate" '' || true
+    fi
+    plan_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null || true)"
+  fi
+  [[ "$plan_now" == "$candidate" ]] || { echo "PRECONDITION FAIL: receipt candidate is not the current or remote-tracking plan/${plan_id} head, and is not reachable from ${target}." >&2; return 1; }
+  git -C "$root" merge-base --is-ancestor "$base" "$candidate" >/dev/null 2>&1 || { echo "PRECONDITION FAIL: receipt base is not an ancestor of its candidate." >&2; return 1; }
+  if [[ "$current" != "$expected" ]]; then
+    git -C "$root" update-ref "$expected" "$current_obj" '' || { echo "PRECONDITION FAIL: could not materialize immutable local receipt ref." >&2; return 1; }
+  fi
+
+  # ── Is this candidate already merged? Determined from git ancestry alone,
+  #    never from a stale runtime hint. If merged, the UNIQUE merge commit is
+  #    the one plan-merge-to-main actually creates: `-p target_head -p
+  #    candidate`, i.e. its first parent is the exact frozen target head and
+  #    its second parent is exactly the candidate. Anything less exact is
+  #    refused rather than guessed. ──────────────────────────────────────────
+  local merged=0 merge_commit="" merge_tag="none"
+  if git -C "$root" merge-base --is-ancestor "$candidate" "$target_now" 2>/dev/null; then
+    merged=1
+    local mline mc mp1 mp2 mmatches=0
+    while IFS=' ' read -r mc mp1 mp2 _rest; do
+      [[ -n "$mc" ]] || continue
+      [[ "$mp1" == "$target_head" && "$mp2" == "$candidate" && -z "$_rest" ]] || continue
+      mmatches=$((mmatches + 1)); merge_commit="$mc"
+    done < <(git -C "$root" rev-list --parents "${target_head}..${target_now}" 2>/dev/null)
+    [[ "$mmatches" -eq 1 ]] || { echo "PRECONDITION FAIL: ${plan_id} candidate ${candidate} is reachable from ${target} but no single commit uniquely matches this plan's merge shape (matches=${mmatches}) — refusing to guess the merge commit." >&2; return 1; }
+    # Matching parents alone only proves SOME commit sits at that graph
+    # position — an attacker (or a bug) could construct one with those exact
+    # two parents but an ARBITRARY tree. Recompute the one deterministic tree
+    # plan-merge-to-main itself would have built and require the discovered
+    # commit's tree to equal it, exactly as the live merge's own tree-identity
+    # check does.
+    local expected_tree actual_merge_tree mt_out mt_rc=0
+    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$candidate" 2>&1)" || mt_rc=$?
+    expected_tree="$(printf '%s' "$mt_out" | head -1 | tr -d '[:space:]')"
+    [[ "$mt_rc" -eq 0 && "$expected_tree" =~ ^[0-9a-f]{40}$ ]] || { echo "PRECONDITION FAIL: ${plan_id} candidate ${candidate} does not merge cleanly into ${target_head} — the discovered merge commit cannot be the deterministic plan merge; refusing to trust it." >&2; return 1; }
+    actual_merge_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null || true)"
+    [[ "$actual_merge_tree" == "$expected_tree" ]] || { echo "PRECONDITION FAIL: ${plan_id} discovered merge commit ${merge_commit} has tree ${actual_merge_tree:-<unresolved>}, not the deterministic merge tree ${expected_tree} — refusing a merge commit whose content does not match candidate+target." >&2; return 1; }
+    local tag_matches=0 tg
+    while IFS= read -r tg; do
+      [[ "$tg" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+      tag_matches=$((tag_matches + 1)); merge_tag="$tg"
+    done < <(git -C "$root" tag --points-at "$merge_commit" 2>/dev/null)
+    [[ "$tag_matches" -le 1 ]] || { echo "PRECONDITION FAIL: ${plan_id} merge commit ${merge_commit} carries more than one version tag — refusing to guess which was the release tag." >&2; return 1; }
+    [[ "$tag_matches" -eq 0 ]] && merge_tag="none"
+  else
+    [[ "$target_now" == "$target_head" ]] || { echo "PRECONDITION FAIL: ${plan_id} target ${target} has moved past its frozen head (${target_head:0:8} -> ${target_now:0:8}) without this candidate becoming an ancestor — this is neither the frozen pre-merge state nor a discoverable merge; refusing to guess." >&2; return 1; }
+  fi
+
+  # IMP-466 item 4: when merged, ALSO recover the durable close-evidence
+  # sidecar if one was sealed — it is what lets a subsequent plan-close
+  # succeed with the runtime evidence directory gone entirely (not just the
+  # manifest/state pointer). Its own git-tracked merge_commit/tag are
+  # cross-checked against what was independently derived from ancestry above;
+  # any disagreement is a forged or stale close receipt and fails closed.
+  local close_ref="" close_hash="" close_receipt=""
+  if [[ "$merged" -eq 1 ]]; then
+    local cref cexpected ccur="" cfound=0
+    local -A _ce_seen=()
+    cexpected="$(_pfsm_plan_final_close_evidence_ref "$plan_id" "$candidate" "$run_id")" || cexpected=""
+    while IFS= read -r cref; do
+      [[ -n "$cref" ]] || continue
+      local creceipt; creceipt="$(git -C "$root" show "${cref}:receipt.json" 2>/dev/null || true)"
+      _pfsm_validate_plan_final_close_receipt_json "$creceipt" || continue
+      [[ "$(git -C "$root" ls-tree -r --name-only "$cref" 2>/dev/null || true)" == "receipt.json" ]] || continue
+      [[ "$(jq -r '.plan_id' <<<"$creceipt")" == "$plan_id" && "$(jq -r '.candidate_sha' <<<"$creceipt")" == "$candidate" && "$(jq -r '.run_id' <<<"$creceipt")" == "$run_id" ]] || continue
+      local csuffix="${cref#refs/heads/}"
+      [[ "$csuffix" == "$cref" ]] && csuffix="$(sed -E 's#^refs/remotes/[^/]+/##' <<<"$cref")"
+      [[ "$csuffix" == "${cexpected#refs/heads/}" ]] || continue
+      local cobj; cobj="$(git -C "$root" rev-parse --verify --quiet "$cref" 2>/dev/null || true)"
+      [[ -n "$cobj" ]] || continue
+      # Same dedup discipline as the review-receipt loop: a local ref and its
+      # own remote-tracking mirror of the SAME suffix are one receipt, not two.
+      if [[ -n "${_ce_seen[$csuffix]:-}" ]]; then
+        [[ "${_ce_seen[$csuffix]}" == "$cobj" ]] || { echo "PRECONDITION FAIL: ${plan_id} close-evidence ${csuffix} disagrees between local and remote-tracking refs." >&2; return 1; }
+        continue
+      fi
+      _ce_seen["$csuffix"]="$cobj"
+      cfound=$((cfound + 1)); ccur="$cref"; close_receipt="$creceipt"
+    done < <(git -C "$root" for-each-ref --format='%(refname)' "refs/heads/aid-evidence-close/${plan_id}/${candidate}/" "refs/remotes/*/aid-evidence-close/${plan_id}/${candidate}/**")
+    if [[ "$cfound" -gt 1 ]]; then
+      echo "PRECONDITION FAIL: ${plan_id} has more than one candidate close-evidence ref — refusing to guess." >&2
+      return 1
+    fi
+    if [[ -n "$close_receipt" ]]; then
+      jq -e --arg mc "$merge_commit" --arg tg "$merge_tag" --arg th "$target_head" '.merge_commit == $mc and .tag == $tg and .target_head_before == $th' <<< "$close_receipt" >/dev/null \
+        || { echo "PRECONDITION FAIL: ${plan_id} close-evidence receipt disagrees with the independently-derived merge (commit/tag/target-head) — refusing a mismatched receipt." >&2; return 1; }
+      if [[ "$ccur" != "$cexpected" ]]; then
+        git -C "$root" update-ref "$cexpected" "$(git -C "$root" rev-parse "$ccur")" '' || { echo "PRECONDITION FAIL: could not materialize immutable local close-evidence ref." >&2; return 1; }
+      fi
+      close_ref="$cexpected"; close_hash="sha256:$(printf '%s\n' "$close_receipt" | sha256sum | awk '{print $1}')"
+    fi
+  fi
+
+  local manifest_is_new=0
+  if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
+    plan_manifest_init "$plan_id" "plan/${plan_id}" "$target" "$base" "$target_head" plan_branch >/dev/null || return 1
+    manifest_is_new=1
+  fi
+  # An extant manifest must agree exactly; recovery never overwrites an
+  # alternate plan binding merely because a receipt exists elsewhere, never
+  # forces a mode it did not already carry, and never touches epic_runs (an
+  # extant manifest's epic history is untouched by any assignment below).
+  local old_c old_r old_mode old_base old_target old_thead old_frozen existing_state
+  old_c="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null || true)"
+  old_r="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id' 2>/dev/null || true)"
+  [[ -z "$old_c" || "$old_c" == "null" || "$old_c" == "not_found" || "$old_c" == "$candidate" ]] || { echo "PRECONDITION FAIL: runtime manifest candidate disagrees with receipt." >&2; return 1; }
+  [[ -z "$old_r" || "$old_r" == "null" || "$old_r" == "not_found" || "$old_r" == "$run_id" ]] || { echo "PRECONDITION FAIL: runtime manifest run disagrees with receipt." >&2; return 1; }
+  if [[ "$manifest_is_new" -eq 0 ]]; then
+    old_mode="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.mode' 2>/dev/null || true)"
+    [[ "$old_mode" == "plan_branch" ]] || { echo "PRECONDITION FAIL: existing runtime manifest for ${plan_id} has mode '${old_mode:-<none>}', not plan_branch — a plan-final receipt cannot repair a non-plan-branch manifest." >&2; return 1; }
+    existing_state="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_state' 2>/dev/null || true)"
+    case "$existing_state" in
+      CLOSED|ABORTED|ROLLED_BACK)
+        echo "PRECONDITION FAIL: ${plan_id} manifest already records terminal state '${existing_state}' — receipt recovery does not apply; reconcile the state file directly instead of receipt recovery." >&2
+        return 1 ;;
+    esac
+    # Sharing candidate/run is NOT sufficient binding: every other field the
+    # receipt is about to (re)write must already agree with whatever the
+    # extant manifest records, or a stale/forged receipt could silently
+    # rebind a real manifest to a different base, target or freeze time.
+    old_base="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit' 2>/dev/null || true)"
+    old_target="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch' 2>/dev/null || true)"
+    old_thead="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze' 2>/dev/null || true)"
+    old_frozen="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_frozen_at' 2>/dev/null || true)"
+    [[ -z "$old_base" || "$old_base" == "null" || "$old_base" == "not_found" || "$old_base" == "$base" ]] || { echo "PRECONDITION FAIL: runtime manifest plan_base_commit disagrees with receipt." >&2; return 1; }
+    [[ -z "$old_target" || "$old_target" == "null" || "$old_target" == "not_found" || "$old_target" == "$target" ]] || { echo "PRECONDITION FAIL: runtime manifest target_branch disagrees with receipt." >&2; return 1; }
+    [[ -z "$old_thead" || "$old_thead" == "null" || "$old_thead" == "not_found" || "$old_thead" == "$target_head" ]] || { echo "PRECONDITION FAIL: runtime manifest target_branch_head_at_candidate_freeze disagrees with receipt." >&2; return 1; }
+    [[ -z "$old_frozen" || "$old_frozen" == "null" || "$old_frozen" == "not_found" || "$old_frozen" == "$(jq -r '.candidate_frozen_at' <<<"$receipt")" ]] || { echo "PRECONDITION FAIL: runtime manifest candidate_frozen_at disagrees with receipt." >&2; return 1; }
+  fi
+
+  local target_plan_state="AWAITING_PM"
+  [[ "$merged" -eq 1 ]] && target_plan_state="PLAN_MERGING"
+
+  local frozen_at esc_c esc_b esc_t esc_h esc_f esc_r esc_ref esc_hash dir hash esc_state
+  frozen_at="$(jq -r '.candidate_frozen_at' <<<"$receipt")"
+  dir="$(_pfsm_plan_final_run_dir_rel "$plan_id" "${run_id##*-final-}")"; hash="sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')"
+  esc_c="$(jq -Rn --arg s "$candidate" '$s')"; esc_b="$(jq -Rn --arg s "$base" '$s')"; esc_t="$(jq -Rn --arg s "$target" '$s')"; esc_h="$(jq -Rn --arg s "$target_head" '$s')"; esc_f="$(jq -Rn --arg s "$frozen_at" '$s')"; esc_r="$(jq -Rn --arg s "$run_id" '$s')"; esc_ref="$(jq -Rn --arg s "$expected" '$s')"; esc_hash="$(jq -Rn --arg s "$hash" '$s')"; esc_state="$(jq -Rn --arg s "$target_plan_state" '$s')"
+
+  local -a _rf=()
+  if [[ "$manifest_is_new" -eq 1 ]]; then
+    _rf+=(".plan_boundary_manifest.mode=\"plan_branch\"" ".plan_boundary_manifest.plan_branch=\"plan/${plan_id}\"")
+  fi
+  _rf+=(
+    ".plan_boundary_manifest.target_branch=${esc_t}"
+    ".plan_boundary_manifest.plan_base_commit=${esc_b}"
+    ".plan_boundary_manifest.candidate_sha=${esc_c}"
+    ".plan_boundary_manifest.candidate_frozen_at=${esc_f}"
+    ".plan_boundary_manifest.target_branch_head_at_candidate_freeze=${esc_h}"
+    ".plan_boundary_manifest.plan_final_run_id=${esc_r}"
+    ".plan_boundary_manifest.plan_final_evidence_dir=\"${dir}\""
+    ".plan_boundary_manifest.plan_final_evidence_ref=${esc_ref}"
+    ".plan_boundary_manifest.plan_final_evidence_receipt_sha256=${esc_hash}"
+    ".plan_boundary_manifest.plan_final_review={candidate_sha:${esc_c},run_id:${esc_r},outputs:$(jq -c '.outputs' <<<"$receipt"),dispatch_counts:{},utilities_run:[]}"
+    ".plan_boundary_manifest.plan_state=${esc_state}"
+  )
+
+  # The runtime pointer to plan_final_c4 is lost with the manifest, but its
+  # OWN durable evidence (release-decision.json + the dual-run corroboration)
+  # is NOT part of the review receipt and may still be sitting, untouched, in
+  # the run directory (only the manifest/state pointer was lost, not the run
+  # dir itself). Reconstruct it ONLY when both files are present and bound to
+  # this exact plan/candidate/run; otherwise leave it absent — close then
+  # fails closed on a real "no C4 decision" rather than a fabricated one.
+  local c4_rd="${root}/${dir}/release-decision.json" c4_dual="${root}/${dir}/release-decision-dual-run.json"
+  if [[ -s "$c4_rd" && -s "$c4_dual" ]]; then
+    local c4_rd_cand c4_dual_run c4_dual_cand
+    c4_rd_cand="$(jq -r '.release_decision.candidate_sha // ""' "$c4_rd" 2>/dev/null || true)"
+    c4_dual_run="$(jq -r '.run_id // ""' "$c4_dual" 2>/dev/null || true)"
+    c4_dual_cand="$(jq -r '.candidate_sha // ""' "$c4_dual" 2>/dev/null || true)"
+    if [[ "$c4_rd_cand" == "$candidate" && "$c4_dual_run" == "$run_id" && "$c4_dual_cand" == "$candidate" ]]; then
+      local c4_json
+      c4_json="$(jq -nc --slurpfile rd "$c4_rd" --slurpfile dl "$c4_dual" --arg run "$run_id" --arg cand "$candidate" \
+        '{run_id:$run, candidate_sha:$cand, target_head_sha:($dl[0].target_head_sha // ""),
+          enforcement:($dl[0].enforcement // "observe"),
+          release_ready:($rd[0].release_decision.release_ready // false),
+          blockers:($rd[0].release_decision.blockers // [] | length),
+          dual_run:{match:($dl[0].match // false), divergence_class:($dl[0].divergence_class // "unknown")}}')"
+      _rf+=(".plan_boundary_manifest.plan_final_c4=${c4_json}")
+    fi
+  fi
+  if [[ "$merged" -eq 1 ]]; then
+    local esc_mc esc_tag esc_tree
+    esc_mc="$(jq -Rn --arg s "$merge_commit" '$s')"; esc_tag="$(jq -Rn --arg s "$merge_tag" '$s')"
+    esc_tree="$(jq -Rn --arg s "$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null || true)" '$s')"
+    _rf+=(".plan_boundary_manifest.plan_final_merge={result:\"merged\",run_id:${esc_r},candidate_sha:${esc_c},target_branch:${esc_t},target_head_before:${esc_h},merge_commit:${esc_mc},merged_tree:${esc_tree},tag:${esc_tag},push:\"unknown\"}")
+    if [[ -n "$close_ref" ]]; then
+      local esc_cref esc_chash
+      esc_cref="$(jq -Rn --arg s "$close_ref" '$s')"; esc_chash="$(jq -Rn --arg s "$close_hash" '$s')"
+      _rf+=(".plan_boundary_manifest.plan_final_close_evidence_ref=${esc_cref}" ".plan_boundary_manifest.plan_final_close_evidence_receipt_sha256=${esc_chash}")
+    fi
+  fi
+  local _rf_joined; _rf_joined="$(IFS='|'; echo "${_rf[*]}")"
+  plan_manifest_update "$plan_id" "$_rf_joined" >/dev/null || return 1
+
+  if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then plan_state_init "$plan_id" plan_branch "plan/${plan_id}" "$target" >/dev/null || return 1; fi
+  local s
+  for s in PLAN_SYNC PLAN_GATES PLAN_REVIEW AWAITING_PM; do _pfsm_plan_state_set "$plan_id" "$s" || { echo "PRECONDITION FAIL: could not restore runtime state path to AWAITING_PM." >&2; return 1; }; done
+  if [[ "$merged" -eq 1 ]]; then
+    _pfsm_plan_state_set "$plan_id" "PLAN_MERGING" || { echo "PRECONDITION FAIL: could not restore runtime state path to PLAN_MERGING after a discovered merge ${merge_commit}." >&2; return 1; }
+  fi
+  echo "recovered ${plan_id} from ${expected} into ${target_plan_state}${merged:+ (merge ${merge_commit:-none} on ${target})}" >&2
+  return 0
+}
+
 _pfsm_plan_state_repair() {
   local plan_id="$1" project_root="$2"
   local plan_branch="plan/${plan_id}"
 
-  if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" >/dev/null 2>&1; then
+  # A fresh clone has this only as a remote-tracking ref; the receipt-recovery
+  # path below (not this legacy one) is what materialises the local branch,
+  # bound to the exact commit its sealed receipt claims. Only when NEITHER a
+  # local nor a remote-tracking copy exists, AND no durable evidence ref
+  # (review OR close) is discoverable either, is there truly nothing to
+  # repair. D1 fix: `plan/<id>` is NEVER pushed by AID itself (only
+  # target_branch, its tag, and the two durable evidence refs are) — a
+  # genuinely fresh clone of a real pushed remote has no `plan/<id>` ref at
+  # all once the merge is complete, by design. Refusing here unconditionally
+  # would make close-evidence recovery (the very thing D1 item 4 built)
+  # unreachable in exactly that realistic scenario.
+  local _evidence_discoverable=""
+  _evidence_discoverable="$(git -C "$project_root" for-each-ref --format='%(refname)' \
+    "refs/heads/aid-evidence/${plan_id}/" "refs/remotes/*/aid-evidence/${plan_id}/**" \
+    "refs/heads/aid-evidence-close/${plan_id}/" "refs/remotes/*/aid-evidence-close/${plan_id}/**" \
+    2>/dev/null || true)"
+  if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" >/dev/null 2>&1 \
+     && [[ -z "$(git -C "$project_root" for-each-ref --format='%(refname)' "refs/remotes/*/${plan_branch}" 2>/dev/null)" ]] \
+     && [[ -z "$_evidence_discoverable" ]]; then
     echo "PRECONDITION FAIL: ${plan_branch} not found — cannot repair a plan that was never started." >&2
     return 1
+  fi
+
+  # D1: a pruned runtime tree may have been at the PM boundary.  Try the
+  # uniquely discoverable sealed projection before the legacy repair's
+  # deliberately conservative "past PLAN_SYNC" refusal.
+  if [[ ! -f "$(plan_manifest_path "$plan_id")" || ! -f "$(plan_state_path "$plan_id")" ]]; then
+    if [[ -n "$_evidence_discoverable" ]]; then
+      _pfsm_recover_plan_final_receipt "$plan_id" "$project_root" && return 0
+      return 1
+    fi
   fi
 
   local target_branch; target_branch="$(aid_target_branch)"
@@ -5111,10 +6136,23 @@ _pfsm_finalize_inputs() {
   local project_id; project_id="$(basename "$root")"
   local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
 
+  # D3 / IMP-465: generate the three plan-boundary specialist scaffolds
+  # (curator, verifier, reporter) BEFORE any of them are dispatched, so none
+  # of the three has to construct a protocol-v2 envelope from prose. Each
+  # call is a no-op if the file already exists (idempotent across retries,
+  # never overwrites specialist work already in progress).
+  local _skel_kind
+  for _skel_kind in curator verifier reporter; do
+    _pfsm_generate_plan_final_skeleton "$_skel_kind" "$root" "$project_id" "$plan_id" \
+      "$base_commit" "$candidate" "$run_id" "$run_dir_abs" || return 1
+  done
+
   # ── 1. review-profile.json, over plan_base_commit..candidate_sha ─────────
   # The range matters: the review stage asserts revision.base_sha equals the
   # plan base, because a profile derived over one EPIC would arm the C3 gate for
-  # a fraction of what is about to be released.
+  # a fraction of what is about to be released. This runs BEFORE the plan-diff
+  # producer below because whether an AC lens is REQUIRED (and therefore
+  # whether plan-diff.json may legitimately be "skipped") is read from here.
   local rp="${run_dir_abs}/review-profile.json" rprc=0
   if [[ -n "$plan_file" && -x "${SCRIPT_DIR}/aid-prefilter.sh" ]]; then
     bash "${SCRIPT_DIR}/aid-prefilter.sh" profile "$plan_file" "$run_dir_abs" \
@@ -5132,8 +6170,64 @@ _pfsm_finalize_inputs() {
   jq --arg p "$plan_id" --arg r "$run_id" --arg b "$base_commit" --arg h "$candidate" \
      '.identity = ((.identity // {}) + {epic_id: null, plan_id: $p, run_id: $r})
       | .revision = ((.revision // {}) + {base_sha: $b, head_sha: $h})' \
-     "$rp" > "$rptmp" 2>/dev/null && mv -f "$rptmp" "$rp" || { rm -f "$rptmp"; 
+     "$rp" > "$rptmp" 2>/dev/null && mv -f "$rptmp" "$rp" || { rm -f "$rptmp";
     echo "PRECONDITION FAIL: plan-finalize --stage inputs: could not bind ${rp} to the plan." >&2; return 1; }
+
+  # D2 / IMP-464: C3 must consume a deterministic plan-AC verdict that was
+  # produced before review dispatch and is sealed with the final inventory.
+  # HERE (the producer) always REQUIRES a plan-diff.json file to exist,
+  # whether or not the lens is armed — aid-plan-diff.sh is always invoked and
+  # always writes one on every normal exit (0/1/2), so "the file is genuinely
+  # missing" at this specific call site means the producer itself failed to
+  # run, never a legitimate "not applicable". This is intentionally STRICTER
+  # than C3's own build-manifest gate (aid-c3-dispatch.sh), which is a
+  # general-purpose tool also used for non-plan-final (EPIC-level) audits
+  # where plan-diff.json is never produced at all — there, file absence with
+  # no armed lens is the legitimate "not_required_absent" classification.
+  # Whether an AC lens (ac_to_test_identity / requirement_test_drift) is
+  # ARMED for this run decides what a legitimate plan-diff.json looks like:
+  #   - armed:      overall_verdict MUST be present|absent (exit 0/1). A
+  #                 skipped/malformed/missing artifact blocks dispatch — it is
+  #                 not evidence and is never read as a pass.
+  #   - not armed:  overall_verdict "skipped" (aid-plan-diff.sh exit 2, no AC
+  #                 section / fast-mode) is the HONEST, EXPECTED outcome and
+  #                 is recorded explicitly as such — never silently upgraded
+  #                 to "present" and never blocked as if it were missing.
+  # Either way the artifact must exist, be well-formed, and be bound to
+  # base_commit..candidate — a truly missing/malformed/mismatched artifact
+  # blocks regardless of whether the lens is armed.
+  local ac_lens_required="false"
+  jq -e '.review_profile.required_lenses // [] | any(. == "ac_to_test_identity" or . == "requirement_test_drift")' "$rp" >/dev/null 2>&1 \
+    && ac_lens_required="true"
+
+  local pd="${run_dir_abs}/plan-diff.json" pdrc=0
+  if [[ -z "$plan_file" || ! -x "${SCRIPT_DIR}/aid-plan-diff.sh" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: C3 requires a real plan source and aid-plan-diff.sh; no plan-diff evidence can be fabricated." >&2
+    return 1
+  fi
+  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" >/dev/null 2>&1 || pdrc=$?
+  local pd_verdict=""
+  if [[ "$pdrc" -eq 0 || "$pdrc" -eq 1 || "$pdrc" -eq 2 ]] && [[ -s "$pd" ]]; then
+    pd_verdict="$(jq -r --arg b "$base_commit" --arg h "$candidate" \
+      'if (.base_commit == $b and .head_commit == $h) then (.overall_verdict // "") else "" end' "$pd" 2>/dev/null || true)"
+  fi
+  if [[ "$ac_lens_required" == "true" ]]; then
+    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]] || {
+      echo "PRECONDITION FAIL: plan-finalize --stage inputs: an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but C3 plan-diff.json is missing, skipped, malformed or not bound to ${base_commit}..${candidate} — a required lens's absence is never read as a pass." >&2
+      return 1
+    }
+  else
+    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" || "$pd_verdict" == "skipped" ]] || {
+      echo "PRECONDITION FAIL: plan-finalize --stage inputs: C3 plan-diff.json is missing, malformed or not bound to ${base_commit}..${candidate}." >&2
+      return 1
+    }
+  fi
+  local pd_hash
+  pd_hash="sha256:$(sha256sum "$pd" | awk '{print $1}')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\", ac_lens_required: ${ac_lens_required}, plan_diff_verdict: \"${pd_verdict}\"}" >/dev/null || {
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: the produced plan-diff hash could not be recorded before review dispatch." >&2
+    return 1
+  }
 
   # ── 2 + 3. the two aggregates, built from the contributing EPICs ─────────
   local contributing
