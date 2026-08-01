@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.66.0] — 2026-08-01
+## [2.66.1] — 2026-08-01
 
 ### Added
 - **Formal Curator adjudication of Auditor findings (D5, IMP-468)** — a raw Auditor blocker (severity critical/high) can no longer be waved off by a bare `curator.blocking_findings: false`; the Curator must record a schema-bound `curator.adjudications[]` entry per finding, exactly bound to the audit report hash, candidate and run. Enforced at both the plan-final review boundary and, for the first time, the `.aid-lifecycle` classifier (previously blind to adjudications, permanently misclassifying a legitimately adjudicated plan as rejected) — via a new shared resolver, `lib/aid-adjudication.sh`.
