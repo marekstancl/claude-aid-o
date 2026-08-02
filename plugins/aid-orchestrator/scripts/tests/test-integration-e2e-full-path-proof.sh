@@ -284,6 +284,13 @@ _scenario_observe_parallel_full_path() {
   _run_divergence_evidence_x3 "$fixture"
   _confirm_rollout_unlocked "$fixture"
 
+  # Codex review: this is the exact commit the observe_parallel evidence
+  # was captured against and dispatched at — captured HERE, before the
+  # LATER sequential-comparison commit moves HEAD forward again, so the
+  # published artifact's commit_sha isn't misleadingly overwritten by a
+  # subsequent, unrelated commit.
+  local observe_commit_sha; observe_commit_sha="$(cd "$fixture" && git rev-parse HEAD)"
+
   local result
   result="$(_dispatch_only "$fixture" observe_parallel "$base_sha")"
   local units_file="${fixture}/.aid-o/work/evidence/E2E/R1/gates/targeted-units.json"
@@ -309,7 +316,7 @@ _scenario_observe_parallel_full_path() {
   _scenario_existing_project_upgrade
   _scenario_mapping_gap_escalation
 
-  _write_artifact observe_parallel_full_path "$(cd "$fixture" && git rev-parse HEAD)"
+  _write_artifact observe_parallel_full_path "$observe_commit_sha"
   rm -rf "$fixture"
 }
 
@@ -361,6 +368,31 @@ YAML
   else
     stage_fail "existing_project_upgrade_applied" "orig_intact=${orig_intact} has_new_gate=${has_new_gate}"
   fi
+
+  # Codex review (HIGH): the earlier version of this scenario stopped at
+  # "the gate key exists" — it never actually RAN it, so a newly-added
+  # gate that was wired but broken (wrong command, unresolved token,
+  # crash) would have passed this scenario anyway. Genuinely dispatch
+  # through the upgraded gate: no catalog exists yet in this fixture, so
+  # aid-select-tests.sh's hardcoded fallback classifies the changed path
+  # as outside the production surface (no test impact) — a real exit 0,
+  # not a fabricated one, proving the gate is genuinely wired and
+  # executes rather than merely present as a key in the YAML.
+  local base_sha; base_sha="$(cd "$fixture" && git rev-parse HEAD)"
+  echo "changed" >> "${fixture}/README.md"
+  ( cd "$fixture" && git add -A && git commit -q -m "touch README (no catalog yet — hardcoded fallback path)" )
+  local report="${fixture}/.aid-o/work/evidence/E2E/R1/gates/gates_report.json"
+  mkdir -p "$(dirname "$report")"
+  ( cd "$fixture" && AID_PLUGIN_PATH="$PLUGIN_DIR" bash "${PLUGIN_DIR}/scripts/aid-run-gates.sh" run-all .aid-o/config/execution.yaml E2E R1 \
+      --base-commit "$base_sha" --report-file "$report" ) >/tmp/e2e-upgrade-dispatch.log 2>&1
+  local upgraded_gate_result
+  upgraded_gate_result="$(jq -r '.gates.targeted_tests.result // empty' "$report" 2>/dev/null)"
+  if [[ "$upgraded_gate_result" == "pass" ]]; then
+    stage_pass "existing_project_upgrade_gate_genuinely_dispatched"
+  else
+    stage_fail "existing_project_upgrade_gate_genuinely_dispatched" "targeted_tests.result='${upgraded_gate_result}'; log: $(tail -20 /tmp/e2e-upgrade-dispatch.log 2>/dev/null)"
+  fi
+
   rm -rf "$fixture"
 }
 
