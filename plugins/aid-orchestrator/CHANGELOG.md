@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.67.0] — 2026-08-02
+
+### Added
+- **Test scheduler (opt-in, staged Constraint-8 rollout)** — a new `aid-test-scheduler.sh` batches and dispatches `targeted_tests` execution units as real, tracked async jobs (`aid-job.sh`) instead of one sequential process; enabled only after a project passes a 3-stage rollout gate (`sequential` → `observe_parallel` → `parallel`), each requiring 3 qualifying, full-catalog-covering divergence-evidence artifacts — `sequential` remains every project's default until it explicitly opts in.
+- **`aid-run-gates.sh` scheduler dispatch + escalation** — `targeted_tests` now dispatches through the scheduler when a project's rollout stage allows it; an unverifiable (exit 3) or mapping-gap (exit 11) result automatically re-runs as a separate `--profile full` subprocess, never in-process, whose report becomes the verdict-bearing result.
+- **Execution-unit membership + concurrency-context evidence** — `execution-unit.schema.json`, membership verification, and `concurrency_context` on `gate-runtime-baseline.yaml` give every scheduled unit a real, schema-bound identity and shared-state accounting.
+- **`aid-select-tests.sh --emit-units`** — a new selector output mode the scheduler consumes directly, additive to (and behaviorally identical to) the existing default selection path.
+- **`bats_all` quarantine remediation evidence + E2E full-path proof** — this repository's own `bats_all` quarantine now has a real, measured evidence bundle (membership agreement, shared-state findings, streamed diagnostics, resume-without-orphan, measured — never invented — runtime) plus a genuine 10-stage E2E proof exercising the real configured-profile → gate-runner → scheduler → receipts path end-to-end in disposable fixtures. `plan_diff` is explicitly named as unresolved and out of this plan's scope.
+- **PM quarantine-decision-record mechanism** — a schema-valid lift/keep/defer decision record, producible only via explicit PM input, citing both evidence bundles above; superseding an existing decision requires naming the current record exactly (fork- and race-proof via a per-gate lock), and no code path ever writes to `execution.yaml`'s `quarantine:` block automatically.
+
+### Changed
+- **Enforcement registry + docs** — 3 new scheduler-related enforcement rows and a new README section document the `test_audit.scheduler.mode` config knob and the rollout/escalation behavior above.
+
 ## [2.66.2] — 2026-08-02
 
 ### Added
