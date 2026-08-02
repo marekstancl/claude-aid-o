@@ -1,4 +1,20 @@
 name: CI
+# Runs on a dedicated self-hosted runner (eco-dev-aid-orchestrator, registered
+# only to this repo) instead of GitHub-hosted ubuntu-latest — GitHub-hosted
+# queue/execution time on this repo's growing bats portfolio had become the
+# dominant part of every PR's turnaround (2026-08-02).
+#
+# Security note: this repo is PUBLIC. Self-hosted runners on public repos are
+# a real attack surface — GitHub's platform-level mitigation is that workflow
+# runs from first-time outside contributors require a maintainer's manual
+# approval before anything executes (this is NOT configurable off; it is the
+# baseline behavior for all public repos, self-hosted or not). There is
+# currently no history of external contributors on this repo. If that
+# changes, re-evaluate whether PR-triggered jobs should stay on this runner
+# or move back to a GitHub-hosted runner for `pull_request` specifically,
+# since the approval gate only covers a contributor's FIRST run, not every
+# subsequent one, and a self-hosted runner's state persists across jobs
+# (no per-run VM reset the way GitHub-hosted runners get).
 on:
   push:
     branches: [main]
@@ -6,7 +22,7 @@ on:
     branches: [main]
 jobs:
   bash-tests:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - name: Install jq + bats + yq
@@ -14,9 +30,11 @@ jobs:
         # run-all-tests.sh silently SKIPS them (they look green but never run).
         # yq is required for dg12-authority.sh to parse YAML authority files.
         run: |
-          sudo apt-get install -y jq bats
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
       - name: Run bash test suite
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
@@ -24,7 +42,7 @@ jobs:
         timeout-minutes: 20
 
   plan-boundary-tests:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - name: Install jq + bats + yq
@@ -36,15 +54,17 @@ jobs:
         # to that job would make unrelated suites fail on timeout, so it
         # gets its own job with its own budget instead (P064 E-064-1_2 Step 1).
         run: |
-          sudo apt-get install -y jq bats
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
       - name: Run plan boundary suite
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats
         timeout-minutes: 15
 
   plan-final-tests:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - name: Install jq + bats + yq
@@ -56,9 +76,11 @@ jobs:
         # remaining headroom. yq is needed because the plan-final path reads
         # .aid-o/config/project.yaml and the lifecycle manifests.
         run: |
-          sudo apt-get install -y jq bats
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
       - name: Run plan-final boundary suite
         # 245 tests as of P066/D1-D5 (was ~15 min budget at a smaller count); the
         # 2026-08-01 CI run measured ~5.4s/test average, i.e. ~22 min for the full
@@ -68,7 +90,7 @@ jobs:
         timeout-minutes: 35
 
   isolation-experiment-tests:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - name: Install jq + bats + yq
@@ -79,9 +101,11 @@ jobs:
         # job and its own budget instead of eating the bash-tests job's
         # headroom. yq is needed for the fixture test-catalog.yaml setup.
         run: |
-          sudo apt-get install -y jq bats
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
       - name: Run isolation-experiment suite
         # 11 tests; all assertions genuinely pass (confirmed: two clean local
         # reproductions both exited 0, ~6 min each) — this suite's own real
@@ -96,7 +120,7 @@ jobs:
         timeout-minutes: 30
 
   vitest:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -109,7 +133,7 @@ jobs:
 
   build-check:
     needs: [vitest]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -121,7 +145,7 @@ jobs:
         timeout-minutes: 10
 
   security-regression:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
