@@ -388,3 +388,32 @@ YAML
   run jq -r '.effective_mode' <<< "$out"
   [ "$output" == "sequential" ]
 }
+
+@test "EPIC 4 whole-diff review: 3 otherwise-valid artifacts covering only a PARTIAL subset of the current catalog never qualify — full-catalog coverage is required" {
+  _set_configured_mode observe_parallel
+  # Each artifact is fully valid (real fingerprint, pass:true, correct
+  # commit/mode) but selects ONLY "bats:suite-a" — a genuine subset of
+  # this fixture's real 2-unit catalog. Without the full-coverage check,
+  # 3 of these would incorrectly unlock observe_parallel project-wide
+  # despite "bats:suite-b" never having been verified under scheduling at
+  # all.
+  local i
+  for i in 1 2 3; do
+    local run_id; run_id="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr 'A-Z' 'a-z')"
+    local cfs="sha256:$(printf 'sha256:aaaaaaaaaaaa\n' | sort | sha256sum | cut -d' ' -f1)"
+    jq -n --arg run_id "$run_id" --arg cfs "$cfs" --arg csha "$COMMIT_SHA" \
+      '{run_id:$run_id, catalog_fingerprint_set:$cfs, commit_sha:$csha, worktree_kind:"disposable_clone",
+        mode_tested:"observe_parallel", selected_unit_ids:["bats:suite-a"],
+        sequential_verdicts:[{unit_id:"bats:suite-a",result:"pass"}],
+        scheduled_verdicts:[{unit_id:"bats:suite-a",result:"pass"}],
+        membership_diff:[], verdict_diff:[], pass:true, evaluated_at:"2026-08-02T00:00:00Z"}' \
+      > ".aid-o/work/evidence/scheduler-divergence/${COMMIT_SHA}-observe_parallel-${run_id}.json"
+  done
+
+  run "$GATE" --project-root "$TEST_PROJECT"
+  out="$output"
+  run jq -r '.observe_parallel_qualifying_count' <<< "$out"
+  [ "$output" == "0" ]
+  run jq -r '.effective_mode' <<< "$out"
+  [ "$output" == "sequential" ]
+}

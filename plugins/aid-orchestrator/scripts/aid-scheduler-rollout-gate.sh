@@ -100,6 +100,16 @@ catalog_json="{}"
 if [[ -f "$catalog_path" ]]; then
   catalog_json="$(yq -o=json '.' "$catalog_path" 2>/dev/null || echo '{}')"
 fi
+# EPIC 4 whole-diff review (HIGH): an artifact's selected_unit_ids can be
+# an arbitrary, possibly tiny subset of the real catalog — without this
+# check, 3 qualifying artifacts for a trivial always-safe 1-unit subset
+# would unlock observe_parallel/parallel PROJECT-WIDE, even though the
+# real portfolio (with its real shared state/locks) was never actually
+# verified safe under scheduling. Requiring exact coverage of the FULL
+# current catalog is the same safeguard Step 15's own evidence collector
+# already applies when assembling its bundle — this closes the identical
+# gap here, at the point that actually GATES scheduled execution.
+full_unit_ids_sorted_json="$(jq -cS '[.run_units[]?.run_unit_id] | sort' <<<"$catalog_json" 2>/dev/null || echo '[]')"
 
 evidence_dir="${project_root}/.aid-o/work/evidence/scheduler-divergence"
 observe_parallel_count=0
@@ -154,6 +164,9 @@ if [[ -d "$evidence_dir" ]]; then
     # as the literal text "null", which would otherwise pass a bare -z
     # check and hash as if it were a real value), invalidates this
     # artifact entirely (never stale-but-acceptable).
+    a_unit_ids_sorted="$(jq -cS '.selected_unit_ids | sort' <<<"$artifact_json")"
+    [[ "$a_unit_ids_sorted" == "$full_unit_ids_sorted_json" ]] || continue
+
     mapfile -t a_unit_ids < <(jq -r '.selected_unit_ids[]' <<<"$artifact_json")
 
     fp_list=""

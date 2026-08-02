@@ -157,12 +157,29 @@ cmd_run() {
   # `cd`, candidate commands ran in whatever directory this script itself
   # happened to be invoked from, silently writing/reading files OUTSIDE
   # the disposable clone entirely.
+  # P069 EPIC 4 whole-diff review: real, measured wall-clock duration
+  # around each dispatch — this is the ONLY place a genuinely-measured
+  # scheduled-mode runtime figure for an arbitrary (possibly quarantined)
+  # gate can ever originate. gate-runtime-baseline's own concurrency_context
+  # samples (Step 3) are only ever recorded for a gate actually dispatched
+  # through aid-run-gates.sh's scheduler integration (Step 14), which is
+  # scoped to the targeted_tests gate alone — never bats_all or any other
+  # quarantined gate this check might be run against directly.
   local seq_out sched_out
+  local seq_start_ms seq_end_ms sched_start_ms sched_end_ms
+  seq_start_ms=$(date +%s%3N)
   seq_out="$(cd "$clone_path" && bash "$SCHEDULER_SH" dispatch --project-root "$clone_path" --run-id "${run_id}-seq" --units-json "$units_file" --mode sequential)" \
     || _die 1 "run: sequential dispatch failed unexpectedly"
+  seq_end_ms=$(date +%s%3N)
+  sched_start_ms=$(date +%s%3N)
   sched_out="$(cd "$clone_path" && bash "$SCHEDULER_SH" dispatch --project-root "$clone_path" --run-id "${run_id}-sched" --units-json "$units_file" --mode "$mode_tested")" \
     || _die 1 "run: scheduled dispatch failed unexpectedly"
+  sched_end_ms=$(date +%s%3N)
   rm -f "$units_file"
+
+  local sequential_duration_ms scheduled_duration_ms
+  sequential_duration_ms=$(( seq_end_ms - seq_start_ms ))
+  scheduled_duration_ms=$(( sched_end_ms - sched_start_ms ))
 
   local sequential_verdicts scheduled_verdicts
   sequential_verdicts="$(jq -c '[.units[] | {unit_id, result:(if .state=="terminal_pass" then "pass" else "fail" end)}]' <<<"$seq_out")"
@@ -193,10 +210,13 @@ cmd_run() {
     --arg mode "$mode_tested" --argjson uids "$unit_ids_json" \
     --argjson seqv "$sequential_verdicts" --argjson schv "$scheduled_verdicts" \
     --argjson mdiff "$membership_diff" --argjson vdiff "$verdict_diff" \
-    --argjson pass "$pass_bool" --arg eat "$evaluated_at" \
+    --argjson pass "$pass_bool" \
+    --argjson seqms "$sequential_duration_ms" --argjson schms "$scheduled_duration_ms" \
+    --arg eat "$evaluated_at" \
     '{run_id:$run_id, catalog_fingerprint_set:$cfs, commit_sha:$csha, worktree_kind:"disposable_clone",
       mode_tested:$mode, selected_unit_ids:$uids, sequential_verdicts:$seqv, scheduled_verdicts:$schv,
-      membership_diff:$mdiff, verdict_diff:$vdiff, pass:$pass, evaluated_at:$eat}')"
+      membership_diff:$mdiff, verdict_diff:$vdiff, pass:$pass,
+      sequential_duration_ms:$seqms, scheduled_duration_ms:$schms, evaluated_at:$eat}')"
 
   adapter_validate_schema "$DIVERGENCE_SCHEMA" "$evidence_json" \
     || _die 1 "run: internal error — produced a schema-invalid divergence artifact, refusing to write"

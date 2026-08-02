@@ -73,6 +73,19 @@ _write_catalog() {
   run jq -r '.worktree_kind' "$f"
   [ "$output" = "disposable_clone" ]
 
+  # EPIC 4 whole-diff review: real, measured wall-clock durations for BOTH
+  # dispatches — never invented, never zero (the whole-diff review found
+  # this is the ONLY place a genuinely-measured scheduled-mode runtime for
+  # an arbitrary gate like bats_all can ever originate, since gate-runtime-
+  # baseline's own concurrency_context samples are only ever recorded for
+  # targeted_tests via aid-run-gates.sh's own scheduler integration).
+  run jq -r '.sequential_duration_ms' "$f"
+  [[ "$output" =~ ^[0-9]+$ ]]
+  [ "$output" -ge 0 ]
+  run jq -r '.scheduled_duration_ms' "$f"
+  [[ "$output" =~ ^[0-9]+$ ]]
+  [ "$output" -ge 0 ]
+
   command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1 && {
     run python3 -c "
 import sys, json

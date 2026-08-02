@@ -8,7 +8,8 @@
   "required": [
     "run_id", "catalog_fingerprint_set", "commit_sha", "worktree_kind", "mode_tested",
     "selected_unit_ids", "sequential_verdicts", "scheduled_verdicts",
-    "membership_diff", "verdict_diff", "pass", "evaluated_at"
+    "membership_diff", "verdict_diff", "pass", "sequential_duration_ms",
+    "scheduled_duration_ms", "evaluated_at"
   ],
   "properties": {
     "run_id": {
@@ -63,6 +64,16 @@
     "pass": {
       "type": "boolean",
       "description": "true only if BOTH membership_diff and verdict_diff are empty."
+    },
+    "sequential_duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Real, measured wall-clock duration of THIS invocation's own sequential dispatch (the SAME run whose verdicts appear in sequential_verdicts above) — added P069 EPIC 4 whole-diff review: this is the only place a genuinely-measured full-selection scheduled/sequential runtime figure can ever originate, since gate-runtime-baseline's own concurrency_context samples (Step 3) are only ever recorded for a gate actually dispatched through aid-run-gates.sh's own scheduler integration (Step 14), which is scoped to the targeted_tests gate alone — never bats_all or any other quarantined gate whose remediation evidence (Step 15) needs a real scheduled-mode duration."
+    },
+    "scheduled_duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Real, measured wall-clock duration of THIS invocation's own scheduled (mode_tested) dispatch."
     },
     "evaluated_at": { "type": "string", "format": "date-time" }
   },

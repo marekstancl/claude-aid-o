@@ -97,6 +97,12 @@ if [[ -d "$evidence_dir" ]]; then
   shopt -s nullglob
   for artifact in "${evidence_dir}"/*.json; do
     a_json="$(jq -c '.' "$artifact" 2>/dev/null)" || continue
+    # Codex review: comparing fields via `jq -r` text output accepted a
+    # malformed artifact with e.g. "pass":"true" (a STRING) exactly like
+    # the real boolean. Validating against the artifact's own schema
+    # first closes that off structurally — never re-implementing type
+    # checks by hand for fields another schema already governs.
+    adapter_validate_schema "${PLUGIN_DIR}/defaults/schemas/divergence-evidence.schema.json" "$a_json" >/dev/null 2>&1 || continue
     a_commit="$(jq -r '.commit_sha // empty' <<<"$a_json" 2>/dev/null)"
     a_mode="$(jq -r '.mode_tested // empty' <<<"$a_json" 2>/dev/null)"
     a_pass="$(jq -r '.pass // false' <<<"$a_json" 2>/dev/null)"
@@ -134,29 +140,56 @@ else
   pass_msg "zero membership/verdict divergence — sequential and scheduled runs agreed exactly"
 fi
 
-# ─── streamed_diagnostics_proof — a real, fast, single-unit dispatch ──────
-# proving aid-job.sh/aid-test-scheduler.sh produce a genuine per-unit
-# stdout_path (streamed to a file, never buffered until batch end) —
-# structural to the mechanism itself, not this portfolio's contents, so a
-# single trivial unit is sufficient real proof; it does not require
-# re-running the whole 83-unit suite.
-echo "TEST: streamed diagnostics — a real, fast dispatch produces a genuine per-unit stdout_path"
+# ─── streamed_diagnostics_proof — a real, fast, DIRECT aid-job.sh run ─────
+# proving output is written to disk WHILE the process is still running
+# (genuinely streamed), never buffered until exit — structural to the
+# mechanism itself, not this portfolio's contents, so one trivial
+# two-line/sleep-gapped unit is sufficient real proof; it does not
+# require re-running the whole 83-unit suite. aid-job.sh's own `run` is
+# asynchronous (returns immediately), letting this poll stdout.log mid-run.
+#
+# Codex review (HIGH): an earlier version cited a stdout path inside a
+# tmp `proof_dir` that was then rm -rf'd before the bundle was even
+# written — `proven:true` while citing a nonexistent log. The retained
+# copy below (alongside the bundle, force-tracked into git) is what the
+# bundle actually cites; a trap guarantees proof_dir itself is cleaned up
+# on every exit path, including an early failure.
+echo "TEST: streamed diagnostics — stdout is written to disk WHILE still running, never buffered until exit"
 streamed_proven=false
 streamed_log_path=""
 proof_dir="$(mktemp -d)"
-proof_units_file="${proof_dir}/units.json"
-jq -n '[{unit_id:"quarantine-remediation-proof", command:{type:"argv",argv:["bash","-c","echo streamed-diagnostics-proof"]}, deadline_seconds:30, resource_locks:[], parallel_eligible:true, membership_verified:true, dedup:false, membership_binding:{catalog_fingerprint:"sha256:proofproofproof", verified_at:"2026-08-02T00:00:00Z", verifier_run_id:"quarantine-remediation-proof"}}]' > "$proof_units_file"
-proof_catalog_file="${proof_dir}/.aid-o/config/test-catalog.yaml"
-mkdir -p "$(dirname "$proof_catalog_file")"
-jq -n '{schema_version:"1.0.0", generated_at:"2026-08-02T00:00:00Z", status:"approved", run_units:[{run_unit_id:"quarantine-remediation-proof", runner:"bash", source_paths:["x"], production_surfaces:["x"], test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium", command:{type:"argv",argv:["bash","-c","echo streamed-diagnostics-proof"]}, runtime:{fingerprint:"sha256:proofproofproof"}, parallel:{status:"safe",exclusive_resources:[],max_workers:null,internal_parallelism:false}, isolation:{temp_workspace:"unknown",fixed_ports:[],shared_paths:[],lock_usage:[],adapter_confidence:"static_parse"}, recommendation:"keep", test_cases:[]}], source_pattern_mappings:[], mapping_approval:{status:"approved",approved_by:"quarantine-remediation-proof",approved_at:"2026-08-02T00:00:00Z",reviewed_diff_hash:"sha256:proofproofproof"}}' > "$proof_catalog_file"
-proof_dispatch_json="$(bash "${PLUGIN_DIR}/scripts/aid-test-scheduler.sh" dispatch --project-root "$proof_dir" --run-id quarantine-remediation-proof --units-json "$proof_units_file" --mode sequential 2>/dev/null)" || true
-proof_stdout_path="$(jq -r '.units[0].stdout_path // empty' <<<"$proof_dispatch_json" 2>/dev/null)"
-if [[ -n "$proof_stdout_path" && -f "$proof_stdout_path" ]] && grep -q "streamed-diagnostics-proof" "$proof_stdout_path" 2>/dev/null; then
+trap 'rm -rf "$proof_dir"' EXIT
+proof_job_id="quarantine-remediation-streamed-proof"
+bash "${PLUGIN_DIR}/scripts/aid-job.sh" run --jobs-dir "$proof_dir" --id "$proof_job_id" --deadline 30 \
+  -- bash -c 'echo streamed-proof-line1; sleep 2; echo streamed-proof-line2' >/dev/null 2>&1
+proof_stdout_path="${proof_dir}/${proof_job_id}/stdout.log"
+
+# Bounded poll for line1 to land WHILE line2 has not yet appeared — the
+# actual streaming proof.
+saw_line1_early=false
+for _ in $(seq 1 20); do
+  if [[ -f "$proof_stdout_path" ]] && grep -q "streamed-proof-line1" "$proof_stdout_path" 2>/dev/null; then
+    grep -q "streamed-proof-line2" "$proof_stdout_path" 2>/dev/null || saw_line1_early=true
+    break
+  fi
+  sleep 0.1
+done
+# Bounded wait for the job's own terminal receipt before reading final content.
+for _ in $(seq 1 300); do
+  [[ -f "${proof_dir}/${proof_job_id}/result.json" ]] && break
+  sleep 0.1
+done
+
+if $saw_line1_early && [[ -f "$proof_stdout_path" ]] \
+   && grep -q "streamed-proof-line1" "$proof_stdout_path" 2>/dev/null \
+   && grep -q "streamed-proof-line2" "$proof_stdout_path" 2>/dev/null; then
+  streamed_log_path="${REPO_ROOT}/.aid-o/work/evidence/quarantine-remediation/${gate_id}-${commit_sha}-streamed-proof.log"
+  mkdir -p "$(dirname "$streamed_log_path")"
+  cp "$proof_stdout_path" "$streamed_log_path"
   streamed_proven=true
-  streamed_log_path="$proof_stdout_path"
-  pass_msg "real per-unit stdout log produced at ${streamed_log_path}"
+  pass_msg "stdout genuinely streamed (line1 visible before job completion) — retained at ${streamed_log_path}"
 else
-  fail_msg "could not produce/verify a real per-unit streamed stdout log"
+  fail_msg "could not prove genuine streamed (not buffered-until-exit) stdout writes"
 fi
 
 # ─── resume_without_orphan_proof — cites the existing, already-passing
@@ -173,33 +206,42 @@ else
 fi
 
 # Real measured runtime: this plan intentionally does NOT invent a number.
-# aid-test-schedule-divergence-check.sh's own artifact does not carry wall-
-# clock duration (only verdicts) — the real duration figures come from
-# this repo's OWN gate-runtime-baseline (Step 3's concurrency-annotated
-# samples), read directly rather than re-measured here.
-baseline_file="${REPO_ROOT}/.aid-o/metrics/gate-runtime-baselines.yaml"
-sequential_ms=0
-scheduled_ms=0
-echo "TEST: measured runtime is read from real, recorded gate-runtime-baseline samples, never invented"
-if [[ -f "$baseline_file" ]]; then
-  sequential_ms="$(yq -r ".gates.${gate_id}.recent_samples[-1].duration_ms // 0" "$baseline_file" 2>/dev/null || echo 0)"
-  scheduled_ms="$(yq -r ".gates.${gate_id}.recent_samples_by_context.${mode}[-1].duration_ms // 0" "$baseline_file" 2>/dev/null || echo 0)"
-fi
+#
+# EPIC 4 whole-diff review (HIGH): this previously read gate-runtime-
+# baselines.yaml's concurrency_context samples — but those are ONLY ever
+# recorded for a gate actually dispatched through aid-run-gates.sh's own
+# scheduler integration (Step 14), which is scoped to the targeted_tests
+# gate alone. bats_all (or any other quarantined gate this script is
+# pointed at) never goes through that path, so its scheduled-mode
+# duration could never actually exist there — a structural gap, not a
+# "waiting for the real run" situation. Fixed by reading the duration
+# directly from the qualifying divergence-evidence artifact itself
+# (sequential_duration_ms/scheduled_duration_ms — added to that schema in
+# this same whole-diff review), which is the ONE place a genuinely-
+# measured full-selection runtime for an arbitrary gate can originate,
+# since aid-test-schedule-divergence-check.sh performs and times both
+# dispatches itself.
+echo "TEST: measured runtime is read from the qualifying divergence-evidence artifact's own real measurement, never invented"
+sequential_ms="$(jq -r '.sequential_duration_ms // 0' <<<"$artifact_json")"
+scheduled_ms="$(jq -r '.scheduled_duration_ms // 0' <<<"$artifact_json")"
 [[ "$sequential_ms" =~ ^[0-9]+$ ]] || sequential_ms=0
 [[ "$scheduled_ms" =~ ^[0-9]+$ ]] || scheduled_ms=0
 if [[ "$sequential_ms" -gt 0 ]]; then
-  pass_msg "sequential_ms=${sequential_ms} read from ${baseline_file}"
+  pass_msg "sequential_ms=${sequential_ms} read from ${qualifying_artifact}"
 else
-  fail_msg "no recorded sequential runtime sample for gate '${gate_id}' in ${baseline_file}"
+  fail_msg "no sequential_duration_ms recorded in ${qualifying_artifact}"
 fi
 if [[ "$scheduled_ms" -gt 0 ]]; then
-  pass_msg "scheduled_ms=${scheduled_ms} (mode ${mode}) read from ${baseline_file}"
+  pass_msg "scheduled_ms=${scheduled_ms} (mode ${mode}) read from ${qualifying_artifact}"
 else
-  fail_msg "no recorded ${mode} runtime sample for gate '${gate_id}' in ${baseline_file}"
+  fail_msg "no scheduled_duration_ms recorded in ${qualifying_artifact}"
 fi
 
+# Codex review: length>0 flips true for an ADVISORY-only findings array
+# too — the schema's own contract is specifically "ANY blocking finding",
+# never "any finding at all".
 quarantine_lift_blocked="false"
-[[ "$(jq 'length' <<<"$shared_state_findings_json")" -gt 0 ]] && quarantine_lift_blocked="true"
+[[ "$(jq '[.[] | select(.severity == "blocking")] | length' <<<"$shared_state_findings_json")" -gt 0 ]] && quarantine_lift_blocked="true"
 
 evaluated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 bundle_json="$(jq -nc \
@@ -225,7 +267,6 @@ bundle_json="$(jq -nc \
   }')"
 
 echo "TEST: the assembled bundle validates against quarantine-remediation-evidence.schema.json"
-rm -rf "$proof_dir"
 if ! adapter_validate_schema "$SCHEMA" "$bundle_json"; then
   fail_msg "bundle failed schema validation (or the validator itself is unavailable) — refusing to publish an unvalidated artifact"
   echo "Results: ${pass}/$((pass+fail)) passed, ${fail} failed"
@@ -240,6 +281,10 @@ echo "  wrote ${out_path}"
 if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   rel="${out_path#"${REPO_ROOT}"/}"
   git -C "$REPO_ROOT" add -f -- "$rel"
+  if [[ -n "$streamed_log_path" && -f "$streamed_log_path" ]]; then
+    rel_log="${streamed_log_path#"${REPO_ROOT}"/}"
+    git -C "$REPO_ROOT" add -f -- "$rel_log"
+  fi
 fi
 
 echo "Results: ${pass}/$((pass+fail)) passed, ${fail} failed"

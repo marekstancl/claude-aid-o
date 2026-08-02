@@ -130,5 +130,18 @@
     },
     "evaluated_at": { "type": "string", "format": "date-time" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "Codex review: quarantine_lift_blocked's own iff contract (see its description) was previously enforced only by the producer script, never the schema itself — a hand-authored bundle could set quarantine_lift_blocked:false alongside a blocking finding and still validate. This cross-field check closes that: ANY shared_state_findings[] entry with severity:\"blocking\" forces quarantine_lift_blocked to true.",
+      "if": {
+        "properties": {
+          "shared_state_findings": {
+            "contains": { "properties": { "severity": { "const": "blocking" } } }
+          }
+        }
+      },
+      "then": { "properties": { "quarantine_lift_blocked": { "const": true } } }
+    }
+  ]
 }
