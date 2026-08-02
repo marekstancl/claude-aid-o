@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/quarantine-remediation-evidence.schema.json",
+  "title": "AID Test Portfolio — Quarantine Remediation Evidence",
+  "$comment": "producer: scripts/tests/test-integration-quarantine-remediation-evidence.sh (P069 Step 15); consumer: Step 18's PM quarantine-decision review, which cites the fixed, retained path .aid-o/work/evidence/quarantine-remediation/<gate_id>-<commit_sha>.json. Addresses every gate-specific quarantine-exit criterion from the original roadmap (docs/plans/P066-test-portfolio-audit-scheduler-remediation.md §6): membership agreement, no shared-state corruption, streamed failure diagnostics, resume-without-orphan/duplicate, and a measured (never invented) runtime figure. Asserts no pass/fail runtime target itself — the PM ratifies the real number.",
+  "type": "object",
+  "required": [
+    "gate_id", "commit_sha", "membership_agreement", "shared_state_findings",
+    "streamed_diagnostics_proof", "resume_without_orphan_proof", "measured_runtime_ms",
+    "quarantine_lift_blocked", "plan_diff_scope_note", "evaluated_at"
+  ],
+  "properties": {
+    "gate_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The quarantined gate this bundle addresses (e.g. \"bats_all\"). One bundle per gate — this plan never conflates two quarantined gates into one bundle (see plan_diff_scope_note: plan_diff is explicitly out of scope, never silently rolled into this gate's own evidence)."
+    },
+    "commit_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "The commit this evidence was measured against — part of the retained artifact's own filename (<gate_id>-<commit_sha>.json)."
+    },
+    "membership_agreement": {
+      "type": "object",
+      "required": ["run_units_expected", "run_units_observed", "cross_check_sources"],
+      "properties": {
+        "run_units_expected": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ALWAYS re-derived from the live .aid-o/config/test-catalog.yaml at measurement time — never a hardcoded constant (P066's own originally-planned \"88\" had already drifted to 83 by P066's release, confirming a fixed number in a schema/plan is unreliable by construction)."
+        },
+        "run_units_observed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The count of run_units this bundle's underlying divergence-evidence/timing data actually covers."
+        },
+        "cross_check_sources": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "description": "Paths to the retained artifacts this bundle's membership-agreement claim is cross-checked against — e.g. .aid-o/work/evidence/scheduler-divergence/<commit>-<mode>-<run_id>.json entries, and/or the P066 Step 7 lock-audit result."
+        }
+      },
+      "additionalProperties": false
+    },
+    "shared_state_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "description", "severity"],
+        "properties": {
+          "finding_id": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "severity": {
+            "type": "string",
+            "enum": ["blocking", "advisory"],
+            "description": "blocking → quarantine_lift_blocked MUST be true; a shared-state/corruption finding is never silently smoothed over into a clean bundle."
+          },
+          "evidence_ref": {
+            "type": "string",
+            "description": "Path to the artifact/log this finding is grounded in."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Empty array = no shared-state finding observed. Never omitted (an absent array would be indistinguishable from \"not checked\")."
+    },
+    "streamed_diagnostics_proof": {
+      "type": "object",
+      "required": ["proven", "example_log_path"],
+      "properties": {
+        "proven": { "type": "boolean" },
+        "example_log_path": {
+          "type": "string",
+          "description": "Path to a real, retained example of a streamed (not buffered-until-batch-end) failure diagnostic. Empty string permitted only when proven:false."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "proven": { "const": true } } },
+          "then": { "properties": { "example_log_path": { "minLength": 1 } } } }
+      ]
+    },
+    "resume_without_orphan_proof": {
+      "type": "object",
+      "required": ["proven", "evidence_path"],
+      "properties": {
+        "proven": { "type": "boolean" },
+        "evidence_path": {
+          "type": "string",
+          "description": "Path to real evidence that a resumed/retried run reaches a terminal receipt for every unit with zero orphaned process groups and zero duplicate receipts. Empty string permitted only when proven:false."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "proven": { "const": true } } },
+          "then": { "properties": { "evidence_path": { "minLength": 1 } } } }
+      ]
+    },
+    "measured_runtime_ms": {
+      "type": "object",
+      "required": ["sequential_ms", "scheduled_ms", "mode_tested"],
+      "properties": {
+        "sequential_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Real, measured wall-clock duration of the sequential run — never invented, never the pre-remediation ~29-70 min baseline restated."
+        },
+        "scheduled_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Real, measured wall-clock duration of the scheduled (mode_tested) run."
+        },
+        "mode_tested": {
+          "type": "string",
+          "enum": ["observe_parallel", "parallel"]
+        }
+      },
+      "additionalProperties": false,
+      "description": "No target runtime number is asserted as a pass/fail AC anywhere in this schema — the real measured figures are reported for PM ratification (Constraint 9), never an invented '≤20 min' style threshold."
+    },
+    "quarantine_lift_blocked": {
+      "type": "boolean",
+      "description": "true iff ANY shared_state_findings[] entry has severity:\"blocking\", OR the underlying divergence evidence (membership_diff/verdict_diff) was non-empty (pass:false) — computed, never hand-set to false to force a clean-looking bundle."
+    },
+    "plan_diff_scope_note": {
+      "type": "string",
+      "const": "plan_diff is explicitly OUT OF SCOPE for this plan (P069). Its documented root cause (aid-plan-diff.sh's outer gate timeout equals its own internal per-AC timeout, so nested bats invocations exhaust the budget) is a timeout-architecture problem, not a scheduling/parallelism problem, and remains unaddressed by this bundle or this plan.",
+      "description": "Fixed string — this bundle explicitly states plan_diff is out of scope rather than silently omitting it."
+    },
+    "evaluated_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "Codex review: quarantine_lift_blocked's own iff contract (see its description) was previously enforced only by the producer script, never the schema itself — a hand-authored bundle could set quarantine_lift_blocked:false alongside a blocking finding and still validate. This cross-field check closes that: ANY shared_state_findings[] entry with severity:\"blocking\" forces quarantine_lift_blocked to true.",
+      "if": {
+        "properties": {
+          "shared_state_findings": {
+            "contains": { "properties": { "severity": { "const": "blocking" } } }
+          }
+        }
+      },
+      "then": { "properties": { "quarantine_lift_blocked": { "const": true } } }
+    }
+  ]
+}

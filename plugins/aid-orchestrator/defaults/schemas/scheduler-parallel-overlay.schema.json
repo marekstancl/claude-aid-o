@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/scheduler-parallel-overlay.schema.json",
+  "title": "AID Test Portfolio — Scheduler Parallel Overlay",
+  "$comment": "producer: aid-test-isolation-experiment.sh (P069 Step 6, proposed) / aid-scheduler-overlay-approve.sh (approved copy); consumer: aid-test-scheduler.sh (Step 5)'s effective-status resolution.",
+  "description": "The ONLY place an `unknown` -> `safe`/`constrained` promotion is ever recorded. Deliberately SEPARATE from and ADDITIVE to .aid-o/config/test-catalog.yaml — never a modification to P066's own parallel.status field or approval semantics (same authority-resolution pattern as resource_locks in Step 1 and the catalog-approval-boundary reconciliation in Step 11). status:proposed = gitignored, evidence-only (.aid-o/work/test-audits/<id>/scheduler-overlay.proposed.json). status:approved = force-tracked (.aid-o/config/test-scheduler-parallel-overlay.yaml), written only by aid-scheduler-overlay-approve.sh.",
+  "type": "object",
+  "required": ["schema_version", "status", "overlay"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "status": { "type": "string", "enum": ["proposed", "approved"] },
+    "overlay": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/overlay_entry" },
+      "description": "At most one entry per run_unit_id — a second promotion for the same run_unit_id supersedes, it never coexists (aid-scheduler-overlay-approve.sh's merge/upsert semantics)."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "overlay_entry": {
+      "type": "object",
+      "required": ["run_unit_id", "promoted_status", "catalog_fingerprint_at_promotion", "promoted_at", "evidence_run_id"],
+      "properties": {
+        "run_unit_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "References test-catalog.yaml's run_units[].run_unit_id — never a separately-minted identity."
+        },
+        "promoted_status": {
+          "type": "string",
+          "enum": ["safe", "constrained"],
+          "description": "The scheduler NEVER reads this array to demote a unit to unknown/exclusive — only to promote off unknown."
+        },
+        "catalog_fingerprint_at_promotion": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{12}$",
+          "description": "The exact run_units[].runtime.fingerprint this run_unit_id had in the catalog at promotion time — the staleness key aid-test-scheduler.sh's effective-status resolution checks. A promotion whose value no longer matches the CURRENT catalog fingerprint is rejected identically to a missing entry."
+        },
+        "promoted_at": { "type": "string", "format": "date-time" },
+        "evidence_run_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The specific isolation-experiment invocation (Step 6) that produced this promotion."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

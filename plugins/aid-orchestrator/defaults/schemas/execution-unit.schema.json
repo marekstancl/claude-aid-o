@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/execution-unit.schema.json",
+  "title": "AID Test Portfolio — Execution Unit",
+  "$comment": "producer: aid-test-execution-unit.sh (P069 Step 1, wraps aid-job.sh — aid-job.sh itself is never modified); consumers: aid-execution-unit-membership.sh (Step 2, sets membership_verified/membership_binding), aid-test-scheduler.sh (Step 5, reads resource_locks/parallel_eligible), aid-select-tests.sh --emit-units (Step 9, produces this shape).",
+  "description": "One schedulable unit of test execution. unit_id always references a P066 run_units[].run_unit_id directly — this schema never mints a competing identity. command is P066's exact discriminated union (test-catalog.schema.json #/$defs/command, duplicated here verbatim since no cross-file $ref resolver is wired into this repo's python3+jsonschema validation idiom) and is never redefined by this plan.",
+  "type": "object",
+  "required": [
+    "unit_id",
+    "command",
+    "deadline_seconds",
+    "resource_locks",
+    "parallel_eligible",
+    "membership_verified",
+    "dedup"
+  ],
+  "properties": {
+    "unit_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MUST equal a P066 run_units[].run_unit_id — never a separately-derived identity."
+    },
+    "command": { "$ref": "#/$defs/command" },
+    "deadline_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Hard wall-clock deadline passed to `aid-job.sh run --deadline`. A unit that exceeds this reaches state:timed_out, never running-forever."
+    },
+    "resource_locks": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Lock names MUST match execution.yaml's test_audit.scheduler.resource_locks — the resolved authority. NEVER read from test-audit.yaml."
+    },
+    "parallel_eligible": {
+      "type": "boolean",
+      "description": "Derived from the catalog's parallel.status (see Step 5's effective-status resolution, which may override this via an approved scheduler-parallel-overlay entry)."
+    },
+    "membership_verified": {
+      "type": "boolean",
+      "default": false,
+      "description": "false until Step 2's membership-verification pass resolves this unit_id to exactly one execution unit and stamps membership_binding."
+    },
+    "dedup": {
+      "type": "boolean",
+      "default": false,
+      "description": "true ONLY when Step 2 resolves multiple matching commands for the same unit_id under an explicit recommendation:merge precondition. Never set by this step."
+    },
+    "membership_binding": {
+      "type": ["object", "null"],
+      "default": null,
+      "description": "Populated only by Step 2. Absent/null here in Step 1's own output — Step 5 rejects any unit with membership_verified false/absent OR a stale membership_binding.catalog_fingerprint.",
+      "required": ["catalog_fingerprint", "verified_at", "verifier_run_id"],
+      "properties": {
+        "catalog_fingerprint": { "type": "string", "minLength": 1 },
+        "verified_at": { "type": "string", "format": "date-time" },
+        "verifier_run_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "command": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["type", "argv"],
+          "properties": {
+            "type": { "const": "argv" },
+            "argv": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["type", "shell"],
+          "properties": {
+            "type": { "const": "shell" },
+            "shell": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

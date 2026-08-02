@@ -263,12 +263,60 @@ gate_baseline_fingerprint() {
   echo "sha256:${h}"
 }
 
+# _gbr_percentiles_json <samples_json>
+#   Shared percentile/count computation (nearest-rank, over the non-censored
+#   subset only) — extracted from gate_baseline_update's own inline filter
+#   (P069 Step 3) so the SAME formula backs both the sequential top-level
+#   fields and each non-sequential context's percentiles_by_context.<ctx>,
+#   rather than two independently-maintained copies that could drift.
+_gbr_percentiles_json() {
+  local samples_json="$1"
+  jq -c '
+    def nearest_rank(P; arr):
+      (arr|length) as $n
+      | if $n == 0 then null
+        else
+          ((( (P/100*$n) | ceil) - 1)) as $idx0
+          | (if $idx0 < 0 then 0 elif $idx0 > ($n-1) then ($n-1) else $idx0 end) as $idx
+          | arr[$idx]
+        end;
+    (map(select(.censored==false))) as $nc
+    | ($nc | map(.duration_ms) | sort) as $durs
+    | {
+        samples_count: length,
+        non_censored_samples_count: ($nc|length),
+        p50_ms: nearest_rank(50; $durs),
+        p90_ms: nearest_rank(90; $durs),
+        p95_ms: nearest_rank(95; $durs),
+        max_ms: (if ($durs|length) > 0 then ($durs|last) else null end)
+      }
+  ' <<<"$samples_json"
+}
+
 # ─── 2. gate_baseline_update ────────────────────────────────────────────────
 # gate_baseline_update <gate_name> <command_template> <resolved_command> \
-#                      <exit_code> <duration_ms> <timeout_seconds>
+#                      <exit_code> <duration_ms> <timeout_seconds> \
+#                      [concurrency_context=sequential]
+#
+# concurrency_context (P069 Step 3): sequential|observe_parallel|parallel,
+# defaulting to sequential when omitted — existing callers passing only 6
+# args are unaffected. A sequential call is BYTE-IDENTICAL to this
+# function's pre-Step-3 behavior. A non-sequential call NEVER touches
+# `.recent_samples`, the top-level percentile fields (p50_ms/p90_ms/p95_ms/
+# max_ms), last_duration_ms/last_exit_code/last_attempt_result, or the
+# policy_result/retryable/operator_action triad — every one of those is
+# copied verbatim from the existing entry (or given the same zero-sample
+# defaults a brand-new sequential entry would have, if none exists yet).
+# It writes ONLY into a new, separate, additive sibling:
+# recent_samples_by_context.<ctx>[] / percentiles_by_context.<ctx> — so
+# gate_baseline_policy_check's `.recent_samples[-$k:]` window and every
+# other existing reader are structurally unaffected BY CONSTRUCTION, not
+# merely by intention (see this step's plan section for the C0 finding that
+# required this).
 gate_baseline_update() {
   local gate_name="$1" command_template="$2" resolved_command="$3" \
-        exit_code="$4" duration_ms="$5" timeout_seconds="$6"
+        exit_code="$4" duration_ms="$5" timeout_seconds="$6" \
+        concurrency_context="${7:-sequential}"
 
   if [[ -z "$gate_name" ]]; then
     _gbr_warn "gate_baseline_update: gate_name is required — skipping write"
@@ -278,6 +326,13 @@ gate_baseline_update() {
     _gbr_warn "gate_baseline_update: exit_code/duration_ms/timeout_seconds must be integers (gate '$gate_name') — skipping write"
     return 0
   fi
+  case "$concurrency_context" in
+    sequential|observe_parallel|parallel) ;;
+    *)
+      _gbr_warn "gate_baseline_update: concurrency_context must be sequential|observe_parallel|parallel (got '$concurrency_context', gate '$gate_name') — skipping write"
+      return 0
+      ;;
+  esac
   _gbr_require_deps || return 0
 
   local fingerprint
@@ -332,15 +387,6 @@ gate_baseline_update() {
       *)   last_attempt_result="fail"; censored_json="false" ;;
     esac
 
-    # Base recent_samples window: empty on reset, else the existing window.
-    local base_samples_json
-    if [[ "$reset_json" == "true" ]]; then
-      base_samples_json="[]"
-    else
-      base_samples_json=$(jq -c '.recent_samples // []' <<<"$existing_entry" 2>/dev/null)
-      [[ -z "$base_samples_json" ]] && base_samples_json="[]"
-    fi
-
     local new_sample_json
     new_sample_json=$(jq -nc \
       --argjson duration_ms "$duration_ms" \
@@ -350,105 +396,206 @@ gate_baseline_update() {
       --arg recorded_at "$now" \
       '{duration_ms: $duration_ms, exit_code: $exit_code, timeout_seconds: $timeout_seconds, censored: $censored, recorded_at: $recorded_at}')
 
-    # Append + FIFO-evict to a max-20 window (bounded WINDOW, not lifetime).
-    local samples_json
-    samples_json=$(jq -c --argjson s "$new_sample_json" \
-      '(. + [$s]) | if length > 20 then .[-20:] else . end' \
-      <<<"$base_samples_json")
-
-    # Percentiles + window counts, over the non-censored subset only.
-    local computed_json
-    computed_json=$(jq -c '
-      def nearest_rank(P; arr):
-        (arr|length) as $n
-        | if $n == 0 then null
-          else
-            ((( (P/100*$n) | ceil) - 1)) as $idx0
-            | (if $idx0 < 0 then 0 elif $idx0 > ($n-1) then ($n-1) else $idx0 end) as $idx
-            | arr[$idx]
-          end;
-      (map(select(.censored==false))) as $nc
-      | ($nc | map(.duration_ms) | sort) as $durs
-      | {
-          samples_count: length,
-          non_censored_samples_count: ($nc|length),
-          p50_ms: nearest_rank(50; $durs),
-          p90_ms: nearest_rank(90; $durs),
-          p95_ms: nearest_rank(95; $durs),
-          max_ms: (if ($durs|length) > 0 then ($durs|last) else null end)
-        }
-    ' <<<"$samples_json")
-
-    local p95_for_rec nc_for_rec
-    p95_for_rec=$(jq -r '.p95_ms // "null"' <<<"$computed_json")
-    nc_for_rec=$(jq -r '.non_censored_samples_count' <<<"$computed_json")
-
-    local timeout_rec run_mode_rec timeout_rec_json run_mode_rec_json
-    timeout_rec=$(_gbr_calc_timeout_rec "$p95_for_rec" "$nc_for_rec")
-    run_mode_rec=$(_gbr_calc_run_mode_rec "$p95_for_rec" "$nc_for_rec")
-    timeout_rec_json="null"
-    [[ -n "$timeout_rec" ]] && timeout_rec_json="$timeout_rec"
-    run_mode_rec_json="null"
-    [[ -n "$run_mode_rec" ]] && run_mode_rec_json="\"$run_mode_rec\""
-
-    # Build the final entry. policy_result/retryable/operator_action are
-    # RUN-SCOPED STATE, not a permanent label — they describe whether a
-    # policy block is CURRENTLY active, not whether one ever happened. Every
-    # gate_baseline_update call (i.e. every new attempt, per aid-run-gates.sh's
-    # per-attempt call site) therefore RESETS them unconditionally to their
-    # cleared defaults ("none"/true/null), regardless of what $existing carried.
-    # gate_baseline_mark_policy_block is the ONLY function that ever flips them
-    # to an active block — it runs strictly AFTER this function within the
-    # same attempt's processing (aid-run-gates.sh: gate_baseline_update first,
-    # then gate_baseline_policy_check against the just-written samples, then
-    # gate_baseline_mark_policy_block only if that check says "block"). This
-    # is what makes a past block clear itself the moment a gate's own next
-    # attempt runs — on a pass, on a command_template edit (fingerprint reset,
-    # handled the same way since $reset no longer matters for these three
-    # fields), or on a raised timeout_seconds that stops re-triggering the
-    # policy check. History is NOT lost: recent_samples (the censored/timeout
-    # trail) is untouched here and only cleared by an actual fingerprint reset,
-    # so a past block remains reconstructable from the sample window even
-    # though the live retryable/policy_result flags move on.
     local entry_json
-    entry_json=$(jq -nc \
-      --arg fingerprint "$fingerprint" \
-      --arg command_template "$command_template" \
-      --arg resolved_command "$resolved_command" \
-      --argjson recent_samples "$samples_json" \
-      --argjson computed "$computed_json" \
-      --argjson duration_ms "$duration_ms" \
-      --argjson exit_code "$exit_code" \
-      --argjson timeout_seconds "$timeout_seconds" \
-      --arg last_attempt_result "$last_attempt_result" \
-      --argjson existing "$existing_entry" \
-      --argjson reset "$reset_json" \
-      --arg now "$now" \
-      --argjson timeout_recommended_seconds "$timeout_rec_json" \
-      --argjson run_mode_recommended "$run_mode_rec_json" \
-      '{
-        command_fingerprint: $fingerprint,
-        command_template: $command_template,
-        last_resolved_command: $resolved_command,
-        samples_count: $computed.samples_count,
-        non_censored_samples_count: $computed.non_censored_samples_count,
-        recent_samples: $recent_samples,
-        p50_ms: $computed.p50_ms,
-        p90_ms: $computed.p90_ms,
-        p95_ms: $computed.p95_ms,
-        max_ms: $computed.max_ms,
-        last_duration_ms: $duration_ms,
-        last_exit_code: $exit_code,
-        last_attempt_result: $last_attempt_result,
-        policy_result: "none",
-        last_timeout_seconds: $timeout_seconds,
-        timeout_recommended_seconds: $timeout_recommended_seconds,
-        run_mode_recommended: $run_mode_recommended,
-        retryable: true,
-        operator_action: null,
-        last_updated: $now,
-        series_reset_at: (if $reset then $now else ($existing.series_reset_at // null) end)
-      }')
+
+    if [[ "$concurrency_context" == "sequential" ]]; then
+      # ── Sequential path: byte-identical to this function's pre-Step-3
+      # behavior, PLUS carrying forward (or, on a fingerprint reset,
+      # clearing — a command_template change invalidates ALL prior history,
+      # sequential and non-sequential alike) the by-context sibling fields.
+      local base_samples_json
+      if [[ "$reset_json" == "true" ]]; then
+        base_samples_json="[]"
+      else
+        base_samples_json=$(jq -c '.recent_samples // []' <<<"$existing_entry" 2>/dev/null)
+        [[ -z "$base_samples_json" ]] && base_samples_json="[]"
+      fi
+
+      # Append + FIFO-evict to a max-20 window (bounded WINDOW, not lifetime).
+      local samples_json
+      samples_json=$(jq -c --argjson s "$new_sample_json" \
+        '(. + [$s]) | if length > 20 then .[-20:] else . end' \
+        <<<"$base_samples_json")
+
+      local computed_json
+      computed_json=$(_gbr_percentiles_json "$samples_json")
+
+      local p95_for_rec nc_for_rec
+      p95_for_rec=$(jq -r '.p95_ms // "null"' <<<"$computed_json")
+      nc_for_rec=$(jq -r '.non_censored_samples_count' <<<"$computed_json")
+
+      local timeout_rec run_mode_rec timeout_rec_json run_mode_rec_json
+      timeout_rec=$(_gbr_calc_timeout_rec "$p95_for_rec" "$nc_for_rec")
+      run_mode_rec=$(_gbr_calc_run_mode_rec "$p95_for_rec" "$nc_for_rec")
+      timeout_rec_json="null"
+      [[ -n "$timeout_rec" ]] && timeout_rec_json="$timeout_rec"
+      run_mode_rec_json="null"
+      [[ -n "$run_mode_rec" ]] && run_mode_rec_json="\"$run_mode_rec\""
+
+      local by_context_json
+      if [[ "$reset_json" == "true" ]]; then
+        by_context_json='{"recent_samples_by_context":{},"percentiles_by_context":{}}'
+      else
+        by_context_json=$(jq -c '{
+          recent_samples_by_context: (.recent_samples_by_context // {}),
+          percentiles_by_context: (.percentiles_by_context // {})
+        }' <<<"$existing_entry" 2>/dev/null)
+        [[ -z "$by_context_json" || "$by_context_json" == "null" ]] && by_context_json='{"recent_samples_by_context":{},"percentiles_by_context":{}}'
+      fi
+
+      # Build the final entry. policy_result/retryable/operator_action are
+      # RUN-SCOPED STATE, not a permanent label — they describe whether a
+      # policy block is CURRENTLY active, not whether one ever happened. Every
+      # gate_baseline_update call (i.e. every new attempt, per aid-run-gates.sh's
+      # per-attempt call site) therefore RESETS them unconditionally to their
+      # cleared defaults ("none"/true/null), regardless of what $existing carried.
+      # gate_baseline_mark_policy_block is the ONLY function that ever flips them
+      # to an active block — it runs strictly AFTER this function within the
+      # same attempt's processing (aid-run-gates.sh: gate_baseline_update first,
+      # then gate_baseline_policy_check against the just-written samples, then
+      # gate_baseline_mark_policy_block only if that check says "block"). This
+      # is what makes a past block clear itself the moment a gate's own next
+      # attempt runs — on a pass, on a command_template edit (fingerprint reset,
+      # handled the same way since $reset no longer matters for these three
+      # fields), or on a raised timeout_seconds that stops re-triggering the
+      # policy check. History is NOT lost: recent_samples (the censored/timeout
+      # trail) is untouched here and only cleared by an actual fingerprint reset,
+      # so a past block remains reconstructable from the sample window even
+      # though the live retryable/policy_result flags move on.
+      entry_json=$(jq -nc \
+        --arg fingerprint "$fingerprint" \
+        --arg command_template "$command_template" \
+        --arg resolved_command "$resolved_command" \
+        --argjson recent_samples "$samples_json" \
+        --argjson computed "$computed_json" \
+        --argjson duration_ms "$duration_ms" \
+        --argjson exit_code "$exit_code" \
+        --argjson timeout_seconds "$timeout_seconds" \
+        --arg last_attempt_result "$last_attempt_result" \
+        --argjson existing "$existing_entry" \
+        --argjson reset "$reset_json" \
+        --arg now "$now" \
+        --argjson timeout_recommended_seconds "$timeout_rec_json" \
+        --argjson run_mode_recommended "$run_mode_rec_json" \
+        --argjson by_context "$by_context_json" \
+        '{
+          command_fingerprint: $fingerprint,
+          command_template: $command_template,
+          last_resolved_command: $resolved_command,
+          samples_count: $computed.samples_count,
+          non_censored_samples_count: $computed.non_censored_samples_count,
+          recent_samples: $recent_samples,
+          p50_ms: $computed.p50_ms,
+          p90_ms: $computed.p90_ms,
+          p95_ms: $computed.p95_ms,
+          max_ms: $computed.max_ms,
+          last_duration_ms: $duration_ms,
+          last_exit_code: $exit_code,
+          last_attempt_result: $last_attempt_result,
+          policy_result: "none",
+          last_timeout_seconds: $timeout_seconds,
+          timeout_recommended_seconds: $timeout_recommended_seconds,
+          run_mode_recommended: $run_mode_recommended,
+          retryable: true,
+          operator_action: null,
+          last_updated: $now,
+          series_reset_at: (if $reset then $now else ($existing.series_reset_at // null) end),
+          recent_samples_by_context: $by_context.recent_samples_by_context,
+          percentiles_by_context: $by_context.percentiles_by_context
+        }')
+    else
+      # ── Non-sequential path (observe_parallel|parallel): `.recent_samples`,
+      # the top-level percentile/last_*/policy fields are NEVER TOUCHED —
+      # copied verbatim from the existing entry (or given the SAME
+      # zero-sample defaults a brand-new sequential entry would carry, if
+      # this gate has no entry at all yet). Only this context's own
+      # recent_samples_by_context.<ctx>/percentiles_by_context.<ctx> change.
+      local entry_is_genesis="false"
+      [[ -z "$existing_entry" || "$existing_entry" == "null" ]] && entry_is_genesis="true"
+
+      # Codex review (real finding, High): a fingerprint reset must NEVER be
+      # driven by a non-sequential sample when real prior history exists —
+      # only a SEQUENTIAL sample may trigger/ride along with a reset (it is
+      # the only thing authorized to rewrite the sequential-owned fields at
+      # all). A non-sequential sample observed under a DIFFERENT
+      # command_template than the entry currently on record is a caller/
+      # config mismatch, not a legitimate reset — refuse the write entirely
+      # (fail open, matching every other invalid-input case in this
+      # function) rather than silently destroying sequential history or
+      # inventing a merge semantics nothing in the plan specifies.
+      if [[ "$entry_is_genesis" == "false" && "$reset_json" == "true" ]]; then
+        _gbr_warn "gate_baseline_update: concurrency_context='$concurrency_context' sample for gate '$gate_name' observed under a command_template whose fingerprint differs from the existing entry's — only a sequential sample may trigger a fingerprint reset; skipping this write rather than destroying sequential history"
+        exit 0
+      fi
+
+      local base_by_context_samples
+      if [[ "$entry_is_genesis" == "true" ]]; then
+        base_by_context_samples="[]"
+      else
+        base_by_context_samples=$(jq -c --arg ctx "$concurrency_context" \
+          '.recent_samples_by_context[$ctx] // []' <<<"$existing_entry" 2>/dev/null)
+        [[ -z "$base_by_context_samples" || "$base_by_context_samples" == "null" ]] && base_by_context_samples="[]"
+      fi
+
+      local by_context_samples_json
+      by_context_samples_json=$(jq -c --argjson s "$new_sample_json" \
+        '(. + [$s]) | if length > 20 then .[-20:] else . end' \
+        <<<"$base_by_context_samples")
+
+      local by_context_computed_json
+      by_context_computed_json=$(_gbr_percentiles_json "$by_context_samples_json")
+
+      if [[ "$entry_is_genesis" == "true" ]]; then
+        # Truly first-ever entry for this gate is being written by a
+        # NON-sequential sample: the sequential-derived fields get the same
+        # zero-sample defaults a brand-new sequential call would produce —
+        # this sample itself never enters them.
+        local zero_computed_json
+        zero_computed_json=$(_gbr_percentiles_json '[]')
+        entry_json=$(jq -nc \
+          --arg fingerprint "$fingerprint" \
+          --arg command_template "$command_template" \
+          --arg resolved_command "$resolved_command" \
+          --argjson zero "$zero_computed_json" \
+          --arg now "$now" \
+          --arg ctx "$concurrency_context" \
+          --argjson ctx_samples "$by_context_samples_json" \
+          --argjson ctx_computed "$by_context_computed_json" \
+          '{
+            command_fingerprint: $fingerprint,
+            command_template: $command_template,
+            last_resolved_command: null,
+            samples_count: $zero.samples_count,
+            non_censored_samples_count: $zero.non_censored_samples_count,
+            recent_samples: [],
+            p50_ms: $zero.p50_ms,
+            p90_ms: $zero.p90_ms,
+            p95_ms: $zero.p95_ms,
+            max_ms: $zero.max_ms,
+            last_duration_ms: null,
+            last_exit_code: null,
+            last_attempt_result: null,
+            policy_result: "none",
+            last_timeout_seconds: null,
+            timeout_recommended_seconds: null,
+            run_mode_recommended: null,
+            retryable: true,
+            operator_action: null,
+            last_updated: $now,
+            series_reset_at: null,
+            recent_samples_by_context: {($ctx): $ctx_samples},
+            percentiles_by_context: {($ctx): $ctx_computed}
+          }')
+      else
+        entry_json=$(jq -c \
+          --arg ctx "$concurrency_context" \
+          --argjson ctx_samples "$by_context_samples_json" \
+          --argjson ctx_computed "$by_context_computed_json" \
+          '.recent_samples_by_context = ((.recent_samples_by_context // {}) + {($ctx): $ctx_samples})
+           | .percentiles_by_context = ((.percentiles_by_context // {}) + {($ctx): $ctx_computed})' \
+          <<<"$existing_entry")
+      fi
+    fi
 
     local updated_doc
     updated_doc=$(jq -c --arg gn "$gate_name" --argjson entry "$entry_json" '.gates[$gn] = $entry' <<<"$doc_json")
@@ -703,7 +850,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       gate_baseline_fingerprint "${2:-}" "${3:-}"
       ;;
     update)
-      gate_baseline_update "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}"
+      gate_baseline_update "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-sequential}"
       ;;
     policy-check)
       gate_baseline_policy_check "${2:-}" "${3:-}" "${4:-3}"
@@ -724,7 +871,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       gate_baseline_report_json "${2:-}"
       ;;
     *)
-      echo "Usage: aid-gate-runtime-baseline.sh {fingerprint <gate_name> <command_template> | update <gate_name> <command_template> <resolved_command> <exit_code> <duration_ms> <timeout_seconds> | policy-check <gate_name> <current_timeout_seconds> [k] | mark-policy-block <gate_name> <operator_action> | recommend-timeout <gate_name> | recommend-run-mode <gate_name> | show <gate_name> | report-json <gate_name>}" >&2
+      echo "Usage: aid-gate-runtime-baseline.sh {fingerprint <gate_name> <command_template> | update <gate_name> <command_template> <resolved_command> <exit_code> <duration_ms> <timeout_seconds> [concurrency_context=sequential] | policy-check <gate_name> <current_timeout_seconds> [k] | mark-policy-block <gate_name> <operator_action> | recommend-timeout <gate_name> | recommend-run-mode <gate_name> | show <gate_name> | report-json <gate_name>}" >&2
       exit 1
       ;;
   esac
