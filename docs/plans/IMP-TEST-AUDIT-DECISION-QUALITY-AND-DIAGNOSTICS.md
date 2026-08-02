@@ -124,6 +124,76 @@ reserve a bounded sub-budget. When it expires, the report says `incomplete`
 and records completed evidence; it does not convert time exhaustion into a
 confident remediation claim.
 
+### D6 — a full audit is a total portfolio decision, not a sparse findings list
+
+The released P066 shard contract permits an auditor to emit zero findings for
+an assigned unit. That is acceptable for a findings collector but not for a
+full portfolio audit: silence cannot distinguish "healthy and uniquely useful"
+from "never inspected". In `full` mode every discovered `run_unit_id` MUST have
+exactly one terminal disposition record, even when the disposition is `keep`.
+
+The disposition records, at minimum:
+
+- the behavior/invariant or historical regression the unit claims to protect;
+- the concrete failure signal and the cheapest falsification or mutation that
+  would prove the test detects it;
+- whether that signal is unique, overlaps named units, or remains unproved;
+- layer fitness (`unit`, `contract`, `integration`, `e2e`) and whether the same
+  signal can be preserved at a cheaper layer;
+- `keep`, `fix`, `rewrite_unit`, `merge`, `split`, `remove`, `quarantine`,
+  `keep_serial`, `parallelize` or a bounded `measure` action; and
+- evidence/confidence plus the current measured cost or honest lower bound.
+
+The inventory count, assigned-unit count and terminal-disposition count MUST
+match exactly. Missing, duplicate or silently dropped units make the audit
+`incomplete`. A portfolio-wide `unknown`, or 83 `unknown` units accompanied by
+only a handful of cost findings, can never be called a completed audit.
+
+### D7 — reduction and retained value are first-class outcomes
+
+The audit must actively test the hypothesis that the portfolio is too large.
+It cannot assume every historical regression deserves another permanent full
+workflow test. It groups tests by protected invariant/failure signal and names:
+
+- duplicate or overlapping tests that can be merged;
+- expensive end-to-end cases that can be rewritten as cheaper unit/contract
+  tests while retaining a small representative end-to-end set;
+- tests for removed/obsolete behavior or source-text implementation details;
+- aggregate gates that execute work already covered by other gates; and
+- genuinely unique/security-critical tests that must remain.
+
+A remove/merge/rewrite proposal requires a falsification check or mutation
+showing which retained test still catches the claimed defect. Conversely, a
+`keep` decision must name its unique signal or explicitly admit that uniqueness
+is unproved. The final decision artifact reports portfolio size and runtime
+before and after the proposed work, with every saving labelled measured,
+estimated or unknown.
+
+### D8 — capability, scheduler and gate wiring must be proven as one path
+
+P066 producing a catalog, P069 shipping a scheduler and a later remediation
+shipping a runner are not success independently. The follow-up must prove the
+real installed path from end to end:
+
+`/aid-audit-tests` -> complete inventory (including standalone shell suites) ->
+one disposition per unit -> decision summary/remediation brief -> explicit
+catalog/mapping approval -> P069 scheduler selection -> real
+`aid-run-gates.sh` dispatch -> per-unit receipts -> final gate verdict.
+
+The proof runs from a fresh/disposable project using the released plugin and
+the real generated configuration path. It must show that the configured mode
+actually leaves `sequential`, that approved units run concurrently, unknown
+units remain serial, and no test is executed twice through overlapping
+`bats_all`, aggregate, `plan_diff` or release surfaces. Component unit tests or
+a synthetic scheduler fixture do not satisfy this requirement.
+
+The self-host grounding baseline must be re-measured at implementation time.
+As of 2026-08-02 the working tree contains 76 Bats files with 1,936 named Bats
+cases plus 39 standalone shell suites (115 test files total), while the
+approved catalog still exposes only 83 run units and marks every one of them
+`parallel.status: unknown`. That is direct evidence that discovery,
+decision-quality audit and scheduling are not yet connected as a usable whole.
+
 ## 4. Required contract changes
 
 Ground exact file names and existing schema versions before implementation;
@@ -167,6 +237,22 @@ unresolved:
   - run_unit_id: stable id
     missing_proof: controlled reason
     next_measurement: named bounded operation
+portfolio_coverage:
+  inventory_count: integer
+  assigned_count: integer
+  disposition_count: integer
+  missing_run_unit_ids: [stable ids]
+  duplicate_run_unit_ids: [stable ids]
+portfolio_change:
+  current_run_units: integer
+  proposed_run_units: integer
+  keep: [stable ids]
+  rewrite_unit: [stable ids]
+  merge_groups: [[stable ids]]
+  remove: [stable ids]
+  runtime_before_ms: integer | null
+  runtime_after_ms: integer | null
+  impact_kind: measured | estimated | unknown
 ```
 
 The schema rejects unknown fields, free-form absolute paths, secrets and
@@ -289,10 +375,17 @@ The pilot produces a **proposal**, not an approved scheduler configuration.
 5. Update the adversarial specialist instruction to challenge resource scope,
    claimed runner availability, false “transaction isolation means safe”
    reasoning, membership mismatch and invented savings.
+6. Change shard output from optional findings to a mandatory terminal
+   disposition for every assigned `run_unit_id`; add deterministic reconciliation
+   of inventory, shard assignment and disposition counts.
+7. Require behavior claim, failure signal, uniqueness/overlap, layer fitness and
+   falsification evidence for every keep/remove/merge/rewrite decision.
 
 **Acceptance:** fixtures prove that a portfolio-wide `unknown`, a missing
 parallel decision, an unmeasured claimed saving and an incomplete result cannot
-be handed to `/aid-plan write` as a remediation-ready audit.
+be handed to `/aid-plan write` as a remediation-ready audit. A shard that emits
+zero records, drops one assigned unit, duplicates a unit or marks every unit
+unknown fails reconciliation rather than producing a sparse green report.
 
 ### Slice 2 — cost diagnosis
 
@@ -344,10 +437,36 @@ and proven-parallel reports.
 17. Update enforcement registry for the new `--write-plan` incomplete refusal
 and for any pilot-promotion enforcement. Document its exact surface and
 recovery behavior; a detector with no consumer is not acceptable.
+18. Render exact named `keep`, `rewrite`, `merge`, `remove`, parallel and serial
+sets plus current/proposed portfolio size and runtime. Never collapse this to
+a five-item severity list.
 
 **Acceptance:** the rendered output gives an ordinary-language recommended
 next action without requiring the user to remember a command. A five-item raw
 technical list cannot be rendered as the only final handoff.
+
+### Slice 5 — whole-path wiring and outcome proof
+
+19. Complete discovery before claiming a repository-wide audit: Bats,
+    standalone shell suites, declared gates/package scripts and CI-only suites
+    must reconcile without double-counting. Fold or depend explicitly on the
+    P070 shell-discovery work; do not silently assume it shipped.
+20. Run one real full audit and approve its catalog/mapping through the public
+    sanctioned flow.
+21. Feed that exact approved artifact to the released P069 scheduler through
+    generated `execution.yaml` and `aid-run-gates.sh`, not a direct scheduler
+    invocation.
+22. Capture an execution ledger keyed by candidate SHA, command fingerprint and
+    `run_unit_id`; fail if the same unit is executed twice by overlapping gate
+    surfaces.
+23. Record before/after wall-clock and membership for the complete release
+    campaign. The implementation is not successful merely because individual
+    scripts and schemas pass their own tests.
+
+**Acceptance:** in a disposable fresh project the ordinary user command
+produces a complete decision, a PM-approved mapping activates real scheduled
+execution, unknown units stay serial, all verdicts match the sequential
+baseline, no unit runs twice and the measured end-to-end wall-clock is reported.
 
 ## 7. Whole-system safety checks
 
@@ -385,6 +504,16 @@ This follow-up is ready to release only when all are true:
    re-grounded and amended.
 7. Documentation, prompts, schemas, renderer, enforcement registry and tests
    all state the same authority boundary.
+8. Every discovered run unit has exactly one terminal disposition; inventory,
+   assignment and disposition counts reconcile, including standalone shell
+   suites.
+9. The report names concrete keep/rewrite/merge/remove candidates and protects
+   every coverage-reducing proposal with falsification/mutation evidence.
+10. A fresh-project E2E proves the approved audit result is consumed by P069
+    through the real gate runner, not merely written to files.
+11. The final campaign ledger proves no test unit ran twice and reports actual
+    before/after wall-clock. Until this passes, the combined P066/P069 follow-up
+    must not be described as delivering test-suite acceleration.
 
 ## 9. Sequencing
 
