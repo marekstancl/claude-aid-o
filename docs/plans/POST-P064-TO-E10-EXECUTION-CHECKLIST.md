@@ -2,11 +2,13 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064, Phase 1, P068 and Phase 4 are complete
-and released. Current next work is P066, then the durable plan-final evidence
-maintenance package below.
+**Status:** active PM checklist — P064, Phase 1, P068, Phase 4 and the
+audit-only half of P066 are complete and released. P069 is the active
+scheduler/gate-integration implementation stream. Two follow-up plans are
+now recorded below: decision-quality test audit and entry-point UX.
 **Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–281,
-IMP-464–468
+IMP-464–468, `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
+`IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`
 
 ## Current checkpoint
 
@@ -20,14 +22,14 @@ IMP-464–468
 | **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
 | **P068** | **DONE** — released v2.63.0; v2.63.1 repaired CI; v2.63.2 records final backlog/checklist repair |
 | P068 delivery proof | P077 clean dogfood reached `release_ready=true` → merge → durable receipt → `CLOSED`; its isolated history is archived on `archive/P068-dogfood-P067-P077-20260727` |
-| **Current version** | `v2.63.2` at `a6cc6f3`, pushed; `main == origin/main` |
+| **Current version** | `v2.66.2` at `281f87f`, pushed; `main == origin/main` |
 | Remote | pushed and synchronized |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
 | IMP-266 | **RESOLVED — PM ratified Option B (2026-07-24)**: `merged_to_plan` stays terminal; wrong entries corrected via the documented recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`), doc-only, no code edge; Option A deferred to P068+ |
-| Next work | Phase 4 (EPIC-generation integrity maintenance) is DONE. P066's first executable draft (audit+scheduler combined) exhausted 3 real Codex C0 rounds (2026-07-28) — the scheduler/gate-integration half never actually wired into `aid-run-gates.sh`/`aid-select-tests.sh`/the real `/aid-init` config path. PM split it: `.aid-o/plans/P066-test-portfolio-audit-capability.md` (audit-only, standalone value) + `.aid-o/plans/P069-scheduler-gate-integration.md` (`depends_on_plans:[P066]`, real gate-runner/config-path integration). **P066: 1 real C0 round, 6 findings, all fixed, clean.** **P069: 4 real C0 rounds (round 4 via explicit PM override after budget exhaustion), 8→7→6→5 findings each fixed; PM stopped after round 4** — lint/dependency-graph clean, but P069 still cites P066 artifacts that don't exist until P066 merges (an inherent, documented risk, not hidden). Both plans await PM review before `/aid-plan epic`; P069 additionally needs re-grounding against P066's real merged contract once P066 closes. |
+| Next work | Phase 4 (EPIC-generation integrity) and **P066 audit capability are DONE**; P066 is released through `v2.66.2`. **P069 scheduler/gate integration is active** on its isolated implementation branch and must finish or freeze before its consumer contract is re-grounded. The next planned maintenance streams are: (1) `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`, which prevents an audit from returning portfolio-wide `unknown` as a remediation-ready result; and (2) `IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`, which repairs help/init/setup discoverability and human handoffs. Neither is folded into P069. |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -272,7 +274,55 @@ override, while an invalid or later-divergent graph fails closed.
 
 ## Phase 5 — P066 test portfolio audit, scheduler and remediation
 
-P066 is currently an interim specification, not an executable plan.
+### 5A — P066 audit capability — DONE
+
+P066's audit-only capability is released on `main` through v2.66.2. It
+inventories runner units, performs bounded measurement/dispatch, records
+receipts, and can produce a remediation brief. Historical checklist entries
+below explain the original delivery intent; they are not evidence that P066 is
+still merely an interim specification.
+
+### 5B — P069 scheduler/gate integration — ACTIVE
+
+P069 is the separate implementation stream that connects only approved,
+evidence-backed catalog mappings to the real gate runner and consumer
+`/aid-init` configuration path. It owns scheduler execution, not audit
+diagnosis. Do not alter its branch from either follow-up below.
+
+### 5C — decision-quality audit follow-up — PLANNED
+
+Canonical plan:
+`docs/plans/IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`.
+
+- [ ] Re-ground the narrow P066↔P069 catalog contract after P069 is merged or
+  frozen.
+- [ ] Make a materially unresolved audit return `audit_status: incomplete`,
+  not a remediation-ready portfolio-wide `unknown`.
+- [ ] Add bounded root-cause profiling for high-cost run units, source-aware
+  resource maps and disposable-clone parallel pilots.
+- [ ] Produce a strict decision artifact and a human-first output: fix/merge/
+  remove/split, proposed parallel lanes, serial exceptions, current time and
+  measured/estimated/unknown future impact.
+- [ ] Keep all scheduler activation and catalog approval in P069's explicit
+  authority boundary.
+
+### 5D — entry-point UX and human handoffs — PLANNED, independent
+
+Canonical plan:
+`docs/plans/IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`.
+
+- [ ] Ground every public command and every init/setup write authority.
+- [ ] Make `/aid-help` mechanically complete, while keeping its prose concise
+  and hand-written.
+- [ ] Preserve separate init/bootstrap and setup/configure authorities;
+  unify the user journey rather than merging commands blindly.
+- [ ] Render structured outcomes in human-first, user-language form without
+  weakening their underlying gate/waiver/lifecycle truth.
+
+The historical P066 roadmap tasks below are retained as context. The current
+implementation order is **finish/freeze P069 → re-ground 5C → implement 5C →
+implement 5D as a separate stream**. Planning/grounding 5D may happen earlier;
+neither implementation may modify P069's active branch.
 
 - [x] Ground the interim brief against current main and produce a reviewable
   roadmap: `docs/plans/P066-test-portfolio-audit-scheduler-remediation.md`
@@ -328,8 +378,9 @@ pass.
   on measured post-remediation data.
 - [ ] PM explicitly removes the quarantine.
 
-**GO to Phase 5.5:** P066's remediation is delivered or its remaining scheduler
-work is explicitly split into P069 against P066's merged contract.
+**GO to Phase 5.5:** P069 has a released/frozen contract, the decision-quality
+audit follow-up is re-grounded, and the durable evidence package can be
+scheduled without conflating it with test scheduler work.
 
 ## Phase 5.5 — durable plan-final evidence and review integrity
 
