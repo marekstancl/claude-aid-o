@@ -1,0 +1,14 @@
+{
+  "run_id": "e2e-self_host_bundle_refresh-20260802T115515Z-117389",
+  "scenario": "self_host_bundle_refresh",
+  "pass": false,
+  "stages_verified": [
+    {
+      "stage": "quarantine_remediation_bundle_regenerated",
+      "pass": false,
+      "detail": "collector's current real result (expected until the deferred real divergence campaign runs): TEST: run_units_expected is re-derived live from the current catalog, never hardcoded\n  PASS: run_units_expected=83 (live from /opt/eco/projects/aid-orchestrator/.aid-o/config/test-catalog.yaml)\nTEST: a qualifying divergence-evidence artifact exists for the CURRENT commit, covering the FULL current catalog\n  FAIL: no qualifying divergence-evidence artifact found under /opt/eco/projects/aid-orchestrator/.aid-o/work/evidence/scheduler-divergence for commit 4874255d3e7af5a7906f5f64b7ff09f818744903, mode observe_parallel, covering all 83 current run_units — run aid-test-schedule-divergence-check.sh first (this script is a collector, not the measurement itself)\nResults: 1/2 passed, 1 failed"
+    }
+  ],
+  "commit_sha": "4874255d3e7af5a7906f5f64b7ff09f818744903",
+  "evaluated_at": "2026-08-02T11:55:15Z"
+}

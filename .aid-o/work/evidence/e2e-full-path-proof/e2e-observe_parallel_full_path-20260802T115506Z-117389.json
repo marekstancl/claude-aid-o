@@ -1,0 +1,45 @@
+{
+  "run_id": "e2e-observe_parallel_full_path-20260802T115506Z-117389",
+  "scenario": "observe_parallel_full_path",
+  "pass": true,
+  "stages_verified": [
+    {
+      "stage": "bootstrap_catalog_approved",
+      "pass": true
+    },
+    {
+      "stage": "bootstrap_mapping_confirmed",
+      "pass": true
+    },
+    {
+      "stage": "execution_yaml_generated_with_targeted_tests_gate",
+      "pass": true
+    },
+    {
+      "stage": "three_real_divergence_passes",
+      "pass": true
+    },
+    {
+      "stage": "rollout_gate_unlocked_observe_parallel",
+      "pass": true
+    },
+    {
+      "stage": "real_scheduled_dispatch_executed_and_passed",
+      "pass": true
+    },
+    {
+      "stage": "scheduled_verdict_matches_sequential_verdict",
+      "pass": true
+    },
+    {
+      "stage": "existing_project_upgrade_applied",
+      "pass": true
+    },
+    {
+      "stage": "mapping_gap_escalation_produces_fail_plus_real_full_substitute",
+      "pass": true
+    }
+  ],
+  "commit_sha": "48178d62f4922d1bf4191e7dfb5945349e3ed79b",
+  "evaluated_at": "2026-08-02T11:55:06Z"
+}
