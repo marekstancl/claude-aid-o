@@ -100,10 +100,19 @@ _iso_remove_worktree() {
 # _iso_run_set <worktree_path> <jobs_dir> <unit_ids_csv_in_launch_order> <unit_command_map_ref> — helper: launches every named unit_id in the given
 # order inside <worktree_path> (cwd), waits for each to reach a terminal
 # receipt, and echoes a JSON object {unit_id: state, ...}.
+#
+# Codex review (real finding): every caller invokes this via command
+# substitution (`states_json="$(_iso_run_set ...)"`), which runs the WHOLE
+# function body in a SUBSHELL — an assignment to a global INSIDE this
+# function is invisible to the parent shell. Setting
+# _ISO_CURRENT_JOBS_DIR here was therefore a no-op from the cleanup trap's
+# point of view: an abort partway through launching jobs would force-remove
+# the worktree with zero record of which jobs to cancel first. Every caller
+# now sets _ISO_CURRENT_JOBS_DIR itself, in the PARENT shell, immediately
+# before calling this function.
 _iso_run_set() {
   local worktree_path="$1" jobs_dir="$2"; shift 2
   local -a ordered_ids=("$@")
-  _ISO_CURRENT_JOBS_DIR="$jobs_dir"
   mkdir -p "$jobs_dir"
 
   local -A job_of=()
@@ -161,9 +170,18 @@ cmd_run() {
   IFS=',' read -r -a unit_ids <<<"$unit_ids_csv"
   [[ ${#unit_ids[@]} -gt 0 ]] || _die 2 "run: --unit-ids must name at least one run_unit_id"
 
-  local catalog_path="${project_root}/.aid-o/config/test-catalog.yaml"
-  [[ -f "$catalog_path" ]] || _die 3 "run: no approved catalog at $catalog_path"
-  local catalog_json; catalog_json="$(yq -o=json '.' "$catalog_path")"
+  # Codex review, real finding: commands/fingerprints were previously read
+  # from the LIVE checkout's catalog, while the worktrees this experiment
+  # actually executes against are pinned to the RESOLVED --commit — with
+  # --commit pointing anywhere other than the live tree's current HEAD,
+  # this ran the CURRENT catalog's command against OLDER source and stamped
+  # the promotion with the CURRENT fingerprint, an evidence/reality
+  # mismatch. Read the catalog from the exact commit being tested instead
+  # (same `git show <commit>:<path>` technique already established in
+  # aid-test-divergence-campaign.sh), never the live working tree.
+  local catalog_json
+  catalog_json="$(git -C "$project_root" show "${commit}:.aid-o/config/test-catalog.yaml" 2>/dev/null | yq -o=json '.' 2>/dev/null)" \
+    || _die 3 "run: could not read .aid-o/config/test-catalog.yaml at commit $commit"
 
   local run_dir="${project_root}/.aid-o/work/test-audits/${run_id}"
   mkdir -p "$run_dir"
@@ -192,8 +210,10 @@ cmd_run() {
     local wt="${run_dir}/isolation-worktree-solo-$(_execution_unit_sanitize_id "$uid")"
     _iso_new_worktree "$wt" "$commit" \
       || _die 1 "run: git worktree add failed for solo baseline of '$uid' — failing closed as unknown, no live-tree fallback"
+    local solo_jobs_dir="${run_dir}/isolation-jobs/solo-$(_execution_unit_sanitize_id "$uid")"
+    _ISO_CURRENT_JOBS_DIR="$solo_jobs_dir"
     local states_json
-    states_json="$(_iso_run_set "$wt" "${run_dir}/isolation-jobs/solo-$(_execution_unit_sanitize_id "$uid")" "$uid")"
+    states_json="$(_iso_run_set "$wt" "$solo_jobs_dir" "$uid")"
     solo_state["$uid"]="$(jq -r --arg u "$uid" '.[$u]' <<<"$states_json")"
     _iso_remove_worktree
   done
@@ -215,8 +235,10 @@ cmd_run() {
     local wt="${run_dir}/isolation-worktree-trial${trial}"
     _iso_new_worktree "$wt" "$commit" \
       || _die 1 "run: git worktree add failed for trial ${trial} — failing closed as unknown, no live-tree fallback"
+    local trial_jobs_dir="${run_dir}/isolation-jobs/trial${trial}"
+    _ISO_CURRENT_JOBS_DIR="$trial_jobs_dir"
     local states_json
-    states_json="$(_iso_run_set "$wt" "${run_dir}/isolation-jobs/trial${trial}" "${ordered_ids[@]}")"
+    states_json="$(_iso_run_set "$wt" "$trial_jobs_dir" "${ordered_ids[@]}")"
     _iso_remove_worktree
 
     for uid in "${ordered_ids[@]}"; do

@@ -124,6 +124,22 @@ _write_catalog() {
   [[ "$output" != *"(0 attempt(s))"* ]]
 }
 
+@test "a pre-existing artifact whose JSON body names a DIFFERENT commit_sha does not satisfy this campaign (Codex regression)" {
+  _write_catalog
+  bash "$CAMPAIGN" run --project-root "$TEST_PROJECT_ROOT" --unit-ids "safe1" --mode-tested observe_parallel --required 1 --max-attempts 2 >/dev/null
+  local evdir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/scheduler-divergence"
+  local f; f="$(ls "$evdir"/*.json | grep -v campaign | head -1)"
+  # Tamper with the artifact's OWN commit_sha field (simulating a
+  # misnamed/copied artifact) while leaving the filename's prefix matching
+  # this campaign's real commit — the filename glob alone must not be
+  # trusted; the JSON body's own commit_sha must be re-checked.
+  jq '.commit_sha = "0000000000000000000000000000000000000000"' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+
+  run bash "$CAMPAIGN" run --project-root "$TEST_PROJECT_ROOT" --unit-ids "safe1" --mode-tested observe_parallel --required 1 --max-attempts 2
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"(0 attempt(s))"* ]]
+}
+
 @test "a campaign's evidence artifact is force-tracked" {
   _write_catalog '[ ! -f marker.txt ] && (touch marker.txt; exit 0) || exit 1'
   bash "$CAMPAIGN" run --project-root "$TEST_PROJECT_ROOT" --unit-ids "safe1" --mode-tested observe_parallel --required 2 --max-attempts 2 || true

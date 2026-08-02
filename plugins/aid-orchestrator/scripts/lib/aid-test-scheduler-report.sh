@@ -38,22 +38,29 @@ scheduler_report_merge_gate_row() {
   local gate_name="$1" expected_unit_ids_json="$2" batches_json="$3"
 
   # Flatten every batch's units[] into one receipts array, tagging each
-  # receipt with its OWN batch's ended_at. Codex review, real finding: a
-  # gate-level retry can dispatch the SAME unit_id across multiple batches
-  # (attempt1 fails, attempt2 re-runs it) — a naive `sort_by(.unit_id) |
-  # map({...}) | add` collapse picks whichever duplicate happens to sort
-  # LAST in the CALLER-SUPPLIED batches_json array order, which is exactly
-  # the reordering this function claims to be immune to (verified: reversing
+  # receipt with its OWN batch's ended_at AND numeric attempt number
+  # (parsed from batch_id's "...-attempt<N>" suffix — Step 5's own
+  # convention). Codex review, real finding: a gate-level retry can
+  # dispatch the SAME unit_id across multiple batches (attempt1 fails,
+  # attempt2 re-runs it) — a naive `sort_by(.unit_id) | map({...}) | add`
+  # collapse picks whichever duplicate happens to sort LAST in the
+  # CALLER-SUPPLIED batches_json array order, which is exactly the
+  # reordering this function claims to be immune to (verified: reversing
   # two batches with conflicting duplicate-unit_id receipts flipped the
-  # verdict). Selection is now keyed on each receipt's OWN batch ended_at
-  # (the most RECENT attempt for a unit_id wins — the real retry semantics:
-  # a later attempt's outcome supersedes an earlier one), with job_id as a
-  # final, fully deterministic tiebreak — never on array/caller order.
+  # verdict). ended_at alone is not a safe tiebreak either — Step 5 only
+  # emits second-resolution timestamps, so two retries finishing within
+  # the same second would otherwise fall back to job_id's lexicographic
+  # order ("attempt9" sorting after "attempt10"). The numeric attempt
+  # number is the real, unambiguous chronology; job_id remains a final
+  # tiebreak only for the degenerate case of a non-conforming batch_id.
   local receipts_json
   receipts_json="$(jq -cS '
-    [ .[] as $b | $b.units[] | . + {_batch_ended_at: $b.ended_at} ]
+    [ .[] as $b
+      | ($b.batch_id | capture("attempt(?<n>[0-9]+)$"; "").n // "0" | tonumber) as $attempt_n
+      | $b.units[] | . + {_batch_ended_at: $b.ended_at, _attempt_n: $attempt_n}
+    ]
     | group_by(.unit_id)
-    | map(sort_by([.["_batch_ended_at"], .job_id]) | last | del(._batch_ended_at))
+    | map(sort_by([._attempt_n, ._batch_ended_at, .job_id]) | last | del(._batch_ended_at, ._attempt_n))
     | sort_by(.unit_id)
   ' <<<"$batches_json")"
 

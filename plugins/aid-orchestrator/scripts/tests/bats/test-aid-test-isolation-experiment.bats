@@ -63,6 +63,11 @@ _write_catalog() {
     ],
     source_pattern_mappings: [], mapping_approval: {status:"proposed"}
   }' | yq -P '.' > "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml"
+  # The catalog must be committed — aid-test-isolation-experiment.sh reads
+  # it via `git show <commit>:...`, never the live working tree (Codex
+  # review fix), so an uncommitted catalog is invisible to it.
+  git -C "$TEST_PROJECT_ROOT" add -f .aid-o/config/test-catalog.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "test catalog"
 }
 
 @test "a genuinely isolated pair promotes to safe with a written, schema-valid proposed overlay" {
@@ -174,6 +179,8 @@ sys.exit(1 if list(Draft202012Validator(schema).iter_errors(inst)) else 0)
     '.run_units += [{run_unit_id:"needs-fresh-tree", runner:"shell", source_paths:["n1"], production_surfaces:["n1"], test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium", command:{type:"shell", shell:"test ! -f leftover.txt && echo leftover > leftover.txt"}, runtime:{fingerprint:"sha256:ffffffffffff"}, parallel:{status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false}, isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"}, recommendation:"keep", test_cases:[]}]' \
     | yq -P '.' > "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml.new"
   mv "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml.new" "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml"
+  git -C "$TEST_PROJECT_ROOT" add -f .aid-o/config/test-catalog.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "add needs-fresh-tree"
 
   run bash "$SCRIPT" run --project-root "$TEST_PROJECT_ROOT" --run-id "iso9" --unit-ids "needs-fresh-tree" --n 3
   [ "$status" -eq 0 ]
@@ -185,6 +192,51 @@ sys.exit(1 if list(Draft202012Validator(schema).iter_errors(inst)) else 0)
   [ "$status" -ne 0 ]
   [[ "$output" != *"usage:"* ]]
   [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/test-audits/iso10/scheduler-overlay.proposed.json" ]
+}
+
+@test "the catalog is read from the resolved --commit, never the live working tree (Codex regression)" {
+  _write_catalog
+  local commit_a; commit_a="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+
+  # Mutate the LIVE catalog (uncommitted) to remove safe1 entirely — if the
+  # experiment reads the live tree instead of commit A, resolving "safe1"
+  # would fail differently (not found) than the real, correct behavior of
+  # reading commit A's catalog, which still has it.
+  yq -o=json '.' "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" | jq '.run_units |= map(select(.run_unit_id != "safe1"))' \
+    | yq -P '.' > "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml"
+
+  run bash "$SCRIPT" run --project-root "$TEST_PROJECT_ROOT" --run-id "iso11" --unit-ids "safe1" --n 2 --commit "$commit_a"
+  [ "$status" -eq 0 ]
+}
+
+@test "TERM mid-trial cancels the outstanding unit to a terminal receipt (Codex regression: jobs-dir visibility across command substitution)" {
+  # _ISO_CURRENT_JOBS_DIR was previously set INSIDE _iso_run_set, which
+  # every caller invokes via command substitution — a subshell — so the
+  # assignment never reached the parent's cleanup trap. Prove the real,
+  # end-to-end consequence is fixed: a signal arriving while a unit is
+  # still running must still result in a real cancellation, not an
+  # orphaned process with the worktree ripped out from under it.
+  _write_catalog
+  yq -o=json '.' "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" | jq \
+    '.run_units += [{run_unit_id:"hung1", runner:"shell", source_paths:["h1"], production_surfaces:["h1"], test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium", command:{type:"shell", shell:"sleep 30 & echo $! > '"$TEST_PROJECT_ROOT"'/child.pid; wait"}, runtime:{fingerprint:"sha256:ffffffffffff"}, parallel:{status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false}, isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"}, recommendation:"keep", test_cases:[]}]' \
+    | yq -P '.' > "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml.new"
+  mv "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml.new" "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml"
+  git -C "$TEST_PROJECT_ROOT" add -f .aid-o/config/test-catalog.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "add hung1"
+
+  bash "$SCRIPT" run --project-root "$TEST_PROJECT_ROOT" --run-id "iso12" --unit-ids "hung1" --n 1 &
+  local pid=$!
+  for ((i = 0; i < 50; i++)); do
+    [[ -f "$TEST_PROJECT_ROOT/child.pid" ]] && break
+    sleep 0.1
+  done
+  [ -f "$TEST_PROJECT_ROOT/child.pid" ]
+  kill -TERM "$pid"
+  wait "$pid" || true
+
+  local child_pid; child_pid="$(cat "$TEST_PROJECT_ROOT/child.pid")"
+  run kill -0 "$child_pid"
+  [ "$status" -ne 0 ]
 }
 
 @test "an unknown run_unit_id is rejected before any worktree is created" {

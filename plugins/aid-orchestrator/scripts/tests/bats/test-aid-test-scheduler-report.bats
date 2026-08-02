@@ -100,6 +100,24 @@ _batch() {
   echo "$out_fwd" | jq -e '.result == "pass"'
 }
 
+@test "same-second retries are ordered by numeric attempt number, not job_id lexicographic order (Codex regression)" {
+  # attempt9 and attempt10 finish within the SAME wall-clock second — a
+  # lexicographic job_id tiebreak would incorrectly rank "attempt9" AFTER
+  # "attempt10" (string "9" > "1"). The numeric attempt number must win.
+  local r9 r10 batch9 batch10 expected
+  r9="$(jq -nc '{unit_id:"bats:a", job_id:"run-bats-a-attempt9-aaaa", state:"terminal_fail", duration_ms:1000, concurrency_context:"sequential", co_scheduled_with:[], stdout_path:null, exit_code:1}')"
+  batch9="$(_batch "run-attempt9" "2026-08-02T00:00:00Z" "2026-08-02T00:00:05Z" "$r9")"
+  r10="$(jq -nc '{unit_id:"bats:a", job_id:"run-bats-a-attempt10-zzzz", state:"terminal_pass", duration_ms:1000, concurrency_context:"sequential", co_scheduled_with:[], stdout_path:null, exit_code:0}')"
+  batch10="$(_batch "run-attempt10" "2026-08-02T00:00:00Z" "2026-08-02T00:00:05Z" "$r10")"
+  expected='["bats:a"]'
+
+  local out_fwd out_rev
+  out_fwd="$(scheduler_report_merge_gate_row "targeted_tests" "$expected" "[$batch9,$batch10]")"
+  out_rev="$(scheduler_report_merge_gate_row "targeted_tests" "$expected" "[$batch10,$batch9]")"
+  [ "$out_fwd" = "$out_rev" ]
+  echo "$out_fwd" | jq -e '.result == "pass"'
+}
+
 @test "a unit resolved to a non-terminal state (in_flight) is aggregated as fail" {
   local r1 batch expected
   r1="$(_receipt "bats:a" "in_flight")"

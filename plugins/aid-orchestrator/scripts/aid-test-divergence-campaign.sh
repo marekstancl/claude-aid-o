@@ -83,15 +83,22 @@ cmd_run() {
   expected_fingerprint_set="sha256:$(printf '%s' "$fp_list" | sort | sha256sum | cut -d' ' -f1)"
 
   # _campaign_artifact_qualifies <path> — true only if pass:true AND this
-  # exact unit-set AND this exact catalog_fingerprint_set match.
+  # exact commit_sha AND unit-set AND catalog_fingerprint_set all match.
+  # Codex review: commit_sha was previously trusted from the FILENAME glob
+  # alone (never re-checked against the artifact's own JSON body) — a
+  # misnamed or copied artifact naming a different commit inside its body
+  # could still count toward this campaign's target.
   _campaign_artifact_qualifies() {
     local path="$1"
     [[ -f "$path" ]] || return 1
-    local pass uids fps
+    local pass csha uids fps
     pass="$(jq -r '.pass' "$path" 2>/dev/null)"
+    csha="$(jq -r '.commit_sha' "$path" 2>/dev/null)"
     uids="$(jq -cS '.selected_unit_ids | sort' "$path" 2>/dev/null)"
     fps="$(jq -r '.catalog_fingerprint_set' "$path" 2>/dev/null)"
-    [[ "$pass" == "true" && "$uids" == "$(jq -cS 'sort' <<<"$expected_unit_ids_json")" && "$fps" == "$expected_fingerprint_set" ]]
+    [[ "$pass" == "true" && "$csha" == "$commit_sha" \
+       && "$uids" == "$(jq -cS 'sort' <<<"$expected_unit_ids_json")" \
+       && "$fps" == "$expected_fingerprint_set" ]]
   }
 
   # Count PRE-EXISTING qualifying artifacts toward the target first — never
