@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/execution-unit-receipt.schema.json",
+  "title": "AID Test Portfolio — Execution Unit Receipt",
+  "$comment": "producer: aid-test-scheduler.sh (P069 Step 5) + aid-run-gates.sh's scheduler dispatch (Step 14); consumers: report merge (Step 8), gate-runner integration (Step 14). Defined here, before either producer exists, to pin the one canonical shape both target — see this plan's Step 4.",
+  "description": "Deterministic report shape for a scheduled batch of execution units (Step 1's shape) and their terminal/non-terminal outcomes. Sort key for `units[]` is ALWAYS unit_id — never arrival or completion order — so two batches built from the same units in a different execution order serialize to byte-identical output.",
+  "$defs": {
+    "receipt": {
+      "type": "object",
+      "required": ["unit_id", "job_id", "state", "duration_ms", "concurrency_context", "co_scheduled_with", "stdout_path", "exit_code"],
+      "properties": {
+        "unit_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MUST equal the execution unit's own unit_id (Step 1) — never a separately-derived identity."
+        },
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The aid-job.sh job id this unit was dispatched under."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["started", "running", "lost", "terminal_pass", "terminal_fail", "timed_out", "cancelled"],
+          "description": "aid-job.sh's own state vocabulary (via aid-test-execution-unit.sh's status/receipt normalization, Step 1) — never a second, competing vocabulary. started/running/lost are non-terminal; the rest are terminal."
+        },
+        "duration_ms": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "null while non-terminal — never fabricated from a partial run. Whole-second-quantized (see aid-test-execution-unit.sh's own documented limitation)."
+        },
+        "concurrency_context": {
+          "type": "string",
+          "enum": ["sequential", "observe_parallel", "parallel"],
+          "description": "P069 Step 3's vocabulary — which baseline series (if any) this unit's timing was recorded into."
+        },
+        "co_scheduled_with": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Diagnostic-only: unit_ids of other units the scheduler ran concurrently with this one in the same batch. Empty for a sequential (size-1) batch. Never used to compute unit_id, job_id, or any selection/scheduling decision."
+        },
+        "stdout_path": {
+          "type": ["string", "null"],
+          "description": "Path to the unit's streamed stdout log (aid-job.sh's own stdout_path)."
+        },
+        "exit_code": {
+          "type": ["integer", "null"],
+          "description": "null while non-terminal."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "enum": ["started", "running", "lost"] } } },
+          "then": { "properties": { "duration_ms": { "const": null }, "exit_code": { "const": null } } },
+          "$comment": "Non-terminal states never carry a fabricated duration/exit_code — matches aid-test-execution-unit.sh's execution_unit_receipt, which emits both as null for every non-terminal state."
+        },
+        {
+          "if": { "properties": { "state": { "enum": ["terminal_pass", "terminal_fail", "timed_out"] } } },
+          "then": { "properties": { "duration_ms": { "type": "integer" }, "exit_code": { "type": "integer" } } },
+          "$comment": "aid-job.sh's normal cmd_wrap completion path always records ended_epoch for these three states, so duration_ms/exit_code are always present — the null exception below is cancelled-only."
+        },
+        {
+          "if": { "properties": { "state": { "const": "cancelled" } } },
+          "then": { "properties": { "exit_code": { "type": "integer" } } },
+          "$comment": "aid-job.sh's cancel path always sets exit_code:143 (even the pre-exec-handshake _wrap_write_cancelled_result), but duration_ms may legitimately be null — that handshake result carries no ended_epoch at all since the command never ran."
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "required": ["batch_id", "units", "started_at", "ended_at"],
+  "properties": {
+    "batch_id": { "type": "string", "minLength": 1 },
+    "units": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/receipt" },
+      "description": "Sorted by unit_id (ascending, byte/codepoint order) at serialization time — the canonical, deterministic ordering every producer/consumer of this shape agrees on."
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}
