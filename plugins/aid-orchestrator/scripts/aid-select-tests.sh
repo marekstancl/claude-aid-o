@@ -106,9 +106,10 @@ Options:
                          Instead of running bats/bash directly, resolves the
                          selected set through the membership verifier and
                          writes execution units (execution-unit.schema.json)
-                         to <file>. The exit-code contract (0/1/3/10) is
-                         unchanged; exit 3 (D-selector-1 unverifiable) still
-                         writes no units file.
+                         to <file>. The exit-code contract (0/1/3/10/11) is
+                         unchanged; exit 3 (D-selector-1 unverifiable) and
+                         exit 11 (P069 Step 10 mapping_gap) both write no
+                         units file.
 EOF
 }
 
@@ -352,8 +353,27 @@ for cp in "${CHANGED_PATHS[@]}"; do
       esac
       continue
     else
-      mapping_gap=true
-      reasoning+=("mapping_gap: no approved mapping row matches ${cp} — escalate to full profile")
+      # EPIC 3 whole-diff review (real integration gap): the approved
+      # catalog only ever carries rows for the Initial mapping's own case
+      # arms plus auto-seeded gap rows for scripts/ and defaults/ files
+      # (Step 11 requires an exact reproduction of the selector-snapshot,
+      # which only covers those two roots — see
+      # aid-test-catalog-selector-snapshot.sh's own `find` scope). Treating
+      # every unmatched path as mapping_gap here — bypassing
+      # is_production_surface entirely — would hard-fail (exit 11) on any
+      # change to README.md, skills/*.md, commands/*.md, non-ui-fidelity
+      # lib/**, docs/, etc., which the hardcoded fallback below correctly
+      # treats as no test impact. Apply the SAME production-surface/.md
+      # test here so an approved catalog can only ever be STRICTER than the
+      # fallback for paths that are actually inside the production surface,
+      # never a hard-fail for paths that were never production surface to
+      # begin with.
+      if [[ "$cp" == *.md ]] || ! is_production_surface "$cp"; then
+        reasoning+=("docs-only (approved catalog mapping, no covering row): ${cp} — outside production surface, no test impact")
+      else
+        mapping_gap=true
+        reasoning+=("mapping_gap: no approved mapping row matches ${cp} — escalate to full profile")
+      fi
       continue
     fi
   fi

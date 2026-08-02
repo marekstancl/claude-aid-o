@@ -165,6 +165,23 @@ _write_catalog() {
   echo "$output" | jq -e '.reasoning | any(startswith("unverifiable:"))'
 }
 
+@test "an approved catalog with no covering row for a non-production path is no-impact, never mapping_gap (EPIC 3 whole-diff review)" {
+  # README.md is outside scripts/ and defaults/ entirely — no case arm, no
+  # auto-seeded gap row (those only ever cover scripts/ and defaults/, per
+  # aid-test-catalog-selector-snapshot.sh's own find scope), and NOT
+  # matched by any of _write_catalog's three rows either. Before the fix,
+  # every unmatched path under an approved catalog was unconditionally
+  # mapping_gap (exit 11) regardless of is_production_surface — hard-
+  # failing on ordinary doc/skill/command changes that were never
+  # production surface to begin with.
+  _write_catalog "approved"
+  commit_change "README.md"
+
+  run "$SELECTOR" --base "$BASE_SHA"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selected_tests == [] and (.reasoning | any(startswith("docs-only (approved catalog mapping, no covering row):")))'
+}
+
 @test "mapping_gap and unknown_production are distinct exit codes, never conflated" {
   _write_catalog "approved"
   commit_change "plugins/aid-orchestrator/scripts/aid-known-gap-example.sh"
