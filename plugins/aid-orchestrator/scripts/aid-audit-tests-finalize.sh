@@ -45,6 +45,10 @@ source "${SCRIPT_DIR}/lib/aid-test-audit-write-plan-bridge.sh"
 _die() { echo "aid-audit-tests-finalize.sh: $2" >&2; exit "$1"; }
 
 audit_id="" wave_artifacts_dir="" dispatch_manifest="" output_dir="" catalog_path="" write_plan="false"
+# P072 Step 3 — the audit mode reaches the write-plan bridge so its decision
+# gate can apply to `full` only. REQUIRED whenever --write-plan is used: the
+# bridge refuses to guess a mode, and so does this script.
+audit_mode=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -52,6 +56,13 @@ while [[ $# -gt 0 ]]; do
     --dispatch-manifest) [[ $# -ge 2 ]] || _die 2 "--dispatch-manifest requires a value"; dispatch_manifest="$2"; shift 2 ;;
     --output-dir) [[ $# -ge 2 ]] || _die 2 "--output-dir requires a value"; output_dir="$2"; shift 2 ;;
     --catalog) [[ $# -ge 2 ]] || _die 2 "--catalog requires a value"; catalog_path="$2"; shift 2 ;;
+    --mode)
+      [[ $# -ge 2 ]] || _die 2 "--mode requires a value"
+      case "$2" in
+        static|measure|full) audit_mode="$2" ;;
+        *) _die 2 "--mode must be static|measure|full (got '$2')" ;;
+      esac
+      shift 2 ;;
     --write-plan) write_plan="true"; shift ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
@@ -69,6 +80,9 @@ done
 if [[ "$write_plan" == "true" && -z "$catalog_path" ]]; then
   _die 2 "--write-plan requires --catalog"
 fi
+if [[ "$write_plan" == "true" && -z "$audit_mode" ]]; then
+  _die 2 "--write-plan requires --mode static|measure|full (the decision gate applies to full only, and this script never guesses which audit ran)"
+fi
 
 # ─── Stage 1: consolidate (Step 14) — fails closed on any incomplete/
 #     mismatched/undeclared wave artifact; produces NO output on failure.
@@ -83,7 +97,9 @@ findings_path="${output_dir%/}/consolidated-findings.json"
 
 # ─── Stage 2: render the mandatory chat summary (Step 15) — persists the
 #     durable record as a side effect; fails closed if that persist fails.
-chat_text="$(aid_test_audit_render_chat_summary "$findings_path")" \
+# "" for $2 keeps the renderer's own default changed_text (it uses :- so an
+# empty string falls back); the mode is $3.
+chat_text="$(aid_test_audit_render_chat_summary "$findings_path" "" "$audit_mode")" \
   || _die 1 "chat summary render failed — no durable record, no chat turn: ${chat_text}"
 
 printf '%s\n' "$chat_text"
@@ -91,6 +107,6 @@ printf '%s\n' "$chat_text"
 # ─── Stage 3 (optional): the write-plan bridge check — same-conversation
 #     continuation and --write-plan both resolve to this identical call.
 if [[ "$write_plan" == "true" ]]; then
-  bridge_result="$(aid_test_audit_write_plan_bridge_check "$output_dir" "$catalog_path")"
+  bridge_result="$(aid_test_audit_write_plan_bridge_check "$output_dir" "$catalog_path" "$audit_mode")"
   printf '%s\n' "$bridge_result"
 fi

@@ -23,6 +23,7 @@ valid_decision() {
   cat <<'JSON'
 {
   "schema_version": "aid-test-audit-decision-v1",
+  "audit_id": "audit-20260802-070629",
   "audit_status": "complete",
   "current_runtime": {
     "kind": "measured",
@@ -292,4 +293,10 @@ mutate() { valid_decision | jq -c "$1"; }
   run aid_test_audit_decision_lane_units "$TMP/d.json"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "a decision artifact without an audit_id is rejected (it could not be bound to its audit)" {
+  run aid_test_audit_decision_write "$(mutate 'del(.audit_id)')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"audit_id"* ]]
 }

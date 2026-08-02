@@ -7,6 +7,7 @@
   "type": "object",
   "required": [
     "schema_version",
+    "audit_id",
     "audit_status",
     "current_runtime",
     "actions",
@@ -17,147 +18,291 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "aid-test-audit-decision-v1" },
-
+    "schema_version": {
+      "const": "aid-test-audit-decision-v1"
+    },
+    "audit_id": {
+      "$ref": "#/$defs/stable_id",
+      "description": "The audit this decision belongs to. The write-plan bridge compares it with the durable record's audit_id, so a decision artifact left in a reused output directory by an EARLIER audit cannot authorize a later one."
+    },
     "audit_status": {
-      "enum": ["complete", "incomplete"],
+      "enum": [
+        "complete",
+        "incomplete"
+      ],
       "description": "`incomplete` blocks the --write-plan handoff (lib/aid-test-audit-write-plan-bridge.sh). It is NOT a failure — it is an honest refusal to be treated as remediation-ready."
     },
-
     "incomplete_reason": {
       "$ref": "#/$defs/controlled_reason",
       "description": "Required when audit_status is `incomplete`; forbidden when `complete`. Controlled vocabulary, never free text."
     },
-
     "current_runtime": {
       "type": "object",
-      "required": ["kind", "duration_ms", "scope"],
+      "required": [
+        "kind",
+        "duration_ms",
+        "scope"
+      ],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["measured", "lower_bound", "unknown"] },
-        "duration_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "kind": {
+          "enum": [
+            "measured",
+            "lower_bound",
+            "unknown"
+          ]
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
         "scope": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/stable_id" },
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          },
           "description": "Named catalog/run-unit membership the duration covers. A duration with no stated membership is not a measurement."
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "kind": { "const": "unknown" } }, "required": ["kind"] },
-          "then": { "properties": { "duration_ms": { "type": "null" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "duration_ms": {
+                "type": "null"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["measured", "lower_bound"] } }, "required": ["kind"] },
-          "then": { "properties": { "duration_ms": { "type": "integer" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "measured",
+                  "lower_bound"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "duration_ms": {
+                "type": "integer"
+              }
+            }
+          }
         }
       ]
     },
-
     "actions": {
       "type": "array",
       "description": "May be empty — a genuinely healthy portfolio proposes nothing. An empty actions[] must never be conflated with audit_status: incomplete.",
       "items": {
         "type": "object",
-        "required": ["action", "targets", "priority", "reason", "evidence_refs", "impact"],
+        "required": [
+          "action",
+          "targets",
+          "priority",
+          "reason",
+          "evidence_refs",
+          "impact"
+        ],
         "additionalProperties": false,
         "properties": {
           "action": {
-            "enum": ["fix", "merge", "remove", "split", "parallelize", "keep_serial", "measure"]
+            "enum": [
+              "fix",
+              "merge",
+              "remove",
+              "split",
+              "parallelize",
+              "keep_serial",
+              "measure"
+            ]
           },
           "targets": {
             "type": "array",
             "minItems": 1,
-            "items": { "$ref": "#/$defs/stable_id" }
+            "items": {
+              "$ref": "#/$defs/stable_id"
+            }
           },
-          "priority": { "enum": ["critical", "high", "medium", "low"] },
-          "reason": { "$ref": "#/$defs/bounded_text" },
+          "priority": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "reason": {
+            "$ref": "#/$defs/bounded_text"
+          },
           "evidence_refs": {
             "type": "array",
             "minItems": 1,
-            "items": { "$ref": "#/$defs/evidence_ref" }
+            "items": {
+              "$ref": "#/$defs/evidence_ref"
+            }
           },
-          "impact": { "$ref": "#/$defs/impact" }
+          "impact": {
+            "$ref": "#/$defs/impact"
+          }
         }
       }
     },
-
     "parallelization": {
       "type": "object",
-      "required": ["lanes", "smallest_safe_pilot"],
+      "required": [
+        "lanes",
+        "smallest_safe_pilot"
+      ],
       "additionalProperties": false,
       "properties": {
         "lanes": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["lane_id", "disposition", "run_unit_ids", "resource_basis", "evidence_refs"],
+            "required": [
+              "lane_id",
+              "disposition",
+              "run_unit_ids",
+              "resource_basis",
+              "evidence_refs"
+            ],
             "additionalProperties": false,
             "properties": {
-              "lane_id": { "$ref": "#/$defs/stable_id" },
+              "lane_id": {
+                "$ref": "#/$defs/stable_id"
+              },
               "disposition": {
-                "enum": ["proposed_parallel", "keep_serial", "blocked_pending_fix", "context_required"]
+                "enum": [
+                  "proposed_parallel",
+                  "keep_serial",
+                  "blocked_pending_fix",
+                  "context_required"
+                ]
               },
               "run_unit_ids": {
                 "type": "array",
                 "minItems": 1,
-                "items": { "$ref": "#/$defs/stable_id" },
+                "items": {
+                  "$ref": "#/$defs/stable_id"
+                },
                 "description": "Disjointness ACROSS lanes is not expressible in JSON Schema; lib/aid-test-audit-decision.sh enforces it in bash and returns exit code 4 naming both lane ids."
               },
               "resource_basis": {
                 "type": "array",
-                "items": { "$ref": "#/$defs/resource_pair" }
+                "items": {
+                  "$ref": "#/$defs/resource_pair"
+                }
               },
               "evidence_refs": {
                 "type": "array",
-                "items": { "$ref": "#/$defs/evidence_ref" }
+                "items": {
+                  "$ref": "#/$defs/evidence_ref"
+                }
               }
             },
             "allOf": [
               {
                 "$comment": "A lane may only be proposed for parallel execution with at least one citable piece of evidence. keep_serial/context_required may legitimately carry none.",
                 "if": {
-                  "properties": { "disposition": { "const": "proposed_parallel" } },
-                  "required": ["disposition"]
+                  "properties": {
+                    "disposition": {
+                      "const": "proposed_parallel"
+                    }
+                  },
+                  "required": [
+                    "disposition"
+                  ]
                 },
-                "then": { "properties": { "evidence_refs": { "minItems": 1 } } }
+                "then": {
+                  "properties": {
+                    "evidence_refs": {
+                      "minItems": 1
+                    }
+                  }
+                }
               }
             ]
           }
         },
         "smallest_safe_pilot": {
-          "type": ["object", "null"],
-          "required": ["run_unit_ids", "workers", "repeat", "pass_criteria"],
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "run_unit_ids",
+            "workers",
+            "repeat",
+            "pass_criteria"
+          ],
           "additionalProperties": false,
           "description": "The smallest bounded pilot that would settle the most currently-unresolved units. Null only when nothing is unresolved.",
           "properties": {
             "run_unit_ids": {
               "type": "array",
               "minItems": 1,
-              "items": { "$ref": "#/$defs/stable_id" }
+              "items": {
+                "$ref": "#/$defs/stable_id"
+              }
             },
-            "workers": { "type": "integer", "minimum": 2 },
-            "repeat": { "type": "integer", "minimum": 1 },
+            "workers": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "repeat": {
+              "type": "integer",
+              "minimum": 1
+            },
             "pass_criteria": {
               "type": "array",
               "minItems": 1,
-              "items": { "$ref": "#/$defs/bounded_text" }
+              "items": {
+                "$ref": "#/$defs/bounded_text"
+              }
             }
           }
         }
       }
     },
-
     "unresolved": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["run_unit_id", "missing_proof", "next_measurement"],
+        "required": [
+          "run_unit_id",
+          "missing_proof",
+          "next_measurement"
+        ],
         "additionalProperties": false,
         "properties": {
-          "run_unit_id": { "$ref": "#/$defs/stable_id" },
-          "missing_proof": { "$ref": "#/$defs/controlled_reason" },
+          "run_unit_id": {
+            "$ref": "#/$defs/stable_id"
+          },
+          "missing_proof": {
+            "$ref": "#/$defs/controlled_reason"
+          },
           "next_measurement": {
             "$ref": "#/$defs/bounded_text",
             "description": "Must name a bounded operation this plugin can actually run — not an aspiration."
@@ -165,7 +310,6 @@
         }
       }
     },
-
     "portfolio_coverage": {
       "type": "object",
       "required": [
@@ -178,14 +322,32 @@
       "additionalProperties": false,
       "description": "Computed by the consolidator from the inventory, the dispatch manifest and the wave artifacts — never from a shard's self-reported count.",
       "properties": {
-        "inventory_count": { "type": "integer", "minimum": 0 },
-        "assigned_count": { "type": "integer", "minimum": 0 },
-        "disposition_count": { "type": "integer", "minimum": 0 },
-        "missing_run_unit_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" } },
-        "duplicate_run_unit_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" } }
+        "inventory_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assigned_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "disposition_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_run_unit_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
+        "duplicate_run_unit_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        }
       }
     },
-
     "portfolio_change": {
       "type": "object",
       "required": [
@@ -201,75 +363,164 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "current_run_units": { "type": "integer", "minimum": 0 },
-        "proposed_run_units": { "type": "integer", "minimum": 0 },
-        "keep": { "type": "array", "items": { "$ref": "#/$defs/stable_id" } },
-        "rewrite_unit": { "type": "array", "items": { "$ref": "#/$defs/stable_id" } },
+        "current_run_units": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proposed_run_units": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
+        "rewrite_unit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
         "merge_groups": {
           "type": "array",
           "items": {
             "type": "array",
             "minItems": 2,
-            "items": { "$ref": "#/$defs/stable_id" }
+            "items": {
+              "$ref": "#/$defs/stable_id"
+            }
           },
           "description": "Connected components over the overlap relation. A group of one is not a merge."
         },
-        "remove": { "type": "array", "items": { "$ref": "#/$defs/stable_id" } },
-        "runtime_before_ms": { "type": ["integer", "null"], "minimum": 0 },
-        "runtime_after_ms": { "type": ["integer", "null"], "minimum": 0 },
-        "impact_kind": { "enum": ["measured", "estimated", "unknown"] }
+        "remove": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
+        "runtime_before_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "runtime_after_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "impact_kind": {
+          "enum": [
+            "measured",
+            "estimated",
+            "unknown"
+          ]
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "impact_kind": { "const": "unknown" } }, "required": ["impact_kind"] },
+          "if": {
+            "properties": {
+              "impact_kind": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "impact_kind"
+            ]
+          },
           "then": {
             "properties": {
-              "runtime_before_ms": { "type": "null" },
-              "runtime_after_ms": { "type": "null" }
+              "runtime_before_ms": {
+                "type": "null"
+              },
+              "runtime_after_ms": {
+                "type": "null"
+              }
             }
           }
         },
         {
-          "if": { "properties": { "impact_kind": { "const": "measured" } }, "required": ["impact_kind"] },
+          "if": {
+            "properties": {
+              "impact_kind": {
+                "const": "measured"
+              }
+            },
+            "required": [
+              "impact_kind"
+            ]
+          },
           "then": {
             "properties": {
-              "runtime_before_ms": { "type": "integer" },
-              "runtime_after_ms": { "type": "integer" }
+              "runtime_before_ms": {
+                "type": "integer"
+              },
+              "runtime_after_ms": {
+                "type": "integer"
+              }
             }
           }
         }
       ]
     }
   },
-
   "allOf": [
     {
       "$comment": "A COMPLETE audit is one where every discovered unit reached exactly one terminal disposition. Missing or duplicate ids are precisely the conditions that make that false, so `complete` cannot coexist with either.",
       "if": {
-        "properties": { "audit_status": { "const": "complete" } },
-        "required": ["audit_status"]
+        "properties": {
+          "audit_status": {
+            "const": "complete"
+          }
+        },
+        "required": [
+          "audit_status"
+        ]
       },
       "then": {
         "properties": {
           "portfolio_coverage": {
             "properties": {
-              "missing_run_unit_ids": { "maxItems": 0 },
-              "duplicate_run_unit_ids": { "maxItems": 0 }
+              "missing_run_unit_ids": {
+                "maxItems": 0
+              },
+              "duplicate_run_unit_ids": {
+                "maxItems": 0
+              }
             }
           }
         },
-        "not": { "required": ["incomplete_reason"] }
+        "not": {
+          "required": [
+            "incomplete_reason"
+          ]
+        }
       }
     },
     {
       "if": {
-        "properties": { "audit_status": { "const": "incomplete" } },
-        "required": ["audit_status"]
+        "properties": {
+          "audit_status": {
+            "const": "incomplete"
+          }
+        },
+        "required": [
+          "audit_status"
+        ]
       },
-      "then": { "required": ["incomplete_reason"] }
+      "then": {
+        "required": [
+          "incomplete_reason"
+        ]
+      }
     }
   ],
-
   "$defs": {
     "stable_id": {
       "type": "string",
@@ -278,15 +529,15 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
       "$comment": "Matches the run_unit_id grammar (bats:path, sh:path, gate:name, npm:script) plus lane ids. Leading '/' is impossible, which is what keeps an absolute path out of an id field."
     },
-
     "bounded_text": {
       "type": "string",
       "minLength": 1,
       "maxLength": 500,
-      "not": { "pattern": "(^|\\s)(/[A-Za-z0-9._-]+){2,}" },
+      "not": {
+        "pattern": "(^|\\s)(/[A-Za-z0-9._-]+){2,}"
+      },
       "$comment": "Rejects an embedded absolute path. Human prose belongs in the rendered report and evidence files; this field carries a bounded, public-safe reason only."
     },
-
     "evidence_ref": {
       "type": "string",
       "minLength": 1,
@@ -294,13 +545,11 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
       "$comment": "Audit-relative path or artifact id. Anchored to a non-'/' first character so an absolute path cannot be recorded; lib/aid-test-audit-decision.sh additionally rejects any ref containing '..'."
     },
-
     "resource_pair": {
       "type": "string",
       "pattern": "^(temp_path|fixed_path|working_dir|git_repo|git_worktree|aid_state|lock|port|socket|process_group|cache|external_service)/(per-test|per-run|shared|unknown)$",
       "$comment": "Controlled vocabulary from P072's resource-namespace design. The kind and its namespace are one fact, so `fixed_path/shared` and `temp_path/per-test` never blend into a single judgement."
     },
-
     "controlled_reason": {
       "enum": [
         "empty_inventory",
@@ -317,45 +566,114 @@
       ],
       "$comment": "Controlled, not free text — a reason a consumer can branch on. Extending this list is a schema change, which is the point: a new reason must be a deliberate contract decision."
     },
-
     "impact": {
       "type": "object",
-      "required": ["kind", "before_ms", "after_ms", "assumptions"],
+      "required": [
+        "kind",
+        "before_ms",
+        "after_ms",
+        "assumptions"
+      ],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["measured", "estimated", "unknown"] },
-        "before_ms": { "type": ["integer", "null"], "minimum": 0 },
-        "after_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "kind": {
+          "enum": [
+            "measured",
+            "estimated",
+            "unknown"
+          ]
+        },
+        "before_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "after_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
         "assumptions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/bounded_text" }
+          "items": {
+            "$ref": "#/$defs/bounded_text"
+          }
         }
       },
       "allOf": [
         {
           "$comment": "measured means two comparable runs happened — both endpoints must be real numbers, and there is nothing left to assume.",
-          "if": { "properties": { "kind": { "const": "measured" } }, "required": ["kind"] },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "measured"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
           "then": {
             "properties": {
-              "before_ms": { "type": "integer" },
-              "after_ms": { "type": "integer" },
-              "assumptions": { "maxItems": 0 }
+              "before_ms": {
+                "type": "integer"
+              },
+              "after_ms": {
+                "type": "integer"
+              },
+              "assumptions": {
+                "maxItems": 0
+              }
             }
           }
         },
         {
           "$comment": "estimated is only honest when its assumptions are stated. An estimate with no stated assumptions is a guess wearing a number.",
-          "if": { "properties": { "kind": { "const": "estimated" } }, "required": ["kind"] },
-          "then": { "properties": { "assumptions": { "minItems": 1 } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "estimated"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "assumptions": {
+                "minItems": 1
+              }
+            }
+          }
         },
         {
           "$comment": "unknown claims no numerical benefit at all.",
-          "if": { "properties": { "kind": { "const": "unknown" } }, "required": ["kind"] },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
           "then": {
             "properties": {
-              "before_ms": { "type": "null" },
-              "after_ms": { "type": "null" },
-              "assumptions": { "maxItems": 0 }
+              "before_ms": {
+                "type": "null"
+              },
+              "after_ms": {
+                "type": "null"
+              },
+              "assumptions": {
+                "maxItems": 0
+              }
             }
           }
         }

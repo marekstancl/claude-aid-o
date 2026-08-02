@@ -57,6 +57,10 @@ _tacs_classify_verdict() {
 #   "clean" verdict.
 aid_test_audit_render_chat_summary() {
   local findings_path="$1" changed_text="${2:-nothing (no separately approved step ran)}"
+  # P072 Step 3 — the mode the audit actually ran in, recorded into the
+  # durable record so the write-plan bridge can refuse a caller that
+  # relabels a full audit as `measure` to slip past the decision gate.
+  local _tacs_audit_mode="${3-}"
 
   if [[ ! -f "$findings_path" ]]; then
     echo "**Audit did not complete cleanly** — no consolidated findings file was produced ($findings_path missing). This is not a clean result; something failed before consolidation."
@@ -131,7 +135,7 @@ aid_test_audit_render_chat_summary() {
   # failure is a failed audit turn, never a "done" one.
   local audit_id
   audit_id="$(jq -r '.audit_id' <<<"$whole_doc")"
-  if ! aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action"; then
+  if ! aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action" "$_tacs_audit_mode"; then
     echo "**Audit did not complete cleanly** — failed to persist the durable audit record (durable-record.json) for $findings_path. This is not a clean result; the --write-plan/continuation handoff cannot be reached without it." >&2
     return 1
   fi

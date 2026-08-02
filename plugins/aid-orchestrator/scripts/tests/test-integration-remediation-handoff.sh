@@ -102,7 +102,13 @@ fi
 [[ -f "${OUT_DIR}/durable-record.json" ]] && pass_msg "durable-record.json was persisted" || fail_msg "durable-record.json missing"
 
 echo "TEST: Step 16's validator returns {ready:true,...} for this REAL brief against this repo's REAL approved catalog"
-bridge_output="$(bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_check '${OUT_DIR}' '${REAL_CATALOG}'")"
+# P072 Step 3: the bridge's decision gate applies to `full` mode only. These
+# fixtures produce findings + brief but no decision artifact, which under the
+# new contract is exactly a `measure`-mode audit — so the mode is now stated
+# explicitly rather than relying on the default. A full-mode variant carrying
+# a real decision artifact arrives with Steps 4-6, which are what make a
+# per-unit disposition (and therefore a complete decision) exist at all.
+bridge_output="$(bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_check '${OUT_DIR}' '${REAL_CATALOG}' measure")"
 echo "  bridge result: ${bridge_output}"
 if echo "$bridge_output" | jq -e '.ready == true' >/dev/null 2>&1; then
   pass_msg "bridge returned {ready:true,...} — the /aid-plan write handoff is genuinely reachable"

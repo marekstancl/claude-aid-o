@@ -36,6 +36,32 @@ run_units:
 source_pattern_mappings: []
 mapping_approval: {status: proposed}
 YAML
+
+  # P072 Step 3 — the bridge's full-mode decision gate runs before every
+  # check below. These cases were written to exercise the DOWNSTREAM checks
+  # (verdict, brief staleness, catalog resolution), so they are given a
+  # valid, complete decision artifact and their own assertions are unchanged.
+  # The gate itself is covered by its own cases at the end of this file.
+  _write_complete_decision
+}
+
+# _write_complete_decision — the minimum artifact that satisfies
+# test-audit-decision.schema.json with audit_status: complete.
+_write_complete_decision() {
+  jq -n '{
+    schema_version: "aid-test-audit-decision-v1",
+    audit_id: "a1",
+    audit_status: "complete",
+    current_runtime: {kind: "unknown", duration_ms: null, scope: ["bats:a"]},
+    actions: [],
+    parallelization: {lanes: [], smallest_safe_pilot: null},
+    unresolved: [],
+    portfolio_coverage: {inventory_count: 1, assigned_count: 1, disposition_count: 1,
+                         missing_run_unit_ids: [], duplicate_run_unit_ids: []},
+    portfolio_change: {current_run_units: 1, proposed_run_units: 1, keep: ["bats:a"],
+                       rewrite_unit: [], merge_groups: [], remove: [],
+                       runtime_before_ms: null, runtime_after_ms: null, impact_kind: "unknown"}
+  }' > "${OUTPUT_DIR}/decision.json"
 }
 
 teardown() {
@@ -59,21 +85,21 @@ _write_valid_findings_and_brief() {
   _write_valid_findings_and_brief
   aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
 
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
   local first="$output"
   [ "$status" -eq 0 ]
 
   # A second, independent call (simulating the same-conversation
   # continuation trigger, which resolves to this same function) MUST
   # produce the identical result — there is only one validator code path.
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
   [ "$output" = "$first" ]
   echo "$output" | jq -e '.ready == true' >/dev/null
 }
 
 @test "a clean-verdict continuation attempt returns {ready:false, reason:'no brief: audit found nothing to fix'}" {
   aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "clean" "no action needed"
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.ready == false' >/dev/null
   [[ "$output" == *"no brief: audit found nothing to fix"* ]]
@@ -81,7 +107,7 @@ _write_valid_findings_and_brief() {
 
 @test "a needs-measurement-verdict continuation attempt also returns {ready:false,...} (no brief exists for it either)" {
   aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "needs measurement" "re-run with --mode measure"
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.ready == false' >/dev/null
 }
@@ -99,7 +125,7 @@ _write_valid_findings_and_brief() {
   echo "# brief" > "${OUTPUT_DIR}/implementation-plan-brief.md"
   aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
 
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.ready == false' >/dev/null
   [[ "$output" == *"stale run_unit_id"* ]]
@@ -123,7 +149,7 @@ _write_valid_findings_and_brief() {
   local marker="$TEST_TMPDIR/aid-plan-write-invoked"
   rm -f "$marker" 2>/dev/null
   local result
-  result="$(aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG")"
+  result="$(aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full)"
   if echo "$result" | jq -e '.ready == true' >/dev/null 2>&1; then
     touch "$marker"
   fi
@@ -134,7 +160,7 @@ _write_valid_findings_and_brief() {
   _write_valid_findings_and_brief
   aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
 
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$TEST_TMPDIR/does-not-exist-catalog.yaml"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$TEST_TMPDIR/does-not-exist-catalog.yaml" full
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.ready == false' >/dev/null
   [[ "$output" == *"cannot verify run_unit_ids"* ]]
@@ -147,7 +173,7 @@ _write_valid_findings_and_brief() {
   local bad_catalog="$TEST_TMPDIR/bad-catalog.yaml"
   printf ':::not valid yaml:::\n\tbroken' > "$bad_catalog"
 
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$bad_catalog"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$bad_catalog" full
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.ready == false' >/dev/null
   [[ "$output" == *"cannot verify run_unit_ids"* ]]
@@ -183,7 +209,7 @@ _write_valid_findings_and_brief() {
   # this 500-entry catalog — so the honest, correct result is ready:false
   # with a real stale_id (proving the check actually ran against the whole
   # 500-entry catalog), never a silent ready:true from a failed jq call.
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$big_catalog"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$big_catalog" full
   [ "$status" -eq 0 ]
   [[ "$output" != *"Argument list too long"* ]]
   echo "$output" | jq -e '.ready == false' >/dev/null
@@ -191,7 +217,7 @@ _write_valid_findings_and_brief() {
 }
 
 @test "a missing durable record returns {ready:false,...} rather than erroring" {
-  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.ready == false' >/dev/null
 }
@@ -204,4 +230,118 @@ _write_valid_findings_and_brief() {
 
 @test "the bridge script never invokes /aid-plan write itself (grep-verified, comments excluded)" {
   ! grep -vE '^\s*#' "$AID_PLUGIN_PATH/scripts/lib/aid-test-audit-write-plan-bridge.sh" | grep -q "aid-plan write"
+}
+
+# ─── P072 Step 3 — the full-mode decision gate ──────────────────────────────
+
+@test "P072: an incomplete decision blocks the handoff with reason audit_incomplete" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+  jq '.audit_status = "incomplete" | .incomplete_reason = "unresolved_fraction_exceeded"' \
+    "${OUTPUT_DIR}/decision.json" > "${OUTPUT_DIR}/d.tmp"
+  mv "${OUTPUT_DIR}/d.tmp" "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":false'* ]]
+  [[ "$output" == *"audit_incomplete"* ]]
+}
+
+@test "P072: a missing decision artifact blocks full mode with decision_artifact_missing" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+  rm -f "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":false'* ]]
+  [[ "$output" == *"decision_artifact_missing"* ]]
+}
+
+@test "P072: a decision artifact that no longer validates blocks with decision_artifact_invalid" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+  echo '{"schema_version":"aid-test-audit-decision-v1","audit_status":"complete"}' \
+    > "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
+  [ "$status" -eq 0 ]
+  ready="$(jq -r '.ready' <<<"$output")"
+  reason="$(jq -r '.reason' <<<"$output")"
+  [ "$ready" = "false" ]
+  [[ "$reason" == decision_artifact_invalid* ]]
+}
+
+@test "P072: static and measure modes reach ready:true with NO decision artifact" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+  rm -f "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" static
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":true'* ]]
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" measure
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":true'* ]]
+}
+
+@test "P072: an omitted mode is refused outright — the bridge never guesses it" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
+  [ "$status" -eq 0 ]
+  ready="$(jq -r '.ready' <<<"$output")"
+  reason="$(jq -r '.reason' <<<"$output")"
+  [ "$ready" = "false" ]
+  [[ "$reason" == *"does not guess"* ]]
+}
+
+@test "P072: a caller cannot relabel a recorded full audit as measure to skip the gate" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan" "full"
+  rm -f "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" measure
+  [ "$status" -eq 0 ]
+  reason="$(jq -r '.reason' <<<"$output")"
+  [[ "$reason" == *"audit mode mismatch"* ]]
+}
+
+@test "P072: a decision artifact belonging to a DIFFERENT audit cannot authorize this one" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan" "full"
+  jq '.audit_id = "some-earlier-audit"' "${OUTPUT_DIR}/decision.json" > "${OUTPUT_DIR}/d.tmp"
+  mv "${OUTPUT_DIR}/d.tmp" "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
+  [ "$status" -eq 0 ]
+  reason="$(jq -r '.reason' <<<"$output")"
+  [[ "$reason" == *"decision_artifact_foreign"* ]]
+}
+
+@test "P072: an unknown mode is refused rather than silently treated as full" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" turbo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":false'* ]]
+  [[ "$output" == *"unknown audit mode"* ]]
+}
+
+@test "P072: the decision gate runs BEFORE the verdict check (an incomplete audit with a clean verdict reports audit_incomplete)" {
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "clean" "no action needed"
+  jq '.audit_status = "incomplete" | .incomplete_reason = "budget_exhausted"' \
+    "${OUTPUT_DIR}/decision.json" > "${OUTPUT_DIR}/d.tmp"
+  mv "${OUTPUT_DIR}/d.tmp" "${OUTPUT_DIR}/decision.json"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
+  [ "$status" -eq 0 ]
+  ready="$(jq -r '.ready' <<<"$output")"
+  reason="$(jq -r '.reason' <<<"$output")"
+  [ "$ready" = "false" ]
+  [ "$reason" = "audit_incomplete" ]
 }

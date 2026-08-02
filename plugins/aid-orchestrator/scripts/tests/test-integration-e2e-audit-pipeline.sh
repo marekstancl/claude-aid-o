@@ -115,7 +115,7 @@ jq -n '{schema_version:"1.0.0", generated_at:"2026-07-30T00:00:00Z", status:"app
 
 finalize_output="$(bash "$FINALIZE" --audit-id e2e-remediation --wave-artifacts-dir "$REMEDIATION_AGENTS" \
   --dispatch-manifest "${WORK_DIR}/remediation-manifest.json" --output-dir "$REMEDIATION_OUT" \
-  --catalog "$mini_catalog" --write-plan)"
+  --catalog "$mini_catalog" --mode measure --write-plan)"
 bridge_result="$(echo "$finalize_output" | tail -1)"
 if echo "$bridge_result" | jq -e '.ready == true' >/dev/null 2>&1; then
   pass_msg "finalize.sh --write-plan returned ready:true for a real remediation-recommended brief"
@@ -127,7 +127,13 @@ echo "TEST: Step 16 validator returns ready:false for a clean-verdict audit"
 CLEAN_OUT="${WORK_DIR}/clean-out"
 mkdir -p "$CLEAN_OUT"
 bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_persist '${CLEAN_OUT}' 'e2e-clean' 'clean' 'no action needed'"
-clean_result="$(bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_check '${CLEAN_OUT}' '${mini_catalog}'")"
+# P072 Step 3: the bridge's decision gate applies to `full` mode only. These
+# fixtures produce findings + brief but no decision artifact, which under the
+# new contract is exactly a `measure`-mode audit — so the mode is now stated
+# explicitly rather than relying on the default. A full-mode variant carrying
+# a real decision artifact arrives with Steps 4-6, which are what make a
+# per-unit disposition (and therefore a complete decision) exist at all.
+clean_result="$(bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_check '${CLEAN_OUT}' '${mini_catalog}' measure")"
 if echo "$clean_result" | jq -e '.ready == false' >/dev/null 2>&1; then
   pass_msg "bridge returned ready:false for a clean-verdict audit"
 else
@@ -137,7 +143,7 @@ fi
 echo "TEST: Step 16 validator returns ready:false for a stale run_unit_id"
 stale_catalog="${WORK_DIR}/stale-catalog.yaml"
 jq -n '{schema_version:"1.0.0", generated_at:"2026-07-30T00:00:00Z", status:"approved", run_units:[{run_unit_id:"npm:something-else"}], source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' | yq -P '.' > "$stale_catalog"
-stale_result="$(bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_check '${REMEDIATION_OUT}' '${stale_catalog}'")"
+stale_result="$(bash -c "source '${PLUGIN_DIR}/scripts/lib/aid-test-audit-write-plan-bridge.sh'; aid_test_audit_write_plan_bridge_check '${REMEDIATION_OUT}' '${stale_catalog}' measure")"
 if echo "$stale_result" | jq -e '.ready == false' >/dev/null 2>&1 && [[ "$stale_result" == *"stale run_unit_id"* ]]; then
   pass_msg "bridge returned ready:false with a named stale run_unit_id"
 else
