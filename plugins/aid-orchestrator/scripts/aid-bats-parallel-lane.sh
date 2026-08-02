@@ -44,19 +44,27 @@ EXCLUDED_RELATIVE_PATHS=(
 usage() {
   cat <<'EOF'
 Usage: aid-bats-parallel-lane.sh [--catalog PATH] [--jobs N] [--dry-run]
+                                  [--pool-only | --dedicated-only]
 
-  --catalog PATH   Path to test-catalog.yaml (default: ./.aid-o/config/test-catalog.yaml,
-                    relative to the current working directory)
-  --jobs N         Parallel worker count for the safe pool (default: 4, or
-                    $AID_BATS_PARALLEL_JOBS if set)
-  --dry-run        Print the resolved partition (safe pool + dedicated lane)
-                    and exit 0 without invoking bats
+  --catalog PATH     Path to test-catalog.yaml (default: ./.aid-o/config/test-catalog.yaml,
+                      relative to the current working directory)
+  --jobs N           Parallel worker count for the safe pool (default: 4, or
+                      $AID_BATS_PARALLEL_JOBS if set)
+  --dry-run          Print the resolved partition (safe pool + dedicated lane)
+                      and exit 0 without invoking bats
+  --pool-only        Run ONLY the safe pool phase, skip the dedicated lane
+                      entirely (P071 Step 3 CP2 fix: lets `gate:bats_all`
+                      carry a short, real timeout_seconds without being
+                      killed by the 2 known-slow boundary files, which get
+                      their own separate, non-required gate instead)
+  --dedicated-only   Run ONLY the dedicated lane (the 2 boundary files,
+                      sequential), skip the safe pool entirely
 
 Exit codes:
-  0  catalog resolved, partition built, all phases passed (or --dry-run)
-  1  one or more phases (pool or dedicated) failed
+  0  catalog resolved, partition built, all requested phases passed (or --dry-run)
+  1  one or more requested phases (pool or dedicated) failed
   2  catalog missing or malformed (fail closed — never falls back to a
-     partial or empty file list)
+     partial or empty file list), or --pool-only + --dedicated-only both given
   3  required dependency missing (yq, bats, or GNU parallel for `bats -j`)
 EOF
 }
@@ -64,6 +72,8 @@ EOF
 CATALOG_PATH="./.aid-o/config/test-catalog.yaml"
 JOBS="${AID_BATS_PARALLEL_JOBS:-4}"
 DRY_RUN=0
+RUN_POOL=1
+RUN_DEDICATED=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,6 +89,14 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
+    --pool-only)
+      RUN_DEDICATED=0
+      shift
+      ;;
+    --dedicated-only)
+      RUN_POOL=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -90,6 +108,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ $RUN_POOL -eq 0 && $RUN_DEDICATED -eq 0 ]]; then
+  echo "ERROR: aid-bats-parallel-lane.sh: --pool-only and --dedicated-only are mutually exclusive" >&2
+  exit 2
+fi
 
 # --- Dependency checks (fail loudly, never silently degrade) ---------------
 if ! command -v yq >/dev/null 2>&1; then
@@ -160,29 +183,37 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 # --- Execute: safe pool first (parallel), then dedicated lane (sequential) --
+# Each phase only runs if requested (RUN_POOL/RUN_DEDICATED) — --pool-only and
+# --dedicated-only let this script back two SEPARATE gates (P071 Step 3 CP2
+# fix) so the fast, currently-reliable pool phase can carry a short required
+# timeout without being killed by the 2 known-slow boundary files.
 POOL_RC=0
-if [[ ${#SAFE_POOL[@]} -gt 0 ]]; then
-  echo "aid-bats-parallel-lane.sh: running ${#SAFE_POOL[@]} bats files in the safe pool (-j $JOBS)" >&2
-  bats -j "$JOBS" "${SAFE_POOL[@]}"
-  POOL_RC=$?
-else
-  echo "WARN: aid-bats-parallel-lane.sh: safe pool is empty (all bats run_units excluded)" >&2
+if [[ $RUN_POOL -eq 1 ]]; then
+  if [[ ${#SAFE_POOL[@]} -gt 0 ]]; then
+    echo "aid-bats-parallel-lane.sh: running ${#SAFE_POOL[@]} bats files in the safe pool (-j $JOBS)" >&2
+    bats -j "$JOBS" "${SAFE_POOL[@]}"
+    POOL_RC=$?
+  else
+    echo "WARN: aid-bats-parallel-lane.sh: safe pool is empty (all bats run_units excluded)" >&2
+  fi
 fi
 
 DEDICATED_RC=0
-for file in "${DEDICATED[@]}"; do
-  echo "aid-bats-parallel-lane.sh: running dedicated lane file '$file' (not pooled)" >&2
-  bats "$file"
-  rc=$?
-  if [[ $rc -ne 0 ]]; then
-    DEDICATED_RC=$rc
-  fi
-done
+if [[ $RUN_DEDICATED -eq 1 ]]; then
+  for file in "${DEDICATED[@]}"; do
+    echo "aid-bats-parallel-lane.sh: running dedicated lane file '$file' (not pooled)" >&2
+    bats "$file"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      DEDICATED_RC=$rc
+    fi
+  done
+fi
 
 if [[ $POOL_RC -ne 0 || $DEDICATED_RC -ne 0 ]]; then
   echo "aid-bats-parallel-lane.sh: FAILED — pool_exit=$POOL_RC dedicated_exit=$DEDICATED_RC" >&2
   exit 1
 fi
 
-echo "aid-bats-parallel-lane.sh: PASSED — safe pool (${#SAFE_POOL[@]} files) + dedicated lane (${#DEDICATED[@]} files)" >&2
+echo "aid-bats-parallel-lane.sh: PASSED — pool_ran=$RUN_POOL (${#SAFE_POOL[@]} files) dedicated_ran=$RUN_DEDICATED (${#DEDICATED[@]} files)" >&2
 exit 0
