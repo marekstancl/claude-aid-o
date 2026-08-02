@@ -1641,3 +1641,81 @@ YAML
 
   unset AID_SELECT_TESTS_PLUGIN_ROOT
 }
+
+# ─── P069 Step 12 — {plugin_path} placeholder resolution ───────────────────
+
+@test "{plugin_path} resolves from .aid-o/config/plugin.yaml, taking precedence over \$AID_PLUGIN_PATH" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml" <<YAML
+plugin_path: "/some/other/plugin/path"
+discovered_at: "2026-08-02T00:00:00Z"
+dispatch_mode: agent_tool
+YAML
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  echo_plugin_path:
+    command: "echo {plugin_path}"
+    required: false
+YAML
+
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.echo_plugin_path.output' "$report"
+  [[ "$output" == *"/some/other/plugin/path"* ]]
+}
+
+@test "{plugin_path} falls back to \$AID_PLUGIN_PATH when plugin.yaml is absent" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  echo_plugin_path:
+    command: "echo {plugin_path}"
+    required: false
+YAML
+
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.echo_plugin_path.output' "$report"
+  [[ "$output" == *"$AID_PLUGIN_PATH"* ]]
+}
+
+@test "{plugin_path} unresolvable (no plugin.yaml, no \$AID_PLUGIN_PATH) fails loud — same unknown-token contract, never a bare command" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  echo_plugin_path:
+    command: "echo {plugin_path}"
+    required: false
+YAML
+
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  local saved_plugin_path="$AID_PLUGIN_PATH"
+  unset AID_PLUGIN_PATH
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  export AID_PLUGIN_PATH="$saved_plugin_path"
+
+  run jq -re '.gates.echo_plugin_path.result' "$report"
+  [ "$output" == "fail" ]
+  run jq -re '.gates.echo_plugin_path.output' "$report"
+  [ "$output" == "unknown_placeholder" ]
+}

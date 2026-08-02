@@ -101,9 +101,11 @@ teardown() {
   [ "$output" == "full" ]
 
   # Profiles reference ONLY gate names the TypeScript stack fragment itself
-  # defines (ts_test/ts_lint/ts_type_check) — never self-host bats_* names.
+  # defines (ts_test/ts_lint/ts_type_check) — never self-host bats_* names —
+  # plus the stack-independent targeted_tests gate (P069 Step 12), which is
+  # added to `targeted` only, never `full`.
   run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test" ]
+  [ "$output" == "ts_test,targeted_tests" ]
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test,ts_lint,ts_type_check" ]
 
@@ -204,7 +206,7 @@ FIXTURE
   run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
   [ "$output" == "targeted" ]
   run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test" ]
+  [ "$output" == "ts_test,targeted_tests" ]
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test,ts_lint,ts_type_check" ]
 

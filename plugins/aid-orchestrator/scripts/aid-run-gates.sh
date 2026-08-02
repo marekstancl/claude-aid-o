@@ -44,6 +44,12 @@
 #   {epic_id}      — EPIC identifier (e.g., E-037-1_2)
 #   {run_id}       — Run identifier within EPIC (e.g., R-E037-1)
 #   {base_commit}  — git SHA at EPIC start (recorded in fsm-state.yaml)
+#   {plugin_path}  — absolute path of the installed aid-orchestrator plugin (P069 Step 12),
+#                    resolved from .aid-o/config/plugin.yaml's plugin_path field (the same
+#                    value /aid-init discovers and writes), falling back to $AID_PLUGIN_PATH
+#                    when that file is absent. Lets a generated gate command reference this
+#                    plugin's own scripts (e.g. aid-select-tests.sh) with a real, resolvable
+#                    path instead of a bare script name with no PATH entry pointing at it.
 #
 # Unknown {token} → fail-loud exit 1 (introduce new tokens via resolve_placeholders).
 
@@ -97,24 +103,29 @@ aid_gate_baseline_ensure_gitignored() {
 }
 
 # Phase 2 (P037) — resolve {token} placeholders in gate commands via bash parameter expansion.
-# Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}.
+# Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}.
 # Unknown {<token>} → fail-loud exit 1 (silent pass-through is a debug trap).
 #
-# Args: $1=command string, $2=epic_id, $3=run_id, $4=base_commit, $5=plan_path (may be "null" or empty)
+# Args: $1=command string, $2=epic_id, $3=run_id, $4=base_commit, $5=plan_path (may be "null" or
+#       empty), $6=plugin_path (P069 Step 12; may be empty — an empty value is deliberately NOT
+#       substituted, so a command that actually references {plugin_path} falls through to the
+#       unknown-token fail-loud check below rather than silently running a hollow/incomplete
+#       command).
 # Returns: resolved command string on stdout; exit 1 on unknown token.
 resolve_placeholders() {
-  local cmd="$1" epic="$2" run="$3" base="$4" plan="$5"
+  local cmd="$1" epic="$2" run="$3" base="$4" plan="$5" plugin_path="${6:-}"
 
   cmd="${cmd//\{epic_id\}/$epic}"
   cmd="${cmd//\{run_id\}/$run}"
   cmd="${cmd//\{base_commit\}/$base}"
   cmd="${cmd//\{plan_path\}/$plan}"
+  [[ -n "$plugin_path" ]] && cmd="${cmd//\{plugin_path\}/$plugin_path}"
 
   # Fail-loud on any remaining {<token>} — gate authors must not introduce unknown placeholders
   if [[ "$cmd" =~ \{[a-zA-Z_]+\} ]]; then
     local bad_token="${BASH_REMATCH[0]}"
     echo "ERROR: aid-run-gates.sh: unknown placeholder $bad_token in gate command" >&2
-    echo "  Valid tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}" >&2
+    echo "  Valid tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}" >&2
     return 1
   fi
 
@@ -320,6 +331,18 @@ run_all_gates() {
   if (( base_commit_opt_set )); then base_commit_resolved="$base_commit_opt"; fi
   if (( plan_path_opt_set )); then plan_path_resolved="$plan_path_opt"; fi
 
+  # P069 Step 12 — resolve {plugin_path} ONCE here, exactly mirroring how
+  # base_commit/plan_path are already resolved by this same caller.
+  # resolve_placeholders() itself gains zero new file/env-reading logic — it
+  # remains a pure substitution function over one additional argument.
+  local plugin_path_resolved=""
+  local _plugin_project_root
+  _plugin_project_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  if [[ -f "${_plugin_project_root}/.aid-o/config/plugin.yaml" ]]; then
+    plugin_path_resolved="$(yq -r '.plugin_path // ""' "${_plugin_project_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "")"
+  fi
+  [[ -z "$plugin_path_resolved" ]] && plugin_path_resolved="${AID_PLUGIN_PATH:-}"
+
   # ─── gate_runner_start (P032 Step 3) ──────────────────────────────
   local gate_count gate_names_json
   gate_count=$(yq '.gates | length' "$execution_yaml")
@@ -412,7 +435,7 @@ run_all_gates() {
     # Phase 2 (P037) — resolve {token} placeholders before bash -c execution.
     # Unknown tokens fail-loud — mark gate as fail and continue to next gate.
     local resolved_cmd
-    if ! resolved_cmd=$(resolve_placeholders "$cmd" "$epic_id" "$run_id" "$base_commit_resolved" "$plan_path_resolved"); then
+    if ! resolved_cmd=$(resolve_placeholders "$cmd" "$epic_id" "$run_id" "$base_commit_resolved" "$plan_path_resolved" "$plugin_path_resolved"); then
       log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="unknown_placeholder"
       overall="fail"
       $first || gates_json+=","
