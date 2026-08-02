@@ -132,7 +132,7 @@ existing clear error rather than die in `grep`.
 
 ### NEW — IMP-464: C3 must receive required plan-diff evidence
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** review-input integrity / false-positive prevention
 
@@ -146,7 +146,7 @@ input; a required missing/malformed input fails before dispatch. See
 
 ### NEW — IMP-465: protocol-v2 plan-final outputs need generated scaffolds
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** producer contract / liveness
 
@@ -158,7 +158,7 @@ fill payload fields only. No new role or agent turn.
 
 ### NEW — IMP-466: preserve plan-final evidence beyond the live checkout
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** critical
 **Class:** durability / plan-boundary integrity
 
@@ -172,7 +172,7 @@ Warnings are defence in depth, not proof.
 
 ### NEW — IMP-467: grouped plan-final freshness must converge
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** lifecycle liveness / false-stale detection
 
@@ -184,7 +184,7 @@ group; retain compatible legacy behavior elsewhere.
 
 ### NEW — IMP-468: lifecycle needs formal Curator adjudication input
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** review semantics / closure liveness
 

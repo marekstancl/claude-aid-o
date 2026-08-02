@@ -334,6 +334,12 @@ neither implementation may modify P069's active branch.
   usable. This is a small standalone release-liveness fix, not P066/P069/UX
   scope; it is tracked in `BACKLOG.md` and must not be lost in a broad plan.
 
+- [ ] **Post-P068 integrity/liveness hardening:** implement IMP-282 together
+  with the verified dogfood common-dir protection (IMP-280) and CP3 prefilter
+  evidence/range fixes, from
+  `docs/plans/IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`. Keep WAN-only
+  `docs_updated` report IMP-281 out until it has a local reproduction.
+
 - [x] Ground the interim brief against current main and produce a reviewable
   roadmap: `docs/plans/P066-test-portfolio-audit-scheduler-remediation.md`
   (2026-07-28). Confirms/corrects the interim brief's claims with file:line
@@ -388,29 +394,30 @@ pass.
   on measured post-remediation data.
 - [ ] PM explicitly removes the quarantine.
 
-**GO to Phase 5.5:** P069 has a released/frozen contract, the decision-quality
-audit follow-up is re-grounded, and the durable evidence package can be
-scheduled without conflating it with test scheduler work.
+**Phase 5.5 record:** P069 has a released/frozen contract before any later
+test-scheduler promotion. The durable-evidence package itself was delivered in
+v2.66.0; its still-open operational hardening is tracked separately above so
+it is not conflated with scheduler work.
 
-## Phase 5.5 — durable plan-final evidence and review integrity
+## Phase 5.5 — durable plan-final evidence and review integrity — DONE in v2.66.0
 
 P078 exposed a plan-boundary gap: review correctly leaves the frozen candidate
 unchanged, but its runtime evidence is not durable outside the active checkout.
-Fix it as standalone AID maintenance after P066, before relying on
-plan-boundary closure for subsequent major plans:
+It was delivered as standalone AID maintenance in v2.66.0 (`d1fada8`), before
+relying on plan-boundary closure for subsequent major plans:
 `docs/plans/IMP-PLAN-FINAL-EVIDENCE-DURABILITY-AND-REVIEW-INTEGRITY.md`.
 
-- [ ] Seal plan-final outputs into an immutable, public-safe, candidate- and
+- [x] Seal plan-final outputs into an immutable, public-safe, candidate- and
   run-bound Git sidecar receipt without moving candidate or target.
-- [ ] Require and verify that receipt at plan merge and close; recover runtime
+- [x] Require and verify that receipt at plan merge and close; recover runtime
   pointers after a clean/reclone/worktree loss.
-- [ ] Correct C3's missing plan-diff input (IMP-464).
-- [ ] Generate and validate protocol-v2 specialist envelopes (IMP-465).
-- [ ] Make plan-final freshness run/receipt scoped, not a per-report Head
+- [x] Correct C3's missing plan-diff input (IMP-464).
+- [x] Generate and validate protocol-v2 specialist envelopes (IMP-465).
+- [x] Make plan-final freshness run/receipt scoped, not a per-report Head
   annotation loop (IMP-467).
-- [ ] Add the exact, schema-bound Curator adjudication path required for a
+- [x] Add the exact, schema-bound Curator adjudication path required for a
   validated false-positive disposition to affect lifecycle status (IMP-468).
-- [ ] Make raw-Git/evidence-loss guidance consistent everywhere (IMP-466),
+- [x] Make raw-Git/evidence-loss guidance consistent everywhere (IMP-466),
   treating warnings/hooks as defence in depth rather than proof.
 - [ ] Add the still-live dogfood ref-isolation preflight (IMP-280): a dogfood
   must refuse a source checkout with the same Git common-dir unless it uses an
