@@ -1,20 +1,29 @@
 #!/usr/bin/env bats
-# test-aid-bats-parallel-lane.bats — P071 EPIC E-071-1_1 Step 3.
+# test-aid-bats-parallel-lane.bats — P071 EPIC E-071-1_1 Step 3 (PM review
+# round 2 rewrite, 2026-08-02).
 #
 # Covers aid-bats-parallel-lane.sh, the wrapper that replaced the
-# `gate:bats_all` quarantine stub (`exit 86`). Two things must be true:
-#   1. Partition logic: the 2 known-unsafe boundary files are excluded from
-#      the parallel safe pool by default, and a NEW bats file not on that
-#      exclusion list lands in the pool automatically (the correct default).
-#   2. A real (not mocked) small-scale invocation actually runs `bats -j N`
-#      over a safe pool plus a sequential dedicated lane, and the gate's
-#      exit code is the logical AND of both phases.
+# `gate:bats_all` quarantine stub (`exit 86`). The classification model is an
+# EXPLICIT, opt-in ALLOWLIST — no blacklist, no "default safe" fallback:
+#   1. Partition logic (3 buckets): SAFE_POOL is ONLY what's on the tracked
+#      allowlist; a brand-new bats file, or any file simply absent from the
+#      allowlist for any reason, lands in the sequential UNCLASSIFIED bucket
+#      instead — NEVER auto-parallel. The 2 known boundary files always land
+#      in BOUNDARY regardless of the allowlist.
+#   2. Fail-closed path validation: a catalog-derived path that doesn't
+#      exist, escapes the repo root, starts with '-', or duplicates another
+#      entry aborts the WHOLE run (exit 2) before any bats invocation.
+#   3. A real (not mocked) small-scale invocation actually runs `bats -j N`
+#      over an allowlisted pool plus sequential phases, and the gate's exit
+#      code is the logical AND of all requested phases.
 #
 # All fixtures are throwaway bats files under a per-test tmpdir mimicking the
 # real repo's relative path layout (plugins/aid-orchestrator/scripts/tests/
-# bats/...) — the exclusion list in aid-bats-parallel-lane.sh is a literal
-# relative-path match, so fixtures must sit at those exact relative paths to
-# exercise it for real.
+# bats/...) — the boundary list and path-validation logic in
+# aid-bats-parallel-lane.sh operate on literal relative-path matches, so
+# fixtures must sit at those exact relative paths to exercise it for real.
+# Each test writes its OWN throwaway allowlist file (--allowlist) so tests
+# never depend on (or mutate) the real tracked allowlist.
 
 setup() {
   SCRIPT="${BATS_TEST_DIRNAME}/../../aid-bats-parallel-lane.sh"
@@ -24,6 +33,16 @@ setup() {
   mkdir -p "$BATS_DIR"
   CATALOG="$PROJECT/.aid-o/config/test-catalog.yaml"
   mkdir -p "$(dirname "$CATALOG")"
+  ALLOWLIST="$TMP/allowlist.txt"
+  : > "$ALLOWLIST"
+}
+
+# _allow <relative_path>... — append entries to this test's throwaway allowlist.
+_allow() {
+  local rel
+  for rel in "$@"; do
+    echo "$rel" >> "$ALLOWLIST"
+  done
 }
 
 teardown() {
@@ -68,8 +87,6 @@ _write_catalog() {
     echo "status: approved"
     echo "run_units:"
     for rel in "$@"; do
-      local id
-      id="$(basename "$rel" .bats)"
       echo "  - run_unit_id: bats:${rel%.bats}"
       echo "    runner: bats"
       echo "    source_paths:"
@@ -84,7 +101,7 @@ _write_catalog() {
 
 # --- Partition logic (--dry-run, no real bats execution) -------------------
 
-@test "partition: both boundary files are excluded from the safe pool by default" {
+@test "partition: both boundary files always land in BOUNDARY regardless of the allowlist" {
   local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
   local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
   local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
@@ -95,55 +112,121 @@ _write_catalog() {
   _write_passing_bats "$PROJECT/$safe1"
   _write_passing_bats "$PROJECT/$safe2"
   _write_catalog "$CATALOG" "$final" "$release" "$safe1" "$safe2"
+  # Deliberately allowlist the boundary files too — BOUNDARY must win anyway.
+  _allow "$final" "$release" "$safe1" "$safe2"
 
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --dry-run
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 0 ]
-  # boundary files land in DEDICATED, never SAFE_POOL
-  [[ "$output" == *"DEDICATED (2):"* ]]
-  [[ "$output" == *"$final"* ]]
-  [[ "$output" == *"$release"* ]]
+  [[ "$output" == *"BOUNDARY (2):"* ]]
   [[ "$output" == *"SAFE_POOL (2):"* ]]
-  [[ "$output" == *"$safe1"* ]]
-  [[ "$output" == *"$safe2"* ]]
+  [[ "$output" == *"UNCLASSIFIED (0):"* ]]
 
-  # boundary paths must not appear in the SAFE_POOL block specifically
   local pool_block
-  pool_block="$(printf '%s\n' "$output" | awk '/^SAFE_POOL/{f=1} /^DEDICATED/{f=0} f')"
+  pool_block="$(printf '%s\n' "$output" | awk '/^SAFE_POOL/{f=1} /^UNCLASSIFIED/{f=0} f')"
   [[ "$pool_block" != *"$final"* ]]
   [[ "$pool_block" != *"$release"* ]]
+  [[ "$pool_block" == *"$safe1"* ]]
+  [[ "$pool_block" == *"$safe2"* ]]
 }
 
-@test "partition: a new bats file not on the exclusion list lands in the safe pool automatically" {
+@test "REGRESSION (PM review round 2): a bats file NOT on the allowlist never enters SAFE_POOL — lands in UNCLASSIFIED instead" {
+  local allowed="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-allowed.bats"
   local newfile="plugins/aid-orchestrator/scripts/tests/bats/test-brand-new-suite.bats"
+
+  _write_passing_bats "$PROJECT/$allowed"
   _write_passing_bats "$PROJECT/$newfile"
-  _write_catalog "$CATALOG" "$newfile"
+  _write_catalog "$CATALOG" "$allowed" "$newfile"
+  _allow "$allowed"
+  # $newfile is deliberately NOT added to the allowlist.
 
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --dry-run
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"SAFE_POOL (1):"* ]]
-  [[ "$output" == *"$newfile"* ]]
-  [[ "$output" == *"DEDICATED (0):"* ]]
+  [[ "$output" == *"UNCLASSIFIED (1):"* ]]
+
+  local pool_block unclassified_block
+  pool_block="$(printf '%s\n' "$output" | awk '/^SAFE_POOL/{f=1} /^UNCLASSIFIED/{f=0} f')"
+  unclassified_block="$(printf '%s\n' "$output" | awk '/^UNCLASSIFIED/{f=1} /^BOUNDARY/{f=0} f')"
+  [[ "$pool_block" == *"$allowed"* ]]
+  [[ "$pool_block" != *"$newfile"* ]]
+  [[ "$unclassified_block" == *"$newfile"* ]]
+  [[ "$unclassified_block" != *"$allowed"* ]]
+}
+
+@test "REGRESSION (PM review round 2): the catalog's parallel.status field is never consulted — an 'unknown'-status file still requires an explicit allowlist entry" {
+  # This catalog fixture mirrors the real catalog shape: every run_unit
+  # carries parallel.status: unknown. The script must classify purely off
+  # the allowlist, never off this field (it doesn't even read it).
+  local unknown="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-unknown-status.bats"
+  _write_passing_bats "$PROJECT/$unknown"
+  {
+    echo "schema_version: 1.0.0"
+    echo "status: approved"
+    echo "run_units:"
+    echo "  - run_unit_id: bats:${unknown%.bats}"
+    echo "    runner: bats"
+    echo "    source_paths:"
+    echo "      - ${unknown}"
+    echo "    parallel:"
+    echo "      status: unknown"
+  } > "$CATALOG"
+  # Not on the allowlist.
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SAFE_POOL (0):"* ]]
+  [[ "$output" == *"UNCLASSIFIED (1):"* ]]
+  [[ "$output" == *"$unknown"* ]]
 }
 
 @test "partition: declared-command run_units are filtered out (only runner==bats counted)" {
   local safe="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-only.bats"
   _write_passing_bats "$PROJECT/$safe"
   _write_catalog "$CATALOG" "$safe"
+  _allow "$safe"
 
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --dry-run
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" != *"some-other-thing.sh"* ]]
 }
 
-# --- Fail-closed catalog handling -------------------------------------------
+@test "partition: an empty allowlist puts every non-boundary file in UNCLASSIFIED, none in SAFE_POOL" {
+  local a="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  local b="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-b.bats"
+  _write_passing_bats "$PROJECT/$a"
+  _write_passing_bats "$PROJECT/$b"
+  _write_catalog "$CATALOG" "$a" "$b"
+  # $ALLOWLIST stays empty (from setup()).
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SAFE_POOL (0):"* ]]
+  [[ "$output" == *"UNCLASSIFIED (2):"* ]]
+}
+
+# --- Fail-closed catalog/allowlist handling ---------------------------------
 
 @test "error handling: missing catalog file fails loudly (exit 2), never an empty run" {
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$PROJECT/.aid-o/config/does-not-exist.yaml" --dry-run
+  run bash "$SCRIPT" --catalog "$PROJECT/.aid-o/config/does-not-exist.yaml" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 2 ]
+  [[ "$output" == *"not found"* ]]
+}
+
+@test "error handling: missing allowlist file fails loudly (exit 2)" {
+  local safe="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  _write_passing_bats "$PROJECT/$safe"
+  _write_catalog "$CATALOG" "$safe"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$TMP/does-not-exist-allowlist.txt" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"allowlist"* ]]
   [[ "$output" == *"not found"* ]]
 }
 
@@ -153,7 +236,7 @@ schema_version: 1.0.0
 run_units: []
 YAML
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --dry-run
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 2 ]
   [[ "$output" == *"malformed"* ]]
 }
@@ -169,7 +252,7 @@ run_units:
       - plugins/aid-orchestrator/scripts/tests/bats/test-x.bats
 YAML
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --dry-run
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 2 ]
   [[ "$output" == *"not 'approved'"* ]]
 }
@@ -185,71 +268,147 @@ run_units:
       - scripts/some-other-thing.sh
 YAML
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --dry-run
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
   [ "$status" -eq 2 ]
   [[ "$output" == *"zero bats run_units"* ]]
 }
 
-# --- Real (not mocked) small-scale execution --------------------------------
+# --- Fail-closed path validation (PM review round 2) ------------------------
 
-@test "real run: safe pool (-j N) + dedicated lane both pass -> gate exits 0" {
-  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
-  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
-  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
-  local safe2="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-b.bats"
-  local safe3="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-c.bats"
-
-  _write_passing_bats "$PROJECT/$final"
-  _write_passing_bats "$PROJECT/$release"
-  _write_passing_bats "$PROJECT/$safe1"
-  _write_passing_bats "$PROJECT/$safe2"
-  _write_passing_bats "$PROJECT/$safe3"
-  _write_catalog "$CATALOG" "$final" "$release" "$safe1" "$safe2" "$safe3"
+@test "path validation: a catalog entry pointing at a nonexistent file fails loudly (exit 2)" {
+  local ghost="plugins/aid-orchestrator/scripts/tests/bats/test-does-not-exist-on-disk.bats"
+  _write_catalog "$CATALOG" "$ghost"
+  # Deliberately never create $PROJECT/$ghost on disk.
 
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --jobs 2
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"running 3 bats files in the safe pool (-j 2)"* ]]
-  [[ "$output" == *"dedicated lane file '$final'"* ]]
-  [[ "$output" == *"dedicated lane file '$release'"* ]]
-  [[ "$output" == *"PASSED"* ]]
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"does not exist"* ]]
+  [[ "$output" == *"$ghost"* ]]
 }
 
-@test "real run: a failure in the safe pool fails the gate even if the dedicated lane passes" {
-  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
-  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
-  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
-  local safe2="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-fails.bats"
-
-  _write_passing_bats "$PROJECT/$final"
-  _write_passing_bats "$PROJECT/$release"
-  _write_passing_bats "$PROJECT/$safe1"
-  _write_failing_bats "$PROJECT/$safe2"
-  _write_catalog "$CATALOG" "$final" "$release" "$safe1" "$safe2"
+@test "path validation: a catalog entry escaping the repo root via '../' fails loudly (exit 2)" {
+  local escape="../etc/test-outside-repo.bats"
+  # Create the file so only the traversal check (not existence) can fail it.
+  mkdir -p "$TMP/etc"
+  _write_passing_bats "$TMP/etc/test-outside-repo.bats"
+  _write_catalog "$CATALOG" "$escape"
 
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --jobs 2
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"FAILED"* ]]
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"escapes repo root"* ]]
 }
 
-@test "real run: a failure in the dedicated lane fails the gate even if the safe pool passes" {
-  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
-  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
-  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
-
-  _write_passing_bats "$PROJECT/$final"
-  _write_failing_bats "$PROJECT/$release"
-  _write_passing_bats "$PROJECT/$safe1"
-  _write_catalog "$CATALOG" "$final" "$release" "$safe1"
+@test "path validation: a catalog entry starting with '-' fails loudly (exit 2) — never reaches bats as a flag" {
+  # This path is deliberately never created on disk either; the '-' check
+  # must fire (and be reported) before the existence check would matter.
+  local dashy="-j999"
+  _write_catalog "$CATALOG" "$dashy"
 
   cd "$PROJECT"
-  run bash "$SCRIPT" --catalog "$CATALOG" --jobs 2
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"FAILED"* ]]
-  # both dedicated files still ran despite the first one failing
-  [[ "$output" == *"dedicated lane file '$final'"* ]]
-  [[ "$output" == *"dedicated lane file '$release'"* ]]
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"begins with '-'"* ]]
+  [[ "$output" == *"$dashy"* ]]
+}
+
+@test "path validation: a duplicate catalog entry fails loudly (exit 2)" {
+  local dup="plugins/aid-orchestrator/scripts/tests/bats/test-duplicated.bats"
+  _write_passing_bats "$PROJECT/$dup"
+  # Hand-craft a catalog with the SAME source_path listed under two distinct
+  # run_unit_ids (a real-world catalog bug this must still catch).
+  {
+    echo "schema_version: 1.0.0"
+    echo "status: approved"
+    echo "run_units:"
+    echo "  - run_unit_id: bats:dup-1"
+    echo "    runner: bats"
+    echo "    source_paths:"
+    echo "      - ${dup}"
+    echo "  - run_unit_id: bats:dup-2"
+    echo "    runner: bats"
+    echo "    source_paths:"
+    echo "      - ${dup}"
+  } > "$CATALOG"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"duplicate catalog entry"* ]]
+  [[ "$output" == *"$dup"* ]]
+}
+
+@test "path validation: multiple invalid paths are ALL reported, not just the first" {
+  local ghost="plugins/aid-orchestrator/scripts/tests/bats/test-ghost.bats"
+  local dashy="-x"
+  {
+    echo "schema_version: 1.0.0"
+    echo "status: approved"
+    echo "run_units:"
+    echo "  - run_unit_id: bats:ghost"
+    echo "    runner: bats"
+    echo "    source_paths:"
+    echo "      - ${ghost}"
+    echo "  - run_unit_id: bats:dashy"
+    echo "    runner: bats"
+    echo "    source_paths:"
+    echo "      - ${dashy}"
+  } > "$CATALOG"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"2 invalid catalog-derived path(s)"* ]]
+  [[ "$output" == *"$ghost"* ]]
+  [[ "$output" == *"$dashy"* ]]
+}
+
+# --- Fail-closed CLI value validation ----------------------------------------
+
+@test "usage: --jobs with a non-numeric value fails loudly (exit 2)" {
+  local safe="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  _write_passing_bats "$PROJECT/$safe"
+  _write_catalog "$CATALOG" "$safe"
+  _allow "$safe"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --jobs banana --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"positive integer"* ]]
+}
+
+@test "usage: --jobs 0 fails loudly (exit 2) — not a silently-clamped minimum" {
+  local safe="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  _write_passing_bats "$PROJECT/$safe"
+  _write_catalog "$CATALOG" "$safe"
+  _allow "$safe"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --jobs 0 --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"positive integer"* ]]
+}
+
+@test "usage: --catalog with no value fails loudly instead of crashing on an unbound argument" {
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"requires a value"* ]]
+}
+
+@test "usage: --jobs with no value fails loudly instead of crashing on an unbound argument" {
+  cd "$PROJECT"
+  run bash "$SCRIPT" --jobs
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"requires a value"* ]]
+}
+
+@test "usage: --allowlist with no value fails loudly instead of crashing on an unbound argument" {
+  cd "$PROJECT"
+  run bash "$SCRIPT" --allowlist
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"requires a value"* ]]
 }
 
 @test "usage: unknown argument fails loudly (exit 2)" {
@@ -264,4 +423,137 @@ YAML
   run bash "$SCRIPT" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
+}
+
+@test "usage: --pool-only and --dedicated-only together are mutually exclusive (exit 2)" {
+  local safe="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  _write_passing_bats "$PROJECT/$safe"
+  _write_catalog "$CATALOG" "$safe"
+  _allow "$safe"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --pool-only --dedicated-only --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"mutually exclusive"* ]]
+}
+
+# --- Real (not mocked) small-scale execution --------------------------------
+
+@test "real run: allowlisted pool + unclassified + boundary all pass -> gate exits 0" {
+  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
+  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  local safe2="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-b.bats"
+  local unclassified="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-unclassified.bats"
+
+  _write_passing_bats "$PROJECT/$final"
+  _write_passing_bats "$PROJECT/$release"
+  _write_passing_bats "$PROJECT/$safe1"
+  _write_passing_bats "$PROJECT/$safe2"
+  _write_passing_bats "$PROJECT/$unclassified"
+  _write_catalog "$CATALOG" "$final" "$release" "$safe1" "$safe2" "$unclassified"
+  _allow "$safe1" "$safe2"
+  # $unclassified deliberately NOT allowlisted.
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --jobs 2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"running 2 allowlisted bats files in the safe pool (-j 2)"* ]]
+  [[ "$output" == *"running unclassified file '$unclassified'"* ]]
+  [[ "$output" == *"boundary lane file '$final'"* ]]
+  [[ "$output" == *"boundary lane file '$release'"* ]]
+  [[ "$output" == *"PASSED"* ]]
+}
+
+@test "real run: a failure in the allowlisted pool fails the gate even if everything else passes" {
+  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
+  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  local safe2="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-fails.bats"
+
+  _write_passing_bats "$PROJECT/$final"
+  _write_passing_bats "$PROJECT/$release"
+  _write_passing_bats "$PROJECT/$safe1"
+  _write_failing_bats "$PROJECT/$safe2"
+  _write_catalog "$CATALOG" "$final" "$release" "$safe1" "$safe2"
+  _allow "$safe1" "$safe2"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --jobs 2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAILED"* ]]
+}
+
+@test "real run: a failure in the UNCLASSIFIED sequential lane fails the gate" {
+  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+  local unclassified_fail="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-unclassified-fails.bats"
+
+  _write_passing_bats "$PROJECT/$safe1"
+  _write_failing_bats "$PROJECT/$unclassified_fail"
+  _write_catalog "$CATALOG" "$safe1" "$unclassified_fail"
+  _allow "$safe1"
+  # $unclassified_fail deliberately NOT allowlisted.
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --pool-only --jobs 2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAILED"* ]]
+  [[ "$output" == *"unclassified_exit=1"* ]]
+}
+
+@test "real run: a failure in the boundary lane fails the gate even if the pool passes" {
+  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
+  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+
+  _write_passing_bats "$PROJECT/$final"
+  _write_failing_bats "$PROJECT/$release"
+  _write_passing_bats "$PROJECT/$safe1"
+  _write_catalog "$CATALOG" "$final" "$release" "$safe1"
+  _allow "$safe1"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --jobs 2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAILED"* ]]
+  # both boundary files still ran despite the first one failing
+  [[ "$output" == *"boundary lane file '$final'"* ]]
+  [[ "$output" == *"boundary lane file '$release'"* ]]
+}
+
+@test "real run: --pool-only skips BOUNDARY entirely (boundary files never invoked)" {
+  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
+  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+
+  _write_passing_bats "$PROJECT/$final"
+  _write_passing_bats "$PROJECT/$release"
+  _write_passing_bats "$PROJECT/$safe1"
+  _write_catalog "$CATALOG" "$final" "$release" "$safe1"
+  _allow "$safe1"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --pool-only --jobs 2
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"boundary lane file"* ]]
+}
+
+@test "real run: --dedicated-only skips the pool AND unclassified entirely" {
+  local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
+  local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+  local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
+
+  _write_passing_bats "$PROJECT/$final"
+  _write_passing_bats "$PROJECT/$release"
+  _write_passing_bats "$PROJECT/$safe1"
+  _write_catalog "$CATALOG" "$final" "$release" "$safe1"
+  _allow "$safe1"
+
+  cd "$PROJECT"
+  run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --dedicated-only --jobs 2
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"safe pool"* ]]
+  [[ "$output" != *"unclassified file"* ]]
+  [[ "$output" == *"boundary lane file '$final'"* ]]
+  [[ "$output" == *"boundary lane file '$release'"* ]]
 }
