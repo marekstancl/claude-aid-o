@@ -36,10 +36,17 @@ jobs:
             sudo chmod +x /usr/local/bin/yq
           }
       - name: Run bash test suite
+        # 2026-08-02: this job's own real CI run only reached suite 53/131 in
+        # its 20-minute budget (last measured a while ago at a much smaller
+        # suite count) — WHILE running concurrently with 3 sibling jobs on
+        # the same self-hosted host, which may have slowed it further via
+        # disk/CPU contention (still being measured in isolation to get a
+        # clean number). 60 min is a wide, non-final safety margin — revisit
+        # once a clean, uncontended local measurement exists.
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --verbose
-        timeout-minutes: 20
+        timeout-minutes: 60
 
   plan-boundary-tests:
     runs-on: [self-hosted, eco-dev]
@@ -60,8 +67,12 @@ jobs:
             sudo chmod +x /usr/local/bin/yq
           }
       - name: Run plan boundary suite
+        # 2026-08-02: this suite has grown to 267 tests (the "15 min" budget
+        # above dates from a much smaller count); a real run reached test
+        # 154/267 (all passing, zero "not ok") in 15 minutes — ~5.8s/test,
+        # so the full suite needs ~26 min. 30 min gives real margin.
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats
-        timeout-minutes: 15
+        timeout-minutes: 30
 
   plan-final-tests:
     runs-on: [self-hosted, eco-dev]
