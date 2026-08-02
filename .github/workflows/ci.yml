@@ -67,6 +67,30 @@ jobs:
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats
         timeout-minutes: 35
 
+  isolation-experiment-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        # Same shape and same reason as plan-boundary-tests/plan-final-tests
+        # above: this suite (test-aid-test-isolation-experiment.bats, P069
+        # Step 6) creates a REAL disposable git worktree per test (git
+        # worktree add/remove) rather than a mocked one, so it gets its own
+        # job and its own budget instead of eating the bash-tests job's
+        # headroom. yq is needed for the fixture test-catalog.yaml setup.
+        run: |
+          sudo apt-get install -y jq bats
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - name: Run isolation-experiment suite
+        # 11 tests; a clean isolated local run measured 5m58s total (real git
+        # worktree add/remove per test dominates). bash-tests' own real CI run
+        # reached this suite at ~18m32s already elapsed and hit its 20-minute
+        # budget mid-suite as a direct, deterministic consequence — not a
+        # flake. 15 min gives real margin without masking a genuine hang.
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment.bats
+        timeout-minutes: 15
+
   vitest:
     runs-on: ubuntu-latest
     steps:
