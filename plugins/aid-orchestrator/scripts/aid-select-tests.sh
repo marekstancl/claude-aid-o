@@ -58,6 +58,12 @@
 #        dedicated test yet.
 #   10 — input validation error (bad CLI usage, unresolvable --base ref,
 #        missing/unreadable --paths-file)
+#   11 — fail (mapping_gap, P069 Step 10): an APPROVED catalog mapping is in
+#        use, but zero source_pattern_mappings[] rows match this changed
+#        path at all — distinct from 3 (a row matched and named it
+#        unknown_production). Recovery: same as 3 (escalate to full
+#        profile), but the underlying gap is "no opinion at all," not "a
+#        known unresolved path" — extend the approved mapping to close it.
 
 set -euo pipefail
 
@@ -234,17 +240,124 @@ is_production_surface() {
   esac
 }
 
+# ─── Catalog↔selector convergence (P069 Step 10) ────────────────────────────
+# aid-select-tests.sh reads P066's catalog source_pattern_mappings[] as its
+# real routing table ONLY when mapping_approval.status == "approved" (P066's
+# Step 17 gate — never merely catalog-file presence). Absent catalog OR any
+# non-"approved" mapping_approval (including a missing object entirely) is
+# treated EXACTLY like catalog-absent — the permanent hardcoded-mapping
+# fallback fires, loudly logged. This fallback is NEVER removed: this same
+# script ships to every consumer project, most of which have no catalog of
+# their own yet.
+CATALOG_PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+CATALOG_PATH_FOR_SELECTOR="${CATALOG_PROJECT_ROOT}/.aid-o/config/test-catalog.yaml"
+CATALOG_JSON=""
+CATALOG_MAPPING_APPROVED=false
+if [[ -f "$CATALOG_PATH_FOR_SELECTOR" ]]; then
+  CATALOG_JSON="$(yq -o=json '.' "$CATALOG_PATH_FOR_SELECTOR" 2>/dev/null || true)"
+  if [[ -n "$CATALOG_JSON" && "$CATALOG_JSON" != "null" ]]; then
+    approval_status="$(jq -r '.mapping_approval.status // "absent"' <<<"$CATALOG_JSON" 2>/dev/null || echo "absent")"
+    [[ "$approval_status" == "approved" ]] && CATALOG_MAPPING_APPROVED=true
+  fi
+fi
+# Logged via `reasoning[]` (part of the JSON summary itself), never a raw
+# stderr line — this script's stdout is a pure-JSON contract real callers
+# (aid-run-gates.sh) consume via command substitution, and bats' own `run`
+# helper merges stdout+stderr into one captured stream, so an unconditional
+# stderr echo here would silently corrupt every existing test's `$output`
+# JSON parsing. Recorded once per invocation, always first in reasoning[].
+declare -a reasoning=()
+if $CATALOG_MAPPING_APPROVED; then
+  reasoning+=("catalog_fallback: false — using approved catalog source_pattern_mappings[] at ${CATALOG_PATH_FOR_SELECTOR}")
+else
+  reasoning+=("catalog_fallback: true — no approved catalog mapping (absent catalog, or mapping_approval.status != approved) — using the permanent hardcoded Initial mapping")
+fi
+
+# _catalog_classify_path <changed_path>
+#   Evaluates every approved source_pattern_mappings[] row (precedence
+#   ascending) for the first match_type/path_pattern match. Prints the
+#   matching row's JSON on stdout and returns 0, or returns 1 (nothing on
+#   stdout) if NO row matches at all — the caller distinguishes that as
+#   mapping_gap, never silently folding it into any matched classification.
+_catalog_classify_path() {
+  local p="$1"
+  local rows n i
+  rows="$(jq -c '[.source_pattern_mappings[] | select(.status=="approved")] | sort_by(.precedence)' <<<"$CATALOG_JSON")"
+  n="$(jq 'length' <<<"$rows")"
+  for ((i = 0; i < n; i++)); do
+    local row match_type pattern matched=false
+    row="$(jq -c ".[$i]" <<<"$rows")"
+    match_type="$(jq -r '.match_type' <<<"$row")"
+    pattern="$(jq -r '.path_pattern' <<<"$row")"
+    case "$match_type" in
+      exact)  [[ "$p" == "$pattern" ]] && matched=true ;;
+      prefix) [[ "$p" == "$pattern"* ]] && matched=true ;;
+      glob)   [[ "$p" == $pattern ]] && matched=true ;;
+    esac
+    if $matched; then
+      echo "$row"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ─── Classify every changed path ────────────────────────────────────────────
 # selected_tests_lines: dedup-ordered "<runner>\t<test_path>" entries.
+# (reasoning[] already declared above, seeded with the catalog_fallback line.)
 declare -a selected_tests_lines=()
-declare -a reasoning=()
 unverifiable=false
+mapping_gap=false
 
 if [[ ${#CHANGED_PATHS[@]} -eq 0 ]]; then
   reasoning+=("no changed paths detected — nothing to select")
 fi
 
 for cp in "${CHANGED_PATHS[@]}"; do
+  if $CATALOG_MAPPING_APPROVED; then
+    if catalog_row="$(_catalog_classify_path "$cp")"; then
+      classification="$(jq -r '.classification' <<<"$catalog_row")"
+      case "$classification" in
+        unknown_production)
+          unverifiable=true
+          reasoning+=("unverifiable: unknown production path ${cp} (approved catalog mapping) — upgrade to standard/full profile")
+          ;;
+        docs_non_production)
+          reasoning+=("docs-only (approved catalog mapping): ${cp} — no test impact")
+          ;;
+        production)
+          target_ids_json="$(jq -c '.target_run_unit_ids' <<<"$catalog_row")"
+          tn="$(jq 'length' <<<"$target_ids_json")"
+          for ((ti = 0; ti < tn; ti++)); do
+            uid="$(jq -r ".[$ti]" <<<"$target_ids_json")"
+            ru="$(jq -c --arg id "$uid" '.run_units[] | select(.run_unit_id == $id)' <<<"$CATALOG_JSON")"
+            if [[ -z "$ru" ]]; then
+              # Fail-closed on any gap (Step 10's own title) — a mapping row
+              # referencing a run_unit_id the catalog no longer has is a
+              # real integrity gap, never silently skipped.
+              unverifiable=true
+              reasoning+=("unverifiable: approved mapping for ${cp} references unknown run_unit_id '${uid}'")
+              continue
+            fi
+            runner="$(jq -r '.runner' <<<"$ru")"
+            test_path="$(jq -r '.source_paths[0]' <<<"$ru")"
+            already=false
+            for existing in "${selected_tests_lines[@]}"; do
+              [[ "$existing" == "${runner}"$'\t'"${test_path}" ]] && { already=true; break; }
+            done
+            $already || selected_tests_lines+=("${runner}"$'\t'"${test_path}")
+            reasoning+=("mapped (approved catalog): ${cp} -> ${test_path}")
+          done
+          ;;
+      esac
+      continue
+    else
+      mapping_gap=true
+      reasoning+=("mapping_gap: no approved mapping row matches ${cp} — escalate to full profile")
+      continue
+    fi
+  fi
+
   mapped="$(map_path_to_tests "$cp")"
   if [[ -n "$mapped" ]]; then
     while IFS=$'\t' read -r runner test_path; do
@@ -281,12 +394,14 @@ done
 # never the default. D-selector-1's exit-3 fail-loud contract is unchanged:
 # an unverifiable changed path still exits 3, writing NO units file at all.
 if [[ -n "$EMIT_UNITS_FILE" ]]; then
-  if $unverifiable; then
+  if $unverifiable || $mapping_gap; then
     # Codex review: a STALE units file from an earlier successful
     # --emit-units run at this same path must never be mistaken for
-    # current output on a run that is failing loud with exit 3 — remove
-    # any pre-existing file at the destination before exiting.
+    # current output on a run that is failing loud — remove any
+    # pre-existing file at the destination before exiting.
     rm -f "$EMIT_UNITS_FILE" 2>/dev/null || true
+    early_exit_status=3
+    $unverifiable || early_exit_status=11
     reasoning_json="[]"
     if [[ ${#reasoning[@]} -gt 0 ]]; then
       reasoning_json=$(printf '%s\n' "${reasoning[@]}" | jq -R . | jq -s '.')
@@ -295,10 +410,11 @@ if [[ -n "$EMIT_UNITS_FILE" ]]; then
       --arg gb "aid-select-tests.sh@${PLUGIN_VERSION}" \
       --arg ga "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --argjson reasons "$reasoning_json" \
-      '{"_generated_by": $gb, "_generated_at": $ga, "selected_tests": [], "reasoning": $reasons, "test_results": [], "exit_status": 3}')
+      --argjson es "$early_exit_status" \
+      '{"_generated_by": $gb, "_generated_at": $ga, "selected_tests": [], "reasoning": $reasons, "test_results": [], "exit_status": $es}')
     echo "$summary"
     [[ -n "$EVIDENCE_FILE" ]] && { mkdir -p "$(dirname "$EVIDENCE_FILE")"; echo "$summary" > "$EVIDENCE_FILE"; }
-    exit 3
+    exit "$early_exit_status"
   fi
 
   project_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -444,6 +560,13 @@ done
 exit_status=0
 if $unverifiable; then
   exit_status=3
+elif $mapping_gap; then
+  # P069 Step 10: an approved mapping present but with zero rows matching a
+  # changed path at all — distinct from unknown_production (exit 3), a
+  # DIFFERENT new code (never reusing 3), still causing the same externally-
+  # visible escalation but logged with a distinguishable reason for a human
+  # to resolve later.
+  exit_status=11
 elif $run_failed; then
   exit_status=1
 fi
