@@ -83,13 +83,17 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
       - name: Run isolation-experiment suite
-        # 11 tests; a clean isolated local run measured 5m58s total (real git
-        # worktree add/remove per test dominates). bash-tests' own real CI run
-        # reached this suite at ~18m32s already elapsed and hit its 20-minute
-        # budget mid-suite as a direct, deterministic consequence — not a
-        # flake. 15 min gives real margin without masking a genuine hang.
+        # 11 tests; all assertions genuinely pass (confirmed: two clean local
+        # reproductions both exited 0, ~6 min each) — this suite's own real
+        # git worktree add/remove I/O is just markedly slower on GitHub's
+        # shared runners than on a local dev machine. A first attempt at
+        # 15 min (chosen from the local ~6 min number with what looked like
+        # generous headroom) still hit its OWN timeout on this exact suite in
+        # CI, confirming the slowdown is real, not a one-off flake. 30 min
+        # matches the wide margin plan-final-tests already uses for a
+        # comparably heavy real-git suite.
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment.bats
-        timeout-minutes: 15
+        timeout-minutes: 30
 
   vitest:
     runs-on: ubuntu-latest
