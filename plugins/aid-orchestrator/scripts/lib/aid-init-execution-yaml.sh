@@ -41,6 +41,49 @@
 #       this is what makes the upgrade byte-preserving by construction rather
 #       than by a promise about a round-trip YAML rewrite.
 #
+#   render_test_audit_scheduler_block <gate|test_audit>
+#       P069 Step 12: renders ONE of the two stack-independent additions this
+#       step makes to every generated execution.yaml — `gate` for the
+#       `targeted_tests:` gate entry (2-space indented, meant to be embedded
+#       inside an existing `gates:` mapping), `test_audit` for the top-level
+#       `test_audit.scheduler` block (mode: sequential, empty resource_locks).
+#       Split in two (not one combined block) because the two pieces need
+#       DIFFERENT write strategies on the existing-project upgrade path
+#       (aid-init-upgrade-test-audit.sh): `test_audit` is a brand-new
+#       top-level key, safe to pure-append; `targeted_tests` must become a
+#       member of the file's EXISTING `gates:` mapping — mikefarah/yq (and
+#       aid-run-gates.sh's own `.gates` reads) resolve a SECOND top-level
+#       `gates:` key by silently taking the LAST one, so a naive pure-append
+#       of a duplicate `gates:` block would delete every previously-defined
+#       gate, not add to them (verified empirically before writing this).
+#       compose_execution_yaml (fresh generation, below) and
+#       aid-init-upgrade-test-audit.sh both call this — one derivation, no
+#       drift between the two paths' rendered text.
+render_test_audit_scheduler_block() {
+  local mode="${1:-}"
+  case "$mode" in
+    gate)
+      cat <<'EOF'
+  targeted_tests:
+    command: "{plugin_path}/scripts/aid-select-tests.sh --base {base_commit}"
+    required: false
+EOF
+      ;;
+    test_audit)
+      cat <<'EOF'
+test_audit:
+  scheduler:
+    mode: sequential
+    resource_locks: {}
+EOF
+      ;;
+    *)
+      echo "[ERROR] render_test_audit_scheduler_block: mode must be 'gate' or 'test_audit' (got '${mode}')" >&2
+      return 1
+      ;;
+  esac
+}
+#
 # Plugin path resolution order:
 #   1. $AID_PLUGIN_PATH env var (worktree dev workflow)
 #   2. $HOME/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator
@@ -226,6 +269,14 @@ render_gate_profiles_block() {
     return 0
   fi
 
+  # P069 Step 12: targeted_tests is stack-independent (aid-select-tests.sh's
+  # own routing table, not a per-stack gate) — added to the `targeted`
+  # profile's include[] only, never `full` (mirrors this repo's own
+  # self-host execution.yaml exception: targeted_tests is a SELECTOR that
+  # only ever picks a subset of what full/release already runs
+  # unconditionally, so including it there would add zero new coverage).
+  targeted_gate_names+=("targeted_tests")
+
   local targeted_csv full_csv
   targeted_csv="$(IFS=', '; echo "${targeted_gate_names[*]}")"
   full_csv="$(IFS=', '; echo "${full_gate_names[*]}")"
@@ -356,6 +407,13 @@ EOF
       done
     fi
 
+    # P069 Step 12: stack-independent targeted_tests gate — added
+    # unconditionally (including the zero-detected-stacks case above), since
+    # aid-select-tests.sh's own routing table is independent of any detected
+    # language stack.
+    echo "  # === Targeted test selector (P069 Step 12) ==="
+    render_test_audit_scheduler_block gate
+
     # P061 E1 Step 5/6: generic gate_profiles substrate — only gate names the
     # stacks above actually defined go into include[]; empty when no stack
     # matched (nothing to profile yet). Delegated to render_gate_profiles_block
@@ -383,6 +441,13 @@ EOF
       echo "# WARNING: stack auto-detect produced no match — verify cp4_production_paths reflects your project's production-code layout"
     fi
     echo "cp4_production_paths: \"${cp4_glob}\""
+
+    # P069 Step 12: stack-independent test_audit.scheduler block — the ONE
+    # authoritative source of scheduler.mode (never P066's test-audit.yaml).
+    # Defaults every fresh project to sequential (Constraint 8 staged
+    # rollout) with an empty resource_locks map.
+    echo ""
+    render_test_audit_scheduler_block test_audit
   } > "${output_file}" || {
     echo "[ERROR] Cannot write to ${output_file} — check permissions or run /aid-init first." >&2
     return 1
@@ -391,4 +456,4 @@ EOF
 
 export -f detect_stacks compose_execution_yaml resolve_cp4_production_paths \
   stack_gate_names render_gate_profiles_block execution_yaml_has_gate_profiles \
-  append_gate_profiles_block
+  append_gate_profiles_block render_test_audit_scheduler_block

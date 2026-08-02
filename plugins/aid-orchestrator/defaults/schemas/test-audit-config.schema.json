@@ -3,7 +3,7 @@
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-config.schema.json",
   "title": "AID Test Portfolio Audit — Project Config",
   "$comment": "producer: PM (hand-edited) or /aid-init copy-if-absent, consumers: [aid-test-audit-config.sh load_test_audit_config, aid-test-audit-dispatch.sh, aid-test-audit-command-allowlist.sh]",
-  "description": "Project-level audit config contract (.aid-o/config/test-audit.yaml). budget_minutes_default/max_read_only_audit_agents/allowed_runners are read by THIS plan. resource_locks/scheduler are reserved for P069 (depends_on_plans:[P066]) so P069 doesn't need a second schema revision — this plan never reads or writes them.",
+  "description": "Project-level audit config contract (.aid-o/config/test-audit.yaml). budget_minutes_default/max_read_only_audit_agents/allowed_runners are read by THIS (P066) plan. resource_locks/scheduler were reserved for P069 (depends_on_plans:[P066]) so it wouldn't need a second schema revision — P066 itself never reads or writes them. P069 has since shipped (v2.67.0) and reads scheduler.* for real.",
   "type": "object",
   "required": ["budget_minutes_default", "max_read_only_audit_agents", "allowed_runners"],
   "properties": {
@@ -20,11 +20,11 @@
     },
     "resource_locks": {
       "type": "object",
-      "description": "Unused by this plan — reserved for P069."
+      "description": "Unused by P066's own logic — reserved for P069, which has since shipped (v2.67.0)."
     },
     "scheduler": {
       "type": "object",
-      "description": "Unused by this plan's own logic — present only so P069 doesn't need a second schema revision. This plan never reads or writes scheduler.*."
+      "description": "Unused by P066's own logic — present only so P069 wouldn't need a second schema revision. P069 has since shipped (v2.67.0) and reads scheduler.* for real via aid-run-gates.sh's rollout-gated dispatch."
     }
   },
   "additionalProperties": false

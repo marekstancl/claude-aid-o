@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/e2e-full-path-proof.schema.json",
+  "title": "AID Test Portfolio — E2E Full Real-Path Proof",
+  "$comment": "producer: scripts/tests/test-integration-e2e-full-path-proof.sh (P069 Step 17); consumer: Step 18's PM quarantine-decision review, which cites the most recent pass:true observe_parallel_full_path run at .aid-o/work/evidence/e2e-full-path-proof/<run_id>.json. Proves the REAL path end-to-end (configured profile -> gate runner -> selected execution units -> scheduler -> per-unit receipts -> aggregated verdict) — config, documentation, or a registry row never substitute for this proof.",
+  "type": "object",
+  "required": ["run_id", "scenario", "pass", "stages_verified", "commit_sha", "evaluated_at"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Matches this artifact's own filename (<run_id>.json)."
+    },
+    "scenario": {
+      "type": "string",
+      "enum": ["observe_parallel_full_path", "sequential_regression", "self_host_bundle_refresh"]
+    },
+    "pass": {
+      "type": "boolean",
+      "description": "true only if every entry in stages_verified[] has pass:true."
+    },
+    "stages_verified": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["stage", "pass"],
+        "properties": {
+          "stage": { "type": "string", "minLength": 1 },
+          "pass": { "type": "boolean" },
+          "detail": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "commit_sha": {
+      "type": "string",
+      "description": "The commit this proof was measured against. May be a fixture-project commit (observe_parallel_full_path/sequential_regression scenarios run inside a disposable fixture, never this plugin repo's own HEAD) or this repo's own HEAD (self_host_bundle_refresh)."
+    },
+    "evaluated_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "Codex review: pass's own stated contract ('true only if every stage passes') was previously enforced only by the producer script's own jq computation, never the schema itself — a hand-authored or drifted artifact could set pass:true alongside a failing stage and still validate. This cross-field check closes that structurally.",
+      "if": {
+        "properties": {
+          "stages_verified": {
+            "contains": { "properties": { "pass": { "const": false } } }
+          }
+        }
+      },
+      "then": { "properties": { "pass": { "const": false } } }
+    }
+  ]
+}

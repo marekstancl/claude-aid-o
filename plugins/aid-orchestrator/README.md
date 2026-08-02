@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-- **Plugin:** 2.66.2
+- **Plugin:** 2.67.0
 - **License:** AGPL-3.0-only
 - **Requires:** Claude Code with plugin support
 
@@ -87,6 +87,52 @@ PATH_add "$AID_PLUGIN_PATH/scripts"
 - `/aid-help` — progressive help (Level 0-3)
 - `CHANGELOG.md` — version history
 - `scripts/README.md` — bash script documentation
+
+## Test scheduler (opt-in, staged rollout)
+
+Every generated `execution.yaml` carries a `targeted_tests` gate plus a
+`test_audit.scheduler` block:
+
+```yaml
+test_audit:
+  scheduler:
+    mode: sequential        # sequential | observe_parallel | parallel
+    resource_locks: {}
+```
+
+`sequential` (the default) runs targeted_tests exactly as before this
+plan — one selected test at a time, no scheduler involved. Moving to
+`observe_parallel`/`parallel` is a project's own opt-in decision, but the
+mode written here is only a *request*: `aid-scheduler-rollout-gate.sh`
+resolves the actual *effective* mode on every run, and can force it back
+down to `sequential` if the evidence isn't there yet.
+
+**Staged rollout (never configure-your-way-past-it):**
+
+1. Run `aid-test-schedule-divergence-check.sh` against the project's own
+   full test-catalog run_unit set, in both sequential and the target
+   mode, inside a fresh disposable clone, at least 3 times, until 3
+   `pass:true` artifacts exist for the current commit.
+2. `observe_parallel` unlocks once 3 such artifacts (mode_tested:
+   `observe_parallel`, covering the *entire* current catalog — a partial
+   subset never counts) exist for the current commit.
+3. `parallel` additionally requires 3 *separate* qualifying artifacts
+   with mode_tested: `parallel` — evidence from one stage never
+   substitutes for the other.
+
+Missing, stale, or partial-coverage evidence fails closed to
+`sequential`, never open. `aid-run-gates.sh` records the real mode each
+`targeted_tests` run actually executed under in the gate's own
+runtime-baseline sample (`concurrency_context`) — every other gate is
+always recorded as `sequential`, since only `targeted_tests` ever goes
+through the scheduler at all.
+
+A `targeted_tests` run that hits exit 3 (unverifiable path) or exit 11
+(no approved-catalog mapping row) never resolves silently — it escalates
+to a genuinely-executed `full`-profile substitute, folded into the
+top-level `gates_report.json` alongside the original attempt (kept as
+`escalation.targeted_run`), so the run's real verdict is never a bare
+pass built on a selector that verified nothing.
 
 ## Plan-level release model
 
