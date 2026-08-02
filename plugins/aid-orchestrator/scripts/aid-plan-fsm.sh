@@ -3678,7 +3678,9 @@ _pfsm_finalize_review() {
   # JSON file that becomes trustworthy merely because its later hash is
   # sealed. Whether "skipped" is an acceptable verdict here depends on the
   # SAME required_lenses[] arming check as C3's own build-manifest gate: a
-  # required AC lens's verdict must be present|absent; when no AC lens is
+  # required AC lens's verdict must be pass|fail (aid-plan-diff.sh's actual
+  # overall_verdict vocabulary — pass|fail|partial|skipped; "present"/"absent"
+  # is the per-AC results[] vocabulary, not this field); when no AC lens is
   # armed, an honest "skipped" is not fabricated evidence, it is the correct
   # explicit classification, and must not block a legitimate no-AC-lens plan.
   local ac_lens_required_rv="false"
@@ -3691,11 +3693,11 @@ _pfsm_finalize_review() {
   [[ "$pd_base" == "$base_commit" && "$pd_head" == "$candidate" ]] \
     || _rassert "plan-diff.json is not bound to ${base_commit}..${candidate}."
   if [[ "$ac_lens_required_rv" == "true" ]]; then
-    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]] \
-      || _rassert "an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected present|absent (skipped/unverifiable is not C3 evidence for a required lens)."
+    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] \
+      || _rassert "an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected pass|fail (partial/skipped/unverifiable is not C3 evidence for a required lens)."
   else
-    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" || "$pd_verdict" == "skipped" ]] \
-      || _rassert "plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected present|absent|skipped."
+    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" || "$pd_verdict" == "skipped" ]] \
+      || _rassert "plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected pass|fail|partial|skipped."
   fi
   jq -e '(.results | type == "array") and (.summary | type == "object")' "${run_dir_abs}/plan-diff.json" >/dev/null 2>&1 \
     || _rassert "plan-diff.json lacks results[] or summary{}; C3 must not read an underspecified AC verdict."
@@ -3712,7 +3714,7 @@ _pfsm_finalize_review() {
   # its evidence_hashes[], that snapshot must ALSO equal the producer's
   # hash, or a swap-dispatch-restore around the dispatch call is caught
   # here. D2 round-3 Codex MEDIUM: whenever plan-diff.json carries a REAL
-  # verdict (present|absent — pd_verdict "skipped" is the only honest way
+  # verdict (pass|fail — pd_verdict "skipped" is the only honest way
   # to NOT have read it), the evidence_hashes[] entry is now MANDATORY, not
   # merely checked-if-present — an absent, non-array, or plan-diff.json-less
   # evidence_hashes[] no longer silently passes as "C3 never read it" when
@@ -3721,7 +3723,7 @@ _pfsm_finalize_review() {
   local c3_evidence_hashes_valid c3_pd_hash
   c3_evidence_hashes_valid="$(jq -e '(.audit_input_manifest.evidence_hashes // []) | type == "array"' "$c3_manifest" >/dev/null 2>&1 && echo true || echo false)"
   c3_pd_hash="$(jq -r '(.audit_input_manifest.evidence_hashes // [])[]? | select(.path=="plan-diff.json") | .sha256' "$c3_manifest" 2>/dev/null | head -1)"
-  if [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]]; then
+  if [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" ]]; then
     if [[ "$c3_evidence_hashes_valid" != "true" ]]; then
       _rassert "audit-input-manifest.json's audit_input_manifest.evidence_hashes is missing or not an array, but plan-diff.json has a real overall_verdict '${pd_verdict}' — C3's own record of what it consumed is unproven."
     elif [[ -z "$c3_pd_hash" ]]; then
@@ -6191,9 +6193,11 @@ _pfsm_finalize_inputs() {
   # no armed lens is the legitimate "not_required_absent" classification.
   # Whether an AC lens (ac_to_test_identity / requirement_test_drift) is
   # ARMED for this run decides what a legitimate plan-diff.json looks like:
-  #   - armed:      overall_verdict MUST be present|absent (exit 0/1). A
-  #                 skipped/malformed/missing artifact blocks dispatch — it is
-  #                 not evidence and is never read as a pass.
+  #   - armed:      overall_verdict MUST be pass|fail (aid-plan-diff.sh exit
+  #                 0/1; mapped below to this manifest's own present|absent
+  #                 plan_diff_verdict vocabulary). A skipped/partial/
+  #                 malformed/missing artifact blocks dispatch — it is not
+  #                 evidence and is never read as a pass.
   #   - not armed:  overall_verdict "skipped" (aid-plan-diff.sh exit 2, no AC
   #                 section / fast-mode) is the HONEST, EXPECTED outcome and
   #                 is recorded explicitly as such — never silently upgraded
@@ -6217,19 +6221,24 @@ _pfsm_finalize_inputs() {
       'if (.base_commit == $b and .head_commit == $h) then (.overall_verdict // "") else "" end' "$pd" 2>/dev/null || true)"
   fi
   if [[ "$ac_lens_required" == "true" ]]; then
-    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]] || {
-      echo "PRECONDITION FAIL: plan-finalize --stage inputs: an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but C3 plan-diff.json is missing, skipped, malformed or not bound to ${base_commit}..${candidate} — a required lens's absence is never read as a pass." >&2
+    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] || {
+      echo "PRECONDITION FAIL: plan-finalize --stage inputs: an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but C3 plan-diff.json is missing, skipped, partial, malformed or not bound to ${base_commit}..${candidate} (overall_verdict='${pd_verdict:-<empty>}', expected pass|fail) — a required lens's absence is never read as a pass." >&2
       return 1
     }
   else
-    [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" || "$pd_verdict" == "skipped" ]] || {
+    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" || "$pd_verdict" == "skipped" ]] || {
       echo "PRECONDITION FAIL: plan-finalize --stage inputs: C3 plan-diff.json is missing, malformed or not bound to ${base_commit}..${candidate}." >&2
       return 1
     }
   fi
-  local pd_hash
+  local pd_hash pd_manifest_verdict
+  case "$pd_verdict" in
+    pass) pd_manifest_verdict="present" ;;
+    fail) pd_manifest_verdict="absent" ;;
+    *)    pd_manifest_verdict="skipped" ;;  # partial or skipped — schema's plan_diff_verdict enum has no "partial"
+  esac
   pd_hash="sha256:$(sha256sum "$pd" | awk '{print $1}')"
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\", ac_lens_required: ${ac_lens_required}, plan_diff_verdict: \"${pd_verdict}\"}" >/dev/null || {
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\", ac_lens_required: ${ac_lens_required}, plan_diff_verdict: \"${pd_manifest_verdict}\"}" >/dev/null || {
     echo "PRECONDITION FAIL: plan-finalize --stage inputs: the produced plan-diff hash could not be recorded before review dispatch." >&2
     return 1
   }

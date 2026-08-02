@@ -1998,7 +1998,7 @@ _write_pd() {
   printf 'PLAN\n' > "$plan"
   export AID_PLAN_AC_FILE="$plan"
   _write_rp '["ac_to_test_identity"]'
-  _write_pd "$BASE_SHA" "$HEAD_SHA" "present"
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "pass"
   _build high
   [ "$status" -eq 0 ]
   run jq -r '.audit_input_manifest.allowlist[] | select(. == "plan-diff.json")' "$MANIFEST"
@@ -2027,7 +2027,7 @@ _write_pd() {
 
 @test "IMP-464: required AC lens + WRONG BASE plan-diff.json refuses before dispatch" {
   _write_rp '["ac_to_test_identity"]'
-  _write_pd "0000000000000000000000000000000000000000" "$HEAD_SHA" "present"
+  _write_pd "0000000000000000000000000000000000000000" "$HEAD_SHA" "pass"
   _build high
   [ "$status" -ne 0 ]
   [[ "$output" == *"AC lens required"* ]]
@@ -2035,7 +2035,7 @@ _write_pd() {
 
 @test "IMP-464: required AC lens + WRONG HEAD plan-diff.json refuses before dispatch" {
   _write_rp '["ac_to_test_identity"]'
-  _write_pd "$BASE_SHA" "0000000000000000000000000000000000000000" "present"
+  _write_pd "$BASE_SHA" "0000000000000000000000000000000000000000" "pass"
   _build high
   [ "$status" -ne 0 ]
   [[ "$output" == *"AC lens required"* ]]
@@ -2070,7 +2070,7 @@ _write_pd() {
 
 @test "IMP-464: review-profile.json present but UNPARSEABLE fails closed regardless of plan-diff.json" {
   printf 'not json\n' > "$TEST_EVIDENCE_DIR/review-profile.json"
-  _write_pd "$BASE_SHA" "$HEAD_SHA" "present"
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "pass"
   _build high
   [ "$status" -ne 0 ]
 }
@@ -2081,7 +2081,7 @@ _write_pd() {
   printf 'PLAN\n' > "$plan"
   export AID_PLAN_AC_FILE="$plan"
   _write_rp '["ac_to_test_identity"]'
-  _write_pd "$BASE_SHA" "$HEAD_SHA" "absent"
+  _write_pd "$BASE_SHA" "$HEAD_SHA" "fail"
   _build high
   [ "$status" -eq 0 ]
   local real_pd_sha

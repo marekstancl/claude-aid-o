@@ -642,10 +642,12 @@ cmd_build_manifest() {
   # ac_lens_required computed above from review-profile.json) decides what a
   # legitimate plan-diff.json looks like here too:
   #   - required:     must exist, parse, be bound to base_sha..head_sha, and
-  #                   carry overall_verdict present|absent. Anything else
-  #                   (missing, malformed, wrong range, "skipped") is refused
-  #                   BEFORE dispatch — a required lens's absence is never
-  #                   read as a pass.
+  #                   carry overall_verdict pass|fail (aid-plan-diff.sh's
+  #                   actual vocabulary; mapped below to this module's own
+  #                   present|absent plan_diff_status output). Anything else
+  #                   (missing, malformed, wrong range, "skipped"/"partial")
+  #                   is refused BEFORE dispatch — a required lens's absence
+  #                   is never read as a pass.
   #   - not required: absence is legitimate and is recorded EXPLICITLY as
   #                   "not_required_absent", never silently treated as a
   #                   passed check. Presence (even "skipped") is still bound
@@ -662,9 +664,10 @@ cmd_build_manifest() {
         "$evidence_dir/plan-diff.json" 2>/dev/null || true)"
     fi
     case "$pd_verdict" in
-      present|absent) plan_diff_status="$pd_verdict" ;;
-      skipped)        plan_diff_status="not_required_skipped" ;;
-      *)              plan_diff_status="malformed_or_unbound" ;;
+      pass)             plan_diff_status="present" ;;
+      fail)             plan_diff_status="absent" ;;
+      skipped|partial)  plan_diff_status="not_required_skipped" ;;
+      *)                plan_diff_status="malformed_or_unbound" ;;
     esac
     if [[ "$ac_lens_required" -eq 1 && "$plan_diff_status" != "present" && "$plan_diff_status" != "absent" ]]; then
       _fail "AC lens required (review-profile.json required_lenses[] includes ac_to_test_identity / requirement_test_drift) but plan-diff.json at ${evidence_dir}/plan-diff.json is missing, malformed, skipped, or not bound to ${base_sha}..${head_sha} (classified: ${plan_diff_status}) — a required AC lens's absent verdict is never treated as evidence."
