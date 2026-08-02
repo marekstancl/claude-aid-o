@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/quarantine-decision.schema.json",
+  "title": "AID Test Portfolio — Quarantine Decision Record",
+  "$comment": "producer: scripts/aid-quarantine-decision-record.sh (P069 Step 18), ONLY on an explicit PM-provided --decision invocation — never automatic, never inferred from evidence content alone. Retained at .aid-o/work/evidence/quarantine-decisions/<gate_id>-<decided_at>.json, one file per decision (never overwritten — a later, conflicting decision for the SAME gate_id is refused unless it explicitly supersedes the prior one). This record is evidence for a PM/implementer to act on SEPARATELY — no code path in this plan writes to execution.yaml's quarantine: block automatically, even when decision:lift exists here.",
+  "type": "object",
+  "required": [
+    "gate_id", "evidence_ref", "e2e_evidence_ref", "decision",
+    "reviewed_by", "decided_at", "rationale"
+  ],
+  "properties": {
+    "gate_id": {
+      "type": "string",
+      "const": "bats_all",
+      "description": "Intentionally single-gate — matches Step 15's own narrowed scope. plan_diff is explicitly out of scope for this whole plan, never decided here."
+    },
+    "evidence_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to Step 15's real, schema-valid quarantine-remediation-evidence bundle this decision was based on (.aid-o/work/evidence/quarantine-remediation/bats_all-<commit_sha>.json)."
+    },
+    "e2e_evidence_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to Step 17's real, schema-valid, pass:true observe_parallel_full_path E2E proof this decision was based on (.aid-o/work/evidence/e2e-full-path-proof/<run_id>.json)."
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["lift", "keep", "defer"]
+    },
+    "reviewed_by": { "type": "string", "minLength": 1 },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time",
+      "$comment": "Codex review: format:date-time alone is NOT enforced by this project's validator (jsonschema's date-time format check is a no-op without the optional rfc3339-validator dependency, which is not installed here) — the pattern below is the actual enforcement. Millisecond precision is REQUIRED (not just permitted) so two decisions for the same gate_id within the same wall-clock second never collide on the derived filename (<gate_id>-<decided_at-sanitized>.json).",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "rationale": { "type": "string", "minLength": 1 },
+    "supersedes": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "The prior record's own decided_at this record explicitly replaces. Absent on a gate's first-ever decision record. Must name the CURRENT unsuperseded leaf record for gate_id (never an already-superseded ancestor) — the producer script enforces this at write time; this schema only constrains shape. The superseded record is never deleted — only this field marks the new one as the current authoritative decision for gate_id."
+    }
+  },
+  "additionalProperties": false
+}
