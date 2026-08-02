@@ -132,6 +132,16 @@ if [[ -d "$e2e_dir" ]]; then
 fi
 [[ -n "$e2e_evidence_ref" ]] || _die 1 "no schema-valid, pass:true observe_parallel_full_path E2E proof found under ${e2e_dir} — run Step 17's E2E script first"
 
+# EPIC 5 whole-diff review (HIGH): both refs were being stored as absolute
+# filesystem paths (derived from --project-root), which the decision record
+# then force-tracks into git — permanently embedding the creating
+# workstation/worktree's own path into a durable, portable artifact that
+# would no longer resolve after a fresh clone or worktree relocation.
+# Stored (and displayed) project_root-relative instead, matching the
+# schemas' own documented ".aid-o/work/evidence/..."-relative convention.
+evidence_ref="${evidence_ref#"${project_root}"/}"
+e2e_evidence_ref="${e2e_evidence_ref#"${project_root}"/}"
+
 echo "Evidence presented for this decision:"
 echo "  evidence_ref:     ${evidence_ref}"
 echo "  e2e_evidence_ref: ${e2e_evidence_ref}"

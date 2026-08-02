@@ -248,6 +248,17 @@ if [[ -n "$first_record_path" ]]; then
   else
     fail_msg "evidence_ref/e2e_evidence_ref resolved incorrectly: ev=${ev_ref} e2e=${e2e_ref}"
   fi
+
+  # EPIC 5 whole-diff review (HIGH): a force-tracked, durable evidence
+  # record that embeds the CREATING machine's own absolute checkout path
+  # would never resolve after a fresh clone/worktree relocation — both
+  # refs must be project_root-RELATIVE, never absolute.
+  echo "TEST: evidence_ref and e2e_evidence_ref are project_root-relative, never absolute paths"
+  if [[ "$ev_ref" != /* ]] && [[ "$e2e_ref" != /* ]]; then
+    pass_msg "both refs are relative (ev_ref='${ev_ref}', e2e_ref='${e2e_ref}')"
+  else
+    fail_msg "a ref is an absolute path — would not survive a fresh clone/relocation (ev_ref='${ev_ref}', e2e_ref='${e2e_ref}')"
+  fi
 else
   fail_msg "cannot check citations — no record file found"
 fi

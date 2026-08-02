@@ -6,9 +6,10 @@
 # this plan shipped. Installed copy-if-absent by /aid-init; never
 # overwritten on re-run (PM customizations preserved).
 #
-# resource_locks / scheduler are reserved for P069 (depends_on_plans:[P066])
-# so that plan doesn't need a second schema revision — this plan never
-# reads or writes them.
+# resource_locks / scheduler were reserved for P069 (depends_on_plans:[P066])
+# so that plan wouldn't need a second schema revision — P066 itself never
+# reads or writes them. P069 has since shipped (v2.67.0) and reads
+# scheduler.* for real via aid-run-gates.sh's rollout-gated dispatch.
 
 budget_minutes_default: 30
 max_read_only_audit_agents: 4
