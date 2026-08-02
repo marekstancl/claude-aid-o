@@ -243,7 +243,7 @@ _gate_output_escape() {
 #          direct (non-scheduled) invocation would have produced.
 run_scheduled_targeted_tests() {
   local gate_name="$1" effective_mode="$2" base_commit="$3" plugin_path="$4" \
-        epic_id="$5" run_id="$6" project_root="$7" timeout_s="$8"
+        epic_id="$5" run_id="$6" project_root="$7" timeout_s="$8" attempt="${9:-1}"
 
   local start_ms; start_ms=$(date +%s%3N)
   local units_file="${project_root}/.aid-o/work/evidence/${epic_id}/${run_id}/gates/targeted-units.json"
@@ -262,8 +262,18 @@ run_scheduled_targeted_tests() {
     return 1
   fi
 
+  # Codex review: a missing/malformed units file after a successful
+  # (exit 0) --emit-units run must never silently degrade to "zero units
+  # selected → pass" — that fail-open would mask a real writer bug as a
+  # clean docs-only-style pass. Require the file to actually parse as a
+  # JSON array before treating an empty result as legitimate.
+  if ! jq -e 'type == "array"' "$units_file" >/dev/null 2>&1; then
+    echo "{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":${duration_ms},\"output\":\"$(_gate_output_escape "aid-select-tests.sh --emit-units exited 0 but ${units_file} is missing or not a valid JSON array")\"}"
+    return 1
+  fi
+
   local expected_unit_ids_json
-  expected_unit_ids_json="$(jq -c '[.[].unit_id]' "$units_file" 2>/dev/null || echo "[]")"
+  expected_unit_ids_json="$(jq -c '[.[].unit_id]' "$units_file")"
 
   if [[ "$(jq 'length' <<<"$expected_unit_ids_json")" -eq 0 ]]; then
     # No test impact (e.g. a docs-only change) — nothing to schedule;
@@ -278,7 +288,7 @@ run_scheduled_targeted_tests() {
   local dispatch_output dispatch_ec=0
   dispatch_output=$(timeout "$timeout_s" bash "${plugin_path}/scripts/aid-test-scheduler.sh" dispatch \
     --project-root "$project_root" --run-id "${run_id}-targeted_tests" \
-    --units-json "$units_file" --mode "$effective_mode" 2>"$dispatch_stderr_file") || dispatch_ec=$?
+    --units-json "$units_file" --mode "$effective_mode" --attempt "$attempt" 2>"$dispatch_stderr_file") || dispatch_ec=$?
 
   end_ms=$(date +%s%3N)
   duration_ms=$(( end_ms - start_ms ))
@@ -587,7 +597,7 @@ run_all_gates() {
     for (( attempt=1; attempt<=max_retries+1; attempt++ )); do
       gate_exit=0
       if $use_scheduled_dispatch; then
-        gate_result=$(run_scheduled_targeted_tests "$gate_name" "$rollout_effective_mode" "$base_commit_resolved" "$plugin_path_resolved" "$epic_id" "$run_id" "$_plugin_project_root" "$timeout_s") || gate_exit=$?
+        gate_result=$(run_scheduled_targeted_tests "$gate_name" "$rollout_effective_mode" "$base_commit_resolved" "$plugin_path_resolved" "$epic_id" "$run_id" "$_plugin_project_root" "$timeout_s" "$attempt") || gate_exit=$?
       else
         gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       fi
@@ -919,13 +929,27 @@ run_all_gates() {
   # OWN complete report. That report becomes the actual, verdict-bearing
   # result verbatim; this pass's own (targeted) report is preserved
   # underneath as informational metadata only, via merge_escalation_report.
-  # targeted_tests is never itself a member of any `full` profile emitted
-  # by compose_execution_yaml/render_gate_profiles_block or this repo's own
-  # hand-authored execution.yaml, so this subprocess can never re-trigger
-  # this same escalation recursively.
-  if $escalation_triggered; then
+  #
+  # Codex review (HIGH): compose_execution_yaml/render_gate_profiles_block
+  # never put targeted_tests in a generated `full` profile, but a
+  # HAND-AUTHORED execution.yaml is free to — profile include[] validation
+  # (above) only checks that named gates exist, never which profile they
+  # belong to. If `full` ever also included targeted_tests, the subprocess
+  # below would hit the identical exit 3/11 and spawn ANOTHER escalation,
+  # unbounded. Refusing to escalate whenever THIS invocation's own active
+  # profile is already "full" closes that off structurally: escalating
+  # "full" to "full" is meaningless regardless of profile contents, so
+  # this guard needs no assumption about what `full` does or doesn't
+  # include.
+  if $escalation_triggered && [[ "$profile" != "full" ]]; then
     echo "aid-run-gates.sh: targeted_tests escalated (${escalation_reason}) — running a full --profile substitute" >&2
     local full_escalation_report_path="${report_path}.full-escalation.json"
+    # Codex review: a STALE report from an earlier escalation attempt at
+    # this same path must never be mistaken for this run's own output if
+    # the subprocess below fails before writing anything — remove it
+    # first so the "no report file" fallback branch is only ever reached
+    # on a genuine failure, never a leftover from a previous run.
+    rm -f "$full_escalation_report_path"
     local -a escalation_args=(run-all "$execution_yaml" "$epic_id" "$run_id" --profile full --report-file "$full_escalation_report_path")
     if [[ -n "$base_commit_resolved" && "$base_commit_resolved" != "null" ]]; then
       escalation_args+=(--base-commit "$base_commit_resolved")
@@ -933,10 +957,23 @@ run_all_gates() {
     if [[ -n "$plan_path_resolved" && "$plan_path_resolved" != "null" ]]; then
       escalation_args+=(--plan-path "$plan_path_resolved")
     fi
+    if [[ -n "$plan_json" ]]; then
+      escalation_args+=(--plan-json "$plan_json")
+    fi
     bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
     if [[ -f "$full_escalation_report_path" ]]; then
       local full_report_json; full_report_json="$(cat "$full_escalation_report_path")"
       report="$(merge_escalation_report "$report" "$full_report_json" "$escalation_reason")"
+      # Codex review (HIGH): the merged report's own .overall now reflects
+      # the FULL pass's real verdict, but this function's own exit status
+      # and gates_complete/gate_runner_complete log events below still
+      # read the shell-local $overall variable — which was computed
+      # BEFORE this merge and still holds the ORIGINAL targeted-only
+      # pass's verdict. Left unfixed, the persisted report and the
+      # command's own exit code could disagree (e.g. report says "pass"
+      # while the command exits 1, or vice versa). Recompute from the
+      # merged report so both stay in agreement.
+      overall="$(jq -r '.overall' <<<"$report")"
     else
       report="$(jq --arg reason "$escalation_reason" \
         '. + {escalation: {triggered_by:"targeted_tests", reason:$reason, targeted_run:null, error:"full-profile escalation run failed to produce a report"}}' \

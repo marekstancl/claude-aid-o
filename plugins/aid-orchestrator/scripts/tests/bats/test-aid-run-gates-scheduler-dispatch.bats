@@ -284,3 +284,77 @@ YAML
   run bash -c "yq -o=json '.gates' '$AID_GATE_BASELINE_FILE' | jq -e '[.[] | (.recent_samples_by_context.parallel // null)] | all(. == null)'"
   [ "$output" == "true" ]
 }
+
+# ─── Codex review (P069 Step 14): 3 real findings, regression-tested ────────
+
+@test "Codex HIGH: a hand-authored 'full' profile that ALSO includes targeted_tests never self-escalates recursively" {
+  commit_change "plugins/aid-orchestrator/scripts/aid-brand-new-unmapped-script.sh"
+
+  cat > .aid-o/config/execution.yaml <<YAML
+gates:
+  targeted_tests:
+    command: "$AID_PLUGIN_PATH/scripts/aid-select-tests.sh --base {base_commit}"
+    required: false
+    timeout_seconds: 30
+gate_profiles:
+  targeted:
+    include: [targeted_tests]
+  full:
+    include: [targeted_tests]
+YAML
+
+  local report=".aid-o/work/evidence/E-X/R-1/gates/gates_report.json"
+  mkdir -p "$(dirname "$report")"
+  # A hanging/unbounded recursive chain would exceed bats' own default
+  # test timeout — completing at all (with the correct single-level
+  # shape below) IS part of what this test proves.
+  run "$RUN_GATES" run-all .aid-o/config/execution.yaml E-X R-1 --base-commit "$BASE_SHA" --profile targeted --report-file "$report"
+  [ "$status" -eq 0 ]
+
+  run jq -r '.gates.targeted_tests.result' "$report"
+  [ "$output" == "fail" ]
+  run jq -r '.gates.targeted_tests.exit_code' "$report"
+  [ "$output" == "3" ]
+
+  # Exactly ONE level of nesting — the nested targeted_run's OWN report
+  # never carries a further .escalation key (which a second, recursive
+  # escalation attempt would have produced).
+  run jq -e '.escalation.targeted_run | has("escalation")' "$report"
+  [ "$output" == "false" ]
+}
+
+@test "Codex HIGH: overall reflects the MERGED (full-pass) verdict, not the stale pre-merge targeted-pass verdict" {
+  # targeted_tests is required:true — under the pre-fix bug, the
+  # targeted-only pass's own overall="fail" (a required gate failed)
+  # would have survived the merge unchanged, disagreeing with the
+  # genuinely-passing full-profile substitute's own real verdict.
+  commit_change "plugins/aid-orchestrator/scripts/aid-brand-new-unmapped-script.sh"
+
+  cat > .aid-o/config/execution.yaml <<YAML
+gates:
+  targeted_tests:
+    command: "$AID_PLUGIN_PATH/scripts/aid-select-tests.sh --base {base_commit}"
+    required: true
+    timeout_seconds: 30
+  always_pass:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  targeted:
+    include: [targeted_tests]
+  full:
+    include: [always_pass]
+YAML
+
+  local report=".aid-o/work/evidence/E-X/R-1/gates/gates_report.json"
+  mkdir -p "$(dirname "$report")"
+  run "$RUN_GATES" run-all .aid-o/config/execution.yaml E-X R-1 --base-commit "$BASE_SHA" --profile targeted --report-file "$report"
+
+  # The command's own exit status agrees with the persisted report — both
+  # reflect the full pass's REAL, passing verdict.
+  [ "$status" -eq 0 ]
+  run jq -r '.overall' "$report"
+  [ "$output" == "pass" ]
+  run jq -r '.gates.always_pass.result' "$report"
+  [ "$output" == "pass" ]
+}
