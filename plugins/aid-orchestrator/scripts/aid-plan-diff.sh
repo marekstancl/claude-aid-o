@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
-PLUGIN_VERSION="${PLUGIN_VERSION:-v2.20.2}"
+PLUGIN_VERSION="${PLUGIN_VERSION:-v2.67.0}"
 
 usage() {
   cat <<EOF

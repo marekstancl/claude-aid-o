@@ -601,7 +601,7 @@ _imp269_write_review_profile() {
 # _imp269_write_plan_diff [verdict]  — a plan-diff.json bound to BASE_SHA..
 # HEAD_SHA (IMP-464/D2: required whenever an AC lens is armed).
 _imp269_write_plan_diff() {
-  local verdict="${1:-present}"
+  local verdict="${1:-pass}"
   jq -n --arg b "$BASE_SHA" --arg h "$HEAD_SHA" --arg v "$verdict" \
     '{base_commit:$b, head_commit:$h, overall_verdict:$v, results:[], summary:{present_count:0,absent_count:0}}' \
     > "$TEST_EVIDENCE_DIR/plan-diff.json"
@@ -638,7 +638,7 @@ _imp269_write_receipt() {
   printf '# Plan\n\n## Acceptance Criteria\nAC1..AC5 real.\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
   export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
   _imp269_write_review_profile '["ac_to_test_identity","requirement_test_drift"]'
-  _imp269_write_plan_diff present
+  _imp269_write_plan_diff pass
 
   run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
   [ "$status" -eq 0 ]
@@ -828,7 +828,7 @@ CODEXEOF
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
   printf '# The REAL plan\n\n## Acceptance Criteria\n- [ ] does X\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/real-plan.md"
   _imp269_write_review_profile '["ac_to_test_identity"]'
-  _imp269_write_plan_diff present
+  _imp269_write_plan_diff pass
   export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/.aid-o/plans/real-plan.md"
   run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
   [ "$status" -eq 0 ]
@@ -883,7 +883,7 @@ CODEXEOF
   # content at HEAD, never this tampered worktree copy.
   printf 'TAMPERED worktree content that never earns trust\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
   _imp269_write_review_profile '["ac_to_test_identity"]'
-  _imp269_write_plan_diff present
+  _imp269_write_plan_diff pass
   export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
   run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
   [ "$status" -eq 0 ]

@@ -1314,7 +1314,7 @@ _write_review_outputs() {
   # plan-diff.json is written BEFORE audit-input-manifest.json so the real
   # producer-sealed hash is known when building the manifest's evidence_hashes[].
   jq -n --arg b "$base" --arg h "$cand" \
-    '{base_commit:$b, head_commit:$h, overall_verdict:"present", results:[], summary:{present_count:0,absent_count:0}}' \
+    '{base_commit:$b, head_commit:$h, overall_verdict:"pass", results:[], summary:{present_count:0,absent_count:0}}' \
     > "${dir}/plan-diff.json"
   local pd_hash; pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
   plan_manifest_update "$PLAN_ID" \
@@ -2988,7 +2988,7 @@ _seed_plan_final_evidence() {
         printf 'Head: %s\n' "$cand" > "${dir}/${f}"
       elif [[ "$f" == "plan-diff.json" ]]; then
         jq -n --arg b "$base" --arg h "$cand" \
-          '{base_commit:$b, head_commit:$h, overall_verdict:"present", results:[], summary:{present_count:0,absent_count:0}}' > "${dir}/${f}"
+          '{base_commit:$b, head_commit:$h, overall_verdict:"pass", results:[], summary:{present_count:0,absent_count:0}}' > "${dir}/${f}"
       else
         jq -n --arg h "$cand" '{schema_version:"aid-2.0", revision:{head_sha:$h}}' > "${dir}/${f}"
       fi
@@ -3711,7 +3711,7 @@ _write_adjudication() {
   _seed_review_project
   _write_review_outputs
   local dir; dir="$(_run_dir)"
-  # plan-diff.json's overall_verdict is "present" (a real, meaningful C3 AC
+  # plan-diff.json's overall_verdict is "pass" (a real, meaningful C3 AC
   # verdict) — the manifest omitting any record of having read it must
   # block, not be treated the same as a legitimate no-AC-lens "skipped".
   jq 'del(.audit_input_manifest.evidence_hashes)' \
