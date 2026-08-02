@@ -294,6 +294,12 @@ cmd_dispatch() {
 
   local ctx="$mode"
   local receipts_json="[]"
+  # Real dispatch-lifecycle span (Codex review, Step 8: both start_at and
+  # ended_at were previously computed AFTER everything completed and set
+  # to the SAME instant, so any downstream duration_ms derived from them
+  # was always 0 — captured here, before any batch launches, so the batch
+  # document's own timestamps mean what its schema/consumers assume).
+  local batch_started_at; batch_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local num_batches; num_batches="$(jq 'length' <<<"$batches_json")"
   local bi
   for ((bi = 0; bi < num_batches; bi++)); do
@@ -367,8 +373,8 @@ cmd_dispatch() {
 
   local batch_id="${run_id}-attempt${attempt}"
   local started_at ended_at
-  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  ended_at="$started_at"
+  started_at="$batch_started_at"
+  ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   jq -nc --arg bid "$batch_id" --argjson units "$(jq -Sc 'sort_by(.unit_id)' <<<"$receipts_json")" \
     --arg sa "$started_at" --arg ea "$ended_at" \
     '{batch_id:$bid, units:$units, started_at:$sa, ended_at:$ea}'
