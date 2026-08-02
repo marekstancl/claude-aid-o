@@ -1438,7 +1438,7 @@ enforcements:
 
   - id: scheduler_unknown_parallelism_sequential
     type: 1
-    source: "scripts/aid-test-scheduler.sh (_sched_plan_batches: `if [[ \"$status\" != \"safe\" && \"$status\" != \"constrained\" ]]` forces unknown/exclusive-status units into their own size-1 batch)"
+    source: "scripts/aid-test-scheduler.sh (_sched_plan_batches)"
     instruction: ".aid-o/plans/P069-scheduler-gate-integration.md Step 5 Implementation Detail"
     severity: blocking
     surface: internal-guard
@@ -1449,7 +1449,7 @@ enforcements:
 
   - id: scheduler_rollout_requires_divergence_evidence
     type: 1
-    source: "scripts/aid-scheduler-rollout-gate.sh (staged qualifying-artifact count check, observe_parallel/parallel each requiring 3 qualifying divergence-evidence artifacts covering the full current catalog)"
+    source: "scripts/aid-scheduler-rollout-gate.sh"
     instruction: ".aid-o/plans/P069-scheduler-gate-integration.md Step 13 (Constraint 8 staged rollout)"
     severity: blocking
     surface: internal-guard
@@ -1460,11 +1460,11 @@ enforcements:
 
   - id: scheduler_no_second_job_supervisor
     type: 1
-    source: "scripts/lib/aid-test-execution-unit.sh (execution_unit_run); scripts/aid-test-scheduler.sh (_sched_plan_batches)"
+    source: "scripts/lib/aid-test-execution-unit.sh (execution_unit_run); scripts/aid-test-scheduler.sh (cmd_dispatch)"
     instruction: ".aid-o/plans/P069-scheduler-gate-integration.md Constraint 4"
     severity: advisory
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "P069 Constraint 4 — execution units (Step 1) and the scheduler's own per-unit dispatch (Step 5) are both thin wrappers over aid-job.sh's existing, already-tested process-lifecycle primitives (setsid detach, deadline enforcement, terminal states terminal_pass|terminal_fail|timed_out|cancelled) — never a second, parallel reimplementation of job supervision. Advisory (not blocking) because this is an architectural discipline verified by code inspection/grep at review time, not something a single runtime precondition can mechanically re-verify on every invocation the way a gate does."
+    description: "P069 Constraint 4 — execution units (Step 1, execution_unit_run) and the scheduler's own per-unit dispatch (Step 5, cmd_dispatch) both delegate ALL actual process creation, deadline enforcement, and process-group lifecycle to aid-job.sh's existing, already-tested primitives (setsid detach, terminal states terminal_pass|terminal_fail|timed_out|cancelled) — never a second, parallel reimplementation of THAT layer. This does not claim the scheduler itself does nothing: cmd_dispatch legitimately owns batch-level coordination (outstanding-job tracking, TERM/INT cancellation fan-out, terminal-receipt polling) — the constraint is specifically that none of that coordination logic re-implements what aid-job.sh already owns (spawning, supervising, or reaping the underlying OS process). Advisory (not blocking) because this is an architectural discipline verified by code inspection/grep at review time, not something a single runtime precondition can mechanically re-verify on every invocation the way a gate does."
     test: "grep guard — no second job-supervision implementation (setsid/process-group management) exists outside scripts/aid-job.sh"

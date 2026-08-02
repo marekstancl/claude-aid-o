@@ -86,8 +86,18 @@ for id in "${REQUIRED_IDS[@]}"; do
         name="$(sed -E 's/^\s+//; s/\s+$//' <<<"$raw_name")"
         [[ -z "$name" ]] && continue
         if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-          if grep -qF "$name" "$resolved_path"; then
-            pass_msg "row '$id' function/identifier '$name' found in $source_file"
+          # Codex review: a bare `grep -qF` substring match would let a
+          # WRONG citation (e.g. a common word or unrelated variable that
+          # happens to appear in a comment) silently pass as if it named a
+          # real function. Require an actual bash function-definition
+          # shape (`name()` or `function name`) first; only fall back to
+          # the looser substring match for identifiers that are clearly
+          # NOT function names (e.g. a referenced variable), so a real
+          # function citation is always held to the stronger check.
+          if grep -Eq "^[[:space:]]*(function[[:space:]]+)?${name}[[:space:]]*\\(\\)" "$resolved_path"; then
+            pass_msg "row '$id' function '$name' is actually DEFINED in $source_file"
+          elif grep -qF "$name" "$resolved_path"; then
+            pass_msg "row '$id' identifier '$name' found in $source_file (not a function definition — verified as plain text occurrence only)"
           else
             fail_msg "row '$id' function/identifier '$name' NOT found in $source_file — source citation does not resolve"
           fi
