@@ -500,19 +500,28 @@ _aid_append_ac_items() {
 scope_allowed_raw="$(extract_subsection "$epic" "Scope" "Allowed files/paths")"
 scope_forbidden_raw="$(extract_subsection "$epic" "Scope" "Forbidden zones")"
 
-# Parse allowed paths into array
+# Parse allowed paths into array. Runs each bullet through the same D4
+# cleaner as the per-step block (lib/aid-scoping.sh) — this is the fallback
+# source for step_allowed_paths_json (see step_has_block==0 below), so an
+# ambiguous multi-path entry here (e.g. a comma-separated list) must fail
+# loudly instead of silently authorizing only the first path.
 allowed_paths_json="[]"
 while IFS= read -r line; do
   line="$(echo "$line" | sed 's/\r$//')"
   # Match lines starting with - that contain a path (not HTML comments)
-  if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+ ]]; then
-    path_val="$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')"
-    # Remove backticks
-    path_val="${path_val//\`/}"
+  if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.*)$ ]]; then
+    path_entry="$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')"
     # Skip HTML comments and empty
-    [[ "$path_val" == "<!--"* ]] && continue
-    [[ -z "$path_val" ]] && continue
-    allowed_paths_json="$(echo "$allowed_paths_json" | jq --arg p "$path_val" '. + [$p]')"
+    [[ "$path_entry" == "<!--"* ]] && continue
+    [[ -z "$path_entry" ]] && continue
+    if ! parsed_scope_paths="$(_aid_split_path_entry "$path_entry")"; then
+      error_exit "Invalid Allowed files/paths entry: ${path_entry}. Canonical multi-path form: \`a\` + \`b\` — description." 1
+    fi
+    while IFS= read -r path_val; do
+      [[ -z "$path_val" ]] && continue
+      allowed_paths_json="$(echo "$allowed_paths_json" | jq --arg p "$path_val" \
+        'if index($p) then . else . + [$p] end')"
+    done <<< "$parsed_scope_paths"
   fi
 done <<< "$scope_allowed_raw"
 
@@ -659,7 +668,9 @@ for i in "${!step_nums[@]}"; do
            && ac_json_valid="$(echo "$ac_json_decoded" | jq -c . 2>/dev/null)"; then
           outputs_json="$files_json_valid"
           step_ac_json="$ac_json_valid"
-          step_allowed_paths_json="$(_aid_allowed_paths_from_files_json "$files_json_valid")"
+          if ! step_allowed_paths_json="$(_aid_allowed_paths_from_files_json "$files_json_valid")"; then
+            error_exit "Invalid Files entry in step ${step_n} scoping block. Canonical multi-path form: \`a\` + \`b\` — description." 1
+          fi
           step_has_block=1
         fi
       fi

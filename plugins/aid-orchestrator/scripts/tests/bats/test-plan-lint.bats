@@ -50,6 +50,17 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   _plan p.md legacy '- Test: extend `scripts/x.sh` (or a yq assertion) to check'
   run "$LINT" p.md; [ "$status" -ne 0 ]
 }
+@test "lint ERROR: comma-separated backtick paths blocks even legacy (ambiguous-entry, not silent narrowing)" {
+  _plan p.md legacy '- Modify: `src/a.ts`, `src/b.ts`'
+  run "$LINT" p.md
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unparsed text after a path"* ]]
+}
+@test "lint ERROR: conjunction-joined backtick paths (no ' + ') blocks even legacy" {
+  _plan p.md legacy '- Modify: `src/a.ts` and `src/b.ts`'
+  run "$LINT" p.md
+  [ "$status" -ne 0 ]
+}
 
 # ── STRICT-tier (cleaner-OK, non-canonical) => strict blocks, legacy advisory ─
 @test "lint STRICT: non-(lines) parenthetical blocks strict, passes legacy" {
@@ -121,4 +132,18 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   # the ERROR here is bad-shape, which is gate-breaking regardless of mode.
   _plan dirty.md legacy '- Modify: the 6 remaining version files.'
   run "$LINT" dirty.md --legacy; [ "$status" -ne 0 ]          # lint: ERROR (blocks even legacy)
+}
+
+# ── REGRESSION: a comma-separated multi-path entry fails EPIC generation
+# outright rather than silently narrowing allowed_paths to the first path
+# (the historical bug this test guards against). Legacy plan, so this proves
+# the fail-closed behavior is NOT gated behind lifecycle_strict.
+@test "integration: comma-separated Files entry fails aid-plan-to-epic generation (legacy plan), never silently narrows" {
+  _plan dirty.md legacy '- Modify: `src/a.ts`, `src/b.ts`'
+  mkdir -p out
+  run "$P2E" --plan dirty.md --phase 1 --total 1 \
+    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
+    --output-dir out --counter-yaml counter.yaml
+  [ "$status" -ne 0 ]
+  [ -z "$(ls out/ 2>/dev/null)" ]                             # NO EPIC file silently written with narrowed scope
 }

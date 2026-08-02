@@ -755,9 +755,12 @@ for sn in "${phase_steps[@]}"; do
   while IFS= read -r _raw_file; do
     _raw_file="${_raw_file#- }"
     [[ "$_raw_file" =~ ^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$ ]] || continue
+    if ! _split_paths="$(_aid_split_path_entry "${BASH_REMATCH[2]}")"; then
+      error_exit "Invalid Files entry in step ${sn}: ${_raw_file}. Canonical multi-path form: \`a\` + \`b\` — description." 1
+    fi
     while IFS= read -r _path; do
       [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
-    done < <(_aid_split_path_entry "${BASH_REMATCH[2]}")
+    done <<< "$_split_paths"
   done <<< "$step_artifacts_top_level"
   if [[ -n "$step_files" ]]; then
     all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'

@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.67.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.69.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -117,9 +117,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.68.0** (current) — real, explicit-allowlist-based parallel bats execution for this repo's own `gate:bats_all` (replacing the quarantine stub), a separate `gate:bats_boundary` for the 2 too-expensive-to-pool files, an idempotent self-host execution.yaml migration + verify mechanism, and `plan_diff`/`shell_pipeline_smoke` gate fixes (P071).
+- **v2.69.0** (current) — fail-closed Files/Scope path parsing: the shared cleaner (`lib/aid-scoping.sh`) now rejects ambiguous multi-path entries (comma/conjunction-separated) instead of silently narrowing `allowed_paths` to the first path, enforced consistently across the per-step scoping block, the legacy Scope fallback, the generation-time preflight, and the D5 contract gate.
+- **v2.68.0** — real, explicit-allowlist-based parallel bats execution for this repo's own `gate:bats_all` (replacing the quarantine stub), a separate `gate:bats_boundary` for the 2 too-expensive-to-pool files, an idempotent self-host execution.yaml migration + verify mechanism, and `plan_diff`/`shell_pipeline_smoke` gate fixes (P071).
 - **v2.67.0** — opt-in test scheduler with staged rollout, real `aid-run-gates.sh` dispatch + escalation, a `bats_all` remediation-evidence collector + genuine E2E full-path proof, and a PM quarantine-decision-record mechanism (P069). This repo's own `bats_all` real measurement campaign remains deferred.
-- **v2.66.2** — plan-final evidence durability + review integrity (D1-D5): atomic close-evidence publication, plan-final C3 identity/AC-verdict pinning, a review-boundary TOCTOU close, a schema-versioned receipt inventory, and formal Curator adjudication enforced at both the review boundary and the `.aid-lifecycle` classifier.
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

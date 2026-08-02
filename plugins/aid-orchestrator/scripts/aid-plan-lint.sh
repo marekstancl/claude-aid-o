@@ -59,6 +59,7 @@ _reason_msg() {
     bad-shape)          echo "path has whitespace/() — a verb, bold wrapper, leading '(', or two-paths-without-'+' leaked in";;
     no-backtick-path)   echo "path is not \`backtick\`-wrapped";;
     non-line-paren)     echo "a parenthetical before '—' is not a (lines ~N-M) range — move the note after '—'";;
+    ambiguous-entry)    echo "unparsed text after a path — use \`a\` + \`b\` for multiple paths and put prose after '—'";;
     *)                  echo "$1";;
   esac
 }

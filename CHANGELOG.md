@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.69.0] — 2026-08-02
+
+### Fixed
+- **Files/Scope path parser no longer silently narrows multi-path entries** — `lib/aid-scoping.sh`'s shared cleaner (`_aid_split_path_entry`) now fails loudly on any unparsed remainder after a Files/Scope entry's path list (comma-separated, conjunction-joined, or otherwise ambiguous), instead of silently keeping only the paths found before the ambiguous text. Applies uniformly to the per-step scoping block, the legacy flattened `## Scope > Allowed files/paths` broadcast fallback, the generation-time preflight (`aid-plan-to-epic.sh`), and the D5 contract gate — closing the gap where a malformed multi-path entry could authorize a narrower `allowed_paths` set than the plan actually declared.
+
 ## [2.68.0] — 2026-08-02
 
 ### Added

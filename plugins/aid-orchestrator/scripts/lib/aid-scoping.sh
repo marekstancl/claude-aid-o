@@ -43,11 +43,19 @@ _aid_parse_scoping_line() {
 # _aid_split_path_entry — D4 cleaner for a single RAW Files bullet (label
 # already stripped). The path declaration sits immediately after the label as
 # ONE backtick-wrapped span, or several joined by literal " + `" (the
-# "`a.md` + `b.md`" dual-file convention). Anything else (a "(...)"
-# parenthetical, an em-dash/"--" description, or a later backtick span in a
-# prose-heavy bullet) stops the run and is discarded as prose. No leading
-# backtick span -> fall back to stripping after the first "--"/em-dash.
-# Args: $1 = one RAW Files bullet, label stripped. Output: one cleaned path/line.
+# "`a.md` + `b.md`" dual-file convention). After the last path span, only an
+# optional (lines ~N-M)/(řádky ...) range and/or an em-dash/"--" description
+# is accepted. Any other remainder (notably a comma/conjunction-separated
+# path list, or stray prose) is a FAILURE — this is the D4 boundary the P071
+# bugfix hardened: a prior version silently stopped at the first
+# unparseable span and returned only the path(s) already found, which meant
+# "`a.md`, `b.md`" silently narrowed a step's allowed_paths to `a.md` alone
+# instead of surfacing the malformed entry. Callers MUST check the return
+# code and treat non-zero as a hard parse failure, never as "zero paths".
+# No leading backtick span -> fall back to stripping after the first
+# "--"/em-dash (unchanged legacy tolerance for non-backtick-first prose).
+# Args: $1 = one RAW Files bullet, label stripped. Output: one cleaned
+# path per line. Returns 1 on an ambiguous/unparseable entry.
 _aid_split_path_entry() {
   local entry="$1"
   local rest="$entry"
@@ -68,18 +76,31 @@ _aid_split_path_entry() {
       found_backtick_path=1
       first_span=0
     else
-      break
+      echo "aid-scoping: invalid path span in Files entry: ${entry}" >&2
+      return 1
     fi
   done
 
-  if [[ "$found_backtick_path" -eq 0 ]]; then
-    local fallback="$entry"
-    fallback="${fallback%%--[[:space:]]*}"
-    fallback="$(printf '%s' "$fallback" | sed 's/[[:space:]]*\xe2\x80\x94[[:space:]].*//')"
-    fallback="${fallback//\`/}"
-    fallback="$(printf '%s' "$fallback" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
+  if [[ "$found_backtick_path" -eq 1 ]]; then
+    rest="$(printf '%s' "$rest" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if [[ -z "$rest" || "$rest" == "—"* || "$rest" == --* ]]; then
+      return 0
+    fi
+    local paren_re='^\([^)]*\)([[:space:]]*(—|--).*)?$'
+    if [[ "$rest" =~ $paren_re ]]; then
+      return 0
+    fi
+    echo "aid-scoping: unparsed text after path declaration: ${rest}. Use \`a\` + \`b\` for multiple paths and put prose after '—'." >&2
+    return 1
   fi
+
+  local fallback="$entry"
+  fallback="${fallback%%--[[:space:]]*}"
+  fallback="$(printf '%s' "$fallback" | sed 's/[[:space:]]*\xe2\x80\x94[[:space:]].*//')"
+  fallback="${fallback//\`/}"
+  fallback="$(printf '%s' "$fallback" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
+  return 0
 }
 
 # _aid_path_shape_ok <path> — the D5 allowed_paths_shape predicate as ONE shared
@@ -135,6 +156,9 @@ _aid_extract_files_bullets_numbered() { awk -v emit_lineno=1 "$_AID_FILES_BULLET
 #   strict:no-backtick-path  cleaner rescued a clean path but the entry does not
 #                            start with a `backtick-wrapped` path.
 #   strict:non-line-paren    a parenthetical before the "—" is not a (lines …) range.
+#   error:ambiguous-entry    the cleaner rejected unparsed trailing text (e.g. a
+#                            comma/conjunction-separated path list) instead of
+#                            silently keeping only the path(s) found before it.
 #   (all three strict:* are canonical only for strict plans, advisory for legacy)
 #   clean                    canonical: `path`[ + `path`]* [(lines …)] [— prose]
 # Uses ONLY the shared cleaner + shape predicate, so its ERROR verdicts are exactly
@@ -142,16 +166,16 @@ _aid_extract_files_bullets_numbered() { awk -v emit_lineno=1 "$_AID_FILES_BULLET
 _aid_classify_files_bullet() {
   local bullet="${1#- }"
   local body; body="$(printf '%s' "$bullet" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
-  # A comma between backtick paths used to look superficially valid: the
-  # cleaner returned the first path and the generator silently discarded the
-  # rest.  Only the explicit ` + ` separator is part of the grammar.
-  [[ "$body" == *\`,\ \`* ]] && { echo "error:bad-shape"; return; }
-  local p count=0 bad_shape=0
+  local p count=0 bad_shape=0 parsed
+  if ! parsed="$(_aid_split_path_entry "$body" 2>/dev/null)"; then
+    echo "error:ambiguous-entry"
+    return
+  fi
   while IFS= read -r p; do
     [[ -z "$p" ]] && continue
     count=$((count+1))
     _aid_path_shape_ok "$p" || bad_shape=1
-  done < <(_aid_split_path_entry "$body")
+  done <<< "$parsed"
   [[ "$bad_shape" -eq 1 ]] && { echo "error:bad-shape"; return; }
   [[ "$count" -eq 0 ]] && { echo "strict:no-path"; return; }
   # Cleaner produced clean path(s). Grammar strictness (cleaner-OK but non-canonical):
@@ -173,18 +197,25 @@ _aid_classify_files_bullet() {
 # Strips the Create/Modify/Test/Rewrite label from each entry, then runs the
 # remainder through _aid_split_path_entry. Order-preserving de-dup.
 # Args: $1 = compact JSON array of RAW files[] strings. Output: compact JSON.
+# Returns 1 (no JSON printed) if any entry is ambiguous/unparseable — callers
+# MUST check the return code; a prior version silently kept whatever path(s)
+# were found before the unparseable remainder instead of failing.
 _aid_allowed_paths_from_files_json() {
   local files_json="$1"
   local out_json="[]"
-  local n idx entry stripped p
+  local n idx entry stripped p parsed
   n="$(echo "$files_json" | jq 'length')"
   for (( idx=0; idx<n; idx++ )); do
     entry="$(echo "$files_json" | jq -r --argjson i "$idx" '.[$i]')"
     stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
+    if ! parsed="$(_aid_split_path_entry "$stripped")"; then
+      echo "aid-scoping: invalid Files entry at array index ${idx}: ${entry}" >&2
+      return 1
+    fi
     while IFS= read -r p; do
       [[ -z "$p" ]] && continue
       out_json="$(echo "$out_json" | jq --arg p "$p" 'if index($p) then . else . + [$p] end')"
-    done < <(_aid_split_path_entry "$stripped")
+    done <<< "$parsed"
   done
   echo "$out_json"
 }

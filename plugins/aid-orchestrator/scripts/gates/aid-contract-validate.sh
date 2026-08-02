@@ -154,7 +154,10 @@ if [[ "$STEP_COUNT" -gt 1 ]]; then
     for (( s=1; s<=STEP_COUNT; s++ )); do
       _bl="$(grep -m1 -F "<!-- step-${s}: files=" "$EPIC_MD")"
       _files_json="$(_aid_parse_scoping_line "$_bl" "$s" | head -1)"
-      _block_allowed="$(_aid_allowed_paths_from_files_json "$_files_json")"
+      if ! _block_allowed="$(_aid_allowed_paths_from_files_json "$_files_json" 2>/dev/null)"; then
+        _conflict="step ${s}: block contains an ambiguous Files entry (use \`a\` + \`b\` for multiple paths)"
+        break
+      fi
       _block_sorted="$(jq -cS 'sort' <<< "$_block_allowed" 2>/dev/null || echo '[]')"
       _gen_sorted="$(jq -cS '(.steps['"$((s-1))"'].allowed_paths // []) | sort' "$PLAN_JSON" 2>/dev/null || echo '[]')"
       if [[ "$_block_sorted" != "$_gen_sorted" ]]; then
