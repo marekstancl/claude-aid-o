@@ -318,11 +318,21 @@ Canonical plan:
   unify the user journey rather than merging commands blindly.
 - [ ] Render structured outcomes in human-first, user-language form without
   weakening their underlying gate/waiver/lifecycle truth.
+- [ ] Complete IMP-261's grounded configuration/precedence matrix as input to
+  a separate project-policy implementation plan; do not hide a new global
+  settings schema inside the UX rewrite.
 
 The historical P066 roadmap tasks below are retained as context. The current
 implementation order is **finish/freeze P069 → re-ground 5C → implement 5C →
 implement 5D as a separate stream**. Planning/grounding 5D may happen earlier;
 neither implementation may modify P069's active branch.
+
+### Verified standalone release hygiene — before the next release automation use
+
+- [ ] **IMP-282:** make optional version-source probes in `aid-release.sh`
+  safe under `set -euo pipefail`, with explicit diagnostics when no source is
+  usable. This is a small standalone release-liveness fix, not P066/P069/UX
+  scope; it is tracked in `BACKLOG.md` and must not be lost in a broad plan.
 
 - [x] Ground the interim brief against current main and produce a reviewable
   roadmap: `docs/plans/P066-test-portfolio-audit-scheduler-remediation.md`
@@ -402,6 +412,15 @@ plan-boundary closure for subsequent major plans:
   validated false-positive disposition to affect lifecycle status (IMP-468).
 - [ ] Make raw-Git/evidence-loss guidance consistent everywhere (IMP-466),
   treating warnings/hooks as defence in depth rather than proof.
+- [ ] Add the still-live dogfood ref-isolation preflight (IMP-280): a dogfood
+  must refuse a source checkout with the same Git common-dir unless it uses an
+  explicit safe namespace/separate clone.
+- [ ] Remove or make CP3-specific the live `aid-prefilter.sh classify
+  --checkpoint cp3` path: it still writes the generic
+  `verifier-output-step-N.md` target and can overwrite CP2 evidence.
+- [ ] Remove CP3's live guessed-range fallback in that same prefilter path:
+  missing canonical `base_commit` must fail loud/unverifiable, not review
+  `merge-base`/`HEAD~5` as an approximation.
 
 **GO to Phase 6:** the P066 quarantine is removed by a reviewed change, and
 plan-final evidence is durable, recoverable and required for a close.

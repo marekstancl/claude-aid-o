@@ -305,9 +305,18 @@ be handed to `/aid-plan write` as a remediation-ready audit.
 9. Dogfood against the actual AID high-cost Bats units. Diagnose the
    progressively expensive `test-aid-plan-final-boundary.bats` AC5 path before
    proposing split/parallel work for it.
+10. Normalise the declared result grammar used by the aggregate runner, or
+    explicitly support every retained grammar with a tested adapter. This folds
+    the verified `test-semantic-review.sh` defect into this work: it emits
+    `=== Results: N passed, M failed ===`, while `run-all-tests.sh` currently
+    accepts only `Results: N/T passed, M failed` and consequently reports the
+    suite as `0/0`. Accurate portfolio cost and membership evidence cannot be
+    built on a silently uncounted successful suite.
 
 **Acceptance:** a timed-out file produces an honest lower bound and a
 root-cause-specific next probe, not a terminal generic `measure` finding.
+The aggregate result collector reports the semantic-review fixture's real
+count, never `0/0`.
 
 ### Slice 3 — resource evidence and parallel pilot
 

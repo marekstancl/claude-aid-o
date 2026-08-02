@@ -122,6 +122,16 @@ The result is a checked-in disposition table with values:
 No implementation slice may claim a command/function is wired until the table
 names its production caller and a test exercises that caller.
 
+This grounding explicitly discharges the **analysis** portion of IMP-261:
+inventory behavior-affecting settings and their source/precedence across
+plugin defaults, project configuration, environment and invocation overrides.
+Current code confirms the motivating gap remains real: C0/C3 models have
+environment-only overrides while their shared Codex transport hard-codes
+`model_reasoning_effort=high`. The analysis must decide what belongs in a
+durable project policy and what remains immutable/host-local. Implementing a
+new versioned all-project settings schema is deliberately a **separate next
+plan**; it must not be smuggled into this UX/instruction scope.
+
 ## 5. Delivery slices
 
 ### Slice 1 — authoritative command/help inventory
@@ -203,10 +213,16 @@ diagnostic result is incomplete; do not fabricate parallelisation advice.
 20. Require the final user-facing response to use the user's language and
 avoid unexplained internal jargon. Do not build a brittle global “tone”
 detector; test required structured sections, not prose aesthetics.
+21. Resolve the verified 0-index/1-index UX seam: machine state and evidence
+filenames may retain their compatibility index, but every human-facing status,
+blocker and handoff must render `Plan Step N` and, where useful, the internal
+index in parentheses. Current FSM/pipeline text still exposes bare
+`current_step` values.
 
 **Acceptance:** golden fixtures for success, blocked, waiver, incomplete audit
 and plan-close show outcome-first summaries. A raw technical list cannot be
-the only final handoff. JSON-producing agents keep valid protocol output.
+the only final handoff. JSON-producing agents keep valid protocol output; a
+state value of `current_step: 0` is rendered to a human as `Plan Step 1`.
 
 ### Slice 5 — whole-path consistency and release
 
