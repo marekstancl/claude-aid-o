@@ -62,6 +62,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/aid-execution-unit-membership.sh
+source "${SCRIPT_DIR}/lib/aid-execution-unit-membership.sh"
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.56.0}"
 
 # Repo-root-relative prefix all Initial-mapping entries live under. Changed
@@ -86,13 +88,21 @@ PLUGIN_ROOT="${AID_SELECT_TESTS_PLUGIN_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 usage() {
   cat <<EOF
 Usage:
-  aid-select-tests.sh --base <base_commit> [--evidence-file <path>]
-  aid-select-tests.sh --paths-file <file>  [--evidence-file <path>]
+  aid-select-tests.sh --base <base_commit> [--evidence-file <path>] [--emit-units <file>]
+  aid-select-tests.sh --paths-file <file>  [--evidence-file <path>] [--emit-units <file>]
 
 Options:
   --base <ref>           Compute changed paths via 'git diff --name-only <ref>..HEAD'.
   --paths-file <file>    Read changed paths, one per line, from this file.
   --evidence-file <path> Also write the JSON summary here (parent dir created).
+  --emit-units <file>    ADDITIONAL, opt-in flag (P069 Step 9) — combined with
+                         --base or --paths-file, never a replacement for either.
+                         Instead of running bats/bash directly, resolves the
+                         selected set through the membership verifier and
+                         writes execution units (execution-unit.schema.json)
+                         to <file>. The exit-code contract (0/1/3/10) is
+                         unchanged; exit 3 (D-selector-1 unverifiable) still
+                         writes no units file.
 EOF
 }
 
@@ -100,6 +110,7 @@ EOF
 BASE_REF=""
 PATHS_FILE=""
 EVIDENCE_FILE=""
+EMIT_UNITS_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base)
@@ -111,6 +122,9 @@ while [[ $# -gt 0 ]]; do
     --evidence-file)
       [[ $# -lt 2 ]] && { echo "ERROR: --evidence-file requires a value" >&2; usage; exit 10; }
       EVIDENCE_FILE="$2"; shift 2 ;;
+    --emit-units)
+      [[ $# -lt 2 ]] && { echo "ERROR: --emit-units requires a value" >&2; usage; exit 10; }
+      EMIT_UNITS_FILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 10 ;;
   esac
@@ -261,6 +275,120 @@ for cp in "${CHANGED_PATHS[@]}"; do
   unverifiable=true
   reasoning+=("unverifiable: unknown production path ${cp} — upgrade to standard/full profile")
 done
+
+# ─── --emit-units (P069 Step 9): resolve through the membership verifier and
+# write execution units instead of running anything directly. Opt-in only —
+# never the default. D-selector-1's exit-3 fail-loud contract is unchanged:
+# an unverifiable changed path still exits 3, writing NO units file at all.
+if [[ -n "$EMIT_UNITS_FILE" ]]; then
+  if $unverifiable; then
+    # Codex review: a STALE units file from an earlier successful
+    # --emit-units run at this same path must never be mistaken for
+    # current output on a run that is failing loud with exit 3 — remove
+    # any pre-existing file at the destination before exiting.
+    rm -f "$EMIT_UNITS_FILE" 2>/dev/null || true
+    reasoning_json="[]"
+    if [[ ${#reasoning[@]} -gt 0 ]]; then
+      reasoning_json=$(printf '%s\n' "${reasoning[@]}" | jq -R . | jq -s '.')
+    fi
+    summary=$(jq -n \
+      --arg gb "aid-select-tests.sh@${PLUGIN_VERSION}" \
+      --arg ga "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --argjson reasons "$reasoning_json" \
+      '{"_generated_by": $gb, "_generated_at": $ga, "selected_tests": [], "reasoning": $reasons, "test_results": [], "exit_status": 3}')
+    echo "$summary"
+    [[ -n "$EVIDENCE_FILE" ]] && { mkdir -p "$(dirname "$EVIDENCE_FILE")"; echo "$summary" > "$EVIDENCE_FILE"; }
+    exit 3
+  fi
+
+  project_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  catalog_path="${project_root}/.aid-o/config/test-catalog.yaml"
+  if [[ ! -f "$catalog_path" ]]; then
+    echo "ERROR: --emit-units requires an approved catalog at ${catalog_path}" >&2
+    exit 1
+  fi
+  catalog_json="$(yq -o=json '.' "$catalog_path")"
+
+  units_json="[]"
+  for entry in "${selected_tests_lines[@]}"; do
+    IFS=$'\t' read -r runner test_path <<< "$entry"
+    case "$runner" in
+      bats) unit_id="bats:${test_path%.bats}" ;;
+      bash) unit_id="sh:${test_path%.sh}" ;;
+      *)
+        echo "ERROR: --emit-units: unknown runner '${runner}' for ${test_path}" >&2
+        exit 1
+        ;;
+    esac
+    # command is a required field even pre-verification — Step 2 overwrites
+    # it with the catalog's own value regardless, but the schema requires
+    # SOME valid discriminated-union value up front; supply the catalog's
+    # current command directly rather than a placeholder.
+    cmd="$(jq -c --arg id "$unit_id" '.run_units[] | select(.run_unit_id == $id) | .command' <<<"$catalog_json")"
+    if [[ -z "$cmd" ]]; then
+      if [[ "$runner" == "bash" ]]; then
+        # Codex review: as of this writing, P066's catalog inventory has NO
+        # shell-suite ("sh:") adapter at all — every Initial-mapping entry
+        # that maps to a .sh harness (aid-plan-diff.sh, schemas/**,
+        # delivery-gate.yaml, the ui-fidelity/** pair) will ALWAYS miss here
+        # today. This is a real, known, ecosystem-level gap (a P066 adapter
+        # concern, out of this step's own scope) — never silently ignored,
+        # but named explicitly so it reads as "the adapter doesn't exist
+        # yet," not "something is broken."
+        echo "ERROR: --emit-units: run_unit_id '${unit_id}' not found in the catalog — no shell-suite (sh:) adapter has inventoried this .sh test yet (a known P066 catalog-coverage gap, not a Step 9 defect) — cannot emit" >&2
+      else
+        echo "ERROR: --emit-units: run_unit_id '${unit_id}' not found in the catalog — cannot emit" >&2
+      fi
+      exit 1
+    fi
+    units_json="$(jq -c --arg u "$unit_id" --argjson cmd "$cmd" \
+      '. + [{unit_id:$u, command:$cmd, deadline_seconds:300, resource_locks:[], parallel_eligible:false, membership_verified:false, dedup:false}]' \
+      <<<"$units_json")"
+  done
+
+  if [[ "$(jq 'length' <<<"$units_json")" -gt 0 ]]; then
+    verified_json="$(execution_unit_membership_verify "$units_json" "$catalog_json" "aid-select-tests")" || {
+      echo "ERROR: --emit-units: membership verification failed" >&2
+      exit 1
+    }
+    # parallel_eligible reflects the catalog's own parallel.status (Step 5's
+    # effective-status resolution may still override this via an approved
+    # overlay entry — this is only ever a hint, never authoritative).
+    units_json="$(jq -c --argjson cat "$catalog_json" '
+      ($cat.run_units | map({(.run_unit_id): .parallel.status}) | add // {}) as $by_id
+      | map(.parallel_eligible = (($by_id[.unit_id] // "unknown") as $s | $s == "safe" or $s == "constrained"))
+    ' <<<"$verified_json")"
+  fi
+
+  tmp="$(mktemp)"
+  printf '%s' "$units_json" | jq '.' > "$tmp"
+  mkdir -p "$(dirname "$EMIT_UNITS_FILE")"
+  mv "$tmp" "$EMIT_UNITS_FILE"
+
+  reasoning_json="[]"
+  if [[ ${#reasoning[@]} -gt 0 ]]; then
+    reasoning_json=$(printf '%s\n' "${reasoning[@]}" | jq -R . | jq -s '.')
+  fi
+  selected_paths_json="[]"
+  if [[ ${#selected_tests_lines[@]} -gt 0 ]]; then
+    paths_only=()
+    for entry in "${selected_tests_lines[@]}"; do
+      IFS=$'\t' read -r _ test_path <<< "$entry"
+      paths_only+=("$test_path")
+    done
+    selected_paths_json=$(printf '%s\n' "${paths_only[@]}" | jq -R . | jq -s '.')
+  fi
+  summary=$(jq -n \
+    --arg gb "aid-select-tests.sh@${PLUGIN_VERSION}" \
+    --arg ga "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson sel "$selected_paths_json" \
+    --argjson reasons "$reasoning_json" \
+    --arg units_file "$EMIT_UNITS_FILE" \
+    '{"_generated_by": $gb, "_generated_at": $ga, "selected_tests": $sel, "reasoning": $reasons, "test_results": [], "units_file": $units_file, "exit_status": 0}')
+  echo "$summary"
+  [[ -n "$EVIDENCE_FILE" ]] && { mkdir -p "$(dirname "$EVIDENCE_FILE")"; echo "$summary" > "$EVIDENCE_FILE"; }
+  exit 0
+fi
 
 # ─── Run the selected tests (real gate command — not a suggestion) ─────────
 run_failed=false
