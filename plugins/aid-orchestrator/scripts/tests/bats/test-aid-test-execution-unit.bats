@@ -160,6 +160,31 @@ _await_terminal_receipt() {
   echo "$output" | jq -e '.state == "cancelled" and .duration_ms == null'
 }
 
+# -- 7e. standalone receipt output validates against Step 4's canonical schema
+# (whole-EPIC Codex review regression: this function previously never
+# emitted concurrency_context/co_scheduled_with at all, so its own output
+# could never satisfy execution-unit-receipt.schema.json's additionalProperties:false
+# per-unit shape).
+@test "a standalone receipt (default args) validates against execution-unit-receipt.schema.json" {
+  command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1 || skip "python3+jsonschema unavailable"
+  unit_json='{"unit_id":"bats:schema-check","command":{"type":"argv","argv":["bash","-c","exit 0"]},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  job_id="$(execution_unit_run "$unit_json" "$JOBS")"
+  _await_terminal_receipt "$job_id"
+  receipt="$(execution_unit_receipt "$JOBS" "$job_id" "bats:schema-check")"
+  echo "$receipt" | jq -e '.concurrency_context == "sequential" and .co_scheduled_with == []'
+  batch_doc="$(jq -nc --argjson r "$receipt" '{batch_id:"b1", units:[$r], started_at:"2026-08-02T00:00:00Z", ended_at:"2026-08-02T00:00:01Z"}')"
+  echo "$batch_doc" > "$TMP/batch_doc.json"
+  SCHEMA="${BATS_TEST_DIRNAME}/../../../defaults/schemas/execution-unit-receipt.schema.json"
+  run python3 -c "
+import sys, json
+from jsonschema.validators import Draft202012Validator
+schema = json.load(open('$SCHEMA'))
+inst = json.load(open('$TMP/batch_doc.json'))
+sys.exit(1 if list(Draft202012Validator(schema).iter_errors(inst)) else 0)
+"
+  [ "$status" -eq 0 ]
+}
+
 # -- 7. streamed log is readable WHILE the unit is still running ------------
 @test "stdout is readable via stdout_path while the unit is still in-flight" {
   unit_json='{"unit_id":"streaming-unit","command":{"type":"shell","shell":"echo first; sleep 3; echo second"},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'

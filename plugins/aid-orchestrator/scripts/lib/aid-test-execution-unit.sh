@@ -102,9 +102,17 @@ execution_unit_cancel() {
   bash "$_AID_JOB_SH" cancel --jobs-dir "$jobs_dir" --id "$job_id"
 }
 
-# execution_unit_receipt <jobs_dir> <job_id> <unit_id>
-#   Normalizes aid-job.sh's record into the scheduler-shaped per-unit row:
-#     {unit_id, job_id, state, duration_ms, stdout_path, exit_code}
+# execution_unit_receipt <jobs_dir> <job_id> <unit_id> [concurrency_context=sequential] [co_scheduled_with_json=[]]
+#   Normalizes aid-job.sh's record into a Step 4 execution-unit-receipt.schema.json
+#   -shaped row: {unit_id, job_id, state, duration_ms, concurrency_context,
+#   co_scheduled_with, stdout_path, exit_code}. concurrency_context/
+#   co_scheduled_with default to "sequential"/[] (Codex review — a whole-EPIC
+#   pass found this function's output, called standalone, could not satisfy
+#   Step 4's canonical schema at all since it never emitted either field):
+#   this function has no batch/scheduling knowledge of its own, so a
+#   standalone call is, correctly, a sequential size-1 batch of one; Step 5's
+#   scheduler overrides both with the real batch composition it alone knows.
+#
 #   duration_ms/exit_code are null while non-terminal — never fabricated
 #   from a partial run. Exit code mirrors aid-job.sh collect's own contract
 #   (0 pass / 1 fail / 3 not-terminal) so callers can reuse the same
@@ -121,7 +129,7 @@ execution_unit_cancel() {
 #   aid-job.sh) never ran the command and carries no ended_epoch at all —
 #   so duration_ms is null for those, never a failed arithmetic subtraction.
 execution_unit_receipt() {
-  local jobs_dir="$1" job_id="$2" unit_id="$3"
+  local jobs_dir="$1" job_id="$2" unit_id="$3" concurrency_context="${4:-sequential}" co_scheduled_with_json="${5:-[]}"
   local job_dir="$jobs_dir/$job_id"
   [[ -d "$job_dir" && -f "$job_dir/job.json" ]] || {
     echo "execution_unit_receipt: no such job: $job_id (under $jobs_dir)" >&2
@@ -136,12 +144,14 @@ execution_unit_receipt() {
     local live_state
     live_state="$(execution_unit_status "$jobs_dir" "$job_id")"
     jq -nc --arg u "$unit_id" --arg j "$job_id" --arg s "$live_state" --arg sp "$stdout_path" \
-      '{unit_id:$u, job_id:$j, state:$s, duration_ms:null, stdout_path:$sp, exit_code:null}'
+      --arg cc "$concurrency_context" --argjson csw "$co_scheduled_with_json" \
+      '{unit_id:$u, job_id:$j, state:$s, duration_ms:null, concurrency_context:$cc, co_scheduled_with:$csw, stdout_path:$sp, exit_code:null}'
     return 3
   fi
 
   jq -c --arg u "$unit_id" --arg sp "$stdout_path" --argjson se "$started_epoch" \
-    '{unit_id:$u, job_id:.id, state:.state,
+    --arg cc "$concurrency_context" --argjson csw "$co_scheduled_with_json" \
+    '{unit_id:$u, job_id:.id, state:.state, concurrency_context:$cc, co_scheduled_with:$csw,
       duration_ms:(if .ended_epoch == null then null else ((.ended_epoch - $se) * 1000) end),
       stdout_path:$sp, exit_code:.exit_code}' "$job_dir/result.json"
 
