@@ -6,7 +6,8 @@
 and released. Current next work is P066, then the durable plan-final evidence
 maintenance package below.
 **Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–281,
-IMP-464–468
+IMP-464–468, `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`, and
+`.aid-o/work/interim-AID-HELP-INIT-SETUP-AND-HUMAN-HANDOFF-UX.md`
 
 ## Current checkpoint
 
@@ -45,6 +46,53 @@ Reach E10 only after AID has:
 4. an audited, isolated and materially shorter test portfolio;
 5. completed risk-based profiles; and
 6. a re-grounded E10 plan whose preconditions match the current repository.
+
+## Current continuation — authoritative order after P071 (2026-08-02)
+
+This section supersedes stale "P066/P069 awaiting implementation" wording
+elsewhere in this historical checklist.
+
+1. [ ] **Finish and release P071**, then leave its implementation stable. Treat
+   it as a component result, not proof that the complete release path is fast.
+2. [ ] **Land and re-ground the P066 decision-quality follow-up** against the
+   released P069/P071 code:
+   `docs/plans/IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`
+   (documentation branch `docs/p066-decision-quality-followup`, current update
+   `12b37b9`).
+3. [ ] **Fold the unfinished P070 discovery gap into that follow-up** instead
+   of running P070 separately: inventory all standalone `test-*.sh` suites as
+   run units and reconcile Bats, shell, declared gates, package scripts and
+   CI-only suites without omissions or double counting.
+4. [ ] **Implement the follow-up outside an open-ended AID review loop.** A
+   full audit must give exactly one evidence-backed disposition to every test
+   unit (`keep|rewrite|merge|remove|split|parallelize|keep_serial|measure`),
+   identify unique/duplicate value, and report current/proposed portfolio size
+   and runtime. Portfolio-wide `unknown` is `incomplete`, never success.
+5. [ ] **Run the corrected full self-host audit once** and create the concrete
+   PM-reviewed reduction/remediation plan from its named results. Implement
+   approved removals, merges, cheaper rewrites and serial/parallel lanes.
+6. [ ] **Prove the whole installed path**, not the individual components:
+   `/aid-audit-tests` -> complete decision artifact -> approved catalog/mapping
+   -> P069 -> generated `execution.yaml` -> real `aid-run-gates.sh` receipts.
+   The final ledger must prove no test ran twice and record real before/after
+   wall-clock. Until this passes, do not claim P066/P069/P071 delivered test
+   acceleration as a whole.
+7. [ ] **Then execute the separate Help/Init/Setup/Release maintenance stream.**
+   Grounding source:
+   `.aid-o/work/interim-AID-HELP-INIT-SETUP-AND-HUMAN-HANDOFF-UX.md`;
+   configuration authority source: `docs/plans/BACKLOG.md` IMP-261. Its writer
+   must inventory every current `/aid-help`, `/aid-init`, `/aid-setup` and
+   `aid-release.sh` behavior, merge/precedence rule, upgrade path and user-facing
+   instruction before changing commands. Include the recurring release defects
+   recorded in `BACKLOG.md` (notably OBS-20260711-05: `[Unreleased]` CHANGELOG
+   handling, blind README version substitution and missing post-release
+   verification), plus the fail-loud no-numeric-CHANGELOG-header liveness fix.
+8. [ ] Resume **P061 E4/E5 -> P061 close -> P062/E10 re-grounding** only after
+   the test path and command/configuration maintenance above have truthful
+   fresh-clone evidence.
+
+**Immediate next action:** finish P071, then hand the decision-quality document
+to the writer. Do not start P070 as a separate plan.
 
 This order is deliberate:
 
