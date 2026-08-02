@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.68.0] — 2026-08-02
+
+### Added
+- **`aid-bats-parallel-lane.sh`** — replaces the self-host `gate:bats_all` quarantine stub with a real, explicit-allowlist-based parallel bats runner: an approved-safe allowlist (`defaults/config/bats-parallel-safe-allowlist.txt`, opt-in, tracked) gates which bats files enter the `bats -j N` pool; anything not on the allowlist (a brand-new file, or the catalog's still-`unknown` `parallel.status`) runs sequentially instead of being silently skipped or auto-parallelized. Fail-closed path validation rejects nonexistent files, paths escaping the repo root, arguments starting with `-`, and duplicate catalog entries before any `bats` invocation.
+- **`gate:bats_boundary`** — a new, separate `required: false` gate for the 2 bats files (`test-aid-plan-final-boundary.bats`, `test-aid-plan-release-boundary.bats`) too expensive to pool or bound with a short timeout; wired into the `full`/`release` gate profiles so it is actually reachable by a real profiled run.
+- **`aid-self-host-migrate-p071-gates.sh`** — an idempotent `apply`/`verify` migration script + hashed local receipt so this repo's own gitignored `.aid-o/config/execution.yaml` gate changes survive a clean re-init instead of silently vanishing; a live-guard bats test asserts the real, current execution.yaml satisfies all migrations.
+
+### Fixed
+- **`gate:plan_diff` timeout** — was a bare, unexplained `120`; now `300`, traceable to this gate's own historical baseline data, with the prior "34 min of wall clock" incident's attribution to `plan_diff` vs. `shell_pipeline_smoke` explicitly documented as unresolved (the config file predates this attempt's git history and is itself gitignored).
+- **`gate:shell_pipeline_smoke` naming** — its description now states plainly that it runs the full aggregate suite (~32 min), not a fast/partial smoke check.
+- **`aid-plan-diff.sh` `overall_verdict` vocabulary mismatch blocked `plan-finalize`** — `aid-plan-diff.sh` has always emitted `pass|fail|partial|skipped`, but three consumers (`aid-plan-fsm.sh`'s `--stage inputs` and `--stage review` C3-input checks, and `aid-c3-dispatch.sh`'s `build-manifest` gate) expected `present|absent|skipped` instead — a vocabulary that field never actually carries. Any plan with a required AC lens (`ac_to_test_identity`/`requirement_test_drift`) armed therefore always failed `plan-finalize`, regardless of whether its ACs actually passed. Fixed all three consumers to recognize the real `pass|fail|partial` values, translating to each consumer's own existing downstream vocabulary where one already existed (`aid-c3-dispatch.sh`'s `plan_diff_status` and the plan-boundary-manifest's `plan_diff_verdict` both keep their `present|absent|skipped` enum — only input recognition changed). Also corrected a stale `_generated_by: v2.20.2` version stamp in `aid-plan-diff.sh` to the current version.
+
 ## [2.67.0] — 2026-08-02
 
 ### Added

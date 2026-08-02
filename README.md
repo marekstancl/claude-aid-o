@@ -117,9 +117,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.67.0** (current) — opt-in test scheduler with staged rollout, real `aid-run-gates.sh` dispatch + escalation, a `bats_all` remediation-evidence collector + genuine E2E full-path proof, and a PM quarantine-decision-record mechanism (P069). This repo's own `bats_all` real measurement campaign remains deferred.
+- **v2.68.0** (current) — real, explicit-allowlist-based parallel bats execution for this repo's own `gate:bats_all` (replacing the quarantine stub), a separate `gate:bats_boundary` for the 2 too-expensive-to-pool files, an idempotent self-host execution.yaml migration + verify mechanism, and `plan_diff`/`shell_pipeline_smoke` gate fixes (P071).
+- **v2.67.0** — opt-in test scheduler with staged rollout, real `aid-run-gates.sh` dispatch + escalation, a `bats_all` remediation-evidence collector + genuine E2E full-path proof, and a PM quarantine-decision-record mechanism (P069). This repo's own `bats_all` real measurement campaign remains deferred.
 - **v2.66.2** — plan-final evidence durability + review integrity (D1-D5): atomic close-evidence publication, plan-final C3 identity/AC-verdict pinning, a review-boundary TOCTOU close, a schema-versioned receipt inventory, and formal Curator adjudication enforced at both the review boundary and the `.aid-lifecycle` classifier.
-- **v2.65.0** — `/aid-audit-tests` test portfolio audit capability: inventory, safe measurement, chat-first recommendation, and a sanctioned `/aid-plan write` handoff (no scheduler — that's the dependent P069 plan).
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
