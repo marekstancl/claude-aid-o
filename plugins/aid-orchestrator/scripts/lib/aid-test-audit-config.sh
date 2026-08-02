@@ -29,8 +29,36 @@ _tac_defaults_json() {
   jq -n '{
     budget_minutes_default: 30,
     max_read_only_audit_agents: 4,
-    allowed_runners: ["bats", "package-script", "declared-command", "ci"]
+    allowed_runners: ["bats", "package-script", "declared-command", "ci"],
+    decision: {
+      max_unresolved_fraction: 0.25,
+      profile_budget_minutes: 20,
+      profile_log_max_bytes: 10485760,
+      rootcause_tie_tolerance: 0.1,
+      pilot_noise_ms: 2000,
+      chat_render_max_ids: 25,
+      prompt_max_bytes: 65536,
+      provenance_recheck_budget_ms: 5000
+    }
   }'
+}
+
+# test_audit_decision_key <key> [project_root] — read one decision.* key,
+# falling back to the hardcoded default when the project config omits it.
+# Consumers call THIS rather than reading the loaded JSON directly, so a
+# project that predates P072 (its test-audit.yaml has no `decision:` block at
+# all) gets the shipped default instead of an empty string that would later
+# be used as a number.
+test_audit_decision_key() {
+  local key="$1" project_root="${2:-.}" cfg val
+  cfg="$(load_test_audit_config "$project_root")" || return 1
+  val="$(jq -r --arg k "$key" '.decision[$k] // empty' <<<"$cfg")"
+  [[ -n "$val" ]] || val="$(jq -r --arg k "$key" '.decision[$k]' <<<"$(_tac_defaults_json)")"
+  [[ -n "$val" && "$val" != "null" ]] || {
+    echo "test_audit_decision_key: unknown decision key '$key'" >&2
+    return 1
+  }
+  printf '%s\n' "$val"
 }
 
 # _tac_have_jsonschema — same idiom as test-aid-c3-dispatch.bats.

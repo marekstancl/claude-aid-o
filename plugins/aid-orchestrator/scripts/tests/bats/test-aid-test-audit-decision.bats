@@ -1,0 +1,295 @@
+#!/usr/bin/env bats
+# test-aid-test-audit-decision.bats — P072 Step 2.
+#
+# Every "cannot" in the decision contract gets a case that ATTEMPTS it and
+# asserts a non-zero exit with the documented code. A rule asserted only in
+# prose is a rule nobody enforces.
+
+setup() {
+  REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../../../../.." && pwd)"
+  LIB="${REPO_ROOT}/plugins/aid-orchestrator/scripts/lib/aid-test-audit-decision.sh"
+  # shellcheck source=/dev/null
+  source "$LIB"
+  TMP="$(mktemp -d)"
+}
+
+teardown() {
+  [[ -n "${TMP:-}" && -d "$TMP" ]] && rm -rf "$TMP"
+}
+
+# A minimal artifact that satisfies every rule — the baseline every negative
+# case mutates exactly one field of, so a failure is attributable.
+valid_decision() {
+  cat <<'JSON'
+{
+  "schema_version": "aid-test-audit-decision-v1",
+  "audit_status": "complete",
+  "current_runtime": {
+    "kind": "measured",
+    "duration_ms": 147000,
+    "scope": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"]
+  },
+  "actions": [
+    {
+      "action": "fix",
+      "targets": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
+      "priority": "high",
+      "reason": "setup/teardown accumulation dominates the measured runtime",
+      "evidence_refs": ["profiles/test-aid-fsm.json"],
+      "impact": { "kind": "measured", "before_ms": 147000, "after_ms": 44790, "assumptions": [] }
+    }
+  ],
+  "parallelization": {
+    "lanes": [
+      {
+        "lane_id": "lane-isolated-1",
+        "disposition": "proposed_parallel",
+        "run_unit_ids": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
+        "resource_basis": ["temp_path/per-test"],
+        "evidence_refs": ["pilots/lane-isolated-1.json"]
+      }
+    ],
+    "smallest_safe_pilot": {
+      "run_unit_ids": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
+      "workers": 4,
+      "repeat": 2,
+      "pass_criteria": ["same membership", "same aggregate verdict", "clean git status"]
+    }
+  },
+  "unresolved": [],
+  "portfolio_coverage": {
+    "inventory_count": 1,
+    "assigned_count": 1,
+    "disposition_count": 1,
+    "missing_run_unit_ids": [],
+    "duplicate_run_unit_ids": []
+  },
+  "portfolio_change": {
+    "current_run_units": 1,
+    "proposed_run_units": 1,
+    "keep": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
+    "rewrite_unit": [],
+    "merge_groups": [],
+    "remove": [],
+    "runtime_before_ms": 147000,
+    "runtime_after_ms": 44790,
+    "impact_kind": "measured"
+  }
+}
+JSON
+}
+
+# mutate <jq-filter> — the baseline with one field changed.
+mutate() { valid_decision | jq -c "$1"; }
+
+@test "baseline: a fully valid artifact writes and reads back" {
+  run aid_test_audit_decision_write "$(valid_decision)" "$TMP/decision.json"
+  [ "$status" -eq 0 ]
+  [ -f "$TMP/decision.json" ]
+
+  run aid_test_audit_decision_read "$TMP/decision.json"
+  [ "$status" -eq 0 ]
+
+  run aid_test_audit_decision_status "$TMP/decision.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "complete" ]
+}
+
+@test "an unknown top-level field is rejected" {
+  run aid_test_audit_decision_write "$(mutate '. + {sneaky: "value"}')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"sneaky"* ]]
+}
+
+@test "a failed validation writes NO file at all" {
+  run aid_test_audit_decision_write "$(mutate '. + {sneaky: "value"}')" "$TMP/d.json"
+  [ "$status" -ne 0 ]
+  [ ! -f "$TMP/d.json" ]
+}
+
+@test "impact.kind measured with a null before_ms is rejected" {
+  run aid_test_audit_decision_write "$(mutate '.actions[0].impact.before_ms = null')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "impact.kind estimated with an empty assumptions[] is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"estimated", before_ms:1000, after_ms:500, assumptions:[]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "impact.kind estimated WITH assumptions is accepted" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"estimated", before_ms:1000, after_ms:500, assumptions:["assumes 4 workers"]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "impact.kind unknown claiming a numeric saving is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:1000, after_ms:500, assumptions:[]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "audit_status complete with a non-empty missing_run_unit_ids is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.portfolio_coverage.missing_run_unit_ids = ["bats:orphan"]')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "audit_status complete with a duplicate run unit is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.portfolio_coverage.duplicate_run_unit_ids = ["bats:dup"]')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "audit_status incomplete without a reason is rejected" {
+  run aid_test_audit_decision_write "$(mutate '.audit_status = "incomplete"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "audit_status incomplete WITH a controlled reason is accepted" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.audit_status = "incomplete" | .incomplete_reason = "unresolved_fraction_exceeded"')" \
+    "$TMP/d.json"
+  [ "$status" -eq 0 ]
+  run aid_test_audit_decision_status "$TMP/d.json"
+  [ "$output" = "incomplete" ]
+}
+
+@test "a free-text incomplete_reason outside the vocabulary is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.audit_status = "incomplete" | .incomplete_reason = "it felt wrong"')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "current_runtime.kind unknown with a duration is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.current_runtime.kind = "unknown"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "an empty actions[] is legal and is NOT conflated with incomplete" {
+  run aid_test_audit_decision_write "$(mutate '.actions = []')" "$TMP/d.json"
+  [ "$status" -eq 0 ]
+  run aid_test_audit_decision_status "$TMP/d.json"
+  [ "$output" = "complete" ]
+}
+
+@test "a proposed_parallel lane with no evidence is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.parallelization.lanes[0].evidence_refs = []')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "a keep_serial lane with no evidence is accepted" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.parallelization.lanes[0].disposition = "keep_serial" | .parallelization.lanes[0].evidence_refs = []')" \
+    "$TMP/d.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "an invalid resource_basis pair is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.parallelization.lanes[0].resource_basis = ["database/sometimes"]')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "two lanes sharing a run unit exit 4 naming BOTH lane ids" {
+  local two_lanes
+  two_lanes="$(mutate '
+    .parallelization.lanes += [{
+      lane_id: "lane-isolated-2",
+      disposition: "proposed_parallel",
+      run_unit_ids: ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
+      resource_basis: ["temp_path/per-test"],
+      evidence_refs: ["pilots/lane-isolated-2.json"]
+    }]')"
+  run aid_test_audit_decision_write "$two_lanes" "$TMP/d.json"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"lane-isolated-1"* ]]
+  [[ "$output" == *"lane-isolated-2"* ]]
+  [ ! -f "$TMP/d.json" ]
+}
+
+# The schema's own pattern anchors a ref to an alphanumeric first character,
+# so a LEADING `../` never reaches the bash check. The escape the schema
+# cannot see is an EMBEDDED `..`, which is what exit 5 exists for — these two
+# cases pin which layer catches which vector, so neither can be removed on
+# the assumption the other covers it.
+@test "an evidence_ref escaping via an embedded .. exits 5" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].evidence_refs = ["profiles/../../../etc/passwd"]')" "$TMP/d.json"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *".."* ]]
+  [ ! -f "$TMP/d.json" ]
+}
+
+@test "an evidence_ref with a leading ../ is caught earlier, by the schema" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].evidence_refs = ["../../etc/passwd"]')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+  [ ! -f "$TMP/d.json" ]
+}
+
+@test "an absolute evidence_ref is rejected by the schema" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].evidence_refs = ["/etc/passwd"]')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "an absolute path smuggled into a reason field is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "see /opt/eco/projects/secret/notes for context"')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "read re-validates: an artifact edited after writing is refused" {
+  aid_test_audit_decision_write "$(valid_decision)" "$TMP/d.json"
+  [ -f "$TMP/d.json" ]
+
+  jq '. + {tampered: true}' "$TMP/d.json" > "$TMP/d.tmp" && mv "$TMP/d.tmp" "$TMP/d.json"
+
+  run aid_test_audit_decision_read "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "status returns non-zero rather than defaulting when the artifact is invalid" {
+  echo '{"schema_version":"aid-test-audit-decision-v1"}' > "$TMP/d.json"
+  run aid_test_audit_decision_status "$TMP/d.json"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ] || [[ "$output" != "complete" && "$output" != "incomplete" ]]
+}
+
+@test "a missing artifact exits 2, distinct from an invalid one" {
+  run aid_test_audit_decision_read "$TMP/nope.json"
+  [ "$status" -eq 2 ]
+}
+
+@test "a wrong schema_version is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.schema_version = "aid-test-audit-decision-v2"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "lane_units returns the sorted union across lanes" {
+  local two_lanes
+  two_lanes="$(mutate '
+    .parallelization.lanes += [{
+      lane_id: "lane-b",
+      disposition: "keep_serial",
+      run_unit_ids: ["sh:plugins/aid-orchestrator/scripts/tests/test-semantic-review"],
+      resource_basis: ["fixed_path/shared"],
+      evidence_refs: []
+    }]')"
+  aid_test_audit_decision_write "$two_lanes" "$TMP/d.json"
+  run aid_test_audit_decision_lane_units "$TMP/d.json"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+}

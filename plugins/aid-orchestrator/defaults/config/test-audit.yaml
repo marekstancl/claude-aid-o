@@ -18,3 +18,18 @@ allowed_runners:
   - package-script
   - declared-command
   - ci
+
+# decision.* — P072 decision-quality audit tuning. Byte-identical to
+# aid-test-audit-config.sh's hardcoded defaults, so a project behaves the
+# same whether or not it has re-run /aid-init since P072 shipped. Each key
+# is read by exactly one step; the comment names it so a reader never has to
+# grep for the consumer.
+decision:
+  max_unresolved_fraction: 0.25      # consolidator: above this, audit_status is `incomplete`
+  profile_budget_minutes: 20         # cost profiler: sub-budget for diagnostic runs
+  profile_log_max_bytes: 10485760    # cost profiler: streamed evidence log cap (10 MiB)
+  rootcause_tie_tolerance: 0.1       # consolidator: two buckets within this tie -> `measure`
+  pilot_noise_ms: 2000               # parallel pilot: benefit below this is safe_not_worthwhile
+  chat_render_max_ids: 25            # chat renderer: ids shown per set before an exact remainder count
+  prompt_max_bytes: 65536            # specialist prompts: size ceiling asserted by the golden test
+  provenance_recheck_budget_ms: 5000 # parallel lane: two-tier provenance recheck budget

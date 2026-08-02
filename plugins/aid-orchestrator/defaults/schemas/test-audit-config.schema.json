@@ -5,9 +5,16 @@
   "$comment": "producer: PM (hand-edited) or /aid-init copy-if-absent, consumers: [aid-test-audit-config.sh load_test_audit_config, aid-test-audit-dispatch.sh, aid-test-audit-command-allowlist.sh]",
   "description": "Project-level audit config contract (.aid-o/config/test-audit.yaml). budget_minutes_default/max_read_only_audit_agents/allowed_runners are read by THIS (P066) plan. resource_locks/scheduler were reserved for P069 (depends_on_plans:[P066]) so it wouldn't need a second schema revision — P066 itself never reads or writes them. P069 has since shipped (v2.67.0) and reads scheduler.* for real.",
   "type": "object",
-  "required": ["budget_minutes_default", "max_read_only_audit_agents", "allowed_runners"],
+  "required": [
+    "budget_minutes_default",
+    "max_read_only_audit_agents",
+    "allowed_runners"
+  ],
   "properties": {
-    "budget_minutes_default": { "type": "integer", "minimum": 1 },
+    "budget_minutes_default": {
+      "type": "integer",
+      "minimum": 1
+    },
     "max_read_only_audit_agents": {
       "type": "integer",
       "minimum": 1,
@@ -15,7 +22,9 @@
     },
     "allowed_runners": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "minItems": 1
     },
     "resource_locks": {
@@ -25,6 +34,50 @@
     "scheduler": {
       "type": "object",
       "description": "Unused by P066's own logic — present only so P069 wouldn't need a second schema revision. P069 has since shipped (v2.67.0) and reads scheduler.* for real via aid-run-gates.sh's rollout-gated dispatch."
+    },
+    "decision": {
+      "type": "object",
+      "description": "P072 decision-quality audit tuning. Every key is read by exactly one named step; absent keys fall back to aid-test-audit-config.sh's hardcoded defaults, which are byte-identical to the shipped test-audit.yaml.",
+      "additionalProperties": false,
+      "properties": {
+        "max_unresolved_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Above this fraction of units left unresolved, a full audit is `incomplete` rather than remediation-ready."
+        },
+        "profile_budget_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "profile_log_max_bytes": {
+          "type": "integer",
+          "minimum": 1024
+        },
+        "rootcause_tie_tolerance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pilot_noise_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "A measured parallel benefit below this is reported as safe_not_worthwhile rather than proposed as a lane."
+        },
+        "chat_render_max_ids": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prompt_max_bytes": {
+          "type": "integer",
+          "minimum": 1024
+        },
+        "provenance_recheck_budget_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Budget for the two-tier provenance recheck on the lane's hot path; units not reached in time fail closed to `unknown`."
+        }
+      }
     }
   },
   "additionalProperties": false
