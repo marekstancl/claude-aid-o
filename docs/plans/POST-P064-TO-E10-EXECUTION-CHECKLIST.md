@@ -2,10 +2,10 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064, Phase 1, P068, Phase 4 and the
-audit-only half of P066 are complete and released. P069 is the active
-scheduler/gate-integration implementation stream. Two follow-up plans are
-now recorded below: decision-quality test audit and entry-point UX.
+**Status:** active PM checklist — P064, Phase 1, P068, Phase 4, P066 and P069
+are complete and released. P071 implementation is complete and is being
+prepared for release. Two follow-up plans are now recorded below:
+decision-quality test audit and entry-point UX.
 **Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–281,
 IMP-464–468, `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
 `IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`
@@ -22,14 +22,15 @@ IMP-464–468, `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
 | **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
 | **P068** | **DONE** — released v2.63.0; v2.63.1 repaired CI; v2.63.2 records final backlog/checklist repair |
 | P068 delivery proof | P077 clean dogfood reached `release_ready=true` → merge → durable receipt → `CLOSED`; its isolated history is archived on `archive/P068-dogfood-P067-P077-20260727` |
-| **Current version** | `v2.66.2` at `281f87f`, pushed; `main == origin/main` |
-| Remote | pushed and synchronized |
+| **Current pushed version** | `v2.67.0` at `6ae0a55`; P069 released |
+| P071 | implementation complete on `release-prep-p071`; release/push still pending at this checkpoint |
+| Remote | `origin/main` contains v2.67.0; local documentation main intentionally contains the newer planning records |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
 | IMP-266 | **RESOLVED — PM ratified Option B (2026-07-24)**: `merged_to_plan` stays terminal; wrong entries corrected via the documented recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`), doc-only, no code edge; Option A deferred to P068+ |
-| Next work | Phase 4 (EPIC-generation integrity) and **P066 audit capability are DONE**; P066 is released through `v2.66.2`. **P069 scheduler/gate integration is active** on its isolated implementation branch and must finish or freeze before its consumer contract is re-grounded. The next planned maintenance streams are: (1) `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`, which prevents an audit from returning portfolio-wide `unknown` as a remediation-ready result; and (2) `IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`, which repairs help/init/setup discoverability and human handoffs. Neither is folded into P069. |
+| Next work | Phase 4, **P066 audit capability and P069 scheduler integration are DONE**. Finish/release P071, then implement `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`; afterward run the corrected full audit and its concrete remediation. The separate `IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md` stream follows. |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -60,6 +61,39 @@ P064 close
   → P062 re-grounding/preflight
   → P062 E10 execution
 ```
+
+## Current continuation — authoritative order after P071 (2026-08-02)
+
+This section supersedes stale historical wording that describes P066 or P069
+as awaiting implementation.
+
+1. [ ] Finish and release P071, then keep its implementation stable. P071 is a
+   component result, not proof that the complete test path is fast.
+2. [ ] Re-ground and implement
+   `docs/plans/IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md` against the
+   released P069/P071 contracts.
+3. [ ] Fold the unfinished P070 discovery gap into that follow-up rather than
+   running P070 separately: inventory Bats, standalone shell suites, declared
+   gates, package scripts and CI-only suites without omissions or double runs.
+4. [ ] Require one evidence-backed disposition for every test unit
+   (`keep|rewrite|merge|remove|split|parallelize|keep_serial|measure`). A
+   portfolio-wide `unknown` result is incomplete, never remediation-ready.
+5. [ ] Run the corrected full self-host audit once, approve its concrete
+   reduction/remediation plan, then implement the named removals, merges,
+   cheaper rewrites and serial/parallel lanes.
+6. [ ] Prove the installed end-to-end path:
+   `/aid-audit-tests` → complete decision artifact → approved catalog/mapping
+   → P069 → generated `execution.yaml` → real `aid-run-gates.sh` receipts.
+   Evidence must show no duplicate execution and real before/after wall-clock.
+7. [ ] Execute the separate Help/Init/Setup/Release stream from
+   `docs/plans/IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`, including
+   the release-liveness defects routed through
+   `docs/plans/IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`.
+8. [ ] Resume P061 E4/E5 → P061 close → P062/E10 re-grounding only after the
+   test and command/configuration paths have truthful fresh-clone evidence.
+
+**Immediate next action:** finish P071 release, then hand the decision-quality
+plan to its implementer. Do not start P070 as a separate plan.
 
 ## Temporary policy currently in force
 
