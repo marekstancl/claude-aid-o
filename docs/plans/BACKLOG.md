@@ -92,9 +92,47 @@ must label the current check as unverified/placeholder rather than passed.
 final/delivery report from the WAN run; confirm whether the gate is `required`
 or advisory and whether any profile can reinterpret the result.
 
+### NEW — IMP-282: release version detection must tolerate an empty numeric CHANGELOG
+
+**Status:** ready — directly reproduced on `main` at v2.66.2
+**Priority:** high
+**Class:** release liveness / fail-loud diagnostics
+**Area:** `plugins/aid-orchestrator/scripts/aid-release.sh`
+
+**Summary:** `_release_detect_version()` treats a missing numeric
+`## [X.Y.Z]` header in an existing `CHANGELOG.md` as a shell failure rather
+than an empty optional source. Under `set -euo pipefail`, the pipeline at the
+`CHANGELOG_HEADER` assignment exits non-zero when `grep` has no match, and the
+script terminates before it can use a valid JSON/package version or print its
+intended “cannot detect version” diagnostic.
+
+**Reproduction:** in a clean temporary Git repository, create a
+`CHANGELOG.md` containing only a title/free text and a valid
+`package.json` with `version: "1.2.3"`; run
+`aid-release.sh patch --dry-run --force`. Current `main` exits `1` with no
+stdout/stderr. The expected result is successful detection from `package.json`
+and a dry-run bump. This is a legitimate consumer-project CHANGELOG shape, not
+corrupt input.
+
+**Proposed change:** make expected zero-match version probes explicitly safe
+under `pipefail`, beginning with:
+
+```bash
+CHANGELOG_HEADER=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1 || true)
+```
+
+Audit the two same-pattern assignments in this script before closing the fix:
+the optional `pyproject.toml` version probe and `update_changelog()` header
+probe. They must either handle zero matches deliberately or fail with an
+explicit, domain-level error; no expected absence may terminate the release
+script silently. Add regressions for: no numeric CHANGELOG header plus valid
+JSON version; no numeric header while writing a new release entry; malformed
+optional `pyproject.toml`; and no usable version source, which must emit the
+existing clear error rather than die in `grep`.
+
 ### NEW — IMP-464: C3 must receive required plan-diff evidence
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** review-input integrity / false-positive prevention
 
@@ -108,7 +146,7 @@ input; a required missing/malformed input fails before dispatch. See
 
 ### NEW — IMP-465: protocol-v2 plan-final outputs need generated scaffolds
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** producer contract / liveness
 
@@ -120,7 +158,7 @@ fill payload fields only. No new role or agent turn.
 
 ### NEW — IMP-466: preserve plan-final evidence beyond the live checkout
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** critical
 **Class:** durability / plan-boundary integrity
 
@@ -134,7 +172,7 @@ Warnings are defence in depth, not proof.
 
 ### NEW — IMP-467: grouped plan-final freshness must converge
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** lifecycle liveness / false-stale detection
 
@@ -146,7 +184,7 @@ group; retain compatible legacy behavior elsewhere.
 
 ### NEW — IMP-468: lifecycle needs formal Curator adjudication input
 
-**Status:** ready after P066
+**Status:** done — released in v2.66.0 (`d1fada8`)
 **Priority:** high
 **Class:** review semantics / closure liveness
 
