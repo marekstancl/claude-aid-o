@@ -62,6 +62,10 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
 # shellcheck source=lib/aid-gitignore-backfill.sh
 source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
+# shellcheck source=lib/aid-test-scheduler-report.sh
+source "${SCRIPT_DIR}/lib/aid-test-scheduler-report.sh"
+# shellcheck source=lib/aid-run-gates-report.sh
+source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
 
@@ -192,6 +196,111 @@ require_yq_mikefarah() {
     echo "  Fix: sudo apt remove python3-yq && download mikefarah binary." >&2
     exit 1
   fi
+}
+
+# _gate_output_escape <string>
+#   Same truncate-then-JSON-escape discipline run_gate() already applies to
+#   a captured command's raw output, factored out for run_scheduled_
+#   targeted_tests() below (which builds its own gate-row JSON by hand,
+#   never through run_gate()'s generic `bash -c "$command"` capture).
+_gate_output_escape() {
+  local s="${1:0:2000}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+# run_scheduled_targeted_tests <gate_name> <effective_mode> <base_commit>
+#                               <plugin_path> <epic_id> <run_id>
+#                               <project_root> <timeout_s>
+#   P069 Step 14 — the targeted_tests-only, scheduler-backed dispatch path,
+#   used INSTEAD OF run_gate() only when Step 13's rollout gate has
+#   unlocked observe_parallel/parallel for THIS run. Never called for any
+#   other gate, and never called at all when the rollout gate resolves
+#   sequential (the ordinary run_gate() path below is then completely
+#   unchanged from pre-Step-14 behavior).
+#
+#   Emits a JSON object on stdout matching run_gate()'s own output
+#   contract exactly ({gate, result, exit_code, duration_ms, output}) so
+#   every downstream consumer (retry loop, waiver check, baseline update,
+#   gates_json aggregation) needs zero changes to accept either source.
+#   Returns 0 iff result=="pass".
+#
+#   aid-select-tests.sh --emit-units's own exit-code contract governs what
+#   happens next:
+#     0  — units written (possibly EMPTY — a docs-only/no-impact change).
+#          A non-empty unit set is handed to aid-test-scheduler.sh dispatch
+#          under the unlocked mode; an empty set is an immediate pass
+#          (aid-test-scheduler.sh itself refuses to schedule zero units).
+#     1/10 — a genuine command/usage failure — treated exactly like an
+#          ordinary gate-command failure, never escalation.
+#     3/11 — D-selector-1 unverifiable / Step 10 mapping_gap — the caller
+#          (run_all_gates(), immediately after this function returns)
+#          is responsible for the escalation decision; this function only
+#          ever reports the plain fail row, unchanged in shape from what a
+#          direct (non-scheduled) invocation would have produced.
+run_scheduled_targeted_tests() {
+  local gate_name="$1" effective_mode="$2" base_commit="$3" plugin_path="$4" \
+        epic_id="$5" run_id="$6" project_root="$7" timeout_s="$8"
+
+  local start_ms; start_ms=$(date +%s%3N)
+  local units_file="${project_root}/.aid-o/work/evidence/${epic_id}/${run_id}/gates/targeted-units.json"
+  mkdir -p "$(dirname "$units_file")"
+
+  local select_output select_ec=0
+  select_output=$(timeout "$timeout_s" "${plugin_path}/scripts/aid-select-tests.sh" \
+    --base "$base_commit" --emit-units "$units_file" </dev/null 2>&1) || select_ec=$?
+
+  local end_ms duration_ms
+  end_ms=$(date +%s%3N)
+  duration_ms=$(( end_ms - start_ms ))
+
+  if [[ $select_ec -ne 0 ]]; then
+    echo "{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":${select_ec},\"duration_ms\":${duration_ms},\"output\":\"$(_gate_output_escape "$select_output")\"}"
+    return 1
+  fi
+
+  local expected_unit_ids_json
+  expected_unit_ids_json="$(jq -c '[.[].unit_id]' "$units_file" 2>/dev/null || echo "[]")"
+
+  if [[ "$(jq 'length' <<<"$expected_unit_ids_json")" -eq 0 ]]; then
+    # No test impact (e.g. a docs-only change) — nothing to schedule;
+    # aid-test-scheduler.sh itself refuses to dispatch a zero-length unit
+    # set, so an immediate pass here matches the direct-execution path's
+    # own "selected_tests is empty by design → exit 0" contract exactly.
+    echo "{\"gate\":\"${gate_name}\",\"result\":\"pass\",\"exit_code\":0,\"duration_ms\":${duration_ms},\"output\":\"$(_gate_output_escape "$select_output")\"}"
+    return 0
+  fi
+
+  local dispatch_stderr_file; dispatch_stderr_file="$(mktemp)"
+  local dispatch_output dispatch_ec=0
+  dispatch_output=$(timeout "$timeout_s" bash "${plugin_path}/scripts/aid-test-scheduler.sh" dispatch \
+    --project-root "$project_root" --run-id "${run_id}-targeted_tests" \
+    --units-json "$units_file" --mode "$effective_mode" 2>"$dispatch_stderr_file") || dispatch_ec=$?
+
+  end_ms=$(date +%s%3N)
+  duration_ms=$(( end_ms - start_ms ))
+
+  if [[ $dispatch_ec -ne 0 ]]; then
+    local err_text; err_text="$(cat "$dispatch_stderr_file" 2>/dev/null)"
+    rm -f "$dispatch_stderr_file"
+    echo "{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":${duration_ms},\"output\":\"$(_gate_output_escape "$err_text")\"}"
+    return 1
+  fi
+  rm -f "$dispatch_stderr_file"
+
+  local batches_json
+  if ! batches_json="$(jq -c -n --argjson b "$dispatch_output" '[$b]' 2>/dev/null)"; then
+    echo "{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":${duration_ms},\"output\":\"scheduler dispatch produced invalid JSON\"}"
+    return 1
+  fi
+
+  local row_json
+  row_json="$(scheduler_report_merge_gate_row "$gate_name" "$expected_unit_ids_json" "$batches_json")"
+  echo "$row_json"
+  [[ "$(jq -r '.result' <<<"$row_json")" == "pass" ]] && return 0 || return 1
 }
 
 run_all_gates() {
@@ -379,6 +488,16 @@ run_all_gates() {
   # round, and never re-fetches the same gate's baseline twice.
   declare -a baseline_summary_gates=()
 
+  # P069 Step 14 — targeted_tests escalation (exit 3 unknown_production /
+  # exit 11 mapping_gap). Set inline when that gate's FINAL result settles
+  # (regardless of whether it ran sequentially or through the scheduler —
+  # both paths ultimately invoke aid-select-tests.sh and can produce either
+  # exit code). Consumed AFTER the whole targeted-profile pass finishes and
+  # its own report has been fully assembled — never mid-loop, and never
+  # mutating this pass's own `gates_json`/`processed`/`gate_count` bookkeeping.
+  local escalation_triggered=false
+  local escalation_reason=""
+
   # Iterate gate names via yq (mikefarah)
   local gate_names
   gate_names=$(yq '.gates | keys | .[]' "$execution_yaml")
@@ -447,10 +566,31 @@ run_all_gates() {
 
     log_event "$timeline_file" "gate_start" gate="$gate_name" epic_id="$epic_id"
 
+    # ─── P069 Step 14 — scheduler dispatch (targeted_tests ONLY) ──────────
+    # Every other gate is completely unaffected: gate_concurrency_context
+    # stays "sequential" and use_scheduled_dispatch stays false, so the
+    # retry loop below calls run_gate() exactly as it always has.
+    local gate_concurrency_context="sequential"
+    local use_scheduled_dispatch=false
+    local rollout_effective_mode="sequential"
+    if [[ "$gate_name" == "targeted_tests" ]]; then
+      local rollout_json
+      rollout_json="$("${SCRIPT_DIR}/aid-scheduler-rollout-gate.sh" --project-root "$_plugin_project_root" 2>/dev/null)" || rollout_json=""
+      rollout_effective_mode="$(jq -r '.effective_mode // "sequential"' <<<"$rollout_json" 2>/dev/null || echo "sequential")"
+      if [[ "$rollout_effective_mode" == "observe_parallel" || "$rollout_effective_mode" == "parallel" ]]; then
+        use_scheduled_dispatch=true
+        gate_concurrency_context="$rollout_effective_mode"
+      fi
+    fi
+
     local gate_result="" attempt=0 gate_exit=0
     for (( attempt=1; attempt<=max_retries+1; attempt++ )); do
       gate_exit=0
-      gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
+      if $use_scheduled_dispatch; then
+        gate_result=$(run_scheduled_targeted_tests "$gate_name" "$rollout_effective_mode" "$base_commit_resolved" "$plugin_path_resolved" "$epic_id" "$run_id" "$_plugin_project_root" "$timeout_s") || gate_exit=$?
+      else
+        gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
+      fi
       local r
       r=$(echo "$gate_result" | jq -r '.result')
       # Phase 2 (P037) — exit code 2 is a graceful skip when gate's pass_criteria
@@ -478,7 +618,7 @@ run_all_gates() {
         baseline_exit_code=$(echo "$gate_result" | jq -r '.exit_code')
         baseline_duration_ms=$(echo "$gate_result" | jq -r '.duration_ms')
         gate_baseline_update "$gate_name" "$cmd" "$resolved_cmd" \
-          "$baseline_exit_code" "$baseline_duration_ms" "$timeout_s" || true
+          "$baseline_exit_code" "$baseline_duration_ms" "$timeout_s" "$gate_concurrency_context" || true
       fi
 
       [[ "$r" == "pass" || "$r" == "skip" ]] && break
@@ -558,6 +698,33 @@ run_all_gates() {
     fi
 
     log_event "$timeline_file" "gate_complete" gate="$gate_name" result="$final_result" attempt="$attempt"
+
+    # ─── P069 Step 14 — targeted_tests escalation detection ───────────────
+    # Exit 3 (D-selector-1 unverifiable) / exit 11 (Step 10 mapping_gap) are
+    # NEVER treated as an ordinary gate failure and NEVER as a pass — a
+    # required:false targeted_tests row failing this way must not let the
+    # WHOLE RUN'S overall verdict silently rest on a selector that verified
+    # nothing. `result` on THIS row is left completely UNCHANGED (still the
+    # existing plain "fail", or "waived" if a valid waiver applied above —
+    # never a new enum value, matching test-aid-run-gates.bats's own
+    # pre-existing, byte-for-byte-preserved assertion on this exact
+    # scenario) — escalation is recorded as PURELY ADDITIVE metadata: a new,
+    # optional `escalation` sibling field on this SAME row, plus a run-level
+    # flag consumed once, after this entire pass's own report is fully
+    # assembled, to trigger a genuinely-executed --profile full substitute.
+    if [[ "$gate_name" == "targeted_tests" ]]; then
+      local _esc_exit_code; _esc_exit_code=$(echo "$gate_result" | jq -r '.exit_code')
+      if [[ "$_esc_exit_code" == "3" || "$_esc_exit_code" == "11" ]]; then
+        local _esc_output _esc_path
+        _esc_output=$(echo "$gate_result" | jq -r '.output')
+        _esc_path=$(grep -oE '(unverifiable: unknown production path [^ ]+|mapping_gap: no approved mapping row matches [^ ]+)' <<<"$_esc_output" | head -1 | awk '{print $NF}')
+        [[ -z "$_esc_path" ]] && _esc_path="unknown"
+        escalation_triggered=true
+        escalation_reason="exit_code ${_esc_exit_code}: ${_esc_path}"
+        gate_result=$(echo "$gate_result" | jq --argjson ec "$_esc_exit_code" --arg path "$_esc_path" \
+          '.escalation = {triggered: true, exit_code: $ec, path: $path}')
+      fi
+    fi
 
     # Add to gates JSON aggregate. `runtime_baseline` (P063 Step 2) is purely
     # additive — gate_baseline_report_json always returns a valid JSON object
@@ -742,6 +909,40 @@ run_all_gates() {
               --argjson waived "$waived_gates_json" \
               '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_reason: $profreason, excluded_gates: $excl, waived_gates: $waived}' \
               <<< "$report")
+
+  # ─── P069 Step 14 — targeted_tests escalation: full-profile substitute ──
+  # Triggered ONLY by targeted_tests's own exit 3/11 (set inline above,
+  # regardless of scheduler mode). A SECOND, entirely separate
+  # run_all_gates()-style pass — invoked as its own subprocess against the
+  # SAME epic_id/run_id, never an in-process recursive call sharing this
+  # invocation's own gates_json/processed/gate_count state — produces its
+  # OWN complete report. That report becomes the actual, verdict-bearing
+  # result verbatim; this pass's own (targeted) report is preserved
+  # underneath as informational metadata only, via merge_escalation_report.
+  # targeted_tests is never itself a member of any `full` profile emitted
+  # by compose_execution_yaml/render_gate_profiles_block or this repo's own
+  # hand-authored execution.yaml, so this subprocess can never re-trigger
+  # this same escalation recursively.
+  if $escalation_triggered; then
+    echo "aid-run-gates.sh: targeted_tests escalated (${escalation_reason}) — running a full --profile substitute" >&2
+    local full_escalation_report_path="${report_path}.full-escalation.json"
+    local -a escalation_args=(run-all "$execution_yaml" "$epic_id" "$run_id" --profile full --report-file "$full_escalation_report_path")
+    if [[ -n "$base_commit_resolved" && "$base_commit_resolved" != "null" ]]; then
+      escalation_args+=(--base-commit "$base_commit_resolved")
+    fi
+    if [[ -n "$plan_path_resolved" && "$plan_path_resolved" != "null" ]]; then
+      escalation_args+=(--plan-path "$plan_path_resolved")
+    fi
+    bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
+    if [[ -f "$full_escalation_report_path" ]]; then
+      local full_report_json; full_report_json="$(cat "$full_escalation_report_path")"
+      report="$(merge_escalation_report "$report" "$full_report_json" "$escalation_reason")"
+    else
+      report="$(jq --arg reason "$escalation_reason" \
+        '. + {escalation: {triggered_by:"targeted_tests", reason:$reason, targeted_run:null, error:"full-profile escalation run failed to produce a report"}}' \
+        <<<"$report")"
+    fi
+  fi
 
   echo "$report"
 
