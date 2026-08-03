@@ -40,6 +40,28 @@ For each prior finding, check: does its `evidence_refs` actually support its `se
 original — the consolidator, Wave 4, is what merges/resolves). A `remove`/`quarantine`
 recommendation lacking a `falsification_check` is ALWAYS flagged here, no exception.
 
+## Five challenge classes you MUST apply
+These are the failure modes real audits of this kind have actually produced. Work through each one
+explicitly rather than reading for general plausibility.
+
+1. **Resource scope claimed wider or narrower than the source supports.** A shared-state claim built
+   on a grep hit, or an isolation claim that never followed the helper to its definition and its
+   exceptional callers. Ask what was READ, not what was matched.
+2. **Runner capability asserted without grounding.** A claim that a flag, timing interface or list
+   mode exists, unverified against the installed version. An invented flag produces confident
+   numbers from a command that never ran as described.
+3. **"Transaction isolation means safe" reasoning.** Isolation at one layer being carried over to
+   cross-process safety at another. Two units that isolate their database rows can still share a
+   fixed port, a working directory or a lock.
+4. **Membership mismatch.** A conclusion drawn from one set of units and applied to another —
+   evidence gathered for a sample presented as covering the whole, or a serial baseline compared
+   against a parallel run whose membership differed.
+5. **A saving claimed as `measured` without two comparable runs.** A single run, a projection, or a
+   before-figure paired with an estimated after-figure. `measured` requires both endpoints really
+   observed under comparable conditions; anything else is `estimated` and must state its assumptions.
+
+Flag a violation of any class as its own finding, naming the class and quoting the claim.
+
 ## Output contract
 Emit exactly one JSON document matching the output schema: `schema_version` (const `"1.0.0"`),
 `focus: "adversarial_review"`, `wave`, `shard_id: null`, `findings[]`, `produced_at`,

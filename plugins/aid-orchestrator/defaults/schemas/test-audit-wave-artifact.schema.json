@@ -444,5 +444,32 @@
       }
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "Pre-P072 rule, restored: only shard_portfolio artifacts are sharded. P072 Step 4 overwrote this key when adding the dispositions requirement and then removed it entirely, silently dropping the shard_id/focus binding — test-aid-test-audit-dispatch.bats caught it.",
+      "if": {
+        "properties": {
+          "focus": {
+            "const": "shard_portfolio"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "shard_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "shard_id": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
 }

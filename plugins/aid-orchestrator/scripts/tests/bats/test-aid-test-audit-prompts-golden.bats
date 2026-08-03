@@ -110,8 +110,15 @@ _all_templates() {
   done < <(_all_templates)
 }
 
-@test "the parallel_safety template explicitly states its output has no in-plan scheduler consumer" {
-  grep -q "no scheduler in this plan consumes it" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
+@test "the parallel_safety template states its output IS consumed, and forbids grep-alone reasoning" {
+  # P072 Step 6: the old assertion pinned the sentence "no scheduler in this
+  # plan consumes it", which stopped being true when P069 shipped a scheduler
+  # that reads this field and P072 wired the parallel lane to it. Pinning a
+  # false sentence is worse than pinning none, so this asserts the corrected
+  # boundary instead of deleting the check.
+  grep -q "Your classification is evidence, not a verdict" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
+  grep -q "aid-bats-parallel-lane.sh" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
+  grep -q "A grep hit alone can never label a resource shared" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
 }
 
 @test "each of the 6 templates matches its focus's exact enum value in its output contract" {
@@ -121,4 +128,135 @@ _all_templates() {
   grep -q '"parallel_safety"' "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
   grep -q '"adversarial_review"' "$PROMPTS_DIR/test-audit-adversarial-review-prompt-v1.md"
   grep -q '"consolidator"' "$PROMPTS_DIR/test-audit-consolidator-prompt-v1.md"
+}
+
+# ─── P072 Step 6: the obligations the consolidator enforces must be STATED ──
+#
+# Every assertion here pins a sentence the reconciliation depends on. A shard
+# that never reads the obligation cannot satisfy it, and the audit then fails
+# closed at consolidation with nobody having been told what was expected.
+
+@test "the shard template demands exactly one terminal disposition per assigned unit" {
+  local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
+  grep -qi "emit \*\*exactly one\*\* \`dispositions\[\]\` record" "$t"
+  grep -q "Silence is not an option" "$t"
+  grep -q "including when the answer is \`keep\`" "$t"
+}
+
+@test "the shard template carries a worked keep example AND a worked remove example" {
+  local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
+  grep -q '"disposition": "keep"' "$t"
+  grep -q '"disposition": "remove"' "$t"
+  grep -q '"uniqueness": "unproved"' "$t"
+  grep -q '"method": "mutation"' "$t"
+}
+
+@test "the shard template names dispositions[] in its OUTPUT CONTRACT section specifically" {
+  # Scoped to the section, not the whole file: a whole-file grep passes from
+  # the terminal-dispositions body even if the output contract stops naming
+  # the field, which is exactly the drift that would let an agent emit an
+  # artifact the consolidator rejects.
+  local section
+  section="$(sed -n '/^## Output contract/,$p' "$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md")"
+  [[ -n "$section" ]]
+  grep -q 'dispositions\[\]' <<<"$section"
+}
+
+@test "the shard template states the exact disposition enum, not a few examples" {
+  local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
+  grep -q "must be exactly one of this enum" "$t"
+  for v in keep fix rewrite_unit merge split remove quarantine keep_serial parallelize measure; do
+    grep -q "\`$v\`" "$t" || { echo "enum value missing from prompt: $v"; return 1; }
+  done
+}
+
+@test "the shard template names missing_proof AND next_measurement as required for measure" {
+  local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
+  grep -q "additionally requires two fields" "$t"
+  grep -q "missing_proof" "$t"
+  grep -q "next_measurement" "$t"
+}
+
+@test "the card and the shard prompt agree on WHICH MODE owes dispositions" {
+  # A card saying full-mode-only while the prompt says unconditional lets a
+  # static-mode agent follow one document and violate the other.
+  local card="$AID_PLUGIN_PATH/agents/test-portfolio-analyst.md"
+  local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
+  grep -q "enforces presence for \`full\` only" "$card"
+  grep -q "enforces presence only for \`full\`" "$t"
+}
+
+@test "the parallel_safety template requires a resource AND its namespace, not a bare label" {
+  local t="$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
+  grep -q "the pair is one" "$t"
+  grep -q "per-test" "$t" && grep -q "shared" "$t"
+  grep -q "fixed_path/shared" "$t"
+}
+
+@test "the parallel_safety template demands a proposed lane or a named bounded proof" {
+  grep -q "End with a proposal or a named proof" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
+}
+
+@test "the adversarial template names all five challenge classes" {
+  local t="$PROMPTS_DIR/test-audit-adversarial-review-prompt-v1.md"
+  grep -q "Resource scope claimed wider or narrower" "$t"
+  grep -q "Runner capability asserted without grounding" "$t"
+  grep -qi "transaction isolation means safe" "$t"
+  grep -q "Membership mismatch" "$t"
+  grep -q "without two comparable runs" "$t"
+}
+
+@test "the consolidator template forbids 'long file therefore split' reasoning" {
+  local t="$PROMPTS_DIR/test-audit-consolidator-prompt-v1.md"
+  grep -q "Never assert that splitting a file is faster because the file is long" "$t"
+  grep -q "Length is not a cause" "$t"
+}
+
+@test "the consolidator template requires an evidence level on every action" {
+  local t="$PROMPTS_DIR/test-audit-consolidator-prompt-v1.md"
+  grep -q "Every action carries an evidence level" "$t"
+  grep -q "a guess wearing a number" "$t"
+}
+
+@test "the agent card restates the terminal-disposition obligation (it can lag the prompt)" {
+  # agents/*.md are deliberately outside test-skill-lint.sh's scope, so this
+  # is where the card's own contract is pinned. A dispatched agent resolves
+  # the card from the INSTALLED plugin, which can lag the working tree — the
+  # obligation must exist in both places or it exists in neither.
+  local card="$AID_PLUGIN_PATH/agents/test-portfolio-analyst.md"
+  grep -q "Terminal dispositions" "$card"
+  grep -q "Silence is never an answer" "$card"
+  grep -q "outside your assignment" "$card"
+}
+
+@test "the agent card no longer claims the parallel classification has no consumer" {
+  local card="$AID_PLUGIN_PATH/agents/test-portfolio-analyst.md"
+  ! grep -q "no scheduler in this plan consumes it" "$card"
+  grep -q "consumed for real" "$card"
+}
+
+@test "the shard template's worked examples are themselves valid against the real disposition schema" {
+  # A worked example that drifts from the schema teaches every dispatched
+  # agent the wrong shape, and the failure surfaces only at consolidation.
+  run python3 - "$AID_PLUGIN_PATH" <<'PY'
+import json, re, sys
+from jsonschema.validators import Draft202012Validator
+root = sys.argv[1]
+schema = json.load(open(root + "/defaults/schemas/test-audit-wave-artifact.schema.json"))
+item = schema["properties"]["dispositions"]["items"]
+text = open(root + "/defaults/prompts/test-audit-shard-auditor-prompt-v1.md").read()
+blocks = re.findall(r"```json\n(.*?)\n```", text, re.S)
+assert len(blocks) >= 2, "expected at least two worked examples, found %d" % len(blocks)
+v = Draft202012Validator(item)
+bad = []
+for i, b in enumerate(blocks, 1):
+    errs = list(v.iter_errors(json.loads(b)))
+    if errs:
+        bad.append("block %d: %s" % (i, "; ".join(e.message for e in errs)))
+if bad:
+    print("\n".join(bad)); sys.exit(1)
+print("all %d worked examples valid" % len(blocks))
+PY
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"worked examples valid"* ]]
 }
