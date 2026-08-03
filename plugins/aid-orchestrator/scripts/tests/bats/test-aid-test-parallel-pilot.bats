@@ -24,15 +24,24 @@ setup() {
 
 teardown() { teardown_test_evidence_dir; }
 
-# _suite <name> <body>
+# Suites are written into the PROJECT and the disposable root is a clone of it:
+# the pilot now refuses a target that is not a snapshot of the audited tree, so
+# a fixture that fabricated an unrelated clone would be testing a path
+# production refuses to take.
 _suite() {
-  mkdir -p "$CLONE/tests"
-  printf '%s' "$2" > "$CLONE/tests/$1.bats"
+  mkdir -p "$PROJ/tests"
+  printf '%s' "$2" > "$PROJ/tests/$1.bats"
 }
 
 _clone() {
-  rm -rf "$CLONE"; mkdir -p "$CLONE/tests"
-  ( cd "$CLONE" && git init -q && git config user.email t@t && git config user.name t )
+  rm -rf "$PROJ/tests"; mkdir -p "$PROJ/tests"
+  ( cd "$PROJ" && git add -A 2>/dev/null; git commit -qm base --allow-empty )
+}
+
+# Call after the suites and catalog are in place.
+_snapshot() {
+  ( cd "$PROJ" && git add -A && git commit -qm fixtures --allow-empty -q )
+  rm -rf "$CLONE"; git clone -q "$PROJ" "$CLONE"
 }
 
 # _catalog <name...> — one bats run unit per suite name
@@ -52,6 +61,7 @@ _catalog() {
 }
 
 _pilot() {
+  _snapshot
   bash "$PILOT" --lane-id "lane-1" --catalog "$PROJ/.aid-o/config/test-catalog.yaml" \
     --execution-yaml "$PROJ/.aid-o/config/execution.yaml" \
     --output-dir "$OUT" --target-root "$CLONE" --project-root "$PROJ" \
@@ -76,6 +86,7 @@ PY
   # Doing that in the checkout under audit is how a measurement becomes an
   # outage.
   _clone; _suite a "${AT} \"x\" { true; }"; _catalog a
+  _snapshot
   run bash "$PILOT" --lane-id l --unit "bats:tests/a" \
     --catalog "$PROJ/.aid-o/config/test-catalog.yaml" \
     --output-dir "$OUT" --target-root "$PROJ" --project-root "$PROJ"
@@ -86,7 +97,7 @@ PY
 @test "REFUSAL: a linked worktree of the project is not a disposable root" {
   # It shares the object store, so a mutation there is not contained.
   _clone; _suite a "${AT} \"x\" { true; }"; _catalog a
-  ( cd "$PROJ" && echo x > f && git add f && git commit -qm init )
+  _snapshot
   local wt="$TEST_TMPDIR/wt"
   ( cd "$PROJ" && git worktree add -q "$wt" -b wtb )
   run bash "$PILOT" --lane-id l --unit "bats:tests/a" \
@@ -154,7 +165,7 @@ ${AT} \"a1\" { [ -d \"\$BATS_TEST_DIRNAME/../shared-dir\" ]; }"
 
 @test "a dirty clone after a run is a refusal, with the paths listed" {
   _clone
-  ( cd "$CLONE" && echo tracked > tracked.txt && git add tracked.txt && git commit -qm init )
+  echo tracked > "$PROJ/tracked.txt"
   _suite a "${AT} \"dirties the tree\" { echo mutated > \"\$BATS_TEST_DIRNAME/../tracked.txt\"; }"
   _catalog a
   local r; r="$(_pilot --unit "bats:tests/a" --workers 2 || true)"
@@ -178,7 +189,7 @@ ${AT} \"a1\" { [ -d \"\$BATS_TEST_DIRNAME/../shared-dir\" ]; }"
 @test "a failing repetition ends the pilot and records its INDEX, with no retry" {
   # Retrying until green is how a flaky lane gets promoted.
   _clone
-  ( cd "$CLONE" && echo t > t.txt && git add t.txt && git commit -qm init )
+  echo t > "$PROJ/t.txt"
   _suite a "${AT} \"dirties\" { echo x > \"\$BATS_TEST_DIRNAME/../t.txt\"; }"
   _catalog a
   local r; r="$(_pilot --unit "bats:tests/a" --workers 2 --repeat 3 || true)"
@@ -286,6 +297,141 @@ YAML
     target_root:"/tmp/x", membership:["bats:a"], workers:2, repeat:1,
     promotion:"refused", reason:"something went wrong somewhere", benefit_ms:null,
     noise_threshold_ms:2000, repetitions:[],
+    parallelism:{available:true, note:"GNU parallel is present here"}}' > "$f"
+  run _validate "$f"
+  [ "$status" -ne 0 ]
+}
+
+# ─── What an adversarial review found, each pinned ─────────────────────────
+
+@test "a lane whose CONCURRENT run exits non-zero is refused, however it reads per case" {
+  # Two suites each containing a case called "same", one failing only under
+  # concurrency. Matching results by NAME found the passing one, the exit code
+  # was never examined, and a lane whose parallel run had failed was proposed.
+  _clone
+  _suite a "${AT} \"same\" {
+  : > \"\$BATS_TEST_DIRNAME/../token\"
+  sleep 2
+  rm \"\$BATS_TEST_DIRNAME/../token\"
+}"
+  _suite b "${AT} \"same\" {
+  sleep 0.1
+  [ ! -e \"\$BATS_TEST_DIRNAME/../token\" ]
+  sleep 2
+}"
+  _catalog a b
+  local r; r="$(_pilot --unit "bats:tests/a" --unit "bats:tests/b" --workers 2 || true)"
+  [ "$(jq -r '.promotion' "$r")" = "refused" ]
+  [ "$(jq -r '.repetitions[0].parallel.exit_code' "$r")" != "0" ]
+  [[ "$(jq -r '.reason' "$r")" == *"exited"* ]]
+}
+
+@test "a serial run may not WARM state that the concurrent run then finds ready" {
+  # Sharing one working tree between the two sides makes a cold race vanish
+  # exactly when it is being looked for. Each side runs in its own snapshot.
+  _clone
+  printf 'state/\n' > "$PROJ/.gitignore"
+  for n in a b; do
+    _suite "$n" "${AT} \"work\" {
+  if [[ ! -e \"\$BATS_TEST_DIRNAME/../state/ready\" ]]; then
+    mkdir \"\$BATS_TEST_DIRNAME/../state\" || return 1
+    sleep 0.2
+    : > \"\$BATS_TEST_DIRNAME/../state/ready\"
+  fi
+  sleep 2
+}"
+  done
+  _catalog a b
+  local r; r="$(_pilot --unit "bats:tests/a" --unit "bats:tests/b" --workers 2 || true)"
+  [ "$(jq -r '.promotion' "$r")" != "proposed" ]
+}
+
+@test "a write GIT IGNORES is still a mutation" {
+  # `git status` cannot see it, and an ignored marker is exactly how one run
+  # leaves state for the next.
+  _clone
+  printf 'scratch/\n' > "$PROJ/.gitignore"
+  _suite a "${AT} \"writes an ignored file\" {
+  mkdir -p \"\$BATS_TEST_DIRNAME/../scratch\"
+  echo x > \"\$BATS_TEST_DIRNAME/../scratch/left-behind\"
+}"
+  _catalog a
+  local r; r="$(_pilot --unit "bats:tests/a" --workers 2 || true)"
+  [ "$(jq -r '.repetitions[0].serial.dirty_paths | length' "$r")" -ge 1 ]
+  [[ "$(jq -r '.repetitions[0].serial.dirty_paths | join(",")' "$r")" == *"left-behind"* ]]
+}
+
+@test "a change to an ALREADY PRESENT file is a mutation, not merely a new path" {
+  _clone
+  echo original > "$PROJ/data.txt"
+  _suite a "${AT} \"edits an existing file\" { echo changed > \"\$BATS_TEST_DIRNAME/../data.txt\"; }"
+  _catalog a
+  local r; r="$(_pilot --unit "bats:tests/a" --workers 2 || true)"
+  [ "$(jq -r '.promotion' "$r")" = "refused" ]
+  [[ "$(jq -r '.reason' "$r")" == *"data.txt"* ]]
+}
+
+@test "REFUSAL: a target root at a DIFFERENT revision is not evidence about this one" {
+  # Otherwise the pilot measures an unrelated or stale repository that happens
+  # to contain the same paths, and the result is consumed for the audited tree.
+  _clone
+  _suite a "${AT} \"a1\" { true; }"
+  _catalog a
+  _snapshot
+  ( cd "$PROJ" && echo drift > drift.txt && git add drift.txt && git commit -qm drift )
+  run bash "$PILOT" --lane-id l --unit "bats:tests/a" \
+    --catalog "$PROJ/.aid-o/config/test-catalog.yaml" \
+    --execution-yaml "$PROJ/.aid-o/config/execution.yaml" \
+    --output-dir "$OUT" --target-root "$CLONE" --project-root "$PROJ"
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"not a snapshot of the audited tree"* ]]
+}
+
+@test "REFUSAL: a unit whose approved command is not exactly [bats, file] is not piloted" {
+  # Taking the first .bats argument out of a longer approved command and
+  # dropping the rest would pilot something the project does not run — and the
+  # dropped file could be the one that races.
+  _clone
+  _suite a "${AT} \"a1\" { true; }"
+  _suite extra "${AT} \"e1\" { true; }"
+  {
+    echo 'schema_version: "1.0.0"'
+    echo 'status: approved'
+    echo 'run_units:'
+    echo '  - run_unit_id: "bats:tests/a"'
+    echo '    runner: bats'
+    echo '    source_paths: ["tests/a.bats"]'
+    echo '    command: {type: argv, argv: ["bats", "tests/a.bats", "tests/extra.bats"]}'
+  } > "$PROJ/.aid-o/config/test-catalog.yaml"
+  printf 'gates: []\n' > "$PROJ/.aid-o/config/execution.yaml"
+  run _pilot --unit "bats:tests/a" --workers 2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"cannot represent exactly"* ]]
+}
+
+@test "a receipt claiming a benefit with NO repetitions is rejected by the schema" {
+  # 'consumes only proposed' would otherwise promote a lane that never ran.
+  local f="$TEST_TMPDIR/empty.json"
+  jq -n '{schema_version:"aid-test-parallel-pilot-v1", lane_id:"l", audit_id:null,
+    target_root:"/tmp/x", membership:["bats:a","bats:b"],
+    membership_sha256:"0000000000000000000000000000000000000000000000000000000000000000",
+    workers:2, repeat:1, promotion:"proposed", reason:"a benefit with no evidence",
+    benefit_ms:5000, noise_threshold_ms:2000, failing_repetition:null, repetitions:[],
+    parallelism:{available:true, note:"GNU parallel is present here"}}' > "$f"
+  run _validate "$f"
+  [ "$status" -ne 0 ]
+}
+
+@test "a receipt whose repetition FAILED cannot be proposed" {
+  local f="$TEST_TMPDIR/failedrep.json"
+  jq -n '{schema_version:"aid-test-parallel-pilot-v1", lane_id:"l", audit_id:null,
+    target_root:"/tmp/x", membership:["bats:a","bats:b"],
+    membership_sha256:"0000000000000000000000000000000000000000000000000000000000000000",
+    workers:2, repeat:1, promotion:"proposed", reason:"claims a benefit anyway",
+    benefit_ms:5000, noise_threshold_ms:2000, failing_repetition:null,
+    repetitions:[{index:1, verdict:"match",
+      serial:{duration_ms:10, exit_code:0, job_state:"terminal_pass", results:[], dirty_paths:[], escaped_paths:[]},
+      parallel:{duration_ms:5, exit_code:1, job_state:"terminal_fail", results:[], dirty_paths:[], escaped_paths:[]}}],
     parallelism:{available:true, note:"GNU parallel is present here"}}' > "$f"
   run _validate "$f"
   [ "$status" -ne 0 ]

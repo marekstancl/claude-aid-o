@@ -5,10 +5,14 @@
 # clone, and reports whether concurrency changed anything. It PROPOSES. It never
 # writes the catalog, `execution.yaml`, or a scheduler mode.
 #
-# WHY THE COMPARISON IS PER CASE, NOT PER VERDICT
-#   A parallel run can be faster and still be wrong in a way the aggregate
-#   hides: a case that silently becomes a skip leaves "N passed" intact while
-#   verifying nothing. So the ordered per-case result set is what is compared.
+# WHAT IS COMPARED
+#   The exit code and terminal job state of both sides, AND the per-case result
+#   sequence position by position — not names used as a lookup key. An
+#   adversarial review built the case that breaks the weaker forms: two suites
+#   each containing a case called "same", one of which fails only under
+#   concurrency. Matching by name found the passing one, the verdict read
+#   `match`, the exit code was never examined at all, and a lane whose parallel
+#   run had FAILED was proposed.
 #
 # WHY A FAILURE IS NEVER RETRIED
 #   Retrying until green is how a flaky lane gets promoted. One failing
@@ -22,10 +26,23 @@
 #   * a command the audit's allowlist does not approve;
 #   * a membership that is not entirely in the approved catalog.
 #
+# EVERY RUN STARTS FROM AN IDENTICAL, FRESH SNAPSHOT
+#   Serial-then-parallel in one working tree lets the serial side WARM state
+#   that the parallel side then finds ready, so a cold race disappears exactly
+#   when it is being looked for. Each side of each repetition therefore runs in
+#   its own copy of the reference root.
+#
 # LEAK CHECKS, AFTER EVERY RUN
-#   `git status --short` must be empty in the disposable root, and the root's
-#   parent directory must contain nothing new. A lane that dirties its clone
-#   would dirty a real checkout too.
+#   A content digest of the whole snapshot — including files git ignores — is
+#   compared against the reference. `git status` alone missed both an ignored
+#   marker file and any change to a file that was already present. The
+#   snapshot's parent is inventoried too.
+#
+#   What that still does NOT cover: a write to an arbitrary absolute path
+#   elsewhere on the machine. Nothing here can watch the whole filesystem, so
+#   that gap is covered by the resource map (Step 14), which reports such a
+#   write as `shared` and keeps the unit out of a lane before a pilot is ever
+#   run.
 #
 # Exit codes: 0 ok (see `promotion` for the verdict) · 2 usage · 3 catalog
 #             · 10 non-disposable root · 11 command not allowlisted
@@ -90,6 +107,23 @@ if git -C "$target_canon" rev-parse --git-common-dir >/dev/null 2>&1; then
   fi
 fi
 
+# The disposable root must be a copy of the tree being audited, at the same
+# revision. Without this the pilot happily measures an unrelated or stale
+# repository that happens to contain the same paths, and reports the result as
+# evidence about the audited one.
+# `git rev-parse HEAD` in a repository with no commits prints "HEAD" on stdout
+# AND fails, so `cmd || echo fallback` yields two lines. Capture first, decide
+# after.
+_head_of() { local o; if o="$(git -C "$1" rev-parse HEAD 2>/dev/null)"; then printf '%s' "$o"; else printf 'no-head'; fi; }
+_tree_of() { local o; if o="$(git -C "$1" rev-parse "HEAD^{tree}" 2>/dev/null)"; then printf '%s' "$o"; else printf 'no-tree'; fi; }
+project_head="$(_head_of "$project_canon")"; target_head="$(_head_of "$target_canon")"
+project_tree="$(_tree_of "$project_canon")"; target_tree="$(_tree_of "$target_canon")"
+if [[ "$project_head" != "no-head" || "$target_head" != "no-head" ]]; then
+  if [[ "$project_head" != "$target_head" || "$project_tree" != "$target_tree" ]]; then
+    _die 10 "the disposable root is not a snapshot of the audited tree (project HEAD ${project_head:0:12}/tree ${project_tree:0:12}, target HEAD ${target_head:0:12}/tree ${target_tree:0:12}) — evidence gathered from a different revision is not evidence about this one"
+  fi
+fi
+
 [[ -n "$execution_yaml" ]] || execution_yaml="${project_root%/}/.aid-o/config/execution.yaml"
 noise_ms="$(test_audit_decision_key pilot_noise_ms "$project_root" 2>/dev/null || echo 2000)"
 [[ "$noise_ms" =~ ^[0-9]+$ ]] || noise_ms=2000
@@ -123,8 +157,18 @@ for unit in "${membership[@]}"; do
   cmd="$(jq -c '.command' <<<"$u")"
   aid_test_audit_check_allowed "full" "$cmd" "$execution_yaml" "$catalog_path" 2>/dev/null \
     || _die 11 "the command for '$unit' is not in the approved allowlist — refused before any process started"
-  f="$(jq -r '(.command.argv // []) | map(select(endswith(".bats")))[0] // empty' <<<"$u")"
-  [[ -n "$f" ]] || _die 3 "could not determine the .bats file for '$unit' from its approved command"
+  # The pool this pilot runs is `bats --timing [--jobs N] <files...>`, which is
+  # a composition of the approved per-unit commands. That composition is only
+  # faithful when each approved command is exactly `bats <one .bats file>`.
+  # Taking the first .bats argument out of a longer approved command and
+  # dropping the rest would pilot something the project does not run — the
+  # dropped file could be the one that races.
+  n_argv="$(jq -r '(.command.argv // []) | length' <<<"$u")"
+  argv0="$(jq -r '(.command.argv // [])[0] // ""' <<<"$u")"
+  f="$(jq -r '(.command.argv // [])[1] // ""' <<<"$u")"
+  if [[ "$n_argv" -ne 2 || "$argv0" != "bats" || "$f" != *.bats ]]; then
+    _die 2 "run unit '$unit' has approved command $(jq -c '.command.argv' <<<"$u"), which this pilot cannot represent exactly — it composes a pool only from units whose approved command is exactly [bats, <file>.bats], and refuses rather than piloting a different command than the project runs"
+  fi
   # Fail-closed path validation, matching the lane runner's own rules.
   [[ "$f" != -* ]] || _die 2 "refusing a path that begins with '-': $f"
   case "$f" in *..*) _die 2 "refusing a path containing '..': $f" ;; esac
@@ -148,23 +192,41 @@ job_seq=0
 # start rather than produce a second receipt.
 job_run_tag="$$-${RANDOM}"
 
+snap_root="${output_dir%/}/pilot-snapshots"
+mkdir -p "$snap_root"
+
+# A content digest of a tree, ignoring only git's own object store. Everything
+# else counts, including files git ignores: an ignored marker file is exactly
+# how one run warms state for the next, and `git status` cannot see it.
+_tree_digest() {
+  ( cd "$1" && find . -path ./.git -prune -o -type f -print0 2>/dev/null \
+      | sort -z | xargs -0 -r sha256sum 2>/dev/null | sort )
+}
+
+reference_digest="$(_tree_digest "$target_canon")"
+
 _parent_inventory() {
-  ( cd "$(dirname "$target_canon")" && ls -A1 2>/dev/null | sort )
+  ( cd "$(dirname "$1")" && ls -A1 2>/dev/null | sort )
 }
 
 # _run_side <label> <parallel:0|1> -> echoes a run object
+#
+# Every side runs in its OWN fresh copy of the reference root. Sharing one tree
+# between the serial and parallel sides is what let a serial warm-up hide a
+# cold concurrency race: the parallel run found the state already built and
+# never took the path that races.
 _run_side() {
   local label="$1" par="$2"
   job_seq=$(( job_seq + 1 ))
   local jid="pilot-${job_run_tag}-${job_seq}-${label}"
-  local before after escaped
+  local snap="${snap_root}/${job_run_tag}-${job_seq}-${label}"
 
-  before="$(_parent_inventory)"
-  # The tree's state BEFORE the run. A clone can legitimately arrive with
-  # untracked files; only what THIS run adds is a leak. Comparing against the
-  # empty set instead reported the fixture's own contents as a mutation.
-  local dirty_before
-  dirty_before="$( (cd "$target_canon" && git status --short 2>/dev/null) | sed 's/^[[:space:]]*//' | sort )"
+  rm -rf "$snap"
+  cp -a "$target_canon" "$snap"
+
+  local before after escaped
+  before="$(_parent_inventory "$snap")"
+
   local t0 t1
   t0=$(( $(date +%s%N) / 1000000 ))
 
@@ -172,9 +234,9 @@ _run_side() {
   [[ "$par" -eq 1 ]] && argv+=(--jobs "$workers")
   argv+=("${bats_files[@]}")
 
-  ( cd "$target_canon" && bash "${SCRIPT_DIR}/aid-job.sh" run \
+  ( cd "$snap" && bash "${SCRIPT_DIR}/aid-job.sh" run \
       --jobs-dir "$jobs_dir" --id "$jid" --label "pilot:${lane_id}:${label}" \
-      --repo "$target_canon" --deadline "$deadline_s" --expect-p95 "$deadline_s" \
+      --repo "$snap" --deadline "$deadline_s" --expect-p95 "$deadline_s" \
       -- "${argv[@]}" ) >/dev/null 2>&1 \
     || _die 1 "could not start the ${label} run through aid-job.sh"
 
@@ -194,33 +256,45 @@ _run_side() {
   exit_code="$(jq -r '.exit_code // 1' <<<"${collect:-null}" 2>/dev/null || echo 1)"
   [[ "$exit_code" =~ ^-?[0-9]+$ ]] || exit_code=1
 
-  # Ordered per-case results from the TAP stream.
+  # Per-case results in TAP order. Order is preserved because the comparison
+  # is positional: two cases sharing a name are two facts, not one.
   local results
   results="$(awk '
-    /^ok /     { st="passed"; if ($0 ~ / # skip/) st="skipped" }
-    /^not ok / { st="failed" }
     /^(ok|not ok) / {
-      line=$0
+      st = ($0 ~ /^not ok /) ? "failed" : "passed"
+      if ($0 ~ / # skip/) st = "skipped"
+      line = $0
       sub(/^(not )?ok +[0-9]+ +/, "", line)
       sub(/ # skip.*$/, "", line)
       sub(/ in [0-9]+ms$/, "", line)
       gsub(/\\/, "\\\\", line); gsub(/"/, "\\\"", line)
       printf "%s{\"name\":\"%s\",\"status\":\"%s\"}", (n++ ? "," : ""), line, st
     }
-    END { }
   ' "${jobs_dir}/${jid}/stdout.log" 2>/dev/null)"
   results="[${results}]"
 
-  local dirty_after dirty
-  dirty_after="$( (cd "$target_canon" && git status --short 2>/dev/null) | sed 's/^[[:space:]]*//' | sort )"
-  dirty="$(comm -13 <(printf '%s\n' "$dirty_before") <(printf '%s\n' "$dirty_after") \
-            | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  # What changed in the snapshot, against the reference every side starts from.
+  # This sees ignored files and edits to files that were already there — both
+  # of which `git status --short` misses.
+  local after_digest changed
+  after_digest="$(_tree_digest "$snap")"
+  # `diff` exits 1 when it finds differences, and under `pipefail` that took
+  # down the whole pilot — the leak detector killing the run it was inspecting.
+  # Differences are the expected outcome here, so the status is not a failure.
+  local raw_changes
+  raw_changes="$( { diff <(printf '%s\n' "$reference_digest") <(printf '%s\n' "$after_digest") || true; } \
+                   | sed -n 's/^[<>] *//p' | awk '{ $1=""; sub(/^ +/, ""); print }' | sort -u )"
+  changed="$(printf '%s' "$raw_changes" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 
-  after="$(_parent_inventory)"
-  escaped="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  after="$(_parent_inventory "$snap")"
+  escaped="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") \
+              | grep -v "^$(basename "$snap")$" || true)"
+  escaped="$(printf '%s' "$escaped" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+
+  rm -rf "$snap"
 
   jq -nc --argjson d "$(( t1 - t0 ))" --argjson rc "$exit_code" --arg st "$state" \
-    --argjson res "$results" --argjson dirty "$dirty" --argjson esc "$escaped" \
+    --argjson res "$results" --argjson dirty "$changed" --argjson esc "$escaped" \
     '{duration_ms:$d, exit_code:$rc, job_state:$st, results:$res,
       dirty_paths:$dirty, escaped_paths:$esc}'
 }
@@ -241,35 +315,38 @@ for (( i = 1; i <= repeat; i++ )); do
   parallel="$(_run_side "parallel-$i" 1)"
 
   diffs="$(jq -nc --argjson s "$serial" --argjson p "$parallel" '
-    [ ( if ($s.results | length) != ($p.results | length)
+    [ # A run that did not finish cleanly is a refusal in its own right. The
+      # first version compared only case results, so a parallel run that
+      # exited non-zero could still be reported as a match.
+      ( if $s.exit_code != 0 then "the serial run exited " + ($s.exit_code|tostring) else empty end ),
+      ( if $p.exit_code != 0 then "the concurrent run exited " + ($p.exit_code|tostring) else empty end ),
+      ( if $s.job_state != "terminal_pass" then "the serial job ended in state " + $s.job_state else empty end ),
+      ( if $p.job_state != "terminal_pass" then "the concurrent job ended in state " + $p.job_state else empty end ),
+
+      ( if ($s.results | length) != ($p.results | length)
         then "case count differs: serial " + (($s.results|length)|tostring)
-             + ", parallel " + (($p.results|length)|tostring)
+             + ", concurrent " + (($p.results|length)|tostring)
         else empty end ),
-      ( [ $s.results[] | .name ] as $sn
-        | [ $p.results[] | .name ] as $pn
-        | ($sn - $pn) as $only_serial
-        | ($pn - $sn) as $only_parallel
-        | ( if ($only_serial | length) > 0
-            then "cases present only in the serial run: " + ($only_serial | join(", "))
-            else empty end ),
-          ( if ($only_parallel | length) > 0
-            then "cases present only in the parallel run: " + ($only_parallel | join(", "))
-            else empty end ) ),
-      ( [ $s.results[] as $c
-          | ( [ $p.results[] | select(.name == $c.name) ][0] ) as $m
-          | select($m != null and $m.status != $c.status)
-          | $c.name + ": " + $c.status + " serially, " + $m.status + " concurrently" ][] ),
+
+      # Positional, not by name. Two cases sharing a name are two facts; using
+      # the name as a lookup key found the passing one and hid the failing one.
+      ( [ range(0; ([($s.results|length), ($p.results|length)] | min)) as $i
+          | ($s.results[$i]) as $a | ($p.results[$i]) as $b
+          | select($a.name != $b.name or $a.status != $b.status)
+          | "position " + (($i+1)|tostring) + ": serial \"" + $a.name + "\" " + $a.status
+            + ", concurrent \"" + $b.name + "\" " + $b.status ][] ),
+
       ( if ($s.dirty_paths | length) > 0
-        then "the serial run left the clone dirty: " + ($s.dirty_paths | join(", "))
+        then "the serial run changed its snapshot: " + ($s.dirty_paths | join(", "))
         else empty end ),
       ( if ($p.dirty_paths | length) > 0
-        then "the parallel run left the clone dirty: " + ($p.dirty_paths | join(", "))
+        then "the concurrent run changed its snapshot: " + ($p.dirty_paths | join(", "))
         else empty end ),
       ( if ($s.escaped_paths | length) > 0
-        then "the serial run wrote outside the disposable root: " + ($s.escaped_paths | join(", "))
+        then "the serial run wrote outside its snapshot: " + ($s.escaped_paths | join(", "))
         else empty end ),
       ( if ($p.escaped_paths | length) > 0
-        then "the parallel run wrote outside the disposable root: " + ($p.escaped_paths | join(", "))
+        then "the concurrent run wrote outside its snapshot: " + ($p.escaped_paths | join(", "))
         else empty end ) ]')"
 
   n_diff="$(jq 'length' <<<"$diffs")"
@@ -315,6 +392,18 @@ elif [[ "$promotion" != "refused" ]]; then
 fi
 
 reps_json="$(jq -sc '.' "$reps_file")"
+
+# A last check before the receipt is written: a proposal must carry as many
+# matching repetitions as were asked for. The schema enforces this too, but a
+# producer that can emit an artifact its own reader rejects is a producer that
+# will be worked around.
+if [[ "$promotion" == "proposed" ]]; then
+  n_reps="$(jq 'length' <<<"$reps_json")"
+  if [[ "$n_reps" -ne "$repeat" ]]; then
+    promotion="refused"; failing_rep="$(( n_reps + 1 ))"
+    reason="only ${n_reps} of ${repeat} repetitions completed — a proposal must rest on every repetition that was asked for"
+  fi
+fi
 
 jq -nc \
   --arg lane "$lane_id" --arg root "$target_canon" --arg aid "$audit_id" \

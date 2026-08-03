@@ -18,7 +18,8 @@
     "noise_threshold_ms",
     "target_root",
     "audit_id",
-    "parallelism"
+    "parallelism",
+    "membership_sha256"
   ],
   "properties": {
     "schema_version": {
@@ -50,7 +51,8 @@
     },
     "membership_sha256": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Digest of the sorted membership. Required, and required to be checked against the lane it would promote: evidence gathered for one set may not promote another."
     },
     "workers": {
       "type": "integer",
@@ -96,7 +98,8 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/repetition"
-      }
+      },
+      "description": "One entry per repetition actually run. A `proposed` receipt must carry exactly `repeat` of them, all matching — otherwise a receipt claiming a benefit with an empty evidence list would validate, and a consumer that trusts `proposed` would promote a lane that never ran."
     },
     "parallelism": {
       "description": "Whether the runner could actually run cases concurrently. Bats delegates --jobs to GNU parallel; without it the flag degrades to serial, and a verdict drawn from that would describe a comparison that never happened.",
@@ -125,7 +128,9 @@
         "duration_ms",
         "exit_code",
         "job_state",
-        "results"
+        "results",
+        "dirty_paths",
+        "escaped_paths"
       ],
       "properties": {
         "duration_ms": {
@@ -278,6 +283,54 @@
         "properties": {
           "promotion": {
             "const": "refused"
+          }
+        }
+      }
+    },
+    {
+      "$comment": "A proposal must be backed by evidence: exactly `repeat` repetitions, every one a match, both sides exiting zero from a terminal_pass job. Without this a receipt with an empty `repetitions` array and a large `benefit_ms` validates, and 'consumes only proposed' promotes a lane nobody ran.",
+      "if": {
+        "properties": {
+          "promotion": {
+            "const": "proposed"
+          }
+        },
+        "required": [
+          "promotion"
+        ]
+      },
+      "then": {
+        "properties": {
+          "repetitions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "verdict": {
+                  "const": "match"
+                },
+                "serial": {
+                  "properties": {
+                    "exit_code": {
+                      "const": 0
+                    },
+                    "job_state": {
+                      "const": "terminal_pass"
+                    }
+                  }
+                },
+                "parallel": {
+                  "properties": {
+                    "exit_code": {
+                      "const": 0
+                    },
+                    "job_state": {
+                      "const": "terminal_pass"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
