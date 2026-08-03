@@ -1,0 +1,14 @@
+{
+  "run_id": "e2e-sequential_regression-20260803T202439Z-3414299",
+  "scenario": "sequential_regression",
+  "pass": false,
+  "stages_verified": [
+    {
+      "stage": "bootstrap_catalog_approved",
+      "pass": false,
+      "detail": "aid-test-catalog-approve.sh failed: aid-test-catalog-approve.sh: --proposed '/tmp/tmp.3GselCXB4u/test-catalog.proposed.yaml' failed schema validation before approval — refusing to publish an unvalidated catalog"
+    }
+  ],
+  "commit_sha": "92204390da561b8bbb8da155aafadf31ee1dd25e",
+  "evaluated_at": "2026-08-03T20:24:39Z"
+}
