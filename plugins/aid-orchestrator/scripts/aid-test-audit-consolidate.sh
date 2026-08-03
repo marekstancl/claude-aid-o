@@ -51,7 +51,7 @@ audit_id="" wave_artifacts_dir="" output_dir="" dispatch_manifest=""
 # P072 Step 4 — the mode decides whether per-unit dispositions are OWED, and
 # the inventory is the denominator every coverage figure is computed against.
 # Both default to the pre-P072 behaviour so an existing caller is unaffected.
-audit_mode="measure" inventory_path="" project_root=""
+audit_mode="measure" inventory_path="" project_root="" profiles_dir=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -64,6 +64,7 @@ while [[ $# -gt 0 ]]; do
       shift 2 ;;
     --inventory) [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory_path="$2"; shift 2 ;;
     --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
+    --profiles-dir) [[ $# -ge 2 ]] || _die 2 "--profiles-dir requires a value"; profiles_dir="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
 done
@@ -326,6 +327,56 @@ if [[ "$audit_mode" == "full" ]]; then
     remove_json="$(jq -c '[.[] | select(.disposition=="remove") | .run_unit_id] | unique' <<<"$dispositions_json")"
     removed_n="$(jq 'length' <<<"$remove_json")"
 
+    # ─── P072 Step 13: profiles become named root-cause actions ─────────────
+    #
+    # The mapping is where a diagnosis stops being a number and becomes advice,
+    # so it is also where a dishonest saving would enter. Two rules hold it
+    # shut:
+    #
+    #   * a receipt that did not COMPLETE can never produce a `measured`
+    #     impact. Its elapsed time is a LOWER BOUND, so it goes in `before_ms`
+    #     with `after_ms: null` and `kind: unknown`. Presenting a lower bound
+    #     as a before-and-after pair is exactly the invented saving the
+    #     adversarial contract forbids.
+    #
+    #   * `fixture_growth` maps to `fix`, NEVER to `split`. A file whose
+    #     per-case cost rises with accumulated state does not get faster when
+    #     cut in half — the growth follows the state into both halves. This is
+    #     the single most tempting wrong action in the whole capability.
+    profile_actions_json='[]'
+    if [[ -n "$profiles_dir" && -d "$profiles_dir" ]]; then
+      profile_actions_json="$(
+        find "$profiles_dir" -name '*.json' -type f -print0 2>/dev/null \
+          | xargs -0 -r jq -sc --argjson rm "$remove_json" '
+            [ .[]
+              | select(.schema_version == "aid-test-profile-v1")
+              # A unit already proposed for deletion gets no cost action:
+              # optimising a test scheduled for removal is wasted work.
+              | select(.run_unit_id as $u | $rm | index($u) | not)
+              | . as $p
+              | ($p.root_cause.bucket) as $b
+              | {
+                  action: (if $b == "fixture_growth" then "fix"
+                           elif $b == "duplicate_membership" then "fix"
+                           elif $b == "test_body" then "keep_serial"
+                           else "measure" end),
+                  targets: [$p.run_unit_id],
+                  priority: (if $p.complete then "medium" else "high" end),
+                  reason: ($p.root_cause.reason | .[0:500]),
+                  evidence_refs: ["profiles/" + ($p.evidence_log // "unknown.log")],
+                  impact: (if $p.complete and ($b == "duplicate_membership")
+                           then {kind:"estimated", before_ms:$p.elapsed_ms, after_ms:null,
+                                 assumptions:["removing the duplicate dispatch saves one full run of this unit"]}
+                           elif $p.complete
+                           then {kind:"unknown", before_ms:null, after_ms:null, assumptions:[]}
+                           else {kind:"unknown", before_ms:$p.lower_bound_ms, after_ms:null, assumptions:[]}
+                           end)
+                } ]' 2>/dev/null || echo '[]'
+      )"
+      [[ -n "$profile_actions_json" ]] || profile_actions_json='[]'
+    fi
+
+
     # ─── P072 Step 5: content checks on the dispositions themselves ─────────
     #
     # Relationship to the mechanism that already ships: the wave-artifact
@@ -477,10 +528,11 @@ if [[ "$audit_mode" == "full" ]]; then
       --argjson removed_n "$removed_n" \
       --argjson merge_groups "$merge_groups_json" --arg impact_kind "$impact_kind" \
       --argjson merged_surplus "$merged_surplus" \
+      --argjson profile_actions "$profile_actions_json" \
       --argjson rt_before "$runtime_before" --argjson rt_after "$runtime_after" '
       {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
        current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
-       actions:[], parallelization:{lanes:[], smallest_safe_pilot:null},
+       actions:$profile_actions, parallelization:{lanes:[], smallest_safe_pilot:null},
        unresolved:$unresolved,
        portfolio_coverage:{inventory_count:$ic, assigned_count:$ac, disposition_count:$dc,
                            missing_run_unit_ids:$missing, duplicate_run_unit_ids:$dupes},

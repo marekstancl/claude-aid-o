@@ -357,3 +357,24 @@ mutate() { valid_decision | jq -c "$1"; }
   [[ "$output" == *"deliberately narrow"* ]]
   [[ "$output" == *"not general secret detection"* ]]
 }
+
+@test "impact.kind unknown MAY carry a before_ms — a current cost is not a claimed saving" {
+  # An unfinished profile's only real measurement is a lower bound. Forbidding
+  # both numbers forced the alternative of dropping it, which would have made
+  # the honest answer ("it costs at least this much, and I cannot say what it
+  # would cost after") unrepresentable.
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:60010, after_ms:null, assumptions:[]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.actions[0].impact.before_ms' "$TMP/d.json")" = "60010" ]
+}
+
+@test "impact.kind unknown still cannot carry an after_ms — no delta may be implied" {
+  # With no after value there is no saving to infer; supplying one is exactly
+  # the smuggled benefit this rule exists to stop.
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:60010, after_ms:1000, assumptions:[]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}

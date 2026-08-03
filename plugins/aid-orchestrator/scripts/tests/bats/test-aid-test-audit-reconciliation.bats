@@ -654,3 +654,106 @@ _shard_artifact_n() {
   [ "$(jq -r '.portfolio_change.impact_kind' "$OUT/decision.json")" = "estimated" ]
   [ "$(jq -r '.portfolio_change.runtime_after_ms' "$OUT/decision.json")" = "null" ]
 }
+
+# ─── P072 Step 13: profiles become actions, honestly ───────────────────────
+
+_profile() {
+  # <run_unit_id> <bucket> <complete> [elapsed] [lower_bound]
+  local id="$1" bucket="$2" complete="$3" elapsed="${4:-1000}" lb="${5:-null}"
+  mkdir -p "$OUT/profiles"
+  jq -nc --arg id "$id" --arg b "$bucket" \
+         --argjson c "$complete" --argjson e "$elapsed" --argjson lb "$lb" '
+    {schema_version:"aid-test-profile-v1", run_unit_id:$id, runner:"bats",
+     complete:$c, incomplete_reason:(if $c then null else "deadline" end),
+     elapsed_ms:$e, exit_code:0, budget_seconds:60,
+     lower_bound_ms:$lb, timing:{}, fixture_growth:{detected:($b=="fixture_growth")},
+     source_signals:{}, duplicate_membership:{gates:[],duplicated:($b=="duplicate_membership")},
+     root_cause:{bucket:$b, confidence:"high", reason:("diagnosed as " + $b + " with cited evidence"), next_probe:null},
+     evidence_log:"x.log"}' > "$OUT/profiles/$(echo "$id" | tr '/:' '__').json"
+}
+
+_run_full_profiled() {
+  bash "$CONSOLIDATE" --audit-id "$AUDIT_ID" --wave-artifacts-dir "$ART" \
+    --dispatch-manifest "$MANIFEST" --output-dir "$OUT" \
+    --mode full --inventory "$INVENTORY" --project-root "$PROJ" \
+    --profiles-dir "$OUT/profiles"
+}
+
+@test "STEP 13: fixture_growth maps to FIX, never to split" {
+  # A file whose per-case cost rises with accumulated state does not get
+  # faster when cut in half — the growth follows the state into both halves.
+  # This is the single most tempting wrong action in the capability.
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "fixture_growth" true
+  _run_full_profiled
+
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "fix" ]
+  [ "$(jq -r '.actions[0].targets[0]' "$OUT/decision.json")" = "bats:a" ]
+  run jq -r '[.actions[].action] | index("split")' "$OUT/decision.json"
+  [ "$output" = "null" ]
+}
+
+@test "STEP 13: an INCOMPLETE profile yields impact.kind unknown with the lower bound in before_ms" {
+  # Presenting a lower bound as a before-and-after pair is the invented saving
+  # the adversarial contract forbids.
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "undecidable" false 60010 60010
+  _run_full_profiled
+
+  [ "$(jq -r '.actions[0].impact.kind' "$OUT/decision.json")" = "unknown" ]
+  [ "$(jq -r '.actions[0].impact.before_ms' "$OUT/decision.json")" = "60010" ]
+  [ "$(jq -r '.actions[0].impact.after_ms' "$OUT/decision.json")" = "null" ]
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "measure" ]
+  [ "$(jq -r '.actions[0].priority' "$OUT/decision.json")" = "high" ]
+}
+
+@test "STEP 13: duplicate_membership yields an ESTIMATED saving with its assumption stated" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "duplicate_membership" true 4200
+  _run_full_profiled
+
+  [ "$(jq -r '.actions[0].impact.kind' "$OUT/decision.json")" = "estimated" ]
+  [ "$(jq -r '.actions[0].impact.before_ms' "$OUT/decision.json")" = "4200" ]
+  [ "$(jq -r '.actions[0].impact.assumptions | length' "$OUT/decision.json")" = "1" ]
+}
+
+@test "STEP 13: a completed profile with no dominant cause claims NO numeric benefit" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true 900
+  _run_full_profiled
+
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "keep_serial" ]
+  [ "$(jq -r '.actions[0].impact.kind' "$OUT/decision.json")" = "unknown" ]
+  [ "$(jq -r '.actions[0].impact.before_ms' "$OUT/decision.json")" = "null" ]
+}
+
+@test "STEP 13: no cost action is emitted for a unit already proposed for REMOVAL" {
+  # Optimising a test scheduled for deletion is wasted work.
+  _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
+  _shard_artifact "$(_disposition "bats:a" "remove")" "$(_disposition "bats:b")"
+  _profile "bats:a" "fixture_growth" true
+  _profile "bats:b" "test_body" true
+  _run_full_profiled
+
+  run jq -r '[.actions[].targets[]] | index("bats:a")' "$OUT/decision.json"
+  [ "$output" = "null" ]
+  run jq -r '[.actions[].targets[]] | index("bats:b")' "$OUT/decision.json"
+  [ "$output" != "null" ]
+}
+
+@test "STEP 13: every emitted action cites its evidence log" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "fixture_growth" true
+  _run_full_profiled
+
+  [ "$(jq -r '.actions[0].evidence_refs | length' "$OUT/decision.json")" -ge 1 ]
+  [[ "$(jq -r '.actions[0].evidence_refs[0]' "$OUT/decision.json")" == profiles/* ]]
+}
+
+@test "STEP 13: with no profiles directory the audit still completes, with no actions" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.actions | length' "$OUT/decision.json")" = "0" ]
+  [ "$(_status)" = "complete" ]
+}

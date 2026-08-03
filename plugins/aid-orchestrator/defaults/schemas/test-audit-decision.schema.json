@@ -687,7 +687,7 @@
           }
         },
         {
-          "$comment": "unknown claims no numerical benefit at all.",
+          "$comment": "`unknown` claims no BENEFIT — which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced.",
           "if": {
             "properties": {
               "kind": {
@@ -701,7 +701,11 @@
           "then": {
             "properties": {
               "before_ms": {
-                "type": "null"
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
               },
               "after_ms": {
                 "type": "null"
