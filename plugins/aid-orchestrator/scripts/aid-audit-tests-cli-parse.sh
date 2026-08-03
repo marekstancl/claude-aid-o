@@ -28,6 +28,18 @@
 #   10 --project-root does not exist (or is not a directory) — checked
 #      regardless of scope, since every later step (scanner, dispatch,
 #      measurement) resolves paths against it
+#   12 disposable-clone precondition: the target is a checkout of the SAME
+#      repository (identified by shared root commit, not by origin URL) but
+#      has no .aid-o/config/execution.yaml — the clone was made without the
+#      gitignored config, so every declared-command gate would silently
+#      vanish. Names the exact copy that fixes it. Downgradeable with
+#      --allow-missing-config.
+#   13 .aid-o/config/execution.yaml exists but cannot be read — distinct from
+#      12 on purpose: "cannot read" and "not there" call for different
+#      operator actions, and a broken symlink must not read as "absent"
+#      (An unrelated or un-initialized target only WARNS: auditing a project
+#      that has no gates is legitimate, and a hard failure there would break
+#      every audit of a bare fixture or a consumer project.)
 
 set -euo pipefail
 
@@ -49,6 +61,7 @@ repeat=""
 write_plan="false"
 resume_id=""
 project_root="$(pwd)"
+allow_missing_config="false"
 
 positional_seen=0
 # Every value-taking option checks `$# -ge 2` before consuming an operand —
@@ -86,6 +99,8 @@ while [[ $# -gt 0 ]]; do
       resume_id="$2"
       shift 2
       ;;
+    --allow-missing-config)
+      allow_missing_config="true"; shift ;;
     --project-root)
       [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"
       project_root="$2"
@@ -136,6 +151,83 @@ fi
 # regardless of scope.
 resolved_root="$(cd "$project_root" 2>/dev/null && pwd -P)" || _die 10 "--project-root '$project_root' does not exist (or is not a directory)"
 project_root="$resolved_root"
+
+# ─── Disposable-clone precondition (P072 Step 8) ────────────────────────────
+#
+# `.aid-o/` is gitignored, so a clone made for a disposable audit carries no
+# config unless someone copied it. Without it every declared-command gate
+# disappears from discovery and the audit reports a smaller portfolio than the
+# project has — confidently, with nothing to show anything is missing.
+#
+# The check is deliberately NARROW. "The invoking directory is configured and
+# the target is not" is NOT enough to conclude a clone: auditing an unrelated,
+# un-initialized project from inside your own AID project is an ordinary thing
+# to do, and failing it hard would break that. The hard error fires only when
+# the target is plausibly a CLONE OF THIS project — same git origin, or the
+# invoker's toplevel reachable as the clone's origin path — because that is
+# the case where the missing config is an accident rather than a fact about
+# the project. Everything else warns.
+_target_exec="${project_root%/}/.aid-o/config/execution.yaml"
+_target_cfg_dir="${project_root%/}/.aid-o/config"
+
+# The invoking project's root comes from git, not from `pwd`: running the
+# audit from a subdirectory is ordinary, and `pwd` would then look for the
+# config in the wrong place and compare the wrong worktree.
+_invoking_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+_invoking_exec="${_invoking_root}/.aid-o/config/execution.yaml"
+
+# _audit_same_repo — 0 when the target is a checkout of the SAME repository as
+# the invoking one.
+#
+# Identity is the ROOT COMMIT, not the origin URL. Comparing URLs is wrong in
+# both directions: `git@host:o/r` and `https://host/o/r` are the same
+# repository and would compare unequal, while a relative or `file://` remote
+# needs resolving against the target's own gitdir before it means anything. A
+# root commit is the same sha in every checkout, however it was cloned, and it
+# needs no parsing, no network and no `cd` onto a value that came out of a
+# config file.
+_audit_same_repo() {
+  command -v git >/dev/null 2>&1 || return 1
+  local t_root i_root
+  t_root="$(git -C "$project_root" rev-list --max-parents=0 HEAD 2>/dev/null | tail -1 || true)"
+  [[ -n "$t_root" ]] || return 1
+  i_root="$(git -C "$_invoking_root" rev-list --max-parents=0 HEAD 2>/dev/null | tail -1 || true)"
+  [[ -n "$i_root" ]] || return 1
+  [[ "$t_root" == "$i_root" ]]
+}
+
+# _audit_path_unreadable — 0 when the config path cannot even be examined
+# because an ancestor is not traversable. Both `-e` and `-L` are false in that
+# case, so without this the directory would be misreported as "no config" and
+# the operator told to copy one in, which a permission problem will not fix.
+_audit_path_unreadable() {
+  [[ -d "$_target_cfg_dir" && ! -x "$_target_cfg_dir" ]] && return 0
+  local parent="${project_root%/}/.aid-o"
+  [[ -d "$parent" && ! -x "$parent" ]] && return 0
+  return 1
+}
+
+if _audit_path_unreadable; then
+  _die 13 "'$_target_exec' cannot be examined — an ancestor directory is not traversable. This is a permissions problem, not a missing config; copying a config in will not fix it."
+elif [[ -e "$_target_exec" || -L "$_target_exec" ]]; then
+  # `-e` FOLLOWS a symlink, so a broken link reads as absent and would be
+  # reported as the copy-the-config case. `-L` catches the link itself, which
+  # is what makes "present but unusable" distinguishable from "not there" —
+  # they need different fixes.
+  [[ -r "$_target_exec" && -f "$_target_exec" ]] \
+    || _die 13 "'$_target_exec' exists but cannot be read as a file (broken symlink, a directory, or permissions) — this is not the same as a missing config; fix the file rather than copying over it"
+elif [[ "$allow_missing_config" == "true" ]]; then
+  echo "aid-audit-tests-cli-parse.sh: WARNING — '$project_root' has no .aid-o/config/execution.yaml; every declared-command gate will be ABSENT from this audit, and its portfolio will be smaller than the project's. Continuing because --allow-missing-config was given." >&2
+elif [[ -f "$_invoking_exec" ]] && _audit_same_repo; then
+  _die 12 "'$project_root' is a checkout of this same repository but has no .aid-o/config/execution.yaml — .aid-o/ is gitignored, so every declared-command gate would silently vanish from this audit. Fix with:
+    mkdir -p '${project_root%/}/.aid-o' && cp -r '${_invoking_root}/.aid-o/config' '${project_root%/}/.aid-o/config'
+Or pass --allow-missing-config to audit without declared gates on purpose."
+fi
+# An unrelated or un-initialized target is SILENT on purpose. Auditing a
+# project that has no declared gates is ordinary, and a warning on every such
+# run is noise that teaches people to ignore warnings — including the two that
+# matter above. The audit's own report states the portfolio it found; it does
+# not need this stage to speculate about what a different project might have.
 
 case "$scope" in
   path:*)

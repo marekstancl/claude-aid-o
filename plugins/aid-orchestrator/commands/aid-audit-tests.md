@@ -31,7 +31,7 @@ and ends every run with a mandatory plain-language chat recommendation.
 ```
 /aid-audit-tests [repo|path:<path>|runner:<id>] [--mode static|measure|full]
                   [--budget-minutes N] [--max-agents N] [--repeat N]
-                  [--write-plan] [--resume <audit-id>]
+                  [--write-plan] [--resume <audit-id>] [--allow-missing-config]
 ```
 
 | Argument | Meaning |
@@ -45,6 +45,26 @@ and ends every run with a mandatory plain-language chat recommendation.
 | `--repeat N` | Repeat a measured command N times (flake-probing use). |
 | `--write-plan` | Non-interactive equivalent of the natural-language "vytvoř plán oprav" continuation (see below) — for CI/scripted use. |
 | `--resume <audit-id>` | Resume an interrupted audit; short-circuits to the resumable state machine before any new scan. |
+| `--allow-missing-config` | Audit a project that has no `.aid-o/config/execution.yaml` on purpose. Downgrades the disposable-clone refusal below to a warning that names what will be absent. |
+
+### Disposable-clone precondition
+
+`.aid-o/` is gitignored, so a clone made for a disposable audit carries no
+config unless someone copied it. Auditing such a clone silently drops **every
+declared-command gate** — the report is confidently smaller than the project,
+with nothing to show anything is missing.
+
+The parser refuses (exit 12) when the target is plausibly a **clone of this
+project** — same git origin, or its origin points at the invoking worktree —
+and prints the exact `cp -r` that fixes it. The check is deliberately narrow:
+auditing an unrelated or un-initialized project from inside your own AID
+project is ordinary and passes silently, because a warning on every such run
+is noise that teaches people to ignore the diagnostics that matter.
+
+A config that exists but cannot be read (a broken symlink, permissions) is
+exit 13, not 12 — "cannot read" and "not there" need different fixes, and
+telling someone to copy a config over a file that is already there sends them
+down the wrong path.
 
 The command file documents this contract; it performs no validation itself. The
 controller invokes the real, deterministic parser

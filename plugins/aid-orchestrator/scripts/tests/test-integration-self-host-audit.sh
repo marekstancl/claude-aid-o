@@ -110,11 +110,21 @@ echo "TEST: cross-check 1 — bats-adapter run_unit count matches the actual .ba
 # -maxdepth 1, single-directory count would false-positive-diverge the moment
 # a .bats file exists in a subdirectory or elsewhere in the tree. Match the
 # adapter's own real search scope exactly: recursive from the project root.
+#
+# P072 Step 7: the bats adapter no longer owns `*.bats` alone. A `test-*.sh`
+# carrying a bats shebang IS a Bats suite — run-all-tests.sh already dispatches
+# it with `bats` — so the adapter claims it too. The expected count is
+# therefore `.bats` files PLUS bats-shebang `.sh` files; asserting against
+# `.bats` alone would now fail by exactly the number of correctly-classified
+# shell-named Bats suites, which is a stale premise rather than a defect.
 actual_bats_files="$(find "$CLONE_DIR" -type f -name '*.bats' 2>/dev/null | wc -l | tr -d ' ')"
-if [[ "$bats_run_unit_count" == "$actual_bats_files" ]]; then
-  pass_msg "bats run_units (${bats_run_unit_count}) == actual .bats files on disk (${actual_bats_files})"
+actual_bats_shebang_sh="$(find "$CLONE_DIR" -type f -name 'test-*.sh' -not -path '*/fixtures/*' 2>/dev/null \
+  | while read -r f; do head -1 "$f" 2>/dev/null | grep -q 'bats' && echo "$f"; done | wc -l | tr -d ' ')"
+expected_bats_units=$((actual_bats_files + actual_bats_shebang_sh))
+if [[ "$bats_run_unit_count" == "$expected_bats_units" ]]; then
+  pass_msg "bats run_units (${bats_run_unit_count}) == ${actual_bats_files} .bats + ${actual_bats_shebang_sh} bats-shebang .sh on disk"
 else
-  fail_msg "bats run_units (${bats_run_unit_count}) != actual .bats files on disk (${actual_bats_files}) — exact discrepancy: $((actual_bats_files - bats_run_unit_count))"
+  fail_msg "bats run_units (${bats_run_unit_count}) != ${expected_bats_units} (${actual_bats_files} .bats + ${actual_bats_shebang_sh} bats-shebang .sh) — exact discrepancy: $((expected_bats_units - bats_run_unit_count))"
 fi
 
 echo "TEST: cross-check 2 — bats_all's declared target (the whole bats/ directory) agrees with the same count"
@@ -149,27 +159,18 @@ for suite in test-aid-plan-release-boundary test-aid-plan-final-boundary; do
   fi
 done
 
-echo "TEST: the shell-suite adapter coverage gap is recorded as an explicit finding, not silently reconciled"
-# run-all-tests.sh's own discovery (never the audit catalog) is the ground truth for
-# "how many real, schedulable commands does this repo actually run" — no shell-suite
-# adapter exists yet (EPIC 1's fixed adapter set: bats, package-script, declared-
-# command only), so standalone test-*.sh scripts not wired as a gate command are
-# invisible to run_units. This is a genuine completeness gap, explicitly out of this
-# plan's adapter scope — recorded for Step 22's remediation plan, never treated as
-# this test's own failure.
-total_sh_scripts="$(find "$CLONE_DIR/plugins/aid-orchestrator/scripts/tests" -maxdepth 1 -name 'test-*.sh' 2>/dev/null | wc -l | tr -d ' ')"
-# Codex review: subtracting run_units_count (which includes declared-command
-# gates like bats_fsm/shell_pipeline_smoke that are NOT 1:1 with any single
-# test-*.sh script) from total_sh_scripts produces an arithmetically
-# meaningless number, not an estimate of uncovered shell scripts. The
-# honest, provable fact is simpler and needs no subtraction at all: the
-# catalog has ZERO run_units with runner=="sh" (no shell-suite adapter
-# exists at all in this plan's fixed EPIC 1 adapter set), so every one of
-# the ${total_sh_scripts} standalone test-*.sh scripts is uncovered by
-# construction — verified directly against the catalog, not inferred.
-sh_runner_count="$(yq -o=json '.run_units' "$CATALOG" 2>/dev/null | jq '[.[] | select(.runner=="sh")] | length')"
-finding "run-all-tests.sh discovers ${actual_bats_files} .bats files + ${total_sh_scripts} standalone test-*.sh shell scripts = $((actual_bats_files + total_sh_scripts)) real schedulable commands. The audit catalog has ${sh_runner_count} run_units with runner==\"sh\" — no shell-suite adapter exists in this plan's fixed EPIC 1 adapter set (bats/package-script/declared-command only), so all ${total_sh_scripts} standalone shell test scripts are uncovered by run_units (verified directly against the catalog, not estimated by subtraction). This is a real portfolio-completeness gap for the generated remediation plan (Step 22) to address, not a defect in this audit run."
-pass_msg "shell-suite adapter coverage gap recorded as a named finding (${total_sh_scripts} standalone shell scripts, 0 represented as runner==\"sh\")"
+echo "TEST: the shell-suite coverage gap is CLOSED — standalone suites are real run_units"
+sh_run_units="$(yq -o=json '.' "$CATALOG" | jq '[.run_units[] | select(.runner == "sh")] | length')"
+# Names the findings block below still writes out.
+sh_runner_count="$sh_run_units"
+total_sh_scripts="$(find "$CLONE_DIR" -type f -name 'test-*.sh' -not -path '*/fixtures/*' -not -path '*/node_modules/*' 2>/dev/null | wc -l | tr -d ' ')"
+real_shell_suites="$(find "$CLONE_DIR" -type f -name 'test-*.sh' -not -path '*/fixtures/*' -not -path '*/node_modules/*' 2>/dev/null \
+  | while read -r f; do head -1 "$f" 2>/dev/null | grep -q 'bats' || echo "$f"; done | wc -l | tr -d ' ')"
+if [[ "$sh_run_units" == "$real_shell_suites" && "$sh_run_units" -gt 0 ]]; then
+  pass_msg "all ${sh_run_units} standalone shell suites are represented as runner==\"sh\" run_units (P072 Step 7 closed the gap this test used to record as a finding)"
+else
+  fail_msg "shell-suite coverage: ${sh_run_units} runner==\"sh\" run_units vs ${real_shell_suites} real standalone shell suites on disk"
+fi
 
 # Persist findings for Step 22 to consume — under the repo's own gitignored
 # .aid-o/work/ evidence tree, never inside a tracked path in the live checkout.

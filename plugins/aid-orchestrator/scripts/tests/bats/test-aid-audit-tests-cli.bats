@@ -140,3 +140,180 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.write_plan == true and .resume_id == "audit-123"' >/dev/null
 }
+
+# ─── P072 Step 8: the disposable-clone precondition ────────────────────────
+#
+# `.aid-o/` is gitignored, so a clone made for a disposable audit carries no
+# config unless someone copied it. Without it every declared-command gate
+# disappears from discovery and the audit reports a smaller portfolio than the
+# project has — confidently, with nothing to show anything is missing.
+
+# _clone_project <invoker> <clone> — a REAL clone of a REAL repo whose
+# .aid-o/ is gitignored, which is the only shape that reproduces the defect.
+# Every clone test goes through this, so none can pass without one.
+_clone_project() {
+  local invoker="$1" clone="$2"
+  _cfg_project "$invoker"
+  git -C "$invoker" init -q
+  git -C "$invoker" config user.email t@t; git -C "$invoker" config user.name t
+  printf '.aid-o/\n' > "$invoker/.gitignore"
+  echo x > "$invoker/f"; git -C "$invoker" add -A; git -C "$invoker" commit -qm init
+  git clone -q "$invoker" "$clone" 2>/dev/null
+  [ ! -f "$clone/.aid-o/config/execution.yaml" ]
+}
+
+_cfg_project() {
+  local d="$1"; mkdir -p "$d/.aid-o/config"
+  printf 'gates:\n  x:\n    command: "true"\n' > "$d/.aid-o/config/execution.yaml"
+}
+
+@test "P072: a real CLONE with no config exits 12 with the exact cp command" {
+  local invoker="$TEST_TMPDIR/invoker" clone="$TEST_TMPDIR/clone"
+  _clone_project "$invoker" "$clone"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$clone'"
+  [ "$status" -eq 12 ]
+  [[ "$output" == *"cp -r '$invoker/.aid-o/config' '$clone/.aid-o/config'"* ]]
+  [[ "$output" == *"silently vanish"* ]]
+  [[ "$output" == *"checkout of this same repository"* ]]
+}
+
+@test "P072: a real clone that HAS been prepared passes" {
+  # Must be a genuine clone, then given the config — otherwise it never
+  # exercises the clone detection it claims to clear.
+  local invoker="$TEST_TMPDIR/invoker2" clone="$TEST_TMPDIR/clone2"
+  _clone_project "$invoker" "$clone"
+  mkdir -p "$clone/.aid-o/config"
+  cp "$invoker/.aid-o/config/execution.yaml" "$clone/.aid-o/config/"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$clone'"
+  [ "$status" -eq 0 ]
+}
+
+@test "P072: --allow-missing-config downgrades exit 12 to a warning that names the consequence" {
+  local invoker="$TEST_TMPDIR/invoker3" clone="$TEST_TMPDIR/clone3"
+  _clone_project "$invoker" "$clone"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$clone' --allow-missing-config"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING"* ]]
+  [[ "$output" == *"declared-command gate will be ABSENT"* ]]
+}
+
+@test "P072: an unreadable config exits 13, distinct from the missing-config 12" {
+  # A broken symlink is 'present but unusable'. `-e` follows the link, so a
+  # naive check reads it as absent and tells the operator to copy a config
+  # over a file that is already there — the wrong fix for the wrong diagnosis.
+  local invoker="$TEST_TMPDIR/invoker4" target="$TEST_TMPDIR/target4"
+  _cfg_project "$invoker"
+  mkdir -p "$target/.aid-o/config"
+  ln -s /nonexistent/execution.yaml "$target/.aid-o/config/execution.yaml"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$target'"
+  [ "$status" -eq 13 ]
+  [[ "$output" == *"cannot be read"* ]]
+  [[ "$output" != *"cp -r"* ]]
+}
+
+@test "P072: an UNRELATED un-configured project is audited silently, not failed" {
+  # Auditing a project with no declared gates is ordinary. Failing it — or
+  # warning on every such run — would break every fixture-based audit and
+  # train people to ignore the two diagnostics that do matter.
+  local invoker="$TEST_TMPDIR/invoker5" target="$TEST_TMPDIR/target5"
+  _cfg_project "$invoker"; mkdir -p "$target"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$target'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"WARNING"* ]]
+  echo "$output" | jq -e '.project_root' >/dev/null
+}
+
+@test "P072: --allow-missing-config on a real clone downgrades the hard failure" {
+  local invoker="$TEST_TMPDIR/invoker6" clone="$TEST_TMPDIR/clone6"
+  _clone_project "$invoker" "$clone"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$clone' --allow-missing-config"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING"* ]]
+}
+
+# ─── Step 8 hardening (Codex review) ───────────────────────────────────────
+
+@test "P072: identity is the ROOT COMMIT, so an ssh-vs-https origin still detects the clone" {
+  # Comparing origin URLs would miss this: `git@host:o/r` and a local path are
+  # the same repository written two ways.
+  local invoker="$TEST_TMPDIR/inv-ssh" clone="$TEST_TMPDIR/clone-ssh"
+  _clone_project "$invoker" "$clone"
+  git -C "$clone" remote set-url origin "git@example.com:org/repo.git"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$clone'"
+  [ "$status" -eq 12 ]
+}
+
+@test "P072: invoking from a SUBDIRECTORY still resolves the invoking project correctly" {
+  # `pwd` would look for the config in the subdirectory and find none.
+  local invoker="$TEST_TMPDIR/inv-sub" clone="$TEST_TMPDIR/clone-sub"
+  _clone_project "$invoker" "$clone"
+  mkdir -p "$invoker/deep/nested"
+
+  run bash -c "cd '$invoker/deep/nested' && bash '$PARSER' --project-root '$clone'"
+  [ "$status" -eq 12 ]
+}
+
+@test "P072: an UNRELATED git repository is not mistaken for a clone" {
+  local invoker="$TEST_TMPDIR/inv-unrel" other="$TEST_TMPDIR/other-repo"
+  _cfg_project "$invoker"
+  git -C "$invoker" init -q; git -C "$invoker" config user.email t@t; git -C "$invoker" config user.name t
+  echo x > "$invoker/f"; git -C "$invoker" add -A; git -C "$invoker" commit -qm init
+  mkdir -p "$other"; git -C "$other" init -q
+  git -C "$other" config user.email t@t; git -C "$other" config user.name t
+  echo y > "$other/g"; git -C "$other" add -A; git -C "$other" commit -qm other
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$other'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"WARNING"* ]]
+}
+
+@test "P072: a non-traversable ancestor is exit 13, never the copy-the-config 12" {
+  local invoker="$TEST_TMPDIR/inv-perm" target="$TEST_TMPDIR/target-perm"
+  _cfg_project "$invoker"
+  mkdir -p "$target/.aid-o/config"
+  chmod 000 "$target/.aid-o"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$target'"
+  chmod 755 "$target/.aid-o"
+  [ "$status" -eq 13 ]
+  [[ "$output" == *"permissions problem"* ]]
+  [[ "$output" != *"cp -r"* ]]
+}
+
+@test "P072: a config path that is a DIRECTORY is exit 13" {
+  local invoker="$TEST_TMPDIR/inv-dir" target="$TEST_TMPDIR/target-dir"
+  _cfg_project "$invoker"
+  mkdir -p "$target/.aid-o/config/execution.yaml"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$target'"
+  [ "$status" -eq 13 ]
+}
+
+@test "P072: the suggested fix creates the parent and is shell-quoted" {
+  local invoker="$TEST_TMPDIR/inv-fix" clone="$TEST_TMPDIR/clone-fix"
+  _clone_project "$invoker" "$clone"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$clone'"
+  [ "$status" -eq 12 ]
+  [[ "$output" == *"mkdir -p '$clone/.aid-o'"* ]]
+  [[ "$output" == *"cp -r '$invoker/.aid-o/config' '$clone/.aid-o/config'"* ]]
+}
+
+@test "P072: --allow-missing-config does NOT downgrade exit 13" {
+  # A permissions or wrong-type problem is not something the operator can
+  # choose to ignore: the config is there and broken, not absent.
+  local invoker="$TEST_TMPDIR/inv-13" target="$TEST_TMPDIR/target-13"
+  _cfg_project "$invoker"
+  mkdir -p "$target/.aid-o/config"
+  ln -s /nonexistent/x "$target/.aid-o/config/execution.yaml"
+
+  run bash -c "cd '$invoker' && bash '$PARSER' --project-root '$target' --allow-missing-config"
+  [ "$status" -eq 13 ]
+}
