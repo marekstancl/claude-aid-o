@@ -5,24 +5,63 @@
   "$comment": "producer: aid-test-inventory.sh, consumers: [aid-test-audit-dispatch.sh, aid-test-catalog-selector-snapshot.sh]",
   "description": "Deterministic, zero-LLM-dispatch scanner output. One entry per adapter-discovered run_unit, with provenance. This is a discovery record, not the catalog itself (aid-test-inventory.sh separately emits test-catalog.proposed.yaml from the same scan).",
   "type": "object",
-  "required": ["schema_version", "generated_at", "runner_families", "entries"],
+  "required": [
+    "schema_version",
+    "generated_at",
+    "runner_families",
+    "entries"
+  ],
   "properties": {
-    "schema_version": { "const": "1.0.0" },
-    "generated_at": { "type": "string", "format": "date-time" },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "runner_families": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "entries": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["run_unit_id", "runner", "adapter", "confidence"],
+        "required": [
+          "run_unit_id",
+          "runner",
+          "adapter",
+          "confidence"
+        ],
         "properties": {
-          "run_unit_id": { "type": "string", "minLength": 1 },
-          "runner": { "type": "string", "minLength": 1 },
-          "adapter": { "type": "string", "enum": ["bats", "package-script", "declared-command"] },
-          "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+          "run_unit_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adapter": {
+            "type": "string",
+            "enum": [
+              "bats",
+              "sh",
+              "package-script",
+              "declared-command"
+            ],
+            "$comment": "P072 Step 7 — `sh` is the standalone-shell-suite adapter. Without it here, discovered shell suites fail inventory validation and the whole audit refuses to publish."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
           "isolation": {
             "type": "object",
             "properties": {
@@ -30,10 +69,17 @@
                 "type": "array",
                 "items": {
                   "type": "object",
-                  "required": ["lock_target", "resolved_scope"],
+                  "required": [
+                    "lock_target",
+                    "resolved_scope"
+                  ],
                   "properties": {
-                    "lock_target": { "type": "string" },
-                    "resolved_scope": { "type": "string" }
+                    "lock_target": {
+                      "type": "string"
+                    },
+                    "resolved_scope": {
+                      "type": "string"
+                    }
                   },
                   "additionalProperties": false
                 }

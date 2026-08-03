@@ -40,6 +40,15 @@ bats_adapter_discover() {
 
   while IFS= read -r -d '' file; do
     rel="${file#"${project_root%/}"/}"
+    # Strip whichever extension this file carries. A Bats suite is identified
+    # by its SHEBANG, not its filename: 7 of this repository's `test-*.sh`
+    # files carry `#!/usr/bin/env bats` and are dispatched with `bats` by
+    # run-all-tests.sh:140, so a filename-only rule mis-runs them with `bash`.
+    # Only `.bats` loses its extension. A Bats-shebang `.sh` KEEPS its `.sh`,
+    # so `tests/x.bats` -> `bats:tests/x` and `tests/x.sh` -> `bats:tests/x.sh`
+    # remain distinct. Stripping both would give two different files the same
+    # run_unit_id the moment a project has a matching stem — a collision the
+    # reconciliation would then report as a duplicate disposition.
     run_unit_id="bats:${rel%.bats}"
     # Hand-built JSON, not `jq -n` — PM feedback (performance): jq's own
     # process-startup cost dominates wall-clock time at portfolio scale far
@@ -57,9 +66,30 @@ bats_adapter_discover() {
       return 1
     }
     adapter_ndjson_append "$ndjson_file" "$unit_json"
-  done < <(find "$search_root" -type f -name '*.bats' -print0 | sort -z)
+  done < <(_bats_adapter_discover_files "$search_root")
 
   adapter_ndjson_finish "$ndjson_file"
+}
+
+# _bats_adapter_discover_files <search_root>
+#   NUL-delimited list of every file this adapter owns: `*.bats` by extension,
+#   plus any `test-*.sh` whose FIRST LINE names bats. The second group exists
+#   because `run-all-tests.sh` already classifies by shebang
+#   (`head -1 "$suite" | grep -q 'bats'`), so an adapter that classified by
+#   filename would disagree with the runner the project actually uses and
+#   would emit `["bash", <file>]` for a Bats suite.
+#
+#   The executable bit is deliberately NOT consulted: 6 of the 7 such files in
+#   this repository are non-executable and one is, so the bit correlates with
+#   nothing.
+_bats_adapter_discover_files() {
+  local search_root="$1"
+  {
+    find "$search_root" -type f -name '*.bats' -print0
+    while IFS= read -r -d '' f; do
+      [[ "$(adapter_shebang_runner "$f")" == "bats" ]] && printf '%s\0' "$f"
+    done < <(find "$search_root" -type f -name 'test-*.sh' -print0)
+  } | sort -z
 }
 
 # _bats_adapter_test_cases <bats_file>

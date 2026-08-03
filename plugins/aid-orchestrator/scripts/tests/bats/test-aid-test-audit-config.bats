@@ -22,7 +22,11 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.budget_minutes_default == 30' >/dev/null
   echo "$output" | jq -e '.max_read_only_audit_agents == 4' >/dev/null
-  echo "$output" | jq -e '.allowed_runners == ["bats","package-script","declared-command","ci"]' >/dev/null
+  # P072 Step 7 added `sh`. Without it aid-test-audit-dispatch.sh filters
+  # every discovered shell suite straight back out, so the sh: adapter would
+  # find 36 units and none would ever be dispatched — invisible one layer
+  # later than before, which is not an improvement.
+  echo "$output" | jq -e '.allowed_runners == ["bats","sh","package-script","declared-command","ci"]' >/dev/null
 }
 
 @test "load_test_audit_config: a present, valid config overrides the defaults correctly" {

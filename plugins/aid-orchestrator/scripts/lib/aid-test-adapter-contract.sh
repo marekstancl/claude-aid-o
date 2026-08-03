@@ -189,6 +189,57 @@ adapter_ndjson_finish() {
   rm -f "$ndjson_file" 2>/dev/null
 }
 
+# adapter_shebang_runner <file> — echoes `bats`, `shell`, or `none`.
+#
+# THE single classification rule, shared by the bats and shell-suite adapters
+# so they cannot disagree about who owns a file. A file classified `bats` here
+# is run with `bats`; `shell` with `bash`; `none` is not a suite.
+#
+# It parses the interpreter rather than substring-matching, because a
+# substring rule claims `#!/bin/batsman`, `#!/bin/sh bats` and
+# `#!/bin/bash # bats` as Bats suites — all three would then be executed with
+# the wrong runner.
+#
+# NOTE on run-all-tests.sh:140, which still uses the looser
+# `head -1 | grep -q bats`: for every file in this repository both rules agree
+# (asserted by the shell-suite adapter's test suite). The looser rule is not
+# copied here, because copying a rule known to misfire is how the misfire
+# becomes load-bearing.
+adapter_shebang_runner() {
+  local file="$1" line interp arg1
+  line="$(head -1 "$file" 2>/dev/null || true)"
+  case "$line" in '#!'*) ;; *) echo "none"; return ;; esac
+
+  # Strip `#!` and split on whitespace; ignore anything after a `#` comment.
+  line="${line#\#!}"
+  line="${line%%#*}"
+  # shellcheck disable=SC2086
+  set -- $line
+  interp="${1:-}"; arg1="${2:-}"
+
+  case "${interp##*/}" in
+    env)
+      # `env [-S] [VAR=val ...] <interpreter>` — take the first token that is
+      # not a flag and not an assignment.
+      shift || true
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -*|*=*) shift ;;
+          *) arg1="$1"; break ;;
+        esac
+      done
+      case "${arg1##*/}" in
+        bats) echo "bats"; return ;;
+        bash|sh|dash|zsh|ksh) echo "shell"; return ;;
+        *) echo "none"; return ;;
+      esac
+      ;;
+    bats) echo "bats"; return ;;
+    bash|sh|dash|zsh|ksh) echo "shell"; return ;;
+    *) echo "none"; return ;;
+  esac
+}
+
 # adapter_validate_schema <schema_path> <instance_json>
 #   Exit 0 valid, 1 invalid. FAILS CLOSED (never a silent skip-as-valid) when
 #   python3+jsonschema is unavailable — matching aid-plan-fsm.sh's own

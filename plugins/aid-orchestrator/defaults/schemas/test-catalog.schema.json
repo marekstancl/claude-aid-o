@@ -5,35 +5,70 @@
   "$comment": "producer: aid-test-inventory.sh (proposed) / aid-test-catalog-approve.sh (approved copy), consumers: [aid-audit-tests dispatch/allowlist/measure, P069 scheduler (shipped v2.67.0, approved-mapping-only)]",
   "description": "Canonical test-portfolio catalog. run_units[] is the ONLY array any selection, scheduling, or fingerprinting logic reads — one entry per real, schedulable command (whole .bats/.sh file, or one declared gate). test_cases[] nested under a run_unit is a diagnostic-only sub-count (e.g. individual Bats @test entries) and is never used for identity, selection, or fingerprinting. source_pattern_mappings[] proposes which run_unit_ids a changed source path should trigger; mapping_approval gates whether that proposal may be treated as authoritative — approving the catalog file as a whole does NOT imply mapping_approval.",
   "type": "object",
-  "required": ["schema_version", "generated_at", "status", "run_units", "source_pattern_mappings", "mapping_approval"],
+  "required": [
+    "schema_version",
+    "generated_at",
+    "status",
+    "run_units",
+    "source_pattern_mappings",
+    "mapping_approval"
+  ],
   "properties": {
-    "schema_version": { "const": "1.0.0" },
-    "generated_at": { "type": "string", "format": "date-time" },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "status": {
       "type": "string",
-      "enum": ["proposed", "approved"],
+      "enum": [
+        "proposed",
+        "approved"
+      ],
       "description": "Whole-document tracking state. proposed = gitignored, evidence-only (.aid-o/work/test-audits/<id>/test-catalog.proposed.yaml). approved = force-tracked (.aid-o/config/test-catalog.yaml), written only by the explicit catalog-approval step."
     },
     "run_units": {
       "type": "array",
-      "items": { "$ref": "#/$defs/run_unit" }
+      "items": {
+        "$ref": "#/$defs/run_unit"
+      }
     },
     "source_pattern_mappings": {
       "type": "array",
-      "items": { "$ref": "#/$defs/source_pattern_mapping" }
+      "items": {
+        "$ref": "#/$defs/source_pattern_mapping"
+      }
     },
-    "mapping_approval": { "$ref": "#/$defs/mapping_approval" }
+    "mapping_approval": {
+      "$ref": "#/$defs/mapping_approval"
+    }
   },
   "additionalProperties": false,
   "allOf": [
     {
       "if": {
-        "properties": { "mapping_approval": { "properties": { "status": { "const": "proposed" } } } }
+        "properties": {
+          "mapping_approval": {
+            "properties": {
+              "status": {
+                "const": "proposed"
+              }
+            }
+          }
+        }
       },
       "then": {
         "properties": {
           "source_pattern_mappings": {
-            "items": { "properties": { "status": { "const": "proposed" } } }
+            "items": {
+              "properties": {
+                "status": {
+                  "const": "proposed"
+                }
+              }
+            }
           }
         }
       },
@@ -45,22 +80,37 @@
       "type": "object",
       "oneOf": [
         {
-          "required": ["type", "argv"],
+          "required": [
+            "type",
+            "argv"
+          ],
           "properties": {
-            "type": { "const": "argv" },
+            "type": {
+              "const": "argv"
+            },
             "argv": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "minItems": 1
             }
           },
           "additionalProperties": false
         },
         {
-          "required": ["type", "shell"],
+          "required": [
+            "type",
+            "shell"
+          ],
           "properties": {
-            "type": { "const": "shell" },
-            "shell": { "type": "string", "minLength": 1 }
+            "type": {
+              "const": "shell"
+            },
+            "shell": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "additionalProperties": false
         }
@@ -68,37 +118,83 @@
     },
     "test_case": {
       "type": "object",
-      "required": ["test_case_id", "name", "filter_expression"],
+      "required": [
+        "test_case_id",
+        "name",
+        "filter_expression"
+      ],
       "properties": {
-        "test_case_id": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "filter_expression": { "type": "string", "minLength": 1 }
+        "test_case_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "filter_expression": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "additionalProperties": false,
       "description": "Diagnostic-only. Never used to compute run_unit_id, runtime.fingerprint, or any selection/scheduling decision."
     },
     "isolation": {
       "type": "object",
-      "required": ["temp_workspace", "fixed_ports", "shared_paths", "lock_usage", "adapter_confidence"],
+      "required": [
+        "temp_workspace",
+        "fixed_ports",
+        "shared_paths",
+        "lock_usage",
+        "adapter_confidence"
+      ],
       "properties": {
-        "temp_workspace": { "type": "string", "enum": ["unknown", "mktemp_per_test", "shared"] },
-        "fixed_ports": { "type": "array", "items": { "type": "integer" } },
-        "shared_paths": { "type": "array", "items": { "type": "string" } },
+        "temp_workspace": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "mktemp_per_test",
+            "shared"
+          ]
+        },
+        "fixed_ports": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "shared_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "lock_usage": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["lock_target", "resolved_scope"],
+            "required": [
+              "lock_target",
+              "resolved_scope"
+            ],
             "properties": {
-              "lock_target": { "type": "string" },
-              "resolved_scope": { "type": "string" }
+              "lock_target": {
+                "type": "string"
+              },
+              "resolved_scope": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
         },
         "adapter_confidence": {
           "type": "string",
-          "enum": ["static_parse", "list_mode"],
+          "enum": [
+            "static_parse",
+            "list_mode"
+          ],
           "description": "static_parse is the normal, supported path for the installed Bats version (1.8.2 has no --list flag). list_mode is reserved for a future, version-gated runner capability — never assumed present."
         }
       },
@@ -106,27 +202,76 @@
     },
     "parallel": {
       "type": "object",
-      "required": ["status", "exclusive_resources", "max_workers", "internal_parallelism"],
+      "required": [
+        "status",
+        "exclusive_resources",
+        "max_workers",
+        "internal_parallelism"
+      ],
       "properties": {
-        "status": { "type": "string", "enum": ["safe", "constrained", "exclusive", "unknown"] },
-        "exclusive_resources": { "type": "array", "items": { "type": "string" } },
-        "max_workers": { "type": ["integer", "null"] },
-        "internal_parallelism": { "type": "boolean" }
+        "status": {
+          "type": "string",
+          "enum": [
+            "safe",
+            "constrained",
+            "exclusive",
+            "unknown"
+          ]
+        },
+        "exclusive_resources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_workers": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "internal_parallelism": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "status": { "const": "unknown" } } },
-          "then": { "properties": { "exclusive_resources": { "maxItems": 0 } } }
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exclusive_resources": {
+                "maxItems": 0
+              }
+            }
+          }
         }
       ]
     },
     "run_unit": {
       "type": "object",
       "required": [
-        "run_unit_id", "runner", "source_paths", "production_surfaces", "test_level",
-        "risk_tags", "profiles", "behavior_claims", "confidence", "command", "runtime",
-        "parallel", "isolation", "recommendation", "test_cases"
+        "run_unit_id",
+        "runner",
+        "source_paths",
+        "production_surfaces",
+        "test_level",
+        "risk_tags",
+        "profiles",
+        "behavior_claims",
+        "confidence",
+        "command",
+        "runtime",
+        "parallel",
+        "isolation",
+        "recommendation",
+        "test_cases"
       ],
       "properties": {
         "run_unit_id": {
@@ -134,18 +279,65 @@
           "minLength": 1,
           "description": "Pure function of {runner, file path} only. Never carries a test-name suffix. For Bats: bats:<relative-path-without-extension>. For shell suites: sh:<relative-path-without-extension>."
         },
-        "runner": { "type": "string", "minLength": 1 },
-        "source_paths": { "type": "array", "items": { "type": "string" } },
-        "production_surfaces": { "type": "array", "items": { "type": "string" } },
-        "test_level": { "type": "string", "enum": ["unit", "integration", "e2e", "suite"] },
-        "risk_tags": { "type": "array", "items": { "type": "string" } },
-        "profiles": { "type": "array", "items": { "type": "string" } },
-        "behavior_claims": { "type": "array", "items": { "type": "string" } },
-        "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
-        "command": { "$ref": "#/$defs/command" },
+        "runner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "production_surfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "test_level": {
+          "type": "string",
+          "enum": [
+            "unit",
+            "integration",
+            "e2e",
+            "suite"
+          ]
+        },
+        "risk_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "behavior_claims": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "command": {
+          "$ref": "#/$defs/command"
+        },
         "runtime": {
           "type": "object",
-          "required": ["fingerprint"],
+          "required": [
+            "fingerprint"
+          ],
           "properties": {
             "fingerprint": {
               "type": "string",
@@ -155,21 +347,44 @@
           },
           "additionalProperties": true
         },
-        "parallel": { "$ref": "#/$defs/parallel" },
-        "isolation": { "$ref": "#/$defs/isolation" },
+        "parallel": {
+          "$ref": "#/$defs/parallel"
+        },
+        "isolation": {
+          "$ref": "#/$defs/isolation"
+        },
         "recommendation": {
           "type": "string",
-          "enum": ["keep", "fix", "split", "merge", "remove", "quarantine", "measure"]
+          "enum": [
+            "keep",
+            "fix",
+            "split",
+            "merge",
+            "remove",
+            "quarantine",
+            "measure"
+          ]
         },
         "provenance": {
           "type": "array",
-          "items": { "type": "string", "enum": ["bats", "package-script", "declared-command"] },
+          "items": {
+            "type": "string",
+            "enum": [
+              "bats",
+              "sh",
+              "package-script",
+              "declared-command"
+            ],
+            "$comment": "P072 Step 7 — `sh` is the standalone-shell-suite adapter, whose naming convention this schema's run_unit_id description already reserved."
+          },
           "minItems": 1,
           "description": "Optional. Which adapter(s) discovered this run_unit. A run_unit whose command exactly matches across two adapters (e.g. a package-script test command also registered as an execution.yaml gate) is tagged with both provenances, never double-counted as two run_units."
         },
         "test_cases": {
           "type": "array",
-          "items": { "$ref": "#/$defs/test_case" },
+          "items": {
+            "$ref": "#/$defs/test_case"
+          },
           "description": "Diagnostic-only sub-array. Never used to compute run_unit_id or select/schedule this run_unit."
         }
       },
@@ -177,20 +392,51 @@
     },
     "source_pattern_mapping": {
       "type": "object",
-      "required": ["match_type", "path_pattern", "target_run_unit_ids", "classification", "precedence", "status"],
+      "required": [
+        "match_type",
+        "path_pattern",
+        "target_run_unit_ids",
+        "classification",
+        "precedence",
+        "status"
+      ],
       "properties": {
-        "match_type": { "type": "string", "enum": ["exact", "prefix", "glob"] },
-        "path_pattern": { "type": "string", "minLength": 1 },
+        "match_type": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "prefix",
+            "glob"
+          ]
+        },
+        "path_pattern": {
+          "type": "string",
+          "minLength": 1
+        },
         "target_run_unit_ids": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "References run_units[].run_unit_id — never a test_cases[] id."
         },
-        "classification": { "type": "string", "enum": ["production", "docs_non_production", "unknown_production"] },
-        "precedence": { "type": "integer" },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "production",
+            "docs_non_production",
+            "unknown_production"
+          ]
+        },
+        "precedence": {
+          "type": "integer"
+        },
         "status": {
           "type": "string",
-          "enum": ["proposed", "approved"],
+          "enum": [
+            "proposed",
+            "approved"
+          ],
           "description": "Per-mapping-row status, distinct from the whole-catalog proposed/approved file-location state. approved here requires the document-root mapping_approval gate to also be approved."
         }
       },
@@ -198,18 +444,46 @@
     },
     "mapping_approval": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
-        "status": { "type": "string", "enum": ["proposed", "approved"] },
-        "approved_by": { "type": "string" },
-        "approved_at": { "type": "string", "format": "date-time" },
-        "reviewed_diff_hash": { "type": "string" }
+        "status": {
+          "type": "string",
+          "enum": [
+            "proposed",
+            "approved"
+          ]
+        },
+        "approved_by": {
+          "type": "string"
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reviewed_diff_hash": {
+          "type": "string"
+        }
       },
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "status": { "const": "approved" } } },
-          "then": { "required": ["status", "approved_by", "approved_at", "reviewed_diff_hash"] }
+          "if": {
+            "properties": {
+              "status": {
+                "const": "approved"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "status",
+              "approved_by",
+              "approved_at",
+              "reviewed_diff_hash"
+            ]
+          }
         }
       ]
     }

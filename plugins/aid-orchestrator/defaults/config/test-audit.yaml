@@ -15,6 +15,10 @@ budget_minutes_default: 30
 max_read_only_audit_agents: 4
 allowed_runners:
   - bats
+  # P072 Step 7 — standalone shell suites. Without this the sh: adapter
+  # discovers them and aid-test-audit-dispatch.sh filters them straight back
+  # out, so they stay invisible one layer later than before.
+  - sh
   - package-script
   - declared-command
   - ci

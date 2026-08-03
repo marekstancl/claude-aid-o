@@ -29,7 +29,7 @@ _tac_defaults_json() {
   jq -n '{
     budget_minutes_default: 30,
     max_read_only_audit_agents: 4,
-    allowed_runners: ["bats", "package-script", "declared-command", "ci"],
+    allowed_runners: ["bats", "sh", "package-script", "declared-command", "ci"],
     decision: {
       max_unresolved_fraction: 0.25,
       profile_budget_minutes: 20,

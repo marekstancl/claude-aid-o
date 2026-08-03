@@ -30,6 +30,8 @@ source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
 source "${SCRIPT_DIR}/lib/aid-test-adapter-bats.sh"
 # shellcheck source=lib/aid-test-adapter-package-script.sh
 source "${SCRIPT_DIR}/lib/aid-test-adapter-package-script.sh"
+# shellcheck source=lib/aid-test-adapter-shell-suite.sh
+source "${SCRIPT_DIR}/lib/aid-test-adapter-shell-suite.sh"
 # shellcheck source=lib/aid-test-adapter-declared-command.sh
 source "${SCRIPT_DIR}/lib/aid-test-adapter-declared-command.sh"
 
@@ -132,7 +134,12 @@ mkdir -p "$output_dir"
 # ─── Wave 0: run all three adapters ─────────────────────────────────────────
 bats_units="$(bats_adapter_discover "$project_root")"
 pkgscript_units="$(package_script_adapter_discover "$project_root")"
-combined_units="$(jq -c -s 'add' <(printf '%s' "$bats_units") <(printf '%s' "$pkgscript_units"))"
+# P072 Step 7 — the fifth adapter. Classification between this one and the
+# bats adapter is by SHEBANG, so the 7 `test-*.sh` files carrying
+# `#!/usr/bin/env bats` land in bats_units and are run with `bats`, not here.
+shell_skipped_file="${output_dir%/}/shell-suite-skipped.json"
+shell_units="$(shell_suite_adapter_discover "$project_root" "$project_root" "$shell_skipped_file")"
+combined_units="$(jq -c -s 'add' <(printf '%s' "$bats_units") <(printf '%s' "$pkgscript_units") <(printf '%s' "$shell_units"))"
 combined_units="$(declared_command_adapter_discover "$execution_yaml" "$combined_units" "$project_root")"
 
 # ─── Lock-usage static grep (Bats run_units only) ───────────────────────────
