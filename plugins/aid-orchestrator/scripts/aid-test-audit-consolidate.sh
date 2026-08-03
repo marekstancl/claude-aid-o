@@ -135,7 +135,8 @@ for ((i = 0; i < expected_count; i++)); do
     # No `|| true`: a jq failure here would otherwise read as "this shard
     # decided nothing", which is exactly the state this reconciliation exists
     # to detect. A parse failure must fail the consolidation instead.
-    jq -c --arg shard "$act_shard_id" '(.dispositions // [])[] | {shard: $shard, run_unit_id, disposition, missing_proof, next_measurement}' \
+    jq -c --arg shard "$act_shard_id" '(.dispositions // [])[] | {shard: $shard, run_unit_id, disposition,
+       missing_proof, next_measurement, uniqueness, overlaps_with, falsification, cost}' \
       <<<"$artifact_json" >> "$all_dispositions_ndjson" \
       || _die 1 "could not read dispositions[] from '$basename_f'"
   fi
@@ -325,6 +326,141 @@ if [[ "$audit_mode" == "full" ]]; then
     remove_json="$(jq -c '[.[] | select(.disposition=="remove") | .run_unit_id] | unique' <<<"$dispositions_json")"
     removed_n="$(jq 'length' <<<"$remove_json")"
 
+    # ─── P072 Step 5: content checks on the dispositions themselves ─────────
+    #
+    # Relationship to the mechanism that already ships: the wave-artifact
+    # schema requires a `falsification_check` STRING on every FINDING, and
+    # this script already dies when a remove/quarantine finding lacks one
+    # (see the block above). That check is retained unchanged and stays at
+    # the findings level. The structured `falsification` object checked here
+    # lives on DISPOSITIONS, which findings do not have. Neither supersedes
+    # the other: findings-level is per reported problem, disposition-level is
+    # per portfolio decision. What must never happen is the two DISAGREEING
+    # about the same unit, which is the cross-level check below.
+    #
+    # ORDER: semantic contradictions (7, 8) are evaluated before filesystem
+    # resolution (6). A contradiction is a defect in the decision itself and
+    # is decidable from the artifacts alone; letting a missing evidence file
+    # mask it would report the shallower problem and hide the deeper one.
+
+    # A merge whose named partner is itself scheduled for deletion produces a
+    # group whose survivor does not survive.
+    contradiction="$(jq -r '
+      (map(select(.disposition == "remove") | .run_unit_id)) as $removed
+      | [ .[] | select(.disposition == "merge")
+          | . as $m | (.overlaps_with // [])[]
+          | select(. as $p | $removed | index($p) != null)
+          | "\($m.run_unit_id) -> \(.)" ] | .[0] // empty' <<<"$dispositions_json")"
+    [[ -z "$contradiction" ]] \
+      || _die 7 "contradictory dispositions: a merge names a partner that is itself marked remove ($contradiction) — the group's survivor is scheduled for deletion"
+
+    # The two levels may differ in SHAPE; they may not CONTRADICT each other
+    # about the same unit. Note what this check is deliberately NOT: an
+    # "empty falsification_check alongside a remove disposition" test would be
+    # unreachable, because test-audit-consolidated-findings.schema.json
+    # already requires falsification_check to be non-empty on every finding —
+    # a check that can never fire is decoration, not defence. The reachable
+    # contradiction is a disposition proposing deletion while a finding for
+    # the same unit recommends keeping it.
+    cross_level="$(jq -r --argjson f "$with_ids_json" '
+      (map(select(.disposition == "remove") | .run_unit_id)) as $rm
+      | [ $f[] | select((.run_unit_id as $r | $rm | index($r)) != null)
+                | select(.recommendation == "keep") | .run_unit_id ] | .[0] // empty' \
+      <<<"$dispositions_json")"
+    [[ -z "$cross_level" ]] \
+      || _die 8 "unit '$cross_level' is proposed for removal by its disposition while a finding for the same unit recommends keeping it — the two levels disagree and the consolidator will not pick a side"
+
+    # An overlaps_with naming a unit that has no disposition of its own would
+    # otherwise be inserted into the published merge groups as a phantom
+    # member of the proposed portfolio.
+    dangling="$(jq -r '
+      (map(.run_unit_id)) as $known
+      | [ .[] | select(.disposition == "merge") | (.overlaps_with // [])[]
+          | select(. as $p | $known | index($p) == null) ] | .[0] // empty' <<<"$dispositions_json")"
+    [[ -z "$dangling" ]] \
+      || _die 9 "a merge names overlap partner '$dangling', which has no disposition of its own — a merge group cannot contain a unit nobody decided"
+
+    # An evidence_ref that names nothing is indistinguishable from no evidence.
+    # The reference is resolved against the audit directory and must stay
+    # inside it: an absolute path, a `..` climb, or a symlink pointing out is
+    # refused rather than accepted because the file happens to exist.
+    evidence_pairs="${_tmpdir}/evidence-pairs.tsv"
+    jq -r '.[] | select(.disposition == "remove" or .disposition == "merge" or .disposition == "rewrite_unit")
+           | [.run_unit_id, (.falsification.evidence_ref // "")] | @tsv' \
+      <<<"$dispositions_json" > "$evidence_pairs" \
+      || _die 1 "could not extract falsification references from the dispositions"
+
+    out_canon="$(cd "$output_dir" && pwd -P)" || _die 1 "could not resolve --output-dir"
+    while IFS=$'\t' read -r _u _ref; do
+      [[ -n "$_ref" ]] \
+        || _die 6 "a coverage-reducing disposition for '$_u' carries no falsification evidence_ref — 'nothing' is not a reference"
+      case "$_ref" in
+        /*) _die 6 "falsification evidence '$_ref' for '$_u' is an absolute path — evidence must live inside the audit directory" ;;
+      esac
+      _target="${out_canon}/${_ref}"
+      [[ -f "$_target" ]] \
+        || _die 6 "a coverage-reducing disposition for '$_u' cites falsification evidence '$_ref', which does not exist — an unresolvable reference is not evidence"
+      # readlink -f, not `cd dirname && pwd -P` + basename: the latter
+      # canonicalises only the DIRECTORY part, so a symlink on the final
+      # component still resolved to a path inside the audit directory while
+      # pointing anywhere on disk.
+      _resolved="$(readlink -f "$_target")" \
+        || _die 6 "could not resolve falsification evidence '$_ref' for '$_u'"
+      case "$_resolved" in
+        "$out_canon"/*) : ;;
+        *) _die 6 "falsification evidence '$_ref' for '$_u' resolves to '$_resolved', outside the audit directory — refused" ;;
+      esac
+    done < "$evidence_pairs"
+
+    # merge_groups: connected components over the overlap relation, so three
+    # mutually overlapping units form ONE group of three rather than three
+    # pairs. Iterated to a genuine fixed point — the loop repeats until the
+    # component list stops changing, rather than relying on a fixed number of
+    # passes over an array that is being mutated as it is indexed.
+    merge_groups_json="$(jq -c '
+      def merge_once:
+        reduce .[] as $g ([];
+          ([ .[] | select((. - $g) != .) ] | flatten) as $touching
+          | if ($touching | length) == 0 then . + [$g]
+            else [ .[] | select((. - $g) == .) ] + [ ($touching + $g) | unique ]
+            end);
+      def fixpoint: merge_once as $n | if $n == . then . else $n | fixpoint end;
+      [ .[] | select(.disposition == "merge")
+        | ([.run_unit_id] + (.overlaps_with // [])) | unique ]
+      | fixpoint | map(select(length > 1)) | unique' <<<"$dispositions_json")"
+
+    merged_surplus="$(jq '[.[] | length - 1] | add // 0' <<<"$merge_groups_json")"
+
+    # impact_kind is the WEAKEST evidence level among the units that
+    # contribute, never the strongest: one unknown cost makes the whole
+    # portfolio figure unknown. A proposed merge additionally makes the AFTER
+    # figure unknowable from per-unit costs — nobody has measured what the
+    # merged unit costs — so a merge downgrades the claim rather than letting
+    # every member's cost survive into a total that no longer describes the
+    # proposed portfolio.
+    impact_kind="$(jq -r '
+      [ .[] | .cost.kind // "unknown" ] as $k
+      | if ($k | length) == 0 then "unknown"
+        elif ($k | index("unknown")) != null then "unknown"
+        elif ($k | index("lower_bound")) != null then "estimated"
+        else "measured" end' <<<"$dispositions_json")"
+    if [[ "$merged_surplus" -gt 0 && "$impact_kind" == "measured" ]]; then
+      impact_kind="estimated"
+    fi
+
+    runtime_before="null"; runtime_after="null"
+    if [[ "$impact_kind" == "measured" ]]; then
+      # Reachable only when every unit is `measured`, which the schema
+      # guarantees carries an integer duration — so there is no absent value
+      # to default here, and defaulting one would fabricate an exact figure.
+      jq -e 'all(.[]; .cost.duration_ms | type == "number")' <<<"$dispositions_json" >/dev/null \
+        || _die 1 "internal error: impact_kind is 'measured' but a cost.duration_ms is not a number"
+      runtime_before="$(jq '[.[] | .cost.duration_ms] | add // 0' <<<"$dispositions_json")"
+      runtime_after="$(jq --argjson rm "$remove_json" \
+        '[.[] | select(.run_unit_id as $r | $rm | index($r) == null) | .cost.duration_ms] | add // 0' \
+        <<<"$dispositions_json")"
+    fi
+
     status="complete"; reason_field="{}"
     if [[ -n "$reason" ]]; then
       status="incomplete"; reason_field="$(jq -nc --arg r "$reason" '{incomplete_reason:$r}')"
@@ -338,16 +474,20 @@ if [[ "$audit_mode" == "full" ]]; then
       --argjson unresolved "$unresolved_json" \
       --argjson keep "$keep_json" --argjson rewrite "$rewrite_json" --argjson remove "$remove_json" \
       --argjson ic "$inventory_count" --argjson ac "$assigned_count" --argjson dc "$disposition_count" \
-      --argjson removed_n "$removed_n" '
+      --argjson removed_n "$removed_n" \
+      --argjson merge_groups "$merge_groups_json" --arg impact_kind "$impact_kind" \
+      --argjson merged_surplus "$merged_surplus" \
+      --argjson rt_before "$runtime_before" --argjson rt_after "$runtime_after" '
       {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
        current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
        actions:[], parallelization:{lanes:[], smallest_safe_pilot:null},
        unresolved:$unresolved,
        portfolio_coverage:{inventory_count:$ic, assigned_count:$ac, disposition_count:$dc,
                            missing_run_unit_ids:$missing, duplicate_run_unit_ids:$dupes},
-       portfolio_change:{current_run_units:$ic, proposed_run_units:($ic - $removed_n),
-                         keep:$keep, rewrite_unit:$rewrite, merge_groups:[], remove:$remove,
-                         runtime_before_ms:null, runtime_after_ms:null, impact_kind:"unknown"}}
+       portfolio_change:{current_run_units:$ic, proposed_run_units:($ic - $removed_n - $merged_surplus),
+                         keep:$keep, rewrite_unit:$rewrite, merge_groups:$merge_groups, remove:$remove,
+                         runtime_before_ms:$rt_before, runtime_after_ms:$rt_after,
+                         impact_kind:$impact_kind}}
       + $extra')"
 
     aid_test_audit_decision_write "$decision_json" "${output_dir%/}/decision.json" \

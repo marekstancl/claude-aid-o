@@ -180,7 +180,9 @@
               "evidence_ref": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 300
+                "maxLength": 300,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+                "description": "Audit-relative path. Anchored to a non-'/' first character so an absolute path cannot be recorded; the consolidator additionally resolves it and refuses anything that escapes the audit directory."
               }
             },
             "allOf": [

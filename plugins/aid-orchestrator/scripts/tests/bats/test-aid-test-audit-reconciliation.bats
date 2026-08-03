@@ -26,6 +26,11 @@ setup() {
 
   INVENTORY="$WORK/inventory.json"
   MANIFEST="$WORK/dispatch-manifest.json"
+
+  # A coverage-reducing disposition must cite falsification evidence that
+  # actually exists — materialise the file the fixtures reference.
+  mkdir -p "$OUT/mutations"
+  printf '%s' '{"mutation":"flip the transition guard","caught_by":"bats:b"}'     > "$OUT/mutations/m1.json"
 }
 
 teardown() { teardown_test_evidence_dir; }
@@ -396,4 +401,256 @@ _shard_artifact_n() {
     --dispatch-manifest "$MANIFEST" --output-dir "$OUT" --mode full --inventory "$INVENTORY"
   [ "$status" -eq 2 ]
   [[ "$output" == *"--project-root is required"* ]]
+}
+
+# ─── P072 Step 5: disposition content ──────────────────────────────────────
+
+@test "a remove citing falsification evidence that does not exist exits 6" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  local bad
+  bad="$(_disposition "bats:a" "remove" | jq -c '.falsification.evidence_ref = "mutations/nope.json"')"
+  _shard_artifact "$bad" "$(_disposition "bats:b")"
+
+  run _run_full
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"mutations/nope.json"* ]]
+  [[ "$output" == *"not evidence"* ]]
+}
+
+@test "a merge naming a partner that is itself marked remove exits 7" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  local m r
+  m="$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"]')"
+  r="$(_disposition "bats:b" "remove")"
+  _shard_artifact "$m" "$r"
+
+  run _run_full
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"bats:a -> bats:b"* ]]
+}
+
+@test "THREE mutually overlapping units form ONE merge group of three, not three pairs" {
+  _inventory "bats:a" "bats:b" "bats:c"
+  _manifest  "bats:a" "bats:b" "bats:c"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"]')" \
+    "$(_disposition "bats:b" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:c"]')" \
+    "$(_disposition "bats:c" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:a"]')"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.merge_groups | length' "$OUT/decision.json")" = "1" ]
+  [ "$(jq -r '.portfolio_change.merge_groups[0] | length' "$OUT/decision.json")" = "3" ]
+}
+
+@test "two disjoint overlap pairs form TWO separate merge groups" {
+  _inventory "bats:a" "bats:b" "bats:c" "bats:d"
+  _manifest  "bats:a" "bats:b" "bats:c" "bats:d"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"]')" \
+    "$(_disposition "bats:b")" \
+    "$(_disposition "bats:c" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:d"]')" \
+    "$(_disposition "bats:d")"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.merge_groups | length' "$OUT/decision.json")" = "2" ]
+}
+
+@test "impact_kind is the WEAKEST evidence level present, never the strongest" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" | jq -c '.cost={kind:"measured",duration_ms:1000}')" \
+    "$(_disposition "bats:b" | jq -c '.cost={kind:"unknown",duration_ms:null}')"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.impact_kind' "$OUT/decision.json")" = "unknown" ]
+  [ "$(jq -r '.portfolio_change.runtime_before_ms' "$OUT/decision.json")" = "null" ]
+}
+
+@test "all costs measured yields measured runtimes, and removal lowers the after figure" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" "remove" | jq -c '.cost={kind:"measured",duration_ms:1000}')" \
+    "$(_disposition "bats:b" | jq -c '.cost={kind:"measured",duration_ms:250}')"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.impact_kind' "$OUT/decision.json")" = "measured" ]
+  [ "$(jq -r '.portfolio_change.runtime_before_ms' "$OUT/decision.json")" = "1250" ]
+  [ "$(jq -r '.portfolio_change.runtime_after_ms' "$OUT/decision.json")" = "250" ]
+}
+
+@test "one lower_bound cost downgrades the portfolio figure to estimated" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" | jq -c '.cost={kind:"measured",duration_ms:1000}')" \
+    "$(_disposition "bats:b" | jq -c '.cost={kind:"lower_bound",duration_ms:3600000}')"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.impact_kind' "$OUT/decision.json")" = "estimated" ]
+}
+
+@test "a keep with uniqueness unproved reconciles fine and is not treated as a defect" {
+  _inventory "bats:a"
+  _manifest  "bats:a"
+  _shard_artifact "$(_disposition "bats:a" | jq -c '.uniqueness="unproved"')"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ "$(_status)" = "complete" ]
+}
+
+@test "a remove disposition contradicted by a finding that recommends keep exits 8" {
+  # The two levels have different shapes and neither supersedes the other, but
+  # they must not disagree about whether the same deletion is supported.
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  local joined
+  joined="$(printf '%s\n' "$(_disposition "bats:a" "remove")" "$(_disposition "bats:b")" | jq -s -c '.')"
+  jq -n --argjson d "$joined" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"coverage", severity:"medium",
+                evidence_refs:["r1"], recommendation:"keep", confidence:"low",
+                falsification_check:"reverting the guard still fails bats:b"}],
+     produced_at:"2026-08-03T00:00:00Z", producer_agent_dispatch_id:"d0", dispositions:$d}' \
+    > "$ART/1-shard_portfolio-shard-0.json"
+
+  run _run_full
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"bats:a"* ]]
+  [[ "$output" == *"disagree"* ]]
+}
+
+@test "the findings-level falsification_check rejection still fires unchanged" {
+  # Pre-existing P066 behaviour: a remove FINDING with no falsification_check
+  # dies before any report is produced. Step 5 must not have displaced it.
+  _inventory "bats:a"
+  _manifest  "bats:a"
+  local joined
+  joined="$(printf '%s\n' "$(_disposition "bats:a")" | jq -s -c '.')"
+  jq -n --argjson d "$joined" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"coverage", severity:"high",
+                evidence_refs:["r1"], recommendation:"remove", confidence:"high",
+                falsification_check:""}],
+     produced_at:"2026-08-03T00:00:00Z", producer_agent_dispatch_id:"d0", dispositions:$d}' \
+    > "$ART/1-shard_portfolio-shard-0.json"
+
+  run _run_full
+  [ "$status" -ne 0 ]
+  # The consolidator's OWN check must be what fired — not a schema rejection
+  # that happens to mention the same field name.
+  [[ "$output" == *"rejected before report"* ]]
+}
+
+# ─── Step 5 hardening (Codex review) ───────────────────────────────────────
+
+@test "a FIVE-node overlap chain collapses into ONE merge group" {
+  _inventory "bats:a" "bats:b" "bats:c" "bats:d" "bats:e"
+  _manifest  "bats:a" "bats:b" "bats:c" "bats:d" "bats:e"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"]')" \
+    "$(_disposition "bats:b" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:c"]')" \
+    "$(_disposition "bats:c" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:d"]')" \
+    "$(_disposition "bats:d" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:e"]')" \
+    "$(_disposition "bats:e")"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.merge_groups | length' "$OUT/decision.json")" = "1" ]
+  [ "$(jq -r '.portfolio_change.merge_groups[0] | length' "$OUT/decision.json")" = "5" ]
+}
+
+@test "a unit overlapping ITSELF does not create a spurious group" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:a","bats:b"]')" \
+    "$(_disposition "bats:b")"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.merge_groups | length' "$OUT/decision.json")" = "1" ]
+  [ "$(jq -r '.portfolio_change.merge_groups[0] | length' "$OUT/decision.json")" = "2" ]
+}
+
+@test "a merge naming a partner nobody decided exits 9 rather than publishing a phantom member" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:ghost"]')" \
+    "$(_disposition "bats:b")"
+
+  run _run_full
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"bats:ghost"* ]]
+}
+
+@test "an ABSOLUTE falsification evidence path is refused" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" "remove" | jq -c '.falsification.evidence_ref="/etc/passwd"')" \
+    "$(_disposition "bats:b")"
+
+  run _run_full
+  # Rejected by the schema's own anchor, before the filesystem is touched.
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "evidence resolving OUTSIDE the audit directory via a symlink is refused" {
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  printf '%s' 'outside' > "$TEST_TMPDIR/outside-evidence.json"
+  ln -s "$TEST_TMPDIR/outside-evidence.json" "$OUT/mutations/escape.json"
+  _shard_artifact \
+    "$(_disposition "bats:a" "remove" | jq -c '.falsification.evidence_ref="mutations/escape.json"')" \
+    "$(_disposition "bats:b")"
+
+  run _run_full
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"outside the audit directory"* ]]
+}
+
+@test "a semantic contradiction is reported even when the evidence file is also missing" {
+  # Exit 7 (the decision contradicts itself) must not be masked by exit 6
+  # (a file is absent) — the deeper defect wins.
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"] | .falsification.evidence_ref="mutations/gone.json"')" \
+    "$(_disposition "bats:b" "remove" | jq -c '.falsification.evidence_ref="mutations/gone.json"')"
+
+  run _run_full
+  [ "$status" -eq 7 ]
+}
+
+@test "a merge reduces proposed_run_units by the collapsed members" {
+  _inventory "bats:a" "bats:b" "bats:c"
+  _manifest  "bats:a" "bats:b" "bats:c"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"]')" \
+    "$(_disposition "bats:b")" \
+    "$(_disposition "bats:c")"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.current_run_units' "$OUT/decision.json")" = "3" ]
+  # 3 units, one merge group of 2 -> the pair becomes one unit.
+  [ "$(jq -r '.portfolio_change.proposed_run_units' "$OUT/decision.json")" = "2" ]
+}
+
+@test "a proposed merge downgrades a fully measured portfolio to estimated" {
+  # Nobody has measured what the MERGED unit costs, so the after figure is
+  # no longer a measurement of the proposed portfolio.
+  _inventory "bats:a" "bats:b"
+  _manifest  "bats:a" "bats:b"
+  _shard_artifact \
+    "$(_disposition "bats:a" "merge" | jq -c '.uniqueness="overlaps" | .overlaps_with=["bats:b"] | .cost={kind:"measured",duration_ms:100}')" \
+    "$(_disposition "bats:b" | jq -c '.cost={kind:"measured",duration_ms:200}')"
+  _run_full
+
+  [ "$(jq -r '.portfolio_change.impact_kind' "$OUT/decision.json")" = "estimated" ]
+  [ "$(jq -r '.portfolio_change.runtime_after_ms' "$OUT/decision.json")" = "null" ]
 }
