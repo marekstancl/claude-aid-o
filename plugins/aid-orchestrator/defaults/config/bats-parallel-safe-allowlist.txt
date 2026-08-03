@@ -1,100 +1,45 @@
-# aid-bats-parallel-lane.sh — approved-safe parallel-pool allowlist
-# (P071 E-071-1_1, PM review round 2, 2026-08-02)
+# RETIRED — P072 Step 17 (2026-08-03)
 #
-# EXPLICIT, opt-in classification. A bats file is eligible for the `-j N`
-# parallel pool ONLY if its exact repo-relative path is listed below — never
-# by default, never because the test catalog's `parallel.status` happens to
-# be anything other than "unknown" (it is "unknown" for every run_unit today;
-# that field is not consulted by this allowlist at all), and never merely
-# because a file is absent from a blacklist. A brand-new bats file, or any
-# file not on this list for any reason, runs in the SEQUENTIAL lane instead
-# (see aid-bats-parallel-lane.sh's three-bucket partition) — it is still
-# executed for full coverage, just never pooled until someone deliberately
-# reviews it and adds it here.
+# This file is no longer read by anything. Pool eligibility now lives in the
+# test catalog, on each run unit's `parallel.status`, and is resolved through
+# `aid_test_catalog_provenance_effective_status`
+# (scripts/lib/aid-test-catalog-provenance.sh).
 #
-# Provenance: this exact 72-file set was independently verified safe twice —
-# (1) P066's test-portfolio audit (audit-20260802-070629) read all 83 bats
-#     files directly (not via static grep) and confirmed the shared
-#     setup_test_evidence_dir/mktemp-per-test isolation helper, or read-only/
-#     in-memory behavior, with no confirmed cross-file resource collision;
-# (2) P071 Step 3 ran this EXACT 72-file set concurrently via `bats -j 4`
-#     twice for real (a 10-file sample, then the full 72-file set) — 1382
-#     individual @test cases, 0 failures, `git status --short` empty both
-#     times (no leaked/mutated state).
+# WHY IT WAS RETIRED
+#   There were two authorities over one question. The catalog carried
+#   `parallel.status` that nothing consulted, and `aid-bats-parallel-lane.sh`
+#   consulted this list, which the catalog knew nothing about. Two authorities
+#   is how a promotion outlives the evidence behind it: a plain list cannot
+#   notice that a file it names has since acquired a lock or started writing a
+#   shared path, so a file stays pooled long after the reason it was pooled has
+#   stopped being true.
 #
-# To add a file: it must go through the same review — read its actual
-# source for shared/fixed state (ports, paths, locks, non-isolated fixtures),
-# not just "it looked fine" — then append its path below, one per line, no
-# trailing comments on the path line itself (parsed as plain lines).
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-cli.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-c3-dispatch.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-compliance.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-emit-dispatch.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-profile.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-report.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-waiver.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-gitignore-backfill.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-test-audit-config.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-init.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-job.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-lock-target-audit.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-to-epic-fence.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-release.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-bats.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-declared-command.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-package-script.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-chat-summary.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-command-allowlist.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-consolidate.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-dispatch.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-measure.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-prompts-golden.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-state.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-write-plan-bridge.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-schema.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-inventory.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-portfolio-analyst-focus.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-anti-fabrication.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-behavior-trace.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-review.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-c3-activation.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-c3-advisory.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit-prompt.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-c3-fix-loop.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-cache-preflight.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-catalog-confirm-mapping.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-catalog-force-tracked.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-ci-floor.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-commit-guard.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-contract-validate.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-cp1-ledger.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-cp3-freshness.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-delivery-report.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-e2e-evidence-clean.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-fsm-dg07-observe.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-invalidation-map.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-e2e.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-reconcile.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-pipeline-c3-dispatch.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-plan-ac-diff.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-plan-close.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-plan-lint.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-plan-writing-rules.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-pm-brief.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-queue-revalidation.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-registry-ttl.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-release-policy-surface-check.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-selector-snapshot-readonly.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-tiered-severity.bats
-plugins/aid-orchestrator/scripts/tests/bats/test-ui-calibration-verify.bats
+#   The catalog can notice. A migrated status carries the hash of the sources
+#   it was verified against and a digest of the resources they touch. A change
+#   to those resources reverts the unit to `unknown`, and it leaves the pool
+#   with nobody editing anything. That reversion was demonstrated on this
+#   repository's own catalog: adding a `flock` to a pooled file moved it from
+#   `safe` to `unknown`, while a comment-only edit left it pooled.
+#
+# WHERE THE EVIDENCE WENT
+#   The 72 paths this file used to list were migrated by
+#   `scripts/aid-test-catalog-migrate-p071-allowlist.sh` with
+#   `method: migrated_p071_step3`, so a migrated entry stays distinguishable
+#   from a freshly piloted one, and an `evidence_ref` citing P071 Step 3 and
+#   audit-20260802-070629.
+#
+#   That evidence_ref records the counts as MEASURED at migration time rather
+#   than as this file's own header claimed them. The header stated that P066's
+#   audit "read all 83 bats files"; the catalog holds 74 bats run units and the
+#   tree holds more than either figure. Carrying "83" across would have turned a
+#   documentation error into a durable schema field.
+#
+# WHAT TO DO INSTEAD
+#   To see the current pool:  aid-bats-parallel-lane.sh --dry-run
+#   To promote a unit:        pilot it (scripts/aid-test-parallel-pilot.sh),
+#                             then record the result on that unit's
+#                             `parallel.provenance` with
+#                             `method: resource_map_plus_pilot`.
+#
+# The file is kept, empty of entries, so that anyone who opens it looking for
+# the old list learns where the answer moved to rather than finding nothing.

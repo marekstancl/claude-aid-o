@@ -3,13 +3,19 @@
 # round 2 rewrite, 2026-08-02).
 #
 # Covers aid-bats-parallel-lane.sh, the wrapper that replaced the
-# `gate:bats_all` quarantine stub (`exit 86`). The classification model is an
-# EXPLICIT, opt-in ALLOWLIST — no blacklist, no "default safe" fallback:
-#   1. Partition logic (3 buckets): SAFE_POOL is ONLY what's on the tracked
-#      allowlist; a brand-new bats file, or any file simply absent from the
-#      allowlist for any reason, lands in the sequential UNCLASSIFIED bucket
-#      instead — NEVER auto-parallel. The 2 known boundary files always land
-#      in BOUNDARY regardless of the allowlist.
+# `gate:bats_all` quarantine stub (`exit 86`).
+#
+# P072 Step 17 moved the classification model: pool eligibility comes from the
+# CATALOG's `parallel.status`, resolved through its provenance, and the
+# separate text allowlist is retired. The direction of the default is
+# unchanged — anything not proven safe runs sequentially — so most of this
+# suite is untouched. The fixtures below now express eligibility in the
+# catalog rather than in a list.
+#   1. Partition logic (3 buckets): SAFE_POOL is ONLY what the catalog says is
+#      safe AND still bound to its verified content; a brand-new bats file has
+#      no provenance, resolves to `unknown`, and lands in the sequential
+#      UNCLASSIFIED bucket — NEVER auto-parallel. The 2 known boundary files
+#      always land in BOUNDARY regardless of their catalog status.
 #   2. Fail-closed path validation: a catalog-derived path that doesn't
 #      exist, escapes the repo root, starts with '-', or duplicates another
 #      entry aborts the WHOLE run (exit 2) before any bats invocation.
@@ -22,8 +28,8 @@
 # bats/...) — the boundary list and path-validation logic in
 # aid-bats-parallel-lane.sh operate on literal relative-path matches, so
 # fixtures must sit at those exact relative paths to exercise it for real.
-# Each test writes its OWN throwaway allowlist file (--allowlist) so tests
-# never depend on (or mutate) the real tracked allowlist.
+# Each test writes its OWN throwaway catalog so tests never depend on (or
+# mutate) this repository's real one.
 
 setup() {
   SCRIPT="${BATS_TEST_DIRNAME}/../../aid-bats-parallel-lane.sh"
@@ -35,14 +41,59 @@ setup() {
   mkdir -p "$(dirname "$CATALOG")"
   ALLOWLIST="$TMP/allowlist.txt"
   : > "$ALLOWLIST"
+  # shellcheck disable=SC1090
+  source "${BATS_TEST_DIRNAME}/../../lib/aid-test-catalog-provenance.sh"
+  ALLOWED_UNITS=()
 }
 
-# _allow <relative_path>... — append entries to this test's throwaway allowlist.
+# _allow <relative_path>... — mark these paths pool-eligible.
+#
+# Eligibility now lives in the catalog, so this records the paths and
+# _write_catalog binds each one to its real source hash and resource digest —
+# the same shape a migrated or piloted entry has. Writing `status: safe` with
+# no provenance would not work, and should not: an unbound status is not
+# evidence.
 _allow() {
   local rel
   for rel in "$@"; do
-    echo "$rel" >> "$ALLOWLIST"
+    ALLOWED_UNITS+=("$rel")
   done
+  # Order-independent: several existing tests call this AFTER writing the
+  # catalog, which was harmless when eligibility lived in a separate file. Now
+  # it does not, so mark and bind immediately when the catalog already exists.
+  [[ -f "${CATALOG:-}" ]] && _mark_allowed_in_catalog "$CATALOG"
+  return 0
+}
+
+# _mark_allowed_in_catalog <catalog> — set status and bind provenance for every
+# recorded path. An unbound `safe` resolves to `unknown`, correctly, so the
+# binding is what makes these fixtures exercise anything.
+_mark_allowed_in_catalog() {
+  local catalog="$1" rel uid h d
+  for rel in "${ALLOWED_UNITS[@]:-}"; do
+    [[ -z "$rel" ]] && continue
+    uid="bats:${rel%.bats}"
+    jq -e --arg id "$uid" '.run_units[] | select(.run_unit_id == $id)' \
+      <(yq -o=json '.' "$catalog" 2>/dev/null) >/dev/null 2>&1 || continue
+    h="$(aid_test_catalog_provenance_hash "$uid" "$catalog" "$PROJECT" 2>/dev/null)"
+    d="$(aid_test_catalog_provenance_resource_digest "$uid" "$catalog" "$PROJECT" 2>/dev/null)"
+    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || continue
+    B_ID="$uid" B_H="$h" B_D="$d" yq -i '
+      (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.status) = "safe"
+      | (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.evidence_ref) = "fixture-pilot"
+      | (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.verified_at) = "2026-08-02T00:00:00Z"
+      | (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.method) = "resource_map_plus_pilot"
+      | (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.source_sha256) = strenv(B_H)
+      | (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.resource_digest) = strenv(B_D)' \
+      "$catalog"
+  done
+  return 0
+}
+
+_is_allowed() {
+  local rel="$1" a
+  for a in "${ALLOWED_UNITS[@]:-}"; do [[ "$a" == "$rel" ]] && return 0; done
+  return 1
 }
 
 teardown() {
@@ -91,17 +142,42 @@ _write_catalog() {
       echo "    runner: bats"
       echo "    source_paths:"
       echo "      - ${rel}"
+      echo "    parallel:"
+      if _is_allowed "$rel"; then
+        echo "      status: safe"
+      else
+        echo "      status: unknown"
+      fi
+      echo "      exclusive_resources: []"
+      echo "      max_workers: null"
+      echo "      internal_parallelism: false"
+      echo "      provenance:"
+      if _is_allowed "$rel"; then
+        echo "        evidence_ref: \"fixture-pilot\""
+        echo "        verified_at: \"2026-08-02T00:00:00Z\""
+        echo "        method: resource_map_plus_pilot"
+        echo "        source_sha256: \"PLACEHOLDER\""
+        echo "        resource_digest: \"PLACEHOLDER\""
+      else
+        echo "        evidence_ref: null"
+        echo "        verified_at: null"
+        echo "        method: null"
+        echo "        source_sha256: null"
+        echo "        resource_digest: null"
+      fi
     done
     echo "  - run_unit_id: declared-command:not-a-bats-file"
     echo "    runner: declared-command"
     echo "    source_paths:"
     echo "      - scripts/some-other-thing.sh"
   } > "$catalog"
+
+  _mark_allowed_in_catalog "$catalog"
 }
 
 # --- Partition logic (--dry-run, no real bats execution) -------------------
 
-@test "partition: both boundary files always land in BOUNDARY regardless of the allowlist" {
+@test "partition: both boundary files always land in BOUNDARY regardless of catalog status" {
   local final="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
   local release="plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
   local safe1="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
@@ -112,7 +188,8 @@ _write_catalog() {
   _write_passing_bats "$PROJECT/$safe1"
   _write_passing_bats "$PROJECT/$safe2"
   _write_catalog "$CATALOG" "$final" "$release" "$safe1" "$safe2"
-  # Deliberately allowlist the boundary files too — BOUNDARY must win anyway.
+  # Deliberately mark the boundary files safe too — BOUNDARY must win anyway,
+  # because their exclusion is a cost decision, not a safety one.
   _allow "$final" "$release" "$safe1" "$safe2"
 
   cd "$PROJECT"
@@ -130,7 +207,7 @@ _write_catalog() {
   [[ "$pool_block" == *"$safe2"* ]]
 }
 
-@test "REGRESSION (PM review round 2): a bats file NOT on the allowlist never enters SAFE_POOL — lands in UNCLASSIFIED instead" {
+@test "REGRESSION: a bats file the catalog does not call safe never enters SAFE_POOL — lands in UNCLASSIFIED instead" {
   local allowed="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-allowed.bats"
   local newfile="plugins/aid-orchestrator/scripts/tests/bats/test-brand-new-suite.bats"
 
@@ -194,7 +271,7 @@ _write_catalog() {
   [[ "$output" != *"some-other-thing.sh"* ]]
 }
 
-@test "partition: an empty allowlist puts every non-boundary file in UNCLASSIFIED, none in SAFE_POOL" {
+@test "partition: with nothing marked safe, every non-boundary file lands in UNCLASSIFIED" {
   local a="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
   local b="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-b.bats"
   _write_passing_bats "$PROJECT/$a"
@@ -218,16 +295,18 @@ _write_catalog() {
   [[ "$output" == *"not found"* ]]
 }
 
-@test "error handling: missing allowlist file fails loudly (exit 2)" {
+@test "error handling: a missing allowlist file is no longer fatal — it is not read at all" {
+  # P072 Step 17 retired that authority. A caller still passing --allowlist is
+  # told plainly that it is ignored, rather than being failed on a file whose
+  # contents would not have been used anyway.
   local safe="plugins/aid-orchestrator/scripts/tests/bats/test-fixture-a.bats"
   _write_passing_bats "$PROJECT/$safe"
   _write_catalog "$CATALOG" "$safe"
 
   cd "$PROJECT"
   run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$TMP/does-not-exist-allowlist.txt" --dry-run
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"allowlist"* ]]
-  [[ "$output" == *"not found"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"retired"* ]]
 }
 
 @test "error handling: catalog missing a 'status' field is malformed (exit 2)" {
@@ -458,7 +537,7 @@ YAML
   cd "$PROJECT"
   run bash "$SCRIPT" --catalog "$CATALOG" --allowlist "$ALLOWLIST" --jobs 2
   [ "$status" -eq 0 ]
-  [[ "$output" == *"running 2 allowlisted bats files in the safe pool (-j 2)"* ]]
+  [[ "$output" == *"running 2 catalog-approved bats files in the safe pool (-j 2)"* ]]
   [[ "$output" == *"running unclassified file '$unclassified'"* ]]
   [[ "$output" == *"boundary lane file '$final'"* ]]
   [[ "$output" == *"boundary lane file '$release'"* ]]

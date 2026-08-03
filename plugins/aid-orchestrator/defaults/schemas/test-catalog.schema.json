@@ -206,7 +206,8 @@
         "status",
         "exclusive_resources",
         "max_workers",
-        "internal_parallelism"
+        "internal_parallelism",
+        "provenance"
       ],
       "properties": {
         "status": {
@@ -232,6 +233,63 @@
         },
         "internal_parallelism": {
           "type": "boolean"
+        },
+        "provenance": {
+          "description": "Where a non-`unknown` status came from, when, by what method, and against which source content. Nullable throughout so a catalog written before this field existed still loads — as all-null, and therefore effectively `unknown`.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "evidence_ref",
+            "verified_at",
+            "method",
+            "source_sha256",
+            "resource_digest"
+          ],
+          "properties": {
+            "evidence_ref": {
+              "description": "The audit or pilot receipt this rests on. A status with no citable evidence is an opinion.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "verified_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "method": {
+              "description": "How it was established. A migrated entry must never be indistinguishable from a freshly piloted one.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "resource_map_plus_pilot",
+                "migrated_p071_step3",
+                "manual_pm",
+                null
+              ]
+            },
+            "source_sha256": {
+              "description": "Digest over the unit's source_paths in catalog order. When it no longer matches, the recorded status describes content that is gone.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "resource_digest": {
+              "description": "Digest over the unit's sorted resource kind/namespace pairs from the Step 14 map. This is the second tier: when the source hash changes but the resources did not, the status survives and the hash is refreshed. A blanket revert would cost a pilot for a comment.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
         }
       },
       "additionalProperties": false,
@@ -251,8 +309,49 @@
               }
             }
           }
+        },
+        {
+          "$comment": "A non-`unknown` status must carry its full provenance. Anything less is a claim with no way to check it, and this field decides whether a test file runs concurrently with others.",
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "unknown"
+                }
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "provenance": {
+                "properties": {
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "verified_at": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "source_sha256": {
+                    "type": "string"
+                  },
+                  "resource_digest": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         }
-      ]
+      ],
+      "description": "Whether this unit may share a parallel pool. `status` means nothing a reader can check unless it carries WHERE the answer came from — which is what `provenance` adds. Every consumer must go through aid_test_catalog_provenance_effective_status rather than reading `status` directly, because the reversion rule below is not something a caller can be trusted to remember."
     },
     "run_unit": {
       "type": "object",

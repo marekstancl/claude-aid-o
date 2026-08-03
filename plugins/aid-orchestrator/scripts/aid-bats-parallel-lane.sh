@@ -6,26 +6,31 @@
 # already owns the parallel process lifecycle for its pool, unlike the
 # sequential single-command-at-a-time model aid-job.sh implements.
 #
-# CLASSIFICATION MODEL (explicit allowlist, opt-in — PM review round 2):
-#   A bats file enters the PARALLEL pool ONLY if its exact repo-relative path
-#   is listed in the tracked allowlist file (default:
-#   defaults/config/bats-parallel-safe-allowlist.txt, relative to this
-#   script's own directory — never the caller's cwd). There is no blacklist
-#   and no "default safe" fallback: the test catalog's `parallel.status`
-#   field is NEVER consulted as a pool-eligibility signal (it is `unknown`
-#   for every run_unit today and stays that way regardless of this script —
-#   that field belongs to a separate, not-yet-built classification effort).
-#   A brand-new bats file, or any file not on the allowlist for any reason,
-#   is NEVER auto-parallel — it lands in the sequential UNCLASSIFIED bucket
-#   instead (still executed, for full coverage, just one at a time).
+# CLASSIFICATION MODEL (catalog provenance — P072 Step 17, 2026-08-03):
+#   A bats file enters the PARALLEL pool only when the test catalog's
+#   `parallel.status` for its run unit resolves to `safe` THROUGH
+#   `aid_test_catalog_provenance_effective_status` — which means the status is
+#   backed by evidence AND still bound to the content it was verified against.
+#   A source change that alters the unit's resources reverts it to `unknown`,
+#   and it drops out of the pool without anyone editing a list.
+#
+#   This replaces a separate text allowlist. Until P072 Step 17 there were two
+#   authorities over one question: the catalog carried `parallel.status` that
+#   nothing read, and this script read a file the catalog knew nothing about.
+#   Two authorities is how a promotion outlives the evidence behind it — the
+#   list cannot know that the file it names has since acquired a lock.
+#
+#   The direction of the default is unchanged: anything not proven safe runs
+#   sequentially. A brand-new bats file has no provenance, resolves to
+#   `unknown`, and lands in the sequential bucket.
 #
 # Three buckets, always:
-#   - SAFE_POOL[]     — on the allowlist, not a known boundary file. Run
-#                        together via `bats -j N`.
+#   - SAFE_POOL[]     — effective status `safe`, not a known boundary file.
+#                        Run together via `bats -j N`.
 #   - UNCLASSIFIED[]   — everything else EXCEPT the 2 known boundary files:
-#                        not on the allowlist (new file, or simply never
-#                        reviewed). Run ONE AT A TIME, sequentially — the
-#                        safe default for anything unvetted, never dropped.
+#                        no provenance, stale provenance, or a non-`safe`
+#                        status. Run ONE AT A TIME, sequentially — the safe
+#                        default for anything unvetted, never dropped.
 #   - BOUNDARY[]       — the 2 files this plan's own diagnostic proved are
 #                        individually too expensive/unstable to pool or run
 #                        alongside anything else; always sequential, always
@@ -53,7 +58,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # into an isolated tmpdir project), which is not necessarily anywhere near
 # where the plugin itself is installed.
 REPO_ROOT="$(pwd)"
-DEFAULT_ALLOWLIST="$SCRIPT_DIR/../defaults/config/bats-parallel-safe-allowlist.txt"
+# shellcheck source=lib/aid-test-catalog-provenance.sh
+source "$SCRIPT_DIR/lib/aid-test-catalog-provenance.sh"
 
 # Boundary files (P071 E-071-1_1 Step 3, 2026-08-02) — both create a real Git
 # repository per test and already own a dedicated CI job (run-all-tests.sh
@@ -66,13 +72,14 @@ BOUNDARY_RELATIVE_PATHS=(
 
 usage() {
   cat <<EOF
-Usage: aid-bats-parallel-lane.sh [--catalog PATH] [--allowlist PATH] [--jobs N]
+Usage: aid-bats-parallel-lane.sh [--catalog PATH] [--jobs N]
                                   [--dry-run] [--pool-only | --dedicated-only]
 
   --catalog PATH     Path to test-catalog.yaml (default: ./.aid-o/config/test-catalog.yaml,
-                      relative to the current working directory)
-  --allowlist PATH   Path to the approved-safe parallel-pool allowlist (default:
-                      $DEFAULT_ALLOWLIST)
+                      relative to the current working directory). Pool
+                      eligibility comes from each unit's parallel.status as
+                      resolved through its provenance — there is no separate
+                      allowlist file.
   --jobs N           Parallel worker count for the safe pool (default: 4, or
                       \$AID_BATS_PARALLEL_JOBS if set)
   --dry-run          Print the resolved 3-bucket partition and exit 0 without
@@ -83,10 +90,10 @@ Usage: aid-bats-parallel-lane.sh [--catalog PATH] [--allowlist PATH] [--jobs N]
                       UNCLASSIFIED entirely
 
 Exit codes:
-  0  catalog + allowlist resolved, partition built, all requested phases passed
+  0  catalog resolved, partition built, all requested phases passed
      (or --dry-run)
   1  one or more requested phases failed (a real bats test failure)
-  2  catalog/allowlist missing or malformed, a catalog-derived path failed
+  2  catalog missing or malformed, a catalog-derived path failed
      validation (outside repo root, nonexistent, starts with '-', or a
      duplicate), or --pool-only + --dedicated-only both given — fail closed,
      never a partial or silently-adjusted file list
@@ -95,7 +102,6 @@ EOF
 }
 
 CATALOG_PATH="./.aid-o/config/test-catalog.yaml"
-ALLOWLIST_PATH="$DEFAULT_ALLOWLIST"
 JOBS="${AID_BATS_PARALLEL_JOBS:-4}"
 DRY_RUN=0
 RUN_POOL=1
@@ -109,8 +115,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --allowlist)
+      # Accepted and ignored, with a loud note: a caller still passing this is
+      # relying on an authority that no longer exists, and silently honouring
+      # nothing would leave them believing a list still governs the pool.
       [[ $# -ge 2 ]] || { echo "ERROR: aid-bats-parallel-lane.sh: --allowlist requires a value" >&2; exit 2; }
-      ALLOWLIST_PATH="$2"
+      echo "WARN: aid-bats-parallel-lane.sh: --allowlist is retired (P072 Step 17). Pool eligibility now comes from the catalog's parallel.status via its provenance; '$2' is not read." >&2
       shift 2
       ;;
     --jobs)
@@ -194,18 +203,20 @@ if [[ ${#BATS_SOURCE_PATHS[@]} -eq 0 ]]; then
   exit 2
 fi
 
-# --- Allowlist resolution (fail closed) -------------------------------------
-if [[ ! -f "$ALLOWLIST_PATH" ]]; then
-  echo "ERROR: aid-bats-parallel-lane.sh: approved-safe allowlist not found at '$ALLOWLIST_PATH' — refusing to guess which files are pool-safe" >&2
-  exit 2
-fi
-
+# --- Pool eligibility, from the catalog (fail closed) -----------------------
+# One call per unit, through the single function that applies the reversion
+# rule. Reading `.parallel.status` directly would skip that rule, which is
+# exactly the mistake having one authority is meant to prevent.
 declare -A ALLOWED_SET=()
-while IFS= read -r line; do
-  [[ -z "$line" ]] && continue
-  [[ "$line" == \#* ]] && continue
-  ALLOWED_SET["$line"]=1
-done < "$ALLOWLIST_PATH"
+while IFS= read -r unit_id; do
+  [[ -z "$unit_id" ]] && continue
+  eff="$(aid_test_catalog_provenance_effective_status "$unit_id" "$CATALOG_PATH" "$REPO_ROOT" 2>/dev/null || echo unknown)"
+  [[ "$eff" == "safe" ]] || continue
+  # Map the unit back to its file, the same way the file list was derived.
+  ufile="$(yq -o=json '.' "$CATALOG_PATH" 2>/dev/null \
+    | jq -r --arg id "$unit_id" '.run_units[] | select(.run_unit_id == $id) | (.source_paths // [])[0] // empty')"
+  [[ -n "$ufile" ]] && ALLOWED_SET["$ufile"]=1
+done < <(yq -r '.run_units[] | select(.runner == "bats") | .run_unit_id' "$CATALOG_PATH" 2>/dev/null)
 
 # --- Path validation (fail closed — an invalid catalog-derived path aborts
 # the WHOLE run, never a silent skip or a partial file list) ----------------
@@ -292,11 +303,13 @@ BOUNDARY_RC=0
 
 if [[ $RUN_POOL -eq 1 ]]; then
   if [[ ${#SAFE_POOL[@]} -gt 0 ]]; then
-    echo "aid-bats-parallel-lane.sh: running ${#SAFE_POOL[@]} allowlisted bats files in the safe pool (-j $JOBS)" >&2
+    echo "aid-bats-parallel-lane.sh: running ${#SAFE_POOL[@]} catalog-approved bats files in the safe pool (-j $JOBS)" >&2
     bats -j "$JOBS" "${SAFE_POOL[@]}"
     POOL_RC=$?
   else
-    echo "WARN: aid-bats-parallel-lane.sh: safe pool is empty (no catalog bats file is on the allowlist)" >&2
+    # An empty pool is a valid, safe state — not an error. It means no unit's
+    # recorded status currently survives its own provenance check.
+    echo "WARN: aid-bats-parallel-lane.sh: safe pool is empty (no catalog bats unit has an effective parallel status of 'safe') — running everything sequentially" >&2
   fi
 
   if [[ ${#UNCLASSIFIED[@]} -gt 0 ]]; then
