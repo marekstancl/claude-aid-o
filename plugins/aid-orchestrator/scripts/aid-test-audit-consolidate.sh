@@ -53,6 +53,7 @@ audit_id="" wave_artifacts_dir="" output_dir="" dispatch_manifest=""
 # the inventory is the denominator every coverage figure is computed against.
 # Both default to the pre-P072 behaviour so an existing caller is unaffected.
 audit_mode="measure" inventory_path="" project_root="" profiles_dir="" profile_selection=""
+resource_maps_dir="" pilots_dir=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -66,6 +67,8 @@ while [[ $# -gt 0 ]]; do
     --inventory) [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory_path="$2"; shift 2 ;;
     --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     --profiles-dir) [[ $# -ge 2 ]] || _die 2 "--profiles-dir requires a value"; profiles_dir="$2"; shift 2 ;;
+    --resource-maps-dir) [[ $# -ge 2 ]] || _die 2 "--resource-maps-dir requires a value"; resource_maps_dir="$2"; shift 2 ;;
+    --pilots-dir) [[ $# -ge 2 ]] || _die 2 "--pilots-dir requires a value"; pilots_dir="$2"; shift 2 ;;
     --profile-selection) [[ $# -ge 2 ]] || _die 2 "--profile-selection requires a value"; profile_selection="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
@@ -442,6 +445,129 @@ if [[ "$audit_mode" == "full" ]]; then
     fi
 
 
+    # ─── P072 Step 18: resource maps and pilots become lanes ────────────────
+    #
+    # A lane is a PROPOSAL written into the decision artifact and rendered for a
+    # human. Nothing here writes the catalog, changes a scheduler mode, or
+    # approves a mapping — that separation is what keeps the audit a
+    # recommendation rather than an actor.
+    #
+    # The grouping rule, and why each branch is what it is:
+    #
+    #   any `shared` resource      -> keep_serial, naming that resource. One
+    #                                 shared resource is enough; a lane is only
+    #                                 as safe as its least isolated member.
+    #   a removable named conflict -> blocked_pending_fix. A fixed path or port
+    #                                 can be fixed; saying so is more useful
+    #                                 than "not parallel".
+    #   an unresolved template     -> context_required, and NOT keep_serial:
+    #                                 the unit was never actually evaluated, and
+    #                                 filing it as "considered and kept serial"
+    #                                 would claim an assessment nobody made.
+    #   everything per-test/per-run-> a candidate lane, which becomes
+    #                                 `proposed_parallel` ONLY with a pilot
+    #                                 receipt for THAT EXACT membership.
+    lanes_json='[]'
+    smallest_pilot='null'
+    if [[ -n "$resource_maps_dir" && -d "$resource_maps_dir" ]]; then
+      maps_json="$(find "$resource_maps_dir" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null \
+                    | xargs -0 -r jq -sc '[.[] | select(.schema_version == "aid-test-resource-map-v1")]')"
+      [[ -n "$maps_json" ]] || maps_json='[]'
+
+      pilots_json='[]'
+      if [[ -n "$pilots_dir" && -d "$pilots_dir" ]]; then
+        pilots_json="$(find "$pilots_dir" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null \
+                        | xargs -0 -r jq -sc '[.[] | select(.schema_version == "aid-test-parallel-pilot-v1")]')"
+        [[ -n "$pilots_json" ]] || pilots_json='[]'
+      fi
+
+      lanes_json="$(jq -nc --argjson maps "$maps_json" --argjson pilots "$pilots_json" \
+                       --argjson rm "$remove_json" '
+        # A unit proposed for removal is not worth arranging into a lane.
+        ($maps | map(select(.run_unit_id as $u | $rm | index($u) | not))) as $m
+
+        # Serial-with-reason: one shared resource is enough.
+        | ( [ $m[] | select([.resources[] | select(.namespace == "shared")] | length > 0)
+              | { lane_id: ("serial-" + (.run_unit_id | gsub("[^A-Za-z0-9]"; "-"))),
+                  disposition: "keep_serial",
+                  run_unit_ids: [.run_unit_id],
+                  resource_basis: ([.resources[] | select(.namespace == "shared")
+                                    | .kind + "/" + .namespace] | unique),
+                  # The MAP is the evidence, and it carries the file:line for
+                  # every entry. A bare `file:line` is not a valid evidence
+                  # ref (the schema requires an audit-relative artifact path),
+                  # and pointing at the artifact keeps the locations one hop
+                  # away rather than losing them.
+                  evidence_refs: ["resource-maps/" + (.run_unit_id | gsub("[/:]"; "_")) + ".json"] } ] ) as $serial
+
+        # Blocked: a NAMED, removable conflict — a fixed path or a port. Worth
+        # distinguishing from "shared, nothing to be done".
+        | ( [ $m[] | select([.resources[] | select(.namespace == "shared"
+                              and (.kind == "fixed_path" or .kind == "port"))] | length > 0)
+              | .run_unit_id ] ) as $blocked_ids
+
+        | ( [ $serial[] | if (.run_unit_ids[0] as $u | $blocked_ids | index($u))
+                          then .disposition = "blocked_pending_fix" else . end ] ) as $serial
+
+        # Never evaluated: a dependency that could not be read at all.
+        | ( [ $m[] | select(.capped_at_unknown == true)
+              | { lane_id: ("context-" + (.run_unit_id | gsub("[^A-Za-z0-9]"; "-"))),
+                  disposition: "context_required",
+                  run_unit_ids: [.run_unit_id],
+                  resource_basis: ([.resources[] | .kind + "/" + .namespace] | unique | .[0:5]),
+                  evidence_refs: ["resource-maps/" + (.run_unit_id | gsub("[/:]"; "_")) + ".json"] } ] ) as $context
+
+        | ( [ $serial[] | .run_unit_ids[0] ] + [ $context[] | .run_unit_ids[0] ] ) as $spoken_for
+
+        # Candidates: everything left, all of whose resources are private.
+        | ( [ $m[] | select(.run_unit_id as $u | $spoken_for | index($u) | not)
+              | select([.resources[] | select(.namespace == "unknown")] | length == 0)
+              | .run_unit_id ] | sort ) as $candidates
+
+        # One candidate lane, deterministic by sorted id so repeated runs on
+        # identical input produce identical lanes.
+        | ( if ($candidates | length) > 1
+            then [ { lane_id: "candidate-pool",
+                     disposition: "keep_serial",
+                     run_unit_ids: $candidates,
+                     resource_basis: ([ $m[] | select(.run_unit_id as $u | $candidates | index($u))
+                                        | .resources[] | .kind + "/" + .namespace ] | unique),
+                     evidence_refs: [] } ]
+            else [] end ) as $candidate_lanes
+
+        # A candidate lane is promoted ONLY by a pilot for its EXACT
+        # membership. Evidence gathered for a different set promotes nothing.
+        | ( [ $candidate_lanes[] as $lane
+              | ( [ $pilots[] | select(.promotion == "proposed")
+                    | select((.membership | sort) == ($lane.run_unit_ids | sort)) ][0] ) as $p
+              | if $p == null then $lane
+                else $lane
+                     | .disposition = "proposed_parallel"
+                     | .evidence_refs = ["pilots/" + ($p.lane_id | gsub("[/:]"; "_")) + ".json"]
+                end ] ) as $candidate_lanes
+
+        | $serial + $context + $candidate_lanes')"
+      [[ -n "$lanes_json" ]] || lanes_json='[]'
+
+      # The smallest membership whose pilot would settle the most currently
+      # unsettled units. Naming it turns "parallelism is unproven" into one
+      # bounded thing somebody can actually run.
+      smallest_pilot="$(jq -nc --argjson lanes "$lanes_json" '
+        ( [ $lanes[] | select(.disposition == "keep_serial") | select((.run_unit_ids | length) > 1) ][0] ) as $l
+        | if $l == null then null
+          else { run_unit_ids: $l.run_unit_ids,
+                 workers: 2,
+                 repeat: 2,
+                 pass_criteria: [
+                   "every case matches position by position between the serial and concurrent runs",
+                   "both runs exit zero from a terminal job state",
+                   "neither run changes its snapshot or writes outside it",
+                   "every repetition satisfies all of the above, with no retry"
+                 ] }
+          end')"
+      [[ -n "$smallest_pilot" ]] || smallest_pilot='null'
+    fi
+
     # ─── P072 Step 5: content checks on the dispositions themselves ─────────
     #
     # Relationship to the mechanism that already ships: the wave-artifact
@@ -594,10 +720,11 @@ if [[ "$audit_mode" == "full" ]]; then
       --argjson merge_groups "$merge_groups_json" --arg impact_kind "$impact_kind" \
       --argjson merged_surplus "$merged_surplus" \
       --argjson profile_actions "$profile_actions_json" \
+      --argjson lanes "$lanes_json" --argjson smallest_pilot "$smallest_pilot" \
       --argjson rt_before "$runtime_before" --argjson rt_after "$runtime_after" '
       {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
        current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
-       actions:$profile_actions, parallelization:{lanes:[], smallest_safe_pilot:null},
+       actions:$profile_actions, parallelization:{lanes:$lanes, smallest_safe_pilot:$smallest_pilot},
        unresolved:$unresolved,
        portfolio_coverage:{inventory_count:$ic, assigned_count:$ac, disposition_count:$dc,
                            missing_run_unit_ids:$missing, duplicate_run_unit_ids:$dupes},

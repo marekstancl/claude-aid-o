@@ -22,8 +22,10 @@
 #   The middle case is why this is two-tier rather than one. A comment edit
 #   changes the file's bytes and nothing else; reverting on that alone would
 #   cost a full pilot for a typo fix, and a rule that expensive gets disabled.
-#   A change that ADDS a lock or a fixed path changes the resource digest, and
-#   that reverts.
+#   A change that adds a lock, a port, or another shared path changes the
+#   resource digest — including when a resource of that same class was already
+#   present, because the digest covers each resource's identifying detail and
+#   not merely its kind.
 #
 # WHY EVERY CALLER MUST USE effective_status
 #   The reversion rule is not something a caller can be trusted to remember.
@@ -56,11 +58,18 @@ aid_test_catalog_provenance_hash() {
   mapfile -t paths < <(jq -r '(.source_paths // [])[]' <<<"$unit")
   [[ "${#paths[@]}" -gt 0 ]] && [[ -n "${paths[0]}" ]] || { echo "missing_source"; return 0; }
 
+  # Each path contributes its NAME and its LENGTH as well as its bytes. Raw
+  # concatenation let a unit swap `[a.bats, helper.bash]` for
+  # `[new-unsafe.bats, copied-helper.bash]` while preserving the byte stream,
+  # and the hash still matched — so the lane would run a different executable
+  # file under a status verified for the old one.
   local tmp; tmp="$(mktemp)"
   for p in "${paths[@]}"; do
     abs="$p"; [[ "$abs" = /* ]] || abs="${project_root%/}/${p}"
     if [[ ! -f "$abs" ]]; then rm -f "$tmp"; echo "missing_source"; return 0; fi
+    printf 'path:%s\nbytes:%s\n' "$p" "$(wc -c < "$abs" | tr -d ' ')" >> "$tmp"
     cat "$abs" >> "$tmp"
+    printf '\n--aid-source-boundary--\n' >> "$tmp"
   done
   sha256sum "$tmp" | cut -d' ' -f1
   rm -f "$tmp"
@@ -68,18 +77,25 @@ aid_test_catalog_provenance_hash() {
 
 # aid_test_catalog_provenance_resource_digest <run_unit_id> <catalog> <project_root>
 #
-# SHA-256 over the unit's sorted `kind/namespace` pairs from the Step 14 map.
-# What this deliberately does NOT include: locations, details, or the order the
-# resources were found in. Two files that touch the same kinds of resource in
-# the same namespaces are the same parallel-safety proposition, even if the
-# line numbers moved.
+# SHA-256 over the unit's sorted `kind/namespace/detail` triples from the Step
+# 14 map.
+#
+# `detail` is included because the pair alone is far too coarse: a unit that
+# already wrote one shared path and then starts writing a SECOND one has the
+# same `fixed_path/shared` pair, so a pair-only digest was unchanged and the
+# unit kept its `safe` status while its sharing proposition had changed
+# completely. The same held for a second lock or a second port.
+#
+# What is still deliberately excluded: LOCATION and ordering. A resource that
+# moved from line 40 to line 50 is the same resource, and reverting on that
+# would make the two-tier rule as expensive as the one-tier rule it replaces.
 aid_test_catalog_provenance_resource_digest() {
   local unit_id="$1" catalog="$2" project_root="$3"
   local map
   map="$(bash "${_TCP_LIB_DIR}/../aid-test-resource-map.sh" \
           --run-unit-id "$unit_id" --catalog "$catalog" --project-root "$project_root" 2>/dev/null)" \
     || { echo "unavailable"; return 0; }
-  jq -r '[.resources[] | .kind + "/" + .namespace] | sort | unique | join("\n")' <<<"$map" \
+  jq -r '[.resources[] | .kind + "/" + .namespace + "/" + (.detail // "")] | sort | unique | join("\n")' <<<"$map" \
     | sha256sum | cut -d' ' -f1
 }
 

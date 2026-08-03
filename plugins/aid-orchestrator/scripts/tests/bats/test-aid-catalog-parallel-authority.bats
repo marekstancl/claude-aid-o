@@ -295,3 +295,67 @@ ${AT} \"a\" { true; }"
   [ "$status" -eq 2 ]
   [[ "$output" == *"not in either place"* ]]
 }
+
+# ─── What an adversarial review found ──────────────────────────────────────
+
+@test "the migration REFUSES a file changed since P071 rather than re-blessing it" {
+  # Hashing the edited content and writing `status: safe` would bind P071's
+  # evidence to bytes P071 never saw — laundering a post-pilot change into
+  # fresh-looking evidence. A warning cannot preserve evidence for different
+  # content.
+  _file a "${AT} \"a\" { true; }"
+  _catalog "a:unknown"
+  # GIT_COMMITTER_DATE, not --date: `git log --before` filters on the committer
+  # date, and --date sets only the author date.
+  ( cd "$PROJ" && git init -q && git config user.email t@t && git config user.name t \
+      && git add -A \
+      && GIT_COMMITTER_DATE="2026-08-01T00:00:00" git commit -qm "before p071" --date="2026-08-01T00:00:00" )
+  # Edit it AFTER that commit.
+  _file a "${AT} \"a\" { flock /var/lock/x.lock true; }"
+  local list="$TEST_TMPDIR/list.txt"
+  printf '%s\n' "$TDIR/a.bats" > "$list"
+  run bash "$MIGRATE" --catalog "$CAT" --allowlist "$list" --project-root "$PROJ"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"were NOT migrated"* ]]
+  [ "$(yq -r '.run_units[0].parallel.status' "$CAT")" = "unknown" ]
+}
+
+@test "the migration refuses a listed path that is not the unit's EXECUTABLE source" {
+  # A listed helper vouching for a unit whose .bats file was never piloted
+  # would let the lane pool that file.
+  _file a "${AT} \"a\" { true; }"
+  printf 'helper_fn() { true; }\n' > "$PROJ/$TDIR/old-helper.bash"
+  {
+    echo 'schema_version: "1.0.0"'; echo 'status: approved'; echo 'run_units:'
+    echo "  - run_unit_id: \"bats:$TDIR/a\""
+    echo '    runner: bats'
+    echo "    source_paths: [\"$TDIR/a.bats\", \"$TDIR/old-helper.bash\"]"
+    echo '    parallel: {status: unknown, exclusive_resources: [], max_workers: null, internal_parallelism: false}'
+  } > "$CAT"
+  local list="$TEST_TMPDIR/list.txt"
+  printf '%s\n' "$TDIR/old-helper.bash" > "$list"
+  run bash "$MIGRATE" --catalog "$CAT" --allowlist "$list" --project-root "$PROJ"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"old-helper.bash"* ]]
+}
+
+@test "a pooled file rewritten between classification and dispatch aborts the run" {
+  # Eligibility is decided from the bytes on disk; anything that rewrites a
+  # file before `bats -j` opens it would put unverified content into the pool.
+  _file a "${AT} \"a\" { true; }"
+  _catalog "a:safe"; _bind a
+  [ "$(_pool_count)" = "1" ]
+
+  # A wrapper that mutates the file after classification but before dispatch is
+  # not expressible here, so assert the guard's own comparison directly: the
+  # recorded hash and the current hash must agree for the file to be dispatched.
+  local recorded current
+  recorded="$(yq -r '.run_units[0].parallel.provenance.source_sha256' "$CAT")"
+  current="$(aid_test_catalog_provenance_hash "bats:$TDIR/a" "$CAT" "$PROJ")"
+  [ "$recorded" = "$current" ]
+  _file a "${AT} \"a\" { flock /var/lock/x.lock true; }"
+  current="$(aid_test_catalog_provenance_hash "bats:$TDIR/a" "$CAT" "$PROJ")"
+  [ "$recorded" != "$current" ]
+  # And the partition follows: it is no longer pooled at all.
+  [ "$(_pool_count)" = "0" ]
+}

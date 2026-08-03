@@ -265,3 +265,66 @@ PY
   run _validate_catalog
   [ "$status" -ne 0 ]
 }
+
+# ─── What an adversarial review found ──────────────────────────────────────
+
+@test "adding a SECOND shared path of the same kind still reverts the unit" {
+  # A `kind/namespace` digest was too coarse: a unit already writing one shared
+  # path that starts writing a second one had the same `fixed_path/shared`
+  # pair, so the digest was unchanged and the unit kept its `safe` status while
+  # its sharing proposition had changed completely.
+  _unit_file a "${AT} \"a\" { touch /var/tmp/aid-one; }"
+  _catalog a safe placeholder placeholder
+  local h d; h="$(_hash a)"; d="$(_digest a)"
+  _catalog a safe "$h" "$d"
+  [ "$(_effective a)" = "safe" ]
+
+  _unit_file a "${AT} \"a\" { touch /var/tmp/aid-one; touch /var/tmp/aid-two; }"
+  [ "$(_effective a)" = "unknown" ]
+}
+
+@test "adding a SECOND lock still reverts the unit" {
+  _unit_file a "${AT} \"a\" { flock /var/lock/one.lock true; }"
+  _catalog a safe placeholder placeholder
+  local h d; h="$(_hash a)"; d="$(_digest a)"
+  _catalog a safe "$h" "$d"
+  [ "$(_effective a)" = "safe" ]
+
+  _unit_file a "${AT} \"a\" { flock /var/lock/one.lock true; flock /var/lock/two.lock true; }"
+  [ "$(_effective a)" = "unknown" ]
+}
+
+@test "a resource that merely MOVED keeps the unit pooled" {
+  # The other side of including detail: location is still excluded, or the
+  # two-tier rule would be as expensive as the one-tier rule it replaces.
+  _unit_file a "${AT} \"a\" { flock /var/lock/one.lock true; }"
+  _catalog a safe placeholder placeholder
+  local h d; h="$(_hash a)"; d="$(_digest a)"
+  _catalog a safe "$h" "$d"
+
+  _unit_file a "# a comment pushing everything down a line
+
+${AT} \"a\" { flock /var/lock/one.lock true; }"
+  [ "$(_effective a)" = "safe" ]
+}
+
+@test "the hash binds the declared PATHS, not only the concatenated bytes" {
+  # Swapping `[a.bats, helper.bash]` for two files with the same combined byte
+  # stream left the hash matching, so the lane would run a different executable
+  # file under a status verified for the old one.
+  printf 'alphabeta' > "$PROJ/tests/one.bats"
+  printf '' > "$PROJ/tests/two.bats"
+  {
+    echo 'schema_version: "1.0.0"'; echo 'status: approved'; echo 'run_units:'
+    echo '  - run_unit_id: "bats:tests/multi"'
+    echo '    runner: bats'
+    echo '    source_paths: ["tests/one.bats", "tests/two.bats"]'
+  } > "$CAT"
+  local h1; h1="$(aid_test_catalog_provenance_hash "bats:tests/multi" "$CAT" "$PROJ")"
+
+  # Same total bytes, split differently across the same two paths.
+  printf 'alpha' > "$PROJ/tests/one.bats"
+  printf 'beta'  > "$PROJ/tests/two.bats"
+  local h2; h2="$(aid_test_catalog_provenance_hash "bats:tests/multi" "$CAT" "$PROJ")"
+  [ "$h1" != "$h2" ]
+}

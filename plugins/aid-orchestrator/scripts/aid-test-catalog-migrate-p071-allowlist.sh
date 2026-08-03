@@ -94,10 +94,15 @@ fi
 
 declare -a unit_ids=()
 for p in "${listed[@]}"; do
+  # The listed path must be the unit's FIRST source path — the .bats file the
+  # lane actually executes. Matching anywhere in source_paths let a listed
+  # helper vouch for a unit whose executable file was never piloted, and the
+  # lane would then pool that file.
   uid="$(jq -r --arg p "$p" \
-    '.run_units[] | select(.runner == "bats") | select((.source_paths // []) | index($p)) | .run_unit_id' \
-    <<<"$catalog_json" | head -1)"
-  if [[ -z "$uid" ]]; then unresolved+=("$p"); else unit_ids+=("$uid"); fi
+    '.run_units[] | select(.runner == "bats") | select(((.source_paths // [])[0]) == $p) | .run_unit_id' \
+    <<<"$catalog_json")"
+  n_match="$(printf '%s\n' "$uid" | grep -c . || true)"
+  if [[ -z "$uid" || "$n_match" -ne 1 ]]; then unresolved+=("$p"); else unit_ids+=("$uid"); fi
 done
 
 if [[ "${#unresolved[@]}" -gt 0 ]]; then
@@ -121,6 +126,7 @@ fi
 
 # ─── Write, and warn about drift rather than hiding it ──────────────────────
 declare -a drifted=()
+p071_commit=""
 i=0
 for uid in "${unit_ids[@]}"; do
   src_hash="$(aid_test_catalog_provenance_hash "$uid" "$catalog_path" "$project_root")"
@@ -130,13 +136,26 @@ for uid in "${unit_ids[@]}"; do
   [[ "$res_digest" =~ ^[0-9a-f]{64}$ ]] \
     || _die 3 "could not compute a resource digest for '$uid' (got '$res_digest')"
 
-  # A file edited since P071 verified it: the hash binds CURRENT content while
-  # the evidence describes older content. Naming it lets a PM decide whether to
-  # re-pilot. Silently excluding it would lose a real pool member with no
-  # record; silently including it would overstate what P071 checked.
-  if ! git -C "$project_root" diff --quiet "$(git -C "$project_root" log -1 --format=%H --before="2026-08-02T23:59:59" 2>/dev/null || echo HEAD)" -- \
-        "${listed[$i]}" 2>/dev/null; then
-    drifted+=("${listed[$i]}")
+  # A file edited since P071 verified it is NOT migrated as safe. Hashing the
+  # edited content and writing `status: safe` would bind P071's evidence to
+  # bytes P071 never saw — the migration would launder a post-pilot change into
+  # fresh-looking evidence, and the lane would pool the changed file.
+  #
+  # A warning cannot preserve evidence for different content, so the unit is
+  # left `unknown` and named. Leaving it out silently would lose a real pool
+  # member with no record; this loses it loudly, and re-piloting restores it.
+  # Drift is only decidable where there IS a commit from before P071 to compare
+  # against. In a project with no such history the check has nothing to say —
+  # and absence of history is not evidence of change, so it must not be read as
+  # drift. Refusing to migrate on "I cannot tell" would make this unusable in
+  # any repository that did not exist in August 2026, including every fixture.
+  p071_commit="$(git -C "$project_root" log -1 --format=%H --before="2026-08-02T23:59:59" 2>/dev/null || true)"
+  if [[ -n "$p071_commit" ]]; then
+    if ! git -C "$project_root" diff --quiet "$p071_commit" -- "${listed[$i]}" 2>/dev/null; then
+      drifted+=("${listed[$i]}")
+      i=$(( i + 1 ))
+      continue
+    fi
   fi
 
   MIG_ID="$uid" MIG_REF="$evidence_ref" MIG_AT="$P071_VERIFIED_AT" \
@@ -152,9 +171,9 @@ for uid in "${unit_ids[@]}"; do
 done
 
 if [[ "${#drifted[@]}" -gt 0 ]]; then
-  echo "aid-test-catalog-migrate-p071-allowlist.sh: WARNING — ${#drifted[@]} migrated file(s) have changed since P071 verified them." >&2
-  echo "  Their source hash binds current content while the evidence describes older content. Consider re-piloting:" >&2
+  echo "aid-test-catalog-migrate-p071-allowlist.sh: ${#drifted[@]} listed file(s) have changed since P071 verified them and were NOT migrated." >&2
+  echo "  P071's evidence describes content these files no longer have. They stay 'unknown' and run sequentially until re-piloted:" >&2
   printf '    - %s\n' "${drifted[@]}" >&2
 fi
 
-echo "aid-test-catalog-migrate-p071-allowlist.sh: migrated ${#unit_ids[@]} run units" >&2
+echo "aid-test-catalog-migrate-p071-allowlist.sh: migrated $(( ${#unit_ids[@]} - ${#drifted[@]} )) of ${#unit_ids[@]} run units" >&2

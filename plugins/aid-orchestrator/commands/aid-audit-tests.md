@@ -117,6 +117,25 @@ parser's own project-root validation load-bearing rather than advisory.
    unit has no receipt (see step 6), so skipping it does not produce a
    quieter audit — it produces no audit.
 
+   c. In `full` mode, assess **parallel safety**, which takes two kinds of
+      evidence and never one:
+
+      `aid-test-resource-map.sh --run-unit-id <id> --catalog <catalog>
+      --project-root <root> --output <output-dir>/resource-maps/<slug>.json`
+      reads each unit's source — following `source`/`.`/`load` to a recorded
+      depth cap — and records every resource it touches with the `file:line`
+      that justifies it. It executes nothing.
+
+      `aid-test-parallel-pilot.sh --lane-id <id> --unit <id>… --catalog
+      <catalog> --output-dir <output-dir> --target-root <disposable clone>
+      --project-root <root> --workers N --repeat N` then runs a candidate
+      membership serially and concurrently in a clone bound to the audited
+      tree, and reports whether concurrency changed anything.
+
+      Only `per-test`/`per-run` units are candidates, and only a pilot for a
+      lane's exact membership can propose it. Everything else stays
+      sequential — the direction the default has always pointed.
+
 6. **Finalize via `aid-audit-tests-finalize.sh` — the ONE mandatory production
    entrypoint for this closing chain (Step 24, E4 release blocker).** The
    controller MUST call this script, never the individual consolidator/
@@ -124,11 +143,13 @@ parser's own project-root validation load-bearing rather than advisory.
    `aid-audit-tests-finalize.sh --audit-id <id> --wave-artifacts-dir <dir>
    --dispatch-manifest <path> --output-dir <dir> --mode <static|measure|full>
    [--inventory <path>] [--project-root <path>] [--catalog <path>]
-   [--profiles-dir <dir>] [--profile-selection <path>] [--write-plan]`.
+   [--profiles-dir <dir>] [--profile-selection <path>]
+   [--resource-maps-dir <dir>] [--pilots-dir <dir>] [--write-plan]`.
 
-   `--profiles-dir` and `--profile-selection` default to
-   `<output-dir>/profiles` and `<output-dir>/profile-selection.json` when those
-   exist, so step 5's artifacts are picked up without being named again. What
+   All four directory arguments default to their conventional locations under
+   `<output-dir>` (`profiles`, `profile-selection.json`, `resource-maps`,
+   `pilots`) when those exist, so step 5's artifacts are picked up without
+   being named again. What
    they buy is refusal: a receipt that fails schema validation, belongs to
    another audit, or whose evidence log no longer hashes to what the receipt
    recorded stops finalization — as does a selected unit with no receipt at

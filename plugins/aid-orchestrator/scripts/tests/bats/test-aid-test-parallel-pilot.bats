@@ -224,11 +224,13 @@ ${AT} \"a1\" { [ -d \"\$BATS_TEST_DIRNAME/../shared-dir\" ]; }"
 }
 
 @test "a real benefit above the threshold IS proposed, with both durations cited" {
-  # Two suites that each sleep: serial ~4s, concurrent ~2s. The threshold is
-  # lowered for the fixture so the assertion is about the rule, not the clock.
+  # Two suites that each sleep: serial ~8s, concurrent ~4s. The sleeps are long
+  # enough that the gap survives a loaded machine — a shorter fixture made this
+  # fail whenever several suites ran at once, which tested the host rather than
+  # the rule. The threshold is lowered so the assertion is about the rule.
   _clone
-  _suite a "${AT} \"slow a\" { sleep 2; }"
-  _suite b "${AT} \"slow b\" { sleep 2; }"
+  _suite a "${AT} \"slow a\" { sleep 4; }"
+  _suite b "${AT} \"slow b\" { sleep 4; }"
   _catalog a b
   cat > "$PROJ/.aid-o/config/test-audit.yaml" <<'YAML'
 budget_minutes_default: 30

@@ -538,10 +538,6 @@ _scan_for_resources() {
       # ── locks ──────────────────────────────────────────────────────────
       # What is invoked, not what is mentioned. A test NAMED "...lock..." is
       # not a lock user; `flock` is. That is the literal P066 false positive.
-      if [[ "$code" =~ (^|[^[:alnum:]_])flock([[:space:]]|$) ]]; then
-        _emit "lock" "shared" "flock" "$rel" "$lineno"
-      fi
-
       if [[ "$code" =~ (localhost|127\.0\.0\.1):([0-9]{2,5}) ]]; then
         _emit "port" "shared" "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}" "$rel" "$lineno"
       fi
@@ -551,37 +547,61 @@ _scan_for_resources() {
       # prefixes: a write to `$HOME/.cache/...` or `/tmp/shared-state`
       # produced no entry at all, so the conflict was invisible to the pooling
       # decision that reads this map.
-      if [[ "$code" =~ (^|[[:space:]])(mkdir|touch|cp|mv|rm|tee|ln)[[:space:]] || "$code" == *'>'* ]]; then
-        local target_expr=""
-        if [[ "$code" =~ \>\>?[[:space:]]*\"?([^[:space:]\"\;\&\|\(\)]+) ]]; then
-          target_expr="${BASH_REMATCH[1]}"
-        elif [[ "$code" =~ (mkdir|touch|cp|mv|rm|tee|ln)[[:space:]]+(-[^[:space:]]+[[:space:]]+)*\"?([^[:space:]\"\;\&\|\(\)]+) ]]; then
-          target_expr="${BASH_REMATCH[3]}"
+      #
+      # And EVERY write on the line, not only the first. `touch /tmp/a; touch
+      # /tmp/b` recorded only /tmp/a, so a unit that started writing a second
+      # shared path looked unchanged to anything comparing resources.
+      _seg_rest="$code"
+      while [[ -n "$_seg_rest" ]]; do
+        _seg="${_seg_rest%%[;&|]*}"
+        if [[ "$_seg_rest" == *[\;\&\|]* ]]; then
+          _seg_rest="${_seg_rest#*[;&|]}"
+        else
+          _seg_rest=""
+        fi
+        [[ -z "${_seg// }" ]] && continue
+
+        # WHICH lock, not merely "a lock". Two different locks are two
+        # different sharing propositions, and a detail of just "flock" made
+        # them indistinguishable to anything comparing resources.
+        if [[ "$_seg" =~ (^|[^[:alnum:]_])flock[[:space:]]+(-[^[:space:]]+[[:space:]]+)*([^[:space:]]+) ]]; then
+          _emit "lock" "shared" "flock ${BASH_REMATCH[3]}" "$rel" "$lineno"
+        elif [[ "$_seg" =~ (^|[^[:alnum:]_])flock([[:space:]]|$) ]]; then
+          _emit "lock" "shared" "flock (target not statically resolvable)" "$rel" "$lineno"
         fi
 
-        if [[ -n "$target_expr" && "$target_expr" != "/dev/null" && "$target_expr" != /dev/* ]]; then
-          local kind="fixed_path"
-          [[ "$target_expr" == *".aid-o"* ]] && kind="aid_state"
-          [[ "$target_expr" == *".cache"* || "$target_expr" == *'$HOME'* ]] && kind="cache"
+        if [[ "$_seg" =~ (^|[[:space:]])(mkdir|touch|cp|mv|rm|tee|ln)[[:space:]] || "$_seg" == *'>'* ]]; then
+          local target_expr=""
+          if [[ "$_seg" =~ \>\>?[[:space:]]*\"?([^[:space:]\"\;\&\|\(\)]+) ]]; then
+            target_expr="${BASH_REMATCH[1]}"
+          elif [[ "$_seg" =~ (mkdir|touch|cp|mv|rm|tee|ln)[[:space:]]+(-[^[:space:]]+[[:space:]]+)*\"?([^[:space:]\"\;\&\|\(\)]+) ]]; then
+            target_expr="${BASH_REMATCH[3]}"
+          fi
 
-          if _is_temp_expr "$target_expr"; then
-            _emit "$kind" "$scope" "$target_expr (under a temp root)" "$rel" "$lineno"
-          elif _is_anchored_elsewhere "$target_expr"; then
-            if [[ "$target_expr" == *'$'* ]]; then
-              _emit "$kind" "unknown" "$target_expr (anchored to a variable this cannot resolve)" "$rel" "$lineno"
+          if [[ -n "$target_expr" && "$target_expr" != "/dev/null" && "$target_expr" != /dev/* ]]; then
+            local kind="fixed_path"
+            [[ "$target_expr" == *".aid-o"* ]] && kind="aid_state"
+            [[ "$target_expr" == *".cache"* || "$target_expr" == *'$HOME'* ]] && kind="cache"
+
+            if _is_temp_expr "$target_expr"; then
+              _emit "$kind" "$scope" "$target_expr (under a temp root)" "$rel" "$lineno"
+            elif _is_anchored_elsewhere "$target_expr"; then
+              if [[ "$target_expr" == *'$'* ]]; then
+                _emit "$kind" "unknown" "$target_expr (anchored to a variable this cannot resolve)" "$rel" "$lineno"
+              else
+                _emit "$kind" "shared" "$target_expr" "$rel" "$lineno"
+              fi
             else
-              _emit "$kind" "shared" "$target_expr" "$rel" "$lineno"
+              local ns; ns="$(_ns_for_cwd "$cwd" "$scope")"
+              case "$ns" in
+                shared)  _emit "$kind" "shared"  "$target_expr (relative to a directory outside any temp root)" "$rel" "$lineno" ;;
+                unknown) _emit "$kind" "unknown" "$target_expr (relative to a directory this cannot resolve)" "$rel" "$lineno" ;;
+                *)       _emit "$kind" "$ns" "$target_expr (under a temp root)" "$rel" "$lineno" ;;
+              esac
             fi
-          else
-            local ns; ns="$(_ns_for_cwd "$cwd" "$scope")"
-            case "$ns" in
-              shared)  _emit "$kind" "shared"  "$target_expr (relative to a directory outside any temp root)" "$rel" "$lineno" ;;
-              unknown) _emit "$kind" "unknown" "$target_expr (relative to a directory this cannot resolve)" "$rel" "$lineno" ;;
-              *)       _emit "$kind" "$ns" "$target_expr (under a temp root)" "$rel" "$lineno" ;;
-            esac
           fi
         fi
-      fi
+      done
     fi
 
     if [[ -n "$blk_kind" && "$depth" -le 0 ]]; then

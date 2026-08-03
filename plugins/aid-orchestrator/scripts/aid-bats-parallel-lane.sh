@@ -14,6 +14,12 @@
 #   A source change that alters the unit's resources reverts it to `unknown`,
 #   and it drops out of the pool without anyone editing a list.
 #
+#   The verified bytes are re-checked immediately before dispatch, so a file
+#   rewritten between classification and execution aborts the run rather than
+#   entering the pool unverified. That narrows, but does not eliminate, the
+#   window: only running from a private snapshot would, and this script
+#   deliberately executes the caller's checkout.
+#
 #   This replaces a separate text allowlist. Until P072 Step 17 there were two
 #   authorities over one question: the catalog carried `parallel.status` that
 #   nothing read, and this script read a file the catalog knew nothing about.
@@ -207,16 +213,29 @@ fi
 # One call per unit, through the single function that applies the reversion
 # rule. Reading `.parallel.status` directly would skip that rule, which is
 # exactly the mistake having one authority is meant to prevent.
+# ONE snapshot of the catalog, read once. Re-reading it per unit meant the
+# eligibility decision and the unit-to-file mapping could come from two
+# different versions of the file: a concurrent rewrite between the two reads
+# could attach a `safe` verdict to a different path than the one it was made
+# about.
+CATALOG_SNAPSHOT="$(yq -o=json '.' "$CATALOG_PATH" 2>/dev/null)" || CATALOG_SNAPSHOT=""
+if [[ -z "$CATALOG_SNAPSHOT" ]]; then
+  echo "ERROR: aid-bats-parallel-lane.sh: could not read the catalog at '$CATALOG_PATH'" >&2
+  exit 2
+fi
+
 declare -A ALLOWED_SET=()
-while IFS= read -r unit_id; do
+declare -A ALLOWED_HASH=()
+while IFS=$'\t' read -r unit_id ufile; do
   [[ -z "$unit_id" ]] && continue
   eff="$(aid_test_catalog_provenance_effective_status "$unit_id" "$CATALOG_PATH" "$REPO_ROOT" 2>/dev/null || echo unknown)"
   [[ "$eff" == "safe" ]] || continue
-  # Map the unit back to its file, the same way the file list was derived.
-  ufile="$(yq -o=json '.' "$CATALOG_PATH" 2>/dev/null \
-    | jq -r --arg id "$unit_id" '.run_units[] | select(.run_unit_id == $id) | (.source_paths // [])[0] // empty')"
-  [[ -n "$ufile" ]] && ALLOWED_SET["$ufile"]=1
-done < <(yq -r '.run_units[] | select(.runner == "bats") | .run_unit_id' "$CATALOG_PATH" 2>/dev/null)
+  [[ -n "$ufile" ]] || continue
+  ALLOWED_SET["$ufile"]=1
+  # Remembered so the file can be re-checked immediately before dispatch.
+  ALLOWED_HASH["$ufile"]="$(sha256sum "$REPO_ROOT/$ufile" 2>/dev/null | cut -d' ' -f1)"
+done < <(jq -r '.run_units[] | select(.runner == "bats")
+                | .run_unit_id + "\t" + ((.source_paths // [])[0] // "")' <<<"$CATALOG_SNAPSHOT")
 
 # --- Path validation (fail closed — an invalid catalog-derived path aborts
 # the WHOLE run, never a silent skip or a partial file list) ----------------
@@ -303,6 +322,23 @@ BOUNDARY_RC=0
 
 if [[ $RUN_POOL -eq 1 ]]; then
   if [[ ${#SAFE_POOL[@]} -gt 0 ]]; then
+    # Re-hash immediately before dispatch. Eligibility was decided from the
+    # bytes on disk at partition time; anything that rewrites a file between
+    # then and now (a concurrent checkout, a generator, a replaced symlink)
+    # would put content into the pool that nothing ever verified. This does not
+    # close the window entirely — nothing short of running from a private
+    # snapshot could — but it narrows it from the whole partition pass to the
+    # moment of dispatch, and a change inside it aborts rather than proceeds.
+    RECHECK_FAILED=()
+    for pooled in "${SAFE_POOL[@]}"; do
+      now_hash="$(sha256sum "$REPO_ROOT/$pooled" 2>/dev/null | cut -d' ' -f1)"
+      [[ "$now_hash" == "${ALLOWED_HASH[$pooled]:-}" ]] || RECHECK_FAILED+=("$pooled")
+    done
+    if [[ ${#RECHECK_FAILED[@]} -gt 0 ]]; then
+      echo "ERROR: aid-bats-parallel-lane.sh: ${#RECHECK_FAILED[@]} pooled file(s) changed between classification and dispatch — refusing to run unverified content concurrently:" >&2
+      printf '  - %s\n' "${RECHECK_FAILED[@]}" >&2
+      exit 2
+    fi
     echo "aid-bats-parallel-lane.sh: running ${#SAFE_POOL[@]} catalog-approved bats files in the safe pool (-j $JOBS)" >&2
     bats -j "$JOBS" "${SAFE_POOL[@]}"
     POOL_RC=$?
