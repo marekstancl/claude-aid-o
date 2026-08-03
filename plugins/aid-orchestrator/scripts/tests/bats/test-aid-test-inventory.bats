@@ -172,3 +172,137 @@ YAML
   [ "$status" -eq 0 ]
   [ "$output" = "bats:tests/suite" ]
 }
+
+# ─── P072 Step 10: cross-runner reconciliation ─────────────────────────────
+#
+# A gate's `source_paths` names the file that DECLARES it, not the test it
+# runs — all 8 declared-command units in this repository share
+# `.aid-o/config/execution.yaml`. Treating that as a test-file identity makes
+# the inventory fail on its own project. The relation a gate has with the
+# tests it dispatches lives in `command.argv`, and that is what `contains[]`
+# is derived from.
+
+_inv_out() {
+  local out="$BATS_TEST_TMPDIR/inv-$RANDOM"
+  mkdir -p "$out"
+  bash "$AID_PLUGIN_PATH/scripts/aid-test-inventory.sh" \
+    --project-root "$1" --audit-id recon --output-dir "$out" >/dev/null 2>&1 || return $?
+  echo "$out"
+}
+
+@test "P072 Step 10: the reconciliation block is published with the arithmetic" {
+  local repo out
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  run jq -e '.reconciliation | has("per_runner_counts") and has("total_run_units")
+             and has("files_seen") and has("overlaps") and has("contains")' "$out/inventory.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "P072 Step 10: the 8 declared gates sharing execution.yaml do NOT trip the collision guard" {
+  # The whole point: a naive path-identity map sees eight same-runner units
+  # claiming one path and exits 9 on this very repository.
+  local repo out
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-test-inventory.sh" \
+    --project-root "$repo" --audit-id nocollide --output-dir "$BATS_TEST_TMPDIR/nc"
+  [ "$status" -eq 0 ]
+}
+
+@test "P072 Step 10: files_seen counts TEST files, excluding the gate-declaring config" {
+  local repo out seen decl
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  seen="$(jq '.reconciliation.files_seen' "$out/inventory.json")"
+  # execution.yaml must not be among the counted test files
+  run jq -e '[.reconciliation.overlaps[].path] | index(".aid-o/config/execution.yaml") == null' "$out/inventory.json"
+  [ "$status" -eq 0 ]
+  [ "$seen" -gt 100 ]
+}
+
+@test "P072 Step 10: contains[] is derived from the gate COMMAND, not its source_paths" {
+  local repo out
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  # gate:bats_fsm invokes one bats file directly — an exact membership of 1.
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_fsm")
+             | "\(.kind)/\(.membership)/\(.run_unit_ids|length)"' "$out/inventory.json"
+  [ "$output" = "direct_invocation/exact/1" ]
+}
+
+@test "P072 Step 10: the two lane gates are complementary partitions, not overlapping sets" {
+  # `--pool-only` and `--dedicated-only` split the bats units between them.
+  # Recording both as containing every bats unit produced 105 false
+  # double-execution reports.
+  local repo out
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_all") | .partition' "$out/inventory.json"
+  [ "$output" = "pool" ]
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_boundary") | .partition' "$out/inventory.json"
+  [ "$output" = "dedicated" ]
+}
+
+@test "P072 Step 10: a candidate set is marked runtime_partitioned, never asserted as exact" {
+  local repo out
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  run jq -r '.reconciliation.contains[] | select(.kind=="catalog_pool_runner" or .kind=="aggregate_runner")
+             | .membership' "$out/inventory.json"
+  [[ "$output" != *"exact"* ]]
+}
+
+@test "P072 Step 10: a template-placeholder gate contains nothing and is context_required" {
+  local repo out
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:targeted_tests")
+             | "\(.kind)/\(.run_unit_ids|length)"' "$out/inventory.json"
+  [ "$output" = "context_required/0" ]
+}
+
+@test "P072 Step 10: no EXACT-membership unit is reached by two gates in this repository" {
+  # The honest double-execution surface. A runtime-partitioned candidate set
+  # must not be counted here, or every pooled bats file looks duplicated.
+  local repo out dupes
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  dupes="$(jq '[.reconciliation.contains[] | select(.membership=="exact")
+                | . as $c | $c.run_unit_ids[] | {unit:., gate:$c.gate}]
+               | group_by(.unit) | map(select(length>1)) | length' "$out/inventory.json")"
+  [ "$dupes" = "0" ]
+}
+
+@test "P072 Step 10: two units of the SAME runner claiming one file exits 9" {
+  # An adapter defect, reported rather than smoothed over by a tie-break.
+  local proj="$BATS_TEST_TMPDIR/dupe-proj"
+  mkdir -p "$proj/tests"
+  printf '#!/usr/bin/env bash\necho hi\n' > "$proj/tests/test-a.sh"
+  # A symlink under a different name would be two sh: ids for one real file if
+  # the adapter followed it; the guard exists so that class fails loudly.
+  run bash -c '
+    source "$1/scripts/lib/aid-gate-runtime-baseline.sh" 2>/dev/null || true
+    source "$1/scripts/lib/aid-test-adapter-contract.sh"
+    units="[{\"run_unit_id\":\"sh:a\",\"runner\":\"sh\",\"source_paths\":[\"tests/x.sh\"]},
+            {\"run_unit_id\":\"sh:b\",\"runner\":\"sh\",\"source_paths\":[\"tests/x.sh\"]}]"
+    sed -n "/^_aid_inventory_reconcile()/,/^}/p" "$1/scripts/aid-test-inventory.sh" > "$2/rec.sh"
+    source "$2/rec.sh"
+    _aid_inventory_reconcile "$units"
+  ' _ "$AID_PLUGIN_PATH" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"claimed twice by runner sh"* ]]
+}
+
+@test "P072 Step 10: a bats/sh overlap on one file exits 9 rather than being resolved by precedence" {
+  # Shebang classification should make this impossible, so it is an adapter
+  # defect — not something to pick a winner for.
+  run bash -c '
+    units="[{\"run_unit_id\":\"bats:x\",\"runner\":\"bats\",\"source_paths\":[\"tests/x.sh\"]},
+            {\"run_unit_id\":\"sh:x\",\"runner\":\"sh\",\"source_paths\":[\"tests/x.sh\"]}]"
+    sed -n "/^_aid_inventory_reconcile()/,/^}/p" "$1/scripts/aid-test-inventory.sh" > "$2/rec2.sh"
+    source "$2/rec2.sh"
+    _aid_inventory_reconcile "$units"
+  ' _ "$AID_PLUGIN_PATH" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"BOTH the bats and sh adapters"* ]]
+}

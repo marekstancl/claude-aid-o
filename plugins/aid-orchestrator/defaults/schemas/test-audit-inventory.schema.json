@@ -90,6 +90,114 @@
         },
         "additionalProperties": true
       }
+    },
+    "reconciliation": {
+      "type": "object",
+      "description": "P072 Step 10 — how the adapters' outputs add up. Present so a reader can check the portfolio's own arithmetic instead of trusting it.",
+      "additionalProperties": false,
+      "required": [
+        "per_runner_counts",
+        "total_run_units",
+        "files_seen",
+        "overlaps",
+        "contains"
+      ],
+      "properties": {
+        "per_runner_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "total_run_units": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_seen": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct TEST-file paths. Excludes declared-command units, whose source_paths names the file that declares the gate rather than a test."
+        },
+        "overlaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "ids",
+              "runners"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "runners": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "contains": {
+          "type": "array",
+          "description": "Which run units each declared gate actually dispatches, derived from its command.argv — NOT from its source_paths. This is what lets a double-execution check tell a legitimate membership apart from the same unit being reached by two independent gates.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "gate",
+              "kind",
+              "partition",
+              "membership",
+              "run_unit_ids"
+            ],
+            "properties": {
+              "gate": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "aggregate_runner",
+                  "catalog_pool_runner",
+                  "direct_invocation",
+                  "context_required"
+                ]
+              },
+              "run_unit_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "partition": {
+                "enum": [
+                  "pool",
+                  "dedicated",
+                  "all"
+                ],
+                "description": "Which slice of its candidate set the gate dispatches. `--pool-only` and `--dedicated-only` are complementary, so the two lane gates do not overlap despite sharing a candidate set."
+              },
+              "membership": {
+                "enum": [
+                  "exact",
+                  "runtime_partitioned"
+                ],
+                "description": "`exact` — run_unit_ids is what this gate runs. `runtime_partitioned` — it is the CANDIDATE set; the real membership is decided at dispatch time, so treating it as exact produces false double-execution reports."
+              }
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false

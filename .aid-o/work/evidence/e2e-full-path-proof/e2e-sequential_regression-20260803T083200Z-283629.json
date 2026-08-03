@@ -1,0 +1,29 @@
+{
+  "run_id": "e2e-sequential_regression-20260803T083200Z-283629",
+  "scenario": "sequential_regression",
+  "pass": true,
+  "stages_verified": [
+    {
+      "stage": "bootstrap_catalog_approved",
+      "pass": true
+    },
+    {
+      "stage": "bootstrap_mapping_confirmed",
+      "pass": true
+    },
+    {
+      "stage": "execution_yaml_generated_with_targeted_tests_gate",
+      "pass": true
+    },
+    {
+      "stage": "sequential_mode_targeted_tests_passes_unchanged",
+      "pass": true
+    },
+    {
+      "stage": "sequential_mode_never_writes_emit_units_artifact",
+      "pass": true
+    }
+  ],
+  "commit_sha": "53a7be9ae333ba07fd094f078399420400d6e54f",
+  "evaluated_at": "2026-08-03T08:32:00Z"
+}

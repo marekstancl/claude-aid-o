@@ -152,6 +152,139 @@ combined_units="$(_aid_test_inventory_annotate_lock_usage "$project_root" "$comb
 # license to skip Wave 0's blanket "purely static discovery" caveat).
 combined_units="$(jq -c 'map(.confidence = "low")' <<<"$combined_units")"
 
+# ─── P072 Step 10: cross-runner reconciliation ─────────────────────────────
+#
+# Two things this must NOT do, both learned the hard way:
+#
+#   * It must not treat a declared gate's `source_paths` as a test-file
+#     identity. A gate's source_paths names the file that DECLARES it — all 8
+#     declared-command units in this repository share
+#     `.aid-o/config/execution.yaml` — so a naive path-identity map sees eight
+#     same-runner units claiming one path and fails this very repository.
+#     The relation a gate has with the tests it runs lives in `command.argv`.
+#
+#   * It must not silently de-duplicate. A file claimed by two adapters, or an
+#     id emitted twice, is a defect to report, not an inconvenience to smooth
+#     over — the disposition reconciliation downstream counts on ids being
+#     exactly as unique as they claim.
+_aid_inventory_reconcile() {
+  local units_json="$1"
+
+  # (1) Path identity over the runners whose source_paths really is the test
+  #     file. `declared-command` is excluded by construction.
+  local dupe_same_runner
+  dupe_same_runner="$(jq -r '
+    [ .[] | select(.runner != "declared-command")
+      | {runner, path: (.source_paths[0] // ""), id: .run_unit_id}
+      | select(.path != "") ]
+    | group_by([.path, .runner])
+    | map(select(length > 1))
+    | .[0] // empty
+    | "\(.[0].path) claimed twice by runner \(.[0].runner): \(map(.id) | join(", "))"
+  ' <<<"$units_json")"
+  if [[ -n "$dupe_same_runner" ]]; then
+    echo "aid-test-inventory.sh: $dupe_same_runner" >&2
+    echo "  Two units of the SAME runner cannot claim one file — this is an adapter defect, and resolving it by an arbitrary tie-break would hide it." >&2
+    exit 9
+  fi
+
+  # (2) Cross-runner overlap, resolved by a fixed precedence: a package-script
+  #     invocation is what the project actually runs, so it outranks a bare
+  #     shell discovery of the same file. bats and sh cannot overlap after the
+  #     shebang classification, so an overlap between THEM is a defect.
+  local overlaps_json
+  overlaps_json="$(jq -c '
+    [ .[] | select(.runner != "declared-command")
+      | {runner, path: (.source_paths[0] // ""), id: .run_unit_id}
+      | select(.path != "") ]
+    | group_by(.path)
+    | map(select(length > 1))
+    | map({ path: .[0].path, ids: map(.id), runners: map(.runner) })
+  ' <<<"$units_json")"
+
+  local bad_overlap
+  bad_overlap="$(jq -r '
+    [ .[] | select((.runners | index("bats")) != null and (.runners | index("sh")) != null) ]
+    | .[0] // empty | .path // empty' <<<"$overlaps_json")"
+  if [[ -n "$bad_overlap" ]]; then
+    echo "aid-test-inventory.sh: '$bad_overlap' was claimed by BOTH the bats and sh adapters — shebang classification should make that impossible, so this is an adapter defect rather than something to resolve by precedence." >&2
+    exit 9
+  fi
+
+  # (3) contains[] — derived from each declared gate's argv, never from its
+  #     source_paths. This is the relation that tells a later double-execution
+  #     check the difference between "gate X legitimately runs unit Y" and
+  #     "unit Y was reached twice by two independent gates".
+  local contains_json
+  contains_json="$(jq -c '
+    (. | map(select(.runner == "bats" or .runner == "sh"))) as $tests
+    | [ .[] | select(.runner == "declared-command")
+        | . as $g
+        # Declared gates carry `type: shell` with a `.command.shell` string,
+        # not an argv array — reading only argv found nothing and produced an
+        # empty contains[], which would have looked like "no gate runs any
+        # test" rather than like a bug.
+        | (if (.command.argv // null) != null
+           then (.command.argv | join(" "))
+           else (.command.shell // "") end) as $cmd
+        | if ($cmd | test("\\{[a-z_]+\\}")) then
+            {gate: $g.run_unit_id, kind: "context_required",
+             partition: "all", membership: "exact", run_unit_ids: []}
+          elif ($cmd | test("run-all-tests\\.sh")) then
+            # The aggregate runner skips suites delegated to their own CI job,
+            # so its real membership is also decided at runtime.
+            {gate: $g.run_unit_id, kind: "aggregate_runner",
+             partition: "all", membership: "runtime_partitioned",
+             run_unit_ids: ($tests | map(.run_unit_id))}
+          elif ($cmd | test("aid-bats-parallel-lane\\.sh")) then
+            # The lane PARTITIONS the bats units — `--pool-only` runs the
+            # pool, `--dedicated-only` runs the boundary files — so the two
+            # gates are complementary, not overlapping. Claiming both contain
+            # every bats unit produced 105 false double-execution reports.
+            # Which unit lands in which bucket is a RUNTIME fact (it depends
+            # on the catalog/allowlist at dispatch time), so the candidate set
+            # is recorded with membership: "runtime_partitioned" rather than
+            # asserted as exact.
+            {gate: $g.run_unit_id, kind: "catalog_pool_runner",
+             partition: (if ($cmd | test("--dedicated-only")) then "dedicated"
+                         elif ($cmd | test("--pool-only")) then "pool"
+                         else "all" end),
+             membership: "runtime_partitioned",
+             run_unit_ids: ($tests | map(select(.runner == "bats") | .run_unit_id))}
+          else
+            # Plain substring containment, not a regex: a source path is full
+            # of `/` and `.`, which as a pattern would match far more than the
+            # file it names.
+            ($tests | map(select(.source_paths[0] as $p | ($cmd | contains($p)))) | map(.run_unit_id)) as $direct
+            | if ($direct | length) > 0
+              then {gate: $g.run_unit_id, kind: "direct_invocation",
+                    partition: "all", membership: "exact", run_unit_ids: $direct}
+              else empty end
+          end ]
+  ' <<<"$units_json")"
+
+  # (4) The arithmetic must close. A unit that vanished between discovery and
+  #     publication is exactly what nobody would otherwise notice.
+  local per_runner_json total_units files_seen emitted
+  per_runner_json="$(jq -c '[.[] | .runner] | group_by(.) | map({(.[0]): length}) | add // {}' <<<"$units_json")"
+  total_units="$(jq 'length' <<<"$units_json")"
+  emitted="$(jq '[.[] | .runner] | length' <<<"$units_json")"
+  files_seen="$(jq '[.[] | select(.runner != "declared-command") | .source_paths[0] // empty] | unique | length' <<<"$units_json")"
+  if [[ "$total_units" -ne "$emitted" ]]; then
+    echo "aid-test-inventory.sh: run-unit arithmetic does not close ($total_units published vs $emitted emitted) — a unit vanished between discovery and publication" >&2
+    exit 8
+  fi
+
+  jq -nc \
+    --argjson per_runner "$per_runner_json" \
+    --argjson overlaps "$overlaps_json" \
+    --argjson contains "$contains_json" \
+    --argjson total "$total_units" \
+    --argjson files "$files_seen" \
+    '{per_runner_counts: $per_runner, total_run_units: $total, files_seen: $files,
+      overlaps: $overlaps, contains: $contains}'
+}
+
 # ─── Collision detection: two adapters claiming the same run_unit_id ───────
 collisions="$(adapter_check_run_unit_id_collisions "$combined_units")"
 if [[ -n "$collisions" ]]; then
@@ -168,16 +301,20 @@ units_file="$(mktemp)"
 trap 'rm -f "$units_file"' EXIT
 printf '%s' "$combined_units" > "$units_file"
 
+reconciliation_json="$(_aid_inventory_reconcile "$combined_units")"
+
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 runner_families_json="$(jq -c '[.[].runner] | unique' <<<"$combined_units")"
 inventory_json="$(jq -n \
   --arg gen "$generated_at" \
   --argjson families "$runner_families_json" \
+  --argjson reconciliation "$reconciliation_json" \
   --slurpfile units_wrap "$units_file" \
   '{
     schema_version: "1.0.0",
     generated_at: $gen,
     runner_families: $families,
+    reconciliation: $reconciliation,
     entries: [$units_wrap[0][] | {run_unit_id, runner, adapter: (.provenance[0] // .runner), confidence, isolation: {lock_usage: .isolation.lock_usage}}]
   }')"
 
