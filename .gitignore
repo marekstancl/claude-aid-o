@@ -90,7 +90,7 @@ docs/
 # specifically because it lost tracking here with no negation rule. Restored
 # 2026-07-09; do not remove this line without an explicit decision to stop
 # tracking findings history.
-!docs/plans/BACKLOG.md
+!docs/plans/2026-06-29-BACKLOG.md
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
 .aid-o/

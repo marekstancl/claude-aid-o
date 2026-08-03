@@ -58,7 +58,7 @@ elsewhere in this historical checklist.
    it as a component result, not proof that the complete release path is fast.
 2. [ ] **Land and re-ground the P066 decision-quality follow-up** against the
    released P069/P071 code:
-   `docs/plans/IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`
+   `docs/plans/2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`
    (documentation branch `docs/p066-decision-quality-followup`, current update
    `12b37b9`).
 3. [ ] **Fold the unfinished P070 discovery gap into that follow-up** instead
@@ -82,7 +82,7 @@ elsewhere in this historical checklist.
 7. [ ] **Then execute the separate Help/Init/Setup/Release maintenance stream.**
    Grounding source:
    `.aid-o/work/interim-AID-HELP-INIT-SETUP-AND-HUMAN-HANDOFF-UX.md`;
-   configuration authority source: `docs/plans/BACKLOG.md` IMP-261. Its writer
+   configuration authority source: `docs/plans/2026-06-29-BACKLOG.md` IMP-261. Its writer
    must inventory every current `/aid-help`, `/aid-init`, `/aid-setup` and
    `aid-release.sh` behavior, merge/precedence rule, upgrade path and user-facing
    instruction before changing commands. Include the recurring release defects
@@ -117,7 +117,7 @@ as awaiting implementation.
 1. [ ] Finish and release P071, then keep its implementation stable. P071 is a
    component result, not proof that the complete test path is fast.
 2. [ ] Re-ground and implement
-   `docs/plans/IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md` against the
+   `docs/plans/2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md` against the
    released P069/P071 contracts.
 3. [ ] Fold the unfinished P070 discovery gap into that follow-up rather than
    running P070 separately: inventory Bats, standalone shell suites, declared
@@ -133,9 +133,9 @@ as awaiting implementation.
    → P069 → generated `execution.yaml` → real `aid-run-gates.sh` receipts.
    Evidence must show no duplicate execution and real before/after wall-clock.
 7. [ ] Execute the separate Help/Init/Setup/Release stream from
-   `docs/plans/IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`, including
+   `docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`, including
    the release-liveness defects routed through
-   `docs/plans/IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`.
+   `docs/plans/2026-08-02-IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`.
 8. [ ] Resume P061 E4/E5 → P061 close → P062/E10 re-grounding only after the
    test and command/configuration paths have truthful fresh-clone evidence.
 
@@ -373,7 +373,7 @@ diagnosis. Do not alter its branch from either follow-up below.
 ### 5C — decision-quality audit follow-up — PLANNED
 
 Canonical plan:
-`docs/plans/IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`.
+`docs/plans/2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`.
 
 - [ ] Re-ground the narrow P066↔P069 catalog contract after P069 is merged or
   frozen.
@@ -390,7 +390,7 @@ Canonical plan:
 ### 5D — entry-point UX and human handoffs — PLANNED, independent
 
 Canonical plan:
-`docs/plans/IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`.
+`docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`.
 
 - [ ] Ground every public command and every init/setup write authority.
 - [ ] Make `/aid-help` mechanically complete, while keeping its prose concise
@@ -418,7 +418,7 @@ neither implementation may modify P069's active branch.
 - [ ] **Post-P068 integrity/liveness hardening:** implement IMP-282 together
   with the verified dogfood common-dir protection (IMP-280) and CP3 prefilter
   evidence/range fixes, from
-  `docs/plans/IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`. Keep WAN-only
+  `docs/plans/2026-08-02-IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`. Keep WAN-only
   `docs_updated` report IMP-281 out until it has a local reproduction.
 
 - [x] Ground the interim brief against current main and produce a reviewable

@@ -222,7 +222,7 @@ work of this plan unless a named step owns them.
   deliberately terminal and is NEVER reversed in place. P068 must not assume,
   add, or rely on any in-tool reopen of `merged_to_plan`. An incorrect entry is
   corrected by the documented, PM-authorized recovery ceremony
-  (`docs/plans/IMP-266-merged-to-plan-recovery-CEREMONY.md`): a new corrective
+  (`docs/plans/2026-07-24-IMP-266-merged-to-plan-recovery-CEREMONY.md`): a new corrective
   EPIC and/or the non-destructive `plan-state --repair` + `--attest-source-ref`
   path, recorded in the git-tracked lifecycle manifest and op log. **CF1**
   (abandoned/superseded EPIC lifecycle path) and Step 6's close/abort design must
@@ -2111,7 +2111,7 @@ cover both renderings. Everything else under `docs/` is out of scope and
 the check must say so rather than silently skipping it, because `docs/`
 is overwhelmingly history and specification, not instruction: at HEAD,
 `docs/plans/archive/**` alone contributes 12 `aid-release.sh` hits from a raw
-agent transcript, `docs/plans/BACKLOG.md` contributes 24 `plan-close` hits,
+agent transcript, `docs/plans/2026-06-29-BACKLOG.md` contributes 24 `plan-close` hits,
 and `docs/plans/AID-plan-level-release-boundary-roadmap.md` — this plan's own
 source specification — contributes 11. None of those can carry a mode fork,
 and none of them instructs an agent. Running the denylist across all of

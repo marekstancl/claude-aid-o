@@ -869,7 +869,7 @@ for a human or a future automation to act on, not a trigger. This is proven beha
 ### What E8 Does NOT Deliver
 
 E8 is deliberately **C3 audit core**, not a full external-audit-and-auto-rerun system. See
-[`docs/plans/BACKLOG.md` § "E8 Deferred"](plans/BACKLOG.md) for the authoritative list; the
+[`docs/plans/2026-06-29-BACKLOG.md` § "E8 Deferred"](plans/2026-06-29-BACKLOG.md) for the authoritative list; the
 items that most affect how you should read the guarantees above:
 
 - **No real `codex exec` dispatch** — `aid-audit-independence.sh` only *detects* whether

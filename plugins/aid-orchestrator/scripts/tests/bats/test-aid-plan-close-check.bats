@@ -302,8 +302,8 @@ YAML
   git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: active.md/queue.yaml sync"
 
   mkdir -p "$TEST_PROJECT_ROOT/docs"
-  echo "IMP-200/201 backlog notes" >> "$TEST_PROJECT_ROOT/docs/BACKLOG.md"
-  git -C "$TEST_PROJECT_ROOT" add docs/BACKLOG.md
+  echo "IMP-200/201 backlog notes" >> "$TEST_PROJECT_ROOT/docs/2026-06-29-BACKLOG.md"
+  git -C "$TEST_PROJECT_ROOT" add docs/2026-06-29-BACKLOG.md
   git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: IMP-200/201 backlog notes"
   local trailing_head; trailing_head=$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)
 

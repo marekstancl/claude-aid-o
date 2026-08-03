@@ -16,7 +16,7 @@ This probe is a temporary observation mode:
 2. A separate observer session watches the run from outside the implementation context.
 3. The observer records friction, false-green risk, confusing instructions, stale
    evidence, overwritten evidence, and undocumented requirements.
-4. Findings go to `docs/plans/BACKLOG.md` with origin date and source.
+4. Findings go to `docs/plans/2026-06-29-BACKLOG.md` with origin date and source.
 5. After several EPICs/plans, run a dedicated AID cleanup/refactor session.
 
 The probe must not turn every observation into an immediate fix. The goal is to find
@@ -108,7 +108,7 @@ Minimum poll checklist:
 - the agent visibly hesitating over an unclear instruction
 - documentation saying one thing while a script does another
 
-**When to write an OBS entry:** write to `docs/plans/BACKLOG.md` immediately
+**When to write an OBS entry:** write to `docs/plans/2026-06-29-BACKLOG.md` immediately
 once a finding is confirmed. An unconfirmed suspicion stays as a working note
 in the observer report only — it does not become a backlog item until
 confirmed.
@@ -274,7 +274,7 @@ If any of these three matter, they need a different observation method
 not an extension of this disk-polling runbook.
 
 **Recovering from a deleted/untracked evidence file (lesson 2026-07-09):**
-if `docs/plans/BACKLOG.md` or this runbook itself goes missing from disk
+if `docs/plans/2026-06-29-BACKLOG.md` or this runbook itself goes missing from disk
 (e.g. a merge conflict resolves by deleting a file that a `.gitignore`
 change untracked earlier), do not silently start a fresh file. First check
 `git log --all --oneline -- <path>` for the last commit that touched it,
@@ -396,4 +396,4 @@ The first field report produced five confirmed AID-system findings:
 5. CP3 `base_commit` fallback can silently approximate the review range when the
    exact run base cannot be read.
 
-These are tracked in `docs/plans/BACKLOG.md` as B-004 through B-008.
+These are tracked in `docs/plans/2026-06-29-BACKLOG.md` as B-004 through B-008.

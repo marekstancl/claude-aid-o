@@ -23,7 +23,7 @@ This satisfies the brief's binding rule: *do not choose the recovery model
 silently.*
 
 The full analysis, both options, and the controller's recommendation are in
-`docs/plans/IMP-266-merged-to-plan-recovery-DECISION.md`.
+`docs/plans/2026-07-24-IMP-266-merged-to-plan-recovery-DECISION.md`.
 
 ## Controller recommendation (for PM ratification)
 
@@ -49,7 +49,7 @@ The PM ratified **Option B**: `merged_to_plan` stays terminal (accounting is not
 erased); a wrong entry is corrected by a documented, audited recovery ceremony —
 a new corrective EPIC or the ceremony steps — never an in-tool reverse
 transition. The ceremony (the Option B deliverable, doc-only) is in
-`docs/plans/IMP-266-merged-to-plan-recovery-CEREMONY.md`. Option A is deferred to
+`docs/plans/2026-07-24-IMP-266-merged-to-plan-recovery-CEREMONY.md`. Option A is deferred to
 P068+ if a real incident shows the ceremony is too slow or error-prone.
 
 **Last Updated:** 2026-07-24

@@ -292,3 +292,123 @@ immediately. P069 must finish or freeze before implementation starts, because
 the final command/config authority inventory has to describe the released
 gate-scheduler surface. Implement this as its own maintenance stream after the
 P066/P069 contract re-grounding; do not fold it into either active plan.
+
+## 10. Validated follow-up — PM emergency override and plan-boundary recovery
+
+**Trigger:** P082 and P083 dogfood in the `wan` workspace. This is a product
+requirement: the PM needs an intentional, universal backdoor when AID's own
+bookkeeping or an implementation defect prevents the supported path from
+making progress. It is not an agent privilege and it must never be a silent
+success.
+
+### Grounding result
+
+This follow-up was independently checked against the implementation and its
+focused regression tests before being added to this plan:
+
+1. `plan-finalize --stage review` deliberately invalidates a frozen candidate
+   after either a plan-branch commit or a tracked dirty write; the focused
+   "accepted Curator fix" test proves that it invalidates the gate report and
+   all review outputs. This behavior is correct for ordinary operation.
+2. The Reporter contract nevertheless tells an agent to commit the delivery
+   report and boundary manifest, while the same plan-final contract says that
+   any tracked write is a fix. The P082 sequence (reviewed candidate moved by
+   report/backlog/state commits) is therefore an instruction/ownership
+   contradiction, not merely an operator sequencing error.
+3. `aid-auto-pipeline.sh` commits/stamps lifecycle state and then calls
+   `plan-start`, but does not first prove that the source plan is committed in
+   the target branch. P083 consequently permitted task branches whose recorded
+   base predated the committed plan. Moving those branches manually made the
+   recorded lineage stale, as the lineage check is designed to detect.
+4. Existing `--force --reason` already provides an audited escape hatch for
+   selected FSM init/transition paths (and the focused lineage test proves it).
+   `plan-close` and `plan-finalize` reject `--force` as an unknown flag, even
+   though `plan-close` is the terminal operation that a PM must be able to
+   complete when AID itself is defective.
+5. The advertised "re-init EPIC" remedy for a legitimate mid-EPIC `plan.json`
+   change is incomplete: normal init rejects the existing state file and
+   `plan-state --repair` intentionally cannot rewrite lineage. A supported,
+   audited recovery transaction is required.
+
+### D6 — universal PM `--force` backdoor
+
+Every public, state-changing AID lifecycle command must accept:
+
+```text
+--force --reason "<PM decision and concrete reason, minimum 20 characters>"
+```
+
+This includes init/re-init, transitions, increment/done advance,
+plan-finalize, plan-merge-to-main, plan-close, repair/attestation and any
+subsequently added lifecycle command. A controller may pass it only after an
+explicit PM instruction; implementers, reviewers and delegated agents must
+never select or synthesize it.
+
+`--force` means that the PM consciously accepts the named failed preconditions
+in order to recover control of the project. It is a real backdoor: a broken AID
+path must not be able to strand the PM merely because the normal verifier or
+bookkeeping state cannot be repaired first. It must, however, preserve truth:
+
+- parse and require `--reason` consistently on every command;
+- record command, normalized arguments (with secrets redacted), plan/EPIC/run,
+  current and requested state, target/candidate SHA where applicable, each
+  precondition bypassed, timestamp and reason in the timeline, audit log and a
+  durable force receipt;
+- for a plan merge/close, commit or otherwise durably attach the force receipt
+  to the target/lifecycle record where possible; if that durable write is the
+  broken operation, write the local receipt and return a clear reconciliation
+  instruction rather than pretending the audit is complete;
+- mark every resulting marker, receipt and human handoff as
+  `forced_override: true` with the reason/receipt reference. A forced close may
+  end the plan, but must not be rendered as an ordinary fully-verified PASS;
+- make the override invocation-scoped and single-operation only. It must not
+  leak through an environment variable into a later command; and
+- never let a force receipt silently satisfy a normal evidence or gate check in
+  another plan. It is PM risk acceptance, not fabricated evidence.
+
+The normal path remains fail-closed. AID must print the exact normal recovery
+first; the PM backdoor is the explicit second route. This preserves useful
+diagnostics while ensuring the operator is never trapped by a tool defect.
+
+### D7 — eliminate the P082/P083 traps before force is needed
+
+1. **Committed-source preflight.** Before lifecycle creation, `plan-start` or
+   any `epic-start`, require the source plan path to resolve from the target
+   branch and require its committed bytes to equal the plan being generated.
+   Refuse before creating a branch, with: "commit the plan on `<target>` and
+   rerun generation." Add a fixture proving no lifecycle/plan/task branch is
+   created when the plan exists only in the worktree.
+2. **Immutable review boundary.** After freeze, plan-final agents write only
+   run-scoped evidence. Move the committed delivery/boundary projection to a
+   post-merge/close transaction that derives it from already verified evidence;
+   no agent or controller may commit it to `plan/<id>` during review. Add a
+   regression test proving the normal Reporter path completes one review round
+   without moving `candidate_sha`.
+3. **Supported recovery, before generic force.** Add a PM-audited transaction
+   that can (a) verify and record a legitimate task-branch rebase/fast-forward
+   onto `plan/<id>`, updating the recorded base, and (b) supersede/archive a
+   stale EPIC FSM run and reinitialize it against the new `plan.json` hash.
+   It must validate real Git ancestry, preserve old evidence, create a new run
+   identity and refuse after the EPIC merged. `--force` remains available when
+   even that recovery code is the defect.
+4. **Instruction handoff.** Put one identical rule in controller, implementer
+   and specialist-facing material: commit the source plan before plan start;
+   agents never alter branch lineage or FSM state; after freeze only evidence
+   outside the candidate may be written; a tracked candidate write is a FIX and
+   requires a new candidate/review. The controller alone may use force after PM
+   authorization.
+5. **Small deterministic UX repairs.** Align the documented no-dependency
+   syntax with its parser, lint Testing Strategy/AC file references against a
+   step's `Files:` allowlist, render the first machine index (`0`) as human
+   "Step 1", and ensure batch generation restores its original branch without
+   leaving its own runtime pointer as a false dirty-tree blocker.
+
+**Acceptance:** focused tests cover normal fail-closed behavior and one forced
+case for every lifecycle command; each forced case creates all applicable audit
+records and has `forced_override: true` in its resulting artifact. A PM can
+force-close a deliberately corrupted fixture, the fixture is terminal, and
+both CLI and final handoff visibly state that its normal evidence guarantees
+were overridden. The P082 Reporter fixture needs no second review solely to
+commit reporting output. The P083 uncommitted-plan fixture fails before any
+plan/task branch exists, while the supported recovery fixture preserves prior
+evidence and restarts with an auditable new run.
