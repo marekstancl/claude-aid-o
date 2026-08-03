@@ -48,12 +48,22 @@ BRIEF_SCHEMA="${SCHEMAS_DIR}/test-audit-plan-brief.schema.json"
 _die() { echo "aid-test-audit-consolidate.sh: $2" >&2; exit "$1"; }
 
 audit_id="" wave_artifacts_dir="" output_dir="" dispatch_manifest=""
+# P072 Step 4 — the mode decides whether per-unit dispositions are OWED, and
+# the inventory is the denominator every coverage figure is computed against.
+# Both default to the pre-P072 behaviour so an existing caller is unaffected.
+audit_mode="measure" inventory_path="" project_root=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
     --wave-artifacts-dir) [[ $# -ge 2 ]] || _die 2 "--wave-artifacts-dir requires a value"; wave_artifacts_dir="$2"; shift 2 ;;
     --dispatch-manifest) [[ $# -ge 2 ]] || _die 2 "--dispatch-manifest requires a value"; dispatch_manifest="$2"; shift 2 ;;
     --output-dir) [[ $# -ge 2 ]] || _die 2 "--output-dir requires a value"; output_dir="$2"; shift 2 ;;
+    --mode)
+      [[ $# -ge 2 ]] || _die 2 "--mode requires a value"
+      case "$2" in static|measure|full) audit_mode="$2" ;; *) _die 2 "--mode must be static|measure|full" ;; esac
+      shift 2 ;;
+    --inventory) [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory_path="$2"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
 done
@@ -78,8 +88,13 @@ fi
 
 # ─── Read + schema-validate exactly the artifacts the manifest declares,
 #     verifying each one's own identity fields match what was declared ────
-all_findings_ndjson="$(mktemp)"
-trap 'rm -f "$all_findings_ndjson"' EXIT
+# One temp DIR, one trap, installed before anything can fail — two sequential
+# mktemp calls under `set -e` leak the first if the second fails.
+_tmpdir="$(mktemp -d)"
+trap 'rm -rf "$_tmpdir"' EXIT
+all_findings_ndjson="${_tmpdir}/findings.ndjson"
+all_dispositions_ndjson="${_tmpdir}/dispositions.ndjson"
+: > "$all_findings_ndjson"; : > "$all_dispositions_ndjson"
 
 consumed_ndjson="$(mktemp)"
 for ((i = 0; i < expected_count; i++)); do
@@ -108,6 +123,22 @@ for ((i = 0; i < expected_count; i++)); do
   fi
 
   jq -c '.findings[]' <<<"$artifact_json" >> "$all_findings_ndjson" 2>/dev/null || true
+
+  # P072 Step 4 — a shard_portfolio artifact owes one terminal disposition per
+  # run unit it was ASSIGNED. Enforced here rather than in the schema because
+  # only this script knows the audit mode, and static/measure legitimately
+  # produce none.
+  if [[ "$exp_focus" == "shard_portfolio" ]]; then
+    if [[ "$audit_mode" == "full" ]] && ! jq -e 'has("dispositions")' <<<"$artifact_json" >/dev/null; then
+      _die 1 "shard artifact '$basename_f' has no dispositions[] — in full mode every assigned run_unit_id needs exactly one terminal disposition, and silence cannot be told apart from 'never inspected'"
+    fi
+    # No `|| true`: a jq failure here would otherwise read as "this shard
+    # decided nothing", which is exactly the state this reconciliation exists
+    # to detect. A parse failure must fail the consolidation instead.
+    jq -c --arg shard "$act_shard_id" '(.dispositions // [])[] | {shard: $shard, run_unit_id, disposition, missing_proof, next_measurement}' \
+      <<<"$artifact_json" >> "$all_dispositions_ndjson" \
+      || _die 1 "could not read dispositions[] from '$basename_f'"
+  fi
   printf '%s\n' "$basename_f" >> "$consumed_ndjson"
 done
 
@@ -184,6 +215,147 @@ consolidated_tmp="${output_dir%/}/consolidated-findings.json.tmp.$$"
 printf '%s\n' "$consolidated_json" > "$consolidated_tmp"
 mv "$consolidated_tmp" "${output_dir%/}/consolidated-findings.json"
 
+# ─── P072 Step 4: three-way reconciliation ─────────────────────────────────
+#
+# Runs BEFORE the remediation brief is written, so an audit that cannot claim
+# a complete decision never leaves a remediation artifact on disk for someone
+# to pick up. Reconciling afterwards would have produced the brief first and
+# only then said the audit was incomplete.
+#
+# Reconciliation is PER SHARD, not over a flattened global set. A global set
+# comparison is fooled by the obvious case: shard A is assigned {a,b} and
+# emits only {a}, shard B is assigned {c} and emits {b,c} — the flattened
+# sets match exactly, while shard A silently decided nothing about b.
+decision_written="false"
+audit_status_final="complete"
+
+if [[ "$audit_mode" == "full" ]]; then
+  # shellcheck source=lib/aid-test-audit-decision.sh
+  source "${SCRIPT_DIR}/lib/aid-test-audit-decision.sh"
+  # shellcheck source=lib/aid-test-audit-config.sh
+  source "${SCRIPT_DIR}/lib/aid-test-audit-config.sh"
+
+  [[ -n "$inventory_path" && -f "$inventory_path" ]] \
+    || _die 2 "--inventory is required in full mode (it is the denominator every coverage figure is measured against) and must exist"
+  [[ -n "$project_root" && -d "$project_root" ]] \
+    || _die 2 "--project-root is required in full mode — the unresolved-fraction threshold is read from that project's test-audit.yaml, and deriving it from --output-dir guesses wrong"
+
+  # IDs stay JSON end to end. A round trip through newline-delimited text
+  # splits an id containing a control character into two different ids.
+  inventory_ids_json="$(jq -c '[.run_units[].run_unit_id]' "$inventory_path")" \
+    || _die 2 "--inventory '$inventory_path' is not readable as JSON with a run_units[] array — an unreadable inventory is an operational failure, not an empty portfolio"
+
+  inv_dupes="$(jq -r 'group_by(.) | map(select(length>1) | .[0]) | .[0] // empty' <<<"$inventory_ids_json")"
+  [[ -z "$inv_dupes" ]] || _die 6 "inventory lists run_unit_id '$inv_dupes' more than once — identity is corrupt, and de-duplicating it would hide that"
+
+  inventory_unique_json="$(jq -c 'unique' <<<"$inventory_ids_json")"
+  inventory_count="$(jq 'length' <<<"$inventory_unique_json")"
+
+  if [[ "$inventory_count" -eq 0 ]]; then
+    audit_status_final="incomplete"
+    decision_json="$(jq -n --arg id "$audit_id" '{
+      schema_version:"aid-test-audit-decision-v1", audit_id:$id,
+      audit_status:"incomplete", incomplete_reason:"empty_inventory",
+      current_runtime:{kind:"unknown",duration_ms:null,scope:["none"]},
+      actions:[], parallelization:{lanes:[],smallest_safe_pilot:null}, unresolved:[],
+      portfolio_coverage:{inventory_count:0,assigned_count:0,disposition_count:0,
+                          missing_run_unit_ids:[],duplicate_run_unit_ids:[]},
+      portfolio_change:{current_run_units:0,proposed_run_units:0,keep:[],rewrite_unit:[],
+                        merge_groups:[],remove:[],runtime_before_ms:null,runtime_after_ms:null,
+                        impact_kind:"unknown"}}')"
+    aid_test_audit_decision_write "$decision_json" "${output_dir%/}/decision.json" \
+      || _die 1 "internal error: the empty-inventory decision artifact failed its own schema"
+    decision_written="true"
+  else
+    # (shard, run_unit_id) pairs on both sides — the multiset comparison.
+    assigned_pairs_json="$(jq -c '[.entries[] | select(.focus == "shard_portfolio")
+      | .shard_id as $s | .run_unit_ids[] | {shard: $s, run_unit_id: .}]' <<<"$manifest_json")" \
+      || _die 1 "could not read shard assignments from the dispatch manifest"
+    decided_pairs_json="$(jq -s -c '[.[] | {shard, run_unit_id}]' "$all_dispositions_ndjson")" \
+      || _die 1 "could not read the collected dispositions"
+    dispositions_json="$(jq -s -c '.' "$all_dispositions_ndjson")" \
+      || _die 1 "could not read the collected dispositions"
+
+    # A disposition naming a unit the inventory never discovered means a shard
+    # invented one — a different failure from merely missing a unit.
+    invented="$(jq -r --argjson inv "$inventory_unique_json" \
+      '[.[] | select(.run_unit_id as $r | $inv | index($r) == null) | .run_unit_id] | unique | .[0] // empty' \
+      <<<"$dispositions_json")"
+    [[ -z "$invented" ]] || _die 5 "a disposition names run_unit_id '$invented', which the inventory never discovered — a shard cannot invent a unit"
+
+    # Assigned-but-not-decided, evaluated per shard.
+    missing_json="$(jq -c -n --argjson a "$assigned_pairs_json" --argjson d "$decided_pairs_json" \
+      '[$a[] | select(. as $p | $d | index($p) == null) | .run_unit_id] | unique')"
+    # Decided more than once for the SAME shard, or by more than one shard.
+    dupes_json="$(jq -c '[.[].run_unit_id] | group_by(.) | map(select(length>1) | .[0]) | unique' \
+      <<<"$decided_pairs_json")"
+
+    assigned_count="$(jq '[.[].run_unit_id] | unique | length' <<<"$assigned_pairs_json")"
+    disposition_count="$(jq '[.[].run_unit_id] | unique | length' <<<"$decided_pairs_json")"
+
+    # The threshold must be a real number in [0,1]. An unreadable value would
+    # otherwise be coerced to 0 by awk, making every audit exceed it.
+    max_unresolved="$(test_audit_decision_key max_unresolved_fraction "$project_root")" \
+      || _die 2 "could not read decision.max_unresolved_fraction from '$project_root' — refusing to guess the threshold that decides whether this audit is complete"
+    awk -v m="$max_unresolved" 'BEGIN{ if (m ~ /^[0-9]*\.?[0-9]+$/ && m+0 >= 0 && m+0 <= 1) exit 0; exit 1 }' \
+      || _die 2 "decision.max_unresolved_fraction '$max_unresolved' is not a number in [0,1]"
+
+    unresolved_json="$(jq -c '[.[] | select(.disposition == "measure") |
+      {run_unit_id, missing_proof: (.missing_proof // "budget_exhausted"),
+       next_measurement: (.next_measurement // "re-run this unit under --mode full with a larger budget")}]' \
+      <<<"$dispositions_json")"
+    unresolved_count="$(jq 'length' <<<"$unresolved_json")"
+
+    reason=""
+    if [[ "$(jq 'length' <<<"$missing_json")" -gt 0 ]]; then
+      reason="coverage_mismatch"
+    elif [[ "$(jq 'length' <<<"$dupes_json")" -gt 0 ]]; then
+      reason="duplicate_dispositions"
+    elif [[ "$inventory_count" -ne "$assigned_count" || "$assigned_count" -ne "$disposition_count" ]]; then
+      reason="coverage_mismatch"
+    elif awk -v u="$unresolved_count" -v t="$inventory_count" -v m="$max_unresolved" \
+          'BEGIN{ exit !((u/t) > m) }'; then
+      # Strictly greater: the configured value is the maximum still ACCEPTED,
+      # so a portfolio sitting exactly on it is complete.
+      reason="unresolved_fraction_exceeded"
+    fi
+
+    keep_json="$(jq -c '[.[] | select(.disposition=="keep") | .run_unit_id] | unique' <<<"$dispositions_json")"
+    rewrite_json="$(jq -c '[.[] | select(.disposition=="rewrite_unit") | .run_unit_id] | unique' <<<"$dispositions_json")"
+    remove_json="$(jq -c '[.[] | select(.disposition=="remove") | .run_unit_id] | unique' <<<"$dispositions_json")"
+    removed_n="$(jq 'length' <<<"$remove_json")"
+
+    status="complete"; reason_field="{}"
+    if [[ -n "$reason" ]]; then
+      status="incomplete"; reason_field="$(jq -nc --arg r "$reason" '{incomplete_reason:$r}')"
+    fi
+    audit_status_final="$status"
+
+    decision_json="$(jq -n \
+      --arg id "$audit_id" --arg status "$status" \
+      --argjson extra "$reason_field" \
+      --argjson inv "$inventory_unique_json" --argjson missing "$missing_json" --argjson dupes "$dupes_json" \
+      --argjson unresolved "$unresolved_json" \
+      --argjson keep "$keep_json" --argjson rewrite "$rewrite_json" --argjson remove "$remove_json" \
+      --argjson ic "$inventory_count" --argjson ac "$assigned_count" --argjson dc "$disposition_count" \
+      --argjson removed_n "$removed_n" '
+      {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
+       current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
+       actions:[], parallelization:{lanes:[], smallest_safe_pilot:null},
+       unresolved:$unresolved,
+       portfolio_coverage:{inventory_count:$ic, assigned_count:$ac, disposition_count:$dc,
+                           missing_run_unit_ids:$missing, duplicate_run_unit_ids:$dupes},
+       portfolio_change:{current_run_units:$ic, proposed_run_units:($ic - $removed_n),
+                         keep:$keep, rewrite_unit:$rewrite, merge_groups:[], remove:$remove,
+                         runtime_before_ms:null, runtime_after_ms:null, impact_kind:"unknown"}}
+      + $extra')"
+
+    aid_test_audit_decision_write "$decision_json" "${output_dir%/}/decision.json" \
+      || _die 1 "internal error: the generated decision artifact failed its own schema"
+    decision_written="true"
+  fi
+fi
+
 # ─── implementation-plan-brief.{json,md} — only when at least one
 # Medium+/actionable finding exists: severity != low AND recommendation is
 # one of fix/split/merge/remove/quarantine (matches
@@ -196,7 +368,12 @@ mv "$consolidated_tmp" "${output_dir%/}/consolidated-findings.json"
 actionable_json="$(jq -c '[.[] | select(.severity != "low" and (.recommendation | IN("fix","split","merge","remove","quarantine")))]' <<<"$with_ids_json")"
 actionable_count="$(jq 'length' <<<"$actionable_json")"
 
-if [[ "$actionable_count" -gt 0 ]]; then
+# An incomplete audit must not leave a remediation brief behind: the brief is
+# the thing a later step picks up, and an audit that cannot claim a complete
+# decision has not earned one.
+if [[ "$audit_status_final" != "complete" ]]; then
+  rm -f "${output_dir%/}/implementation-plan-brief.json" "${output_dir%/}/implementation-plan-brief.md"
+elif [[ "$actionable_count" -gt 0 ]]; then
   consolidated_hash="sha256:$(sha256sum "${output_dir%/}/consolidated-findings.json" | cut -d' ' -f1)"
   items_json="$(jq -c '[.[] | {
     finding_id, run_unit_id, category,
