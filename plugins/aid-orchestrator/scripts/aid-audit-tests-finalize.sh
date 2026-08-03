@@ -48,7 +48,7 @@ audit_id="" wave_artifacts_dir="" dispatch_manifest="" output_dir="" catalog_pat
 # P072 Step 3 — the audit mode reaches the write-plan bridge so its decision
 # gate can apply to `full` only. REQUIRED whenever --write-plan is used: the
 # bridge refuses to guess a mode, and so does this script.
-audit_mode="" inventory_path="" project_root=""
+audit_mode="" inventory_path="" project_root="" profiles_dir="" profile_selection=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -65,6 +65,8 @@ while [[ $# -gt 0 ]]; do
       shift 2 ;;
     --inventory) [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory_path="$2"; shift 2 ;;
     --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
+    --profiles-dir) [[ $# -ge 2 ]] || _die 2 "--profiles-dir requires a value"; profiles_dir="$2"; shift 2 ;;
+    --profile-selection) [[ $# -ge 2 ]] || _die 2 "--profile-selection requires a value"; profile_selection="$2"; shift 2 ;;
     --write-plan) write_plan="true"; shift ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
@@ -136,6 +138,41 @@ if [[ "$audit_mode" == "full" ]]; then
   [[ -d "$project_root" ]] || _die 2 "--project-root '$project_root' does not exist"
 fi
 
+# ─── Profiles ───────────────────────────────────────────────────────────────
+#
+# A measure or full audit that profiled anything writes its receipts under the
+# audit's own output directory. Passing the directory explicitly is allowed;
+# when it is not passed, the conventional location is used IF IT EXISTS.
+#
+# What is deliberately NOT done here: inventing an empty directory so the
+# consolidator has something to read. An absent profiles directory means no
+# unit was profiled, which is a real and reportable state. A present one that
+# fails validation stops the audit inside the consolidator — see
+# lib/aid-test-profile-validate.sh.
+if [[ -z "$profiles_dir" && "$audit_mode" != "static" ]]; then
+  _conventional="${output_dir%/}/profiles"
+  [[ -d "$_conventional" ]] && profiles_dir="$_conventional"
+fi
+# The selection, likewise: conventional location when not named, and it is the
+# artifact that makes "this audit skipped its own diagnosis" a hard failure
+# rather than a thing a reader would have to notice.
+if [[ -z "$profile_selection" && "$audit_mode" != "static" ]]; then
+  _conventional_sel="${output_dir%/}/profile-selection.json"
+  [[ -f "$_conventional_sel" ]] && profile_selection="$_conventional_sel"
+fi
+if [[ -n "$profile_selection" ]]; then
+  [[ -f "$profile_selection" ]] \
+    || _die 2 "--profile-selection '$profile_selection' does not exist"
+  [[ "$audit_mode" != "static" ]] \
+    || _die 2 "--mode static cannot carry a profile selection: a static audit measures nothing to select from"
+fi
+if [[ -n "$profiles_dir" ]]; then
+  [[ -d "$profiles_dir" ]] \
+    || _die 2 "--profiles-dir '$profiles_dir' does not exist — an audit that names a profiles directory must have one"
+  [[ "$audit_mode" != "static" ]] \
+    || _die 2 "--mode static cannot carry profiles: a static audit runs nothing, so a profiling receipt under it did not come from this audit"
+fi
+
 # ─── Stage 1: consolidate (Step 14) — fails closed on any incomplete/
 #     mismatched/undeclared wave artifact; produces NO output on failure.
 consolidate_args=(
@@ -149,6 +186,10 @@ consolidate_args=(
 [[ -n "$audit_mode" ]] && consolidate_args+=(--mode "$audit_mode")
 [[ -n "$inventory_path" ]] && consolidate_args+=(--inventory "$inventory_path")
 [[ -n "$project_root" ]] && consolidate_args+=(--project-root "$project_root")
+# Bound by audit id and by each receipt's evidence-log hash, both re-checked
+# inside the consolidator rather than assumed from the path.
+[[ -n "$profiles_dir" ]] && consolidate_args+=(--profiles-dir "$profiles_dir")
+[[ -n "$profile_selection" ]] && consolidate_args+=(--profile-selection "$profile_selection")
 
 if ! bash "${SCRIPT_DIR}/aid-test-audit-consolidate.sh" "${consolidate_args[@]}" >/dev/null; then
   _die 1 "consolidation failed — refusing to render a chat turn or persist a durable record over an incomplete/invalid audit (no consolidated-findings.json was produced)"

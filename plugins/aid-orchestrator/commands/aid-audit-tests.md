@@ -93,14 +93,48 @@ parser's own project-root validation load-bearing rather than advisory.
    `aid-job.sh` (never batched, never a second process supervisor) —
    `aid-test-audit-measure.sh` checks every command against
    `aid_test_audit_check_allowed` (Step 13) before it ever reaches `aid-job.sh`.
-5. **Finalize via `aid-audit-tests-finalize.sh` — the ONE mandatory production
+5. In `measure`/`full` mode, decide what owes a **cost profile** and produce it.
+   Both halves are scripted, because "was that slow suite ever diagnosed?" must
+   be answerable from the artifacts rather than from what the controller
+   remembered to do:
+
+   a. `aid-test-audit-profile-select.sh --measurements <jsonl> --project-root
+      <root> --audit-id <id> --output <output-dir>/profile-selection.json`
+      ranks the terminal measurements and names the units at or above
+      `decision.profile_trigger_ms`, capped at `decision.profile_max_units`.
+      Units over the trigger but past the cap are written to `deferred` with
+      their measured cost — reported, never dropped.
+
+   b. For **each** selected unit,
+      `aid-test-audit-profile.sh --run-unit-id <id> --catalog <approved catalog>
+      --output-dir <output-dir> --audit-id <id> --target-root <disposable clone>
+      --project-root <root>`. The target root MUST be a disposable clone; the
+      profiler exits 10 against the live checkout or a linked worktree. Each
+      receipt lands in `<output-dir>/profiles/` bound to the audit id and to
+      the sha256 of its own evidence log.
+
+   This step is enforced, not advisory: finalization **fails** when a selected
+   unit has no receipt (see step 6), so skipping it does not produce a
+   quieter audit — it produces no audit.
+
+6. **Finalize via `aid-audit-tests-finalize.sh` — the ONE mandatory production
    entrypoint for this closing chain (Step 24, E4 release blocker).** The
    controller MUST call this script, never the individual consolidator/
    renderer/bridge functions directly:
    `aid-audit-tests-finalize.sh --audit-id <id> --wave-artifacts-dir <dir>
    --dispatch-manifest <path> --output-dir <dir> --mode <static|measure|full>
    [--inventory <path>] [--project-root <path>] [--catalog <path>]
-   [--write-plan]`.
+   [--profiles-dir <dir>] [--profile-selection <path>] [--write-plan]`.
+
+   `--profiles-dir` and `--profile-selection` default to
+   `<output-dir>/profiles` and `<output-dir>/profile-selection.json` when those
+   exist, so step 5's artifacts are picked up without being named again. What
+   they buy is refusal: a receipt that fails schema validation, belongs to
+   another audit, or whose evidence log no longer hashes to what the receipt
+   recorded stops finalization — as does a selected unit with no receipt at
+   all. The version this replaced ended its profile ingestion with
+   `|| echo '[]'`, which turned every one of those into an empty action list
+   indistinguishable from "nothing needed doing".
 
    **`--mode` is required for `--write-plan`, and `--mode full` additionally
    requires `--inventory` and `--project-root`** — the inventory is the
@@ -193,4 +227,4 @@ that consumption is entirely P069's job.
 - Never writes to `.aid-o/config/test-catalog.yaml` directly — that is the
   separate, explicit catalog-approval step's job.
 
-**Last Updated:** 2026-07-30
+**Last Updated:** 2026-08-03

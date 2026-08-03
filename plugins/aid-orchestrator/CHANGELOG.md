@@ -3,6 +3,26 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **`/aid-audit-tests` decision artifact** — a full audit now produces a schema-bound `decision.json` (`aid-test-audit-decision-v1`) recording one terminal disposition per run unit, the portfolio arithmetic behind it, and every proposed action with its impact; the `--write-plan` handoff is gated on it, so an audit that could not decide cannot hand anyone a remediation brief.
+- **Cost profiler (`aid-test-audit-profile.sh`)** — bounded per-run-unit diagnosis that says WHERE the time goes, or says plainly that it cannot. Runs only against a disposable clone, only commands the approved catalog already contains, and only through `aid-job.sh`, so a diagnostic run cannot strand a process group or outlive its budget. A run killed at its deadline reports the prefix it observed and a lower bound, never an extrapolation.
+- **Deterministic profile selection (`aid-test-audit-profile-select.sh`)** — ranks the audit's own measurements and names the units at or above `decision.profile_trigger_ms`, capped by `decision.profile_max_units`. Units over the trigger but past the cap are reported as deferred with their measured cost. Finalization fails when a selected unit has no receipt, so whether a slow suite gets diagnosed is a policy rather than something a controller might forget.
+- **Per-test timing from Bats (`lib/aid-test-timing-bats.sh`)** — parses `--timing` output against the shapes the installed runner really emits (skips, names containing " in ", names ending in something like "42ms", truncated runs), and records plainly what Bats cannot report: it gives one duration per case and does not separate setup, body and teardown.
+- **Shell-suite adapter and run-unit discovery** — the 36 `test-*.sh` suites are now discoverable and correctly classified by the interpreter their shebang names, rather than by whether the word `bats` appears somewhere in the file.
+
+### Changed
+- **`aid-audit-tests-finalize.sh` is the one production entrypoint** — it now passes `--mode`, `--inventory`, `--project-root`, and (when present) `--profiles-dir` and `--profile-selection` through to the consolidator. Before this, the entrypoint invoked the consolidator without the first three, so it fell back to `measure`, never wrote `decision.json`, and `--write-plan` failed with `decision_artifact_missing` — the gate was built, tested, and unreachable from the command a user actually runs.
+- **`run-all-tests.sh` result parsing** — suite results are read token-by-token against the six `Results:` shapes the repository's suites really print; anything ambiguous is reported as `unparsed` instead of being guessed at. A miscount can no longer pass as a result.
+- **Profiling root-cause vocabulary** — the bucket formerly called `fixture_growth` is now `cost_rises_across_run`, and it maps to `measure` rather than `fix`. A rising per-case cost means later cases were more expensive than earlier ones; it does not establish that state accumulated, and the two call for opposite remedies. The document diagnosing this repository's own boundary suite has been corrected accordingly, with the retracted claim left visible rather than quietly edited.
+- **`impact.kind: unknown` may carry a `before_ms`, but must qualify it** — a current cost is not a claimed saving, so an unfinished profile's lower bound is representable; a bare number would read as a measured total, so recording one now requires an assumption saying what it is.
+
+### Fixed
+- **An incomplete audit could render as "Verdict: clean"** — the chat renderer classified from findings alone, so an audit that never finished looked like one that found nothing. `incomplete` now outranks findings and renders its own shape, naming the reason and the undecided units, and stating that no remediation plan can be created.
+- **Profile ingestion failed open** — the consolidator ended its profile pipeline with `|| echo '[]'`, so an unparseable, foreign or tampered receipt silently became an empty action list, indistinguishable from "nothing needed doing". Every receipt is now validated against `aid-test-profile-v1`, bound to the audit that produced it, and hash-checked against its own evidence log; any violation halts finalization.
+- **A disposable clone could audit itself short** — the audit's identity is now derived from the repository's root commit rather than its origin URL, so a clone no longer resolves to a different project than the one it is a copy of.
+
 ## [2.69.0] — 2026-08-02
 
 ### Fixed

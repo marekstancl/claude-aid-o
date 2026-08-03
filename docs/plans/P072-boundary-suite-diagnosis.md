@@ -5,20 +5,28 @@ via `aid-test-audit-profile.sh --budget-minutes 20`.
 **Receipt:** `profiles/bats_..._test-aid-plan-final-boundary.json` (schema
 `aid-test-profile-v1`), with its streamed evidence log alongside.
 
+> **Correction, same day.** The first version of this document claimed the
+> suite's cost came from accumulating fixture state, and rated that `high`
+> confidence. That claim was wrong, and it is retracted below rather than
+> quietly edited. The measurement it rested on is unchanged; the causal
+> conclusion drawn from it was never established. The profiler's bucket has
+> since been renamed from `fixture_growth` to `cost_rises_across_run` for the
+> same reason: the old name asserted a cause the measurement cannot see.
+
 ---
 
 ## Headline
 
 The suite **did not finish**, and the run says so: `complete: false`,
-`incomplete_reason: deadline`, exit 124, **lower bound 1 200 021 ms (20 min)**.
-In that time it completed **57 of 245 planned cases**.
+`incomplete_reason: deadline`, **lower bound 1 200 021 ms (20 min)**. In that
+time it completed **57 of 245 planned cases**.
 
-But the run is not merely a timeout. It carries a **named, evidenced cause**:
+What the run establishes is a correlation, and only that:
 
 > per-case cost rises from **8 814 ms** (first quartile of observed cases) to
 > **53 506 ms** (last quartile) — a **6.07×** increase across a single run.
 
-`root_cause.bucket = fixture_growth`, confidence `high`.
+Later cases were more expensive than earlier ones. That is the whole finding.
 
 ## The evidence, in the suite's own numbers
 
@@ -43,59 +51,79 @@ Slowest five observed (all in the AC3 band, cases 45–51):
 | 47 | `AC3: a C2 final review recording an EPIC-sized range is refused` | 52 591 ms |
 
 Zero failures in the observed prefix — the suite is not slow because it is
-retrying or failing. It is slow because each case costs more than the one
-before it.
+retrying or failing.
 
 Source signals in the same file: **270 git invocations**, **716 subprocess
 substitutions**, 13 explicit sleeps, 5 retry/wait constructs. Those are
 recorded as signals, not as an attributed share of the milliseconds — the
 runner reports one duration per case and cannot separate waiting from working.
 
-## What this rules OUT
+## The retracted claim, and why it was false
 
-**Splitting the file will not fix it.** This is the conclusion the numbers
-force, and it is the opposite of what a file-level timeout invites. The cost
-grows with accumulated state, so cutting the file in half produces two halves
-that each grow — the later one starting from wherever the split left it. The
-profiler therefore maps `fixture_growth` to `fix`, never to `split`.
+The first version read the rising curve as accumulating fixture state, and
+went on to rule out splitting the file on that basis. Checking the suite's own
+setup shows why that could not be right:
 
-**Parallelising it will not fix it either.** A 6× intra-run slowdown is a
-property of one sequential accumulation. Distributing the same cases across
-workers redistributes the growth rather than removing it, and the two boundary
-files are already outside the parallel pool for exactly this reason.
+```bash
+# scripts/tests/bats/test-helpers.bash — setup_test_evidence_dir(), called
+# from this suite's setup(), i.e. once PER TEST CASE:
+TEST_TMPDIR=$(mktemp -d)
+export TEST_PROJECT_ROOT="$TEST_TMPDIR/project"
+mkdir -p "$TEST_EVIDENCE_DIR"
+cd "$TEST_PROJECT_ROOT"
+git init -q -b main
+...
+git commit -q -m "initial"
+```
 
-## What it does NOT yet establish
+Every case gets a freshly mktemp'd root and a freshly initialised git
+repository. There is no fixture carried from one case to the next, so there is
+no accumulating fixture for the cost to grow with. The mechanism named in the
+original diagnosis does not exist in this suite.
 
-The profiler names the *shape* (accumulation), not the *substance*. It does not
-say which state accumulates. The candidates its signals point at, in the order
-worth checking:
+The measurement was fine. The story attached to it was not, and it was rated
+`high` confidence — which is the specific failure mode this whole capability
+was built to remove: a plausible-sounding cause, cited with a real number,
+pointing remediation at the wrong thing.
 
-1. **Git history in the fixture repository.** 270 git invocations, and the
-   suite's plan-boundary cases build up commits, branches and tags in one
-   fixture repo. Each subsequent case then operates on a longer history.
-2. **`.aid-o` evidence trees.** Later cases validate against directories that
-   earlier cases filled.
-3. **Subprocess fan-out per case.** 716 substitutions is high, but it is a
-   per-case constant unless the data those subprocesses walk is itself growing
-   — which is the same hypothesis as (1) and (2).
+## What is actually still open
 
-The honest bounded next probe, and the one this document recommends: **run
-cases 1–10 and cases 45–54 in isolation, each against a FRESH fixture root**.
-If the AC3 band is fast from a clean root, the accumulation is confirmed and
-the fix is per-case fixture isolation. If it is slow even from clean, the cost
-is intrinsic to those cases and belongs to a different remedy.
+Two explanations remain live, and the run cannot rank them:
 
-That probe is bounded (roughly 20 cases, minutes not hours) and decisive. It is
-deliberately NOT run here: Step 13's obligation is to diagnose before anyone
-proposes surgery, and proposing the surgery is a separate, separately reviewed
-decision.
+1. **The later cases are simply heavier work.** Case ordering in the file is
+   not random: cases 45+ are the AC3 band, which drives full review passes,
+   C2 commit ranges and plan-utility registration. Heavier setup per case
+   would produce exactly this curve with no accumulation anywhere.
+2. **Something outside the per-case fixture accumulates.** Per-case roots are
+   fresh, but they are all created under the same `TMPDIR` and never removed
+   during the run; 245 temp trees, each with its own git repository, is a
+   plausible source of a cost that grows with position. This is a *different*
+   mechanism from the retracted one, and it is equally unproven.
+
+## The probe that would settle it
+
+**Run cases 1–10 and cases 45–54 in isolation, each from a fresh fixture root,
+and then run the same two bands in reversed order.**
+
+- If the AC3 band is slow whether it runs first or last, the cost is intrinsic
+  to those cases — and splitting the file becomes a reasonable option rather
+  than a ruled-out one.
+- If the AC3 band is fast when it runs first and slow when it runs last, then
+  something accumulates across the run, and hypothesis (2) is where to look
+  next.
+
+The probe is bounded — roughly 20 cases in each ordering, minutes rather than
+hours — and it discriminates. Until it runs, the profiler maps this receipt to
+`measure`, not to `fix` and not to `split`.
 
 ## Status against the plan
 
 - Step 13's acceptance asked for an honest lower bound and a
   root-cause-specific next probe rather than a generic `measure` finding.
-  **Met**: 1 200 021 ms lower bound, `fixture_growth` with a cited ratio, and
-  a named probe above.
+  **Met on the lower bound** (1 200 021 ms, with the observed prefix kept) and
+  **met on the probe**, which is specific to this file's structure.
+  **Not met on naming a cause** — and the corrected receipt now says so
+  rather than supplying one.
 - The run did **not** complete within its budget, which the plan anticipated
   explicitly. That is recorded as the result, not worked around by extending
   the budget until a confident answer appeared.

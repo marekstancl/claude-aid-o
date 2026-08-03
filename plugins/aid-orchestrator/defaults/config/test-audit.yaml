@@ -31,6 +31,8 @@ allowed_runners:
 decision:
   max_unresolved_fraction: 0.25      # consolidator: above this, audit_status is `incomplete`
   profile_budget_minutes: 20         # cost profiler: sub-budget for diagnostic runs
+  profile_trigger_ms: 120000         # profile selector: a measured unit at or above this owes a profile
+  profile_max_units: 3               # profile selector: at most this many units profiled per audit
   profile_log_max_bytes: 10485760    # cost profiler: streamed evidence log cap (10 MiB)
   rootcause_tie_tolerance: 0.1       # consolidator: two buckets within this tie -> `measure`
   pilot_noise_ms: 2000               # parallel pilot: benefit below this is safe_not_worthwhile

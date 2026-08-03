@@ -657,39 +657,72 @@ _shard_artifact_n() {
 
 # ─── P072 Step 13: profiles become actions, honestly ───────────────────────
 
+# A receipt the production ingestion will actually accept: schema-valid, bound
+# to this audit, and hashed against a real evidence log sitting beside it.
+# Fixtures that skip the bindings would test a path production never takes.
 _profile() {
-  # <run_unit_id> <bucket> <complete> [elapsed] [lower_bound]
+  # <run_unit_id> <bucket> <complete> [elapsed] [lower_bound] [audit_id]
   local id="$1" bucket="$2" complete="$3" elapsed="${4:-1000}" lb="${5:-null}"
+  local aid="${6:-$AUDIT_ID}"
+  local base; base="$(echo "$id" | tr '/:' '__')"
   mkdir -p "$OUT/profiles"
-  jq -nc --arg id "$id" --arg b "$bucket" \
+  printf '1..1\nok 1 something in 5ms\n' > "$OUT/profiles/${base}.log"
+  local sha; sha="$(sha256sum "$OUT/profiles/${base}.log" | cut -d' ' -f1)"
+  local probe="null"
+  case "$bucket" in
+    cost_rises_across_run|undecidable)
+      probe='"re-run the fastest and slowest bands from a fresh root, and again reversed"' ;;
+  esac
+  jq -nc --arg id "$id" --arg b "$bucket" --arg aid "$aid" --arg sha "$sha" \
+         --arg log "${base}.log" --argjson probe "$probe" \
          --argjson c "$complete" --argjson e "$elapsed" --argjson lb "$lb" '
     {schema_version:"aid-test-profile-v1", run_unit_id:$id, runner:"bats",
      complete:$c, incomplete_reason:(if $c then null else "deadline" end),
      elapsed_ms:$e, exit_code:0, budget_seconds:60,
-     lower_bound_ms:$lb, timing:{}, fixture_growth:{detected:($b=="fixture_growth")},
+     lower_bound_ms:$lb, timing:{cases:[],planned:0,truncated:false},
+     cost_curve:{detected:($b=="cost_rises_across_run")},
      source_signals:{}, duplicate_membership:{gates:[],duplicated:($b=="duplicate_membership")},
-     root_cause:{bucket:$b, confidence:"high", reason:("diagnosed as " + $b + " with cited evidence"), next_probe:null},
-     evidence_log:"x.log"}' > "$OUT/profiles/$(echo "$id" | tr '/:' '__').json"
+     root_cause:{bucket:$b, confidence:(if $c then "medium" else "low" end),
+                 reason:("diagnosed as " + $b + " with cited evidence"), next_probe:$probe},
+     evidence_log:$log, evidence_log_sha256:$sha, cancelled:false,
+     audit_id:$aid,
+     job:{id:"j-1", state:"terminal_pass", live_log:"/dev/null"}}' \
+    > "$OUT/profiles/${base}.json"
+}
+
+_selection() {
+  # <audit_id> then pairs of <selected_id> — deferred entries via _selection_deferred
+  local aid="$1"; shift
+  jq -nc --arg aid "$aid" --args '
+    {schema_version:"aid-test-profile-selection-v1", audit_id:$aid,
+     policy:{profile_trigger_ms:120000, profile_max_units:3},
+     measured_units: ($ARGS.positional | length),
+     selected: [$ARGS.positional[] | {run_unit_id:., measured_ms:200000,
+                                      reason:"measured 200000ms, at or above the trigger"}],
+     deferred: []}' -- "$@" > "$OUT/profile-selection.json"
 }
 
 _run_full_profiled() {
   bash "$CONSOLIDATE" --audit-id "$AUDIT_ID" --wave-artifacts-dir "$ART" \
     --dispatch-manifest "$MANIFEST" --output-dir "$OUT" \
     --mode full --inventory "$INVENTORY" --project-root "$PROJ" \
-    --profiles-dir "$OUT/profiles"
+    --profiles-dir "$OUT/profiles" "$@"
 }
 
-@test "STEP 13: fixture_growth maps to FIX, never to split" {
-  # A file whose per-case cost rises with accumulated state does not get
-  # faster when cut in half — the growth follows the state into both halves.
-  # This is the single most tempting wrong action in the capability.
+@test "STEP 13: a rising cost curve maps to MEASURE — not fix, and not split" {
+  # `cost_rises_across_run` says later cases cost more than earlier ones. It
+  # does NOT say state accumulated: the cases may simply be heavier work, and
+  # the two call for opposite remedies. An earlier build mapped this to `fix`
+  # on the strength of a cause it had not established.
   _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
-  _profile "bats:a" "fixture_growth" true
+  _profile "bats:a" "cost_rises_across_run" true
   _run_full_profiled
 
-  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "fix" ]
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "measure" ]
   [ "$(jq -r '.actions[0].targets[0]' "$OUT/decision.json")" = "bats:a" ]
   run jq -r '[.actions[].action] | index("split")' "$OUT/decision.json"
+  [ "$output" = "null" ]
+  run jq -r '[.actions[].action] | index("fix")' "$OUT/decision.json"
   [ "$output" = "null" ]
 }
 
@@ -705,6 +738,39 @@ _run_full_profiled() {
   [ "$(jq -r '.actions[0].impact.after_ms' "$OUT/decision.json")" = "null" ]
   [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "measure" ]
   [ "$(jq -r '.actions[0].priority' "$OUT/decision.json")" = "high" ]
+  # and the lower bound is labelled as one, not left to be read as a total
+  [[ "$(jq -r '.actions[0].impact.assumptions[0]' "$OUT/decision.json")" == *"lower bound"* ]]
+}
+
+@test "STEP 13: an incomplete run may NOT carry a high-confidence growth diagnosis" {
+  # The cases an unfinished run never reached are exactly the ones that would
+  # settle whether cost rose because state accumulated. Claiming `high` from
+  # the prefix is the failure this capability exists to remove — so the schema
+  # rejects the receipt outright rather than letting it reach an action.
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "cost_rises_across_run" false 60010 60010
+  local f="$OUT/profiles/bats_a.json"
+  jq '.root_cause.confidence = "high"' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  # re-hash is unnecessary: the log is untouched, only the receipt changed
+  run _run_full_profiled
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"aid-test-profile-v1"* ]]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "STEP 13: a LOST job is an incomplete profile, never a measurement" {
+  # `lost` is aid-job.sh's word for a wrapper that died before writing a
+  # terminal record. It is a third thing, distinct from a deadline and from an
+  # operator cancel, and none of the three may become a number.
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "undecidable" false 30000 30000
+  local f="$OUT/profiles/bats_a.json"
+  jq '.incomplete_reason = "lost" | .job.state = "lost"' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+
+  _run_full_profiled
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "measure" ]
+  [ "$(jq -r '.actions[0].impact.kind' "$OUT/decision.json")" = "unknown" ]
+  [ "$(jq -r '.actions[0].impact.after_ms' "$OUT/decision.json")" = "null" ]
 }
 
 @test "STEP 13: duplicate_membership yields an ESTIMATED saving with its assumption stated" {
@@ -731,7 +797,7 @@ _run_full_profiled() {
   # Optimising a test scheduled for deletion is wasted work.
   _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
   _shard_artifact "$(_disposition "bats:a" "remove")" "$(_disposition "bats:b")"
-  _profile "bats:a" "fixture_growth" true
+  _profile "bats:a" "cost_rises_across_run" true
   _profile "bats:b" "test_body" true
   _run_full_profiled
 
@@ -743,11 +809,136 @@ _run_full_profiled() {
 
 @test "STEP 13: every emitted action cites its evidence log" {
   _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
-  _profile "bats:a" "fixture_growth" true
+  _profile "bats:a" "cost_rises_across_run" true
   _run_full_profiled
 
   [ "$(jq -r '.actions[0].evidence_refs | length' "$OUT/decision.json")" -ge 1 ]
   [[ "$(jq -r '.actions[0].evidence_refs[0]' "$OUT/decision.json")" == profiles/* ]]
+}
+
+# ─── Fail-closed ingestion ─────────────────────────────────────────────────
+#
+# Every case below used to produce an empty action list and a successful exit,
+# because the ingestion pipeline ended in `|| echo '[]'`. An empty action list
+# renders identically to "nothing needed doing", so a corrupt input read as a
+# clean bill of health.
+
+@test "STEP 13 FAIL-CLOSED: an unparseable receipt HALTS finalization" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true
+  printf 'not json at all{' > "$OUT/profiles/bats_a.json"
+
+  run _run_full_profiled
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not parseable JSON"* ]]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "STEP 13 FAIL-CLOSED: a receipt missing a required field HALTS finalization" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true
+  local f="$OUT/profiles/bats_a.json"
+  jq 'del(.root_cause)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+
+  run _run_full_profiled
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "STEP 13 FAIL-CLOSED: a FOREIGN audit's receipt is refused, not absorbed" {
+  # A profiles directory is a directory, not provenance. Without the audit-id
+  # binding, a receipt left behind by an earlier audit reads as current
+  # evidence for this one.
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true 1000 null "some-other-audit"
+
+  run _run_full_profiled
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"some-other-audit"* ]]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "STEP 13 FAIL-CLOSED: an evidence log edited after the run HALTS finalization" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true
+  printf '1..1\nok 1 something ENTIRELY different in 5000ms\n' > "$OUT/profiles/bats_a.log"
+
+  run _run_full_profiled
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed after the run"* ]]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "STEP 13 FAIL-CLOSED: an unknown root-cause bucket is refused, never defaulted" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true
+  local f="$OUT/profiles/bats_a.json"
+  jq '.root_cause.bucket = "something_invented"' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+
+  run _run_full_profiled
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+# ─── The selection is the obligation ───────────────────────────────────────
+
+@test "STEP 13 SELECTION: a selected unit with NO receipt HALTS finalization" {
+  # Otherwise the selector is a detector with no enforcement: it names three
+  # slow suites, nobody profiles them, and the audit finalizes looking exactly
+  # as complete as one that had.
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  mkdir -p "$OUT/profiles"
+  _selection "$AUDIT_ID" "bats:a"
+
+  run _run_full_profiled --profile-selection "$OUT/profile-selection.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bats:a"* ]]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "STEP 13 SELECTION: a selection from ANOTHER audit is refused" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true
+  _selection "not-this-audit" "bats:a"
+
+  run _run_full_profiled --profile-selection "$OUT/profile-selection.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not-this-audit"* ]]
+}
+
+@test "STEP 13 SELECTION: a satisfied selection finalizes normally" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard_artifact "$(_disposition "bats:a")"
+  _profile "bats:a" "test_body" true
+  _selection "$AUDIT_ID" "bats:a"
+
+  run _run_full_profiled --profile-selection "$OUT/profile-selection.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "keep_serial" ]
+}
+
+@test "STEP 13 SELECTION: a DEFERRED unit is reported with its measured cost, not dropped" {
+  # A unit over the trigger that did not fit under the ceiling is a known,
+  # quantified gap. Leaving it out of the findings is how a gap goes invisible.
+  _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
+  _shard_artifact "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _profile "bats:a" "test_body" true
+  jq -nc --arg aid "$AUDIT_ID" '
+    {schema_version:"aid-test-profile-selection-v1", audit_id:$aid,
+     policy:{profile_trigger_ms:120000, profile_max_units:1},
+     measured_units:2,
+     selected:[{run_unit_id:"bats:a", measured_ms:300000, reason:"over the trigger"}],
+     deferred:[{run_unit_id:"bats:b", measured_ms:180000,
+                reason:"over the 120000ms trigger but past the 1-unit ceiling for this audit — not diagnosed, and not dismissed"}]}' \
+    > "$OUT/profile-selection.json"
+
+  run _run_full_profiled --profile-selection "$OUT/profile-selection.json"
+  [ "$status" -eq 0 ]
+  local deferred
+  deferred="$(jq -c '[.actions[] | select(.targets[0] == "bats:b")][0]' "$OUT/decision.json")"
+  [ "$(jq -r '.action' <<<"$deferred")" = "measure" ]
+  [ "$(jq -r '.impact.before_ms' <<<"$deferred")" = "180000" ]
+  [ "$(jq -r '.impact.kind' <<<"$deferred")" = "unknown" ]
+  [[ "$(jq -r '.reason' <<<"$deferred")" == *"not diagnosed"* ]]
 }
 
 @test "STEP 13: with no profiles directory the audit still completes, with no actions" {

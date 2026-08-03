@@ -1,0 +1,77 @@
+{
+  "actions": [
+    {
+      "action": "keep_serial",
+      "evidence_refs": [
+        "profiles/bats_plugins_aid-orchestrator_scripts_tests_bats_test-aid-test-audit-config.log"
+      ],
+      "impact": {
+        "after_ms": null,
+        "assumptions": [],
+        "before_ms": null,
+        "kind": "unknown"
+      },
+      "priority": "medium",
+      "reason": "no rising cost, no duplicate membership and no wait constructs — the cost appears to be the behaviour under test",
+      "targets": [
+        "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config"
+      ]
+    },
+    {
+      "action": "measure",
+      "evidence_refs": [
+        "profile-selection.json"
+      ],
+      "impact": {
+        "after_ms": null,
+        "assumptions": [
+          "measured wall time only — no diagnosis was run for this unit"
+        ],
+        "before_ms": 2069,
+        "kind": "unknown"
+      },
+      "priority": "low",
+      "reason": "over the 1ms trigger but past the 1-unit ceiling for this audit — not diagnosed, and not dismissed",
+      "targets": [
+        "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary"
+      ]
+    }
+  ],
+  "audit_id": "e2e-1785759557",
+  "audit_status": "complete",
+  "current_runtime": {
+    "duration_ms": null,
+    "kind": "unknown",
+    "scope": [
+      "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary",
+      "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config"
+    ]
+  },
+  "parallelization": {
+    "lanes": [],
+    "smallest_safe_pilot": null
+  },
+  "portfolio_change": {
+    "current_run_units": 2,
+    "impact_kind": "unknown",
+    "keep": [
+      "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary",
+      "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config"
+    ],
+    "merge_groups": [],
+    "proposed_run_units": 2,
+    "remove": [],
+    "rewrite_unit": [],
+    "runtime_after_ms": null,
+    "runtime_before_ms": null
+  },
+  "portfolio_coverage": {
+    "assigned_count": 2,
+    "disposition_count": 2,
+    "duplicate_run_unit_ids": [],
+    "inventory_count": 2,
+    "missing_run_unit_ids": []
+  },
+  "schema_version": "aid-test-audit-decision-v1",
+  "unresolved": []
+}

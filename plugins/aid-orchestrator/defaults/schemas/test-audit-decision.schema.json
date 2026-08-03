@@ -687,7 +687,7 @@
           }
         },
         {
-          "$comment": "`unknown` claims no BENEFIT — which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced.",
+          "$comment": "`unknown` claims no BENEFIT — which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced. The assumptions rule follows from that same relaxation: when a number IS recorded it must be qualified, because a bare `before_ms` on an unfinished run reads as a measured total; when no number is recorded there is nothing to qualify and assumptions would be clutter.",
           "if": {
             "properties": {
               "kind": {
@@ -711,9 +711,38 @@
                 "type": "null"
               },
               "assumptions": {
-                "maxItems": 0
+                "type": "array"
               }
-            }
+            },
+            "allOf": [
+              {
+                "$comment": "a recorded cost must say what it is",
+                "if": {
+                  "properties": {
+                    "before_ms": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "before_ms"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "assumptions": {
+                      "minItems": 1
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "assumptions": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       ]

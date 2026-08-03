@@ -444,3 +444,113 @@ _finalize_full() {
   [ "$status" -eq 0 ]
   [ -f "$OUT/decision.json" ]
 }
+
+# ─── Profiles reach production through this entrypoint, or not at all ──────
+#
+# The same class of gap as the one that motivated this file: the profiler and
+# its consolidation mapping were both green in their own suites while nothing
+# a user runs ever passed a profiles directory to the consolidator.
+
+_prod_profile() {
+  # <run_unit_id> <bucket> [audit_id]
+  local id="$1" bucket="$2" aid="${3:-$AUDIT_ID}"
+  local base; base="$(echo "$id" | tr '/:' '__')"
+  mkdir -p "$OUT/profiles"
+  printf '1..1\nok 1 something in 5ms\n' > "$OUT/profiles/${base}.log"
+  local sha; sha="$(sha256sum "$OUT/profiles/${base}.log" | cut -d' ' -f1)"
+  jq -nc --arg id "$id" --arg b "$bucket" --arg aid "$aid" --arg sha "$sha" \
+         --arg log "${base}.log" '
+    {schema_version:"aid-test-profile-v1", run_unit_id:$id, runner:"bats",
+     complete:true, incomplete_reason:null, elapsed_ms:4200, exit_code:0,
+     budget_seconds:60, lower_bound_ms:null,
+     timing:{cases:[],planned:0,truncated:false}, cost_curve:{detected:false},
+     source_signals:{}, duplicate_membership:{gates:["g1","g2"],duplicated:true},
+     root_cause:{bucket:$b, confidence:"high",
+                 reason:"dispatched by more than one gate with exact membership",
+                 next_probe:null},
+     evidence_log:$log, evidence_log_sha256:$sha, cancelled:false, audit_id:$aid,
+     job:{id:"j-1", state:"terminal_pass", live_log:"/dev/null"}}' \
+    > "$OUT/profiles/${base}.json"
+}
+
+@test "PRODUCTION: a profile in the conventional location becomes an ACTION with no extra flags" {
+  # `<output-dir>/profiles` is picked up without being named, so a controller
+  # that ran step 5 does not also have to remember to wire step 6 to it.
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _prod_profile "bats:a" "duplicate_membership"
+
+  run _finalize_full
+  [ "$status" -eq 0 ]
+  local act; act="$(jq -c '[.actions[] | select(.targets[0] == "bats:a")][0]' "$OUT/decision.json")"
+  [ "$(jq -r '.action' <<<"$act")" = "fix" ]
+  [ "$(jq -r '.impact.kind' <<<"$act")" = "estimated" ]
+  [ "$(jq -r '.impact.before_ms' <<<"$act")" = "4200" ]
+}
+
+@test "PRODUCTION: a corrupt profile stops the entrypoint — no chat turn, no decision" {
+  # The version this replaced ended profile ingestion with `|| echo '[]'`, so
+  # a corrupt receipt produced an empty action list and a successful-looking
+  # summary. An empty action list reads as "nothing needed doing".
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _prod_profile "bats:a" "duplicate_membership"
+  printf '{ truncated' > "$OUT/profiles/bats_a.json"
+
+  run _finalize_full
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+  [[ "$output" != *"Verdict"* ]]
+}
+
+@test "PRODUCTION: another audit's leftover profile is refused, not absorbed" {
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _prod_profile "bats:a" "duplicate_membership" "an-older-audit"
+
+  run _finalize_full
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "PRODUCTION: a selected unit that was never profiled blocks finalization" {
+  # Without this the selector is a detector with no enforcement: it names the
+  # slow suites, nobody profiles them, and the audit finalizes looking exactly
+  # as complete as one that had.
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  mkdir -p "$OUT/profiles"
+  jq -nc --arg aid "$AUDIT_ID" '
+    {schema_version:"aid-test-profile-selection-v1", audit_id:$aid,
+     policy:{profile_trigger_ms:120000, profile_max_units:3}, measured_units:2,
+     selected:[{run_unit_id:"bats:b", measured_ms:400000, reason:"over the trigger"}],
+     deferred:[]}' > "$OUT/profile-selection.json"
+
+  run _finalize_full
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bats:b"* ]]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "PRODUCTION: a satisfied selection finalizes and the profiled unit gets its action" {
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _prod_profile "bats:b" "duplicate_membership"
+  jq -nc --arg aid "$AUDIT_ID" '
+    {schema_version:"aid-test-profile-selection-v1", audit_id:$aid,
+     policy:{profile_trigger_ms:120000, profile_max_units:3}, measured_units:2,
+     selected:[{run_unit_id:"bats:b", measured_ms:400000, reason:"over the trigger"}],
+     deferred:[]}' > "$OUT/profile-selection.json"
+
+  run _finalize_full
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.actions[] | select(.targets[0] == "bats:b")] | length' "$OUT/decision.json")" -ge 1 ]
+}
+
+@test "PRODUCTION: static mode refuses a profiles directory rather than ignoring it" {
+  # A static audit runs nothing, so a receipt underneath it did not come from
+  # this audit. Quietly ignoring it would leave a stale diagnosis in place.
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _prod_profile "bats:a" "duplicate_membership"
+
+  run bash "$FINALIZE" --audit-id "$AUDIT_ID" --wave-artifacts-dir "$ART" \
+    --dispatch-manifest "$MANIFEST" --output-dir "$OUT" --mode static \
+    --profiles-dir "$OUT/profiles"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"static"* ]]
+}

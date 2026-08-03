@@ -54,6 +54,16 @@
           "type": "integer",
           "minimum": 1024
         },
+        "profile_trigger_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "A measured run unit at or above this wall time owes a cost profile. The selector is deterministic so that whether a slow suite gets diagnosed is a policy, not a controller's discretion."
+        },
+        "profile_max_units": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ceiling on units profiled per audit. Units over the trigger but past the ceiling are reported as deferred WITH their measured cost, never dropped silently."
+        },
         "rootcause_tie_tolerance": {
           "type": "number",
           "minimum": 0,

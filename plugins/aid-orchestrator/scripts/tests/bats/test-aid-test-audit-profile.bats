@@ -69,18 +69,126 @@ _clone() {
   [ "$(jq -r '.root_cause.reason | length > 20' "$r")" = "true" ]
 }
 
-@test "the evidence log is written INCREMENTALLY, not at the end" {
+@test "the evidence log is READABLE WHILE THE RUN IS STILL GOING" {
   # A suite that will exceed an hour must be observable long before its
   # deadline; a log that appears only on exit is indistinguishable from a hung
-  # process.
+  # process. Asserting this AFTER the run proves nothing — a log written in one
+  # shot at the end passes that check — so this reads the live log mid-flight.
   local c; c="$(_clone)"
   bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm" \
+    --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 5 \
+    >"$TEST_TMPDIR/receipt_path" 2>/dev/null &
+  local profiler_pid=$!
+
+  # Poll the supervised job's live log while the profiler is still running.
+  local live="" waited=0 saw_content=0
+  while kill -0 "$profiler_pid" 2>/dev/null && [ "$waited" -lt 120 ]; do
+    live="$(find "$OUT/profile-jobs" -name 'stdout.log' 2>/dev/null | head -1)"
+    if [ -n "$live" ] && [ -s "$live" ]; then saw_content=1; break; fi
+    sleep 1; waited=$(( waited + 1 ))
+  done
+
+  kill -TERM "$profiler_pid" 2>/dev/null || true
+  wait "$profiler_pid" 2>/dev/null || true
+
+  [ "$saw_content" -eq 1 ]
+}
+
+@test "the profiled command runs under aid-job.sh, with a terminal receipt" {
+  # Not a bare `timeout`. The job supervisor owns the process group, so a
+  # profiler that is killed does not strand the suite it was measuring, and
+  # every run leaves a durable terminal record rather than an exit code
+  # nobody wrote down.
+  local c r; c="$(_clone)"
+  r="$(bash "$PROFILE" \
     --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary" \
     --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
-    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3 >/dev/null
-  local log; log="$(find "$OUT/profiles" -name '*.log' | head -1)"
-  [ -s "$log" ]
-  grep -q '^1\.\.' "$log"
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
+  [ "$(jq -r '.job.state' "$r")" = "terminal_pass" ]
+  local jid; jid="$(jq -r '.job.id' "$r")"
+  [ -f "$OUT/profile-jobs/$jid/result.json" ]
+  [ "$(jq -r '.schema' "$OUT/profile-jobs/$jid/result.json")" = "aid-job-result/1" ]
+}
+
+@test "the ALLOWLIST approves the exact argv that runs, --timing included" {
+  # The check used to happen before `--timing` was inserted, so the approved
+  # argv and the executed argv were different strings. The exemption is now
+  # explicit and narrow: exactly one known token, over an otherwise approved
+  # command.
+  local c contains r; c="$(_clone)"
+  # A catalog whose command carries an extra flag is a command nobody approved.
+  # The unit id is still real, so nothing but the argv comparison can catch it —
+  # and the executed argv would be that flag PLUS --timing, which is why the
+  # exemption has to be an exact one-token diff rather than "close enough".
+  local bad="$TEST_TMPDIR/bad-catalog.yaml"
+  yq -o=json '.' "$CATALOG" \
+    | jq '(.run_units[] | select(.run_unit_id | test("test-aid-epic-summary")) | .command.argv)
+          |= (.[0:1] + ["--jobs=99"] + .[1:])' \
+    | yq -P -o=yaml '.' > "$bad"
+  run bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary" \
+    --catalog "$bad" --approved-catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3
+  [ "$status" -eq 11 ]
+  [[ "$output" == *"not in the approved allowlist"* ]]
+  [[ "$output" == *"--jobs=99"* ]]
+
+  # And the honest path still works, with --timing actually applied.
+  r="$(bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary" \
+    --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
+  [ "$(jq -r '.timing.cases | length' "$r")" -gt 0 ]
+}
+
+@test "the receipt is bound to its audit and to the BYTES of its evidence log" {
+  # A profiles directory is a directory, not provenance.
+  local c r; c="$(_clone)"
+  r="$(bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary" \
+    --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" --audit-id "AUD-XYZ" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
+  [ "$(jq -r '.audit_id' "$r")" = "AUD-XYZ" ]
+  local recorded actual
+  recorded="$(jq -r '.evidence_log_sha256' "$r")"
+  actual="$(sha256sum "$OUT/profiles/$(jq -r '.evidence_log' "$r")" | cut -d' ' -f1)"
+  [ "$recorded" = "$actual" ]
+}
+
+@test "an OPERATOR CANCEL is not filed as a deadline" {
+  # A deadline kill and a `kill` from a person both arrive as SIGTERM. Reading
+  # the exit code alone would file every interrupted run as "this suite is too
+  # slow" — a measurement nobody made.
+  local c; c="$(_clone)"
+  bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm" \
+    --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 10 \
+    >"$TEST_TMPDIR/rp" 2>/dev/null &
+  local pid=$!
+
+  # Wait until the job exists, then cancel it the way an operator would.
+  local jid="" waited=0
+  while [ "$waited" -lt 60 ]; do
+    jid="$(find "$OUT/profile-jobs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)"
+    [ -n "$jid" ] && [ -f "$jid/job.json" ] && break
+    sleep 1; waited=$(( waited + 1 ))
+  done
+  [ -n "$jid" ]
+  bash "$PLUGIN_DIR/scripts/aid-job.sh" cancel --jobs-dir "$OUT/profile-jobs" \
+    --id "$(basename "$jid")" >/dev/null 2>&1 || true
+
+  wait "$pid" 2>/dev/null || true
+  local r; r="$(cat "$TEST_TMPDIR/rp")"
+  [ -f "$r" ]
+  [ "$(jq -r '.complete' "$r")" = "false" ]
+  [ "$(jq -r '.incomplete_reason' "$r")" = "cancelled" ]
+  [ "$(jq -r '.cancelled' "$r")" = "true" ]
+  # and a cancelled run names no cause at all
+  [ "$(jq -r '.root_cause.bucket' "$r")" = "undecidable" ]
+  [ "$(jq -r '.root_cause.confidence' "$r")" = "low" ]
 }
 
 @test "DEADLINE: an unfinished run reports a lower bound and refuses to name a cause" {
@@ -160,7 +268,7 @@ JSON
   [ "$(jq -r '.schema_version' "$r")" = "aid-test-profile-v1" ]
 }
 
-@test "fixture_growth needs enough timed cases to tell growth from noise" {
+@test "the cost curve needs enough timed cases to tell growth from noise" {
   # Declaring accumulation from three data points is how a plausible-sounding
   # cause gets attached to ordinary variance.
   local c r; c="$(_clone)"
@@ -170,8 +278,8 @@ JSON
     --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
   local n; n="$(jq -r '.timing.cases | length' "$r")"
   if [ "$n" -lt 8 ]; then
-    [ "$(jq -r '.fixture_growth.detected' "$r")" = "false" ]
-    [[ "$(jq -r '.fixture_growth.note // ""' "$r")" == *"too few timed cases"* ]]
+    [ "$(jq -r '.cost_curve.detected' "$r")" = "false" ]
+    [[ "$(jq -r '.cost_curve.note // ""' "$r")" == *"too few timed cases"* ]]
   fi
 }
 

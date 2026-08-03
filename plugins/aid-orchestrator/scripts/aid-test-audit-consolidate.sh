@@ -40,6 +40,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMAS_DIR="$(cd "${SCRIPT_DIR}/../defaults/schemas" && pwd)"
 # shellcheck source=lib/aid-test-adapter-contract.sh
 source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
+source "${SCRIPT_DIR}/lib/aid-test-profile-validate.sh"
 
 FINDINGS_SCHEMA="${SCHEMAS_DIR}/test-audit-consolidated-findings.schema.json"
 WAVE_SCHEMA="${SCHEMAS_DIR}/test-audit-wave-artifact.schema.json"
@@ -51,7 +52,7 @@ audit_id="" wave_artifacts_dir="" output_dir="" dispatch_manifest=""
 # P072 Step 4 — the mode decides whether per-unit dispositions are OWED, and
 # the inventory is the denominator every coverage figure is computed against.
 # Both default to the pre-P072 behaviour so an existing caller is unaffected.
-audit_mode="measure" inventory_path="" project_root="" profiles_dir=""
+audit_mode="measure" inventory_path="" project_root="" profiles_dir="" profile_selection=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -65,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --inventory) [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory_path="$2"; shift 2 ;;
     --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     --profiles-dir) [[ $# -ge 2 ]] || _die 2 "--profiles-dir requires a value"; profiles_dir="$2"; shift 2 ;;
+    --profile-selection) [[ $# -ge 2 ]] || _die 2 "--profile-selection requires a value"; profile_selection="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
 done
@@ -339,41 +341,104 @@ if [[ "$audit_mode" == "full" ]]; then
     #     as a before-and-after pair is exactly the invented saving the
     #     adversarial contract forbids.
     #
-    #   * `fixture_growth` maps to `fix`, NEVER to `split`. A file whose
-    #     per-case cost rises with accumulated state does not get faster when
-    #     cut in half — the growth follows the state into both halves. This is
-    #     the single most tempting wrong action in the whole capability.
+    #   * a rising per-case cost maps to `measure`, never to `fix` and never
+    #     to `split`. `cost_rises_across_run` says later cases were more
+    #     expensive than earlier ones. It does NOT say state accumulated —
+    #     the cases may simply be heavier work — and the two call for opposite
+    #     remedies. Only the fresh-root/reordered probe named in the receipt
+    #     separates them, so until it runs the honest action is to measure.
+    #
+    #   * a receipt that fails schema validation stops the audit. See
+    #     `lib/aid-test-profile-validate.sh` for why an empty action list is
+    #     the most dangerous possible response to a corrupt input.
     profile_actions_json='[]'
-    if [[ -n "$profiles_dir" && -d "$profiles_dir" ]]; then
+    if [[ -n "$profiles_dir" ]]; then
+      # Fail-closed. A profiles directory that was named but does not exist, or
+      # that holds one unreadable receipt, HALTS finalization. The alternative
+      # — the `|| echo '[]'` this replaced — turned a corrupt input into an
+      # empty action list, which renders identically to "nothing needed doing".
+      if ! test_profile_validate_dir "$profiles_dir" "$audit_id"; then
+        _die 6 "profiles directory '$profiles_dir' contains a receipt that is not a valid aid-test-profile-v1 — finalization stops here rather than producing an action list that silently omits it"
+      fi
+      # An empty profiles directory is a real state — the audit profiled
+      # nothing — and must not be confused with synthesis that produced
+      # nothing from receipts that were there.
+      _receipt_count="$(find "$profiles_dir" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l)"
+      if [[ "$_receipt_count" -gt 0 ]]; then
       profile_actions_json="$(
-        find "$profiles_dir" -name '*.json' -type f -print0 2>/dev/null \
+        find "$profiles_dir" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null \
           | xargs -0 -r jq -sc --argjson rm "$remove_json" '
             [ .[]
-              | select(.schema_version == "aid-test-profile-v1")
               # A unit already proposed for deletion gets no cost action:
               # optimising a test scheduled for removal is wasted work.
               | select(.run_unit_id as $u | $rm | index($u) | not)
               | . as $p
               | ($p.root_cause.bucket) as $b
               | {
-                  action: (if $b == "fixture_growth" then "fix"
-                           elif $b == "duplicate_membership" then "fix"
+                  action: (if $b == "duplicate_membership" then "fix"
                            elif $b == "test_body" then "keep_serial"
                            else "measure" end),
                   targets: [$p.run_unit_id],
                   priority: (if $p.complete then "medium" else "high" end),
                   reason: ($p.root_cause.reason | .[0:500]),
-                  evidence_refs: ["profiles/" + ($p.evidence_log // "unknown.log")],
+                  evidence_refs: ["profiles/" + $p.evidence_log],
                   impact: (if $p.complete and ($b == "duplicate_membership")
                            then {kind:"estimated", before_ms:$p.elapsed_ms, after_ms:null,
                                  assumptions:["removing the duplicate dispatch saves one full run of this unit"]}
                            elif $p.complete
                            then {kind:"unknown", before_ms:null, after_ms:null, assumptions:[]}
-                           else {kind:"unknown", before_ms:$p.lower_bound_ms, after_ms:null, assumptions:[]}
+                           else {kind:"unknown", before_ms:$p.lower_bound_ms, after_ms:null,
+                                 assumptions:["the run did not finish — this is a lower bound on current cost, not a measured total"]}
                            end)
-                } ]' 2>/dev/null || echo '[]'
-      )"
-      [[ -n "$profile_actions_json" ]] || profile_actions_json='[]'
+                } ]'
+      )" || _die 6 "could not build actions from the validated profiles in '$profiles_dir'"
+      [[ -n "$profile_actions_json" ]] || _die 6 "profile action synthesis produced nothing from '$profiles_dir' — an empty result from a non-empty directory is a bug, not a finding"
+      fi
+    fi
+
+    # ─── The selection is the obligation, and it is enforced here ───────────
+    #
+    # A selection artifact names the units this audit decided owed a profile.
+    # Without this check the selector would be a detector with no enforcement:
+    # it would name three slow suites, nobody would profile them, and the audit
+    # would finalize looking exactly as complete as one that had.
+    if [[ -n "$profile_selection" ]]; then
+      [[ -f "$profile_selection" ]] \
+        || _die 6 "--profile-selection '$profile_selection' does not exist"
+      jq -e '.schema_version == "aid-test-profile-selection-v1"' "$profile_selection" >/dev/null 2>&1 \
+        || _die 6 "'$profile_selection' is not an aid-test-profile-selection-v1 artifact"
+      _sel_audit="$(jq -r '.audit_id // ""' "$profile_selection")"
+      [[ "$_sel_audit" == "$audit_id" ]] \
+        || _die 6 "the profile selection belongs to audit '$_sel_audit', not '$audit_id'"
+
+      _owed="$(jq -r '.selected[].run_unit_id' "$profile_selection")"
+      if [[ -n "$_owed" ]]; then
+        _have='[]'
+        if [[ -n "$profiles_dir" && -d "$profiles_dir" ]]; then
+          _have="$(find "$profiles_dir" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null \
+                    | xargs -0 -r jq -sc '[.[].run_unit_id]')"
+          [[ -n "$_have" ]] || _have='[]'
+        fi
+        _missing="$(jq -r --argjson have "$_have" \
+          '[.selected[].run_unit_id | select(. as $u | $have | index($u) | not)] | join(", ")' \
+          "$profile_selection")"
+        [[ -z "$_missing" ]] \
+          || _die 6 "the audit selected these units for cost profiling and no receipt exists for them: ${_missing} — finalizing here would present an audit that skipped its own diagnosis as one that completed it"
+      fi
+
+      # Deferred units are reported, never dropped. A unit over the trigger
+      # that did not fit under the ceiling is a known, quantified gap; leaving
+      # it out of the findings is how a gap becomes invisible.
+      _deferred_actions="$(jq -c '[.deferred[] | {
+          action: "measure",
+          targets: [.run_unit_id],
+          priority: "low",
+          reason: .reason,
+          evidence_refs: ["profile-selection.json"],
+          impact: {kind:"unknown", before_ms:.measured_ms, after_ms:null,
+                   assumptions:["measured wall time only — no diagnosis was run for this unit"]}
+        }]' "$profile_selection")"
+      profile_actions_json="$(jq -nc --argjson a "$profile_actions_json" --argjson b "$_deferred_actions" '$a + $b')"
     fi
 
 

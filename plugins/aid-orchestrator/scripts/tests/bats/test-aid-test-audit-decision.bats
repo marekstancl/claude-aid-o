@@ -364,10 +364,29 @@ mutate() { valid_decision | jq -c "$1"; }
   # the honest answer ("it costs at least this much, and I cannot say what it
   # would cost after") unrepresentable.
   run aid_test_audit_decision_write \
-    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:60010, after_ms:null, assumptions:[]}')" \
+    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:60010, after_ms:null,
+       assumptions:["the run did not finish — this is a lower bound on current cost, not a measured total"]}')" \
     "$TMP/d.json"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.actions[0].impact.before_ms' "$TMP/d.json")" = "60010" ]
+}
+
+@test "impact.kind unknown with a BARE before_ms is refused — the number must say what it is" {
+  # `before_ms: 60010` on an unfinished run reads as a measured total unless it
+  # is qualified. Permitting the number without the qualifier reintroduces the
+  # overstatement that allowing the number at all was meant to avoid.
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:60010, after_ms:null, assumptions:[]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "impact.kind unknown with NO number carries no assumptions either" {
+  # Nothing to qualify, so a qualifier would be clutter dressed as rigour.
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].impact = {kind:"unknown", before_ms:null, after_ms:null, assumptions:["something"]}')" \
+    "$TMP/d.json"
+  [ "$status" -eq 3 ]
 }
 
 @test "impact.kind unknown still cannot carry an after_ms — no delta may be implied" {

@@ -33,6 +33,8 @@ _tac_defaults_json() {
     decision: {
       max_unresolved_fraction: 0.25,
       profile_budget_minutes: 20,
+      profile_trigger_ms: 120000,
+      profile_max_units: 3,
       profile_log_max_bytes: 10485760,
       rootcause_tie_tolerance: 0.1,
       pilot_noise_ms: 2000,
