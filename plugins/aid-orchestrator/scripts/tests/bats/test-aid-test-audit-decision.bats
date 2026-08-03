@@ -300,3 +300,60 @@ mutate() { valid_decision | jq -c "$1"; }
   [ "$status" -eq 3 ]
   [[ "$output" == *"audit_id"* ]]
 }
+
+# ─── Public-safe reason text: named credential shapes ───────────────────────
+#
+# The contract claims a NARROW, enumerated list — not general secret
+# detection. These cases pin both halves of that claim: the shapes it does
+# reject, and the ordinary prose it must NOT reject, since a reason field that
+# fires on the word "token" would push authors into vaguer reasons.
+
+@test "an AWS access key id in a reason is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "credentials leaked: AKIAIOSFODNN7EXAMPLE"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "a GitHub token in a reason is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "use ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "a Slack token in a reason is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "slack xoxb-1234567890-abcdefghij"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "a PEM private-key header in a reason is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "found -----BEGIN RSA PRIVATE KEY----- in the fixture"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "an inline credential assignment with a substantial value is rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "api_key=sk_live_51H8xQ2eZvKYlo2C"')" "$TMP/d.json"
+  [ "$status" -eq 3 ]
+}
+
+@test "ordinary prose mentioning api_key or token is NOT rejected" {
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "the api_key is unset in this fixture"')" "$TMP/d.json"
+  [ "$status" -eq 0 ]
+
+  run aid_test_audit_decision_write \
+    "$(mutate '.actions[0].reason = "token handling is covered by the auth suite"')" "$TMP/d.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "the credential list is documented as narrow, not as general secret detection" {
+  # The contract must not reappear as an unkeepable promise. If someone
+  # broadens the wording, this fails and they have to broaden the checks too.
+  run jq -r '.["$defs"].bounded_text["$comment"]' \
+    "${REPO_ROOT}/plugins/aid-orchestrator/defaults/schemas/test-audit-decision.schema.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deliberately narrow"* ]]
+  [[ "$output" == *"not general secret detection"* ]]
+}

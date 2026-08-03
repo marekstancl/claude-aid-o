@@ -533,10 +533,45 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 500,
-      "not": {
-        "pattern": "(^|\\s)(/[A-Za-z0-9._-]+){2,}"
-      },
-      "$comment": "Rejects an embedded absolute path. Human prose belongs in the rendered report and evidence files; this field carries a bounded, public-safe reason only."
+      "$comment": "Bounded, public-safe reason text. What is ACTUALLY enforced: length 1-500, no embedded absolute path, and a NAMED set of credential shapes (AWS key id, GitHub/Slack tokens, PEM private-key header, an inline credential assignment with a 12+ character value). This is a deliberately narrow list, not general secret detection — claiming the latter would promise a guarantee no regex can keep. Human prose belongs in the rendered report and evidence files.",
+      "allOf": [
+        {
+          "$comment": "Rejects an embedded absolute path. Human prose belongs in the rendered report and evidence files; this field carries a bounded, public-safe reason only.",
+          "not": {
+            "pattern": "(^|\\s)(/[A-Za-z0-9._-]+){2,}"
+          }
+        },
+        {
+          "$comment": "AWS access key id.",
+          "not": {
+            "pattern": "(AKIA|ASIA)[0-9A-Z]{16}"
+          }
+        },
+        {
+          "$comment": "GitHub personal access / app tokens.",
+          "not": {
+            "pattern": "(ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}"
+          }
+        },
+        {
+          "$comment": "Slack tokens.",
+          "not": {
+            "pattern": "xox[abprs]-[A-Za-z0-9-]{10,}"
+          }
+        },
+        {
+          "$comment": "A PEM private-key header.",
+          "not": {
+            "pattern": "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+          }
+        },
+        {
+          "$comment": "An inline credential assignment with a substantial value: `api_key=…`, `secret: …`, `password=…`, `token=…`. Deliberately requires 12+ characters so a sentence like `the api_key is unset` is not rejected.",
+          "not": {
+            "pattern": "(?i)(api[_-]?key|secret|passwd|password|token)\\s*[:=]\\s*\\S{12,}"
+          }
+        }
+      ]
     },
     "evidence_ref": {
       "type": "string",

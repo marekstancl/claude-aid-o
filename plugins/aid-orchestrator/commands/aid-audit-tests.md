@@ -78,8 +78,21 @@ parser's own project-root validation load-bearing rather than advisory.
    controller MUST call this script, never the individual consolidator/
    renderer/bridge functions directly:
    `aid-audit-tests-finalize.sh --audit-id <id> --wave-artifacts-dir <dir>
-   --dispatch-manifest <path> --output-dir <dir> [--catalog <path>]
-   [--write-plan]`. It chains, in order, with no way to skip a stage:
+   --dispatch-manifest <path> --output-dir <dir> --mode <static|measure|full>
+   [--inventory <path>] [--project-root <path>] [--catalog <path>]
+   [--write-plan]`.
+
+   **`--mode` is required for `--write-plan`, and `--mode full` additionally
+   requires `--inventory` and `--project-root`** — the inventory is the
+   denominator every coverage figure is measured against, and the project root
+   is where the unresolved-fraction threshold lives. Neither is guessed: full
+   mode fails at argument validation, before any output directory is created
+   or any chat turn is printed, because rendering a successful-looking summary
+   over an audit that then cannot decide anything is the misleading outcome
+   this contract exists to remove. Passing only the pre-P072 argument set to a
+   full audit silently produced no decision artifact at all.
+
+   It chains, in order, with no way to skip a stage:
    consolidate (`aid-test-audit-consolidate.sh`, Step 14 — fails closed on
    any wave artifact missing, extra, or mismatched against the dispatch
    manifest) → render the mandatory 5-part chat summary

@@ -48,7 +48,7 @@ audit_id="" wave_artifacts_dir="" dispatch_manifest="" output_dir="" catalog_pat
 # P072 Step 3 — the audit mode reaches the write-plan bridge so its decision
 # gate can apply to `full` only. REQUIRED whenever --write-plan is used: the
 # bridge refuses to guess a mode, and so does this script.
-audit_mode=""
+audit_mode="" inventory_path="" project_root=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -63,6 +63,8 @@ while [[ $# -gt 0 ]]; do
         *) _die 2 "--mode must be static|measure|full (got '$2')" ;;
       esac
       shift 2 ;;
+    --inventory) [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory_path="$2"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     --write-plan) write_plan="true"; shift ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
@@ -80,26 +82,112 @@ done
 if [[ "$write_plan" == "true" && -z "$catalog_path" ]]; then
   _die 2 "--write-plan requires --catalog"
 fi
-if [[ "$write_plan" == "true" && -z "$audit_mode" ]]; then
-  _die 2 "--write-plan requires --mode static|measure|full (the decision gate applies to full only, and this script never guesses which audit ran)"
+# --mode is required for EVERY invocation, not only --write-plan: an omitted
+# mode used to reach the consolidator as its own `measure` default and the
+# renderer as an empty string, which is the same silent downgrade the command
+# doc already tells the controller not to perform.
+if [[ -z "$audit_mode" ]]; then
+  _die 2 "--mode static|measure|full is required (the decision gate applies to full only, and this script never guesses which audit ran)"
+fi
+
+# The audit-state record, when present, is what the AUDIT wrote about itself;
+# the argument is what whoever is finalizing claims. The record outranks the
+# claim, so a full audit cannot be finalized as `measure` to skip the gate.
+# A PRESENT state file is authoritative and is treated as such: it is either
+# readable, about this audit, and carrying a mode — or finalization refuses.
+# The earlier version swallowed jq's failure with `|| true`, so a corrupt
+# state produced an empty mode and the guard fell through to the caller's
+# claim. An authority that fails open is not an authority; a state file that
+# cannot be read is a reason to stop, not a reason to trust the argument.
+#
+# An ABSENT state file is still allowed: finalize is reachable from fixtures
+# and from a resumed audit whose state lives elsewhere. Absence means "no
+# corroboration", not "corroborated".
+_state_file="${output_dir%/}/audit-state.json"
+if [[ -f "$_state_file" ]]; then
+  if ! _state_json="$(jq -e '.' "$_state_file" 2>/dev/null)"; then
+    _die 2 "audit-state.json at ${_state_file} is present but not valid JSON — refusing to finalize against an unreadable authority (delete it if this audit has no state, rather than leaving a corrupt one)"
+  fi
+  _recorded_mode="$(jq -r '.mode // empty' <<<"$_state_json")"
+  [[ -n "$_recorded_mode" ]] \
+    || _die 2 "audit-state.json at ${_state_file} records no .mode — refusing to fall back to the caller's claim"
+  case "$_recorded_mode" in
+    static|measure|full) ;;
+    *) _die 2 "audit-state.json records an unrecognised mode '$_recorded_mode'" ;;
+  esac
+  _recorded_audit_id="$(jq -r '.audit_id // empty' <<<"$_state_json")"
+  [[ -n "$_recorded_audit_id" ]] \
+    || _die 2 "audit-state.json at ${_state_file} records no .audit_id — it cannot be shown to belong to this audit"
+  [[ "$_recorded_audit_id" == "$audit_id" ]] \
+    || _die 2 "audit-state.json belongs to audit '${_recorded_audit_id}', not '${audit_id}' — refusing to finalize against another audit's state"
+  [[ "$_recorded_mode" == "$audit_mode" ]] \
+    || _die 2 "audit mode mismatch: audit-state.json records '$_recorded_mode', this invocation claims '$audit_mode' — refusing to finalize an audit as a mode it did not run in"
+fi
+# A full audit owes a decision artifact, and the consolidator cannot build one
+# without the inventory (its denominator) and the project root (where the
+# unresolved-fraction threshold lives). Validate up front, before Stage 1 runs
+# and long before a chat turn is printed: rendering a successful-looking
+# summary over an audit that then cannot decide anything is precisely the
+# misleading outcome this plan exists to remove.
+if [[ "$audit_mode" == "full" ]]; then
+  [[ -n "$inventory_path" ]] || _die 2 "--mode full requires --inventory (the consolidator measures coverage against it; it never guesses the denominator)"
+  [[ -f "$inventory_path" ]] || _die 2 "--inventory '$inventory_path' does not exist"
+  [[ -n "$project_root" ]] || _die 2 "--mode full requires --project-root (the unresolved-fraction threshold is read from that project's test-audit.yaml)"
+  [[ -d "$project_root" ]] || _die 2 "--project-root '$project_root' does not exist"
 fi
 
 # ─── Stage 1: consolidate (Step 14) — fails closed on any incomplete/
 #     mismatched/undeclared wave artifact; produces NO output on failure.
-if ! bash "${SCRIPT_DIR}/aid-test-audit-consolidate.sh" \
-    --audit-id "$audit_id" --wave-artifacts-dir "$wave_artifacts_dir" \
-    --dispatch-manifest "$dispatch_manifest" --output-dir "$output_dir" >/dev/null; then
+consolidate_args=(
+  --audit-id "$audit_id" --wave-artifacts-dir "$wave_artifacts_dir"
+  --dispatch-manifest "$dispatch_manifest" --output-dir "$output_dir"
+)
+# Without these three the consolidator falls back to its own `measure`
+# default and never writes decision.json — so a real full audit produced no
+# decision at all and --write-plan then failed with decision_artifact_missing.
+# The gate was built, tested and unreachable from the production entrypoint.
+[[ -n "$audit_mode" ]] && consolidate_args+=(--mode "$audit_mode")
+[[ -n "$inventory_path" ]] && consolidate_args+=(--inventory "$inventory_path")
+[[ -n "$project_root" ]] && consolidate_args+=(--project-root "$project_root")
+
+if ! bash "${SCRIPT_DIR}/aid-test-audit-consolidate.sh" "${consolidate_args[@]}" >/dev/null; then
   _die 1 "consolidation failed — refusing to render a chat turn or persist a durable record over an incomplete/invalid audit (no consolidated-findings.json was produced)"
 fi
 
 findings_path="${output_dir%/}/consolidated-findings.json"
 [[ -f "$findings_path" ]] || _die 1 "internal error: consolidate.sh exited 0 but ${findings_path} does not exist"
 
+# ─── Stage 1b (full mode only): the decision artifact must exist and be
+#     readable BEFORE Stage 2 renders a chat turn or persists a durable
+#     record. Both of those are outward-facing and effectively irreversible —
+#     a user has read the summary, and the record is what a continuation reply
+#     resolves against — so discovering a missing or corrupt decision at the
+#     bridge, after both have happened, is too late.
+#
+#     `incomplete` is NOT a failure here and must still be rendered: telling
+#     the user what remains unproved is the renderer's job, and the bridge is
+#     what refuses the remediation handoff.
+if [[ "$audit_mode" == "full" ]]; then
+  decision_path="${output_dir%/}/decision.json"
+  [[ -f "$decision_path" ]] \
+    || _die 1 "full-mode consolidation exited 0 but produced no decision.json — refusing to render a chat turn over an audit that decided nothing"
+  # shellcheck source=lib/aid-test-audit-decision.sh
+  source "${SCRIPT_DIR}/lib/aid-test-audit-decision.sh"
+  if ! aid_test_audit_decision_status "$decision_path" >/dev/null 2>&1; then
+    _die 1 "full-mode decision artifact at ${decision_path} does not validate — refusing to render a chat turn or persist a durable record over it"
+  fi
+  decision_audit_id="$(jq -r '.audit_id // empty' "$decision_path" 2>/dev/null || true)"
+  [[ "$decision_audit_id" == "$audit_id" ]] \
+    || _die 1 "decision artifact belongs to audit '${decision_audit_id}', not '${audit_id}' — refusing to finalize over a foreign decision"
+fi
+
 # ─── Stage 2: render the mandatory chat summary (Step 15) — persists the
 #     durable record as a side effect; fails closed if that persist fails.
 # "" for $2 keeps the renderer's own default changed_text (it uses :- so an
 # empty string falls back); the mode is $3.
-chat_text="$(aid_test_audit_render_chat_summary "$findings_path" "" "$audit_mode")" \
+# $4 is the decision artifact: in full mode the renderer must let
+# `audit_status: incomplete` outrank whatever the findings happen to say.
+chat_text="$(aid_test_audit_render_chat_summary "$findings_path" "" "$audit_mode" "${decision_path:-}")" \
   || _die 1 "chat summary render failed — no durable record, no chat turn: ${chat_text}"
 
 printf '%s\n' "$chat_text"

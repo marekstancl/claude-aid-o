@@ -77,8 +77,11 @@ jq -n --arg path "${AGENTS_DIR}/1-shard_portfolio-shard-0.json" '{
 }' > "${WORK_DIR}/manifest.json"
 
 echo "TEST: the real production entrypoint (finalize.sh) produces correctly-shaped 5-part chat text for this fixture"
+# P072: --mode is required on every finalize invocation. These fixtures
+# produce findings but no decision artifact, which under the new contract is
+# exactly a measure-mode audit, so they state that mode explicitly.
 chat_text="$(bash "$FINALIZE" --audit-id e2e-vitest-only --wave-artifacts-dir "$AGENTS_DIR" \
-  --dispatch-manifest "${WORK_DIR}/manifest.json" --output-dir "$FIXTURE_OUT")"
+  --dispatch-manifest "${WORK_DIR}/manifest.json" --output-dir "$FIXTURE_OUT" --mode measure)"
 finalize_status=$?
 if [[ "$finalize_status" -eq 0 ]]; then
   ok=1
@@ -163,7 +166,8 @@ jq -n --arg p1 "${INCOMPLETE_AGENTS}/1-shard_portfolio-shard-0.json" --arg p3 "$
   ]
 }' > "${WORK_DIR}/incomplete-manifest.json"
 if bash "$FINALIZE" --audit-id e2e-incomplete --wave-artifacts-dir "$INCOMPLETE_AGENTS" \
-    --dispatch-manifest "${WORK_DIR}/incomplete-manifest.json" --output-dir "$INCOMPLETE_OUT" >/dev/null 2>&1; then
+    --dispatch-manifest "${WORK_DIR}/incomplete-manifest.json" --output-dir "$INCOMPLETE_OUT" \
+    --mode measure >/dev/null 2>&1; then
   fail_msg "finalize.sh exited 0 for an incomplete wave set — expected a hard failure"
 else
   no_artifacts="$(find "$INCOMPLETE_OUT" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"

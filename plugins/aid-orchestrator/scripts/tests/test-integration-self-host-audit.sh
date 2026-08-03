@@ -118,16 +118,24 @@ else
 fi
 
 echo "TEST: cross-check 2 — bats_all's declared target (the whole bats/ directory) agrees with the same count"
-# bats_all is currently PM-quarantined (its live .gates.bats_all.command is a stub,
-# tracked separately as its own declared-command run_unit) — its DOCUMENTED intended
-# target, recorded in execution.yaml's quarantine.original_command, is the bats/
-# directory as a whole. That directory's real file count is what this cross-check
-# verifies against, independent of the quarantine state.
-original_command="$(yq -r '.gates.bats_all.quarantine.original_command // ""' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)"
-if [[ "$original_command" == *"bats/"* ]]; then
-  pass_msg "bats_all's documented original_command targets the bats/ directory (${actual_bats_files} files), consistent with the bats-adapter count"
+# P071 (v2.68.0) LIFTED bats_all's quarantine: the stub command was replaced by
+# a real parallel-lane runner, and the `quarantine.original_command` field this
+# check used to read no longer exists. The check therefore resolved "" on every
+# run and failed unconditionally — a stale assertion against a removed field,
+# which is exactly the drift class this audit capability exists to catch, so it
+# is corrected rather than deleted.
+#
+# The lane derives its file list from the approved catalog itself, so what this
+# cross-check verifies now is that bats_all's live command really is the lane
+# (and not some narrower target that would silently under-run the portfolio).
+live_command="$(yq -r '.gates.bats_all.command // ""' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)"
+quarantine_block="$(yq -r '.gates.bats_all.quarantine // "absent"' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)"
+if [[ "$live_command" == *"aid-bats-parallel-lane.sh"* ]]; then
+  pass_msg "bats_all dispatches the catalog-driven parallel lane (${actual_bats_files} .bats files discovered), consistent with the bats-adapter count"
+elif [[ "$quarantine_block" != "absent" && "$(yq -r '.gates.bats_all.quarantine.original_command // ""' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)" == *"bats/"* ]]; then
+  pass_msg "bats_all is quarantined; its documented original_command targets the bats/ directory (${actual_bats_files} files)"
 else
-  fail_msg "could not resolve bats_all's intended target directory from execution.yaml"
+  fail_msg "bats_all's command resolves to neither the parallel lane nor a documented bats/ target: '${live_command}'"
 fi
 
 echo "TEST: cross-check 3 — both of CI's dedicated bats jobs resolve to real run_unit_ids in the catalog"

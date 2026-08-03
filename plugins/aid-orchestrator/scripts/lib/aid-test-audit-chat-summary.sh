@@ -61,6 +61,14 @@ aid_test_audit_render_chat_summary() {
   # durable record so the write-plan bridge can refuse a caller that
   # relabels a full audit as `measure` to slip past the decision gate.
   local _tacs_audit_mode="${3-}"
+  # P072 EPIC 1 correction — the decision artifact, for full-mode audits. The
+  # renderer used to classify from findings ALONE, so an audit whose decision
+  # said `incomplete` but whose findings happened to be empty was rendered to
+  # the user as "Verdict: clean". Without --write-plan the bridge never runs,
+  # so nothing downstream corrected it: the user was told the portfolio was
+  # healthy while units had gone undecided. `incomplete` therefore outranks
+  # findings classification here, at the only place the user actually reads.
+  local _tacs_decision_path="${4-}"
 
   if [[ ! -f "$findings_path" ]]; then
     echo "**Audit did not complete cleanly** — no consolidated findings file was produced ($findings_path missing). This is not a clean result; something failed before consolidation."
@@ -90,6 +98,27 @@ aid_test_audit_render_chat_summary() {
   local verdict
   verdict="$(_tacs_classify_verdict "$findings_json")"
 
+  # ─── incomplete outranks everything the findings say ──────────────────────
+  local _tacs_incomplete="false" _tacs_reason="" _tacs_missing="" _tacs_next=""
+  if [[ -n "$_tacs_decision_path" && -f "$_tacs_decision_path" ]]; then
+    local _tacs_status
+    _tacs_status="$(jq -r '.audit_status // empty' "$_tacs_decision_path" 2>/dev/null)" || _tacs_status=""
+    if [[ "$_tacs_status" == "incomplete" ]]; then
+      _tacs_incomplete="true"
+      verdict="incomplete"
+      _tacs_reason="$(jq -r '.incomplete_reason // "unspecified"' "$_tacs_decision_path" 2>/dev/null)"
+      _tacs_missing="$(jq -r '
+        (.portfolio_coverage.missing_run_unit_ids // []) as $m
+        | if ($m | length) == 0 then "(none — the gap is not a missing unit)"
+          else ($m[0:10] | join(", ")) + (if ($m|length) > 10 then " (+\(($m|length) - 10) more)" else "" end)
+          end' "$_tacs_decision_path" 2>/dev/null)"
+      _tacs_next="$(jq -r '
+        if ((.unresolved // []) | length) > 0
+        then (.unresolved[0].next_measurement // "re-run this audit with a larger budget")
+        else "decide the units listed above, then re-run this audit" end' "$_tacs_decision_path" 2>/dev/null)"
+    fi
+  fi
+
   # 3-5 evidenced reasons: top findings by severity (critical>high>medium>low), then finding_id.
   local reasons_text
   reasons_text="$(jq -r '
@@ -101,6 +130,9 @@ aid_test_audit_render_chat_summary() {
   [[ -n "$reasons_text" ]] || reasons_text="(no findings to report)"
 
   local next_action
+  if [[ "$_tacs_incomplete" == "true" ]]; then
+    next_action="This audit is NOT finished — $_tacs_next. A remediation plan cannot be created from it (the --write-plan handoff refuses an incomplete audit)."
+  else
   case "$verdict" in
     "remediation recommended")
       next_action="Reply \"vytvoř plán oprav\" (or run \`--write-plan\`) to generate a remediation plan from this audit's findings."
@@ -112,6 +144,7 @@ aid_test_audit_render_chat_summary() {
       next_action="No action needed."
       ;;
   esac
+  fi
 
   local has_conflict residual_risk
   has_conflict="$(jq -r '[.[] | select(.unresolved_conflict == true)] | length > 0' <<<"$findings_json")"
@@ -138,6 +171,30 @@ aid_test_audit_render_chat_summary() {
   if ! aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action" "$_tacs_audit_mode"; then
     echo "**Audit did not complete cleanly** — failed to persist the durable audit record (durable-record.json) for $findings_path. This is not a clean result; the --write-plan/continuation handoff cannot be reached without it." >&2
     return 1
+  fi
+
+  if [[ "$_tacs_incomplete" == "true" ]]; then
+    # An incomplete audit gets its own shape. It must never read as a result:
+    # the point is that the audit did not finish deciding, and the reader has
+    # to see what is missing rather than a findings list that looks like a
+    # verdict on a portfolio nobody fully examined.
+    cat <<EOF
+**Verdict:** audit NOT complete (\`audit_status: incomplete\`)
+
+**Why it is not complete:** ${_tacs_reason}
+
+**Units left undecided:** ${_tacs_missing}
+
+**What the findings so far say** (partial — not a verdict on the portfolio):
+${reasons_text}
+
+**Changed:** ${changed_text}
+
+**Next action:** ${next_action}
+
+**Residual risk / PM decision:** This audit cannot support a remediation plan. Treat every unit not listed as decided as unexamined, not as healthy.
+EOF
+    return 0
   fi
 
   cat <<EOF
