@@ -288,6 +288,8 @@ assert_instruction "$PLUGIN_DIR/agents/verifier.md" \
 echo ""
 echo "=================================="
 echo "Instruction Consistency: $PASS passed, $FAIL failed, $WARN warnings"
+# P072 Step 9 — canonical line for the aggregate collector.
+echo "Results: ${PASS}/$((PASS + FAIL)) passed, ${FAIL} failed"
 echo "=================================="
 
 [[ $FAIL -eq 0 ]] && exit 0 || exit 1

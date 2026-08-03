@@ -15,10 +15,93 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ─── parse_suite_result <suite_output> ──────────────────────────────────────
+#
+# Sets PSR_PASSED / PSR_RUN / PSR_FAILED / PSR_SKIPPED / PSR_STATE
+# (`parsed` or `unparsed`).
+#
+# TOKEN-based, not shape-based. This tree really does contain six different
+# `Results:` shapes:
+#
+#   Results: N/T passed, M failed[, W skipped]      <- canonical
+#   Results: N/T passed
+#   Results: N/T run, P passed, F failed
+#   Results: N passed, M failed
+#   === Results: N passed, M failed ===
+#   Results: N/T passed, M failed ... (trailing prose)
+#
+# Matching whole shapes would need six patterns and would still be one new
+# suite away from a seventh. Reading the TOKENS — `X/Y passed`, `X/Y run`,
+# `N passed`, `M failed`, `W skipped` — is one rule that covers all of them,
+# and a shape nobody has written yet composes from the same tokens.
+#
+# A missing `Results:` line remains `unparsed` rather than 0/0: a suite whose
+# output cannot be read is a distinct, visible state, not a suite that ran
+# nothing.
+parse_suite_result() {
+  local out="$1" line
+  PSR_PASSED=0; PSR_RUN=0; PSR_FAILED=0; PSR_SKIPPED=0; PSR_STATE="unparsed"
+
+  line="$(printf '%s\n' "$out" | grep -E '^(===[[:space:]]*)?Results:' | tail -1)"
+  [[ -n "$line" ]] || return 0
+
+  # AMBIGUITY IS UNPARSED, never a guess. Three shapes previously produced a
+  # confident wrong number instead of an honest "cannot read this":
+  #   `Results: 1,000 passed`      -> the regex took `000`, i.e. zero
+  #   `... 5 passed ... 99 passed` -> the first token won, silently
+  #   a child's own line echoed verbatim at line start
+  # A miscount that claims to be parsed is worse than an unparsed suite,
+  # because it is invisible; this step exists to remove exactly that.
+  local _n_passed _n_failed
+  _n_passed="$(grep -oE '[0-9]+[[:space:]]+passed' <<<"$line" | wc -l)"
+  _n_failed="$(grep -oE '[0-9]+[[:space:]]+failed' <<<"$line" | wc -l)"
+  if [[ "$_n_passed" -gt 1 || "$_n_failed" -gt 1 ]]; then
+    return 0
+  fi
+  # A digit-group separator means the number is not what a bare [0-9]+ reads.
+  if grep -qE '[0-9],[0-9]' <<<"$line"; then
+    return 0
+  fi
+
+  # Fraction first, wherever it appears: `N/T passed` or `N/T run`.
+  if [[ "$line" =~ ([0-9]+)/([0-9]+)[[:space:]]+passed ]]; then
+    PSR_PASSED="${BASH_REMATCH[1]}"; PSR_RUN="${BASH_REMATCH[2]}"; PSR_STATE="parsed"
+  elif [[ "$line" =~ ([0-9]+)/([0-9]+)[[:space:]]+run ]]; then
+    PSR_RUN="${BASH_REMATCH[2]}"; PSR_STATE="parsed"
+  fi
+
+  # Bare `N passed` — the authority when there was no fraction to read it from.
+  if [[ "$PSR_PASSED" -eq 0 && "$line" =~ (^|[^/0-9])([0-9]+)[[:space:]]+passed ]]; then
+    PSR_PASSED="${BASH_REMATCH[2]}"; PSR_STATE="parsed"
+  fi
+  if [[ "$line" =~ ([0-9]+)[[:space:]]+failed ]]; then
+    PSR_FAILED="${BASH_REMATCH[1]}"; PSR_STATE="parsed"
+  fi
+  if [[ "$line" =~ ([0-9]+)[[:space:]]+skipped ]]; then
+    PSR_SKIPPED="${BASH_REMATCH[1]}"
+  fi
+
+  # No explicit total: the honest one is what actually ran.
+  if [[ "$PSR_STATE" == "parsed" && "$PSR_RUN" -eq 0 ]]; then
+    PSR_RUN=$(( PSR_PASSED + PSR_FAILED + PSR_SKIPPED ))
+  fi
+
+  # A count no real suite could produce means the line was misread. Refusing
+  # it keeps one nonsense number from corrupting the portfolio totals every
+  # later cost claim is built on.
+  local _max=1000000
+  if [[ "$PSR_PASSED" -gt "$_max" || "$PSR_RUN" -gt "$_max" || "$PSR_FAILED" -gt "$_max" ]]; then
+    PSR_PASSED=0; PSR_RUN=0; PSR_FAILED=0; PSR_SKIPPED=0; PSR_STATE="unparsed"
+  fi
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 VERBOSE=0
+UNPARSED_SUITES=()
+INCONSISTENT_SUITES=()
 for arg in "$@"; do
   case "$arg" in
     --verbose|-v)
@@ -206,26 +289,22 @@ for suite in "${SUITES[@]}"; do
       suite_skipped=0
     fi
   else
-    # Parse the Results line from the bash suite output
-    # Expected formats:
-    #   "Results: X/Y passed, Z failed"
-    #   "Results: X/Y passed, Z failed, W skipped"
-    results_line="$(echo "$suite_output" | grep -E '^Results:' | tail -1)"
-
-    if [[ -n "$results_line" ]]; then
-      # Extract passed/total
-      if [[ "$results_line" =~ ([0-9]+)/([0-9]+)\ passed ]]; then
-        suite_passed="${BASH_REMATCH[1]}"
-        suite_run="${BASH_REMATCH[2]}"
-      fi
-      # Extract failed count
-      if [[ "$results_line" =~ ([0-9]+)\ failed ]]; then
-        suite_failed="${BASH_REMATCH[1]}"
-      fi
-      # Extract skipped count (if present)
-      if [[ "$results_line" =~ ([0-9]+)\ skipped ]]; then
-        suite_skipped="${BASH_REMATCH[1]}"
-      fi
+    # P072 Step 9 — one tested parser, and an explicit `unparsed` state.
+    #
+    # Seven suites used to emit nothing this could read and were recorded as
+    # 0/0: a passing suite and a crashed one were indistinguishable, and a
+    # fully green run silently contributed zero tests to the totals.
+    parse_suite_result "$suite_output"
+    suite_passed="$PSR_PASSED"; suite_run="$PSR_RUN"
+    suite_failed="$PSR_FAILED"; suite_skipped="$PSR_SKIPPED"
+    if [[ "$PSR_STATE" == "unparsed" ]]; then
+      UNPARSED_SUITES+=("$suite_name")
+    fi
+    # A suite reporting more passes than tests is counting two different
+    # things in one line (assertions over tests, typically). It inflates the
+    # aggregate totals silently, so name it rather than adding it up.
+    if [[ "$suite_passed" -gt "$suite_run" ]]; then
+      INCONSISTENT_SUITES+=("${suite_name} (${suite_passed}/${suite_run})")
     fi
   fi
 
@@ -268,8 +347,31 @@ if [[ "$TOTAL_SKIPPED" -gt 0 ]]; then
   skip_summary=" ($TOTAL_SKIPPED skipped)"
 fi
 echo "  Tests:   $TOTAL_PASSED/$TOTAL_TESTS passed, $TOTAL_FAILED failed${skip_summary}"
+
+# P072 Step 9 — an `unparsed` suite is one whose output this collector cannot
+# read. It used to be recorded as 0/0, which made a passing suite and a
+# crashed one identical in the totals.
+if [[ "${#UNPARSED_SUITES[@]}" -gt 0 ]]; then
+  echo ""
+  echo "  UNPARSED suites (no readable Results line — counted as 0/0):"
+  for _u in "${UNPARSED_SUITES[@]}"; do echo "    - $_u"; done
+fi
+if [[ "${#INCONSISTENT_SUITES[@]}" -gt 0 ]]; then
+  echo ""
+  echo "  INCONSISTENT suites (more passes than tests — mixed units in one line):"
+  for _i in "${INCONSISTENT_SUITES[@]}"; do echo "    - $_i"; done
+fi
 echo "  Total:   $TOTAL_TESTS tests across $SUITES_RUN suites"
 echo ""
+
+# Fail the aggregate on an unparsed suite. Enabled only after a full run
+# measured zero of them (P072 Step 9 acceptance): 138 suites, 2564 tests,
+# zero unparsed and zero inconsistent.
+if [[ "${AID_ALLOW_UNPARSED_SUITES:-0}" != "1" && "${#UNPARSED_SUITES[@]}" -gt 0 ]]; then
+  echo "RESULT: FAIL — ${#UNPARSED_SUITES[@]} suite(s) produced no readable Results line; their tests are not counted in the totals above"
+  echo ""
+  exit 1
+fi
 
 if [[ "$SUITES_FAILED" -gt 0 ]]; then
   echo "  Failed suites:"

@@ -56,6 +56,10 @@ GATE_SCRIPT="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-cp1-gate.sh"
 # ---------------------------------------------------------------------------
 TESTS_RUN=0
 TESTS_PASSED=0
+TESTS_PASSED_UNIQUE=0
+TESTS_FAILED_UNIQUE=0
+CURRENT_TEST_OPEN=0
+CURRENT_TEST_FAILED=0
 TESTS_FAILED=0
 
 # ---------------------------------------------------------------------------
@@ -70,6 +74,12 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+# P072 Step 9 — assertions and TESTS are different units, and the aggregate's
+# "Tests" total must receive tests. `pass`/`fail` count assertions (one test
+# calls pass() several times); `run_test` counts tests. Reporting assertions in
+# a fraction whose denominator was tests produced `54/28`; reporting assertions
+# on both sides would still inflate the portfolio's own test count from 28 to
+# 54. A test is failed when ANY assertion inside it failed.
 pass() {
   TESTS_PASSED=$(( TESTS_PASSED + 1 ))
   echo "  PASS: $1"
@@ -77,11 +87,26 @@ pass() {
 
 fail() {
   TESTS_FAILED=$(( TESTS_FAILED + 1 ))
+  CURRENT_TEST_FAILED=1
   echo "  FAIL: $1 -- $2"
 }
 
+# _close_current_test — fold the finished test into the TEST-level tally.
+_close_current_test() {
+  [[ "${CURRENT_TEST_OPEN:-0}" -eq 1 ]] || return 0
+  if [[ "${CURRENT_TEST_FAILED:-0}" -eq 1 ]]; then
+    TESTS_FAILED_UNIQUE=$(( TESTS_FAILED_UNIQUE + 1 ))
+  else
+    TESTS_PASSED_UNIQUE=$(( TESTS_PASSED_UNIQUE + 1 ))
+  fi
+  CURRENT_TEST_OPEN=0
+}
+
 run_test() {
+  _close_current_test
   TESTS_RUN=$(( TESTS_RUN + 1 ))
+  CURRENT_TEST_OPEN=1
+  CURRENT_TEST_FAILED=0
   echo ""
   echo "TEST: $1"
 }
@@ -1204,7 +1229,12 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
+# The canonical line reports TESTS, matching what the aggregate's "Tests"
+# total means. Assertion counts stay visible on their own line, where they
+# inform a reader without inflating a portfolio-wide number.
+_close_current_test
+echo "Results: ${TESTS_PASSED_UNIQUE}/${TESTS_RUN} passed, ${TESTS_FAILED_UNIQUE} failed"
+echo "  (${TESTS_PASSED} passing assertions, ${TESTS_FAILED} failing)"
 echo ""
 
 if [[ "$TESTS_FAILED" -gt 0 ]]; then

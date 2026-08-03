@@ -21,8 +21,9 @@ BASELINE="${SCRIPT_DIR}/fixtures/control-boundary-baseline.yaml"
 REGISTRY="${PLUGIN_ROOT}/defaults/enforcement-registry.yaml"
 
 fails=0
-pass() { printf 'PASS  %s\n' "$1"; }
-fail() { printf 'FAIL  %s\n' "$1" >&2; fails=$((fails + 1)); }
+checks=0
+pass() { printf 'PASS  %s\n' "$1"; checks=$((checks + 1)); }
+fail() { printf 'FAIL  %s\n' "$1" >&2; fails=$((fails + 1)); checks=$((checks + 1)); }
 
 command -v yq >/dev/null 2>&1 || { echo "SKIP: yq is required for test-control-boundary.sh" >&2; exit 0; }
 [[ -f "$BASELINE" ]] || { echo "FAIL: baseline not found at $BASELINE" >&2; exit 1; }
@@ -96,6 +97,10 @@ else
 fi
 
 echo "---"
+# P072 Step 9 — canonical line for the aggregate collector, counting the real
+# assertions this suite made rather than a suite-granularity 1/1.
+if [[ "$checks" -eq 0 ]]; then checks=1; fi
+echo "Results: $(( checks - fails ))/${checks} passed, ${fails} failed"
 if [[ "$fails" -eq 0 ]]; then
   echo "test-control-boundary: OK"
   exit 0

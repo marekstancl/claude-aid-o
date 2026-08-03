@@ -218,4 +218,8 @@ rm -rf "$T10_DIR"
 
 echo ""
 echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
+# P072 Step 9 — the canonical line run-all-tests.sh counts. The decorated line
+# above matches neither its `^Results:` anchor nor its `N/T` fraction, so this
+# suite was recorded as 0/0 while passing.
+echo "Results: ${PASS}/$((PASS + FAIL)) passed, ${FAIL} failed"
 [[ "$FAIL" -eq 0 ]] && exit 0 || exit 1

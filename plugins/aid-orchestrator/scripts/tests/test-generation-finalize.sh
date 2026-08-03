@@ -1,10 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ─── P072 Step 9: canonical result line for the aggregate collector ─────────
+#
+# This suite is exit-code driven: it has no per-case counters, so it reports at
+# SUITE granularity — 1/1 on success, 0/1 on failure. That is honest about what
+# it knows, and it is the difference between "this suite passed" and the `0/0`
+# the collector used to record, which was indistinguishable from a suite that
+# crashed before running anything.
+#
+# Emitted from the EXIT trap so every exit path is covered. Where the suite
+# already has an EXIT trap for cleanup, this COMPOSES with it — a shell has
+# exactly one EXIT trap, and installing a second silently discards the first,
+# which would leak every temp directory these suites create.
+_p072_emit_results() {
+  # errexit OFF for the duration: a failing `echo` (closed stdout, full disk)
+  # would otherwise abort the trap before the cleanup that follows it.
+  # Reporting is best-effort; cleanup is not optional.
+  set +e
+  local rc="${1:-$?}"
+  if [[ "$rc" -eq 0 ]]; then
+    echo "Results: 1/1 passed, 0 failed"
+  else
+    echo "Results: 0/1 passed, 1 failed"
+  fi
+  return 0
+}
+
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 SCRIPTS="$ROOT/plugins/aid-orchestrator/scripts"
 PLAN="$SCRIPTS/tests/fixtures/multi-phase-plan-numeric.md"
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+tmp="$(mktemp -d)"; trap '_p072_rc=$?; _p072_emit_results "$_p072_rc"; rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/.aid-o/plans" "$tmp/.aid-o/tasks" "$tmp/.aid-o/config" "$tmp/.aid-o/work/evidence/P099/generation"
 cp "$PLAN" "$tmp/.aid-o/plans/P099.md"
 # Make the E2E path exercise the actual strict receipt consumer, not only the
