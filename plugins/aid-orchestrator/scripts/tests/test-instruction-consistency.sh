@@ -285,6 +285,53 @@ assert_instruction "$PLUGIN_DIR/agents/verifier.md" \
   'Review an immutable revision in an isolated worktree' \
   "verifier reviews immutable isolated revision"
 
+
+REPO_ROOT="$(cd "${PLUGIN_DIR}/../.." && pwd)"
+
+# ─── P072 Step 23: the parallel classification HAS a consumer ───────────────
+#
+# Three shipped documents said the opposite of what is now true — that
+# `parallel.status` is a descriptive finding nothing consumes. That sentence
+# survived three releases, so a reviewer noticing is not the mechanism this
+# needs. It is pinned here, where drift of exactly this class is already
+# caught.
+#
+# The scope is `plugins/` and the LIVE docs tree. Archived plans under
+# docs/plans/archive/ legitimately record the boundary as it was at the time
+# and must not be rewritten to match the present.
+echo ""
+echo "TEST: no shipped file claims the parallel classification is consumed by nothing"
+STALE_CLAIM_HITS=""
+while IFS= read -r hit; do
+  [[ -z "$hit" ]] && continue
+  STALE_CLAIM_HITS="${STALE_CLAIM_HITS}${STALE_CLAIM_HITS:+$'\n'}${hit}"
+done < <(grep -rIl -E 'no scheduler that consumes|consumed by nothing|classification is consumed by no|schedules nothing, batches' \
+           "$PLUGIN_DIR" "$REPO_ROOT/docs" 2>/dev/null \
+         | grep -v '/docs/plans/archive/' \
+         | grep -v 'test-instruction-consistency.sh' || true)
+if [[ -z "$STALE_CLAIM_HITS" ]]; then
+  PASS=$((PASS + 1)); echo "  ✓ no file claims the parallel classification has no consumer"
+else
+  FAIL=$((FAIL + 1))
+  echo "  ✗ these files still claim the parallel classification is consumed by nothing:"
+  printf '      %s\n' $STALE_CLAIM_HITS
+  echo "      Correct the file rather than excluding it — an exclusion list is how"
+  echo "      the contradictory sentence survived three releases in the first place."
+fi
+
+echo ""
+echo "TEST: an ARCHIVED document keeps its historical claim (the check is scoped)"
+ARCHIVE_FIXTURE="$REPO_ROOT/docs/plans/archive/.p072-scope-fixture.md"
+mkdir -p "$(dirname "$ARCHIVE_FIXTURE")"
+printf 'Historical record: this plan ships no scheduler that consumes it.\n' > "$ARCHIVE_FIXTURE"
+if grep -rIl -E 'no scheduler that consumes' "$PLUGIN_DIR" "$REPO_ROOT/docs" 2>/dev/null \
+     | grep -v '/docs/plans/archive/' | grep -v 'test-instruction-consistency.sh' | grep -q .; then
+  FAIL=$((FAIL + 1)); echo "  ✗ the scoped check fired on an archived file"
+else
+  PASS=$((PASS + 1)); echo "  ✓ an archived record carrying the old sentence is left alone"
+fi
+rm -f "$ARCHIVE_FIXTURE"
+
 echo ""
 echo "=================================="
 echo "Instruction Consistency: $PASS passed, $FAIL failed, $WARN warnings"

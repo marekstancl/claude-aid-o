@@ -1261,3 +1261,69 @@ E9.5 sits between E9 and E10: the plan-boundary layer is its own phase, not a
 sub-task of E9, because E10's calibration promotion depends on the plan-final
 cadence existing. The specialist stack is dispatched once per PLAN, not once per
 EPIC — if you are budgeting dispatches, budget them per plan.
+
+---
+
+## Test-portfolio decision quality (P072)
+
+Fifteen enforcements were added by P072. This section is a contributor's index
+to them; the parallel-safety rules live on one page of their own, in
+[`P072-authority-boundary.md`](plans/P072-authority-boundary.md), and are not
+restated here — one source, linked to, rather than two that drift.
+
+### The decision artifact
+
+A `full` audit produces `decision.json` (`aid-test-audit-decision-v1`) beside
+its findings. It carries `audit_status`, one terminal disposition per run unit,
+the portfolio arithmetic, the proposed actions with their impact, the
+parallelization lanes, and what remains unresolved.
+
+Two properties make it worth having, and both are enforced rather than
+conventional:
+
+- **`audit_status: incomplete` blocks the handoff.** `--write-plan` and the
+  same-conversation continuation both refuse. Building a remediation plan on
+  the part an audit skipped makes the skipped units read as
+  examined-and-healthy.
+- **`impact.kind` cannot overstate.** `measured` needs two comparable runs;
+  `estimated` needs its assumptions stated; `unknown` may carry a `before_ms`
+  but must then qualify it, because a bare number on an unfinished run reads as
+  a measured total.
+
+### The fifteen enforcements
+
+| Row | What it stops |
+|---|---|
+| `test_audit_incomplete_blocks_write_plan` | A remediation plan built on an audit that did not finish deciding |
+| `test_audit_disposition_reconciliation` | A partial shard result rendering as a verdict on the whole portfolio |
+| `test_audit_coverage_reduction_requires_falsification` | Deleting a test on `unproved` — which is not an argument for deletion |
+| `test_audit_clone_config_precondition` | Auditing a config-less clone, which silently drops every declared-command gate |
+| `test_audit_aggregate_unparsed_fails` | An unparseable suite result counting as zero tests and passing |
+| `test_audit_inventory_arithmetic_guard` | A run unit vanishing between adapters |
+| `test_audit_profile_ingestion_fail_closed` | A corrupt profile receipt becoming an empty action list that reads as "nothing needed doing" |
+| `test_audit_profile_selection_owed` | A slow suite the audit selected for diagnosis, and nobody diagnosed |
+| `test_audit_profile_supervised_execution` | A deadline kill filed as an operator cancel — both arrive as exit 143 |
+| `test_audit_resource_map_shared_evidence` | A shared-state claim resting on a pattern match rather than read source |
+| `test_audit_pilot_evidence_bound` | A lane promoted on a pilot that was retried until it went green |
+| `test_catalog_parallel_provenance_binding` | A `safe` status outliving the content it was verified against |
+| `test_lane_single_parallel_authority` | Two consumers disagreeing about the same unit |
+| `test_audit_lane_membership_exact` | A lane promoted on evidence gathered for a different set |
+| `test_execution_no_double_dispatch` | **PLANNED** — a run unit executed twice in one gate run |
+
+Each row records its **recovery behaviour**: what an operator actually does
+when it fires. A blocking enforcement with no stated recovery is a wall, and
+the registry test refuses a row that omits it.
+
+`test_execution_no_double_dispatch` is deliberately `status: planned` with a
+deadline. Neither the ledger nor its production caller exists yet, and this
+repository already contains one real double-execution — the row exists so the
+ledger cannot ship as a detector read only by its own test, which is the P026
+failure this whole registry answers.
+
+### Adding to this area
+
+The command file (`commands/aid-audit-tests.md`) is the operator contract and
+is NOT on the lint gate's grandfathered list — keep it clean rather than adding
+it. The agent card is verified by the golden-prompt test instead, because
+linting it would demand frontmatter fields that are meaningless for a
+dispatched agent.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-enforcement-registry-test-audit.sh — P066 Step 19.
+# test-enforcement-registry-test-audit.sh — P066 Step 19, extended by P072 Step 22.
 #
 # Verifies the 3 enforcement rows this plan registers
 # (test_audit_static_command_allowlist, test_audit_catalog_approval_boundary,
@@ -132,6 +132,123 @@ else
   else
     pass_msg "all $baseline_count pre-existing rows are present and byte-identical to the pre-Step-19 baseline"
   fi
+fi
+
+
+# ─── P072 Step 22 ───────────────────────────────────────────────────────────
+#
+# The registry exists because of P026: a working detector flagged correctly and
+# the change was merged anyway, because nothing acted on it. A row is the
+# promise that a detector has a consumer — and a promise nobody checks is the
+# same failure one level up.
+
+INTERNAL_REGISTRY="$(cd "${PLUGIN_DIR}/../.." && pwd)/docs/plans/archive/AID-audit-2026-06/enforcement-registry.yaml"
+
+P072_ROWS=(
+  test_audit_incomplete_blocks_write_plan
+  test_audit_disposition_reconciliation
+  test_audit_coverage_reduction_requires_falsification
+  test_audit_clone_config_precondition
+  test_audit_aggregate_unparsed_fails
+  test_audit_inventory_arithmetic_guard
+  test_audit_resource_map_shared_evidence
+  test_audit_pilot_evidence_bound
+  test_catalog_parallel_provenance_binding
+  test_lane_single_parallel_authority
+  test_audit_lane_membership_exact
+  test_audit_profile_ingestion_fail_closed
+  test_audit_profile_selection_owed
+  test_audit_profile_supervised_execution
+  test_execution_no_double_dispatch
+)
+
+_p072_field() {   # <id> <field> [registry]
+  ROW_ID="$1" yq -r ".enforcements[] | select(.id == strenv(ROW_ID)) | .${2} // \"\"" \
+    "${3:-$REGISTRY}" 2>/dev/null | head -1
+}
+
+echo "TEST: every P072 row exists in BOTH registries"
+missing_dist=""; missing_int=""
+for id in "${P072_ROWS[@]}"; do
+  [[ -n "$(_p072_field "$id" id)" ]] || missing_dist="$missing_dist $id"
+  [[ -n "$(_p072_field "$id" id "$INTERNAL_REGISTRY")" ]] || missing_int="$missing_int $id"
+done
+[[ -z "$missing_dist" ]] && pass_msg "all ${#P072_ROWS[@]} P072 rows are in the distributed registry" \
+  || fail_msg "missing from the distributed registry:$missing_dist"
+# A row added to one registry only is a row nobody finds from the other, which
+# is why both CHANGELOGs are identical too.
+[[ -z "$missing_int" ]] && pass_msg "all ${#P072_ROWS[@]} P072 rows are mirrored internally" \
+  || fail_msg "missing from the internal registry:$missing_int"
+
+echo "TEST: an ACTIVE P072 row's source resolves to a real file"
+bad=""
+for id in "${P072_ROWS[@]}"; do
+  [[ "$(_p072_field "$id" status)" == "active" ]] || continue
+  src="$(_p072_field "$id" source)"
+  found=0
+  while read -r token; do
+    [[ -z "$token" ]] && continue
+    [[ -f "${PLUGIN_DIR}/${token}" ]] && found=1
+  done < <(grep -oE '(scripts|defaults)/[A-Za-z0-9_./-]+\.(sh|json|yaml|txt)' <<<"$src" || true)
+  [[ "$found" -eq 1 ]] || bad="$bad $id"
+done
+[[ -z "$bad" ]] && pass_msg "every active P072 row cites a source file that exists" \
+  || fail_msg "active rows citing a nonexistent source:$bad"
+
+echo "TEST: an ACTIVE P072 row names a test file that exists"
+bad=""
+for id in "${P072_ROWS[@]}"; do
+  [[ "$(_p072_field "$id" status)" == "active" ]] || continue
+  t="$(_p072_field "$id" test)"
+  found=0
+  while read -r token; do
+    [[ -z "$token" ]] && continue
+    [[ -f "${PLUGIN_DIR}/${token}" ]] && found=1
+  done < <(grep -oE 'scripts/tests/[A-Za-z0-9_./-]+\.(sh|bats)' <<<"$t" || true)
+  [[ "$found" -eq 1 ]] || bad="$bad $id"
+done
+[[ -z "$bad" ]] && pass_msg "every active P072 row names a test that exists" \
+  || fail_msg "active rows naming a nonexistent test:$bad"
+
+echo "TEST: a PLANNED row carries a deadline, so it cannot sit unwired forever"
+bad=""
+for id in "${P072_ROWS[@]}"; do
+  [[ "$(_p072_field "$id" status)" == "planned" ]] || continue
+  d="$(_p072_field "$id" deadline)"
+  [[ -n "$d" && "$d" != "null" ]] || bad="$bad $id"
+done
+[[ -z "$bad" ]] && pass_msg "every planned P072 row carries a deadline" \
+  || fail_msg "planned rows with no deadline:$bad"
+
+echo "TEST: every P072 row records its recovery behaviour"
+bad=""
+for id in "${P072_ROWS[@]}"; do
+  r="$(_p072_field "$id" recovery)"
+  [[ -n "$r" && "$r" != "null" ]] || bad="$bad $id"
+done
+[[ -z "$bad" ]] && pass_msg "every P072 row states what an operator does when it fires" \
+  || fail_msg "rows with no stated recovery:$bad"
+
+echo "TEST: the source check FIRES — a row citing a nonexistent file is rejected"
+# Asserted against a deliberately broken row, so this cannot pass merely
+# because every real row happens to be fine.
+broken_found=0
+while read -r token; do
+  [[ -z "$token" ]] && continue
+  [[ -f "${PLUGIN_DIR}/${token}" ]] && broken_found=1
+done < <(grep -oE 'scripts/[A-Za-z0-9_./-]+\.sh' <<<"scripts/this-file-does-not-exist.sh" || true)
+[[ "$broken_found" -eq 0 ]] \
+  && pass_msg "the source check rejects a citation that does not resolve" \
+  || fail_msg "the source check accepted a nonexistent file — the guard cannot fire"
+
+echo "TEST: this plan adds no auto-invocation surface"
+# test_audit_never_auto_invoked claims the audit runs only when a user asks.
+# P072 must not have quietly made that false.
+if grep -q "aid-audit-tests" "${PLUGIN_DIR}/scripts/aid-fsm.sh" 2>/dev/null \
+   || grep -q "aid-audit-tests" "${PLUGIN_DIR}/skills/pipeline.md" 2>/dev/null; then
+  fail_msg "an FSM or pipeline surface now references aid-audit-tests — never-auto-invoked is no longer true"
+else
+  pass_msg "no FSM or pipeline surface dispatches the audit"
 fi
 
 echo "----------------------------------------------------------------------"

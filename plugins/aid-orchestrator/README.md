@@ -88,6 +88,30 @@ PATH_add "$AID_PLUGIN_PATH/scripts"
 - `CHANGELOG.md` — version history
 - `scripts/README.md` — bash script documentation
 
+## Test portfolio audit (`/aid-audit-tests`)
+
+Inventories a project's tests, optionally measures a bounded subset, and ends
+with a six-part plain-language summary that answers **what to do** before it
+shows any evidence: what to do now, what to fix or remove, what can run in
+parallel, what must stay serial, test time now and after, and what is not
+proved yet.
+
+**It recommends; it does not act.** The audit never edits a test, never writes
+the catalog's `parallel.status`, never changes `execution.yaml` and never
+changes a scheduler mode. What a `full` run produces is a decision artifact
+whose lanes and actions are proposals — acting on one is a separate, explicit
+step you take.
+
+Two properties are worth knowing before you run it:
+
+- An audit that did not finish deciding says so (`audit_status: incomplete`)
+  and **refuses** to hand over a remediation plan. A plan built on the part it
+  skipped would make those units read as examined-and-healthy.
+- Parallel safety has exactly one authority — the catalog's `parallel` block,
+  bound to the content it was verified against, read by every consumer through
+  one resolver. See
+  [`docs/plans/P072-authority-boundary.md`](../../docs/plans/P072-authority-boundary.md).
+
 ## Test scheduler (opt-in, staged rollout)
 
 Every generated `execution.yaml` carries a `targeted_tests` gate plus a

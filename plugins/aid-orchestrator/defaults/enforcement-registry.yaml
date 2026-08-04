@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 336          # granular registry rows; recomputed via `.enforcements|length`. P069 Step 16 adds three scheduler-integration enforcement rows (scheduler_unknown_parallelism_sequential, scheduler_rollout_requires_divergence_evidence — both type 1, active/ALIGNED, blocking; scheduler_no_second_job_supervisor — type 1, active/ALIGNED, advisory), taking 325 to 328. P066 Step 19 adds three test-portfolio-audit enforcement rows (test_audit_static_command_allowlist, test_audit_catalog_approval_boundary, test_audit_never_auto_invoked — all type 9, active/ALIGNED, blocking), taking 322 to 325. IMP-265/IMP-258/IMP-267 add three lineage-integrity rows (plan_manifest_lineage_fail_closed — omitted lineage now fail-closes to unproven, malformed rejected; plan_repair_nondestructive_fail_closed — healthy repair byte-identical no-op + per-entry write failures propagated, F-2 no-mint invariant preserved; attest_ancestry_rederive_fail_closed — attest re-derives epic_base_commit/epic_merge_commit from Git and fails closed), all type 1, active/ALIGNED, blocking, internal-guard. IMP-269 adds c3_ac_source_binding (type 4, active/ALIGNED, blocking — build-manifest records+enforces ac_source and seals a HEAD-bound targeted-run receipt). IMP-262 adds job_supervisor_liveness (type 3, active/ALIGNED, advisory — the opt-in controller-boundary background job supervisor + AUTO liveness helper aid-job.sh). IMP-263 adds increment_step_binding (active/ALIGNED). IMP-270 adds gate_scoped_waiver (active/ALIGNED). P064 E-064-2_2 Step 3 (plan Step 8) adds gate_profile_epic_boundary_cap (active/ALIGNED) + plan_final_required_gates_record (PLANNED/unmapped since the IMP-274 honesty pass — writer-only until P068's plan-final reader exists); Step 4 (plan Step 9) adds plan_branch_release_skip + plan_mode_unresolved_block; the CP3 integration fix adds plan_mode_single_authority — verdict: ALIGNED unless noted. Step 2's plan-aware queue is FOUR rows split by what is actually wired (CP2 finding 6): plan_branch_merge_target (reader, active) + plan_queue_append_locked (append LOCKING, active) + plan_queue_entry_block_structure (append CONTENT — charset guards + the library's own structural re-derivation of the entry block, active; CP2 iteration 2 finding 1) + plan_queue_scripted_transitions (transitions, PLANNED — built and tested but zero production callers, so it must not be recorded as active enforcement). Step 2 also adds the four E-064-2_2 Step 1 mechanisms that had no owning registry until now (epic_merge_ancestry_proof, epic_lineage_unproven_merge_gate, epic_merge_in_progress_guard, plan_branch_expected_sha_guard) — all verdict: ALIGNED. P064 E-064-1_2 Step 5 adds plan_boundary_manifest (verdict: ALIGNED). v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. P068 E-068-2_2 Step 3 adds the five plan-final rows (plan_final_gate_required, plan_final_specialist_review, epic_specialist_review_exception, plan_candidate_identity_binding, plan_merge_cas — all type 1, active/ALIGNED, blocking) plus plan_finalize_c4_inputs_producer, taking 314 to 320. (That row began as the advisory plan_finalize_c4_reader_gap; the 2026-07-27 follow-up shipped the producer, so it is now an active/ALIGNED enforcement rather than a recorded gap.) P072 EPIC 4 (Steps 14-18) adds five parallel-safety rows (test_audit_resource_map_shared_evidence, test_audit_pilot_evidence_bound, test_catalog_parallel_provenance_binding, test_lane_single_parallel_authority, test_audit_lane_membership_exact — all type 1, active/ALIGNED, blocking, internal-guard), taking 331 to 336. P072 Step 13 adds three profiling rows (test_audit_profile_ingestion_fail_closed, test_audit_profile_selection_owed, test_audit_profile_supervised_execution — all type 1, active/ALIGNED, blocking, internal-guard), taking 328 to 331. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
+  enforcements: 343          # granular registry rows; recomputed via `.enforcements|length`. P069 Step 16 adds three scheduler-integration enforcement rows (scheduler_unknown_parallelism_sequential, scheduler_rollout_requires_divergence_evidence — both type 1, active/ALIGNED, blocking; scheduler_no_second_job_supervisor — type 1, active/ALIGNED, advisory), taking 325 to 328. P066 Step 19 adds three test-portfolio-audit enforcement rows (test_audit_static_command_allowlist, test_audit_catalog_approval_boundary, test_audit_never_auto_invoked — all type 9, active/ALIGNED, blocking), taking 322 to 325. IMP-265/IMP-258/IMP-267 add three lineage-integrity rows (plan_manifest_lineage_fail_closed — omitted lineage now fail-closes to unproven, malformed rejected; plan_repair_nondestructive_fail_closed — healthy repair byte-identical no-op + per-entry write failures propagated, F-2 no-mint invariant preserved; attest_ancestry_rederive_fail_closed — attest re-derives epic_base_commit/epic_merge_commit from Git and fails closed), all type 1, active/ALIGNED, blocking, internal-guard. IMP-269 adds c3_ac_source_binding (type 4, active/ALIGNED, blocking — build-manifest records+enforces ac_source and seals a HEAD-bound targeted-run receipt). IMP-262 adds job_supervisor_liveness (type 3, active/ALIGNED, advisory — the opt-in controller-boundary background job supervisor + AUTO liveness helper aid-job.sh). IMP-263 adds increment_step_binding (active/ALIGNED). IMP-270 adds gate_scoped_waiver (active/ALIGNED). P064 E-064-2_2 Step 3 (plan Step 8) adds gate_profile_epic_boundary_cap (active/ALIGNED) + plan_final_required_gates_record (PLANNED/unmapped since the IMP-274 honesty pass — writer-only until P068's plan-final reader exists); Step 4 (plan Step 9) adds plan_branch_release_skip + plan_mode_unresolved_block; the CP3 integration fix adds plan_mode_single_authority — verdict: ALIGNED unless noted. Step 2's plan-aware queue is FOUR rows split by what is actually wired (CP2 finding 6): plan_branch_merge_target (reader, active) + plan_queue_append_locked (append LOCKING, active) + plan_queue_entry_block_structure (append CONTENT — charset guards + the library's own structural re-derivation of the entry block, active; CP2 iteration 2 finding 1) + plan_queue_scripted_transitions (transitions, PLANNED — built and tested but zero production callers, so it must not be recorded as active enforcement). Step 2 also adds the four E-064-2_2 Step 1 mechanisms that had no owning registry until now (epic_merge_ancestry_proof, epic_lineage_unproven_merge_gate, epic_merge_in_progress_guard, plan_branch_expected_sha_guard) — all verdict: ALIGNED. P064 E-064-1_2 Step 5 adds plan_boundary_manifest (verdict: ALIGNED). v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. P068 E-068-2_2 Step 3 adds the five plan-final rows (plan_final_gate_required, plan_final_specialist_review, epic_specialist_review_exception, plan_candidate_identity_binding, plan_merge_cas — all type 1, active/ALIGNED, blocking) plus plan_finalize_c4_inputs_producer, taking 314 to 320. (That row began as the advisory plan_finalize_c4_reader_gap; the 2026-07-27 follow-up shipped the producer, so it is now an active/ALIGNED enforcement rather than a recorded gap.) P072 Step 22 adds seven decision-quality rows (test_audit_incomplete_blocks_write_plan, test_audit_disposition_reconciliation, test_audit_coverage_reduction_requires_falsification, test_audit_clone_config_precondition, test_audit_aggregate_unparsed_fails, test_audit_inventory_arithmetic_guard — all active/ALIGNED; plus test_execution_no_double_dispatch as status: planned, because neither the ledger nor its caller exists yet), taking 336 to 343. Two further enforcements the plan named separately are already covered by EPIC 4's rows and are NOT duplicated: `test_audit_parallel_promotion_requires_provenance` is test_catalog_parallel_provenance_binding, and `test_audit_pilot_requires_disposable_root` is part of test_audit_pilot_evidence_bound. P072 EPIC 4 (Steps 14-18) adds five parallel-safety rows (test_audit_resource_map_shared_evidence, test_audit_pilot_evidence_bound, test_catalog_parallel_provenance_binding, test_lane_single_parallel_authority, test_audit_lane_membership_exact — all type 1, active/ALIGNED, blocking, internal-guard), taking 331 to 336. P072 Step 13 adds three profiling rows (test_audit_profile_ingestion_fail_closed, test_audit_profile_selection_owed, test_audit_profile_supervised_execution — all type 1, active/ALIGNED, blocking, internal-guard), taking 328 to 331. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -1478,6 +1478,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P072 Step 13 — every profiling receipt an audit ingests must validate against aid-test-profile-v1 (defaults/schemas/test-profile.schema.json), carry THIS audit's audit_id, and hash-match the evidence log sitting beside it. Any violation halts finalization before consolidated-findings.json or decision.json exists. The version this replaced ended the ingestion pipeline with `|| echo '[]'`, so an unparseable, foreign or tampered receipt became an empty action list — which renders identically to 'nothing needed doing'. Silence that reads as a clean bill of health is the failure mode this row exists to close."
+    recovery: "The halt names the offending receipt and why (unparseable, foreign audit id, or a log that no longer hashes to what the receipt recorded). Re-run the profile for that unit, or remove the stale receipt from the profiles directory."
     test: "scripts/tests/bats/test-aid-test-audit-reconciliation.bats (STEP 13 FAIL-CLOSED cases); scripts/tests/bats/test-aid-audit-tests-finalize-production.bats (PRODUCTION profile cases)"
 
   - id: test_audit_profile_selection_owed
@@ -1489,6 +1490,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P072 Step 13 — the selector deterministically names which measured run units owe a cost profile (decision.profile_trigger_ms, capped by decision.profile_max_units), and the consolidator REFUSES to finalize a full audit in which a selected unit has no receipt. Without the refusal the selector would be a detector with no enforcement: it would name three slow suites, nobody would profile them, and the audit would finalize looking exactly as complete as one that had. Units over the trigger but past the cap are emitted as `measure` actions carrying their measured cost, so a bounded budget produces a reported gap rather than a silent one."
+    recovery: "The halt names the selected units with no receipt. Profile them (aid-test-audit-profile.sh), or lower decision.profile_max_units so they are recorded as deferred instead of selected."
     test: "scripts/tests/bats/test-aid-test-audit-profile-select.bats; scripts/tests/bats/test-aid-test-audit-reconciliation.bats (STEP 13 SELECTION cases)"
 
   - id: test_audit_profile_supervised_execution
@@ -1500,6 +1502,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P072 Step 13 — the profiler runs its measured command through aid-job.sh, never a bare `timeout`, so a diagnostic run obeys the same contract as every other long-running command here: process-group ownership, a durable terminal receipt, an explicit `lost` state, and operator cancel. Outcome is classified from the job STATE, never the exit code: a deadline kill and an operator's `kill` both arrive as SIGTERM/143, so reading the code would file every timeout as 'someone stopped it'. The allowlist approves the EXACT executed argv; `--timing` is permitted only as a checked one-token diff over an otherwise approved command, and approval comes from the approved catalog rather than from whichever catalog the command was derived from."
+    recovery: "The receipt states the job state. `deadline` means raise --budget-minutes; `cancelled` means re-run without interrupting; `lost` means the supervisor died — check the jobs directory named in the receipt."
     test: "scripts/tests/bats/test-aid-test-audit-profile.bats"
 
   - id: test_audit_resource_map_shared_evidence
@@ -1511,6 +1514,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P072 Step 14 — parallel-safety reasoning rests on read source rather than on a pattern match. The builder follows source/./load directives to a recorded depth cap and cites file:line for every resource; the schema rejects a `shared` entry that names no location. Because only per-test/per-run units may share a pool downstream, every rule resolves toward `unknown` (which costs exactly what `shared` costs) rather than toward private: an explicit `git -C`/GIT_DIR selector overrides the working directory, an absolute or $VAR-anchored path ignores it entirely, an unresolvable or conditional `cd` makes the directory unknown rather than leaving a stale value standing, and a helper that exists but sits beyond the depth cap caps the whole unit."
+    recovery: "A `shared` entry cites the file:line that justifies it — go read it. An `unknown` namespace names what defeated the analysis (an unresolvable cd, a computed path, a helper beyond the depth cap); making that construct readable, or raising --depth-cap, resolves it."
     test: "scripts/tests/bats/test-aid-test-resource-map.bats"
 
   - id: test_audit_pilot_evidence_bound
@@ -1521,7 +1525,8 @@ enforcements:
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "P072 Step 15 — a lane may be proposed only on a pilot that ran its own membership in a disposable clone bound to the audited tree's HEAD and tree hash. Every side of every repetition runs in its own fresh snapshot (a shared tree let the serial side warm state that made a cold concurrency race vanish); both sides must exit zero from a terminal_pass job; the per-case comparison is positional rather than name-keyed (two cases sharing a name are two facts); leak detection digests the whole snapshot including git-ignored files and edits to pre-existing ones. A failing repetition ends the pilot with the failing index and NO retry, because retrying until green is how a flaky lane gets promoted. The schema rejects `proposed` without as many matching repetitions as were requested, and rejects it outright when GNU parallel was unavailable and no concurrent run actually happened."
+    description: "P072 Step 15 (this row also carries the plan's `test_audit_pilot_requires_disposable_root`: the pilot exits 10 against the live checkout or a linked worktree, before any process starts) — a lane may be proposed only on a pilot that ran its own membership in a disposable clone bound to the audited tree's HEAD and tree hash. Every side of every repetition runs in its own fresh snapshot (a shared tree let the serial side warm state that made a cold concurrency race vanish); both sides must exit zero from a terminal_pass job; the per-case comparison is positional rather than name-keyed (two cases sharing a name are two facts); leak detection digests the whole snapshot including git-ignored files and edits to pre-existing ones. A failing repetition ends the pilot with the failing index and NO retry, because retrying until green is how a flaky lane gets promoted. The schema rejects `proposed` without as many matching repetitions as were requested, and rejects it outright when GNU parallel was unavailable and no concurrent run actually happened."
+    recovery: "A refusal names the failing repetition and what differed. Fix the shared state the concurrent run exposed, then re-pilot. Never re-run hoping for green: the refusal is the finding."
     test: "scripts/tests/bats/test-aid-test-parallel-pilot.bats"
 
   - id: test_catalog_parallel_provenance_binding
@@ -1532,7 +1537,8 @@ enforcements:
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "P072 Step 16 (hardened by pre-merge review) — provenance binds a status to the unit's whole DEPENDENCY CLOSURE, not only its declared source_paths: a status covering just the unit's own file survived its shared helper acquiring a lock, since the unit's bytes were unchanged and the resource digest was therefore never recomputed. A non-`unknown` parallel.status must carry its evidence_ref, verified_at, method, source_sha256 and resource_digest, enforced by the catalog schema. Every consumer resolves the field through aid_test_catalog_provenance_effective_status, which applies a two-tier reversion: an unchanged source keeps the status; a changed source whose resource digest is unchanged keeps it and refreshes the hash; a changed digest or a deleted source path reverts to `unknown`. One tier would cost a full pilot for a comment fix and stop being obeyed. The digest covers each resource's identifying detail, not merely its kind — a unit already writing one shared path that starts writing a second one changes its sharing proposition and must revert. A recheck that cannot finish within decision.provenance_recheck_budget_ms fails closed."
+    description: "P072 Step 16 (hardened by pre-merge review; this row is the plan's `test_audit_parallel_promotion_requires_provenance`) — provenance binds a status to the unit's whole DEPENDENCY CLOSURE, not only its declared source_paths: a status covering just the unit's own file survived its shared helper acquiring a lock, since the unit's bytes were unchanged and the resource digest was therefore never recomputed. A non-`unknown` parallel.status must carry its evidence_ref, verified_at, method, source_sha256 and resource_digest, enforced by the catalog schema. Every consumer resolves the field through aid_test_catalog_provenance_effective_status, which applies a two-tier reversion: an unchanged source keeps the status; a changed source whose resource digest is unchanged keeps it and refreshes the hash; a changed digest or a deleted source path reverts to `unknown`. One tier would cost a full pilot for a comment fix and stop being obeyed. The digest covers each resource's identifying detail, not merely its kind — a unit already writing one shared path that starts writing a second one changes its sharing proposition and must revert. A recheck that cannot finish within decision.provenance_recheck_budget_ms fails closed."
+    recovery: "A unit that reverted to `unknown` runs sequentially until re-piloted — that is the safe state, not an outage. Re-run the pilot for it and record the result with method resource_map_plus_pilot."
     test: "scripts/tests/bats/test-aid-test-catalog-provenance.bats; scripts/tests/test-integration-parallel-authority-e2e.sh"
 
   - id: test_lane_single_parallel_authority
@@ -1544,6 +1550,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P072 Step 17 (hardened by pre-merge review) — pool eligibility has exactly one authority, and all three consumers use it: aid-bats-parallel-lane.sh, aid-select-tests.sh and aid-test-scheduler.sh all call aid_test_catalog_effective_status_map. The scheduler's approved overlay is an INPUT to that resolver rather than a competing one, and provenance is a floor: an overlay can promote a unit provenance still trusts and can never rescue one it has revoked, because an overlay entry vouches for content it never saw. The authoritative catalog is committed, so a clean clone reproduces the pool. The lane runner reads each unit's effective status from a single catalog snapshot (per-unit re-reads let a concurrent rewrite attach a verdict to a different path than it was made about) and re-hashes every pooled file immediately before dispatch, aborting rather than running content nothing verified. The competing text allowlist is retired to a notice; --allowlist is accepted with a warning that it is not read. The migration carries P071's evidence across with method: migrated_p071_step3, requires each listed path to be its unit's executable source, and REFUSES to migrate a file changed since P071 verified it — hashing edited content into a `safe` status would launder a post-pilot change into fresh-looking evidence."
+    recovery: "When the pre-dispatch re-hash aborts, a pooled file changed mid-run: re-run the gate against a settled tree. For the migration, a file listed as changed since P071 is re-piloted rather than re-blessed."
     test: "scripts/tests/bats/test-aid-catalog-parallel-authority.bats; scripts/tests/bats/test-aid-bats-parallel-lane.bats; scripts/tests/test-integration-parallel-authority-e2e.sh"
 
   - id: test_audit_lane_membership_exact
@@ -1555,4 +1562,90 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P072 Step 18 (hardened by pre-merge review) — resource maps and pilot receipts are FAIL-CLOSED inputs, validated against their schemas and bound to this audit's inventory and audit id before any lane is built; a pilot's membership hash must cover the membership it names and its repetition contract is re-checked rather than trusted. Selecting these by a schema_version string match alone let a receipt claiming `proposed` with an empty repetitions array promote a lane. A candidate lane reaches `proposed_parallel` only when a pilot receipt reports `promotion: proposed` for its EXACT membership; evidence gathered for any other set promotes nothing. A unit with any shared resource becomes its own keep_serial entry naming that resource, a named removable conflict (fixed path or port) becomes blocked_pending_fix, and a unit whose dependencies could not be read becomes context_required rather than keep_serial — filing an unevaluated unit as 'considered and kept serial' would claim an assessment nobody made. Lane assignment is deterministic by sorted run_unit_id so repeated runs on identical input produce identical lanes. Lanes are proposals written into the decision artifact; nothing here writes the catalog or a scheduler mode."
+    recovery: "The halt names the invalid or foreign lane input. Re-run the map or pilot for this audit, or remove an artifact belonging to a different one. A lane that stays keep_serial simply has no pilot for its exact membership yet."
     test: "scripts/tests/bats/test-aid-test-audit-lanes.bats"
+
+  - id: test_audit_incomplete_blocks_write_plan
+    type: 1
+    source: "scripts/lib/aid-test-audit-write-plan-bridge.sh (aid_test_audit_write_plan_bridge_check); scripts/aid-audit-tests-finalize.sh"
+    instruction: "commands/aid-audit-tests.md — `audit_status`, and what an `incomplete` audit refuses"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 3 — an audit whose decision artifact says `incomplete` cannot hand anyone a remediation plan. The bridge returns ready:false with reason `audit_incomplete`, blocking BOTH `--write-plan` and the same-conversation continuation. Building a plan on the part an audit skipped is worse than building none: the skipped units read as examined-and-healthy."
+    recovery: "The chat summary's first section names the smallest bounded next action (a pilot membership, or the highest-priority `measure`). Do that, re-run the audit, then hand off."
+    test: "scripts/tests/test-integration-audit-report-shapes.sh (incomplete shape); scripts/tests/bats/test-aid-test-audit-write-plan-bridge.bats"
+
+  - id: test_audit_disposition_reconciliation
+    type: 1
+    source: "scripts/aid-test-audit-consolidate.sh (coverage reconciliation, exit 5)"
+    instruction: "commands/aid-audit-tests.md — `audit_status` table"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 4 — every unit a shard was assigned must come back with exactly one terminal disposition. The consolidator reconciles inventory count, assigned count and disposition count three ways; a mismatch or a duplicate makes the audit `incomplete` rather than letting a partial result render as a verdict on the whole portfolio."
+    recovery: "Re-dispatch the shard whose units are named in `portfolio_coverage.missing_run_unit_ids`, or reduce the shard so its budget covers what it was given."
+    test: "scripts/tests/bats/test-aid-test-audit-reconciliation.bats"
+
+  - id: test_audit_coverage_reduction_requires_falsification
+    type: 1
+    source: "defaults/schemas/test-audit-wave-artifact.schema.json (dispositions conditional on remove|merge|rewrite_unit)"
+    instruction: "agents/test-portfolio-analyst.md — terminal dispositions"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 5 — a proposal that REDUCES coverage must name which retained test still catches the defect, with a real falsification method (mutation, revert or input_probe) and a citable evidence ref. `unproved` is not an argument for deletion, and the schema refuses the artifact rather than trusting a reviewer to notice."
+    recovery: "Run the falsification probe named in the disposition and record its evidence, or downgrade the proposal to `keep`."
+    test: "scripts/tests/bats/test-aid-test-audit-reconciliation.bats; scripts/tests/test-integration-audit-report-shapes.sh"
+
+  - id: test_audit_clone_config_precondition
+    type: 1
+    source: "scripts/aid-audit-tests-cli-parse.sh (exit 12 clone-of-self, 13 unreadable config, 14 missing config)"
+    instruction: "commands/aid-audit-tests.md — Disposable-clone precondition"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 8 — `.aid-o/` is gitignored, so a disposable clone carries no config unless someone copied it, and auditing such a clone silently drops every declared-command gate: the report comes out confidently smaller than the project with nothing to show anything is missing. The parser refuses before the scan, and distinguishes 'cannot read' from 'not there' because those need different fixes."
+    recovery: "Copy the live checkout's `.aid-o/config/` into the clone (the refusal prints the exact `cp -r`), or pass `--allow-missing-config` to audit a genuinely un-initialized project, which downgrades the refusal to a warning naming what will be absent."
+    test: "scripts/tests/bats/test-aid-audit-tests-cli.bats"
+
+  - id: test_audit_aggregate_unparsed_fails
+    type: 1
+    source: "scripts/tests/run-all-tests.sh (parse_suite_result, `unparsed` classification)"
+    instruction: "docs/extending-aid.md — aggregate result grammar"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 9 — a suite whose result line the aggregate runner cannot parse is reported as `unparsed` and fails the aggregate, instead of being counted as zero tests and silently passing. An ambiguous line (two `N passed` tokens, a thousands separator) is unparsed rather than guessed at: a miscount that reads as a result is worse than a loud refusal."
+    recovery: "Make the suite print one of the recognised `Results:` shapes, or fix the suite so its real result is emitted."
+    test: "scripts/tests/bats/test-run-all-tests-result-grammar.bats"
+
+  - id: test_audit_inventory_arithmetic_guard
+    type: 1
+    source: "scripts/aid-test-inventory.sh (per-runner emission arithmetic, exit 8; overlap resolution, exit 9)"
+    instruction: "docs/extending-aid.md — inventory reconciliation"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 10 — the sum of per-runner emissions must equal the final run-unit count. A mismatch means a unit vanished between adapters, which is exactly the failure that produces a confidently incomplete portfolio, so the scanner exits rather than publishing."
+    recovery: "The exit names the runner whose count disagrees; fix that adapter's emission or its overlap resolution and re-scan."
+    test: "scripts/tests/bats/test-aid-test-inventory.bats"
+
+  - id: test_execution_no_double_dispatch
+    type: 1
+    source: "scripts/aid-test-execution-ledger.sh (close) — NOT YET IMPLEMENTED (P072 Step 26)"
+    instruction: ".aid-o/plans/P072-test-audit-decision-quality.md Step 26"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    deadline: "2026-09-30"
+    verdict: unmapped
+    description: "P072 Step 26 — a ledger proving no run unit is executed twice within one gate run, closed by `aid-run-gates.sh` at run end. Recorded as `planned` because neither the ledger nor its production caller exists yet: this repository already contains one real double-execution (a bats file dispatched by two gates), so the row exists specifically to stop the ledger shipping as a detector read only by its own test."
+    recovery: "n/a until implemented. When it lands, a non-zero close means a unit ran twice — deduplicate the gate memberships that contain it."
+    test: "planned — scripts/tests/bats/test-aid-test-execution-ledger.bats"
