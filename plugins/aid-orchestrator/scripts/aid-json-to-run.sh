@@ -722,20 +722,30 @@ elif [[ ! -f "$fsm_state_file" ]]; then
   fi
   fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then
-    if git checkout "$fsm_branch" >/dev/null 2>&1; then
+    # P073 Step 6: capture the failure text from the FIRST and ONLY attempt.
+    # An earlier cut ran a second `git checkout` purely to surface the error;
+    # that retry is stateful and could SUCCEED, leaving the branch correctly
+    # restored while the script still reported a failure and stopped the
+    # pipeline (adversarial-review finding).
+    fsm_restore_err=""
+    if fsm_restore_err="$(git checkout "$fsm_branch" 2>&1)"; then
       echo "P040 Component E: restored generation branch '$fsm_branch' after FSM init (was on '$fsm_after_branch')" >&2
     else
-      # P073 Step 6: a WARNING here used to let the pipeline continue on the
-      # WRONG branch — every follow-on phase (queue, report, a further EPIC)
-      # then generated against a checkout the operator never chose. The stop
-      # happens at the point of failed restore, not merely at the end, and
-      # exits 3 so aid-auto-pipeline.sh can distinguish it from an ordinary
-      # generation failure. Artifacts from the phase that COMPLETED are left
-      # in place — they are valid; only continuation is stopped.
+      # A WARNING here used to let the pipeline continue on the WRONG branch —
+      # every follow-on phase (queue, report, a further EPIC) then generated
+      # against a checkout the operator never chose. The stop happens at the
+      # point of failed restore, not merely at the end. Artifacts from the
+      # phase that COMPLETED are left in place — they are valid; only
+      # continuation is stopped.
+      #
+      # Exit code 4, NOT 3: this script already returns 3 for ordinary I/O
+      # failures (unwritable output dir, missing EPIC file, temp-file
+      # failure), so reusing it would make an unrelated I/O error print a
+      # misleading "git checkout" recovery instruction from the pipeline.
       echo "P040 Component E: ERROR — generation completed but the checkout is now on '$fsm_after_branch' instead of '$fsm_branch' — run: git checkout $fsm_branch ; then rerun any follow-on action" >&2
       echo "P040 Component E: underlying git checkout failure:" >&2
-      git checkout "$fsm_branch" >&2 || true
-      exit 3
+      printf '%s\n' "$fsm_restore_err" >&2
+      exit 4
     fi
   fi
 else

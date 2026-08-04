@@ -547,17 +547,18 @@ for phase in $(seq 1 "$total_phases"); do
   )
   [[ "$streamlined" == "true" ]] && json_to_run_args+=(--streamlined)
   [[ -n "$force_init_reason" ]] && json_to_run_args+=(--force-init-reason "$force_init_reason")
-  # P073 Step 6: exit 3 from aid-json-to-run.sh means generation SUCCEEDED but
+  # P073 Step 6: exit 4 from aid-json-to-run.sh means generation SUCCEEDED but
   # the checkout could not be restored to the branch this run started on.
+  # (4, not 3 — that script already uses 3 for ordinary I/O failures.)
   # Every remaining phase (queue, report, a further EPIC) would otherwise run
   # against a branch the operator never chose, so stop here and pass the
   # recovery instruction through. Any other non-zero status is an ordinary
   # generation failure and keeps its existing meaning.
   _j2r_rc=0
   run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" "${json_to_run_args[@]}")" || _j2r_rc=$?
-  if [[ "$_j2r_rc" -eq 3 ]]; then
+  if [[ "$_j2r_rc" -eq 4 ]]; then
     echo "[ERROR] Branch restore failed after EPIC generation — the remaining pipeline phases (queue, report) were NOT run. Follow the 'git checkout' instruction above, then rerun." >&2
-    exit 3
+    exit 4
   fi
   [[ "$_j2r_rc" -eq 0 ]] || exit "$_j2r_rc"
 
@@ -705,9 +706,9 @@ if [[ "$two_stage" == true ]]; then
     # restore must not let the NEXT phase initialise on the wrong branch.
     _j2r_rc=0
     _run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" "${_j2r_args[@]}")" || _j2r_rc=$?
-    if [[ "$_j2r_rc" -eq 3 ]]; then
+    if [[ "$_j2r_rc" -eq 4 ]]; then
       echo "[ERROR] Branch restore failed after phase ${phase}/${total_phases} (${_epic_id}) — no queue entry was written for it and no further phase was initialised. Follow the 'git checkout' instruction above, then rerun." >&2
-      exit 3
+      exit 4
     fi
     [[ "$_j2r_rc" -eq 0 ]] || exit "$_j2r_rc"
 

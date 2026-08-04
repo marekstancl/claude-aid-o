@@ -6,8 +6,11 @@
 # branch, and then restores the branch generation started on. When that
 # restore FAILED it only printed a WARNING, so every follow-on phase (queue,
 # report, a further EPIC) kept generating against a checkout the operator
-# never chose. The failure now exits 3 at the point of failure, and
-# aid-auto-pipeline.sh propagates that distinctly.
+# never chose. The failure now exits 4 at the point of failure, and
+# aid-auto-pipeline.sh propagates that distinctly. (4, not the 3 the plan
+# named: aid-json-to-run.sh already returns 3 for ordinary I/O failures, so
+# reusing it would make an unrelated I/O error print a misleading "git
+# checkout" recovery instruction — found while reviewing this step.)
 #
 # FAULT INJECTION: the restore failure is produced by a real git mechanism, not
 # a stub. A `post-checkout` hook deletes the original branch the moment the FSM
@@ -84,13 +87,13 @@ _run_pipeline() {
 
 # ─── the failure path ─────────────────────────────────────────────────────
 
-@test "P073 Step 6: a failed branch restore exits 3 with a git-checkout recovery instruction" {
+@test "P073 Step 6: a failed branch restore exits 4 with a git-checkout recovery instruction" {
   _make_ws "main"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
   _break_restore "main"
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
-  [ "$status" -eq 3 ]
+  [ "$status" -eq 4 ]
   [[ "$output" == *"instead of 'main'"* ]]
   [[ "$output" == *"git checkout main"* ]]
 }
@@ -101,7 +104,7 @@ _run_pipeline() {
   _break_restore "main"
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
-  [ "$status" -eq 3 ]
+  [ "$status" -eq 4 ]
   # The pipeline names the phases it skipped rather than continuing silently.
   [[ "$output" == *"were NOT run"* || "$output" == *"no further phase was initialised"* ]]
   # No queue entry was written for the aborted run.
@@ -120,7 +123,7 @@ _run_pipeline() {
   _break_restore "main"
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
-  [ "$status" -eq 3 ]
+  [ "$status" -eq 4 ]
   run bash -c "find '$WS/.aid-o' -name 'plan.json' | wc -l"
   [ "$output" -ge 1 ]
 }
@@ -163,5 +166,35 @@ _run_pipeline() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"detached HEAD"* || "$output" == *"cannot determine current git branch"* ]]
   # Not the restore-failure code — this is a different, earlier refusal.
-  [ "$status" -ne 3 ]
+  [ "$status" -ne 4 ]
+}
+
+# ─── Codex-review findings on the first cut of this step ───────────────────
+
+@test "P073 Step 6 (review finding): an ordinary I/O failure keeps its own exit 3 and never claims a branch-restore problem" {
+  # aid-json-to-run.sh already used 3 for I/O failures. Had the restore
+  # failure reused it, this run would print the pipeline's "Branch restore
+  # failed / git checkout" instruction for a completely unrelated fault.
+  _make_ws "main"
+  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+
+  run bash -c "cd '$WS' && bash '$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh' \
+      --plan-json '$FIXTURES/minimal-plan.json' \
+      --run-template '$AID_PLUGIN_PATH/defaults/templates/run-new-feature.md' \
+      --epic '$FIXTURES/E-TEST-001-1_1-minimal-test-plan.md' \
+      --output-dir /proc/definitely-not-writable \
+      --run-id R-TEST-1"
+  [ "$status" -ne 4 ]
+  [[ "$output" != *"git checkout"* ]]
+}
+
+@test "P073 Step 6 (review finding): the restore failure is diagnosed WITHOUT a second checkout attempt" {
+  # An earlier cut re-ran `git checkout` purely to surface the error text.
+  # That retry is stateful: if it succeeded, the branch was actually restored
+  # while the script still reported failure and stopped the pipeline. The
+  # error is now captured from the single attempt.
+  run grep -c 'git checkout "$fsm_branch" >&2' "$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh"
+  [ "$output" = "0" ]
+  run grep -c 'fsm_restore_err="$(git checkout "$fsm_branch" 2>&1)"' "$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh"
+  [ "$output" = "1" ]
 }
