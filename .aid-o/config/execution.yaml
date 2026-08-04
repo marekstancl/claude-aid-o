@@ -33,7 +33,11 @@ gates:
     #   original_command: "bats plugins/aid-orchestrator/scripts/tests/bats/"
     command: "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --pool-only"
     required: true
-    timeout_seconds: 600
+    timeout_seconds: 2400  # measured 1556s uncapped (2026-08-04); 600s had NEVER
+                           # completed since the P071 quarantine lift — two
+                           # censored samples, no percentile, and a real red
+                           # case hidden for two commits because a gate that
+                           # always times out reports nothing
     max_retries: 0
   bats_boundary:
     # P071 E-071-1_1 Step 3 CP2 fix (2026-08-02): the 2 bats files excluded
