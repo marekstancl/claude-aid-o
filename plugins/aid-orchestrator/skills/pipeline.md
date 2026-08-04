@@ -1032,7 +1032,7 @@ otherwise silently never run and still report pass — OBS-20260702-05).
 **Present to PM:**
 ```
 ESCALATION — {trigger_reason}
-EPIC: {epic_id} | Progress: {current_step + 1}/{total_steps}
+EPIC: {epic_id} | Progress: {executing_step}/{total_steps}
 
 State: {failed_state}
 
@@ -1048,7 +1048,7 @@ Options:
 Recommendation: {auto-generated}
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
 
 
 In FIRST AID mode, add option D: "Continue manual".
@@ -2308,12 +2308,12 @@ aid-fsm.sh get-state <state_file>   # Returns current state
 
 **Manual mode:** do not auto-resume after a crash. Report to PM:
 ```
-Stale state detected: {state} at step {current_step + 1}/{total_steps}.
+Stale state detected: {state} at step {executing_step}/{total_steps}.
 
 Resume with: /aid-run --resume {run_id}
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
 
 
 **Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume

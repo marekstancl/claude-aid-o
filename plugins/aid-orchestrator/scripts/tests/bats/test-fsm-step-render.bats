@@ -100,17 +100,24 @@ teardown() {
 
 # ─── prose surfaces carry the rendering rule, not just the template ──────
 
-@test "P073 Step 4: every enumerated prose surface renders the +1 form and states the rule" {
+@test "P073 Step 4: every enumerated prose surface renders executing_step and states the rule" {
   local root="$AID_PLUGIN_PATH"
   local f
   for f in commands/aid-status.md commands/aid-run.md commands/aid-stop.md \
            skills/pipeline.md skills/memory.md; do
     run grep -c 'Step rendering rule' "$root/$f"
     [ "$output" -ge 1 ]
+    # The rule must define the CAP, not just the +1 — a bare +1 renders
+    # "T+1 of T" for a completed run (Codex review finding on the first cut).
+    run grep -c 'executing_step = min(current_step + 1, total_steps)' "$root/$f"
+    [ "$output" -ge 1 ]
   done
   # No template still renders the bare 0-based value.
   run bash -c "grep -rn '{current_step}/{total_steps}' '$root/commands' '$root/skills' || true"
   [ -z "$output" ]
   run bash -c "grep -rn '{current_step} of {total_steps}' '$root/commands' '$root/skills' || true"
+  [ -z "$output" ]
+  # And no template applies an UNCAPPED +1 either.
+  run bash -c "grep -rn '{current_step + 1}' '$root/commands' '$root/skills' || true"
   [ -z "$output" ]
 }
