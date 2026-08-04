@@ -1,15 +1,35 @@
 #!/usr/bin/env bash
 # aid-test-audit-chat-summary.sh — P066 Step 15.
 #
-# Renders the mandatory 5-part plain-language chat message from
-# consolidated-findings.json: (1) verdict, (2) up to 5 evidenced reasons —
-# one per top finding, NEVER fabricated/padded to reach a minimum count
-# (Codex review: a "3-5" phrasing read as a hard floor is dishonest for a
-# sparse, 1-2-finding result — a real audit with 1 genuine finding gets
-# exactly 1 real reason, not 2 invented ones), (3) what changed, (4) one
-# plain-language next action, (5) residual risk/PM-decision-needed.
-# Verdict classification is a PURE FUNCTION of consolidated-findings.json's
-# severity/recommendation fields — reproducible, never an LLM judgment call.
+# Renders the mandatory SIX-part plain-language chat message — P072 Step 19.
+#
+# THE ORDER IS THE POINT
+#   1. What to do now
+#   2. What to fix, merge, split or remove
+#   3. What can run in parallel
+#   4. What must remain serial
+#   5. Test time now, and after the proposed work
+#   6. What is not proved yet
+#   + Technical evidence (appendix)
+#
+#   The five-part predecessor led with a verdict and a severity-ranked list of
+#   findings, so a reader met the evidence before the decision and had to
+#   assemble the answer themselves. A test-portfolio audit exists to answer
+#   "what should I do about my tests"; that answer goes first, and the
+#   evidence goes in an appendix underneath it.
+#
+#   Sections 2-6 render the NAMED ID SETS from the decision artifact — keep,
+#   rewrite_unit, merge_groups, remove, lanes, unresolved — rather than a
+#   top-five list. Five findings ranked by severity tell a reader what is
+#   loudest, not what is left to do.
+#
+# EVERY HEADING ALWAYS RENDERS
+#   Including when its section is empty, with an explicit statement of that.
+#   A missing heading reads as an omission; "nothing here" is a finding and
+#   has to be said.
+#
+# Verdict classification remains a PURE FUNCTION of the artifacts —
+# reproducible, never an LLM judgment call.
 #
 # Testability boundary, stated explicitly: this renderer's OUTPUT TEXT is
 # ordinary, deterministic code — fully Bats-testable. The controller's act of
@@ -25,6 +45,10 @@ _TACS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_TACS_LIB_DIR}/aid-test-adapter-contract.sh"
 # shellcheck source=aid-test-audit-write-plan-bridge.sh
 source "${_TACS_LIB_DIR}/aid-test-audit-write-plan-bridge.sh"
+# shellcheck source=aid-test-audit-config.sh
+source "${_TACS_LIB_DIR}/aid-test-audit-config.sh"
+# shellcheck source=aid-test-audit-decision.sh
+source "${_TACS_LIB_DIR}/aid-test-audit-decision.sh"
 _TACS_FINDINGS_SCHEMA="${_TACS_LIB_DIR}/../../defaults/schemas/test-audit-consolidated-findings.schema.json"
 
 # _tacs_classify_verdict <findings_json>
@@ -169,43 +193,267 @@ aid_test_audit_render_chat_summary() {
   local audit_id
   audit_id="$(jq -r '.audit_id' <<<"$whole_doc")"
   if ! aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action" "$_tacs_audit_mode"; then
-    echo "**Audit did not complete cleanly** — failed to persist the durable audit record (durable-record.json) for $findings_path. This is not a clean result; the --write-plan/continuation handoff cannot be reached without it." >&2
+    # BOTH channels. This function's contract is that its stdout IS the
+    # user-facing turn, so a failure explained only on stderr leaves the caller
+    # presenting nothing — or worse, an earlier success-looking message.
+    local _persist_msg="**Audit did not complete cleanly** — failed to persist the durable audit record (durable-record.json) for $findings_path. This is not a clean result; do not rely on it and do not attempt \`--write-plan\`, whose handoff cannot be reached without it."
+    echo "$_persist_msg"
+    echo "$_persist_msg" >&2
     return 1
   fi
 
+  # ─── The six sections ─────────────────────────────────────────────────────
+  #
+  # `_d` is the decision artifact when there is one. Without it — a static or
+  # measure audit — the sections that describe portfolio decisions say so
+  # rather than rendering an empty set that would read as "nothing to do".
+  local _d="" _have_decision="false"
+  if [[ -n "$_tacs_decision_path" && -f "$_tacs_decision_path" ]]; then
+    # VALIDATED, not merely present. A `{}` or wrong-shaped artifact used to
+    # sail through: every jq query returned null, every null became an
+    # affirmative default, and the reader was told "everything reached a
+    # decision it can defend" over a file containing nothing at all.
+    if aid_test_audit_decision_read "$_tacs_decision_path" >/dev/null 2>&1; then
+      _d="$_tacs_decision_path"; _have_decision="true"
+    else
+      echo "**Audit did not complete cleanly** — the decision artifact at ${_tacs_decision_path} is invalid or incompatible (\`aid-test-audit-decision-v1\`). No decision, parallelization or proof-completeness claim can be made from it. Do not attempt \`--write-plan\`."
+      return 1
+    fi
+  fi
+
+  # A full audit OWES a decision artifact. Rendering one without it produced
+  # "No action needed." over an audit that had decided nothing — the single
+  # most misleading sentence this renderer can emit.
+  if [[ "$_tacs_audit_mode" == "full" && "$_have_decision" != "true" ]]; then
+    echo "**Audit did not complete cleanly** — a full audit requires a decision artifact and none was produced. Findings may exist below, but the portfolio decisions, the parallel-safety assessment and the remediation handoff are NOT established. Do not attempt \`--write-plan\`."
+    return 1
+  fi
+
+  local max_ids=25
+  if [[ "$_have_decision" == "true" ]]; then
+    max_ids="$(test_audit_decision_key chat_render_max_ids "$(dirname "$(dirname "$_d")")" 2>/dev/null || echo 25)"
+    [[ "$max_ids" =~ ^[0-9]+$ ]] || max_ids=25
+  fi
+
+  # _tacs_id_set <jq-path> <label> — the named set, truncated with an EXACT
+  # remaining count and a path to the full list. A silent truncation would let
+  # a reader act on a partial set believing it complete.
+  _tacs_id_set() {
+    local expr="$1" label="$2"
+    [[ "$_have_decision" == "true" ]] || { printf -- '- %s: (requires a full audit)\n' "$label"; return 0; }
+    # `--arg lbl`, not `--arg label`: `label` is a jq keyword, and binding it
+    # made every one of these sets render as "(unreadable)".
+    jq -r --argjson n "$max_ids" --arg lbl "$label" --arg path "$(basename "$_d")" "
+      ($expr) as \$ids
+      | if (\$ids | length) == 0 then \"- \" + \$lbl + \": none\"
+        else \"- \" + \$lbl + \" (\" + ((\$ids|length)|tostring) + \"): \"
+             + (\$ids[0:\$n] | join(\", \"))
+             + (if (\$ids|length) > \$n
+                then \" — and \" + (((\$ids|length) - \$n)|tostring) + \" more, in \" + \$path
+                else \"\" end)
+        end" "$_d" 2>/dev/null || printf -- '- %s: (unreadable)\n' "$label"
+  }
+
+  # Merge groups render GROUP BY GROUP. Flattening them into one id set turned
+  # two separate two-unit merges into what reads as a single four-unit merge —
+  # a different instruction, and an unsafe one to execute.
+  _tacs_merge_groups() {
+    [[ "$_have_decision" == "true" ]] || { printf -- '- Merge: (requires a full audit)\n'; return 0; }
+    jq -r --argjson n "$max_ids" '
+      (.portfolio_change.merge_groups // []) as $g
+      | if ($g | length) == 0 then "- Merge: none"
+        else ( ["- Merge (" + (($g|length)|tostring) + " group(s)):"]
+               + ( $g[0:$n] | to_entries
+                   | map("  - group " + ((.key + 1)|tostring) + ": " + (.value | join(", "))) )
+               + ( if ($g|length) > $n
+                   then ["  - and " + ((($g|length) - $n)|tostring) + " more group(s), in decision.json"]
+                   else [] end ) ) | join("\n")
+        end' "$_d" 2>/dev/null || printf -- '- Merge: (unreadable)\n'
+  }
+
+  # 1 — What to do now.
+  local section_now
   if [[ "$_tacs_incomplete" == "true" ]]; then
-    # An incomplete audit gets its own shape. It must never read as a result:
-    # the point is that the audit did not finish deciding, and the reader has
-    # to see what is missing rather than a findings list that looks like a
-    # verdict on a portfolio nobody fully examined.
-    cat <<EOF
-**Verdict:** audit NOT complete (\`audit_status: incomplete\`)
+    # A bounded next diagnostic action, never a suggestion to plan remediation.
+    section_now="$(jq -r '
+      if (.parallelization.smallest_safe_pilot // null) != null
+      then "Run the smallest bounded pilot that would settle the most units: "
+           + (.parallelization.smallest_safe_pilot.run_unit_ids | join(", "))
+           + " (at " + ((.parallelization.smallest_safe_pilot.workers)|tostring) + " workers, repeated "
+           + ((.parallelization.smallest_safe_pilot.repeat)|tostring) + " times)."
+      elif ([.actions[] | select(.action == "measure")] | length) > 0
+      then "Measure before deciding anything else: "
+           + ([.actions[] | select(.action == "measure")] | sort_by(.priority) | .[0].reason)
+      else "Decide the units listed as undecided below, then re-run this audit."
+      end' "$_d" 2>/dev/null)"
+    [[ -n "$section_now" ]] || section_now="Re-run this audit with a larger budget."
+    section_now="This audit did NOT finish (\`audit_status: incomplete\` — ${_tacs_reason}). ${section_now}
+A remediation plan cannot be created from it: the \`--write-plan\` handoff refuses an incomplete audit."
+  else
+    # When there IS a decision, the action comes from it — not from a
+    # findings-severity classification that can contradict it. "No action
+    # needed" printed directly above "Remove (1): bats:legacy" is one message
+    # disagreeing with itself.
+    local _proposed=""
+    if [[ "$_have_decision" == "true" ]]; then
+      _proposed="$(jq -r '
+        [ (if ((.portfolio_change.remove // []) | length) > 0
+           then "remove " + (((.portfolio_change.remove) | length)|tostring) + " unit(s)" else empty end),
+          (if ((.portfolio_change.rewrite_unit // []) | length) > 0
+           then "rewrite " + (((.portfolio_change.rewrite_unit) | length)|tostring) + " unit(s)" else empty end),
+          (if ((.portfolio_change.merge_groups // []) | length) > 0
+           then "merge " + (((.portfolio_change.merge_groups) | length)|tostring) + " group(s)" else empty end),
+          (if ([.parallelization.lanes[]? | select(.disposition == "proposed_parallel")] | length) > 0
+           then "adopt " + (([.parallelization.lanes[]? | select(.disposition == "proposed_parallel")] | length)|tostring) + " parallel lane(s)" else empty end)
+        ] | join(", ")' "$_d" 2>/dev/null)"
+    fi
+    if [[ -n "$_proposed" ]]; then
+      # The findings-derived next action is REPLACED, not appended: "No action
+      # needed" trailing a list of proposed removals is the same contradiction
+      # in a longer sentence.
+      [[ "$next_action" == "No action needed." ]] \
+        && next_action="Reply \"vytvoř plán oprav\" (or run \`--write-plan\`) to turn these into a remediation plan."
+      section_now="This audit proposes: ${_proposed} — see section 2 for the exact units. ${next_action}"
+      # The appendix verdict must not read `clean` next to an explicit change.
+      [[ "$verdict" == "clean" ]] && verdict="remediation recommended"
+    else
+      section_now="${next_action}"
+    fi
+  fi
 
-**Why it is not complete:** ${_tacs_reason}
+  # 5 — Test time, with the impact label attached so an estimate is never read
+  # as a measurement.
+  local section_time
+  if [[ "$_have_decision" == "true" ]]; then
+    section_time="$(jq -r '
+      (.portfolio_change.runtime_before_ms) as $b
+      | (.portfolio_change.runtime_after_ms) as $a
+      | (.portfolio_change.impact_kind // "unknown") as $k
+      | if $b == null and $a == null
+        then "Not measured. No before-and-after figure was produced by this audit."
+        else "Now: " + (if $b == null then "not measured" else (($b/1000)|floor|tostring) + "s" end)
+             + " — after the proposed work: "
+             + (if $a == null then "not projected" else (($a/1000)|floor|tostring) + "s" end)
+             + " (" + $k + ")"
+             + (if $k == "estimated" then " — an ESTIMATE, not a measured saving." else "" end)
+        end' "$_d" 2>/dev/null)"
+    if [[ "$_tacs_incomplete" == "true" && "$section_time" != "Not measured."* ]]; then
+      section_time="${section_time}
+NOT a decision-grade portfolio figure: this audit is incomplete, so the \"after\" side describes work that was never fully decided."
+    fi
+  else
+    section_time="Not measured. A full audit is required to produce a before-and-after figure."
+  fi
+  [[ -n "$section_time" ]] || section_time="Not measured."
 
-**Units left undecided:** ${_tacs_missing}
+  # The units this audit never decided. `_tacs_missing` was computed and then
+  # never rendered, so the text said "decide the units listed above" with no
+  # such list anywhere.
+  local _tacs_undecided_line=""
+  if [[ "$_tacs_incomplete" == "true" && -n "$_tacs_missing" ]]; then
+    _tacs_undecided_line="
+**Undecided — no disposition was reached for these:** ${_tacs_missing}
+Treat every one of them as unexamined, not as healthy."
+  fi
 
-**What the findings so far say** (partial — not a verdict on the portfolio):
-${reasons_text}
+  # 6 — What is not proved yet.
+  local section_unproved
+  if [[ "$_have_decision" == "true" ]]; then
+    section_unproved="$(jq -r '
+      ([ .unresolved[]? | "- " + .run_unit_id + ": " + (.missing_proof // "unstated")
+                          + " — next: " + (.next_measurement // "unstated") ]
+       + [ .portfolio_change.keep[]? | select(. != null) | empty ]) as $lines
+      | if ($lines | length) == 0 then "Everything this audit examined reached a decision it can defend."
+        else ($lines | join("\n")) end' "$_d" 2>/dev/null)"
+  else
+    section_unproved="This audit did not produce a decision artifact, so nothing here is proved to the standard a full audit applies."
+  fi
+  [[ -n "$section_unproved" ]] || section_unproved="Everything this audit examined reached a decision it can defend."
 
-**Changed:** ${changed_text}
+  # 3/4 — Lanes.
+  local section_parallel section_serial
+  if [[ "$_have_decision" == "true" ]]; then
+    section_parallel="$(jq -r '
+      [ .parallelization.lanes[]? | select(.disposition == "proposed_parallel") ] as $l
+      | if ($l | length) == 0
+        then "Nothing is proposed to run in parallel on current evidence."
+        else ($l | map("- " + .lane_id + ": " + (.run_unit_ids | join(", "))
+                       + " (evidence: " + ((.evidence_refs // []) | join(", ")) + ")") | join("\n"))
+        end' "$_d" 2>/dev/null)"
+    section_serial="$(jq -r '
+      [ .parallelization.lanes[]? | select(.disposition != "proposed_parallel") ] as $l
+      | if ($l | length) == 0
+        then "Nothing was found that must stay serial."
+        else ($l | map("- " + (.run_unit_ids | join(", ")) + " — " + .disposition
+                       + (if ((.resource_basis // []) | length) > 0
+                          then " (" + (.resource_basis | join(", ")) + ")" else "" end)) | join("\n"))
+        end' "$_d" 2>/dev/null)"
+  else
+    section_parallel="Not assessed. Parallel safety requires a full audit."
+    section_serial="Not assessed. Parallel safety requires a full audit."
+  fi
 
-**Next action:** ${next_action}
+  # 2 — The portfolio sets, plus the exact no-removal sentence.
+  local removal_line=""
+  if [[ "$_have_decision" == "true" ]]; then
+    if [[ "$(jq -r '(.portfolio_change.remove // []) | length' "$_d" 2>/dev/null)" == "0" ]]; then
+      removal_line="No test is recommended for removal on current evidence."
+    fi
+  fi
 
-**Residual risk / PM decision:** This audit cannot support a remediation plan. Treat every unit not listed as decided as unexamined, not as healthy.
-EOF
-    return 0
+  # An incomplete audit's later sections are PROVISIONAL. Rendering them
+  # unlabelled presented a partial result as an instruction set: `Remove (1):
+  # legacy-suite` under an audit that never finished deciding reads exactly
+  # like one that did.
+  local provisional=""
+  if [[ "$_tacs_incomplete" == "true" ]]; then
+    provisional="
+> **Provisional — this audit did not finish.** Everything below is a partial
+> observation, not an instruction. Do not execute these changes or rely on
+> these lanes and timings until the audit is completed."
   fi
 
   cat <<EOF
+## 1. What to do now
+
+${section_now}
+${provisional}
+
+## 2. What to fix, merge, split or remove
+
+$(_tacs_id_set '[.portfolio_change.keep[]?]' 'Keep as-is')
+$(_tacs_id_set '[.portfolio_change.rewrite_unit[]?]' 'Rewrite')
+$(_tacs_merge_groups)
+$(_tacs_id_set '[.portfolio_change.remove[]?]' 'Remove')
+${removal_line}
+
+## 3. What can run in parallel
+
+${section_parallel}
+
+## 4. What must remain serial
+
+${section_serial}
+
+## 5. Test time now, and after the proposed work
+
+${section_time}
+
+## 6. What is not proved yet
+
+${section_unproved}
+${_tacs_undecided_line}
+
+---
+
+### Technical evidence
+
 **Verdict:** ${verdict}
 
-**Reasons:**
+**Findings** (evidence, not a to-do list):
 ${reasons_text}
 
 **Changed:** ${changed_text}
-
-**Next action:** ${next_action}
 
 **Residual risk / PM decision:** ${residual_risk}
 EOF

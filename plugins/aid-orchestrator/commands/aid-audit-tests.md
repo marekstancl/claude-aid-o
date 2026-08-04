@@ -223,9 +223,24 @@ merely asserted to.
 
 ## Parallel-safety findings
 
-`safe|constrained|exclusive|unknown` is a descriptive audit finding only — this
-plan ships no scheduler that consumes it (see P069, `depends_on_plans: [P066]`,
-for the dependent scheduler work). Reading a run_unit's `parallel.status`:
+`safe|constrained|exclusive|unknown` on a run unit is **consumed**, and it is the
+single authority for whether that unit may run concurrently with others. Three
+consumers read it, all through the same resolver
+(`aid_test_catalog_provenance_effective_status`): `aid-bats-parallel-lane.sh`,
+`aid-test-scheduler.sh` and `aid-select-tests.sh`. The separate text allowlist
+that used to govern the pool is retired.
+
+Promotion out of `unknown` requires TWO kinds of evidence, never one: a
+resource map read from source (`aid-test-resource-map.sh`) and a pilot that ran
+the exact membership serially and concurrently in a disposable clone
+(`aid-test-parallel-pilot.sh`).
+
+A recorded status is bound to the content it was verified against — the unit's
+whole dependency closure, including the helpers it sources. Change that
+content's resources and the status reverts to `unknown` on its own, with nobody
+editing anything.
+
+Reading a run_unit's `parallel.status`:
 
 | Value | Meaning |
 |---|---|
@@ -234,9 +249,52 @@ for the dependent scheduler work). Reading a run_unit's `parallel.status`:
 | `exclusive` | Must run alone — a genuine mutual-exclusion requirement was found (a fixed port, a shared mutable path, or lock usage with no safe concurrency margin). |
 | `unknown` | The default absent direct, cited adapter evidence. This command **never promotes a test to `safe` optimistically** — an unexamined or ambiguous run_unit stays `unknown` rather than being guessed into a more permissive class. |
 
-These are audit findings, nothing more: this plan schedules nothing, batches
-nothing, and enforces no concurrency limit based on this classification —
-that consumption is entirely P069's job.
+**The audit still recommends; it does not act.** It never writes
+`parallel.status`, never edits `execution.yaml`, and never changes a scheduler
+mode. What it produces is a decision artifact whose lanes are proposals. Acting
+on them is a separate, explicit step.
+
+## `audit_status`, and what an `incomplete` audit refuses
+
+A full audit ends in `complete` or `incomplete`, recorded in `decision.json`.
+`incomplete` **blocks** both `--write-plan` and the same-conversation "vytvoř
+plán oprav" continuation: an audit that did not finish deciding cannot hand
+anyone a remediation plan built on the part it skipped.
+
+The reason is drawn from a controlled vocabulary — never free text — so a
+consumer can branch on it. The ones a full audit reaches most often:
+
+| Reason | What happened |
+|---|---|
+| `coverage_mismatch` | The inventory, the assignment and the disposition counts do not reconcile — typically a unit assigned to a shard that came back with no terminal disposition. |
+| `duplicate_dispositions` | A unit received more than one terminal disposition. |
+| `unresolved_fraction_exceeded` | More than `decision.max_unresolved_fraction` of the portfolio is unresolved. |
+| `budget_exhausted` | The audit ran out of its wall-clock budget before deciding everything. |
+| `empty_inventory` | The scan found no run units at all. |
+
+The full list lives in `test-audit-decision.schema.json` (`controlled_reason`);
+extending it is a deliberate schema change, which is the point.
+
+Recovery is the same in each case: the chat summary's first section names the
+smallest bounded next action, and the audit is re-run after it.
+
+## The six-part chat handoff
+
+Every run ends with a summary in this exact order — the decision first, the
+evidence last:
+
+1. What to do now
+2. What to fix, merge, split or remove
+3. What can run in parallel
+4. What must remain serial
+5. Test time now, and after the proposed work
+6. What is not proved yet
+7. Technical evidence (appendix)
+
+Every heading renders even when its section is empty, with an explicit
+statement of that: a missing heading reads as an omission, and "nothing here"
+is a finding that has to be said. An `estimated` saving always renders with its
+label attached, so it can never be read as a measured one.
 
 ## Reads / Writes
 
@@ -248,4 +306,4 @@ that consumption is entirely P069's job.
 - Never writes to `.aid-o/config/test-catalog.yaml` directly — that is the
   separate, explicit catalog-approval step's job.
 
-**Last Updated:** 2026-08-03
+**Last Updated:** 2026-08-04

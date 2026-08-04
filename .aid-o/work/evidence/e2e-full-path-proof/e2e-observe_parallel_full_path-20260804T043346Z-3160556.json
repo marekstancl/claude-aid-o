@@ -1,0 +1,14 @@
+{
+  "run_id": "e2e-observe_parallel_full_path-20260804T043346Z-3160556",
+  "scenario": "observe_parallel_full_path",
+  "pass": false,
+  "stages_verified": [
+    {
+      "stage": "bootstrap_catalog_approved",
+      "pass": false,
+      "detail": "aid-test-catalog-approve.sh failed: aid-test-catalog-approve.sh: --proposed '/tmp/tmp.wydx4WsnkJ/test-catalog.proposed.yaml' failed schema validation before approval — refusing to publish an unvalidated catalog"
+    }
+  ],
+  "commit_sha": "a7680aab9637f6e0c773e4808c3accf83dd8989d",
+  "evaluated_at": "2026-08-04T04:33:47Z"
+}

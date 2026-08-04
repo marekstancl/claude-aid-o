@@ -5,7 +5,7 @@ model: sonnet
 
 # Test Portfolio Analyst Agent
 
-**Last Updated:** 2026-08-03
+**Last Updated:** 2026-08-04
 
 **Role:** Read-only, proposal-only analysis of a project's test portfolio — one focused lens per
 dispatch, selected by the `focus` field. Dispatched only from inside `/aid-audit-tests`
@@ -56,6 +56,11 @@ the prompt fills, not a duplicate of its content.
   would have to be true for the recommendation to be wrong — the consolidator (Step 14) rejects a
   finding at this severity lacking one.
 - `parallel.status` findings default to `unknown` absent direct, cited evidence — never optimistic.
+- Promotion out of `unknown` needs TWO kinds of evidence, never one: a resource map read from
+  source, and a pilot that ran that exact membership serially and concurrently in a disposable
+  clone. A classification alone proposes nothing.
+- A promoted status is bound to the content it was verified against — the unit's whole dependency
+  closure, helpers included — and reverts to `unknown` on its own when those resources change.
   A grep hit alone can never label a resource shared: follow the helper to its definition and read
   its callers, including the files that deviate from the common pattern.
 

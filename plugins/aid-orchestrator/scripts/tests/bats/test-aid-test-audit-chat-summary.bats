@@ -27,7 +27,7 @@ _write_findings() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"**Verdict:** clean"* ]]
   [[ "$output" == *"**Changed:**"* ]]
-  [[ "$output" == *"**Next action:**"* ]]
+  [[ "$output" == *"## 1. What to do now"* ]]
   [[ "$output" == *"**Residual risk"* ]]
   [[ "$output" == *"No PM decision required."* ]]
 }
@@ -117,7 +117,8 @@ _write_findings() {
   run aid_test_audit_render_chat_summary "$f"
   [ "$status" -eq 0 ]
   local reason_lines
-  reason_lines="$(echo "$output" | sed -n '/\*\*Reasons:\*\*/,/\*\*Changed:\*\*/p' | grep -cE '^[0-9]+\.')"
+  # The findings list moved into the technical-evidence appendix (P072 Step 19).
+  reason_lines="$(echo "$output" | sed -n '/\*\*Findings\*\*/,/\*\*Changed:\*\*/p' | grep -cE '^[0-9]+\.')"
   [ "$reason_lines" -eq 1 ]
 }
 
@@ -161,13 +162,162 @@ _write_findings() {
   [ ! -f "$TEST_TMPDIR/readonly-dir/durable-record.json" ]
 }
 
-@test "final chat output contains all 5 parts for every verdict" {
+@test "final chat output contains all six sections plus the evidence appendix, in order" {
+  # The ORDER is the contract: a reader must meet the decision before the
+  # evidence. The five-part predecessor led with a verdict and a severity list,
+  # so the answer to "what should I do" had to be assembled by the reader.
   local f="$TEST_TMPDIR/findings.json"
   _write_findings "$f" '[]'
   run aid_test_audit_render_chat_summary "$f"
-  [[ "$output" == *"**Verdict:**"* ]]
-  [[ "$output" == *"**Reasons:**"* ]]
-  [[ "$output" == *"**Changed:**"* ]]
-  [[ "$output" == *"**Next action:**"* ]]
-  [[ "$output" == *"**Residual risk"* ]]
+  [ "$status" -eq 0 ]
+
+  local expected=(
+    "## 1. What to do now"
+    "## 2. What to fix, merge, split or remove"
+    "## 3. What can run in parallel"
+    "## 4. What must remain serial"
+    "## 5. Test time now, and after the proposed work"
+    "## 6. What is not proved yet"
+    "### Technical evidence"
+  )
+  local prev=0 pos h
+  for h in "${expected[@]}"; do
+    [[ "$output" == *"$h"* ]] || { echo "missing section: $h" >&2; false; }
+    pos="$(printf '%s' "$output" | grep -n -F -m1 "$h" | cut -d: -f1)"
+    [ "$pos" -gt "$prev" ] || { echo "section out of order: $h" >&2; false; }
+    prev="$pos"
+  done
+}
+
+@test "every heading renders even when its section is empty" {
+  # A missing heading reads as an omission. "Nothing here" is a finding and
+  # has to be said.
+  local f="$TEST_TMPDIR/findings.json"
+  _write_findings "$f" '[]'
+  run aid_test_audit_render_chat_summary "$f"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"## 3. What can run in parallel"* ]]
+  [[ "$output" == *"## 6. What is not proved yet"* ]]
+}
+
+# ─── What an adversarial review of the renderer found ──────────────────────
+#
+# This text is the only thing most users read. Every case below is a state
+# that produced a CONFIDENT, COMPLETE-LOOKING message over an audit that had
+# decided nothing, or that said two contradictory things at once.
+
+_decision() {
+  jq -n --argjson pc "$2" --arg st "${3:-complete}" \
+    '{schema_version:"aid-test-audit-decision-v1", audit_id:"a1", audit_status:$st,
+      current_runtime:{kind:"unknown", duration_ms:null, scope:["bats:a"]},
+      actions:[], parallelization:{lanes:[], smallest_safe_pilot:null}, unresolved:[],
+      portfolio_coverage:{inventory_count:1, assigned_count:1, disposition_count:1,
+                          missing_run_unit_ids:[], duplicate_run_unit_ids:[]},
+      portfolio_change:$pc}
+     + (if $st == "incomplete" then {incomplete_reason:"coverage_mismatch"} else {} end)' > "$1"
+}
+
+_pc() {
+  jq -nc --argjson rm "${1:-[]}" --argjson mg "${2:-[]}" \
+    '{current_run_units:1, proposed_run_units:1, keep:[], rewrite_unit:[],
+      merge_groups:$mg, remove:$rm,
+      runtime_before_ms:null, runtime_after_ms:null, impact_kind:"unknown"}'
+}
+
+@test "a FULL audit with no decision artifact is refused, never rendered as 'no action needed'" {
+  # The single most misleading sentence this renderer can emit: a confident
+  # all-clear over an audit that decided nothing.
+  local f="$TEST_TMPDIR/findings.json"
+  _write_findings "$f" '[]'
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" ""
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"did not complete cleanly"* ]]
+  [[ "$output" != *"No action needed"* ]]
+}
+
+@test "a decision artifact that does not validate is refused, not read past" {
+  # `{}` used to sail through: every query returned null and every null became
+  # an affirmative default.
+  local f="$TEST_TMPDIR/findings.json" d="$TEST_TMPDIR/bad.json"
+  _write_findings "$f" '[]'
+  echo '{}' > "$d"
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid or incompatible"* ]]
+  [[ "$output" != *"reached a decision it can defend"* ]]
+}
+
+@test "'clean' never coexists with an explicit removal instruction" {
+  # Findings said nothing; the decision said remove a test. Section 1 said
+  # "No action needed." directly above "Remove (1)".
+  local f="$TEST_TMPDIR/findings.json" d="$TEST_TMPDIR/d.json"
+  _write_findings "$f" '[]'
+  _decision "$d" "$(_pc '["bats:legacy"]')"
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"remove 1 unit(s)"* ]]
+  [[ "$output" != *"No action needed"* ]]
+  [[ "$output" != *"**Verdict:** clean"* ]]
+}
+
+@test "merge groups keep their BOUNDARIES — two pairs are not one group of four" {
+  # Flattened, `Merge (4): a, b, c, d` reads as a single four-unit merge: a
+  # different instruction, and an unsafe one to execute.
+  local f="$TEST_TMPDIR/findings.json" d="$TEST_TMPDIR/d.json"
+  _write_findings "$f" '[]'
+  _decision "$d" "$(_pc '[]' '[["bats:a","bats:b"],["bats:c","bats:d"]]')"
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"group 1: bats:a, bats:b"* ]]
+  [[ "$output" == *"group 2: bats:c, bats:d"* ]]
+  [[ "$output" != *"Merge (4)"* ]]
+}
+
+@test "an INCOMPLETE audit labels its later sections provisional" {
+  # `audit_status: incomplete` protected only section 1, so partial removals
+  # and lanes below it read exactly like instructions from a finished audit.
+  local f="$TEST_TMPDIR/findings.json" d="$TEST_TMPDIR/d.json"
+  _write_findings "$f" '[]'
+  _decision "$d" "$(_pc '["bats:legacy"]')" incomplete
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Provisional"* ]]
+  [[ "$output" == *"did not finish"* ]]
+}
+
+@test "an incomplete audit NAMES the units it never decided" {
+  # The list was computed and then never rendered, so the text said "decide
+  # the units listed above" with no such list anywhere.
+  local f="$TEST_TMPDIR/findings.json" d="$TEST_TMPDIR/d.json"
+  _write_findings "$f" '[]'
+  _decision "$d" "$(_pc '[]')" incomplete
+  jq '.portfolio_coverage.missing_run_unit_ids = ["bats:u1","bats:u2"]' "$d" > "$d.tmp" && mv "$d.tmp" "$d"
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bats:u1"* ]]
+  [[ "$output" == *"unexamined, not as healthy"* ]]
+}
+
+@test "an incomplete audit's runtime figure is marked as not decision-grade" {
+  local f="$TEST_TMPDIR/findings.json" d="$TEST_TMPDIR/d.json"
+  _write_findings "$f" '[]'
+  _decision "$d" "$(_pc '[]')" incomplete
+  jq '.portfolio_change.runtime_before_ms = 40000
+      | .portfolio_change.runtime_after_ms = 25000
+      | .portfolio_change.impact_kind = "estimated"' "$d" > "$d.tmp" && mv "$d.tmp" "$d"
+  run aid_test_audit_render_chat_summary "$f" "nothing" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NOT a decision-grade"* ]]
+}
+
+@test "a durable-record persist failure is explained on STDOUT, not only stderr" {
+  # This function's stdout IS the user-facing turn. A failure explained only on
+  # stderr leaves the caller presenting nothing, or an earlier success message.
+  local f="$TEST_TMPDIR/findings.json"
+  _write_findings "$f" '[]'
+  chmod a-w "$TEST_TMPDIR"
+  run aid_test_audit_render_chat_summary "$f"
+  chmod u+w "$TEST_TMPDIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"did not complete cleanly"* ]]
 }

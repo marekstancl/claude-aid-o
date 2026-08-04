@@ -134,7 +134,10 @@ _bootstrap_catalog() {
        test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
        command:{type:"argv", argv:["bats","tests/fixture-a.bats"]},
        runtime:{fingerprint:"sha256:eeeeeeeeeeee"},
-       parallel:{status:"safe", exclusive_resources:[], max_workers:null, internal_parallelism:false},
+       parallel:{status:"safe", exclusive_resources:[], max_workers:null, internal_parallelism:false,
+                 provenance:{evidence_ref:"e2e-fixture-pilot", verified_at:"2026-08-02T00:00:00Z",
+                             method:"resource_map_plus_pilot",
+                             source_sha256:"PLACEHOLDER", resource_digest:"PLACEHOLDER"}},
        isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
        recommendation:"keep", test_cases:[]}
     ],
@@ -145,6 +148,21 @@ _bootstrap_catalog() {
     ],
     mapping_approval: {status:"proposed"}
   }' | yq -P '.' > "$proposed"
+
+  # P072 Step 16: a non-`unknown` parallel.status must carry provenance bound
+  # to real content, so the fixture binds it the way a migrated or piloted
+  # entry is bound. An unbound `safe` is not evidence, and the catalog schema
+  # now says so — which is what this fixture used to rely on not being true.
+  # shellcheck disable=SC1090
+  source "${PLUGIN_DIR}/scripts/lib/aid-test-catalog-provenance.sh"
+  local _fx_h _fx_d
+  _fx_h="$(aid_test_catalog_provenance_hash "bats:tests/fixture-a" "$proposed" "$fixture" 2>/dev/null)"
+  _fx_d="$(aid_test_catalog_provenance_resource_digest "bats:tests/fixture-a" "$proposed" "$fixture" 2>/dev/null)"
+  if [[ "$_fx_h" =~ ^[0-9a-f]{64}$ && "$_fx_d" =~ ^[0-9a-f]{64}$ ]]; then
+    FX_H="$_fx_h" FX_D="$_fx_d" yq -i '
+      (.run_units[0].parallel.provenance.source_sha256) = strenv(FX_H)
+      | (.run_units[0].parallel.provenance.resource_digest) = strenv(FX_D)' "$proposed"
+  fi
 
   if ! bash "$approve" --proposed "$proposed" --project-root "$fixture" >/tmp/e2e-approve.log 2>&1; then
     stage_fail "bootstrap_catalog_approved" "aid-test-catalog-approve.sh failed: $(cat /tmp/e2e-approve.log)"
@@ -410,7 +428,10 @@ _scenario_mapping_gap_escalation() {
        test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
        command:{type:"argv", argv:["bats","tests/fixture-a.bats"]},
        runtime:{fingerprint:"sha256:eeeeeeeeeeee"},
-       parallel:{status:"safe", exclusive_resources:[], max_workers:null, internal_parallelism:false},
+       parallel:{status:"safe", exclusive_resources:[], max_workers:null, internal_parallelism:false,
+                 provenance:{evidence_ref:"e2e-fixture-pilot", verified_at:"2026-08-02T00:00:00Z",
+                             method:"resource_map_plus_pilot",
+                             source_sha256:"PLACEHOLDER", resource_digest:"PLACEHOLDER"}},
        isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
        recommendation:"keep", test_cases:[]}
     ],
@@ -421,6 +442,21 @@ _scenario_mapping_gap_escalation() {
     ],
     mapping_approval: {status:"proposed"}
   }' | yq -P '.' > "$proposed"
+
+  # P072 Step 16: a non-`unknown` parallel.status must carry provenance bound
+  # to real content, so the fixture binds it the way a migrated or piloted
+  # entry is bound. An unbound `safe` is not evidence, and the catalog schema
+  # now says so — which is what this fixture used to rely on not being true.
+  # shellcheck disable=SC1090
+  source "${PLUGIN_DIR}/scripts/lib/aid-test-catalog-provenance.sh"
+  local _fx_h _fx_d
+  _fx_h="$(aid_test_catalog_provenance_hash "bats:tests/fixture-a" "$proposed" "$fixture" 2>/dev/null)"
+  _fx_d="$(aid_test_catalog_provenance_resource_digest "bats:tests/fixture-a" "$proposed" "$fixture" 2>/dev/null)"
+  if [[ "$_fx_h" =~ ^[0-9a-f]{64}$ && "$_fx_d" =~ ^[0-9a-f]{64}$ ]]; then
+    FX_H="$_fx_h" FX_D="$_fx_d" yq -i '
+      (.run_units[0].parallel.provenance.source_sha256) = strenv(FX_H)
+      | (.run_units[0].parallel.provenance.resource_digest) = strenv(FX_D)' "$proposed"
+  fi
   bash "${PLUGIN_DIR}/scripts/aid-test-catalog-approve.sh" --proposed "$proposed" --project-root "$fixture" >/dev/null 2>&1
   local diff_out hash
   diff_out="$(bash "${PLUGIN_DIR}/scripts/aid-test-catalog-confirm-mapping.sh" --project-root "$fixture" 2>&1)"
