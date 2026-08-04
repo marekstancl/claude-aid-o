@@ -102,6 +102,38 @@ This is recorded rather than quietly done. If the stricter rule is still wanted,
 it is a change to the overlay schema and its approval flow — a separate
 amendment, not a line in the resolver.
 
+## 4a. PM decision on the deviation — 2026-08-04
+
+The section above described a deviation but left it hanging: the plan still said
+one thing and the code did another, which is not a resolved deviation, it is an
+unrecorded one. The PM review of 2026-08-04 called that out and directed that
+the decision be recorded and the plan amended to whichever contract was actually
+chosen.
+
+**Decision: the deviation is ACCEPTED. The narrow-only rule is withdrawn.**
+
+The binding contract for the scheduler overlay is now:
+
+> Provenance wins wherever it has an opinion. The overlay resolves only the case
+> where provenance has none.
+
+| Provenance state | Overlay may promote? | Why |
+|---|---|---|
+| Verified and matching | n/a — already `safe` | nothing to resolve |
+| REVOKED (source hash or resource digest mismatch) | **No** | provenance has an opinion, and it is `unknown`; an overlay promoting here would contradict a content check |
+| Never verified | **Yes**, if the entry is approved | provenance has no opinion; this is the overlay's whole remaining purpose |
+
+**What changed as a result:** the plan text at Slice 5 step 25 and Slice 6
+step 4 (`.aid-o/plans/P072-test-audit-decision-quality.md`) carries an `AMENDED
+2026-08-04` block stating this contract in place of "only narrow, never widen".
+The acceptance criterion for that step is correspondingly the revoked-vs-
+never-verified split, not overlay monotonicity.
+
+**What was NOT decided:** whether the overlay should be able to demote at all.
+That remains a separate P069 amendment touching the overlay schema
+(`promoted_status` currently admits only `safe` and `constrained`), the approval
+script and the field names. It is deferred, not rejected.
+
 ## 5. What this check did NOT prove
 
 - **Scheduled concurrency on this repository.** The 3-stage rollout gate

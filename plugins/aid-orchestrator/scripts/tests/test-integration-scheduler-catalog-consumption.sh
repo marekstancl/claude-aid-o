@@ -173,5 +173,49 @@ else
   fail_msg "the map costs ${YQ_CALLS} yq invocations for 2 units — that scales per unit"
 fi
 
+echo "TEST: the scheduler APPENDS to the execution ledger — the fourth emission path"
+# The scheduler was the one dispatch point the ledger could not see. Units it
+# ran were absent from the accounting entirely, so a unit run here AND by a
+# gate looked like a unit that ran once.
+_catalog safe safe; _units
+LEDGER_SH="${PLUGIN_DIR}/scripts/aid-test-execution-ledger.sh"
+SL="$WORK/sched-ledger.json"
+bash "$LEDGER_SH" open --path "$SL" --run-id "sched-emission" --candidate-sha "abc123" >/dev/null
+AID_EXECUTION_LEDGER="$SL" AID_CURRENT_GATE_ID="gate:sched_test" \
+  bash "$SCHED" dispatch --project-root "$PROJ" --run-id l1 \
+    --units-json "$PROJ/units.json" --mode observe_parallel --max-workers 4 >/dev/null 2>&1
+SCHED_ENTRIES="$(jq -r '[.entries[] | select(.dispatch_point == "scheduler")] | length' "$SL")"
+if [[ "${SCHED_ENTRIES:-0}" -eq 2 ]]; then
+  pass_msg "both dispatched units are in the ledger with dispatch_point=scheduler"
+else
+  fail_msg "the scheduler recorded ${SCHED_ENTRIES:-0} of 2 units — units it runs are invisible to the double-execution check"
+fi
+if [[ "$(jq -r '[.entries[] | select(.dispatch_point == "scheduler") | .gate_id] | unique | join(",")' "$SL")" == "gate:sched_test" ]]; then
+  pass_msg "and each entry carries the gate it ran under, not a placeholder"
+else
+  fail_msg "scheduler entries do not carry the real gate id"
+fi
+
+echo "TEST: a scheduler dispatch declared as escalation is not an accidental duplicate"
+# P069's escalation reruns the same units with the parent's ledger inherited.
+SL2="$WORK/sched-ledger-esc.json"
+bash "$LEDGER_SH" open --path "$SL2" --run-id "sched-esc" --candidate-sha "abc123" >/dev/null
+AID_EXECUTION_LEDGER="$SL2" AID_CURRENT_GATE_ID="gate:first" \
+  bash "$SCHED" dispatch --project-root "$PROJ" --run-id l2 \
+    --units-json "$PROJ/units.json" --mode observe_parallel --max-workers 4 >/dev/null 2>&1
+AID_EXECUTION_LEDGER="$SL2" AID_CURRENT_GATE_ID="gate:escalated" \
+  bash "$SCHED" dispatch --project-root "$PROJ" --run-id l3 \
+    --units-json "$PROJ/units.json" --mode observe_parallel --max-workers 4 \
+    --execution-kind escalation >/dev/null 2>&1
+if ESC_OUT="$(bash "$LEDGER_SH" close --path "$SL2" 2>&1)"; then
+  if [[ "$(jq -r '.summary.deliberate_repeats | length' "$SL2")" -eq 2 ]]; then
+    pass_msg "both reruns are recorded as deliberate repeats, and the run is not failed"
+  else
+    fail_msg "the escalation rerun was not recorded as deliberate: ${ESC_OUT}"
+  fi
+else
+  fail_msg "a declared escalation rerun failed the ledger as an accidental duplicate: ${ESC_OUT}"
+fi
+
 echo "Results: ${pass}/$(( pass + fail )) passed, ${fail} failed"
 [[ "$fail" -eq 0 ]]

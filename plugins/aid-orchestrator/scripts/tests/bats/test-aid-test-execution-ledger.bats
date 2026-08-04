@@ -109,10 +109,15 @@ JSON
   [ "$status" -eq 0 ]
 }
 
-@test "an append naming a ledger that does not exist is silently a no-op, not a crash" {
+@test "an append naming a ledger that does not exist FAILS — a named ledger is an accounted run" {
+  # This used to return 0, which made "the ledger vanished mid-run" and
+  # "nothing ran twice" produce the same observable outcome. A path was
+  # supplied, so a run IS being accounted for; the file's absence is the
+  # accounting failing, not an absence of accounting.
   run bash "$LEDGER" append --path "$TEST_TMPDIR/never-opened.json" \
     --run-unit-id "bats:a" --gate-id "gate:x" --dispatch-point bats_lane
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"does not exist"* ]]
 }
 
 @test "an append MISSING its required fields is a usage error, not a silent skip" {
@@ -190,4 +195,64 @@ JSON
   wait
   _close
   [ "$(jq -r '.summary.dispatched' "$L")" = "12" ]
+}
+
+# ─── Deliberate repeats are declared, never inferred ────────────────────────
+
+@test "a repeat DECLARED as escalation is a deliberate repeat, not a duplicate" {
+  # P069's escalation reruns the same units under the full profile with the
+  # parent's ledger inherited. Without a way to say so, correct behaviour
+  # would fail the run.
+  _open
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:two" \
+    --dispatch-point gate_runner_direct --execution-kind escalation
+  run bash "$LEDGER" close --path "$L"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.summary.duplicates | length' "$L")" = "0" ]
+  [ "$(jq -r '.summary.deliberate_repeats | length' "$L")" = "1" ]
+}
+
+@test "a deliberate repeat is REPORTED, never silent — it still costs wall clock" {
+  _open
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:two" \
+    --dispatch-point gate_runner_direct --execution-kind escalation
+  run bash "$LEDGER" close --path "$L"
+  [[ "$output" == *"deliberate repeat"* ]]
+  [[ "$output" == *"bats:a"* ]]
+}
+
+@test "AID_EXECUTION_KIND declares a whole subprocess — that is how escalation marks itself" {
+  _open
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  AID_EXECUTION_KIND=escalation bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" \
+    --gate-id "gate:two" --dispatch-point bats_lane
+  run bash "$LEDGER" close --path "$L"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.summary.deliberate_repeats | length' "$L")" = "1" ]
+}
+
+@test "an UNDECLARED repeat is still a double execution — silence is not a declaration" {
+  # The whole exemption is worth nothing if forgetting to mark something is
+  # the same as marking it.
+  _open
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:two" --dispatch-point gate_runner_direct
+  run bash "$LEDGER" close --path "$L"
+  [ "$status" -eq 7 ]
+  [ "$(jq -r '.summary.deliberate_repeats | length' "$L")" = "0" ]
+}
+
+@test "an unrecognised --execution-kind is rejected — a typo must not become a free pass" {
+  _open
+  run bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" \
+    --dispatch-point bats_lane --execution-kind "escalation!"
+  [ "$status" -eq 2 ]
+}
+
+@test "every entry records its execution kind, and the default is normal" {
+  _open
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  [ "$(jq -r '.entries[0].execution_kind' "$L")" = "normal" ]
 }

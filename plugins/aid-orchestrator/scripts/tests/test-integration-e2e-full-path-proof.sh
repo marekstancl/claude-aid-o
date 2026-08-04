@@ -32,9 +32,19 @@
 #      EXISTING "fail" (never a new enum value) with the additive
 #      escalation:{...} field, and a REAL executed full-profile substitute
 #
-# Writes one schema-valid artifact per scenario to
-# .aid-o/work/evidence/e2e-full-path-proof/<run_id>.json, force-tracked
-# into THIS repo (not the disposable fixture) immediately after each write.
+# Writes one schema-valid artifact per scenario to a DISPOSABLE directory,
+# outside this checkout. It used to write them into `.aid-o/work/evidence/`
+# and `git add -f` them, which meant running the test dirtied the index of the
+# repository it was testing — a test that mutates its own subject cannot be
+# trusted to report on it, and in practice it swept its artifacts into an
+# unrelated commit. Set AID_E2E_PROOF_DIR to publish somewhere deliberately —
+# that is how an operator feeds aid-quarantine-decision-record.sh, which reads
+# <project_root>/.aid-o/work/evidence/e2e-full-path-proof/. Publishing there is
+# now an explicit act with a person behind it, not a side effect of testing.
+#
+# The final stage is a NEGATIVE control: the source checkout's porcelain status
+# must be byte-identical before and after. If this test ever writes into the
+# tree or the index again, that check fails.
 #
 # Usage:
 #   test-integration-e2e-full-path-proof.sh [--scenario observe_parallel_full_path|sequential_regression|self_host_bundle_refresh|all]
@@ -55,6 +65,13 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown option '$1'" >&2; exit 2 ;;
   esac
 done
+
+# Where artifacts go — never inside the checkout unless explicitly directed.
+PROOF_DIR="${AID_E2E_PROOF_DIR:-$(mktemp -d -t aid-e2e-proof-XXXXXX)}"
+mkdir -p "$PROOF_DIR"
+
+# The negative control's baseline, taken before anything runs.
+REPO_STATUS_BEFORE="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)"
 
 pass=0; fail=0
 fail_msg() { echo "  FAIL: $1"; fail=$((fail + 1)); }
@@ -83,13 +100,11 @@ _write_artifact() {
     return 1
   fi
 
-  local out_path="${REPO_ROOT}/.aid-o/work/evidence/e2e-full-path-proof/${run_id}.json"
-  mkdir -p "$(dirname "$out_path")"
+  local out_path="${PROOF_DIR}/${run_id}.json"
   echo "$artifact_json" | jq '.' > "$out_path"
   echo "  wrote ${out_path} (scenario=${run_scenario}, pass=${overall_pass})"
-  if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-    git -C "$REPO_ROOT" add -f -- "${out_path#"${REPO_ROOT}"/}"
-  fi
+  # Deliberately NO `git add`. Publishing evidence is an operator decision,
+  # not something a test suite performs on the repository under test.
   STAGES=()
 }
 
@@ -568,7 +583,17 @@ case "$scenario" in
   *) echo "unknown --scenario '$scenario'" >&2; exit 2 ;;
 esac
 
+# ─── Negative control: the source checkout is exactly as we found it ────────
+echo "TEST: the source checkout and its index are untouched by this run"
+REPO_STATUS_AFTER="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)"
+if [[ "$REPO_STATUS_BEFORE" == "$REPO_STATUS_AFTER" ]]; then
+  pass_msg "source repo status is byte-identical before and after — nothing was written to the tree or staged"
+else
+  fail_msg "this run changed the source checkout: $(diff <(printf '%s\n' "$REPO_STATUS_BEFORE") <(printf '%s\n' "$REPO_STATUS_AFTER") | grep -E '^[<>]' | head -5 | tr '\n' ' ')"
+fi
+
 echo "----------------------------------------------------------------------"
+echo "artifacts: ${PROOF_DIR}"
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"
 [[ "$fail" -eq 0 ]]

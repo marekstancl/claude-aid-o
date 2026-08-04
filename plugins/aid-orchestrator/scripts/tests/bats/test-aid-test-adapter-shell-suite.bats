@@ -161,15 +161,42 @@ PY
 
 # ─── Against the real repository ───────────────────────────────────────────
 
-@test "REAL REPO: exactly 36 shell suites, and exactly 7 declined to the bats adapter" {
-  # Fixed numbers, not a re-derivation with the same loose `grep bats` rule
-  # the adapter itself uses — an assertion that reuses the rule under test
-  # passes whatever that rule does.
+@test "REAL REPO: every shell suite present is either discovered or declined with a reason" {
+  # This used to assert the fixed numbers 36 and 7. Both were true when they
+  # were written and both were stale within the same plan — this plan ADDS
+  # suites, so a frozen count fails for the one reason that is not a defect.
+  #
+  # The invariant that actually matters is reconciliation: every `test-*.sh`
+  # in the tests directory is accounted for exactly once, either as a
+  # discovered shell unit or as an explicitly declined one. That holds at any
+  # portfolio size, and unlike a count it fails when a file goes MISSING from
+  # both sides — which is the real defect a count was standing in for.
   local repo; repo="$(cd "$PLUGIN_DIR/../.." && pwd)"
-  local led="$TEST_TMPDIR/repo-skipped.json" found
-  found="$(shell_suite_adapter_discover "$repo" "$repo" "$led" | jq 'length')"
-  [ "$found" = "36" ]
-  [ "$(jq '[.[] | select(.reason=="claimed_by_bats_adapter")] | length' "$led")" = "7" ]
+  local led="$TEST_TMPDIR/repo-skipped.json"
+  local units; units="$(shell_suite_adapter_discover "$repo" "$repo" "$led")"
+
+  local present discovered declined accounted
+  present="$(find "$repo/plugins/aid-orchestrator/scripts/tests" -maxdepth 1 -name 'test-*.sh' | wc -l)"
+  discovered="$(jq 'length' <<<"$units")"
+  declined="$(jq '[.[] | select((.path // .source_path // "") | test("/tests/test-[^/]*\\.sh$"))] | length' "$led")"
+  accounted=$(( discovered + declined ))
+
+  # Reported, so a failure says WHICH way the books do not balance.
+  echo "present=${present} discovered=${discovered} declined=${declined} accounted=${accounted}" >&3
+  [ "$accounted" -eq "$present" ]
+  [ "$discovered" -gt 0 ]
+}
+
+@test "REAL REPO: a declined suite always carries WHY it was declined" {
+  # A decline with no reason is indistinguishable from a file the scanner
+  # simply lost.
+  local repo; repo="$(cd "$PLUGIN_DIR/../.." && pwd)"
+  local led="$TEST_TMPDIR/repo-skipped-reasons.json"
+  shell_suite_adapter_discover "$repo" "$repo" "$led" >/dev/null
+  [ "$(jq '[.[] | select((.reason // "") == "")] | length' "$led")" = "0" ]
+  # And the bats adapter is the reason we expect to see most of, since the two
+  # adapters partition the same tree.
+  [ "$(jq '[.[] | select(.reason == "claimed_by_bats_adapter")] | length' "$led")" -gt 0 ]
 }
 
 @test "REAL REPO: no sh: unit is emitted for a file the bats adapter also claims" {

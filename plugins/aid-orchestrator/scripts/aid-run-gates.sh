@@ -516,13 +516,16 @@ run_all_gates() {
   local _ledger_path=""
   if [[ -z "${AID_EXECUTION_LEDGER:-}" ]]; then
     _ledger_path="${_plugin_project_root%/}/.aid-o/work/evidence/execution-ledger/${run_id:-run}-$(date -u +%Y%m%dT%H%M%SZ).json"
-    if bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" open \
+    # A failed open is NOT a reason to run unaccounted. Swallowing it produced
+    # exactly the outcome the ledger exists to prevent: a green gate run whose
+    # test accounting silently did not happen.
+    if ! bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" open \
          --path "$_ledger_path" --run-id "${run_id:-run}" \
          --candidate-sha "${base_commit_resolved:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" >/dev/null 2>&1; then
-      export AID_EXECUTION_LEDGER="$_ledger_path"
-    else
-      _ledger_path=""
+      echo "ERROR: aid-run-gates.sh: could not open the execution ledger at '$_ledger_path' — refusing to run gates unaccounted" >&2
+      return 3
     fi
+    export AID_EXECUTION_LEDGER="$_ledger_path"
   fi
 
   # Iterate gate names via yq (mikefarah)
@@ -625,11 +628,16 @@ run_all_gates() {
     if [[ -n "${AID_EXECUTION_LEDGER:-}" ]]; then
       while read -r _lg_bats; do
         [[ -z "$_lg_bats" ]] && continue
-        bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" append \
-          --path "$AID_EXECUTION_LEDGER" \
-          --run-unit-id "bats:${_lg_bats%.bats}" --gate-id "$gate_name" \
-          --fingerprint "$(printf '%s' "$resolved_cmd" | sha256sum | cut -c1-16)" \
-          --dispatch-point gate_runner_direct >/dev/null 2>&1 || true
+        # No `|| true`. An append that fails is a hole in the accounting, and
+        # a holed ledger reports zero duplicates just like a clean one.
+        if ! bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" append \
+             --path "$AID_EXECUTION_LEDGER" \
+             --run-unit-id "bats:${_lg_bats%.bats}" --gate-id "$gate_name" \
+             --fingerprint "$(printf '%s' "$resolved_cmd" | sha256sum | cut -c1-16)" \
+             --dispatch-point gate_runner_direct >/dev/null 2>&1; then
+          echo "ERROR: aid-run-gates.sh: execution-ledger append failed for gate '$gate_name' — refusing to continue with incomplete accounting" >&2
+          return 3
+        fi
       done < <(grep -oE '[A-Za-z0-9_./-]+\.bats' <<<"$resolved_cmd" 2>/dev/null \
                  | grep -v 'aid-bats-parallel-lane' || true)
     fi
@@ -823,6 +831,13 @@ run_all_gates() {
   if [[ -n "${_ledger_path:-}" && -f "${_ledger_path}" ]]; then
     local _ledger_out _ledger_rc=0
     _ledger_out="$(bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" close --path "$_ledger_path" 2>&1)" || _ledger_rc=$?
+    # Any failure OTHER than "duplicates found" means the ledger could not be
+    # evaluated at all, which is not a clean run — it is an unknown one.
+    if [[ "$_ledger_rc" -ne 0 && "$_ledger_rc" -ne 7 ]]; then
+      echo "ERROR: aid-run-gates.sh: the execution ledger could not be closed or evaluated (exit ${_ledger_rc}): ${_ledger_out}" >&2
+      unset AID_EXECUTION_LEDGER
+      return 3
+    fi
     if [[ "$_ledger_rc" -eq 7 ]]; then
       echo "$_ledger_out" >&2
       gates_json+=",\"_execution_ledger\":$(jq -c '{path:$p, duplicates:.summary.duplicates, dispatched:.summary.dispatched}' \
@@ -1026,7 +1041,11 @@ run_all_gates() {
     if [[ -n "$plan_json" ]]; then
       escalation_args+=(--plan-json "$plan_json")
     fi
-    bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
+    # Everything this subprocess dispatches is a DELIBERATE rerun: it inherits
+    # the parent's AID_EXECUTION_LEDGER, so without this marker the escalation
+    # re-running the same units under the full profile would be recorded as an
+    # accidental double execution and fail a run that behaved correctly.
+    AID_EXECUTION_KIND=escalation bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
     if [[ -f "$full_escalation_report_path" ]]; then
       local full_report_json; full_report_json="$(cat "$full_escalation_report_path")"
       report="$(merge_escalation_report "$report" "$full_report_json" "$escalation_reason")"

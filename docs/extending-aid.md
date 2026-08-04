@@ -1326,11 +1326,21 @@ it has **four** emission points, not the three obvious ones:
 4. `aid-run-gates.sh` — for any gate whose command invokes a runner **directly**
 
 The fourth is the one that matters and the one easiest to leave out. This
-repository has a gate that runs `test-aid-fsm.bats` on its own while the
-parallel pool runs it too, and the `full` and `release` profiles include both:
-that file executes twice on every full run. With only the fan-out points
-instrumented, the ledger would have recorded one entry for it and reported zero
-duplicates — certifying as clean the exact defect it was built to detect.
+repository HAD a gate that ran `test-aid-fsm.bats` on its own while the
+parallel pool ran it too, with the `full` and `release` profiles including
+both, so that file executed twice on every full run. With only the fan-out
+points instrumented, the ledger would have recorded one entry for it and
+reported zero duplicates — certifying as clean the exact defect it was built to
+detect. It found it instead, and `bats_fsm` is now absent from those two
+profiles; the red proof lives in a fixture so fixing the waste did not blind
+the check.
+
+The third point was also missing for a while, which is worth knowing because it
+failed quietly: units the SCHEDULER ran were absent from the accounting
+entirely, so a unit run by both the scheduler and a gate looked like a unit run
+once. The scheduler now appends BEFORE launching each unit, and a failed append
+cancels that dispatch — recording an execution that then does not happen is
+recoverable; running one that nothing records is not.
 
 There is deliberately **no membership exemption**. Exempting "the pool gate
 contains this unit" was implemented, and it silenced that same defect. Each
@@ -1338,11 +1348,23 @@ dispatch point appends once per execution it actually performs, so two entries
 under two gate ids are two executions; `--contains` is recorded for a reader
 but suppresses nothing.
 
-An append that cannot take its lock fails rather than being skipped: a ledger
-with a gap is indistinguishable from one showing no duplication. A dispatch
-point running outside a gate run finds no ledger path and appends nothing,
-which is not an error — a developer running a suite by hand has no run to
-account for.
+**Everything inside an accounted run is fail-closed.** A failed open, a failed
+append, a ledger path that names a file that is not there, a close that cannot
+be evaluated — each fails the gate run, because a ledger with a gap reports zero
+duplicates exactly like a clean one. There is no `|| true` on any emission
+path, and there used to be. The ONE permitted no-op is a dispatch point with no
+ledger path at all: a developer running a suite by hand has no run to account
+for. "The path was set but the file is missing" is NOT that case, and was once
+treated as though it were.
+
+What DOES excuse a repeat is a declaration made when it happens.
+`--execution-kind normal|retry|escalation` marks a single append;
+`AID_EXECUTION_KIND` marks a whole subprocess, which is how P069's escalation —
+which re-invokes the gate runner with the parent's ledger inherited — avoids
+being recorded as an accident. Declared repeats appear in the summary as
+`deliberate_repeats`: never failing, never invisible, because a rerun somebody
+asked for still costs the wall clock twice. The default is `normal`, so silence
+is not a declaration and a forgotten mark stays a defect.
 
 ### Adding to this area
 

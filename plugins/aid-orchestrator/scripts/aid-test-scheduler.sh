@@ -144,6 +144,10 @@ _sched_plan_batches() {
 
 cmd_dispatch() {
   local project_root="" run_id="" units_file="" mode="sequential" max_workers=4 attempt=1
+  # How the execution ledger should record these dispatches. Callers that know
+  # a run is a deliberate repeat — P069's escalation rerun is the real one —
+  # say so explicitly; nothing infers it.
+  local execution_kind=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-root) project_root="$2"; shift 2 ;;
@@ -152,12 +156,22 @@ cmd_dispatch() {
       --mode) mode="$2"; shift 2 ;;
       --max-workers) max_workers="$2"; shift 2 ;;
       --attempt) attempt="$2"; shift 2 ;;
+      --execution-kind) execution_kind="$2"; shift 2 ;;
       *) _die 2 "dispatch: unknown arg '$1'" ;;
     esac
   done
   [[ -n "$project_root" && -n "$run_id" && -n "$units_file" ]] || _die 2 "dispatch: --project-root, --run-id, --units-json are required"
   case "$mode" in sequential|observe_parallel|parallel) ;; *) _die 2 "dispatch: --mode must be sequential|observe_parallel|parallel" ;; esac
   [[ "$attempt" =~ ^[0-9]+$ && "$attempt" -ge 1 ]] || _die 2 "dispatch: --attempt must be a positive integer"
+  # A second attempt IS a repeat, and the ledger should not have to guess.
+  # An explicit --execution-kind always wins over this inference.
+  if [[ -z "$execution_kind" ]]; then
+    if [[ "$attempt" -gt 1 ]]; then execution_kind="retry"; else execution_kind="normal"; fi
+  fi
+  case "$execution_kind" in
+    normal|retry|escalation) ;;
+    *) _die 2 "dispatch: --execution-kind must be normal, retry or escalation (got '$execution_kind')" ;;
+  esac
   # Codex review: an unvalidated --max-workers is later used as a bash
   # arithmetic operand ([[ ... -lt "$max_workers" ]]) — bash arithmetic
   # recursively evaluates array-subscript-shaped operands, including command
@@ -331,6 +345,26 @@ cmd_dispatch() {
       # (see run_rc handling below) is harmless — aid-job.sh cancel fails
       # closed with "no such job" and this trap already ignores that (`||
       # true`).
+      # ─── Execution ledger, the scheduler's emission path ────────────────
+      # This was the one dispatch point the ledger could not see: units the
+      # scheduler ran were absent from the accounting entirely, so a unit run
+      # here AND by a gate looked like a unit run once. The append happens
+      # BEFORE the launch and a failed append cancels the dispatch — recording
+      # an execution that then does not happen is recoverable, running one that
+      # nothing records is the gap this ledger exists to refuse.
+      if [[ -n "${AID_EXECUTION_LEDGER:-}" ]]; then
+        if ! bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" append \
+             --path "$AID_EXECUTION_LEDGER" \
+             --run-unit-id "$uid" \
+             --gate-id "${AID_CURRENT_GATE_ID:-gate:scheduler}" \
+             --fingerprint "$(printf '%s' "$unit_json" | sha256sum | cut -c1-16)" \
+             --dispatch-point scheduler \
+             --execution-kind "$execution_kind" >/dev/null 2>&1; then
+          echo "aid-test-scheduler.sh: execution-ledger append failed for unit '$uid' — refusing to dispatch a unit no ledger will record" >&2
+          run_failed["$uid"]=1
+          continue
+        fi
+      fi
       outstanding_job_ids+=("$job_id")
       # Codex review: a terminal_fail/timed_out/cancelled unit is an
       # EXPECTED, routine scheduling outcome, not a scheduler-level error —
@@ -391,7 +425,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   case "${1:-}" in
     dispatch) shift; cmd_dispatch "$@" ;;
     *)
-      echo "Usage: aid-test-scheduler.sh dispatch --project-root <path> --run-id <id> --units-json <file> [--mode sequential|observe_parallel|parallel] [--max-workers N] [--attempt N]" >&2
+      echo "Usage: aid-test-scheduler.sh dispatch --project-root <path> --run-id <id> --units-json <file> [--mode sequential|observe_parallel|parallel] [--max-workers N] [--attempt N] [--execution-kind normal|retry|escalation]" >&2
       exit 1
       ;;
   esac

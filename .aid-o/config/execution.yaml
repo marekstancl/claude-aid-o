@@ -1,0 +1,286 @@
+version: '1.0'
+generated_by: manual override for E-035-1_2 (P035 Phase 1)
+gates:
+  bats_fsm:
+    command: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats
+    required: true
+    timeout_seconds: 300
+    max_retries: 1
+  bats_all:
+    # QUARANTINE LIFTED (P071 E-071-1_1 Step 3, 2026-08-02): the 2026-07-23
+    # quarantine (below, kept for history) blocked the monolithic aggregate
+    # after two overlapping E-064-2_2 runs shared the live repository and
+    # cost 50-95 minutes of untrustworthy evidence. P071 replaced the blanket
+    # `bats plugins/aid-orchestrator/scripts/tests/bats/` invocation with
+    # aid-bats-parallel-lane.sh --pool-only, which partitions the approved
+    # catalog (.aid-o/config/test-catalog.yaml) and runs only the `bats -j N`
+    # safe pool (everything except the 2 known-slow boundary files below).
+    #
+    # CP2 fix (2026-08-02): this gate ONLY runs the pool phase now, split out
+    # from the 2 boundary files (see gate:bats_boundary below) — an earlier
+    # version ran both phases under ONE required:true gate with
+    # timeout_seconds:1800, but test-aid-plan-final-boundary.bats alone is
+    # known (this session's diagnostic work) to potentially exceed 3600s+
+    # without completing, which would have made this required gate fail from
+    # a plain timeout kill on essentially every real invocation, until Step 4
+    # fixes that file's speed — a real regression vs. the quarantine stub it
+    # replaced. Splitting keeps this gate real, required, and fast; the 2
+    # slow boundary files get their own separate, non-required gate instead.
+    #
+    # Original 2026-07-23 quarantine record (history only, no longer active):
+    #   authorized_by: "PM 2026-07-23"
+    #   tracked_by: "P066"
+    #   original_command: "bats plugins/aid-orchestrator/scripts/tests/bats/"
+    command: "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --pool-only"
+    required: true
+    timeout_seconds: 600
+    max_retries: 0
+  bats_boundary:
+    # P071 E-071-1_1 Step 3 CP2 fix (2026-08-02): the 2 bats files excluded
+    # from gate:bats_all's parallel pool (test-aid-plan-final-boundary.bats,
+    # test-aid-plan-release-boundary.bats) — both create a real git repo per
+    # test and run sequentially, never pooled. required:false + a generous
+    # timeout because test-aid-plan-final-boundary.bats's own root-cause fix
+    # is explicitly P071 Step 4's job, not this gate's; until that lands this
+    # gate is advisory (informational signal only, never blocks GATES→DONE).
+    # Re-evaluate required:true once Step 4 brings this file's cost down to
+    # something a real timeout budget can bound.
+    command: "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --dedicated-only"
+    required: false
+    timeout_seconds: 7200
+    max_retries: 0
+  shell_pipeline_smoke:
+    description: >-
+      Despite the name, this is NOT a fast/partial smoke check — it runs the
+      FULL aggregate test suite via run-all-tests.sh (timeout_seconds 1900,
+      ~32 min budget). Treat it as equivalent in scope/cost to bats_all, not
+      as a quick sanity check.
+    # Kept the historical key name rather than renaming it (P071 E-071-1_1
+    # Step 2, 2026-08-02) — release_quarantine's own reason text (see below)
+    # quotes `shell_pipeline_smoke` verbatim, p064-closure's reason text
+    # quotes it too, and grep across .aid-o/work/ turns up dozens of evidence
+    # plan.json / interim-doc references to this exact string. A rename would
+    # require rewriting all of those consistently with no reliable way to
+    # confirm every reference was caught, for a gate that has no other active
+    # collision. The name's "smoke" implication is corrected via description
+    # above instead.
+    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+    required: false
+    timeout_seconds: 1900
+    max_retries: 0
+  plan_diff:
+    note: 'required=false for AID self-host: P037 plan predates plan-level AC convention;
+      gate becomes meaningful for P038+'
+    description: Plan AC blocks materially satisfied in codebase HEAD
+    # timeout_seconds attribution (P071 E-071-1_1 Step 1, 2026-08-02): the
+    # p064-closure profile's "34 min of wall clock" note (below) describes
+    # plan_diff and shell_pipeline_smoke TOGETHER (both excluded from that
+    # profile as a pair) and does not break out a per-gate duration.
+    # .aid-o/config/execution.yaml is git-ignored (**/.aid-o/ in .gitignore),
+    # so there is no commit history to trace which gate contributed how much
+    # of the 34 min — the attribution to plan_diff alone could not be
+    # confirmed or ruled out. Falling back to this gate's own historical
+    # baseline instead: gate-runtime-baselines.yaml -> gates.plan_diff has 8
+    # non-censored samples (the other 6 recorded samples are
+    # censored:true/exit_code 124 at the old 120s cap and are excluded per
+    # that file's own convention), avg ~15.6s, max ~68.5s. 300s (~4.4x the
+    # observed non-censored max) gives headroom without reintroducing an
+    # unbounded/guessed value.
+    timeout_seconds: 300
+    pass_criteria: exit 0 (all present) or exit 2 (legacy plan / Fast Mode graceful
+      skip)
+    max_retries: 0
+  ui_calibration_result:
+    description: "Calibration evidence verified: 5 cases pass/fail, all artifacts present on disk, D-desktop/D-mobile prove real ScreenG capture"
+    note: "required=false for post-E7-CAL EPICs: one-time verification done in E-056-2_3; gate is advisory for subsequent runs"
+    required: false
+    type: deterministic
+    command: "bash plugins/aid-orchestrator/scripts/tests/ui-calibration-verify.sh .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json .aid-o/work/evidence/{epic_id}/{run_id}"
+    timeout_seconds: 30
+    pass_criteria: "exit code 0 (all verification checks pass)"
+    max_retries: 0
+  ui_calibration_signoff:
+    description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack"
+    note: "required=false for post-E7-CAL EPICs: signoff was completed in E-056-2_3; advisory for subsequent runs"
+    required: false
+    type: deterministic
+    command: "jq -e '.calibration.pm_signoff.confirmed_by | length > 0' .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json"
+    timeout_seconds: 10
+    pass_criteria: "exit code 0 (confirmed_by is non-empty string)"
+    max_retries: 0
+  targeted_tests:
+    note: 'P061 EPIC 3 Step 10 — defined but NOT activated in any self-host
+      gate_profiles.*.include[] yet (EPIC 4, D1/D3, wires the self-host
+      activation); registered here so aid-run-gates.sh can resolve and run it
+      on demand ahead of that activation.'
+    description: Targeted test selector — maps git-diff changed paths to their
+      mapped test(s) via the Initial mapping and runs them for real; an
+      unknown production path is a deliberate fail, never a silent skip
+      (D-selector-1).
+    required: false
+    type: deterministic
+    command: plugins/aid-orchestrator/scripts/aid-select-tests.sh --base {base_commit}
+    timeout_seconds: 600
+    pass_criteria: exit 0 (selected tests passed, or nothing selected e.g.
+      docs-only change); exit 1 = a selected test failed; exit 3 = unverifiable
+      unknown production path (D-selector-1) — both 1 and 3 surface as gate
+      result "fail" (any non-zero exit)
+    max_retries: 0
+  docs_updated:
+    description: "Documentation updated for changed APIs/models"
+    required: false
+    type: deterministic
+    command: |
+      api_changed=$(git diff --name-only {base_commit}..HEAD | grep -cE 'routes/|api/|endpoints/|models/|schemas/|openapi/' || true)
+      doc_changed=$(git diff --name-only {base_commit}..HEAD | grep -cE 'README|docs/|CHANGELOG|\.md$' || true)
+      if [[ $api_changed -gt 0 && $doc_changed -eq 0 ]]; then
+        echo "WARN: API files changed ($api_changed) but no docs updated"; exit 1
+      fi
+notifications:
+  telegram:
+    enabled: false
+    chat_id: null
+    alert_on_repeated_precondition_fail: true
+    alert_threshold: 3
+gate_profiles:
+  # ─── P064 plan Step 8 — the five canonical risk profiles ────────────────
+  # These are the names lib/aid-gate-profile.sh's resolver can return
+  # (quick < targeted < standard < full < release). Until this block existed,
+  # every auto-resolve took aid-fsm.sh's `gate_profile_auto_resolve_skipped`
+  # branch and `targeted_tests` was defined but never activated anywhere.
+  #
+  # `docs_updated` is in EVERY include[] on purpose. plan.json.gates[] is a
+  # per-EPIC hard floor enforced at GATES:DONE (`plan_gate_profile_excluded`,
+  # aid-fsm.sh), and this repository's own EPICs routinely declare
+  # `docs_updated` there — a profile that excluded it would refuse the very
+  # EPIC that selected it. The gate costs two `git diff --name-only` calls,
+  # so carrying it in the cheapest profile is still cheaper than one skipped
+  # doc review. `release` therefore stays a strict superset of `full`.
+  #
+  # `bats_all` appears only in `full` and `release`: the EPIC boundary can
+  # never resolve above `standard` in plan_branch mode, so the broad suite is
+  # a plan-final (or PM-exception) act, not a per-EPIC one.
+  #
+  # `targeted_tests` runs in `targeted` and `standard` but DELIBERATELY NOT in
+  # `full`/`release`, so the include lists are not a monotonic chain. This is
+  # the one documented exception, raised as CP2 security finding 1 on
+  # E-064-2_2 Step 3 and adjudicated here rather than silently.
+  #
+  # The concern is real in form: the rank order quick < targeted < standard <
+  # full < release is consumed as a SAFETY order by aid-fsm.sh's
+  # `risk_profile_below_required`, which asserts a higher rank verifies at
+  # least as much. The exception is nonetheless correct, because
+  # `targeted_tests` is a SELECTOR, not a test suite:
+  #
+  #   * Coverage is not lost. `aid-select-tests.sh` maps changed paths to a
+  #     SUBSET of the suites `bats_all` runs unconditionally at `full`, so at
+  #     `full` the selector can only ever pick tests that already ran.
+  #   * The one non-redundant signal is exit 3 (unknown production path,
+  #     D-selector-1). Its sole wired effect is to raise the plan-final floor
+  #     to at least `full` (aid-plan-fsm.sh, epic-complete). At an active
+  #     `full` the floor is already there, so the signal has nothing left to
+  #     do — it can only restate a conclusion already reached.
+  #   * Including it anyway would plant a permanent `fail` row in every `full`
+  #     run of this repository: the Initial mapping currently covers none of
+  #     `scripts/aid-plan-fsm.sh`, `scripts/lib/aid-queue-write.sh`,
+  #     `scripts/lib/aid-gate-profile.sh`, `scripts/aid-queue-add.sh` or
+  #     `defaults/enforcement-registry.yaml`, so exit 3 is guaranteed. A red
+  #     row that carries no information the run does not already have is
+  #     noise, and noise is what makes real red rows get ignored.
+  #
+  # The genuine fix is to extend the Initial mapping in
+  # scripts/aid-select-tests.sh so those five paths resolve to suites. That
+  # file is outside every step's allowed paths in this EPIC and is filed as a
+  # carried finding instead. When it lands, revisit this exception: with the
+  # mapping complete, exit 3 becomes rare and putting `targeted_tests` in
+  # every profile costs nothing.
+  quick:
+    include:
+      - bats_fsm
+      - docs_updated
+  targeted:
+    include:
+      - targeted_tests
+      - bats_fsm
+      - docs_updated
+  standard:
+    include:
+      - targeted_tests
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+  # bats_fsm is deliberately ABSENT from full and release: `bats_all` runs
+  # test-aid-fsm.bats in its pool, so including both dispatched the same run
+  # unit twice in one gate run — real, and the defect the P072 execution ledger
+  # was built to surface. It surfaced it here. The detector's own red proof
+  # lives in a fixture (test-aid-test-execution-ledger.bats case 1), not in
+  # this configuration, so removing the duplication does not blind the check.
+  # The narrower profiles keep bats_fsm because they do not run bats_all.
+  full:
+    include:
+      - bats_all
+      - bats_boundary
+      - plan_diff
+      - docs_updated
+  release:
+    include:
+      - bats_all
+      - bats_boundary
+      - shell_pipeline_smoke
+      - plan_diff
+      - docs_updated
+  bats_all_quarantine:
+    reason: >-
+      Temporary PM-authorized AID self-host profile while P066 audits and
+      repairs the monolithic bats portfolio. It never runs bats_all and is
+      never equivalent to full/release. Use only after affected suites have
+      separate terminal evidence, then cross GATES:DONE with an explicit
+      audited --force reason naming bats_all_quarantine.
+    include:
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+  release_quarantine:
+    reason: >-
+      P068 Step 2 — THE plan-final substitute for `release` while a release
+      gate carries a declared `quarantine:` block (at v2.62.1 that is
+      `bats_all`, PM 2026-07-23, tracked by P066). It is `release` MINUS the
+      quarantined gate and NOTHING else: every other release gate — including
+      `shell_pipeline_smoke` — still runs for real.
+      This is deliberately NOT `bats_all_quarantine`: that profile is
+      EPIC-boundary-scoped and omits `shell_pipeline_smoke`, so using it for a
+      plan-final run would silently drop a non-quarantined release gate. The
+      plan-final stage (`aid-plan-fsm.sh plan-finalize --stage gates`) asserts
+      this set equality against `release` and refuses to run otherwise, so a
+      future edit that drops another gate from here fails loudly instead of
+      quietly shrinking the plan-final evidence.
+      The quarantined gate is never green: it is reported
+      profile_excluded/waived and must carry its own marked targeted-substitute
+      receipt in the report's `quarantine_substitutes[]`.
+    include:
+      - bats_fsm
+      - shell_pipeline_smoke
+      - plan_diff
+      - docs_updated
+  p064-closure:
+    reason: >-
+      P064 E-064-1_2 closure run (PM disposition 2026-07-22). Re-seals gate
+      evidence at the post-fix HEAD to clear C3 attempt-03 finding
+      c3-E-064-1_2-0 (stale gates_report head_sha). Includes both required
+      gates (bats_fsm, bats_all) plus the plan-required docs_updated and the
+      advisory targeted_tests selector. Excludes shell_pipeline_smoke and
+      plan_diff (both exit 124 timeout_policy_block, required=false, 34 min
+      of wall clock with no verdict — P071 E-071-1_1 Step 1 attribution note:
+      this 34 min figure is the COMBINED duration of both gates running in
+      that closure attempt; it was not possible to split it per-gate because
+      .aid-o/ is git-ignored and no commit history exists to trace it further,
+      so plan_diff.timeout_seconds above was set from that gate's own
+      historical baseline instead, not from this incident) and
+      ui_calibration_result / ui_calibration_signoff (UI gates; this EPIC
+      touches only bash scripts, schemas and docs — no UI surface exists to
+      calibrate).
+    include:
+      - bats_fsm
+      - bats_all
+      - targeted_tests
+      - docs_updated

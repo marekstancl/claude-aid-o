@@ -4,7 +4,13 @@ Step 24 asks for a real `--mode full` audit of this repository through the
 ordinary user path, with its catalog and mapping approved through the
 sanctioned scripts.
 
-**Status: PARTIAL, and deliberately recorded as such.**
+**Status: LIVE-ACCEPTANCE PENDING.** Not partial-but-finishable — *pending*, and
+the whole P072 plan inherits that status. Nothing in this line of work may be
+described as complete, and no `v2.70.0` tag or release may be created, until the
+two live runs at the bottom of this page have actually happened and are green.
+
+That is a PM ruling of 2026-08-04, taken after a review found this step being
+counted as done on the strength of the machinery around it.
 
 A full audit dispatches read-only `test-portfolio-analyst` agents, one per
 shard, and consolidates their terminal dispositions. That dispatch is a
@@ -63,18 +69,49 @@ gitignored `.aid-o/config/`).
 - **Step 28**'s measured-wall-clock campaign is the one thing genuinely
   blocked: it needs a real audit's decision to act on.
 
-## To finish this step
+## The two live runs that clear this status
 
-Run, in a disposable clone with `.aid-o/config/` copied in:
+Both are controller actions with real agents and a real installed plugin.
+Neither can be satisfied by a fixture, and neither has been performed.
+
+### Run 1 — the real full audit (this step)
+
+In a disposable clone with `.aid-o/config/` copied in:
 
 ```
 /aid-audit-tests repo --mode full --budget-minutes 60
 ```
 
-Then approve through the sanctioned scripts and record here: the audit id, the
-six-part rendered output verbatim, `inventory_count` / `assigned_count` /
-`disposition_count`, the per-runner counts, how many units reached each
-disposition, and how many remain `measure` with their named next measurement.
+Real `test-portfolio-analyst` dispatches, then approval through
+`aid-test-catalog-approve.sh` and `aid-test-catalog-confirm-mapping.sh` on that
+audit's own output. Record here: the audit id, the six-part rendered output
+verbatim, `inventory_count` / `assigned_count` / `disposition_count`, the
+per-runner counts, how many units reached each disposition, and how many remain
+`measure` with their named next measurement.
 
-The machinery that consumes all of it is in place and tested; what is missing
-is the dispatch, which is a controller action.
+### Run 2 — the consumer E2E from the installed release candidate
+
+Not from this working tree. From the plugin as a consumer would actually receive
+it — the marketplace clone at the release-candidate commit:
+
+```
+fresh clone → /aid-init → full audit → approval
+            → real gate runner / scheduler → ledger close
+```
+
+The evidence must carry **the resolved plugin version and the commit SHA it was
+installed from**. Every automated proof in this plan runs scripts out of the
+working tree, which cannot show that what ships is what was tested.
+
+### Only then
+
+Green Run 1 + green Run 2 → the plan may be called complete, and the `v2.70.0`
+tag and release may be created. Not before, and not in the other order.
+
+## Why this is pending rather than done
+
+The machinery that consumes all of it is in place and tested; what is missing is
+the dispatch, which is a controller action, and the install, which needs a
+published candidate. Recording that gap as a status is the point — a plan that
+calls itself complete while its own acceptance step never ran is precisely the
+failure mode this plan was written to detect in others.

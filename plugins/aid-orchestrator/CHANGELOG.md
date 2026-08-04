@@ -5,14 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.70.0] — 2026-08-04
 
+> **Release candidate — NOT tagged, NOT released.** Live acceptance is pending:
+> the real full audit (Step 24) and the consumer E2E from the installed
+> candidate have not been run. See `docs/plans/P072-real-audit-record.md`.
+> Nothing here may be described as delivering test-suite acceleration — the
+> measurement campaign has not been run either
+> (`docs/plans/P072-campaign-ledger.md`).
+
 ### Added
 - **Source-aware resource map, parallel pilot and provenance-bound catalog** — parallel safety now rests on two kinds of evidence: a map read from source that cites `file:line` for every resource it records, and a pilot that runs a lane's exact membership serially and concurrently in a disposable clone. A promoted `parallel.status` carries where it came from and is bound to the unit's whole dependency closure, so a shared helper acquiring a lock reverts it on its own.
-- **Execution ledger (`aid-test-execution-ledger.sh`)** — records one entry per run unit actually dispatched during a gate run and fails when the same unit ran under two gates. Four emission paths, including the gate runner itself for directly-invoked commands: without that fourth one it would have certified this repository's own double execution as clean.
+- **Execution ledger (`aid-test-execution-ledger.sh`)** — records one entry per run unit actually dispatched during a gate run and fails when the same unit ran under two gates. Four emission paths — the bats lane, the aggregate runner, the scheduler, and the gate runner itself for directly-invoked commands: without that fourth one it would have certified this repository's own double execution as clean. It is fail-closed throughout: inside an accounted run, a failed open, a failed append, a missing ledger file or an unevaluable close each fail the gate run, because a ledger with a gap reports zero duplicates exactly like a clean one.
+- **Deliberate repeats are declared, not inferred** — an execution can record itself as `retry` or `escalation`, and P069's escalation subprocess marks everything beneath it that way. Those are reported separately as `deliberate_repeats` rather than failing the run, while an undeclared repeat is still a double execution — the default is `normal`, so forgetting to mark one is never a free pass.
 - **Decision artifact for full audits** — `decision.json` (`aid-test-audit-decision-v1`) carries one terminal disposition per run unit, the portfolio arithmetic, the proposed actions with their impact, and the parallelization lanes. `--write-plan` is gated on it.
 - **Cost profiler and deterministic profile selection** — a bounded per-unit diagnosis that runs only against a disposable clone, only through `aid-job.sh`, and reports a lower bound rather than an extrapolation when it does not finish. Which units owe a profile is a policy, and finalization fails when a selected one has no receipt.
 - **Five report shapes end to end** plus a clean-clone authority E2E, both driving the real production entrypoint rather than library functions.
 
 ### Changed
+- **`test-aid-fsm.bats` no longer runs twice per full and release gate run** — `bats_fsm` is dropped from those two profiles, which already run that file through `bats_all`'s pool. This was the live duplication the execution ledger found; the detector's red proof moves into a fixture so removing the waste does not blind the check.
+- **Frozen portfolio counts replaced by reconciliation** — the shell-adapter check asserted "exactly 36 suites, 7 declined", which this plan's own new suites made stale. It now asserts that every `test-*.sh` present is accounted for exactly once, discovered or declined with a reason.
 - **One authority over parallel safety** — `aid-bats-parallel-lane.sh`, `aid-test-scheduler.sh` and `aid-select-tests.sh` all resolve through `aid_test_catalog_effective_status_map`. The separate text allowlist is retired to a notice, and P071's evidence is migrated with `method: migrated_p071_step3` — except for files changed since P071 verified them, which stay `unknown` and are named rather than re-blessed.
 - **The scheduler overlay is subordinate to provenance** — it may still promote a unit nobody has assessed, and can no longer rescue one whose content moved after it was verified. A contract change from P069, recorded with its reasoning in `docs/plans/P069-recontract-check.md`.
 - **The audit's chat handoff leads with the decision** — six sections and a technical appendix, replacing a verdict followed by a severity-ranked findings list. A full audit with no decision artifact, or with one that does not validate, now refuses rather than rendering "No action needed".
@@ -22,7 +32,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **The parallel-safety resolver was unusable on the hot path** — 101s to partition this repository's own pool, because it re-parsed the catalog and shelled out to the map builder once per unit. One batch pass with a shared budget: 60s.
 - **An incomplete audit could render as "Verdict: clean"** — the renderer classified from findings alone, so an audit that never finished looked like one that found nothing.
 - **Profile ingestion failed open** — a corrupt, foreign or tampered receipt became an empty action list, which reads exactly like "nothing needed doing". Every lane and profile input is now schema-validated and bound to its audit.
-- **`parallel.status` was documented as consumed by nothing** — three shipped documents said so; the sentence is corrected and pinned by `test-instruction-consistency.sh` so it cannot reappear.
+- **Three shipped documents described `parallel.status` as having no consumer** — which stopped being true once the lane and the scheduler both began resolving through it. The sentence is corrected in all three and pinned by `test-instruction-consistency.sh` so it cannot reappear.
 
 ## [2.69.0] — 2026-08-02
 
