@@ -61,15 +61,37 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # `${1:?...}` still fires identically when the script is called with no
 # arguments, because the legacy dispatch arm forwards "$@" unchanged.
 _release_parse_args_and_resolve_bump() {
-BUMP_TYPE="${1:?Usage: aid-release.sh <auto|patch|minor|major> [--dry-run] [--force]}"
+BUMP_TYPE="${1:?Usage: aid-release.sh <auto|patch|minor|major> [--dry-run] [--force --reason <text>]}"
 DRY_RUN=false
 FORCE=false
-for arg in "${@:2}"; do
-  case "$arg" in
+FORCE_REASON=""
+# P073 Step 9: this was the ONE unaudited bypass in the system — the FSM guard
+# below even RECOMMENDED `--force` with no reason and no record anywhere. It
+# now requires a reason and writes the same audit records every other force in
+# this codebase writes.
+local local_i=2
+while [[ "$local_i" -le "$#" ]]; do
+  case "${!local_i}" in
     --dry-run) DRY_RUN=true ;;
     --force) FORCE=true ;;
+    --reason)
+      local_i=$(( local_i + 1 ))
+      FORCE_REASON="${!local_i:-}"
+      ;;
   esac
+  local_i=$(( local_i + 1 ))
 done
+if [[ "$FORCE" == "true" && "${#FORCE_REASON}" -lt 20 ]]; then
+  echo "ERROR: --force requires --reason with at least 20 characters (got ${#FORCE_REASON})." >&2
+  echo "       A release-gate bypass with no recorded reason is the one unaudited" >&2
+  echo "       override this codebase had; it is now a forensic record like every other." >&2
+  echo "  aid-release.sh ${BUMP_TYPE} --force --reason '<why bypassing the FSM guard is correct here>'" >&2
+  exit 1
+fi
+if [[ "$FORCE" != "true" && -n "$FORCE_REASON" ]]; then
+  echo "ERROR: --reason was supplied without --force — it bypasses nothing and must not look like it did." >&2
+  exit 1
+fi
 
 # ─── Auto-detection from conventional commits ────────────────────────────
 
@@ -153,14 +175,100 @@ if [[ -n "$STATE_FILE" && "$FORCE" != "true" ]]; then
 
   if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
     echo "ERROR: FSM state is DONE but done_phase=${DONE_PHASE:-<not set>}." >&2
-    echo "Or use --force to bypass." >&2
+    echo "Finish the run's release phase, or bypass with an audited, recorded reason:" >&2
+    echo "  aid-release.sh ${BUMP_TYPE} --force --reason '<why this bypass is correct>'" >&2
     exit 1
   elif [[ "$FSM_STATE" =~ ^(READY|EXECUTE|GATES|ESCALATION)$ ]]; then
     echo "ERROR: FSM state is ${FSM_STATE} — run still in progress." >&2
-    echo "Or use --force to bypass." >&2
+    echo "Finish the run, or bypass with an audited, recorded reason:" >&2
+    echo "  aid-release.sh ${BUMP_TYPE} --force --reason '<why this bypass is correct>'" >&2
     exit 1
   fi
 fi
+
+# P073 Step 9: a force that actually bypassed a live FSM guard writes the same
+# three-record trail every other force in this codebase writes. Recorded only
+# when a state file was FOUND — a --force with no guard to bypass changed
+# nothing and needs no receipt, matching the plan-FSM rule.
+if [[ "$FORCE" == "true" && -n "$STATE_FILE" ]]; then
+  _release_record_force "$STATE_FILE"
+fi
+}
+
+# ---------------------------------------------------------------------------
+# _release_record_force <state_file> — the audited record for the legacy
+# --force. Fail-closed on the artifact, matching the plan-FSM force: a bypass
+# that cannot be recorded does not happen.
+# ---------------------------------------------------------------------------
+_release_record_force() {
+  local state_file="$1"
+  local operator="${USER:-unknown}"
+  local now; now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  local fname_ts; fname_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
+  local head_sha; head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  local fsm_state; fsm_state="$(grep '^state:' "$state_file" 2>/dev/null | awk '{print $2}' || echo unknown)"
+
+  # Where the receipt goes: the active run's evidence dir when there is one,
+  # else a repo-root-adjacent file with a stderr note — never silently skipped.
+  local dir="" wfile=""
+  dir="$(dirname "$state_file")"
+  if [[ -d "$dir" && -w "$dir" ]]; then
+    wfile="${dir}/waiver-release-force-${fname_ts}.json"
+  elif [[ -d "$REPO_ROOT/.aid-o/work" ]]; then
+    wfile="${REPO_ROOT}/.aid-o/work/release-force-${fname_ts}.json"
+    echo "NOTE: no writable run evidence dir — recording the release force at ${wfile}" >&2
+  else
+    wfile="${REPO_ROOT}/.aid-release-force-${fname_ts}.json"
+    echo "NOTE: no .aid-o workspace — recording the release force at ${wfile}" >&2
+  fi
+
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: cannot record the release force — jq is unavailable; refusing a silent bypass." >&2
+    exit 1
+  }
+  local payload json
+  payload="$(jq -nc --arg wc "aid-release:fsm_guard" --arg rs "$FORCE_REASON" \
+    --arg wb "$operator" --arg wa "$now" \
+    '{waived_check:$wc, reason:$rs, waived_by:$wb, waived_at:$wa, scope:"run", visible:true}')" || {
+      echo "ERROR: cannot render the release force receipt — refusing a silent bypass." >&2
+      exit 1
+    }
+  json="$(jq -n --arg created_at "$now" --arg head_sha "$head_sha" \
+    --arg state "$fsm_state" --arg sf "$state_file" --argjson waiver "$payload" \
+    '{
+      schema_version: "aid-2.0",
+      artifact_type: "waiver",
+      producer: "aid-release.sh@force-override",
+      created_at: $created_at,
+      control_protocol: "aid-2.0",
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "blocked",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-release.sh"},
+      waiver: $waiver,
+      forced_override: true,
+      records: "precondition_bypass",
+      bypassed_preconditions: ["fsm_release_guard"],
+      bypassed_state: $state,
+      bypassed_state_file: $sf
+    }')" || {
+      echo "ERROR: cannot render the release force receipt — refusing a silent bypass." >&2
+      exit 1
+    }
+  printf '%s\n' "$json" > "${wfile}.tmp.$$" 2>/dev/null && mv "${wfile}.tmp.$$" "$wfile" 2>/dev/null || {
+    rm -f "${wfile}.tmp.$$" 2>/dev/null || true
+    echo "ERROR: cannot write the release force receipt at ${wfile} — refusing a silent bypass." >&2
+    exit 1
+  }
+
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "release" --run-id "aid-release.sh" \
+    --event "release_force_override" \
+    --reason "$FORCE_REASON" --operator "$operator" \
+    --bypassed-state "$fsm_state" --receipt "$(basename "$wfile")" \
+    --output "${REPO_ROOT}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
+
+  echo "FORCE: FSM release guard bypassed (state ${fsm_state}) — recorded at ${wfile}" >&2
 }
 
 # ─── Version-probe primitive (P073 Step 2) ──────────────────────────────

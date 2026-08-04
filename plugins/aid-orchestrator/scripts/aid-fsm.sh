@@ -2327,9 +2327,30 @@ cmd_init() {
           ${_bepic:+--blocking-epic "$_bepic"} ${_bplan:+--blocking-plan "$_bplan"}
         force="true"
         ;;
+      --*)
+        # P073 Step 9: this was a SILENT sink. The comment claimed unknown
+        # flags past $8 were "safe to ignore", which made a typo'd or a
+        # misplaced flag indistinguishable from one that was honoured — the
+        # same class of failure as a silently swallowed --force. Every
+        # sanctioned caller passes only documented flags, so an undocumented
+        # one now surfaces loudly, which is the point.
+        #
+        # ONE carve-out: --force already consumed "${@:i+1}" above as its own
+        # payload (--reason and its value, --blocked-checks, ...). Rejecting
+        # those here would reject the very reason the call just used, and the
+        # loop must keep running past them because a documented flag such as
+        # --streamlined may legitimately follow --force.
+        if [[ "$force" == "true" ]]; then
+          : # force payload, already consumed by fsm_handle_force_override
+        else
+          echo "ERROR: Unknown flag for init: ${!i}" >&2
+          echo "  init accepts: --plan <path>, --streamlined, --force --reason <text>" >&2
+          exit 2
+        fi
+        ;;
       *)
-        # Unknown flag at this position — preserved as before; existing callers don't
-        # pass anything past $8 unless it's --force, so safe to ignore here.
+        # A non-flag positional past $8 is still ignored: the positional
+        # contract is fixed at eight and callers have never passed more.
         ;;
     esac
     i=$((i + 1))
@@ -5427,6 +5448,26 @@ cmd_check_promotion_candidates() {
 # Skips are logged to audit-log.jsonl with rationale.
 # Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 cmd_plan_close() {
+  # P073 Step 9: this function took three positionals and NOTHING else, so the
+  # dispatcher's `"$@"` handed it any `--force --reason ...` the operator
+  # typed and it vanished — worse than a rejection, because the operator
+  # believed they had forced something. Flags are now peeled first, in the
+  # same shape cmd_transition uses, and an unknown one is refused by name.
+  # The three positionals keep their exact legacy meaning and order.
+  local -a _pc_positional=()
+  local _pc_force="false" _pc_reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force)  _pc_force="true"; shift ;;
+      --reason) _pc_reason="${2:-}"; shift 2 ;;
+      --*)      echo "ERROR: Unknown flag for plan-close: $1" >&2
+                echo "  plan-close accepts: <epic_id> <evidence_dir> <project_root> [--force --reason <text>]" >&2
+                exit 2 ;;
+      *)        _pc_positional+=("$1"); shift ;;
+    esac
+  done
+  set -- "${_pc_positional[@]:-}"
+
   local epic_id="${1:-}"
   local evidence_dir="${2:-}"
   local project_root="${3:-}"
@@ -5434,6 +5475,19 @@ cmd_plan_close() {
   [[ -z "$epic_id" ]]       && echo "Missing: epic_id"       >&2 && exit 1
   [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
   [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
+
+  # Route the force through the SAME audited path every other force in this
+  # file uses. fsm_handle_force_override validates the reason (>= 20 chars)
+  # and writes the three records; a --force with no reason dies there, exactly
+  # as it does for transition/increment-step/done-advance.
+  if [[ "$_pc_force" == "true" ]]; then
+    local run_id="${evidence_dir##*/}"
+    fsm_handle_force_override "plan-close" "closed" "" "plan-close" \
+      --reason "$_pc_reason" --blocked-checks "plan_close_bookkeeping"
+  elif [[ -n "$_pc_reason" ]]; then
+    echo "ERROR: plan-close: --reason was supplied without --force — it bypasses nothing and must not look like it did." >&2
+    exit 2
+  fi
 
   # Derive plan_id through the ONE shared helper (`_fsm_epic_plan_nnn`, top of
   # this file): E-046-2_3 -> 046 -> P046, E-013-1 -> 013 -> P013. This used to
