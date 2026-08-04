@@ -72,12 +72,22 @@ done < "$measurements"
 selection="$(jq -sc \
   --argjson trigger "$trigger_ms" --argjson cap "$max_units" \
   --arg audit "$audit_id" '
-  # Only terminal measurements are candidates. A unit whose job never reached a
-  # terminal state has no duration worth ranking, and profiling it would be
-  # measuring a measurement that failed.
+  # Terminal measurements are candidates, and `timed_out` IS one of them.
+  #
+  # It used to be excluded on the reasoning that a job which never finished has
+  # "no duration worth ranking". That is exactly backwards for a timeout: the
+  # elapsed time is a LOWER BOUND, and a unit that exhausted its deadline is by
+  # definition among the most expensive things in the portfolio. Dropping those
+  # meant the single slowest gate was the one unit guaranteed never to get a
+  # cost breakdown — found by a real audit, where `shell_pipeline_smoke` blew
+  # through its cap at 73 of 151 suites and was then silently not profiled.
+  #
+  # `lost` and `cancelled` stay out: those have no duration at all, only an
+  # absence.
   ( [ .[]
       | select(.run_unit_id != null and .duration_ms != null)
-      | select(.state == "terminal_pass" or .state == "terminal_fail")
+      | select(.state == "terminal_pass" or .state == "terminal_fail" or .state == "timed_out")
+      | . + { measurement_kind: (if .state == "timed_out" then "lower_bound" else "measured" end) }
     ] ) as $all
   | ( [ $all[] | select(.duration_ms >= $trigger) ]
       | sort_by(-.duration_ms) ) as $over
@@ -88,8 +98,12 @@ selection="$(jq -sc \
       measured_units: ($all | length),
       selected: [ $over[:$cap][]
                   | { run_unit_id, measured_ms: .duration_ms,
-                      reason: ("measured " + (.duration_ms|tostring) + "ms, at or above the "
-                               + ($trigger|tostring) + "ms profiling trigger") } ],
+                      measurement_kind: .measurement_kind,
+                      reason: (if .measurement_kind == "lower_bound"
+                               then "ran at least " + (.duration_ms|tostring) + "ms before exhausting its deadline — a lower bound, and above the "
+                                    + ($trigger|tostring) + "ms profiling trigger"
+                               else "measured " + (.duration_ms|tostring) + "ms, at or above the "
+                                    + ($trigger|tostring) + "ms profiling trigger" end) } ],
       deferred: [ $over[$cap:][]
                   | { run_unit_id, measured_ms: .duration_ms,
                       reason: ("over the " + ($trigger|tostring) + "ms trigger but past the "

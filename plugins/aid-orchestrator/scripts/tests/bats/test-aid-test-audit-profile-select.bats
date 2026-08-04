@@ -140,3 +140,41 @@ YAML
   [ "$(jq -r '.selected | length' "$OUT")" = "1" ]
   [ "$(jq -r '.deferred | length' "$OUT")" = "1" ]
 }
+
+# ─── A timeout is the strongest cost signal there is ────────────────────────
+
+@test "a timed_out unit IS selected — it is a lower bound, and the slowest thing measured" {
+  # It used to be dropped, on the reasoning that an unfinished job has no
+  # duration worth ranking. Backwards: exhausting a deadline is the strongest
+  # evidence of cost in the whole portfolio, so the single slowest gate was the
+  # one unit guaranteed never to get a breakdown. A real audit hit exactly that
+  # with shell_pipeline_smoke.
+  _m "gate:fast" 1000 terminal_pass
+  _m "gate:slow" 2001000 timed_out
+  run _run --trigger-ms 60000 --max-units 3
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.selected[].run_unit_id] | join(",")' "$OUT")" = "gate:slow" ]
+}
+
+@test "and it is labelled a lower bound, never reported as a measurement" {
+  _m "gate:slow" 2001000 timed_out
+  run _run --trigger-ms 60000 --max-units 3
+  [ "$(jq -r '.selected[0].measurement_kind' "$OUT")" = "lower_bound" ]
+  [[ "$(jq -r '.selected[0].reason' "$OUT")" == *"at least"* ]]
+  [[ "$(jq -r '.selected[0].reason' "$OUT")" != *"measured "* ]]
+}
+
+@test "an ordinary measurement is still labelled measured" {
+  _m "gate:slow" 120000 terminal_pass
+  run _run --trigger-ms 60000 --max-units 3
+  [ "$(jq -r '.selected[0].measurement_kind' "$OUT")" = "measured" ]
+}
+
+@test "lost and cancelled stay out — those have an absence, not a duration" {
+  _m "gate:lost" 500000 lost
+  _m "gate:cancelled" 500000 cancelled
+  run _run --trigger-ms 60000 --max-units 3
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.selected | length' "$OUT")" = "0" ]
+  [ "$(jq -r '.measured_units' "$OUT")" = "0" ]
+}

@@ -176,7 +176,14 @@ fi
 # the working directory comes from the subshell (a detached child inherits
 # cwd), never from wrapping the command in `env -C`, which would mean the
 # thing approved and the thing recorded were different strings.
-jobs_dir="${output_dir%/}/profile-jobs"
+# Job records live INSIDE the disposable clone, not in the audit's own output
+# directory. A real audit lost its entire evidence tree — inventory, catalog,
+# eight agent artifacts, 112 resource maps — during a profiling run, and the
+# mechanism was never pinned down. Whatever it was, the profiler had no reason
+# to be writing into that tree in the first place: the only thing the audit
+# needs back is the receipt, and that is copied out at the end. Everything else
+# stays in the clone, which is disposable by construction.
+jobs_dir="${target_canon%/}/.aid-o/work/profile-jobs"
 mkdir -p "$jobs_dir"
 
 # Job ids are [A-Za-z0-9._-] and <=128. A run unit id can exceed that and can
@@ -191,6 +198,19 @@ while [[ -e "${jobs_dir}/${job_id}" ]]; do
   _n=$(( _n + 1 ))
   job_id="profile-${_id_hash}-${_n}-${_id_slug}"
 done
+
+# ─── The audit's own evidence must survive its diagnostics ──────────────────
+# A detector, because the cause is not known. A real full audit came back with
+# its output directory gone and no way to tell what removed it, which turned a
+# 90-minute run into nothing and left the deletion unexplained. Whatever the
+# mechanism, it will not be silent a second time: the file list is recorded
+# before the profiled command runs and checked after, and anything that
+# disappeared is named.
+_evidence_manifest() {
+  [[ -d "$output_dir" ]] || return 0
+  ( cd "$output_dir" && find . -type f 2>/dev/null | LC_ALL=C sort )
+}
+_evidence_before="$(_evidence_manifest)"
 
 started_ms=$(( $(date +%s%N) / 1000000 ))
 if ! ( cd "$target_canon" && bash "${SCRIPT_DIR}/aid-job.sh" run \
@@ -224,6 +244,20 @@ while (( _waited <= _grace )); do
 done
 ended_ms=$(( $(date +%s%N) / 1000000 ))
 elapsed_ms=$(( ended_ms - started_ms ))
+
+# Did the diagnostics eat the evidence? Checked BEFORE anything else is
+# written, so the report names what vanished rather than what is missing after
+# this script has also had a turn.
+_evidence_after="$(_evidence_manifest)"
+_evidence_lost="$(comm -23 <(printf '%s\n' "$_evidence_before") <(printf '%s\n' "$_evidence_after") 2>/dev/null | grep -v '^$' | grep -v '/profile-jobs/' || true)"
+if [[ -n "$_evidence_lost" ]]; then
+  echo "aid-test-audit-profile.sh: FILES THIS AUDIT HAD ALREADY COLLECTED DISAPPEARED WHILE PROFILING '$run_unit_id':" >&2
+  printf '%s\n' "$_evidence_lost" | sed 's|^\./|    |' >&2
+  echo "  The profiled command ran in the disposable clone at '$target_canon' and must not be able to reach" >&2
+  echo "  '$output_dir' at all. Refusing to continue: an audit that silently loses its own evidence produces" >&2
+  echo "  a smaller portfolio than it examined, with nothing to show anything is missing." >&2
+  exit 13
+fi
 
 : > "$log_path"
 if [[ -f "$live_log" ]]; then cat "$live_log" >> "$log_path"; fi
@@ -434,6 +468,7 @@ jq -nc \
   --argjson log_dropped "$log_dropped_bytes" \
   --argjson cancelled "$([[ "$cancelled" == "true" ]] && echo true || echo false)" \
   --arg job_id "$job_id" --arg job_state "$job_state" --arg live_log "$live_log" \
+  --arg jobs_dir "$jobs_dir" \
   --arg audit_id "$audit_id" --arg log_sha "$evidence_log_sha256" \
   '{schema_version:"aid-test-profile-v1", run_unit_id:$id, runner:$runner,
     complete:$complete, incomplete_reason:$reason,
@@ -444,7 +479,11 @@ jq -nc \
     evidence_log_sha256:$log_sha,
     audit_id: (if $audit_id == "" then null else $audit_id end),
     cancelled:$cancelled,
-    job: {id:$job_id, state:$job_state, live_log:$live_log},
+    # jobs_dir is named because it moved: job records live inside the
+    # disposable clone now, not under --output-dir. An operator cancelling a
+    # long profile needs the path, and reading it here is the contract —
+    # deriving it from a layout is what broke when the layout changed.
+    job: {id:$job_id, state:$job_state, live_log:$live_log, jobs_dir:$jobs_dir},
     evidence_log_truncated:$log_truncated, evidence_log_dropped_bytes:$log_dropped}' \
   > "$receipt_path"
 

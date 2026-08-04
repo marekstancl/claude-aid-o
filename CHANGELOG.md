@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.3] — 2026-08-04
+
+> A second real audit lost its own evidence: the entire
+> `.aid-o/work/test-audits/<id>/` tree — inventory, catalog, eight agent
+> artifacts, measurements, 112 resource maps — disappeared during a cost
+> profiling run, and the finalize step then had nothing to read. Ninety minutes
+> of work, gone, with no error.
+
+### Fixed
+- **The cost profiler wrote into the audit's own evidence tree, and that tree vanished during a profiling run** — the mechanism was not identified, so this fixes what can be fixed and refuses to let it be silent again. Job records now live inside the disposable clone instead of `--output-dir`: the profiler had no reason to write there, since the only thing the audit needs back is the receipt. And the audit's file list is recorded before the profiled command runs and checked after — anything that disappeared is named and the run exits 13, because an audit that quietly loses its own evidence reports a smaller portfolio than it examined with nothing to show anything is missing.
+- **The slowest unit in the portfolio was the one guaranteed never to be profiled** — `profile-select` took only `terminal_pass`/`terminal_fail`, on the reasoning that an unfinished job has no duration worth ranking. That is backwards for a timeout: exhausting a deadline is a lower bound and the strongest cost signal there is. `timed_out` units are selected now and carry `measurement_kind: "lower_bound"` so they can never be read as a measurement; `lost` and `cancelled` stay out, because those have an absence rather than a duration.
+
 ## [2.70.2] — 2026-08-04
 
 > A second real audit run got further and hit the next wall: the resource map

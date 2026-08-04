@@ -85,7 +85,9 @@ _clone() {
   # Poll the supervised job's live log while the profiler is still running.
   local live="" waited=0 saw_content=0
   while kill -0 "$profiler_pid" 2>/dev/null && [ "$waited" -lt 120 ]; do
-    live="$(find "$OUT/profile-jobs" -name 'stdout.log' 2>/dev/null | head -1)"
+    # Job records live inside the disposable clone now, not under --output-dir:
+    # the profiler must not write into the audit's own evidence tree.
+    live="$(find "$c/.aid-o/work/profile-jobs" -name 'stdout.log' 2>/dev/null | head -1)"
     if [ -n "$live" ] && [ -s "$live" ]; then saw_content=1; break; fi
     sleep 1; waited=$(( waited + 1 ))
   done
@@ -107,9 +109,14 @@ _clone() {
     --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
     --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
   [ "$(jq -r '.job.state' "$r")" = "terminal_pass" ]
-  local jid; jid="$(jq -r '.job.id' "$r")"
-  [ -f "$OUT/profile-jobs/$jid/result.json" ]
-  [ "$(jq -r '.schema' "$OUT/profile-jobs/$jid/result.json")" = "aid-job-result/1" ]
+  # Read the job location from the RECEIPT rather than assuming a layout —
+  # assuming one is what broke when job records moved into the clone.
+  local jid jdir; jid="$(jq -r '.job.id' "$r")"; jdir="$(jq -r '.job.jobs_dir' "$r")"
+  [ -n "$jdir" ] && [ "$jdir" != "null" ]
+  [ -f "$jdir/$jid/result.json" ]
+  [ "$(jq -r '.schema' "$jdir/$jid/result.json")" = "aid-job-result/1" ]
+  # And it is NOT in the audit's output directory.
+  [ ! -d "$OUT/profile-jobs" ]
 }
 
 @test "the ALLOWLIST approves the exact argv that runs, --timing included" {
@@ -172,12 +179,12 @@ _clone() {
   # Wait until the job exists, then cancel it the way an operator would.
   local jid="" waited=0
   while [ "$waited" -lt 60 ]; do
-    jid="$(find "$OUT/profile-jobs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)"
+    jid="$(find "$c/.aid-o/work/profile-jobs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)"
     [ -n "$jid" ] && [ -f "$jid/job.json" ] && break
     sleep 1; waited=$(( waited + 1 ))
   done
   [ -n "$jid" ]
-  bash "$PLUGIN_DIR/scripts/aid-job.sh" cancel --jobs-dir "$OUT/profile-jobs" \
+  bash "$PLUGIN_DIR/scripts/aid-job.sh" cancel --jobs-dir "$c/.aid-o/work/profile-jobs" \
     --id "$(basename "$jid")" >/dev/null 2>&1 || true
 
   wait "$pid" 2>/dev/null || true
