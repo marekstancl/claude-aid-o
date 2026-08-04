@@ -153,11 +153,13 @@ _write_units() {
   [[ "$output" == *"bats:a"* ]]
 }
 
-@test "E2E: a real unknown unit becomes schedulable in a multi-unit batch after promotion + approval" {
+@test "an approved overlay still promotes a unit provenance never assessed" {
+  # P069's contract, kept. The overlay schema admits only `safe` and
+  # `constrained` and its fields are named `promoted_*` — it exists to resolve
+  # exactly this case, and a narrow-only overlay would have nothing to do.
   _write_catalog "unknown" "unknown"
   _write_units
 
-  # Before promotion: both isolated (unknown never batches).
   run bash "$SCRIPT" dispatch --project-root "$TEST_PROJECT_ROOT" --run-id "r8a" --units-json "$TEST_PROJECT_ROOT/units.json" --mode observe_parallel
   echo "$output" | jq -e '[.units[].co_scheduled_with] == [[],[]]'
 
@@ -176,6 +178,30 @@ JSON
   run bash "$SCRIPT" dispatch --project-root "$TEST_PROJECT_ROOT" --run-id "r8b" --units-json "$TEST_PROJECT_ROOT/units.json" --mode observe_parallel --max-workers 4
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '(.units[] | select(.unit_id=="bats:a") | .co_scheduled_with) == ["bats:b"]'
+}
+
+@test "P072: an overlay cannot RESCUE a unit whose content moved after it was verified" {
+  # `safe` in the catalog, then the SOURCE gains a lock. Faking the hash alone
+  # would not do it: the two-tier rule correctly keeps a status whose bytes
+  # moved but whose resources did not. Only a real resource change revokes.
+  _write_catalog "safe" "safe"
+  _write_units
+  printf '%s "acquires a lock" { flock /var/lock/x.lock true; }\n' '@'"test" >> "$TEST_PROJECT_ROOT/a.bats"
+
+  cat > "$TEST_PROJECT_ROOT/overlay.proposed.json" <<'JSON'
+{"schema_version":"1.0.0","status":"proposed","overlay":[
+  {"run_unit_id":"bats:a","promoted_status":"safe","catalog_fingerprint_at_promotion":"sha256:aaaaaaaaaaaa","promoted_at":"2026-08-02T00:00:00Z","evidence_run_id":"iso-1"}
+]}
+JSON
+  local display_out hash
+  display_out="$(bash "$APPROVE" --proposed "$TEST_PROJECT_ROOT/overlay.proposed.json" --project-root "$TEST_PROJECT_ROOT")"
+  hash="$(echo "$display_out" | grep -oE 'sha256:[a-f0-9]+' | tail -1)"
+  bash "$APPROVE" --proposed "$TEST_PROJECT_ROOT/overlay.proposed.json" --project-root "$TEST_PROJECT_ROOT" --confirm-overlay "$hash" >/dev/null
+
+  # bats:a is revoked and stays isolated, whatever the overlay says.
+  run bash "$SCRIPT" dispatch --project-root "$TEST_PROJECT_ROOT" --run-id "n3" --units-json "$TEST_PROJECT_ROOT/units.json" --mode observe_parallel --max-workers 4
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '(.units[] | select(.unit_id=="bats:a") | .co_scheduled_with) == []'
 }
 
 @test "a proposed-but-unapproved overlay entry is never read as authoritative" {

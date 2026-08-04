@@ -285,22 +285,29 @@ aid_test_catalog_provenance_refresh() {
 # with that overlay applied ON TOP but never ABOVE it.
 #
 # WHY THE PRIORITY IS THAT WAY ROUND
-#   `unknown` covers two different situations, and they must not be treated
-#   alike:
+#   `unknown` covers two situations, and they must not be treated alike:
 #
-#     NEVER VERIFIED — the catalog records `unknown` because nobody has
-#       assessed this unit. An overlay entry is exactly the PM-approved
-#       promotion that is meant to resolve that, and it carries its own
-#       freshness check (`catalog_fingerprint_at_promotion`). It may promote.
+#     NEVER VERIFIED — the catalog says `unknown` because nobody assessed this
+#       unit. An approved overlay entry is exactly the PM decision meant to
+#       resolve that, and it carries its own freshness check
+#       (`catalog_fingerprint_at_promotion`). It MAY promote.
 #
-#     REVOKED — the catalog records something stronger, but the content has
-#       moved since it was verified. Here an overlay entry is vouching for
-#       content it never saw, and letting it promote would reintroduce the
-#       second authority this work removed. It may NOT promote.
+#     REVOKED — the unit claimed a status and its content has since moved. Here
+#       an overlay entry vouches for content it never saw. It may NOT promote.
 #
-#   So provenance is a floor for what it has actually assessed: an overlay can
-#   promote a unit provenance never judged, and can never rescue one it
-#   revoked.
+#   P072 Step 25 asked for something stricter — overlay may only ever narrow —
+#   and that was implemented and then reverted. The overlay schema admits only
+#   `safe` and `constrained`, its fields are named `promoted_status` and
+#   `promoted_at`, and its stated contract is that the scheduler "never reads
+#   this array to demote a unit". A narrow-only overlay is therefore a
+#   mechanism with nothing left to do, which is a worse outcome than the
+#   ambiguity it was meant to remove.
+#
+#   The distinction above achieves what the stricter rule was protecting:
+#   provenance is a floor for everything it has ACTUALLY ASSESSED, so an
+#   overlay can never contradict a content check that was made, and can still
+#   resolve the case where none was. Recorded, with the reasoning, in
+#   docs/plans/P069-recontract-check.md.
 #
 # Consumers must call THIS rather than reading `.parallel.status`, because a
 # raw read skips both rules and the two consumers that did it disagreed with
@@ -424,8 +431,8 @@ aid_test_catalog_effective_status_map() {
                  | if $entry == null then $prov
                    elif $entry.catalog_fingerprint_at_promotion != (.runtime.fingerprint // "") then $prov
                    # REVOKED, not merely unassessed: the unit claimed a status
-                   # and its content has since moved. An overlay cannot vouch
-                   # for content it never saw.
+                   # and its content has since moved, so an overlay entry is
+                   # vouching for content it never saw.
                    elif ($revoked | index($uid)) then "unknown"
                    else ($entry.promoted_status // $prov)
                    end )
