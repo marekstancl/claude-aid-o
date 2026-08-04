@@ -52,7 +52,9 @@ _force() {
 
 @test "P073 Step 7: a reason under 20 characters is refused and writes nothing" {
   run _force '
-    _PFSM_FORCE=1; _PFSM_FORCE_REASON="too short"; _PFSM_BYPASSED="clean_worktree"
+    _PFSM_FORCE=1; _PFSM_FORCE_REASON="too short"
+    _fails() { return 1; }
+    _pfsm_precondition "clean_worktree" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   [ "$status" -ne 0 ]
@@ -67,7 +69,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
-    _PFSM_BYPASSED="bookkeeping_complete"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   [ "$status" -eq 0 ]
@@ -97,7 +100,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
-    _PFSM_BYPASSED="bookkeeping_complete"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   [ "$status" -eq 0 ]
@@ -127,7 +131,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
-    _PFSM_BYPASSED="bookkeeping_complete"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   local rc="$status"
@@ -206,7 +211,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="closing after \$(rm -rf /) `id` and a \"quote\"; long enough to pass validation"
-    _PFSM_BYPASSED="bookkeeping_complete"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   [ "$status" -eq 0 ]
@@ -225,7 +231,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
-    _PFSM_BYPASSED="bookkeeping_complete"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   [ "$status" -eq 0 ]
@@ -286,7 +293,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
-    _PFSM_BYPASSED="bookkeeping_complete"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
     _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
   '
   [ "$status" -eq 0 ]
@@ -318,7 +326,8 @@ _force() {
   run _force '
     _PFSM_FORCE=1
     _PFSM_FORCE_REASON="plan-start forced past a lineage mismatch on an existing branch"
-    _PFSM_BYPASSED="lineage_mismatch"
+    _fails() { return 1; }
+    _pfsm_precondition "lineage_mismatch" forceable _fails
     _pfsm_handle_force "plan-start" "P900" "'"$ROOT"'" "" "OPEN"
   '
   [ "$status" -eq 0 ]
@@ -337,9 +346,16 @@ _force() {
     if [[ -d "$_force_fallback" ]]; then
       for _fw in "$_force_fallback"/waiver-plan-*.json; do
         [[ -e "$_fw" ]] || continue
-        mv "$_fw" "${run_dir_abs}/" 2>/dev/null \
-          && echo "swept $(basename "$_fw")"
+        if mv -n "$_fw" "${run_dir_abs}/" 2>/dev/null && [[ ! -e "$_fw" ]]; then
+          echo "swept $(basename "$_fw")"
+        else
+          echo "NOT swept $(basename "$_fw")"
+        fi
       done
+      if [[ -s "${_force_fallback}/timeline.jsonl" ]]; then
+        cat "${_force_fallback}/timeline.jsonl" >> "${run_dir_abs}/timeline.jsonl" 2>/dev/null \
+          && rm -f "${_force_fallback}/timeline.jsonl" 2>/dev/null || true
+      fi
       rmdir "$_force_fallback" 2>/dev/null || true
     fi
   '
@@ -355,4 +371,117 @@ _force() {
 @test "P073 Step 7: the freeze body carries the sweep, so the wiring is not test-only" {
   run grep -c 'swept pre-attempt force receipt' "$PFSM"
   [ "$output" = "1" ]
+}
+
+# ─── Codex-review findings on the first cut of this step ──────────────────
+
+@test "P073 Step 7 (review finding 1): a FAILED receipt write leaves no timeline or audit-log trail" {
+  # The first cut wrote the timeline event and the audit-log entry BEFORE the
+  # fail-closed waiver, so a refused force still left records describing a
+  # successful override. Nothing is recorded until the receipt is on disk.
+  mkdir -p "$ROOT/.aid-o/work/plan-final/P900"
+  chmod a-w "$ROOT/.aid-o/work/plan-final/P900"
+  run _force '
+    _PFSM_FORCE=1
+    _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
+    _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
+  '
+  local rc="$status"
+  chmod u+w "$ROOT/.aid-o/work/plan-final/P900"
+  [ "$rc" -ne 0 ]
+  [ ! -e "$ROOT/.aid-o/work/plan-final/P900/timeline.jsonl" ]
+  [ ! -e "$ROOT/.aid-o/work/audit-log.jsonl" ]
+}
+
+@test "P073 Step 7 (review finding 2): a manifest evidence dir that escapes the plan tree is not honoured" {
+  run _force '
+    _PFSM_FORCE=1
+    _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
+    # Stub the manifest reader to return a traversing path.
+    plan_manifest_get() { printf "../../../../tmp/escaped"; }
+    d="$(_pfsm_force_evidence_dir "'"$ROOT"'" P900)"
+    echo "dir=$d"
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"is not contained in"* ]]
+  [[ "$output" == *"dir=$ROOT/.aid-o/work/plan-final/P900"* ]]
+  [[ "$output" != *"dir=$ROOT/../../"* ]]
+}
+
+@test "P073 Step 7 (review finding 3): the sweep never clobbers an existing receipt of the same name" {
+  run _force '
+    _PFSM_FORCE=1
+    _PFSM_FORCE_REASON="plan-start forced past a lineage mismatch on an existing branch"
+    _fails() { return 1; }
+    _pfsm_precondition "lineage_mismatch" forceable _fails
+    _pfsm_handle_force "plan-start" "P900" "'"$ROOT"'" "" "OPEN"
+  '
+  [ "$status" -eq 0 ]
+  local fallback="$ROOT/.aid-o/work/plan-final/P900"
+  local src; src="$(ls "$fallback"/waiver-plan-*.json | head -1)"
+  local run_dir_abs="$ROOT/.aid-o/work/evidence/P900/R-P900-final-1"
+  mkdir -p "$run_dir_abs"
+  # A file of the same basename is already there, holding different content.
+  printf '{"pre":"existing"}\n' > "$run_dir_abs/$(basename "$src")"
+
+  run bash -c '
+    set -uo pipefail
+    _fw="'"$src"'"; run_dir_abs="'"$run_dir_abs"'"
+    if mv -n "$_fw" "${run_dir_abs}/" 2>/dev/null && [[ ! -e "$_fw" ]]; then
+      echo "swept"
+    else
+      echo "NOT swept"
+    fi
+  '
+  [[ "$output" == *"NOT swept"* ]]
+  # The pre-existing receipt is intact and the source is still there.
+  run jq -r '.pre' "$run_dir_abs/$(basename "$src")"
+  [ "$output" = "existing" ]
+  [ -e "$src" ]
+}
+
+@test "P073 Step 7 (review finding 4): a hand-set bypass name gets a refusal, not a receipt" {
+  # `hard` was protected by convention only: _pfsm_handle_force trusted the
+  # mutable global, so any caller could write a hard check's name into it and
+  # obtain a receipt asserting that check was legitimately bypassed.
+  run _force '
+    _PFSM_FORCE=1
+    _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
+    _PFSM_BYPASSED="merge_in_progress"      # never went through the forceable path
+    _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
+  '
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"never bypassed through the forceable precondition path"* ]]
+  run bash -c "find '$ROOT/.aid-o' -name 'waiver-plan-*.json' 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
+}
+
+@test "P073 Step 7 (review finding 4): a REAL forceable bypass still mints its receipt" {
+  # The provenance gate must not break the legitimate path.
+  run _force '
+    _PFSM_FORCE=1
+    _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
+    _fails() { return 1; }
+    _pfsm_precondition "bookkeeping_complete" forceable _fails
+    _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
+  '
+  [ "$status" -eq 0 ]
+  run bash -c "find '$ROOT/.aid-o' -name 'waiver-plan-*.json' 2>/dev/null | wc -l"
+  [ "$output" = "1" ]
+}
+
+@test "P073 Step 7 (review finding 4): a HARD refusal records nothing, so no receipt is even possible" {
+  run _force '
+    _PFSM_FORCE=1
+    _PFSM_FORCE_REASON="manifest corrupted by an interrupted merge; closing to unblock the release"
+    _fails() { return 1; }
+    _pfsm_precondition "merge_in_progress" hard _fails || true
+    _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bypassed nothing"* ]]
+  run bash -c "find '$ROOT/.aid-o' -name 'waiver-plan-*.json' 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
 }

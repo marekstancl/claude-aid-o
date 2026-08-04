@@ -315,9 +315,17 @@ _pfsm_check_clean_worktree() {
 # because there is nothing on the other side of them to complete.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Set by _pfsm_precondition when a forceable check is bypassed; consumed and
-# cleared by _pfsm_handle_force. Comma-separated check names.
+# Set by _pfsm_precondition when a forceable check is bypassed; consumed by
+# _pfsm_handle_force. Comma-separated check names.
 _PFSM_BYPASSED=""
+# PROVENANCE for the above. _pfsm_precondition is the only writer, and it
+# records a name here ONLY on the forceable branch. _pfsm_handle_force refuses
+# to mint a receipt for any name that is not present, so a caller that sets
+# _PFSM_BYPASSED directly — including with a `hard` check's name — gets a
+# refusal rather than a receipt claiming that check was bypassed. Without this
+# the hard/forceable split would be convention only (adversarial-review
+# finding on the first cut of this step).
+_PFSM_BYPASS_PROVENANCE=""
 # Set to 1 by a command's argument loop when --force was passed.
 _PFSM_FORCE=0
 # The --reason value for the force (>= 20 chars, validated at use).
@@ -333,9 +341,18 @@ _PFSM_FORCE_REASON=""
 _pfsm_force_evidence_dir() {
   local root="$1" plan_id="$2" rel=""
   rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || rel=""
+  # Defence in depth (adversarial-review finding): the manifest VALIDATOR
+  # already enforces this containment, but this function reads the field
+  # directly, so a hand-edited manifest that never went through the validator
+  # must not be able to steer a force receipt outside the plan's own evidence
+  # tree. An absolute path or any `..` component falls back to the safe
+  # default rather than being honoured.
   if [[ -n "$rel" && "$rel" != "null" ]]; then
-    printf '%s/%s' "$root" "$rel"
-    return 0
+    if [[ "$rel" == ".aid-o/work/evidence/${plan_id}/"* && "$rel" != *".."* && "$rel" != /* ]]; then
+      printf '%s/%s' "$root" "$rel"
+      return 0
+    fi
+    echo "WARNING: manifest plan_final_evidence_dir '${rel}' is not contained in .aid-o/work/evidence/${plan_id}/ — writing the force receipt to the default location instead." >&2
   fi
   printf '%s/.aid-o/work/plan-final/%s' "$root" "$plan_id"
 }
@@ -362,6 +379,7 @@ _pfsm_precondition() {
     forceable)
       if [[ "$_PFSM_FORCE" -eq 1 ]]; then
         _PFSM_BYPASSED="${_PFSM_BYPASSED:+${_PFSM_BYPASSED},}${name}"
+        _PFSM_BYPASS_PROVENANCE="${_PFSM_BYPASS_PROVENANCE:+${_PFSM_BYPASS_PROVENANCE},}${name}"
         echo "FORCE: bypassing precondition '${name}' — recorded in the force receipt." >&2
         return 0
       fi
@@ -406,36 +424,31 @@ _pfsm_handle_force() {
   local evidence_dir; evidence_dir="$(_pfsm_force_evidence_dir "$root" "$plan_id")"
   local timeline="${evidence_dir}/timeline.jsonl"
 
-  # Record 1 — timeline. Written only when the run dir already exists, exactly
-  # like aid-fsm.sh's log_event no-op contract.
-  if [[ -d "$evidence_dir" ]]; then
-    local ev
-    ev="$(jq -nc --arg ts "$now" --arg ev "plan_force_override" --arg cmd "$command" \
-      --arg plan "$plan_id" --arg reason "$reason" --arg op "$operator" \
-      --arg from "$from_state" --arg to "$to_state" --arg by "$bypassed" \
-      '{ts:$ts, event:$ev, command:$cmd, plan_id:$plan, from:$from, to:$to,
-        reason:$reason, operator:$op,
-        bypassed_preconditions: (if $by == "" then [] else ($by | split(",")) end)}' 2>/dev/null)" || ev=""
-    [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "$timeline" 2>/dev/null || true
-  fi
-
   # A force that bypassed nothing writes no waiver — see the header note.
   if [[ -z "$bypassed" ]]; then
     echo "FORCE: every precondition passed — --force bypassed nothing and no waiver was written." >&2
     return 0
   fi
 
-  # Record 2 — cross-plan audit log (best-effort by contract).
-  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
-    --epic-id "$plan_id" --run-id "${command}" \
-    --event "plan_force_override" \
-    --command "$command" --plan-id "$plan_id" \
-    --reason "$reason" --operator "$operator" \
-    --from "$from_state" --to "$to_state" \
-    --bypassed-preconditions-array "$bypassed" \
-    --output "${root}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
+  # PROVENANCE GATE (adversarial-review finding): every accumulated name must
+  # have come through _pfsm_precondition's forceable branch. A name that did
+  # not — a `hard` check's name written directly into the global, or any other
+  # hand-set value — gets a refusal instead of a receipt asserting it was
+  # legitimately bypassed.
+  local _bp
+  while IFS= read -r _bp; do
+    [[ -n "$_bp" ]] || continue
+    if [[ ",${_PFSM_BYPASS_PROVENANCE}," != *",${_bp},"* ]]; then
+      echo "PRECONDITION FAIL: refusing to mint a force receipt for '${_bp}' — it was never bypassed through the forceable precondition path (a 'hard' precondition, or a hand-set value). No records were written." >&2
+      return 1
+    fi
+  done <<< "${bypassed//,/$'\n'}"
 
-  # Record 3 — the HEAD-bound waiver artifact. FAIL-CLOSED.
+  # ORDER MATTERS (adversarial-review finding): the authoritative, fail-closed
+  # waiver artifact is written FIRST. The earlier cut wrote the timeline event
+  # and the audit-log entry before it, so a failed receipt write left a
+  # forensic trail describing an override that was actually refused. Nothing
+  # is recorded anywhere until the receipt is durably on disk.
   command -v jq >/dev/null 2>&1 || {
     echo "PRECONDITION FAIL: cannot write force receipt — jq is unavailable; refusing a silent bypass." >&2
     return 1
@@ -502,6 +515,33 @@ _pfsm_handle_force() {
     echo "PRECONDITION FAIL: cannot write force receipt at ${wfile} — refusing a silent bypass." >&2
     return 1
   fi
+
+  # The receipt is durable. Now, and only now, the two supporting records.
+  #
+  # Record 2 — timeline. Written only when the run dir exists, exactly like
+  # aid-fsm.sh's log_event no-op contract (the mkdir above guarantees it does
+  # by this point).
+  local ev
+  ev="$(jq -nc --arg ts "$now" --arg ev "plan_force_override" --arg cmd "$command" \
+    --arg plan "$plan_id" --arg reason "$reason" --arg op "$operator" \
+    --arg from "$from_state" --arg to "$to_state" --arg by "$bypassed" \
+    --arg receipt "$(basename "$wfile")" \
+    '{ts:$ts, event:$ev, command:$cmd, plan_id:$plan, from:$from, to:$to,
+      reason:$reason, operator:$op, receipt:$receipt,
+      bypassed_preconditions: ($by | split(","))}' 2>/dev/null)" || ev=""
+  [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "$timeline" 2>/dev/null || true
+
+  # Record 3 — cross-plan audit log (best-effort by contract: the waiver
+  # artifact above is the authoritative record).
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "$plan_id" --run-id "${command}" \
+    --event "plan_force_override" \
+    --command "$command" --plan-id "$plan_id" \
+    --reason "$reason" --operator "$operator" \
+    --from "$from_state" --to "$to_state" \
+    --receipt "$(basename "$wfile")" \
+    --bypassed-preconditions-array "$bypassed" \
+    --output "${root}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
 
   echo "FORCE: recorded at ${wfile} — bypassed: ${bypassed}" >&2
   return 0
@@ -2495,9 +2535,23 @@ _pfsm_finalize_freeze() {
     local _fw
     for _fw in "$_force_fallback"/waiver-plan-*.json; do
       [[ -e "$_fw" ]] || continue
-      mv "$_fw" "${run_dir_abs}/" 2>/dev/null \
-        && echo "plan-finalize --stage freeze: swept pre-attempt force receipt $(basename "$_fw") into ${run_dir_rel}" >&2
+      # `mv -n` plus a source-gone post-check: on coreutils 9.1 a skipped
+      # `mv -n` still exits 0, so the exit code alone would report a sweep that
+      # did not happen and could mask an existing receipt of the same name
+      # (adversarial-review finding).
+      if mv -n "$_fw" "${run_dir_abs}/" 2>/dev/null && [[ ! -e "$_fw" ]]; then
+        echo "plan-finalize --stage freeze: swept pre-attempt force receipt $(basename "$_fw") into ${run_dir_rel}" >&2
+      else
+        echo "WARNING: pre-attempt force receipt $(basename "$_fw") was NOT swept — a file of that name already exists in ${run_dir_rel}. The receipt is left at ${_fw} and must be reconciled by hand; nothing was overwritten." >&2
+      fi
     done
+    # The pre-attempt force also logged its timeline event in the fallback
+    # dir. Fold it into the attempt's timeline rather than orphaning it —
+    # JSONL appends cleanly, so no record is lost or overwritten.
+    if [[ -s "${_force_fallback}/timeline.jsonl" ]]; then
+      cat "${_force_fallback}/timeline.jsonl" >> "${run_dir_abs}/timeline.jsonl" 2>/dev/null \
+        && rm -f "${_force_fallback}/timeline.jsonl" 2>/dev/null || true
+    fi
     rmdir "$_force_fallback" 2>/dev/null || true
   fi
 
