@@ -106,7 +106,8 @@ FIRST AID disengaged.
 Mode:        manual (auto-mode disengaged)
 
   EPIC:  {epic_id}
-  Step:  {current_step} of {total_steps} ({state})
+  Step:  {current_step + 1} of {total_steps} ({state})
+
   Run:   {run_id}
 
 Resume options:
@@ -114,6 +115,9 @@ Resume options:
   /aid-run {id}          Continue this EPIC manually (step by step)
   /aid-status {id}       Check current EPIC status
 ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 
 ---
 
@@ -166,4 +170,4 @@ Remaining EPICs in `.aid-o/config/queue.yaml` are untouched. They remain queued.
 - The stop sequence NEVER prompts for confirmation. When PM says stop, it stops. Immediately.
 
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-08-04

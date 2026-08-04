@@ -62,7 +62,7 @@ Use /aid-status <id> for details, /aid-status queue for queue management.
 EPIC Status: E-003-1_2 — Add Auth System
 ====================================
 State: EXECUTE          ← from fsm-state.yaml .state
-Step: 3/7               ← current_step / total_steps
+Step: 4/7               ← the EXECUTING step: current_step + 1 of total_steps
 Mode: manual            ← from fsm-state.yaml .mode
 Branch: task/E-003-1_2  ← from fsm-state.yaml .branch
 Gate retries: 0/2       ← gate_retries
@@ -78,6 +78,9 @@ Recent events (last 5 from timeline.jsonl):
 
 Evidence: .aid-o/work/evidence/E-003-1_2/{run_id}/
 ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 
 **Status when no run started:**
 ```
@@ -166,7 +169,7 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-08-04
 
 ## Plan mode
 

@@ -233,6 +233,30 @@ is_worktree() {
   [[ "$git_dir" == *.git/worktrees/* ]]
 }
 
+# ─── Human step rendering (P073 Step 4) ─────────────────────────────────
+#
+# `current_step` is 0-BASED and counts COMPLETED steps, so an operator reading
+# "current_step=2" for the third step has to do the arithmetic themselves —
+# and repeatedly got it wrong. Machine surfaces (fsm-state.yaml, `verify-state`
+# JSON, evidence filenames) stay 0-based and are frozen compatibility
+# surfaces; only the human-facing MESSAGES gain a suffix, appended AFTER the
+# machine values so existing greps on those messages still match.
+#
+# _fsm_human_step <current> <total> — echoes " (human: ...)" or nothing.
+#   current >= total  -> "step T of T complete" (all done; there is no N+1)
+#   total == 0        -> nothing (degenerate plan: machine values only)
+#   non-integer input -> nothing (the caller's own malformed-state error fires)
+_fsm_human_step() {
+  local current="${1:-}" total="${2:-}"
+  [[ "$current" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 0
+  [[ "$total" -gt 0 ]] || return 0
+  if [[ "$current" -ge "$total" ]]; then
+    printf ' (human: step %s of %s complete)' "$total" "$total"
+  else
+    printf ' (human: step %s of %s is next)' "$((current + 1))" "$total"
+  fi
+}
+
 # Print a multi-line error to stderr and exit 1.
 # Use for unrecoverable PRE-FLIGHT / precondition failures with copy-paste fix.
 die() {
@@ -1784,7 +1808,7 @@ check_preconditions() {
       current=$(yaml_field "$state_file" current_step)
       total=$(yaml_field "$state_file" total_steps)
       [[ "$current" -lt "$total" ]] || {
-        echo "PRECONDITION FAIL: current_step=${current} == total_steps=${total}. All steps done — use EXECUTE→GATES." >&2
+        echo "PRECONDITION FAIL: current_step=${current} == total_steps=${total}$(_fsm_human_step "$current" "$total"). All steps done — use EXECUTE→GATES." >&2
         return 1
       }
       ;;
@@ -1796,7 +1820,7 @@ check_preconditions() {
       total=$(yaml_field "$state_file" total_steps)
       [[ "$current" -ge "$total" ]] || {
         _PRECONDITION_FAIL_REASON="steps_incomplete"
-        echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}. Not all steps completed." >&2
+        echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}$(_fsm_human_step "$current" "$total"). Not all steps completed." >&2
         return 1
       }
 
@@ -2928,7 +2952,7 @@ cmd_advance_to_gates() {
 
   # Validate numeric step fields (defensive — malformed fsm-state.yaml caught early).
   if [[ ! "$current_step" =~ ^[0-9]+$ ]] || [[ ! "$total_steps" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: malformed fsm-state.yaml — current_step=$current_step total_steps=$total_steps must be integers" >&2
+    echo "ERROR: malformed fsm-state.yaml — current_step=$current_step total_steps=$total_steps must be integers (current_step is 0-based and counts COMPLETED steps)" >&2
     exit 1
   fi
 
@@ -2938,7 +2962,7 @@ cmd_advance_to_gates() {
     exit 1
   fi
   if (( current_step < total_steps )); then
-    echo "ERROR: advance-to-gates requires current_step ($current_step) >= total_steps ($total_steps). Not all steps completed." >&2
+    echo "ERROR: advance-to-gates requires current_step ($current_step) >= total_steps ($total_steps)$(_fsm_human_step "$current_step" "$total_steps"). Not all steps completed." >&2
     exit 1
   fi
 

@@ -21,6 +21,8 @@ To check current task status:
   bash: cat .aid-o/work/evidence/{epic_id}/{run_id}/fsm-state.yaml
   → shows: state, current_step, total_steps, gate_retries
 
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the executing step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field, `get-state` JSON, and evidence filenames stay 0-based.
+
 To get recent events:
   bash: tail -20 .aid-o/work/evidence/{epic_id}/{run_id}/timeline.jsonl | jq .
 
@@ -66,4 +68,4 @@ If `integrations.yaml → memory.cross_project.enabled: true`:
 - NEVER delete entries from backlog.md
 - Qdrant is optional — all workflows work without it
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-08-04

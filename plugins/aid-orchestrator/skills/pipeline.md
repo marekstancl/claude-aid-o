@@ -1032,7 +1032,8 @@ otherwise silently never run and still report pass — OBS-20260702-05).
 **Present to PM:**
 ```
 ESCALATION — {trigger_reason}
-EPIC: {epic_id} | Progress: {current_step}/{total_steps}
+EPIC: {epic_id} | Progress: {current_step + 1}/{total_steps}
+
 State: {failed_state}
 
 {per-type context block — see below}
@@ -1046,6 +1047,9 @@ Options:
 
 Recommendation: {auto-generated}
 ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 
 In FIRST AID mode, add option D: "Continue manual".
 
@@ -2304,9 +2308,13 @@ aid-fsm.sh get-state <state_file>   # Returns current state
 
 **Manual mode:** do not auto-resume after a crash. Report to PM:
 ```
-Stale state detected: {state} at step {current_step}/{total_steps}.
+Stale state detected: {state} at step {current_step + 1}/{total_steps}.
+
 Resume with: /aid-run --resume {run_id}
 ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 
 **Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume
 from the last mechanically confirmed boundary. Route ambiguous technical recovery to Codex

@@ -287,7 +287,8 @@ FSM initialized: READY
    ```
    ESCALATION: {reason}
    ====================================
-   EPIC: {epic_id} | Step: {current_step}/{total_steps}
+   EPIC: {epic_id} | Step: {current_step + 1}/{total_steps}
+
 
    {per-type context — see pipeline.md §6 per-type context blocks}
 
@@ -300,6 +301,9 @@ FSM initialized: READY
 
    Recommendation: {auto-generated}
    ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps. Render the EXECUTING step as `current_step + 1`, capped at `total_steps`: while executing show `Step {current_step + 1}/{total_steps}`; when `current_step == total_steps` (all steps done, state GATES/DONE) show `Step {total_steps}/{total_steps}`. Never render the bare 0-based value to a human. The machine field itself, `aid-fsm.sh verify-state` JSON, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 3. In auto mode → apply auto-decision rules:
    - S-effort fix patterns → auto-fix
    - M-effort → use default action from permissions
@@ -491,4 +495,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-07-23
+**Last Updated:** 2026-08-04
