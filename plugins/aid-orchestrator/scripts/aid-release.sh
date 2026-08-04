@@ -163,6 +163,45 @@ if [[ -n "$STATE_FILE" && "$FORCE" != "true" ]]; then
 fi
 }
 
+# ─── Version-probe primitive (P073 Step 2) ──────────────────────────────
+#
+# Every "optional" version probe in this script goes through here. Three
+# distinct outcomes, none of them silent:
+#   - a match      -> _PROBE_RESULT holds the FIRST match, return 0
+#   - no match     -> _PROBE_RESULT is empty, return 0 (the caller's own
+#                     downstream logic decides what that means)
+#   - unreadable / a genuine grep error -> an ERROR naming the file, return 1
+#                     (callers `|| exit 1`)
+#
+# Two things this deliberately does NOT do:
+#   - it does not pipe through `head -1`. Closing the pipe early can leave
+#     grep killed by SIGPIPE, and under `set -o pipefail` that non-zero
+#     status is indistinguishable from "no match" — a `|| VAR=""` fallback
+#     would then DISCARD a match that was genuinely found. Measured on this
+#     machine: a ~290 KB CHANGELOG reproduces exit 141 on 20/20 runs.
+#     `grep -m1` keeps the probe a single process with meaningful exit codes.
+#   - it does not blanket-mask the exit status. grep distinguishes 1 (no
+#     match) from >=2 (a real error, including a file that became unreadable
+#     after the `-r` test), and only the former is treated as "no match".
+_PROBE_RESULT=""
+_release_probe_first() {
+  local file="$1" pattern="$2" out rc
+  _PROBE_RESULT=""
+  if [[ ! -r "$file" ]]; then
+    echo "ERROR: cannot read $file while detecting version" >&2
+    return 1
+  fi
+  out="$(grep -m1 -oP "$pattern" "$file")" && rc=0 || rc=$?
+  if [[ "$rc" -ge 2 ]]; then
+    echo "ERROR: failed to read $file while detecting version (grep exit $rc)" >&2
+    return 1
+  fi
+  # `-o` can emit more than one match from the single matched line; the
+  # callers all want the first.
+  _PROBE_RESULT="${out%%$'\n'*}"
+  return 0
+}
+
 # ─── Detect version source (single source of truth) ─────────────────────
 #
 # Two-source detection (IMP-093 fix, v2.19.1):
@@ -185,17 +224,12 @@ CURRENT=""
 
 # Read newest CHANGELOG header (if exists).
 # P073 Step 2: this script runs under `set -euo pipefail`, so a grep that
-# simply finds nothing returns 1 and used to kill the run BEFORE the explicit
-# "Cannot detect version" diagnostic below could ever print. `|| VAR=""`
-# neutralises only the pipeline's exit status; an unreadable file is still
-# reported loudly rather than masked.
+# simply finds nothing returned 1 and used to kill the run BEFORE the explicit
+# "Cannot detect version" diagnostic below could ever print. See
+# _release_probe_first for the three-way outcome this now has.
 if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
-  if [[ -r "$REPO_ROOT/CHANGELOG.md" ]]; then
-    CHANGELOG_HEADER=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1) || CHANGELOG_HEADER=""
-  else
-    echo "ERROR: cannot read $REPO_ROOT/CHANGELOG.md while detecting version" >&2
-    exit 1
-  fi
+  _release_probe_first "$REPO_ROOT/CHANGELOG.md" '## \[\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  CHANGELOG_HEADER="$_PROBE_RESULT"
 fi
 
 # Read actually released version from JSON sources (preferred over CHANGELOG)
@@ -219,12 +253,8 @@ if [[ -z "$RELEASED_VERSION" && -f "$REPO_ROOT/pyproject.toml" ]]; then
   # P073 Step 2: a pyproject.toml with no top-level `version = "X.Y.Z"` line
   # (a workspace root, a poetry file using a different key) must FALL THROUGH
   # to the diagnostic below, not abort the script here.
-  if [[ -r "$REPO_ROOT/pyproject.toml" ]]; then
-    RELEASED_VERSION=$(grep -oP '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/pyproject.toml" | head -1) || RELEASED_VERSION=""
-  else
-    echo "ERROR: cannot read $REPO_ROOT/pyproject.toml while detecting version" >&2
-    exit 1
-  fi
+  _release_probe_first "$REPO_ROOT/pyproject.toml" '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  RELEASED_VERSION="$_PROBE_RESULT"
   [[ -n "$RELEASED_VERSION" ]] && VERSION_SOURCE="pyproject.toml"
 fi
 
@@ -268,15 +298,13 @@ UPDATED=()
 update_changelog() {
   local file="$1"
   [[ -f "$file" ]] || return 0
-  local header=""
   # P073 Step 2: a CHANGELOG with no version ledger at all (a landing page)
-  # must reach the prepend branch below, not abort the release mid-update.
-  if [[ -r "$file" ]]; then
-    header=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$file" | head -1) || header=""
-  else
-    echo "ERROR: cannot read $file while updating the CHANGELOG" >&2
-    exit 1
-  fi
+  # must reach the prepend branch below, not abort the release mid-update —
+  # and a SIGPIPE-truncated probe must never make a populated CHANGELOG look
+  # headerless (which would prepend a duplicate entry).
+  local header
+  _release_probe_first "$file" '## \[\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  header="$_PROBE_RESULT"
   if [[ "$header" == "$NEW_VERSION" ]]; then
     # Pre-written entry for upcoming release — header already correct, no-op.
     echo "Skipped: $file (header already $NEW_VERSION — pre-written entry)"
@@ -438,10 +466,109 @@ echo ""
 echo "Updated ${#UPDATED[@]} files total."
 }
 
+# ─── CHANGELOG entry validation (P073 Step 3) ───────────────────────────
+#
+# `update_changelog` writes the literal placeholder below when it PREPENDS a
+# new section, and until now nothing ever read it back — a release could be
+# committed, tagged and published with "fill in entry content" as its entire
+# user-facing description. This is the checker; the two call sites are
+# `cmd_prepare_plan` (whose commit becomes the frozen, reviewed candidate —
+# the high-value hook) and the legacy `_release_commit_and_tag`.
+#
+# Blocking conditions, all three about the TARGET version's own section:
+#   - the section is absent (including "the file uses a heading format this
+#     script cannot locate" — never a silent pass)
+#   - the section still contains the exact generated placeholder line
+#   - the section has no real bullet at all (e.g. only a `### Changed` heading)
+# A placeholder in an OLDER section is historical debt: reported on stderr,
+# never blocking.
+_RELEASE_CHANGELOG_PLACEHOLDER='- _PM/agent: fill in entry content_'
+
+# _release_changelog_section <file> <version> — prints the target section's
+# body (everything between `## [<version>]` and the next `## [` heading).
+_release_changelog_section() {
+  local file="$1" version="$2"
+  awk -v ver="$version" '
+    index($0, "## [" ver "]") == 1 { inblock = 1; next }
+    inblock && index($0, "## [") == 1 { exit }
+    inblock { print }
+  ' "$file"
+}
+
+# _release_validate_changelog_entry <file> <version> — 0 = entry is real,
+# 1 = blocked (message on stderr naming file, version and the required edit).
+_release_validate_changelog_entry() {
+  local file="$1" version="$2"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -qF "## [${version}]" "$file"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — no '## [${version}]' section was found (this script locates entries by that exact heading form); add the section with a real user-facing description and rerun" >&2
+    return 1
+  fi
+
+  local block
+  block="$(_release_changelog_section "$file" "$version")"
+
+  # `--` is required: the placeholder literal starts with "- ", which grep
+  # would otherwise parse as an option.
+  if grep -qxF -- "$_RELEASE_CHANGELOG_PLACEHOLDER" <<<"$block"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — replace the placeholder with a real user-facing description and rerun" >&2
+    return 1
+  fi
+
+  # At least one bullet that is not a placeholder-shaped italic line. The
+  # class excludes '_' so the generated placeholder can never satisfy this
+  # even if its wording changes, and excludes whitespace so '- ' alone fails.
+  if ! grep -qE -- '^- [^_[:space:]]' <<<"$block"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — the section has no content bullet; add a real user-facing description and rerun" >&2
+    return 1
+  fi
+
+  # Historical placeholders elsewhere in the file: debt, reported once per
+  # offending section, never blocking this release.
+  local stale
+  stale="$(awk -v ver="$version" -v ph="$_RELEASE_CHANGELOG_PLACEHOLDER" '
+    index($0, "## [") == 1 { section = $0; intarget = (index($0, "## [" ver "]") == 1); next }
+    !intarget && $0 == ph && section != "" && !(section in seen) { seen[section] = 1; print section }
+  ' "$file")"
+  if [[ -n "$stale" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      echo "WARNING: historical placeholder in section ${line%% —*} of ${file} — debt, not blocking" >&2
+    done <<<"$stale"
+  fi
+  return 0
+}
+
+# _release_validate_updated_changelogs <version> — runs the check over every
+# CHANGELOG.md in the current UPDATED[] set. Returns 1 if ANY is incomplete.
+_release_validate_updated_changelogs() {
+  local version="$1" f rc=0
+  # Scope: the CHANGELOGs this release actually touched. A CHANGELOG.md that
+  # is not part of the version registry is deliberately NOT validated — that
+  # would be a new blocking gate on repositories the release path never wrote
+  # to, which the plan's loosening directive forbids.
+  for f in "${UPDATED[@]:-}"; do
+    [[ -n "$f" ]] || continue
+    [[ "$(basename "$f")" == "CHANGELOG.md" ]] || continue
+    _release_validate_changelog_entry "$f" "$version" || rc=1
+  done
+  return "$rc"
+}
+
 # ─── Git commit + tag (LEGACY path only) ─────────────────────────────────
 
 _release_commit_and_tag() {
 cd "$REPO_ROOT"
+
+# P073 Step 3: refuse to commit or tag a release whose own CHANGELOG entry is
+# still the generated placeholder. Exits BEFORE the commit, so the edits stay
+# in the worktree for correction.
+if ! _release_validate_updated_changelogs "$NEW_VERSION"; then
+  echo "No release commit and no tag were created — amend the entry and rerun." >&2
+  exit 1
+fi
+
 git add "${UPDATED[@]}" 2>/dev/null || true
 # Also add any files updated in the config loop (may have been missed)
 git add -u
@@ -651,6 +778,15 @@ cmd_prepare_plan() {
   fi
 
   _release_update_files
+
+  # P073 Step 3: this commit becomes the frozen, REVIEWED candidate, so a
+  # placeholder entry here would be reviewed and released as the release's
+  # user-facing description. Exits before any `git add`, leaving the worktree
+  # uncommitted for correction — matching the precondition style below.
+  if ! _release_validate_updated_changelogs "$NEW_VERSION"; then
+    echo "PRECONDITION FAIL: prepare-plan will not freeze a candidate whose CHANGELOG entry is incomplete — nothing was staged or committed." >&2
+    exit 1
+  fi
 
   # ── Explicit staging only (guarantee 2) ─────────────────────────────────
   if [[ ${#UPDATED[@]} -eq 0 ]]; then

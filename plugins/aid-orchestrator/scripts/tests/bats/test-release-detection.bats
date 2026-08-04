@@ -110,8 +110,80 @@ EOF
 
   cd "$TEST_PROJECT_ROOT"
   run bash "$RELEASE" patch
-  [ "$status" -eq 0 ]
+  # P073 Step 3 interaction: the prepended section's only bullet is the
+  # generated placeholder, so the release is refused at the CHANGELOG-entry
+  # check. What THIS test proves is the probe: the prepend branch was reached
+  # and executed instead of the script dying at the header grep.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"replace the placeholder"* ]]
   # The headerless CHANGELOG got a prepended entry rather than aborting.
   run grep -c '## \[2.70.4\]' "$TEST_PROJECT_ROOT/CHANGELOG.md"
   [ "$output" -ge 1 ]
+}
+
+# ─── Codex-review findings on the first cut of this step ───────────────────
+# The adversarial review of Step 2 raised two real defects in the initial
+# `VAR=$(grep ... | head -1) || VAR=""` form:
+#   1. SIGPIPE: `head -1` closing the pipe early can leave grep killed by
+#      SIGPIPE; under `pipefail` that non-zero status is indistinguishable
+#      from "no match", so the fallback DISCARDS a match that was found.
+#      Measured: a ~290 KB CHANGELOG reproduced exit 141 on 20/20 runs.
+#   2. The blanket `|| VAR=""` also masked genuine grep errors, contradicting
+#      the step's own fail-loud promise.
+# Both are fixed by `_release_probe_first` (grep -m1, exit-code triage).
+
+@test "P073 Step 2 (review finding 1): a LARGE populated CHANGELOG is never misread as headerless — no SIGPIPE-induced empty probe" {
+  mkdir -p "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin"
+  cat > "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin/plugin.json" <<'EOF'
+{"version": "2.70.3"}
+EOF
+  # Big enough to reproduce the SIGPIPE race with the old `| head -1` form.
+  {
+    echo "# Changelog"
+    echo ""
+    echo "Format follows Keep a Changelog."
+    echo ""
+    local i
+    for ((i = 2500; i > 0; i--)); do
+      printf '## [9.%d.0] — 2026-01-01\n\n### Changed\n\n- A real historical entry, long enough to grow this file past the pipe buffer.\n\n' "$i"
+    done
+  } > "$TEST_PROJECT_ROOT/CHANGELOG.md"
+  # ~300 KB — the size that reproduced exit 141 on 20/20 measured runs.
+  [ "$(stat -c%s "$TEST_PROJECT_ROOT/CHANGELOG.md")" -gt 250000 ]
+  _init_fixture_repo
+
+  cd "$TEST_PROJECT_ROOT"
+  # Run it repeatedly: the old form failed non-deterministically on timing.
+  local t
+  for t in 1 2 3 4 5; do
+    run bash "$RELEASE" patch --dry-run
+    [ "$status" -eq 0 ]
+    # The header probe must report the real newest header, never empty.
+    [[ "$output" == *"CHANGELOG header is 9.2500.0"* ]]
+  done
+}
+
+@test "P073 Step 2 (review finding 2): an unreadable CHANGELOG dies naming the file instead of silently detecting no version" {
+  mkdir -p "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin"
+  cat > "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin/plugin.json" <<'EOF'
+{"version": "2.70.3"}
+EOF
+  cat > "$TEST_PROJECT_ROOT/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## [2.70.3] — 2026-08-01
+
+### Added
+- Something real.
+EOF
+  _init_fixture_repo
+  chmod a-r "$TEST_PROJECT_ROOT/CHANGELOG.md"
+
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch --dry-run
+  local rc="$status"
+  chmod u+r "$TEST_PROJECT_ROOT/CHANGELOG.md"
+  [ "$rc" -ne 0 ]
+  [[ "$output" == *"cannot read"* ]]
+  [[ "$output" == *"CHANGELOG.md"* ]]
 }

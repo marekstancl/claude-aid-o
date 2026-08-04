@@ -63,7 +63,13 @@ EOF
   seed_release_fixture "2.19.0" "2.20.0"
   cd "$TEST_PROJECT_ROOT"
   run bash "$RELEASE" patch
-  [ "$status" -eq 0 ]
+  # P073 Step 3 interaction: the prepend path writes the generated placeholder
+  # as the new section's only bullet, and the release is now REFUSED on exactly
+  # that (an unfilled entry must never reach a commit or a tag). The prepend
+  # itself — what this test is about — has already happened in the worktree,
+  # so every structural assertion below is unchanged.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"replace the placeholder"* ]]
   # New entry [2.19.1] prepended; pre-written [2.20.0] preserved below.
   grep -q '^## \[2.19.1\] — ' "$TEST_PROJECT_ROOT/CHANGELOG.md"
   grep -q '^## \[2.20.0\] — ' "$TEST_PROJECT_ROOT/CHANGELOG.md"
