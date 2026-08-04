@@ -43,18 +43,43 @@ _write_catalog() {
       {run_unit_id:"bats:a", runner:"bats", source_paths:["a.bats"], production_surfaces:["a.bats"],
        test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
        command:{type:"argv",argv:["bash","-c","echo A; exit 0"]}, runtime:{fingerprint:"sha256:aaaaaaaaaaaa"},
-       parallel:{status:$sa, exclusive_resources:$ea, max_workers:null, internal_parallelism:false},
+       parallel:{status:$sa, exclusive_resources:$ea, max_workers:null, internal_parallelism:false,
+                 provenance:{evidence_ref:"fixture-pilot", verified_at:"2026-08-02T00:00:00Z",
+                             method:"resource_map_plus_pilot", source_sha256:"PH_A", resource_digest:"PH_A"}},
        isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
        recommendation:"keep", test_cases:[]},
       {run_unit_id:"bats:b", runner:"bats", source_paths:["b.bats"], production_surfaces:["b.bats"],
        test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
        command:{type:"argv",argv:["bash","-c","echo B; exit 0"]}, runtime:{fingerprint:"sha256:bbbbbbbbbbbb"},
-       parallel:{status:$sb, exclusive_resources:$eb, max_workers:null, internal_parallelism:false},
+       parallel:{status:$sb, exclusive_resources:$eb, max_workers:null, internal_parallelism:false,
+                 provenance:{evidence_ref:"fixture-pilot", verified_at:"2026-08-02T00:00:00Z",
+                             method:"resource_map_plus_pilot", source_sha256:"PH_B", resource_digest:"PH_B"}},
        isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
        recommendation:"keep", test_cases:[]}
     ],
     source_pattern_mappings: [], mapping_approval: {status:"proposed"}
   }' | yq -P '.' > "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml"
+
+  # The declared source files have to exist for provenance to bind to anything.
+  printf '%s "a" { true; }\n' '@'"test" > "$TEST_PROJECT_ROOT/a.bats"
+  printf '%s "b" { true; }\n' '@'"test" > "$TEST_PROJECT_ROOT/b.bats"
+
+  # Bind each non-unknown status to its real source content, the way a migrated
+  # or piloted entry is bound. An UNBOUND `safe` resolves to `unknown` — which
+  # is correct, and would make every batching fixture below test nothing.
+  # shellcheck disable=SC1090
+  source "${BATS_TEST_DIRNAME}/../../lib/aid-test-catalog-provenance.sh"
+  local _cat="$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml"
+  local _u _h _d
+  for _u in "bats:a" "bats:b"; do
+    [[ "$(yq -r ".run_units[] | select(.run_unit_id == \"$_u\") | .parallel.status" "$_cat")" == "unknown" ]] && continue
+    _h="$(aid_test_catalog_provenance_hash "$_u" "$_cat" "$TEST_PROJECT_ROOT" 2>/dev/null)"
+    _d="$(aid_test_catalog_provenance_resource_digest "$_u" "$_cat" "$TEST_PROJECT_ROOT" 2>/dev/null)"
+    [[ "$_h" =~ ^[0-9a-f]{64}$ ]] || continue
+    B_ID="$_u" B_H="$_h" B_D="$_d" yq -i '
+      (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.source_sha256) = strenv(B_H)
+      | (.run_units[] | select(.run_unit_id == strenv(B_ID)) | .parallel.provenance.resource_digest) = strenv(B_D)' "$_cat"
+  done
 }
 
 _write_units() {

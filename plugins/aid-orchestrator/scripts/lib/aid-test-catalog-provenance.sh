@@ -239,20 +239,33 @@ aid_test_catalog_provenance_refresh() {
 # with that overlay applied ON TOP but never ABOVE it.
 #
 # WHY THE PRIORITY IS THAT WAY ROUND
-#   The overlay records a PM-approved promotion, fingerprinted against the
-#   catalog at the time it was approved. Provenance records whether the unit's
-#   content still matches what was verified. If provenance says `unknown` — the
-#   sources moved — then an overlay entry is vouching for content it never saw,
-#   and letting it promote anyway would reintroduce exactly the second
-#   authority this work removed. So provenance is a floor: the overlay can
-#   promote a unit provenance still trusts, and can never rescue one it does
-#   not.
+#   `unknown` covers two different situations, and they must not be treated
+#   alike:
+#
+#     NEVER VERIFIED — the catalog records `unknown` because nobody has
+#       assessed this unit. An overlay entry is exactly the PM-approved
+#       promotion that is meant to resolve that, and it carries its own
+#       freshness check (`catalog_fingerprint_at_promotion`). It may promote.
+#
+#     REVOKED — the catalog records something stronger, but the content has
+#       moved since it was verified. Here an overlay entry is vouching for
+#       content it never saw, and letting it promote would reintroduce the
+#       second authority this work removed. It may NOT promote.
+#
+#   So provenance is a floor for what it has actually assessed: an overlay can
+#   promote a unit provenance never judged, and can never rescue one it
+#   revoked.
 #
 # Consumers must call THIS rather than reading `.parallel.status`, because a
 # raw read skips both rules and the two consumers that did it disagreed with
 # the lane runner about the same unit.
+# A fourth argument restricts resolution to a named subset (newline-separated
+# ids in a file). Units outside it report `unknown` rather than their recorded
+# value, because this call did not verify them. That matters for cost: a
+# closure hash per unit across a whole pool is minutes, and a check that
+# expensive on a hot path is a check that gets skipped.
 aid_test_catalog_effective_status_map() {
-  local catalog="$1" project_root="$2" overlay_json="${3:-}"
+  local catalog="$1" project_root="$2" overlay_json="${3:-}" only_file="${4:-}"
   local catalog_json
   catalog_json="$(yq -o=json '.' "$catalog" 2>/dev/null)" || { echo '{}'; return 1; }
 
@@ -260,18 +273,24 @@ aid_test_catalog_effective_status_map() {
   # units claiming something stronger are resolved.
   local claiming
   claiming="$(jq -r '.run_units[] | select((.parallel.status // "unknown") != "unknown") | .run_unit_id' <<<"$catalog_json")"
+  if [[ -n "$only_file" && -f "$only_file" ]]; then
+    claiming="$(grep -xF -f "$only_file" <<<"$claiming" || true)"
+  fi
 
-  local resolved='{}'
+  local resolved='{}' revoked='[]'
   if [[ -n "$claiming" ]]; then
     local uid eff
     while IFS= read -r uid; do
       [[ -z "$uid" ]] && continue
       eff="$(aid_test_catalog_provenance_effective_status "$uid" "$catalog" "$project_root" 2>/dev/null || echo unknown)"
+      # A unit that CLAIMED something stronger and resolved to `unknown` was
+      # revoked; that fact is what the overlay rule below turns on.
       resolved="$(jq -c --arg u "$uid" --arg e "$eff" '. + {($u): $e}' <<<"$resolved")"
+      [[ "$eff" == "unknown" ]] && revoked="$(jq -c --arg u "$uid" '. + [$u]' <<<"$revoked")"
     done <<< "$claiming"
   fi
 
-  jq -c --argjson resolved "$resolved" --argjson ov "${overlay_json:-null}" '
+  jq -c --argjson resolved "$resolved" --argjson revoked "$revoked" --argjson ov "${overlay_json:-null}" '
     [ .run_units[]
       | .run_unit_id as $uid
       | ($resolved[$uid] // "unknown") as $prov
@@ -279,9 +298,10 @@ aid_test_catalog_effective_status_map() {
           else ( ($ov.overlay // [] | map(select(.run_unit_id == $uid)) | .[0]) as $entry
                  | if $entry == null then $prov
                    elif $entry.catalog_fingerprint_at_promotion != (.runtime.fingerprint // "") then $prov
-                   # Provenance is a floor. An overlay cannot vouch for content
-                   # it never saw.
-                   elif $prov == "unknown" then "unknown"
+                   # REVOKED, not merely unassessed: the unit claimed a status
+                   # and its content has since moved. An overlay cannot vouch
+                   # for content it never saw.
+                   elif ($revoked | index($uid)) then "unknown"
                    else ($entry.promoted_status // $prov)
                    end )
           end ) as $eff
