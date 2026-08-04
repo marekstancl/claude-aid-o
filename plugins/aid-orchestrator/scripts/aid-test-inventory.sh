@@ -333,8 +333,13 @@ if aid_test_catalog_selector_applies "$project_root"; then
     || { echo "aid-test-inventory.sh: the selector snapshot this project's catalog approval requires could not be produced — refusing to propose a catalog whose routing map is a guess" >&2; exit 1; }
 fi
 
+# Through a file for the same reason units_wrap is: this scales with the
+# selector's case arms, and a single argv argument is capped at 128 KB.
+mappings_file="$(mktemp)"
+printf '%s\n' "$mappings_json" > "$mappings_file"
+
 catalog_json="$(jq -n \
-  --argjson mappings "$mappings_json" \
+  --slurpfile mappings "$mappings_file" \
   --arg gen "$generated_at" \
   --slurpfile units_wrap "$units_file" \
   '{
@@ -342,9 +347,10 @@ catalog_json="$(jq -n \
     generated_at: $gen,
     status: "proposed",
     run_units: $units_wrap[0],
-    source_pattern_mappings: $mappings,
+    source_pattern_mappings: $mappings[0],
     mapping_approval: {status: "proposed"}
   }')"
+rm -f "$mappings_file"
 catalog_yaml="$(printf '%s' "$catalog_json" | yq -o=yaml -P '.')"
 
 # ─── Validate BEFORE publish — never write an invalid artifact to its real

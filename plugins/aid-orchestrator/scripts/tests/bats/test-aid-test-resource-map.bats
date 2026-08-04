@@ -464,3 +464,61 @@ EOF
   local doc; doc="$(_map "bats:tests/cache")"
   [ "$(jq -r '[.resources[] | select(.namespace == "shared")] | length' <<<"$doc")" -ge 1 ]
 }
+
+# ─── argv is not a transport for the document ───────────────────────────────
+
+@test "the assembled document never travels through argv" {
+  # `--argjson` puts the whole JSON in ONE command-line argument, and Linux
+  # caps a single argument at 128 KB (MAX_ARG_STRLEN) regardless of ARG_MAX.
+  # This repository's two largest test files produce maps above that, so the
+  # script exited "Argument list too long" and wrote no map at all — found by a
+  # real audit, not by any test here, because every fixture was small.
+  #
+  # The mechanism is what is pinned: the big values must be read from files.
+  local doc_block
+  doc_block="$(sed -n '/^doc="\$(jq -nc/,/capped_at_unknown/p' "$MAP")"
+  [ -n "$doc_block" ]
+  # No --argjson for the three unbounded values.
+  ! grep -qE -- '--argjson (sources|res|unres) ' <<<"$doc_block"
+  # And they are slurped from files instead.
+  grep -q -- '--slurpfile sources' <<<"$doc_block"
+  grep -q -- '--slurpfile res'     <<<"$doc_block"
+  grep -q -- '--slurpfile unres'   <<<"$doc_block"
+}
+
+@test "a document larger than a single argv argument is still written" {
+  # The functional half: 128 KB+ of resources really does come out the other
+  # end. Built rather than borrowed from the repo so the case does not depend
+  # on this repository staying large.
+  local proj="$TEST_TMPDIR/big"
+  mkdir -p "$proj/tests"
+  {
+    printf '#!/usr/bin/env bats\n'
+    local i
+    for i in $(seq 1 2500); do
+      printf '@test "case %s" { flock /var/lock/aid-big-%s.lock true; }\n' "$i" "$i"
+    done
+  } > "$proj/tests/test-big.bats"
+
+  cat > "$proj/catalog.yaml" <<'YAML'
+schema_version: "1.0.0"
+generated_at: "2026-08-04T00:00:00Z"
+status: approved
+run_units:
+  - run_unit_id: "bats:tests/test-big"
+    runner: bats
+    source_paths: ["tests/test-big.bats"]
+    command: {type: argv, argv: ["bats", "tests/test-big.bats"]}
+    parallel: {status: unknown, exclusive_resources: [], max_workers: null, internal_parallelism: false}
+YAML
+
+  run bash "$MAP" --run-unit-id "bats:tests/test-big" --catalog "$proj/catalog.yaml" \
+    --project-root "$proj" --output "$proj/map.json"
+  [ "$status" -eq 0 ]
+  [ -f "$proj/map.json" ]
+  # Above the single-argument ceiling that used to kill this.
+  local size; size="$(wc -c < "$proj/map.json")"
+  echo "map size: ${size}B" >&3
+  [ "$size" -gt 131072 ]
+  [ "$(jq -r '.schema_version' "$proj/map.json")" = "aid-test-resource-map-v1" ]
+}

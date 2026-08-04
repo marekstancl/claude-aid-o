@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.2] — 2026-08-04
+
+> A second real audit run got further and hit the next wall: the resource map
+> crashed on this repository's two largest test files. Not a defect of the
+> audited project — a defect of the plugin doing the auditing.
+
+### Fixed
+- **`Argument list too long` killed the resource map on large files** — the assembled document was passed to `jq` with `--argjson`, which puts the whole JSON in ONE command-line argument, and Linux caps a single argument at 128 KB (`MAX_ARG_STRLEN`) no matter how large `ARG_MAX` is. This repository's two biggest test files produce maps above that, so the script died and wrote nothing. The three unbounded values are read from files via `--slurpfile` now, and the same treatment is applied to the catalog's `source_pattern_mappings`, which scales with the selector rather than with anything bounded.
+
 ## [2.70.1] — 2026-08-04
 
 > The first real `--mode full` audit of this repository reached a terminal state

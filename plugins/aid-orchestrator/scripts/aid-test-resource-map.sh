@@ -840,12 +840,24 @@ fi
 resources_json="$(jq -c 'unique_by([.kind, .namespace, .detail, .location])' <<<"$resources_json")"
 read_json="$(jq -Rsc 'split("\n") | map(select(length > 0))' < "$work/files.txt")"
 
+# The three big values go through FILES, not argv. `--argjson` puts the whole
+# JSON string in one command-line argument, and Linux caps a single argument at
+# 128 KB (MAX_ARG_STRLEN) no matter how large ARG_MAX is — so the two biggest
+# test files in this repository produced "Argument list too long" and no
+# resource map at all. A real audit hit it. `--slurpfile` reads the value from
+# a file and has no such ceiling; `$name[0]` is the value.
+printf '%s\n' "$read_json"        > "$work/doc-sources.json"
+printf '%s\n' "$resources_json"   > "$work/doc-resources.json"
+printf '%s\n' "$unresolved_json"  > "$work/doc-unresolved.json"
+
 doc="$(jq -nc \
-  --arg id "$run_unit_id" --argjson sources "$read_json" --argjson cap "$depth_cap" \
-  --argjson res "$resources_json" --argjson unres "$unresolved_json" --argjson capped "$capped" \
+  --arg id "$run_unit_id" --argjson cap "$depth_cap" --argjson capped "$capped" \
+  --slurpfile sources "$work/doc-sources.json" \
+  --slurpfile res "$work/doc-resources.json" \
+  --slurpfile unres "$work/doc-unresolved.json" \
   '{schema_version:"aid-test-resource-map-v1", run_unit_id:$id,
-    source_paths:$sources, follow_depth_cap:$cap,
-    resources:$res, unresolved_sources:$unres, capped_at_unknown:$capped}')"
+    source_paths:$sources[0], follow_depth_cap:$cap,
+    resources:$res[0], unresolved_sources:$unres[0], capped_at_unknown:$capped}')"
 
 if [[ -n "$out_path" ]]; then
   mkdir -p "$(dirname "$out_path")"
