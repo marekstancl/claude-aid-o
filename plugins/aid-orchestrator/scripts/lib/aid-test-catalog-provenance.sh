@@ -60,6 +60,52 @@ source "${_TCP_LIB_DIR}/aid-test-audit-config.sh"
 # Echoes the digest, `missing_source` when a path is gone, or
 # `unresolved_closure` when a dependency could not be read — the latter being a
 # closure this cannot claim to have hashed.
+# aid_test_catalog_provenance_hash_from_closure <unit_id> <catalog> <project_root> <closure_file>
+#
+# The same digest, over a closure someone else already computed. The batch
+# resolver builds every unit's closure in ONE pass; without this, each unit
+# would still shell out to the map builder and the batch would save nothing.
+# <unit_id> <declared_paths_newline_separated> <project_root> <closure_file>
+#
+# Takes the declared paths rather than re-reading the catalog: parsing YAML
+# once per unit was 65 `yq` invocations on the hot path, which is most of what
+# batching was supposed to remove.
+aid_test_catalog_provenance_hash_from_closure() {
+  local unit_id="$1" declared="$2" project_root="$3" closure_file="$4"
+  # Declared paths in CATALOG ORDER first, then the rest of the closure sorted
+  # — byte-identical ordering to the non-batch function, or a migrated hash
+  # computed by one would never match a check made by the other.
+  local -a paths=()
+  mapfile -t paths < <(printf '%s\n' "$declared" | grep -v '^$' || true)
+  [[ "${#paths[@]}" -gt 0 && -n "${paths[0]}" ]] || { echo "missing_source"; return 0; }
+
+  local line extra known seen
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    case "$line" in
+      unresolved:*) echo "unresolved_closure"; return 0 ;;
+    esac
+  done < "$closure_file"
+  while IFS= read -r extra; do
+    [[ -z "$extra" ]] && continue
+    seen=0
+    for known in "${paths[@]}"; do [[ "$known" == "$extra" ]] && seen=1; done
+    [[ "$seen" -eq 0 ]] && paths+=("$extra")
+  done < <(grep -v '^unresolved:' "$closure_file" | sort)
+
+  local tmp; tmp="$(mktemp)"
+  local p abs
+  for p in "${paths[@]}"; do
+    abs="$p"; [[ "$abs" = /* ]] || abs="${project_root%/}/${p}"
+    if [[ ! -f "$abs" ]]; then rm -f "$tmp"; echo "missing_source"; return 0; fi
+    printf 'path:%s\nbytes:%s\n' "$p" "$(wc -c < "$abs" | tr -d ' ')" >> "$tmp"
+    cat "$abs" >> "$tmp"
+    printf '\n--aid-source-boundary--\n' >> "$tmp"
+  done
+  sha256sum "$tmp" | cut -d' ' -f1
+  rm -f "$tmp"
+}
+
 aid_test_catalog_provenance_hash() {
   local unit_id="$1" catalog="$2" project_root="$3"
   local unit paths p abs
@@ -279,15 +325,94 @@ aid_test_catalog_effective_status_map() {
 
   local resolved='{}' revoked='[]'
   if [[ -n "$claiming" ]]; then
-    local uid eff
+    # ── ONE pass, one shared budget ──────────────────────────────────────
+    #
+    # The first cut re-parsed the catalog and shelled out to the map builder
+    # once PER UNIT: 101 seconds to partition this repository's own pool, on a
+    # path that runs before every gate. A check that expensive is a check
+    # somebody disables. The plan asked for a batch pass and a shared budget,
+    # and this is it.
+    local budget_ms="${_TCP_BATCH_BUDGET_MS:-}"
+    [[ -n "$budget_ms" ]] || budget_ms="$(test_audit_decision_key provenance_recheck_budget_ms "$project_root" 2>/dev/null || echo 5000)"
+    [[ "$budget_ms" =~ ^[0-9]+$ ]] || budget_ms=5000
+
+    local work; work="$(mktemp -d)"
+    printf '%s\n' "$claiming" > "$work/units.txt"
+    : > "$work/resolved.tsv"
+
+    # Closures for EVERY claiming unit, in a single process.
+    bash "${_TCP_LIB_DIR}/../aid-test-resource-map.sh" --files-only \
+      --units-from "$work/units.txt" --catalog "$catalog" --project-root "$project_root" \
+      > "$work/closures.tsv" 2>/dev/null || : > "$work/closures.tsv"
+
+    # The budget governs the DIGEST RECHECKS — the expensive part, and the one
+    # the plan names. Hashing is cheap and must happen for every claiming unit:
+    # applying the budget to it too meant the first few units consumed it and
+    # every later one fell to `unknown`, which is fail-closed but useless.
+    local deadline_ms=$(( $(date +%s%N) / 1000000 + budget_ms ))
+    local uid eff recorded_hash current_hash recorded_digest current_digest declared
+
+    # One pass over the catalog for every field this loop needs.
+    jq -r '.run_units[]
+           | .run_unit_id + "\t" + (.parallel.status // "unknown")
+             + "\t" + (.parallel.provenance.source_sha256 // "null")
+             + "\t" + (.parallel.provenance.resource_digest // "null")
+             + "\t" + ((.source_paths // []) | join(","))' <<<"$catalog_json" > "$work/fields.tsv"
+
     while IFS= read -r uid; do
       [[ -z "$uid" ]] && continue
-      eff="$(aid_test_catalog_provenance_effective_status "$uid" "$catalog" "$project_root" 2>/dev/null || echo unknown)"
-      # A unit that CLAIMED something stronger and resolved to `unknown` was
-      # revoked; that fact is what the overlay rule below turns on.
-      resolved="$(jq -c --arg u "$uid" --arg e "$eff" '. + {($u): $e}' <<<"$resolved")"
-      [[ "$eff" == "unknown" ]] && revoked="$(jq -c --arg u "$uid" '. + [$u]' <<<"$revoked")"
+
+      IFS=$'\t' read -r _ eff recorded_hash recorded_digest declared \
+        < <(awk -F'\t' -v u="$uid" '$1 == u { print; exit }' "$work/fields.tsv")
+      declared="${declared//,/$'\n'}"
+
+      awk -F'\t' -v u="$uid" '$1 == u { print $2 }' "$work/closures.tsv" > "$work/one.txt"
+      if [[ -z "$recorded_hash" || "$recorded_hash" == "null" ]]; then
+        # No provenance is not evidence.
+        printf '%s\tunknown\trevoked\n' "$uid" >> "$work/resolved.tsv"
+        continue
+      fi
+
+      current_hash="$(aid_test_catalog_provenance_hash_from_closure "$uid" "$declared" "$project_root" "$work/one.txt")"
+      if [[ "$current_hash" == "$recorded_hash" ]]; then
+        printf '%s\t%s\tkept\n' "$uid" "$eff" >> "$work/resolved.tsv"
+        continue
+      fi
+
+      # The bytes moved. Only NOW is the expensive digest worth computing, and
+      # only for this unit — which is why the common case costs one process for
+      # the whole pool rather than one per member.
+      if [[ -z "$recorded_digest" || "$recorded_digest" == "null" ]]; then
+        printf '%s\tunknown\trevoked\n' "$uid" >> "$work/resolved.tsv"
+        continue
+      fi
+
+      local remaining_ms=$(( deadline_ms - $(date +%s%N) / 1000000 ))
+      if [[ "$remaining_ms" -le 0 ]]; then
+        printf '%s\tunknown\trevoked\n' "$uid" >> "$work/resolved.tsv"
+        continue
+      fi
+      current_digest="$(timeout "$(printf '%d.%03d' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))")s" \
+        bash -c "source '${_TCP_LIB_DIR}/aid-test-catalog-provenance.sh'; \
+                 aid_test_catalog_provenance_resource_digest '$uid' '$catalog' '$project_root'" 2>/dev/null || echo timeout)"
+
+      if [[ "$current_digest" == "$recorded_digest" ]]; then
+        printf '%s\t%s\tkept\n' "$uid" "$eff" >> "$work/resolved.tsv"
+      else
+        printf '%s\tunknown\trevoked\n' "$uid" >> "$work/resolved.tsv"
+      fi
     done <<< "$claiming"
+
+    # One conversion, not one per unit.
+    if [[ -s "$work/resolved.tsv" ]]; then
+      resolved="$(awk -F'\t' '{printf "%s\n%s\n", $1, $2}' "$work/resolved.tsv" \
+                   | jq -Rc -s 'split("\n") | map(select(length > 0))
+                                | . as $f | [range(0; length; 2) | {($f[.]): $f[.+1]}] | add // {}')"
+      revoked="$(awk -F'\t' '$3 == "revoked" { print $1 }' "$work/resolved.tsv" \
+                   | jq -Rc -s 'split("\n") | map(select(length > 0))')"
+    fi
+
+    rm -rf "$work"
   fi
 
   jq -c --argjson resolved "$resolved" --argjson revoked "$revoked" --argjson ov "${overlay_json:-null}" '

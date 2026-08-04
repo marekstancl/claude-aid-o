@@ -284,12 +284,43 @@ _collect_file() {
 # Running the full collector for them cost ~4.7s per unit, which is five
 # minutes across this repository's pool and therefore a check nobody would keep
 # on a hot path. This walks the `source`/`.`/`load` directives directly.
+# Direct dependencies per file, cached across units — but ONLY for files whose
+# every directive is context-free (no `$`). A directive like
+# `source "$LIB_DIR/x.sh"` resolves through the CALLING unit's variables, so
+# the first unit's answer is not the second unit's answer, and caching it
+# dropped 30 of 193 closure entries in this repository — a silent loss of
+# coverage, which is the one thing a provenance closure may never do.
+#
+# The restriction still pays: in batch mode the shared test helper and the
+# production libraries are in nearly every closure.
+declare -A _closure_direct=()
+declare -A _closure_seen=()
+
 _closure_fast() {
   local file="$1" depth="$2"
   local rel; rel="$(_rel "$file")"
-  if grep -qxF "$rel" "$work/files.txt" 2>/dev/null; then return 0; fi
+  if [[ -n "${_closure_seen[$rel]:-}" ]]; then return 0; fi
+  _closure_seen["$rel"]=1
   printf '%s\n' "$rel" >> "$work/files.txt"
   [[ -r "$file" ]] || { printf 'unresolved:%s\n' "$rel" >> "$work/unresolved.jsonl"; return 0; }
+
+  # Already analysed under another unit: replay its direct dependencies rather
+  # than re-reading the file.
+  if [[ -n "${_closure_direct[$rel]+set}" ]]; then
+    local dep
+    for dep in ${_closure_direct[$rel]}; do
+      case "$dep" in
+        unresolved:*) printf '%s\n' "$dep" >> "$work/unresolved.jsonl" ;;
+        *) if [[ "$depth" -lt "$depth_cap" ]]; then
+             _closure_fast "${project_canon}/${dep}" $(( depth + 1 ))
+           else
+             printf 'unresolved:%s\n' "$dep" >> "$work/unresolved.jsonl"
+           fi ;;
+      esac
+    done
+    return 0
+  fi
+  local _direct="" _ctx_free=1
 
   local dir; dir="$(dirname "$file")"
 
@@ -297,6 +328,11 @@ _closure_fast() {
   # library that names its own directory and then sources its siblings through
   # that variable is the ordinary shape here, and stopping at the unit's own
   # file left every one of those closures incomplete.
+  #
+  # Pre-filtered with grep rather than read line by line. A bash loop over
+  # every line of every file in the closure — production libraries included —
+  # was 62 of the 65 seconds a full pool resolution cost, for the sake of the
+  # handful of lines that are actually assignments.
   local _l _n _v _x
   while IFS= read -r _l; do
     if [[ "$_l" =~ ^[[:space:]]*(local[[:space:]]+|export[[:space:]]+|readonly[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$ ]]; then
@@ -308,7 +344,7 @@ _closure_fast() {
         [[ -n "$_x" ]] && path_vars["$_n"]="$_x"
       fi
     fi
-  done < "$file"
+  done < <(grep -E '^[[:space:]]*(local |export |readonly )?[A-Za-z_][A-Za-z0-9_]*=.*[/$]' "$file" 2>/dev/null || true)
 
   local directive target expanded
   while IFS= read -r directive; do
@@ -318,6 +354,8 @@ _closure_fast() {
     case "$directive" in
       /*) target="$directive" ;;
       *\$*)
+        # Resolved through this unit's variables: the answer is not reusable.
+        _ctx_free=0
         expanded="$(_expand_path_expr "$directive" "$dir" || true)"
         if [[ -z "$expanded" ]]; then
           printf 'unresolved:%s\n' "$directive" >> "$work/unresolved.jsonl"
@@ -343,6 +381,8 @@ _closure_fast() {
     # parses as a `.` source directive with the target "as", and every file
     # containing one reported a phantom unresolved dependency.
   done < <(sed -n 's/#.*$//; s/^[[:space:]]*\(source\|\.\|load\)[[:space:]]\+\(["'"'"']\?[^[:space:]]*[\/.$"'"'"'][^[:space:]]*\).*$/\2/p' "$file" 2>/dev/null)
+  # Only cache a file whose directives were all context-free.
+  [[ "$_ctx_free" -eq 1 ]] && _closure_direct["$rel"]="$_direct"
   return 0
 }
 
@@ -356,6 +396,7 @@ if [[ -n "$units_from" && "$files_only" -eq 1 ]]; then
   while IFS= read -r _uid; do
     [[ -z "$_uid" ]] && continue
     : > "$work/files.txt"; : > "$work/unresolved.jsonl"
+    _closure_seen=()
     path_vars=()
     mapfile -t _srcs < <(jq -r --arg id "$_uid" \
       '.run_units[] | select(.run_unit_id == $id) | (.source_paths // [])[]' <<<"$catalog_all")

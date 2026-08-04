@@ -76,7 +76,7 @@ jq -n --arg path "${AGENTS_DIR}/1-shard_portfolio-shard-0.json" '{
   entries:[{wave:1, focus:"shard_portfolio", shard_id:"shard-0", artifact_path:$path, producer_agent_dispatch_id:"e2e-1"}]
 }' > "${WORK_DIR}/manifest.json"
 
-echo "TEST: the real production entrypoint (finalize.sh) produces correctly-shaped 5-part chat text for this fixture"
+echo "TEST: the real production entrypoint (finalize.sh) produces the six-part decision-first chat text"
 # P072: --mode is required on every finalize invocation. These fixtures
 # produce findings but no decision artifact, which under the new contract is
 # exactly a measure-mode audit, so they state that mode explicitly.
@@ -84,14 +84,39 @@ chat_text="$(bash "$FINALIZE" --audit-id e2e-vitest-only --wave-artifacts-dir "$
   --dispatch-manifest "${WORK_DIR}/manifest.json" --output-dir "$FIXTURE_OUT" --mode measure)"
 finalize_status=$?
 if [[ "$finalize_status" -eq 0 ]]; then
+  # P072 Step 19 replaced the five-part findings handoff with six
+  # decision-first sections plus a technical appendix. The ORDER is the
+  # contract — a reader must meet the decision before the evidence — so this
+  # asserts position, not merely presence.
   ok=1
-  for marker in '**Verdict:**' '**Reasons:**' '**Changed:**' '**Next action:**' '**Residual risk'; do
-    [[ "$chat_text" == *"$marker"* ]] || ok=0
+  missing=""
+  prev=0
+  for marker in \
+    '## 1. What to do now' \
+    '## 2. What to fix, merge, split or remove' \
+    '## 3. What can run in parallel' \
+    '## 4. What must remain serial' \
+    '## 5. Test time now, and after the proposed work' \
+    '## 6. What is not proved yet' \
+    '### Technical evidence'; do
+    if [[ "$chat_text" != *"$marker"* ]]; then
+      ok=0; missing="${missing}${missing:+, }${marker}"
+      continue
+    fi
+    pos="$(printf '%s' "$chat_text" | grep -n -F -m1 "$marker" | cut -d: -f1)"
+    if [[ "${pos:-0}" -le "$prev" ]]; then
+      ok=0; missing="${missing}${missing:+, }${marker} (out of order)"
+    fi
+    prev="${pos:-$prev}"
+  done
+  # The evidence the appendix still carries, now underneath the decision.
+  for marker in '**Verdict:**' '**Changed:**'; do
+    [[ "$chat_text" == *"$marker"* ]] || { ok=0; missing="${missing}${missing:+, }${marker}"; }
   done
   if [[ "$ok" -eq 1 ]]; then
-    pass_msg "finalize.sh's chat text contains all 5 mandatory parts"
+    pass_msg "finalize.sh renders all six sections plus the evidence appendix, in order"
   else
-    fail_msg "finalize.sh's chat text is missing one or more of the 5 mandatory parts: ${chat_text}"
+    fail_msg "finalize.sh's chat text is missing or misordering: ${missing}"
   fi
 else
   fail_msg "finalize.sh exited ${finalize_status} for the fixture's own wave artifact"

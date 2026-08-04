@@ -243,15 +243,20 @@ if [[ -z "$CATALOG_SNAPSHOT" ]]; then
   exit 2
 fi
 
+# ONE batch resolution for the whole catalog, not one call per unit. The
+# per-unit form re-parsed the catalog and shelled out to the map builder 65
+# times, costing ~100s on a path that runs before every gate — and a check that
+# expensive is a check somebody disables.
 declare -A ALLOWED_SET=()
 declare -A ALLOWED_HASH=()
+
+EFF_MAP="$(aid_test_catalog_effective_status_map "$CATALOG_FROZEN" "$REPO_ROOT" 2>/dev/null)" || EFF_MAP='{}'
+[[ -n "$EFF_MAP" ]] || EFF_MAP='{}'
+
 while IFS=$'\t' read -r unit_id ufile; do
-  [[ -z "$unit_id" ]] && continue
-  # The FROZEN snapshot, not the live path: the verdict and the path it is
-  # about must come from the same bytes.
-  eff="$(aid_test_catalog_provenance_effective_status "$unit_id" "$CATALOG_FROZEN" "$REPO_ROOT" 2>/dev/null || echo unknown)"
+  [[ -z "$unit_id" || -z "$ufile" ]] && continue
+  eff="$(jq -r --arg u "$unit_id" '.[$u] // "unknown"' <<<"$EFF_MAP")"
   [[ "$eff" == "safe" ]] || continue
-  [[ -n "$ufile" ]] || continue
   ALLOWED_SET["$ufile"]=1
   # Remembered so the file can be re-checked immediately before dispatch.
   ALLOWED_HASH["$ufile"]="$(sha256sum "$REPO_ROOT/$ufile" 2>/dev/null | cut -d' ' -f1)"
