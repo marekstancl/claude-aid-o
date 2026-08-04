@@ -304,8 +304,13 @@ _pfsm_check_clean_worktree() {
 #      the force itself fails and state is left unchanged — a silent bypass is
 #      worse than a blocked command.
 #
-# WHAT A FORCE RECEIPT IS NOT: it is a record of what happened, never a
-# consumable authorization. The consumable-grant concept exists only for the
+# WHAT A FORCE RECEIPT RECORDS — and does not. It records that named
+# preconditions WERE BYPASSED (`records: "precondition_bypass"`, with
+# `status: "blocked"` and `verdict.ready: false`); it does NOT assert that the
+# command went on to complete. A command that mints a receipt and then fails a
+# later, unrouted precondition leaves a truthful record of the bypass and no
+# claim of success (adversarial-review finding: the receipt must not be read
+# as "this operation happened"). It is never a consumable authorization. The consumable-grant concept exists only for the
 # C0/C3 PM-override artifacts, which are claimed atomically and single-use.
 #
 # FORCEABLE vs HARD: every precondition a public command runs is classified in
@@ -502,6 +507,7 @@ _pfsm_handle_force() {
       provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-plan-fsm.sh"},
       waiver: $waiver,
       forced_override: true,
+      records: "precondition_bypass",
       candidate_sha: (if $candidate_sha == "" then null else $candidate_sha end),
       bypassed_preconditions: ($by | split(","))
     }')" || json=""
@@ -559,6 +565,40 @@ _pfsm_handle_force() {
 #   no-op when --force was not passed. Refuses the command (returns 1) when
 #   the receipt cannot be minted, so a bypass is never silently taken.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _pfsm_force_arg_check <command>
+#   Call right after a command's argument loop. A force reason supplied
+#   WITHOUT --force used to be parsed and silently discarded, which is exactly
+#   the "operator believes they forced something" failure this plan is fixing
+#   elsewhere (adversarial-review finding).
+# ---------------------------------------------------------------------------
+# Commands whose preconditions are not yet routed through _pfsm_precondition.
+# --force is PARSED there (universality of the flag is the PM decision) but can
+# currently bypass nothing, so saying so out loud is the honest contract: an
+# operator must never believe they forced something that was never forceable
+# (adversarial-review finding).
+_PFSM_UNROUTED_COMMANDS="epic-complete plan-close plan-rollback"
+
+_pfsm_force_arg_check() {
+  local command="$1"
+  if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+    # The reason requirement applies the moment --force is passed, on every
+    # command — not only where a bypass happens to be available.
+    if [[ "${#_PFSM_FORCE_REASON}" -lt 20 ]]; then
+      echo "ERROR: ${command}: --force requires a reason of at least 20 characters (--force-reason '<text>'). The force receipt is a forensic record; a throwaway reason defeats its purpose." >&2
+      return 1
+    fi
+    if [[ " ${_PFSM_UNROUTED_COMMANDS} " == *" ${command} "* ]]; then
+      echo "NOTICE: ${command} accepts --force, but none of its preconditions is wired to the forceable classifier yet, so this --force will bypass NOTHING and write no receipt. If ${command} is refusing, the refusal is not one force can lift — repair the underlying record, or use plan-state's audited recovery tools." >&2
+    fi
+  fi
+  if [[ "$_PFSM_FORCE" -ne 1 && -n "$_PFSM_FORCE_REASON" ]]; then
+    echo "ERROR: ${command}: a force reason was supplied without --force. Pass --force as well, or drop the reason — a reason on its own bypasses nothing and must not look like it did." >&2
+    return 1
+  fi
+  return 0
+}
+
 _pfsm_commit_force() {
   [[ "$_PFSM_FORCE" -eq 1 ]] || return 0
   _pfsm_handle_force "$@" || return 1
@@ -752,6 +792,9 @@ cmd_plan_start() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-start" || exit 2
   if [[ -z "$plan_id" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -985,6 +1028,9 @@ cmd_epic_start() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "epic-start" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
     echo "Usage: aid-plan-fsm.sh epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -1403,6 +1449,9 @@ cmd_epic_complete() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "epic-complete" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
     echo "Usage: aid-plan-fsm.sh epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -1797,6 +1846,9 @@ cmd_epic_merge_to_plan() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "epic-merge-to-plan" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
     echo "Usage: aid-plan-fsm.sh epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -4581,6 +4633,9 @@ cmd_plan_finalize() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-finalize" || exit 2
 
   if [[ -z "$plan_id" || -z "$stage" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
@@ -4845,6 +4900,9 @@ cmd_plan_merge_to_main() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-merge-to-main" || exit 2
 
   if [[ -z "$plan_id" || -z "$decision_file" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]" >&2
@@ -5473,6 +5531,9 @@ cmd_plan_close() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-close" || exit 2
 
   if [[ -z "$plan_id" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]" >&2
@@ -7102,6 +7163,9 @@ cmd_plan_rollback() {
          shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-rollback" || exit 2
   if [[ -z "$plan_id" || -z "$revert_commit" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2

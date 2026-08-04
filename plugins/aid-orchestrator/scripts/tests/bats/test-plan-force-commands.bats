@@ -197,3 +197,77 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
     [ "$output" = "0" ]
   fi
 }
+
+# ─── Codex-review findings on the first cut of this step ──────────────────
+
+@test "P073 Step 8 (review finding 1): --force on a command with no routed precondition SAYS SO instead of pretending" {
+  # The flag is universal by PM decision, but on these three commands nothing
+  # is wired to the forceable classifier yet. An operator must never believe
+  # they forced something that was never forceable.
+  local cmd
+  for cmd in epic-complete plan-close plan-rollback; do
+    run _pf "$cmd" P900 --force --force-reason "$REASON"
+    [[ "$output" == *"will bypass NOTHING and write no receipt"* ]] || {
+      echo "command '$cmd' forced silently" >&2
+      false
+    }
+  done
+  [ "$(_receipts)" = "0" ]
+}
+
+@test "P073 Step 8 (review finding 1): --force requires a reason on EVERY command, routed or not" {
+  local cmd
+  for cmd in plan-start epic-start epic-complete epic-merge-to-plan \
+             plan-finalize plan-merge-to-main plan-close plan-rollback; do
+    run _pf "$cmd" P900 --force
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"requires a reason of at least 20 characters"* ]] || {
+      echo "command '$cmd' accepted --force with no reason" >&2
+      false
+    }
+  done
+}
+
+@test "P073 Step 8 (review finding 2): a force reason WITHOUT --force is an error, not a silently discarded argument" {
+  # Previously --reason/--force-reason parsed fine on their own and were
+  # ignored, so the invocation looked accepted while forcing nothing.
+  local cmd
+  for cmd in plan-start epic-start epic-merge-to-plan plan-finalize \
+             plan-merge-to-main plan-close; do
+    run _pf "$cmd" P900 --reason "$REASON"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"force reason was supplied without --force"* ]] || {
+      echo "command '$cmd' silently ignored a lone --reason" >&2
+      false
+    }
+  done
+}
+
+@test "P073 Step 8 (review finding 2): --force-reason alone is refused on the commands that own --reason too" {
+  local cmd
+  for cmd in epic-complete plan-rollback; do
+    run _pf "$cmd" P900 --force-reason "$REASON"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"force reason was supplied without --force"* ]]
+  done
+}
+
+@test "P073 Step 8 (review finding 2): the business --reason on epic-complete and plan-rollback is untouched by the guard" {
+  # Their own --reason must not trip the force guard.
+  run _pf epic-complete P900 E-900-1_1 --abandon --reason "abandoned for a documented business reason"
+  [[ "$output" != *"force reason was supplied without --force"* ]]
+  run _pf plan-rollback P900 --reason "rolled back for a documented business reason"
+  [[ "$output" != *"force reason was supplied without --force"* ]]
+}
+
+@test "P073 Step 8 (review finding 3): the receipt states it records a BYPASS, never that the command completed" {
+  # A receipt minted before a later, unrouted precondition fails must not read
+  # as "this operation happened".
+  _dirty
+  run _pf plan-start P900 --mode legacy_epic_release_mode --force --force-reason "$REASON"
+  local w; w="$(find "$ROOT/.aid-o" -name 'waiver-plan-plan-start-*.json' | head -1)"
+  [ -n "$w" ]
+  [ "$(jq -r '.records' "$w")" = "precondition_bypass" ]
+  [ "$(jq -r '.status' "$w")" = "blocked" ]
+  [ "$(jq -r '.verdict.ready' "$w")" = "false" ]
+}
