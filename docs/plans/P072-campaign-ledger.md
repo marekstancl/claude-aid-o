@@ -42,11 +42,102 @@ The ledger detects the shape this repository actually has: `gate:bats_fsm` runs
 `execution.yaml` — the fourth emission path resolves `bats_fsm →
 test-aid-fsm.bats` and nothing spurious.
 
-**That duplication is still present in this repository.** It is now detected
-rather than silent; removing it is a configuration change to the gate profiles,
-not a code change, and it is deliberately not made here — a plan that both
-introduces a detector and edits the configuration it flags leaves nobody able
-to tell whether the detector works.
+**That duplication has now been REMOVED** (PM review round 2, 2026-08-04):
+`bats_fsm` is out of the `full` and `release` profiles, which already run that
+file through `bats_all`'s pool.
+
+The order mattered and is worth recording. A detector whose only proof is the
+defect it currently flags cannot be shown to work once that defect is fixed, so
+the red proof moved into a fixture FIRST — `test-aid-test-execution-ledger.bats`
+case 1 asserts the same two gate ids still exit 7 — and only then did the
+configuration change. Otherwise removing the waste would have been
+indistinguishable from breaking the check.
+
+Until this round the plan's own acceptance criterion for Step 26 was that a
+real full run REPORTS the duplicate. That would have meant shipping a plan whose
+success condition is that the repository keeps wasting the run; the criterion is
+amended, and the live requirement is now zero duplicates on a real full run.
+
+## The real full gate run of 2026-08-04 — zero duplicates, and two timeouts
+
+A real `aid-run-gates.sh run-all --profile full` against this repository at
+`2fd1f1b`, opened 07:50:57Z and closed 10:01:02Z.
+
+**The ledger's verdict: 66 dispatched, 66 distinct, 0 duplicates, 0 deliberate
+repeats.** `test-aid-fsm.bats` appears exactly once, and `bats_fsm` is reported
+`profile_excluded` — the live duplication this plan found is gone, and the run
+that used to double-count it no longer does.
+
+That is the amended Step 26 criterion met. It is also the whole value of the
+detector: it was built, it found a real defect in this repository, the defect
+was removed, and the same detector now certifies the removal on a real run
+rather than a fixture.
+
+**What that same run does NOT show: a green aggregate.** Two gates failed, both
+with exit code 124 — a timeout, not a red test. No case in the run printed
+`not ok`.
+
+| Gate | Result | Cap | Elapsed |
+|---|---|---|---|
+| `bats_all` | fail (124) | 600 s | 600.15 s — exhausted |
+| `bats_boundary` | fail (124) | 7200 s | 7200.02 s — exhausted |
+| `docs_updated` | pass | — | ~1 s |
+| `plan_diff` | skip | — | — |
+
+`bats_boundary` exhausting two hours is the already-documented boundary problem
+(`P072-boundary-suite-diagnosis.md`: a lower bound of ≥ 1 200 021 ms for 57 of
+245 cases in one file), and it is a deferred campaign, not a regression.
+
+`bats_all` hitting a 600-second cap turned out to be older and more interesting
+than this run. Its runtime baseline
+(`.aid-o/metrics/gate-runtime-baselines.yaml`) holds **two samples, and both are
+censored timeouts**:
+
+| Recorded | Elapsed | Cap | Exit |
+|---|---|---|---|
+| 2026-08-02T16:16:32Z | 600 171 ms | 600 s | 124 |
+| 2026-08-04T08:00:58Z | 600 150 ms | 600 s | 124 |
+
+The first predates every commit on this branch — it is P071's own run, taken
+the day the quarantine was lifted. **`bats_all` has therefore never once
+completed inside its cap since it was reinstated**, and no percentile exists for
+it because there is not a single uncensored sample to compute one from.
+
+This is not a regression introduced here, and it is equally not something to
+report as "a timeout happened". The gate that is supposed to be this
+repository's aggregate proof has never produced one. Whether the answer is a
+larger cap or a faster pool cannot be decided from two censored samples, and
+deciding it is precisely the deferred measurement campaign below — which now
+has a concrete reason to run rather than a general one.
+
+### The one red case, and what it turned out to be
+
+The uncapped pool run finished in **1556 s** — 1442 cases passed, **1 failed**.
+So the 600-second cap is 2.6× too small, and that is now measured rather than
+inferred from two censored samples.
+
+The single failure was mine. `test-aid-gitignore-backfill.bats` asserts that a
+gate run never touches the git state of the checkout it runs in, and the
+execution ledger broke it in commit `56441cb` by doing `mkdir -p` on its own
+evidence directory. Bisected: green at `v2.69.0`, red from `56441cb` — a P072
+regression, introduced by the ledger itself and caught by a suite that had been
+timing out before it could report.
+
+Fixed by making the ledger obey the discipline the gate runner already had: the
+timeline and the report are written INTO a directory that exists and never
+create one, so the ledger now lives at
+`.aid-o/work/evidence/<epic>/<run>/execution-ledger.json` and is opened only if
+that directory is already there. When it is not, the run says so loudly and is
+not accounted — because "not accounted" and "no duplicates" must never look
+alike.
+
+That the failure was invisible for two commits is itself the finding: a gate
+that always times out cannot report anything, so its suite's verdicts were
+never seen. Raising the cap is not a cosmetic change.
+
+**So the aggregate is not green, and this plan does not claim it is.** The
+no-double-execution claim is proven; the runs-clean-and-fast claim is not, and
+the two are being kept apart deliberately.
 
 ## Why the campaign was not run
 

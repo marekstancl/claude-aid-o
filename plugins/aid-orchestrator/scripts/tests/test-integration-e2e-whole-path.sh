@@ -182,6 +182,55 @@ else
   fi
 fi
 
+echo "TEST: a gate run NEVER creates directories in the project it is testing"
+# A real regression: the ledger did `mkdir -p` its own evidence directory, which
+# made every gate run dirty the `git status` of the checkout under test. The
+# gate runner writes its timeline and its report the same way — into a
+# directory that already exists, never bringing one into being — and the ledger
+# now follows that discipline. Without it, running gates from a checkout
+# somebody is working in silently adds untracked paths.
+GR="$WORK/gaterepo"
+mkdir -p "$GR"
+( cd "$GR" && git init -q && git config user.email t@t && git config user.name T \
+  && echo x > f.txt && git add f.txt && git commit -qm init )
+cat > "$GR/exec.yaml" <<'YAML'
+version: '1.0'
+gates:
+  noop:
+    command: "true"
+    required: true
+    timeout_seconds: 30
+YAML
+BEFORE="$(git -C "$GR" status --porcelain)"
+( cd "$GR" && bash "${PLUGIN_DIR}/scripts/aid-run-gates.sh" run-all exec.yaml E-X R-1 >/dev/null 2>&1 )
+AFTER="$(git -C "$GR" status --porcelain)"
+if [[ "$BEFORE" == "$AFTER" ]]; then
+  pass_msg "with no evidence directory, the run left git status byte-identical"
+else
+  fail_msg "the gate run dirtied the checkout it was testing: $(diff <(printf '%s\n' "$BEFORE") <(printf '%s\n' "$AFTER") | grep '^>' | head -3 | tr '\n' ' ')"
+fi
+# NOT "no .aid-o at all": `.aid-o/metrics/` is created deliberately by the
+# runtime-baseline writer, which backfills `.git/info/exclude` itself so it
+# stays invisible to git (AC9). That is a feature with its own tests. What must
+# not appear is a ledger directory nobody asked for.
+if [[ ! -e "$GR/.aid-o/work/evidence/execution-ledger" ]] && [[ -z "$(find "$GR" -name 'execution-ledger*.json' 2>/dev/null)" ]]; then
+  pass_msg "and no execution-ledger path was invented anywhere under the project"
+else
+  fail_msg "the gate run created a ledger path with no evidence directory to hold it: $(find "$GR" -name 'execution-ledger*' | head -2 | tr '\n' ' ')"
+fi
+
+echo "TEST: but WITH an evidence directory the ledger really is opened and closed"
+# The guard above must not be satisfied the lazy way — by never writing a
+# ledger anywhere.
+mkdir -p "$GR/.aid-o/work/evidence/E-Y/R-2"
+( cd "$GR" && bash "${PLUGIN_DIR}/scripts/aid-run-gates.sh" run-all exec.yaml E-Y R-2 >/dev/null 2>&1 )
+GL="$GR/.aid-o/work/evidence/E-Y/R-2/execution-ledger.json"
+if [[ -f "$GL" ]] && [[ "$(jq -r '.closed_at // "no"' "$GL")" != "no" ]]; then
+  pass_msg "the ledger was written beside the run's other evidence and closed: duplicates=$(jq -r '.summary.duplicates | length' "$GL")"
+else
+  fail_msg "no closed ledger at ${GL} — the directory guard is silencing the ledger entirely"
+fi
+
 echo "TEST (scenario 6): the campaign record states its wall clock, or says it was not run"
 REC="${PLUGIN_DIR}/../../docs/plans/P072-campaign-ledger.md"
 if [[ -f "$REC" ]]; then

@@ -515,17 +515,33 @@ run_all_gates() {
   # record one entry per gate and could never find the overlap it exists for.
   local _ledger_path=""
   if [[ -z "${AID_EXECUTION_LEDGER:-}" ]]; then
-    _ledger_path="${_plugin_project_root%/}/.aid-o/work/evidence/execution-ledger/${run_id:-run}-$(date -u +%Y%m%dT%H%M%SZ).json"
-    # A failed open is NOT a reason to run unaccounted. Swallowing it produced
-    # exactly the outcome the ledger exists to prevent: a green gate run whose
-    # test accounting silently did not happen.
-    if ! bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" open \
-         --path "$_ledger_path" --run-id "${run_id:-run}" \
-         --candidate-sha "${base_commit_resolved:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" >/dev/null 2>&1; then
-      echo "ERROR: aid-run-gates.sh: could not open the execution ledger at '$_ledger_path' — refusing to run gates unaccounted" >&2
-      return 3
+    # Beside this run's other evidence, and created the same way the timeline
+    # and the report are: written INTO an existing directory, never bringing
+    # one into being. The gate runner does not create directories in the
+    # project under test — a real regression this broke, because an invented
+    # `.aid-o/work/evidence/execution-ledger/` is an untracked path, and a gate
+    # run that dirties `git status` is one that cannot be run safely from a
+    # checkout somebody is working in.
+    local _ledger_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    if [[ -d "$_ledger_dir" ]]; then
+      _ledger_path="${_ledger_dir}/execution-ledger.json"
+      # A failed open is NOT a reason to run unaccounted. Swallowing it produced
+      # exactly the outcome the ledger exists to prevent: a green gate run whose
+      # test accounting silently did not happen.
+      if ! bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" open \
+           --path "$_ledger_path" --run-id "${run_id:-run}" \
+           --candidate-sha "${base_commit_resolved:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" >/dev/null 2>&1; then
+        echo "ERROR: aid-run-gates.sh: could not open the execution ledger at '$_ledger_path' — refusing to run gates unaccounted" >&2
+        return 3
+      fi
+      export AID_EXECUTION_LEDGER="$_ledger_path"
+    else
+      # No evidence directory means no run is being recorded at all — the
+      # timeline and the report have nowhere to go either. Said out loud
+      # rather than inferred from silence, because "this run was not
+      # accounted" and "this run had no duplicates" must never look alike.
+      echo "WARN: aid-run-gates.sh: no evidence directory at '${_ledger_dir}' — this gate run is NOT accounted by an execution ledger and cannot support a no-double-execution claim" >&2
     fi
-    export AID_EXECUTION_LEDGER="$_ledger_path"
   fi
 
   # Iterate gate names via yq (mikefarah)

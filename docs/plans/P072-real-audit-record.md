@@ -49,6 +49,16 @@ gitignored `.aid-o/config/`).
 | Lane pool / sequential / boundary | 65 / 7 / 2 |
 | Units refused by the P071 migration | 6 — 4 changed since P071 verified them, 2 whose dependency closure still cannot be fully read |
 
+These figures were measured before the PM review of 2026-08-04, and two of them
+have already moved: the shell-suite scan now reports **40** discovered plus 7
+declined against 47 files present, and a live scan reports far more run units
+than the approved catalog's 83. That gap is not an error in either number — the
+catalog is an APPROVED artifact and the scan is the current tree — but it is
+another reason the real audit below cannot be skipped: only it reconciles the
+two. The frozen counts that used to be asserted as "exactly 36" have been
+replaced by that reconciliation, precisely because a number goes stale and an
+invariant does not.
+
 ## What was NOT run, and why
 
 - **The agent dispatch waves.** A `full` audit's shard and specialist waves are
