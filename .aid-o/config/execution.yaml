@@ -56,9 +56,10 @@ gates:
   shell_pipeline_smoke:
     description: >-
       Despite the name, this is NOT a fast/partial smoke check — it runs the
-      FULL aggregate test suite via run-all-tests.sh (timeout_seconds 1900,
-      ~32 min budget). Treat it as equivalent in scope/cost to bats_all, not
-      as a quick sanity check.
+      FULL aggregate test suite via run-all-tests.sh (timeout_seconds 7200).
+      Treat it as MORE expensive than bats_all, not as a quick sanity check:
+      it runs the same bats work plus 40 standalone shell suites bats_all
+      never touches. Its true cost is not yet known — no run has completed.
     # Kept the historical key name rather than renaming it (P071 E-071-1_1
     # Step 2, 2026-08-02) — release_quarantine's own reason text (see below)
     # quotes `shell_pipeline_smoke` verbatim, p064-closure's reason text
@@ -70,7 +71,22 @@ gates:
     # above instead.
     command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
     required: false
-    timeout_seconds: 1900
+    # 1900s -> 7200s (2026-08-04). A real audit cut this gate off at 2001s with
+    # 73 of 151 suites done, so it had NEVER completed inside its cap — and a
+    # gate that always stops a third of the way through verifies nothing while
+    # still costing half an hour. It hid a genuine failing case for two commits,
+    # exactly as bats_all's own 600s cap did.
+    #
+    # 7200 is a CEILING chosen to let the gate finish and finally produce a real
+    # number, NOT a prediction of how long it takes. Nobody knows that yet:
+    # 2001s/73-suites is a lower bound, and scaling it to 151 would be the
+    # arithmetic this plan forbids. Once one run completes, set this from the
+    # measurement.
+    #
+    # For scale: bats_all measures 1602s, and this gate runs that bats work PLUS
+    # 40 standalone shell suites bats_all never touches — which is also why the
+    # two are not interchangeable and neither is redundant.
+    timeout_seconds: 7200
     max_retries: 0
   plan_diff:
     note: 'required=false for AID self-host: P037 plan predates plan-level AC convention;
