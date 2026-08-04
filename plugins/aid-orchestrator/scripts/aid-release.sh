@@ -479,7 +479,12 @@ echo "Updated ${#UPDATED[@]} files total."
 #   - the section is absent (including "the file uses a heading format this
 #     script cannot locate" — never a silent pass)
 #   - the section still contains the exact generated placeholder line
-#   - the section has no real bullet at all (e.g. only a `### Changed` heading)
+#   - the section has no CONTENT at all (e.g. only a `### Changed` heading).
+#     Deliberately format-agnostic: a nested list, a table, prose, or a bullet
+#     whose first word is italic (`- _Breaking_: ...`) are all legitimate
+#     user-facing entries. An earlier, stricter form required a top-level
+#     `- ` bullet and would have blocked every one of them — a false refusal
+#     is exactly what this plan's loosening directive forbids.
 # A placeholder in an OLDER section is historical debt: reported on stderr,
 # never blocking.
 _RELEASE_CHANGELOG_PLACEHOLDER='- _PM/agent: fill in entry content_'
@@ -516,11 +521,12 @@ _release_validate_changelog_entry() {
     return 1
   fi
 
-  # At least one bullet that is not a placeholder-shaped italic line. The
-  # class excludes '_' so the generated placeholder can never satisfy this
-  # even if its wording changes, and excludes whitespace so '- ' alone fails.
-  if ! grep -qE -- '^- [^_[:space:]]' <<<"$block"; then
-    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — the section has no content bullet; add a real user-facing description and rerun" >&2
+  # At least one line of real content: anything that is neither blank nor a
+  # Markdown heading. The exact generated placeholder was already rejected
+  # above, so this only has to catch the empty-section case (a bare
+  # `### Changed` with nothing under it).
+  if ! grep -qE -- '^[[:space:]]*[^[:space:]#]' <<<"$block"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — the section has no content; add a real user-facing description and rerun" >&2
     return 1
   fi
 

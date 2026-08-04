@@ -171,7 +171,7 @@ EOF
   cd "$TEST_PROJECT_ROOT"
   run bash "$RELEASE" patch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no content bullet"* ]]
+  [[ "$output" == *"the section has no content"* ]]
 }
 
 @test "P073 Step 3: a CHANGELOG whose headings this script cannot locate is blocked, naming the expected form (never a silent pass)" {
@@ -255,4 +255,106 @@ EOF
   cd "$TEST_PROJECT_ROOT"
   run bash "$RELEASE" patch
   [ "$status" -eq 0 ]
+}
+
+# ─── Codex-review finding on the first cut of this step ────────────────────
+# The adversarial review found the original `^- [^_[:space:]]` bullet test
+# rejected legitimate Markdown: a nested list, a table, or a bullet whose
+# first word is italic. A false refusal is exactly what this plan's loosening
+# directive forbids, so the check is now format-agnostic — any non-blank,
+# non-heading line is content.
+
+@test "P073 Step 3 (review finding): a section whose content is a NESTED list is legitimate and releases" {
+  _seed "2.0.0" "$(cat <<'EOF'
+# Changelog
+
+Format follows Keep a Changelog.
+
+## [2.0.1] — 2026-08-04
+
+### Fixed
+
+  - Nested bullet describing the fix.
+
+## [2.0.0] — 2026-07-01
+
+### Added
+- The first real release.
+EOF
+)"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch
+  [ "$status" -eq 0 ]
+}
+
+@test "P073 Step 3 (review finding): a section whose content is a TABLE is legitimate and releases" {
+  _seed "2.0.0" "$(cat <<'EOF'
+# Changelog
+
+Format follows Keep a Changelog.
+
+## [2.0.1] — 2026-08-04
+
+### Changed
+
+| Component | Effect |
+|-----------|--------|
+| Releases  | Entry validation added. |
+
+## [2.0.0] — 2026-07-01
+
+### Added
+- The first real release.
+EOF
+)"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch
+  [ "$status" -eq 0 ]
+}
+
+@test "P073 Step 3 (review finding): a bullet whose first word is italic is legitimate and releases" {
+  _seed "2.0.0" "$(cat <<'EOF'
+# Changelog
+
+Format follows Keep a Changelog.
+
+## [2.0.1] — 2026-08-04
+
+### Changed
+
+- _Breaking_: the release path now validates its own CHANGELOG entry.
+
+## [2.0.0] — 2026-07-01
+
+### Added
+- The first real release.
+EOF
+)"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch
+  [ "$status" -eq 0 ]
+}
+
+@test "P073 Step 3 (review finding): a heading-only section is STILL blocked — the loosening did not open a hole" {
+  _seed "2.0.0" "$(cat <<'EOF'
+# Changelog
+
+Format follows Keep a Changelog.
+
+## [2.0.1] — 2026-08-04
+
+### Changed
+
+#### Sub-heading with nothing under it
+
+## [2.0.0] — 2026-07-01
+
+### Added
+- The first real release.
+EOF
+)"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the section has no content"* ]]
 }
