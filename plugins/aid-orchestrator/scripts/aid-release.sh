@@ -183,9 +183,19 @@ CHANGELOG_HEADER=""
 RELEASED_VERSION=""
 CURRENT=""
 
-# Read newest CHANGELOG header (if exists)
+# Read newest CHANGELOG header (if exists).
+# P073 Step 2: this script runs under `set -euo pipefail`, so a grep that
+# simply finds nothing returns 1 and used to kill the run BEFORE the explicit
+# "Cannot detect version" diagnostic below could ever print. `|| VAR=""`
+# neutralises only the pipeline's exit status; an unreadable file is still
+# reported loudly rather than masked.
 if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
-  CHANGELOG_HEADER=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1)
+  if [[ -r "$REPO_ROOT/CHANGELOG.md" ]]; then
+    CHANGELOG_HEADER=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1) || CHANGELOG_HEADER=""
+  else
+    echo "ERROR: cannot read $REPO_ROOT/CHANGELOG.md while detecting version" >&2
+    exit 1
+  fi
 fi
 
 # Read actually released version from JSON sources (preferred over CHANGELOG)
@@ -206,7 +216,15 @@ done
 
 # Fallback to pyproject.toml if no JSON found
 if [[ -z "$RELEASED_VERSION" && -f "$REPO_ROOT/pyproject.toml" ]]; then
-  RELEASED_VERSION=$(grep -oP '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/pyproject.toml" | head -1)
+  # P073 Step 2: a pyproject.toml with no top-level `version = "X.Y.Z"` line
+  # (a workspace root, a poetry file using a different key) must FALL THROUGH
+  # to the diagnostic below, not abort the script here.
+  if [[ -r "$REPO_ROOT/pyproject.toml" ]]; then
+    RELEASED_VERSION=$(grep -oP '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/pyproject.toml" | head -1) || RELEASED_VERSION=""
+  else
+    echo "ERROR: cannot read $REPO_ROOT/pyproject.toml while detecting version" >&2
+    exit 1
+  fi
   [[ -n "$RELEASED_VERSION" ]] && VERSION_SOURCE="pyproject.toml"
 fi
 
@@ -250,8 +268,15 @@ UPDATED=()
 update_changelog() {
   local file="$1"
   [[ -f "$file" ]] || return 0
-  local header
-  header=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$file" | head -1)
+  local header=""
+  # P073 Step 2: a CHANGELOG with no version ledger at all (a landing page)
+  # must reach the prepend branch below, not abort the release mid-update.
+  if [[ -r "$file" ]]; then
+    header=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$file" | head -1) || header=""
+  else
+    echo "ERROR: cannot read $file while updating the CHANGELOG" >&2
+    exit 1
+  fi
   if [[ "$header" == "$NEW_VERSION" ]]; then
     # Pre-written entry for upcoming release — header already correct, no-op.
     echo "Skipped: $file (header already $NEW_VERSION — pre-written entry)"
