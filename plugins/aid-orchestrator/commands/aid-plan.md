@@ -479,12 +479,15 @@ indefinitely with the ledger never actually advancing.
 raw-bound response) yields `review_status: unverifiable`. This blocks
 EPIC generation for the high-risk plan pending a PM decision, but it is NOT a
 loop iteration — do NOT call `aid-cp1-ledger.sh increment` for it, and do not
-treat it as consuming one of the 2 rechecks. Retry it freely (transient
+treat it as consuming one of the 4 rechecks. Retry it freely (transient
 Codex unavailability), exactly like C3's own carve-out.
 
 **A genuine dispatch with blocking findings enters the bounded loop** (while
 blocking AND `cp1-ledger.sh check-budget` reports budget available,
-`review-checkpoints.yaml` → `cp1_codex_review.max_rechecks: 2`).
+the shipped budget of 5 sessions, documented in `review-checkpoints.yaml`
+→ `cp1_codex_review.max_rechecks: 4`, whose mechanical authority is
+`MAX_ATTEMPTS` in `scripts/lib/aid-cp1-ledger.sh` — that YAML key is
+documentation only and no consumer reads it).
 **Caution on `check-budget`'s meaning after an override-authorized attempt:**
 once `attempts > max` via a PM-override-claimed increment (see below),
 `check-budget` reports `available` again — but this describes the CURRENT
@@ -538,9 +541,9 @@ Codex dispatch on an attempt that will fail closed anyway.
 **Exit conditions (exactly one applies):**
 - **Clean** → proceed to EPIC generation as normal.
 - **`aid-cp1-ledger.sh check-budget` reports `exhausted`** (initial review +
-  2 rechecks = 3 Codex runs consumed, still blocking) →
+  4 rechecks = 5 Codex runs consumed, still blocking) →
   **`PM_ESCALATION_REQUIRED`**: execution halts, surfaced to the PM;
-  `aid-cp1-gate.sh` refuses EPIC generation. A 4th review run requires an
+  `aid-cp1-gate.sh` refuses EPIC generation. A 6th review run requires an
   explicit PM-escalation override artifact (below) — never automatic
   re-entry into this loop.
 - **Same fingerprint survives a recheck, or conflicting findings** (see step
@@ -641,7 +644,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-06-29
+**Last Updated:** 2026-08-04
 
 ## Plan mode
 

@@ -114,7 +114,7 @@
 #                         evidence-root path afterward. See cmd_dispatch's own
 #                         header comment for the full contract.
 #
-# **Last Updated:** 2026-07-23
+# **Last Updated:** 2026-08-04
 # =============================================================================
 set -euo pipefail
 
@@ -1745,7 +1745,7 @@ _c3_copy_atomic() {
 #                          still status=="fail" AND recheck_count has reached
 #                          c3_fix_loop.max_rechecks — the SAME policy key
 #                          build-manifest already reads via C3_AUDIT_POLICY/
-#                          DEFAULT_POLICY, fail-closed to 2 on any read issue,
+#                          DEFAULT_POLICY, fail-closed to 4 on any read issue,
 #                          matching Step 16's own fail-closed default), or null
 #                          (still blocking, budget not yet exhausted — loop
 #                          should recheck again). Writing "escalated" here is a
@@ -1787,10 +1787,15 @@ _c3_write_loop_summary() {
   recheck_count=0
   [[ "$dispatched_count" -gt 0 ]] && recheck_count=$(( dispatched_count - 1 ))
 
-  local policy_file="${C3_AUDIT_POLICY:-$DEFAULT_POLICY}" max_rechecks=2
+  # P073 Step 1: the C3 fix loop budget is 4 rechecks (initial audit + 4
+  # rechecks = 5 genuinely dispatched Codex sessions). The three literals here
+  # are the FAIL-CLOSED fallback used when the policy file is missing,
+  # unreadable, or carries a non-numeric value — never unbounded, and never
+  # wider than the shipped default.
+  local policy_file="${C3_AUDIT_POLICY:-$DEFAULT_POLICY}" max_rechecks=4
   if [[ -f "$policy_file" ]]; then
     local mr
-    mr="$(yq -r '.c3_fix_loop.max_rechecks // 2' "$policy_file" 2>/dev/null || echo 2)"
+    mr="$(yq -r '.c3_fix_loop.max_rechecks // 4' "$policy_file" 2>/dev/null || echo 4)"
     [[ "$mr" =~ ^[0-9]+$ ]] && max_rechecks="$mr"
   fi
 

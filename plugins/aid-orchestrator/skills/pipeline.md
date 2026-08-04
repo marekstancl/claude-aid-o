@@ -1580,8 +1580,9 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    blocking C3 finding only got flagged in the PM Summary (step 12) and the PM decided ABORT
    manually — C3 now gets the same bounded auto-repair loop CP2/CP3 already have
    (`review-checkpoints.yaml` `fix_loop.max_iterations: 2`), read here from
-   `c3-audit-policy.yaml` → `c3_fix_loop` (`max_rechecks: 2`, `eligible_severities: [critical,
-   high]`; policy unreadable → fail-closed to `max_rechecks: 2`).
+   `c3-audit-policy.yaml` → `c3_fix_loop` (`max_rechecks: 4`, `eligible_severities: [critical,
+   high]`; policy unreadable → fail-closed to `max_rechecks: 4`). Initial audit + up to 4
+   rechecks = 5 genuinely dispatched Codex sessions (P073 Step 1).
 
    **Entry condition:** the report is genuinely `dispatched` (a real Codex run — check
    `c3/c3-dispatch.json` `.dispatch.outcome == "dispatched"`, NOT the `degraded_advisory`
@@ -1656,8 +1657,8 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    **Exit conditions (exactly one applies):**
    - **Clean** → proceed to Curator dispatch (step 6's closing paragraph) and the merge
      decision as normal.
-   - **`c3_recheck_count == max_rechecks (2)` and still blocking** → **ESCALATION**: surfaced to
-     the PM in step 12's summary as blocking (never silently merged); a 3rd recheck / 4th total
+   - **`c3_recheck_count == max_rechecks (4)` and still blocking** → **ESCALATION**: surfaced to
+     the PM in step 12's summary as blocking (never silently merged); a 5th recheck / 6th total
      Codex run is PM-approved only, never automatic re-entry into this loop.
    - **Same fingerprint survives a recheck** (auto-detected, see step 3 above) **or conflicting
      findings** (controller calls `escalate`, see step 3 above) → **ESCALATION** immediately,
@@ -2494,7 +2495,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-04
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

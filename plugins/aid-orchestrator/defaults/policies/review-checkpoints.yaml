@@ -31,7 +31,12 @@ review_checkpoints:
   cp1_codex_review:
     enabled_for: [high]            # risk profiles that require this review; low/docs/medium
                                     # (no high-risk pattern match) never trigger it
-    max_rechecks: 2                # initial review + up to 2 rechecks = 3 Codex runs max
+    max_rechecks: 4                # initial review + up to 4 rechecks = 5 Codex runs max.
+                                    # DOCUMENTATION of the shipped budget, not a consumed
+                                    # override: the CP1/C0 loop's mechanical authority is
+                                    # MAX_ATTEMPTS in scripts/lib/aid-cp1-ledger.sh, and no
+                                    # consumer reads this key. Editing it here changes
+                                    # nothing (P073 Step 1).
 
   # Trivial skip — skip CP2/CP6 for small changes
   skip_trivial: true

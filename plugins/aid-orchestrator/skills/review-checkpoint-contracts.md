@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-07-18
+**Last Updated:** 2026-08-04
 
 ## False-Green Guardrails
 
@@ -205,9 +205,11 @@ Any of the 4 failing is bypassable ONLY by a PM-escalation override
 artifact — see "Bounded Loop" below.
 
 **Bounded loop (mirrors `pipeline.md` §6a, at plan level):**
-- Initial review + up to `max_rechecks: 2` rechecks (`review-checkpoints.yaml`
-  → `cp1_codex_review.max_rechecks`) = 3 Codex runs max, same budget shape
-  as C3's fix→reverify loop.
+- Initial review + up to 4 rechecks = 5 Codex runs max, same budget shape as
+  C3's fix→reverify loop. The mechanical authority is `MAX_ATTEMPTS` in
+  `scripts/lib/aid-cp1-ledger.sh`; `review-checkpoints.yaml` →
+  `cp1_codex_review.max_rechecks: 4` documents the same shipped number but is
+  read by no consumer — editing it does not change the budget.
 - Each recheck is a genuine plan REVISION: a new commit → a new
   `reviewed_plan_hash` → a fresh, isolated Codex session. The CP1 revision-
   limit ledger (`scripts/lib/aid-cp1-ledger.sh`) is the mechanical authority
@@ -228,10 +230,10 @@ artifact — see "Bounded Loop" below.
     remaining budget on a non-converging fix) — same judgment split as
     C3's fingerprint-survives (mechanical) vs. conflicting-findings
     (controller judgment call) distinction.
-  - After the 3rd review run (initial + 2 rechecks) still blocking →
+  - After the 5th review run (initial + 4 rechecks) still blocking →
     `PM_ESCALATION_REQUIRED`: execution halts, `aid-cp1-gate.sh` reports
     `check-budget` as exhausted, and only an explicit PM-escalation
-    override permits a 4th attempt — never an automatic re-entry.
+    override permits a 6th attempt — never an automatic re-entry.
 - **PM-escalation override:** a `cp1-pm-escalation-override.json` artifact
   at the plan's evidence root, containing a non-empty `pm_ref` (>= 20
   characters, mirroring this project's `AID_C3_FORCE_BEYOND_ESCALATION`

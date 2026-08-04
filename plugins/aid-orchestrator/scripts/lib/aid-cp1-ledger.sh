@@ -48,7 +48,15 @@
 #   schema_version:  "aid-2.0"
 #   plan_id:         string
 #   attempts:        integer (0 = no revision cycle counted yet)
-#   max:             integer, currently 3 (1 initial + 2 revisions)
+#   max:             integer, currently 5 (1 initial review + 4 revisions).
+#                    A ledger written before P073 carries the legacy value 3;
+#                    it is READ as legacy-valid (see _ledger_read_json) and
+#                    re-stamped to 5 with `migrated_from: 3` by the next
+#                    genuine write in cmd_increment. Read-only consumers
+#                    never migrate — they report budget against the current
+#                    MAX_ATTEMPTS regardless of the stored value.
+#   migrated_from:   integer|absent — set to 3 by the one-shot P073 budget
+#                    migration; purely informational.
 #   pre_enforcement: boolean (true only for the explicit P065 bootstrap path)
 #   pm_override:     {present: boolean, ref: string|null,
 #                      claim_artifact: string|null, claim_sha256: string|null}
@@ -88,11 +96,21 @@
 #     shared single-use cp1-pm-escalation-override.json artifact, claimed
 #     atomically by cmd_increment.
 #
-# **Last Updated:** 2026-07-18
+# **Last Updated:** 2026-08-04
 # =============================================================================
 set -euo pipefail
 
-MAX_ATTEMPTS=3
+# P073 Step 1: the CP1/C0 review loop budget is 5 genuinely dispatched Codex
+# sessions (1 initial review + 4 rechecks). This constant is the SOLE
+# mechanical authority — aid-cp1-gate.sh delegates to `check-budget` and holds
+# no literal of its own, and defaults/policies/review-checkpoints.yaml is
+# documentation for the same shipped number, not a consumed override.
+MAX_ATTEMPTS=5
+
+# The pre-P073 budget. A ledger still carrying this value is legacy-valid on
+# READ (never "tampered") and is migrated to MAX_ATTEMPTS by the next genuine
+# write — see _ledger_read_json and cmd_increment.
+LEGACY_MAX_ATTEMPTS=3
 
 # ---------------------------------------------------------------------------
 # usage
@@ -272,7 +290,16 @@ _json_str_or_null() {
 #     - max: integer, EQUAL TO this script's own MAX_ATTEMPTS constant — no
 #       ledger may claim a different budget than the fixed policy allows;
 #       there is no per-plan override mechanism for max, so any deviation
-#       is definitionally tampering, not a legitimate variant.
+#       is definitionally tampering, not a legitimate variant. ONE bounded
+#       exception (P073 Step 1 budget migration 3 -> 5): a ledger written
+#       under the previous budget, i.e. max == LEGACY_MAX_ATTEMPTS AND
+#       attempts <= LEGACY_MAX_ATTEMPTS, is legacy-valid. That pair is
+#       exactly what the old code could produce and nothing more — any
+#       other mismatch (inflated max, legacy max with an attempts count the
+#       old budget could never have reached) stays rejected as tampering.
+#       This function remains a PURE PREDICATE: it never migrates. The
+#       re-stamp to max: MAX_ATTEMPTS + migrated_from happens only inside
+#       cmd_increment's locked write path.
 #     - plan_id: non-empty string, and MUST equal the caller's expected
 #       plan_id (catches a ledger file swapped/symlinked under a different
 #       plan's path).
@@ -291,9 +318,10 @@ _ledger_read_json() {
   local json
   json="$(yq -o=json '.' "$path" 2>/dev/null)" || return 1
   [[ -n "$json" ]] || return 1
-  printf '%s' "$json" | jq -e --arg plan_id "$expected_plan_id" --argjson max "$MAX_ATTEMPTS" '
+  printf '%s' "$json" | jq -e --arg plan_id "$expected_plan_id" --argjson max "$MAX_ATTEMPTS" --argjson legacy_max "$LEGACY_MAX_ATTEMPTS" '
     (.attempts | type == "number" and (. | floor) == . and . >= 0)
-    and (.max | type == "number" and (. | floor) == . and . == $max)
+    and (.max | type == "number" and (. | floor) == .)
+    and ((.max == $max) or (.max == $legacy_max and .attempts <= $legacy_max))
     and (.plan_id | type == "string" and length > 0 and . == $plan_id)
     and (.attempts_log | type == "array")
     and ((.attempts_log | length) == .attempts)
@@ -440,10 +468,16 @@ cmd_increment() {
   # plan_hash AND a new codex_session to differ would risk a stuck ledger if
   # a caller re-supplies the prior session id alongside a genuinely new
   # plan_hash. Session-repeat enforcement, if wanted, is Step 20's call.
-  local last_hash attempts max
+  local last_hash attempts max stored_max
   last_hash="$(printf '%s' "$ledger_json" | jq -r '.attempts_log[-1].plan_hash // ""')"
   attempts="$(printf '%s' "$ledger_json" | jq -r '.attempts')"
-  max="$(printf '%s' "$ledger_json" | jq -r '.max')"
+  stored_max="$(printf '%s' "$ledger_json" | jq -r '.max')"
+  # P073 Step 1: budget arithmetic always runs against the CURRENT policy
+  # budget, never against the value a legacy ledger happens to store. A
+  # pre-P073 ledger (max: 3, validated legacy-valid above) therefore gets the
+  # full budget of 5 immediately — the deliberate loosening — and is
+  # re-stamped below as part of THIS write.
+  max="$MAX_ATTEMPTS"
 
   if [[ "$plan_hash" == "$last_hash" ]]; then
     printf '%s\n' "$ledger_json"
@@ -546,7 +580,17 @@ cmd_increment() {
     override_json='{"present": false, "ref": null, "claim_artifact": null, "claim_sha256": null}'
   fi
 
-  local cs_json new_json
+  # P073 Step 1 budget migration: the re-stamp to the current MAX_ATTEMPTS
+  # rides on THIS already-locked write, so the validator stays a pure
+  # read-only predicate and no consumer ever writes as a side effect of
+  # reading. If this write fails for any reason (read-only checkout, disk
+  # error), the ledger bytes are untouched and the legacy file keeps reading
+  # exactly as before — the migration is idempotent and never half-applied.
+  local cs_json new_json migrate_json='{}'
+  if [[ "$stored_max" != "$MAX_ATTEMPTS" ]]; then
+    migrate_json="$(jq -nc --argjson from "$stored_max" --argjson to "$MAX_ATTEMPTS" \
+      '{max: $to, migrated_from: $from}')"
+  fi
   cs_json="$(_json_str_or_null "$codex_session")"
   new_json="$(printf '%s' "$ledger_json" | jq \
     --arg ph "$plan_hash" \
@@ -554,9 +598,11 @@ cmd_increment() {
     --arg now "$now" \
     --argjson n "$new_n" \
     --argjson pmo "$override_json" \
+    --argjson mig "$migrate_json" \
     '.attempts = $n
      | .updated_at = $now
      | .pm_override = $pmo
+     | . + $mig
      | .attempts_log += [{n: $n, plan_hash: $ph, codex_session: $cs, at: $now}]')" \
     || _fail "cannot compute updated ledger for ${plan_id}"
 
@@ -650,7 +696,13 @@ cmd_check_budget() {
 
   local attempts max
   attempts="$(printf '%s' "$ledger_json" | jq -r '.attempts')"
-  max="$(printf '%s' "$ledger_json" | jq -r '.max')"
+  # P073 Step 1: report and compare against the CURRENT policy budget, not
+  # the value stored in a legacy (pre-migration) ledger. This keeps
+  # check-budget strictly READ-ONLY — a legacy ledger reports the same
+  # numbers on every call, byte-identically, and is migrated only by the next
+  # genuine increment write.
+  max="$MAX_ATTEMPTS"
+  local remaining; remaining=$(( max - attempts )); [[ "$remaining" -lt 0 ]] && remaining=0
   local ev_bool; ev_bool="$([[ "$evidence_present" == "true" ]] && echo true || echo false)"
 
   # pm_override.present is SET by cmd_increment ONLY when that specific
@@ -700,25 +752,25 @@ cmd_check_budget() {
       fi
 
       if [[ "$claim_ok" == true ]]; then
-        jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" --arg ref "$pm_ref" \
-          '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: true,
+        jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson remaining "$remaining" --argjson ev "$ev_bool" --arg ref "$pm_ref" \
+          '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, remaining: $remaining, pm_override: true,
             reason: ("attempts (" + ($attempts|tostring) + ") exceeds max (" + ($max|tostring) + ") but the LATEST attempt was PM-escalation-authorized: " + $ref)}'
         return 0
       fi
 
-      jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
-        '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,
+      jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson remaining "$remaining" --argjson ev "$ev_bool" \
+        '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, remaining: $remaining, pm_override: false,
           reason: "attempts >= max — revision budget exhausted. pm_override.present is set but could not be corroborated against a genuine, matching .consumed-<epoch> claim artifact (missing, unreadable, or content mismatch) — treated as untrusted, not a legitimate override. Use a fresh PM-escalation override if needed."}'
       return 1
     fi
-    jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
-      '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,
+    jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson remaining "$remaining" --argjson ev "$ev_bool" \
+      '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, remaining: $remaining, pm_override: false,
         reason: "attempts >= max — revision budget exhausted. Use PM-escalation override if needed."}'
     return 1
   fi
 
-  jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
-    '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,
+  jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson remaining "$remaining" --argjson ev "$ev_bool" \
+    '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, remaining: $remaining, pm_override: false,
       reason: "within budget"}'
   return 0
 }

@@ -51,6 +51,17 @@ _seed_evidence() {
   printf 'verdict: pass\n' > "$dir/$fname"
 }
 
+# _fill_to_max <plan_id>  — advances the ledger to exactly MAX_ATTEMPTS (5)
+# attempts with distinct hashes, i.e. budget exhausted. P073 Step 1 raised the
+# budget from 3 to 5, so every exhaustion fixture goes through this helper
+# instead of hard-coding a run of increments.
+_fill_to_max() {
+  local plan_id="$1" h
+  for h in aaa bbb ccc ddd eee; do
+    bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "$plan_id" "sha256:$h" >/dev/null
+  done
+}
+
 # _ledger <plan_id> <jq_filter>  — reads the ledger as JSON and applies a jq filter.
 _ledger_field() {
   local plan_id="$1" filter="$2"
@@ -64,7 +75,7 @@ _ledger_field() {
   [ "$status" -eq 0 ]
   [ -f "$(_ledger_file P100)" ]
   [ "$(_ledger_field P100 '.attempts')" = "0" ]
-  [ "$(_ledger_field P100 '.max')" = "3" ]
+  [ "$(_ledger_field P100 '.max')" = "5" ]
   [ "$(_ledger_field P100 '.pre_enforcement')" = "false" ]
   [ "$(_ledger_field P100 '.pm_override.present')" = "false" ]
 }
@@ -180,10 +191,8 @@ _ledger_field() {
 
 @test "check-budget reports exhausted when attempts >= max and no pm_override" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P131
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P131 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P131 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P131 sha256:ccc >/dev/null
-  [ "$(_ledger_field P131 '.attempts')" = "3" ]
+  _fill_to_max P131
+  [ "$(_ledger_field P131 '.attempts')" = "5" ]
   run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P131
   [ "$status" -eq 1 ]
   [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
@@ -191,10 +200,8 @@ _ledger_field() {
 
 @test "check-budget reports exhausted (pm_override false) when no increment was ever override-claimed" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:ccc >/dev/null
-  # attempts=3, max=3 — exhausted. None of these 3 increments were
+  _fill_to_max P132
+  # attempts=5, max=5 — exhausted. None of these 3 increments were
   # override-claimed (no override artifact was ever present), so
   # pm_override.present is false and check-budget correctly reports
   # exhausted.
@@ -221,9 +228,7 @@ _ledger_field() {
   # this test now proves the INVERSE of what it used to: a hand-edited
   # boolean with no matching artifact grants NOTHING.
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132b
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132b sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132b sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132b sha256:ccc >/dev/null
+  _fill_to_max P132b
 
   local lf; lf="$(_ledger_file P132b)"
   yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"
@@ -242,9 +247,7 @@ _ledger_field() {
   # the claimed path, but its content doesn't match claim_sha256" — proves
   # the check is a genuine content comparison, not just an existence check.
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132c
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132c sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132c sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132c sha256:ccc >/dev/null
+  _fill_to_max P132c
 
   local plan_evidence_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P132c"
   mkdir -p "$plan_evidence_root"
@@ -264,9 +267,7 @@ _ledger_field() {
 
 @test "DONE-review #5 fix: claim_artifact with a path-traversal filename is rejected (never escapes the plan's own evidence root)" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132d
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132d sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132d sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132d sha256:ccc >/dev/null
+  _fill_to_max P132d
 
   local lf; lf="$(_ledger_file P132d)"
   yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"
@@ -363,38 +364,34 @@ _ledger_field() {
 
 @test "FINDING 2: increment rejects a new hash when budget is exhausted (attempts >= max)" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P150
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:ccc >/dev/null
-  [ "$(_ledger_field P150 '.attempts')" = "3" ]
-  [ "$(_ledger_field P150 '.max')" = "3" ]
+  _fill_to_max P150
+  [ "$(_ledger_field P150 '.attempts')" = "5" ]
+  [ "$(_ledger_field P150 '.max')" = "5" ]
 
   # At this point, attempts == max, budget is exhausted. Attempt to increment
   # with a NEW hash (different from the last recorded one).
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:ddd
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:fff
   [ "$status" -ne 0 ]
   [[ "$output" == *"budget exhausted"* ]]
 
-  # Proof: ledger must be byte-for-byte unchanged (attempts still 3, log still has 3 entries).
-  [ "$(_ledger_field P150 '.attempts')" = "3" ]
-  [ "$(_ledger_field P150 '.attempts_log | length')" = "3" ]
+  # Proof: ledger must be byte-for-byte unchanged (attempts still 5, log still has 5 entries).
+  [ "$(_ledger_field P150 '.attempts')" = "5" ]
+  [ "$(_ledger_field P150 '.attempts_log | length')" = "5" ]
 }
 
 @test "FINDING 2: increment with unchanged hash at max is still a no-op (not budget-gated)" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P151
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:ccc >/dev/null
-  [ "$(_ledger_field P151 '.attempts')" = "3" ]
+  _fill_to_max P151
+  [ "$(_ledger_field P151 '.attempts')" = "5" ]
 
   # At max budget, but re-running with the SAME last hash is a no-op and must
   # NOT be rejected (the design intent: only NEW hashes trigger budget checks).
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:ccc
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:eee
   [ "$status" -eq 0 ]
 
-  # Proof: attempts still 3, log still has 3 entries (no new entry added).
-  [ "$(_ledger_field P151 '.attempts')" = "3" ]
-  [ "$(_ledger_field P151 '.attempts_log | length')" = "3" ]
+  # Proof: attempts still 5, log still has 5 entries (no new entry added).
+  [ "$(_ledger_field P151 '.attempts')" = "5" ]
+  [ "$(_ledger_field P151 '.attempts_log | length')" = "5" ]
 }
 
 # ─── PM-escalation override tests ──────────────────────────────────────────
@@ -410,36 +407,32 @@ _write_override() {
 
 @test "PM-override: increment at max with valid override artifact succeeds and advances attempts to max+1" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P160
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:ccc >/dev/null
-  [ "$(_ledger_field P160 '.attempts')" = "3" ]
+  _fill_to_max P160
+  [ "$(_ledger_field P160 '.attempts')" = "5" ]
 
   # Write a valid PM-escalation override at the plan-evidence-root.
   local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P160"
   _write_override "$ev_root"
 
   # Attempt to increment with a new hash at max budget WITH a valid override.
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:ddd
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:fff
   [ "$status" -eq 0 ]
 
-  # Proof: attempts advances to max+1 (4).
-  [ "$(_ledger_field P160 '.attempts')" = "4" ]
-  [ "$(_ledger_field P160 '.attempts_log | length')" = "4" ]
-  [ "$(_ledger_field P160 '.attempts_log[-1].plan_hash')" = "sha256:ddd" ]
+  # Proof: attempts advances to max+1 (6).
+  [ "$(_ledger_field P160 '.attempts')" = "6" ]
+  [ "$(_ledger_field P160 '.attempts_log | length')" = "6" ]
+  [ "$(_ledger_field P160 '.attempts_log[-1].plan_hash')" = "sha256:fff" ]
 }
 
 @test "PM-override: the override artifact is consumed (renamed) after a successful override-authorized increment" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P161
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:ccc >/dev/null
+  _fill_to_max P161
 
   local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P161"
   _write_override "$ev_root"
   local override_path="${ev_root}/cp1-pm-escalation-override.json"
 
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:ddd >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:fff >/dev/null
 
   # Proof: original file is gone.
   [ ! -f "$override_path" ]
@@ -451,61 +444,55 @@ _write_override() {
 
 @test "PM-override: a second increment without a fresh override is rejected (single-use proven)" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P162
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:ccc >/dev/null
+  _fill_to_max P162
 
   local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P162"
   _write_override "$ev_root"
 
   # First increment: succeeds because override is present.
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:ddd >/dev/null
-  [ "$(_ledger_field P162 '.attempts')" = "4" ]
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:fff >/dev/null
+  [ "$(_ledger_field P162 '.attempts')" = "6" ]
 
   # Second increment: should fail because the override was consumed.
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:eee
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:ggg
   [ "$status" -ne 0 ]
   [[ "$output" == *"budget exhausted"* ]]
 
-  # Proof: attempts remains 4 (unchanged by the rejected attempt).
-  [ "$(_ledger_field P162 '.attempts')" = "4" ]
-  [ "$(_ledger_field P162 '.attempts_log | length')" = "4" ]
+  # Proof: attempts remains 6 (unchanged by the rejected attempt).
+  [ "$(_ledger_field P162 '.attempts')" = "6" ]
+  [ "$(_ledger_field P162 '.attempts_log | length')" = "6" ]
 }
 
 @test "PM-override: without an override artifact, increment at max still rejects (regression)" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P163
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:ccc >/dev/null
-  [ "$(_ledger_field P163 '.attempts')" = "3" ]
+  _fill_to_max P163
+  [ "$(_ledger_field P163 '.attempts')" = "5" ]
 
   # Do NOT write an override — budget should remain exhausted.
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:ddd
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:fff
   [ "$status" -ne 0 ]
   [[ "$output" == *"budget exhausted"* ]]
 
   # Proof: ledger unchanged.
-  [ "$(_ledger_field P163 '.attempts')" = "3" ]
-  [ "$(_ledger_field P163 '.attempts_log | length')" = "3" ]
+  [ "$(_ledger_field P163 '.attempts')" = "5" ]
+  [ "$(_ledger_field P163 '.attempts_log | length')" = "5" ]
 }
 
 @test "PM-override: a too-short pm_ref (< 20 chars) is rejected" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P164
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:ccc >/dev/null
+  _fill_to_max P164
 
   local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P164"
   # Write an override with a pm_ref that is too short (19 chars).
   _write_override "$ev_root" "too-short-ref-1234"
 
   # Attempt to increment with the invalid override — should be rejected.
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:ddd
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:fff
   [ "$status" -ne 0 ]
   [[ "$output" == *"budget exhausted"* ]]
 
   # Proof: ledger unchanged, override untouched (not consumed).
-  [ "$(_ledger_field P164 '.attempts')" = "3" ]
+  [ "$(_ledger_field P164 '.attempts')" = "5" ]
   local ev_root_abs; ev_root_abs="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P164"
   [ -f "${ev_root_abs}/cp1-pm-escalation-override.json" ]
 }
@@ -521,17 +508,15 @@ _write_override() {
   # check-budget (a genuinely separate, later call) reads it and reports
   # "available", not "exhausted".
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P165
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:ccc >/dev/null
+  _fill_to_max P165
 
   local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P165"
   _write_override "$ev_root"
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:ddd >/dev/null
-  [ "$(_ledger_field P165 '.attempts')" = "4" ]
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:fff >/dev/null
+  [ "$(_ledger_field P165 '.attempts')" = "6" ]
 
   # Proof 1: the ledger itself now records pm_override.present == true for
-  # this specific (4th) attempt.
+  # this specific (6th) attempt.
   [ "$(_ledger_field P165 '.pm_override.present')" = "true" ]
   [ -n "$(_ledger_field P165 '.pm_override.ref')" ]
 
@@ -550,16 +535,14 @@ _write_override() {
   # Once past max, EVERY further new-hash increment (there is no "normal,
   # non-override" path once attempts >= max — the exhaustion check fires
   # unconditionally) requires its own fresh, single-use override claim.
-  # This proves a 5th attempt does NOT ride on the 4th's already-spent
+  # This proves a 7th attempt does NOT ride on the 6th's already-spent
   # authorization — it needs, and gets, a genuinely SECOND PM decision.
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P166
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:ccc >/dev/null
+  _fill_to_max P166
 
   local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P166"
   _write_override "$ev_root"
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:ddd >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:fff >/dev/null
   [ "$(_ledger_field P166 '.pm_override.present')" = "true" ]
 
   # A fresh override authorizes a 5th attempt too (each override is
@@ -570,8 +553,8 @@ _write_override() {
   # back-to-back claims — irrelevant to what THIS test is proving.
   sleep 1
   _write_override "$ev_root"
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:eee >/dev/null
-  [ "$(_ledger_field P166 '.attempts')" = "5" ]
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:ggg >/dev/null
+  [ "$(_ledger_field P166 '.attempts')" = "7" ]
   [ "$(_ledger_field P166 '.pm_override.present')" = "true" ]
   [ "$(_ledger_field P166 '.pm_override.ref')" != "null" ]
 }
@@ -640,7 +623,7 @@ _write_override() {
 
 @test "8th DONE-review audit fix: a FRACTIONAL max is rejected" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P211
-  yq -i '.max = 3.5' "$(_ledger_file P211)"
+  yq -i '.max = 5.5' "$(_ledger_file P211)"
   run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P211
   [ "$status" -ne 0 ]
 }
@@ -736,4 +719,106 @@ _write_override() {
   [ "$status" -ne 0 ]
   # Fail-closed means untouched, not consumed.
   [ -f "$ev_root/cp1-pm-escalation-override.json" ]
+}
+
+# ─── P073 Step 1: budget raised 3 -> 5, with a read-only legacy migration ──
+# The budget constant moved from 3 to 5 (1 initial Codex review + 4 rechecks).
+# A ledger written under the old budget must NOT be treated as tampered, must
+# report its budget against the NEW value without ever being written by a
+# read-only consumer, and must be re-stamped only by the next genuine write.
+
+@test "P073: a legacy ledger (max:3, attempts:2) is legacy-valid and reports 3 remaining against the new budget of 5" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P230
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P230 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P230 sha256:bbb >/dev/null
+  yq -i '.max = 3' "$(_ledger_file P230)"
+
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P230
+  [ "$status" -eq 0 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "available" ]]
+  [[ "$(echo "$output" | jq -r '.max')" == "5" ]]
+  [[ "$(echo "$output" | jq -r '.remaining')" == "3" ]]
+}
+
+@test "P073: check-budget on a legacy ledger is READ-ONLY — two consecutive reads are byte-identical and the file is untouched" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P231
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P231 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P231 sha256:bbb >/dev/null
+  yq -i '.max = 3' "$(_ledger_file P231)"
+  local before_sha; before_sha="$(sha256sum "$(_ledger_file P231)" | awk '{print $1}')"
+
+  local read1 read2
+  read1="$(bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P231)"
+  read2="$(bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P231)"
+  [ "$read1" = "$read2" ]
+
+  # Proof the read really did not migrate: the ledger bytes are unchanged.
+  local after_sha; after_sha="$(sha256sum "$(_ledger_file P231)" | awk '{print $1}')"
+  [ "$before_sha" = "$after_sha" ]
+  [ "$(_ledger_field P231 '.max')" = "3" ]
+}
+
+@test "P073: the next genuine increment re-stamps a legacy ledger to max:5 with migrated_from:3" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P232
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P232 sha256:aaa >/dev/null
+  yq -i '.max = 3' "$(_ledger_file P232)"
+
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P232 sha256:bbb >/dev/null
+  [ "$(_ledger_field P232 '.max')" = "5" ]
+  [ "$(_ledger_field P232 '.migrated_from')" = "3" ]
+  [ "$(_ledger_field P232 '.attempts')" = "2" ]
+}
+
+@test "P073: an in-flight ledger exhausted under the OLD budget (max:3, attempts:3) gains the 2 extra sessions" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P233
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P233 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P233 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P233 sha256:ccc >/dev/null
+  yq -i '.max = 3' "$(_ledger_file P233)"
+
+  # Under the old budget this was exhausted; under the new one it has 2 left,
+  # with NO override artifact involved (the intended P073 loosening).
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P233
+  [ "$status" -eq 0 ]
+  [[ "$(echo "$output" | jq -r '.remaining')" == "2" ]]
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P233 sha256:ddd
+  [ "$status" -eq 0 ]
+  [ "$(_ledger_field P233 '.max')" = "5" ]
+}
+
+@test "P073: a legacy max with an impossible attempts count (max:3, attempts:4) is still rejected as tampered" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P234
+  local h
+  for h in aaa bbb ccc ddd; do
+    bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P234 "sha256:$h" >/dev/null
+  done
+  yq -i '.max = 3' "$(_ledger_file P234)"
+
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P234
+  [ "$status" -ne 0 ]
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P234
+  [ "$status" -eq 1 ]
+}
+
+@test "P073: a FAILED re-stamp write (read-only ledger dir) fails the increment and leaves the ledger bytes and reported budget unchanged" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P235
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P235 sha256:aaa >/dev/null
+  yq -i '.max = 3' "$(_ledger_file P235)"
+  local ledger_dir; ledger_dir="$(dirname "$(_ledger_file P235)")"
+  local before_sha budget_before
+  before_sha="$(sha256sum "$(_ledger_file P235)" | awk '{print $1}')"
+  budget_before="$(bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P235)"
+
+  # _write_ledger_json writes a sibling temp file then renames it, so a
+  # read-only DIRECTORY is what actually blocks the write.
+  chmod a-w "$ledger_dir"
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P235 sha256:bbb
+  local rc="$status"
+  chmod u+w "$ledger_dir"
+  [ "$rc" -ne 0 ]
+
+  # Bytes untouched, and a second read reports exactly the same budget —
+  # the legacy-tolerance arithmetic is idempotent across a failed migration.
+  [ "$(sha256sum "$(_ledger_file P235)" | awk '{print $1}')" = "$before_sha" ]
+  [ "$(bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P235)" = "$budget_before" ]
 }
