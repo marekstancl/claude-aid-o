@@ -283,6 +283,241 @@ _pfsm_check_clean_worktree() {
   return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PM FORCE BACKDOOR (P073 Step 7)
+#
+# WHY: aid-plan-fsm.sh hard-rejects `--force` on every subcommand, so a
+# defective bookkeeping path could strand the PM with no supported way to
+# finish a plan (the P082 stranding). aid-fsm.sh already implements an audited
+# force with a three-record pattern; this ports that EXACT pattern to the plan
+# FSM with one added field rather than inventing a fourth persistence
+# mechanism.
+#
+# THREE RECORDS PER FORCE (all of them, or the force does not happen):
+#   1. a `plan_force_override` timeline event in the plan-final run's timeline
+#      (a silent no-op when no attempt exists yet — matching aid-fsm.sh);
+#   2. an append to the cross-plan `.aid-o/work/audit-log.jsonl` (best-effort,
+#      matching fsm_emit_audit_log's own `|| true` contract, because the
+#      waiver artifact below is the authoritative record);
+#   3. a HEAD-bound protocol-v2 waiver artifact the C4 aggregator surfaces in
+#      `waivers_applied[]`. This one is FAIL-CLOSED: if it cannot be written,
+#      the force itself fails and state is left unchanged — a silent bypass is
+#      worse than a blocked command.
+#
+# WHAT A FORCE RECEIPT IS NOT: it is a record of what happened, never a
+# consumable authorization. The consumable-grant concept exists only for the
+# C0/C3 PM-override artifacts, which are claimed atomically and single-use.
+#
+# FORCEABLE vs HARD: every precondition a public command runs is classified in
+# CODE (see _pfsm_precondition), not in prose. `hard` is reserved for physical
+# git impossibilities — an unresolvable merge state, a missing branch or
+# commit object, an unreadable repository. Force can never bypass those,
+# because there is nothing on the other side of them to complete.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Set by _pfsm_precondition when a forceable check is bypassed; consumed and
+# cleared by _pfsm_handle_force. Comma-separated check names.
+_PFSM_BYPASSED=""
+# Set to 1 by a command's argument loop when --force was passed.
+_PFSM_FORCE=0
+# The --reason value for the force (>= 20 chars, validated at use).
+_PFSM_FORCE_REASON=""
+
+# ---------------------------------------------------------------------------
+# _pfsm_force_evidence_dir <root> <plan_id>
+#   Where the waiver artifact goes. The plan-final run's evidence dir when the
+#   manifest records one (that is where the C4 aggregator scans), else a
+#   fallback the freeze allocator later sweeps into the first real attempt dir
+#   — see _pfsm_finalize_freeze, so a pre-attempt force receipt is never lost.
+# ---------------------------------------------------------------------------
+_pfsm_force_evidence_dir() {
+  local root="$1" plan_id="$2" rel=""
+  rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || rel=""
+  if [[ -n "$rel" && "$rel" != "null" ]]; then
+    printf '%s/%s' "$root" "$rel"
+    return 0
+  fi
+  printf '%s/.aid-o/work/plan-final/%s' "$root" "$plan_id"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_precondition <name> <forceable|hard> <check-fn> [args...]
+#
+# Runs <check-fn>. On success, returns 0. On failure it ALWAYS lets the check
+# print its own recovery message first (the normal path is never hidden behind
+# the force), and then:
+#   - `hard`, or force not active  -> returns 1; the caller refuses as before.
+#   - `forceable` and force active -> records <name> in _PFSM_BYPASSED, prints
+#     that the bypass is being recorded, and returns 0 so the command
+#     continues.
+# A `hard` failure under --force additionally says that force cannot bypass
+# it, so the operator is not left guessing.
+# ---------------------------------------------------------------------------
+_pfsm_precondition() {
+  local name="$1" class="$2"; shift 2
+  if "$@"; then
+    return 0
+  fi
+  case "$class" in
+    forceable)
+      if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+        _PFSM_BYPASSED="${_PFSM_BYPASSED:+${_PFSM_BYPASSED},}${name}"
+        echo "FORCE: bypassing precondition '${name}' — recorded in the force receipt." >&2
+        return 0
+      fi
+      return 1
+      ;;
+    hard)
+      if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+        echo "FORCE CANNOT BYPASS '${name}': it is a physical repository state, not a bookkeeping check — there is nothing on the other side of it to complete. Repair the repository (or use plan-rollback) and retry." >&2
+      fi
+      return 1
+      ;;
+    *)
+      echo "INTERNAL: _pfsm_precondition called with unknown class '${class}' for '${name}' — refusing (fail closed)." >&2
+      return 1
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_handle_force <command> <plan_id> <root> [from_state] [to_state]
+#
+# Writes the three records for the bypasses accumulated in _PFSM_BYPASSED.
+# Returns 0 when the force is recorded, 1 when it must not proceed.
+#
+# A force whose preconditions ALL passed is a no-op flag: nothing was
+# bypassed, so no waiver artifact is written (a receipt for nothing would be
+# noise in waivers_applied[]); the timeline gets a `force_unused` note.
+# ---------------------------------------------------------------------------
+_pfsm_handle_force() {
+  local command="$1" plan_id="$2" root="$3" from_state="${4:-}" to_state="${5:-}"
+  local reason="$_PFSM_FORCE_REASON"
+  local bypassed="$_PFSM_BYPASSED"
+  local operator="${USER:-unknown}"
+  local now; now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  local head_sha; head_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)"
+
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: --force requires --reason with at least 20 characters (got ${#reason}). The force receipt is a forensic record; an empty or throwaway reason defeats its whole purpose." >&2
+    return 1
+  fi
+
+  local evidence_dir; evidence_dir="$(_pfsm_force_evidence_dir "$root" "$plan_id")"
+  local timeline="${evidence_dir}/timeline.jsonl"
+
+  # Record 1 — timeline. Written only when the run dir already exists, exactly
+  # like aid-fsm.sh's log_event no-op contract.
+  if [[ -d "$evidence_dir" ]]; then
+    local ev
+    ev="$(jq -nc --arg ts "$now" --arg ev "plan_force_override" --arg cmd "$command" \
+      --arg plan "$plan_id" --arg reason "$reason" --arg op "$operator" \
+      --arg from "$from_state" --arg to "$to_state" --arg by "$bypassed" \
+      '{ts:$ts, event:$ev, command:$cmd, plan_id:$plan, from:$from, to:$to,
+        reason:$reason, operator:$op,
+        bypassed_preconditions: (if $by == "" then [] else ($by | split(",")) end)}' 2>/dev/null)" || ev=""
+    [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "$timeline" 2>/dev/null || true
+  fi
+
+  # A force that bypassed nothing writes no waiver — see the header note.
+  if [[ -z "$bypassed" ]]; then
+    echo "FORCE: every precondition passed — --force bypassed nothing and no waiver was written." >&2
+    return 0
+  fi
+
+  # Record 2 — cross-plan audit log (best-effort by contract).
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "$plan_id" --run-id "${command}" \
+    --event "plan_force_override" \
+    --command "$command" --plan-id "$plan_id" \
+    --reason "$reason" --operator "$operator" \
+    --from "$from_state" --to "$to_state" \
+    --bypassed-preconditions-array "$bypassed" \
+    --output "${root}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
+
+  # Record 3 — the HEAD-bound waiver artifact. FAIL-CLOSED.
+  command -v jq >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: cannot write force receipt — jq is unavailable; refusing a silent bypass." >&2
+    return 1
+  }
+  mkdir -p "$evidence_dir" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot write force receipt — ${evidence_dir} is not creatable; refusing a silent bypass." >&2
+    return 1
+  }
+
+  local candidate_sha=""
+  candidate_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate_sha=""
+  [[ "$candidate_sha" == "null" ]] && candidate_sha=""
+
+  local fname_ts; fname_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
+  local safe_cmd; safe_cmd="$(printf '%s' "$command" | tr -c 'A-Za-z0-9._-' '_')"
+  local wfile="${evidence_dir}/waiver-plan-${safe_cmd}-${fname_ts}.json"
+
+  local payload hash json
+  payload="$(jq -nc --arg wc "plan-fsm:${command}" --arg rs "$reason" \
+    --arg wb "$operator" --arg wa "$now" \
+    '{waived_check:$wc, reason:$rs, waived_by:$wb, waived_at:$wa, scope:"run", visible:true}')" || payload=""
+  [[ -n "$payload" ]] || {
+    echo "PRECONDITION FAIL: cannot render force receipt payload — refusing a silent bypass." >&2
+    return 1
+  }
+  hash="$(printf '%s' "$payload" | jq -Sc . 2>/dev/null | sha256sum 2>/dev/null | cut -c1-64)" \
+    || hash="0000000000000000000000000000000000000000000000000000000000000000"
+
+  local project_id; project_id="$(basename "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || echo "$root")")"
+  json="$(jq -n \
+    --arg created_at "$now" \
+    --arg project_id "${project_id:-unknown}" \
+    --arg plan_id "$plan_id" \
+    --arg run_id "$command" \
+    --arg head_sha "$head_sha" \
+    --arg candidate_sha "$candidate_sha" \
+    --arg subject_hash "sha256:${hash}" \
+    --arg by "$bypassed" \
+    --argjson waiver "$payload" \
+    '{
+      schema_version: "aid-2.0",
+      artifact_type: "waiver",
+      producer: "aid-plan-fsm.sh@force-override",
+      created_at: $created_at,
+      control_protocol: "aid-2.0",
+      identity: {project_id: $project_id, epic_id: $plan_id, run_id: $run_id, step_id: null},
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "blocked",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-plan-fsm.sh"},
+      waiver: $waiver,
+      forced_override: true,
+      candidate_sha: (if $candidate_sha == "" then null else $candidate_sha end),
+      bypassed_preconditions: ($by | split(","))
+    }')" || json=""
+  [[ -n "$json" ]] || {
+    echo "PRECONDITION FAIL: cannot render force receipt — refusing a silent bypass." >&2
+    return 1
+  }
+  local tmp="${wfile}.tmp.$$"
+  if ! printf '%s\n' "$json" > "$tmp" 2>/dev/null || ! mv "$tmp" "$wfile" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "PRECONDITION FAIL: cannot write force receipt at ${wfile} — refusing a silent bypass." >&2
+    return 1
+  fi
+
+  echo "FORCE: recorded at ${wfile} — bypassed: ${bypassed}" >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_parse_force_flag <flag> <value-getter...>
+#   Shared shape for the eight public commands' argument loops. Kept as a
+#   comment rather than a function because each loop owns its own `shift`
+#   discipline:
+#       --force)  _PFSM_FORCE=1; shift ;;
+#       --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+#   plan-rollback is the ONE exception: its `--reason` already carries the
+#   rollback business reason, so its force path uses `--force-reason`.
+# ---------------------------------------------------------------------------
+
 # _pfsm_preflight <project_root> — the shared pair of checks both commands
 # run before creating anything.
 _pfsm_preflight() {
@@ -2248,6 +2483,23 @@ _pfsm_finalize_freeze() {
     echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2
     return 1
   }
+
+  # P073 Step 7: sweep any force receipt written BEFORE this plan had an
+  # attempt dir into the newly allocated one. The C4 aggregator scans
+  # `waiver-*.json` only under the CURRENT attempt's evidence dir, so a
+  # pre-attempt force (e.g. a forced plan-start) would otherwise be invisible
+  # in waivers_applied[]. Moved, never copied, so a receipt is never
+  # double-counted across two attempts.
+  local _force_fallback="${root}/.aid-o/work/plan-final/${plan_id}"
+  if [[ -d "$_force_fallback" ]]; then
+    local _fw
+    for _fw in "$_force_fallback"/waiver-plan-*.json; do
+      [[ -e "$_fw" ]] || continue
+      mv "$_fw" "${run_dir_abs}/" 2>/dev/null \
+        && echo "plan-finalize --stage freeze: swept pre-attempt force receipt $(basename "$_fw") into ${run_dir_rel}" >&2
+    done
+    rmdir "$_force_fallback" 2>/dev/null || true
+  fi
 
   # P068 Step 5: `prepare-plan` runs BEFORE this stage, so it cannot write into
   # a run directory that does not exist yet — it records the resolved version
