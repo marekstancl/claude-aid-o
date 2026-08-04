@@ -117,7 +117,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.69.0** (current) — fail-closed Files/Scope path parsing: the shared cleaner (`lib/aid-scoping.sh`) now rejects ambiguous multi-path entries (comma/conjunction-separated) instead of silently narrowing `allowed_paths` to the first path, enforced consistently across the per-step scoping block, the legacy Scope fallback, the generation-time preflight, and the D5 contract gate.
+- **v2.70.0** (current) — test-portfolio decision quality: a full audit now produces a schema-bound decision artifact, parallel safety has one content-bound authority read by all three consumers, and an execution ledger catches a run unit dispatched by two gates.
+- **v2.69.0** — fail-closed Files/Scope path parsing: the shared cleaner (`lib/aid-scoping.sh`) now rejects ambiguous multi-path entries (comma/conjunction-separated) instead of silently narrowing `allowed_paths` to the first path, enforced consistently across the per-step scoping block, the legacy Scope fallback, the generation-time preflight, and the D5 contract gate.
 - **v2.68.0** — real, explicit-allowlist-based parallel bats execution for this repo's own `gate:bats_all` (replacing the quarantine stub), a separate `gate:bats_boundary` for the 2 too-expensive-to-pool files, an idempotent self-host execution.yaml migration + verify mechanism, and `plan_diff`/`shell_pipeline_smoke` gate fixes (P071).
 - **v2.67.0** — opt-in test scheduler with staged rollout, real `aid-run-gates.sh` dispatch + escalation, a `bats_all` remediation-evidence collector + genuine E2E full-path proof, and a PM quarantine-decision-record mechanism (P069). This repo's own `bats_all` real measurement campaign remains deferred.
 
