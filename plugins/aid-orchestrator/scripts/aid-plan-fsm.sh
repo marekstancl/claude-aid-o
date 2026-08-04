@@ -543,7 +543,25 @@ _pfsm_handle_force() {
     --bypassed-preconditions-array "$bypassed" \
     --output "${root}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
 
+  # CONSUME. The accumulated bypasses belong to the receipt just minted, so a
+  # command that calls this after each precondition group never mints a second
+  # receipt for the same ones.
+  _PFSM_BYPASSED=""
+  _PFSM_BYPASS_PROVENANCE=""
+
   echo "FORCE: recorded at ${wfile} — bypassed: ${bypassed}" >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_commit_force <command> <plan_id> <root> [from] [to]
+#   Call after a command's preconditions and BEFORE its first mutation. A
+#   no-op when --force was not passed. Refuses the command (returns 1) when
+#   the receipt cannot be minted, so a bypass is never silently taken.
+# ---------------------------------------------------------------------------
+_pfsm_commit_force() {
+  [[ "$_PFSM_FORCE" -eq 1 ]] || return 0
+  _pfsm_handle_force "$@" || return 1
   return 0
 }
 
@@ -714,6 +732,20 @@ cmd_plan_start() {
       --mode) mode="${2:-}"; shift 2 ;;
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-start: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-start: unexpected argument: $1" >&2; exit 2; fi
@@ -746,7 +778,11 @@ cmd_plan_start() {
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
 
-  _pfsm_preflight "$invoke_root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree_or_detached_head" forceable _pfsm_preflight "$invoke_root" || exit 1
+  _pfsm_commit_force "plan-start" "$plan_id" "$project_root" || exit 1
 
   # Edge Case: a CLOSED plan is not reopened.
   local cur_state="" src=0
@@ -927,6 +963,20 @@ cmd_epic_start() {
       --run-id) run_id_opt="${2:-}"; shift 2 ;;
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: epic-start: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -954,7 +1004,11 @@ cmd_epic_start() {
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
 
-  _pfsm_preflight "$invoke_root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree_or_detached_head" forceable _pfsm_preflight "$invoke_root" || exit 1
+  _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
@@ -985,7 +1039,11 @@ cmd_epic_start() {
 
   if [[ "$branch_exists" -eq 0 ]]; then
     if [[ -n "$entry_json" ]]; then
-      _pfsm_verify_epic_lineage "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
+      # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+      # bookkeeping obstacle, not a physical impossibility, so an audited
+      # --force may pass it. The check still prints its own recovery first.
+      _pfsm_precondition "epic_lineage" forceable _pfsm_verify_epic_lineage "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
+      _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
       exit 0
     fi
 
@@ -1330,6 +1388,13 @@ cmd_epic_complete() {
       --op-id)
         _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
+      # P073 Step 8: this command already owns `--reason` for its own business
+      # meaning, so the force path uses the unambiguous `--force-reason`.
+      # Passing --force without it dies naming both flags.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason)
+        _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
       --*) echo "ERROR: epic-complete: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -1710,6 +1775,20 @@ cmd_epic_merge_to_plan() {
       --op-id)
         _pfsm_require_optval "epic-merge-to-plan" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: epic-merge-to-plan: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -1741,7 +1820,11 @@ cmd_epic_merge_to_plan() {
   # happens to stand (a linked worktree never holds `plan/<plan_id>` here).
   _pfsm_check_detached_head "$project_root" || exit 1
   _pfsm_check_no_merge_in_progress "$project_root" || exit 1
-  _pfsm_check_clean_worktree "$project_root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$project_root" || exit 1
+  _pfsm_commit_force "epic-merge-to-plan" "$plan_id" "$project_root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
@@ -4480,6 +4563,14 @@ cmd_plan_finalize() {
       --frozen-at)
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         frozen_at="$2"; shift 2 ;;
+      # P073 Step 8 — see the note on plan-start's loop.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
+      --reason)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
       --project-root)
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         project_root_opt="$2"; shift 2 ;;
@@ -4533,7 +4624,11 @@ cmd_plan_finalize() {
   # changed, and `_pfsm_finalize_c4` turns that into an invalidation rather than a
   # "commit or stash first" that would hide it.
   if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" ]]; then
-    _pfsm_check_clean_worktree "$project_root" || exit 1
+    # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+    # bookkeeping obstacle, not a physical impossibility, so an audited
+    # --force may pass it. The check still prints its own recovery first.
+    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$project_root" || exit 1
+    _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || exit 1
   fi
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
@@ -4729,6 +4824,20 @@ cmd_plan_merge_to_main() {
         _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
       --push) do_push=1; shift ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-merge-to-main: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -4753,7 +4862,11 @@ cmd_plan_merge_to_main() {
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
 
   _pfsm_check_no_merge_in_progress "$root" || exit 1
-  _pfsm_check_clean_worktree "$root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$root" || exit 1
+  _pfsm_commit_force "plan-merge-to-main" "$plan_id" "$root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
@@ -5339,6 +5452,20 @@ cmd_plan_close() {
       # It relaxes the delivery-report EXISTENCE requirement only; every other
       # check still runs, exactly as the legacy path already treats this toggle.
       --skip-delivery-report) skip_delivery_report=1; shift ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -6962,6 +7089,13 @@ cmd_plan_rollback() {
                       reason="$2"; shift 2 ;;
       --op-id)        _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
                       op_id_opt="$2"; shift 2 ;;
+      # P073 Step 8: this command already owns `--reason` for its own business
+      # meaning, so the force path uses the unambiguous `--force-reason`.
+      # Passing --force without it dies naming both flags.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason)
+        _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
       --*) echo "ERROR: plan-rollback: unknown flag: $1" >&2; exit 2 ;;
       *) if [[ -z "$plan_id" ]]; then plan_id="$1"
          else echo "ERROR: plan-rollback: unexpected argument: $1" >&2; exit 2; fi
