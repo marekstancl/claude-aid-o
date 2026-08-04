@@ -291,6 +291,14 @@ _release_update_files() {
 TODAY=$(date +%Y-%m-%d)
 UPDATED=()
 
+# P073 EPIC 1: record which paths were ALREADY dirty before this run touched
+# anything, so a later refusal can roll back exactly what IT changed and never
+# clobber an operator's pre-existing edit. See _release_rollback_updated.
+_RELEASE_PREDIRTY=""
+if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  _RELEASE_PREDIRTY="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | sed 's/^...//')"
+fi
+
 # IMP-093 fix: CHANGELOG header logic depends on whether it's pre-written
 # for the upcoming release (header == NEW_VERSION) or stale at the previously
 # released version (header == CURRENT). Skip rename in either case.
@@ -546,6 +554,36 @@ _release_validate_changelog_entry() {
   return 0
 }
 
+# _release_rollback_updated — undo this run's version-file edits.
+#
+# P073 EPIC 1 (whole-EPIC review finding). Step 3's CHANGELOG gate refuses
+# AFTER _release_update_files has already rewritten plugin.json/marketplace.json
+# and prepended the CHANGELOG section. Because this script derives CURRENT from
+# those very files, the refusal used to leave a half-applied bump: the operator
+# filled in the 2.0.1 entry the message asked for, reran, and the tool released
+# 2.0.2 — silently orphaning the entry they had just written. Measured on a
+# fixture before this rollback existed.
+#
+# Only paths this run made dirty are restored: anything already dirty when the
+# run started is left exactly as the operator had it.
+_release_rollback_updated() {
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || {
+    echo "WARNING: not a git repository — the version-file edits from this run were left in place and must be reverted by hand before rerunning" >&2
+    return 0
+  }
+  local f rel restored=""
+  for f in "${UPDATED[@]:-}"; do
+    [[ -n "$f" ]] || continue
+    rel="$(realpath -m --relative-to="$REPO_ROOT" -- "$f" 2>/dev/null)" || rel="$f"
+    # Already dirty before this run → not ours to revert.
+    grep -qxF -- "$rel" <<<"$_RELEASE_PREDIRTY" && continue
+    git -C "$REPO_ROOT" checkout -- "$rel" 2>/dev/null && restored+="${rel} "
+  done
+  if [[ -n "$restored" ]]; then
+    echo "Rolled back this run's version-file edits so a rerun bumps from the same base: ${restored}" >&2
+  fi
+}
+
 # _release_validate_updated_changelogs <version> — runs the check over every
 # CHANGELOG.md in the current UPDATED[] set. Returns 1 if ANY is incomplete.
 _release_validate_updated_changelogs() {
@@ -571,7 +609,8 @@ cd "$REPO_ROOT"
 # still the generated placeholder. Exits BEFORE the commit, so the edits stay
 # in the worktree for correction.
 if ! _release_validate_updated_changelogs "$NEW_VERSION"; then
-  echo "No release commit and no tag were created — amend the entry and rerun." >&2
+  _release_rollback_updated
+  echo "No release commit and no tag were created. If the generated placeholder section was rolled back with the rest of this run's edits, add a '## [${NEW_VERSION}]' section with a real user-facing description to your CHANGELOG and rerun — the rerun will bump from the same base." >&2
   exit 1
 fi
 
@@ -790,7 +829,8 @@ cmd_prepare_plan() {
   # user-facing description. Exits before any `git add`, leaving the worktree
   # uncommitted for correction — matching the precondition style below.
   if ! _release_validate_updated_changelogs "$NEW_VERSION"; then
-    echo "PRECONDITION FAIL: prepare-plan will not freeze a candidate whose CHANGELOG entry is incomplete — nothing was staged or committed." >&2
+    _release_rollback_updated
+    echo "PRECONDITION FAIL: prepare-plan will not freeze a candidate whose CHANGELOG entry is incomplete — nothing was staged or committed. Add a '## [${NEW_VERSION}]' section with a real user-facing description and rerun; the rerun bumps from the same base." >&2
     exit 1
   fi
 

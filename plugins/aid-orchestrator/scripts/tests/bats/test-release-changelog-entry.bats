@@ -358,3 +358,85 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"the section has no content"* ]]
 }
+
+# ─── Whole-EPIC review finding: the refusal must be rerunnable ─────────────
+# Step 3's gate refuses AFTER _release_update_files has already rewritten the
+# version files, and this script derives CURRENT from those very files. The
+# refusal therefore used to leave a half-applied bump: the operator wrote the
+# 2.0.1 entry the message asked for, reran, and the tool released 2.0.2 —
+# silently orphaning the entry they had just written. Measured on a fixture.
+
+# _seed_prepend <released> — a CHANGELOG with a PRE-WRITTEN newer header, which
+# is the only shape that drives update_changelog's placeholder-generating
+# prepend branch (the rename branch reuses real content and never trips the
+# gate).
+_seed_prepend() {
+  _seed "$1" "$(cat <<'EOF'
+# Changelog
+
+Format follows Keep a Changelog.
+
+## [2.2.0] — 2026-09-01
+
+### Added
+- A pre-written entry for a future release.
+
+## [2.0.0] — 2026-07-01
+
+### Added
+- The first real release.
+EOF
+)"
+}
+
+@test "P073 EPIC 1 (review finding): a refused release rolls back its own version-file edits" {
+  _seed_prepend "2.0.0"
+  cd "$TEST_PROJECT_ROOT"
+
+  run bash "$RELEASE" patch
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Rolled back this run's version-file edits"* ]]
+
+  # The version source is back at the base, and the worktree is clean.
+  [ "$(jq -r '.version' plugins/aid-orchestrator/.claude-plugin/plugin.json)" = "2.0.0" ]
+  [ -z "$(git status --porcelain)" ]
+  run grep -c '## \[2.0.1\]' CHANGELOG.md
+  [ "$output" = "0" ]
+}
+
+@test "P073 EPIC 1 (review finding): the rerun after writing the entry releases THAT version, not the next one" {
+  _seed_prepend "2.0.0"
+  cd "$TEST_PROJECT_ROOT"
+
+  run bash "$RELEASE" patch
+  [ "$status" -ne 0 ]
+
+  # The operator does exactly what the message asks: authors the 2.0.1 section.
+  python3 - <<'PY'
+import io
+s = io.open('CHANGELOG.md', encoding='utf-8').read()
+s = s.replace("Format follows Keep a Changelog.\n",
+              "Format follows Keep a Changelog.\n\n## [2.0.1] — 2026-08-05\n\n### Fixed\n\n- **A real entry** — written by the operator after the refusal.\n")
+io.open('CHANGELOG.md', 'w', encoding='utf-8').write(s)
+PY
+  run bash "$RELEASE" patch
+  [ "$status" -eq 0 ]
+  # 2.0.1 was released — NOT 2.0.2, and the operator's entry was not orphaned.
+  [ "$(jq -r '.version' plugins/aid-orchestrator/.claude-plugin/plugin.json)" = "2.0.1" ]
+  [ -n "$(git tag -l 'v2.0.1')" ]
+  [ -z "$(git tag -l 'v2.0.2')" ]
+  run grep -c 'written by the operator after the refusal' CHANGELOG.md
+  [ "$output" = "1" ]
+}
+
+@test "P073 EPIC 1 (review finding): a file the operator had ALREADY edited is never rolled back" {
+  _seed_prepend "2.0.0"
+  cd "$TEST_PROJECT_ROOT"
+  printf '{"version": "2.0.0", "operatorEdit": true}\n' > plugins/aid-orchestrator/.claude-plugin/plugin.json
+
+  run bash "$RELEASE" patch
+  [ "$status" -ne 0 ]
+  # The pre-existing edit survives; only paths this run made dirty are reverted.
+  run grep -c 'operatorEdit' plugins/aid-orchestrator/.claude-plugin/plugin.json
+  [ "$output" = "1" ]
+}

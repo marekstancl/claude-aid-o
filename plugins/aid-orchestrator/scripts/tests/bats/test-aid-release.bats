@@ -63,23 +63,21 @@ EOF
   seed_release_fixture "2.19.0" "2.20.0"
   cd "$TEST_PROJECT_ROOT"
   run bash "$RELEASE" patch
-  # P073 Step 3 interaction: the prepend path writes the generated placeholder
-  # as the new section's only bullet, and the release is now REFUSED on exactly
-  # that (an unfilled entry must never reach a commit or a tag). The prepend
-  # itself — what this test is about — has already happened in the worktree,
-  # so every structural assertion below is unchanged.
+  # P073 interaction: the prepend path writes the generated placeholder as the
+  # new section's only bullet, so the release is now REFUSED on exactly that
+  # (an unfilled entry must never reach a commit or a tag) and the whole run's
+  # edits are rolled back so a rerun bumps from the same base. What this test
+  # is about — that the prepend branch ran and did NOT rename the pre-written
+  # entry — is asserted from the script's own report plus the untouched
+  # pre-written section.
   [ "$status" -ne 0 ]
   [[ "$output" == *"replace the placeholder"* ]]
-  # New entry [2.19.1] prepended; pre-written [2.20.0] preserved below.
-  grep -q '^## \[2.19.1\] — ' "$TEST_PROJECT_ROOT/CHANGELOG.md"
+  [[ "$output" == *"prepended new 2.19.1 entry"* ]]
+  [[ "$output" == *"Rolled back this run's version-file edits"* ]]
+  # The pre-written [2.20.0] entry was never renamed, and no 2.19.1 section
+  # was left behind by the rolled-back run.
   grep -q '^## \[2.20.0\] — ' "$TEST_PROJECT_ROOT/CHANGELOG.md"
-  # Verify ordering: 2.19.1 line number < 2.20.0 line number
-  local line_2191 line_2200
-  line_2191=$(grep -n '^## \[2.19.1\]' "$TEST_PROJECT_ROOT/CHANGELOG.md" | head -1 | cut -d: -f1)
-  line_2200=$(grep -n '^## \[2.20.0\]' "$TEST_PROJECT_ROOT/CHANGELOG.md" | head -1 | cut -d: -f1)
-  [ "$line_2191" -lt "$line_2200" ]
-  # Note line in script output
-  [[ "$output" == *"pre-written"* ]] || [[ "$output" == *"prepended"* ]]
+  ! grep -q '^## \[2.19.1\]' "$TEST_PROJECT_ROOT/CHANGELOG.md"
 }
 
 @test "aid-release: header == new_version (already pre-written for upcoming) → skip rename, no-op" {

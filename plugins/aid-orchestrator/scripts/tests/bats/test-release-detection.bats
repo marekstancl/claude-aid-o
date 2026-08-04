@@ -110,15 +110,14 @@ EOF
 
   cd "$TEST_PROJECT_ROOT"
   run bash "$RELEASE" patch
-  # P073 Step 3 interaction: the prepended section's only bullet is the
-  # generated placeholder, so the release is refused at the CHANGELOG-entry
-  # check. What THIS test proves is the probe: the prepend branch was reached
-  # and executed instead of the script dying at the header grep.
+  # P073 interaction: the prepended section's only bullet is the generated
+  # placeholder, so the release is refused at the CHANGELOG-entry check and
+  # the run's edits are rolled back. What THIS test proves is the probe — the
+  # prepend branch was REACHED and executed instead of the script dying at the
+  # header grep — which the script's own report shows.
   [ "$status" -ne 0 ]
+  [[ "$output" == *"prepended new 2.70.4 entry"* ]]
   [[ "$output" == *"replace the placeholder"* ]]
-  # The headerless CHANGELOG got a prepended entry rather than aborting.
-  run grep -c '## \[2.70.4\]' "$TEST_PROJECT_ROOT/CHANGELOG.md"
-  [ "$output" -ge 1 ]
 }
 
 # ─── Codex-review findings on the first cut of this step ───────────────────
