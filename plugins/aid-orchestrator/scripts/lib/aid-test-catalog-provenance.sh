@@ -42,12 +42,24 @@ source "${_TCP_LIB_DIR}/aid-test-audit-config.sh"
 
 # aid_test_catalog_provenance_hash <run_unit_id> <catalog> <project_root>
 #
-# SHA-256 over the concatenated contents of the unit's source_paths, in CATALOG
-# ORDER. Order is part of the identity: a multi-file unit whose sources are
-# reordered is a different composition, and a reversion that costs one
-# re-verification is the safe direction to be wrong in.
+# SHA-256 over the unit's DEPENDENCY CLOSURE — its declared source_paths plus
+# every file reached from them through `source`, `.` and `load` — with each
+# file's path and length hashed alongside its bytes.
 #
-# Echoes the digest, or `missing_source` when a declared path is gone.
+# The closure, and not merely the declared paths, because a status bound only
+# to a unit's own file survives its shared helper acquiring a lock: the unit's
+# bytes are unchanged, the hash still matches, the resource digest is never
+# recomputed, and the unit stays in the parallel pool with a hazard nobody
+# looked at. The helper IS part of what was verified, so it is part of what the
+# verification is bound to.
+#
+# Order is part of the identity: declared paths in catalog order first, then
+# the rest of the closure sorted, so the result is deterministic while a
+# reordering of the declared paths still changes it.
+#
+# Echoes the digest, `missing_source` when a path is gone, or
+# `unresolved_closure` when a dependency could not be read — the latter being a
+# closure this cannot claim to have hashed.
 aid_test_catalog_provenance_hash() {
   local unit_id="$1" catalog="$2" project_root="$3"
   local unit paths p abs
@@ -57,6 +69,22 @@ aid_test_catalog_provenance_hash() {
 
   mapfile -t paths < <(jq -r '(.source_paths // [])[]' <<<"$unit")
   [[ "${#paths[@]}" -gt 0 ]] && [[ -n "${paths[0]}" ]] || { echo "missing_source"; return 0; }
+
+  # Extend the declared paths with the rest of the closure.
+  local closure extra
+  closure="$(bash "${_TCP_LIB_DIR}/../aid-test-resource-map.sh" --files-only \
+              --run-unit-id "$unit_id" --catalog "$catalog" --project-root "$project_root" 2>/dev/null || true)"
+  if grep -q '^unresolved:' <<<"$closure" 2>/dev/null; then
+    echo "unresolved_closure"; return 0
+  fi
+  if [[ -n "$closure" ]]; then
+    while IFS= read -r extra; do
+      [[ -z "$extra" ]] && continue
+      local seen=0 known
+      for known in "${paths[@]}"; do [[ "$known" == "$extra" ]] && seen=1; done
+      [[ "$seen" -eq 0 ]] && paths+=("$extra")
+    done < <(printf '%s\n' "$closure" | sort)
+  fi
 
   # Each path contributes its NAME and its LENGTH as well as its bytes. Raw
   # concatenation let a unit swap `[a.bats, helper.bash]` for
@@ -111,9 +139,10 @@ aid_test_catalog_provenance_verify() {
 
   current="$(aid_test_catalog_provenance_hash "$unit_id" "$catalog" "$project_root")"
   case "$current" in
-    missing_source) echo "missing_source" ;;
-    "$recorded")    echo "match" ;;
-    *)              echo "mismatch" ;;
+    missing_source)     echo "missing_source" ;;
+    unresolved_closure) echo "missing_source" ;;
+    "$recorded")        echo "match" ;;
+    *)                  echo "mismatch" ;;
   esac
 }
 
@@ -199,4 +228,63 @@ aid_test_catalog_provenance_refresh() {
     | (.run_units[] | select(.run_unit_id == strenv(TCP_ID)) | .parallel.provenance.verified_at) = strenv(TCP_NOW)
   ' "$catalog" || return 1
   return 0
+}
+
+# ─── The one resolver every consumer uses ───────────────────────────────────
+#
+# aid_test_catalog_effective_status_map <catalog> <project_root> [overlay_json]
+#
+# Echoes {run_unit_id: effective_status} for every unit in the catalog, with the
+# provenance reversion rule applied — and, when a scheduler overlay is supplied,
+# with that overlay applied ON TOP but never ABOVE it.
+#
+# WHY THE PRIORITY IS THAT WAY ROUND
+#   The overlay records a PM-approved promotion, fingerprinted against the
+#   catalog at the time it was approved. Provenance records whether the unit's
+#   content still matches what was verified. If provenance says `unknown` — the
+#   sources moved — then an overlay entry is vouching for content it never saw,
+#   and letting it promote anyway would reintroduce exactly the second
+#   authority this work removed. So provenance is a floor: the overlay can
+#   promote a unit provenance still trusts, and can never rescue one it does
+#   not.
+#
+# Consumers must call THIS rather than reading `.parallel.status`, because a
+# raw read skips both rules and the two consumers that did it disagreed with
+# the lane runner about the same unit.
+aid_test_catalog_effective_status_map() {
+  local catalog="$1" project_root="$2" overlay_json="${3:-}"
+  local catalog_json
+  catalog_json="$(yq -o=json '.' "$catalog" 2>/dev/null)" || { echo '{}'; return 1; }
+
+  # `unknown` needs no work and is already the fail-closed value, so only the
+  # units claiming something stronger are resolved.
+  local claiming
+  claiming="$(jq -r '.run_units[] | select((.parallel.status // "unknown") != "unknown") | .run_unit_id' <<<"$catalog_json")"
+
+  local resolved='{}'
+  if [[ -n "$claiming" ]]; then
+    local uid eff
+    while IFS= read -r uid; do
+      [[ -z "$uid" ]] && continue
+      eff="$(aid_test_catalog_provenance_effective_status "$uid" "$catalog" "$project_root" 2>/dev/null || echo unknown)"
+      resolved="$(jq -c --arg u "$uid" --arg e "$eff" '. + {($u): $e}' <<<"$resolved")"
+    done <<< "$claiming"
+  fi
+
+  jq -c --argjson resolved "$resolved" --argjson ov "${overlay_json:-null}" '
+    [ .run_units[]
+      | .run_unit_id as $uid
+      | ($resolved[$uid] // "unknown") as $prov
+      | ( if $ov == null or ($ov.status // "") != "approved" then $prov
+          else ( ($ov.overlay // [] | map(select(.run_unit_id == $uid)) | .[0]) as $entry
+                 | if $entry == null then $prov
+                   elif $entry.catalog_fingerprint_at_promotion != (.runtime.fingerprint // "") then $prov
+                   # Provenance is a floor. An overlay cannot vouch for content
+                   # it never saw.
+                   elif $prov == "unknown" then "unknown"
+                   else ($entry.promoted_status // $prov)
+                   end )
+          end ) as $eff
+      | {($uid): $eff} ]
+    | add // {}' <<<"$catalog_json"
 }

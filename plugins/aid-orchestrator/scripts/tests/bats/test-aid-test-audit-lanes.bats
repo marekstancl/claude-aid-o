@@ -76,15 +76,30 @@ _map() {
 }
 
 # _pilot <lane_id> <promotion> <run_unit_id>...
+#
+# Produces a receipt the consolidator will actually ACCEPT: a real membership
+# hash over the sorted membership, and one clean repetition per `repeat`. The
+# first version of this helper emitted `promotion: proposed` with an empty
+# `repetitions` array and a zero hash — an artifact the pilot's own schema
+# rejects — and the consolidator promoted a lane from it anyway. Fixtures that
+# take a shortcut production forbids test a path production does not have.
 _pilot() {
   local lane="$1" promo="$2"; shift 2
-  jq -nc --arg l "$lane" --arg p "$promo" --args \
-    '{schema_version:"aid-test-parallel-pilot-v1", lane_id:$l, audit_id:null,
+  local sha; sha="$(printf '%s\n' "$@" | sort | tr '\n' '\0' | sha256sum | cut -d' ' -f1)"
+  local reps='[]'
+  if [[ "$promo" == "proposed" ]]; then
+    reps="$(jq -nc '[{index:1, verdict:"match",
+      serial:{duration_ms:20, exit_code:0, job_state:"terminal_pass", results:[], dirty_paths:[], escaped_paths:[]},
+      parallel:{duration_ms:10, exit_code:0, job_state:"terminal_pass", results:[], dirty_paths:[], escaped_paths:[]}}]')"
+  fi
+  jq -nc --arg l "$lane" --arg p "$promo" --arg sha "$sha" --argjson reps "$reps" \
+    --arg aid "$AUDIT_ID" --args \
+    '{schema_version:"aid-test-parallel-pilot-v1", lane_id:$l, audit_id:$aid,
       target_root:"/tmp/clone", membership:($ARGS.positional | sort),
-      membership_sha256:"0000000000000000000000000000000000000000000000000000000000000000",
+      membership_sha256:$sha,
       workers:2, repeat:1, promotion:$p, reason:"fixture receipt for lane construction",
-      benefit_ms:5000, noise_threshold_ms:2000, failing_repetition:null,
-      repetitions:[], parallelism:{available:true, note:"GNU parallel is present"}}' \
+      benefit_ms:5000, noise_threshold_ms:2000, failing_repetition:(if $p == "refused" then 1 else null end),
+      repetitions:$reps, parallelism:{available:true, note:"GNU parallel is present"}}' \
     -- "$@" > "$PILOTS/$lane.json"
 }
 
@@ -284,4 +299,87 @@ _lane_for() { jq -c --arg u "$1" '[.parallelization.lanes[] | select(.run_unit_i
   [ "$(jq -r '.pass_criteria | length' <<<"$sp")" -ge 1 ]
   [ "$(jq -r '.workers' <<<"$sp")" -ge 2 ]
   [ "$(jq -r '.repeat' <<<"$sp")" -ge 1 ]
+}
+
+# ─── Lane inputs are fail-closed ───────────────────────────────────────────
+#
+# Selecting these by a `schema_version` string match alone let a malformed,
+# foreign or self-contradicting artifact promote a lane.
+
+@test "FAIL-CLOSED: a pilot claiming `proposed` with NO repetitions halts the audit" {
+  # Its own schema rejects this outright, and the consolidator used to promote
+  # a lane from it regardless.
+  _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _map "bats:a" false "temp_path/per-test"
+  _map "bats:b" false "temp_path/per-test"
+  local sha; sha="$(printf '%s\n' "bats:a" "bats:b" | sort | tr '\n' '\0' | sha256sum | cut -d' ' -f1)"
+  jq -nc --arg sha "$sha" --arg aid "$AUDIT_ID" \
+    '{schema_version:"aid-test-parallel-pilot-v1", lane_id:"candidate-pool", audit_id:$aid,
+      target_root:"/tmp/clone", membership:["bats:a","bats:b"], membership_sha256:$sha,
+      workers:2, repeat:1, promotion:"proposed", reason:"a benefit with no evidence at all",
+      benefit_ms:5000, noise_threshold_ms:2000, failing_repetition:null, repetitions:[],
+      parallelism:{available:true, note:"GNU parallel is present"}}' > "$PILOTS/candidate-pool.json"
+
+  run _run
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "FAIL-CLOSED: a pilot whose membership hash does not cover its membership halts" {
+  _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _map "bats:a" false "temp_path/per-test"
+  _map "bats:b" false "temp_path/per-test"
+  _pilot "candidate-pool" proposed "bats:a" "bats:b"
+  jq '.membership_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' \
+    "$PILOTS/candidate-pool.json" > "$PILOTS/tmp" && mv "$PILOTS/tmp" "$PILOTS/candidate-pool.json"
+
+  run _run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"membership"* ]]
+}
+
+@test "FAIL-CLOSED: a pilot from ANOTHER audit halts rather than promoting" {
+  _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _map "bats:a" false "temp_path/per-test"
+  _map "bats:b" false "temp_path/per-test"
+  _pilot "candidate-pool" proposed "bats:a" "bats:b"
+  jq '.audit_id = "some-older-audit"' "$PILOTS/candidate-pool.json" > "$PILOTS/tmp" \
+    && mv "$PILOTS/tmp" "$PILOTS/candidate-pool.json"
+
+  run _run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"some-older-audit"* ]]
+}
+
+@test "FAIL-CLOSED: an unparseable resource map halts the audit" {
+  _inventory "bats:a"; _manifest "bats:a"; _shard "$(_disposition "bats:a")"
+  _map "bats:a" false "temp_path/per-test"
+  printf '{ truncated' > "$MAPS/bats_a.json"
+  run _run
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUT/decision.json" ]
+}
+
+@test "FAIL-CLOSED: a resource map for a unit outside this audit halts" {
+  # A map for a unit the inventory never heard of describes something else.
+  _inventory "bats:a"; _manifest "bats:a"; _shard "$(_disposition "bats:a")"
+  _map "bats:a" false "temp_path/per-test"
+  _map "bats:stranger" false "temp_path/per-test"
+  run _run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"stranger"* ]]
+}
+
+@test "FAIL-CLOSED: a pilot for a unit outside this audit halts" {
+  _inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
+  _shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
+  _map "bats:a" false "temp_path/per-test"
+  _map "bats:b" false "temp_path/per-test"
+  _pilot "candidate-pool" proposed "bats:a" "bats:outsider"
+  run _run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"outsider"* ]]
 }

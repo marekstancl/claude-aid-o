@@ -190,7 +190,26 @@ if [[ ! -f "$CATALOG_PATH" ]]; then
   exit 2
 fi
 
-CATALOG_STATUS="$(yq -r '.status // ""' "$CATALOG_PATH" 2>/dev/null)"
+# ONE read of the catalog, into an immutable snapshot, before any decision is
+# taken from it. The status check, the file list, the unit ids and the
+# provenance resolution all come from THIS text. Reading the file four times
+# meant a concurrent rewrite could pair a path from one version with a verdict
+# from another.
+CATALOG_SNAPSHOT="$(yq -o=json '.' "$CATALOG_PATH" 2>/dev/null)" || CATALOG_SNAPSHOT=""
+if [[ -z "$CATALOG_SNAPSHOT" ]]; then
+  echo "ERROR: aid-bats-parallel-lane.sh: could not read the catalog at '$CATALOG_PATH'" >&2
+  exit 2
+fi
+# The snapshot is written to a file so the resolver reads the same bytes rather
+# than re-opening the live path.
+CATALOG_FROZEN="$(mktemp)"
+trap 'rm -f "$CATALOG_FROZEN"' EXIT
+printf '%s' "$CATALOG_SNAPSHOT" | yq -P -o=yaml '.' > "$CATALOG_FROZEN" 2>/dev/null || {
+  echo "ERROR: aid-bats-parallel-lane.sh: could not freeze the catalog snapshot" >&2
+  exit 2
+}
+
+CATALOG_STATUS="$(jq -r '.status // ""' <<<"$CATALOG_SNAPSHOT")"
 if [[ -z "$CATALOG_STATUS" ]]; then
   echo "ERROR: aid-bats-parallel-lane.sh: test catalog at '$CATALOG_PATH' is malformed (no top-level 'status' field)" >&2
   exit 2
@@ -201,7 +220,7 @@ if [[ "$CATALOG_STATUS" != "approved" ]]; then
 fi
 
 mapfile -t BATS_SOURCE_PATHS < <(
-  yq -r '.run_units[] | select(.runner == "bats") | .source_paths[0]' "$CATALOG_PATH" 2>/dev/null
+  jq -r '.run_units[] | select(.runner == "bats") | .source_paths[0]' <<<"$CATALOG_SNAPSHOT" 2>/dev/null
 )
 
 if [[ ${#BATS_SOURCE_PATHS[@]} -eq 0 ]]; then
@@ -228,7 +247,9 @@ declare -A ALLOWED_SET=()
 declare -A ALLOWED_HASH=()
 while IFS=$'\t' read -r unit_id ufile; do
   [[ -z "$unit_id" ]] && continue
-  eff="$(aid_test_catalog_provenance_effective_status "$unit_id" "$CATALOG_PATH" "$REPO_ROOT" 2>/dev/null || echo unknown)"
+  # The FROZEN snapshot, not the live path: the verdict and the path it is
+  # about must come from the same bytes.
+  eff="$(aid_test_catalog_provenance_effective_status "$unit_id" "$CATALOG_FROZEN" "$REPO_ROOT" 2>/dev/null || echo unknown)"
   [[ "$eff" == "safe" ]] || continue
   [[ -n "$ufile" ]] || continue
   ALLOWED_SET["$ufile"]=1

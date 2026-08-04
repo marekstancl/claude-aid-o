@@ -70,6 +70,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-execution-unit-membership.sh
 source "${SCRIPT_DIR}/lib/aid-execution-unit-membership.sh"
+# shellcheck source=lib/aid-test-catalog-provenance.sh
+source "${SCRIPT_DIR}/lib/aid-test-catalog-provenance.sh"
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.56.0}"
 
 # Repo-root-relative prefix all Initial-mapping entries live under. Changed
@@ -487,12 +489,13 @@ if [[ -n "$EMIT_UNITS_FILE" ]]; then
       echo "ERROR: --emit-units: membership verification failed" >&2
       exit 1
     }
-    # parallel_eligible reflects the catalog's own parallel.status (Step 5's
-    # effective-status resolution may still override this via an approved
-    # overlay entry — this is only ever a hint, never authoritative).
-    units_json="$(jq -c --argjson cat "$catalog_json" '
-      ($cat.run_units | map({(.run_unit_id): .parallel.status}) | add // {}) as $by_id
-      | map(.parallel_eligible = (($by_id[.unit_id] // "unknown") as $s | $s == "safe" or $s == "constrained"))
+    # parallel_eligible comes from the SHARED effective-status resolver, not
+    # from a raw `.parallel.status` read. A raw read skips the provenance
+    # reversion rule, so this consumer and the lane runner could disagree about
+    # the same unit — one seeing a status the other had already retired.
+    _eff_map="$(aid_test_catalog_effective_status_map "$catalog_path" "$project_root" 2>/dev/null || echo '{}')"
+    units_json="$(jq -c --argjson eff "${_eff_map:-\{\}}" '
+      map(.parallel_eligible = (($eff[.unit_id] // "unknown") as $s | $s == "safe" or $s == "constrained"))
     ' <<<"$verified_json")"
   fi
 

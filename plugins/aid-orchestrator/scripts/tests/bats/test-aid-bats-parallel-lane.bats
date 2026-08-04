@@ -232,7 +232,7 @@ _write_catalog() {
   [[ "$unclassified_block" != *"$allowed"* ]]
 }
 
-@test "REGRESSION (PM review round 2): the catalog's parallel.status field is never consulted — an 'unknown'-status file still requires an explicit allowlist entry" {
+@test "REGRESSION: an 'unknown'-status file never enters the pool, whatever else is present" {
   # This catalog fixture mirrors the real catalog shape: every run_unit
   # carries parallel.status: unknown. The script must classify purely off
   # the allowlist, never off this field (it doesn't even read it).

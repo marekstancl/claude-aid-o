@@ -48,7 +48,7 @@ set -euo pipefail
 
 _die() { echo "aid-test-resource-map.sh: $2" >&2; exit "$1"; }
 
-run_unit_id="" catalog_path="" project_root="" depth_cap=3 out_path=""
+run_unit_id="" catalog_path="" project_root="" depth_cap=3 out_path="" files_only=0 units_from=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,25 +57,32 @@ while [[ $# -gt 0 ]]; do
     --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     --depth-cap)    [[ $# -ge 2 ]] || _die 2 "--depth-cap requires a value"; depth_cap="$2"; shift 2 ;;
     --output)       [[ $# -ge 2 ]] || _die 2 "--output requires a value"; out_path="$2"; shift 2 ;;
+    --files-only)   files_only=1; shift ;;
+    --units-from)   [[ $# -ge 2 ]] || _die 2 "--units-from requires a value"; units_from="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
 done
 
-[[ -n "$run_unit_id" ]] || _die 2 "--run-unit-id is required"
+[[ -n "$run_unit_id" || -n "$units_from" ]] || _die 2 "--run-unit-id or --units-from is required"
 [[ -n "$catalog_path" && -f "$catalog_path" ]] || _die 2 "--catalog is required and must exist"
 [[ -n "$project_root" && -d "$project_root" ]] || _die 2 "--project-root is required and must exist"
 [[ "$depth_cap" =~ ^[0-9]+$ ]] || _die 2 "--depth-cap must be a non-negative integer (got '$depth_cap')"
 
 project_canon="$(cd "$project_root" && pwd -P)"
 
-unit_json="$(yq -o=json '.' "$catalog_path" \
-  | jq -c --arg id "$run_unit_id" '.run_units[] | select(.run_unit_id == $id)')" \
-  || _die 3 "could not read the catalog"
-[[ -n "$unit_json" ]] || _die 3 "run unit '$run_unit_id' is not in the catalog"
+# Batch mode resolves each unit inside its own loop, so the single-unit lookup
+# below does not apply to it.
+declare -a own_sources=()
+if [[ -z "$units_from" ]]; then
+  unit_json="$(yq -o=json '.' "$catalog_path" \
+    | jq -c --arg id "$run_unit_id" '.run_units[] | select(.run_unit_id == $id)')" \
+    || _die 3 "could not read the catalog"
+  [[ -n "$unit_json" ]] || _die 3 "run unit '$run_unit_id' is not in the catalog"
 
-mapfile -t own_sources < <(jq -r '(.source_paths // [])[]' <<<"$unit_json")
-[[ "${#own_sources[@]}" -gt 0 ]] \
-  || _die 3 "run unit '$run_unit_id' declares no source_paths — there is nothing to read, and an empty map would read as 'touches nothing'"
+  mapfile -t own_sources < <(jq -r '(.source_paths // [])[]' <<<"$unit_json")
+  [[ "${#own_sources[@]}" -gt 0 ]] \
+    || _die 3 "run unit '$run_unit_id' declares no source_paths — there is nothing to read, and an empty map would read as 'touches nothing'"
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -159,7 +166,13 @@ _expand_path_expr() {          # <expr> <dir-of-current-file> -> expanded or ""
     # here names the plugin root. Leaving it unexpanded meant every helper
     # reached through X was unreadable, and the unit capped at `unknown` —
     # fail-closed, but for no reason: the path is right there.
-    if [[ "$e" =~ \$\(cd[[:space:]]+\"?([^\"\&\)]+)\"?[[:space:]]*\&\&[[:space:]]*pwd[[:space:]]*\) ]]; then
+    # `X="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"` — how every
+    # production library here names its own directory. Without it, each of
+    # those libraries ended the closure early and the units that source them
+    # could never be bound to their content at all.
+    if [[ "$e" == *'$(dirname "${BASH_SOURCE[0]}")'* || "$e" == *'$(dirname "$BASH_SOURCE")'* ]]; then
+      e="$dir"
+    elif [[ "$e" =~ \$\(cd[[:space:]]+\"?([^\"\&\)]+)\"?[[:space:]]*\&\&[[:space:]]*pwd[[:space:]]*\) ]]; then
       local _inner="${BASH_REMATCH[1]}"
       _inner="${_inner//\$\{BATS_TEST_DIRNAME\}/$dir}"; _inner="${_inner//\$BATS_TEST_DIRNAME/$dir}"
       _inner="${_inner//\$\{SCRIPT_DIR\}/$dir}"; _inner="${_inner//\$SCRIPT_DIR/$dir}"
@@ -264,12 +277,151 @@ _collect_file() {
   return 0
 }
 
+# ─── The fast path for `--files-only` ───────────────────────────────────────
+#
+# Callers that only need the dependency CLOSURE — provenance hashing, above
+# all — do not need function locations, call graphs or resource classification.
+# Running the full collector for them cost ~4.7s per unit, which is five
+# minutes across this repository's pool and therefore a check nobody would keep
+# on a hot path. This walks the `source`/`.`/`load` directives directly.
+_closure_fast() {
+  local file="$1" depth="$2"
+  local rel; rel="$(_rel "$file")"
+  if grep -qxF "$rel" "$work/files.txt" 2>/dev/null; then return 0; fi
+  printf '%s\n' "$rel" >> "$work/files.txt"
+  [[ -r "$file" ]] || { printf 'unresolved:%s\n' "$rel" >> "$work/unresolved.jsonl"; return 0; }
+
+  local dir; dir="$(dirname "$file")"
+
+  # Assignments in THIS file too, not only in the unit's declared sources: a
+  # library that names its own directory and then sources its siblings through
+  # that variable is the ordinary shape here, and stopping at the unit's own
+  # file left every one of those closures incomplete.
+  local _l _n _v _x
+  while IFS= read -r _l; do
+    if [[ "$_l" =~ ^[[:space:]]*(local[[:space:]]+|export[[:space:]]+|readonly[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$ ]]; then
+      _n="${BASH_REMATCH[2]}"; _v="${BASH_REMATCH[3]%%#*}"
+      _v="${_v%"${_v##*[![:space:]]}"}"
+      [[ "$_v" == \"*\" ]] && _v="${_v:1:${#_v}-2}"
+      if [[ "$_v" == */* || "$_v" == *'$'* ]]; then
+        _x="$(_expand_path_expr "$_v" "$dir" || true)"
+        [[ -n "$_x" ]] && path_vars["$_n"]="$_x"
+      fi
+    fi
+  done < "$file"
+
+  local directive target expanded
+  while IFS= read -r directive; do
+    [[ -z "$directive" ]] && continue
+    directive="${directive//\"/}"; directive="${directive//\'/}"
+    target=""
+    case "$directive" in
+      /*) target="$directive" ;;
+      *\$*)
+        expanded="$(_expand_path_expr "$directive" "$dir" || true)"
+        if [[ -z "$expanded" ]]; then
+          printf 'unresolved:%s\n' "$directive" >> "$work/unresolved.jsonl"
+        else
+          target="$expanded"
+        fi
+        ;;
+      *) target="${dir}/${directive}" ;;
+    esac
+    [[ -n "$target" ]] || continue
+    if [[ ! -f "$target" && -f "${target}.bash" ]]; then target="${target}.bash"; fi
+    if [[ -f "$target" ]]; then
+      if [[ "$depth" -lt "$depth_cap" ]]; then
+        _closure_fast "$target" $(( depth + 1 ))
+      else
+        printf 'unresolved:%s\n' "$directive" >> "$work/unresolved.jsonl"
+      fi
+    else
+      printf 'unresolved:%s\n' "$directive" >> "$work/unresolved.jsonl"
+    fi
+    # The operand must look like a path: contain a '/', a '.', a '$' or a
+    # quote. Without that, jq's `. as $x` — ordinary inside a heredoc here —
+    # parses as a `.` source directive with the target "as", and every file
+    # containing one reported a phantom unresolved dependency.
+  done < <(sed -n 's/#.*$//; s/^[[:space:]]*\(source\|\.\|load\)[[:space:]]\+\(["'"'"']\?[^[:space:]]*[\/.$"'"'"'][^[:space:]]*\).*$/\2/p' "$file" 2>/dev/null)
+  return 0
+}
+
+# Batch closure: one process and one catalog parse for many units. Per-unit
+# invocation cost is dominated by interpreter and yq startup, so a consumer
+# resolving a whole pool paid it 67 times over — enough to make the check
+# something a hot path would be tempted to skip.
+if [[ -n "$units_from" && "$files_only" -eq 1 ]]; then
+  [[ -f "$units_from" ]] || _die 2 "--units-from '$units_from' does not exist"
+  catalog_all="$(yq -o=json '.' "$catalog_path")" || _die 3 "could not read the catalog"
+  while IFS= read -r _uid; do
+    [[ -z "$_uid" ]] && continue
+    : > "$work/files.txt"; : > "$work/unresolved.jsonl"
+    path_vars=()
+    mapfile -t _srcs < <(jq -r --arg id "$_uid" \
+      '.run_units[] | select(.run_unit_id == $id) | (.source_paths // [])[]' <<<"$catalog_all")
+    if [[ "${#_srcs[@]}" -eq 0 || -z "${_srcs[0]}" ]]; then
+      printf '%s\tunresolved:no-source-paths\n' "$_uid"
+      continue
+    fi
+    _bad=0
+    for src in "${_srcs[@]}"; do
+      abs="$src"; [[ "$abs" = /* ]] || abs="${project_canon}/${src}"
+      if [[ ! -f "$abs" ]]; then printf '%s\tunresolved:missing:%s\n' "$_uid" "$src"; _bad=1; break; fi
+      while IFS= read -r _line; do
+        if [[ "$_line" =~ ^[[:space:]]*(local[[:space:]]+|export[[:space:]]+|readonly[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$ ]]; then
+          _vn="${BASH_REMATCH[2]}"; _vv="${BASH_REMATCH[3]%%#*}"
+          _vv="${_vv%"${_vv##*[![:space:]]}"}"
+          [[ "$_vv" == \"*\" ]] && _vv="${_vv:1:${#_vv}-2}"
+          if [[ "$_vv" == */* || "$_vv" == *'$'* ]]; then
+            _exp="$(_expand_path_expr "$_vv" "$(dirname "$abs")" || true)"
+            [[ -n "$_exp" ]] && path_vars["$_vn"]="$_exp"
+          fi
+        fi
+      done < "$abs"
+      _closure_fast "$abs" 0
+    done
+    [[ "$_bad" -eq 1 ]] && continue
+    while IFS= read -r f; do [[ -n "$f" ]] && printf '%s\t%s\n' "$_uid" "$f"; done < "$work/files.txt"
+    if [[ -s "$work/unresolved.jsonl" ]]; then
+      while IFS= read -r u; do printf '%s\t%s\n' "$_uid" "$u"; done < <(sort -u "$work/unresolved.jsonl")
+    fi
+  done < "$units_from"
+  exit 0
+fi
+
+if [[ "$files_only" -eq 1 ]]; then
+  # Assignments still have to be seen, so `source "$HELPER"` is followable.
+  for src in "${own_sources[@]}"; do
+    abs="$src"; [[ "$abs" = /* ]] || abs="${project_canon}/${src}"
+    [[ -f "$abs" ]] || _die 4 "declared source path '$src' does not exist — a map built over a missing file would describe nothing"
+    while IFS= read -r _line; do
+      if [[ "$_line" =~ ^[[:space:]]*(local[[:space:]]+|export[[:space:]]+|readonly[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$ ]]; then
+        _vn="${BASH_REMATCH[2]}"; _vv="${BASH_REMATCH[3]%%#*}"
+        _vv="${_vv%"${_vv##*[![:space:]]}"}"
+        [[ "$_vv" == \"*\" ]] && _vv="${_vv:1:${#_vv}-2}"
+        if [[ "$_vv" == */* || "$_vv" == *'$'* ]]; then
+          _exp="$(_expand_path_expr "$_vv" "$(dirname "$abs")" || true)"
+          [[ -n "$_exp" ]] && path_vars["$_vn"]="$_exp"
+        fi
+      fi
+    done < "$abs"
+    _closure_fast "$abs" 0
+  done
+  cat "$work/files.txt"
+  [[ -s "$work/unresolved.jsonl" ]] && sort -u "$work/unresolved.jsonl"
+  exit 0
+fi
+
 for src in "${own_sources[@]}"; do
   abs="$src"; [[ "$abs" = /* ]] || abs="${project_canon}/${src}"
   [[ -f "$abs" ]] || _die 4 "declared source path '$src' does not exist — a map built over a missing file would describe nothing"
   _collect_file "$abs" 0
 done
 
+# `--files-only` stops after the collection pass. The dependency CLOSURE is
+# what provenance must hash — a status bound only to a unit's declared file
+# survives its shared helper acquiring a lock — and computing the closure does
+# not require the far more expensive resource classification.
 all_fn_names="$(cut -f1 "$work/funcdefs.txt" 2>/dev/null | sort -u || true)"
 
 # ─── Block recognition, shared by every later pass ──────────────────────────

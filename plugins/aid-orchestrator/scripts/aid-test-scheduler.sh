@@ -36,6 +36,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-test-execution-unit.sh
 source "${SCRIPT_DIR}/lib/aid-test-execution-unit.sh"
+# shellcheck source=lib/aid-test-catalog-provenance.sh
+source "${SCRIPT_DIR}/lib/aid-test-catalog-provenance.sh"
 
 _die() { echo "aid-test-scheduler.sh: $2" >&2; exit "$1"; }
 
@@ -216,17 +218,22 @@ cmd_dispatch() {
   fi
 
   # Per-unit effective status + resolved locks, for exactly the requested units.
+  # The effective status comes from the SHARED resolver, which applies the
+  # provenance reversion rule first and the overlay only on top of it. Reading
+  # `.parallel.status` here and applying the overlay locally made this a second
+  # authority: the lane runner could retire a unit whose sources had moved
+  # while this one still dispatched it as safe.
+  local eff_map_json
+  eff_map_json="$(aid_test_catalog_effective_status_map "$catalog_path" "$project_root" "$overlay_json" 2>/dev/null || echo '{}')"
+  [[ -n "$eff_map_json" ]] || eff_map_json='{}'
+
   local units_status_json
-  units_status_json="$(jq -c --argjson cat "$catalog_json" --argjson ov "$overlay_json" --argjson lm "$locks_map_json" '
+  units_status_json="$(jq -c --argjson cat "$catalog_json" --argjson eff "$eff_map_json" --argjson lm "$locks_map_json" '
     ($cat.run_units | map({(.run_unit_id): .}) | add) as $by_id
     | [ .[] | .unit_id as $uid
         | ($by_id[$uid]) as $ru
         | (if $ru == null then error("dispatch: unit_id not found in catalog: " + $uid) else $ru end) as $ru
-        | ($ov.overlay // [] | map(select(.run_unit_id == $uid)) | .[0]) as $entry
-        | ($ru.parallel.status) as $catalog_status
-        | (if ($ov.status == "approved") and ($entry != null) and ($entry.catalog_fingerprint_at_promotion == $ru.runtime.fingerprint)
-           then $entry.promoted_status else $catalog_status end) as $effective
-        | { unit_id: $uid, effective_status: $effective,
+        | { unit_id: $uid, effective_status: ($eff[$uid] // "unknown"),
             resolved_locks: [ ($ru.parallel.exclusive_resources // [])[] | ($lm[.] // .) ] }
       ] | sort_by(.unit_id)
   ' <<<"$units_json")" || exit 1

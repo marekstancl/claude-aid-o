@@ -126,15 +126,26 @@ fi
 
 # ─── Write, and warn about drift rather than hiding it ──────────────────────
 declare -a drifted=()
+declare -a unbindable=()
 p071_commit=""
 i=0
 for uid in "${unit_ids[@]}"; do
   src_hash="$(aid_test_catalog_provenance_hash "$uid" "$catalog_path" "$project_root")"
-  [[ "$src_hash" =~ ^[0-9a-f]{64}$ ]] \
-    || _die 3 "could not hash the sources of '$uid' (got '$src_hash') — a migrated entry must be bound to real content"
+  if [[ ! "$src_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    # A unit whose dependency closure cannot be fully read cannot be bound to
+    # real content, so it is not migrated — the same treatment as drift, and
+    # for the same reason. One such unit must not abort the migration of the
+    # rest: that would trade 71 correct bindings for one unreadable one.
+    unbindable+=("${listed[$i]} (${src_hash})")
+    i=$(( i + 1 ))
+    continue
+  fi
   res_digest="$(aid_test_catalog_provenance_resource_digest "$uid" "$catalog_path" "$project_root")"
-  [[ "$res_digest" =~ ^[0-9a-f]{64}$ ]] \
-    || _die 3 "could not compute a resource digest for '$uid' (got '$res_digest')"
+  if [[ ! "$res_digest" =~ ^[0-9a-f]{64}$ ]]; then
+    unbindable+=("${listed[$i]} (resource digest: ${res_digest})")
+    i=$(( i + 1 ))
+    continue
+  fi
 
   # A file edited since P071 verified it is NOT migrated as safe. Hashing the
   # edited content and writing `status: safe` would bind P071's evidence to
@@ -176,4 +187,9 @@ if [[ "${#drifted[@]}" -gt 0 ]]; then
   printf '    - %s\n' "${drifted[@]}" >&2
 fi
 
-echo "aid-test-catalog-migrate-p071-allowlist.sh: migrated $(( ${#unit_ids[@]} - ${#drifted[@]} )) of ${#unit_ids[@]} run units" >&2
+if [[ "${#unbindable[@]}" -gt 0 ]]; then
+  echo "aid-test-catalog-migrate-p071-allowlist.sh: ${#unbindable[@]} listed file(s) could not be bound to their content and were NOT migrated:" >&2
+  printf '    - %s\n' "${unbindable[@]}" >&2
+fi
+
+echo "aid-test-catalog-migrate-p071-allowlist.sh: migrated $(( ${#unit_ids[@]} - ${#drifted[@]} - ${#unbindable[@]} )) of ${#unit_ids[@]} run units" >&2

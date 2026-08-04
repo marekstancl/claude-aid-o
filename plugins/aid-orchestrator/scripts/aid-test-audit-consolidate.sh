@@ -41,6 +41,7 @@ SCHEMAS_DIR="$(cd "${SCRIPT_DIR}/../defaults/schemas" && pwd)"
 # shellcheck source=lib/aid-test-adapter-contract.sh
 source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
 source "${SCRIPT_DIR}/lib/aid-test-profile-validate.sh"
+source "${SCRIPT_DIR}/lib/aid-test-lane-input-validate.sh"
 
 FINDINGS_SCHEMA="${SCHEMAS_DIR}/test-audit-consolidated-findings.schema.json"
 WAVE_SCHEMA="${SCHEMAS_DIR}/test-audit-wave-artifact.schema.json"
@@ -470,14 +471,28 @@ if [[ "$audit_mode" == "full" ]]; then
     lanes_json='[]'
     smallest_pilot='null'
     if [[ -n "$resource_maps_dir" && -d "$resource_maps_dir" ]]; then
+      # Fail-closed, on the same terms as the profile receipts. Selecting these
+      # by a `schema_version` string match alone let a malformed, foreign or
+      # self-contradicting artifact promote a lane — including one claiming
+      # `promotion: proposed` with an empty `repetitions` array, which its own
+      # schema rejects outright.
+      # The audit's own inventory names the units this audit is about.
+      _known_ids="$(mktemp)"
+      jq -r '.run_units[].run_unit_id' "$inventory_path" > "$_known_ids" 2>/dev/null || : > "$_known_ids"
+      if ! test_lane_validate_resource_maps "$resource_maps_dir" "$_known_ids"; then
+        _die 6 "resource-map directory '$resource_maps_dir' contains an artifact that is not a valid aid-test-resource-map-v1 for this catalog — finalization stops rather than proposing lanes from evidence it could not read"
+      fi
       maps_json="$(find "$resource_maps_dir" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null \
-                    | xargs -0 -r jq -sc '[.[] | select(.schema_version == "aid-test-resource-map-v1")]')"
+                    | xargs -0 -r jq -sc '[.[]]')"
       [[ -n "$maps_json" ]] || maps_json='[]'
 
       pilots_json='[]'
       if [[ -n "$pilots_dir" && -d "$pilots_dir" ]]; then
+        if ! test_lane_validate_pilots "$pilots_dir" "$audit_id" "$_known_ids"; then
+          _die 6 "pilots directory '$pilots_dir' contains a receipt that is not a valid, this-audit, self-consistent aid-test-parallel-pilot-v1 — finalization stops rather than promoting a lane on it"
+        fi
         pilots_json="$(find "$pilots_dir" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null \
-                        | xargs -0 -r jq -sc '[.[] | select(.schema_version == "aid-test-parallel-pilot-v1")]')"
+                        | xargs -0 -r jq -sc '[.[]]')"
         [[ -n "$pilots_json" ]] || pilots_json='[]'
       fi
 

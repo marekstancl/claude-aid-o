@@ -26,6 +26,12 @@ run_units:
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 104 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: null
+        source_sha256: e0e961214f009cc5b5ab10546768748fe75a2a4e8bf9dd7cb5bd2ca67d866279
+        resource_digest: 42813a56ed2c415e3d189f25592f8d7a299c9bdada196dd39ba68cbb0a2921d8
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -113,10 +119,16 @@ run_units:
     runtime:
       fingerprint: sha256:151ae9cfccb5
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 03ff92ecd5b8f964623c8a485098194f475d0ae3209bf549b98c4d7df261b9d9
+        resource_digest: 7a247a7b8ede05d8366cd151200c2b0c1ff67667ebf32f0a2300da1c86552e3d
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -552,10 +564,16 @@ run_units:
     runtime:
       fingerprint: sha256:977eaf35afeb
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 974e91b02fe4831725319b7483760090c0b353ae21b35b11f9bf4bdc6be66288
+        resource_digest: 1a789b5fded17c9a1c9ef59ce20e293628246008a7dc2e8773dae52e454643ce
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -598,10 +616,16 @@ run_units:
     runtime:
       fingerprint: sha256:acc2ca2fbd4a
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 329d550e426a71948c4a242a4fbfc991056b9047d53f078d0cb276fb8a2fed93
+        resource_digest: c2e46d9b70d956d8a9e9a165dcc70ea8539a8adc4ea04508b4899ce96add30af
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -677,10 +701,16 @@ run_units:
     runtime:
       fingerprint: sha256:993763cf5c08
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: cbc2c1c0ca580b0f82ad499e1c9e7f4e547348f19d1a406d4436c9db39fd7d35
+        resource_digest: ae613731cc6ab6de7a63f4aae9314da2106acf3077a0ebfb93d323b4fadaf6a8
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -717,10 +747,16 @@ run_units:
     runtime:
       fingerprint: sha256:2b12d0a96d5d
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: a81eedea2a3d720dcd285f8c9c6c0c470b138d07af10dad78404e60599588f4d
+        resource_digest: 49e76c02864d5bbf49144e0d7882ed50a500fa873a643e216b56d865412802cc
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1068,10 +1104,16 @@ run_units:
     runtime:
       fingerprint: sha256:96f65500507b
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: e71b081f4ab1472ac1b15310fe72d91383af4e225485c8b9db3b3ee919ba1be9
+        resource_digest: 9b84e62202876272a7b75a1ee15c11fa00dddc66f6b739dea257f3f512e315d3
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1192,10 +1234,16 @@ run_units:
     runtime:
       fingerprint: sha256:994f9c5e5020
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: df60ef333b1537d4adaed5b51c02c349a171f2d0b65c8103a6026167d77d1e3e
+        resource_digest: 95a2b25ae18840f435f3cece551f8788786f7209d26e56a623e2af584cefa55c
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1271,10 +1319,16 @@ run_units:
     runtime:
       fingerprint: sha256:c3b398584280
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: fc727a628c7a346b1e93144913a2a3c22a6bf77bd036fcb7166d3448468867b4
+        resource_digest: 34cf00b153e521afe1271f4b241e182343f09420e8d58eaa2b6573d2f02f45c1
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1341,10 +1395,16 @@ run_units:
     runtime:
       fingerprint: sha256:3051c8249bf0
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: feaaf099c714d8b95d94aaae03d74c63a951a3d0d58de3e1440ed2ab78119547
+        resource_digest: a805400d8379270c56a140d4f5b3cac53af0978a9b43b502ba2f21c103ac9cf3
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1447,10 +1507,16 @@ run_units:
     runtime:
       fingerprint: sha256:b3e236cb399f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 35e051a490b2a232369d94ef1ecbc48f2e2486c156da442a036e6b2b867e94b5
+        resource_digest: 4a7af62ba94fe9c2ce201ba32de7d68606c7e195833d71ec857477fffdb57dfd
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1545,10 +1611,16 @@ run_units:
     runtime:
       fingerprint: sha256:89c09e3cc05a
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: b20c1579eb081f2294f76365af63aaa3109fb337721d99d0b5aa45fdc1248133
+        resource_digest: 461377b757f858ec8e8fed2970de9865a53399083582715b57a2d65e857b8920
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1594,10 +1666,16 @@ run_units:
     runtime:
       fingerprint: sha256:22e0e0418249
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 84e06e6fab6174213a39b5f627c571fea8fe2f86ec8d93f004b35169bd560694
+        resource_digest: 4ecf514fa027df42406006a2eae86350d5fc24a9b5b026cde4b567a35f568137
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1667,10 +1745,16 @@ run_units:
     runtime:
       fingerprint: sha256:f08c3ba7da9c
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: e201401c424a7c2b00449b7addb605a8fff2c1d3c3f9f29b933a38af8a2104cd
+        resource_digest: 8d218dbcb2d8286e6c328bf944791e95ffa7b1e85a68a2fa6691585a62a138a9
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1764,10 +1848,16 @@ run_units:
     runtime:
       fingerprint: sha256:7a3a4eb94422
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: ccf5ee1881de89289d87c791e80a5af84c2ed8701a38eb88d1d35fda26faf5a9
+        resource_digest: c2f44fd3b8beeca2f82736da94f8b3998de8ac1f908131c18a1338fabf909753
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -1812,6 +1902,12 @@ run_units:
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 104 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: null
+        source_sha256: 3b7eb6d58a229291f11cd339a440cc196c5d6c895049c07e6e8016394da47c78
+        resource_digest: 83c545b5d71433699b9f7fcbf3b2a9bbc278f4d072a04a9ddf51bd51dcb299c1
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3404,10 +3500,16 @@ run_units:
     runtime:
       fingerprint: sha256:bb40c8a1ef52
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: e1328610dadd029c41d5494d73219ade2ed82905b8e0315be24a256f06762f7b
+        resource_digest: 2d926760cc99cf22170ebacdc9d1e8493b5367b7f5c1a5f4ac2a2c07e0342926
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3444,10 +3546,16 @@ run_units:
     runtime:
       fingerprint: sha256:86f9314fcff7
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 0a1d44cae480c02a6f04876032532d7231ed05e3dbfbf7e592c509227679accc
+        resource_digest: fedcc396534dc752299b8de4e785fd48c03e70222ca458f5ff1f77b7da656d8b
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3541,10 +3649,16 @@ run_units:
     runtime:
       fingerprint: sha256:07738bf5bb61
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 8827a188065c9e180ab03941ba629b179bc9bc804a0af15f2b1eb8e4de0de9b3
+        resource_digest: 90f3413aef85745eee8e51eba913e954073a198ab56e4c79170bd07534f49b14
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3584,10 +3698,16 @@ run_units:
     runtime:
       fingerprint: sha256:86978ca061ee
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: aadaba0ef826010f14a2e796465156a5b0b80ad050f51e50a5fb3e72b0783a49
+        resource_digest: 66023568a6ef5ce5c295b2a629bd64697973badccba685f21748bcfd0e7b60ce
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3741,10 +3861,16 @@ run_units:
     runtime:
       fingerprint: sha256:7f88104e8624
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: afbd5f0598c9de963988f025ff5e4f48400c1f98ba72555ef46f4757984cd528
+        resource_digest: e41318402441a15a3c8f9d840a799f06d0c7108e979472b2c136f9157c5d2647
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3856,10 +3982,16 @@ run_units:
     runtime:
       fingerprint: sha256:27ccb0ae0445
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 48ee70ce70a78713b40ed55032ad90b9f4df101e1a4d83f305058e84eab68a49
+        resource_digest: bfab41fb83e467a046cac833d3e1858c51b4e748364490be7f40dbb699d58e85
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3917,10 +4049,16 @@ run_units:
     runtime:
       fingerprint: sha256:99f8e953fd32
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 4e0d75c5acf85aad8258bffcad24a7420bddc9a62385ed944e5cc6c3b004f05b
+        resource_digest: 557054e097c2b282c84131f0d5e442abad9116aef8132ed11658763d1ddd4bb9
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -3969,10 +4107,16 @@ run_units:
     runtime:
       fingerprint: sha256:deffc4b932e0
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: a0393d8a8429102d08b1a6ad04dab42da7d479b20d10d3f54c1d8c6602dbefd9
+        resource_digest: a7d503e0039df52b42b2656d18c0d85541b5a51e2161c01a45cb124ebeca3558
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4018,10 +4162,16 @@ run_units:
     runtime:
       fingerprint: sha256:68ebcce873ef
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 07a0bf8fb9c3513bc8434e5d61e62a472792ca1eeea630271d1c3c30bf94a406
+        resource_digest: d910158fd1e36d4663d4c41a6eb49dc8f1a75a499355f8cb2ab556c85d044b85
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4100,10 +4250,16 @@ run_units:
     runtime:
       fingerprint: sha256:c92c39f21c0f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 966dd4d722ef74f87b0d2bbf537a8ecccc496c7ba30a45aa72c9ac7f25f45779
+        resource_digest: ae01af99e18dbd9afdf0e8cf309348d310aab1feb42408d13b8800f7f5f13a5c
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4174,6 +4330,12 @@ run_units:
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 104 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: null
+        source_sha256: 013a7c8ed358e8c072ca73dd78d3556a8cda57e37635b3b125b3dc44155ed0c6
+        resource_digest: 3b6298559bb87317fe5412c399267884f6bb2f83b9b1e6db3776ac7087fa938e
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4222,10 +4384,16 @@ run_units:
     runtime:
       fingerprint: sha256:c81d8824bd2c
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 9adfec6bdf8f0e28e17a4c7f3472e3044670d2f9297e45f3a69ab31e1df80956
+        resource_digest: a282d784f993498c7290c929b8d7f2017ce2f619741443a1a2a45f3733b064b9
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4313,10 +4481,16 @@ run_units:
     runtime:
       fingerprint: sha256:6d24de2cae4e
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: ed46e64f9cd642561d1beb83a89758c1433959b40f46da502513973a38ff2d4b
+        resource_digest: 0173482ab5e79175274ffdb9860ff64fbce9b5072db704333529ef4775074e4d
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4428,10 +4602,16 @@ run_units:
     runtime:
       fingerprint: sha256:f0517baf1d2e
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 72964bc62a00cbdfe0429b5a2693ffe80a0a95b0f43ad991f4b264890dd057d3
+        resource_digest: e0cdc9dc44c6110e77334e885244dfd158f5d29291a5b50e592fd3a0cde0c56e
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4502,6 +4682,12 @@ run_units:
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 104 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: null
+        source_sha256: 4e6dd6ffd4653cd3858265c037d443602b341490f8a1e5cb79665c607b972aea
+        resource_digest: 4424be50cabf1607a6a53170c337e99f824f036d990e4f6fadeed863ddb691b9
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4553,10 +4739,16 @@ run_units:
     runtime:
       fingerprint: sha256:0c39d2cc177f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: bc79062433a847541edf6dcbfc1d1b0953d4f3a757c8bac36e40f77276f26921
+        resource_digest: ec6697f26cb3299996505d464db99a7063936c98e919cd7f289f457de2255f3c
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4645,10 +4837,16 @@ run_units:
     runtime:
       fingerprint: sha256:9b2d3d141b6d
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 5d1cb5d854313b46084fe50a0a5165b7b3106c7bfca3999640d3eb1ebeb4c622
+        resource_digest: 66d8e04036248970e0d72572188950f65bbc1b9eced0128b6a504e6d81ef54b0
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4709,10 +4907,16 @@ run_units:
     runtime:
       fingerprint: sha256:a4f0c68e809b
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: edbed22ee1382deb10ad0de93481f5d01f7b38e03afc5a3d8b74d1a10b286d6f
+        resource_digest: 21baf588c98ca445f6d2089bdefeee4de5bf47718a8e42ccf56b0501eb11f0b7
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4792,6 +4996,12 @@ run_units:
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 104 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: null
+        source_sha256: e5943580a7ce112c927956b76ce5e446bc677cb2393f2cb1ec75bf0650b95d2e
+        resource_digest: 3037e77eb8856d2ee117b560f3627a364d3a926a4b02fc33e6510960cc4b2290
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4850,10 +5060,16 @@ run_units:
     runtime:
       fingerprint: sha256:7d2106f31341
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: bf4629e95bc43a1ceaa941dad2681d122c77cbf16f31b518604fce4b954050b9
+        resource_digest: c2f44fd3b8beeca2f82736da94f8b3998de8ac1f908131c18a1338fabf909753
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4905,10 +5121,16 @@ run_units:
     runtime:
       fingerprint: sha256:d83403f020ed
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: c6c4d67c24b0a16753fc332e9bec346323c34ad856a51e31c05f89739a8c531b
+        resource_digest: b0ca3ab37010724d570864bbc1c21e1d854f62a8812c3d013af64440beec7e68
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -4957,10 +5179,16 @@ run_units:
     runtime:
       fingerprint: sha256:87d144ae783e
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 6dbabfdf66366892d1bfb84e479ca8200ba59bf9d203fa78d2edc72b6e5440fa
+        resource_digest: 4754e9fa279824fabfb30dcefa26510b95a3baa00c300d8d545022a7e228bfd2
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5009,10 +5237,16 @@ run_units:
     runtime:
       fingerprint: sha256:28e4f01772e9
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: e9a3773858ebd629a9c6c6dbd49105e4af9ed61576a3eebdf5a1496c5a1e2f45
+        resource_digest: 736467638f2910180030532d8d53a19aa9a0d40bbefcec3f56badbe5b820d168
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5259,10 +5493,16 @@ run_units:
     runtime:
       fingerprint: sha256:403c2bcd28f8
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 4e48ce72c1b13bbfe0317bd00043b9b57f693a0153e97707b68ea8aaf45c3b85
+        resource_digest: 9e2dd70b7044451b0b47db55e745f35ae5e030f1deb66d1d51a6b73047ab45c2
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5389,10 +5629,16 @@ run_units:
     runtime:
       fingerprint: sha256:069cf26cfbbc
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 3dd6dedde2c57297f7ecff46772b29d69b1a9d7687c26c5c4ec653106041f0ab
+        resource_digest: 86917cde8131aef1b2d81a5e27d6a704d00957fcb961a2f50cb199a6c14330d6
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5474,10 +5720,16 @@ run_units:
     runtime:
       fingerprint: sha256:cb87f4367309
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 9cbf859dcd42284d6aa07fc6ba2c5f6061991e4d06977f40b221a89e81b1efe4
+        resource_digest: 4d7eea40941baf24493d97a814f69dd29656ac06de56bf8b80f927bf4e4eafde
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5559,10 +5811,16 @@ run_units:
     runtime:
       fingerprint: sha256:28b524e23aae
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 58c5160cc2def785bf0b9eb4b6b22a16169258eac4844a228952710873fc5b37
+        resource_digest: 76cd4fd788ca2008d7c31364243a731136ff42493b2a47780e97ce943e8c08c3
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5743,10 +6001,16 @@ run_units:
     runtime:
       fingerprint: sha256:d13ed9ac135e
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: a1f3b685d88bef78f5c525d18e9f16384f5133cfc47fa0a88660f6cf4004e8c2
+        resource_digest: c61dbbdedbf9ccf1555d50cf9a74dfcb84743d52b1b2145d0ff6e36000dff39e
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5876,10 +6140,16 @@ run_units:
     runtime:
       fingerprint: sha256:6d24299db49f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 44fe47d8b2635853aa752741c2d60cf5b95b35e76e7057260f77f04c29c0bc37
+        resource_digest: f86ddc5c0045a2188f367d9c6df7c2af3c83441c0d206d9ffe7ac358d1247605
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5934,10 +6204,16 @@ run_units:
     runtime:
       fingerprint: sha256:6e7cbe5fa1e4
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 437dcb9d1f744da99724903405f8304df911827eac999e6dc742fc57b3d9af13
+        resource_digest: 1534869c21167cd6a6f48e987b6c2a449ecea6141b903c56ba15cb704e3a2b00
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -5992,10 +6268,16 @@ run_units:
     runtime:
       fingerprint: sha256:e05e4589a39f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 8bdb9e822902bce463c4d54cbfbac94387bdc2e729d21c1ad7407a56b4f99dbd
+        resource_digest: 2ce51f4ba031fb9df3eb3ed18f4d0f5ed39d4cad636fa6b51f0e7749aa7d8ae4
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6050,10 +6332,16 @@ run_units:
     runtime:
       fingerprint: sha256:30bbcbcd8d97
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 84bf8f7cd791c7fcf32f1675ca986f9af11dc66442e3f5d20cd5e2c9bbfc1430
+        resource_digest: c6955e3ab1df8828fe81c62849a17e64f06d1522d3e18945a1e891094936a8cf
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6096,10 +6384,16 @@ run_units:
     runtime:
       fingerprint: sha256:214aa22e575a
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 7015bd363475b5ced80588062bfa9fe61b02af410818640921cda0ce167154b2
+        resource_digest: 6ada10f2b3c65e0d21abee312a15876c4b14c84c130beb0f5f302cbe346ba820
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6190,10 +6484,16 @@ run_units:
     runtime:
       fingerprint: sha256:47d83c649069
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 87a45c0cee0fb8d1235ed41b9d6359d974d91bc5e5261fdb5789a77286082a71
+        resource_digest: f70f2a17f77ecf044e2182f2d4e11b5ad7b5de842e734edd3fa1dfa3196468f9
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6287,10 +6587,16 @@ run_units:
     runtime:
       fingerprint: sha256:a84ed0457f49
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 2f7436f0c140366c71e60745a2cbaef5af7d5040b5945a0c49f204853ae38b7c
+        resource_digest: 80109d78c0f41a7ca41aea33c7cbaff5b735cf46901507222bcd66c3a9cac483
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6470,10 +6776,16 @@ run_units:
     runtime:
       fingerprint: sha256:29c2afc126ae
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 4b178fcf224f412386c05912e24860d25e0b250ba173051c687653f5cf79ed3f
+        resource_digest: 4c1f517bb5d3cc6a6305728061455da0b8511737c0e4dddb1c5a450c6e7c2a52
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6531,10 +6843,16 @@ run_units:
     runtime:
       fingerprint: sha256:57be05b251f1
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 3c5d894e2bf04430fef455edaa569c819029bef44da9dcbc94aeb34716c70826
+        resource_digest: e7b4767ef1c5c7af8919d6767939b5dfb1b3688d76143f3566486bfa41a7e289
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6583,10 +6901,16 @@ run_units:
     runtime:
       fingerprint: sha256:b82bbb8a8bcf
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: da131cf13f72165a8343419e02bdbc5b62ec03824d33d84c39d07af5dd06224b
+        resource_digest: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6656,10 +6980,16 @@ run_units:
     runtime:
       fingerprint: sha256:8ca456dafa20
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 2c78e4e421cb6abe234f0766a338a2ecbd06e3de32840aa21d40db4c0f4fb842
+        resource_digest: 6b70987eadc15b1dc50cb50b2b0fd1c18aed47ac0b51af13506e24dcc51f082a
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6696,10 +7026,16 @@ run_units:
     runtime:
       fingerprint: sha256:31eb2257b2d6
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 5e411e95592b04f1757246d73c5098b416113c0d11f89da9e97469d2b336c315
+        resource_digest: 92f03c62f3f04ee7e919b57f42445bdc4db4d5c6a027e0ba63fc1d07a2bd8072
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6762,10 +7098,16 @@ run_units:
     runtime:
       fingerprint: sha256:ea82d0beaf13
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 0b99d7dfa888e34754dfd1260cb6f5267fb04ff0a82746fce7596228803ac926
+        resource_digest: 9d4fe8ea147856077fd6c6a79bbdfe459b9fdd145bb58f513311970eca26cb07
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6850,10 +7192,16 @@ run_units:
     runtime:
       fingerprint: sha256:f5b7762c221b
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 13ad0207a27f8b9622fff3681e23f45000fdfa385861f4c1cb8b8fc3b24fb55a
+        resource_digest: 181349df3cc3ca9df5e2169640b134dae79591c21e03a0714b6103cf6a5582b2
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -6926,10 +7274,16 @@ run_units:
     runtime:
       fingerprint: sha256:fb4b9040d3e5
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: efac2f27d65cf0edb3f47ac7858c2ab343486f8bae9ce8a55f4f85317e682ed9
+        resource_digest: 1ba01ff9bfd278ffdaa52f5f009e88ea300beb59dee1fa1e983284d23a5d7d0a
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7005,10 +7359,16 @@ run_units:
     runtime:
       fingerprint: sha256:f1b8f2a9bac8
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 47bff0b74867c709c44defba9e71e00b13662d905a0b7f29308e9b6a58c1df70
+        resource_digest: 37691b251581bbcf77384fd43dbee213593883cd962e2ce3acba2694da78918e
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7078,10 +7438,16 @@ run_units:
     runtime:
       fingerprint: sha256:123d158c8d26
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 6a36d8d3653fb9caac103e6e6337dddb589690e6cf0950d7c4b39271f88c335c
+        resource_digest: 5b9db27b0dab4eb47934c964b2328d9b4f782f3f9657990a71ba5847fa0d06ec
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7136,10 +7502,16 @@ run_units:
     runtime:
       fingerprint: sha256:98a6e0b4f2c5
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: f1d06a17cd9b71295133519791512750776980da386b74201ebac6bf49eb808f
+        resource_digest: 22a0d731d7a58756b310eda4557eef93f671c1bb3758817102c7fe04d580bb05
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7221,10 +7593,16 @@ run_units:
     runtime:
       fingerprint: sha256:188805bd626d
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: ccbf0931f37482df4c8076736ab00b65dc26d75139b7fc0f3ca9f7887b7ead06
+        resource_digest: 5e9dc738d6f3f6856ebf8320992da32f807e7cfbf6437f19a64fe27e28bf6e62
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7294,10 +7672,16 @@ run_units:
     runtime:
       fingerprint: sha256:e9ae98990e64
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 0bff0907b158e371935d3c9fdd41faf2b3249f142448fbb9cfd43d910ad80e3a
+        resource_digest: dcca71d14115a3648c1f6fa170909ba600372d34e8dd5114738762130ecabbe1
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7346,10 +7730,16 @@ run_units:
     runtime:
       fingerprint: sha256:c923ab90d678
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: ca8d1e457f80e277863aea859bd65e3445d1b7c47a125fc59544b94705dc8317
+        resource_digest: 5b1c6b3911233ddabedd79252dba5ed84772cb631a6b7463276fe363008ce35a
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7449,10 +7839,16 @@ run_units:
     runtime:
       fingerprint: sha256:3f1450a7807f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 2d729951ab35ecfdca491aa114cc962a088a69bb206a396a7ad34a72a51b71fc
+        resource_digest: 5130a22774d11e14c6da02295a80d48219daff0422095709132d7ecafc6d591f
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7507,10 +7903,16 @@ run_units:
     runtime:
       fingerprint: sha256:69416c2b1857
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: aa337a481c9fc1dd4c14264e1f5fe3313b0c2d2631bb2bccd15ec50ab8166d2a
+        resource_digest: c24778b0e6193608673004f13a82d36280f9322528a1038c43d0e9cf8e87a538
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7580,10 +7982,16 @@ run_units:
     runtime:
       fingerprint: sha256:4b44d96cdd50
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 4cdd32524940709e692f49b95b5adb47750c522df72e157cee933bbf25703022
+        resource_digest: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7639,6 +8047,12 @@ run_units:
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: null
+        source_sha256: e6b447dda9e4725283b2041e37fb631890757f8b346e75b6e560bab849771548
+        resource_digest: 73bc071e5f6c8882cd892c4d13238f3da7c58e04fe1fd0e60db829382e8f7d64
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7903,10 +8317,16 @@ run_units:
     runtime:
       fingerprint: sha256:143eb51fdc24
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 80f32d8c0497c24ffd9b8c60c278a3da8e33174bcbc3de53e68e1dd2ea2fab70
+        resource_digest: 42220b53c8b22cb9a3fab79db9099b0c4121b9a4eb7e19bfe831586bb34d8965
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -7958,10 +8378,16 @@ run_units:
     runtime:
       fingerprint: sha256:9be6f15e15f0
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 333eb84a5a50d649519d5aab48f3f98706db3879515ecfd23f0bd26f52c0aac5
+        resource_digest: 5de05be738d30f5b8237c22c5802e639f36a61d17efe7ca487048b3b5de26ef7
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -8043,10 +8469,16 @@ run_units:
     runtime:
       fingerprint: sha256:c9d45287528f
     parallel:
-      status: unknown
+      status: safe
       exclusive_resources: []
       max_workers: null
       internal_parallelism: false
+      provenance:
+        evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
+        verified_at: "2026-08-02T00:00:00Z"
+        method: migrated_p071_step3
+        source_sha256: 16a1978c55de13a60f5c248156c59d0c064332ad00f5f7508563b078edefc723
+        resource_digest: 9baef682e2c2cdbba899503a8c6ca7f67eae3721f954866a9d6a18f4bc25bb3a
     isolation:
       temp_workspace: unknown
       fixed_ports: []
