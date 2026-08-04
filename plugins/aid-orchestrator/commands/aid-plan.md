@@ -445,7 +445,7 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDEN
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
 ```
 `PLAN_EVIDENCE_ROOT` is `.aid-o/work/evidence/<plan_id>/` (one level above
-`cp1-deep/` — the same root `aid-c0-plan-review.sh` and `aid-cp1-gate.sh` both
+`cp1-deep/` — the same root `lib/aid-c0-plan-review.sh` and `aid-cp1-gate.sh` both
 read). `init` runs once per plan, before the first C0 dispatch of its
 lifetime.
 
@@ -584,12 +584,12 @@ failure.
 | `c0-lens-dep_api_grounding.md` | C0 dep_api_grounding lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-idempotency_matrix.md` | C0 idempotency_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-authority_runtime_matrix.md` | C0 authority_runtime_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-plan-review.json` | C0 cross-provider (Codex) plan review (`aid-c0-plan-review.sh`) | `review_status`/`blocking_findings` fields + a passing `verify` | **blocking (high-risk only)** |
+| `c0-plan-review.json` | C0 cross-provider (Codex) plan review (`lib/aid-c0-plan-review.sh`) | `review_status`/`blocking_findings` fields + a passing `verify` | **blocking (high-risk only)** |
 
 Evidence location for L1/L2/L3/adjudicator: `.aid-o/work/evidence/<plan_id>/cp1-deep/`
 Evidence location for C0 lenses: `.aid-o/work/evidence/<plan_id>/c0/`
 Evidence location for the C0 cross-provider plan review: `.aid-o/work/evidence/<plan_id>/c0-plan-review.json` (the canonical, latest-attempt review result, stored at the plan evidence ROOT — one level above `cp1-deep/`). Note: raw Codex evidence (dispatch.json, codex-events.jsonl, codex-last-message.json) is not retained per-attempt; only the final canonical review survives.
-Ledger location (high-risk only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`aid-cp1-ledger.sh`).
+Ledger location (high-risk only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`lib/aid-cp1-ledger.sh`).
 
 EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L1/L2/L3/adjudicator files, unresolved accepted blockers, a missing/unverifiable/still-blocking C0 review, or an exhausted CP1 ledger budget each cause a non-zero exit — see "C0 Cross-Provider Review Loop" above for the full contract.
 

@@ -318,7 +318,23 @@ inventory_json="$(jq -n \
     entries: [$units_wrap[0][] | {run_unit_id, runner, adapter: (.provenance[0] // .runner), confidence, isolation: {lock_usage: .isolation.lock_usage}}]
   }')"
 
+# The routing map the approver will re-derive and require. Writing `[]` here
+# unconditionally is what made a freshly-proposed catalog unapprovable: the
+# approver re-derives this from a fresh selector snapshot and refuses anything
+# that does not reproduce it, so producer and consumer disagreed about the same
+# field. Both now call the same function. Where the dogfood selector does not
+# exist, `[]` remains correct and the approver's guard is a no-op too.
+# shellcheck source=lib/aid-test-catalog-selector-mappings.sh
+source "${SCRIPT_DIR}/lib/aid-test-catalog-selector-mappings.sh"
+mappings_json="[]"
+if aid_test_catalog_selector_applies "$project_root"; then
+  mappings_json="$(aid_test_catalog_expected_mappings "$project_root" \
+    "${SCRIPT_DIR}/aid-test-catalog-selector-snapshot.sh")" \
+    || { echo "aid-test-inventory.sh: the selector snapshot this project's catalog approval requires could not be produced — refusing to propose a catalog whose routing map is a guess" >&2; exit 1; }
+fi
+
 catalog_json="$(jq -n \
+  --argjson mappings "$mappings_json" \
   --arg gen "$generated_at" \
   --slurpfile units_wrap "$units_file" \
   '{
@@ -326,7 +342,7 @@ catalog_json="$(jq -n \
     generated_at: $gen,
     status: "proposed",
     run_units: $units_wrap[0],
-    source_pattern_mappings: [],
+    source_pattern_mappings: $mappings,
     mapping_approval: {status: "proposed"}
   }')"
 catalog_yaml="$(printf '%s' "$catalog_json" | yq -o=yaml -P '.')"

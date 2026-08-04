@@ -83,7 +83,25 @@ run_on_fixture() {
 # First-run mode: generate golden snapshots if directory absent
 # ---------------------------------------------------------------------------
 if [[ ! -d "$GOLDEN_DIR" ]]; then
-  echo "Golden directory not found — generating snapshots (first-run mode)."
+  # A missing golden directory is a BROKEN CHECKOUT, not an invitation to mint
+  # a baseline. The goldens are committed; if they are not here, something is
+  # wrong with this tree — and silently recording whatever the code currently
+  # produces means a refactor that broke the output gets enshrined as correct,
+  # while the suite reports "0/0 run" and exits 0, which reads exactly like a
+  # clean pass.
+  #
+  # Regenerating is still possible, but it now has to be asked for by a person
+  # who means it.
+  if [[ "${AID_REGENERATE_GOLDEN:-0}" != "1" ]]; then
+    echo "ERROR: golden directory '$GOLDEN_DIR' is missing." >&2
+    echo "       The goldens are committed, so this is a broken checkout." >&2
+    echo "       This suite refuses to mint a baseline from the current output —" >&2
+    echo "       that would record a broken refactor as the expected result." >&2
+    echo "       If you genuinely intend to regenerate: AID_REGENERATE_GOLDEN=1 $0" >&2
+    echo "Results: 0/1 passed, 1 failed"
+    exit 1
+  fi
+  echo "Golden directory not found — regenerating on explicit request (AID_REGENERATE_GOLDEN=1)."
   mkdir -p "$GOLDEN_DIR"
 
   out_dir="$TMPDIR_ROOT/gen-minimal"
@@ -98,7 +116,7 @@ if [[ ! -d "$GOLDEN_DIR" ]]; then
 
   echo "Generated golden snapshot: $GOLDEN_DIR/minimal-plan.golden.json"
   echo ""
-  echo "Results: 0/0 run, 0 passed, 0 failed"
+  echo "Results: 0/0 run, 0 passed, 0 failed (REGENERATED — this run verified nothing)"
   exit 0
 fi
 

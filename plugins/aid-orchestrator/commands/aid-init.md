@@ -501,7 +501,7 @@ Config defaults installation:
   [EXISTS]    .aid-o/config/test-audit.yaml — keeping existing (PM customizations preserved)
 ```
 
-**What the config does:** Read by `/aid-audit-tests` (`aid-test-audit-config.sh`'s `load_test_audit_config`) for its budget/agent-concurrency/allowed-runner defaults. The distributed template's values are byte-identical to the loader's own hardcoded defaults, so a project's `/aid-audit-tests` behavior is unchanged whether or not `/aid-init` has run since this plan shipped.
+**What the config does:** Read by `/aid-audit-tests` (`lib/aid-test-audit-config.sh`'s `load_test_audit_config`) for its budget/agent-concurrency/allowed-runner defaults. The distributed template's values are byte-identical to the loader's own hardcoded defaults, so a project's `/aid-audit-tests` behavior is unchanged whether or not `/aid-init` has run since this plan shipped.
 
 ### Optional: Plan Boundary CI Check
 

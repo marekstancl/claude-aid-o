@@ -240,8 +240,29 @@ _collect_file() {
     fi
 
     if [[ "$code" =~ ^[[:space:]]*(source|\.|load)[[:space:]]+(.+)$ ]]; then
+      local _kw="${BASH_REMATCH[1]}"
       local directive="${BASH_REMATCH[2]}"
       directive="${directive%%[[:space:]]*}"
+      # `. as $x |` inside a jq program is not a shell `source`. jq lines like
+      # `. as $bf |` begin with a dot and a space, matched the dot form, and
+      # produced "as" as a file to resolve — which never resolves, so it landed
+      # in unresolved_sources and helped hold the whole map at
+      # capped_at_unknown. A real audit found it doing exactly that.
+      #
+      # Only the DOT form is narrowed, and only to targets that look like a
+      # file reference; `source foo` and `load helper` keep working, because
+      # neither can be confused with jq.
+      if [[ "$_kw" == "." ]]; then
+        case "$directive" in
+          as|and|or|not|if|then|elif|else|end|reduce|foreach|try|catch|def|import|include|label|__loc__)
+            continue ;;
+        esac
+        # A shell source target names a path: it has a separator, a variable,
+        # or an extension. A bare jq token has none of those.
+        if [[ "$directive" != */* && "$directive" != *'$'* && "$directive" != *.* ]]; then
+          continue
+        fi
+      fi
       directive="${directive//\"/}"; directive="${directive//\'/}"
       local target=""
       case "$directive" in

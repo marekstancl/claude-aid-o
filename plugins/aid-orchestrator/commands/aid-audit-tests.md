@@ -91,7 +91,9 @@ parser's own project-root validation load-bearing rather than advisory.
    dispatch-progress record.
 4. In `measure`/`full` mode, run allowlisted commands sequentially via
    `aid-job.sh` (never batched, never a second process supervisor) —
-   `aid-test-audit-measure.sh` checks every command against
+   `lib/aid-test-audit-measure.sh` (a sourced library, not an executable —
+   the path here previously named a top-level script that does not exist)
+   checks every command against
    `aid_test_audit_check_allowed` (Step 13) before it ever reaches `aid-job.sh`.
 5. In `measure`/`full` mode, decide what owes a **cost profile** and produce it.
    Both halves are scripted, because "was that slow suite ever diagnosed?" must
@@ -171,10 +173,10 @@ parser's own project-root validation load-bearing rather than advisory.
    consolidate (`aid-test-audit-consolidate.sh`, Step 14 — fails closed on
    any wave artifact missing, extra, or mismatched against the dispatch
    manifest) → render the mandatory 5-part chat summary
-   (`aid-test-audit-chat-summary.sh`, Step 15 — persists the durable record
+   (`lib/aid-test-audit-chat-summary.sh`, Step 15 — persists the durable record
    as a side effect; fails closed if that persist fails) → (with
    `--write-plan`, or on a same-conversation continuation reply) the write-
-   plan bridge check (`aid-test-audit-write-plan-bridge.sh`, Step 16). The
+   plan bridge check (`lib/aid-test-audit-write-plan-bridge.sh`, Step 16). The
    script prints the chat text to stdout — the controller presents that
    text VERBATIM as this command's own final turn; the renderer's text is
    ordinary, deterministic, fully Bats-tested code, but the controller's
@@ -209,7 +211,7 @@ FSM/gate/release boundary.
 invokes directly (not a subprocess a shell script can call). Both `--write-plan`
 (CI/scripted use — never required end-user knowledge) and a recognized
 same-conversation continuation reply resolve to the **identical** validator
-call: `aid-test-audit-write-plan-bridge.sh`'s `aid_test_audit_write_plan_bridge_check`.
+call: `lib/aid-test-audit-write-plan-bridge.sh`'s `aid_test_audit_write_plan_bridge_check`.
 The controller (a) runs this validator, and (b) on a `{ready:true}` verdict,
 invokes `/aid-plan write` itself with the validator's `brief_path` as input. The
 validator itself **never invokes `/aid-plan write`** — it only checks: the

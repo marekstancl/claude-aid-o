@@ -290,3 +290,38 @@ PY
   [ "$status" -eq 2 ]
   [[ "$output" == *"required"* ]]
 }
+
+# ─── Packaging: a documented entrypoint must be runnable as documented ──────
+
+@test "REAL REPO: every top-level script is committed executable" {
+  # Seven were committed 0644, so invoking them exactly as the docs and command
+  # files write them — without a `bash` prefix — exited 126. An installed
+  # plugin keeps the committed mode, so this reached consumers.
+  #
+  # Scoped to scripts/ itself: everything under scripts/lib/ is sourced, never
+  # invoked, and does not need the bit.
+  local repo; repo="$(cd "$PLUGIN_DIR/../.." && pwd)"
+  local non_exec
+  non_exec="$(git -C "$repo" ls-files -s plugins/aid-orchestrator/scripts/ \
+    | awk '$1=="100644" && $4 ~ /\.sh$/ && $4 !~ /\/lib\//  {print $4}')"
+  [ -z "$non_exec" ] || echo "not executable: $non_exec" >&3
+  [ -z "$non_exec" ]
+}
+
+@test "REAL REPO: every script a command file names actually exists at that path" {
+  # Six command-file references named top-level scripts that only exist under
+  # scripts/lib/. Somebody following the documentation gets "No such file".
+  # Cheap to check, and it had gone unchecked across the whole command set.
+  local repo; repo="$(cd "$PLUGIN_DIR/../.." && pwd)"
+  local missing=""
+  local f s
+  for f in "$repo"/plugins/aid-orchestrator/commands/*.md; do
+    while IFS= read -r s; do
+      [ -n "$s" ] || continue
+      [ -e "$repo/plugins/aid-orchestrator/scripts/$s" ] \
+        || missing="${missing}$(basename "$f"): $s"$'\n'
+    done < <(grep -oE '`(lib/)?aid-[a-z0-9-]+\.sh`' "$f" 2>/dev/null | tr -d '`' | sort -u)
+  done
+  [ -z "$missing" ] || echo "$missing" >&3
+  [ -z "$missing" ]
+}

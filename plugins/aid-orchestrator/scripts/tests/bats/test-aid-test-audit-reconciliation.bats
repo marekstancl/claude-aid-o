@@ -36,10 +36,24 @@ setup() {
 teardown() { teardown_test_evidence_dir; }
 
 # _inventory <id...> — the discovered portfolio.
+#
+# This used to emit `{"schema_version":"1.0.0","run_units":[...]}`, a shape the
+# real scanner has never produced and the inventory schema does not allow. The
+# consolidator read `.run_units[]` to match it, so producer and consumer
+# disagreed in production while every test here passed. A fixture that invents
+# its own contract proves only that two pieces of test code agree.
+#
+# It now emits what aid-test-inventory.sh emits, and the consolidator
+# schema-validates whatever it is handed — so this can never drift silently
+# again.
 _inventory() {
   local ids=("$@")
   printf '%s\n' "${ids[@]}" | jq -R -s \
-    '{schema_version:"1.0.0", run_units: (split("\n") | map(select(length>0)) | map({run_unit_id: .}))}' \
+    '{schema_version:"1.0.0",
+      generated_at:"2026-08-04T00:00:00Z",
+      runner_families:["bats"],
+      entries: (split("\n") | map(select(length>0))
+                | map({run_unit_id: ., runner:"bats", adapter:"bats", confidence:"medium"}))}' \
     > "$INVENTORY"
 }
 
@@ -194,7 +208,7 @@ _reason() { jq -r '.incomplete_reason // ""' "$OUT/decision.json"; }
 }
 
 @test "an empty inventory is incomplete with empty_inventory, never a completed audit of nothing" {
-  printf '%s' '{"schema_version":"1.0.0","run_units":[]}' > "$INVENTORY"
+  printf '%s' '{"schema_version":"1.0.0","generated_at":"2026-08-04T00:00:00Z","runner_families":[],"entries":[]}' > "$INVENTORY"
   _manifest "bats:a"
   _shard_artifact "$(_disposition "bats:a")"
 
@@ -341,12 +355,20 @@ _shard_artifact_n() {
 
   run _run_full
   [ "$status" -eq 2 ]
-  [[ "$output" == *"not readable as JSON"* ]]
+  # The inventory is now schema-validated before any field is read, so this is
+  # refused as "not a valid inventory" rather than "not readable as JSON". The
+  # invariant is the same and is what this test is for: an operational failure,
+  # never a silent `empty_inventory`, and never a decision artifact.
+  [[ "$output" == *"not a valid aid-test-audit-inventory"* ]]
+  [[ "$output" != *"empty_inventory"* ]]
   [ ! -f "$OUT/decision.json" ]
 }
 
 @test "an inventory listing the same run unit twice is corrupt identity, not something to de-duplicate" {
-  printf '%s' '{"schema_version":"1.0.0","run_units":[{"run_unit_id":"bats:a"},{"run_unit_id":"bats:a"}]}' > "$INVENTORY"
+  # Real inventory shape, duplicated entry. The previous fixture used a
+  # `run_units[]` key the scanner has never emitted, so this asserted nothing
+  # about a real inventory.
+  printf '%s' '{"schema_version":"1.0.0","generated_at":"2026-08-04T00:00:00Z","runner_families":["bats"],"entries":[{"run_unit_id":"bats:a","runner":"bats","adapter":"bats","confidence":"medium"},{"run_unit_id":"bats:a","runner":"bats","adapter":"bats","confidence":"medium"}]}' > "$INVENTORY"
   _manifest "bats:a"
   _shard_artifact "$(_disposition "bats:a")"
 

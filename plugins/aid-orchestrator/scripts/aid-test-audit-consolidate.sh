@@ -43,6 +43,7 @@ source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
 source "${SCRIPT_DIR}/lib/aid-test-profile-validate.sh"
 source "${SCRIPT_DIR}/lib/aid-test-lane-input-validate.sh"
 
+INVENTORY_SCHEMA="${SCHEMAS_DIR}/test-audit-inventory.schema.json"
 FINDINGS_SCHEMA="${SCHEMAS_DIR}/test-audit-consolidated-findings.schema.json"
 WAVE_SCHEMA="${SCHEMAS_DIR}/test-audit-wave-artifact.schema.json"
 BRIEF_SCHEMA="${SCHEMAS_DIR}/test-audit-plan-brief.schema.json"
@@ -245,13 +246,24 @@ if [[ "$audit_mode" == "full" ]]; then
 
   [[ -n "$inventory_path" && -f "$inventory_path" ]] \
     || _die 2 "--inventory is required in full mode (it is the denominator every coverage figure is measured against) and must exist"
+  # Validate the inventory against its OWN schema before reading a single field.
+  # This exists because of a real, total failure: this script read `.run_units[]`
+  # while the scanner and the schema both say `entries[]`, so every `--mode full`
+  # audit died at consolidation — and the regression suite never saw it, because
+  # its fixture was hand-written as `{"run_units":[]}`, a shape the real producer
+  # has never emitted. A fixture that invents its own contract tests nothing.
+  # Validating here means a wrong-shaped inventory now fails loudly wherever it
+  # came from, test or production.
+  if ! adapter_validate_schema "$INVENTORY_SCHEMA" "$(cat "$inventory_path")"; then
+    _die 2 "--inventory '$inventory_path' is not a valid aid-test-audit-inventory (see ${INVENTORY_SCHEMA}) — an inventory that does not match its contract cannot be the denominator for anything"
+  fi
   [[ -n "$project_root" && -d "$project_root" ]] \
     || _die 2 "--project-root is required in full mode — the unresolved-fraction threshold is read from that project's test-audit.yaml, and deriving it from --output-dir guesses wrong"
 
   # IDs stay JSON end to end. A round trip through newline-delimited text
   # splits an id containing a control character into two different ids.
-  inventory_ids_json="$(jq -c '[.run_units[].run_unit_id]' "$inventory_path")" \
-    || _die 2 "--inventory '$inventory_path' is not readable as JSON with a run_units[] array — an unreadable inventory is an operational failure, not an empty portfolio"
+  inventory_ids_json="$(jq -c '[.entries[].run_unit_id]' "$inventory_path")" \
+    || _die 2 "--inventory '$inventory_path' is not readable as JSON with an entries[] array — an unreadable inventory is an operational failure, not an empty portfolio"
 
   inv_dupes="$(jq -r 'group_by(.) | map(select(length>1) | .[0]) | .[0] // empty' <<<"$inventory_ids_json")"
   [[ -z "$inv_dupes" ]] || _die 6 "inventory lists run_unit_id '$inv_dupes' more than once — identity is corrupt, and de-duplicating it would hide that"
@@ -478,7 +490,12 @@ if [[ "$audit_mode" == "full" ]]; then
       # schema rejects outright.
       # The audit's own inventory names the units this audit is about.
       _known_ids="$(mktemp)"
-      jq -r '.run_units[].run_unit_id' "$inventory_path" > "$_known_ids" 2>/dev/null || : > "$_known_ids"
+      # NOT `|| : > "$_known_ids"`. Failing to an empty id set here made every
+      # resource map look like it named an unknown unit — or, worse, made the
+      # validation vacuous. The inventory was schema-validated above, so a
+      # failure at this point is a real one.
+      jq -r '.entries[].run_unit_id' "$inventory_path" > "$_known_ids" \
+        || _die 2 "could not read run_unit_ids from the validated inventory '$inventory_path'"
       if ! test_lane_validate_resource_maps "$resource_maps_dir" "$_known_ids"; then
         _die 6 "resource-map directory '$resource_maps_dir' contains an artifact that is not a valid aid-test-resource-map-v1 for this catalog — finalization stops rather than proposing lanes from evidence it could not read"
       fi

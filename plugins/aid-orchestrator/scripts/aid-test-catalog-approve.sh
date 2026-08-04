@@ -101,76 +101,19 @@ adapter_validate_schema "$CATALOG_SCHEMA" "$proposed_json" \
 # require repo-identity/signing infrastructure that exists nowhere else in
 # this codebase and is out of this step's own scope.
 SNAPSHOT_SCRIPT="${SCRIPT_DIR}/aid-test-catalog-selector-snapshot.sh"
-if [[ -f "${project_root}/plugins/aid-orchestrator/scripts/aid-select-tests.sh" ]]; then
-  snapshot_json="$(bash "$SNAPSHOT_SCRIPT" --project-root "$project_root" 2>/dev/null)" \
+# shellcheck source=lib/aid-test-catalog-selector-mappings.sh
+source "${SCRIPT_DIR}/lib/aid-test-catalog-selector-mappings.sh"
+if aid_test_catalog_selector_applies "$project_root"; then
+  # The derivation itself lives in the shared library, because the SCANNER now
+  # calls the same function to populate what it proposes. Deriving it twice —
+  # once to write and once to check — is what made a freshly-proposed catalog
+  # unapprovable in this repository for the whole of P072.
+  expected_mappings_json="$(aid_test_catalog_expected_mappings "$project_root" "$SNAPSHOT_SCRIPT")" \
     || _die 1 "pre-approval selector-snapshot re-verification failed to run — refusing to approve"
 
-  # The snapshot's own classification conflates "no case arm covers this
-  # probe path" with "not production" — a row derived from a REAL, targeted
-  # case arm (non-empty target_run_unit_ids) is always production,
-  # regardless of what is_production_surface says about the reconstructed
-  # probe path (that function only recognizes scripts/ and defaults/ as
-  # production roots; lib/ui-fidelity/** is a real, additional
-  # Initial-mapping production root the probe-path heuristic was never
-  # taught). Corrected at THIS consumption layer only — the snapshot
-  # script's own parsing/extraction logic is never touched.
-  # Selector-gap findings become exact-match unknown_production rows —
-  # Step 10's own real classification (exit 3), never left absent (which
-  # Step 10 would otherwise classify as mapping_gap, exit 11) — precedence
-  # placed after every real case-arm row; an exact match can never collide
-  # with a broader prefix/glob row for the SAME path (if one existed, the
-  # gap finding for that exact path would never have been raised at all).
-  expected_mappings_json="$(jq -c '
-    [.source_pattern_mappings[] | if ((.target_run_unit_ids | length) > 0) then .classification = "production" else . end]
-  ' <<<"$snapshot_json")"
-  # Codex review: an explicit case arm that (hypothetically) resolves to
-  # zero targets would otherwise get BOTH its own real row AND an
-  # auto-seeded gap row for the identical path_pattern — the real row,
-  # sorted first, would make the seeded row unreachable, silently
-  # defeating the "never left absent" guarantee. Exclude any finding whose
-  # path already has an explicit row (does not occur against the real
-  # selector today — verified — but never assumed to be structurally
-  # impossible).
-  existing_patterns_json="$(jq -c '[.[].path_pattern]' <<<"$expected_mappings_json")"
-  gap_rows_json="$(jq -c --argjson existing "$existing_patterns_json" '
-    [.findings[] | select(.category == "selector-gap") |
-      (.evidence_refs[0] | sub("^selector-snapshot:"; "")) as $p
-      | select(($existing | index($p)) == null)
-      | { match_type: "exact",
-          path_pattern: $p,
-          target_run_unit_ids: [],
-          classification: "unknown_production",
-          precedence: 1000,
-          status: "proposed" }
-    ]
-  ' <<<"$snapshot_json")"
-  expected_mappings_json="$(jq -c --argjson gaps "$gap_rows_json" '. + $gaps' <<<"$expected_mappings_json")"
-
-  # Canonical comparison: ORDER-preserved tuples of the fields that
-  # actually determine Step 10's classification behavior — sorted by
-  # (precedence, path_pattern), NEVER by the literal precedence NUMBER
-  # alone (Codex review: the schema permits duplicate precedence values —
-  # e.g. every auto-seeded gap row shares precedence 1000 — so sorting by
-  # precedence alone left tied rows in caller/iteration-dependent order,
-  # making two semantically-identical mapping sets compare unequal merely
-  # because two exact-match gap rows were listed in a different order).
-  # path_pattern is a stable, always-present tiebreak; the literal
-  # precedence number itself and the per-row status (proposed vs approved)
-  # are excluded from the compared tuple entirely — neither is this
-  # check's concern.
-  # Sort by (precedence, path_pattern) BEFORE canonicalizing — precedence
-  # ordering is preserved across DIFFERENT precedence values (it changes
-  # real matching behavior for overlapping prefix/glob rows), while
-  # path_pattern only ever breaks ties WITHIN the same precedence value
-  # (true collisions only occur among auto-seeded gap rows here, which are
-  # all mutually non-overlapping exact matches, so this tiebreak never
-  # changes behavior — only removes iteration-order noise).
-  _canon_mappings() {
-    jq -cS '[.[] | {match_type, path_pattern, target_run_unit_ids: (.target_run_unit_ids | sort), classification}]'
-  }
-  expected_canon="$(_canon_mappings <<<"$(jq -c 'sort_by([.precedence, .path_pattern])' <<<"$expected_mappings_json")")"
+  expected_canon="$(aid_test_catalog_canon_mappings <<<"$expected_mappings_json")"
   actual_mappings_json="$(jq -c '[.source_pattern_mappings[]] | sort_by([.precedence, .path_pattern])' <<<"$proposed_json")"
-  actual_canon="$(_canon_mappings <<<"$actual_mappings_json")"
+  actual_canon="$(aid_test_catalog_canon_mappings <<<"$actual_mappings_json")"
 
   if [[ "$actual_canon" != "$expected_canon" ]]; then
     echo "aid-test-catalog-approve.sh: refusing to approve — --proposed source_pattern_mappings[] does not match a fresh selector-snapshot re-verification (drift since the proposal was generated):" >&2
@@ -185,6 +128,38 @@ fi
 # Flip ONLY the document-root status. mapping_approval and every
 # source_pattern_mappings[] row's own status are copied through unchanged —
 # this action alone never approves the routing map.
+# ─── Provenance-revocation guard ────────────────────────────────────────────
+# Approval REPLACES the catalog wholesale, and a freshly-scanned proposal knows
+# nothing about parallel safety — every unit in it is `unknown`. So approving a
+# scan output over a catalog that carries provenance-bound `safe` entries
+# silently revokes all of them: in this repository that is 65 units leaving the
+# pool, turning a 24-minute concurrent run back into a serial one. Nothing about
+# the operation announces that; it looks like an ordinary approval.
+#
+# Real evidence being thrown away is a decision, not a side effect. It is named,
+# counted, and requires the operator to say they meant it.
+if [[ -f "$approved_path" ]]; then
+  _current_json="$(yq -o=json '.' "$approved_path" 2>/dev/null)" || _current_json=""
+  if [[ -n "$_current_json" && "$_current_json" != "null" ]]; then
+    _revoked="$(jq -r --argjson prop "$proposed_json" '
+      [ .run_units[]?
+        | select((.parallel.status // "unknown") != "unknown")
+        | .run_unit_id as $id
+        | select( [ $prop.run_units[]? | select(.run_unit_id == $id)
+                    | select((.parallel.status // "unknown") != "unknown") ] | length == 0 )
+        | $id ]' <<<"$_current_json" 2>/dev/null)" || _revoked="[]"
+    _n_revoked="$(jq -r 'length' <<<"$_revoked" 2>/dev/null || echo 0)"
+    if [[ "${_n_revoked:-0}" -gt 0 && "${AID_CATALOG_ACCEPT_REVOCATION:-0}" != "1" ]]; then
+      echo "aid-test-catalog-approve.sh: refusing to approve — this proposal would revoke the parallel-safety evidence of ${_n_revoked} unit(s) that the current approved catalog records as non-unknown:" >&2
+      jq -r '.[] | "    " + .' <<<"$_revoked" >&2
+      echo "  A freshly-scanned proposal classifies every unit as 'unknown', so approving one over a catalog" >&2
+      echo "  carrying real pilot/migration evidence discards that evidence and serialises those units." >&2
+      echo "  If that is intended, re-run with AID_CATALOG_ACCEPT_REVOCATION=1." >&2
+      exit 1
+    fi
+  fi
+fi
+
 approved_json="$(jq -c '.status = "approved"' <<<"$proposed_json")"
 
 adapter_validate_schema "$CATALOG_SCHEMA" "$approved_json" \

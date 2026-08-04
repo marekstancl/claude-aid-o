@@ -119,12 +119,19 @@ command_json="$(jq -c '.command' <<<"$unit_json")"
 # fabricated per-case breakdown.
 runner="$(jq -r '.runner' <<<"$unit_json")"
 timing_supported="false"
+command_is_shell_form="false"
 mapfile -t argv < <(jq -r '(.argv // [])[]' <<<"$command_json")
 if [[ "${#argv[@]}" -eq 0 ]]; then
-  # shell-form command
+  # shell-form command: what actually runs is `bash -c <string>`.
+  command_is_shell_form="true"
   mapfile -t argv < <(printf '%s\n' "bash" "-c" "$(jq -r '.shell // ""' <<<"$command_json")")
 fi
-if [[ "$runner" == "bats" ]] && bats_timing_supported; then
+# `--timing` goes to the RUNNER, and for a shell-form command argv[0] is `bash`,
+# not the runner. Inserting it there produced `bash --timing -c '<command>'`,
+# which is not a thing bash accepts — a per-case breakdown request that could
+# only ever fail. A shell-form unit gets a file-level lower bound instead, which
+# is the same honest fallback used for any runner that cannot report per case.
+if [[ "$runner" == "bats" && "$command_is_shell_form" == "false" ]] && bats_timing_supported; then
   timing_supported="true"
   argv=("${argv[0]}" "--timing" "${argv[@]:1}")
 fi

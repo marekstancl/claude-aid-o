@@ -110,3 +110,63 @@ teardown() {
   run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/does-not-exist.yaml" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 3 ]
 }
+
+# ─── Approval must not silently discard parallel-safety evidence ────────────
+
+_unit_yaml() {   # <id> <status>
+  jq -nc --arg id "$1" --arg st "$2" '
+    {run_unit_id:$id, runner:"bats", source_paths:["a.bats"], production_surfaces:["a.bats"],
+     test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
+     command:{type:"argv",argv:["bash","-c","true"]}, runtime:{fingerprint:"sha256:aaaaaaaaaaaa"},
+     parallel:({status:$st, exclusive_resources:[], max_workers:null, internal_parallelism:false}
+               + (if $st == "unknown" then {}
+                  else {provenance:{evidence_ref:"fixture", verified_at:"2026-08-01T00:00:00Z",
+                                    method:"resource_map_plus_pilot",
+                                    source_sha256:"aa11bb22cc33dd44ee55ff6677889900aa11bb22cc33dd44ee55ff6677889900",
+                                    resource_digest:"bb22cc33dd44ee55ff6677889900aa11bb22cc33dd44ee55ff6677889900aa11"}}
+                  end)),
+     isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
+     recommendation:"keep", test_cases:[]}'
+}
+_catalog_yaml() {   # <out> <status-doc> <unit-status>
+  jq -n --argjson u "$(_unit_yaml "bats:a" "$3")" --arg s "$2" \
+    '{schema_version:"1.0.0", generated_at:"2026-08-01T00:00:00Z", status:$s,
+      run_units:[$u], source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' \
+    | yq -P '.' > "$1"
+}
+
+@test "approving a freshly-scanned proposal over provenance-bound evidence is REFUSED, and names what it would revoke" {
+  # A scan classifies every unit `unknown`. Approving one over a catalog that
+  # carries real pilot/migration evidence silently revokes all of it — in this
+  # repository, 65 units leaving the safe pool and a 24-minute concurrent run
+  # becoming a serial one. Nothing about the operation announced that.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _catalog_yaml "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" approved safe
+  _catalog_yaml "$TEST_TMPDIR/scan.yaml" proposed unknown
+
+  run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/scan.yaml" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"would revoke the parallel-safety evidence"* ]]
+  [[ "$output" == *"bats:a"* ]]
+  # And it did not publish: the evidence is still there.
+  [ "$(yq -r '.run_units[0].parallel.status' "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml")" = "safe" ]
+}
+
+@test "the revocation is allowed when the operator says they meant it" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _catalog_yaml "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" approved safe
+  _catalog_yaml "$TEST_TMPDIR/scan.yaml" proposed unknown
+
+  AID_CATALOG_ACCEPT_REVOCATION=1 run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/scan.yaml" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.run_units[0].parallel.status' "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml")" = "unknown" ]
+}
+
+@test "a proposal that PRESERVES the evidence approves without any override" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _catalog_yaml "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" approved safe
+  _catalog_yaml "$TEST_TMPDIR/keeps.yaml" proposed safe
+
+  run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/keeps.yaml" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}

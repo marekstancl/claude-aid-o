@@ -52,6 +52,31 @@ _tacl_is_static_discovery_command() {
   return 1
 }
 
+# _tacl_canonical_argv <command_json>
+#   The argv a command JSON actually executes as. `{type:"shell", shell:S}` and
+#   `{type:"argv", argv:["bash","-c",S]}` are the SAME execution — the second is
+#   just the first written out — so the allowlist must see them as the same
+#   command.
+#
+#   This exists because they were not seen as the same, and it made `--mode
+#   full` unusable on any project whose expensive units are gates. The profiler
+#   reads a gate's shell-form command, rewrites it to argv because that is what
+#   it must hand the job supervisor, and then asked the allowlist about the
+#   rewritten form — which the gate matcher, comparing `{type:"shell", …}`
+#   objects for exact equality, could never approve. Same command, allowed as
+#   shell, refused as argv, exit 11, no receipt. Since the selector always picks
+#   the most expensive unit and that is always a gate, it failed every time.
+#
+#   The equivalence does NOT widen what is approved: an argv candidate matches
+#   only if some declared gate or approved catalog entry has exactly that shell
+#   string, which was already approved in its own right.
+_tacl_canonical_argv() {
+  jq -c 'if (.argv // []) | length > 0
+         then .argv
+         else ["bash", "-c", (.shell // "")]
+         end' <<<"$1" 2>/dev/null
+}
+
 # _tacl_matches_gate_command <command_json> <execution_yaml>
 #   True if <command_json> exactly equals (type-aware) a real gate's command
 #   in the target project's execution.yaml. Gate commands are always
@@ -65,8 +90,10 @@ _tacl_matches_gate_command() {
   local gates_json
   gates_json="$(yq -o=json '.gates // {}' "$execution_yaml" 2>/dev/null)" || return 1
   [[ "$gates_json" != "null" ]] || return 1
-  jq -e --argjson cmd "$command_json" '
-    any(.[]; {type:"shell", shell: .command} == $cmd)
+  local cand; cand="$(_tacl_canonical_argv "$command_json")"
+  [[ -n "$cand" ]] || return 1
+  jq -e --argjson cand "$cand" '
+    any(.[]; ["bash", "-c", .command] == $cand)
   ' <<<"$gates_json" >/dev/null 2>&1
 }
 
@@ -90,7 +117,14 @@ _tacl_matches_approved_catalog_command() {
   local status
   status="$(jq -r '.status // empty' <<<"$catalog_json")"
   [[ "$status" == "approved" ]] || return 1
-  jq -e --argjson cmd "$command_json" 'any(.run_units[]?; .command == $cmd)' <<<"$catalog_json" >/dev/null 2>&1
+  local cand; cand="$(_tacl_canonical_argv "$command_json")"
+  [[ -n "$cand" ]] || return 1
+  jq -e --argjson cand "$cand" '
+    any(.run_units[]?;
+        (.command | if (.argv // []) | length > 0
+                    then .argv
+                    else ["bash", "-c", (.shell // "")] end) == $cand)
+  ' <<<"$catalog_json" >/dev/null 2>&1
 }
 
 # aid_test_audit_check_allowed <mode> <command_json> <execution_yaml> <approved_catalog_path>
