@@ -4,6 +4,32 @@ Step 24 asks for a real `--mode full` audit of this repository through the
 ordinary user path, with its catalog and mapping approved through the
 sanctioned scripts.
 
+## Round 2 — the audit ran, and it found the reasons it could not finish
+
+A real `/aid-audit-tests repo --mode full --budget-minutes 60` was run against a
+disposable clone of `a792186` on 2026-08-04 (audit id
+`audit-20260804-131748`, ~85 minutes against a 60-minute budget). It reached a
+terminal state **without producing a decision**, and that is the most useful
+thing this plan has produced so far: it named three independent blockers, each
+fatal on its own, and every one of them was a defect this plan introduced.
+
+| Blocker | What it was |
+|---|---|
+| Inventory | the consolidator read `.run_units[]`; the scanner and the schema both say `entries[]`. Every full audit died at consolidation. The regression suite's fixture was hand-written in the invented shape, so it agreed with the bug |
+| Profiler | it rewrites a gate's shell command to `bash -c …`, then asked an allowlist that only compares shell-form objects. Same command, allowed as shell, refused as argv. The selector always picks the most expensive unit, and that is always a gate |
+| Approval | the scanner wrote `source_pattern_mappings: []` while the approver required a fresh selector snapshot to be reproduced. A freshly-proposed catalog could never be approved |
+
+All three are fixed in **v2.70.1**, each with a test, along with five smaller
+real defects the same audit surfaced. What the audit did NOT do is fail
+quietly: fail-closed refused three times out of three and never rendered a
+report that looked finished. That part worked.
+
+**The expensive artifacts survived** — 8 wave artifacts, 163 dispositions, the
+inventory and the measurements are all intact in the clone, so the re-run can
+resume rather than start over.
+
+---
+
 **Status: LIVE-ACCEPTANCE PENDING.** Not partial-but-finishable — *pending*, and
 the whole P072 plan inherits that status. Nothing in this line of work may be
 described as complete, and no `v2.70.0` tag or release may be created, until the
@@ -115,8 +141,13 @@ working tree, which cannot show that what ships is what was tested.
 
 ### Only then
 
-Green Run 1 + green Run 2 → the plan may be called complete, and the `v2.70.0`
-tag and release may be created. Not before, and not in the other order.
+Green Run 1 + green Run 2 → the plan may be called complete.
+
+`v2.70.0` and `v2.70.1` are tagged and released, which is a deliberate change
+from the earlier sequencing and is recorded rather than glossed: releasing is
+what makes the plugin installable, and installing is a precondition of both
+runs. A release is not a claim that the plan is finished. This page is where
+that claim would have to be made, and it is not made here.
 
 ## Why this is pending rather than done
 

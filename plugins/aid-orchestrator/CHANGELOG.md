@@ -3,13 +3,33 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.1] — 2026-08-04
+
+> The first real `--mode full` audit of this repository reached a terminal state
+> without producing a decision. It found three independent blockers, each fatal
+> on its own, plus five smaller real defects. This release is those fixes.
+>
+> Live acceptance remains pending: the audit still has to complete, and the
+> consumer E2E from an installed plugin has not run.
+
+### Fixed
+- **`--mode full` could never finish on real data** — the consolidator read `.run_units[]` from the inventory while the scanner and the inventory schema both say `entries[]`, so every full audit died at consolidation. The regression suite missed it because its fixture was hand-written in the invented shape, which is why the consolidator now schema-validates the inventory before reading a field: a fixture that makes up its own contract proves only that two pieces of test code agree.
+- **The cost profiler refused every gate unit** — it rewrote a gate's shell-form command into `bash -c …` to hand it to the job supervisor, then asked an allowlist that compared shell-form objects for exact equality. Same command, allowed as shell, refused as argv, exit 11, no receipt — and since the selector always picks the most expensive unit, and that is always a gate, it failed every time. The allowlist now compares the canonical execution form, which widens nothing.
+- **`bats --timing` was inserted into the wrong argv slot** for shell-form commands, producing `bash --timing -c …`. Those units get a file-level lower bound instead, the same fallback as any runner that cannot report per case.
+- **A freshly-proposed catalog could not be approved** — the scanner wrote `source_pattern_mappings: []` unconditionally while the approver re-derived the real map from a fresh selector snapshot and refused anything that did not reproduce it. Both now call one shared derivation.
+- **Approving a scan silently revoked parallel-safety evidence** — a scan classifies every unit `unknown`, so approving one over a catalog carrying real pilot evidence discarded it: 65 units out of the pool and a 24-minute concurrent run back to serial, with nothing announcing it. Approval now names what would be revoked and requires `AID_CATALOG_ACCEPT_REVOCATION=1`.
+- **Seven entrypoint scripts were committed non-executable** — invoked as the docs write them, without a `bash` prefix, they exited 126. Six command-file references named scripts that only exist under `scripts/lib/`. Both are now checked by a suite.
+- **A missing golden directory minted a new baseline** — `test-epic-to-json-regression.sh` recorded whatever the code currently produced and reported `0/0` with exit 0, so a broken refactor became the expected result in any checkout without the fixtures. It now fails; regenerating requires `AID_REGENERATE_GOLDEN=1`.
+- **The resource map read jq's `. as $x` as a shell `source`** — dot-space at the start of a line matched the source-directive rule, producing `as` as a file to resolve, which inflated `unresolved_sources` and helped hold maps at `capped_at_unknown`.
+
 ## [2.70.0] — 2026-08-04
 
-> **Release candidate — NOT tagged, NOT released.** Live acceptance is pending:
-> the real full audit (Step 24) and the consumer E2E from the installed
-> candidate have not been run. See `docs/plans/P072-real-audit-record.md`.
-> Nothing here may be described as delivering test-suite acceleration — the
-> measurement campaign has not been run either
+> Superseded by 2.70.1, which fixes three defects that made `--mode full`
+> unable to finish on real data. Live acceptance is still pending — the real
+> full audit (Step 24) has not completed and the consumer E2E from an installed
+> candidate has not run (`docs/plans/P072-real-audit-record.md`) — and nothing
+> in this line of work may be described as delivering test-suite acceleration,
+> because the measurement campaign has not been run either
 > (`docs/plans/P072-campaign-ledger.md`).
 
 ### Added
@@ -29,14 +49,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`run-all-tests.sh` result parsing** — suite results are read token-by-token against the shapes this repository's suites really print; anything ambiguous is `unparsed` and fails the aggregate instead of counting as zero tests.
 
 ### Fixed
-- **`--mode full` could never finish on real data** — the consolidator read `.run_units[]` from the inventory while the scanner and the inventory schema both say `entries[]`, so every full audit died at consolidation. The regression suite missed it because its fixture was hand-written in the invented shape, which is why the consolidator now schema-validates the inventory before reading a field: a fixture that makes up its own contract proves only that two pieces of test code agree.
-- **The cost profiler refused every gate unit** — it rewrote a gate's shell-form command into `bash -c …` to hand it to the job supervisor, then asked an allowlist that compared shell-form objects for exact equality. Same command, allowed as shell, refused as argv, exit 11, no receipt — and since the selector always picks the most expensive unit, and that is always a gate, it failed every time. The allowlist now compares the canonical execution form, which widens nothing.
-- **`bats --timing` was inserted into the wrong argv slot** for shell-form commands, producing `bash --timing -c …`. Those units get a file-level lower bound instead, the same fallback as any runner that cannot report per case.
-- **A freshly-proposed catalog could not be approved** — the scanner wrote `source_pattern_mappings: []` unconditionally while the approver re-derived the real map from a fresh selector snapshot and refused anything that did not reproduce it. Both now call one shared derivation.
-- **Approving a scan silently revoked parallel-safety evidence** — a scan classifies every unit `unknown`, so approving one over a catalog carrying real pilot evidence discarded it: 65 units out of the pool and a 24-minute concurrent run back to serial, with nothing announcing it. Approval now names what would be revoked and requires `AID_CATALOG_ACCEPT_REVOCATION=1`.
-- **Seven entrypoint scripts were committed non-executable** — invoked as the docs write them, without a `bash` prefix, they exited 126. Six command-file references named scripts that only exist under `scripts/lib/`. Both are now checked by a suite.
-- **A missing golden directory minted a new baseline** — `test-epic-to-json-regression.sh` recorded whatever the code currently produced and reported `0/0` with exit 0, so a broken refactor became the expected result in any checkout without the fixtures. It now fails; regenerating requires `AID_REGENERATE_GOLDEN=1`.
-- **The resource map read jq's `. as $x` as a shell `source`** — dot-space at the start of a line matched the source-directive rule, producing `as` as a file to resolve, which inflated `unresolved_sources` and helped hold maps at `capped_at_unknown`.
 - **The parallel-safety resolver was unusable on the hot path** — 101s to partition this repository's own pool, because it re-parsed the catalog and shelled out to the map builder once per unit. One batch pass with a shared budget: 60s.
 - **An incomplete audit could render as "Verdict: clean"** — the renderer classified from findings alone, so an audit that never finished looked like one that found nothing.
 - **Profile ingestion failed open** — a corrupt, foreign or tampered receipt became an empty action list, which reads exactly like "nothing needed doing". Every lane and profile input is now schema-validated and bound to its audit.
