@@ -288,3 +288,88 @@ _to_epic() {
   run grep -c 'Depends on: none' "$AID_PLUGIN_PATH/skills/plan-writing.md"
   [ "$output" -ge 1 ]
 }
+
+# ─── Codex-review findings on the first cut of this step ───────────────────
+# The adversarial review found two real defects:
+#   1. The `Blocks:` guard matched the WORD anywhere on the line, so a normal
+#      `- Depends on: Step 2 — Blocks: API work` was skipped entirely and its
+#      dependency silently vanished. It now matches the FIELD prefix only.
+#   2. The reference patterns were not end-anchored, so `Steps 1-3 and 5`
+#      matched the valid prefix and silently discarded the 5.
+# Anchoring alone rejected 5 plans in this repo's own corpus that previously
+# generated, because the dominant real annotation form is a PARENTHETICAL
+# ("Step 1 (visual_refs field in schema)"), so the annotation separator set
+# was widened to em dash, en dash, ' - ' and ' ('. Measured over every plan in
+# .aid-o/plans: pre-P073 accepted 25, this step now accepts 29, with ZERO
+# newly rejected.
+
+@test "P073 Step 5 (review finding 1): a Depends line whose ANNOTATION mentions 'Blocks:' keeps its dependency" {
+  _write_plan "Step 1 — Blocks: API work downstream"
+  run _graph
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '[.edges[]? | select(.after == "step-2" and .before == "step-1")] | length')" = "1" ]
+}
+
+@test "P073 Step 5 (review finding 2): 'Steps 1-3 and 5' fails loudly instead of silently dropping the 5" {
+  _write_plan "Steps 1-1 and 5"
+  run _graph
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unrecognised dependency token"* ]]
+  [[ "$output" == *"and 5"* ]]
+}
+
+@test "P073 Step 5 (review finding 2): a bare trailing note after a valid reference no longer passes unnoticed" {
+  _write_plan "Step 1 plus whatever else"
+  run _graph
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unrecognised dependency token"* ]]
+}
+
+@test "P073 Step 5: a PARENTHETICAL annotation is supported (the form this repo's plan corpus actually uses)" {
+  _write_plan "Step 1 (creates the fixture file this step reads)"
+  run _graph
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '[.edges[]? | select(.after == "step-2" and .before == "step-1")] | length')" = "1" ]
+}
+
+@test "P073 Step 5: an EN-DASH annotation is supported" {
+  _write_plan "Step 1 – creates the fixture file this step reads"
+  run _graph
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '[.edges[]? | select(.after == "step-2" and .before == "step-1")] | length')" = "1" ]
+}
+
+@test "P073 Step 5: a SPACED ASCII-hyphen annotation is supported, while an UNSPACED hyphen stays part of a range" {
+  _write_plan "Step 1 - creates the fixture file this step reads"
+  run _graph
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '[.edges[]? | select(.after == "step-2" and .before == "step-1")] | length')" = "1" ]
+
+  # The unspaced form must still parse as a RANGE, not as an annotation.
+  _write_plan "Steps 1-1"
+  run _graph
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '[.edges[]? | select(.after == "step-2" and .before == "step-1")] | length')" = "1" ]
+}
+
+@test "P073 Step 5: parse_step_deps honours the same four annotation separators and anchoring" {
+  run bash -c '
+    set -uo pipefail
+    step_counter=2
+    eval "$(sed -n "/^parse_step_deps() {/,/^}/p" "$1")"
+    printf "em=%s\n"    "$(parse_step_deps "Step 1 — note")"
+    printf "en=%s\n"    "$(parse_step_deps "Step 1 – note")"
+    printf "hyph=%s\n"  "$(parse_step_deps "Step 1 - note")"
+    printf "paren=%s\n" "$(parse_step_deps "Step 1 (note)")"
+    printf "range=%s\n" "$(parse_step_deps "Steps 1-3")"
+    parse_step_deps "Steps 1-3 and 5" && echo "UNANCHORED-LEAK" || echo "anchored-ok"
+  ' _ "$PLAN_TO_EPIC"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"em=1"* ]]
+  [[ "$output" == *"en=1"* ]]
+  [[ "$output" == *"hyph=1"* ]]
+  [[ "$output" == *"paren=1"* ]]
+  [[ "$output" == *"range=1, 2, 3"* ]]
+  [[ "$output" == *"anchored-ok"* ]]
+  [[ "$output" != *"UNANCHORED-LEAK"* ]]
+}

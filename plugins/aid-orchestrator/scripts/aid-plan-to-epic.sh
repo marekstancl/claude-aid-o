@@ -424,14 +424,17 @@ parse_step_deps() {
 
   # P073 Step 5 — one dependency grammar, shared with the canonical parser in
   # lib/aid-source-plan-graph.sh:
-  #   * everything from the FIRST em dash on is a human annotation, discarded
-  #     before parsing;
+  #   * everything from the FIRST annotation separator on (em dash, en dash,
+  #     a SPACED ASCII hyphen — unspaced would collide with `Steps 1-3` — or a
+  #     space-preceded opening parenthesis) is human prose, discarded before
+  #     parsing;
   #   * `none` (authoring form) and `---` (generated-canonical form) are the
   #     two accepted no-dependency markers;
-  #   * every remaining token must be recognised — an unrecognised one used to
-  #     be silently dropped, which turned a typo into "no dependency" and let
-  #     generation continue with a graph the author never wrote.
-  raw="${raw%%—*}"
+  #   * every remaining token must be recognised IN FULL (the patterns are
+  #     end-anchored) — an unrecognised one used to be silently dropped, which
+  #     turned a typo into "no dependency", and an unanchored match silently
+  #     discarded the tail, so `Steps 1-3 and 5` lost the 5.
+  raw="$(printf '%s' "$raw" | sed 's/[—–].*$//; s/ - .*$//; s/ (.*$//')"
   case "$(printf '%s' "$raw" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
     ---|none|'') return 0 ;;
   esac
@@ -447,7 +450,7 @@ parse_step_deps() {
     [[ -z "$token" ]] && continue
 
     # Match range pattern: "Steps M-N" or "steps M-N" (with optional trailing text)
-    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
       local range_start="${BASH_REMATCH[1]}"
       local range_end="${BASH_REMATCH[2]}"
 
@@ -461,13 +464,13 @@ parse_step_deps() {
       done
 
     # Match singular pattern: "Step N" (with optional trailing text)
-    elif [[ "$token" =~ ^[Ss]tep[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       result+=("${BASH_REMATCH[1]}")
 
     # Match "Task" range — plans that use "## Task N:" headers reference deps
     # the same way (e.g. "Depends on: Tasks 3-5"). Mirror the Steps logic so
     # Task-style dependency lines are not silently dropped.
-    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
       local range_start="${BASH_REMATCH[1]}"
       local range_end="${BASH_REMATCH[2]}"
 
@@ -481,17 +484,18 @@ parse_step_deps() {
       done
 
     # Match "Task N" singular
-    elif [[ "$token" =~ ^[Tt]ask[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       result+=("${BASH_REMATCH[1]}")
 
-    # Match bare number (possibly left after earlier processing)
-    elif [[ "$token" =~ ^([0-9]+) ]]; then
+    # Match bare number (possibly left after earlier processing). Anchored
+    # too: `2 and 5` must not silently become `2`.
+    elif [[ "$token" =~ ^([0-9]+)[[:space:]]*$ ]]; then
       result+=("${BASH_REMATCH[1]}")
 
     else
       # P073 Step 5: loud, not silent. The message names the step and the
       # offending token verbatim so the author can fix the exact line.
-      echo "ERROR: step ${step_counter:-?}: unrecognised dependency token '${token}' — accepted: 'Step N', 'Steps N-M', 'none', '---' (optionally followed by ' — annotation')" >&2
+      echo "ERROR: step ${step_counter:-?}: unrecognised dependency token '${token}' — accepted: 'Step N', 'Steps N-M', 'none', '---', comma-separated, optionally followed by an annotation after ' — ', ' – ', ' - ' or ' ('" >&2
       return 1
     fi
   done <<< "$tokens"

@@ -299,14 +299,29 @@ same thing: **`Depends on: none`** is the authoring form, and **`Depends on:
 else counts — `Depends on: nothing`, an empty value, or a marker mixed with a
 real reference (`none, Step 3`) all block generation.
 
-An optional human annotation may follow the references after an em dash —
-`Depends on: Step 2 — needs the force helper`. Both parsers split on the FIRST
-em dash, grade only the reference list to its left, and ignore the annotation.
-Every token on the left must be recognised: `Depends on: Step 2, banana` fails
-loudly rather than silently becoming `Step 2`.
+An optional human annotation may follow the references, introduced by an em
+dash, an en dash, a spaced ASCII hyphen, or an opening parenthesis — all four
+of these are equivalent:
+
+```
+- Depends on: Step 2 — needs the force helper
+- Depends on: Step 2 – needs the force helper
+- Depends on: Step 2 - needs the force helper
+- Depends on: Step 2 (needs the force helper)
+```
+
+Both parsers split on the FIRST separator, grade only the reference list to
+its left, and ignore the annotation. An UNSPACED hyphen is never a separator —
+it is the range form, so `Steps 1-3` stays a range.
+
+Every token to the left must be recognised IN FULL. `Depends on: Step 2,
+banana` fails loudly rather than silently becoming `Step 2`, and
+`Depends on: Steps 1-3 and 5` fails rather than silently dropping the 5 — put
+that kind of prose in an annotation instead.
 
 `Blocks:` lines live in the same block and are never folded into the depends
-set, even when indented.
+set, even when indented. A `Depends on:` line whose ANNOTATION happens to
+mention "Blocks:" keeps its dependency.
 
 A missing step, duplicate, self-reference, forward reference, reversed range,
 or unrecognised token blocks generation; it is never interpreted as “no

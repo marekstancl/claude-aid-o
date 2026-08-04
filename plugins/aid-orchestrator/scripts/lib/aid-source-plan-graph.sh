@@ -4,13 +4,17 @@
 #
 # This is deliberately source-plan based: it runs before EPIC/plan.json exists.
 # Consumers must not invent a second awk parser.  A dependency declaration is
-# accepted only as `Depends on: <refs> [— annotation]`, where <refs> is a
+# accepted only as `Depends on: <refs> [<sep> annotation]`, where <refs> is a
 # comma-separated list of `Step N`, `Steps X-Y`, `Task N`, `Tasks X-Y`, or one
 # of the two no-dependency markers `none` (authoring form) and `---`
 # (generated-canonical form).  It may be split over indented continuation
-# lines.  Everything after the FIRST em dash is a human annotation and is
-# ignored; every token on the LEFT of it must be recognised.  A declared but
-# unparseable dependency is an error, never an empty graph.
+# lines.  <sep> is an em dash, an en dash, or a SPACED ASCII hyphen (` - ` —
+# unspaced would collide with the `Steps 1-3` range form); everything after
+# the first one is a human annotation and is ignored.  Every token on the
+# LEFT of it must be recognised IN FULL: the reference patterns are
+# end-anchored, so `Steps 1-3 and 5` fails loudly instead of silently
+# dropping the 5.  A declared but unparseable dependency is an error, never
+# an empty graph.
 # =============================================================================
 [[ -n "${_AID_SOURCE_PLAN_GRAPH_LOADED:-}" ]] && return 0
 _AID_SOURCE_PLAN_GRAPH_LOADED=1
@@ -29,11 +33,17 @@ _aid_spg_dep_out=""
 _aid_spg_dep_numbers() {
   local raw="$1" token start end i found=0
   _aid_spg_dep_out=""
-  # P073 Step 5: everything from the FIRST em dash on is a human annotation
-  # ("Depends on: Step 2 — needs the force helper") and is discarded before
-  # parsing; only the reference list to its left is graded, and every token
-  # there must be recognised.
-  raw="${raw%%—*}"
+  # P073 Step 5: everything from the FIRST annotation separator on is human
+  # prose ("Depends on: Step 2 — needs the force helper") and is discarded
+  # before parsing; only the reference list to its left is graded, and every
+  # token there must be recognised in full. Four separators are honoured, in
+  # the order they appear: em dash, en dash, a SPACED ASCII hyphen (an
+  # UNSPACED hyphen must stay part of the `Steps 1-3` range form), and a
+  # space-preceded '(' — the parenthetical form most of this repo's own plan
+  # corpus uses ("Step 1 (visual_refs field in schema)"). Anchoring without
+  # it rejected 5 plans that previously generated, which the loosening
+  # directive forbids.
+  raw="$(printf '%s' "$raw" | sed 's/[—–].*$//; s/ - .*$//; s/ (.*$//')"
   # The two accepted no-dependency markers: `none` is the authoring form,
   # `---` the generated-canonical one. Case-insensitive; nothing else counts.
   case "$(printf '%s' "$raw" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
@@ -43,26 +53,26 @@ _aid_spg_dep_numbers() {
   while IFS= read -r token; do
     token="$(printf '%s' "$token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     [[ -z "$token" ]] && continue
-    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
       start="${BASH_REMATCH[1]}"; end="${BASH_REMATCH[2]}"
       if (( start > end )); then _aid_spg_error="reversed dependency range Steps ${start}-${end}"; return 1; fi
       for ((i=start; i<=end; i++)); do _aid_spg_dep_out+="${i}"$'\n'; done
       found=1
-    elif [[ "$token" =~ ^[Ss]tep[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       _aid_spg_dep_out+="${BASH_REMATCH[1]}"$'\n'; found=1
-    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
       start="${BASH_REMATCH[1]}"; end="${BASH_REMATCH[2]}"
       if (( start > end )); then _aid_spg_error="reversed dependency range Tasks ${start}-${end}"; return 1; fi
       for ((i=start; i<=end; i++)); do _aid_spg_dep_out+="${i}"$'\n'; done
       found=1
-    elif [[ "$token" =~ ^[Tt]ask[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       _aid_spg_dep_out+="${BASH_REMATCH[1]}"$'\n'; found=1
     else
       # P073 Step 5: an unrecognised token is a LOUD failure. Previously such
       # a token was silently dropped, so `Depends on: Step 2, banana` and even
       # a no-dependency marker mixed with a real reference parsed as a partial
       # graph nobody had asked for.
-      _aid_spg_error="unrecognised dependency token '${token}' — accepted: 'Step N', 'Steps N-M', 'Task N', 'Tasks N-M', 'none', '---' (optionally followed by ' — annotation')"
+      _aid_spg_error="unrecognised dependency token '${token}' — accepted: 'Step N', 'Steps N-M', 'Task N', 'Tasks N-M', 'none', '---', comma-separated, optionally followed by an annotation after ' — ', ' – ', ' - ' or ' ('"
       return 1
     fi
   done <<< "$raw"
@@ -93,8 +103,10 @@ aid_source_plan_graph() {
       if (in_deps && $0 ~ /^\*\*[A-Z][^:]*:\*\*/) { in_deps=0 }
       # P073 Step 5: `- Blocks: Step 5` sits in the same block and is indented,
       # so the generic continuation branch used to fold it into the DEPENDS
-      # set — inventing a forward dependency the author never declared.
-      if (in_deps && $0 ~ /Blocks:/) next
+      # set — inventing a forward dependency the author never declared. The
+      # guard matches the FIELD at the start of the line only: a Depends line
+      # whose annotation merely mentions "Blocks:" must keep its dependency.
+      if (in_deps && $0 ~ /^[[:space:]]*-?[[:space:]]*Blocks:/) next
       if (in_deps) { if ($0 ~ /^[[:space:]]*-[[:space:]]*Depends on:/ || $0 ~ /^[[:space:]]+/ || $0 ~ /^[[:space:]]*Depends on:/) { t=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", t); sub(/^Depends on:[[:space:]]*/, "", t); deps=deps t " " } }
     }
     END { flush() }
