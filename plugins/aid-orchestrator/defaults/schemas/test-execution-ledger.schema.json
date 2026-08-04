@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator/schemas/test-execution-ledger-v1",
+  "title": "aid-test-execution-ledger-v1",
+  "description": "One entry per run unit ACTUALLY DISPATCHED during a gate run. The ledger exists to answer one question — did anything run twice? — and it can only answer it if every dispatch point appends. A gap is indistinguishable from an absence of duplication, which is why an append that cannot take its lock fails the run rather than being skipped.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "candidate_sha", "opened_at", "entries"],
+  "properties": {
+    "schema_version": { "const": "aid-test-execution-ledger-v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "candidate_sha": {
+      "description": "The revision under test. Two entries only collide if they describe the same code — a unit run against two different commits is two legitimate executions.",
+      "type": "string",
+      "minLength": 1
+    },
+    "opened_at": { "type": "string", "minLength": 1 },
+    "closed_at": { "type": ["string", "null"] },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_unit_id", "gate_id", "command_fingerprint", "dispatch_point", "at"],
+      "properties": {
+        "run_unit_id": { "type": "string", "minLength": 1 },
+        "gate_id": {
+          "description": "Which gate this dispatch happened under. Two entries for one unit under the SAME gate id are one gate's own business (a retry, a repeat); under two different gate ids they are the double execution this ledger exists to find.",
+          "type": "string",
+          "minLength": 1
+        },
+        "command_fingerprint": { "type": "string", "minLength": 1 },
+        "dispatch_point": {
+          "description": "Which of the four emission paths appended this. `gate_runner_direct` is the fourth and least obvious one: a gate whose command invokes a runner directly passes through none of the fan-out points, so without it the ledger would have certified this repository's own known double execution as clean.",
+          "type": "string",
+          "enum": ["bats_lane", "aggregate_runner", "scheduler", "gate_runner_direct"]
+        },
+        "at": { "type": "string", "minLength": 1 }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dispatched", "distinct_units", "duplicates"],
+      "properties": {
+        "dispatched": { "type": "integer", "minimum": 0 },
+        "distinct_units": { "type": "integer", "minimum": 0 },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["run_unit_id", "gate_ids"],
+            "properties": {
+              "run_unit_id": { "type": "string" },
+              "gate_ids": {
+                "type": "array",
+                "minItems": 2,
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

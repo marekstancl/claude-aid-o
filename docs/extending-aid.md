@@ -1308,17 +1308,41 @@ conventional:
 | `test_catalog_parallel_provenance_binding` | A `safe` status outliving the content it was verified against |
 | `test_lane_single_parallel_authority` | Two consumers disagreeing about the same unit |
 | `test_audit_lane_membership_exact` | A lane promoted on evidence gathered for a different set |
-| `test_execution_no_double_dispatch` | **PLANNED** — a run unit executed twice in one gate run |
+| `test_execution_no_double_dispatch` | A run unit executed twice in one gate run |
 
 Each row records its **recovery behaviour**: what an operator actually does
 when it fires. A blocking enforcement with no stated recovery is a wall, and
 the registry test refuses a row that omits it.
 
-`test_execution_no_double_dispatch` is deliberately `status: planned` with a
-deadline. Neither the ledger nor its production caller exists yet, and this
-repository already contains one real double-execution — the row exists so the
-ledger cannot ship as a detector read only by its own test, which is the P026
-failure this whole registry answers.
+### The execution ledger, and its fourth emission path
+
+`test_execution_no_double_dispatch` is worth reading about before you touch the
+gate runner. The ledger records one entry per run unit ACTUALLY DISPATCHED, and
+it has **four** emission points, not the three obvious ones:
+
+1. `aid-bats-parallel-lane.sh` — pool, sequential and boundary buckets alike
+2. `run-all-tests.sh` — one per suite
+3. `aid-test-scheduler.sh` — one per scheduled unit
+4. `aid-run-gates.sh` — for any gate whose command invokes a runner **directly**
+
+The fourth is the one that matters and the one easiest to leave out. This
+repository has a gate that runs `test-aid-fsm.bats` on its own while the
+parallel pool runs it too, and the `full` and `release` profiles include both:
+that file executes twice on every full run. With only the fan-out points
+instrumented, the ledger would have recorded one entry for it and reported zero
+duplicates — certifying as clean the exact defect it was built to detect.
+
+There is deliberately **no membership exemption**. Exempting "the pool gate
+contains this unit" was implemented, and it silenced that same defect. Each
+dispatch point appends once per execution it actually performs, so two entries
+under two gate ids are two executions; `--contains` is recorded for a reader
+but suppresses nothing.
+
+An append that cannot take its lock fails rather than being skipped: a ledger
+with a gap is indistinguishable from one showing no duplication. A dispatch
+point running outside a gate run finds no ledger path and appends nothing,
+which is not an error — a developer running a suite by hand has no run to
+account for.
 
 ### Adding to this area
 

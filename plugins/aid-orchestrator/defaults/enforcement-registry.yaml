@@ -1639,13 +1639,12 @@ enforcements:
 
   - id: test_execution_no_double_dispatch
     type: 1
-    source: "scripts/aid-test-execution-ledger.sh (close) — NOT YET IMPLEMENTED (P072 Step 26)"
-    instruction: ".aid-o/plans/P072-test-audit-decision-quality.md Step 26"
+    source: "scripts/aid-test-execution-ledger.sh (open/append/close, exit 7); scripts/aid-run-gates.sh (lifecycle + gate_runner_direct emission); scripts/aid-bats-parallel-lane.sh; scripts/tests/run-all-tests.sh"
+    instruction: "docs/extending-aid.md — Test-portfolio decision quality (P072)"
     severity: blocking
     surface: internal-guard
-    status: planned
-    deadline: "2026-09-30"
-    verdict: unmapped
-    description: "P072 Step 26 — a ledger proving no run unit is executed twice within one gate run, closed by `aid-run-gates.sh` at run end. Recorded as `planned` because neither the ledger nor its production caller exists yet: this repository already contains one real double-execution (a bats file dispatched by two gates), so the row exists specifically to stop the ledger shipping as a detector read only by its own test."
-    recovery: "n/a until implemented. When it lands, a non-zero close means a unit ran twice — deduplicate the gate memberships that contain it."
-    test: "planned — scripts/tests/bats/test-aid-test-execution-ledger.bats"
+    status: active
+    verdict: ALIGNED
+    description: "P072 Step 26 — a ledger proving no run unit is executed twice within one gate run. FOUR emission paths, not three: the bats lane, the aggregate runner, the scheduler, and — critically — `aid-run-gates.sh` itself for any gate whose command invokes a runner directly. Instrumenting only the three fan-out points would have recorded ONE entry for `gate:bats_fsm` (which runs a file the pool also runs) and reported zero duplicates, certifying as clean the exact defect the ledger exists to detect. There is deliberately NO membership exemption: it was built, and it silenced that same defect, because each dispatch point appends once per execution it actually performs — so two entries under two gate ids are two executions. An append that cannot take its lock FAILS rather than being skipped, since a ledger with a gap is indistinguishable from one showing no duplication."
+    recovery: "The close names the unit and both gates. Remove the unit from one of them — usually by dropping the standalone gate whose file the pool already covers — or, if both dispatches are deliberate, split them across profiles so no single run does both."
+    test: "scripts/tests/bats/test-aid-test-execution-ledger.bats"

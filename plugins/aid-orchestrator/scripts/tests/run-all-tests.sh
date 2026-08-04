@@ -209,6 +209,23 @@ fi
 echo ""
 
 for suite in "${SUITES[@]}"; do
+  # ─── Execution ledger (P072 Step 26) ─────────────────────────────────
+  # One entry per suite this runner dispatches. Unset outside a gate run, in
+  # which case this appends nothing — a developer running the suite by hand
+  # has no run to account for.
+  if [[ -n "${AID_EXECUTION_LEDGER:-}" ]]; then
+    _lg_rel="${suite#"$SCRIPT_DIR/"}"
+    case "$suite" in
+      *.bats) _lg_unit="bats:plugins/aid-orchestrator/scripts/tests/bats/$(basename "$suite" .bats)" ;;
+      *)      _lg_unit="sh:plugins/aid-orchestrator/scripts/tests/$(basename "$suite")" ;;
+    esac
+    bash "$SCRIPT_DIR/../aid-test-execution-ledger.sh" append \
+      --path "$AID_EXECUTION_LEDGER" --run-unit-id "$_lg_unit" \
+      --gate-id "${AID_CURRENT_GATE_ID:-gate:shell_pipeline_smoke}" \
+      --fingerprint "$(printf '%s' "$_lg_rel" | sha256sum | cut -c1-16)" \
+      --dispatch-point aggregate_runner || exit 2
+  fi
+
   suite_name="$(basename "$suite" .bats)"
   suite_name="${suite_name%.sh}"   # strip .sh if .bats didn't match
   SUITES_RUN=$(( SUITES_RUN + 1 ))

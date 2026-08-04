@@ -328,6 +328,20 @@ for path in "${BATS_SOURCE_PATHS[@]}"; do
   fi
 done
 
+# ─── Execution ledger (P072 Step 26) ────────────────────────────────────────
+# One entry per unit this lane actually dispatches, in the pool bucket AND the
+# sequential one. Outside a gate run AID_EXECUTION_LEDGER is unset and this
+# appends nothing, which is not an error: there is no run to account for.
+_ledger_note() {   # <file> <gate-id>
+  [[ -n "${AID_EXECUTION_LEDGER:-}" ]] || return 0
+  bash "$SCRIPT_DIR/aid-test-execution-ledger.sh" append \
+    --path "$AID_EXECUTION_LEDGER" \
+    --run-unit-id "bats:${1%.bats}" \
+    --gate-id "${2:-${AID_CURRENT_GATE_ID:-gate:bats_lane}}" \
+    --fingerprint "$(printf '%s' "$1" | sha256sum | cut -c1-16)" \
+    --dispatch-point bats_lane || return 1
+}
+
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "SAFE_POOL (${#SAFE_POOL[@]}):"
   printf '  %s\n' "${SAFE_POOL[@]}"
@@ -365,6 +379,7 @@ if [[ $RUN_POOL -eq 1 ]]; then
       printf '  - %s\n' "${RECHECK_FAILED[@]}" >&2
       exit 2
     fi
+    for pooled in "${SAFE_POOL[@]}"; do _ledger_note "$pooled" || exit 2; done
     echo "aid-bats-parallel-lane.sh: running ${#SAFE_POOL[@]} catalog-approved bats files in the safe pool (-j $JOBS)" >&2
     bats -j "$JOBS" "${SAFE_POOL[@]}"
     POOL_RC=$?
@@ -375,7 +390,8 @@ if [[ $RUN_POOL -eq 1 ]]; then
   fi
 
   if [[ ${#UNCLASSIFIED[@]} -gt 0 ]]; then
-    echo "aid-bats-parallel-lane.sh: running ${#UNCLASSIFIED[@]} UNCLASSIFIED bats file(s) sequentially (not on the allowlist — safe default, never auto-pooled)" >&2
+    for seq_file in "${UNCLASSIFIED[@]}"; do _ledger_note "$seq_file" || exit 2; done
+    echo "aid-bats-parallel-lane.sh: running ${#UNCLASSIFIED[@]} sequential bats file(s) (not proven pool-safe — the safe default, never auto-pooled)" >&2
     for file in "${UNCLASSIFIED[@]}"; do
       echo "aid-bats-parallel-lane.sh: running unclassified file '$file'" >&2
       bats "$file"
@@ -387,6 +403,7 @@ fi
 
 if [[ $RUN_DEDICATED -eq 1 ]]; then
   for file in "${BOUNDARY[@]}"; do
+    _ledger_note "$file" || exit 2
     echo "aid-bats-parallel-lane.sh: running boundary lane file '$file' (not pooled, not unclassified)" >&2
     bats "$file"
     rc=$?

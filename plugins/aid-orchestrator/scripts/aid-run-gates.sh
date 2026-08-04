@@ -508,6 +508,23 @@ run_all_gates() {
   local escalation_triggered=false
   local escalation_reason=""
 
+  # ─── Execution ledger (P072 Step 26) ─────────────────────────────────────
+  # The gate runner owns the ledger's LIFECYCLE only; the dispatch points own
+  # its content. It cannot see run units for a fan-out command — `run_gate`
+  # takes an opaque command string — so a ledger appended from here would
+  # record one entry per gate and could never find the overlap it exists for.
+  local _ledger_path=""
+  if [[ -z "${AID_EXECUTION_LEDGER:-}" ]]; then
+    _ledger_path="${_plugin_project_root%/}/.aid-o/work/evidence/execution-ledger/${run_id:-run}-$(date -u +%Y%m%dT%H%M%SZ).json"
+    if bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" open \
+         --path "$_ledger_path" --run-id "${run_id:-run}" \
+         --candidate-sha "${base_commit_resolved:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" >/dev/null 2>&1; then
+      export AID_EXECUTION_LEDGER="$_ledger_path"
+    else
+      _ledger_path=""
+    fi
+  fi
+
   # Iterate gate names via yq (mikefarah)
   local gate_names
   gate_names=$(yq '.gates | keys | .[]' "$execution_yaml")
@@ -591,6 +608,30 @@ run_all_gates() {
         use_scheduled_dispatch=true
         gate_concurrency_context="$rollout_effective_mode"
       fi
+    fi
+
+    # The dispatch points tag their entries with the gate they are running
+    # under, which only this loop knows.
+    export AID_CURRENT_GATE_ID="$gate_name"
+
+    # THE FOURTH EMISSION PATH. A gate whose command invokes a runner DIRECTLY
+    # passes through none of the fan-out points, so without this the ledger
+    # would record nothing for it — and this repository's real double
+    # execution (`gate:bats_fsm` running a file the pool also runs) would have
+    # been certified clean by the very check built to find it.
+    #
+    # A command that resolves to no test file appends nothing, which is
+    # correct: those gates execute no unit.
+    if [[ -n "${AID_EXECUTION_LEDGER:-}" ]]; then
+      while read -r _lg_bats; do
+        [[ -z "$_lg_bats" ]] && continue
+        bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" append \
+          --path "$AID_EXECUTION_LEDGER" \
+          --run-unit-id "bats:${_lg_bats%.bats}" --gate-id "$gate_name" \
+          --fingerprint "$(printf '%s' "$resolved_cmd" | sha256sum | cut -c1-16)" \
+          --dispatch-point gate_runner_direct >/dev/null 2>&1 || true
+      done < <(grep -oE '[A-Za-z0-9_./-]+\.bats' <<<"$resolved_cmd" 2>/dev/null \
+                 | grep -v 'aid-bats-parallel-lane' || true)
     fi
 
     local gate_result="" attempt=0 gate_exit=0
@@ -767,6 +808,31 @@ run_all_gates() {
       overall="fail"
     fi
   done <<< "$gate_names"
+  unset AID_CURRENT_GATE_ID
+
+  # ─── Close the ledger, and evaluate it ───────────────────────────────────
+  # `close` is where the duplicate check actually runs. Opening a ledger and
+  # never closing it would be a detector with no consumer — the exact shape
+  # this project's registry exists to prevent.
+  #
+  # A detected double execution is recorded on the report rather than silently
+  # tolerated. It does not fail the gate PASS/FAIL verdict, which belongs to
+  # the gates themselves; it is a run-level finding about the run's own shape,
+  # and it is visible because the alternative is double-counting wall clock
+  # forever.
+  if [[ -n "${_ledger_path:-}" && -f "${_ledger_path}" ]]; then
+    local _ledger_out _ledger_rc=0
+    _ledger_out="$(bash "${SCRIPT_DIR}/aid-test-execution-ledger.sh" close --path "$_ledger_path" 2>&1)" || _ledger_rc=$?
+    if [[ "$_ledger_rc" -eq 7 ]]; then
+      echo "$_ledger_out" >&2
+      gates_json+=",\"_execution_ledger\":$(jq -c '{path:$p, duplicates:.summary.duplicates, dispatched:.summary.dispatched}' \
+        --arg p "$_ledger_path" "$_ledger_path")"
+    else
+      gates_json+=",\"_execution_ledger\":$(jq -c '{path:$p, duplicates:(.summary.duplicates // []), dispatched:(.summary.dispatched // 0)}' \
+        --arg p "$_ledger_path" "$_ledger_path" 2>/dev/null || echo '{}')"
+    fi
+    unset AID_EXECUTION_LEDGER
+  fi
 
   # ─── defined==processed integrity assert (OBS-20260708-07) ──────────────
   # `gate_count` (yq '.gates | length') is `defined`; `processed` is the number
