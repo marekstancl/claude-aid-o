@@ -725,7 +725,17 @@ elif [[ ! -f "$fsm_state_file" ]]; then
     if git checkout "$fsm_branch" >/dev/null 2>&1; then
       echo "P040 Component E: restored generation branch '$fsm_branch' after FSM init (was on '$fsm_after_branch')" >&2
     else
-      echo "P040 Component E: WARNING — could not restore branch '$fsm_branch' after FSM init (now on '$fsm_after_branch')" >&2
+      # P073 Step 6: a WARNING here used to let the pipeline continue on the
+      # WRONG branch — every follow-on phase (queue, report, a further EPIC)
+      # then generated against a checkout the operator never chose. The stop
+      # happens at the point of failed restore, not merely at the end, and
+      # exits 3 so aid-auto-pipeline.sh can distinguish it from an ordinary
+      # generation failure. Artifacts from the phase that COMPLETED are left
+      # in place — they are valid; only continuation is stopped.
+      echo "P040 Component E: ERROR — generation completed but the checkout is now on '$fsm_after_branch' instead of '$fsm_branch' — run: git checkout $fsm_branch ; then rerun any follow-on action" >&2
+      echo "P040 Component E: underlying git checkout failure:" >&2
+      git checkout "$fsm_branch" >&2 || true
+      exit 3
     fi
   fi
 else
