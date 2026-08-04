@@ -261,6 +261,15 @@ _release_record_force() {
     exit 1
   }
 
+  # BEST-EFFORT BY DESIGN, and stated here so it is never mistaken for a
+  # fail-closed guarantee (an adversarial review read it as one). Two
+  # authorities are deliberately different: the WAIVER RECEIPT above is the
+  # authoritative record and IS fail-closed — a bypass that cannot be
+  # receipted does not happen. The cross-plan audit log is a convenience
+  # index, and every other force in this codebase appends to it with the same
+  # `|| true` contract (see fsm_emit_audit_log). Making this one abort the
+  # release would make an unwritable index file — a condition that loses no
+  # evidence, since the receipt is already durable — block a PM's last resort.
   bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
     --epic-id "release" --run-id "aid-release.sh" \
     --event "release_force_override" \

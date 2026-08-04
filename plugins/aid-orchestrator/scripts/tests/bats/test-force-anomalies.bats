@@ -199,3 +199,42 @@ EOF
   run grep -c "force --reason" "$RELEASE"
   [ "$output" -ge 1 ]
 }
+
+# ─── Codex-review finding on the first cut of this step ───────────────────
+# The review read "receipt plus audit-log entry" as two fail-closed records.
+# They are deliberately not: the WAIVER RECEIPT is the authoritative record
+# and is fail-closed; the cross-plan audit log is a convenience index appended
+# with the same `|| true` contract every other force in this codebase uses
+# (fsm_emit_audit_log). This pins that split so neither half drifts.
+
+@test "P073 Step 9 (review finding): the RECEIPT is fail-closed — an unwritable evidence dir blocks the bypass" {
+  _seed_release_repo
+  chmod a-w "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-900-1_1/R-900-1"
+  chmod a-w "$TEST_PROJECT_ROOT/.aid-o/work"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch --force --reason "$REASON"
+  local rc="$status"
+  chmod u+w "$TEST_PROJECT_ROOT/.aid-o/work" "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-900-1_1/R-900-1"
+  [ "$rc" -ne 0 ]
+  [[ "$output" == *"refusing a silent bypass"* ]]
+  [ -z "$(git tag -l 'v2.0.1')" ]
+}
+
+@test "P073 Step 9 (review finding): an unwritable AUDIT LOG does not block the bypass, because the receipt already holds the evidence" {
+  _seed_release_repo
+  # The receipt's own directory stays writable; only the convenience index is
+  # blocked, by making it a directory the appender cannot write as a file.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch --force --reason "$REASON"
+  [ "$status" -eq 0 ]
+  # The authoritative record exists even though the index write could not land.
+  local w; w="$(find "$TEST_PROJECT_ROOT/.aid-o" -name 'waiver-release-force-*.json' | head -1)"
+  [ -n "$w" ]
+  [ "$(jq -r '.waiver.reason' "$w")" = "$REASON" ]
+}
+
+@test "P073 Step 9 (review finding): the code states which of the two records is authoritative" {
+  run grep -c 'authoritative record and IS fail-closed' "$RELEASE"
+  [ "$output" -ge 1 ]
+}
