@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.7] — 2026-08-05
+
+> The audit could prove which tests are safe to run side by side, and had no way
+> to write that down. The proof landed in `decision.json` and the catalog — the
+> file every consumer reads — came out with every unit `unknown` regardless.
+
+### Added
+- **`aid-test-catalog-apply-evidence.sh` — the missing link between what the audit proves and what the catalog says.** It promotes the units of every `proposed_parallel` lane to `parallel.status: safe`, bound to the content they were verified against, and carries forward evidence the previously approved catalog already held for units whose content has not moved. Carrying forward is safe by construction: every entry is bound to a source hash and a resource digest, so anything whose file changed fails its own binding and reverts to `unknown` with no list to maintain. It runs automatically at the end of every full audit; before this, the only path from evidence to catalog was a one-shot migration written for P071's text allowlist, and everything else was manual.
+
+### Changed
+- **A bare `/aid-audit-tests` asks instead of assuming** — it used to fall back to `static`, which answers a different question than the one most people are asking, while `full` refused to start without a budget nobody remembers. The controller now offers the recommended run (full, 180 minutes) in one sentence and accepts a plain yes. Explicit arguments still win.
+
 ## [2.70.6] — 2026-08-05
 
 > Found by a real full audit of this repository: 174 run units and 158 447 bytes

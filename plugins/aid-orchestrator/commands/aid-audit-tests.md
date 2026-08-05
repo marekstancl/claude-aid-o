@@ -28,6 +28,30 @@ and ends every run with a mandatory plain-language chat recommendation.
 
 ## Invocation
 
+### Bare `/aid-audit-tests` — ASK, never assume
+
+**When the user types `/aid-audit-tests` with no arguments, the controller MUST
+ask before running anything.** It does not silently fall back to `static`, and
+it does not silently pick a budget. A full audit takes hours and a static one
+answers a different question; guessing which the user meant wastes either their
+afternoon or their expectations.
+
+Ask ONE short question in the user's own language, offering the defaults
+pre-filled so a bare "ano" is enough:
+
+> Pustím **plný audit** (`--mode full`) s rozpočtem **180 minut** na celý
+> projekt. Sedí to, nebo chceš něco jiného?
+>
+> - **plný** — najde všechno včetně toho, co smí běžet paralelně (hodiny)
+> - **měřený** — změří časy, paralelismus neřeší (desítky minut)
+> - **rychlý** — jen soupis testů, nic nespouští (minuty)
+
+Then run what they confirm. `full` + 180 minutes is the recommended default
+because it is the only mode that fills in the catalog's parallel column, which
+is what makes the test suite fast afterwards.
+
+Explicit arguments always win — a user who typed them has already answered.
+
 ```
 /aid-audit-tests [repo|path:<path>|runner:<id>] [--mode static|measure|full]
                   [--budget-minutes N] [--max-agents N] [--repeat N]
@@ -40,7 +64,7 @@ and ends every run with a mandatory plain-language chat recommendation.
 | `path:<path>` | Scope: a subdirectory only. |
 | `runner:<id>` | Scope: one discovered runner family only (e.g. `runner:bats`). |
 | `--mode static\|measure\|full` | `static` (default): discovery + static analysis only. `measure`: adds bounded, sequential command execution against the approved-catalog-only allowlist. `full`: adds a deeper flake/order/isolation probe. |
-| `--budget-minutes N` | Wall-clock budget for `measure`/`full`. **Required for `--mode full`** — hard error, not a default. |
+| `--budget-minutes N` | Wall-clock budget for `measure`/`full`. **Required for `--mode full`** — hard error, not a default. The controller supplies it from the question above rather than making the user remember it. |
 | `--max-agents N` | Ceiling on concurrent read-only audit agents (independent of `dispatch.max_parallel`). |
 | `--repeat N` | Repeat a measured command N times (flake-probing use). |
 | `--write-plan` | Non-interactive equivalent of the natural-language "vytvoř plán oprav" continuation (see below) — for CI/scripted use. |

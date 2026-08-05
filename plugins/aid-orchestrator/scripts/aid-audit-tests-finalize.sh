@@ -239,6 +239,30 @@ if [[ "$audit_mode" == "full" ]]; then
     || _die 1 "decision artifact belongs to audit '${decision_audit_id}', not '${audit_id}' — refusing to finalize over a foreign decision"
 fi
 
+  # ─── Stage 1c: the evidence reaches the catalog ──────────────────────────
+  # Without this the audit proved parallel safety into decision.json and NOTHING
+  # carried it into the catalog, which is the file every consumer reads. A
+  # freshly proposed catalog therefore came out with every unit `unknown` no
+  # matter how much evidence had been gathered, and approving it traded a
+  # 27-minute concurrent test run for a 55-minute serial one. The proof existed
+  # and had nowhere to go.
+  #
+  # Advisory on purpose: a catalog that cannot be updated must not sink an
+  # otherwise complete audit, and the operator still has to approve whatever
+  # comes out. But it is never silent.
+  _proposed_catalog="${output_dir%/}/test-catalog.proposed.yaml"
+  if [[ -f "$_proposed_catalog" && -n "$project_root" ]]; then
+    _apply_args=(--catalog "$_proposed_catalog" --decision "$decision_path" --project-root "$project_root")
+    # The currently approved catalog is where previously-proven evidence lives.
+    # Carrying it forward is safe because every entry is bound to a content
+    # hash: anything whose source moved fails its own binding and reverts.
+    _approved_catalog="${project_root%/}/.aid-o/config/test-catalog.yaml"
+    [[ -f "$_approved_catalog" ]] && _apply_args+=(--previous "$_approved_catalog")
+    if ! bash "${SCRIPT_DIR}/aid-test-catalog-apply-evidence.sh" "${_apply_args[@]}" >&2; then
+      echo "WARN: aid-audit-tests-finalize.sh: could not apply this audit's parallel-safety evidence to ${_proposed_catalog} — the proposed catalog is complete but its parallel column is not filled in" >&2
+    fi
+  fi
+
 # ─── Stage 2: render the mandatory chat summary (Step 15) — persists the
 #     durable record as a side effect; fails closed if that persist fails.
 # "" for $2 keeps the renderer's own default changed_text (it uses :- so an
