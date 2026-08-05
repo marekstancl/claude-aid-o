@@ -359,7 +359,7 @@ is a genuine change, not an artifact.
 Only then offer the remediation plan. Two questions, in the order the user
 cares about: first make the tests run right, then decide what to fix.
 
-### What a full audit proposes (v2.71.0)
+### What a full audit proposes
 
 Analysts no longer stop at classifying. Where a finding recommends anything but
 `keep`, it carries a **proposal**: the exact change with file:line, an effort

@@ -28,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Step rendering and dependency grammar** — an unparseable dependency token is now a hard failure at generation time instead of a silently dropped edge that produces a plausible, wrong run order.
 
 ### Fixed
+- **Version-stamped heading in aid-audit-tests.md** — v2.71.0 shipped a heading carrying its own version number, which the repository's own skill linter forbids; the whole suite was red until it was dropped.
 - **Release script silent aborts** — a `grep | head -1` probe took SIGPIPE on large inputs (measured 20/20 at ~290KB) and the aborted probe read as a clean absence, so the release silently skipped work it believed unnecessary.
 - **Placeholder release entries** — a release whose CHANGELOG section for the new version is empty or a placeholder is refused; the entry is the only human-readable record of what shipped.
 - **Reporter plan-boundary contradiction** — a Reporter round no longer moves the candidate it is reporting on.
