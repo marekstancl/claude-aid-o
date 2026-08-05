@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-05
 
 ## False-Green Guardrails
 
@@ -234,7 +234,14 @@ artifact — see "Bounded Loop" below.
     `PM_ESCALATION_REQUIRED`: execution halts, `aid-cp1-gate.sh` reports
     `check-budget` as exhausted, and only an explicit PM-escalation
     override permits a 6th attempt — never an automatic re-entry.
-- **PM-escalation override:** a `cp1-pm-escalation-override.json` artifact
+- **PM-escalation override:** THE PM route is
+  `aid-fsm.sh pm-override grant c0 <plan_id> --reason "<text, >= 20 chars>"`,
+  which writes the artifact below. **Agents never create this artifact and
+  never set an override environment variable** — it is the PM's decision made
+  physical, and an agent producing one would be forging the authorisation the
+  loop exists to be bounded by.
+
+  The artifact is a `cp1-pm-escalation-override.json`
   at the plan's evidence root, containing a non-empty `pm_ref` (>= 20
   characters, mirroring this project's `AID_C3_FORCE_BEYOND_ESCALATION`
   reasoned-override convention). `aid-cp1-gate.sh` consumes it EXACTLY

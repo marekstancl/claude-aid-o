@@ -1664,6 +1664,14 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    - **`c3_recheck_count == max_rechecks (4)` and still blocking** → **ESCALATION**: surfaced to
      the PM in step 12's summary as blocking (never silently merged); a 5th recheck / 6th total
      Codex run is PM-approved only, never automatic re-entry into this loop.
+
+     **THE PM route is** `aid-fsm.sh pm-override grant c3 <plan_id> --reason "<text, >= 20
+     chars>"`, which writes a single-use `c3-pm-escalation-override.json` that the exhaustion
+     gate claims ATOMICALLY — one grant authorises exactly one further attempt (P073 Step 10,
+     the same mechanism C0 uses). **Agents never create this artifact and never set an override
+     environment variable.** The legacy `AID_C3_FORCE_BEYOND_ESCALATION` still works for one
+     more release: it is converted into the same single-use artifact with a deprecation warning,
+     once per plan, so a lingering export can no longer authorise attempt after attempt.
    - **Same fingerprint survives a recheck** (auto-detected, see step 3 above) **or conflicting
      findings** (controller calls `escalate`, see step 3 above) → **ESCALATION** immediately,
      regardless of remaining budget.
@@ -2503,7 +2511,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-05
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

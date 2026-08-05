@@ -114,7 +114,7 @@
 #                         evidence-root path afterward. See cmd_dispatch's own
 #                         header comment for the full contract.
 #
-# **Last Updated:** 2026-08-04
+# **Last Updated:** 2026-08-05
 # =============================================================================
 set -euo pipefail
 
@@ -182,7 +182,9 @@ Subcommands:
       allows a further dispatch only when the outcome is "" (in-progress) or
       "unverifiable" (must stay retriable); every other value, including the
       "escalated" this call just wrote, is rejected without an override —
-      bypassable only via AID_C3_FORCE_BEYOND_ESCALATION, same as always.
+      bypassable only via a single-use PM escalation override artifact
+      (`aid-fsm.sh pm-override grant c3 <plan_id> --reason "<text>"`), claimed
+      atomically exactly once — see the PM ESCALATION OVERRIDE section below.
 EOF
 }
 
@@ -192,6 +194,140 @@ EOF
 _fail() {
   echo "PRECONDITION FAIL: $1" >&2
   exit 1
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PM ESCALATION OVERRIDE — one artifact schema, shared with C0 (P073 Step 10)
+#
+# Two opposite override philosophies used to coexist. C0 required a single-use
+# artifact claimed atomically and corroborated afterwards; C3 took a bare
+# environment variable that left no receipt, could not be corroborated, and —
+# because an export persists — silently authorised EVERY subsequent attempt in
+# the same shell. C0's own error text explicitly rejects the env model. This
+# converges C3 onto C0's mechanism.
+#
+# THE ARTIFACT: `<evidence_root>/c3-pm-escalation-override.json`
+#   {schema_version, artifact_type, target: "c3", plan_id, pm_ref (>=20 chars),
+#    created_at, origin: "grant"|"env"}
+# produced by `aid-fsm.sh pm-override grant c3 <plan_id> --reason "<text>"`.
+#
+# THE CLAIM is `mv -n` plus a MANDATORY source-gone post-check. On the
+# installed coreutils 9.1 a SKIPPED `mv -n` still exits 0, so trusting the
+# exit code alone would let a race loser believe it owned the override. This
+# copies aid-cp1-gate.sh's corroboration pattern verbatim rather than
+# reimplementing it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _c3_override_file <evidence_root>
+_c3_override_file() {
+  printf '%s/c3-pm-escalation-override.json' "$1"
+}
+
+# _c3_convert_env_override <evidence_root> <plan_id>
+#   THE ONLY place in this file permitted to read the deprecated variable —
+#   the plan-level acceptance criterion greps for exactly that. Converts a
+#   still-exported deprecated variable (named in the body below) into one
+#   single-use
+#   artifact, once. Returns 0 when an artifact now exists because of this
+#   call, 1 otherwise.
+#
+#   SINGLE-USE ACROSS THE PLAN, not just per shell: before converting, it
+#   looks for a `.consumed-*` sibling whose `origin` is `env`. If one exists
+#   the variable has already had its one conversion, and a lingering export
+#   must not become a standing multi-use bypass — so it refuses and names the
+#   grant command instead.
+#
+#   RETURN CODES (the caller must never read the variable itself — the
+#   plan-level acceptance criterion mechanically checks that this function is
+#   its only reader):
+#     0 — an unconsumed artifact now exists because of this call
+#     2 — the variable is set but an unconsumed artifact was ALREADY present:
+#         the artifact wins and the variable is ignored for this attempt,
+#         which is what prevents a double-use race
+#     1 — nothing to convert, or the conversion was refused
+_c3_convert_env_override() {
+  local evidence_root="$1" plan_id="$2"
+  # THE deprecated variable, read here and nowhere else in this file. The
+  # plan-level acceptance criterion greps this function body against the
+  # whole-file count to keep that true.
+  local raw="${AID_C3_FORCE_BEYOND_ESCALATION:-}"
+  [[ -n "$raw" ]] || return 1
+
+  if [[ -f "$(_c3_override_file "$evidence_root")" ]]; then
+    return 2
+  fi
+
+  if [[ "${#raw}" -lt 20 ]]; then
+    echo "PRECONDITION FAIL: AID_C3_FORCE_BEYOND_ESCALATION is set but its reason is under 20 characters — an override reason is a forensic record, not a formality." >&2
+    return 1
+  fi
+
+  local consumed
+  for consumed in "${evidence_root}"/c3-pm-escalation-override.json.consumed-*; do
+    [[ -e "$consumed" ]] || continue
+    if [[ "$(jq -r '.origin // ""' "$consumed" 2>/dev/null)" == "env" ]]; then
+      echo "PRECONDITION FAIL: the deprecated env override was already consumed once — use 'aid-fsm.sh pm-override grant c3 ${plan_id} --reason \"<text>\"' for a further attempt." >&2
+      return 1
+    fi
+  done
+
+  local out; out="$(_c3_override_file "$evidence_root")"
+  mkdir -p "$evidence_root" 2>/dev/null || return 1
+  local tmp="${out}.tmp.$$"
+  jq -n --arg ref "$raw" --arg plan "$plan_id" \
+    --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:"aid-2.0", artifact_type:"pm_escalation_override",
+      target:"c3", plan_id:$plan, pm_ref:$ref, created_at:$now, origin:"env"}' \
+    > "$tmp" 2>/dev/null && mv "$tmp" "$out" 2>/dev/null || {
+      rm -f "$tmp" 2>/dev/null || true
+      echo "PRECONDITION FAIL: could not convert AID_C3_FORCE_BEYOND_ESCALATION into an override artifact at ${out}." >&2
+      return 1
+    }
+  echo "WARNING: AID_C3_FORCE_BEYOND_ESCALATION is deprecated — converted to a single-use override artifact; this compatibility path is removed in the next release." >&2
+  return 0
+}
+
+# _c3_claim_pm_override <evidence_root>
+#   Atomically consumes a present, valid override. Echoes
+#   `{reason, consumed_path, consumed_sha256}` on success; fails closed
+#   otherwise. Mirrors aid-cp1-ledger.sh's claim exactly, including the
+#   corroboration fields, so a later audit can verify the claim happened.
+_c3_claim_pm_override() {
+  local evidence_root="$1" override_file consumed_file reason
+  override_file="$(_c3_override_file "$evidence_root")"
+  [[ -f "$override_file" ]] || return 1
+  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
+  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
+
+  # EPOCH-SECOND COLLISION. The CP1 primitive this mirrors names the archive
+  # `.consumed-<epoch>` and stops there, so two legitimate claims inside the
+  # same second collide: `mv -n` skips on the existing destination and the
+  # post-check fails the SECOND one closed. Fail-closed is the safe direction,
+  # but it wrongly rejects a genuine fresh grant — the existing CP1 suite
+  # papers over it with a `sleep 1`. Found by a test here, so this copy picks
+  # the first free name instead of inheriting the bug.
+  #
+  # The window between choosing the name and `mv -n` is harmless: if the
+  # destination appears meanwhile, `mv -n` skips and the mandatory source-gone
+  # post-check below still fails closed. No double-claim is possible either way.
+  local base n=0
+  base="${override_file}.consumed-$(date -u +%s)"
+  consumed_file="$base"
+  while [[ -e "$consumed_file" ]]; do
+    n=$(( n + 1 ))
+    [[ "$n" -gt 100 ]] && return 1
+    consumed_file="${base}-${n}"
+  done
+  if mv -n "$override_file" "$consumed_file" 2>/dev/null && [[ ! -f "$override_file" ]]; then
+    local sha; sha="sha256:$(sha256sum "$consumed_file" | awk '{print $1}')"
+    jq -nc --arg reason "$reason" --arg p "$consumed_file" --arg s "$sha" \
+      '{reason:$reason, consumed_path:$p, consumed_sha256:$s}'
+    return 0
+  fi
+  # Either mv failed outright (a race loser, or a permission error), or it
+  # no-op'd on a pre-existing destination (source still present) — we do NOT
+  # own this override. Fail closed.
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -2004,12 +2140,39 @@ cmd_dispatch() {
       local prior_loop_outcome
       prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)" || prior_loop_outcome=""
       if [[ "$prior_loop_outcome" != "" && "$prior_loop_outcome" != "unverifiable" ]]; then
-        if [[ -z "${AID_C3_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C3_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+        # P073 Step 10: the override is now a single-use ARTIFACT, claimed
+        # atomically, not a bare environment variable. An artifact present and
+        # unconsumed wins; only when there is none does the deprecated variable
+        # get its one conversion (which is itself single-use per plan). Either
+        # way the claim below is what actually authorises the attempt, so a
+        # lingering export can never authorise a second one.
+        local _c3_ovr_root="$evidence_dir"
+        local _c3_plan_id=""
+        [[ "${epic_id:-}" =~ ^E-([0-9]+) ]] && _c3_plan_id="P${BASH_REMATCH[1]}"
+        local _c3_env_rc=0
+        _c3_convert_env_override "$_c3_ovr_root" "${_c3_plan_id:-<plan>}" || _c3_env_rc=$?
+        if [[ "$_c3_env_rc" -eq 2 ]]; then
+          echo "NOTICE: an unconsumed PM override artifact is present — the deprecated environment variable is ignored for this attempt (the artifact wins; this prevents a double-use race)." >&2
+        fi
+
+        local _c3_claim=""
+        if ! _c3_claim="$(_c3_claim_pm_override "$_c3_ovr_root")"; then
           echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement: only an in-progress or \"unverifiable\" outcome may proceed without override; \"$prior_loop_outcome\" is treated as terminal, whether or not it is a recognized value)." >&2
-          echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C3_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          echo "Fix: a further attempt requires an explicit, auditable PM-authorized override, granted once per attempt:" >&2
+          echo "  aid-fsm.sh pm-override grant c3 ${_c3_plan_id:-<plan_id>} --reason '<why a further recheck is warranted, >=20 chars>'" >&2
           exit 1
         fi
-        echo "aid-c3-dispatch: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${AID_C3_FORCE_BEYOND_ESCALATION}" >&2
+        local _c3_ovr_reason _c3_ovr_path _c3_ovr_sha
+        _c3_ovr_reason="$(jq -r '.reason' <<<"$_c3_claim")"
+        _c3_ovr_path="$(jq -r '.consumed_path' <<<"$_c3_claim")"
+        _c3_ovr_sha="$(jq -r '.consumed_sha256' <<<"$_c3_claim")"
+        echo "aid-c3-dispatch: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${_c3_ovr_reason}" >&2
+        echo "aid-c3-dispatch: override CONSUMED (single-use) — $(basename "$_c3_ovr_path") ${_c3_ovr_sha}" >&2
+        # Recorded in the loop state with the SAME corroboration field names
+        # aid-cp1-ledger.sh uses, so a later audit can verify the claim rather
+        # than trust a message that has already scrolled past.
+        C3_OVERRIDE_CONSUMED_PATH="$_c3_ovr_path"
+        C3_OVERRIDE_CONSUMED_SHA256="$_c3_ovr_sha"
       fi
     fi
 

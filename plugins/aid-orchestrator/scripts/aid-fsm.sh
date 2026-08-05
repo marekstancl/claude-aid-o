@@ -2278,6 +2278,112 @@ EOF
 
 # ─── Commands ───────────────────────────────────────────────────────────
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PM ESCALATION OVERRIDE — the producer (P073 Step 10)
+#
+# One artifact schema for BOTH bounded review loops. Housed here as an
+# aid-fsm.sh subcommand rather than a new script: this is the operator's
+# existing entry point, and the override is a lifecycle action, not a review
+# internal.
+#
+#   aid-fsm.sh pm-override grant <c0|c3> <plan_id> --reason "<text >=20>"
+#              [--project-root <path>] [--evidence-root <path>]
+#
+# C0 writes .aid-o/work/evidence/<plan_id>/cp1-pm-escalation-override.json —
+# the EXISTING path and the existing `{pm_ref}` shape, extended additively so
+# aid-cp1-gate.sh's and aid-cp1-ledger.sh's `jq -r .pm_ref` reads are
+# untouched. C3 writes c3-pm-escalation-override.json with the identical
+# shape. Both are claimed atomically and exactly once by their consumer.
+#
+# THE ARTIFACT IS NOT WRITTEN BY AGENTS. It is the PM's decision made
+# physical; an agent creating one would be forging the authorisation it is
+# meant to be bounded by.
+# ═══════════════════════════════════════════════════════════════════════════
+cmd_pm_override() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    grant) : ;;
+    ""|-h|--help)
+      echo "Usage: aid-fsm.sh pm-override grant <c0|c3> <plan_id> --reason '<text>' [--project-root <path>] [--evidence-root <path>]" >&2
+      exit 1 ;;
+    *)
+      echo "ERROR: pm-override: unknown action '${action}' (only 'grant' exists)." >&2
+      exit 2 ;;
+  esac
+
+  local target="${1:-}"; shift || true
+  local plan_id="${1:-}"; shift || true
+  local reason="" project_root="." evidence_root=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason)        reason="${2:-}"; shift 2 ;;
+      --project-root)  project_root="${2:-}"; shift 2 ;;
+      --evidence-root) evidence_root="${2:-}"; shift 2 ;;
+      --*) echo "ERROR: pm-override grant: unknown flag: $1" >&2; exit 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  case "$target" in
+    c0|c3) : ;;
+    *) echo "ERROR: pm-override grant: target must be 'c0' or 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
+  esac
+  [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || {
+    echo "ERROR: pm-override grant: plan_id must match ^P[0-9]{3}\$ (got '${plan_id:-<empty>}')." >&2
+    exit 2
+  }
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: pm-override grant: --reason must be at least 20 characters (got ${#reason})." >&2
+    echo "  The reason IS the authorisation record — a bounded review loop that can be" >&2
+    echo "  reopened without a stated reason is not bounded at all." >&2
+    exit 2
+  fi
+  command -v jq >/dev/null 2>&1 || { echo "ERROR: pm-override grant: jq is required." >&2; exit 2; }
+
+  # Resolve where the consumer will look. C0's root is the plan evidence root;
+  # C3's is the run evidence dir recorded in the loop state, which the caller
+  # supplies with --evidence-root when it is not the default.
+  local dir fname
+  if [[ -n "$evidence_root" ]]; then
+    dir="$evidence_root"
+  else
+    dir="${project_root}/.aid-o/work/evidence/${plan_id}"
+  fi
+  case "$target" in
+    c0) fname="cp1-pm-escalation-override.json" ;;
+    c3) fname="c3-pm-escalation-override.json" ;;
+  esac
+  local out="${dir}/${fname}"
+
+  if [[ ! -d "$dir" ]]; then
+    mkdir -p "$dir" 2>/dev/null || {
+      echo "ERROR: pm-override grant: cannot create the evidence root ${dir}. Pass --evidence-root if the consumer looks elsewhere." >&2
+      exit 1
+    }
+  fi
+  # Never overwrite an unconsumed grant: two grants in flight would let one
+  # PM decision authorise two attempts.
+  if [[ -e "$out" ]]; then
+    echo "ERROR: pm-override grant: an UNCONSUMED override already exists at ${out}. It authorises exactly one further attempt; let it be claimed before granting another." >&2
+    exit 1
+  fi
+
+  local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp="${out}.tmp.$$"
+  jq -n --arg ref "$reason" --arg plan "$plan_id" --arg t "$target" --arg now "$now" \
+    --arg op "${USER:-unknown}" \
+    '{schema_version:"aid-2.0", artifact_type:"pm_escalation_override",
+      target:$t, plan_id:$plan, pm_ref:$ref, created_at:$now,
+      origin:"grant", granted_by:$op}' > "$tmp" 2>/dev/null && mv "$tmp" "$out" 2>/dev/null || {
+    rm -f "$tmp" 2>/dev/null || true
+    echo "ERROR: pm-override grant: could not write ${out}." >&2
+    exit 1
+  }
+  echo "Granted a single-use ${target} escalation override for ${plan_id} at ${out}" >&2
+  echo "$out"
+}
+
+
 cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
@@ -6203,11 +6309,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     plan-record-delivery)       shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-record-delivery <epic_id> [root]" >&2; exit 1; }
                                 aid_lifecycle_record_delivery "$1" "${2:-.}" ;;
+    pm-override)                shift; cmd_pm_override "$@" ;;
     plan-state)                 shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
       exit 1 ;;
   esac
 fi
