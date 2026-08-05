@@ -166,6 +166,8 @@ source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 
 # ---------------------------------------------------------------------------
 # _pfsm_resolve_invoke_root [given] — `--project-root` if given (resolved to
@@ -274,7 +276,7 @@ _pfsm_check_clean_worktree() {
   local root="$1"
   local dirty
   dirty="$(git -C "$root" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   if [[ -n "$dirty" ]]; then
     echo "PRECONDITION FAIL: uncommitted changes present — commit or stash before plan-start/epic-start:" >&2
     printf '%s\n' "$dirty" >&2
@@ -3627,7 +3629,7 @@ _pfsm_review_candidate_drift() {
   fi
   local dirty=""
   dirty="$(git -C "$root" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   if [[ -n "$dirty" ]]; then
     printf 'uncommitted TRACKED changes against the candidate %s: %s' "$candidate" "$(printf '%s' "$dirty" | tr '\n' ';')"
     return 1

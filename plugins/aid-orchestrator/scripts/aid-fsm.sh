@@ -19,6 +19,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
@@ -2895,7 +2898,7 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # directory-wide glob).
   local _dirty
   _dirty="$(git status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy4 || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
        git status   # review

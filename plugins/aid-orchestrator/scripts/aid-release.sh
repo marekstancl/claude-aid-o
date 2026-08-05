@@ -53,6 +53,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+
 # Find repo root (walk up from CWD, not from script location)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
@@ -936,7 +939,7 @@ cmd_prepare_plan() {
   #    "dirty" by design are not real blockers.
   local dirty
   dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   if [[ -n "$dirty" ]]; then
     echo "PRECONDITION FAIL: prepare-plan refuses to run with modified tracked files — they would be swept into the commit that is about to become the frozen, reviewed candidate. Commit or stash first:" >&2
     printf '%s\n' "$dirty" >&2
