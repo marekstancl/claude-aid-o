@@ -60,15 +60,59 @@ done
 [[ -z "$plan" ]] && error_exit "Missing required argument: --plan" 1
 [[ ! -f "$plan" ]] && error_exit "Plan file not found: $plan" 3
 
-# Validate queue mode
-case "$queue_mode" in
-  chain|separate|custom) ;;
-  *) error_exit "Invalid queue mode: $queue_mode (must be chain, separate, or custom)" 1 ;;
-esac
-
-# Custom mode with empty --depends-on is treated as separate
-if [[ "$queue_mode" == "custom" && -z "$custom_depends" ]]; then
-  queue_mode="separate"
+# =============================================================================
+# P073 Step 11 — committed-source preflight (P083)
+# =============================================================================
+# The only check here used to be "the file exists on disk", and cmd_plan_start
+# never sees a path at all. The clean-worktree preflight runs with
+# `--untracked-files=no`, so a plan that was never `git add`ed is invisible to
+# it too. Generation therefore created a plan branch, task branches and a
+# lifecycle manifest from bytes that exist ONLY in one worktree — and the
+# manifest's source_plan_sha then bound the whole plan to a source nobody else
+# could ever read. That is P083.
+#
+# SCOPE, learned the hard way: the check is about THIS WORKSPACE's repository
+# and the plan's relationship to its target branch. A first cut resolved the
+# repo from the plan's own directory and hard-failed when no target branch
+# resolved, which refused every plan living outside the workspace (the test
+# fixtures, and any shared plan library) — an over-block the loosening
+# directive forbids. Three cases are therefore skipped WITH A LOG LINE rather
+# than refused, because none of them has a target-branch relationship to
+# verify: the workspace is not a git repo, the plan is not inside it, or the
+# plan is gitignored. In each the manifest's source_plan_sha IS the binding.
+_p083_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
+_p083_plan_abs="$(realpath -m -- "$plan" 2>/dev/null || echo "$plan")"
+if [[ -z "$_p083_repo_root" ]]; then
+  echo "[INFO] plan_source_binding: source_plan_sha (this workspace is not a git repository)" >&2
+elif [[ "$_p083_plan_abs" != "$_p083_repo_root"/* ]]; then
+  echo "[INFO] plan_source_binding: source_plan_sha (${plan} lives outside this workspace's repository, so it has no target-branch relationship to verify)" >&2
+elif git check-ignore -q -- "$_p083_plan_abs" 2>/dev/null; then
+  # DELIBERATE, not a loophole: this very repository gitignores `.aid-o/plans/`,
+  # so a hard tracked-only rule would break the plugin's own dogfood workflow.
+  echo "[INFO] plan_source_binding: source_plan_sha (${plan} is gitignored — the committed manifest's source_plan_sha is the binding, not a tracked blob)" >&2
+else
+  _p083_target="$(aid_target_branch 2>/dev/null || echo "")"
+  _p083_rel="${_p083_plan_abs#"$_p083_repo_root"/}"
+  if [[ -z "$_p083_target" ]] || ! git rev-parse --verify --quiet "$_p083_target" >/dev/null 2>&1; then
+    # No integration branch exists to verify against. Refuse only when the plan
+    # is already TRACKED — then it is genuinely part of the repository's history
+    # and a missing target branch is the fresh-repo case the plan names. An
+    # UNTRACKED plan in a workspace with no target branch has nothing to be
+    # checked against at all, and refusing it would block every such workspace
+    # (found when this broke the branch-restore fixtures).
+    if git ls-files --error-unmatch -- "$_p083_plan_abs" >/dev/null 2>&1; then
+      error_exit "PRECONDITION FAIL: source plan ${_p083_rel} is tracked but the target branch '${_p083_target:-<unresolved>}' does not exist — create and commit the target branch first, or gitignore the plan if it is deliberately unshared." 1
+    fi
+    echo "[INFO] plan_source_binding: source_plan_sha (no target branch '${_p083_target:-<unresolved>}' exists to verify ${_p083_rel} against)" >&2
+    _p083_target=""
+  fi
+  if [[ -n "$_p083_target" ]]; then
+    if ! git cat-file -e "${_p083_target}:${_p083_rel}" 2>/dev/null \
+       || ! git show "${_p083_target}:${_p083_rel}" 2>/dev/null | cmp -s - "$_p083_plan_abs"; then
+      error_exit "PRECONDITION FAIL: source plan is not committed on ${_p083_target} (or differs from the worktree copy) — commit the plan on ${_p083_target} and rerun generation." 1
+    fi
+    echo "[INFO] plan_source_binding: committed blob ${_p083_target}:${_p083_rel} matches the worktree copy byte for byte" >&2
+  fi
 fi
 
 # =============================================================================
@@ -368,8 +412,12 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
   # re-initialisation.
   if [[ "$_pb_default_mode" == "plan_branch" && ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
     _ps_rc=0
+    # P073 Step 11: pass the source plan through so plan-start can verify it is
+    # committed and stamp its path. The pipeline's own preflight above already
+    # ran the same check, so this is the second, closer-to-the-mutation layer
+    # rather than the first line of defence.
     bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-start "$plan_id" \
-      --mode "$_pb_default_mode" --project-root "." >/dev/null 2>&1 || _ps_rc=$?
+      --mode "$_pb_default_mode" --project-root "." --plan-file "$plan" >/dev/null 2>&1 || _ps_rc=$?
     if [[ "$_ps_rc" -eq 0 ]]; then
       echo "[INFO] plan state initialised for $plan_id (mode=${_pb_default_mode})" >&2
     else

@@ -616,6 +616,78 @@ _pfsm_commit_force() {
 #   rollback business reason, so its force path uses `--force-reason`.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# _pfsm_check_committed_source <project_root> <plan_file>  — P073 Step 11 (P083)
+#
+# A plan that was never `git add`ed is invisible to the clean-worktree
+# preflight (it runs `--untracked-files=no`), so generation would create a
+# plan branch, task branches and a lifecycle manifest from bytes that exist in
+# ONE worktree, with the manifest's source_plan_sha binding the plan to a
+# source nobody else can read.
+#
+# The gitignored carve-out is deliberate: this repository gitignores
+# `.aid-o/plans/`, so a hard tracked-only rule would break the plugin's own
+# dogfood workflow. There the manifest's source_plan_sha IS the binding, and
+# the difference is logged rather than assumed.
+# ---------------------------------------------------------------------------
+_pfsm_check_committed_source() {
+  local root="$1" plan_file="$2"
+  [[ -n "$plan_file" ]] || return 0
+  if [[ ! -f "$plan_file" ]]; then
+    echo "PRECONDITION FAIL: --plan-file '${plan_file}' does not exist." >&2
+    return 1
+  fi
+  local repo_root; repo_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || echo "")"
+  if [[ -z "$repo_root" ]]; then
+    echo "plan_source_binding: source_plan_sha (this workspace is not a git repository)" >&2
+    return 0
+  fi
+  # SCOPE: only a plan INSIDE this workspace's repository has a target-branch
+  # relationship to verify. A plan from a shared library or a test fixture has
+  # none, and refusing it would be an over-block (found when a first cut broke
+  # every pipeline fixture).
+  local plan_abs; plan_abs="$(realpath -m -- "$plan_file" 2>/dev/null || echo "$plan_file")"
+  if [[ "$plan_abs" != "$repo_root"/* ]]; then
+    echo "plan_source_binding: source_plan_sha (${plan_file} lives outside this workspace's repository)" >&2
+    return 0
+  fi
+
+  if git -C "$root" check-ignore -q -- "$plan_file" 2>/dev/null; then
+    echo "plan_source_binding: source_plan_sha (${plan_file} is gitignored — the committed manifest's source_plan_sha is the binding)" >&2
+    return 0
+  fi
+
+  local target rel
+  target="$(aid_target_branch 2>/dev/null || echo "")"
+  if [[ -z "$target" ]] || ! git -C "$root" rev-parse --verify --quiet "$target" >/dev/null 2>&1; then
+    # See the pipeline's copy of this rule: refuse only for an already-TRACKED
+    # plan (the fresh-repo case the plan names); an untracked plan in a
+    # workspace with no integration branch has nothing to verify against.
+    if git -C "$root" ls-files --error-unmatch -- "$plan_abs" >/dev/null 2>&1; then
+      echo "PRECONDITION FAIL: source plan ${plan_file} is tracked but the target branch '${target:-<unresolved>}' does not exist — create and commit the target branch first, or gitignore the plan if it is deliberately unshared." >&2
+      return 1
+    fi
+    echo "plan_source_binding: source_plan_sha (no target branch '${target:-<unresolved>}' exists to verify ${plan_file} against)" >&2
+    return 0
+  fi
+  rel="$(git -C "$root" ls-files --full-name --error-unmatch -- "$plan_file" 2>/dev/null || true)"
+  if [[ -z "$rel" ]]; then
+    rel="$(realpath -m --relative-to="$(git -C "$root" rev-parse --show-toplevel)" -- "$plan_file" 2>/dev/null || echo "$plan_file")"
+  fi
+
+  local git_err=""
+  if ! git_err="$(git -C "$root" cat-file -e "${target}:${rel}" 2>&1)"; then
+    echo "PRECONDITION FAIL: source plan is not committed on ${target} (or differs from the worktree copy) — commit the plan on ${target} and rerun generation." >&2
+    [[ -n "$git_err" ]] && printf '%s\n' "$git_err" >&2
+    return 1
+  fi
+  if ! git -C "$root" show "${target}:${rel}" 2>/dev/null | cmp -s - "$plan_file"; then
+    echo "PRECONDITION FAIL: source plan is not committed on ${target} (or differs from the worktree copy) — commit the plan on ${target} and rerun generation." >&2
+    return 1
+  fi
+  return 0
+}
+
 # _pfsm_preflight <project_root> — the shared pair of checks both commands
 # run before creating anything.
 _pfsm_preflight() {
@@ -766,12 +838,18 @@ _pfsm_plan_final_installed() {
 # dispatcher (i.e. when P068 lands them).
 # =============================================================================
 cmd_plan_start() {
-  local plan_id="" mode="" project_root_opt="" op_id_opt=""
+  local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode="${2:-}"; shift 2 ;;
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
+      # P073 Step 11 (P083): the path of the source plan this lifecycle is
+      # being created FROM. Optional so legacy callers are unchanged; the
+      # production caller (aid-auto-pipeline.sh) always passes it, and it is
+      # what lets this command verify the source is committed before it
+      # creates a branch or a manifest.
+      --plan-file) plan_file_opt="${2:-}"; shift 2 ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -820,6 +898,15 @@ cmd_plan_start() {
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  # P073 Step 11 (P083): refuse BEFORE any git mutation when the source plan
+  # is absent from the target branch or differs from the worktree bytes this
+  # lifecycle is about to be generated from. Forceable — a PM who knowingly
+  # accepts an unshared source can proceed with an audited receipt.
+  if [[ -n "$plan_file_opt" ]]; then
+    _pfsm_precondition "committed_source_plan" forceable \
+      _pfsm_check_committed_source "$project_root" "$plan_file_opt" || exit 1
+  fi
 
   # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
   # bookkeeping obstacle, not a physical impossibility, so an audited
