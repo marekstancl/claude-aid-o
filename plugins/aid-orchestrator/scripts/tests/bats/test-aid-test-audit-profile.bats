@@ -377,3 +377,53 @@ YAML
   [ "$status" -eq 15 ]
   [[ "$output" == *"TWO different commands"* ]]
 }
+
+# ─── Losing the audit's evidence must be survivable, not just reportable ────
+
+@test "evidence deleted DURING a profiling run is restored, and the run continues" {
+  # A real audit lost its whole output tree — inventory, catalog, eight agent
+  # artifacts, 112 resource maps — during a profiling run, and finalize then had
+  # nothing to read. The cause was never identified. Detecting it names the loss
+  # but still costs the operator the run, so the tree is copied before the
+  # profiled command and put back if anything vanishes.
+  local c; c="$(_clone)"
+  # Evidence this audit has "already collected".
+  mkdir -p "$OUT"
+  echo '{"schema_version":"1.0.0"}' > "$OUT/inventory.json"
+  mkdir -p "$OUT/agents"; echo '{}' > "$OUT/agents/shard-0.json"
+
+  # A command that deletes the audit's evidence while it runs — standing in for
+  # whatever really did it.
+  local exec2="$TEST_TMPDIR/destructive-exec.yaml"
+  local cat2="$TEST_TMPDIR/destructive-catalog.yaml"
+  printf 'gates:\n  wrecker:\n    command: "rm -f %s/inventory.json"\n    timeout_seconds: 60\n' "$OUT" > "$exec2"
+  jq -n --arg cmd "rm -f $OUT/inventory.json" '
+    {schema_version:"1.0.0", generated_at:"2026-08-04T00:00:00Z", status:"approved",
+     run_units:[{run_unit_id:"gate:wrecker", runner:"declared-command", source_paths:["x"],
+                 command:{type:"shell", shell:$cmd},
+                 parallel:{status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false}}],
+     source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' | yq -P '.' > "$cat2"
+
+  run bash "$PROFILE" --run-unit-id "gate:wrecker" \
+    --catalog "$cat2" --execution-yaml "$exec2" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 1
+
+  # The run did not die...
+  [ "$status" -eq 0 ]
+  # ...the evidence is back...
+  [ -f "$OUT/inventory.json" ]
+  [ -f "$OUT/agents/shard-0.json" ]
+  # ...and it is on the record, so a restored run is never mistaken for a quiet one.
+  [[ "$output" == *"RESTORED"* ]]
+  local r; r="$(ls "$OUT"/profiles/*.json | head -1)"
+  [ "$(jq -r '.evidence_loss_restored' "$r")" != "null" ]
+}
+
+@test "an ordinary run records no evidence loss" {
+  local c r; c="$(_clone)"
+  r="$(bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary" \
+    --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
+  [ "$(jq -r '.evidence_loss_restored' "$r")" = "null" ]
+}

@@ -211,6 +211,13 @@
           ]
         }
       }
+    },
+    "evidence_loss_restored": {
+      "description": "Non-null when files the audit had already collected disappeared during this profiling run and were restored from a pre-run copy. The cause of the disappearance is not identified; this field is how a restored run stays distinguishable from one where nothing happened.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "allOf": [

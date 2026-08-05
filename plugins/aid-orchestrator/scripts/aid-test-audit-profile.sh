@@ -256,6 +256,17 @@ _evidence_manifest() {
 }
 _evidence_before="$(_evidence_manifest)"
 
+# A DETECTOR IS NOT ENOUGH. Naming what vanished still costs the operator the
+# whole run. The audit's evidence is copied somewhere the profiled command has
+# no reason to reach, so whatever removes it can be undone rather than merely
+# reported. This is cheap — the tree is a few MB of JSON — and it is the only
+# thing that actually answers "will it lose my work again".
+_evidence_backup=""
+if [[ -d "$output_dir" ]]; then
+  _evidence_backup="$(mktemp -d -t aid-audit-evidence-XXXXXX)"
+  cp -a "$output_dir/." "$_evidence_backup/" 2>/dev/null || _evidence_backup=""
+fi
+
 started_ms=$(( $(date +%s%N) / 1000000 ))
 if ! ( cd "$target_canon" && bash "${SCRIPT_DIR}/aid-job.sh" run \
         --jobs-dir "$jobs_dir" --id "$job_id" \
@@ -294,14 +305,23 @@ elapsed_ms=$(( ended_ms - started_ms ))
 # this script has also had a turn.
 _evidence_after="$(_evidence_manifest)"
 _evidence_lost="$(comm -23 <(printf '%s\n' "$_evidence_before") <(printf '%s\n' "$_evidence_after") 2>/dev/null | grep -v '^$' | grep -v '/profile-jobs/' || true)"
+_evidence_restored=""
 if [[ -n "$_evidence_lost" ]]; then
   echo "aid-test-audit-profile.sh: FILES THIS AUDIT HAD ALREADY COLLECTED DISAPPEARED WHILE PROFILING '$run_unit_id':" >&2
   printf '%s\n' "$_evidence_lost" | sed 's|^\./|    |' >&2
-  echo "  The profiled command ran in the disposable clone at '$target_canon' and must not be able to reach" >&2
-  echo "  '$output_dir' at all. Refusing to continue: an audit that silently loses its own evidence produces" >&2
-  echo "  a smaller portfolio than it examined, with nothing to show anything is missing." >&2
-  exit 13
+  echo "  The profiled command ran in the disposable clone at '$target_canon' and has no business reaching" >&2
+  echo "  '$output_dir'. The cause is not yet identified — see docs/plans/P072-real-audit-record.md." >&2
+  if [[ -n "$_evidence_backup" ]] && cp -a "$_evidence_backup/." "$output_dir/" 2>/dev/null; then
+    _evidence_restored="$(printf '%s' "$_evidence_lost" | tr '\n' ' ')"
+    echo "  RESTORED from the pre-run copy — the audit keeps its evidence and continues. This is recorded on the" >&2
+    echo "  receipt as evidence_loss_restored so it cannot be mistaken for a run where nothing happened." >&2
+  else
+    echo "  Could not restore (no usable pre-run copy). Refusing to continue: an audit that loses its own evidence" >&2
+    echo "  reports a smaller portfolio than it examined, with nothing to show anything is missing." >&2
+    exit 13
+  fi
 fi
+[[ -n "$_evidence_backup" && -d "$_evidence_backup" ]] && rm -rf "$_evidence_backup"
 
 : > "$log_path"
 if [[ -f "$live_log" ]]; then cat "$live_log" >> "$log_path"; fi
@@ -519,6 +539,7 @@ jq -nc \
   --argjson cancelled "$([[ "$cancelled" == "true" ]] && echo true || echo false)" \
   --arg job_id "$job_id" --arg job_state "$job_state" --arg live_log "$live_log" \
   --arg jobs_dir "$jobs_dir" \
+  --arg ev_restored "$_evidence_restored" \
   --arg audit_id "$audit_id" --arg log_sha "$evidence_log_sha256" \
   '{schema_version:"aid-test-profile-v1", run_unit_id:$id, runner:$runner,
     complete:$complete, incomplete_reason:$reason,
@@ -534,6 +555,7 @@ jq -nc \
     # long profile needs the path, and reading it here is the contract —
     # deriving it from a layout is what broke when the layout changed.
     job: {id:$job_id, state:$job_state, live_log:$live_log, jobs_dir:$jobs_dir},
+    evidence_loss_restored: (if $ev_restored == "" then null else $ev_restored end),
     evidence_log_truncated:$log_truncated, evidence_log_dropped_bytes:$log_dropped}' \
   > "$receipt_path"
 

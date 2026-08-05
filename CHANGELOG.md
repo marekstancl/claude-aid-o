@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.5] — 2026-08-05
+
+### Fixed
+- **An audit that loses its own evidence now survives it** — a real full audit had its entire output tree deleted during a cost-profiling run: inventory, catalog, eight agent artifacts, measurements, 112 resource maps, and finalize then had nothing to read. 2.70.3 reduced the exposure and added a detector, but detecting a loss still costs the operator the run. The tree is now copied before the profiled command starts and restored if anything disappears, so the audit keeps its evidence and continues; the receipt records `evidence_loss_restored` so a restored run is never mistaken for a quiet one. **The cause of the deletion is still not identified** — every `rm` in the production scripts, `TEST_PROJECT_ROOT`, `git clean`/`reset --hard` and `aid-job.sh --repo` were ruled out — so this is a safety net, not a fix.
+
 ## [2.70.4] — 2026-08-04
 
 > A third real audit found the profiler emitting receipts that failed its own
