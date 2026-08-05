@@ -6114,6 +6114,13 @@ cmd_plan_state() {
 # replayed against a different plan.json, and a forged or stale record — one
 # whose hashes do not match what is actually on disk — authorises nothing.
 #
+# WHAT IT TOUCHES, precisely. The run's EVIDENCE ARTIFACTS — step outputs,
+# reports, transcripts — are never read, moved or deleted. The one file that
+# does change is the state file itself, and it is ARCHIVED IN PLACE beside
+# them as `fsm-state.yaml.superseded-<epoch>`, never removed. (An earlier
+# comment here claimed the evidence directory was untouched full stop, which
+# was not true of the directory: adversarial-review finding.)
+#
 # WHY NOT --force: force is a bypass with a receipt. This is a TRANSACTION: it
 # archives the old state, records what it archived, and lets exactly one
 # matching init through. `plan-state` is deliberately NON-forceable for the
@@ -6252,7 +6259,8 @@ _pfsm_plan_state_supersede() {
   fi
 
   echo "superseded ${epic_id}: archived $(basename "$archive"), record $(basename "$record")" >&2
-  echo "  The evidence directory is untouched; re-init with the regenerated plan.json to continue." >&2
+  echo "  Evidence artifacts are untouched; the state file is archived in place beside them." >&2
+  echo "  Re-init with the plan.json this record binds ($(basename "$plan_json")) to continue." >&2
   printf '%s\n' "$record"
   return 0
 }

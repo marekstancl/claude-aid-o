@@ -2662,50 +2662,55 @@ cmd_init() {
   # live state file is ABSENT because `plan-state --supersede-epic` archived
   # it, and it opens for exactly one specific re-initialisation.
   #
-  # FOUR-FIELD BINDING, all of it re-derived from disk rather than trusted:
-  # the record must name THIS plan and epic, its old_state_sha256 must equal
-  # the hash of the newest archived sibling, and its new_plan_json_sha256 must
-  # equal the hash of the plan.json being initialised from NOW. A stale record
-  # (superseded twice, older one still lying around), a forged one, or one
-  # written for a different package therefore authorises nothing — the
-  # unconditional rejection simply stands.
+  # FIVE-FIELD BINDING, all of it re-derived from disk rather than trusted:
+  # the record must name THIS plan and epic, its old_run_id must be the run
+  # directory the archive actually sits in, its old_state_sha256 must equal the
+  # hash of the newest archived sibling, and its new_plan_json_sha256 must
+  # equal the hash of the plan.json being initialised from NOW. (old_run_id was
+  # missing from a first cut: with two archives of identical content, an OLDER
+  # record could then authorise an init against the NEWER archive —
+  # adversarial-review finding.)
   #
-  # Consumption renames the record to `.consumed-<epoch>`, so one PM decision
-  # authorises one init and never a second.
-  local _sup_archive="" _sup_record="" _sup_consumed=0
-  if [[ -n "${_pb_plan_id:-}" ]] && command -v jq >/dev/null 2>&1; then
-    _sup_archive="$(ls -1t "${state_file}".superseded-* 2>/dev/null | head -1 || true)"
-    if [[ -n "$_sup_archive" && -f "$_sup_archive" ]]; then
-      local _sup_arch_sha _sup_json _sup_json_sha _sup_dir _r
-      _sup_arch_sha="sha256:$(sha256sum "$_sup_archive" | awk '{print $1}')"
-      _sup_json="$(dirname "$state_file")/plan.json"
-      _sup_json_sha=""
-      [[ -f "$_sup_json" ]] && _sup_json_sha="sha256:$(sha256sum "$_sup_json" | awk '{print $1}')"
-      _sup_dir="${project_root:-.}/.aid-o/work/plan-state"
-      for _r in "$_sup_dir"/supersede-"${_pb_plan_id}"-"${epic_id}"-*.json; do
-        [[ -f "$_r" ]] || continue
-        if [[ "$(jq -r '.plan_id // ""' "$_r" 2>/dev/null)" == "$_pb_plan_id" \
-           && "$(jq -r '.epic_id // ""' "$_r" 2>/dev/null)" == "$epic_id" \
-           && "$(jq -r '.old_state_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_arch_sha" \
-           && -n "$_sup_json_sha" \
-           && "$(jq -r '.new_plan_json_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_json_sha" ]]; then
-          _sup_record="$_r"
-          break
-        fi
-      done
-      if [[ -n "$_sup_record" ]]; then
-        if mv -n "$_sup_record" "${_sup_record}.consumed-$(date -u +%s)" 2>/dev/null && [[ ! -f "$_sup_record" ]]; then
-          _sup_consumed=1
-          echo "aid-fsm: re-initialising ${epic_id} under supersede record $(basename "$_sup_record") (archived state: $(basename "$_sup_archive"))" >&2
-        else
-          echo "ERROR: a matching supersede record for ${epic_id} could not be claimed (a concurrent init took it) — refusing to re-init." >&2
-          exit 1
-        fi
-      else
-        echo "ERROR: ${epic_id} has an archived superseded state ($(basename "$_sup_archive")) but no supersede record matching BOTH that archive and the current plan.json — re-run 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --supersede-epic ${epic_id} --reason ...' against the current package." >&2
-        exit 1
-      fi
+  # VERIFY HERE, CONSUME LATER. The claim is deliberately NOT taken at this
+  # point: every remaining init gate still has to pass, and consuming first
+  # meant a later gate failure burned the PM's one authorisation with no state
+  # file written and no way to re-supersede (there is no live state left to
+  # archive). The record is claimed only once the state file exists.
+  local _sup_archive="" _sup_record="" _sup_verified=0
+  _sup_archive="$(ls -1t "${state_file}".superseded-* 2>/dev/null | head -1 || true)"
+  if [[ -n "$_sup_archive" && -f "$_sup_archive" ]]; then
+    # An archive with no derivable plan id must NOT fall through to a normal
+    # init: that bypassed the whole authorisation check for any EPIC id from
+    # which no plan id derives (adversarial-review finding).
+    if [[ -z "${_pb_plan_id:-}" ]] || ! command -v jq >/dev/null 2>&1; then
+      echo "ERROR: ${epic_id} has an archived superseded state ($(basename "$_sup_archive")) but its supersede record cannot be checked here (no plan id derives from '${epic_id}', or jq is unavailable) — refusing to re-init unauthorised." >&2
+      exit 1
     fi
+    local _sup_arch_sha _sup_arch_run _sup_json _sup_json_sha _sup_dir _r
+    _sup_arch_sha="sha256:$(sha256sum "$_sup_archive" | awk '{print $1}')"
+    _sup_arch_run="$(basename "$(dirname "$_sup_archive")")"
+    _sup_json="$(dirname "$state_file")/plan.json"
+    _sup_json_sha=""
+    [[ -f "$_sup_json" ]] && _sup_json_sha="sha256:$(sha256sum "$_sup_json" | awk '{print $1}')"
+    _sup_dir="${project_root:-.}/.aid-o/work/plan-state"
+    for _r in "$_sup_dir"/supersede-"${_pb_plan_id}"-"${epic_id}"-*.json; do
+      [[ -f "$_r" ]] || continue
+      if [[ "$(jq -r '.plan_id // ""' "$_r" 2>/dev/null)" == "$_pb_plan_id" \
+         && "$(jq -r '.epic_id // ""' "$_r" 2>/dev/null)" == "$epic_id" \
+         && "$(jq -r '.old_run_id // ""' "$_r" 2>/dev/null)" == "$_sup_arch_run" \
+         && "$(jq -r '.old_state_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_arch_sha" \
+         && -n "$_sup_json_sha" \
+         && "$(jq -r '.new_plan_json_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_json_sha" ]]; then
+        _sup_record="$_r"
+        break
+      fi
+    done
+    if [[ -z "$_sup_record" ]]; then
+      echo "ERROR: ${epic_id} has an archived superseded state ($(basename "$_sup_archive")) but no supersede record matching BOTH that archive and the current plan.json — re-run 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --supersede-epic ${epic_id} --reason ...' against the current package." >&2
+      exit 1
+    fi
+    _sup_verified=1
+    echo "aid-fsm: ${epic_id} re-init authorised by $(basename "$_sup_record") (archived state: $(basename "$_sup_archive")); the record is claimed once the new state file exists." >&2
   fi
 
   # ── D1 (IMP-232 v2.58.0): dependency-scoped init gate + advisory ──────────
@@ -2929,6 +2934,26 @@ EOF
   # runs already passed the hard-stop above and record nothing here. Appended
   # here (before the steps[] block below) so scalar fields stay grouped and the
   # steps[] sequence remains the trailing YAML node. Never blocks init.
+  # P073 Step 13: the supersede authorisation is spent only once the new state
+  # file DEMONSTRABLY exists. Verifying early but consuming late is the whole
+  # point: an earlier cut consumed before the remaining init work, so any later
+  # failure burned the PM's one authorisation with no state file written and no
+  # way to re-supersede — there is no live state left to archive
+  # (adversarial-review finding). A concurrent init that claimed it first makes
+  # this one refuse rather than proceed on a claim it does not own.
+  if [[ "${_sup_verified:-0}" -eq 1 ]]; then
+    if [[ ! -s "$state_file" ]]; then
+      echo "ERROR: ${epic_id}'s state file was not written — the supersede record is left unclaimed so the re-init can simply be retried." >&2
+      exit 1
+    fi
+    if mv -n "$_sup_record" "${_sup_record}.consumed-$(date -u +%s)" 2>/dev/null && [[ ! -f "$_sup_record" ]]; then
+      echo "aid-fsm: supersede record $(basename "$_sup_record") consumed — it authorises no further init." >&2
+    else
+      echo "ERROR: the supersede record for ${epic_id} could not be claimed (a concurrent init took it) — refusing to re-init." >&2
+      exit 1
+    fi
+  fi
+
   run_cache_preflight "$state_file" "$timeline_path" || true
 
   # Audit trail

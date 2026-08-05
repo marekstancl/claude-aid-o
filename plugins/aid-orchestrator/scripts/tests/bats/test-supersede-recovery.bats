@@ -194,7 +194,7 @@ _init_epic() {
   [ "$status" -eq 0 ]
 
   run _init_epic
-  [[ "$output" == *"under supersede record"* ]]
+  [[ "$output" == *"re-init authorised by"* ]]
   # The record was consumed, so a SECOND re-init has nothing to authorise it.
   [ "$(_records)" = "0" ]
   run bash -c "ls '$ROOT/.aid-o/work/plan-state'/supersede-*.consumed-* | wc -l"
@@ -254,7 +254,7 @@ _init_epic() {
   run _pf plan-state "$PLAN" --supersede-epic "$EPIC" --reason "$REASON"
   [ "$status" -eq 0 ]
   run _init_epic
-  [[ "$output" == *"under supersede record"* ]]
+  [[ "$output" == *"re-init authorised by"* ]]
   [ -f "$(_run_dir)/fsm-state.yaml" ]
 
   # Second cycle: a fresh supersede is required; the first record is consumed.
@@ -263,7 +263,7 @@ _init_epic() {
   [ "$status" -eq 0 ]
   [ "$(_archives)" = "2" ]
   run _init_epic
-  [[ "$output" == *"under supersede record"* ]]
+  [[ "$output" == *"re-init authorised by"* ]]
   # Both cycles left their own consumed record; neither reused the other's.
   run bash -c "ls '$ROOT/.aid-o/work/plan-state'/supersede-*.consumed-* | wc -l"
   [ "$output" = "2" ]
@@ -299,4 +299,84 @@ _init_epic() {
   [ "$output" = "active" ]
   run yq -e '.enforcements[] | select(.id == "attest_recomputes_base_unconditionally") | .status' "$reg"
   [ "$output" = "active" ]
+}
+
+# ─── Codex-review findings on the first cut of this step ──────────────────
+
+@test "P073 Step 13 (review finding 1): a later init gate failure does NOT burn the PM's authorisation" {
+  # The record used to be consumed BEFORE the remaining init gates ran, so a
+  # gate failure left no state file AND no record — and supersede could not
+  # repair it, because there is no live state left to archive. The PM's one
+  # authorisation was simply gone.
+  _seed_epic_run
+  run _pf plan-state "$PLAN" --supersede-epic "$EPIC" --reason "$REASON"
+  [ "$status" -eq 0 ]
+
+  # Force a failure AFTER the supersede verification: an unwritable run
+  # directory means the state file cannot be created.
+  chmod a-w "$(_run_dir)"
+  run _init_epic
+  local rc="$status"
+  chmod u+w "$(_run_dir)"
+  [ "$rc" -ne 0 ]
+  [ ! -f "$(_run_dir)/fsm-state.yaml" ]
+
+  # The record survived, so the PM can simply retry.
+  [ "$(_records)" = "1" ]
+  run _init_epic
+  [[ "$output" == *"authorised by"* ]]
+  [ -f "$(_run_dir)/fsm-state.yaml" ]
+  [ "$(_records)" = "0" ]
+}
+
+@test "P073 Step 13 (review finding 2): an EPIC with no derivable plan id cannot bypass the check" {
+  # The branch used to be conditional on a derived plan id, so for an EPIC id
+  # yielding none, an archived state plus no record fell through to a NORMAL
+  # init — re-initialising with no authorisation at all.
+  local rd="$ROOT/.aid-o/work/evidence/E-test/R-test"
+  mkdir -p "$rd"
+  printf 'state: EXECUTE\n' > "$rd/fsm-state.yaml.superseded-1700000000"
+  printf '{"steps":[]}\n' > "$rd/plan.json"
+
+  run bash -c "cd '$ROOT' && bash '$FSM' init E-test R-test 3 full main \
+      \"\$(git rev-parse HEAD)\" '$rd/fsm-state.yaml'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"refusing to re-init unauthorised"* ]]
+  [ ! -f "$rd/fsm-state.yaml" ]
+}
+
+@test "P073 Step 13 (review finding 3): an OLDER record cannot authorise the NEWER archive" {
+  # Without an old_run_id binding, two archives of identical content let a
+  # stale record match the newest archive and authorise an init the PM never
+  # granted for that run.
+  _seed_epic_run
+  run _pf plan-state "$PLAN" --supersede-epic "$EPIC" --reason "$REASON"
+  [ "$status" -eq 0 ]
+  local rec; rec="$(find "$ROOT/.aid-o/work/plan-state" -name 'supersede-*.json' | head -1)"
+
+  # Repoint the record at a DIFFERENT run than the archive actually sits in.
+  jq '.old_run_id = "R-900-9"' "$rec" > "$rec.tmp" && mv "$rec.tmp" "$rec"
+
+  run _init_epic
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no supersede record matching BOTH"* ]]
+  [ ! -f "$(_run_dir)/fsm-state.yaml" ]
+}
+
+@test "P073 Step 13 (review finding 4): evidence ARTIFACTS survive and the state file is archived in place" {
+  # The earlier claim that the evidence directory was untouched was not true
+  # of the directory — the state file lives in it. What is true is the useful
+  # part: artifacts are preserved and the state file is archived, not deleted.
+  _seed_epic_run
+  printf 'transcript\n' > "$(_run_dir)/reporter-transcript.txt"
+  run _pf plan-state "$PLAN" --supersede-epic "$EPIC" --reason "$REASON"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Evidence artifacts are untouched"* ]]
+  [[ "$output" == *"archived in place"* ]]
+  [ -f "$(_run_dir)/reporter-transcript.txt" ]
+  [ "$(_archives)" = "1" ]
+  # Nothing was deleted: the archive holds the old state's exact bytes.
+  local arch; arch="$(find "$(_run_dir)" -name 'fsm-state.yaml.superseded-*' | head -1)"
+  run grep -c 'state: EXECUTE' "$arch"
+  [ "$output" = "1" ]
 }
