@@ -412,11 +412,15 @@ _init_epic() {
   done
   [ "$winners" = "1" ]
 
-  # Every loser says it changed nothing, and the record was consumed once.
-  local losers=0
-  for i in 1 2 3 4; do
-    if [[ "$(cat "$out/$i.rc")" != "0" ]]; then
-      grep -q 'could not be reserved\|nothing was written\|state_file already exists' "$out/$i.err" && losers=$(( losers + 1 ))
+  # Every loser refused LOUDLY. Matching exact message text was flaky: which
+  # refusal a loser hits depends on how far it got (reservation lost, state
+  # file already there, branch-creation race), and all of them are correct
+  # outcomes. What must hold is that none exited silently.
+  local losers=0 i2
+  for i2 in 1 2 3 4; do
+    if [[ "$(cat "$out/$i2.rc")" != "0" ]]; then
+      [ -s "$out/$i2.err" ] || { echo "loser $i2 exited non-zero with no message" >&2; false; }
+      losers=$(( losers + 1 ))
     fi
   done
   [ "$losers" = "3" ]
@@ -464,4 +468,55 @@ _init_epic() {
   run bash -c "cd '$ROOT' && bash '$FSM' init E-900-3_3 R-1 3 full main \
       \"\$(git rev-parse HEAD)\" '$sf' --force --reason 'a genuine twenty-plus character reason here' --blocked-checks 'x' --streamlined"
   [[ "$output" != *"Unknown flag for init"* ]]
+}
+
+# ─── Independent-review findings ──────────────────────────────────────────
+
+@test "P073 (independent review): concurrent SUPERSEDES leave one archive/record pair and never strand the run" {
+  # Reproduced by the reviewer before the fix: four concurrent supersedes left
+  # ONE archived state and ZERO records — the exact stranding this recovery
+  # exists to prevent. The producer checked "does the record exist", wrote it
+  # with a plain `mv` (which overwrites), then archived; so two callers both
+  # passed the check, the second clobbered the first's record, and when its own
+  # archive failed its error path deleted the record they BOTH relied on.
+  _seed_epic_run
+  local out="$ROOT/sup"; mkdir -p "$out"
+  local i
+  for i in 1 2 3 4; do
+    ( cd "$ROOT" && bash "$PFSM" plan-state "$PLAN" --supersede-epic "$EPIC" \
+        --reason "$REASON" >"$out/$i.out" 2>"$out/$i.err"; echo "$?" > "$out/$i.rc" ) &
+  done
+  wait
+
+  local wins=0
+  for i in 1 2 3 4; do
+    [[ "$(cat "$out/$i.rc")" == "0" ]] && wins=$(( wins + 1 ))
+  done
+  [ "$wins" = "1" ]
+  # THE INVARIANT: exactly one archive and exactly one record, paired.
+  [ "$(_archives)" = "1" ]
+  [ "$(_records)" = "1" ]
+
+  # And the run is genuinely recoverable, not stranded.
+  run _init_epic
+  [[ "$output" == *"re-init authorised by"* ]]
+  [ -f "$(_run_dir)/fsm-state.yaml" ]
+}
+
+@test "P073 (independent review): a supersede that loses the lock race says so and changes nothing" {
+  _seed_epic_run
+  local out="$ROOT/sup2"; mkdir -p "$out"
+  local i
+  for i in 1 2 3; do
+    ( cd "$ROOT" && bash "$PFSM" plan-state "$PLAN" --supersede-epic "$EPIC" \
+        --reason "$REASON" >/dev/null 2>"$out/$i.err"; echo "$?" > "$out/$i.rc" ) &
+  done
+  wait
+  local losers=0
+  for i in 1 2 3; do
+    if [[ "$(cat "$out/$i.rc")" != "0" ]]; then
+      grep -q 'superseded by a concurrent call\|already recorded in this same second\|nothing to supersede\|holds the lock' "$out/$i.err" && losers=$(( losers + 1 ))
+    fi
+  done
+  [ "$losers" = "2" ]
 }

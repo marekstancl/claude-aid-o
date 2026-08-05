@@ -169,10 +169,25 @@ if [[ -z "$STATE_FILE" && -d "$REPO_ROOT/.aid-o/work/evidence/" ]]; then
   STATE_FILE=$(find "$REPO_ROOT/.aid-o/work/evidence/" -name "fsm-state.yaml" -exec grep -l "state: EXECUTE\|state: GATES\|state: READY" {} \; 2>/dev/null | head -1)
 fi
 
-if [[ -n "$STATE_FILE" && "$FORCE" != "true" ]]; then
+# P073: decide WOULD-HAVE-BLOCKED independently of --force. The old shape read
+# the state only on the non-forced path, so a forced run never learned whether
+# the guard was actually going to block — and then recorded a waiver claiming
+# fsm_release_guard was bypassed whenever ANY state file existed. An
+# independent review reproduced that: a DONE/release run under `runs/` (the
+# first `find` has no state filter) produced an audit record asserting a bypass
+# that never happened.
+FSM_WOULD_BLOCK=false
+if [[ -n "$STATE_FILE" ]]; then
   FSM_STATE=$(grep '^state:' "$STATE_FILE" | awk '{print $2}' || true)
   DONE_PHASE=$(grep '^done_phase:' "$STATE_FILE" | awk '{print $2}' || true)
+  if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
+    FSM_WOULD_BLOCK=true
+  elif [[ "$FSM_STATE" =~ ^(READY|EXECUTE|GATES|ESCALATION)$ ]]; then
+    FSM_WOULD_BLOCK=true
+  fi
+fi
 
+if [[ "$FSM_WOULD_BLOCK" == "true" && "$FORCE" != "true" ]]; then
   if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
     echo "ERROR: FSM state is DONE but done_phase=${DONE_PHASE:-<not set>}." >&2
     echo "Finish the run's release phase, or bypass with an audited, recorded reason:" >&2
@@ -188,9 +203,10 @@ fi
 
 # P073 Step 9: a force that actually bypassed a live FSM guard writes the same
 # three-record trail every other force in this codebase writes. Recorded only
-# when a state file was FOUND — a --force with no guard to bypass changed
-# nothing and needs no receipt, matching the plan-FSM rule.
-if [[ "$FORCE" == "true" && -n "$STATE_FILE" ]]; then
+# when the guard WOULD HAVE BLOCKED — the mere existence of a state file is not
+# a bypass, and claiming one that never happened corrupts the audit trail in
+# the opposite direction from the hole this step closed.
+if [[ "$FORCE" == "true" && "$FSM_WOULD_BLOCK" == "true" ]]; then
   _release_record_force "$STATE_FILE"
 fi
 }
@@ -210,17 +226,28 @@ _release_record_force() {
 
   # Where the receipt goes: the active run's evidence dir when there is one,
   # else a repo-root-adjacent file with a stderr note — never silently skipped.
-  local dir="" wfile=""
+  local dir="" wbase=""
   dir="$(dirname "$state_file")"
   if [[ -d "$dir" && -w "$dir" ]]; then
-    wfile="${dir}/waiver-release-force-${fname_ts}.json"
+    wbase="${dir}/waiver-release-force-${fname_ts}"
   elif [[ -d "$REPO_ROOT/.aid-o/work" ]]; then
-    wfile="${REPO_ROOT}/.aid-o/work/release-force-${fname_ts}.json"
-    echo "NOTE: no writable run evidence dir — recording the release force at ${wfile}" >&2
+    wbase="${REPO_ROOT}/.aid-o/work/release-force-${fname_ts}"
+    echo "NOTE: no writable run evidence dir — recording the release force under ${wbase}" >&2
   else
-    wfile="${REPO_ROOT}/.aid-release-force-${fname_ts}.json"
-    echo "NOTE: no .aid-o workspace — recording the release force at ${wfile}" >&2
+    wbase="${REPO_ROOT}/.aid-release-force-${fname_ts}"
+    echo "NOTE: no .aid-o workspace — recording the release force under ${wbase}" >&2
   fi
+  # Second precision plus a plain `mv` let two forces inside one second leave a
+  # single audit record. Pick the first free name and publish with `mv -n`.
+  local wfile="${wbase}.json" _wn=0
+  while [[ -e "$wfile" ]]; do
+    _wn=$(( _wn + 1 ))
+    if [[ "$_wn" -gt 100 ]]; then
+      echo "ERROR: cannot find a free release force-receipt name — refusing a silent bypass." >&2
+      exit 1
+    fi
+    wfile="${wbase}-${_wn}.json"
+  done
 
   command -v jq >/dev/null 2>&1 || {
     echo "ERROR: cannot record the release force — jq is unavailable; refusing a silent bypass." >&2
@@ -255,7 +282,7 @@ _release_record_force() {
       echo "ERROR: cannot render the release force receipt — refusing a silent bypass." >&2
       exit 1
     }
-  printf '%s\n' "$json" > "${wfile}.tmp.$$" 2>/dev/null && mv "${wfile}.tmp.$$" "$wfile" 2>/dev/null || {
+  printf '%s\n' "$json" > "${wfile}.tmp.$$" 2>/dev/null && mv -n "${wfile}.tmp.$$" "$wfile" 2>/dev/null && [[ ! -e "${wfile}.tmp.$$" ]] || {
     rm -f "${wfile}.tmp.$$" 2>/dev/null || true
     echo "ERROR: cannot write the release force receipt at ${wfile} — refusing a silent bypass." >&2
     exit 1

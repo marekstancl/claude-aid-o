@@ -238,3 +238,39 @@ EOF
   run grep -c 'authoritative record and IS fail-closed' "$RELEASE"
   [ "$output" -ge 1 ]
 }
+
+# ─── Independent-review findings ──────────────────────────────────────────
+
+@test "P073 (independent review): no waiver is written when the FSM guard would not have blocked" {
+  # The recorder fired whenever ANY state file existed, so a DONE/release run
+  # produced an audit record asserting fsm_release_guard was bypassed when it
+  # never blocked. Reproduced by the reviewer via the runs/ path, whose `find`
+  # has no state filter.
+  mkdir -p "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin" \
+           "$TEST_PROJECT_ROOT/.aid-o/work/runs/R-1"
+  printf '{"version": "2.0.0"}\n' > "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin/plugin.json"
+  printf '# Changelog\n\n## [2.0.1] — 2026-08-05\n\n### Fixed\n- A real entry.\n' \
+    > "$TEST_PROJECT_ROOT/CHANGELOG.md"
+  printf 'state: DONE\ndone_phase: release\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/runs/R-1/fsm-state.yaml"
+  ( cd "$TEST_PROJECT_ROOT" && git init -q && git config user.email t@e.com \
+      && git config user.name T && git add -A && git commit -qm seed ) >/dev/null 2>&1
+
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch --force --reason "$REASON"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"FSM release guard bypassed"* ]]
+  run bash -c "find '$TEST_PROJECT_ROOT' -name 'waiver-release-force-*.json' 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
+}
+
+@test "P073 (independent review): a waiver IS still written when the guard genuinely blocked" {
+  # The narrowing must not silence the real case.
+  _seed_release_repo
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch --force --reason "$REASON"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FSM release guard bypassed (state EXECUTE)"* ]]
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o' -name 'waiver-release-force-*.json' | wc -l"
+  [ "$output" = "1" ]
+}

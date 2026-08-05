@@ -485,3 +485,26 @@ _force() {
   run bash -c "find '$ROOT/.aid-o' -name 'waiver-plan-*.json' 2>/dev/null | wc -l"
   [ "$output" = "0" ]
 }
+
+# ─── Independent-review finding ───────────────────────────────────────────
+
+@test "P073 (independent review): two force receipts in the SAME second both survive" {
+  # Second-precision names plus a plain `mv` meant the second force silently
+  # overwrote the first's audit record — reproduced by the reviewer.
+  local i
+  for i in 1 2 3; do
+    run _force '
+      _PFSM_FORCE=1
+      _PFSM_FORCE_REASON="force '"$i"' with a reason long enough to pass validation properly"
+      _fails() { return 1; }
+      _pfsm_precondition "bookkeeping_complete" forceable _fails
+      _pfsm_handle_force "plan-close" "P900" "'"$ROOT"'" "OPEN" "CLOSED"
+    '
+    [ "$status" -eq 0 ]
+  done
+  run bash -c "find '$ROOT/.aid-o' -name 'waiver-plan-*.json' | wc -l"
+  [ "$output" = "3" ]
+  # Each carries its own distinct reason — none was clobbered.
+  run bash -c "find '$ROOT/.aid-o' -name 'waiver-plan-*.json' -exec jq -r '.waiver.reason' {} \; | sort -u | wc -l"
+  [ "$output" = "3" ]
+}

@@ -467,9 +467,22 @@ _pfsm_handle_force() {
   candidate_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate_sha=""
   [[ "$candidate_sha" == "null" ]] && candidate_sha=""
 
+  # COLLISION-PROOF NAME. Second precision plus a plain `mv` meant two forces
+  # inside one second left ONE audit record — reproduced by an independent
+  # review. The first free suffix is chosen, and the publish below is `mv -n`
+  # plus a source-gone post-check, so an existing receipt is never overwritten.
   local fname_ts; fname_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
   local safe_cmd; safe_cmd="$(printf '%s' "$command" | tr -c 'A-Za-z0-9._-' '_')"
-  local wfile="${evidence_dir}/waiver-plan-${safe_cmd}-${fname_ts}.json"
+  local wbase="${evidence_dir}/waiver-plan-${safe_cmd}-${fname_ts}"
+  local wfile="${wbase}.json" _wn=0
+  while [[ -e "$wfile" ]]; do
+    _wn=$(( _wn + 1 ))
+    if [[ "$_wn" -gt 100 ]]; then
+      echo "PRECONDITION FAIL: cannot find a free force-receipt name under ${evidence_dir} — refusing a silent bypass." >&2
+      return 1
+    fi
+    wfile="${wbase}-${_wn}.json"
+  done
 
   local payload hash json
   payload="$(jq -nc --arg wc "plan-fsm:${command}" --arg rs "$reason" \
@@ -516,7 +529,7 @@ _pfsm_handle_force() {
     return 1
   }
   local tmp="${wfile}.tmp.$$"
-  if ! printf '%s\n' "$json" > "$tmp" 2>/dev/null || ! mv "$tmp" "$wfile" 2>/dev/null; then
+  if ! printf '%s\n' "$json" > "$tmp" 2>/dev/null || ! mv -n "$tmp" "$wfile" 2>/dev/null || [[ -e "$tmp" ]]; then
     rm -f "$tmp" 2>/dev/null || true
     echo "PRECONDITION FAIL: cannot write force receipt at ${wfile} — refusing a silent bypass." >&2
     return 1
@@ -6170,6 +6183,7 @@ _pfsm_epic_state_file() {
 # _pfsm_plan_state_supersede <plan_id> <project_root> <epic_id> <reason>
 _pfsm_plan_state_supersede() {
   local plan_id="$1" project_root="$2" epic_id="$3" reason="$4"
+  local _sup_lock_fd=
 
   if [[ -z "$epic_id" || -z "$reason" ]]; then
     echo "ERROR: plan-state --supersede-epic requires --reason, both non-empty." >&2
@@ -6234,21 +6248,58 @@ _pfsm_plan_state_supersede() {
     return 1
   fi
 
-  # ONE epoch for both names, so the archive and its record pair 1:1 and a
-  # second supersede can never collide with or overwrite the first.
-  local epoch; epoch="$(date -u +%s)"
-  local archive="${state_file}.superseded-${epoch}"
   local rec_dir; rec_dir="$(_pfsm_supersede_record_dir "$project_root")"
-  local record="${rec_dir}/supersede-${plan_id}-${epic_id}-${epoch}.json"
-
-  if [[ -e "$archive" || -e "$record" ]]; then
-    echo "PRECONDITION FAIL: a supersede for ${epic_id} was already recorded in this same second — rerun in a moment so the archive and its record keep their 1:1 pairing." >&2
-    return 1
-  fi
   mkdir -p "$rec_dir" 2>/dev/null || {
     echo "PRECONDITION FAIL: cannot create ${rec_dir} for the supersede record." >&2
     return 1
   }
+
+  # ── THE WHOLE TRANSACTION IS SERIALIZED, per plan+EPIC ───────────────────
+  # An independent review reproduced the failure this closes: four concurrent
+  # supersedes left ONE archived state and ZERO records — the exact stranding
+  # this recovery exists to prevent. The old shape checked "does the record
+  # exist", then wrote it with a plain `mv` (which overwrites), then archived;
+  # so two callers both passed the check, the second clobbered the first's
+  # record, and when its own archive failed (the state file was already gone)
+  # its error path deleted the record they were BOTH relying on.
+  #
+  # A lock is the honest fix rather than more atomic primitives: this is a
+  # two-file transaction (record + archive) with a cross-file invariant, and
+  # no single rename can express that. Scoped per plan+EPIC so unrelated
+  # supersedes never serialize against each other.
+  local lockfile="${rec_dir}/.supersede-${plan_id}-${epic_id}.lock"
+  touch "$lockfile" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot create the supersede lock at ${lockfile}." >&2
+    return 1
+  }
+  exec {_sup_lock_fd}<>"$lockfile" || {
+    echo "PRECONDITION FAIL: cannot open the supersede lock at ${lockfile}." >&2
+    return 1
+  }
+  if ! flock -x -w 10 "$_sup_lock_fd"; then
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: another supersede for ${epic_id} holds the lock (waited 10s) — rerun once it finishes." >&2
+    return 1
+  fi
+
+  # RE-CHECK UNDER THE LOCK. A racer that won the lock first may already have
+  # archived the state file, so the pre-lock reads above can be stale.
+  if [[ ! -f "$state_file" ]]; then
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: ${epic_id} was superseded by a concurrent call while this one waited — nothing was done here. Check .aid-o/work/plan-state/ for the record it wrote." >&2
+    return 1
+  fi
+
+  # ONE epoch for both names, so the archive and its record pair 1:1 and a
+  # second supersede can never collide with or overwrite the first.
+  local epoch; epoch="$(date -u +%s)"
+  local archive="${state_file}.superseded-${epoch}"
+  local record="${rec_dir}/supersede-${plan_id}-${epic_id}-${epoch}.json"
+  if [[ -e "$archive" || -e "$record" ]]; then
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: a supersede for ${epic_id} was already recorded in this same second — rerun in a moment so the archive and its record keep their 1:1 pairing." >&2
+    return 1
+  fi
 
   # RECORD FIRST, then archive. A record with no archive authorises nothing
   # (the init-side verifier requires a matching archived file), whereas an
@@ -6263,17 +6314,23 @@ _pfsm_plan_state_supersede() {
       old_state_sha256:$oldsha, old_run_id:$oldrun,
       new_plan_json_sha256:$newsha,
       reason:$reason, operator:$op, created_at:$now}' > "$tmp" 2>/dev/null \
-    && mv "$tmp" "$record" 2>/dev/null || {
+    && mv -n "$tmp" "$record" 2>/dev/null && [[ ! -e "$tmp" ]] || {
       rm -f "$tmp" 2>/dev/null || true
+      eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
       echo "PRECONDITION FAIL: cannot write the supersede record at ${record} — nothing was archived." >&2
       return 1
     }
 
   if ! mv "$state_file" "$archive" 2>/dev/null; then
+    # Safe under the lock: this record is provably ours (it did not exist when
+    # we took the lock, and `mv -n` proved we created it), so removing it
+    # cannot strand a concurrent caller the way the unlocked version did.
     rm -f "$record" 2>/dev/null || true
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
     echo "PRECONDITION FAIL: cannot archive ${state_file} — the record was removed again, so nothing is half-done." >&2
     return 1
   fi
+  eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
 
   echo "superseded ${epic_id}: archived $(basename "$archive"), record $(basename "$record")" >&2
   echo "  Evidence artifacts are untouched; the state file is archived in place beside them." >&2
