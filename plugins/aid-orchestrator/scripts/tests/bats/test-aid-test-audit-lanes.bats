@@ -31,7 +31,11 @@ teardown() { teardown_test_evidence_dir; }
 
 _inventory() {
   printf '%s\n' "$@" | jq -R -s \
-    '{schema_version:"1.0.0", run_units: (split("\n") | map(select(length>0)) | map({run_unit_id: .}))}' \
+    '{schema_version:"1.0.0",
+      generated_at:"2026-08-04T00:00:00Z",
+      runner_families:["bats"],
+      entries: (split("\n") | map(select(length>0))
+                | map({run_unit_id: ., runner:"bats", adapter:"bats", confidence:"medium"}))}' \
     > "$INVENTORY"
 }
 _manifest() {

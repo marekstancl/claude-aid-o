@@ -51,7 +51,11 @@ _shape() {
 
 _inventory() {
   printf '%s\n' "$@" | jq -R -s \
-    '{schema_version:"1.0.0", run_units: (split("\n") | map(select(length>0)) | map({run_unit_id: .}))}' > "$INV"
+    '{schema_version:"1.0.0",
+      generated_at:"2026-08-04T00:00:00Z",
+      runner_families:["bats"],
+      entries: (split("\n") | map(select(length>0))
+                | map({run_unit_id: ., runner:"bats", adapter:"bats", confidence:"medium"}))}' > "$INV"
 }
 _manifest() {
   printf '%s\n' "$@" | jq -R -s --arg a "$AUDIT_ID" \
@@ -136,7 +140,9 @@ _assert_contained() {
 # Every shape asserts a non-zero unit count FIRST, so a shape cannot pass
 # because its fixture was empty.
 _assert_units() {
-  local n; n="$(jq -r '.run_units | length' "$INV")"
+  # `.entries`, the inventory's real key — `.run_units` is the CATALOG's key,
+  # and reading it here counted zero for every shape.
+  local n; n="$(jq -r '.entries | length' "$INV")"
   if [[ "${n:-0}" -gt 0 ]]; then
     pass_msg "${SHAPE}: fixture has ${n} run unit(s) — the shape is not passing vacuously"
   else

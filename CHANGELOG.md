@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.4] — 2026-08-04
+
+> A third real audit found the profiler emitting receipts that failed its own
+> schema while reporting success, so consolidation rejected all of them and the
+> audit died with no artifact naming the cause. Two of the three blockers were
+> introduced by this plan's own earlier releases.
+
+### Fixed
+- **The profiler wrote receipts its own schema rejects, and exited 0 doing it** — `job.jobs_dir` was added in 2.70.3 without checking the schema, which declares `additionalProperties: false` on `job`, and the no-per-case-timing branch emitted `timing: {}` where `cases`/`planned`/`truncated` are required. Both are fixed, and the profiler now validates its own receipt and fails with exit 14 rather than moving the failure three steps downstream where no field can be named.
+- **`evidence_refs` had two different contracts on either side of a wave boundary** — the wave-artifact schema set no `minItems` while the consolidated-findings schema requires 1, so an agent could hand in an artifact that passed its own validation and then killed consolidation with an internal error naming neither the finding nor the field. The producer is held to the strictest consumer's rule: a finding with no evidence is not a finding.
+- **A run unit could carry two different commands and be profiled against the wrong one** — measurement reads `execution.yaml`, the profiler reads the catalog. Where they disagreed, this repository measured a 25-minute pool runner and then "diagnosed" a quarantine stub that exits in three seconds, recording `complete: true`: the check meant to prove the slow suite was diagnosed was satisfied by evidence that it never ran. Divergence is now refused with exit 15.
+- **Four test fixtures invented their own inventory shape** — `run_units[]` where the scanner and the schema say `entries[]`. One was found by an audit and three more by the inventory validation added in 2.70.1, which had left two suites red across three releases because its effect was never run against every consumer.
+- **A gate run's stdout is a JSON document, and 2.70.3 wrote a warning across it** — the "this run is not accounted by a ledger" notice went to stderr, which merges into stdout for any caller capturing both, so the report became unparseable and four gate-runner tests went red. The notice is now a field on the report (`_execution_ledger.accounted: false` with its reason), which is durable, machine-readable, and cannot corrupt the contract it is describing.
+- **A selector fixture asserted that an unbound `safe` is parallel eligible** — since P072 a status with no provenance object resolves to `unknown`, because a status nothing verified is a claim rather than evidence. The fixture had been asserting the opposite of what the product does.
+- **A suite asserted renderer wording removed when the six-part summary landed** — `finalize-production` had been checking for "audit NOT complete" and "Units left undecided" since that rewrite. Aligned to what the renderer actually prints.
+
 ## [2.70.3] — 2026-08-04
 
 > A second real audit lost its own evidence: the entire

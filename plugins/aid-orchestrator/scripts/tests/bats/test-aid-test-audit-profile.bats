@@ -305,3 +305,75 @@ JSON
   run jq -e '.root_cause | has("attributed_ms")' "$r"
   [ "$status" -ne 0 ]
 }
+
+# ─── The real output, through the real validator ────────────────────────────
+
+@test "a REAL profiler receipt validates against the REAL schema, both branches" {
+  # This is the test whose absence let two schema violations ship. Everything
+  # here checked `.schema_version` — a string — while the consumers built
+  # hand-written fixtures that happened to be valid. Producer and consumer were
+  # both tested against fixtures, and the actual output never met the actual
+  # validator until a live audit did it, at which point the profiler exited 0
+  # and consolidation rejected every receipt with no field named.
+  #
+  # Both branches, because the one that broke was the no-per-case-timing path:
+  # it emitted `timing: {}` where the schema requires cases/planned/truncated.
+  local schema="$PLUGIN_DIR/defaults/schemas/test-profile.schema.json"
+  local c r; c="$(_clone)"
+
+  # Branch 1: a bats unit, which parses per-case timing.
+  r="$(bash "$PROFILE" \
+    --run-unit-id "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary" \
+    --catalog "$CATALOG" --execution-yaml "$EXEC_YAML" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 3)"
+  run python3 -c '
+import json,sys
+from jsonschema.validators import Draft202012Validator
+schema=json.load(open(sys.argv[1])); inst=json.load(open(sys.argv[2]))
+errs=list(Draft202012Validator(schema).iter_errors(inst))
+for e in errs: print("/".join(str(x) for x in e.path) or "(root)", e.message)
+sys.exit(1 if errs else 0)' "$schema" "$r"
+  [ "$status" -eq 0 ]
+
+  # And the emitted job block really does carry the field that broke it, so
+  # this cannot pass by the field having been quietly dropped again.
+  [ "$(jq -r '.job.jobs_dir' "$r")" != "null" ]
+}
+
+@test "the profiler FAILS on a receipt its own schema rejects, rather than exiting 0" {
+  # The producer used to write whatever it built and report success. Moving the
+  # failure three steps downstream is how a wrong field became an audit that
+  # died with nothing to show why.
+  grep -q 'adapter_validate_schema "$PROFILE_SCHEMA"' "$PROFILE"
+  grep -q 'exit 14' "$PROFILE"
+}
+
+@test "a unit whose catalog and execution.yaml commands DISAGREE is refused" {
+  # gate:bats_all was a 25-minute pool runner in execution.yaml and a
+  # quarantine stub exiting 86 in the catalog. The audit measured one and
+  # profiled the other, then recorded complete: true — the check meant to prove
+  # the slow suite was diagnosed was satisfied by proof that it never ran.
+  local c; c="$(_clone)"
+  local cat2="$TEST_TMPDIR/divergent-catalog.yaml"
+  local exec2="$TEST_TMPDIR/divergent-exec.yaml"
+
+  cat > "$exec2" <<'YAML'
+gates:
+  demo:
+    command: "sleep 0.1"
+    timeout_seconds: 60
+YAML
+  jq -n '{schema_version:"1.0.0", generated_at:"2026-08-04T00:00:00Z", status:"approved",
+          run_units:[{run_unit_id:"gate:demo", runner:"declared-command",
+                      source_paths:["x"],
+                      command:{type:"shell", shell:"echo QUARANTINED; exit 86"},
+                      parallel:{status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false}}],
+          source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' \
+    | yq -P '.' > "$cat2"
+
+  run bash "$PROFILE" --run-unit-id "gate:demo" \
+    --catalog "$cat2" --execution-yaml "$exec2" \
+    --output-dir "$OUT" --target-root "$c" --project-root "$REPO" --budget-minutes 1
+  [ "$status" -eq 15 ]
+  [[ "$output" == *"TWO different commands"* ]]
+}
