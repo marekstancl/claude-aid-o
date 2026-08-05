@@ -99,19 +99,39 @@ _aid_ancillary_fallback() {
 }
 
 # ---------------------------------------------------------------------------
-# _aid_ancillary_glob_match <path> <pattern>
+# _aid_ancillary_glob_match <path> <pattern> [strict]
 #   ONE matcher, shared with protected-set matching so the two can never
 #   diverge on the same entry. Same technique as gates/scope-check.sh:33-42
 #   (a bash `case` glob), plus the pre-commit hook's directory-prefix rule:
 #   an entry matches a path that IS it, or that sits under it.
-#   A trailing `/**` is the explicit directory form.
+#
+#   TWO SEMANTICS, because the legacy modes must reproduce four ANCHORED
+#   regexes, not approximate them:
+#
+#   permissive (default) — the pre-commit hook's rule. A bare entry also
+#     covers what is under it, and `<dir>/**` covers the directory itself.
+#     This is what the policy globs and the protected set want.
+#
+#   strict (third argument "strict") — exactly the old `^.. <path>$` anchors.
+#     A bare entry matches ONLY that path; `<dir>/**` matches only things
+#     UNDER the directory, never the bare directory name. Measured before this
+#     split existed, the permissive rule silently exempted three paths the old
+#     regexes blocked: `.aid-o/config/queue.yaml/nested.txt`,
+#     `.aid-o/work/audit-log.jsonl/foo` and the bare `.aid-o/work/plan-state`.
+#     A "behaviour-neutral" refactor that quietly widens an exception set is
+#     the exact failure this step exists to prevent.
 # ---------------------------------------------------------------------------
 _aid_ancillary_glob_match() {
-  local path="$1" pattern="$2"
+  local path="$1" pattern="$2" strict="${3:-}"
   [[ -n "$pattern" && "$pattern" != \#* ]] || return 1
   # Explicit directory form.
   if [[ "$pattern" == */\*\* ]]; then
     local base="${pattern%/\*\*}"
+    if [[ "$strict" == "strict" ]]; then
+      # The old regex was a prefix WITH the slash: `\.aid-o/work/plan-state/`.
+      [[ "$path" == "$base"/* ]] && return 0
+      return 1
+    fi
     [[ "$path" == "$base" || "$path" == "$base"/* ]] && return 0
     return 1
   fi
@@ -119,7 +139,9 @@ _aid_ancillary_glob_match() {
   case "$path" in
     $pattern) return 0 ;;
   esac
-  # Directory-prefix rule: a bare entry also covers what is under it.
+  # Directory-prefix rule — permissive only. Under `strict` the old `$` anchor
+  # meant a bare entry covered nothing beneath it.
+  [[ "$strict" == "strict" ]] && return 1
   [[ "$path" == "$pattern"/* ]] && return 0
   return 1
 }
@@ -157,9 +179,12 @@ aid_ancillary_filter_porcelain() {
     esac
   done
   local -a patterns=()
+  # The legacy modes match STRICTLY, so they reproduce the four anchored
+  # regexes exactly rather than approximating them.
+  local strict=""
   case "$mode" in
-    legacy5) patterns=("${_AID_ANCILLARY_LEGACY5[@]}") ;;
-    legacy4) patterns=("${_AID_ANCILLARY_LEGACY4[@]}") ;;
+    legacy5) patterns=("${_AID_ANCILLARY_LEGACY5[@]}"); strict="strict" ;;
+    legacy4) patterns=("${_AID_ANCILLARY_LEGACY4[@]}"); strict="strict" ;;
     policy)  aid_ancillary_load "$root"; patterns=("${_AID_ANCILLARY_PATTERNS[@]}") ;;
     *)
       echo "ERROR: aid_ancillary_filter_porcelain requires --mode <legacy5|legacy4|policy> (got '${mode:-<none>}'). The mode is mandatory so no caller silently inherits a wider exception set." >&2
@@ -176,7 +201,7 @@ aid_ancillary_filter_porcelain() {
     path="${line:3}"
     keep=1
     for p in "${patterns[@]}"; do
-      if _aid_ancillary_glob_match "$path" "$p"; then keep=0; break; fi
+      if _aid_ancillary_glob_match "$path" "$p" "$strict"; then keep=0; break; fi
     done
     [[ "$keep" -eq 1 ]] && printf '%s\n' "$line"
   done

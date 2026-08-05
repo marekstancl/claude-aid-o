@@ -10,7 +10,12 @@
 # `--mode legacy5` (or `legacy4`), reproducing its current exception set
 # exactly; the broader `--mode policy` is switched on only by Step 17. The
 # byte-identical assertions below are what make that contract checkable rather
-# than asserted.
+# than asserted — but only if the fixture EXERCISES the differences. The first
+# cut of this suite passed while the classifier silently exempted three paths
+# the old regexes blocked, because the porcelain stream contained none of the
+# edge cases. The stream below now carries them explicitly: a descendant of a
+# bare exact entry, the bare directory of a prefix entry, and near-miss
+# suffixes.
 
 load test-helpers.bash
 
@@ -55,6 +60,11 @@ _porcelain() {
  M .aid-o/metrics/gate-runtime-baselines.yaml
  M .aid-o/metrics/gate-runtime-baselines.yaml.lock
  M .aid-o/work/plan-state/P900/plan-state.yaml
+ M .aid-o/work/plan-state
+ M .aid-o/config/queue.yaml.bak
+ M .aid-o/config/queue.yaml/nested.txt
+ M .aid-o/work/audit-log.jsonl/foo
+ M .aid-o/metrics/gate-runtime-baselines.yamlX
  M .aid-o/work/evidence/P900/R-1/delivery-report.json
  M .aid-o/reports/P900-delivery.md
  M .aid-o/metrics/other-metric.yaml
@@ -219,4 +229,33 @@ EOF
   [ "$output" = "1" ]
   run bash -c "grep -c 'aid_ancillary_filter_porcelain --mode legacy4' '$AID_PLUGIN_PATH/scripts/aid-fsm.sh'"
   [ "$output" = "1" ]
+}
+
+# ─── Codex-review finding on the first cut of this step ───────────────────
+
+@test "P073 Step 14 (review finding): the legacy modes are ANCHORED — a descendant of a bare entry still blocks" {
+  # The permissive directory-prefix rule silently exempted paths the old
+  # anchored regexes blocked. Measured: three of them.
+  local p
+  for p in ".aid-o/config/queue.yaml/nested.txt" ".aid-o/work/audit-log.jsonl/foo"; do
+    run bash -c "printf ' M %s\n' '$p' | $(printf '%q' bash) -c '. \"$LIB\"; aid_ancillary_filter_porcelain --mode legacy5'"
+    [ -n "$output" ]   # still dirty => still blocks, as it did before
+  done
+}
+
+@test "P073 Step 14 (review finding): the bare directory of a prefix entry still blocks under legacy" {
+  # The old regex was `\.aid-o/work/plan-state/` — WITH the slash — so a
+  # tracked file literally named `.aid-o/work/plan-state` was never exempt.
+  run bash -c "printf ' M .aid-o/work/plan-state\n' | $(printf '%q' bash) -c '. \"$LIB\"; aid_ancillary_filter_porcelain --mode legacy5'"
+  [ -n "$output" ]
+  # While something genuinely under it is exempt, exactly as before.
+  run bash -c "printf ' M .aid-o/work/plan-state/P900/x.yaml\n' | $(printf '%q' bash) -c '. \"$LIB\"; aid_ancillary_filter_porcelain --mode legacy5'"
+  [ -z "$output" ]
+}
+
+@test "P073 Step 14 (review finding): POLICY mode keeps the permissive rule, which is what its globs want" {
+  # The strictness applies to the legacy modes only — `.aid-o/work/**` is meant
+  # to cover the subtree.
+  run bash -c "printf ' M .aid-o/work/anything/deep/x.txt\n' | $(printf '%q' bash) -c '. \"$LIB\"; cd \"$ROOT\"; aid_ancillary_filter_porcelain --mode policy'"
+  [ -z "$output" ]
 }
