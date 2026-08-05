@@ -63,7 +63,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
 
 @test "P073 Step 15: freeze stores the protected set, sorted and de-duplicated" {
   _init_manifest
-  printf '%s\n' "scripts/b.sh" "scripts/a.sh" "scripts/a.sh" "docs/x.md" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/b.sh" "scripts/a.sh" "scripts/a.sh" "docs/x.md" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   [ "$status" -eq 0 ]
   run _protected
@@ -72,7 +72,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
 
 @test "P073 Step 15: the set lands in the SAME write as the candidate — never one without the other" {
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   [ "$status" -eq 0 ]
   run _pm "plan_manifest_get P900 '.plan_boundary_manifest.candidate_sha'"
@@ -94,21 +94,27 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
   [ "$output" = "false" ]
 }
 
-@test "P073 Step 15: paths with spaces and odd characters survive the round trip" {
+@test "P073 Step 15: paths with spaces, odd characters AND newlines survive the round trip" {
   _init_manifest
-  printf '%s\n' "docs/a file with spaces.md" "scripts/weird\$name.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "docs/a file with spaces.md" "scripts/weird\$name.sh" "docs/two
+line.md" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   [ "$status" -eq 0 ]
   run _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_paths[]' | tr '\n' '|'"
   [[ "$output" == *"a file with spaces.md"* ]]
   [[ "$output" == *'weird$name.sh'* ]]
+  # A path CONTAINING a newline stays ONE entry. Newline delimiting split it
+  # into two wrong entries, neither of which was the real path
+  # (adversarial-review finding).
+  run _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_paths | length'"
+  [ "$output" = "3" ]
 }
 
 # ─── invalidation clears the set WITH the pair ────────────────────────────
 
 @test "P073 Step 15: invalidate clears candidate and protected set together" {
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   [ "$status" -eq 0 ]
   run _pm "plan_manifest_clear_candidate P900 'the plan branch moved off the candidate' PLAN_FIX >/dev/null"
@@ -124,7 +130,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
   # A protected set with no candidate would let Step 16's predicate reason
   # about a surface nobody froze.
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   [ "$status" -eq 0 ]
   # Clear the whole freeze PAIR (an earlier invariant already rejects a lone
@@ -141,7 +147,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
 
 @test "P073 Step 15: a candidate with NO protected set is rejected too" {
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
   jq '.plan_boundary_manifest.protected_paths = []' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
@@ -154,7 +160,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
   # A manifest frozen before this field existed must not become invalid;
   # Step 16 reports "equivalence unavailable" for it rather than guessing.
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
   jq 'del(.plan_boundary_manifest.protected_paths) | del(.plan_boundary_manifest.protected_paths_complete)' \
@@ -167,7 +173,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
 
 @test "P073 Step 15: accepted_head without its receipt binding is rejected" {
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
   jq --arg h "$HEAD_SHA" '.plan_boundary_manifest.accepted_head = $h' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
@@ -179,7 +185,7 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
 @test "P073 Step 15: freeze resets accepted_head and its receipt binding" {
   # A re-freeze must not inherit a previous acceptance.
   _init_manifest
-  printf '%s\n' "scripts/a.sh" > "$ROOT/prot.txt"
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
   run _freeze "$ROOT/prot.txt" true
   local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
   run jq -r '.plan_boundary_manifest | [.accepted_head, .equivalence_receipt_path, .equivalence_receipt_sha256] | map(tostring) | join(",")' "$mf"
@@ -219,4 +225,76 @@ _protected() { _pm "plan_manifest_get P900 '.plan_boundary_manifest.protected_pa
   [ "$output" -ge 1 ]
   run grep -c 'protected set incomplete' "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
   [ "$output" -ge 1 ]
+}
+
+# ─── Codex-review findings on the first cut of this step ──────────────────
+
+@test "P073 Step 15 (review finding): the OLD six-argument freeze call is refused, not silently accepted" {
+  # Accepting it stored a deliberately too-small protected set while the
+  # freeze still looked complete.
+  _init_manifest
+  run _pm "plan_manifest_freeze_candidate P900 '$HEAD_SHA' '$HEAD_SHA' R-P900-final-1 \
+           '.aid-o/work/evidence/P900/R-P900-final-1' '2026-08-05T00:00:00Z'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"protected-paths file is REQUIRED"* ]]
+}
+
+@test "P073 Step 15 (review finding): an unreadable protected-paths file is refused" {
+  _init_manifest
+  run _freeze "$ROOT/does-not-exist.nul" true
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not readable"* ]]
+}
+
+@test "P073 Step 15 (review finding): accepted_head with an EMPTY receipt path is rejected" {
+  # The invariant checked `type == "string"` only, so "" passed and the
+  # manifest could hold an accepted head with no usable receipt.
+  _init_manifest
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
+  run _freeze "$ROOT/prot.txt" true
+  local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
+  jq --arg h "$HEAD_SHA" '.plan_boundary_manifest.accepted_head = $h
+      | .plan_boundary_manifest.equivalence_receipt_path = ""
+      | .plan_boundary_manifest.equivalence_receipt_sha256 = "x"' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
+  run _pm "plan_manifest_validate P900"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"accepted_head requires"* ]]
+}
+
+@test "P073 Step 15 (review finding): accepted_head with a malformed sha256 is rejected" {
+  _init_manifest
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
+  run _freeze "$ROOT/prot.txt" true
+  local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
+  jq --arg h "$HEAD_SHA" '.plan_boundary_manifest.accepted_head = $h
+      | .plan_boundary_manifest.equivalence_receipt_path = "r.json"
+      | .plan_boundary_manifest.equivalence_receipt_sha256 = "not-a-hash"' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
+  run _pm "plan_manifest_validate P900"
+  [ "$status" -ne 0 ]
+}
+
+@test "P073 Step 15 (review finding): a WELL-FORMED acceptance binding validates" {
+  # The tightening must not break the state Step 16 will legitimately write.
+  _init_manifest
+  printf '%s\0' "scripts/a.sh" > "$ROOT/prot.txt"
+  run _freeze "$ROOT/prot.txt" true
+  local mf="$ROOT/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
+  jq --arg h "$HEAD_SHA" \
+     --arg s "sha256:$(printf 'x' | sha256sum | awk '{print $1}')" \
+     '.plan_boundary_manifest.accepted_head = $h
+      | .plan_boundary_manifest.equivalence_receipt_path = ".aid-o/work/evidence/P900/R-1/review-equivalence-receipt.json"
+      | .plan_boundary_manifest.equivalence_receipt_sha256 = $s' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
+  run _pm "plan_manifest_validate P900"
+  [ "$status" -eq 0 ]
+}
+
+@test "P073 Step 15 (review finding): the freeze body marks the set incomplete on a malformed plan.json, an empty evidence_dir and an ambiguous source glob" {
+  # Each was a path to a set that was too small while still claiming complete.
+  local f="$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
+  run grep -c 'is malformed or unreadable by jq' "$f"
+  [ "$output" = "1" ]
+  run grep -c 'has no evidence_dir recorded in the manifest' "$f"
+  [ "$output" = "1" ]
+  run grep -c 'files match .aid-o/plans/' "$f"
+  [ "$output" = "1" ]
 }

@@ -2833,14 +2833,16 @@ _pfsm_finalize_freeze() {
   # that already drives the pre-commit scope hook and gates/scope-check.sh —
   # reusing it means the protected set and the scope guard can never disagree
   # about what a step was allowed to touch.
-  local _prot_file="${run_dir_abs}/.protected-paths.txt"
+  # NUL-DELIMITED, because a delivery path may contain anything but NUL.
+  # Newline delimiting silently split such a path into two wrong entries.
+  local _prot_file="${run_dir_abs}/.protected-paths.nul"
   local _prot_complete=true
   : > "$_prot_file"
 
-  # The three lifecycle paths are the floor.
+  # The lifecycle paths are the floor.
   {
-    printf '%s\n' ".aid-lifecycle/manifests/${plan_id}.yaml"
-    printf '%s\n' ".aid-lifecycle/receipts/${plan_id}.yaml"
+    printf '%s\0' ".aid-lifecycle/manifests/${plan_id}.yaml"
+    printf '%s\0' ".aid-lifecycle/receipts/${plan_id}.yaml"
   } >> "$_prot_file"
 
   # The source plan. Step 11 stamps its repo-relative path at lifecycle
@@ -2849,15 +2851,25 @@ _pfsm_finalize_freeze() {
   local _src_path=""
   _src_path="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.source_plan_path' 2>/dev/null)" || _src_path=""
   if [[ -z "$_src_path" || "$_src_path" == "null" ]]; then
-    local _g
+    # AMBIGUITY IS NOT RESOLVED BY GLOB ORDER. Taking the first match made the
+    # protected set depend on locale/readdir order, which could protect the
+    # wrong source plan (adversarial-review finding). Two matches means the
+    # set is incomplete and equivalence is off for this freeze.
+    local _g; local -a _src_matches=()
     for _g in "${root}/.aid-o/plans/${plan_id}"-*.md; do
       [[ -f "$_g" ]] || continue
-      _src_path="${_g#"${root}/"}"
-      break
+      _src_matches+=("${_g#"${root}/"}")
     done
+    if [[ "${#_src_matches[@]}" -eq 1 ]]; then
+      _src_path="${_src_matches[0]}"
+    elif [[ "${#_src_matches[@]}" -gt 1 ]]; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${#_src_matches[@]} files match .aid-o/plans/${plan_id}-*.md and no source_plan_path is recorded, so which one the plan was generated from is not decidable: ${_src_matches[*]}" >&2
+      _src_path=""
+    fi
   fi
   if [[ -n "$_src_path" && "$_src_path" != "null" ]]; then
-    printf '%s\n' "$_src_path" >> "$_prot_file"
+    printf '%s\0' "$_src_path" >> "$_prot_file"
   else
     _prot_complete=false
     echo "WARNING: protected set incomplete — no source plan path recorded for ${plan_id} and no .aid-o/plans/${plan_id}-*.md matched." >&2
@@ -2865,22 +2877,43 @@ _pfsm_finalize_freeze() {
 
   # Every EPIC's plan.json allowed_paths, read from the evidence dir the
   # manifest records for that run.
-  local _epic_line _e_id _e_dir _e_json
+  local _e_id _e_dir _e_json _e_paths
   while IFS=$'\t' read -r _e_id _e_dir; do
     [[ -n "$_e_id" ]] || continue
+    if [[ -z "$_e_dir" ]]; then
+      # An empty evidence_dir used to probe "${root}//plan.json", which
+      # resolves to a repository-root plan.json — an unrelated file whose
+      # allowed_paths would have been protected instead of the EPIC's
+      # (adversarial-review finding).
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${_e_id} has no evidence_dir recorded in the manifest" >&2
+      continue
+    fi
     _e_json="${root}/${_e_dir}/plan.json"
-    if [[ -r "$_e_json" ]]; then
-      jq -r '.steps[]?.allowed_paths[]? // empty' "$_e_json" 2>/dev/null >> "$_prot_file" || true
-    else
+    if [[ ! -r "$_e_json" ]]; then
       _prot_complete=false
       echo "WARNING: protected set incomplete — ${_e_id} plan.json unlocatable at ${_e_dir}/plan.json" >&2
+      continue
     fi
+    # A jq FAILURE (malformed plan.json) must mark the set incomplete, not be
+    # swallowed: `|| true` left the EPIC's paths out while the freeze still
+    # claimed to be complete.
+    if ! _e_paths="$(jq -j '.steps[]?.allowed_paths[]? // empty | . + "\u0000"' "$_e_json" 2>/dev/null)"; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${_e_id} plan.json at ${_e_dir}/plan.json is malformed or unreadable by jq" >&2
+      continue
+    fi
+    printf '%s' "$_e_paths" >> "$_prot_file"
   done < <(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs[]? | [.epic_id, (.evidence_dir // "")] | @tsv' 2>/dev/null || true)
 
   # The overlap between the ancillary policy and this set is EXPECTED —
   # close-consumed evidence lives under `.aid-o/work/`, itself an ancillary
   # glob. Warn so the precedence is visible; protection wins at the path level.
-  aid_ancillary_overlap_warn "$_prot_file" "$root" || true
+  # The warner reads newline records, so hand it a newline projection of the
+  # NUL file rather than teaching two readers about two formats.
+  tr '\0' '\n' < "$_prot_file" > "${_prot_file}.lines" 2>/dev/null || true
+  aid_ancillary_overlap_warn "${_prot_file}.lines" "$root" || true
+  rm -f "${_prot_file}.lines" 2>/dev/null || true
 
   if [[ "$_prot_complete" != true ]]; then
     echo "WARNING: ${plan_id} freezes with protected_paths_complete=false — review EQUIVALENCE is unavailable for this freeze, so any movement after it invalidates exactly as before P073." >&2

@@ -524,8 +524,12 @@ _pm_check_invariants() {
       .plan_boundary_manifest as $m
       | ($m.accepted_head == null)
         or (($m.candidate_sha != null)
+            and ($m.accepted_head | type == "string")
+            and ($m.accepted_head | test("^[0-9a-f]{40}$"))
             and ($m.equivalence_receipt_path | type == "string")
-            and ($m.equivalence_receipt_sha256 | type == "string"))
+            and ($m.equivalence_receipt_path | length > 0)
+            and ($m.equivalence_receipt_sha256 | type == "string")
+            and ($m.equivalence_receipt_sha256 | test("^(sha256:)?[0-9a-f]{64}$")))
     ' "$file" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — accepted_head requires a frozen candidate and a receipt path+sha256 recorded with it" >&2
     return 1
@@ -1300,12 +1304,25 @@ plan_manifest_freeze_candidate() {
   # recomputing at read time is what makes it a property OF THIS FREEZE: a
   # later plan.json edit cannot retroactively change what was protected.
   #
-  # The caller passes a newline-delimited file (paths are arbitrary strings;
-  # an argv list would be the thing that breaks on the first odd one).
+  # The caller passes a NUL-DELIMITED file. Paths are arbitrary strings: an
+  # argv list breaks on the first odd one, and newline delimiting corrupts a
+  # path that CONTAINS a newline — one delivery path silently becomes two
+  # entries, neither of which is the real path (adversarial-review finding).
+  # NUL is the only separator git itself guarantees cannot occur in a path.
   local protected_json='[]'
-  if [[ -n "$protected_file" && -r "$protected_file" ]]; then
-    protected_json="$(jq -Rn '[inputs | select(length > 0)] | sort | unique' < "$protected_file" 2>/dev/null)" || protected_json='[]'
+  if [[ -z "$protected_file" ]]; then
+    # The pre-P073 six-argument call. Accepting it silently would store a
+    # deliberately too-small protected set and mark the freeze complete, so it
+    # is refused by name instead.
+    _pm_warn "plan_manifest_freeze_candidate: a protected-paths file is REQUIRED (7th argument). A freeze with no protected set cannot support review equivalence and must not look as if it does."
+    return 1
   fi
+  if [[ ! -r "$protected_file" ]]; then
+    _pm_warn "plan_manifest_freeze_candidate: protected-paths file '${protected_file}' is not readable"
+    return 1
+  fi
+  protected_json="$(jq -sR '[splits("\u0000") | select(length > 0)] | sort | unique' < "$protected_file" 2>/dev/null)" || protected_json='[]'
+  if [[ -z "$protected_json" ]]; then protected_json='[]'; fi
   case "$protected_complete" in
     true|false) ;;
     *) _pm_warn "plan_manifest_freeze_candidate: protected_paths_complete must be true or false (got '${protected_complete}')"; return 1 ;;
