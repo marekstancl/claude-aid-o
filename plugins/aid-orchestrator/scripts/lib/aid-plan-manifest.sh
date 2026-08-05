@@ -1431,6 +1431,73 @@ plan_manifest_clear_candidate() {
 }
 
 # ===========================================================================
+# plan_manifest_set_accepted_head <plan_id> <accepted_head> <receipt_path>
+#                                  <receipt_sha256>
+#
+# P073 Step 16 — the ONE sanctioned mutator for review-equivalence acceptance.
+# All three fields move together in a single atomic mutate: the manifest
+# binding is what names the AUTHORITATIVE receipt, so a head without its
+# receipt (or a receipt hash that does not travel with the path) would leave
+# the merge unable to tell which of several receipt files authorised it.
+#
+# candidate_sha is deliberately NOT touched. The PM authorised a review of
+# that exact commit; equivalence asserts the review still describes the
+# delivery, never that something else was reviewed.
+#
+# Returns: 0 success, 1 bad args / invariant violation, 2 missing jq,
+# 3 lock timeout, 5 corrupt.
+# ===========================================================================
+plan_manifest_set_accepted_head() {
+  local plan_id="$1" head="$2" receipt_path="$3" receipt_sha="$4"
+  # COMPARE-AND-SWAP inputs. `_plan_manifest_atomic_mutate` re-reads the file
+  # under its lock, so a guard expressed in the jq filter is a true CAS: the
+  # second of two racing acceptances sees the first one's committed result and
+  # refuses instead of overwriting it. Callers that pass neither degrade to the
+  # old unguarded set, so the guard is opt-in but the FSM always passes it.
+  local expect_candidate="${5:-}" expect_prior="${6:-}"
+
+  _plan_manifest_require_jq || return 2
+  _pm_validate_plan_id_charset "$plan_id" || return 1
+  if ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+    _pm_warn "plan_manifest_set_accepted_head: accepted_head must be a 40-hex sha (got '${head:-<empty>}')"
+    return 1
+  fi
+  if [[ -z "$receipt_path" ]]; then
+    _pm_warn "plan_manifest_set_accepted_head: a receipt path is required — the manifest binding is what names the authoritative receipt"
+    return 1
+  fi
+  if ! [[ "$receipt_sha" =~ ^(sha256:)?[0-9a-f]{64}$ ]]; then
+    _pm_warn "plan_manifest_set_accepted_head: receipt sha256 is malformed (got '${receipt_sha:-<empty>}')"
+    return 1
+  fi
+
+  local guard=""
+  if [[ -n "$expect_candidate" ]]; then
+    guard='
+    (if (.plan_boundary_manifest.candidate_sha // "") != $ecand
+       then error("CAS FAILED: candidate_sha is now \(.plan_boundary_manifest.candidate_sha // "null"), not the \($ecand) this acceptance was decided against")
+       else . end)
+    | (if ((.plan_boundary_manifest.accepted_head // "") != $eprior)
+       then error("CAS FAILED: accepted_head is now \(.plan_boundary_manifest.accepted_head // "null"), not the \(if $eprior == "" then "null" else $eprior end) this acceptance saw — another acceptance won the race")
+       else . end)
+    | '
+  fi
+
+  # The write touches ONLY the three acceptance fields. candidate_sha,
+  # protected_paths and the frozen review binding are read by the guard and
+  # never assigned — an acceptance must not be able to move the thing it is
+  # being compared against.
+  local filter="${guard}"'
+    .plan_boundary_manifest.accepted_head = $head
+    | .plan_boundary_manifest.equivalence_receipt_path = $rpath
+    | .plan_boundary_manifest.equivalence_receipt_sha256 = $rsha
+  '
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" \
+    --arg head "$head" --arg rpath "$receipt_path" --arg rsha "$receipt_sha" \
+    --arg ecand "$expect_candidate" --arg eprior "$expect_prior"
+}
+
+# ===========================================================================
 # plan_manifest_validate <plan_id> [--current-head <sha>]
 #
 # The public three-layer validator (see file header "INVARIANT ENFORCEMENT")

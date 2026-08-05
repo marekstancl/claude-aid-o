@@ -3715,6 +3715,415 @@ _pfsm_verify_plan_final_skeleton_envelope() {
 # untracked, and every review output lands in it. Only a TRACKED write is a
 # candidate-changing fix.
 # ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# REVIEW EQUIVALENCE (P073 Step 16)
+#
+# The problem: after freeze, ANY tracked write threw away a completed review.
+# An audit-log append or a rendered report cost a full re-review cycle even
+# though nothing about the delivery had changed.
+#
+# The model: a plan-branch head that DIFFERS from the frozen candidate only in
+# ANCILLARY paths still describes the same delivery, so the review it received
+# still applies. Anything touching the PROTECTED set is a fix and costs the
+# review, exactly as before.
+#
+# ── A PURE PREDICATE, AND A SEPARATE DELIBERATE ACCEPTANCE ──────────────────
+# `plan_final_review_equivalent` performs NO writes. The drift consumers need
+# to ask the question freely; minting a receipt is a distinct controller act
+# with its own subcommand. Collapsing the two would mean every drift check
+# quietly changed state.
+#
+# ── HONEST ENFORCEMENT CLASSIFICATION (AID-v3-principles §1) ────────────────
+# "Controller-only" is an INSTRUCTION-ONLY rule: agents have Bash and no
+# actor-identity guard exists in either FSM script, so nothing mechanically
+# stops an agent from running the acceptance. What IS mechanical are the
+# EFFECT BOUNDS, and they are what make the instruction safe to ship:
+#   * the predicate cannot pass a protected-surface change, so acceptance
+#     cannot widen what equivalence permits;
+#   * the receipt durably records who accepted what, when, and which paths;
+#   * merge RE-VERIFIES live (Step 18), so a stale or rogue acceptance is
+#     caught at the irreversible moment rather than trusted.
+# A rogue acceptance is therefore detectable and bounded, not prevented.
+#
+# ── NO CONTENT DIGEST ──────────────────────────────────────────────────────
+# An earlier design hashed the protected surface. It was dropped: acceptance
+# writes `accepted_head` INTO the manifest, so any digest covering the manifest
+# would invalidate itself. A git SHA already proves content; ancestry plus a
+# PATH set is sufficient and cannot self-invalidate.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ---------------------------------------------------------------------------
+# _pfsm_equivalence_classify <root> <plan_id> <candidate> <head>
+#   Prints one line per changed path, classified. Used by the predicate for
+#   its failure output, so the operator sees exactly which path cost them the
+#   review rather than "drift".
+# ---------------------------------------------------------------------------
+_pfsm_equivalence_classify() {
+  local root="$1" plan_id="$2" candidate="$3" head="$4"
+  local prot_json path
+  prot_json="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || prot_json='[]'
+  [[ -n "$prot_json" && "$prot_json" != "null" ]] || prot_json='[]'
+
+  # `--no-renames` is LOAD-BEARING, not tidiness. With git's default rename
+  # detection a delivery file moved into an ancillary directory is reported
+  # under its NEW name only — measured: renaming `scripts/a.sh` to
+  # `.aid-o/work/a.sh` printed just the ancillary destination, so the
+  # disappearance of a protected delivery path was invisible and the move
+  # classified as ancillary-only. `-z` removes the C-quoting git applies to
+  # paths with newlines, which would otherwise arrive as a different string
+  # than the protected set stores.
+  # Via a TEMP FILE, not `$(...)`: command substitution silently drops NUL
+  # bytes, so capturing `-z` output in a variable would glue every path into
+  # one string. A temp file keeps the delimiters AND keeps git's exit status
+  # observable, which a pipe or process substitution would hide.
+  local raw_f="" grc=0
+  raw_f="$(mktemp "${TMPDIR:-/tmp}/aid-eqdiff.XXXXXX")" || {
+    echo "equivalence unavailable: cannot create a temporary file to read the diff" >&2
+    return 2
+  }
+  git -C "$root" diff --no-renames --name-only -z "$candidate".."$head" > "$raw_f" 2>/dev/null || grc=$?
+  if [[ "$grc" -ne 0 ]]; then
+    rm -f "$raw_f"
+    # A FAILED diff is not "no changes". Returning an empty classification here
+    # would read as ancillary-only and accept a head nobody compared.
+    echo "equivalence unavailable: git diff ${candidate}..${head} failed (exit ${grc}) — an unreadable diff is never treated as 'nothing changed'" >&2
+    return 2
+  fi
+
+  while IFS= read -r -d '' path; do
+    [[ -n "$path" ]] || continue
+    if _pfsm_path_is_protected "$path" "$prot_json"; then
+      printf 'PROTECTED  %s\n' "$path"
+    elif aid_ancillary_match "$path" "$root"; then
+      printf 'ancillary  %s\n' "$path"
+    else
+      printf 'DELIVERY   %s\n' "$path"
+    fi
+  done < "$raw_f"
+  rm -f "$raw_f"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_path_is_protected <path> <protected_json>
+#   Uses the SAME matcher as the ancillary classifier so protected-set matching
+#   and scope checking can never diverge on the same entry, with the
+#   permissive directory-prefix semantics the pre-commit hook uses.
+# ---------------------------------------------------------------------------
+_pfsm_path_is_protected() {
+  local path="$1" prot_json="$2" entry
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    _aid_ancillary_glob_match "$path" "$entry" && return 0
+  done < <(jq -r '.[]? // empty' <<<"$prot_json" 2>/dev/null)
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# plan_final_review_equivalent <root> <plan_id>
+#
+# RETURN CODES:
+#   0 — the plan head is review-equivalent to the frozen candidate
+#   1 — it is NOT (the classification is printed, naming every offender)
+#   2 — equivalence is UNAVAILABLE (no candidate, a legacy freeze with no
+#       protected set, or a partial one). Callers treat 2 exactly like today's
+#       invalidation path: a partial protected set can never mint a receipt.
+#
+# SIDE EFFECTS: none. This is asserted by a test that runs it against a
+# read-only tree.
+# ---------------------------------------------------------------------------
+plan_final_review_equivalent() {
+  local root="$1" plan_id="$2"
+
+  local candidate="" prot_json="" prot_complete=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate=""
+  [[ -n "$candidate" && "$candidate" != "null" ]] || {
+    echo "equivalence unavailable: no frozen candidate for ${plan_id}" >&2
+    return 2
+  }
+  prot_json="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || prot_json=""
+  prot_complete="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths_complete' 2>/dev/null)" || prot_complete=""
+  if [[ -z "$prot_json" || "$prot_json" == "null" ]]; then
+    echo "equivalence unavailable: ${plan_id} was frozen before the protected path set existed — any movement invalidates, exactly as before P073" >&2
+    return 2
+  fi
+  if [[ "$prot_complete" != "true" ]]; then
+    echo "equivalence unavailable: ${plan_id}'s protected set is PARTIAL (protected_paths_complete=false) — a partial surface can never authorise an acceptance" >&2
+    return 2
+  fi
+
+  local head=""
+  head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null)" || head=""
+  if [[ -z "$head" ]]; then
+    echo "equivalence unavailable: plan/${plan_id} does not resolve" >&2
+    return 2
+  fi
+  # NOTE: an unmoved head is NOT an early return. The worktree check below
+  # still has to run — a delivery file modified but not yet committed is
+  # exactly the drift the existing detector treats as invalidating, and
+  # short-circuiting on `head == candidate` would have reported "equivalent"
+  # while a delivery change sat uncommitted in the tree (caught by this step's
+  # own test).
+  if [[ "$head" != "$candidate" ]]; then
+
+  # (1) ANCESTRY. The candidate must still be reachable from the head — a
+  # force-pushed or rewritten branch is not "the same delivery plus a note".
+  if ! git -C "$root" merge-base --is-ancestor "$candidate" "$head" 2>/dev/null; then
+    echo "not equivalent: the frozen candidate ${candidate} is not an ancestor of plan/${plan_id} (${head}) — the branch was rewritten, not appended to" >&2
+    return 1
+  fi
+
+  # (2)+(3) EVERY changed path must be ancillary, and none may be protected.
+  # Protected takes precedence at the PATH level, so a path that is both is
+  # protected — that is what keeps close-consumed evidence under .aid-o/work/
+  # safe despite the ancillary glob covering it.
+  local offenders="" line classified="" crc=0
+  # Captured, not piped: a process substitution hides the classifier's exit
+  # status, which is exactly how a failed diff became "equivalent".
+  classified="$(_pfsm_equivalence_classify "$root" "$plan_id" "$candidate" "$head")" || crc=$?
+  if [[ "$crc" -ne 0 ]]; then
+    return 2
+  fi
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == ancillary* ]] || offenders+="  ${line}"$'\n'
+  done <<< "$classified"
+  if [[ -n "$offenders" ]]; then
+    echo "not equivalent: plan/${plan_id} moved from ${candidate} to ${head} and the difference is not ancillary-only:" >&2
+    printf '%s' "$offenders" >&2
+    return 1
+  fi
+
+  fi  # end: head != candidate
+
+  # (4) The worktree must carry no tracked dirt on the protected surface or
+  # outside the ancillary policy.
+  #
+  # PROTECTED FIRST, deliberately. The shared ancillary filter alone is wrong
+  # here: close-consumed receipts live under `.aid-o/work/`, which IS an
+  # ancillary glob, so an uncommitted edit to a protected receipt would be
+  # filtered away as ancillary and the head accepted. The committed-diff
+  # classifier already gives protected precedence; the worktree must use the
+  # same order or the two disagree about the same path.
+  local status_f="" src=0
+  status_f="$(mktemp "${TMPDIR:-/tmp}/aid-eqstat.XXXXXX")" || {
+    echo "equivalence unavailable: cannot create a temporary file to read the worktree status" >&2
+    return 2
+  }
+  git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+  if [[ "$src" -ne 0 ]]; then
+    rm -f "$status_f"
+    echo "equivalence unavailable: git status failed (exit ${src}) — an unreadable worktree is never treated as clean" >&2
+    return 2
+  fi
+
+  local dirty="" entry xy wpath
+  # `-z` porcelain: `XY <path>\0`, and for R/C a second `\0`-terminated field
+  # carries the ORIGINAL path. Both names are classified — a rename away from
+  # a protected path is exactly the case `--no-renames` covers for commits.
+  while IFS= read -r -d '' entry; do
+    [[ -n "$entry" ]] || continue
+    xy="${entry:0:2}"
+    wpath="${entry:3}"
+    if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+      dirty+="  PROTECTED  ${xy} ${wpath}"$'\n'
+    elif ! aid_ancillary_match "$wpath" "$root"; then
+      dirty+="  DELIVERY   ${xy} ${wpath}"$'\n'
+    fi
+    if [[ "$xy" == R* || "$xy" == C* ]]; then
+      local orig=""
+      IFS= read -r -d '' orig || true
+      if [[ -n "$orig" ]]; then
+        if _pfsm_path_is_protected "$orig" "$prot_json"; then
+          dirty+="  PROTECTED  ${xy} ${orig} (renamed from)"$'\n'
+        elif ! aid_ancillary_match "$orig" "$root"; then
+          dirty+="  DELIVERY   ${xy} ${orig} (renamed from)"$'\n'
+        fi
+      fi
+    fi
+  done < "$status_f"
+  rm -f "$status_f"
+
+  if [[ -n "$dirty" ]]; then
+    echo "not equivalent: uncommitted TRACKED changes on the protected surface or outside the ancillary policy:" >&2
+    printf '%s' "$dirty" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_accept_ancillary <root> <plan_id>  — the `accept-ancillary`
+# stage. The controller runs it after a deliberate ancillary commit.
+#
+# `candidate_sha` NEVER MOVES. The PM authorised a review of that exact
+# commit; equivalence means that review still describes the delivery, not that
+# a different commit was reviewed.
+# ---------------------------------------------------------------------------
+_pfsm_finalize_accept_ancillary() {
+  local root="$1" plan_id="$2"
+
+  # ONE LOCK around check → receipt → manifest binding. Without it the head
+  # could advance between the equivalence check and the receipt (binding a head
+  # nobody compared), and two concurrent acceptances could each pick a free
+  # `-N` receipt name and race the manifest binding — the suffix scan is not a
+  # lock. The manifest CAS below is the second half of the same guarantee.
+  local _aa_lock_path _aa_fd=""
+  _aa_lock_path="${root}/.aid-o/work/plan-state/${plan_id}/accept-ancillary.lock"
+  mkdir -p "$(dirname "$_aa_lock_path")" 2>/dev/null || true
+  if declare -F aid_lock_acquire >/dev/null 2>&1; then
+    aid_lock_acquire "$_aa_lock_path" "${AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S:-30}" || {
+      echo "PRECONDITION FAIL: another accept-ancillary is in progress for ${plan_id} — acceptance is serialised so two decisions can never bind different receipts." >&2
+      _aa_unlock; return 1
+    }
+    _aa_fd="$AID_LOCK_FD"
+  fi
+  _aa_unlock() { [[ -n "${_aa_fd:-}" ]] && aid_lock_release "$_aa_fd" 2>/dev/null; _aa_fd=""; }
+
+  local candidate=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate=""
+  if [[ -z "$candidate" || "$candidate" == "null" ]]; then
+    echo "PRECONDITION FAIL: nothing is frozen — accept-ancillary is meaningful only between freeze and merge." >&2
+    _aa_unlock; return 1
+  fi
+
+  local erc=0
+  plan_final_review_equivalent "$root" "$plan_id" || erc=$?
+  if [[ "$erc" -eq 2 ]]; then
+    echo "PRECONDITION FAIL: equivalence is unavailable for ${plan_id} (see above) — acceptance is impossible, and any movement invalidates the review as before." >&2
+    _aa_unlock; return 1
+  fi
+  if [[ "$erc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan/${plan_id} is not review-equivalent to the frozen candidate — the offending paths are named above. A protected-surface change is a FIX: re-sync, re-freeze and re-review." >&2
+    _aa_unlock; return 1
+  fi
+
+  local head run_dir_rel run_dir_abs
+  head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head=""
+  if [[ -z "$head" ]]; then
+    echo "PRECONDITION FAIL: plan/${plan_id} does not resolve — nothing to accept." >&2
+    _aa_unlock; return 1
+  fi
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
+  if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
+    echo "PRECONDITION FAIL: no plan-final run directory recorded for ${plan_id} — nowhere to write the acceptance receipt." >&2
+    _aa_unlock; return 1
+  fi
+  run_dir_abs="${root}/${run_dir_rel}"
+  mkdir -p "$run_dir_abs" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot create ${run_dir_rel} for the acceptance receipt." >&2
+    _aa_unlock; return 1
+  }
+
+  local prior_accepted=""
+  prior_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || prior_accepted=""
+  [[ "$prior_accepted" == "null" ]] && prior_accepted=""
+
+  # IDEMPOTENT: accepting the same head twice writes no second receipt. A
+  # no-op acceptance that minted a duplicate would make the audit trail lie
+  # about how many decisions were taken.
+  if [[ -n "$prior_accepted" && "$prior_accepted" == "$head" ]]; then
+    # Trusting the field alone would report "accepted" over a receipt that was
+    # deleted or edited after the fact. The binding is only meaningful if the
+    # file it names still exists and still hashes to the recorded digest.
+    local bnd_path bnd_sha cur_sha
+    bnd_path="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || bnd_path=""
+    bnd_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || bnd_sha=""
+    [[ "$bnd_path" == "null" ]] && bnd_path=""
+    [[ "$bnd_sha" == "null" ]] && bnd_sha=""
+    if [[ -z "$bnd_path" || ! -r "${root}/${bnd_path}" ]]; then
+      echo "PRECONDITION FAIL: ${plan_id} records accepted_head ${head} but its receipt (${bnd_path:-<none>}) is missing — the acceptance cannot be proven. Re-freeze and re-review." >&2
+      _aa_unlock; return 1
+    fi
+    cur_sha="sha256:$(sha256sum "${root}/${bnd_path}" | awk '{print $1}')"
+    if [[ "$cur_sha" != "$bnd_sha" ]]; then
+      echo "PRECONDITION FAIL: ${plan_id}'s acceptance receipt ${bnd_path} no longer hashes to the recorded ${bnd_sha} (now ${cur_sha}) — the audit trail was altered." >&2
+      _aa_unlock; return 1
+    fi
+    echo "accept-ancillary: plan/${plan_id} head ${head} is already the accepted head, and its receipt ${bnd_path} still verifies — nothing to do." >&2
+    printf '%s\n' "$head"
+    _aa_unlock; return 0
+  fi
+
+  # A second acceptance appends a suffixed receipt; the superseded ones remain
+  # as audit history. The MANIFEST binding names the authoritative one, never a
+  # directory listing.
+  # NOTE: two `local` declarations, not one. Bash expands every word of a
+  # single `local` before running it, so `local a=x b="${a}"` reads `a` while
+  # it is still unset — fatal under `set -u`.
+  local rbase="${run_dir_abs}/review-equivalence-receipt"
+  local rfile="${rbase}.json" n=0
+  while [[ -e "$rfile" ]]; do
+    n=$(( n + 1 ))
+    if [[ "$n" -gt 100 ]]; then
+      echo "PRECONDITION FAIL: cannot find a free acceptance-receipt name under ${run_dir_rel}." >&2
+      _aa_unlock; return 1
+    fi
+    rfile="${rbase}-${n}.json"
+  done
+
+  local changed_json policy_sha run_id now
+  changed_json="$(git -C "$root" diff --name-only "$candidate".."$head" 2>/dev/null | jq -Rn '[inputs | select(length > 0)]')" || changed_json='[]'
+  policy_sha="unknown"
+  if [[ -n "${_AID_ANCILLARY_POLICY_FILE:-}" && -r "${_AID_ANCILLARY_POLICY_FILE}" ]]; then
+    policy_sha="sha256:$(sha256sum "${_AID_ANCILLARY_POLICY_FILE}" | awk '{print $1}')"
+  fi
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id' 2>/dev/null)" || run_id=""
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  local prot_count
+  prot_count="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths | length' 2>/dev/null)" || prot_count=0
+
+  local json tmp
+  json="$(jq -n \
+    --arg sv "aid-2.0" --arg plan "$plan_id" --arg run "$run_id" \
+    --arg cand "$candidate" --arg prior "$prior_accepted" --arg head "$head" \
+    --argjson changed "$changed_json" --arg psha "$policy_sha" \
+    --argjson pcount "${prot_count:-0}" --arg op "${USER:-unknown}" --arg now "$now" \
+    '{schema_version:$sv, artifact_type:"review_equivalence_receipt",
+      plan_id:$plan, run_id:$run,
+      candidate_sha:$cand,
+      prior_accepted_head:(if $prior == "" then null else $prior end),
+      accepted_head:$head,
+      changed_paths:$changed,
+      ancillary_policy_sha256:$psha,
+      protected_paths_count:$pcount,
+      operator:$op, created_at:$now}')" || {
+    echo "PRECONDITION FAIL: cannot render the acceptance receipt." >&2
+    _aa_unlock; return 1
+  }
+  tmp="${rfile}.tmp.$$"
+  if ! printf '%s\n' "$json" > "$tmp" 2>/dev/null || ! mv -n "$tmp" "$rfile" 2>/dev/null || [[ -e "$tmp" ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "PRECONDITION FAIL: cannot write the acceptance receipt at ${rfile}." >&2
+    _aa_unlock; return 1
+  fi
+
+  # THE RECEIPT EXISTS FIRST, then the manifest points at it — the mutator is
+  # never run against a receipt that is not on disk.
+  local rsha rrel
+  rsha="sha256:$(sha256sum "$rfile" | awk '{print $1}')"
+  rrel="${rfile#"${root}/"}"
+  # Last check before the binding: the branch must not have moved while the
+  # receipt was rendered, and the CAS re-verifies both frozen values under the
+  # manifest lock.
+  local head_now=""
+  head_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head_now=""
+  if [[ "$head_now" != "$head" ]]; then
+    echo "PRECONDITION FAIL: plan/${plan_id} moved from ${head} to ${head_now:-<unresolvable>} while the acceptance receipt was written — nothing was bound. Re-run accept-ancillary." >&2
+    _aa_unlock; return 1
+  fi
+  if ! plan_manifest_set_accepted_head "$plan_id" "$head" "$rrel" "$rsha" "$candidate" "$prior_accepted" >/dev/null; then
+    echo "PRECONDITION FAIL: the acceptance receipt was written at ${rrel} but the manifest could not record it — the review is NOT accepted; rerun the stage." >&2
+    _aa_unlock; return 1
+  fi
+
+  echo "accept-ancillary: plan/${plan_id} head ${head} accepted as review-equivalent to the frozen candidate ${candidate} (receipt ${rrel}). candidate_sha is unchanged." >&2
+  printf '%s\n' "$head"
+  _aa_unlock
+  return 0
+}
+
 _pfsm_review_candidate_drift() {
   local root="$1" plan_id="$2" candidate="$3"
   local plan_head=""
@@ -4808,7 +5217,7 @@ _pfsm_finalize_summary() {
 }
 
 # =============================================================================
-# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>]
+# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>]
 #                    [--execution-yaml <path>] [--substitute-receipt <gate>=<path>]
 #                    [--project-root <path>]
 # =============================================================================
@@ -4864,7 +5273,7 @@ cmd_plan_finalize() {
     exit 2
   fi
   case "$stage" in
-    sync|freeze|gates|inputs|review|c4|summary) ;;
+    sync|freeze|gates|inputs|review|c4|summary|accept-ancillary) ;;
     *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates', 'inputs', 'review', 'c4' or 'summary' (got '${stage}')" >&2; exit 2 ;;
   esac
   if [[ "$stage" != "gates" && ${#substitute_receipts[@]} -gt 0 ]]; then
@@ -4896,7 +5305,10 @@ cmd_plan_finalize() {
   # inside the review->decision->summary boundary a tracked write MEANS the candidate
   # changed, and `_pfsm_finalize_c4` turns that into an invalidation rather than a
   # "commit or stash first" that would hide it.
-  if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" ]]; then
+  # P073 Step 16: `accept-ancillary` joins the dirty-tree exemption. A dirty
+  # tree is its INPUT, not a refusal condition — the whole point is to classify
+  # what moved rather than demand it be stashed away first.
+  if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" && "$stage" != "accept-ancillary" ]]; then
     # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
     # bookkeeping obstacle, not a physical impossibility, so an audited
     # --force may pass it. The check still prints its own recovery first.
@@ -4942,6 +5354,7 @@ cmd_plan_finalize() {
       ;;
     c4)      _pfsm_finalize_c4 "$project_root" "$plan_id" || rc=$? ;;
     summary) _pfsm_finalize_summary "$project_root" "$plan_id" || rc=$? ;;
+    accept-ancillary) _pfsm_finalize_accept_ancillary "$project_root" "$plan_id" || rc=$? ;;
   esac
   exit "$rc"
 }
