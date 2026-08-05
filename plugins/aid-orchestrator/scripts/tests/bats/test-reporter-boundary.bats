@@ -60,8 +60,14 @@ _seed_manifest_with_run() {
     . "$SCRIPT_DIR/lib/aid-plan-manifest.sh"
     cd "'"$ROOT"'"
     plan_manifest_init '"$plan_id"' plan/'"$plan_id"' main "'"$head"'" "'"$head"'" plan_branch >/dev/null
+    # P073 Step 15 made the protected-path set part of the freeze contract:
+    # arguments 7 and 8 are REQUIRED. This fixture predated that and called the
+    # 6-argument form, so the freeze warned and recorded NOTHING — every test
+    # below then failed on a missing run directory rather than on its subject.
+    printf "%s\0" "scripts/a.sh" > "'"$BATS_TEST_TMPDIR"'/reporter-prot.nul"
     plan_manifest_freeze_candidate '"$plan_id"' "'"$head"'" "'"$head"'" \
-      R-'"$plan_id"'-final-1 "'"$rel"'" "2026-08-05T00:00:00Z" >/dev/null
+      R-'"$plan_id"'-final-1 "'"$rel"'" "2026-08-05T00:00:00Z" \
+      "'"$BATS_TEST_TMPDIR"'/reporter-prot.nul" true >/dev/null
   '
   echo "$ROOT/$rel"
 }
