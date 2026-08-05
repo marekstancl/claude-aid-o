@@ -2823,13 +2823,76 @@ _pfsm_finalize_freeze() {
     cp -p "$prep_src" "${run_dir_abs}/release-prep.json" 2>/dev/null || true
   fi
 
+  # ── P073 Step 15: compute the PROTECTED PATH SET ────────────────────────
+  # The delivery surface this freeze's review will describe. Step 16's
+  # equivalence predicate refuses any commit that touches it, so getting it
+  # wrong in either direction matters: too small and a delivery change rides
+  # through a frozen review; too large and nothing is ever equivalent.
+  #
+  # `allowed_paths` in plan.json is the machine-readable delivery contract
+  # that already drives the pre-commit scope hook and gates/scope-check.sh —
+  # reusing it means the protected set and the scope guard can never disagree
+  # about what a step was allowed to touch.
+  local _prot_file="${run_dir_abs}/.protected-paths.txt"
+  local _prot_complete=true
+  : > "$_prot_file"
+
+  # The three lifecycle paths are the floor.
+  {
+    printf '%s\n' ".aid-lifecycle/manifests/${plan_id}.yaml"
+    printf '%s\n' ".aid-lifecycle/receipts/${plan_id}.yaml"
+  } >> "$_prot_file"
+
+  # The source plan. Step 11 stamps its repo-relative path at lifecycle
+  # creation; a legacy manifest without the field falls back to a
+  # deterministic glob, and a miss is recorded rather than assumed away.
+  local _src_path=""
+  _src_path="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.source_plan_path' 2>/dev/null)" || _src_path=""
+  if [[ -z "$_src_path" || "$_src_path" == "null" ]]; then
+    local _g
+    for _g in "${root}/.aid-o/plans/${plan_id}"-*.md; do
+      [[ -f "$_g" ]] || continue
+      _src_path="${_g#"${root}/"}"
+      break
+    done
+  fi
+  if [[ -n "$_src_path" && "$_src_path" != "null" ]]; then
+    printf '%s\n' "$_src_path" >> "$_prot_file"
+  else
+    _prot_complete=false
+    echo "WARNING: protected set incomplete — no source plan path recorded for ${plan_id} and no .aid-o/plans/${plan_id}-*.md matched." >&2
+  fi
+
+  # Every EPIC's plan.json allowed_paths, read from the evidence dir the
+  # manifest records for that run.
+  local _epic_line _e_id _e_dir _e_json
+  while IFS=$'\t' read -r _e_id _e_dir; do
+    [[ -n "$_e_id" ]] || continue
+    _e_json="${root}/${_e_dir}/plan.json"
+    if [[ -r "$_e_json" ]]; then
+      jq -r '.steps[]?.allowed_paths[]? // empty' "$_e_json" 2>/dev/null >> "$_prot_file" || true
+    else
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${_e_id} plan.json unlocatable at ${_e_dir}/plan.json" >&2
+    fi
+  done < <(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs[]? | [.epic_id, (.evidence_dir // "")] | @tsv' 2>/dev/null || true)
+
+  # The overlap between the ancillary policy and this set is EXPECTED —
+  # close-consumed evidence lives under `.aid-o/work/`, itself an ancillary
+  # glob. Warn so the precedence is visible; protection wins at the path level.
+  aid_ancillary_overlap_warn "$_prot_file" "$root" || true
+
+  if [[ "$_prot_complete" != true ]]; then
+    echo "WARNING: ${plan_id} freezes with protected_paths_complete=false — review EQUIVALENCE is unavailable for this freeze, so any movement after it invalidates exactly as before P073." >&2
+  fi
+
   # ── The atomic two-field freeze write ───────────────────────────────────
   # candidate_sha + candidate_frozen_at land in the SAME manifest write (with
   # the target head, the run id/dir and plan_state), so the manifest is never
   # observable with one of the pair set and the other absent.
   local wrc=0
   plan_manifest_freeze_candidate "$plan_id" "$plan_head" "$target_head" \
-    "$run_id" "$run_dir_rel" "$frozen_at" >/dev/null || wrc=$?
+    "$run_id" "$run_dir_rel" "$frozen_at" "$_prot_file" "$_prot_complete" >/dev/null || wrc=$?
   if [[ "$wrc" -ne 0 ]]; then
     rmdir "$run_dir_abs" 2>/dev/null || true
     echo "PRECONDITION FAIL: could not record the candidate freeze for ${plan_id} (rc=${wrc}) — NO candidate is recorded; nothing was half-written." >&2
