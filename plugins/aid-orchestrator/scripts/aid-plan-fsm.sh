@@ -5642,7 +5642,23 @@ _pfsm_render_close_projections() {
   y_src="$(jq -rn --arg v "${run_dir_rel}/delivery-report.json" '$v|@json')"
   y_run="$(jq -rn --arg v "$run_id" '$v|@json')"
   y_now="$(jq -rn --arg v "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$v|@json')"
+  # `Head:` IS REQUIRED, in BOTH projections. aid-plan-close-check.sh check2
+  # reads it from the frontmatter of exactly these two paths to verify
+  # freshness, and refuses a report that has none. A first cut emitted it only
+  # when the JSON happened to carry one, and never in the boundary manifest —
+  # so rendering here OVERWROTE reports that had it and broke the very close
+  # this renderer runs inside (regression caught by the plan-final boundary
+  # suite's crash-recovery case, which passes at the pre-P073 baseline).
+  #
+  # Preference order is honest, not convenient: the delivery report's own head
+  # when it records one — that is the head the delivery was VERIFIED at, and if
+  # it is stale check2 correctly says so — otherwise the live HEAD, which is
+  # what a file rendered at this instant genuinely describes.
   y_head="$(jq -r '(.head // .Head // "") | @json' "$src" 2>/dev/null || echo '""')"
+  if [[ "$y_head" == '""' ]]; then
+    local _live_head; _live_head="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
+    [[ -n "$_live_head" ]] && y_head="$(jq -rn --arg v "$_live_head" '$v|@json')"
+  fi
   y_cand="$(jq -r '(.candidate_sha // "") | @json' "$src" 2>/dev/null || echo '""')"
 
   {
@@ -5651,7 +5667,7 @@ _pfsm_render_close_projections() {
     printf 'rendered_by: "aid-plan-fsm.sh plan-close"\n'
     printf 'rendered_at: %s\n' "$y_now"
     printf 'source: %s\n' "$y_src"
-    [[ "$y_head" != '""' ]] && printf 'Head: %s\n' "$y_head"
+    printf 'Head: %s\n' "$y_head"
     printf -- '---\n\n'
     printf '# Delivery report — %s\n\n' "$plan_id"
     printf 'This file is a PROJECTION rendered at close from the run-scoped\n'
@@ -5671,6 +5687,7 @@ _pfsm_render_close_projections() {
     printf 'plan_id: %s\n' "$y_plan"
     printf 'generated_at: %s\n' "$y_now"
     printf 'boundary_complete: true\n'
+    printf 'Head: %s\n' "$y_head"
     printf 'run_id: %s\n' "$y_run"
     [[ "$y_cand" != '""' ]] && printf 'candidate_sha: %s\n' "$y_cand"
     printf 'delivery_report: "%s-delivery.md"\n' "$plan_id"

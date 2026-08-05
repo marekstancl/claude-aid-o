@@ -303,3 +303,44 @@ _seed_delivery_json() {
   [[ "$output" == *"after the review boundary has closed"* ]]
   [ ! -e "$ROOT/.aid-o/reports/P900-delivery.md" ]
 }
+
+# ─── Regression caught by the plan-final boundary suite ───────────────────
+# The renderer writes to exactly the two paths aid-plan-close-check.sh check2
+# reads a `Head:` field from to verify freshness. Emitting it only when the
+# JSON happened to carry one — and never in the boundary manifest — meant
+# rendering OVERWROTE reports that had it and broke the very close this
+# renderer runs inside. It passed at the pre-P073 baseline and failed after
+# Step 12, so it was ours.
+
+@test "P073 Step 12 (regression): BOTH projections always carry a Head field" {
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  _seed_delivery_json "$dir"
+  run _render P900
+  [ "$status" -eq 0 ]
+  run grep -c '^Head: ' "$ROOT/.aid-o/reports/P900-delivery.md"
+  [ "$output" = "1" ]
+  run grep -c '^Head: ' "$ROOT/.aid-o/reports/P900-boundary.md"
+  [ "$output" = "1" ]
+}
+
+@test "P073 Step 12 (regression): a report JSON with NO head still yields a Head field, from the live HEAD" {
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  jq -n '{summary:"Delivered.", epics:[], delivered_paths:[]}' > "$dir/delivery-report.json"
+  run _render P900
+  [ "$status" -eq 0 ]
+  local live; live="$(cd "$ROOT" && git rev-parse HEAD)"
+  run bash -c "sed -e '1d' -e '/^---$/,\$d' '$ROOT/.aid-o/reports/P900-delivery.md' | yq -r '.Head'"
+  [ "$output" = "$live" ]
+  run bash -c "sed -e '1d' -e '/^---$/,\$d' '$ROOT/.aid-o/reports/P900-boundary.md' | yq -r '.Head'"
+  [ "$output" = "$live" ]
+}
+
+@test "P073 Step 12 (regression): the report's OWN head wins over the live HEAD, so a stale report still reads stale" {
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  jq -n '{summary:"Delivered.", head:"0000000000000000000000000000000000000000",
+          epics:[], delivered_paths:[]}' > "$dir/delivery-report.json"
+  run _render P900
+  [ "$status" -eq 0 ]
+  run bash -c "sed -e '1d' -e '/^---$/,\$d' '$ROOT/.aid-o/reports/P900-delivery.md' | yq -r '.Head'"
+  [ "$output" = "0000000000000000000000000000000000000000" ]
+}
