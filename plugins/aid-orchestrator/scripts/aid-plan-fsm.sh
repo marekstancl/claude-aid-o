@@ -5557,6 +5557,100 @@ _pfsm_close_marker_path() {
   printf '%s/plan-close-complete' "$(dirname "$(plan_state_path "$1")")"
 }
 
+# ---------------------------------------------------------------------------
+# _pfsm_render_close_projections <root> <plan_id>  — P073 Step 12 (P082)
+#
+# The Reporter used to be told to COMMIT its delivery report and boundary
+# manifest, which was unexecutable three ways over: pipeline.md invalidates the
+# review on any tracked write during it, the ordered path `.aid-o/reports/` is
+# gitignored, and the reporter contract said so itself two paragraphs later.
+# The Reporter now writes run-scoped evidence only, and the CONTROLLER renders
+# the human/CI projections HERE — after merge and close, outside any freeze
+# window, so the projection can never cost a review.
+#
+# NEVER A CLOSE BLOCKER. `delivery-report.json` in the run evidence dir is the
+# authoritative artifact; these are derived files with no history value. A
+# missing JSON, an unparseable one, or an unwritable reports directory each
+# produce a WARNING and close proceeds. (Whether the JSON must EXIST at all is
+# a close-check concern, forceable per Step 8 — not this renderer's.)
+# ---------------------------------------------------------------------------
+_pfsm_render_close_projections() {
+  local root="$1" plan_id="$2"
+  local run_dir_rel src reports_dir
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
+  if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
+    echo "WARNING: no plan-final run directory recorded for ${plan_id} — human projection not rendered." >&2
+    return 0
+  fi
+  src="${root}/${run_dir_rel}/delivery-report.json"
+  if [[ ! -s "$src" ]]; then
+    echo "WARNING: no verified delivery-report.json in ${run_dir_rel} — human projection not rendered." >&2
+    return 0
+  fi
+  if ! jq -e 'type == "object"' "$src" >/dev/null 2>&1; then
+    echo "WARNING: ${run_dir_rel}/delivery-report.json is not a JSON object — human projection not rendered." >&2
+    return 0
+  fi
+
+  reports_dir="${root}/.aid-o/reports"
+  if ! mkdir -p "$reports_dir" 2>/dev/null; then
+    echo "WARNING: cannot create ${reports_dir} — human projection not rendered; ${run_dir_rel}/delivery-report.json remains authoritative." >&2
+    return 0
+  fi
+
+  # Deterministic transform, so a re-close after a forced close overwrites
+  # idempotently rather than accumulating variants.
+  local delivery="${reports_dir}/${plan_id}-delivery.md"
+  local boundary="${reports_dir}/${plan_id}-boundary.md"
+  local head_sha candidate run_id
+  head_sha="$(jq -r '.head // .Head // ""' "$src" 2>/dev/null)"
+  candidate="$(jq -r '.candidate_sha // ""' "$src" 2>/dev/null)"
+  run_id="${run_dir_rel##*/}"
+
+  {
+    printf -- '---\n'
+    printf 'plan_id: "%s"\n' "$plan_id"
+    printf 'rendered_by: "aid-plan-fsm.sh plan-close"\n'
+    printf 'rendered_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'source: "%s/delivery-report.json"\n' "$run_dir_rel"
+    [[ -n "$head_sha" ]] && printf 'Head: %s\n' "$head_sha"
+    printf -- '---\n\n'
+    printf '# Delivery report — %s\n\n' "$plan_id"
+    printf 'This file is a PROJECTION rendered at close from the run-scoped\n'
+    printf 'delivery-report.json, which remains the authoritative artifact. It is\n'
+    printf 'derived: regenerating it is always safe.\n\n'
+    printf '## Summary\n\n'
+    jq -r '.summary // "(no summary recorded)"' "$src" 2>/dev/null
+    printf '\n## Per-EPIC verdicts\n\n'
+    jq -r '(.epics // []) | if length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>/dev/null
+    printf '\n## Delivered paths\n\n'
+    jq -r '(.delivered_paths // []) | if length == 0 then "(none recorded)" else (.[] | "- \(.)") end' "$src" 2>/dev/null
+    printf '\n'
+  } > "${delivery}.tmp.$$" 2>/dev/null && mv "${delivery}.tmp.$$" "$delivery" 2>/dev/null || {
+    rm -f "${delivery}.tmp.$$" 2>/dev/null || true
+    echo "WARNING: cannot write ${delivery} — projection skipped; the run-scoped JSON remains authoritative." >&2
+    return 0
+  }
+
+  {
+    printf -- '---\n'
+    printf 'plan_id: "%s"\n' "$plan_id"
+    printf 'generated_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'boundary_complete: true\n'
+    printf 'run_id: "%s"\n' "$run_id"
+    [[ -n "$candidate" ]] && printf 'candidate_sha: "%s"\n' "$candidate"
+    printf 'delivery_report: "%s-delivery.md"\n' "$plan_id"
+    printf -- '---\n'
+  } > "${boundary}.tmp.$$" 2>/dev/null && mv "${boundary}.tmp.$$" "$boundary" 2>/dev/null || {
+    rm -f "${boundary}.tmp.$$" 2>/dev/null || true
+    echo "WARNING: cannot write ${boundary} — projection skipped." >&2
+    return 0
+  }
+
+  echo "plan-close: rendered human projections ${plan_id}-delivery.md and ${plan_id}-boundary.md from ${run_dir_rel}/delivery-report.json" >&2
+  return 0
+}
+
 # _pfsm_lock_held <path> — 0 iff a non-blocking flock acquire FAILS, i.e. the
 # advisory lock is still held by a live open file description. Existence of the
 # sidecar is deliberately NOT the signal (flock releases on descriptor close,
@@ -5847,6 +5941,11 @@ cmd_plan_close() {
       exit 1
     fi
     plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
+
+    # P073 Step 12 (P082): the controller renders the committed/worktree
+    # projections HERE — after merge and close, outside any freeze window, so
+    # a projection can never cost a review. Never a close blocker.
+    _pfsm_render_close_projections "$root" "$plan_id" || true
   fi
 
   local crc=0

@@ -1322,6 +1322,19 @@ review output stop being authoritative and the plan returns to `PLAN_FIX`. This 
 tree here has a defined meaning, and hiding it behind "commit or stash first" would lose it.
 Untracked writes into the run directory are the normal case and never invalidate anything.
 
+**THE PLAN-FINAL BOUNDARY RULE (stated once, referenced everywhere).** After
+freeze, plan-final agents write only run-scoped evidence. A tracked candidate
+write is a FIX and requires a new candidate and a new review. The controller
+alone renders committed or worktree projections, and only after merge/close —
+outside any freeze window, where a projection cannot cost a review.
+
+Role cards and agent contracts REFERENCE this paragraph rather than restating
+it. Restating it is how the P082 contradiction survived: `agents/reporter.md`
+ordered its outputs to be committed, this rule invalidated the review on
+exactly that write, and the ordered path (`.aid-o/reports/`) is gitignored, so
+the order was unexecutable in three independent ways at once — and the reporter
+contract itself said so, two paragraphs below the order.
+
 C3 applicability is unchanged: the single plan-level Auditor dispatch is always recorded, but
 whether C3 **blocks** stays governed by `defaults/policies/c3-audit-policy.yaml`.
 
