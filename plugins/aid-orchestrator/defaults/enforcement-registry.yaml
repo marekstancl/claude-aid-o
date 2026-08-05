@@ -1660,3 +1660,27 @@ enforcements:
     description: "P073 Step 11 (P083) — refuses to create a plan branch, task branch or lifecycle manifest while the source plan is absent from the target branch or differs from the worktree bytes being generated from. The gap was end-to-end: aid-auto-pipeline.sh checked only disk existence, cmd_plan_start never saw a path at all, and the clean-worktree preflight runs with --untracked-files=no, so a plan that was never `git add`ed was invisible to every layer. Generation then bound a whole plan lifecycle, via the manifest's source_plan_sha, to bytes that existed in exactly one worktree. The check runs BEFORE any git mutation, at the production caller that actually knows the path. The gitignored carve-out is deliberate and logged, not a loophole: this repository gitignores `.aid-o/plans/`, so a hard tracked-only rule would break the plugin's own dogfood workflow — there the manifest's source_plan_sha IS the binding, and the run says so. Classified `forceable`, so a PM who knowingly accepts an unshared source proceeds with an audited receipt rather than being stranded."
     recovery: "The refusal names the target branch: commit the plan there and rerun generation. If the plan is deliberately unshared, --force --force-reason records that decision."
     test: "scripts/tests/bats/test-committed-source.bats"
+
+  - id: epic_supersede_bound_reinit
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_plan_state_supersede (producer); scripts/aid-fsm.sh cmd_init (the narrow supersede exception to the unconditional duplicate-init rejection)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 13 — a PM-audited transaction that retires a stale EPIC FSM run and authorises exactly ONE re-initialisation. `aid-fsm.sh init` rejects a duplicate init unconditionally, which is correct — silently re-initialising over a live run loses its history — but it left a PM whose run went stale with no supported way forward except hand-deleting state, the unaudited surgery this plan exists to replace. `plan-state --supersede-epic` archives the state file to `.superseded-<epoch>` and writes a record binding FOUR fields: plan_id, epic_id, the archived file's content hash, and the hash of the plan.json the re-init must present. Init re-derives all four from disk rather than trusting the record, so a stale record (a second supersede leaving the first lying around), a forged one, or one written for a different package authorises nothing and the unconditional rejection simply stands. Consumption renames the record to `.consumed-<epoch>`, so one PM decision authorises one init and never a second. The record is written BEFORE the archive: a record with no archive authorises nothing, while an archive with no record would strand the run. Evidence directories are never touched. Deliberately NOT forceable — this IS the audited transaction a force would otherwise be used to fake, and a forceable repair tool could fabricate the very records other commands trust."
+    recovery: "The refusal names which binding failed. Re-run 'aid-plan-fsm.sh plan-state <plan_id> --supersede-epic <epic_id> --reason ...' against the CURRENT package; the record binds one exact transition by design."
+    test: "scripts/tests/bats/test-supersede-recovery.bats"
+
+  - id: attest_recomputes_base_unconditionally
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_plan_state_attest (IMP-267 ancestry re-derivation)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 13 — the moved-task-branch recovery. The plan specified a NEW `--recompute-base` flag for attestation; implementing it would have been decoration, because IMP-267 already made the recomputation UNCONDITIONAL: attestation re-derives epic_base_commit (and epic_merge_commit) from real Git ancestry with the same primitives epic-merge-to-plan uses, and fails closed when the ancestry cannot be proven, rather than promoting a stored value --repair may have left wrong. A flag toggling behaviour that already always happens would be a detector without an enforcement point (AID-v3-principles §1). This row records the capability where the plan expected the flag, so the absence is a documented decision rather than a gap; the covering test asserts a genuinely rebased task branch attests to the recomputed base."
+    recovery: "Attestation itself is the recovery: 'aid-plan-fsm.sh plan-state <plan_id> --attest-source-ref <ref> --reason <text> --epic <epic_id>'. It refuses rather than attesting ancestry it cannot prove."
+    test: "scripts/tests/bats/test-supersede-recovery.bats"

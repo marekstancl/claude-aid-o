@@ -6002,10 +6002,14 @@ cmd_plan_close() {
 #                [--project-root ...]
 # =============================================================================
 cmd_plan_state() {
-  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt=""
+  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
+      # P073 Step 13: the supported recovery for a stale EPIC run. Deliberately
+      # NOT forceable — see the supersede header: this IS the audited
+      # transaction force would otherwise be used to fake.
+      --supersede-epic) supersede_epic="${2:-}"; shift 2 ;;
       --attest-source-ref) attest_ref="${2:-}"; shift 2 ;;
       --reason) attest_reason="${2:-}"; shift 2 ;;
       --epic) attest_epic="${2:-}"; shift 2 ;;
@@ -6017,7 +6021,7 @@ cmd_plan_state() {
     esac
   done
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -6029,6 +6033,12 @@ cmd_plan_state() {
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  if [[ -n "$supersede_epic" ]]; then
+    local src=0
+    _pfsm_plan_state_supersede "$plan_id" "$project_root" "$supersede_epic" "$attest_reason" || src=$?
+    exit "$src"
+  fi
 
   if [[ -n "$attest_ref" || -n "$attest_reason" || -n "$attest_epic" ]]; then
     local arc=0
@@ -6086,6 +6096,167 @@ cmd_plan_state() {
 # anything, so re-attesting an already-proven entry, or an entry that was
 # never marked unproven, is rejected rather than silently no-op'd.
 # ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# SUPERSEDE — the supported recovery for a stale EPIC FSM run (P073 Step 13)
+#
+# `aid-fsm.sh init` rejects a duplicate init unconditionally, which is right:
+# silently re-initialising over a live run would lose its history. But it left
+# a PM whose EPIC run went stale — a regenerated plan.json, an abandoned
+# attempt — with no supported way forward except hand-deleting state, which is
+# exactly the unaudited surgery this plan exists to replace.
+#
+# THE RECORD BINDS ONE EXACT TRANSITION, four fields deep:
+#   old_state_sha256      the archived state file's content hash
+#   old_run_id            which run is being retired
+#   new_plan_json_sha256  the plan.json the re-init must present
+#   plan_id + epic_id     whose run this is
+# So a record authorises exactly ONE specific re-initialisation. It cannot be
+# replayed against a different plan.json, and a forged or stale record — one
+# whose hashes do not match what is actually on disk — authorises nothing.
+#
+# WHY NOT --force: force is a bypass with a receipt. This is a TRANSACTION: it
+# archives the old state, records what it archived, and lets exactly one
+# matching init through. `plan-state` is deliberately NON-forceable for the
+# same reason (see the Scope note in the force framework header) — a forced
+# repair tool could fabricate the very records other commands trust.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _pfsm_supersede_record_dir <project_root>
+_pfsm_supersede_record_dir() {
+  printf '%s/.aid-o/work/plan-state' "$1"
+}
+
+# _pfsm_epic_state_file <project_root> <epic_id>
+#   The EPIC FSM's state file. Its run directory is not recorded anywhere the
+#   plan layer can read, so it is discovered — there is at most one live
+#   fsm-state.yaml per EPIC by construction (init refuses a second).
+_pfsm_epic_state_file() {
+  local root="$1" epic_id="$2"
+  local base="${root}/.aid-o/work/evidence/${epic_id}"
+  [[ -d "$base" ]] || return 1
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    printf '%s' "$f"
+    return 0
+  done < <(find "$base" -maxdepth 2 -name 'fsm-state.yaml' -type f 2>/dev/null | sort)
+  return 1
+}
+
+# _pfsm_plan_state_supersede <plan_id> <project_root> <epic_id> <reason>
+_pfsm_plan_state_supersede() {
+  local plan_id="$1" project_root="$2" epic_id="$3" reason="$4"
+
+  if [[ -z "$epic_id" || -z "$reason" ]]; then
+    echo "ERROR: plan-state --supersede-epic requires --reason, both non-empty." >&2
+    return 2
+  fi
+  if ! _pfsm_validate_epic_id "$epic_id"; then
+    echo "ERROR: plan-state --supersede-epic must match ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}')" >&2
+    return 2
+  fi
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: plan-state --supersede-epic: --reason must be at least 20 characters (got ${#reason}). The record is the audit trail for retiring a run; a throwaway reason defeats it." >&2
+    return 2
+  fi
+  command -v jq >/dev/null 2>&1 || { echo "ERROR: plan-state --supersede-epic requires jq." >&2; return 2; }
+
+  local path; path="$(plan_manifest_path "$plan_id")"
+  if [[ ! -f "$path" ]]; then
+    echo "PRECONDITION FAIL: no manifest for ${plan_id} — nothing to supersede." >&2
+    return 1
+  fi
+
+  local entry_json="" erc=0
+  entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || erc=$?
+  if [[ "$erc" -eq 5 ]]; then
+    echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt." >&2
+    return 5
+  fi
+  if [[ -z "$entry_json" ]]; then
+    echo "PRECONDITION FAIL: no epic_runs entry for ${epic_id} in ${plan_id}'s manifest — supersede operates on a recorded EPIC run." >&2
+    return 1
+  fi
+
+  # A MERGED EPIC IS HISTORY, NOT A STALE RUN. Its work is already on the plan
+  # branch; retiring its state would invite a re-run that re-merges it.
+  local status=""
+  status="$(jq -r '.status // ""' <<<"$entry_json" 2>/dev/null)"
+  if [[ "$status" == "merged_to_plan" ]]; then
+    echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan — a merged EPIC is history, not a stale run. Supersede is for a run that never landed; to undo a merge use plan-rollback." >&2
+    return 1
+  fi
+
+  local state_file=""
+  if ! state_file="$(_pfsm_epic_state_file "$project_root" "$epic_id")"; then
+    echo "PRECONDITION FAIL: no fsm-state.yaml found for ${epic_id} — nothing to supersede." >&2
+    return 1
+  fi
+
+  local old_sha old_run_id
+  old_sha="sha256:$(sha256sum "$state_file" | awk '{print $1}')"
+  old_run_id="$(basename "$(dirname "$state_file")")"
+
+  # The plan.json the re-init will present. Same run directory as the state
+  # file — that is the package the superseded run was initialised from, and
+  # the record binds the NEXT init to whatever is there NOW (the regenerated
+  # one), which is the whole point of the transaction.
+  local plan_json="$(dirname "$state_file")/plan.json"
+  local new_json_sha=""
+  if [[ -f "$plan_json" ]]; then
+    new_json_sha="sha256:$(sha256sum "$plan_json" | awk '{print $1}')"
+  else
+    echo "PRECONDITION FAIL: no plan.json beside ${state_file} — the record must bind the exact package the re-init will present, and there is none to bind to. Regenerate the EPIC package first." >&2
+    return 1
+  fi
+
+  # ONE epoch for both names, so the archive and its record pair 1:1 and a
+  # second supersede can never collide with or overwrite the first.
+  local epoch; epoch="$(date -u +%s)"
+  local archive="${state_file}.superseded-${epoch}"
+  local rec_dir; rec_dir="$(_pfsm_supersede_record_dir "$project_root")"
+  local record="${rec_dir}/supersede-${plan_id}-${epic_id}-${epoch}.json"
+
+  if [[ -e "$archive" || -e "$record" ]]; then
+    echo "PRECONDITION FAIL: a supersede for ${epic_id} was already recorded in this same second — rerun in a moment so the archive and its record keep their 1:1 pairing." >&2
+    return 1
+  fi
+  mkdir -p "$rec_dir" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot create ${rec_dir} for the supersede record." >&2
+    return 1
+  }
+
+  # RECORD FIRST, then archive. A record with no archive authorises nothing
+  # (the init-side verifier requires a matching archived file), whereas an
+  # archive with no record would strand the run with no way to re-init.
+  local tmp="${record}.tmp.$$"
+  jq -n --arg plan "$plan_id" --arg epic "$epic_id" \
+    --arg oldsha "$old_sha" --arg oldrun "$old_run_id" \
+    --arg newsha "$new_json_sha" --arg reason "$reason" \
+    --arg op "${USER:-unknown}" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:"aid-2.0", artifact_type:"epic_supersede_record",
+      plan_id:$plan, epic_id:$epic,
+      old_state_sha256:$oldsha, old_run_id:$oldrun,
+      new_plan_json_sha256:$newsha,
+      reason:$reason, operator:$op, created_at:$now}' > "$tmp" 2>/dev/null \
+    && mv "$tmp" "$record" 2>/dev/null || {
+      rm -f "$tmp" 2>/dev/null || true
+      echo "PRECONDITION FAIL: cannot write the supersede record at ${record} — nothing was archived." >&2
+      return 1
+    }
+
+  if ! mv "$state_file" "$archive" 2>/dev/null; then
+    rm -f "$record" 2>/dev/null || true
+    echo "PRECONDITION FAIL: cannot archive ${state_file} — the record was removed again, so nothing is half-done." >&2
+    return 1
+  fi
+
+  echo "superseded ${epic_id}: archived $(basename "$archive"), record $(basename "$record")" >&2
+  echo "  The evidence directory is untouched; re-init with the regenerated plan.json to continue." >&2
+  printf '%s\n' "$record"
+  return 0
+}
+
 _pfsm_plan_state_attest() {
   local plan_id="$1" project_root="$2" ref="$3" reason="$4" epic_id="$5"
 

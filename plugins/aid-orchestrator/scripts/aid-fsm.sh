@@ -2656,6 +2656,58 @@ cmd_init() {
     exit 1
   fi
 
+  # ── P073 Step 13: the ONE narrow supersede exception ─────────────────────
+  # The rejection above stays unconditional — it is what stops a re-init from
+  # silently losing a live run's history. This branch is reached only when the
+  # live state file is ABSENT because `plan-state --supersede-epic` archived
+  # it, and it opens for exactly one specific re-initialisation.
+  #
+  # FOUR-FIELD BINDING, all of it re-derived from disk rather than trusted:
+  # the record must name THIS plan and epic, its old_state_sha256 must equal
+  # the hash of the newest archived sibling, and its new_plan_json_sha256 must
+  # equal the hash of the plan.json being initialised from NOW. A stale record
+  # (superseded twice, older one still lying around), a forged one, or one
+  # written for a different package therefore authorises nothing — the
+  # unconditional rejection simply stands.
+  #
+  # Consumption renames the record to `.consumed-<epoch>`, so one PM decision
+  # authorises one init and never a second.
+  local _sup_archive="" _sup_record="" _sup_consumed=0
+  if [[ -n "${_pb_plan_id:-}" ]] && command -v jq >/dev/null 2>&1; then
+    _sup_archive="$(ls -1t "${state_file}".superseded-* 2>/dev/null | head -1 || true)"
+    if [[ -n "$_sup_archive" && -f "$_sup_archive" ]]; then
+      local _sup_arch_sha _sup_json _sup_json_sha _sup_dir _r
+      _sup_arch_sha="sha256:$(sha256sum "$_sup_archive" | awk '{print $1}')"
+      _sup_json="$(dirname "$state_file")/plan.json"
+      _sup_json_sha=""
+      [[ -f "$_sup_json" ]] && _sup_json_sha="sha256:$(sha256sum "$_sup_json" | awk '{print $1}')"
+      _sup_dir="${project_root:-.}/.aid-o/work/plan-state"
+      for _r in "$_sup_dir"/supersede-"${_pb_plan_id}"-"${epic_id}"-*.json; do
+        [[ -f "$_r" ]] || continue
+        if [[ "$(jq -r '.plan_id // ""' "$_r" 2>/dev/null)" == "$_pb_plan_id" \
+           && "$(jq -r '.epic_id // ""' "$_r" 2>/dev/null)" == "$epic_id" \
+           && "$(jq -r '.old_state_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_arch_sha" \
+           && -n "$_sup_json_sha" \
+           && "$(jq -r '.new_plan_json_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_json_sha" ]]; then
+          _sup_record="$_r"
+          break
+        fi
+      done
+      if [[ -n "$_sup_record" ]]; then
+        if mv -n "$_sup_record" "${_sup_record}.consumed-$(date -u +%s)" 2>/dev/null && [[ ! -f "$_sup_record" ]]; then
+          _sup_consumed=1
+          echo "aid-fsm: re-initialising ${epic_id} under supersede record $(basename "$_sup_record") (archived state: $(basename "$_sup_archive"))" >&2
+        else
+          echo "ERROR: a matching supersede record for ${epic_id} could not be claimed (a concurrent init took it) — refusing to re-init." >&2
+          exit 1
+        fi
+      else
+        echo "ERROR: ${epic_id} has an archived superseded state ($(basename "$_sup_archive")) but no supersede record matching BOTH that archive and the current plan.json — re-run 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --supersede-epic ${epic_id} --reason ...' against the current package." >&2
+        exit 1
+      fi
+    fi
+  fi
+
   # ── D1 (IMP-232 v2.58.0): dependency-scoped init gate + advisory ──────────
   # An independent plan's state NEVER hard-blocks another plan's init. A hard
   # block occurs ONLY when THIS plan declares a STRUCTURED depends_on_plans
