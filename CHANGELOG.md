@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.6] — 2026-08-05
+
+> Found by a real full audit of this repository: 174 run units and 158 447 bytes
+> of findings were enough to kill the only mandatory closing step, so a
+> completed audit produced no decision artifact at all.
+
+### Fixed
+- **Consolidation died on any portfolio big enough to matter** — `--argjson` puts a whole JSON value in ONE command-line argument, and Linux caps a single argument at 128 KB (`MAX_ARG_STRLEN`) no matter how large `ARG_MAX` is. The findings set, the aggregated resource maps, the pilots, the inventory, the keep/rewrite/remove sets, the lanes and the profile actions all scale with the portfolio and all went through argv, so `aid-test-audit-consolidate.sh` failed with "Argument list too long" — and because it is the only mandatory closing step and fails closed, the audit ended with nothing. Every value that grows with the portfolio is now read from a file. This is the same defect fixed in `aid-test-resource-map.sh` in 2.70.2 and not swept for at the time; the regression test builds a 226 KB artifact, and its own fixture hit the limit first, which is a fair measure of how easy it is to reach.
+
 ## [2.70.5] — 2026-08-05
 
 ### Fixed

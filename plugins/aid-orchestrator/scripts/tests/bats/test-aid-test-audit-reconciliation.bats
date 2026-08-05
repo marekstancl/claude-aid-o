@@ -970,3 +970,44 @@ _run_full_profiled() {
   [ "$(jq -r '.actions | length' "$OUT/decision.json")" = "0" ]
   [ "$(_status)" = "complete" ]
 }
+
+# ─── Big portfolios must not die on argv ────────────────────────────────────
+
+@test "a portfolio larger than a single argv argument still consolidates" {
+  # A real audit of this repository produced 158 447 bytes of findings and a
+  # larger aggregate of resource maps. `--argjson` puts a whole JSON value in
+  # ONE command-line argument, and Linux caps a single argument at 128 KB
+  # (MAX_ARG_STRLEN) regardless of ARG_MAX — so consolidation died with
+  # "Argument list too long". Because this script is the only mandatory closing
+  # step and it fails closed, the audit produced no decision artifact at all.
+  #
+  # The same defect was fixed in aid-test-resource-map.sh in 2.70.2 and never
+  # swept for here. Every fixture in this file is small, which is exactly why
+  # nothing caught it — so this one is deliberately not small.
+  local n=400 i
+  local -a ids=()
+  local dfile="$WORK/dispositions.ndjson"; : > "$dfile"
+  for ((i=0; i<n; i++)); do
+    ids+=("bats:unit-with-a-deliberately-long-identifier-so-the-set-is-big-$i")
+    _disposition "bats:unit-with-a-deliberately-long-identifier-so-the-set-is-big-$i" keep >> "$dfile"
+  done
+  _inventory "${ids[@]}"
+  _manifest "${ids[@]}"
+  # Assembled from a FILE, because `_shard_artifact` passes its arguments to jq
+  # and would hit the very limit this test exists to cover — the fixture running
+  # into it too is a fair demonstration of how easy it is to reach.
+  jq -s '{schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+          findings:[], produced_at:"2026-08-03T00:00:00Z",
+          producer_agent_dispatch_id:"d0", dispositions:.}' \
+    "$dfile" > "$ART/1-shard_portfolio-shard-0.json"
+
+  local size; size="$(wc -c < "$ART/1-shard_portfolio-shard-0.json")"
+  echo "wave artifact: ${size}B (limit na jeden argument je 131072)" >&3
+  [ "$size" -gt 131072 ]
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/decision.json" ]
+  # The whole point: a decision artifact exists and accounts for every unit.
+  [ "$(jq -r '[.. | objects | select(has("inventory_count")) | .inventory_count] | first' "$OUT/decision.json")" = "$n" ]
+}

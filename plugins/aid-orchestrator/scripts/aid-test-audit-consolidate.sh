@@ -100,6 +100,26 @@ fi
 # mktemp calls under `set -e` leak the first if the second fails.
 _tmpdir="$(mktemp -d)"
 trap 'rm -rf "$_tmpdir"' EXIT
+
+# ─── Big JSON goes through files, never argv ────────────────────────────────
+# `--argjson` puts a whole JSON value in ONE command-line argument, and Linux
+# caps a single argument at 128 KB (MAX_ARG_STRLEN) no matter how large ARG_MAX
+# is. A real audit of this repository produced 158 447 bytes of findings and a
+# larger aggregate of resource maps, so consolidation died with "Argument list
+# too long" — and because this script is the only mandatory closing step, and it
+# fails closed, the whole audit produced no decision artifact at all.
+#
+# The same defect was fixed once in aid-test-resource-map.sh (2.70.2) and not
+# swept for elsewhere. `_bigjson` is that sweep: it writes a value to a temp
+# file and prints the path, for use with `--slurpfile NAME` + `$NAME[0]`.
+_TAC_BIGJSON_FILES=()
+_bigjson() {
+  local f; f="$(mktemp "${_tmpdir:-/tmp}/bigjson.XXXXXX")"
+  printf '%s\n' "$1" > "$f"
+  _TAC_BIGJSON_FILES+=("$f")
+  printf '%s' "$f"
+}
+
 all_findings_ndjson="${_tmpdir}/findings.ndjson"
 all_dispositions_ndjson="${_tmpdir}/dispositions.ndjson"
 : > "$all_findings_ndjson"; : > "$all_dispositions_ndjson"
@@ -214,8 +234,9 @@ with_ids_json="$(jq -cs 'sort_by(.finding_id)' "$ids_ndjson" 2>/dev/null || echo
 rm -f "$ids_ndjson"
 
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-consolidated_json="$(jq -n --arg audit_id "$audit_id" --arg gen "$generated_at" --argjson findings "$with_ids_json" \
-  '{schema_version:"1.0.0", audit_id:$audit_id, generated_at:$gen, findings:$findings}')"
+consolidated_json="$(jq -n --arg audit_id "$audit_id" --arg gen "$generated_at" \
+  --slurpfile findings "$(_bigjson "$with_ids_json")" \
+  '{schema_version:"1.0.0", audit_id:$audit_id, generated_at:$gen, findings:$findings[0]}')"
 
 adapter_validate_schema "$FINDINGS_SCHEMA" "$consolidated_json" \
   || _die 1 "internal error: generated consolidated-findings.json failed its own schema"
@@ -513,8 +534,10 @@ if [[ "$audit_mode" == "full" ]]; then
         [[ -n "$pilots_json" ]] || pilots_json='[]'
       fi
 
-      lanes_json="$(jq -nc --argjson maps "$maps_json" --argjson pilots "$pilots_json" \
+      lanes_json="$(jq -nc --slurpfile maps_w "$(_bigjson "$maps_json")" \
+                       --slurpfile pilots_w "$(_bigjson "$pilots_json")" \
                        --argjson rm "$remove_json" '
+        ($maps_w[0]) as $maps | ($pilots_w[0]) as $pilots |
         # A unit proposed for removal is not worth arranging into a lane.
         ($maps | map(select(.run_unit_id as $u | $rm | index($u) | not))) as $m
 
@@ -636,7 +659,8 @@ if [[ "$audit_mode" == "full" ]]; then
     # a check that can never fire is decoration, not defence. The reachable
     # contradiction is a disposition proposing deletion while a finding for
     # the same unit recommends keeping it.
-    cross_level="$(jq -r --argjson f "$with_ids_json" '
+    cross_level="$(jq -r --slurpfile f_w "$(_bigjson "$with_ids_json")" '
+      ($f_w[0]) as $f |
       (map(select(.disposition == "remove") | .run_unit_id)) as $rm
       | [ $f[] | select((.run_unit_id as $r | $rm | index($r)) != null)
                 | select(.recommendation == "keep") | .run_unit_id ] | .[0] // empty' \
@@ -744,16 +768,25 @@ if [[ "$audit_mode" == "full" ]]; then
     decision_json="$(jq -n \
       --arg id "$audit_id" --arg status "$status" \
       --argjson extra "$reason_field" \
-      --argjson inv "$inventory_unique_json" --argjson missing "$missing_json" --argjson dupes "$dupes_json" \
-      --argjson unresolved "$unresolved_json" \
-      --argjson keep "$keep_json" --argjson rewrite "$rewrite_json" --argjson remove "$remove_json" \
+      --slurpfile inv_w "$(_bigjson "$inventory_unique_json")" \
+      --slurpfile missing_w "$(_bigjson "$missing_json")" \
+      --slurpfile dupes_w "$(_bigjson "$dupes_json")" \
+      --slurpfile unresolved_w "$(_bigjson "$unresolved_json")" \
+      --slurpfile keep_w "$(_bigjson "$keep_json")" \
+      --slurpfile rewrite_w "$(_bigjson "$rewrite_json")" \
+      --slurpfile remove_w "$(_bigjson "$remove_json")" \
       --argjson ic "$inventory_count" --argjson ac "$assigned_count" --argjson dc "$disposition_count" \
       --argjson removed_n "$removed_n" \
-      --argjson merge_groups "$merge_groups_json" --arg impact_kind "$impact_kind" \
+      --slurpfile merge_groups_w "$(_bigjson "$merge_groups_json")" --arg impact_kind "$impact_kind" \
       --argjson merged_surplus "$merged_surplus" \
-      --argjson profile_actions "$profile_actions_json" \
-      --argjson lanes "$lanes_json" --argjson smallest_pilot "$smallest_pilot" \
+      --slurpfile profile_actions_w "$(_bigjson "$profile_actions_json")" \
+      --slurpfile lanes_w "$(_bigjson "$lanes_json")" --argjson smallest_pilot "$smallest_pilot" \
       --argjson rt_before "$runtime_before" --argjson rt_after "$runtime_after" '
+      ($inv_w[0]) as $inv | ($missing_w[0]) as $missing | ($dupes_w[0]) as $dupes
+      | ($unresolved_w[0]) as $unresolved | ($keep_w[0]) as $keep
+      | ($rewrite_w[0]) as $rewrite | ($remove_w[0]) as $remove
+      | ($merge_groups_w[0]) as $merge_groups | ($profile_actions_w[0]) as $profile_actions
+      | ($lanes_w[0]) as $lanes |
       {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
        current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
        actions:$profile_actions, parallelization:{lanes:$lanes, smallest_safe_pilot:$smallest_pilot},
