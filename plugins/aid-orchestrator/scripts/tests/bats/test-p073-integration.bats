@@ -235,3 +235,42 @@ _head() { ( cd "$ROOT" && git rev-parse HEAD ); }
     [ "$output" = "1" ]
   done
 }
+
+# --- EPIC 3 whole-diff review finding ------------------------------------
+
+@test "P073 integration (whole-diff): a MULTI-path plan.json stores every path separately" {
+  # MEASURED before the fix: `jq -j '. + "\u0000"'` emits no byte at all for the
+  # NUL on jq 1.6 (and command substitution would strip it anyway), so
+  # "src/app.sh" and "docs/release-notes.md" were stored as the single entry
+  # "src/app.shdocs/release-notes.md" -- NEITHER path was protected, while the
+  # freeze still recorded protected_paths_complete=true. A declared delivery
+  # path could then be classified ancillary, accepted, and merged without a
+  # review covering it. This is the ONE fixture shape that shows it: a
+  # single-path plan.json cannot.
+  _fixture
+  local ev=".aid-o/work/evidence/E-903-1/R-1"
+  mkdir -p "$ROOT/$ev"
+  jq -n '{schema_version:"aid-2.0", epic_id:"E-903-1",
+          steps:[{step_id:"S1", allowed_paths:["src/app.sh","docs/release-notes.md","scripts/deliver.sh"]}]}' \
+    > "$ROOT/$ev/plan.json"
+
+  run bash -c "jq -r '.steps[]?.allowed_paths[]? // empty | @base64' '$ROOT/$ev/plan.json' | wc -l"
+  [ "$(echo "$output" | tr -d ' ')" = "3" ]
+
+  # And the classifier must see three DISTINCT entries, not one glued token.
+  local prot
+  prot="$(jq -c '[.steps[]?.allowed_paths[]?]' "$ROOT/$ev/plan.json")"
+  run _p "_pfsm_path_is_protected 'docs/release-notes.md' '$prot'"
+  [ "$status" -eq 0 ]
+  run _p "_pfsm_path_is_protected 'src/app.sh' '$prot'"
+  [ "$status" -eq 0 ]
+  run _p "_pfsm_path_is_protected 'src/app.shdocs/release-notes.md' '$prot'"
+  [ "$status" -ne 0 ]
+}
+
+@test "P073 integration (whole-diff): the freeze no longer emits NUL through jq" {
+  # The construction itself is pinned: jq cannot emit a NUL byte, so any
+  # reintroduction of it silently reproduces the glued-path defect.
+  run grep -c 'u0000' "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
+  [ "$output" = "0" ]
+}

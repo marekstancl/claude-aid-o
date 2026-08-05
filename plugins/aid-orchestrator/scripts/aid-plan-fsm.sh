@@ -2898,12 +2898,34 @@ _pfsm_finalize_freeze() {
     # A jq FAILURE (malformed plan.json) must mark the set incomplete, not be
     # swallowed: `|| true` left the EPIC's paths out while the freeze still
     # claimed to be complete.
-    if ! _e_paths="$(jq -j '.steps[]?.allowed_paths[]? // empty | . + "\u0000"' "$_e_json" 2>/dev/null)"; then
+    # BASE64, not a NUL-delimited jq stream. Two separate reasons, both
+    # MEASURED on this repo's jq 1.6: a jq filter appending a NUL escape emits
+    # NO byte at all for it, and bash command substitution would strip the byte
+    # even if jq produced one. Either way every allowed_path was concatenated into ONE blob —
+    # `src/app.sh` + `docs/release-notes.md` became `src/app.shdocs/release-notes.md`,
+    # so NEITHER path was protected while the freeze still recorded
+    # protected_paths_complete=true. A delivery-path change could then be
+    # classified ancillary, accepted, and merged without a review covering it.
+    # One base64 token per line survives every byte a path can contain,
+    # including newlines, and this loop writes the NUL separators itself.
+    if ! _e_paths="$(jq -r '.steps[]?.allowed_paths[]? // empty | @base64' "$_e_json" 2>/dev/null)"; then
       _prot_complete=false
       echo "WARNING: protected set incomplete — ${_e_id} plan.json at ${_e_dir}/plan.json is malformed or unreadable by jq" >&2
       continue
     fi
-    printf '%s' "$_e_paths" >> "$_prot_file"
+    local _e_b64 _e_one _e_decode_failed=0
+    while IFS= read -r _e_b64; do
+      [[ -n "$_e_b64" ]] || continue
+      if ! _e_one="$(printf '%s' "$_e_b64" | base64 -d 2>/dev/null)" || [[ -z "$_e_one" ]]; then
+        _e_decode_failed=1
+        continue
+      fi
+      printf '%s\0' "$_e_one" >> "$_prot_file"
+    done <<< "$_e_paths"
+    if [[ "$_e_decode_failed" -eq 1 ]]; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — at least one allowed_path in ${_e_dir}/plan.json could not be decoded" >&2
+    fi
   done < <(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs[]? | [.epic_id, (.evidence_dir // "")] | @tsv' 2>/dev/null || true)
 
   # The overlap between the ancillary policy and this set is EXPECTED —
