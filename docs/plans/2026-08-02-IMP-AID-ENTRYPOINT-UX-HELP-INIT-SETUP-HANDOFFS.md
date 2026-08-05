@@ -295,6 +295,19 @@ P066/P069 contract re-grounding; do not fold it into either active plan.
 
 ## 10. Validated follow-up — PM emergency override and plan-boundary recovery
 
+> **Plan written: P073 (EPIC 2)** — implementation tracked in
+> `.aid-o/plans/P073-loosening-force-ancillary.md`. D6 (universal PM `--force`
+> backdoor) and D7 (the P082/P083 traps) are covered end to end.
+>
+> **Sections 11-13 of this document exist only in a newer, uncommitted revision
+> of this file and are therefore NOT annotated here.** Their P073 coverage is:
+> §11 — EPIC 1 covers grounding items 3-4 and D10; D8 (per-commit
+> release-impact trailer) and D9 (stable project pre-commit interface) remain
+> unplanned. §12 — EPIC 3 covers D11, D12 and the required consumer matrix,
+> which lives in `docs/extending-aid.md`. §13 — EPICs 1 and 2 cover D13 (budget
+> raised to 5) and D14 (one public PM force path); D15 (making the Codex review
+> instruction prove coverage rather than request it) remains unplanned.
+
 **Trigger:** P082 and P083 dogfood in the `wan` workspace. This is a product
 requirement: the PM needs an intentional, universal backdoor when AID's own
 bookkeeping or an implementation defect prevents the supported path from

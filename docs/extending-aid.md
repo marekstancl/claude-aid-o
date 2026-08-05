@@ -1373,3 +1373,112 @@ is NOT on the lint gate's grandfathered list — keep it clean rather than addin
 it. The agent card is verified by the golden-prompt test instead, because
 linting it would demand frontmatter fields that are meaningless for a
 dispatched agent.
+
+## The force framework, PM overrides, and review equivalence (P073)
+
+P073 loosened three places where AID refused work it had no physical reason to
+refuse. Each loosening is paired with an audited receipt: what used to be
+unrecorded surgery is now a decision with a name on it.
+
+### Forceable vs hard preconditions
+
+Every plan-level precondition is classified at its call site:
+
+```bash
+_pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$root" || exit 1
+_pfsm_commit_force "plan-merge-to-main" "$plan_id" "$root" || exit 1
+```
+
+- **`forceable`** — a bookkeeping obstacle, not a physical impossibility. A
+  dirty worktree, an unproven lineage, an unshared source plan. A PM who
+  knowingly accepts the state proceeds with `--force --force-reason "<why>"`.
+- **`hard`** — identity, evidence integrity, PM authorization. These cannot be
+  forced at all. A force that could fake an authorization would be the backdoor
+  the framework exists to replace.
+
+The force path is **fail-closed**: `_pfsm_commit_force` writes the waiver
+receipt BEFORE the command proceeds, and a receipt that cannot be written
+refuses the force rather than passing it unrecorded. `--force` without
+`--force-reason` is a usage error, so no waiver is ever anonymous. The refusal
+always prints the precondition's own recovery FIRST — the force is offered as
+the second option, never the first.
+
+**When you add a precondition,** classify it in the same commit. An unclassified
+one is not forceable by default; it simply has no force path, which is the safe
+default but also an invisible dead end for the PM.
+
+### Single-use PM-override artifacts
+
+A PM override (the C3 grant, the EPIC supersede record) is a file the producer
+writes and exactly one consumer claims. The claim is:
+
+```bash
+mv -n "$grant" "$claimed" || return 1
+[[ ! -e "$grant" ]] || { echo "PRECONDITION FAIL: the grant is still on disk"; return 1; }
+```
+
+The post-check is **not** belt-and-braces. On coreutils 9.1 `mv -n` exits 0 when
+it SKIPS the move, so without it the claim reports success while the grant stays
+on disk and authorises a second consumer. Any new single-use artifact must carry
+the same post-check.
+
+The consumer must also **re-derive** every field it trusts rather than reading
+it from the record. A stale record, a forged one, or one written for a different
+package then authorises nothing, and the underlying unconditional rule simply
+stands.
+
+### Ancillary paths and review equivalence
+
+After a plan-final review freezes a candidate, any tracked write used to throw
+the review away — an audit-log append cost a full re-review cycle even though
+nothing about the delivery had changed.
+
+Two sets decide this now:
+
+- The **ancillary policy** (`defaults/policies/plan-final-policy.yaml`, project
+  override at `.aid-o/config/policies/plan-final-policy.yaml`) lists paths whose
+  movement does not describe the delivery.
+- The **protected surface**, computed at freeze from every step's
+  `allowed_paths` plus the source plan, the lifecycle manifest and the
+  close-consumed receipts, and stored in the plan-boundary manifest.
+
+**Protected wins.** Close-consumed evidence lives under `.aid-o/work/`, which is
+an ancillary glob, so a path in both sets is protected — in the committed diff
+and in the worktree alike.
+
+`plan_final_review_equivalent` returns **three** states:
+
+| Code | Meaning |
+|------|---------|
+| 0 | the head differs from the candidate in ancillary paths only |
+| 1 | it does not — every offending path is named with its classification |
+| 2 | equivalence is UNAVAILABLE (legacy freeze, partial protected set, unreadable git) |
+
+A caller that collapses 2 into 0 accepts a head nobody compared. Treat 2 exactly
+like today's invalidation.
+
+The predicate is **pure**. Acceptance is a separate deliberate act
+(`plan-finalize <plan> --stage accept-ancillary`) that runs under one lock,
+re-verifies the head immediately before the write, and binds the receipt with a
+compare-and-swap on the frozen candidate and the prior accepted head.
+
+#### Which consumers accept equivalence
+
+| Consumer | Behaviour |
+|----------|-----------|
+| `_pfsm_review_candidate_drift` (review pre/post, C4) | equivalence-aware — accepts a receipted accepted head |
+| `plan-merge-to-main` (head leg) | equivalence-aware, with LIVE re-verification against the current policy |
+| PM decision binding | **exact only** — always the frozen candidate |
+| pre-commit scope guard, `gates/scope-check.sh` | **exact only** |
+| release preparation and staging | **exact only** |
+| `--at-head`, CP3, C3, `aid-plan-close-check.sh` | **exact only** |
+
+Exact-only is the default. A consumer becomes equivalence-aware by being wired
+deliberately and covered by a test that proves both the accepting and the
+refusing case — never by inheriting the predicate because it happened to be in
+scope.
+
+**A protected-surface change is a FIX,** not something to accept: re-sync,
+re-freeze, re-review. The invalidation message says so, and it offers the
+`accept-ancillary` recovery only when the difference really is ancillary-only —
+offering it otherwise would send the operator into a refusal loop.

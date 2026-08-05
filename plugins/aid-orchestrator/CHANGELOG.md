@@ -3,6 +3,36 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+> Three EPICs of loosening. AID was refusing work it had no physical reason to
+> refuse: a completed plan-level review died to an audit-log append, a PM whose
+> run went stale had no supported way forward except hand-deleting state, and a
+> release could ship a changelog entry that said nothing. None of those are
+> safety — they are bookkeeping obstacles wearing safety's clothes. Every
+> loosening here is paired with an audited receipt, so what used to be
+> unrecorded surgery is now a decision with a name on it.
+
+### Added
+- **PM force backdoor** — every plan-level precondition is classified `forceable` or `hard` at its call site; a forceable one can be passed with `--force --force-reason "<why>"`, which writes a waiver receipt BEFORE the command proceeds and refuses the force outright if the receipt cannot be written. Identity, evidence integrity and PM authorization are `hard` and cannot be forced at all.
+- **PM-override grant for C3** — a single-use, PM-signed artifact claimed with `mv -n` plus a mandatory source-gone post-check, because coreutils 9.1 exits 0 when `mv -n` skips the move. One PM decision authorises one action and never a second.
+- **`plan-finalize --stage accept-ancillary`** — records that a plan head which differs from the frozen candidate only in ancillary paths still describes the reviewed delivery. It writes one receipt, binds it in the manifest, and leaves `candidate_sha` byte-identical.
+- **`plan-state --supersede-epic`** — an audited transaction that retires a stale EPIC FSM run and authorises exactly ONE re-initialisation, replacing the hand-deletion of state files it used to take.
+- **Committed-source preflight** — plan generation refuses to bind a whole lifecycle to plan bytes that exist in exactly one worktree, before any git mutation.
+
+### Changed
+- **CP1 review budget raised to 5 sessions** — three was measured to be the wrong number; legacy ledgers keep their old cap and migrate on the next locked write, so no in-flight review changes shape underneath its author.
+- **Review equivalence replaces any-movement invalidation** — the drift detector, the review pre/post checks, the C4 decision and the merge all accept a head at a receipted accepted head as well as at the candidate. A plan frozen before this release keeps the old any-movement rule byte for byte.
+- **Freeze stores the protected path surface** — every step's `allowed_paths`, the source plan, the lifecycle manifest and the close-consumed receipts, in the same atomic write as the candidate. A set that cannot be completed is recorded as PARTIAL and equivalence is simply unavailable.
+- **One ancillary classifier** — four verbatim copies of the same exception regex became one library with a MANDATORY mode argument, so no caller can silently inherit a wider exception set, and an unreadable policy fails closed to the legacy paths.
+- **Step rendering and dependency grammar** — an unparseable dependency token is now a hard failure at generation time instead of a silently dropped edge that produces a plausible, wrong run order.
+
+### Fixed
+- **Release script silent aborts** — a `grep | head -1` probe took SIGPIPE on large inputs (measured 20/20 at ~290KB) and the aborted probe read as a clean absence, so the release silently skipped work it believed unnecessary.
+- **Placeholder release entries** — a release whose CHANGELOG section for the new version is empty or a placeholder is refused; the entry is the only human-readable record of what shipped.
+- **Reporter plan-boundary contradiction** — a Reporter round no longer moves the candidate it is reporting on.
+- **Branch-restore continuation** — a failed branch restore stops the run instead of continuing on whatever branch the worktree happens to be on, where every subsequent command succeeds while operating on the wrong branch.
+
 ## [2.70.3] — 2026-08-04
 
 > A second real audit lost its own evidence: the entire
