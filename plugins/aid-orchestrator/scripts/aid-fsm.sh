@@ -257,6 +257,17 @@ _fsm_human_step() {
   fi
 }
 
+# _aid_sup_restore — EXIT trap installed while a supersede reservation is held
+# (P073 EPIC 2 review). Puts the reservation back under its original name so a
+# failed init does not burn the PM's one authorisation. A no-op once the
+# finalize has cleared _AID_SUP_RESERVED.
+_AID_SUP_RESERVED=""
+_AID_SUP_RECORD=""
+_aid_sup_restore() {
+  [[ -n "${_AID_SUP_RESERVED:-}" && -f "${_AID_SUP_RESERVED}" ]] || return 0
+  mv "${_AID_SUP_RESERVED}" "${_AID_SUP_RECORD}" 2>/dev/null || true
+}
+
 # Print a multi-line error to stderr and exit 1.
 # Use for unrecoverable PRE-FLIGHT / precondition failures with copy-paste fix.
 die() {
@@ -2453,13 +2464,17 @@ cmd_init() {
         # sanctioned caller passes only documented flags, so an undocumented
         # one now surfaces loudly, which is the point.
         #
-        # ONE carve-out: --force already consumed "${@:i+1}" above as its own
-        # payload (--reason and its value, --blocked-checks, ...). Rejecting
-        # those here would reject the very reason the call just used, and the
-        # loop must keep running past them because a documented flag such as
-        # --streamlined may legitimately follow --force.
-        if [[ "$force" == "true" ]]; then
-          : # force payload, already consumed by fsm_handle_force_override
+        # ONE carve-out, and it is a WHITELIST. --force already consumed
+        # "${@:i+1}" above as its own payload, and rejecting those here would
+        # reject the very reason the call just used — but a blanket "accept
+        # anything after --force" restored exactly the silent sink this step
+        # removed (`init ... --force --reason '...' --typo` was accepted;
+        # whole-EPIC review finding). Only the payload flags
+        # fsm_handle_force_override actually parses are tolerated.
+        if [[ "$force" == "true" ]] \
+           && [[ "${!i}" == "--reason" || "${!i}" == "--blocked-checks" \
+                 || "${!i}" == "--blocking-epic" || "${!i}" == "--blocking-plan" ]]; then
+          : # a known force-payload flag, already consumed above
         else
           echo "ERROR: Unknown flag for init: ${!i}" >&2
           echo "  init accepts: --plan <path>, --streamlined, --force --reason <text>" >&2
@@ -2911,6 +2926,33 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   mkdir -p "$(dirname "$state_file")"
   local _now_iso
   _now_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  # P073 EPIC 2 (whole-EPIC review): RESERVE the supersede record immediately
+  # before the state-file write. Verifying early and consuming at the very end
+  # fixed one problem and created another: two concurrent inits could both
+  # VERIFY the same unconsumed record while no state file existed, both write
+  # one, and only then race the rename — so the loser errored after it had
+  # already mutated state. A reservation closes that: the winner is decided
+  # BEFORE anything is written, and the loser refuses having changed nothing.
+  #
+  # The reservation is restored on a failed write (below), so a failure here
+  # still does not burn the PM's one authorisation.
+  local _sup_reserved=""
+  if [[ "${_sup_verified:-0}" -eq 1 ]]; then
+    _sup_reserved="${_sup_record}.reserved-$$-$(date -u +%s)"
+    if ! mv -n "$_sup_record" "$_sup_reserved" 2>/dev/null || [[ -f "$_sup_record" ]]; then
+      echo "ERROR: the supersede record for ${epic_id} could not be reserved (a concurrent init took it) — refusing to re-init; nothing was written." >&2
+      exit 1
+    fi
+    # This script runs under `set -e`, so a failed write below aborts on the
+    # spot and never reaches the finalize — orphaning the reservation and
+    # burning the PM's one authorisation. An EXIT trap is the only thing that
+    # survives every abort path between here and the finalize; the finalize
+    # clears it once the outcome is decided.
+    _AID_SUP_RESERVED="$_sup_reserved"
+    _AID_SUP_RECORD="$_sup_record"
+    trap _aid_sup_restore EXIT
+  fi
+
   cat > "$state_file" << EOF
 epic_id: $epic_id
 run_id: $run_id
@@ -2934,24 +2976,22 @@ EOF
   # runs already passed the hard-stop above and record nothing here. Appended
   # here (before the steps[] block below) so scalar fields stay grouped and the
   # steps[] sequence remains the trailing YAML node. Never blocks init.
-  # P073 Step 13: the supersede authorisation is spent only once the new state
-  # file DEMONSTRABLY exists. Verifying early but consuming late is the whole
-  # point: an earlier cut consumed before the remaining init work, so any later
-  # failure burned the PM's one authorisation with no state file written and no
-  # way to re-supersede — there is no live state left to archive
-  # (adversarial-review finding). A concurrent init that claimed it first makes
-  # this one refuse rather than proceed on a claim it does not own.
+  # P073 Step 13: finalize the reservation taken just before the write. The
+  # authorisation is spent only once the new state file demonstrably exists;
+  # if the write failed, the reservation goes back under its original name so
+  # the PM can simply retry rather than having to re-supersede (there would be
+  # no live state left to archive).
   if [[ "${_sup_verified:-0}" -eq 1 ]]; then
     if [[ ! -s "$state_file" ]]; then
+      mv "$_sup_reserved" "$_sup_record" 2>/dev/null || true
       echo "ERROR: ${epic_id}'s state file was not written — the supersede record is left unclaimed so the re-init can simply be retried." >&2
       exit 1
     fi
-    if mv -n "$_sup_record" "${_sup_record}.consumed-$(date -u +%s)" 2>/dev/null && [[ ! -f "$_sup_record" ]]; then
-      echo "aid-fsm: supersede record $(basename "$_sup_record") consumed — it authorises no further init." >&2
-    else
-      echo "ERROR: the supersede record for ${epic_id} could not be claimed (a concurrent init took it) — refusing to re-init." >&2
-      exit 1
-    fi
+    mv "$_sup_reserved" "${_sup_record}.consumed-$(date -u +%s)" 2>/dev/null \
+      && echo "aid-fsm: supersede record $(basename "$_sup_record") consumed — it authorises no further init." >&2
+    # Outcome decided: the restore trap must not fire for anything after this.
+    _AID_SUP_RESERVED=""
+    trap - EXIT
   fi
 
   run_cache_preflight "$state_file" "$timeline_path" || true

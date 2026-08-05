@@ -380,3 +380,88 @@ _init_epic() {
   run grep -c 'state: EXECUTE' "$arch"
   [ "$output" = "1" ]
 }
+
+# ─── Whole-EPIC-2 review findings ─────────────────────────────────────────
+
+@test "P073 EPIC 2 (review finding): concurrent re-inits — exactly one wins, the loser writes nothing" {
+  # Verifying early and consuming at the very end fixed one problem and made
+  # another: two inits could both VERIFY the same record while no state file
+  # existed, both write one, and only then race the rename — so the loser
+  # errored after it had already mutated state. A reservation taken before the
+  # write decides the winner first.
+  _seed_epic_run
+  run _pf plan-state "$PLAN" --supersede-epic "$EPIC" --reason "$REASON"
+  [ "$status" -eq 0 ]
+
+  # Pre-create the task branch the inits would otherwise all race to create:
+  # four concurrent `git checkout -b` in one repository is a fixture race, not
+  # the property under test, and it made this flaky.
+  ( cd "$ROOT" && git branch "task/${EPIC}/main" >/dev/null 2>&1 || true )
+  local out="$ROOT/conc"; mkdir -p "$out"
+  local i
+  for i in 1 2 3 4; do
+    ( cd "$ROOT" && bash "$FSM" init "$EPIC" R-900-1 3 full main \
+        "$(git rev-parse HEAD)" "$(_run_dir)/fsm-state.yaml" \
+        >"$out/$i.out" 2>"$out/$i.err"; echo "$?" > "$out/$i.rc" ) &
+  done
+  wait
+
+  local winners=0
+  for i in 1 2 3 4; do
+    [[ "$(cat "$out/$i.rc")" == "0" ]] && winners=$(( winners + 1 ))
+  done
+  [ "$winners" = "1" ]
+
+  # Every loser says it changed nothing, and the record was consumed once.
+  local losers=0
+  for i in 1 2 3 4; do
+    if [[ "$(cat "$out/$i.rc")" != "0" ]]; then
+      grep -q 'could not be reserved\|nothing was written\|state_file already exists' "$out/$i.err" && losers=$(( losers + 1 ))
+    fi
+  done
+  [ "$losers" = "3" ]
+  [ "$(_records)" = "0" ]
+  run bash -c "ls '$ROOT/.aid-o/work/plan-state'/supersede-*.consumed-* | wc -l"
+  [ "$output" = "1" ]
+  # No reservation was left dangling.
+  run bash -c "ls '$ROOT/.aid-o/work/plan-state'/supersede-*.reserved-* 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
+}
+
+@test "P073 EPIC 2 (review finding): a failed state-file write RESTORES the reservation for a retry" {
+  _seed_epic_run
+  run _pf plan-state "$PLAN" --supersede-epic "$EPIC" --reason "$REASON"
+  [ "$status" -eq 0 ]
+
+  chmod a-w "$(_run_dir)"
+  run _init_epic
+  local rc="$status"
+  chmod u+w "$(_run_dir)"
+  [ "$rc" -ne 0 ]
+
+  # Back under its original name — not reserved, not consumed.
+  [ "$(_records)" = "1" ]
+  run bash -c "ls '$ROOT/.aid-o/work/plan-state'/supersede-*.reserved-* 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
+  run _init_epic
+  [[ "$output" == *"re-init authorised by"* ]]
+}
+
+@test "P073 EPIC 2 (review finding): init's strict flag check is NOT disabled by --force" {
+  # A blanket "accept anything after --force" restored exactly the silent sink
+  # Step 9 removed.
+  local sf="$ROOT/.aid-o/work/evidence/E-900-2_2/R-1/fsm-state.yaml"
+  mkdir -p "$(dirname "$sf")"
+  run bash -c "cd '$ROOT' && bash '$FSM' init E-900-2_2 R-1 3 full main \
+      \"\$(git rev-parse HEAD)\" '$sf' --force --reason 'a genuine twenty-plus character reason here' --typo"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Unknown flag for init: --typo"* ]]
+}
+
+@test "P073 EPIC 2 (review finding): the KNOWN force payload flags are still accepted after --force" {
+  local sf="$ROOT/.aid-o/work/evidence/E-900-3_3/R-1/fsm-state.yaml"
+  mkdir -p "$(dirname "$sf")"
+  run bash -c "cd '$ROOT' && bash '$FSM' init E-900-3_3 R-1 3 full main \
+      \"\$(git rev-parse HEAD)\" '$sf' --force --reason 'a genuine twenty-plus character reason here' --blocked-checks 'x' --streamlined"
+  [[ "$output" != *"Unknown flag for init"* ]]
+}
