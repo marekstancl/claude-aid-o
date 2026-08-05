@@ -359,4 +359,28 @@ is a genuine change, not an artifact.
 Only then offer the remediation plan. Two questions, in the order the user
 cares about: first make the tests run right, then decide what to fix.
 
+### What a full audit proposes (v2.71.0)
+
+Analysts no longer stop at classifying. Where a finding recommends anything but
+`keep`, it carries a **proposal**: the exact change with file:line, an effort
+bucket built from counted facts (S/M/L/decision-required, with a separate
+verify bucket — a delete is S to perform and L to verify, and the verify cost
+is the one that decides), and a benefit that is measured, extrapolated,
+estimated or **unknown** — unknown being a normal answer, never dressed up as
+a number. Time benefits count only on the critical path.
+
+The categories span both directions: remove/merge/strengthen a weak oracle,
+fix a fixable parallel blocker (fixed path → temp dir), move tests off a
+genuinely unfixable shared resource, `add` a missing error-path test, `rewire`
+a gate that runs a unit twice or a timeout below real runtime. Destructive
+proposals (remove, merge) are always decision-required and guarded — a test
+born in a bugfix commit is presumptively load-bearing.
+
+Proposals carry a stable `proposal_id`. Ones the owner has declined — listed in
+`.aid-o/config/test-audit-decisions.yaml` under `declined:` — are marked and
+never re-proposed. Contradicting proposals reference each other via
+`conflicts_with` instead of being emitted as independent advice. The render
+shows the top slice ranked by priority and evidence strength; the full set
+stays in `decision.json`.
+
 **Last Updated:** 2026-08-05

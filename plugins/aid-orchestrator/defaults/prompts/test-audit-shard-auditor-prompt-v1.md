@@ -100,6 +100,60 @@ Worked example — a `remove` carrying real falsification evidence:
  "cost": {"kind": "measured", "duration_ms": 8400}, "confidence": "high"}
 ```
 
+## Proposals: end with a remediation, not a label
+
+A finding that stops at "fix" has told the owner nothing he can act on. Where
+you recommend anything other than `keep`, attach a `proposal` object:
+
+- **`change`** — the exact edit, naming file:line: "test-aid-fsm.bats:359
+  writes `$TEST_PROJECT_ROOT/.aid-o` under a fixed path; allocate a per-test
+  temp dir instead". Never "improve isolation".
+- **`effort`** — counted facts, not hours. `bucket`: S (one file, mechanical),
+  M (several files or a new helper), L (test architecture, gate config, or
+  production code), decision-required (a human must rule on intent — every
+  delete and merge is decision-required). `verify_bucket` is SEPARATE: most
+  deletes are S to perform and L to verify, and the verify cost is what decides
+  whether it is worth doing. `repeat_count` when one mechanical change applies
+  to many sites — "S x 14" is more truthful than "M".
+- **`benefit`** — `kind` is measured / extrapolated / estimated / unknown, and
+  **unknown is a normal answer**; an audit that never says unknown is not
+  measuring. Time counts only on the CRITICAL PATH — 30s saved beside a
+  5-minute serial test saves nothing. For remove/merge/add/strengthen the unit
+  is `risk_note` (what newly goes undetected, or newly detected), never
+  seconds alone.
+- **`conflicts_with`** — when your own advice collides ("share the setup"
+  contradicts "isolate per test"), emit the conflict on both findings. Never
+  both sides as independent advice.
+
+A proposal you cannot fill honestly is a proposal you must not emit — keep the
+finding, omit the proposal, and name the cheapest experiment that would let a
+later audit propose it properly.
+
+### What this wave may propose, and its guards
+
+- **`remove`** — the test asserts nothing, or passes regardless of production
+  code. GUARDS, all mandatory: it is a candidate, never a done deal
+  (decision-required); "asserts nothing" must survive checking exit-code
+  semantics, `set -e`, schema validators and custom helpers — assertion often
+  lives outside `[ ]`; a duplication claim must cite WHICH test covers the same
+  behaviour and on what evidence — name similarity is not evidence; a test born
+  in a bugfix commit is presumptively load-bearing — check `git log` for its
+  origin and say so.
+- **`strengthen`** — the test exercises real code but its oracle is too weak to
+  fail (bare exit-0, a substring too loose, mock call-counts mirroring the
+  implementation). This is NOT `remove` — deleting a weak test loses the
+  scaffolding; fixing its assertion is usually S.
+- **`merge`** — same behaviour proven twice. GUARDS: same file and same fixture
+  only; both assertion sets preserved verbatim; never across gates.
+- **`add`** — an error path or contract nothing asserts, weighted by churn and
+  blast radius. Benefit is risk, not seconds.
+- **`fix` (wrong level)** — an e2e whose assertion is reachable at unit level
+  is usually the largest speed lever in a portfolio; say what the unit-level
+  oracle would be.
+- **Zombie sweep** — permanently skipped tests, skip with no reason, expired
+  quarantine, xfail that now passes: each is a finding with a proposal, because
+  they cost collection time and give false comfort.
+
 ## Output contract
 Emit exactly one JSON document matching the output schema: `schema_version` (const `"1.0.0"`),
 `focus: "shard_portfolio"`, `wave`, `shard_id`, `findings[]`, `dispositions[]`, `produced_at`,

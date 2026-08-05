@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.71.0] — 2026-08-05
+
+> Until now the audit classified, measured and proved — and then told the owner
+> "fix" with no object. The analysts were required to record every resource with
+> file:line and forbidden from concluding anything with it: their instructions
+> allowed exactly two endings, a lane or a measurement. This release adds the
+> third ending the whole exercise was for.
+
+### Added
+- **Findings carry concrete remediation proposals** — the exact change with file:line ("a.bats:359 writes under a fixed path; allocate a per-test temp dir"), an effort bucket built from counted facts (S/M/L/decision-required, with a separate verify bucket, because a delete is S to perform and L to verify and the verify cost is the one that decides), and a benefit that is measured, extrapolated, estimated or **unknown** — unknown being a normal answer an honest audit gives often. Time benefits count only on the critical path: 30s saved beside a 5-minute serial test saves nothing.
+- **Both directions, not just subtraction** — an audit that can only shrink a suite monotonically degrades safety. New recommendation values: `add` (a missing error-path test — benefit is risk, not seconds), `strengthen` (a weak oracle gets a real assertion instead of deletion), `rewire` (a gate that runs a unit twice, a unit no gate runs, a timeout below real runtime).
+- **Guards on everything destructive** — remove/merge are always decision-required; "asserts nothing" must survive checking exit-code semantics and custom helpers; a duplication claim must name its basis, never file-name similarity; a test born in a bugfix commit is presumptively load-bearing; the adversarial wave now verifies proposals like findings and flags a confident number whose evidence tier cannot support it.
+- **Proposals have identity and memory** — a stable `proposal_id`, a declined ledger (`.aid-o/config/test-audit-decisions.yaml`) so a declined proposal is marked and never re-litigated, and `conflicts_with` cross-references on both sides of contradicting advice ("share the setup" vs "isolate per test"), computed as well as declared.
+- **The proposals reach the artifacts people read** — findings' proposals become `decision.json` actions (a bare verb without a proposal deliberately does not), ride into the remediation brief the plan is generated from, and render as a ranked, capped list — the artifact keeps everything, the render shows the top slice, because an audit emitting four hundred proposals has produced zero.
+
 ## [2.70.8] — 2026-08-05
 
 ### Changed

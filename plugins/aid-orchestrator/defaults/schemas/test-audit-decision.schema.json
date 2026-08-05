@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-decision.schema.json",
-  "title": "AID Test Portfolio Audit — Consolidated Decision Artifact",
-  "$comment": "producer: aid-test-audit-consolidate.sh (via lib/aid-test-audit-decision.sh aid_test_audit_decision_write), consumers: [lib/aid-test-audit-chat-summary.sh, lib/aid-test-audit-write-plan-bridge.sh]. P072 Step 2. This is the CONSOLIDATED decision — a single global conclusion per audit. Per-unit terminal dispositions live in the wave artifacts (test-audit-wave-artifact.schema.json), not here.",
-  "description": "Strict, public-safe decision artifact written once per full-mode audit. Human prose belongs in the rendered report and the evidence files, never in a durable protocol field here — every free-text field is length-bounded and rejects absolute paths.",
+  "title": "AID Test Portfolio Audit \u2014 Consolidated Decision Artifact",
+  "$comment": "producer: aid-test-audit-consolidate.sh (via lib/aid-test-audit-decision.sh aid_test_audit_decision_write), consumers: [lib/aid-test-audit-chat-summary.sh, lib/aid-test-audit-write-plan-bridge.sh]. P072 Step 2. This is the CONSOLIDATED decision \u2014 a single global conclusion per audit. Per-unit terminal dispositions live in the wave artifacts (test-audit-wave-artifact.schema.json), not here.",
+  "description": "Strict, public-safe decision artifact written once per full-mode audit. Human prose belongs in the rendered report and the evidence files, never in a durable protocol field here \u2014 every free-text field is length-bounded and rejects absolute paths.",
   "type": "object",
   "required": [
     "schema_version",
@@ -30,7 +30,7 @@
         "complete",
         "incomplete"
       ],
-      "description": "`incomplete` blocks the --write-plan handoff (lib/aid-test-audit-write-plan-bridge.sh). It is NOT a failure — it is an honest refusal to be treated as remediation-ready."
+      "description": "`incomplete` blocks the --write-plan handoff (lib/aid-test-audit-write-plan-bridge.sh). It is NOT a failure \u2014 it is an honest refusal to be treated as remediation-ready."
     },
     "incomplete_reason": {
       "$ref": "#/$defs/controlled_reason",
@@ -114,7 +114,7 @@
     },
     "actions": {
       "type": "array",
-      "description": "May be empty — a genuinely healthy portfolio proposes nothing. An empty actions[] must never be conflated with audit_status: incomplete.",
+      "description": "May be empty \u2014 a genuinely healthy portfolio proposes nothing. An empty actions[] must never be conflated with audit_status: incomplete.",
       "items": {
         "type": "object",
         "required": [
@@ -135,7 +135,11 @@
               "split",
               "parallelize",
               "keep_serial",
-              "measure"
+              "measure",
+              "add",
+              "strengthen",
+              "rewire",
+              "quarantine"
             ]
           },
           "targets": {
@@ -165,6 +169,81 @@
           },
           "impact": {
             "$ref": "#/$defs/impact"
+          },
+          "proposal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable fingerprint (sha256 of action+targets+change, first 16 hex). Without identity, every audit re-proposes the two hundred things the owner already declined, and a proposal cannot go stale when its file changes."
+          },
+          "change": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The concrete edit, naming file:line. Carried from the finding's proposal."
+          },
+          "effort": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "bucket"
+                ],
+                "properties": {
+                  "bucket": {
+                    "enum": [
+                      "S",
+                      "M",
+                      "L",
+                      "decision-required"
+                    ],
+                    "description": "S: single file, mechanical. M: multiple files or a new fixture/helper. L: test architecture, gate config, or production code. decision-required: a human must rule on intent (delete, merge, coverage adequacy)."
+                  },
+                  "verify_bucket": {
+                    "enum": [
+                      "S",
+                      "M",
+                      "L",
+                      "decision-required"
+                    ],
+                    "description": "Effort to VERIFY the change did not lose anything \u2014 split from the edit itself, because most delete proposals are S to perform and L to verify, and the verification cost is what decides whether it is worth doing."
+                  },
+                  "repeat_count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "How many sites the same mechanical change applies to. 'S x 14 sites' is more truthful than 'M'."
+                  },
+                  "facts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The countable facts that produced the bucket: files touched, production code changed y/n, new helper needed y/n."
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Counted-facts effort buckets; see the proposal contract."
+          },
+          "conflicts_with": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "proposal_ids this action contradicts. Both sides carry the reference; neither is silently dropped."
+          },
+          "declined_previously": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "True when this proposal_id appears in the project's declined ledger (.aid-o/config/test-audit-decisions.yaml). Kept in the artifact for honesty, hidden from the default render."
           }
         }
       }
@@ -305,7 +384,7 @@
           },
           "next_measurement": {
             "$ref": "#/$defs/bounded_text",
-            "description": "Must name a bounded operation this plugin can actually run — not an aspiration."
+            "description": "Must name a bounded operation this plugin can actually run \u2014 not an aspiration."
           }
         }
       }
@@ -320,7 +399,7 @@
         "duplicate_run_unit_ids"
       ],
       "additionalProperties": false,
-      "description": "Computed by the consolidator from the inventory, the dispatch manifest and the wave artifacts — never from a shard's self-reported count.",
+      "description": "Computed by the consolidator from the inventory, the dispatch manifest and the wave artifacts \u2014 never from a shard's self-reported count.",
       "properties": {
         "inventory_count": {
           "type": "integer",
@@ -533,7 +612,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 500,
-      "$comment": "Bounded, public-safe reason text. What is ACTUALLY enforced: length 1-500, no embedded absolute path, and a NAMED set of credential shapes (AWS key id, GitHub/Slack tokens, PEM private-key header, an inline credential assignment with a 12+ character value). This is a deliberately narrow list, not general secret detection — claiming the latter would promise a guarantee no regex can keep. Human prose belongs in the rendered report and evidence files.",
+      "$comment": "Bounded, public-safe reason text. What is ACTUALLY enforced: length 1-500, no embedded absolute path, and a NAMED set of credential shapes (AWS key id, GitHub/Slack tokens, PEM private-key header, an inline credential assignment with a 12+ character value). This is a deliberately narrow list, not general secret detection \u2014 claiming the latter would promise a guarantee no regex can keep. Human prose belongs in the rendered report and evidence files.",
       "allOf": [
         {
           "$comment": "Rejects an embedded absolute path. Human prose belongs in the rendered report and evidence files; this field carries a bounded, public-safe reason only.",
@@ -566,7 +645,7 @@
           }
         },
         {
-          "$comment": "An inline credential assignment with a substantial value: `api_key=…`, `secret: …`, `password=…`, `token=…`. Deliberately requires 12+ characters so a sentence like `the api_key is unset` is not rejected.",
+          "$comment": "An inline credential assignment with a substantial value: `api_key=\u2026`, `secret: \u2026`, `password=\u2026`, `token=\u2026`. Deliberately requires 12+ characters so a sentence like `the api_key is unset` is not rejected.",
           "not": {
             "pattern": "(?i)(api[_-]?key|secret|passwd|password|token)\\s*[:=]\\s*\\S{12,}"
           }
@@ -599,7 +678,7 @@
         "template_context_required",
         "source_unreadable"
       ],
-      "$comment": "Controlled, not free text — a reason a consumer can branch on. Extending this list is a schema change, which is the point: a new reason must be a deliberate contract decision."
+      "$comment": "Controlled, not free text \u2014 a reason a consumer can branch on. Extending this list is a schema change, which is the point: a new reason must be a deliberate contract decision."
     },
     "impact": {
       "type": "object",
@@ -641,7 +720,7 @@
       },
       "allOf": [
         {
-          "$comment": "measured means two comparable runs happened — both endpoints must be real numbers, and there is nothing left to assume.",
+          "$comment": "measured means two comparable runs happened \u2014 both endpoints must be real numbers, and there is nothing left to assume.",
           "if": {
             "properties": {
               "kind": {
@@ -687,7 +766,7 @@
           }
         },
         {
-          "$comment": "`unknown` claims no BENEFIT — which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced. The assumptions rule follows from that same relaxation: when a number IS recorded it must be qualified, because a bare `before_ms` on an unfinished run reads as a measured total; when no number is recorded there is nothing to qualify and assumptions would be clutter.",
+          "$comment": "`unknown` claims no BENEFIT \u2014 which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced. The assumptions rule follows from that same relaxation: when a number IS recorded it must be qualified, because a bare `before_ms` on an unfinished run reads as a measured total; when no number is recorded there is nothing to qualify and assumptions would be clutter.",
           "if": {
             "properties": {
               "kind": {

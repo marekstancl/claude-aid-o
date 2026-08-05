@@ -1011,3 +1011,112 @@ _run_full_profiled() {
   # The whole point: a decision artifact exists and accounts for every unit.
   [ "$(jq -r '[.. | objects | select(has("inventory_count")) | .inventory_count] | first' "$OUT/decision.json")" = "$n" ]
 }
+
+# ─── A finding's proposal reaches the decision, with identity and honesty ───
+
+_disposition_with_proposal() {   # <unit-id>
+  jq -nc --arg id "$1" '
+    {run_unit_id:$id, disposition:"keep",
+     behavior_claim:"guards the FSM transition table",
+     failure_signal:"transition returns the previous state",
+     falsification:{method:"unproved"},
+     uniqueness:"unique", layer:"unit", cheaper_layer_possible:"no",
+     cost:{kind:"unknown", duration_ms:null}, confidence:"medium"}'
+}
+
+_finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
+  jq -nc --arg id "$1" --arg rec "$2" --argjson conf "${3:-[]}" '
+    {run_unit_id:$id, category:"parallel_safety", severity:"high",
+     evidence_refs:["resource-maps/x.json"],
+     recommendation:$rec, confidence:"high",
+     falsification_check:"delete the fixed path write and the map goes clean",
+     proposal:{
+       change:"a.bats:359 writes $ROOT/.aid-o under a fixed path; allocate a per-test temp dir",
+       effort:{bucket:"S", verify_bucket:"M", repeat_count:14,
+               facts:["1 file","no production code","no new helper"]},
+       benefit:{kind:"unknown", critical_path_ms:null,
+                risk_note:null, assumptions:[]},
+       conflicts_with:$conf}}'
+}
+
+@test "a finding with a proposal becomes a decision action carrying change, effort and identity" {
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  printf '%s\n' "$(_disposition_with_proposal "bats:a")" | jq -s -c '.' > "$TEST_TMPDIR/d.json"
+  jq -n --argjson d "$(cat "$TEST_TMPDIR/d.json")" \
+        --argjson f "[$(_finding_with_proposal "bats:a" fix)]" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:$f, produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  local act
+  act="$(jq -c '[.actions[] | select(.change != null)] | .[0]' "$OUT/decision.json")"
+  [ "$(jq -r '.action' <<<"$act")" = "fix" ]
+  [[ "$(jq -r '.change' <<<"$act")" == *"a.bats:359"* ]]
+  [ "$(jq -r '.effort.bucket' <<<"$act")" = "S" ]
+  [ "$(jq -r '.effort.verify_bucket' <<<"$act")" = "M" ]
+  # An unknown benefit stays unknown — never upgraded to a number.
+  [ "$(jq -r '.impact.kind' <<<"$act")" = "unknown" ]
+  [ "$(jq -r '.impact.after_ms' <<<"$act")" = "null" ]
+  # Identity: 16 hex, stable across runs.
+  [[ "$(jq -r '.proposal_id' <<<"$act")" =~ ^[0-9a-f]{16}$ ]]
+}
+
+@test "a previously declined proposal is marked, kept, and never silently re-litigated" {
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" \
+        --argjson f "[$(_finding_with_proposal "bats:a" fix)]" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:$f, produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  # First run to learn the id, then decline it.
+  run _run_full
+  [ "$status" -eq 0 ]
+  local pid; pid="$(jq -r '[.actions[] | select(.change != null)] | .[0].proposal_id' "$OUT/decision.json")"
+  mkdir -p "$PROJ/.aid-o/config"
+  printf 'declined:\n  - "%s"\n' "$pid" > "$PROJ/.aid-o/config/test-audit-decisions.yaml"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.actions[] | select(.change != null)] | .[0].declined_previously' "$OUT/decision.json")" = "true" ]
+}
+
+@test "a remove and a fix sharing a target carry the conflict on BOTH sides" {
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" \
+        --argjson f "[$(_finding_with_proposal "bats:a" fix), $(_finding_with_proposal "bats:a" remove)]" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:$f, produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  local n_with_conf
+  n_with_conf="$(jq -r '[.actions[] | select(.change != null) | select((.conflicts_with // []) | length > 0)] | length' "$OUT/decision.json")"
+  [ "$n_with_conf" -eq 2 ]
+}
+
+@test "a finding with NO proposal produces no action — a bare verb is not remediation" {
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"parallel_safety", severity:"high",
+                evidence_refs:["x"], recommendation:"fix", confidence:"low",
+                falsification_check:"none"}],
+     produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.actions[] | select(.change != null)] | length' "$OUT/decision.json")" = "0" ]
+}

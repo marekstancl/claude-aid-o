@@ -1,57 +1,235 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-consolidated-findings.schema.json",
-  "title": "AID Test Portfolio Audit — Consolidated Findings",
+  "title": "AID Test Portfolio Audit \u2014 Consolidated Findings",
   "$comment": "producer: aid-test-audit-consolidate.sh, consumers: [aid-test-audit-chat-summary.sh, aid-test-audit-write-plan-bridge.sh]",
-  "description": "Deterministic merge of all wave artifacts by stable ID (run_unit_id+category+evidence_refs) — never by prose similarity. Exact duplicates collapse; conflicting recommendations remain visible, tagged unresolved_conflict:true.",
+  "description": "Deterministic merge of all wave artifacts by stable ID (run_unit_id+category+evidence_refs) \u2014 never by prose similarity. Exact duplicates collapse; conflicting recommendations remain visible, tagged unresolved_conflict:true.",
   "type": "object",
-  "required": ["schema_version", "audit_id", "generated_at", "findings"],
+  "required": [
+    "schema_version",
+    "audit_id",
+    "generated_at",
+    "findings"
+  ],
   "properties": {
-    "schema_version": { "const": "1.0.0" },
-    "audit_id": { "type": "string", "minLength": 1 },
-    "generated_at": { "type": "string", "format": "date-time" },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "audit_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "findings": {
       "type": "array",
-      "items": { "$ref": "#/$defs/finding" }
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
     }
   },
   "additionalProperties": false,
   "$defs": {
     "finding": {
       "type": "object",
-      "required": ["finding_id", "run_unit_id", "category", "severity", "evidence_refs", "recommendation", "confidence", "falsification_check"],
+      "required": [
+        "finding_id",
+        "run_unit_id",
+        "category",
+        "severity",
+        "evidence_refs",
+        "recommendation",
+        "confidence",
+        "falsification_check"
+      ],
       "properties": {
         "finding_id": {
           "type": "string",
           "minLength": 1,
-          "description": "Hash of run_unit_id+category — the basis for deterministic dedup/ordering."
+          "description": "Hash of run_unit_id+category \u2014 the basis for deterministic dedup/ordering."
         },
-        "run_unit_id": { "type": "string", "minLength": 1 },
-        "category": { "type": "string", "minLength": 1 },
-        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "run_unit_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
         "evidence_refs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         },
         "recommendation": {
           "type": "string",
-          "enum": ["keep", "fix", "split", "merge", "remove", "quarantine", "measure"]
+          "enum": [
+            "keep",
+            "fix",
+            "split",
+            "merge",
+            "remove",
+            "quarantine",
+            "measure",
+            "add",
+            "strengthen",
+            "rewire"
+          ]
         },
-        "owner": { "type": "string" },
-        "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+        "owner": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
         "falsification_check": {
           "type": "string",
           "minLength": 1,
-          "description": "Required for remove/quarantine recommendations — the consolidator rejects a removal/quarantine finding lacking this."
+          "description": "Required for remove/quarantine recommendations \u2014 the consolidator rejects a removal/quarantine finding lacking this."
         },
-        "unresolved_conflict": { "type": "boolean" }
+        "unresolved_conflict": {
+          "type": "boolean"
+        },
+        "proposal": {
+          "description": "A concrete remediation proposal. Not a label \u2014 the change names the file:line and the exact edit, the benefit says how it was obtained (and 'unknown' is a normal answer), and the effort is counted facts, never invented hours. Analysts that cannot fill these honestly must omit the proposal rather than decorate a guess.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "change",
+            "effort",
+            "benefit"
+          ],
+          "properties": {
+            "change": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The exact edit, naming file:line \u2014 'test-aid-fsm.bats:359 writes $TEST_PROJECT_ROOT/.aid-o under a fixed path; allocate a per-test temp dir instead'. Never 'improve isolation'."
+            },
+            "effort": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "bucket"
+              ],
+              "properties": {
+                "bucket": {
+                  "enum": [
+                    "S",
+                    "M",
+                    "L",
+                    "decision-required"
+                  ],
+                  "description": "S: single file, mechanical. M: multiple files or a new fixture/helper. L: test architecture, gate config, or production code. decision-required: a human must rule on intent (delete, merge, coverage adequacy)."
+                },
+                "verify_bucket": {
+                  "enum": [
+                    "S",
+                    "M",
+                    "L",
+                    "decision-required"
+                  ],
+                  "description": "Effort to VERIFY the change did not lose anything \u2014 split from the edit itself, because most delete proposals are S to perform and L to verify, and the verification cost is what decides whether it is worth doing."
+                },
+                "repeat_count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "How many sites the same mechanical change applies to. 'S x 14 sites' is more truthful than 'M'."
+                },
+                "facts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The countable facts that produced the bucket: files touched, production code changed y/n, new helper needed y/n."
+                }
+              }
+            },
+            "benefit": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "measured",
+                    "extrapolated",
+                    "estimated",
+                    "unknown"
+                  ],
+                  "description": "measured: from this run's own timings/pilot. extrapolated: measured on a sample and scaled \u2014 name both. estimated: from a stated model. unknown: emit no number at all. An audit that never says unknown is not measuring."
+                },
+                "critical_path_ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Seconds saved on the CRITICAL PATH, not summed CPU \u2014 saving 30s beside a 5-minute serial test saves nothing. Null unless kind supports a number."
+                },
+                "risk_note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "What newly goes undetected (for remove/merge) or newly becomes detected (for add/strengthen). The only unit available where time is not the point."
+                },
+                "assumptions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "conflicts_with": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "finding_ids/proposal_ids this proposal contradicts \u2014 'share the setup' contradicts 'isolate per test'. Emit the conflict; never both sides as independent advice."
+            }
+          }
+        }
       },
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "recommendation": { "enum": ["remove", "quarantine"] } } },
-          "then": { "properties": { "falsification_check": { "minLength": 1 } } }
+          "if": {
+            "properties": {
+              "recommendation": {
+                "enum": [
+                  "remove",
+                  "quarantine"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "falsification_check": {
+                "minLength": 1
+              }
+            }
+          }
         }
       ]
     }
