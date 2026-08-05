@@ -5740,3 +5740,81 @@ _ancillary_commit_on_plan() {
   run grep -c 'plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "${candidate}.${merged_head}"' "$PLAN_FSM_CLI"
   [ "$output" = "1" ]
 }
+
+# =============================================================================
+# ─── P073 Step 8 (remainder): forced plan-close ─────────────────────────────
+# =============================================================================
+#
+# plan-close is the TERMINAL operation. A plan that cannot be closed cannot be
+# abandoned either — that is the P082 stranding the force backdoor exists for.
+# Its bookkeeping-completeness checks are therefore forceable; the physical
+# ones are not. And a forced close whose lifecycle receipt cannot be committed
+# must NOT claim `closed`, because aid-lifecycle.sh defines that word as
+# receipt-committed-and-reachable.
+
+_FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
+
+@test "P073 Step 8: a blocking close-check REFUSES without --force and writes no marker" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "P073 Step 8: the SAME blocking close-check passes under --force, with a waiver" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close --force --force-reason "$_FORCE_REASON"
+  [ "$status" -eq 0 ]
+  [ -f "$(_marker)" ]
+  # The check output is still printed — force is the second route, not a way
+  # to avoid looking at what failed.
+  [[ "$output" == *"FORCE: bypassing precondition 'close_check_complete'"* ]]
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o' -name 'waiver-plan-*.json' | wc -l"
+  [ "$(echo "$output" | tr -d ' ')" = "1" ]
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o' -name 'waiver-plan-*.json' -exec jq -r '.bypassed_preconditions // .bypassed // empty' {} +"
+  [[ "$output" == *"close_check_complete"* ]]
+}
+
+@test "P073 Step 8: a forced close still refuses without a reason, and changes nothing" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close --force
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "P073 Step 8: a missing lifecycle manifest closes under --force as closed_pending_receipt" {
+  # The stranding scenario itself: the tracked manifest was deleted by hand.
+  # Without force this is a blocking defect (and stays one).
+  _seed_closable
+  rm -f "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  git -C "$TEST_PROJECT_ROOT" rm -q --cached ".aid-lifecycle/manifests/${PLAN_ID}.yaml" 2>/dev/null || true
+
+  _close
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+
+  _close --force --force-reason "$_FORCE_REASON"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RECONCILIATION REQUIRED"* ]]
+  [[ "$output" == *"CLOSED PENDING RECEIPT"* ]]
+  # The word `closed` alone is never claimed while the receipt is missing.
+  [[ "$output" != *"CLOSED: ${PLAN_ID} is closed"* ]]
+}
+
+@test "P073 Step 8: closed_pending_receipt is a legal lifecycle-receipt state" {
+  local schema="$AID_PLUGIN_PATH/defaults/schemas/plan-lifecycle-receipt.schema.json"
+  run bash -c "jq -r '.. | .enum? // empty | .[]' '$schema' | grep -c '^closed_pending_receipt\$'"
+  [ "$output" = "1" ]
+}
+
+@test "P073 Step 8: force cannot bypass a HARD precondition on close" {
+  # A physical repository state has nothing on the other side to complete.
+  _seed_closable
+  rm -f "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID/plan-boundary-manifest.json"
+  _close --force --force-reason "$_FORCE_REASON"
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+}

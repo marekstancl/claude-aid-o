@@ -10,7 +10,7 @@
     "repo_id": { "type": "string", "minLength": 1 },
     "plan_id": { "type": "string", "pattern": "^P[0-9]+$" },
     "plan_manifest_sha": { "type": "string" },
-    "state": { "enum": ["closed", "delivered-but-unreconciled", "legacy-unverifiable", "closing_pending_commit"] },
+    "state": { "enum": ["closed", "closed_pending_receipt", "delivered-but-unreconciled", "legacy-unverifiable", "closing_pending_commit"] },
     "target_branch": { "type": "string" },
     "finalized_at": { "type": "string" },
     "aid_version": { "type": "string" },

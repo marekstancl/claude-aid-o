@@ -285,8 +285,14 @@ _force() {
     plan_manifest_init P900 plan/P900 main "'"$head"'" "'"$head"'" plan_branch >/dev/null
     # The aggregator enforces the P064 identity invariant, so the manifest has
     # to carry a real frozen candidate pointing at this evidence dir.
+    # P073 Step 15 made the protected-path set part of the freeze contract:
+    # the 7th and 8th arguments are REQUIRED, because a freeze with no
+    # protected set cannot support review equivalence and must not look as if
+    # it does. This fixture predates that and was calling the 6-argument form.
+    printf "%s\0" "scripts/a.sh" > "'"$BATS_TEST_TMPDIR"'/force-prot.nul"
     plan_manifest_freeze_candidate P900 "'"$head"'" "'"$head"'" \
-      R-P900-final-1 ".aid-o/work/evidence/P900/R-P900-final-1" "2026-08-05T00:00:00Z" >/dev/null
+      R-P900-final-1 ".aid-o/work/evidence/P900/R-P900-final-1" "2026-08-05T00:00:00Z" \
+      "'"$BATS_TEST_TMPDIR"'/force-prot.nul" true >/dev/null
   '
   [ "$status" -eq 0 ]
 

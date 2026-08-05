@@ -6645,6 +6645,19 @@ cmd_plan_close() {
                      --close-op-id "$op_id")
   [[ "$skip_delivery_report" -eq 1 ]] && _cc_args+=(--skip-delivery-report)
   ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "${_cc_args[@]}" 2>&1)" || ccrc=$?
+  # P073 Step 8: the close-check is BOOKKEEPING COMPLETENESS — unreachable
+  # receipts, missing delivery records. It is the exact check that stranded
+  # P082: plan-close is the terminal operation a PM must always be able to
+  # complete, and a plan that cannot be closed cannot be abandoned either.
+  # Classified forceable, so the PM proceeds with an audited waiver instead of
+  # hand-editing state. The full check output is still printed FIRST, forced or
+  # not: the force is offered as the second route, never as a way to not look.
+  if [[ "$ccrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
+    printf '%s\n' "$ccout" >&2
+    if _pfsm_precondition "close_check_complete" forceable false; then
+      ccrc=0
+    fi
+  fi
   if [[ "$ccrc" -ne 0 ]]; then
     _pfsm_close_release
     if [[ -f "$marker" ]]; then
@@ -6655,6 +6668,18 @@ cmd_plan_close() {
     printf '%s\n' "$ccout" >&2
     exit 1
   fi
+
+  # P073 Step 8: mint the waiver BEFORE the durable close work, not after.
+  # A bypass that completes the operation and only then tries to record itself
+  # would, on a failed receipt write, leave a plan closed with nothing saying
+  # why — the exact "detector without enforcement" shape. Refusing here costs
+  # nothing yet: no marker, no commit, no state change has happened.
+  #
+  # NOTE: this runs unconditionally, not only when something was bypassed.
+  # `_pfsm_commit_force` returns 0 immediately when --force is absent, and
+  # `_pfsm_handle_force` itself reports "bypassed nothing" when the force was
+  # a no-op — the two cases stay distinguishable in the operator's output.
+  _pfsm_commit_force "plan-close" "$plan_id" "$root" || { _pfsm_close_release; exit 1; }
 
   # ── 3. intent (op_id was derived above, for the check's exclusion) ────────
   local phase="none" prc=0
@@ -6687,12 +6712,36 @@ cmd_plan_close() {
       # plan-branch plan's MANDATORY receipt into an optional one and closed the
       # plan with no durable proof. This command only ever closes plan-branch
       # plans, so the absence is a blocking defect, not a legacy shape.
-      _pfsm_close_release
-      echo "PRECONDITION FAIL: plan-close: ${plan_id} has no .aid-lifecycle manifest at ${lc_manifest}, but the receipt is MANDATORY for a plan-branch close — refusing to declare the plan closed with no durable proof. NO marker was written and ${plan_id} stays ${cur_state}." >&2
-      exit 1
-    else
+      # P073 Step 8: forceable — this IS the stranding scenario the backdoor
+      # exists for (a manually deleted manifest, a branch removed by hand). The
+      # close still records what it could not prove.
+      if [[ "$_PFSM_FORCE" -eq 1 ]] && _pfsm_precondition "lifecycle_manifest_present" forceable false; then
+        lifecycle_note="closed_pending_receipt"
+        applied_sha="$target_head"
+        echo "RECONCILIATION REQUIRED: ${plan_id} has no .aid-lifecycle manifest, so this close carries NO durable receipt and is recorded as closed_pending_receipt. The force waiver names the bypass; restore the manifest and re-run plan-close to converge." >&2
+      else
+        _pfsm_close_release
+        echo "PRECONDITION FAIL: plan-close: ${plan_id} has no .aid-lifecycle manifest at ${lc_manifest}, but the receipt is MANDATORY for a plan-branch close — refusing to declare the plan closed with no durable proof. NO marker was written and ${plan_id} stays ${cur_state}." >&2
+        exit 1
+      fi
+    fi
+    if [[ -f "$lc_manifest" ]]; then
       local lrc=0 lout=""
       lout="$(aid_lifecycle_plan_close "$plan_id" "$root" "$target_head" 2>&1)" || lrc=$?
+      if [[ "$lrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
+        printf '%s\n' "$lout" >&2
+        if _pfsm_precondition "lifecycle_receipt_committed" forceable false; then
+          # LIFECYCLE TRUTHFULNESS. `aid-lifecycle.sh` defines `closed` as
+          # receipt-committed-and-reachable, so a forced close whose receipt
+          # write is the broken operation must NOT claim it. It records
+          # `closed_pending_receipt` — a real terminal state for the FSM, and an
+          # honest one for the lifecycle: the follow-up receipt commit flips it
+          # to `closed` once the write path is repaired.
+          lrc=0
+          lifecycle_note="closed_pending_receipt"
+          echo "RECONCILIATION REQUIRED: the lifecycle receipt for ${plan_id} could NOT be committed, so this close is recorded as closed_pending_receipt, not closed. The force waiver is written locally; attach the receipt once the write path is repaired (re-running plan-close converges)." >&2
+        fi
+      fi
       if [[ "$lrc" -ne 0 ]]; then
         _pfsm_close_release
         echo "PRECONDITION FAIL: plan-close: the lifecycle receipt for ${plan_id} was NOT committed (rc=${lrc}) — for a plan_branch plan the receipt is MANDATORY, not best-effort, so NO close marker was written and ${plan_id} stays ${cur_state}. Detail: ${lout}" >&2
@@ -6793,7 +6842,14 @@ cmd_plan_close() {
 
   echo "$marker"
   if [[ "$close_mode" == "merge" ]]; then
-    echo "CLOSED: ${plan_id} is closed (${lifecycle_note}); the merge ${merge_commit:-<none>} is published on ${target_branch} and the close marker is bound to ${applied_sha}." >&2
+    if [[ "$lifecycle_note" == "closed_pending_receipt" ]]; then
+      # NEVER the word "closed" alone here. `aid-lifecycle.sh` defines closed as
+      # receipt-committed-and-reachable; saying it while the receipt is missing
+      # would be the one contradiction this whole path exists to avoid.
+      echo "CLOSED PENDING RECEIPT: ${plan_id} is terminal, but its lifecycle receipt is NOT committed — the durable proof is missing and the force waiver records why. The merge ${merge_commit:-<none>} is published on ${target_branch}; re-run plan-close once the receipt path is repaired to converge to closed." >&2
+    else
+      echo "CLOSED: ${plan_id} is closed (${lifecycle_note}); the merge ${merge_commit:-<none>} is published on ${target_branch} and the close marker is bound to ${applied_sha}." >&2
+    fi
   else
     echo "CLOSED (ABORTED): ${plan_id} closed by abort (${lifecycle_note}); ${target_branch} is unchanged at ${applied_sha}, the abandoned candidate was ${candidate}, and the abort record is in ${run_dir_rel}/." >&2
   fi
