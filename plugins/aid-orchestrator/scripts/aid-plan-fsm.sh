@@ -5910,7 +5910,12 @@ cmd_plan_merge_to_main() {
   # a resume of the same candidate keeps the identical key (determinism holds),
   # while a different candidate is a different operation. The candidate sha never
   # contains ':', so the key stays parseable.
-  local op_id="${op_id_opt:-$(plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "$candidate")}"
+  # P073 Step 18: the key covers the head being MERGED, not only the candidate.
+  # A candidate-path merge and an accepted-head merge of the same candidate are
+  # different immutable operations; sharing a key would let a resume of one be
+  # read as a resume of the other. `$merged_head` equals `$candidate` on the
+  # normal path, so pre-P073 keys are unchanged there.
+  local op_id="${op_id_opt:-$(plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "${candidate}.${merged_head}")}"
   local phase="none" prc=0
   phase="$(plan_op_reconcile "$plan_id" "$op_id")" || prc=$?
   local resumed_merge=""
@@ -6001,7 +6006,29 @@ cmd_plan_merge_to_main() {
     # Already published by an earlier attempt of THIS op — never a second merge.
     merge_commit="$resumed_merge"
     merged_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null)"
-    echo "RESUME: the plan merge ${merge_commit} is already published on ${target_branch} — skipping the merge and continuing with the lifecycle bindings, the tag and the push." >&2
+
+    # P073 Step 18: PROVE the published merge is the one we would publish now,
+    # before sealing anything that describes it. Without this, a resume seals
+    # `merged_head`/`review_equivalence` computed from the CURRENT plan head
+    # while the published merge may have had the other second parent — the
+    # close receipt would then attest a merge that never happened. Two concrete
+    # ways that happens: a candidate merge published, then the plan branch
+    # accepts an ancillary head before the resume; or an accepted-head merge
+    # published, then the plan ref reset back to the candidate.
+    local rp_line rp_p1 rp_p2 rp_rest rp_expected_tree rp_mt rp_rc=0
+    rp_line="$(git -C "$root" rev-list --parents -n1 "$merge_commit" 2>/dev/null)" || rp_line=""
+    read -r _ rp_p1 rp_p2 rp_rest <<< "$rp_line"
+    if [[ "$rp_p1" != "$target_head" || "$rp_p2" != "$merged_head" || -n "${rp_rest:-}" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has parents (${rp_p1:-<none>}, ${rp_p2:-<none>}), not the (${target_head}, ${merged_head}) this run would publish — refusing to seal close evidence describing a merge that was not made. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    rp_mt="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$merged_head" 2>&1)" || rp_rc=$?
+    rp_expected_tree="$(printf '%s' "$rp_mt" | head -1 | tr -d '[:space:]')"
+    if [[ "$rp_rc" -ne 0 || ! "$rp_expected_tree" =~ ^[0-9a-f]{40}$ || "$rp_expected_tree" != "$merged_tree" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has tree ${merged_tree:-<unresolved>}, not the deterministic merge tree for (${target_head}, ${merged_head}) — refusing to attest it. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    echo "RESUME: the plan merge ${merge_commit} is already published on ${target_branch} with the expected parents and tree — skipping the merge and continuing with the lifecycle bindings, the tag and the push." >&2
   else
     # Merge TREE first — no ref moves, no worktree is touched, no MERGE_HEAD is
     # created, so a conflict costs nothing and leaves nothing to abort.
@@ -7371,13 +7398,45 @@ _pfsm_recover_plan_final_receipt() {
   #    candidate`, i.e. its first parent is the exact frozen target head and
   #    its second parent is exactly the candidate. Anything less exact is
   #    refused rather than guessed. ──────────────────────────────────────────
+  # P073 Step 18: an equivalence-path merge has SECOND PARENT = the accepted
+  # head, not the candidate. Recovery must look for the head that was actually
+  # merged, or it would refuse to recognise a merge it published itself — the
+  # candidate is still what proves reachability, and the accepted head is only
+  # honoured when the manifest recorded one.
+  local rec_head="$candidate" rec_accepted=""
+  rec_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || rec_accepted=""
+  [[ "$rec_accepted" == "null" ]] && rec_accepted=""
+  if [[ -n "$rec_accepted" && "$rec_accepted" != "$candidate" ]] \
+     && git -C "$root" merge-base --is-ancestor "$candidate" "$rec_accepted" 2>/dev/null; then
+    # Ancestry alone is not enough: it would let ANY descendant recorded in the
+    # manifest redefine which merge shape recovery looks for. The receipt must
+    # exist, hash to the recorded digest, and name this candidate and this head
+    # — the same proof the merge itself demanded.
+    local rec_rp rec_rs rec_now rec_rc rec_rh
+    rec_rp="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || rec_rp=""
+    rec_rs="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || rec_rs=""
+    [[ "$rec_rp" == "null" ]] && rec_rp=""
+    [[ "$rec_rs" == "null" ]] && rec_rs=""
+    if [[ -n "$rec_rp" && -r "${root}/${rec_rp}" ]]; then
+      rec_now="sha256:$(sha256sum "${root}/${rec_rp}" | awk '{print $1}')"
+      rec_rc="$(jq -r '.candidate_sha // ""' "${root}/${rec_rp}" 2>/dev/null)" || rec_rc=""
+      rec_rh="$(jq -r '.accepted_head // ""' "${root}/${rec_rp}" 2>/dev/null)" || rec_rh=""
+      if [[ "$rec_now" == "$rec_rs" && "$rec_rc" == "$candidate" && "$rec_rh" == "$rec_accepted" ]]; then
+        rec_head="$rec_accepted"
+      fi
+    fi
+    if [[ "$rec_head" == "$candidate" ]]; then
+      echo "NOTE: ${plan_id} records accepted_head ${rec_accepted} but no receipt proves it here (a fresh clone carries no runtime acceptance binding) — recovery looks for a merge of the CANDIDATE. If the published merge used the accepted head, recovery will refuse rather than guess." >&2
+    fi
+  fi
+
   local merged=0 merge_commit="" merge_tag="none"
   if git -C "$root" merge-base --is-ancestor "$candidate" "$target_now" 2>/dev/null; then
     merged=1
     local mline mc mp1 mp2 mmatches=0
     while IFS=' ' read -r mc mp1 mp2 _rest; do
       [[ -n "$mc" ]] || continue
-      [[ "$mp1" == "$target_head" && "$mp2" == "$candidate" && -z "$_rest" ]] || continue
+      [[ "$mp1" == "$target_head" && "$mp2" == "$rec_head" && -z "$_rest" ]] || continue
       mmatches=$((mmatches + 1)); merge_commit="$mc"
     done < <(git -C "$root" rev-list --parents "${target_head}..${target_now}" 2>/dev/null)
     [[ "$mmatches" -eq 1 ]] || { echo "PRECONDITION FAIL: ${plan_id} candidate ${candidate} is reachable from ${target} but no single commit uniquely matches this plan's merge shape (matches=${mmatches}) — refusing to guess the merge commit." >&2; return 1; }
@@ -7388,7 +7447,7 @@ _pfsm_recover_plan_final_receipt() {
     # commit's tree to equal it, exactly as the live merge's own tree-identity
     # check does.
     local expected_tree actual_merge_tree mt_out mt_rc=0
-    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$candidate" 2>&1)" || mt_rc=$?
+    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$rec_head" 2>&1)" || mt_rc=$?
     expected_tree="$(printf '%s' "$mt_out" | head -1 | tr -d '[:space:]')"
     [[ "$mt_rc" -eq 0 && "$expected_tree" =~ ^[0-9a-f]{40}$ ]] || { echo "PRECONDITION FAIL: ${plan_id} candidate ${candidate} does not merge cleanly into ${target_head} — the discovered merge commit cannot be the deterministic plan merge; refusing to trust it." >&2; return 1; }
     actual_merge_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null || true)"

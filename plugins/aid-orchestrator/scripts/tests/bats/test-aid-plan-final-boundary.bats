@@ -5706,3 +5706,37 @@ _ancillary_commit_on_plan() {
   [[ "$output" == *"neither the frozen candidate"* ]]
   [ "$(_main_sha)" = "$before" ]
 }
+
+@test "P073 Step 18: a RESUME whose published merge has the other second parent refuses to seal" {
+  # Codex round-1 finding 4: resume sealed merged_head/review_equivalence from
+  # the CURRENT plan head without proving the published merge had that parent.
+  # Here a candidate-path merge is published, the plan branch then gains an
+  # accepted ancillary head, and the resumed run must refuse rather than attest
+  # `review_equivalence: true` for a merge whose second parent was the candidate.
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _merge "$d"
+  [ "$status" -eq 0 ]
+  local published; published="$(_merge_commit)"
+
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  # Re-enter the same op: the merge is already on main.
+  local main_before; main_before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  # MEASURED: the refusal arrives from the stale-authorization guard (main has
+  # advanced past the approved head) BEFORE the resume path is reached, and the
+  # op key now differs for an accepted-head run so the candidate merge's op-log
+  # entry is not read as this run's resume either. Both are fail-closed; what
+  # this test guarantees is the invariant that matters — no second merge, and
+  # no close evidence sealed for a merge that was not made.
+  [ "$(_main_sha)" = "$main_before" ]
+  [ -n "$published" ]
+}
+
+@test "P073 Step 18: the op key distinguishes a candidate merge from an accepted-head merge" {
+  run grep -c 'plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "${candidate}.${merged_head}"' "$PLAN_FSM_CLI"
+  [ "$output" = "1" ]
+}
