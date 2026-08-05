@@ -1377,6 +1377,76 @@ mismatched one is refused, not treated as "C3 never read it". A forgotten
 silent — the resulting `audit-report.json` will fail `--stage review`'s plan-identity check
 outright, exactly as it should for evidence that never proved which plan it belongs to.
 
+### Review equivalence — an ancillary commit does NOT cost the review (P073)
+
+A completed plan-level review used to die to ANY tracked write after the freeze:
+an audit-log append or a rendered report threw away the whole review even though
+nothing about the delivery had changed. It no longer does.
+
+**When the drift detector invalidates and tells you the difference is
+ancillary-only, run the acceptance instead of re-running the review:**
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage accept-ancillary
+```
+
+That records the moved head as review-equivalent to the frozen candidate: one
+receipt in the plan-final run directory, bound in the manifest, and
+`candidate_sha` is left byte-identical. `--stage review` and `--stage c4` then
+proceed, and `plan-merge-to-main` merges the accepted head after re-verifying
+equivalence live.
+
+**Read the refusal before reaching for it.** The recovery hint appears ONLY when
+the difference really is ancillary-only. If the message does not name
+`accept-ancillary`, the change touched the protected delivery surface and it is
+a FIX, not something to accept: commit the fix, then `--stage sync`,
+`--stage freeze`, `--stage gates`, `--stage review` against the NEW candidate.
+
+Two more things worth knowing:
+
+- Only the EXACT accepted head is tolerated. One further commit — even another
+  ancillary one — invalidates again and needs a fresh acceptance.
+- A plan frozen before P073 has no protected path set, so equivalence is simply
+  unavailable and any movement invalidates exactly as it always did. The
+  refusal says so; do not try to force it.
+
+### The PM force backdoor (P073)
+
+Every plan-level precondition is classified. A **forceable** one is bookkeeping
+— a dirty worktree, an unshared source plan, an incomplete close. A **hard** one
+is identity, evidence integrity or PM authorization, and no flag bypasses it.
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-close {plan_id} \
+  --force --force-reason "why this must proceed despite the refusal"
+```
+
+The reason is mandatory and must be at least 20 characters — the waiver is a
+forensic record, and the receipt is written BEFORE the command proceeds, so a
+force that cannot be recorded is refused rather than performed silently.
+
+**Always print and read the normal refusal first.** It names its own recovery;
+force is the second route, never the first. If the refusal says FORCE CANNOT
+BYPASS, stop — there is nothing on the other side to complete, and the message
+names the repair.
+
+`plan-close` under force can end in `closed_pending_receipt` rather than
+`closed` when the lifecycle receipt itself is what is broken. That is not a
+failure: the plan is terminal, the proof is missing, and re-running `plan-close`
+once the write path is repaired converges it to `closed`.
+
+### Retiring a stale EPIC run (P073)
+
+When an EPIC's FSM run is stale and `aid-fsm.sh init` refuses as a duplicate, do
+NOT delete state files by hand:
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-state {plan_id} --supersede-epic {epic_id}
+```
+
+This archives the state file beside its evidence and authorises exactly ONE
+re-initialisation. Evidence artifacts are never touched.
+
 ### Plan Boundary: Scanner Memory Scan
 
 After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
