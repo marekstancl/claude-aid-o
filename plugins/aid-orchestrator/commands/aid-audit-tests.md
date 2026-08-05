@@ -332,4 +332,31 @@ label attached, so it can never be read as a measured one.
 - Never writes to `.aid-o/config/test-catalog.yaml` directly — that is the
   separate, explicit catalog-approval step's job.
 
-**Last Updated:** 2026-08-04
+### Closing the loop: OFFER the approval, do not make the user find it
+
+The approval boundary stays — the catalog is an execution allowlist and a human
+confirms it. What must NOT stay is the user having to know that, or having to
+remember two script names to finish what the audit started.
+
+**After a `full` audit renders its summary, the controller offers the approval
+in one sentence** and, on a plain yes, runs it:
+
+> Katalog je připravený: **174 testů, 54 z nich ověřeně paralelních**.
+> Mám ho schválit, aby se podle něj testy pouštěly?
+
+On yes, run `aid-test-catalog-approve.sh --proposed
+<output-dir>/test-catalog.proposed.yaml --project-root <root>` followed by
+`aid-test-catalog-confirm-mapping.sh` (read the printed hash, pass it back).
+Report the result in one line.
+
+**Name what would be lost, before asking.** If approving would revoke evidence
+the current catalog holds — units the new proposal marks `unknown` that the
+approved one has proven — say how many and which, because that is a real cost
+and the approval script will refuse without an explicit override. Stage 1c has
+already carried forward everything it safely could, so a surviving revocation
+is a genuine change, not an artifact.
+
+Only then offer the remediation plan. Two questions, in the order the user
+cares about: first make the tests run right, then decide what to fix.
+
+**Last Updated:** 2026-08-05

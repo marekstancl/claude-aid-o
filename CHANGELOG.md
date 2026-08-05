@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.70.8] — 2026-08-05
+
+### Changed
+- **The audit now offers the catalog approval instead of leaving it on the floor** — it produces a proposed catalog and, by design, never writes the approved one; that boundary is right, because the catalog is an execution allowlist. What was wrong is that finishing the job then required knowing two script names. The controller now says what the catalog holds, asks whether to approve it, runs both steps on a plain yes, and names anything the approval would revoke before asking. Only then does it offer the remediation plan — first make the tests run right, then decide what to fix.
+
 ## [2.70.7] — 2026-08-05
 
 > The audit could prove which tests are safe to run side by side, and had no way
