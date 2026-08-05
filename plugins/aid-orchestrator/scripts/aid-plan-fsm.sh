@@ -6040,14 +6040,21 @@ cmd_plan_merge_to_main() {
     local rp_line rp_p1 rp_p2 rp_rest rp_expected_tree rp_mt rp_rc=0
     rp_line="$(git -C "$root" rev-list --parents -n1 "$merge_commit" 2>/dev/null)" || rp_line=""
     read -r _ rp_p1 rp_p2 rp_rest <<< "$rp_line"
-    if [[ "$rp_p1" != "$target_head" || "$rp_p2" != "$merged_head" || -n "${rp_rest:-}" ]]; then
-      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has parents (${rp_p1:-<none>}, ${rp_p2:-<none>}), not the (${target_head}, ${merged_head}) this run would publish — refusing to seal close evidence describing a merge that was not made. ${target_branch} is unchanged." >&2
+    # ANCHOR ON THE FROZEN TARGET HEAD, not the live one. `$target_head` is
+    # read fresh from the branch, and on a resume the branch has ALREADY moved
+    # — to the merge itself and then past it, over the lifecycle commit. The
+    # first parent to expect is therefore the head the candidate was frozen
+    # against, which is exactly what the fresh merge used (the
+    # stale-authorization check makes the two equal at merge time). Comparing
+    # against the live head made every successful resume refuse itself.
+    if [[ "$rp_p1" != "$target_head_frozen" || "$rp_p2" != "$merged_head" || -n "${rp_rest:-}" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has parents (${rp_p1:-<none>}, ${rp_p2:-<none>}), not the (${target_head_frozen}, ${merged_head}) this run would publish — refusing to seal close evidence describing a merge that was not made. ${target_branch} is unchanged." >&2
       exit 1
     fi
-    rp_mt="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$merged_head" 2>&1)" || rp_rc=$?
+    rp_mt="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head_frozen" "$merged_head" 2>&1)" || rp_rc=$?
     rp_expected_tree="$(printf '%s' "$rp_mt" | head -1 | tr -d '[:space:]')"
     if [[ "$rp_rc" -ne 0 || ! "$rp_expected_tree" =~ ^[0-9a-f]{40}$ || "$rp_expected_tree" != "$merged_tree" ]]; then
-      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has tree ${merged_tree:-<unresolved>}, not the deterministic merge tree for (${target_head}, ${merged_head}) — refusing to attest it. ${target_branch} is unchanged." >&2
+      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has tree ${merged_tree:-<unresolved>}, not the deterministic merge tree for (${target_head_frozen}, ${merged_head}) — refusing to attest it. ${target_branch} is unchanged." >&2
       exit 1
     fi
     echo "RESUME: the plan merge ${merge_commit} is already published on ${target_branch} with the expected parents and tree — skipping the merge and continuing with the lifecycle bindings, the tag and the push." >&2
