@@ -1383,7 +1383,8 @@ A completed plan-level review used to die to ANY tracked write after the freeze:
 an audit-log append or a rendered report threw away the whole review even though
 nothing about the delivery had changed. It no longer does.
 
-**Preconditions — all three, or the stage refuses:**
+**Preconditions — all three are required for acceptance. An unmoved head is a
+no-op; the other two REFUSE:**
 
 1. The plan has a FROZEN candidate (`--stage freeze` ran).
 2. The plan branch head MOVED off that candidate. Acceptance at an unmoved head
@@ -1409,9 +1410,19 @@ proceed, and `plan-merge-to-main` merges the accepted head after re-verifying
 equivalence live against the current policy.
 
 **Read the refusal before reaching for it.** The recovery hint appears ONLY when
-the difference really is ancillary-only. If the message does not name
-`accept-ancillary`, the change touched the protected delivery surface and it is
-a FIX, not something to accept. The recovery is the FULL stage chain against the
+the difference really is ancillary-only, so its presence is a reliable green
+light. Its ABSENCE is not one single diagnosis — read what the message actually
+says:
+
+- It names PROTECTED paths → the change touched the delivery surface. That is a
+  FIX, and the full recovery chain below applies.
+- It says equivalence is UNAVAILABLE → nothing is wrong with your change; this
+  freeze simply cannot support acceptance (legacy freeze, or a protected set
+  that could not be completed). Re-freeze, or accept that any movement
+  invalidates for this plan.
+- Anything else → the message names its own repair. Do that, not this.
+
+For a protected-surface FIX, the recovery is the FULL stage chain against the
 new candidate — `inputs` is not optional, `--stage review` refuses without it:
 
 ```
@@ -1446,9 +1457,9 @@ bash {plugin_path}/scripts/aid-plan-fsm.sh plan-close {plan_id} \
   --force --force-reason "why this must proceed despite the refusal"
 ```
 
-The reason is mandatory and at least 20 characters. The waiver receipt is
-written BEFORE the command proceeds, so a force that cannot be recorded is
-refused rather than performed silently. A reason without `--force` is an error,
+The reason is mandatory and at least 20 characters. When a precondition is
+actually bypassed, the waiver receipt is written BEFORE the command proceeds, so
+a force that cannot be recorded is refused rather than performed silently. A reason without `--force` is an error,
 never a silently discarded argument.
 
 **Do not try to predict what is forceable.** Each precondition is classified
