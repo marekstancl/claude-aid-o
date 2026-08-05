@@ -4128,13 +4128,104 @@ _pfsm_review_candidate_drift() {
   local root="$1" plan_id="$2" candidate="$3"
   local plan_head=""
   plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null)" || plan_head=""
+
+  # ── P073 Step 17: the head may also sit at a RECEIPTED accepted head ──────
+  # Two positions are legitimate: the candidate itself, and the exact head a
+  # deliberate `--stage accept-ancillary` recorded. Anything else invalidates
+  # as before — including one commit PAST the accepted head, because only the
+  # head that was actually compared carries a receipt.
+  local accepted="" acc_receipt="" acc_sha=""
+  accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || accepted=""
+  [[ "$accepted" == "null" ]] && accepted=""
+
   if [[ "$plan_head" != "$candidate" ]]; then
-    printf 'plan/%s moved from the frozen candidate %s to %s' "$plan_id" "$candidate" "${plan_head:-<unresolvable>}"
-    return 1
+    local via_equivalence=0
+    if [[ -n "$accepted" && "$plan_head" == "$accepted" ]]; then
+      # The manifest field is state; the receipt is the proof. A binding whose
+      # receipt vanished or changed keeps NO review alive — otherwise deleting
+      # a file would be enough to launder an unreviewed head.
+      acc_receipt="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || acc_receipt=""
+      acc_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || acc_sha=""
+      [[ "$acc_receipt" == "null" ]] && acc_receipt=""
+      [[ "$acc_sha" == "null" ]] && acc_sha=""
+      if [[ -n "$acc_receipt" && -r "${root}/${acc_receipt}" ]]; then
+        local now_sha
+        now_sha="sha256:$(sha256sum "${root}/${acc_receipt}" | awk '{print $1}')"
+        [[ "$now_sha" == "$acc_sha" ]] && via_equivalence=1
+      fi
+      if [[ "$via_equivalence" -eq 0 ]]; then
+        printf 'plan/%s is at the recorded accepted head %s but its review-equivalence receipt (%s) is missing or altered — the acceptance cannot be proven' \
+          "$plan_id" "$plan_head" "${acc_receipt:-<none>}"
+        return 1
+      fi
+      echo "review preserved via review-equivalence receipt ${acc_receipt}: plan/${plan_id} is at the accepted head ${plan_head}, which differs from the frozen candidate ${candidate} in ancillary paths only." >&2
+    else
+      # THE HINT IS CONDITIONAL. Offering `accept-ancillary` for a
+      # protected-surface change would send the operator into a refusal loop:
+      # acceptance re-runs the same predicate and refuses again. It is offered
+      # only when the predicate says the difference really is ancillary-only.
+      local erc=0
+      plan_final_review_equivalent "$root" "$plan_id" >/dev/null 2>&1 || erc=$?
+      printf 'plan/%s moved from the frozen candidate %s to %s' "$plan_id" "$candidate" "${plan_head:-<unresolvable>}"
+      if [[ "$erc" -eq 0 ]]; then
+        printf ' — the difference is ancillary-only, so this review can be preserved: run plan-finalize %s --stage accept-ancillary' "$plan_id"
+      fi
+      return 1
+    fi
   fi
+
+  # ── Dirt: the full ancillary policy, PROTECTED FIRST ─────────────────────
+  # Which classifier applies depends on what the freeze recorded. A plan frozen
+  # before the protected set existed keeps the five legacy runtime paths and
+  # the old any-movement rule, byte for byte — widening the exception set for a
+  # manifest that cannot name its own delivery surface would loosen exactly
+  # where there is no evidence to loosen against.
+  local prot_json="" prot_complete=""
+  prot_json="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || prot_json=""
+  prot_complete="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths_complete' 2>/dev/null)" || prot_complete=""
+  [[ "$prot_json" == "null" ]] && prot_json=""
+
   local dirty=""
-  dirty="$(git -C "$root" status --porcelain --untracked-files=no \
-    | aid_ancillary_filter_porcelain --mode legacy5 || true)"
+  if [[ -z "$prot_json" || "$prot_complete" != "true" ]]; then
+    dirty="$(git -C "$root" status --porcelain --untracked-files=no \
+      | aid_ancillary_filter_porcelain --mode legacy5 || true)"
+  else
+    local status_f="" src=0
+    status_f="$(mktemp "${TMPDIR:-/tmp}/aid-driftstat.XXXXXX")" || {
+      printf 'cannot read the worktree status for the candidate %s' "$candidate"
+      return 1
+    }
+    git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+    if [[ "$src" -ne 0 ]]; then
+      rm -f "$status_f"
+      printf 'git status failed (exit %s) — an unreadable worktree is never treated as clean' "$src"
+      return 1
+    fi
+    local entry xy wpath orig
+    while IFS= read -r -d '' entry; do
+      [[ -n "$entry" ]] || continue
+      xy="${entry:0:2}"
+      wpath="${entry:3}"
+      if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+        dirty+="PROTECTED ${xy} ${wpath}"$'\n'
+      elif ! aid_ancillary_match "$wpath" "$root"; then
+        dirty+="${xy} ${wpath}"$'\n'
+      fi
+      if [[ "$xy" == R* || "$xy" == C* ]]; then
+        orig=""
+        IFS= read -r -d '' orig || true
+        if [[ -n "$orig" ]]; then
+          if _pfsm_path_is_protected "$orig" "$prot_json"; then
+            dirty+="PROTECTED ${xy} ${orig}"$'\n'
+          elif ! aid_ancillary_match "$orig" "$root"; then
+            dirty+="${xy} ${orig}"$'\n'
+          fi
+        fi
+      fi
+    done < "$status_f"
+    rm -f "$status_f"
+  fi
+
   if [[ -n "$dirty" ]]; then
     printf 'uncommitted TRACKED changes against the candidate %s: %s' "$candidate" "$(printf '%s' "$dirty" | tr '\n' ';')"
     return 1
@@ -5108,12 +5199,21 @@ _pfsm_finalize_c4() {
       return 1
     }
 
+  # P073 Step 17: the PM surface must show when a review survived on
+  # equivalence rather than on an unmoved head. Both fields are ADDITIVE —
+  # existing consumers read by key and ignore them.
+  local c4_accepted=""
+  c4_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || c4_accepted=""
+  [[ "$c4_accepted" == "null" ]] && c4_accepted=""
+
   local c4_json
   c4_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg thead "$target_head" \
     --arg enf "$enforcement" --argjson rr "$release_ready" --argjson bn "$blockers_n" \
-    --argjson m "$match" --arg div "$divergence" \
+    --argjson m "$match" --arg div "$divergence" --arg ah "$c4_accepted" \
     '{run_id:$run, candidate_sha:$cand, target_head_sha:$thead, enforcement:$enf,
-      release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div}}')"
+      release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div},
+      accepted_head:(if $ah == "" then null else $ah end),
+      review_equivalence:($ah != "")}')"
   plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_c4 = ${c4_json}" >/dev/null || {
     echo "PRECONDITION FAIL: the plan-final C4 decision for ${plan_id} was written to ${run_dir_rel}/release-decision.json, but the result could not be recorded in the manifest. Re-run '--stage c4' — the aggregator is deterministic at a fixed candidate." >&2
     return 1
