@@ -80,12 +80,20 @@ done
 # than refused, because none of them has a target-branch relationship to
 # verify: the workspace is not a git repo, the plan is not inside it, or the
 # plan is gitignored. In each the manifest's source_plan_sha IS the binding.
+# Containment is decided on the LEXICAL path, with the symlink case refused
+# explicitly rather than exempted: deciding it on the canonical path let
+# `repo/plans/x.md -> /tmp/x.md` resolve outside the repo and take the "lives
+# outside" skip, so a plan invoked through a repository path could still bind
+# the lifecycle to local-only bytes (adversarial-review finding).
 _p083_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
-_p083_plan_abs="$(realpath -m -- "$plan" 2>/dev/null || echo "$plan")"
+_p083_plan_abs="$(realpath -m --no-symlinks -- "$plan" 2>/dev/null || echo "$plan")"
+_p083_plan_real="$(realpath -m -- "$plan" 2>/dev/null || echo "$_p083_plan_abs")"
 if [[ -z "$_p083_repo_root" ]]; then
   echo "[INFO] plan_source_binding: source_plan_sha (this workspace is not a git repository)" >&2
 elif [[ "$_p083_plan_abs" != "$_p083_repo_root"/* ]]; then
   echo "[INFO] plan_source_binding: source_plan_sha (${plan} lives outside this workspace's repository, so it has no target-branch relationship to verify)" >&2
+elif [[ "$_p083_plan_real" != "$_p083_plan_abs" && "$_p083_plan_real" != "$_p083_repo_root"/* ]]; then
+  error_exit "PRECONDITION FAIL: ${plan} is a repository path but resolves through a symlink to ${_p083_plan_real}, outside the repository — the lifecycle would bind source_plan_sha to bytes this repository does not contain. Commit the plan inside the repository, or gitignore it and accept the source_plan_sha binding deliberately." 1
 elif git check-ignore -q -- "$_p083_plan_abs" 2>/dev/null; then
   # DELIBERATE, not a loophole: this very repository gitignores `.aid-o/plans/`,
   # so a hard tracked-only rule would break the plugin's own dogfood workflow.

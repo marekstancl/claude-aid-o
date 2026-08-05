@@ -226,3 +226,63 @@ _no_mutation() {
   run grep -c 'plan_source_binding' "$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh"
   [ "$output" -ge 3 ]
 }
+
+# ─── Codex-review findings on the first cut of this step ──────────────────
+
+@test "P073 Step 11 (review finding 1): a repo-path SYMLINK pointing outside the repo is refused, not exempted" {
+  # Deciding containment on the CANONICAL path let this take the "lives
+  # outside" skip: a plan invoked through a repository path, with a valid
+  # target branch, could still bind the lifecycle to local-only bytes — which
+  # is exactly the unshared source this check exists to refuse.
+  local outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$outside"
+  printf '# Plan\n' > "$outside/plan.md"
+  ln -s "$outside/plan.md" "$ROOT/docs/plan.md"
+
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"resolves through a symlink"* ]]
+  [[ "$output" == *"outside the repository"* ]]
+  _no_mutation
+}
+
+@test "P073 Step 11 (review finding 1): a symlink pointing INSIDE the repo is fine" {
+  # Only an escaping symlink is a problem; an internal one still names bytes
+  # the repository contains.
+  printf '# Plan\n' > "$ROOT/docs/real.md"
+  ( cd "$ROOT" && git add docs/real.md && git commit -qm "plan" )
+  ln -s "$ROOT/docs/real.md" "$ROOT/docs/plan.md"
+
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  [[ "$output" != *"resolves through a symlink"* ]]
+}
+
+@test "P073 Step 11 (review finding 2): --project-root away from CWD gives the SAME verdict as the pipeline" {
+  # plan_abs was resolved against the caller's CWD while git ran with -C "$root"
+  # on the caller's original relative argument, so git tested a doubled path: a
+  # genuinely ignored plan missed its deliberate skip and was refused as absent
+  # from the target branch. The same plan must not depend on the entry point.
+  printf '.aid-o/\n' > "$ROOT/.gitignore"
+  ( cd "$ROOT" && git add .gitignore && git commit -qm "ignore .aid-o" )
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+
+  # Invoked from the PARENT of the repo, with a relative --project-root.
+  run bash -c "cd '$(dirname "$ROOT")' && bash '$PFSM' plan-start P900 \
+      --mode legacy_epic_release_mode \
+      --project-root '$(basename "$ROOT")' \
+      --plan-file '$(basename "$ROOT")/.aid-o/plans/plan.md'"
+  [[ "$output" == *"is gitignored"* ]]
+  [[ "$output" != *"not committed on"* ]]
+}
+
+@test "P073 Step 11 (review finding 2): a committed plan verifies identically from a foreign CWD" {
+  printf '# Plan\n' > "$ROOT/docs/plan.md"
+  ( cd "$ROOT" && git add docs/plan.md && git commit -qm "plan" )
+
+  run bash -c "cd '$(dirname "$ROOT")' && bash '$PFSM' plan-start P900 \
+      --mode legacy_epic_release_mode \
+      --project-root '$(basename "$ROOT")' \
+      --plan-file '$(basename "$ROOT")/docs/plan.md'"
+  [[ "$output" != *"not committed on"* ]]
+  [[ "$output" != *"differs from the worktree copy"* ]]
+}

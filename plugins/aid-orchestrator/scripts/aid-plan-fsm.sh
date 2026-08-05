@@ -646,42 +646,62 @@ _pfsm_check_committed_source() {
   # relationship to verify. A plan from a shared library or a test fixture has
   # none, and refusing it would be an over-block (found when a first cut broke
   # every pipeline fixture).
-  local plan_abs; plan_abs="$(realpath -m -- "$plan_file" 2>/dev/null || echo "$plan_file")"
-  if [[ "$plan_abs" != "$repo_root"/* ]]; then
+  #
+  # Containment is decided on the LEXICAL path (--no-symlinks), and the
+  # symlink case is then refused explicitly rather than exempted. Deciding it
+  # on the canonical path let `repo/plans/x.md -> /tmp/x.md` resolve outside
+  # the repo and take the "lives outside" skip — so a plan invoked through a
+  # repository path, with a valid target branch, could still bind the
+  # lifecycle to local-only bytes. That is precisely the unshared source this
+  # check exists to refuse (adversarial-review finding).
+  local plan_lex plan_real
+  plan_lex="$(realpath -m --no-symlinks -- "$plan_file" 2>/dev/null || echo "$plan_file")"
+  plan_real="$(realpath -m -- "$plan_file" 2>/dev/null || echo "$plan_lex")"
+  if [[ "$plan_lex" != "$repo_root"/* ]]; then
     echo "plan_source_binding: source_plan_sha (${plan_file} lives outside this workspace's repository)" >&2
     return 0
   fi
+  if [[ "$plan_real" != "$plan_lex" && "$plan_real" != "$repo_root"/* ]]; then
+    echo "PRECONDITION FAIL: ${plan_file} is a repository path but resolves through a symlink to ${plan_real}, outside the repository — the lifecycle would bind source_plan_sha to bytes this repository does not contain. Commit the plan inside the repository, or gitignore it and accept the source_plan_sha binding deliberately." >&2
+    return 1
+  fi
 
-  if git -C "$root" check-ignore -q -- "$plan_file" 2>/dev/null; then
-    echo "plan_source_binding: source_plan_sha (${plan_file} is gitignored — the committed manifest's source_plan_sha is the binding)" >&2
+  # ONE repo-relative path for every git call below. Deriving it from the
+  # canonical path rather than reusing the caller's (possibly relative)
+  # argument fixes a real inconsistency: with --project-root pointing somewhere
+  # other than the caller's CWD, `git -C "$root" check-ignore -- "$plan_file"`
+  # tested a doubled path, so a genuinely ignored plan missed its deliberate
+  # skip and was refused as absent from the target branch — while the pipeline,
+  # running git from the workspace with an absolute path, skipped it. The same
+  # plan must not depend on which entry point the operator used
+  # (adversarial-review finding).
+  local rel="${plan_lex#"$repo_root"/}"
+
+  if git -C "$root" check-ignore -q -- "$rel" 2>/dev/null; then
+    echo "plan_source_binding: source_plan_sha (${rel} is gitignored — the committed manifest's source_plan_sha is the binding)" >&2
     return 0
   fi
 
-  local target rel
+  local target
   target="$(aid_target_branch 2>/dev/null || echo "")"
   if [[ -z "$target" ]] || ! git -C "$root" rev-parse --verify --quiet "$target" >/dev/null 2>&1; then
     # See the pipeline's copy of this rule: refuse only for an already-TRACKED
     # plan (the fresh-repo case the plan names); an untracked plan in a
     # workspace with no integration branch has nothing to verify against.
-    if git -C "$root" ls-files --error-unmatch -- "$plan_abs" >/dev/null 2>&1; then
+    if git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
       echo "PRECONDITION FAIL: source plan ${plan_file} is tracked but the target branch '${target:-<unresolved>}' does not exist — create and commit the target branch first, or gitignore the plan if it is deliberately unshared." >&2
       return 1
     fi
     echo "plan_source_binding: source_plan_sha (no target branch '${target:-<unresolved>}' exists to verify ${plan_file} against)" >&2
     return 0
   fi
-  rel="$(git -C "$root" ls-files --full-name --error-unmatch -- "$plan_file" 2>/dev/null || true)"
-  if [[ -z "$rel" ]]; then
-    rel="$(realpath -m --relative-to="$(git -C "$root" rev-parse --show-toplevel)" -- "$plan_file" 2>/dev/null || echo "$plan_file")"
-  fi
-
   local git_err=""
   if ! git_err="$(git -C "$root" cat-file -e "${target}:${rel}" 2>&1)"; then
     echo "PRECONDITION FAIL: source plan is not committed on ${target} (or differs from the worktree copy) — commit the plan on ${target} and rerun generation." >&2
     [[ -n "$git_err" ]] && printf '%s\n' "$git_err" >&2
     return 1
   fi
-  if ! git -C "$root" show "${target}:${rel}" 2>/dev/null | cmp -s - "$plan_file"; then
+  if ! git -C "$root" show "${target}:${rel}" 2>/dev/null | cmp -s - "$plan_lex"; then
     echo "PRECONDITION FAIL: source plan is not committed on ${target} (or differs from the worktree copy) — commit the plan on ${target} and rerun generation." >&2
     return 1
   fi
