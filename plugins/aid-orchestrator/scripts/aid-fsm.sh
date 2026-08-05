@@ -2374,11 +2374,23 @@ cmd_pm_override() {
     --arg op "${USER:-unknown}" \
     '{schema_version:"aid-2.0", artifact_type:"pm_escalation_override",
       target:$t, plan_id:$plan, pm_ref:$ref, created_at:$now,
-      origin:"grant", granted_by:$op}' > "$tmp" 2>/dev/null && mv "$tmp" "$out" 2>/dev/null || {
+      origin:"grant", granted_by:$op}' > "$tmp" 2>/dev/null || {
     rm -f "$tmp" 2>/dev/null || true
     echo "ERROR: pm-override grant: could not write ${out}." >&2
     exit 1
   }
+  # ATOMIC PUBLISH, same shape as the claim primitive. A plain `mv` overwrites
+  # its destination, so two PMs granting concurrently both passed the existence
+  # check above, both wrote, and the later one silently replaced the earlier
+  # artifact while BOTH commands printed "Granted" — one PM decision lost
+  # without a trace (adversarial-review finding). `mv -n` plus the mandatory
+  # tmp-gone post-check makes the loser say so instead. The post-check is not
+  # optional: on the installed coreutils 9.1 a SKIPPED `mv -n` still exits 0.
+  if ! mv -n "$tmp" "$out" 2>/dev/null || [[ -e "$tmp" ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "ERROR: pm-override grant: an override for ${plan_id} was granted concurrently and is already at ${out} — NOTHING was written by this call. It authorises exactly one further attempt; let it be claimed before granting another." >&2
+    exit 1
+  fi
   echo "Granted a single-use ${target} escalation override for ${plan_id} at ${out}" >&2
   echo "$out"
 }

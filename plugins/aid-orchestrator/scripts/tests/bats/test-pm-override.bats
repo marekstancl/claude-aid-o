@@ -238,3 +238,60 @@ _convert() {
   run grep -n 'AID_C3_FORCE_BEYOND_ESCALATION' "$C3LIB"
   [[ "$output" != *"prior_loop_outcome"* ]]
 }
+
+# ─── Codex-review finding on the first cut of this step ───────────────────
+
+@test "P073 Step 10 (review finding): concurrent grants cannot both report success" {
+  # The first cut published with a plain `mv`, which OVERWRITES. Two PMs
+  # granting at once both passed the existence check, both wrote, the later
+  # silently replaced the earlier — and both printed "Granted". One PM
+  # decision was lost without a trace.
+  local ev="$ROOT/.aid-o/work/evidence/P900"
+  mkdir -p "$ev"
+  local outdir="$ROOT/out"; mkdir -p "$outdir"
+
+  local i
+  for i in 1 2 3 4 5 6; do
+    ( "$FSM" pm-override grant c3 P900 \
+        --reason "concurrent grant number ${i} with a reason long enough to validate" \
+        --project-root "$ROOT" >"$outdir/$i.out" 2>"$outdir/$i.err"; echo "$?" > "$outdir/$i.rc" ) &
+  done
+  wait
+
+  local granted=0
+  for i in 1 2 3 4 5 6; do
+    [[ "$(cat "$outdir/$i.rc")" == "0" ]] && granted=$(( granted + 1 ))
+  done
+  # Exactly one artifact exists, and exactly one caller was told it granted it.
+  [ "$granted" = "1" ]
+  run bash -c "ls '$ev'/c3-pm-escalation-override.json | wc -l"
+  [ "$output" = "1" ]
+
+  # Every loser says so explicitly rather than exiting quietly.
+  local losers=0
+  for i in 1 2 3 4 5 6; do
+    if [[ "$(cat "$outdir/$i.rc")" != "0" ]]; then
+      grep -q 'already at\|UNCONSUMED override already exists' "$outdir/$i.err" && losers=$(( losers + 1 ))
+    fi
+  done
+  [ "$losers" = "5" ]
+
+  # And no temp file was left behind by the losers.
+  run bash -c "ls '$ev'/c3-pm-escalation-override.json.tmp.* 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
+}
+
+@test "P073 Step 10 (review finding): the single artifact left by a concurrent race is a valid, claimable grant" {
+  local ev="$ROOT/.aid-o/work/evidence/P900"
+  mkdir -p "$ev"
+  local i
+  for i in 1 2 3; do
+    ( "$FSM" pm-override grant c3 P900 \
+        --reason "concurrent grant number ${i} with a reason long enough to validate" \
+        --project-root "$ROOT" >/dev/null 2>&1 ) &
+  done
+  wait
+  [ "$(jq -r '.artifact_type' "$ev/c3-pm-escalation-override.json")" = "pm_escalation_override" ]
+  run _claim "$ev"
+  [ "$status" -eq 0 ]
+}
