@@ -1383,8 +1383,20 @@ A completed plan-level review used to die to ANY tracked write after the freeze:
 an audit-log append or a rendered report threw away the whole review even though
 nothing about the delivery had changed. It no longer does.
 
-**When the drift detector invalidates and tells you the difference is
-ancillary-only, run the acceptance instead of re-running the review:**
+**Preconditions — all three, or the stage refuses:**
+
+1. The plan has a FROZEN candidate (`--stage freeze` ran).
+2. The plan branch head MOVED off that candidate. Acceptance at an unmoved head
+   is a no-op and writes nothing.
+3. The freeze recorded a COMPLETE protected path set. A plan frozen before P073,
+   or one whose EPIC `plan.json` files could not all be located, reports
+   equivalence UNAVAILABLE — any movement then invalidates exactly as it always
+   did, and no force changes that.
+
+Acceptance is worth running at the moment a drift refusal costs you a review:
+between `--stage review` and `plan-merge-to-main`. It does not require the
+review to have completed — it preserves whatever review the frozen candidate
+already carries — but if no review has run yet, re-freezing is cheaper.
 
 ```bash
 bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage accept-ancillary
@@ -1392,60 +1404,100 @@ bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage accep
 
 That records the moved head as review-equivalent to the frozen candidate: one
 receipt in the plan-final run directory, bound in the manifest, and
-`candidate_sha` is left byte-identical. `--stage review` and `--stage c4` then
+`candidate_sha` left byte-identical. `--stage review` and `--stage c4` then
 proceed, and `plan-merge-to-main` merges the accepted head after re-verifying
-equivalence live.
+equivalence live against the current policy.
 
 **Read the refusal before reaching for it.** The recovery hint appears ONLY when
 the difference really is ancillary-only. If the message does not name
 `accept-ancillary`, the change touched the protected delivery surface and it is
-a FIX, not something to accept: commit the fix, then `--stage sync`,
-`--stage freeze`, `--stage gates`, `--stage review` against the NEW candidate.
+a FIX, not something to accept. The recovery is the FULL stage chain against the
+new candidate — `inputs` is not optional, `--stage review` refuses without it:
+
+```
+--stage sync → --stage freeze → --stage gates → --stage inputs → --stage review
+```
 
 Two more things worth knowing:
 
 - Only the EXACT accepted head is tolerated. One further commit — even another
   ancillary one — invalidates again and needs a fresh acceptance.
-- A plan frozen before P073 has no protected path set, so equivalence is simply
-  unavailable and any movement invalidates exactly as it always did. The
-  refusal says so; do not try to force it.
+- Acceptance is idempotent on the same head, and it verifies its own receipt: a
+  deleted or edited receipt is refused, not reported as still accepted.
 
 ### The PM force backdoor (P073)
 
-Every plan-level precondition is classified. A **forceable** one is bookkeeping
-— a dirty worktree, an unshared source plan, an incomplete close. A **hard** one
-is identity, evidence integrity or PM authorization, and no flag bypasses it.
+**Exactly eight commands accept `--force`.** No other command does, and
+`plan-state` (repair/attest/supersede) deliberately does not — it IS the audited
+recovery mechanism a force would otherwise be used to fake:
+
+```
+plan-start   epic-start   epic-complete   epic-merge-to-plan
+plan-finalize   plan-merge-to-main   plan-close   plan-rollback
+```
+
+`--force-reason "<text>"` works on all eight. `--reason` is accepted as a
+synonym only on the six that own no business `--reason` of their own;
+`epic-complete` and `plan-rollback` already use `--reason` for their own
+meaning, so there you MUST use `--force-reason`.
 
 ```bash
 bash {plugin_path}/scripts/aid-plan-fsm.sh plan-close {plan_id} \
   --force --force-reason "why this must proceed despite the refusal"
 ```
 
-The reason is mandatory and must be at least 20 characters — the waiver is a
-forensic record, and the receipt is written BEFORE the command proceeds, so a
-force that cannot be recorded is refused rather than performed silently.
+The reason is mandatory and at least 20 characters. The waiver receipt is
+written BEFORE the command proceeds, so a force that cannot be recorded is
+refused rather than performed silently. A reason without `--force` is an error,
+never a silently discarded argument.
 
-**Always print and read the normal refusal first.** It names its own recovery;
-force is the second route, never the first. If the refusal says FORCE CANNOT
-BYPASS, stop — there is nothing on the other side to complete, and the message
-names the repair.
+**Do not try to predict what is forceable.** Each precondition is classified
+`forceable` (bookkeeping — a dirty worktree, an unshared source plan, an
+incomplete close) or `hard` (identity, evidence integrity, PM authorization),
+and **the refusal message is the only authority**. Run the command normally
+first and read what it says:
 
-`plan-close` under force can end in `closed_pending_receipt` rather than
-`closed` when the lifecycle receipt itself is what is broken. That is not a
-failure: the plan is terminal, the proof is missing, and re-running `plan-close`
-once the write path is repaired converges it to `closed`.
+- It names its own recovery → do that. Force is the second route, never the
+  first.
+- It prints `FORCE CANNOT BYPASS '<name>'` → stop. There is nothing on the other
+  side to complete; the message names the repair.
+- Force succeeded but printed `bypassed nothing` → no waiver was written,
+  because nothing was actually overridden.
+
+**`closed_pending_receipt`.** A forced `plan-close` whose lifecycle receipt
+write is itself the broken operation ends the plan as `closed_pending_receipt`,
+not `closed` — the plan is terminal, but the durable proof is missing. Re-running
+`plan-close` does NOT fix this: once the close marker exists, `plan-close` is a
+no-op and says `ALREADY CLOSED`. Converge it instead by repairing what broke
+(usually a missing `.aid-lifecycle/manifests/<plan_id>.yaml`) and then running
+the lifecycle's own reconciliation:
+
+```bash
+bash {plugin_path}/scripts/aid-lifecycle.sh plan-reconcile {plan_id} --apply
+```
+
+It prints `state: closed` when the receipt is committed and reachable. Anything
+else means it is not converged yet.
 
 ### Retiring a stale EPIC run (P073)
 
-When an EPIC's FSM run is stale and `aid-fsm.sh init` refuses as a duplicate, do
-NOT delete state files by hand:
+Use this ONLY when `aid-fsm.sh init` refuses a specific EPIC as a duplicate AND
+that EPIC's run is genuinely stale (abandoned, superseded by a re-plan). It is
+not a general cleanup tool. Do NOT delete state files by hand:
 
 ```bash
 bash {plugin_path}/scripts/aid-plan-fsm.sh plan-state {plan_id} --supersede-epic {epic_id}
 ```
 
 This archives the state file beside its evidence and authorises exactly ONE
-re-initialisation. Evidence artifacts are never touched.
+re-initialisation, bound to the `plan.json` the re-init must present. Evidence
+artifacts are never touched.
+
+The authorisation is consumed only once the new state file exists, so an init
+that fails a LATER gate does not burn it — fix the gate and re-run `init`. If
+the init fails because the package itself is wrong (a different `plan.json` than
+the one recorded), the record no longer matches and a fresh
+`--supersede-epic` is required.
 
 ### Plan Boundary: Scanner Memory Scan
 
