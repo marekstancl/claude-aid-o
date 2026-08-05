@@ -222,3 +222,84 @@ _seed_delivery_json() {
     plan_manifest_get P900 ".plan_boundary_manifest.candidate_sha"' )"
   [ "$candidate_after" = "$candidate_before" ]
 }
+
+# ─── Codex-review findings on the first cut of this step ──────────────────
+
+@test "P073 Step 12 (review finding 1): a malformed delivery-report.json yields NO projection, not a partial one" {
+  # The formatting jq calls used to run inside the redirection group with
+  # errors sent to /dev/null, and a trailing printf made the group succeed —
+  # so a report whose .epics was a string was published WITHOUT its verdict
+  # section, misrepresenting the authoritative JSON as complete.
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  jq -n '{summary:"Delivered.", epics:"not-an-array", delivered_paths:[]}' \
+    > "$dir/delivery-report.json"
+
+  run _render P900
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not have the expected shape"* ]]
+  [ ! -e "$ROOT/.aid-o/reports/P900-delivery.md" ]
+  [ ! -e "$ROOT/.aid-o/reports/P900-boundary.md" ]
+}
+
+@test "P073 Step 12 (review finding 1): no temp file is left behind by a refused projection" {
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  jq -n '{summary:"Delivered.", delivered_paths:"not-an-array"}' > "$dir/delivery-report.json"
+  run _render P900
+  [ "$status" -eq 0 ]
+  run bash -c "ls '$ROOT/.aid-o/reports'/*.tmp.* 2>/dev/null | wc -l"
+  [ "$output" = "0" ]
+}
+
+@test "P073 Step 12 (review finding 2): a newline in a JSON value cannot inject a frontmatter key" {
+  # A `head` of "abc\nboundary_complete: false" used to become a second YAML
+  # key, so a downstream consumer read a different document than was rendered.
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  jq -n '{summary:"Delivered.",
+          head:"abc\nboundary_complete: false",
+          candidate_sha:"def\nplan_id: \"P999\"",
+          epics:[], delivered_paths:[]}' > "$dir/delivery-report.json"
+
+  run _render P900
+  [ "$status" -eq 0 ]
+
+  # The injected keys are inert: they sit inside a quoted scalar.
+  run grep -c '^boundary_complete: false' "$ROOT/.aid-o/reports/P900-delivery.md"
+  [ "$output" = "0" ]
+  run grep -c '^plan_id: "P999"' "$ROOT/.aid-o/reports/P900-boundary.md"
+  [ "$output" = "0" ]
+  # The boundary manifest still says what the renderer meant it to say.
+  run grep -c '^boundary_complete: true' "$ROOT/.aid-o/reports/P900-boundary.md"
+  [ "$output" = "1" ]
+  # And a YAML parser reads back the value as ONE scalar, not two keys.
+  run bash -c "sed -e '1d' -e '/^---$/,\$d' '$ROOT/.aid-o/reports/P900-boundary.md' | yq -r '.plan_id'"
+  [ "$output" = "P900" ]
+  run bash -c "sed -e '1d' -e '/^---$/,\$d' '$ROOT/.aid-o/reports/P900-boundary.md' | yq -r '.boundary_complete'"
+  [ "$output" = "true" ]
+}
+
+@test "P073 Step 12 (review finding 3): the renderer refuses to write while the plan is not CLOSED" {
+  # The caller reaches the renderer after the CLOSED transition, but the
+  # manifest mirror update above it is best-effort — so an unexpected state
+  # here means a review may still be open, and writing into .aid-o/reports/
+  # would be exactly the tracked write this step exists to keep out of a
+  # freeze window.
+  local dir; dir="$(_seed_manifest_with_run P900)"
+  _seed_delivery_json "$dir"
+  # A real plan-state record in OPEN. (A manifest alone carries no plan state,
+  # and with no record at all the guard deliberately does not block — there is
+  # nothing to contradict.)
+  run bash -c '
+    set -uo pipefail
+    SCRIPT_DIR="'"$AID_PLUGIN_PATH"'/scripts"
+    . "$SCRIPT_DIR/lib/aid-plan-state.sh"
+    cd "'"$ROOT"'"
+    plan_state_init P900 plan_branch plan/P900 main >/dev/null
+  '
+  [ "$status" -eq 0 ]
+
+  run _render P900
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not CLOSED"* ]]
+  [[ "$output" == *"after the review boundary has closed"* ]]
+  [ ! -e "$ROOT/.aid-o/reports/P900-delivery.md" ]
+}

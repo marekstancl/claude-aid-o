@@ -5576,6 +5576,19 @@ _pfsm_close_marker_path() {
 # ---------------------------------------------------------------------------
 _pfsm_render_close_projections() {
   local root="$1" plan_id="$2"
+  # POST-CLOSE ONLY, verified rather than assumed. The caller reaches here
+  # after the CLOSED transition, but the manifest mirror update just above it
+  # is best-effort — so an unexpected state here means the plan may still be
+  # pre-close with a review open, and writing into .aid-o/reports/ would be
+  # exactly the tracked write this whole step exists to keep out of a freeze
+  # window (adversarial-review finding).
+  # plan_state_get REQUIRES the field name; calling it without one returns 1
+  # and an empty value, which would have made this guard silently inert.
+  local _state; _state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || echo "")"
+  if [[ -n "$_state" && "$_state" != "not_found" && "$_state" != "CLOSED" ]]; then
+    echo "WARNING: ${plan_id} is ${_state}, not CLOSED — human projection not rendered (a projection is only ever written after the review boundary has closed)." >&2
+    return 0
+  fi
   local run_dir_rel src reports_dir
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
   if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
@@ -5602,30 +5615,51 @@ _pfsm_render_close_projections() {
   # idempotently rather than accumulating variants.
   local delivery="${reports_dir}/${plan_id}-delivery.md"
   local boundary="${reports_dir}/${plan_id}-boundary.md"
-  local head_sha candidate run_id
-  head_sha="$(jq -r '.head // .Head // ""' "$src" 2>/dev/null)"
-  candidate="$(jq -r '.candidate_sha // ""' "$src" 2>/dev/null)"
-  run_id="${run_dir_rel##*/}"
+  local run_id="${run_dir_rel##*/}"
+
+  # EVERY SECTION IS BUILT AND CHECKED BEFORE ANYTHING IS PUBLISHED.
+  # An earlier cut ran the formatting `jq` calls inside the redirection group
+  # with their errors sent to /dev/null, and a trailing printf made the group
+  # succeed — so a report whose `.epics` was, say, a string instead of an array
+  # was published WITHOUT its verdict section, misrepresenting the
+  # authoritative JSON as a complete projection (adversarial-review finding).
+  # A malformed report now yields NO projection and a warning.
+  local sec_summary sec_epics sec_paths
+  if ! sec_summary="$(jq -r '.summary // "(no summary recorded)"' "$src" 2>&1)" \
+     || ! sec_epics="$(jq -r '(.epics // []) | if (type != "array") then error("epics is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>&1)" \
+     || ! sec_paths="$(jq -r '(.delivered_paths // []) | if (type != "array") then error("delivered_paths is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.)") end' "$src" 2>&1)"; then
+    echo "WARNING: ${run_dir_rel}/delivery-report.json does not have the expected shape — human projection not rendered (a partial projection would misrepresent it as complete)." >&2
+    return 0
+  fi
+
+  # EVERY INTERPOLATED SCALAR IS EMITTED AS A jq-QUOTED STRING. A raw value
+  # containing a newline used to inject a second frontmatter key — e.g. a
+  # `head` of "abc\nboundary_complete: false" — so a downstream YAML consumer
+  # read a different document than the one that was rendered
+  # (adversarial-review finding).
+  local y_plan y_src y_head y_cand y_run y_now
+  y_plan="$(jq -rn --arg v "$plan_id" '$v|@json')"
+  y_src="$(jq -rn --arg v "${run_dir_rel}/delivery-report.json" '$v|@json')"
+  y_run="$(jq -rn --arg v "$run_id" '$v|@json')"
+  y_now="$(jq -rn --arg v "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$v|@json')"
+  y_head="$(jq -r '(.head // .Head // "") | @json' "$src" 2>/dev/null || echo '""')"
+  y_cand="$(jq -r '(.candidate_sha // "") | @json' "$src" 2>/dev/null || echo '""')"
 
   {
     printf -- '---\n'
-    printf 'plan_id: "%s"\n' "$plan_id"
+    printf 'plan_id: %s\n' "$y_plan"
     printf 'rendered_by: "aid-plan-fsm.sh plan-close"\n'
-    printf 'rendered_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'source: "%s/delivery-report.json"\n' "$run_dir_rel"
-    [[ -n "$head_sha" ]] && printf 'Head: %s\n' "$head_sha"
+    printf 'rendered_at: %s\n' "$y_now"
+    printf 'source: %s\n' "$y_src"
+    [[ "$y_head" != '""' ]] && printf 'Head: %s\n' "$y_head"
     printf -- '---\n\n'
     printf '# Delivery report — %s\n\n' "$plan_id"
     printf 'This file is a PROJECTION rendered at close from the run-scoped\n'
     printf 'delivery-report.json, which remains the authoritative artifact. It is\n'
     printf 'derived: regenerating it is always safe.\n\n'
-    printf '## Summary\n\n'
-    jq -r '.summary // "(no summary recorded)"' "$src" 2>/dev/null
-    printf '\n## Per-EPIC verdicts\n\n'
-    jq -r '(.epics // []) | if length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>/dev/null
-    printf '\n## Delivered paths\n\n'
-    jq -r '(.delivered_paths // []) | if length == 0 then "(none recorded)" else (.[] | "- \(.)") end' "$src" 2>/dev/null
-    printf '\n'
+    printf '## Summary\n\n%s\n' "$sec_summary"
+    printf '\n## Per-EPIC verdicts\n\n%s\n' "$sec_epics"
+    printf '\n## Delivered paths\n\n%s\n' "$sec_paths"
   } > "${delivery}.tmp.$$" 2>/dev/null && mv "${delivery}.tmp.$$" "$delivery" 2>/dev/null || {
     rm -f "${delivery}.tmp.$$" 2>/dev/null || true
     echo "WARNING: cannot write ${delivery} — projection skipped; the run-scoped JSON remains authoritative." >&2
@@ -5634,11 +5668,11 @@ _pfsm_render_close_projections() {
 
   {
     printf -- '---\n'
-    printf 'plan_id: "%s"\n' "$plan_id"
-    printf 'generated_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'plan_id: %s\n' "$y_plan"
+    printf 'generated_at: %s\n' "$y_now"
     printf 'boundary_complete: true\n'
-    printf 'run_id: "%s"\n' "$run_id"
-    [[ -n "$candidate" ]] && printf 'candidate_sha: "%s"\n' "$candidate"
+    printf 'run_id: %s\n' "$y_run"
+    [[ "$y_cand" != '""' ]] && printf 'candidate_sha: %s\n' "$y_cand"
     printf 'delivery_report: "%s-delivery.md"\n' "$plan_id"
     printf -- '---\n'
   } > "${boundary}.tmp.$$" 2>/dev/null && mv "${boundary}.tmp.$$" "$boundary" 2>/dev/null || {
