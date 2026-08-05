@@ -4004,6 +4004,15 @@ _pfsm_finalize_accept_ancillary() {
     echo "PRECONDITION FAIL: plan/${plan_id} does not resolve — nothing to accept." >&2
     _aa_unlock; return 1
   fi
+  # An UNMOVED head has nothing to accept. Minting a receipt here was measured
+  # to make the C4 record report review_equivalence:true for a plan whose head
+  # never left the candidate — a decision surface claiming a loosening that was
+  # never used.
+  if [[ "$head" == "$candidate" ]]; then
+    echo "accept-ancillary: plan/${plan_id} is still AT the frozen candidate ${candidate} — there is nothing to accept, and no receipt was written. The review is already bound to this head." >&2
+    printf '%s\n' "$head"
+    _aa_unlock; return 0
+  fi
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
   if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
     echo "PRECONDITION FAIL: no plan-final run directory recorded for ${plan_id} — nowhere to write the acceptance receipt." >&2
@@ -4148,10 +4157,23 @@ _pfsm_review_candidate_drift() {
       acc_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || acc_sha=""
       [[ "$acc_receipt" == "null" ]] && acc_receipt=""
       [[ "$acc_sha" == "null" ]] && acc_sha=""
-      if [[ -n "$acc_receipt" && -r "${root}/${acc_receipt}" ]]; then
-        local now_sha
+      # The hash alone proves the receipt is unaltered, NOT that it describes
+      # this freeze. A mixed or hand-edited manifest can carry an acceptance
+      # from an earlier candidate; the sanctioned re-freeze clears these fields,
+      # but the detector must not depend on every writer having done so.
+      # Equivalence must also be AVAILABLE at all — an incomplete protected set
+      # can never have authorised an acceptance, so one recorded against it is
+      # not honoured here either.
+      local acc_complete=""
+      acc_complete="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths_complete' 2>/dev/null)" || acc_complete=""
+      if [[ "$acc_complete" == "true" && -n "$acc_receipt" && -r "${root}/${acc_receipt}" ]]; then
+        local now_sha r_cand r_head
         now_sha="sha256:$(sha256sum "${root}/${acc_receipt}" | awk '{print $1}')"
-        [[ "$now_sha" == "$acc_sha" ]] && via_equivalence=1
+        r_cand="$(jq -r '.candidate_sha // ""' "${root}/${acc_receipt}" 2>/dev/null)" || r_cand=""
+        r_head="$(jq -r '.accepted_head // ""' "${root}/${acc_receipt}" 2>/dev/null)" || r_head=""
+        if [[ "$now_sha" == "$acc_sha" && "$r_cand" == "$candidate" && "$r_head" == "$plan_head" ]]; then
+          via_equivalence=1
+        fi
       fi
       if [[ "$via_equivalence" -eq 0 ]]; then
         printf 'plan/%s is at the recorded accepted head %s but its review-equivalence receipt (%s) is missing or altered — the acceptance cannot be proven' \
@@ -4211,6 +4233,11 @@ _pfsm_review_candidate_drift() {
       elif ! aid_ancillary_match "$wpath" "$root"; then
         dirty+="${xy} ${wpath}"$'\n'
       fi
+      # X-column only, deliberately. Measured on this git: an UNSTAGED rename
+      # is reported as ` D <old>` plus `?? <new>`, never ` R`, and only a
+      # STAGED rename emits the second NUL-delimited original path. Matching
+      # R/C in the Y column would consume the NEXT record whenever git did not
+      # emit an original path — the very desynchronisation it would aim to fix.
       if [[ "$xy" == R* || "$xy" == C* ]]; then
         orig=""
         IFS= read -r -d '' orig || true
@@ -4410,7 +4437,16 @@ _pfsm_validate_plan_final_close_receipt_json() {
   local json="$1"
   jq -e '
     (type == "object") and
-    ((keys | sort) == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort)) and
+    # P073 Step 18: TWO exact key sets, not a relaxed superset. A receipt
+    # merged at the candidate keeps the legacy shape byte for byte; one merged
+    # via review equivalence additionally carries merged_head and
+    # review_equivalence. Both are exact — an unexpected key is still refused.
+    ((keys | sort) as $k
+      | ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort))
+        or ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","merged_head","review_equivalence","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort))) and
+    (if has("merged_head")
+       then (.merged_head | test("^[0-9a-f]{40}$")) and (.review_equivalence == true)
+       else true end) and
     (.schema_version == "aid-plan-final-close-evidence-1") and
     (.artifact_type == "plan_final_close_evidence_receipt") and
     (.plan_id | test("^P[0-9]{3}$")) and
@@ -4434,6 +4470,10 @@ _pfsm_seal_plan_final_close_evidence() {
   local root="$1" plan_id="$2" candidate="$3" run_id="$4" target="$5" target_head_before="$6" merge_commit="$7" merged_tree="$8" tag="$9"
   shift 9
   local gates_report="$1" c4_decision_file="$2" c4_dual_run_file="$3" pm_decision_file="$4"
+  # P073 Step 18: OPTIONAL, and deliberately so. Omitted (the candidate path)
+  # the receipt keeps its pre-P073 bytes exactly, which is what lets the
+  # existing merge tests pass unmodified.
+  local merged_head_arg="${5:-}" review_equiv_arg="${6:-}"
   local ref receipt tmp blob tree commit existing existing_receipt expected_hash actual_hash
 
   [[ -s "$gates_report" ]] && jq -e '.overall == "pass"' "$gates_report" >/dev/null 2>&1 || { echo "PRECONDITION FAIL: refusing to seal close evidence — gates_report.json is missing or not overall pass." >&2; return 1; }
@@ -4457,7 +4497,9 @@ _pfsm_seal_plan_final_close_evidence() {
   receipt="$(jq -nc --arg plan "$plan_id" --arg candidate "$candidate" --arg run "$run_id" --arg target "$target" \
     --arg thb "$target_head_before" --arg mc "$merge_commit" --arg mt "$merged_tree" --arg tag "$tag" \
     --argjson blockers "$c4_blockers" --arg pmh "$pm_hash" \
-    '{schema_version:"aid-plan-final-close-evidence-1",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers,dual_run_match:true},pm_decision:{decision:"MERGE",sha256:$pmh}}')" || { rm -f "$tmp"; return 1; }
+    --arg mh "$merged_head_arg" --arg req "$review_equiv_arg" \
+    '{schema_version:"aid-plan-final-close-evidence-1",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers,dual_run_match:true},pm_decision:{decision:"MERGE",sha256:$pmh}}
+     + (if $req == "true" then {merged_head:$mh, review_equivalence:true} else {} end)')" || { rm -f "$tmp"; return 1; }
   _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: refusing to seal a non-public-safe plan-final close receipt." >&2; rm -f "$tmp"; return 1; }
   printf '%s\n' "$receipt" > "$tmp" || { rm -f "$tmp"; return 1; }
   expected_hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
@@ -4481,7 +4523,7 @@ _pfsm_seal_plan_final_close_evidence() {
   tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)" || return 1
   commit="$(git -C "$root" commit-tree "$tree" -m "aid: seal plan-final close evidence ${plan_id} ${run_id}")" || return 1
   if ! git -C "$root" update-ref "$ref" "$commit" ''; then
-    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$c4_dual_run_file" "$pm_decision_file"
+    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$c4_dual_run_file" "$pm_decision_file" "$merged_head_arg" "$review_equiv_arg"
     return $?
   fi
   actual_hash="sha256:$(git -C "$root" show "${ref}:receipt.json" | sha256sum | awk '{print $1}')"
@@ -5213,7 +5255,7 @@ _pfsm_finalize_c4() {
     '{run_id:$run, candidate_sha:$cand, target_head_sha:$thead, enforcement:$enf,
       release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div},
       accepted_head:(if $ah == "" then null else $ah end),
-      review_equivalence:($ah != "")}')"
+      review_equivalence:($ah != "" and $ah != $cand)}')"
   plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_c4 = ${c4_json}" >/dev/null || {
     echo "PRECONDITION FAIL: the plan-final C4 decision for ${plan_id} was written to ${run_dir_rel}/release-decision.json, but the result could not be recorded in the manifest. Re-run '--stage c4' — the aggregator is deterministic at a fixed candidate." >&2
     return 1
@@ -5781,9 +5823,67 @@ cmd_plan_merge_to_main() {
     echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} not found — ${target_branch} is unchanged." >&2
     exit 1
   fi
-  if [[ "$d_cand" != "$candidate" || "$plan_head" != "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-merge-to-main: candidate mismatch — the decision names ${d_cand}, the manifest's frozen candidate is ${candidate}, and ${plan_branch} is at ${plan_head}. All three must be identical. ${target_branch} is unchanged and no Git action was taken." >&2
+  # ── The DECISION leg is untouched and hard ───────────────────────────────
+  # The PM authorized the review of the FROZEN candidate. Equivalence means
+  # that review still describes the delivery surface — it never means the PM
+  # authorized some other candidate. This binding does not loosen.
+  if [[ "$d_cand" != "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: candidate mismatch — the decision names ${d_cand} but the manifest's frozen candidate is ${candidate}. ${target_branch} is unchanged and no Git action was taken." >&2
     exit 1
+  fi
+
+  # ── The HEAD leg gains exactly ONE alternative ───────────────────────────
+  # P073 Step 18: the head may be the candidate (unchanged path) or the exact
+  # accepted head — and in the latter case equivalence is RE-VERIFIED LIVE
+  # here, against the CURRENT policy, immediately before the irreversible
+  # action. A stale acceptance receipt is not a licence: acceptance proves what
+  # was true when it ran, the merge must prove what is true now.
+  local merged_head="$candidate" review_equivalence="false"
+  if [[ "$plan_head" != "$candidate" ]]; then
+    local m_accepted="" m_rpath="" m_rsha=""
+    m_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || m_accepted=""
+    [[ "$m_accepted" == "null" ]] && m_accepted=""
+    if [[ -z "$m_accepted" || "$plan_head" != "$m_accepted" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} is at ${plan_head}, which is neither the frozen candidate ${candidate} nor a recorded review-equivalent accepted head${m_accepted:+ (${m_accepted})}. ${target_branch} is unchanged and no Git action was taken." >&2
+      exit 1
+    fi
+
+    m_rpath="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || m_rpath=""
+    m_rsha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || m_rsha=""
+    [[ "$m_rpath" == "null" ]] && m_rpath=""
+    [[ "$m_rsha" == "null" ]] && m_rsha=""
+    if [[ -z "$m_rpath" || ! -r "${root}/${m_rpath}" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: accepted_head ${m_accepted} is recorded but its receipt (${m_rpath:-<none>}) is missing — never merge on manifest state alone. Rerun plan-finalize ${plan_id} --stage accept-ancillary. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    local m_now_sha
+    m_now_sha="sha256:$(sha256sum "${root}/${m_rpath}" | awk '{print $1}')"
+    if [[ "$m_now_sha" != "$m_rsha" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the acceptance receipt ${m_rpath} no longer hashes to the recorded ${m_rsha} — the audit trail was altered. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    # The receipt must describe THIS decision: the same frozen candidate and
+    # the same accepted head the manifest binds.
+    local r_cand r_head
+    r_cand="$(jq -r '.candidate_sha // ""' "${root}/${m_rpath}" 2>/dev/null)" || r_cand=""
+    r_head="$(jq -r '.accepted_head // ""' "${root}/${m_rpath}" 2>/dev/null)" || r_head=""
+    if [[ "$r_cand" != "$candidate" || "$r_head" != "$m_accepted" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the acceptance receipt ${m_rpath} describes candidate ${r_cand:-<none>} / head ${r_head:-<none>}, not ${candidate} / ${m_accepted}. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+
+    # LIVE re-verification, same predicate as the acceptance stage — no
+    # merge-local variant that could drift from it. This closes both the
+    # stale-receipt window and a policy tightened since the acceptance.
+    local merc=0
+    plan_final_review_equivalent "$root" "$plan_id" || merc=$?
+    if [[ "$merc" -ne 0 ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} at ${plan_head} is no longer review-equivalent to the frozen candidate ${candidate} (the classification is above). Nothing was merged and the review was NOT invalidated — the merge is read-only until its git action." >&2
+      exit 1
+    fi
+    merged_head="$plan_head"
+    review_equivalence="true"
+    echo "plan-merge-to-main: merging the review-equivalent accepted head ${plan_head} (frozen candidate ${candidate}, receipt ${m_rpath}); equivalence was re-verified live against the current policy." >&2
   fi
   if [[ "$d_target" != "$target_branch" ]]; then
     echo "PRECONDITION FAIL: plan-merge-to-main: the decision authorizes a merge into '${d_target}', but ${plan_id}'s target branch is '${target_branch}'. Nothing was merged." >&2
@@ -5906,10 +6006,15 @@ cmd_plan_merge_to_main() {
     # Merge TREE first — no ref moves, no worktree is touched, no MERGE_HEAD is
     # created, so a conflict costs nothing and leaves nothing to abort.
     local mt_out="" mt_rc=0
-    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$candidate" 2>&1)" || mt_rc=$?
+    # P073 Step 18: `$merged_head` is the candidate on the normal path and the
+    # accepted head on the equivalence path. Merging `$candidate` here while the
+    # close receipt recorded `merged_head` as the accepted head would publish a
+    # tree that does NOT contain the accepted commit — the receipt would
+    # describe a merge that never happened. Caught by this step's ancestry test.
+    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$merged_head" 2>&1)" || mt_rc=$?
     if [[ "$mt_rc" -ne 0 ]]; then
       _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
-      echo "MERGE CONFLICT: ${plan_branch} (${candidate}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage sync'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
+      echo "MERGE CONFLICT: ${plan_branch} (${merged_head}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage sync'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
       printf '%s\n' "$mt_out" >&2
       exit 4
     fi
@@ -5920,7 +6025,7 @@ cmd_plan_merge_to_main() {
     fi
 
     local msg="merge(plan): ${plan_id} — ${plan_branch} into ${target_branch}"
-    merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$candidate" -m "$msg" 2>/dev/null)" || merge_commit=""
+    merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$merged_head" -m "$msg" 2>/dev/null)" || merge_commit=""
     if [[ -z "$merge_commit" ]]; then
       echo "PRECONDITION FAIL: plan-merge-to-main: could not build the merge commit for ${plan_id} — no ref was moved and ${target_branch} is unchanged." >&2
       exit 1
@@ -6006,7 +6111,8 @@ cmd_plan_merge_to_main() {
   close_sealed="$(_pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target_branch" \
     "$target_head_frozen" "$merge_commit" "$merged_tree" "$tag_status" \
     "${run_dir_abs}/gates_report.json" "${run_dir_abs}/release-decision.json" \
-    "${run_dir_abs}/release-decision-dual-run.json" "$decision_file")" || {
+    "${run_dir_abs}/release-decision-dual-run.json" "$decision_file" \
+    "$merged_head" "$review_equivalence")" || {
     echo "WARN: plan-merge-to-main: the merge ${merge_commit} is published, but its durable close-evidence receipt could not be sealed — plan-close will require the runtime evidence directory until this is resolved (re-run plan-merge-to-main; sealing is idempotent)." >&2
     close_sealed=""
   }

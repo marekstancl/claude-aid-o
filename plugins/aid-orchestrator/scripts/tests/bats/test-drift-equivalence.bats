@@ -234,3 +234,48 @@ _accept() { _drift "_pfsm_finalize_accept_ancillary . $PLAN"; }
   run grep -c 'review_equivalence' "$PFSM"
   [ "$output" -ge 1 ]
 }
+
+# ─── Codex round-1 findings on this step ──────────────────────────────────
+
+@test "P073 Step 17 (F1): an accepted head whose receipt names ANOTHER candidate is not honoured" {
+  # The receipt hash proves the file is unaltered, not that it describes this
+  # freeze. A mixed manifest could otherwise carry an acceptance forward.
+  _seed
+  _ancillary_commit
+  _accept >/dev/null 2>&1
+  local r
+  r="$(find "$ROOT/.aid-o" -name 'review-equivalence-receipt*.json' | head -1)"
+  jq '.candidate_sha = "ffffffffffffffffffffffffffffffffffffffff"' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+  # Re-bind the manifest to the tampered receipt's real hash so ONLY the
+  # candidate binding is wrong.
+  local mf="$ROOT/.aid-o/work/plan-state/$PLAN/plan-boundary-manifest.json"
+  jq --arg s "sha256:$(sha256sum "$r" | awk '{print $1}')" \
+     '.plan_boundary_manifest.equivalence_receipt_sha256 = $s' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
+  run _drift "_pfsm_review_candidate_drift . $PLAN '$CAND'"
+  [ "$status" -ne 0 ]
+}
+
+@test "P073 Step 17 (F1): an acceptance recorded against a PARTIAL protected set is not honoured" {
+  _seed
+  _ancillary_commit
+  _accept >/dev/null 2>&1
+  local mf="$ROOT/.aid-o/work/plan-state/$PLAN/plan-boundary-manifest.json"
+  jq '.plan_boundary_manifest.protected_paths_complete = false' "$mf" > "$mf.tmp" && mv "$mf.tmp" "$mf"
+  run _drift "_pfsm_review_candidate_drift . $PLAN '$CAND'"
+  [ "$status" -ne 0 ]
+}
+
+@test "P073 Step 17 (F3): acceptance at an UNMOVED head writes no receipt" {
+  # Measured before the fix: it minted one, and C4 then reported
+  # review_equivalence:true for a plan whose head never left the candidate.
+  _seed
+  run _accept
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to accept"* ]]
+  [ "$(find "$ROOT/.aid-o" -name 'review-equivalence-receipt*.json' | wc -l | tr -d ' ')" = "0" ]
+}
+
+@test "P073 Step 17 (F3): the C4 flag compares accepted_head against the candidate" {
+  run grep -c 'review_equivalence:($ah != "" and $ah != $cand)' "$PFSM"
+  [ "$output" = "1" ]
+}

@@ -102,9 +102,20 @@ _bootstrap() {
 _add_epic() {
   local plan_id="$1" epic_id="$2"
   local base; base="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/${plan_id}")"
+  local ev=".aid-o/work/evidence/${epic_id}/R-${epic_id}-1"
   plan_manifest_add_epic "$plan_id" "$epic_id" "R-${epic_id}-1" \
     "task/${epic_id}/main" "$base" "plan/${plan_id}" \
-    ".aid-o/work/evidence/${epic_id}/R-${epic_id}-1" "proven"
+    "$ev" "proven"
+  # P073 Step 15/18: a real EPIC run leaves a plan.json in its evidence dir,
+  # and the freeze reads every one of them to compute the protected surface.
+  # Without it the freeze correctly records protected_paths_complete:false and
+  # review equivalence is unavailable — which is right, but it means this
+  # fixture could never exercise the equivalence path at all.
+  mkdir -p "$TEST_PROJECT_ROOT/$ev"
+  jq -n --arg e "$epic_id" \
+    '{schema_version:"aid-2.0", epic_id:$e,
+      steps:[{step_id:"S1", allowed_paths:["epic-work.txt","scripts/**"]}]}' \
+    > "$TEST_PROJECT_ROOT/$ev/plan.json"
 }
 
 # _commit_on <branch> <file> <text> — one real commit, HEAD restored.
@@ -5546,4 +5557,152 @@ _revert_the_merge() {
   [ "$output" = "$target_deliveries" ]
   run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.status'"
   [ "$output" = "rolled_back" ]
+}
+
+# =============================================================================
+# ─── P073 Step 18: merging a review-EQUIVALENT accepted head ────────────────
+# =============================================================================
+#
+# The PM authorized the review of the FROZEN candidate. Equivalence means that
+# review still describes the delivery surface — it never means the PM
+# authorized a different candidate. So the DECISION leg stays hard, the HEAD
+# leg gains exactly one alternative, and the merge re-verifies equivalence LIVE
+# against the current policy immediately before the irreversible action.
+
+# _accept_ancillary — the real stage, on the real seeded project.
+_accept_ancillary() {
+  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage accept-ancillary \
+    --project-root "$TEST_PROJECT_ROOT"
+}
+
+# _ancillary_commit_on_plan — one commit touching ONLY an ancillary path.
+_ancillary_commit_on_plan() {
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/$PLAN_ID"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+  printf '{"event":"post-freeze note"}\n' >> "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  git -C "$TEST_PROJECT_ROOT" add -f .aid-o/work/audit-log.jsonl
+  git -C "$TEST_PROJECT_ROOT" commit -qm "chore: an ancillary note after the freeze"
+}
+
+@test "P073 Step 18: a merge at the ACCEPTED head succeeds and carries both SHAs" {
+  _seed_merge_project
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  local d; d="$(_decision_file)"   # bound to the FROZEN candidate, deliberately
+  _ancillary_commit_on_plan
+  local accepted; accepted="$(_plan_sha)"
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+
+  _merge "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"review-equivalent accepted head"* ]]
+  # The merge really carries the accepted head. ANCESTRY, not literal
+  # parentage: plan-merge-to-main re-scopes the lifecycle manifest onto the
+  # plan branch first, so the merge's second parent is that re-scope commit —
+  # a descendant of the accepted head, which is itself a descendant of the
+  # candidate.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' merge-base --is-ancestor '$accepted' '$(_merge_commit)'"
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' merge-base --is-ancestor '$cand' '$accepted'"
+  [ "$status" -eq 0 ]
+  [ "$cand" != "$accepted" ]
+}
+
+@test "P073 Step 18: the equivalence-path close receipt carries merged_head and review_equivalence" {
+  _seed_merge_project
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  local accepted; accepted="$(_plan_sha)"
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  _merge "$d"
+  [ "$status" -eq 0 ]
+
+  local ref="refs/heads/aid-evidence-close/${PLAN_ID}/${cand}/$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show '${ref}:receipt.json' | jq -r '.review_equivalence'"
+  [ "$output" = "true" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show '${ref}:receipt.json' | jq -r '.merged_head'"
+  [ "$output" = "$accepted" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show '${ref}:receipt.json' | jq -r '.candidate_sha'"
+  [ "$output" = "$cand" ]
+}
+
+@test "P073 Step 18: a PROTECTED commit after acceptance refuses at live re-verification" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  # A delivery change lands AFTER the acceptance. The receipt is still valid
+  # and still hashes correctly — only the live re-check can catch this.
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/$PLAN_ID"
+  printf 'late change\n' >> "$TEST_PROJECT_ROOT/epic-work.txt"
+  git -C "$TEST_PROJECT_ROOT" commit -aqm "fix: a delivery change after acceptance"
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: a receipt whose accepted_head disagrees with the manifest refuses" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+
+  local r; r="$(find "$TEST_PROJECT_ROOT/.aid-o" -name 'review-equivalence-receipt*.json' | head -1)"
+  jq '.accepted_head = "ffffffffffffffffffffffffffffffffffffffff"' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+  # Re-bind the digest so ONLY the head binding is wrong.
+  _poke_manifest ".plan_boundary_manifest.equivalence_receipt_sha256 = \"sha256:$(sha256sum "$r" | awk '{print $1}')\""
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: accepted_head recorded but the receipt missing refuses — never merge on manifest state alone" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  find "$TEST_PROJECT_ROOT/.aid-o" -name 'review-equivalence-receipt*.json' -delete
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"receipt"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: the DECISION leg is unchanged — a decision naming the accepted head is refused" {
+  # Equivalence loosens WHICH HEAD is merged, never WHICH CANDIDATE the PM
+  # authorized. A decision bound to anything but the frozen candidate fails.
+  _seed_merge_project
+  _ancillary_commit_on_plan
+  local accepted; accepted="$(_plan_sha)"
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  local d; d="$(_decision_file ".candidate_sha = \"$accepted\"")"
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"candidate mismatch"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: a head that is neither the candidate nor an accepted head still refuses" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan   # moved, never accepted
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"neither the frozen candidate"* ]]
+  [ "$(_main_sha)" = "$before" ]
 }
