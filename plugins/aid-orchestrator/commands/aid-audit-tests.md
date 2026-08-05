@@ -28,6 +28,30 @@ and ends every run with a mandatory plain-language chat recommendation.
 
 ## Invocation
 
+### Bare `/aid-audit-tests` — ASK, never assume
+
+**When the user types `/aid-audit-tests` with no arguments, the controller MUST
+ask before running anything.** It does not silently fall back to `static`, and
+it does not silently pick a budget. A full audit takes hours and a static one
+answers a different question; guessing which the user meant wastes either their
+afternoon or their expectations.
+
+Ask ONE short question in the user's own language, offering the defaults
+pre-filled so a bare "ano" is enough:
+
+> Pustím **plný audit** (`--mode full`) s rozpočtem **180 minut** na celý
+> projekt. Sedí to, nebo chceš něco jiného?
+>
+> - **plný** — najde všechno včetně toho, co smí běžet paralelně (hodiny)
+> - **měřený** — změří časy, paralelismus neřeší (desítky minut)
+> - **rychlý** — jen soupis testů, nic nespouští (minuty)
+
+Then run what they confirm. `full` + 180 minutes is the recommended default
+because it is the only mode that fills in the catalog's parallel column, which
+is what makes the test suite fast afterwards.
+
+Explicit arguments always win — a user who typed them has already answered.
+
 ```
 /aid-audit-tests [repo|path:<path>|runner:<id>] [--mode static|measure|full]
                   [--budget-minutes N] [--max-agents N] [--repeat N]
@@ -40,7 +64,7 @@ and ends every run with a mandatory plain-language chat recommendation.
 | `path:<path>` | Scope: a subdirectory only. |
 | `runner:<id>` | Scope: one discovered runner family only (e.g. `runner:bats`). |
 | `--mode static\|measure\|full` | `static` (default): discovery + static analysis only. `measure`: adds bounded, sequential command execution against the approved-catalog-only allowlist. `full`: adds a deeper flake/order/isolation probe. |
-| `--budget-minutes N` | Wall-clock budget for `measure`/`full`. **Required for `--mode full`** — hard error, not a default. |
+| `--budget-minutes N` | Wall-clock budget for `measure`/`full`. **Required for `--mode full`** — hard error, not a default. The controller supplies it from the question above rather than making the user remember it. |
 | `--max-agents N` | Ceiling on concurrent read-only audit agents (independent of `dispatch.max_parallel`). |
 | `--repeat N` | Repeat a measured command N times (flake-probing use). |
 | `--write-plan` | Non-interactive equivalent of the natural-language "vytvoř plán oprav" continuation (see below) — for CI/scripted use. |
@@ -308,4 +332,55 @@ label attached, so it can never be read as a measured one.
 - Never writes to `.aid-o/config/test-catalog.yaml` directly — that is the
   separate, explicit catalog-approval step's job.
 
-**Last Updated:** 2026-08-04
+### Closing the loop: OFFER the approval, do not make the user find it
+
+The approval boundary stays — the catalog is an execution allowlist and a human
+confirms it. What must NOT stay is the user having to know that, or having to
+remember two script names to finish what the audit started.
+
+**After a `full` audit renders its summary, the controller offers the approval
+in one sentence** and, on a plain yes, runs it:
+
+> Katalog je připravený: **174 testů, 54 z nich ověřeně paralelních**.
+> Mám ho schválit, aby se podle něj testy pouštěly?
+
+On yes, run `aid-test-catalog-approve.sh --proposed
+<output-dir>/test-catalog.proposed.yaml --project-root <root>` followed by
+`aid-test-catalog-confirm-mapping.sh` (read the printed hash, pass it back).
+Report the result in one line.
+
+**Name what would be lost, before asking.** If approving would revoke evidence
+the current catalog holds — units the new proposal marks `unknown` that the
+approved one has proven — say how many and which, because that is a real cost
+and the approval script will refuse without an explicit override. Stage 1c has
+already carried forward everything it safely could, so a surviving revocation
+is a genuine change, not an artifact.
+
+Only then offer the remediation plan. Two questions, in the order the user
+cares about: first make the tests run right, then decide what to fix.
+
+### What a full audit proposes (v2.71.0)
+
+Analysts no longer stop at classifying. Where a finding recommends anything but
+`keep`, it carries a **proposal**: the exact change with file:line, an effort
+bucket built from counted facts (S/M/L/decision-required, with a separate
+verify bucket — a delete is S to perform and L to verify, and the verify cost
+is the one that decides), and a benefit that is measured, extrapolated,
+estimated or **unknown** — unknown being a normal answer, never dressed up as
+a number. Time benefits count only on the critical path.
+
+The categories span both directions: remove/merge/strengthen a weak oracle,
+fix a fixable parallel blocker (fixed path → temp dir), move tests off a
+genuinely unfixable shared resource, `add` a missing error-path test, `rewire`
+a gate that runs a unit twice or a timeout below real runtime. Destructive
+proposals (remove, merge) are always decision-required and guarded — a test
+born in a bugfix commit is presumptively load-bearing.
+
+Proposals carry a stable `proposal_id`. Ones the owner has declined — listed in
+`.aid-o/config/test-audit-decisions.yaml` under `declined:` — are marked and
+never re-proposed. Contradicting proposals reference each other via
+`conflicts_with` instead of being emitted as independent advice. The render
+shows the top slice ranked by priority and evidence strength; the full set
+stays in `decision.json`.
+
+**Last Updated:** 2026-08-05

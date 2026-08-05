@@ -63,6 +63,53 @@ basis, or state the specific bounded proof that would settle it — a named, run
 an aspiration. Two units you believe isolated but never compared are a proposal for a pilot, not a
 lane.
 
+## Proposals: end with a remediation, not a label
+
+A finding that stops at "fix" has told the owner nothing he can act on. Where
+you recommend anything other than `keep`, attach a `proposal` object:
+
+- **`change`** — the exact edit, naming file:line: "test-aid-fsm.bats:359
+  writes `$TEST_PROJECT_ROOT/.aid-o` under a fixed path; allocate a per-test
+  temp dir instead". Never "improve isolation".
+- **`effort`** — counted facts, not hours. `bucket`: S (one file, mechanical),
+  M (several files or a new helper), L (test architecture, gate config, or
+  production code), decision-required (a human must rule on intent — every
+  delete and merge is decision-required). `verify_bucket` is SEPARATE: most
+  deletes are S to perform and L to verify, and the verify cost is what decides
+  whether it is worth doing. `repeat_count` when one mechanical change applies
+  to many sites — "S x 14" is more truthful than "M".
+- **`benefit`** — `kind` is measured / extrapolated / estimated / unknown, and
+  **unknown is a normal answer**; an audit that never says unknown is not
+  measuring. Time counts only on the CRITICAL PATH — 30s saved beside a
+  5-minute serial test saves nothing. For remove/merge/add/strengthen the unit
+  is `risk_note` (what newly goes undetected, or newly detected), never
+  seconds alone.
+- **`conflicts_with`** — when your own advice collides ("share the setup"
+  contradicts "isolate per test"), emit the conflict on both findings. Never
+  both sides as independent advice.
+
+A proposal you cannot fill honestly is a proposal you must not emit — keep the
+finding, omit the proposal, and name the cheapest experiment that would let a
+later audit propose it properly.
+
+### What this wave may propose, and its guards
+
+- **`fix` (fixable resource)** — fixed path → per-test temp dir; fixed port →
+  ephemeral; shared lock → per-test lock. GUARDS: distinguish *direct write
+  observed* from *inferred through a helper* in your confidence; a read-only
+  use of a shared path is not a blocker; never propose ephemeral ports where
+  the port number appears in fixtures or docs.
+- **Contention reduction where the resource is genuinely unfixable** — the
+  remediation is to move tests OFF the shared resource, not to fix it: "20 of
+  these 22 tests use the shared git repo only as scenery; give them a per-test
+  init and keep the 2 that genuinely test git behaviour serial."
+- **Order dependence** — a unit that passes only in declared order is invisible
+  to static reading; where you suspect it, the proposal is the shuffle pilot
+  that would prove it, named and bounded.
+- **Non-hermetic dependencies** — real network, real clock, HOME/TZ/locale,
+  unseeded randomness: these fail even at concurrency 1 and belong here as
+  findings with proposals, not as parallelism labels.
+
 ## Output contract
 Emit exactly one JSON document matching the output schema: `schema_version` (const `"1.0.0"`),
 `focus: "parallel_safety"`, `wave`, `shard_id: null`, `findings[]`, `produced_at`,

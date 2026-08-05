@@ -41,6 +41,51 @@ per-test scope) from the real receipts and catalog `isolation` fields. Never inf
 single run — a flake finding requires at least one observed inconsistency across repeated runs, cited
 in `evidence_refs`.
 
+## Proposals: end with a remediation, not a label
+
+A finding that stops at "fix" has told the owner nothing he can act on. Where
+you recommend anything other than `keep`, attach a `proposal` object:
+
+- **`change`** — the exact edit, naming file:line: "test-aid-fsm.bats:359
+  writes `$TEST_PROJECT_ROOT/.aid-o` under a fixed path; allocate a per-test
+  temp dir instead". Never "improve isolation".
+- **`effort`** — counted facts, not hours. `bucket`: S (one file, mechanical),
+  M (several files or a new helper), L (test architecture, gate config, or
+  production code), decision-required (a human must rule on intent — every
+  delete and merge is decision-required). `verify_bucket` is SEPARATE: most
+  deletes are S to perform and L to verify, and the verify cost is what decides
+  whether it is worth doing. `repeat_count` when one mechanical change applies
+  to many sites — "S x 14" is more truthful than "M".
+- **`benefit`** — `kind` is measured / extrapolated / estimated / unknown, and
+  **unknown is a normal answer**; an audit that never says unknown is not
+  measuring. Time counts only on the CRITICAL PATH — 30s saved beside a
+  5-minute serial test saves nothing. For remove/merge/add/strengthen the unit
+  is `risk_note` (what newly goes undetected, or newly detected), never
+  seconds alone.
+- **`conflicts_with`** — when your own advice collides ("share the setup"
+  contradicts "isolate per test"), emit the conflict on both findings. Never
+  both sides as independent advice.
+
+A proposal you cannot fill honestly is a proposal you must not emit — keep the
+finding, omit the proposal, and name the cheapest experiment that would let a
+later audit propose it properly.
+
+### What this wave may propose, and its guards
+
+- **`fix` (flake with a named cause)** — GUARD: a cause may be stated only when
+  evidence links it (fails only in the parallel lane; correlates with load);
+  otherwise it is a hypothesis and must be labelled one. With fewer than N
+  observed failures you have an anecdote, not a finding.
+- **`quarantine`** — always with an expiry and an owner, and the expiry must
+  itself become a finding when it lapses; quarantine without a sweep
+  manufactures zombies.
+- **`rewire` (retry policy)** — auto-retry configured anywhere makes flake
+  invisible and under-reports this whole wave; surfacing it precedes every
+  other flake finding.
+- **Non-hermetic dependency** — real network/clock/env: the fix is hermetic
+  setup, and it usually also unblocks parallelism — fill `conflicts_with` when
+  your fix and a parallel-safety fix touch the same lines.
+
 ## Output contract
 Emit exactly one JSON document matching the output schema: `schema_version` (const `"1.0.0"`),
 `focus: "flake_isolation"`, `wave`, `shard_id: null`, `findings[]`, `produced_at`,

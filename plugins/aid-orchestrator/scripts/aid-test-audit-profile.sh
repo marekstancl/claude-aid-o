@@ -28,6 +28,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=lib/aid-test-adapter-contract.sh
+source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
+PROFILE_SCHEMA="${PLUGIN_ROOT}/defaults/schemas/test-profile.schema.json"
 
 # shellcheck source=lib/aid-test-timing-bats.sh
 source "${SCRIPT_DIR}/lib/aid-test-timing-bats.sh"
@@ -136,6 +139,47 @@ if [[ "$runner" == "bats" && "$command_is_shell_form" == "false" ]] && bats_timi
   argv=("${argv[0]}" "--timing" "${argv[@]:1}")
 fi
 
+# ─── One unit, one command ──────────────────────────────────────────────────
+# The measurement reads execution.yaml; the profiler reads the catalog. When
+# those disagree about the same gate, the audit measures one thing and then
+# "diagnoses" another — and says complete: true about it. That happened here:
+# gate:bats_all is a real pool runner taking 25 minutes in execution.yaml and a
+# quarantine stub exiting 86 in the catalog, so a 25-minute measurement was
+# followed by a 3-second profile of a command that runs nothing. The check that
+# exists to prove the slow suite was diagnosed was satisfied by evidence that it
+# never ran.
+#
+# A unit whose two authorities disagree is refused rather than silently
+# profiled against whichever one this script happens to read.
+if [[ "$run_unit_id" == gate:* && -f "$execution_yaml" ]]; then
+  _gate_name="${run_unit_id#gate:}"
+  # `strenv`, not `--arg`: yq here is mikefarah's Go implementation, which has
+  # no `--arg` at all — that is jq's flag. The first cut used it, the read
+  # failed every time, and a `|| true` turned the failure into an empty result,
+  # so this check silently passed everything. A guard that cannot fail loudly
+  # is not a guard; the two outcomes are separated deliberately below.
+  _gate_cmd=""
+  _gate_rc=0
+  _gate_cmd="$(_TACP_GATE="$_gate_name" yq -r '.gates[strenv(_TACP_GATE)].command // ""' "$execution_yaml" 2>/dev/null)" || _gate_rc=$?
+  if [[ "$_gate_rc" -ne 0 ]]; then
+    echo "aid-test-audit-profile.sh: could not read gate commands from '$execution_yaml' — refusing to profile '$run_unit_id' without being able to check its command against the gate it stands for" >&2
+    exit 15
+  fi
+  if [[ -n "$_gate_cmd" ]]; then
+    _cat_argv="$(jq -c 'if (.argv // []) | length > 0 then .argv else ["bash","-c",(.shell // "")] end' <<<"$command_json" 2>/dev/null || true)"
+    _gate_argv="$(jq -nc --arg c "$_gate_cmd" '["bash","-c",$c]' 2>/dev/null || true)"
+    [[ -n "$_cat_argv" && -n "$_gate_argv" ]] || _cat_argv="$_gate_argv"
+    if [[ "$_cat_argv" != "$_gate_argv" ]]; then
+      echo "aid-test-audit-profile.sh: '$run_unit_id' has TWO different commands and they disagree:" >&2
+      echo "  execution.yaml: $_gate_cmd" >&2
+      echo "  catalog:        $(jq -r 'if (.argv // []) | length > 0 then (.argv | join(" ")) else (.shell // "") end' <<<"$command_json")" >&2
+      echo "  Profiling either one produces a diagnosis of something the project does not run." >&2
+      echo "  Re-approve the catalog so the unit's command matches the gate it stands for." >&2
+      exit 15
+    fi
+  fi
+fi
+
 # The allowlist must approve the command that will ACTUALLY RUN, not the one
 # it was derived from. Checking before the `--timing` insertion approved a
 # different argv than the one executed — a small gap, but the whole point of
@@ -212,6 +256,17 @@ _evidence_manifest() {
 }
 _evidence_before="$(_evidence_manifest)"
 
+# A DETECTOR IS NOT ENOUGH. Naming what vanished still costs the operator the
+# whole run. The audit's evidence is copied somewhere the profiled command has
+# no reason to reach, so whatever removes it can be undone rather than merely
+# reported. This is cheap — the tree is a few MB of JSON — and it is the only
+# thing that actually answers "will it lose my work again".
+_evidence_backup=""
+if [[ -d "$output_dir" ]]; then
+  _evidence_backup="$(mktemp -d -t aid-audit-evidence-XXXXXX)"
+  cp -a "$output_dir/." "$_evidence_backup/" 2>/dev/null || _evidence_backup=""
+fi
+
 started_ms=$(( $(date +%s%N) / 1000000 ))
 if ! ( cd "$target_canon" && bash "${SCRIPT_DIR}/aid-job.sh" run \
         --jobs-dir "$jobs_dir" --id "$job_id" \
@@ -250,14 +305,23 @@ elapsed_ms=$(( ended_ms - started_ms ))
 # this script has also had a turn.
 _evidence_after="$(_evidence_manifest)"
 _evidence_lost="$(comm -23 <(printf '%s\n' "$_evidence_before") <(printf '%s\n' "$_evidence_after") 2>/dev/null | grep -v '^$' | grep -v '/profile-jobs/' || true)"
+_evidence_restored=""
 if [[ -n "$_evidence_lost" ]]; then
   echo "aid-test-audit-profile.sh: FILES THIS AUDIT HAD ALREADY COLLECTED DISAPPEARED WHILE PROFILING '$run_unit_id':" >&2
   printf '%s\n' "$_evidence_lost" | sed 's|^\./|    |' >&2
-  echo "  The profiled command ran in the disposable clone at '$target_canon' and must not be able to reach" >&2
-  echo "  '$output_dir' at all. Refusing to continue: an audit that silently loses its own evidence produces" >&2
-  echo "  a smaller portfolio than it examined, with nothing to show anything is missing." >&2
-  exit 13
+  echo "  The profiled command ran in the disposable clone at '$target_canon' and has no business reaching" >&2
+  echo "  '$output_dir'. The cause is not yet identified — see docs/plans/P072-real-audit-record.md." >&2
+  if [[ -n "$_evidence_backup" ]] && cp -a "$_evidence_backup/." "$output_dir/" 2>/dev/null; then
+    _evidence_restored="$(printf '%s' "$_evidence_lost" | tr '\n' ' ')"
+    echo "  RESTORED from the pre-run copy — the audit keeps its evidence and continues. This is recorded on the" >&2
+    echo "  receipt as evidence_loss_restored so it cannot be mistaken for a run where nothing happened." >&2
+  else
+    echo "  Could not restore (no usable pre-run copy). Refusing to continue: an audit that loses its own evidence" >&2
+    echo "  reports a smaller portfolio than it examined, with nothing to show anything is missing." >&2
+    exit 13
+  fi
 fi
+[[ -n "$_evidence_backup" && -d "$_evidence_backup" ]] && rm -rf "$_evidence_backup"
 
 : > "$log_path"
 if [[ -f "$live_log" ]]; then cat "$live_log" >> "$log_path"; fi
@@ -309,7 +373,13 @@ if [[ "$log_bytes" -gt "$log_cap" ]]; then
 fi
 
 # ─── Attribution ────────────────────────────────────────────────────────────
-timing_doc='{}'
+# NOT `{}`. The schema requires cases/planned/truncated, so the no-timing
+# branch emitted a receipt that failed its own contract — and since the
+# profiler did not validate itself, it exited 0 and the consolidator rejected
+# every receipt three steps later, with the audit dying and no artifact to show
+# why. An empty timing document is "no cases parsed", and it has to say so in
+# the shape the schema defines.
+timing_doc='{"cases":[],"planned":0,"truncated":false}'
 if [[ "$timing_supported" == "true" ]]; then
   timing_doc="$(bats_timing_parse "$(cat "$log_path")" "$run_unit_id" "$(bats_timing_version || true)")"
 fi
@@ -469,6 +539,7 @@ jq -nc \
   --argjson cancelled "$([[ "$cancelled" == "true" ]] && echo true || echo false)" \
   --arg job_id "$job_id" --arg job_state "$job_state" --arg live_log "$live_log" \
   --arg jobs_dir "$jobs_dir" \
+  --arg ev_restored "$_evidence_restored" \
   --arg audit_id "$audit_id" --arg log_sha "$evidence_log_sha256" \
   '{schema_version:"aid-test-profile-v1", run_unit_id:$id, runner:$runner,
     complete:$complete, incomplete_reason:$reason,
@@ -484,7 +555,24 @@ jq -nc \
     # long profile needs the path, and reading it here is the contract —
     # deriving it from a layout is what broke when the layout changed.
     job: {id:$job_id, state:$job_state, live_log:$live_log, jobs_dir:$jobs_dir},
+    evidence_loss_restored: (if $ev_restored == "" then null else $ev_restored end),
     evidence_log_truncated:$log_truncated, evidence_log_dropped_bytes:$log_dropped}' \
   > "$receipt_path"
+
+# ─── The producer validates its own output ──────────────────────────────────
+# It did not, and that is how two schema violations — an undeclared `job`
+# field and an empty `timing` object — reached production while the profiler
+# reported success. The consolidator rejected every receipt three steps later
+# and the whole audit died with nothing to show which field was wrong.
+#
+# A producer that emits an artifact its own schema rejects, and exits 0 while
+# doing it, has moved the failure somewhere it cannot be diagnosed. It fails
+# here now, naming the receipt.
+if ! adapter_validate_schema "$PROFILE_SCHEMA" "$(cat "$receipt_path")"; then
+  echo "aid-test-audit-profile.sh: the receipt this run just wrote does not validate against ${PROFILE_SCHEMA}" >&2
+  echo "  '$receipt_path' is not a usable aid-test-profile-v1 artifact, so nothing downstream could consume it." >&2
+  echo "  Failing HERE rather than letting consolidation reject it with no field named." >&2
+  exit 14
+fi
 
 echo "$receipt_path"

@@ -62,6 +62,24 @@ explicitly rather than reading for general plausibility.
 
 Flag a violation of any class as its own finding, naming the class and quoting the claim.
 
+## Proposals: verify them like findings
+
+Every `proposal` in the artifacts you review is a claim, and confident-but-
+wrong proposals are worse than none — they spend the owner's trust.
+
+- A `remove`/`merge` without decision-required effort, without a named
+  duplication basis, or whose target originates in a bugfix commit nobody
+  checked: flag it.
+- A `benefit` with a number whose `kind` does not support it — an "estimated"
+  figure with no stated model, an "extrapolated" one with no named sample — or
+  any time-benefit not on the critical path: flag it.
+- Two proposals that contradict each other without `conflicts_with` on both
+  ("share setup" vs "isolate per test"): flag the pair.
+- A proposal whose `change` does not name file:line: flag it — it is a label
+  wearing a proposal's clothes.
+- An artifact with many proposals and no `unknown` benefits anywhere: treat
+  that as its own finding about the artifact.
+
 ## Output contract
 Emit exactly one JSON document matching the output schema: `schema_version` (const `"1.0.0"`),
 `focus: "adversarial_review"`, `wave`, `shard_id: null`, `findings[]`, `produced_at`,

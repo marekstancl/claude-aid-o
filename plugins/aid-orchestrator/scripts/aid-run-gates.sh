@@ -513,7 +513,7 @@ run_all_gates() {
   # its content. It cannot see run units for a fan-out command — `run_gate`
   # takes an opaque command string — so a ledger appended from here would
   # record one entry per gate and could never find the overlap it exists for.
-  local _ledger_path=""
+  local _ledger_path="" _ledger_unaccounted_reason=""
   if [[ -z "${AID_EXECUTION_LEDGER:-}" ]]; then
     # Beside this run's other evidence, and created the same way the timeline
     # and the report are: written INTO an existing directory, never bringing
@@ -540,7 +540,13 @@ run_all_gates() {
       # timeline and the report have nowhere to go either. Said out loud
       # rather than inferred from silence, because "this run was not
       # accounted" and "this run had no duplicates" must never look alike.
-      echo "WARN: aid-run-gates.sh: no evidence directory at '${_ledger_dir}' — this gate run is NOT accounted by an execution ledger and cannot support a no-double-execution claim" >&2
+      # Recorded in the REPORT, not on stderr. This command's stdout contract is
+      # a JSON document, and a diagnostic on stderr merges into it for any
+      # caller that captures both — bats' own `run` does exactly that, and this
+      # line turned four passing gate-runner tests red by making the report
+      # unparseable. The fact still has to be durable, so it goes where the rest
+      # of the run's findings go.
+      _ledger_unaccounted_reason="no evidence directory at '${_ledger_dir}' — this gate run is NOT accounted by an execution ledger and cannot support a no-double-execution claim"
     fi
   fi
 
@@ -863,6 +869,8 @@ run_all_gates() {
         --arg p "$_ledger_path" "$_ledger_path" 2>/dev/null || echo '{}')"
     fi
     unset AID_EXECUTION_LEDGER
+  elif [[ -n "$_ledger_unaccounted_reason" ]]; then
+    gates_json+=",\"_execution_ledger\":$(jq -nc --arg r "$_ledger_unaccounted_reason" '{accounted:false, reason:$r}')"
   fi
 
   # ─── defined==processed integrity assert (OBS-20260708-07) ──────────────

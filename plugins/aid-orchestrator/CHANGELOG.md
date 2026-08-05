@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [2.72.0] — 2026-08-05
 
 > Three EPICs of loosening. AID was refusing work it had no physical reason to
 > refuse: a completed plan-level review died to an audit-log append, a PM whose
@@ -32,6 +32,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Placeholder release entries** — a release whose CHANGELOG section for the new version is empty or a placeholder is refused; the entry is the only human-readable record of what shipped.
 - **Reporter plan-boundary contradiction** — a Reporter round no longer moves the candidate it is reporting on.
 - **Branch-restore continuation** — a failed branch restore stops the run instead of continuing on whatever branch the worktree happens to be on, where every subsequent command succeeds while operating on the wrong branch.
+## [2.71.0] — 2026-08-05
+
+> Until now the audit classified, measured and proved — and then told the owner
+> "fix" with no object. The analysts were required to record every resource with
+> file:line and forbidden from concluding anything with it: their instructions
+> allowed exactly two endings, a lane or a measurement. This release adds the
+> third ending the whole exercise was for.
+
+### Added
+- **Findings carry concrete remediation proposals** — the exact change with file:line ("a.bats:359 writes under a fixed path; allocate a per-test temp dir"), an effort bucket built from counted facts (S/M/L/decision-required, with a separate verify bucket, because a delete is S to perform and L to verify and the verify cost is the one that decides), and a benefit that is measured, extrapolated, estimated or **unknown** — unknown being a normal answer an honest audit gives often. Time benefits count only on the critical path: 30s saved beside a 5-minute serial test saves nothing.
+- **Both directions, not just subtraction** — an audit that can only shrink a suite monotonically degrades safety. New recommendation values: `add` (a missing error-path test — benefit is risk, not seconds), `strengthen` (a weak oracle gets a real assertion instead of deletion), `rewire` (a gate that runs a unit twice, a unit no gate runs, a timeout below real runtime).
+- **Guards on everything destructive** — remove/merge are always decision-required; "asserts nothing" must survive checking exit-code semantics and custom helpers; a duplication claim must name its basis, never file-name similarity; a test born in a bugfix commit is presumptively load-bearing; the adversarial wave now verifies proposals like findings and flags a confident number whose evidence tier cannot support it.
+- **Proposals have identity and memory** — a stable `proposal_id`, a declined ledger (`.aid-o/config/test-audit-decisions.yaml`) so a declined proposal is marked and never re-litigated, and `conflicts_with` cross-references on both sides of contradicting advice ("share the setup" vs "isolate per test"), computed as well as declared.
+- **The proposals reach the artifacts people read** — findings' proposals become `decision.json` actions (a bare verb without a proposal deliberately does not), ride into the remediation brief the plan is generated from, and render as a ranked, capped list — the artifact keeps everything, the render shows the top slice, because an audit emitting four hundred proposals has produced zero.
+
+## [2.70.8] — 2026-08-05
+
+### Changed
+- **The audit now offers the catalog approval instead of leaving it on the floor** — it produces a proposed catalog and, by design, never writes the approved one; that boundary is right, because the catalog is an execution allowlist. What was wrong is that finishing the job then required knowing two script names. The controller now says what the catalog holds, asks whether to approve it, runs both steps on a plain yes, and names anything the approval would revoke before asking. Only then does it offer the remediation plan — first make the tests run right, then decide what to fix.
+
+## [2.70.7] — 2026-08-05
+
+> The audit could prove which tests are safe to run side by side, and had no way
+> to write that down. The proof landed in `decision.json` and the catalog — the
+> file every consumer reads — came out with every unit `unknown` regardless.
+
+### Added
+- **`aid-test-catalog-apply-evidence.sh` — the missing link between what the audit proves and what the catalog says.** It promotes the units of every `proposed_parallel` lane to `parallel.status: safe`, bound to the content they were verified against, and carries forward evidence the previously approved catalog already held for units whose content has not moved. Carrying forward is safe by construction: every entry is bound to a source hash and a resource digest, so anything whose file changed fails its own binding and reverts to `unknown` with no list to maintain. It runs automatically at the end of every full audit; before this, the only path from evidence to catalog was a one-shot migration written for P071's text allowlist, and everything else was manual.
+
+### Changed
+- **A bare `/aid-audit-tests` asks instead of assuming** — it used to fall back to `static`, which answers a different question than the one most people are asking, while `full` refused to start without a budget nobody remembers. The controller now offers the recommended run (full, 180 minutes) in one sentence and accepts a plain yes. Explicit arguments still win.
+
+## [2.70.6] — 2026-08-05
+
+> Found by a real full audit of this repository: 174 run units and 158 447 bytes
+> of findings were enough to kill the only mandatory closing step, so a
+> completed audit produced no decision artifact at all.
+
+### Fixed
+- **Consolidation died on any portfolio big enough to matter** — `--argjson` puts a whole JSON value in ONE command-line argument, and Linux caps a single argument at 128 KB (`MAX_ARG_STRLEN`) no matter how large `ARG_MAX` is. The findings set, the aggregated resource maps, the pilots, the inventory, the keep/rewrite/remove sets, the lanes and the profile actions all scale with the portfolio and all went through argv, so `aid-test-audit-consolidate.sh` failed with "Argument list too long" — and because it is the only mandatory closing step and fails closed, the audit ended with nothing. Every value that grows with the portfolio is now read from a file. This is the same defect fixed in `aid-test-resource-map.sh` in 2.70.2 and not swept for at the time; the regression test builds a 226 KB artifact, and its own fixture hit the limit first, which is a fair measure of how easy it is to reach.
+
+## [2.70.5] — 2026-08-05
+
+### Fixed
+- **An audit that loses its own evidence now survives it** — a real full audit had its entire output tree deleted during a cost-profiling run: inventory, catalog, eight agent artifacts, measurements, 112 resource maps, and finalize then had nothing to read. 2.70.3 reduced the exposure and added a detector, but detecting a loss still costs the operator the run. The tree is now copied before the profiled command starts and restored if anything disappears, so the audit keeps its evidence and continues; the receipt records `evidence_loss_restored` so a restored run is never mistaken for a quiet one. **The cause of the deletion is still not identified** — every `rm` in the production scripts, `TEST_PROJECT_ROOT`, `git clean`/`reset --hard` and `aid-job.sh --repo` were ruled out — so this is a safety net, not a fix.
+
+## [2.70.4] — 2026-08-04
+
+> A third real audit found the profiler emitting receipts that failed its own
+> schema while reporting success, so consolidation rejected all of them and the
+> audit died with no artifact naming the cause. Two of the three blockers were
+> introduced by this plan's own earlier releases.
+
+### Fixed
+- **The profiler wrote receipts its own schema rejects, and exited 0 doing it** — `job.jobs_dir` was added in 2.70.3 without checking the schema, which declares `additionalProperties: false` on `job`, and the no-per-case-timing branch emitted `timing: {}` where `cases`/`planned`/`truncated` are required. Both are fixed, and the profiler now validates its own receipt and fails with exit 14 rather than moving the failure three steps downstream where no field can be named.
+- **`evidence_refs` had two different contracts on either side of a wave boundary** — the wave-artifact schema set no `minItems` while the consolidated-findings schema requires 1, so an agent could hand in an artifact that passed its own validation and then killed consolidation with an internal error naming neither the finding nor the field. The producer is held to the strictest consumer's rule: a finding with no evidence is not a finding.
+- **A run unit could carry two different commands and be profiled against the wrong one** — measurement reads `execution.yaml`, the profiler reads the catalog. Where they disagreed, this repository measured a 25-minute pool runner and then "diagnosed" a quarantine stub that exits in three seconds, recording `complete: true`: the check meant to prove the slow suite was diagnosed was satisfied by evidence that it never ran. Divergence is now refused with exit 15.
+- **Four test fixtures invented their own inventory shape** — `run_units[]` where the scanner and the schema say `entries[]`. One was found by an audit and three more by the inventory validation added in 2.70.1, which had left two suites red across three releases because its effect was never run against every consumer.
+- **A gate run's stdout is a JSON document, and 2.70.3 wrote a warning across it** — the "this run is not accounted by a ledger" notice went to stderr, which merges into stdout for any caller capturing both, so the report became unparseable and four gate-runner tests went red. The notice is now a field on the report (`_execution_ledger.accounted: false` with its reason), which is durable, machine-readable, and cannot corrupt the contract it is describing.
+- **A selector fixture asserted that an unbound `safe` is parallel eligible** — since P072 a status with no provenance object resolves to `unknown`, because a status nothing verified is a claim rather than evidence. The fixture had been asserting the opposite of what the product does.
+- **A suite asserted renderer wording removed when the six-part summary landed** — `finalize-production` had been checking for "audit NOT complete" and "Units left undecided" since that rewrite. Aligned to what the renderer actually prints.
 
 ## [2.70.3] — 2026-08-04
 

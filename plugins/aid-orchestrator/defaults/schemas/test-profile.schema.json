@@ -24,68 +24,163 @@
     "evidence_log_sha256"
   ],
   "properties": {
-    "schema_version": { "const": "aid-test-profile-v1" },
-    "run_unit_id": { "type": "string", "minLength": 1 },
-    "runner": { "type": "string", "minLength": 1 },
-    "complete": { "type": "boolean" },
+    "schema_version": {
+      "const": "aid-test-profile-v1"
+    },
+    "run_unit_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
     "incomplete_reason": {
       "description": "Why the run produced no complete measurement. `deadline` is the budget; `cancelled` is an operator; `lost` is a job that never reached a terminal record. Conflating them would let a keyboard interrupt read as a slow suite.",
-      "type": ["string", "null"],
-      "enum": ["deadline", "cancelled", "lost", null]
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "deadline",
+        "cancelled",
+        "lost",
+        null
+      ]
     },
-    "elapsed_ms": { "type": "integer", "minimum": 0 },
-    "exit_code": { "type": "integer" },
-    "budget_seconds": { "type": "integer", "minimum": 1 },
-    "lower_bound_ms": { "type": ["integer", "null"], "minimum": 0 },
-    "cancelled": { "type": "boolean" },
-    "evidence_log": { "type": "string", "minLength": 1 },
+    "elapsed_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "budget_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "lower_bound_ms": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "cancelled": {
+      "type": "boolean"
+    },
+    "evidence_log": {
+      "type": "string",
+      "minLength": 1
+    },
     "evidence_log_sha256": {
       "description": "sha256 of the evidence log the claims were derived from. Re-checked at ingestion, so a log edited or swapped after the fact stops finalization instead of silently backing conclusions it no longer supports.",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
     "audit_id": {
-      "description": "Which audit this receipt belongs to. Null is allowed for a standalone diagnostic run, but an audit that ingests profiles requires an exact match — a directory is not provenance.",
-      "type": ["string", "null"]
+      "description": "Which audit this receipt belongs to. Null is allowed for a standalone diagnostic run, but an audit that ingests profiles requires an exact match \u2014 a directory is not provenance.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
-    "evidence_log_truncated": { "type": "boolean" },
-    "evidence_log_dropped_bytes": { "type": "integer", "minimum": 0 },
+    "evidence_log_truncated": {
+      "type": "boolean"
+    },
+    "evidence_log_dropped_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
     "job": {
       "description": "The supervised job the measurement came from. Present so a receipt can be traced back to a durable terminal record instead of being taken on faith.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "state", "live_log"],
+      "required": [
+        "id",
+        "state",
+        "live_log"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
         "state": {
           "type": "string",
-          "enum": ["terminal_pass", "terminal_fail", "timed_out", "cancelled", "lost", "unknown"]
+          "enum": [
+            "terminal_pass",
+            "terminal_fail",
+            "timed_out",
+            "cancelled",
+            "lost",
+            "unknown"
+          ]
         },
-        "live_log": { "type": "string" }
+        "live_log": {
+          "type": "string"
+        },
+        "jobs_dir": {
+          "description": "Where the job records live. Named here because they moved INSIDE the disposable clone in 2.70.3 \u2014 an operator cancelling a long profile needs the path, and deriving it from a layout is what broke when the layout changed. Optional, so receipts written before 2.70.3 still validate.",
+          "type": "string"
+        }
       }
     },
     "timing": {
       "type": "object",
-      "required": ["cases", "planned", "truncated"],
+      "required": [
+        "cases",
+        "planned",
+        "truncated"
+      ],
       "properties": {
-        "cases": { "type": "array" },
-        "planned": { "type": "integer", "minimum": 0 },
-        "truncated": { "type": "boolean" },
-        "bats_version": { "type": ["string", "null"] },
-        "parsed_lines": { "type": "integer", "minimum": 0 },
-        "run_unit_id": { "type": "string" }
+        "cases": {
+          "type": "array"
+        },
+        "planned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "bats_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parsed_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "run_unit_id": {
+          "type": "string"
+        }
       }
     },
     "cost_curve": {
       "description": "Whether per-case duration rises with ordinal, and by how much. Named for the measurement, not for a cause: a rising curve is consistent with accumulation AND with later cases being heavier work, and this document cannot tell them apart.",
       "type": "object"
     },
-    "source_signals": { "type": "object" },
-    "duplicate_membership": { "type": "object" },
+    "source_signals": {
+      "type": "object"
+    },
+    "duplicate_membership": {
+      "type": "object"
+    },
     "root_cause": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bucket", "confidence", "reason", "next_probe"],
+      "required": [
+        "bucket",
+        "confidence",
+        "reason",
+        "next_probe"
+      ],
       "properties": {
         "bucket": {
           "description": "Closed set. A bucket the consolidator does not know maps to no action, and an unknown string must halt rather than fall through to a default.",
@@ -97,40 +192,113 @@
             "undecidable"
           ]
         },
-        "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
-        "reason": { "type": "string", "minLength": 20 },
-        "next_probe": { "type": ["string", "null"] }
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 20
+        },
+        "next_probe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
+    },
+    "evidence_loss_restored": {
+      "description": "Non-null when files the audit had already collected disappeared during this profiling run and were restored from a pre-run copy. The cause of the disappearance is not identified; this field is how a restored run stays distinguishable from one where nothing happened.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "allOf": [
     {
       "description": "A complete run has no incomplete reason and no lower bound; an incomplete run has both a reason and a lower bound. A lower bound presented alongside `complete: true` would read as a measured total.",
-      "if": { "properties": { "complete": { "const": true } }, "required": ["complete"] },
+      "if": {
+        "properties": {
+          "complete": {
+            "const": true
+          }
+        },
+        "required": [
+          "complete"
+        ]
+      },
       "then": {
         "properties": {
-          "incomplete_reason": { "type": "null" },
-          "lower_bound_ms": { "type": "null" }
+          "incomplete_reason": {
+            "type": "null"
+          },
+          "lower_bound_ms": {
+            "type": "null"
+          }
         }
       },
       "else": {
         "properties": {
-          "incomplete_reason": { "type": "string" },
-          "lower_bound_ms": { "type": "integer", "minimum": 0 }
+          "incomplete_reason": {
+            "type": "string"
+          },
+          "lower_bound_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     },
     {
       "description": "`cancelled: true` and `incomplete_reason: cancelled` are one fact and must agree.",
-      "if": { "properties": { "cancelled": { "const": true } }, "required": ["cancelled"] },
-      "then": { "properties": { "incomplete_reason": { "const": "cancelled" } } }
+      "if": {
+        "properties": {
+          "cancelled": {
+            "const": true
+          }
+        },
+        "required": [
+          "cancelled"
+        ]
+      },
+      "then": {
+        "properties": {
+          "incomplete_reason": {
+            "const": "cancelled"
+          }
+        }
+      }
     },
     {
       "description": "High confidence is reserved for causes decidable without a complete run. An incomplete run reached none of the cases that would settle a timing question, so it may not claim high confidence.",
-      "if": { "properties": { "complete": { "const": false } }, "required": ["complete"] },
+      "if": {
+        "properties": {
+          "complete": {
+            "const": false
+          }
+        },
+        "required": [
+          "complete"
+        ]
+      },
       "then": {
         "properties": {
-          "root_cause": { "properties": { "confidence": { "enum": ["low", "medium"] } } }
+          "root_cause": {
+            "properties": {
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -139,16 +307,32 @@
       "if": {
         "properties": {
           "root_cause": {
-            "properties": { "bucket": { "enum": ["cost_rises_across_run", "undecidable"] } },
-            "required": ["bucket"]
+            "properties": {
+              "bucket": {
+                "enum": [
+                  "cost_rises_across_run",
+                  "undecidable"
+                ]
+              }
+            },
+            "required": [
+              "bucket"
+            ]
           }
         },
-        "required": ["root_cause"]
+        "required": [
+          "root_cause"
+        ]
       },
       "then": {
         "properties": {
           "root_cause": {
-            "properties": { "next_probe": { "type": "string", "minLength": 20 } }
+            "properties": {
+              "next_probe": {
+                "type": "string",
+                "minLength": 20
+              }
+            }
           }
         }
       }

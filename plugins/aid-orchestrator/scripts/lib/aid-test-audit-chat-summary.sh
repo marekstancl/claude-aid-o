@@ -235,6 +235,42 @@ aid_test_audit_render_chat_summary() {
     [[ "$max_ids" =~ ^[0-9]+$ ]] || max_ids=25
   fi
 
+
+  # _tacs_proposed_actions — the concrete remediation list, ranked and capped.
+  # An audit emitting four hundred proposals has produced zero; the artifact
+  # keeps everything, the render shows the top slice and says how many more
+  # there are. Declined-previously rows are counted, never re-litigated.
+  _tacs_proposed_actions() {
+    local cap=15
+    [[ -n "$_tacs_decision_path" && -f "$_tacs_decision_path" ]] || { echo "(no decision artifact)"; return 0; }
+    jq -r --argjson cap "$cap" '
+      ([.actions[]? | select(.change != null)]) as $props
+      | ([$props[] | select(.declined_previously == true)]) as $declined
+      | ([$props[] | select(.declined_previously != true)]
+         | sort_by((["critical","high","medium","low"] | index(.priority)),
+                   (if .impact.kind == "measured" then 0 elif .impact.kind == "estimated" then 1 else 2 end))) as $live
+      | if ($props | length) == 0 then
+          "No concrete remediation was proposed — findings that could not carry an honest change/benefit/effort stayed findings."
+        else
+          ( [ $live[:$cap][]
+              | "- **" + .action + "** " + (.targets | join(", "))
+                + (if .effort then " — effort " + .effort.bucket
+                     + (if (.effort.repeat_count // 1) > 1 then " x" + (.effort.repeat_count|tostring) else "" end)
+                     + (if .effort.verify_bucket then " (verify " + .effort.verify_bucket + ")" else "" end)
+                   else "" end)
+                + (if .impact.kind == "measured" and .impact.after_ms then ", saves ~" + ((.impact.after_ms/1000)|floor|tostring) + "s on the critical path (measured)"
+                   elif .impact.kind == "estimated" and .impact.after_ms then ", ~" + ((.impact.after_ms/1000)|floor|tostring) + "s (estimated)"
+                   elif .impact.kind == "unknown" then ", benefit unknown"
+                   else "" end)
+                + (if ((.conflicts_with // []) | length) > 0 then " — CONFLICTS with " + (.conflicts_with | join(", ")) else "" end)
+                + "\n  " + (.change // .reason)
+            ] | join("\n") )
+          + (if ($live | length) > $cap then "\n- … and " + (($live | length) - $cap | tostring) + " more in decision.json" else "" end)
+          + (if ($declined | length) > 0 then "\n- (" + ($declined | length | tostring) + " previously declined — kept in decision.json, not re-proposed)" else "" end)
+        end
+    ' "$_tacs_decision_path"
+  }
+
   # _tacs_id_set <jq-path> <label> — the named set, truncated with an EXACT
   # remaining count and a path to the full list. A silent truncation would let
   # a reader act on a partial set believing it complete.
@@ -426,6 +462,10 @@ $(_tacs_id_set '[.portfolio_change.rewrite_unit[]?]' 'Rewrite')
 $(_tacs_merge_groups)
 $(_tacs_id_set '[.portfolio_change.remove[]?]' 'Remove')
 ${removal_line}
+
+**Proposed changes** (ranked; the full set is in decision.json):
+
+$(_tacs_proposed_actions)
 
 ## 3. What can run in parallel
 

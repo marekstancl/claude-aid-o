@@ -100,6 +100,26 @@ fi
 # mktemp calls under `set -e` leak the first if the second fails.
 _tmpdir="$(mktemp -d)"
 trap 'rm -rf "$_tmpdir"' EXIT
+
+# ─── Big JSON goes through files, never argv ────────────────────────────────
+# `--argjson` puts a whole JSON value in ONE command-line argument, and Linux
+# caps a single argument at 128 KB (MAX_ARG_STRLEN) no matter how large ARG_MAX
+# is. A real audit of this repository produced 158 447 bytes of findings and a
+# larger aggregate of resource maps, so consolidation died with "Argument list
+# too long" — and because this script is the only mandatory closing step, and it
+# fails closed, the whole audit produced no decision artifact at all.
+#
+# The same defect was fixed once in aid-test-resource-map.sh (2.70.2) and not
+# swept for elsewhere. `_bigjson` is that sweep: it writes a value to a temp
+# file and prints the path, for use with `--slurpfile NAME` + `$NAME[0]`.
+_TAC_BIGJSON_FILES=()
+_bigjson() {
+  local f; f="$(mktemp "${_tmpdir:-/tmp}/bigjson.XXXXXX")"
+  printf '%s\n' "$1" > "$f"
+  _TAC_BIGJSON_FILES+=("$f")
+  printf '%s' "$f"
+}
+
 all_findings_ndjson="${_tmpdir}/findings.ndjson"
 all_dispositions_ndjson="${_tmpdir}/dispositions.ndjson"
 : > "$all_findings_ndjson"; : > "$all_dispositions_ndjson"
@@ -214,8 +234,9 @@ with_ids_json="$(jq -cs 'sort_by(.finding_id)' "$ids_ndjson" 2>/dev/null || echo
 rm -f "$ids_ndjson"
 
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-consolidated_json="$(jq -n --arg audit_id "$audit_id" --arg gen "$generated_at" --argjson findings "$with_ids_json" \
-  '{schema_version:"1.0.0", audit_id:$audit_id, generated_at:$gen, findings:$findings}')"
+consolidated_json="$(jq -n --arg audit_id "$audit_id" --arg gen "$generated_at" \
+  --slurpfile findings "$(_bigjson "$with_ids_json")" \
+  '{schema_version:"1.0.0", audit_id:$audit_id, generated_at:$gen, findings:$findings[0]}')"
 
 adapter_validate_schema "$FINDINGS_SCHEMA" "$consolidated_json" \
   || _die 1 "internal error: generated consolidated-findings.json failed its own schema"
@@ -458,6 +479,82 @@ if [[ "$audit_mode" == "full" ]]; then
     fi
 
 
+    # ─── Findings' proposals become actions ────────────────────────────────
+    # Until now decision.json's actions came ONLY from cost profiles, so an
+    # analyst could name the exact fixable resource with file:line and none of
+    # it reached the artifact the owner reads — the audit did the thinking and
+    # left the conclusion on the floor. A finding whose recommendation is not
+    # `keep` and that carries a proposal becomes an action, with a stable
+    # proposal_id so the next audit does not re-propose what was already
+    # declined, and with its conflicts carried rather than flattened.
+    _finding_actions='[]'
+    _finding_actions="$(jq -c '[ .[]
+      | select((.recommendation // "keep") != "keep")
+      | select(.proposal != null)
+      | {
+          action: .recommendation,
+          targets: [.run_unit_id],
+          priority: (if .severity == "critical" then "critical"
+                     elif .severity == "high" then "high"
+                     elif .severity == "medium" then "medium"
+                     else "low" end),
+          reason: (.finding + " — " + .proposal.change),
+          change: .proposal.change,
+          evidence_refs: .evidence_refs,
+          effort: .proposal.effort,
+          conflicts_with: (.proposal.conflicts_with // []),
+          impact: {
+            # extrapolated collapses to estimated here, and the collapse is
+            # recorded as an assumption rather than silently upgraded.
+            kind: (if .proposal.benefit.kind == "measured" then "measured"
+                   elif .proposal.benefit.kind == "unknown" then "unknown"
+                   else "estimated" end),
+            before_ms: null,
+            after_ms: (.proposal.benefit.critical_path_ms // null),
+            assumptions: ((.proposal.benefit.assumptions // [])
+              + (if .proposal.benefit.kind == "extrapolated" then ["extrapolated from a sample — see the finding"] else [] end)
+              + (if .proposal.benefit.risk_note then ["risk: " + .proposal.benefit.risk_note] else [] end))
+          }
+        }
+      ]' <<<"$with_ids_json" 2>/dev/null)" || _finding_actions='[]'
+
+    # Stable identity: sha256(action|targets|change), first 16 hex. Computed in
+    # bash because jq has no sha256.
+    if [[ "$(jq -r 'length' <<<"$_finding_actions")" -gt 0 ]]; then
+      _fa_with_ids='[]'
+      while IFS= read -r _row; do
+        _pid="$(jq -r '[.action, (.targets|sort|join(",")), (.change // "")] | join("|")' <<<"$_row" | sha256sum | cut -c1-16)"
+        _fa_with_ids="$(jq -c --argjson r "$_row" --arg id "$_pid" '. + [($r + {proposal_id:$id})]' <<<"$_fa_with_ids")"
+      done < <(jq -c '.[]' <<<"$_finding_actions")
+      _finding_actions="$_fa_with_ids"
+
+      # The declined ledger: proposals the owner already said no to are kept in
+      # the artifact for honesty and marked, never silently re-litigated.
+      _declined_file="${project_root%/}/.aid-o/config/test-audit-decisions.yaml"
+      if [[ -f "$_declined_file" ]]; then
+        _declined_ids="$(yq -o=json '.declined // []' "$_declined_file" 2>/dev/null || echo '[]')"
+        _finding_actions="$(jq -c --argjson d "$_declined_ids" \
+          '[ .[] | . + {declined_previously: ((.proposal_id as $i | $d | index($i)) != null)} ]' <<<"$_finding_actions")"
+      fi
+
+      # Computed conflicts, on top of analyst-declared ones: a remove/merge and
+      # any other action sharing a target contradict each other, and both sides
+      # carry the reference.
+      _finding_actions="$(jq -c '
+        . as $all
+        | [ .[] | . as $a
+            | ($all
+               | map(select(.proposal_id != $a.proposal_id)
+                     | select((.targets | map(. as $t | $a.targets | index($t) != null) | any))
+                     | select((.action == "remove" or .action == "merge") != ($a.action == "remove" or $a.action == "merge")
+                              or (.action == "remove" or .action == "merge"))
+                     | .proposal_id)) as $extra
+            | .conflicts_with = ((.conflicts_with + $extra) | unique) ]' <<<"$_finding_actions" 2>/dev/null)" || true
+
+      profile_actions_json="$(jq -nc --argjson a "$profile_actions_json" --argjson b "$_finding_actions" '$a + $b')"
+    fi
+
+
     # ─── P072 Step 18: resource maps and pilots become lanes ────────────────
     #
     # A lane is a PROPOSAL written into the decision artifact and rendered for a
@@ -513,8 +610,10 @@ if [[ "$audit_mode" == "full" ]]; then
         [[ -n "$pilots_json" ]] || pilots_json='[]'
       fi
 
-      lanes_json="$(jq -nc --argjson maps "$maps_json" --argjson pilots "$pilots_json" \
+      lanes_json="$(jq -nc --slurpfile maps_w "$(_bigjson "$maps_json")" \
+                       --slurpfile pilots_w "$(_bigjson "$pilots_json")" \
                        --argjson rm "$remove_json" '
+        ($maps_w[0]) as $maps | ($pilots_w[0]) as $pilots |
         # A unit proposed for removal is not worth arranging into a lane.
         ($maps | map(select(.run_unit_id as $u | $rm | index($u) | not))) as $m
 
@@ -636,7 +735,8 @@ if [[ "$audit_mode" == "full" ]]; then
     # a check that can never fire is decoration, not defence. The reachable
     # contradiction is a disposition proposing deletion while a finding for
     # the same unit recommends keeping it.
-    cross_level="$(jq -r --argjson f "$with_ids_json" '
+    cross_level="$(jq -r --slurpfile f_w "$(_bigjson "$with_ids_json")" '
+      ($f_w[0]) as $f |
       (map(select(.disposition == "remove") | .run_unit_id)) as $rm
       | [ $f[] | select((.run_unit_id as $r | $rm | index($r)) != null)
                 | select(.recommendation == "keep") | .run_unit_id ] | .[0] // empty' \
@@ -744,16 +844,25 @@ if [[ "$audit_mode" == "full" ]]; then
     decision_json="$(jq -n \
       --arg id "$audit_id" --arg status "$status" \
       --argjson extra "$reason_field" \
-      --argjson inv "$inventory_unique_json" --argjson missing "$missing_json" --argjson dupes "$dupes_json" \
-      --argjson unresolved "$unresolved_json" \
-      --argjson keep "$keep_json" --argjson rewrite "$rewrite_json" --argjson remove "$remove_json" \
+      --slurpfile inv_w "$(_bigjson "$inventory_unique_json")" \
+      --slurpfile missing_w "$(_bigjson "$missing_json")" \
+      --slurpfile dupes_w "$(_bigjson "$dupes_json")" \
+      --slurpfile unresolved_w "$(_bigjson "$unresolved_json")" \
+      --slurpfile keep_w "$(_bigjson "$keep_json")" \
+      --slurpfile rewrite_w "$(_bigjson "$rewrite_json")" \
+      --slurpfile remove_w "$(_bigjson "$remove_json")" \
       --argjson ic "$inventory_count" --argjson ac "$assigned_count" --argjson dc "$disposition_count" \
       --argjson removed_n "$removed_n" \
-      --argjson merge_groups "$merge_groups_json" --arg impact_kind "$impact_kind" \
+      --slurpfile merge_groups_w "$(_bigjson "$merge_groups_json")" --arg impact_kind "$impact_kind" \
       --argjson merged_surplus "$merged_surplus" \
-      --argjson profile_actions "$profile_actions_json" \
-      --argjson lanes "$lanes_json" --argjson smallest_pilot "$smallest_pilot" \
+      --slurpfile profile_actions_w "$(_bigjson "$profile_actions_json")" \
+      --slurpfile lanes_w "$(_bigjson "$lanes_json")" --argjson smallest_pilot "$smallest_pilot" \
       --argjson rt_before "$runtime_before" --argjson rt_after "$runtime_after" '
+      ($inv_w[0]) as $inv | ($missing_w[0]) as $missing | ($dupes_w[0]) as $dupes
+      | ($unresolved_w[0]) as $unresolved | ($keep_w[0]) as $keep
+      | ($rewrite_w[0]) as $rewrite | ($remove_w[0]) as $remove
+      | ($merge_groups_w[0]) as $merge_groups | ($profile_actions_w[0]) as $profile_actions
+      | ($lanes_w[0]) as $lanes |
       {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
        current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
        actions:$profile_actions, parallelization:{lanes:$lanes, smallest_safe_pilot:$smallest_pilot},
@@ -796,7 +905,12 @@ elif [[ "$actionable_count" -gt 0 ]]; then
     proposed_action: .recommendation,
     evidence_refs,
     owner: (.owner // "unassigned")
-  }]' <<<"$actionable_json")"
+  }
+  # The concrete change, effort and benefit ride along — the brief is what the
+  # remediation plan is generated from, and a plan built from bare verbs
+  # ("fix", "remove") re-derives everything the analysts already established.
+  + (if .proposal != null then {proposal: .proposal} else {} end)
+  ]' <<<"$actionable_json")"
   brief_json="$(jq -n --arg audit_id "$audit_id" --arg hash "$consolidated_hash" --argjson items "$items_json" \
     '{audit_id:$audit_id, verdict:"remediation recommended", items:$items, generated_from_hash:$hash}')"
 

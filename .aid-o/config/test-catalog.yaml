@@ -8583,7 +8583,7 @@ run_units:
     confidence: low
     command:
       type: shell
-      shell: 'echo ''BATS_ALL_QUARANTINED: PM approval required; run targeted/standard gates and record an explicit FSM waiver'' >&2; exit 86'
+      shell: bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --pool-only
     runtime:
       fingerprint: sha256:30c3a15b29e9
     parallel:
@@ -8830,6 +8830,7 @@ run_units:
     test_cases: []
     provenance:
       - declared-command
+  - {"run_unit_id": "gate:bats_boundary", "runner": "declared-command", "source_paths": [".aid-o/config/execution.yaml"], "production_surfaces": [".aid-o/config/execution.yaml"], "test_level": "suite", "risk_tags": [], "profiles": ["default"], "behavior_claims": [], "confidence": "low", "command": {"type": "shell", "shell": "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --dedicated-only"}, "runtime": {"fingerprint": "sha256:30c3a15b29e9"}, "parallel": {"status": "unknown", "exclusive_resources": [], "max_workers": null, "internal_parallelism": false}, "isolation": {"temp_workspace": "unknown", "fixed_ports": [], "shared_paths": [], "lock_usage": [], "adapter_confidence": "static_parse"}, "recommendation": "keep", "test_cases": [], "provenance": ["declared-command"]}
 source_pattern_mappings: []
 mapping_approval:
   status: proposed

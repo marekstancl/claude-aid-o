@@ -41,7 +41,11 @@ teardown() { teardown_test_evidence_dir; }
 
 _inventory() {
   printf '%s\n' "$@" | jq -R -s \
-    '{schema_version:"1.0.0", run_units: (split("\n") | map(select(length>0)) | map({run_unit_id: .}))}' \
+    '{schema_version:"1.0.0",
+      generated_at:"2026-08-04T00:00:00Z",
+      runner_families:["bats"],
+      entries: (split("\n") | map(select(length>0))
+                | map({run_unit_id: ., runner:"bats", adapter:"bats", confidence:"medium"}))}' \
     > "$INVENTORY"
 }
 
@@ -309,7 +313,7 @@ _finalize_full() {
   run _finalize_full
   [ "$status" -eq 0 ]
   [ "$(jq -r '.audit_status' "$OUT/decision.json")" = "incomplete" ]
-  [[ "$output" == *"audit NOT complete"* ]]
+  [[ "$output" == *"did NOT finish"* ]]
   [[ "$output" != *"Verdict:** clean"* ]]
   [[ "$output" != *"remediation recommended"* ]]
 }
@@ -320,14 +324,14 @@ _finalize_full() {
   run _finalize_full
   [[ "$output" == *"coverage_mismatch"* ]]
   [[ "$output" == *"bats:b"* ]]
-  [[ "$output" == *"Units left undecided"* ]]
+  [[ "$output" == *"Undecided — no disposition was reached"* ]]
 }
 
 @test "INCOMPLETE: the chat text states a remediation plan cannot be created" {
   _shard "$(_disposition "bats:a")"
 
   run _finalize_full
-  [[ "$output" == *"cannot support a remediation plan"* ]]
+  [[ "$output" == *"A remediation plan cannot be created"* ]]
   [[ "$output" == *"unexamined, not as healthy"* ]]
 }
 
@@ -342,7 +346,7 @@ _finalize_full() {
 
   run _finalize_full
   [ "$(jq -r '.incomplete_reason' "$OUT/decision.json")" = "unresolved_fraction_exceeded" ]
-  [[ "$output" == *"audit NOT complete"* ]]
+  [[ "$output" == *"did NOT finish"* ]]
   [[ "$output" == *"re-run this unit alone"* ]]
 }
 
@@ -351,7 +355,7 @@ _finalize_full() {
 
   run _finalize_full
   [ "$(jq -r '.audit_status' "$OUT/decision.json")" = "complete" ]
-  [[ "$output" != *"audit NOT complete"* ]]
+  [[ "$output" != *"did NOT finish"* ]]
   [[ "$output" == *"Verdict:"* ]]
 }
 
@@ -361,7 +365,7 @@ _finalize_full() {
   run bash "$FINALIZE" --audit-id "$AUDIT_ID" --wave-artifacts-dir "$ART" \
     --dispatch-manifest "$MANIFEST" --output-dir "$OUT" --mode measure
   [ "$status" -eq 0 ]
-  [[ "$output" != *"audit NOT complete"* ]]
+  [[ "$output" != *"did NOT finish"* ]]
 }
 
 @test "GUARD PREDICATE: a foreign audit_id is detectable by the comparison finalize makes" {
