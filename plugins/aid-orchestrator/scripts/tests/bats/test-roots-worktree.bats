@@ -343,7 +343,13 @@ _plant_tripwire() {
       echo "getstate_rc=$?"
       bash "$S/aid-fsm.sh" init E-910-1_1 R-910 2 manual main HEAD ".aid-o/work/evidence/E-910-1_1/R-910/fsm-state.yaml"
       echo "init_rc=$?"
-      find .aid-o -type f | sort
+      # P074 Step 15 adds the generation-transaction artifacts, which the old
+      # (pre-migration) script tree cannot produce — they are a deliberate new
+      # behaviour, not a migration side effect. This golden compares ROOT
+      # RESOLUTION, so they are filtered out of the layout listing.
+      find .aid-o -type f \
+        | grep -vE 'generation/(transaction\.json(\.lock)?|generation-authority\.json)$' \
+        | sort
       cat .aid-o/work/evidence/E-910-1_1/R-910/fsm-state.yaml
     ) 2>&1
   }

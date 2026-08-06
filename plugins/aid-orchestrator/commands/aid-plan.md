@@ -372,6 +372,54 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - `/aid-run --auto` — start autonomous execution
 - Review created files
 
+### Generation is one transaction
+
+Generation for a plan is a single transaction, not N independent phase runs.
+Two files under `.aid-o/work/evidence/<plan_id>/generation/` hold it together:
+
+| File | What it is |
+|------|-----------|
+| `generation-authority.json` | The CP1 decision, made **once per plan** before any output exists, sealed to the exact plan bytes, target head and phase set. Every phase verifies it instead of re-running the gate. |
+| `transaction.json` | Identity plus one record per phase. Phase status is **derived** by re-hashing the recorded outputs and reading queue membership — the files and the queue are the truth. |
+
+**CP1 blocked the plan.** Generation stops before anything is created and prints
+the blocking conditions. Fix them and rerun — or, when the PM deliberately
+accepts the risk, override with the reason on the record:
+
+```bash
+bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --force --reason "<at least 20 characters>"
+```
+
+The force is invocation-scoped and audited three ways (timeline event,
+cross-plan audit log, HEAD-bound waiver artifact). The CP1 evidence on disk is
+never rewritten as clean. A `--force` on a plan that passes anyway is recorded
+as unused and writes no waiver.
+
+**A run was interrupted.** Just rerun the same command. Phases whose outputs
+still verify are skipped, only what fails verification is regenerated, ids stay
+identical, and an EPIC already in the queue is a verified idempotent skip rather
+than a duplicate error.
+
+**The plan changed.** A different identity (plan bytes, target head, phase
+count, or derivation version) is never mixed with the old one:
+
+- the previous transaction was **complete** → it rolls over automatically, the
+  finished pair is archived to `.completed-<epoch>` siblings, and a fresh
+  transaction starts;
+- the previous transaction was **incomplete** → generation refuses, naming both
+  identities. Archive it deliberately first:
+
+```bash
+bash {plugin_path}/scripts/aid-auto-pipeline.sh supersede-generation \
+  --plan <path> --reason "<at least 20 characters>"
+```
+
+`supersede-generation` archives the authority/transaction pair to
+`.superseded-<epoch>` siblings, writes the audit record, and prints what the
+abandoned generation had already produced. **It deletes nothing** — removing
+EPIC files, branches or queue entries stays with `plan-rollback` and the
+queue-removal path.
+
 ## CP1 Mode Selection
 
 Risk classification runs automatically during CP1 before EPIC generation. It applies to any plan processed by `/aid-plan`.

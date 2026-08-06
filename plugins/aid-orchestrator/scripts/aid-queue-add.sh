@@ -6,7 +6,14 @@
 #   ./aid-queue-add.sh \
 #     --epic-id <E-xxx> --epic-path <path> --queue-yaml <path> \
 #     [--priority <medium>] [--depends-on <E-xxx,E-yyy>] [--plan-ref <path>] \
-#     [--plan-id <Pxxx|null>] [--merge-target <ref|null>]
+#     [--plan-id <Pxxx|null>] [--merge-target <ref|null>] [--transaction <path>]
+#
+# --transaction (P074 Step 15): the generation transaction manifest that owns
+# this add. When the queue ALREADY holds the epic_id and the transaction owns
+# both the id and the plan the entry was queued for, the historical hard fail
+# becomes a VERIFIED IDEMPOTENT SKIP (exit 0, stdout "skipped:<epic_id>") —
+# the decision is made once, inside the queue writer's lock. A duplicate NOT
+# owned by the transaction keeps the hard fail exactly as before.
 #
 # P064 Step 7: the entry now carries `plan_id` + `merge_target` (the ref a
 # dependent's readiness is proven against) and `status: pending` instead of the
@@ -43,9 +50,11 @@ queue_yaml=""
 plan_ref=""
 plan_id_opt=""
 merge_target_opt=""
+transaction=""   # P074 Step 15 — the generation transaction that owns this add
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --transaction)  transaction="$2";      shift 2 ;;
     --epic-id)      epic_id="$2";          shift 2 ;;
     --epic-path)    epic_path="$2";        shift 2 ;;
     --priority)     priority="$2";         shift 2 ;;
@@ -339,7 +348,35 @@ duplicate="$(echo "$queue_json" | jq -r \
 )"
 
 if [[ "$duplicate" -gt 0 ]]; then
-  error_exit "Duplicate: EPIC $epic_id is already in the queue with status pending/queued/blocked/running" 1
+  # -------------------------------------------------------------------------
+  # P074 Step 15 — a duplicate the GENERATION TRANSACTION already owns is not
+  # a conflict, it is a resumed run meeting its own earlier work.
+  #
+  # The 2026-08-04 live failure: a rerun regenerated from phase 1 and died
+  # HERE on phase 1's duplicate, leaving phases 2..N stranded. Ownership is
+  # verified, never assumed: the transaction must record this epic_id AND its
+  # plan_path must be the same plan this entry was queued for.
+  #
+  # OWNERSHIP IS IDENTITY-BOUND, not id-bound: `_queue_tx_owns` (the single
+  # implementation, in lib/aid-queue-write.sh) additionally requires that this
+  # very transaction queued the entry, or that the entry was added during this
+  # transaction's lifetime. A pre-rollover entry — same plan file, same derived
+  # epic id, content from a DIFFERENT identity — therefore fails ownership and
+  # keeps the hard fail.
+  #
+  # DECIDED ONCE, UNDER THE LOCK: this unlocked pre-check does not exit 0 by
+  # itself — it defers to `queue_append_entry`, which re-runs exactly the same
+  # ownership test while holding `<queue>.lock` and returns rc 4 for a verified
+  # skip. A pass here followed by a hard fail inside the writer is precisely
+  # the split-decision this arrangement removes.
+  # -------------------------------------------------------------------------
+  if ! { [[ -n "$transaction" ]] && _queue_tx_owns "$epic_id" "$transaction" "$queue_yaml"; }; then
+    if [[ -n "$transaction" && -f "$transaction" ]]; then
+      error_exit "Duplicate: EPIC $epic_id is already in the queue, and the queued entry does NOT belong to this generation transaction — it predates it (a superseded or rolled-over generation) or names another plan. A stale-identity entry is never silently adopted: remove it from the queue, or archive this generation with supersede-generation, then re-run." 1
+    fi
+    error_exit "Duplicate: EPIC $epic_id is already in the queue with status pending/queued/blocked/running" 1
+  fi
+  echo "[INFO] queue-add: ${epic_id} is already queued and is owned by the generation transaction ${transaction} — deferring the idempotency decision to the locked writer." >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -598,10 +635,17 @@ AID_QUEUE_FILE="$queue_yaml"
 export AID_QUEUE_FILE
 
 append_rc=0
-queue_append_entry "$epic_id" "$new_entry" || append_rc=$?
+queue_append_entry "$epic_id" "$new_entry" "$transaction" || append_rc=$?
 case "$append_rc" in
   0) ;;
   1) error_exit "EPIC already in queue (detected under lock): $epic_id" 1 ;;
+  # 4 = P074 Step 15: the entry is already present AND the generation
+  # transaction that owns this add also owns that entry — a verified
+  # idempotent SKIP, decided under the lock. Exit 0: the queue is already in
+  # the state this add was asking for.
+  4) echo "[INFO] queue-add: ${epic_id} already queued by this generation transaction — verified idempotent skip, nothing written." >&2
+     echo "skipped:${epic_id}"
+     exit 0 ;;
   # 2 = the library's STRUCTURE layer refused the rendered block. That is a
   # validation failure of THIS script's inputs, not an I/O failure, so it must
   # not be reported as exit 3.

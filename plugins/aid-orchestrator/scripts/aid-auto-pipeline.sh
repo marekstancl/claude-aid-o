@@ -48,6 +48,419 @@ AID_PROJECT_ROOT="$_aid_pipeline_state_root"
 export AID_PROJECT_ROOT
 
 # =============================================================================
+# P074 EPIC 3 (Steps 13/15/16) — GENERATION IS ONE TRANSACTION
+# =============================================================================
+# THE GROUNDED FAILURES THIS REPLACES (2026-08-04, live):
+#   F2  the CP1 gate ran once PER PHASE, because aid-plan-to-epic.sh calls it
+#       unconditionally per invocation and its one-shot override memo is
+#       function-local — a 3-phase plan demanded 3 PM artifacts.
+#   F3  a rerun regenerated from phase 1, silently overwrote outputs, and died
+#       on the queue duplicate, leaving phases 2..N stranded.
+#   F4  the receipt's per-EPIC `queue_status` stayed at `pending_receipt`
+#       forever, because nothing rewrote it after stage 2.
+#
+# THE MECHANISM. One plan-scoped decision (`generation-authority.json`) and one
+# durable manifest (`transaction.json`) live side by side under
+# `.aid-o/work/evidence/<plan_id>/generation/`:
+#
+#   authority    the SEALED CP1 decision for this plan, bound to the exact plan
+#                bytes, the target head, and the phase set. Phase generation
+#                VERIFIES it (aid-plan-to-epic.sh --generation-authority)
+#                instead of re-running the gate.
+#   transaction  identity + one record per phase. STATUS IS NEVER STORED: it is
+#                derived by re-hashing the recorded outputs and reading queue
+#                membership, so the files and the queue are always the truth and
+#                the manifest is only the binding that lets a rerun VERIFY
+#                rather than blindly redo.
+#
+# CONCURRENCY ORDERING (the reason the skeleton is written before the gate):
+# the FIRST act after the committed-source preflight is acquiring the
+# transaction lock and writing the IDENTITY-ONLY skeleton; only then does the
+# CP1 gate run and the authority get written, both still under that same
+# serialization point. Two concurrent invocations for one plan can therefore
+# never both observe "no transaction" and double-run CP1 or race the fixed
+# authority path — the loser blocks on the flock, then finds a matching
+# identity and a sealed authority, and resumes.
+#
+# HONEST CLASSIFICATION (AID-v3 §1). The authority receipt, like every AID
+# artifact, is forgeable by a Bash-capable actor. The enforcement is NOT actor
+# impossibility: it is the hash/transaction binding (a forged or replayed
+# receipt fails verification against the real plan bytes, the real target head
+# and the owning transaction) plus audit detectability.
+# =============================================================================
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-lock.sh"
+
+# phase_derivation_version — a LITERAL CONSTANT, bumped only when the phase
+# detection algorithm below ("Detect phase count from plan") changes
+# semantically. It exists so a resumed transaction can detect that a plugin
+# upgrade changed how phases would be derived, instead of silently mixing
+# artifacts from two derivations.
+AID_GEN_PHASE_DERIVATION_VERSION=1
+AID_GEN_LOCK_TIMEOUT="${AID_GEN_LOCK_TIMEOUT:-60}"
+_GEN_LOCK_FD=""
+
+_gen_dir()              { aid_state_path ".aid-o/work/evidence/${1}/generation"; }
+_gen_authority_path()   { printf '%s/generation-authority.json\n' "$(_gen_dir "$1")"; }
+_gen_transaction_path() { printf '%s/transaction.json\n' "$(_gen_dir "$1")"; }
+_gen_audit_log_path()   { aid_state_path ".aid-o/work/audit-log.jsonl"; }
+
+# _gen_target_branch — the configured integration branch. Deliberately a local
+# copy of lib/aid-lifecycle.sh's `aid_target_branch` (same rule, same default):
+# that lib is sourced far below, AFTER this block, and sourcing it earlier
+# would change the committed-source preflight's behaviour as a side effect.
+_gen_target_branch() {
+  local orch="${SCRIPT_DIR}/../defaults/orchestration.yaml" tb=""
+  if [[ -f "$orch" ]] && command -v yq >/dev/null 2>&1; then
+    tb="$(yq -r '.lifecycle.target_branch // ""' "$orch" 2>/dev/null || true)"
+  fi
+  [[ -z "$tb" || "$tb" == "null" ]] && tb="main"
+  printf '%s\n' "$tb"
+}
+
+# _gen_target_head — the commit the target branch points at, or "" when no such
+# branch exists. EMPTY IS A LEGITIMATE VALUE, not an error: fixture repos and
+# fresh workspaces have no integration branch, and the verifier compares the
+# sealed value against the freshly resolved one, so "" == "" still binds.
+_gen_target_head() {
+  git -C "$_aid_pipeline_state_root" rev-parse --verify --quiet "$(_gen_target_branch)^{commit}" 2>/dev/null || true
+}
+
+# ── ID derivation ──────────────────────────────────────────────────────────
+# DELIBERATE DUPLICATE of aid-plan-to-epic.sh's plan_num/epic_id derivation and
+# aid-epic-to-json.sh's run_id derivation. The transaction pre-registers every
+# phase's ids in the skeleton (before any generator runs), so the verifier can
+# compare a RE-DERIVED id against a RECORDED one and catch derivation drift
+# between plugin versions at verify time instead of at queue time. Keep the
+# three copies in step; the resume + authority-verify suites fail on drift.
+_gen_plan_num() { printf '%s\n' "$1" | sed 's/^P//; s/^-//'; }
+_gen_epic_id()  { printf 'E-%s-%s_%s\n' "$(_gen_plan_num "$1")" "$2" "$3"; }
+_gen_run_id() {
+  local epic_id="$1"
+  if [[ "$epic_id" =~ ^E-([0-9]+)-([0-9]+)_([0-9]+)$ ]]; then
+    printf 'R-E%s-%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  else
+    printf 'R-%s-1\n' "$(printf '%s' "$epic_id" | sed 's/[^a-zA-Z0-9]//g')"
+  fi
+}
+
+_gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
+# Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent
+# hashes an embedded-self-field envelope): canonical JSON via `jq -S -c` with
+# the hash field NULLED, piped to sha256sum. Verifiers recompute exactly this.
+_gen_self_sha256() { jq -S -c '.self_sha256 = null' "$1" 2>/dev/null | sha256sum | awk '{print $1}'; }
+
+_gen_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# ── the generation lock ────────────────────────────────────────────────────
+# RE-ENTRANT BY DEPTH COUNT, and that is not a nicety: the whole generation
+# runs under ONE hold (see the pre-phase block), while `_gen_tx_update` also
+# asks for the lock on every manifest write. `flock` is per open file
+# DESCRIPTION, not per process — a second `exec {fd}<>` + `flock -x` from the
+# same process on the same file DEADLOCKS against our own hold. Nesting is
+# therefore counted, and only the outermost release actually drops the flock.
+#
+# STALE-LOCK RECOVERY: flock is released by the kernel when the last descriptor
+# closes, INCLUDING on process death, so a killed generation never leaves a
+# lock that blocks the next run. The pid inside the sidecar is informational
+# only — it is what a timed-out acquirer reports so a human can see who holds
+# it. If a run really is wedged, kill that pid; deleting the `.lock` file is
+# never the fix (it would let a second writer in alongside the first).
+_GEN_LOCK_DEPTH=0
+_gen_lock() {
+  if [[ "$_GEN_LOCK_DEPTH" -gt 0 ]]; then
+    _GEN_LOCK_DEPTH=$(( _GEN_LOCK_DEPTH + 1 ))
+    return 0
+  fi
+  local lp; lp="$(_gen_transaction_path "$1").lock"
+  aid_lock_acquire "$lp" "$AID_GEN_LOCK_TIMEOUT" || return 3
+  _GEN_LOCK_FD="$AID_LOCK_FD"
+  _GEN_LOCK_DEPTH=1
+  return 0
+}
+_gen_unlock() {
+  [[ "$_GEN_LOCK_DEPTH" -gt 0 ]] || return 0
+  _GEN_LOCK_DEPTH=$(( _GEN_LOCK_DEPTH - 1 ))
+  [[ "$_GEN_LOCK_DEPTH" -eq 0 ]] || return 0
+  [[ -n "${_GEN_LOCK_FD:-}" ]] || return 0
+  aid_lock_release "$_GEN_LOCK_FD" || true
+  _GEN_LOCK_FD=""
+}
+# _gen_lock_holder <plan_id> — the pid recorded in the sidecar (informational).
+_gen_lock_holder() {
+  local lp; lp="$(_gen_transaction_path "$1").lock"
+  local h; h="$(cat "$lp" 2>/dev/null | tr -d '[:space:]')"
+  printf '%s' "${h:-unknown}"
+}
+
+# _gen_write_atomic <path> <content> — mktemp + mv, never an in-place rewrite.
+_gen_write_atomic() {
+  local path="$1" content="$2" tmp=""
+  mkdir -p "$(dirname "$path")" 2>/dev/null || return 3
+  tmp="$(mktemp "${path}.tmp.XXXXXX" 2>/dev/null)" || return 3
+  printf '%s\n' "$content" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 3; }
+  mv -- "$tmp" "$path" 2>/dev/null || { rm -f "$tmp"; return 3; }
+  return 0
+}
+
+# _gen_tx_update <plan_id> <jq-filter> [jq args...]
+#   LOCKED read-modify-write plus atomic tmp+mv, so two pipeline invocations
+#   never interleave a lost update. `updated_at` is refreshed on every write.
+_gen_tx_update() {
+  local plan_id="$1" filter="$2"; shift 2
+  local txp; txp="$(_gen_transaction_path "$plan_id")"
+  _gen_lock "$plan_id" || error_exit "cannot acquire the generation transaction lock for ${plan_id} (${txp}.lock) — another generation for this plan is running, or flock is unavailable." 3
+  if [[ ! -f "$txp" ]]; then
+    _gen_unlock
+    error_exit "generation transaction manifest disappeared mid-run (${txp}) — it was superseded or removed while this generation was running. Nothing further was recorded. Re-run generation to start a fresh transaction." 3
+  fi
+  local updated=""
+  updated="$(jq "$@" --arg _u "$(_gen_now)" "($filter) | .updated_at = \$_u" "$txp" 2>/dev/null)" || {
+    _gen_unlock
+    error_exit "cannot update the generation transaction manifest ${txp} (malformed JSON?)" 3
+  }
+  _gen_write_atomic "$txp" "$updated" || {
+    _gen_unlock
+    error_exit "cannot write the generation transaction manifest ${txp}" 3
+  }
+  _gen_unlock
+  return 0
+}
+
+# _gen_phase_stage1_verified <plan_id> <phase>
+#   DERIVED status, never a stored enum: the recorded outputs must exist on
+#   disk AND re-hash to the recorded values, and the phase's contract-validation
+#   evidence must still be a pass. Anything else means "regenerate this phase".
+_gen_phase_stage1_verified() {
+  local plan_id="$1" phase="$2" txp epic_path plan_json epic_sha plan_sha cv
+  txp="$(_gen_transaction_path "$plan_id")"
+  [[ -f "$txp" ]] || return 1
+  epic_path="$(jq -r --arg p "$phase" '.phases[$p].epic_path // ""' "$txp" 2>/dev/null)"
+  plan_json="$(jq -r --arg p "$phase" '.phases[$p].plan_json // ""' "$txp" 2>/dev/null)"
+  epic_sha="$(jq -r --arg p "$phase" '.phases[$p].epic_sha256 // ""' "$txp" 2>/dev/null)"
+  plan_sha="$(jq -r --arg p "$phase" '.phases[$p].plan_json_sha256 // ""' "$txp" 2>/dev/null)"
+  cv="$(jq -r --arg p "$phase" '.phases[$p].contract_validate // ""' "$txp" 2>/dev/null)"
+  [[ -n "$epic_path" && -n "$plan_json" && -n "$epic_sha" && -n "$plan_sha" ]] || return 1
+  [[ -f "$epic_path" && -f "$plan_json" ]] || return 1
+  [[ "$(_gen_sha256_file "$epic_path")" == "$epic_sha" ]] || return 1
+  [[ "$(_gen_sha256_file "$plan_json")" == "$plan_sha" ]] || return 1
+  [[ -n "$cv" && -f "$cv" ]] || return 1
+  jq -e '.result == "pass"' "$cv" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# _gen_queue_status <queue_yaml> <epic_id> — the entry's real status, or "".
+_gen_queue_status() {
+  [[ -f "$1" ]] || return 0
+  awk -v want="$2" '
+    /^[[:space:]]*-[[:space:]]*epic_id:/ {
+      id = $0; sub(/^[^:]*:[[:space:]]*/, "", id); gsub(/"/, "", id)
+      cur = (id == want) ? 1 : 0; next
+    }
+    cur && /^[[:space:]]*status:/ { s = $0; sub(/^[^:]*:[[:space:]]*/, "", s); gsub(/"/, "", s); print s; exit }
+  ' "$1" 2>/dev/null
+}
+
+# _gen_tx_complete <plan_id> <total> <queue_yaml> <receipt>
+#   A transaction is COMPLETE only when every phase verifies on disk, every
+#   phase was QUEUED BY THIS TRANSACTION, AND the receipt's queue-status
+#   rewrite has happened. The rewrite is the LAST act of a successful run, so a
+#   crash before it always leaves the transaction resumable (never a false
+#   "already done").
+#
+#   WHY `queued` AND NOT LIVE QUEUE MEMBERSHIP. The queue is mutable AFTER a
+#   generation finishes — entries complete, get archived, get removed. Deriving
+#   completeness from the live file therefore makes a finished generation
+#   silently un-finish itself the moment its entries are cleaned up, which in
+#   turn makes the automatic rollover unreachable (a rollover requires a
+#   COMPLETE predecessor, and a predecessor with live entries is exactly what
+#   the rollover precondition refuses — the two conditions could never both
+#   hold). `queued: true` is this transaction's own durable record that IT
+#   queued that entry, written under the lock right after the successful add,
+#   and it does not decay. The live queue is still the truth where it matters:
+#   the per-phase resume decision and queue-add's ownership test both read it.
+_gen_tx_complete() {
+  local plan_id="$1" total="$2" queue_yaml="$3" receipt="$4" p
+  for p in $(seq 1 "$total"); do
+    _gen_phase_stage1_verified "$plan_id" "$p" || return 1
+    jq -e --arg p "$p" '.phases[$p].queued == true' \
+      "$(_gen_transaction_path "$plan_id")" >/dev/null 2>&1 || return 1
+  done
+  [[ -f "$receipt" ]] || return 1
+  jq -e '[.epics[].queue_status] | length > 0 and (map(. == "pending_receipt") | any | not)' \
+    "$receipt" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# _gen_identity_of <file> — the identity tuple as one canonical string.
+_gen_identity_of() {
+  jq -r '[(.plan_sha256 // ""), (.target_head // ""), ((.phase_derivation_version // 0) | tostring), ((.total_phases // 0) | tostring)] | join("|")' "$1" 2>/dev/null
+}
+
+# _gen_archive_pair <plan_id> <suffix> — atomically move the transaction and
+# the authority to `<name>.<suffix>` siblings sharing ONE epoch, so the pair is
+# identifiable. Nothing is ever deleted.
+_gen_archive_pair() {
+  local plan_id="$1" suffix="$2" txp auth
+  txp="$(_gen_transaction_path "$plan_id")"; auth="$(_gen_authority_path "$plan_id")"
+  [[ -f "$txp" ]] && { mv -- "$txp" "${txp}.${suffix}" || return 3; }
+  [[ -f "$auth" ]] && { mv -- "$auth" "${auth}.${suffix}" || return 3; }
+  return 0
+}
+
+# =============================================================================
+# P074 Step 16 — supersede-generation recovery (a SEPARATE invocation)
+# =============================================================================
+# Usage: aid-auto-pipeline.sh supersede-generation --plan <path> --reason "<≥20 chars>"
+#
+# An INCOMPLETE generation transaction can be explicitly archived by a PM with
+# an audited reason, unblocking a changed-identity regeneration without ever
+# silently mixing artifacts from two derivations. It DELETES NOTHING: cleanup
+# of already-created EPIC files, branches and queue entries stays with the
+# existing recovery commands (`aid-plan-fsm.sh plan-rollback`, queue removal).
+#
+# ACTOR RULE, honestly classified (AID-v3 §1): "PM-only" is INSTRUCTION-ONLY —
+# nothing here can tell a PM apart from an agent. The audit record IS the
+# enforcement surface.
+# =============================================================================
+_gen_plan_id_of() {
+  local fm; fm="$(parse_frontmatter "$1")" || return 1
+  local k v
+  while IFS='=' read -r k v; do
+    [[ "$k" == "id" ]] && { printf '%s\n' "$v"; return 0; }
+  done <<< "$fm"
+  return 1
+}
+
+_gen_supersede() {
+  local sup_plan="" sup_reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --plan)   sup_plan="$2";   shift 2 ;;
+      --reason) sup_reason="$2"; shift 2 ;;
+      *) error_exit "Unknown argument for supersede-generation: $1 (usage: supersede-generation --plan <path> --reason \"<at least 20 characters>\")" 1 ;;
+    esac
+  done
+  [[ -z "$sup_plan" ]] && error_exit "Missing required argument: --plan" 1
+  [[ ! -f "$sup_plan" ]] && error_exit "Plan file not found: $sup_plan" 3
+  if [[ "${#sup_reason}" -lt 20 ]]; then
+    error_exit "supersede-generation requires --reason with at least 20 characters (got ${#sup_reason}). The audit record is a forensic artifact; a throwaway reason defeats its whole purpose." 1
+  fi
+
+  local sup_plan_id; sup_plan_id="$(_gen_plan_id_of "$sup_plan")" \
+    || error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
+  # ABSOLUTE paths throughout: aid_state_path deliberately returns a RELATIVE
+  # path when the caller already stands at the state root (stdout byte-identity
+  # for primary-checkout invocations), and an audit record naming a path that
+  # only resolves from one cwd is not a forensic record.
+  local gdir txp auth
+  gdir="$(realpath -m -- "$(_gen_dir "$sup_plan_id")")"
+  txp="${gdir}/transaction.json"
+  auth="${gdir}/generation-authority.json"
+
+  # HALF-ARCHIVED PAIR RECOVERY (idempotent). A previous call whose second
+  # rename failed leaves one `.superseded-<epoch>` sibling with its partner
+  # still live. A repeated call COMPLETES exactly that missing rename under the
+  # original epoch instead of archiving a fresh one.
+  local half_epoch=""
+  local cand
+  for cand in "${txp}".superseded-* "${auth}".superseded-*; do
+    [[ -e "$cand" ]] || continue
+    half_epoch="${cand##*.superseded-}"
+  done
+  if [[ -n "$half_epoch" ]] && { [[ -f "$txp" && ! -e "${txp}.superseded-${half_epoch}" ]] || [[ -f "$auth" && ! -e "${auth}.superseded-${half_epoch}" ]]; }; then
+    [[ -f "$txp"  && ! -e "${txp}.superseded-${half_epoch}"  ]] && mv -- "$txp"  "${txp}.superseded-${half_epoch}"
+    [[ -f "$auth" && ! -e "${auth}.superseded-${half_epoch}" ]] && mv -- "$auth" "${auth}.superseded-${half_epoch}"
+    echo "[INFO] supersede-generation: completed the missing rename of a half-archived pair under the original epoch ${half_epoch} — no fresh epoch was created." >&2
+    printf 'superseded:%s:%s\n' "$sup_plan_id" "$half_epoch"
+    return 0
+  fi
+
+  [[ -f "$txp" ]] || error_exit "Nothing to supersede: no generation transaction exists at ${txp} for ${sup_plan_id}." 1
+
+  # The flag must match the archived identity — never a cross-plan archive.
+  local recorded_plan; recorded_plan="$(jq -r '.plan_id // ""' "$txp" 2>/dev/null || true)"
+  if [[ -n "$recorded_plan" && "$recorded_plan" != "$sup_plan_id" ]]; then
+    error_exit "--plan names ${sup_plan_id} but the transaction at ${txp} records ${recorded_plan} — refusing a cross-plan archive. Pass the plan the transaction belongs to." 1
+  fi
+
+  local sup_total sup_queue sup_receipt
+  sup_total="$(jq -r '.total_phases // 0' "$txp" 2>/dev/null || echo 0)"
+  sup_queue="$(aid_state_path ".aid-o/config/queue.yaml")"
+  sup_receipt="${gdir}/receipt.json"
+  if _gen_tx_complete "$sup_plan_id" "$sup_total" "$sup_queue" "$sup_receipt"; then
+    error_exit "The generation transaction for ${sup_plan_id} is COMPLETE — a complete transaction needs no supersession. A changed plan starts fresh by itself: the pipeline's automatic rollover archives the completed authority/transaction pair to '.completed-<epoch>' siblings on the next run with a different identity. Nothing was archived." 1
+  fi
+
+  local epoch; epoch="$(date -u +%s)"
+  local now; now="$(_gen_now)"
+  local operator="${USER:-unknown}"
+  local head_sha; head_sha="$(git -C "$_aid_pipeline_state_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+  local identity; identity="$(_gen_identity_of "$txp")"
+  local generated
+  generated="$(jq -c '[.phases | to_entries[] | {phase: .key, epic_id: .value.epic_id, run_id: .value.run_id, epic_path: (.value.epic_path // null), generated: ((.value.epic_sha256 // "") != "")}] | sort_by(.phase)' "$txp" 2>/dev/null || echo '[]')"
+
+  # RENAME, retry the second once, then report the exact mv to finish.
+  mv -- "$txp" "${txp}.superseded-${epoch}" \
+    || error_exit "cannot archive the transaction manifest: mv ${txp} ${txp}.superseded-${epoch} failed. Nothing was changed." 3
+  if [[ -f "$auth" ]] && ! mv -- "$auth" "${auth}.superseded-${epoch}" 2>/dev/null; then
+    sleep 1
+    if ! mv -- "$auth" "${auth}.superseded-${epoch}" 2>/dev/null; then
+      error_exit "HALF-ARCHIVED: the transaction is archived at ${txp}.superseded-${epoch} but the authority could not be moved. Finish it with: mv '${auth}' '${auth}.superseded-${epoch}' — or simply re-run supersede-generation, which completes exactly this missing rename under the same epoch." 3
+    fi
+  fi
+
+  # AUDIT — the P073 three-record pattern, authoritative artifact FIRST.
+  local rec_file="${gdir}/generation-superseded-${epoch}.json"
+  local rec
+  rec="$(jq -n \
+    --arg schema "aid-generation-supersede/v1" --arg created_at "$now" \
+    --arg plan_id "$sup_plan_id" --arg plan_path "$sup_plan" \
+    --arg reason "$sup_reason" --arg operator "$operator" --arg head_sha "$head_sha" \
+    --arg archived_transaction "${txp}.superseded-${epoch}" \
+    --arg archived_authority "$( [[ -e "${auth}.superseded-${epoch}" ]] && printf '%s' "${auth}.superseded-${epoch}" )" \
+    --arg tx_sha256 "$(_gen_sha256_file "${txp}.superseded-${epoch}")" \
+    --arg auth_sha256 "$( [[ -e "${auth}.superseded-${epoch}" ]] && _gen_sha256_file "${auth}.superseded-${epoch}" )" \
+    --arg archived_identity "$identity" \
+    --arg current_identity "$(_gen_sha256_file "$sup_plan")|$(_gen_target_head)|${AID_GEN_PHASE_DERIVATION_VERSION}" \
+    --argjson generated "$generated" \
+    '{schema:$schema, created_at:$created_at, plan_id:$plan_id, plan_path:$plan_path,
+      reason:$reason, operator:$operator, head_sha:$head_sha,
+      archived_transaction:$archived_transaction, archived_authority:(if $archived_authority == "" then null else $archived_authority end),
+      transaction_sha256:$tx_sha256, authority_sha256:(if $auth_sha256 == "" then null else $auth_sha256 end),
+      archived_identity:$archived_identity,
+      current_identity:$current_identity,
+      generated:$generated, deletes_nothing:true, actor_semantics:"instruction_only"}')" || rec=""
+  [[ -n "$rec" ]] && _gen_write_atomic "$rec_file" "$rec"
+  { printf '%s\n' "$(jq -nc --arg ts "$now" --arg ev "generation_superseded" --arg plan "$sup_plan_id" \
+      --arg reason "$sup_reason" --arg op "$operator" --arg epoch "$epoch" --arg id "$identity" \
+      '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, epoch:$epoch, archived_identity:$id}')" \
+      >> "${gdir}/timeline.jsonl"; } 2>/dev/null || true
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "$sup_plan_id" --run-id "supersede-generation" \
+    --event "generation_superseded" \
+    --plan-id "$sup_plan_id" --reason "$sup_reason" --operator "$operator" \
+    --archived-identity "$identity" --epoch "$epoch" \
+    --output "$(_gen_audit_log_path)" 2>/dev/null || true
+
+  echo "[INFO] supersede-generation: archived the incomplete transaction for ${sup_plan_id} (epoch ${epoch})." >&2
+  echo "  ${txp}.superseded-${epoch}" >&2
+  [[ -e "${auth}.superseded-${epoch}" ]] && echo "  ${auth}.superseded-${epoch}" >&2
+  echo "  audit record: ${rec_file}" >&2
+  echo "  What this generation had already produced (nothing was deleted):" >&2
+  jq -r '.[] | "    phase \(.phase): \(.epic_id) / \(.run_id) — \(if .generated then "generated" else "not generated" end)\(if .epic_path then " (\(.epic_path))" else "" end)"' <<< "$generated" >&2
+  echo "  Cleanup of already-created EPIC files, branches and queue entries is NOT done here: use 'aid-plan-fsm.sh plan-rollback' and the queue-removal path for that." >&2
+  printf 'superseded:%s:%s\n' "$sup_plan_id" "$epoch"
+  return 0
+}
+
+if [[ "${1:-}" == "supersede-generation" ]]; then
+  shift
+  _gen_supersede "$@"
+  exit $?
+fi
+
+# =============================================================================
 # Parse CLI arguments
 # =============================================================================
 plan=""
@@ -56,6 +469,8 @@ plugin_dir=""
 custom_depends=""
 streamlined=false   # P040 Component D passthrough → aid-json-to-run.sh → aid-fsm.sh init (CP3 gap fix)
 force_init_reason="" # PM-authorized, audited cross-plan force-init reason → aid-json-to-run.sh → aid-fsm.sh init (waives ONLY the false-positive cross-plan ca-review-complete precondition)
+force_generation=false # P074 Step 13 — --force over the plan-level CP1 gate
+force_reason=""        # P074 Step 13 — --reason for the above (>= 20 chars)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,6 +480,13 @@ while [[ $# -gt 0 ]]; do
     --depends-on)   custom_depends="$2"; shift 2 ;;
     --streamlined)  streamlined=true;    shift 1 ;;
     --force-init-reason) force_init_reason="$2"; shift 2 ;;
+    # P074 Step 13 — PUBLIC, P073-style force over the plan-level CP1 gate.
+    # Invocation-scoped (never an env var, never a stored grant), audited with
+    # the full three-record pattern. The PM typing this command IS the
+    # authorization; that is instruction-only for actors, and the audit records
+    # are what make it detectable.
+    --force)        force_generation=true; shift 1 ;;
+    --reason)       force_reason="$2";     shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -76,6 +498,16 @@ done
 # =============================================================================
 [[ -z "$plan" ]] && error_exit "Missing required argument: --plan" 1
 [[ ! -f "$plan" ]] && error_exit "Plan file not found: $plan" 3
+
+# P074 Step 13 — the force contract, validated BEFORE anything else happens.
+# Same message shape as P073's _pfsm_handle_force: the receipt is a forensic
+# record, and an empty or throwaway reason defeats its whole purpose.
+if [[ "$force_generation" == true && "${#force_reason}" -lt 20 ]]; then
+  error_exit "--force requires --reason with at least 20 characters (got ${#force_reason}). The force receipt is a forensic record; an empty or throwaway reason defeats its whole purpose." 1
+fi
+if [[ "$force_generation" != true && -n "$force_reason" ]]; then
+  error_exit "--reason was given without --force — it would record nothing. Pass both, or neither." 1
+fi
 
 # =============================================================================
 # P073 Step 11 — committed-source preflight (P083)
@@ -296,6 +728,7 @@ if [[ "$total_phases" -eq 0 ]]; then
   error_exit "Cannot detect any phases in plan file. Expected EPIC/Phase markers, ### Step N:, or ## Task N: headers." 1
 fi
 
+
 # =============================================================================
 # Start timer
 #
@@ -482,10 +915,343 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
   fi
 fi
 
+# =============================================================================
+# P074 Steps 13 + 15 — TRANSACTION SKELETON, then the ONE CP1 gate, then the
+# sealed authority. All three under ONE lock hold (see the header block).
+#
+# PLACEMENT — after the lifecycle-manifest ensure, before the phase loop, and
+# GROUNDED rather than arbitrary. An earlier cut put this block immediately
+# after the committed-source preflight, which is where "before any output"
+# points; it broke on the very first fixture run, because
+# `aid_lifecycle_ensure_manifest` COMMITS the manifest to the target branch.
+# target_head therefore moves between the seal and the first phase's
+# verification, and every phase died on the target_head check. Sealing after
+# the ensure keeps the identity stable both within a run and across reruns
+# (the ensure is a no-op once the manifest is durable). No EPIC, plan.json,
+# run, FSM state or queue entry exists yet at this point — the gate still runs
+# before every artifact this pipeline is here to produce.
+#
+# The serialization property Step 13 actually requires is untouched: the lock
+# is acquired FIRST, the identity-only skeleton is written under it, and only
+# then does the CP1 gate run and the authority get written — still under the
+# same hold. Two concurrent invocations can never both observe "no
+# transaction".
+# =============================================================================
+_gen_plan_sha256="$(_gen_sha256_file "$plan")"
+_gen_target_branch_name="$(_gen_target_branch)"
+_gen_target_head_sha="$(_gen_target_head)"
+_gen_identity="${_gen_plan_sha256}|${_gen_target_head_sha}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total_phases}"
+_gen_dir_path="$(_gen_dir "$plan_id")"
+_gen_tx_path="$(_gen_transaction_path "$plan_id")"
+_gen_auth_path="$(_gen_authority_path "$plan_id")"
+mkdir -p "$_gen_dir_path" 2>/dev/null || error_exit "Cannot create the generation evidence directory: $_gen_dir_path" 3
+
+# =============================================================================
+# ONE HOLD FOR THE WHOLE GENERATION (Codex round: BLOCKER 2)
+# =============================================================================
+# The first cut released this lock as soon as the authority was sealed, keeping
+# only the skeleton/gate/authority critical section. That is not enough. The
+# phase work itself is NOT idempotent-under-concurrency: two same-identity
+# invocations both pass the resume check, then race on the counter, on FSM
+# init, on run rendering, and — worst — one hashes an EPIC/plan.json the other
+# is in the middle of replacing, recording a hash for bytes that no longer
+# exist. "Both verify and converge" holds for the pure re-derivation, never for
+# those steps.
+#
+# So the hold spans skeleton -> gate -> authority -> every phase -> stage 2 ->
+# receipt rewrite, and is released by an EXIT trap (which also covers every
+# error_exit path and any signal-driven death). A second invocation blocks for
+# at most AID_GEN_LOCK_TIMEOUT seconds and then refuses by name, telling the
+# operator which pid holds it — never interleaves.
+# =============================================================================
+trap '_gen_unlock' EXIT
+if ! _gen_lock "$plan_id"; then
+  error_exit "generation already in progress for ${plan_id} (holder pid $(_gen_lock_holder "$plan_id")); waited ${AID_GEN_LOCK_TIMEOUT}s for ${_gen_tx_path}.lock and nothing was generated. Wait for that run to finish and re-run — a rerun resumes rather than regenerates. If the holder is gone, the lock is already free (flock drops on process death); raise AID_GEN_LOCK_TIMEOUT if the other run is simply slow. Never delete the .lock file — that lets a second writer in alongside the first." 3
+fi
+
+_gen_resumed=false
+if [[ -f "$_gen_tx_path" ]]; then
+  _gen_existing_identity="$(_gen_identity_of "$_gen_tx_path")"
+  if [[ "$_gen_existing_identity" == "$_gen_identity" ]]; then
+    _gen_resumed=true
+    echo "[INFO] generation_transaction: resuming the existing transaction for ${plan_id} (identity unchanged) — verified phases are skipped, only what fails verification is regenerated." >&2
+  elif _gen_tx_complete "$plan_id" "$(jq -r '.total_phases // 0' "$_gen_tx_path" 2>/dev/null || echo 0)" "$queue_yaml" "${_gen_dir_path}/receipt.json"; then
+    # ROLLOVER PRECONDITION (Codex round: BLOCKER 3). A new transaction for
+    # edited plan bytes derives the SAME epic ids from the same plan file, so
+    # the previous generation's queue entries would look adoptable while
+    # standing for content from a DIFFERENT identity. The ownership test in the
+    # queue writer refuses that, but refusing there means refusing halfway
+    # through stage 2, after everything has been regenerated. So it is decided
+    # HERE, before anything is archived or regenerated, and it is named.
+    #
+    # ANY entry with one of those ids blocks, whatever its status. The queue
+    # holds ONE entry per EPIC id (that is what the locked writer enforces), so
+    # a regenerated EPIC cannot get its own entry while the old one is there —
+    # the old entry would simply come to stand for content it was never queued
+    # for. Status is irrelevant to that: a `completed` entry is still the one
+    # and only row carrying that id.
+    _gen_stale_entries=""
+    for _gp in $(jq -r '.phases[]?.epic_id // empty' "$_gen_tx_path" 2>/dev/null); do
+      _gp_status="$(_gen_queue_status "$queue_yaml" "$_gp")"
+      [[ -n "$_gp_status" ]] && _gen_stale_entries="${_gen_stale_entries:+${_gen_stale_entries}, }${_gp} (${_gp_status})"
+    done
+    if [[ -n "$_gen_stale_entries" ]]; then
+      _gen_unlock
+      error_exit "the completed generation for ${plan_id} still has queue entries (${_gen_stale_entries}), and this invocation's plan bytes derive the SAME EPIC ids from a DIFFERENT identity ('${_gen_existing_identity}' -> '${_gen_identity}'). The queue holds one entry per EPIC id, so rolling over would leave those entries standing for regenerated content they were never queued for. Nothing was archived or regenerated. Remove those queue entries (finish them first if they are still in flight), then re-run." 1
+    fi
+    # AUTOMATIC ROLLOVER. A COMPLETE record is never clobbered at its fixed
+    # live path: the pair is archived to `.completed-<epoch>` siblings sharing
+    # one epoch, and the changed plan starts a fresh transaction.
+    _gen_rollover_epoch="$(date -u +%s)"
+    _gen_archive_pair "$plan_id" "completed-${_gen_rollover_epoch}" || {
+      _gen_unlock
+      error_exit "cannot archive the COMPLETED generation pair for ${plan_id} to .completed-${_gen_rollover_epoch} siblings — refusing to clobber a completed record." 3
+    }
+    echo "[INFO] generation_transaction: the previous transaction for ${plan_id} was COMPLETE and the plan identity changed — archived to .completed-${_gen_rollover_epoch} siblings; starting a fresh transaction." >&2
+  else
+    _gen_unlock
+    error_exit "generation transaction identity mismatch for ${plan_id}: the existing INCOMPLETE transaction records identity '${_gen_existing_identity}' (plan_sha256|target_head|phase_derivation_version|total_phases) but this invocation derives '${_gen_identity}'. Artifacts from two derivations are never mixed. Archive the incomplete transaction first: aid-auto-pipeline.sh supersede-generation --plan '${plan}' --reason \"<at least 20 characters>\"" 1
+  fi
+fi
+
+if [[ "$_gen_resumed" != true ]]; then
+  # IDENTITY-ONLY SKELETON. Every phase's ids are pre-derived here so the phase
+  # verifier compares a RE-DERIVED id against a RECORDED one; the two hashes
+  # stay absent until each phase's outputs exist (schema allows that).
+  _gen_phases_json="{}"
+  for _gp in $(seq 1 "$total_phases"); do
+    _gp_epic="$(_gen_epic_id "$plan_id" "$_gp" "$total_phases")"
+    _gen_phases_json="$(jq -c --arg k "$_gp" --arg e "$_gp_epic" --arg r "$(_gen_run_id "$_gp_epic")" \
+      '. + {($k): {epic_id: $e, run_id: $r}}' <<< "$_gen_phases_json")"
+  done
+  _gen_skeleton="$(jq -n \
+    --arg schema "aid-generation-transaction/v1" \
+    --arg plan_id "$plan_id" --arg plan_path "$plan" \
+    --arg plan_sha256 "$_gen_plan_sha256" --arg target_branch "$_gen_target_branch_name" \
+    --arg target_head "$_gen_target_head_sha" \
+    --argjson pdv "$AID_GEN_PHASE_DERIVATION_VERSION" --argjson total "$total_phases" \
+    --arg created "$(_gen_now)" --argjson phases "$_gen_phases_json" \
+    '{schema:$schema, plan_id:$plan_id, plan_path:$plan_path, plan_sha256:$plan_sha256,
+      target_branch:$target_branch, target_head:$target_head,
+      phase_derivation_version:$pdv, total_phases:$total,
+      authority_sha256:null, phases:$phases, created_at:$created, updated_at:$created}')" || _gen_skeleton=""
+  [[ -n "$_gen_skeleton" ]] || { _gen_unlock; error_exit "cannot render the generation transaction skeleton for ${plan_id}" 3; }
+  _gen_write_atomic "$_gen_tx_path" "$_gen_skeleton" || { _gen_unlock; error_exit "cannot write the generation transaction skeleton at ${_gen_tx_path}" 3; }
+fi
+
+# ── the ONE CP1 gate call, and the sealed authority ────────────────────────
+_gen_authority_valid=false
+if [[ -f "$_gen_auth_path" ]]; then
+  if jq -e --arg s "aid-generation-authority/v1" --arg id "$_gen_plan_sha256" \
+       --arg th "$_gen_target_head_sha" --argjson pdv "$AID_GEN_PHASE_DERIVATION_VERSION" \
+       --argjson total "$total_phases" \
+       '.schema == $s and .plan_sha256 == $id and .target_head == $th
+        and .phase_derivation_version == $pdv and .total_phases == $total' \
+       "$_gen_auth_path" >/dev/null 2>&1 \
+     && [[ "$(jq -r '.self_sha256 // ""' "$_gen_auth_path")" == "$(_gen_self_sha256 "$_gen_auth_path")" ]]; then
+    _gen_authority_valid=true
+    echo "[INFO] generation_authority: reusing the sealed plan-scoped authority at ${_gen_auth_path} (identity unchanged) — the CP1 gate is NOT re-consulted." >&2
+  else
+    echo "[WARN] generation_authority: the authority at ${_gen_auth_path} does not bind this identity (or fails its own self-hash) — it is re-sealed from a fresh gate decision." >&2
+  fi
+fi
+
+if [[ "$_gen_authority_valid" != true ]]; then
+  _gen_cp1_out=""; _gen_cp1_rc=0
+  if [[ -f "${SCRIPT_DIR}/aid-cp1-gate.sh" ]]; then
+    _gen_cp1_out="$(bash "${SCRIPT_DIR}/aid-cp1-gate.sh" --plan "$plan" --project-root "$_aid_pipeline_state_root" 2>&1)" || _gen_cp1_rc=$?
+  else
+    _gen_cp1_out="cp1 gate script not present — no gate to run"
+  fi
+  printf '%s\n' "$_gen_cp1_out" >&2
+
+  _gen_cp1_json='{"verdict":"pass"}'
+  _gen_forced=false
+  if [[ "$_gen_cp1_rc" -ne 0 ]]; then
+    if [[ "$force_generation" != true ]]; then
+      _gen_unlock
+      error_exit "aid_cp1_blocked: the CP1 gate refused generation for ${plan_id} (see the gate output above). Nothing was generated. Resolve the blocking conditions, or override deliberately with: aid-auto-pipeline.sh --plan '${plan}' --force --reason \"<at least 20 characters>\"" 1
+    fi
+    _gen_forced=true
+    # The bypassed conditions, recorded verbatim from the gate's own output —
+    # never a paraphrase, and never a rewrite of the CP1 artifacts on disk.
+    _gen_cp1_json="$(jq -n --arg out "$_gen_cp1_out" --argjson rc "$_gen_cp1_rc" \
+      --argjson refs "$(jq -n --arg a "$(aid_state_path ".aid-o/work/evidence/${plan_id}/c0-plan-review.json")" \
+                              --arg b "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1-deep")" \
+        '[{path:$a, sha256:null},{path:$b, sha256:null}]')" \
+      '{bypassed_conditions: ($out | split("\n") | map(select(length > 0))), gate_exit: $rc, evidence_refs: $refs}')"
+    # Fill the evidence_refs hashes for whatever actually exists (audit
+    # provenance at decision time; the gate already validated those files).
+    _gen_c0_ref="$(aid_state_path ".aid-o/work/evidence/${plan_id}/c0-plan-review.json")"
+    if [[ -f "$_gen_c0_ref" ]]; then
+      _gen_cp1_json="$(jq -c --arg p "$_gen_c0_ref" --arg h "$(_gen_sha256_file "$_gen_c0_ref")" \
+        '.evidence_refs |= map(if .path == $p then .sha256 = $h else . end)' <<< "$_gen_cp1_json")"
+    fi
+  elif [[ "$force_generation" == true ]]; then
+    # --force on a plan whose gate PASSES: the force is recorded as UNUSED —
+    # nothing was bypassed, so no waiver is written (P073 Step 8 semantics).
+    _gen_cp1_json='{"verdict":"pass","force_unused":true}'
+  fi
+
+  _gen_auth_draft="$(jq -n \
+    --arg schema "aid-generation-authority/v1" \
+    --arg plan_id "$plan_id" --arg plan_path "$plan" --arg plan_sha256 "$_gen_plan_sha256" \
+    --arg target_branch "$_gen_target_branch_name" --arg target_head "$_gen_target_head_sha" \
+    --arg mode "$queue_mode" --argjson total "$total_phases" \
+    --argjson pdv "$AID_GEN_PHASE_DERIVATION_VERSION" \
+    --argjson cp1 "$_gen_cp1_json" --argjson forced "$_gen_forced" \
+    --arg reason "$force_reason" --arg invoker "${USER:-unknown}" --arg created "$(_gen_now)" \
+    '{schema:$schema, plan_id:$plan_id, plan_path:$plan_path, plan_sha256:$plan_sha256,
+      target_branch:$target_branch, target_head:$target_head, mode:$mode,
+      total_phases:$total, phase_derivation_version:$pdv, cp1:$cp1,
+      forced_override:$forced, force_reason:(if $reason == "" then null else $reason end),
+      invoker:$invoker, created_at:$created, self_sha256:null}')" || _gen_auth_draft=""
+  [[ -n "$_gen_auth_draft" ]] || { _gen_unlock; error_exit "cannot render the generation authority receipt for ${plan_id}" 3; }
+  _gen_auth_self="$(printf '%s\n' "$_gen_auth_draft" | jq -S -c '.self_sha256 = null' | sha256sum | awk '{print $1}')"
+  _gen_auth_final="$(jq --arg h "$_gen_auth_self" '.self_sha256 = $h' <<< "$_gen_auth_draft")"
+
+  # ==========================================================================
+  # ORDER: EVERY AUDIT RECORD FIRST, THEN THE AUTHORITY (Codex round: BLOCKER 1)
+  # ==========================================================================
+  # The first cut wrote the authority first and treated the timeline and
+  # audit-log writes as best-effort (`|| true`, P073's contract for them). On a
+  # forced run that is a hole with teeth: a kill or an I/O error between the
+  # two left a VALID `forced_override: true` authority on disk with no P073
+  # trail at all — and resume ACCEPTS a valid authority without re-consulting
+  # the gate, so the bypass became permanent and invisible.
+  #
+  # The authority is the thing that authorizes generation, so it is now the
+  # LAST write of this block: all three records must be durable before it
+  # exists. All three are FAIL-CLOSED here — a deliberate divergence from
+  # P073's best-effort audit-log contract, where the waiver artifact is the
+  # authority and the log is a convenience. Here the receipt being verified
+  # downstream IS the authority file, so anything that cannot record the
+  # bypass must abort before that file exists.
+  #
+  # aid-audit-log.sh swallows its own write failures by design ("audit log
+  # failure must never abort primary FSM operation") and always returns 0, so
+  # its success is verified by READING THE RECORD BACK, not by its exit code.
+  if [[ "$_gen_forced" == true ]]; then
+    _gen_force_epoch="$(date -u +%Y%m%dT%H%M%SZ)"
+    _gen_waiver="${_gen_dir_path}/waiver-generation-${_gen_force_epoch}.json"
+    _gen_wn=0
+    while [[ -e "$_gen_waiver" ]]; do
+      _gen_wn=$(( _gen_wn + 1 ))
+      [[ "$_gen_wn" -gt 100 ]] && { _gen_unlock; error_exit "cannot find a free force-receipt name under ${_gen_dir_path} — refusing a silent bypass." 3; }
+      _gen_waiver="${_gen_dir_path}/waiver-generation-${_gen_force_epoch}-${_gen_wn}.json"
+    done
+    _gen_head_sha="$(git -C "$_aid_pipeline_state_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+    _gen_waiver_json="$(jq -n \
+      --arg created_at "$(_gen_now)" --arg plan_id "$plan_id" \
+      --arg head_sha "$_gen_head_sha" --arg reason "$force_reason" \
+      --arg by "${USER:-unknown}" --arg subject "sha256:${_gen_auth_self}" \
+      --argjson cp1 "$_gen_cp1_json" \
+      '{schema_version:"aid-2.0", artifact_type:"waiver",
+        producer:"aid-auto-pipeline.sh@generation-force-override",
+        created_at:$created_at, control_protocol:"aid-2.0",
+        identity:{project_id:null, epic_id:$plan_id, run_id:"generation", step_id:null},
+        subject:{subject_hash:$subject},
+        revision:{head_sha:$head_sha, head_is_current:true, freshness:"current"},
+        status:"blocked", verdict:{kind:"none", ready:false},
+        provenance:{dispatch_mode:"deterministic", generated_by_tool:"aid-auto-pipeline.sh"},
+        waiver:{waived_check:"aid-auto-pipeline:cp1-gate", reason:$reason, waived_by:$by, waived_at:$created_at, scope:"run", visible:true},
+        forced_override:true, records:"precondition_bypass", actor_semantics:"instruction_only",
+        bypassed_preconditions:($cp1.bypassed_conditions // [])}')" || _gen_waiver_json=""
+    [[ -n "$_gen_waiver_json" ]] || { _gen_unlock; error_exit "cannot render the generation force receipt — refusing a silent bypass." 3; }
+    # Record 1 — the HEAD-bound waiver artifact.
+    _gen_write_atomic "$_gen_waiver" "$_gen_waiver_json" || { _gen_unlock; error_exit "cannot write the generation force receipt at ${_gen_waiver} — refusing a silent bypass. No authority was sealed." 3; }
+    # Record 2 — the timeline event. FAIL-CLOSED.
+    if ! printf '%s\n' "$(jq -nc --arg ts "$(_gen_now)" --arg ev "generation_force_override" --arg plan "$plan_id" \
+        --arg reason "$force_reason" --arg op "${USER:-unknown}" --arg receipt "$(basename "$_gen_waiver")" \
+        --argjson cp1 "$_gen_cp1_json" \
+        '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, receipt:$receipt,
+          force_unused:false, bypassed_preconditions:($cp1.bypassed_conditions // [])}')" \
+        >> "${_gen_dir_path}/timeline.jsonl" 2>/dev/null; then
+      rm -f "$_gen_waiver" 2>/dev/null || true
+      _gen_unlock
+      error_exit "cannot append the generation_force_override timeline event to ${_gen_dir_path}/timeline.jsonl — refusing a silent bypass. No authority was sealed." 3
+    fi
+    # Record 3 — the cross-plan audit log, VERIFIED BY READING IT BACK.
+    bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+      --epic-id "$plan_id" --run-id "generation" --event "generation_force_override" \
+      --plan-id "$plan_id" --reason "$force_reason" --operator "${USER:-unknown}" \
+      --receipt "$(basename "$_gen_waiver")" \
+      --output "$(_gen_audit_log_path)" >/dev/null 2>&1 || true
+    if ! tail -n 5 "$(_gen_audit_log_path)" 2>/dev/null \
+         | grep -q "\"event\":\"generation_force_override\".*\"plan_id\":\"${plan_id}\""; then
+      rm -f "$_gen_waiver" 2>/dev/null || true
+      _gen_unlock
+      error_exit "the generation_force_override entry could not be read back from $(_gen_audit_log_path) — the bypass is not durably recorded, so no authority was sealed and nothing was generated. Repair the audit-log path and re-run." 3
+    fi
+    echo "[WARN] generation_force_override: the CP1 gate was BYPASSED for ${plan_id}. Recorded at ${_gen_waiver}; the CP1 artifacts on disk were NOT rewritten." >&2
+  elif [[ "$force_generation" == true ]]; then
+    # Nothing was bypassed, so there is no waiver — but the unused force is
+    # still recorded, and still before the authority exists.
+    if ! printf '%s\n' "$(jq -nc --arg ts "$(_gen_now)" --arg ev "generation_force_override" --arg plan "$plan_id" \
+        --arg reason "$force_reason" --arg op "${USER:-unknown}" \
+        '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, force_unused:true, bypassed_preconditions:[]}')" \
+        >> "${_gen_dir_path}/timeline.jsonl" 2>/dev/null; then
+      _gen_unlock
+      error_exit "cannot append the force_unused timeline event to ${_gen_dir_path}/timeline.jsonl — no authority was sealed." 3
+    fi
+    echo "[INFO] generation_force_override: every CP1 condition passed — --force bypassed nothing and no waiver was written." >&2
+  fi
+
+  # NOW, and only now, the authority itself. Every record that explains it is
+  # already durable, so a valid authority can never exist without its trail.
+  _gen_write_atomic "$_gen_auth_path" "$_gen_auth_final" || { _gen_unlock; error_exit "cannot write the generation authority receipt at ${_gen_auth_path} — no phase output was produced." 3; }
+  echo "[INFO] generation_authority: sealed at ${_gen_auth_path} (self_sha256 ${_gen_auth_self})" >&2
+fi
+
+# Bind the transaction to the authority it was decided under. Done inside the
+# same lock hold, so the pair can never disagree.
+_gen_auth_sha="$(jq -r '.self_sha256 // ""' "$_gen_auth_path" 2>/dev/null)"
+_gen_tx_bound="$(jq --arg h "$_gen_auth_sha" --arg u "$(_gen_now)" '.authority_sha256 = $h | .updated_at = $u' "$_gen_tx_path")" \
+  || { _gen_unlock; error_exit "cannot bind the generation transaction to its authority" 3; }
+_gen_write_atomic "$_gen_tx_path" "$_gen_tx_bound" || { _gen_unlock; error_exit "cannot write the generation transaction manifest at ${_gen_tx_path}" 3; }
+
+# NO UNLOCK HERE — the hold continues through every phase, stage 2 and the
+# receipt rewrite, and is dropped by the EXIT trap. See the "ONE HOLD FOR THE
+# WHOLE GENERATION" note above for why the phase work cannot be run
+# concurrently by two same-identity invocations.
+
 for phase in $(seq 1 "$total_phases"); do
 
   # -------------------------------------------------------------------------
+  # P074 Step 15 — RESUME. A phase whose recorded outputs still exist and
+  # re-hash to the recorded values (and whose contract validation is still a
+  # pass) is NOT regenerated: its manifest entry is rebuilt from the
+  # transaction and the loop moves on. Everything else is regenerated in place.
+  # -------------------------------------------------------------------------
+  if [[ "$two_stage" == true ]] && _gen_phase_stage1_verified "$plan_id" "$phase"; then
+    _res="$(jq -c --arg p "$phase" '.phases[$p]' "$_gen_tx_path")"
+    epic_id="$(jq -r '.epic_id' <<< "$_res")"
+    epic_path="$(jq -r '.epic_path' <<< "$_res")"
+    plan_json_path="$(jq -r '.plan_json' <<< "$_res")"
+    run_id="$(jq -r '.run_id' <<< "$_res")"
+    _c0_dir="$(jq -r '.contract_validate' <<< "$_res")"; _c0_dir="$(dirname "$_c0_dir")"
+    _stage_depends="$(_generation_depends_for_epic "$epic_path" "$prev_epic_id")"
+    _stage_depends_json="[]"
+    if [[ -n "$_stage_depends" ]]; then
+      _stage_depends_json="$(printf '%s' "$_stage_depends" | tr ',' '\n' | jq -R . | jq -s .)"
+    fi
+    epics_json="$(echo "$epics_json" | jq \
+      --argjson phase "$phase" --arg epic_id "$epic_id" --arg epic_path "$epic_path" \
+      --arg plan_json "$plan_json_path" --arg run_id "$run_id" --arg contract_validate "${_c0_dir}/contract-validate.json" --argjson depends_on "$_stage_depends_json" \
+      '. + [{phase:$phase, epic_id:$epic_id, epic_path:$epic_path, plan_json:$plan_json, contract_validate:$contract_validate, run_id:$run_id, queue_status:"pending_receipt", depends_on:$depends_on}]')"
+    prev_epic_id="$epic_id"
+    echo "[INFO] Phase ${phase}/${total_phases}: ${epic_id} verified against the transaction (hashes match on disk) — regeneration skipped" >&2
+    continue
+  fi
+
+  # -------------------------------------------------------------------------
   # Phase N.a: Plan -> EPIC
+  #
+  # P074 Step 14 wiring: the sealed authority + the owning transaction are
+  # passed instead of letting the generator re-run the CP1 gate per phase. The
+  # generator VERIFIES both (schema, self-hash, plan bytes, target head, phase
+  # range, re-derived ids, transaction linkage); a standalone invocation
+  # without these flags keeps the full per-invocation gate.
   # -------------------------------------------------------------------------
   epic_path="$("${SCRIPT_DIR}/aid-plan-to-epic.sh" \
     --plan "$plan" \
@@ -494,6 +1260,8 @@ for phase in $(seq 1 "$total_phases"); do
     --epic-template "$epic_template" \
     --output-dir "$(aid_state_path ".aid-o/tasks")" \
     --counter-yaml "$counter_yaml" \
+    --generation-authority "$_gen_auth_path" \
+    --transaction "$_gen_tx_path" \
     --project-root "$_aid_pipeline_state_root")"
 
   # Extract epic_id from the generated filename
@@ -622,6 +1390,15 @@ for phase in $(seq 1 "$total_phases"); do
   # Stage 1 ends here on the normal path: no run/FSM/queue state exists until
   # the finalizer has verified every generated phase against the source graph.
   if [[ "$two_stage" == true ]]; then
+    # WRITE-AHEAD ORDERING (P074 Step 15): the phase's outputs are on disk and
+    # contract-validated, so the transaction records them BEFORE the loop
+    # proceeds. A crash after this point resumes at the NEXT phase; a crash
+    # before it regenerates this one (the hashes will not verify).
+    _gen_tx_update "$plan_id" '.phases[$p] = ((.phases[$p] // {}) + {epic_id:$e, run_id:$r, epic_path:$ep, plan_json:$pj, contract_validate:$cv, epic_sha256:$es, plan_json_sha256:$ps})' \
+      --arg p "$phase" --arg e "$epic_id" --arg r "$run_id" \
+      --arg ep "$(realpath -m -- "$epic_path")" --arg pj "$(realpath -m -- "$plan_json_path")" \
+      --arg cv "$(realpath -m -- "${_c0_dir}/contract-validate.json")" \
+      --arg es "$(_gen_sha256_file "$epic_path")" --arg ps "$(_gen_sha256_file "$plan_json_path")"
     _stage_depends="$(_generation_depends_for_epic "$epic_path" "$prev_epic_id")"
     _stage_depends_json="[]"
     if [[ -n "$_stage_depends" ]]; then
@@ -816,13 +1593,40 @@ if [[ "$two_stage" == true ]]; then
     fi
     [[ "$_j2r_rc" -eq 0 ]] || exit "$_j2r_rc"
 
-    _queue_args=(--epic-id "$_epic_id" --epic-path "$_epic_path" --priority medium --queue-yaml "$queue_yaml" --plan-ref "$plan")
+    # P074 Step 15: `--transaction` turns a duplicate this very transaction
+    # already owns into a VERIFIED idempotent skip (the 2026-08-04 live
+    # failure: a resumed run died on phase 1's queue duplicate and stranded
+    # phases 2..N). A duplicate NOT owned by the transaction keeps its hard fail.
+    _queue_args=(--epic-id "$_epic_id" --epic-path "$_epic_path" --priority medium --queue-yaml "$queue_yaml" --plan-ref "$plan" --transaction "$_gen_tx_path")
     _depends_csv="$(jq -r '.depends_on | join(",")' <<< "$_entry")"
     [[ -n "$_depends_csv" ]] && _queue_args+=(--depends-on "$_depends_csv")
     "${SCRIPT_DIR}/aid-queue-add.sh" "${_queue_args[@]}" >/dev/null
-    epics_json="$(jq --argjson p "$phase" --arg rp "$_run_path" 'map(if .phase == $p then . + {run_path:$rp, queue_status:"pending"} else . end)' <<< "$epics_json")"
-    echo "[INFO] Phase ${phase}/${total_phases}: ${_epic_id} initialised and queued after receipt" >&2
+    _gen_tx_update "$plan_id" '.phases[$p] = ((.phases[$p] // {}) + {queued: true})' --arg p "$phase"
+    _queue_real_status="$(_gen_queue_status "$queue_yaml" "$_epic_id")"
+    [[ -n "$_queue_real_status" ]] || _queue_real_status="pending"
+    epics_json="$(jq --argjson p "$phase" --arg rp "$_run_path" --arg qs "$_queue_real_status" 'map(if .phase == $p then . + {run_path:$rp, queue_status:$qs} else . end)' <<< "$epics_json")"
+    echo "[INFO] Phase ${phase}/${total_phases}: ${_epic_id} initialised and queued after receipt (queue status: ${_queue_real_status})" >&2
   done
+
+  # -------------------------------------------------------------------------
+  # P074 Step 15 — REWRITE the receipt with the REAL queue statuses.
+  #
+  # The grounded defect: the receipt was composed before stage 2, so every
+  # per-EPIC `queue_status` stayed at the placeholder `pending_receipt`
+  # forever. The rewrite runs after the LAST queue-add, through the SAME
+  # composer (single writer, full re-canonicalize, atomic replace), so the
+  # receipt is self-consistent and its frozen consumer fields (schema,
+  # plan_sha256, per-EPIC plan_json_sha256) are unchanged by construction.
+  #
+  # This is also the transaction's COMPLETION marker: `_gen_tx_complete`
+  # returns false until it has happened, so a crash anywhere before this point
+  # always leaves the transaction resumable.
+  # -------------------------------------------------------------------------
+  printf '%s\n' "$epics_json" > "$_generation_tmp"
+  mv "$_generation_tmp" "$_generation_manifest"
+  "${SCRIPT_DIR}/aid-generation-finalize.sh" --plan "$plan" --total "$total_phases" \
+    --epics-json "$_generation_manifest" --output "$generation_receipt" --rewrite >/dev/null
+  echo "[INFO] generation_receipt: queue statuses rewritten to their final values at ${generation_receipt}" >&2
 fi
 
 # =============================================================================

@@ -1026,7 +1026,7 @@ _queue_validate_entry_block() {
   return 0
 }
 
-# queue_append_entry <epic_id> <entry_yaml_block>
+# queue_append_entry <epic_id> <entry_yaml_block> [transaction_path]
 #   The append half of the write path, delegated here from aid-queue-add.sh so
 #   BOTH the append and every later transition happen under the same lock. The
 #   duplicate check is re-run INSIDE the lock: aid-queue-add.sh's own check
@@ -1036,8 +1036,82 @@ _queue_validate_entry_block() {
 #   _queue_validate_entry_block. Validation happens BEFORE the lock is taken:
 #   it touches no file, and a rejected append must not make a concurrent
 #   legitimate one wait.
+#
+#   P074 STEP 15 — TRANSACTION-OWNED DUPLICATES. This second, previously
+#   status-blind duplicate refusal is the one that actually decides, because it
+#   is the one holding the lock. It therefore gains the SAME ownership
+#   awareness as aid-queue-add.sh's unlocked pre-check: when <transaction_path>
+#   records this epic_id AND the already-present entry's plan_ref is the plan
+#   that transaction was generated from, the duplicate is a VERIFIED IDEMPOTENT
+#   SKIP (rc 4) instead of a refusal (rc 1). Making the CLI layer pass and this
+#   layer hard-fail would be exactly the split decision this closes.
+#   Ownership is VERIFIED, never assumed — an unreadable transaction, an
+#   unrecorded id, or a plan_ref belonging to a different plan all fall back to
+#   the historical rc 1.
+#
+#   Returns: 0 written | 1 duplicate (refused) | 2 malformed input
+#            3 lock/IO failure | 4 transaction-owned duplicate (verified skip)
+
+# _queue_tx_owns <epic_id> <transaction_path> <queue_file>
+#   Does <transaction_path> own the queue entry that already carries <epic_id>?
+#
+#   IDENTITY, NOT JUST THE ID (Codex round: BLOCKER 3). The first cut asked
+#   only "does the transaction record this epic_id, and is its plan_path the
+#   entry's plan_ref". After an automatic rollover both are still true — a new
+#   transaction for EDITED plan bytes derives the SAME epic ids from the same
+#   plan file — so the pre-rollover entries looked owned and were silently
+#   skipped. The queue then pointed at entries standing for content generated
+#   under a DIFFERENT identity.
+#
+#   The queue entry shape is a frozen machine-compatibility surface, so the
+#   binding is built from fields that already exist:
+#
+#     phase.queued == true          this transaction itself queued it (the
+#                                   flag is written only after its own
+#                                   successful queue-add), or
+#     entry.added_at >= tx.created_at
+#                                   the entry was added during THIS
+#                                   transaction's lifetime — the crash window
+#                                   between a successful queue-add and the
+#                                   manifest update, which resume adopts.
+#
+#   A pre-rollover (or pre-supersede) entry fails both: it was added before the
+#   current transaction was created and this transaction never queued it. It is
+#   therefore NOT adoptable, and the caller reports a named refusal.
+_queue_tx_owns() {
+  local epic_id="${1:-}" transaction="${2:-}" file="${3:-}"
+  [[ -n "$transaction" && -f "$transaction" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e --arg eid "$epic_id" 'any(.phases[]?; .epic_id == $eid)' "$transaction" >/dev/null 2>&1 || return 1
+
+  local tx_plan entry_plan tx_real entry_real
+  tx_plan="$(jq -r '.plan_path // ""' "$transaction" 2>/dev/null)"
+  entry_plan="$(queue_get_field "$epic_id" plan_ref "$file" 2>/dev/null || true)"
+  [[ -n "$tx_plan" ]] || return 1
+  # Compare on the resolved path: the pipeline may hand a relative plan path on
+  # one run and an absolute one on the next.
+  tx_real="$(realpath -m -- "$tx_plan" 2>/dev/null || printf '%s' "$tx_plan")"
+  entry_real="$(realpath -m -- "$entry_plan" 2>/dev/null || printf '%s' "$entry_plan")"
+  [[ "$tx_real" == "$entry_real" ]] || return 1
+
+  # Written by THIS transaction?
+  if jq -e --arg eid "$epic_id" 'any(.phases[]?; .epic_id == $eid and .queued == true)' \
+       "$transaction" >/dev/null 2>&1; then
+    return 0
+  fi
+  # Added during this transaction's lifetime (the adopt-from-queue window)?
+  local tx_created entry_added
+  tx_created="$(jq -r '.created_at // ""' "$transaction" 2>/dev/null)"
+  entry_added="$(queue_get_field "$epic_id" added_at "$file" 2>/dev/null || true)"
+  [[ -n "$tx_created" && -n "$entry_added" ]] || return 1
+  # Both are ISO-8601 UTC (iso_timestamp / _gen_now), so lexical order is
+  # chronological order.
+  [[ ! "$entry_added" < "$tx_created" ]] || return 1
+  return 0
+}
+
 queue_append_entry() {
-  local epic_id="${1:-}" block="${2:-}"
+  local epic_id="${1:-}" block="${2:-}" transaction="${3:-}"
   if [[ -z "$epic_id" || -z "$block" ]]; then
     _aid_queue_warn "queue_append_entry: usage: queue_append_entry <epic_id> <entry_yaml>"
     return 2
@@ -1057,8 +1131,17 @@ queue_append_entry() {
   local existing
   existing="$(queue_entry_ids "$file" | grep -Fx -- "$epic_id" || true)"
   if [[ -n "$existing" ]]; then
+    if [[ -n "$transaction" ]] && _queue_tx_owns "$epic_id" "$transaction" "$file"; then
+      aid_lock_release "$fd"
+      _aid_queue_warn "queue_append_entry: ${epic_id} already present and owned by the generation transaction ${transaction} — verified idempotent skip, nothing written"
+      return 4
+    fi
     aid_lock_release "$fd"
-    _aid_queue_warn "queue_append_entry: ${epic_id} already present — nothing written"
+    if [[ -n "$transaction" && -f "$transaction" ]]; then
+      _aid_queue_warn "queue_append_entry: ${epic_id} is already in the queue but the entry does NOT belong to this generation transaction (it predates it, or names another plan) — a stale-identity entry is never silently adopted; nothing written"
+    else
+      _aid_queue_warn "queue_append_entry: ${epic_id} already present — nothing written"
+    fi
     return 1
   fi
 

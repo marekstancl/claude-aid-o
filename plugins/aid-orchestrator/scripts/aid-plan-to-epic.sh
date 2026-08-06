@@ -6,7 +6,13 @@
 #   ./aid-plan-to-epic.sh \
 #     --plan <path> --phase <N> --total <T> \
 #     --epic-template <path> --output-dir <path> --counter-yaml <path> \
-#     [--project-root <workspace>]
+#     [--project-root <workspace>] \
+#     [--generation-authority <path> --transaction <path>]
+#
+# --generation-authority / --transaction (P074 Step 14, both or neither):
+# verify the pipeline's sealed plan-scoped CP1 decision instead of re-running
+# the CP1 gate for this phase. Without them the per-invocation gate runs
+# exactly as before.
 #
 # Reads the plan, extracts phase-specific steps, fills the EPIC template,
 # and writes the completed EPIC to the output directory.
@@ -37,6 +43,8 @@ epic_template=""
 output_dir=""
 counter_yaml=""
 project_root=""
+generation_authority=""   # P074 Step 14 — sealed plan-scoped CP1 decision
+generation_transaction="" # P074 Step 14 — the transaction that owns this phase
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +55,8 @@ while [[ $# -gt 0 ]]; do
     --output-dir)  output_dir="$2";    shift 2 ;;
     --counter-yaml) counter_yaml="$2"; shift 2 ;;
     --project-root) project_root="$2"; shift 2 ;;
+    --generation-authority) generation_authority="$2"; shift 2 ;;
+    --transaction)          generation_transaction="$2"; shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -141,8 +151,202 @@ fi
 # accepted blockers from the adjudicator. Producer-before-consumer: this
 # check runs after plan_id is known but before any EPIC artifacts are written.
 # ---------------------------------------------------------------------------
+#
+# P074 STEP 14 — AUTHORITY VERIFICATION INSTEAD OF A PER-PHASE GATE.
+#
+# THE GROUNDED FAILURE (F2, live 2026-08-04): this call is unconditional per
+# invocation and the gate's one-shot PM-override memo is function-local, so a
+# 3-phase plan demanded 3 PM artifacts and got worked around with a watcher —
+# the anti-pattern §16a explicitly forbids normalizing. The pipeline now runs
+# the gate ONCE per plan and seals the decision; each phase VERIFIES that seal.
+#
+# HONEST CLASSIFICATION (AID-v3 §1): the authority receipt, like every AID
+# artifact, is FORGEABLE by a Bash-capable actor — there is no actor
+# impossibility here and none is claimed. What enforces the decision is the
+# BINDING plus audit detectability: a forged or replayed receipt must still
+# match the real plan bytes, the real target head, this phase's independently
+# re-derived ids, and the owning transaction's authority_sha256, and every
+# forced authority carries the three P073 audit records. A leaked authority
+# file is therefore useless outside its own transaction.
+#
+# WITHOUT the flags, the standalone per-invocation gate below runs unchanged.
+# ---------------------------------------------------------------------------
+if { [[ -n "$generation_authority" ]] && [[ -z "$generation_transaction" ]]; } \
+   || { [[ -z "$generation_authority" ]] && [[ -n "$generation_transaction" ]]; }; then
+  error_exit "--generation-authority and --transaction must be passed together (a receipt without its owning transaction proves nothing, and a transaction without its receipt has no sealed decision). Run generation through aid-auto-pipeline.sh." 1
+fi
+
+AID_GEN_PHASE_DERIVATION_VERSION=1   # keep in step with aid-auto-pipeline.sh
+
+# _validate_against_schema <document> <schema.json> <label>
+#   A small, dependency-free draft-07 subset validator: `required`, `type`,
+#   `const`, `pattern`, `minimum`, `minLength`, `additionalProperties: false`,
+#   and one level of `additionalProperties: {object schema}` (the transaction's
+#   phases map). Enough to make "fails its schema" a real statement about these
+#   two documents rather than a spot check, and it fails CLOSED if the schema
+#   file itself is missing.
+_validate_against_schema() {
+  local doc="$1" schema="$2" label="$3"
+  [[ -f "$schema" ]] \
+    || error_exit "cannot validate the ${label}: schema ${schema} is missing — the verifier is fail-closed and will not accept an unvalidated document." 2
+  local errs rc=0
+  errs="$(jq -r -n --slurpfile d "$doc" --slurpfile s "$schema" '
+    def typeok($v; $t):
+      if $t == null then true
+      elif ($t | type) == "array" then ([ $t[] | typeok($v; .) ] | any)
+      elif $t == "integer" then (($v | type) == "number" and (($v | floor) == $v))
+      elif $t == "null" then ($v == null)
+      else (($v | type) == $t) end;
+
+    # NOT `$sch.additionalProperties // true`: jq treats FALSE as empty for
+    # `//`, so the literal `false` this validator exists to honour would
+    # silently become `true` and every unknown property would be allowed.
+    def ap($sch): if ($sch | has("additionalProperties")) then $sch.additionalProperties else true end;
+
+    def check($val; $sch; $path):
+      ( if ($sch | has("const")) and ($val != $sch.const)
+          then ["\($path): must be \($sch.const | tojson)"] else [] end )
+      + ( if ($sch.type != null) and (typeok($val; $sch.type) | not)
+            then ["\($path): expected \($sch.type | tojson), got \($val | type)"] else [] end )
+      + ( if ($sch.pattern != null) and (($val | type) == "string") and (($val | test($sch.pattern)) | not)
+            then ["\($path): does not match /\($sch.pattern)/"] else [] end )
+      + ( if ($sch.minLength != null) and (($val | type) == "string") and (($val | length) < $sch.minLength)
+            then ["\($path): shorter than minLength \($sch.minLength)"] else [] end )
+      + ( if ($sch.minimum != null) and (($val | type) == "number") and ($val < $sch.minimum)
+            then ["\($path): below minimum \($sch.minimum)"] else [] end )
+      + ( if ($val | type) == "object"
+            then [ ($sch.required // [])[] as $k | select(($val | has($k)) | not)
+                   | "\($path).\($k): required property is missing" ]
+            else [] end )
+      + ( if ($val | type) == "object" and (ap($sch) == false)
+            then [ ($val | keys_unsorted[]) as $k | select((($sch.properties // {}) | has($k)) | not)
+                   | "\($path).\($k): property is not allowed (additionalProperties: false)" ]
+            else [] end )
+      + ( if ($val | type) == "object"
+            then ( [ ($val | keys_unsorted[]) as $k | select((($sch.properties // {}) | has($k))) | $k ]
+                   | map(. as $k | check($val[$k]; $sch.properties[$k]; "\($path).\($k)")) | add // [] )
+            else [] end )
+      + ( if ($val | type) == "object" and ((ap($sch) | type) == "object")
+            then ( [ ($val | keys_unsorted[]) as $k | select((($sch.properties // {}) | has($k)) | not) | $k ]
+                   | map(. as $k | check($val[$k]; ap($sch); "\($path).\($k)")) | add // [] )
+            else [] end );
+
+    check($d[0]; $s[0]; "$") | unique | join("; ")
+  ' 2>/dev/null)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    error_exit "cannot validate the ${label} ${doc} against ${schema} (unreadable or malformed JSON) — the verifier is fail-closed." 1
+  fi
+  [[ -z "$errs" ]] && return 0
+  error_exit "${label} ${doc} fails its schema ($(jq -r '."$id" // "unknown"' "$schema")): ${errs}" 1
+}
+
+_verify_generation_authority() {
+  local auth="$1" tx="$2"
+  # FAIL-CLOSED BY DEFINITION: no jq, no verification, no generation.
+  command -v jq >/dev/null 2>&1 \
+    || error_exit "generation authority verification requires jq, which is unavailable — the verifier is fail-closed by definition and will not fall back to gate-less generation." 2
+  [[ -f "$auth" ]] || error_exit "generation authority not readable: ${auth} — run generation through aid-auto-pipeline.sh (never a gate-less fallback)." 1
+  [[ -f "$tx" ]]   || error_exit "generation transaction not readable: ${tx} — a transaction is never implicitly recreated mid-run. Run generation through aid-auto-pipeline.sh." 1
+
+  # SCHEMA VALIDATION of BOTH documents against the shipped schemas: every
+  # `required` key present with the declared type, and `additionalProperties:
+  # false` honoured. Field-presence spot checks were not enough (Codex round:
+  # MAJOR 4) — a document could carry an unknown field, a wrong type, or a
+  # missing required key and still pass. The schemas are the source of truth;
+  # jq walks them so no external validator is required (and a missing
+  # validator can never become a silent skip).
+  local schema_dir="${SCRIPT_DIR}/../defaults/schemas"
+  _validate_against_schema "$auth" "${schema_dir}/generation-authority.schema.json" "generation authority"
+  _validate_against_schema "$tx"   "${schema_dir}/generation-transaction.schema.json" "generation transaction"
+
+  # self_sha256 — canonical JSON (`jq -S -c`) with the hash field NULLED.
+  local recorded computed
+  recorded="$(jq -r '.self_sha256' "$auth")"
+  computed="$(jq -S -c '.self_sha256 = null' "$auth" | sha256sum | awk '{print $1}')"
+  [[ "$recorded" == "$computed" ]] \
+    || error_exit "generation authority self_sha256 mismatch: recorded ${recorded}, recomputed ${computed} — ${auth} was modified after it was sealed." 1
+
+  # plan bytes
+  local plan_now; plan_now="$(sha256sum "$plan" | awk '{print $1}')"
+  [[ "$(jq -r '.plan_sha256' "$auth")" == "$plan_now" ]] \
+    || error_exit "generation authority plan_sha256 does not match the plan on disk (sealed $(jq -r '.plan_sha256' "$auth"), current ${plan_now}) — the plan was edited after the authority was sealed. Supersede the transaction and regenerate." 1
+
+  # target head — resolved the same way aid-auto-pipeline.sh resolves it.
+  local orch tb head_now
+  orch="${SCRIPT_DIR}/../defaults/orchestration.yaml"; tb=""
+  if [[ -f "$orch" ]] && command -v yq >/dev/null 2>&1; then
+    tb="$(yq -r '.lifecycle.target_branch // ""' "$orch" 2>/dev/null || true)"
+  fi
+  [[ -z "$tb" || "$tb" == "null" ]] && tb="main"
+  # The BRANCH itself, not only the commit it points at: an authority sealed
+  # against a different integration branch that happens to share a head today
+  # would otherwise verify.
+  [[ "$(jq -r '.target_branch' "$auth")" == "$tb" ]] \
+    || error_exit "generation authority target_branch is '$(jq -r '.target_branch' "$auth")' but this workspace's configured integration branch is '${tb}' — the authority was sealed for a different branch. Supersede the transaction and regenerate." 1
+  head_now="$(git -C "$_project_root" rev-parse --verify --quiet "${tb}^{commit}" 2>/dev/null || true)"
+  [[ "$(jq -r '.target_head' "$auth")" == "$head_now" ]] \
+    || error_exit "generation authority target_head does not match ${tb} (sealed $(jq -r '.target_head' "$auth"), current ${head_now:-<unresolved>}) — the target branch moved after the authority was sealed. Supersede the transaction and regenerate." 1
+
+  # phase range + derivation version
+  local sealed_total sealed_pdv
+  sealed_total="$(jq -r '.total_phases' "$auth")"
+  sealed_pdv="$(jq -r '.phase_derivation_version' "$auth")"
+  [[ "$sealed_total" == "$total" ]] \
+    || error_exit "generation authority total_phases (${sealed_total}) does not match this invocation's --total (${total})." 1
+  [[ "$phase" -ge 1 && "$phase" -le "$sealed_total" ]] \
+    || error_exit "phase ${phase} is outside the authorized range 1..${sealed_total}." 1
+  [[ "$sealed_pdv" == "$AID_GEN_PHASE_DERIVATION_VERSION" ]] \
+    || error_exit "generation authority was sealed under phase_derivation_version ${sealed_pdv} but this script derives phases at version ${AID_GEN_PHASE_DERIVATION_VERSION} — plugin upgraded mid-transaction; supersede and regenerate." 1
+
+  # transaction linkage — a leaked authority is useless outside its own
+  # transaction, and a foreign transaction cannot adopt it.
+  [[ "$(jq -r '.authority_sha256 // ""' "$tx")" == "$recorded" ]] \
+    || error_exit "transaction ${tx} is not bound to this authority (transaction.authority_sha256 $(jq -r '.authority_sha256 // "<null>"' "$tx"), authority.self_sha256 ${recorded}) — a replayed or foreign receipt." 1
+  [[ "$(jq -r '.plan_id' "$tx")" == "$(jq -r '.plan_id' "$auth")" ]] \
+    || error_exit "transaction plan_id $(jq -r '.plan_id' "$tx") does not match authority plan_id $(jq -r '.plan_id' "$auth")." 1
+
+  # THE FULL IDENTITY TUPLE, both documents. The linkage hash alone only proves
+  # the transaction NAMES this authority; a transaction whose own recorded
+  # identity has drifted (a hand-edited or stale manifest) would still pass
+  # (Codex round: MAJOR 4). Identity is (plan_sha256, target_head,
+  # phase_derivation_version, total_phases) — the exact tuple the authority
+  # seals — so the two can never disagree about what is being generated.
+  local a_id t_id
+  a_id="$(jq -r '[.plan_sha256, .target_head, (.phase_derivation_version|tostring), (.total_phases|tostring)] | join("|")' "$auth")"
+  t_id="$(jq -r '[.plan_sha256, .target_head, (.phase_derivation_version|tostring), (.total_phases|tostring)] | join("|")' "$tx")"
+  [[ "$a_id" == "$t_id" ]] \
+    || error_exit "transaction identity '${t_id}' does not match authority identity '${a_id}' (plan_sha256|target_head|phase_derivation_version|total_phases) — the pair describes two different generations. Supersede the transaction and regenerate." 1
+  [[ "$t_id" == "${plan_now}|${head_now}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total}" ]] \
+    || error_exit "the sealed identity '${t_id}' does not describe this invocation ('${plan_now}|${head_now}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total}')." 1
+
+  # per-phase ids: RE-DERIVED here from plan_num+phase (the same derivation the
+  # generator itself uses below) and compared against the recorded entry, so
+  # derivation drift between plugin versions is caught at verify time rather
+  # than at queue time.
+  local d_num d_epic d_run r_epic r_run
+  d_num="$(printf '%s\n' "$plan_id" | sed 's/^P//; s/^-//')"
+  d_epic="E-${d_num}-${phase}_${total}"
+  if [[ "$d_epic" =~ ^E-([0-9]+)-([0-9]+)_([0-9]+)$ ]]; then
+    d_run="R-E${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
+  else
+    d_run="R-$(printf '%s' "$d_epic" | sed 's/[^a-zA-Z0-9]//g')-1"
+  fi
+  r_epic="$(jq -r --arg p "$phase" '.phases[$p].epic_id // ""' "$tx")"
+  r_run="$(jq -r --arg p "$phase" '.phases[$p].run_id // ""' "$tx")"
+  [[ -n "$r_epic" ]] \
+    || error_exit "transaction ${tx} has no record for phase ${phase} — the phase is not part of this transaction." 1
+  [[ "$r_epic" == "$d_epic" ]] \
+    || error_exit "phase ${phase} epic_id mismatch: transaction records ${r_epic}, this script derives ${d_epic}." 1
+  [[ "$r_run" == "$d_run" ]] \
+    || error_exit "phase ${phase} run_id mismatch: transaction records ${r_run}, this script derives ${d_run}." 1
+
+  echo "[INFO] generation_authority: verified ${auth} for phase ${phase}/${total} (plan bytes, ${tb} head, phase range, re-derived ids, transaction linkage) — the CP1 gate is not re-run for this phase." >&2
+}
+
 CP1_GATE_SCRIPT="${SCRIPT_DIR}/aid-cp1-gate.sh"
-if [[ -f "$CP1_GATE_SCRIPT" ]]; then
+if [[ -n "$generation_authority" ]]; then
+  _verify_generation_authority "$generation_authority" "$generation_transaction"
+elif [[ -f "$CP1_GATE_SCRIPT" ]]; then
   if ! bash "$CP1_GATE_SCRIPT" --plan "$plan" --project-root "$_project_root"; then
     # Gate script already emitted the human-readable error to stderr.
     exit 1
