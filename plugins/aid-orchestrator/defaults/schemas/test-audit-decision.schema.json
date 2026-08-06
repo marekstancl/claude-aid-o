@@ -244,6 +244,17 @@
               "null"
             ],
             "description": "True when this proposal_id appears in the project's declined ledger (.aid-o/config/test-audit-decisions.yaml). Kept in the artifact for honesty, hidden from the default render."
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/bounded_text"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What newly goes undetected (remove/merge) or newly becomes detected (add/strengthen). Its own field because smuggling it into impact.assumptions violated the impact contract: an unknown impact with no number carries no prose, and that rule is right \u2014 risk is not an assumption about a number, it is a consequence of the change."
           }
         }
       }

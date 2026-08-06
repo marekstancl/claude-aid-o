@@ -288,6 +288,7 @@ aid_test_audit_render_chat_summary() {
                    else "" end)
                 + (if ((.conflicts_with // []) | length) > 0 then " — CONFLICTS with " + (.conflicts_with | join(", ")) else "" end)
                 + "\n  " + (.change // .reason)
+                + (if .risk then "\n  risk: " + .risk else "" end)
             ] | join("\n") )
           + (if ($live | length) > $cap then "\n- … and " + (($live | length) - $cap | tostring) + " more in decision.json" else "" end)
           + (if ($declined | length) > 0 then "\n- (" + ($declined | length | tostring) + " previously declined — kept in decision.json, not re-proposed)" else "" end)

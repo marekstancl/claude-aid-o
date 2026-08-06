@@ -522,19 +522,26 @@ if [[ "$audit_mode" == "full" ]]; then
                           | if length == 0 then ["consolidated-findings.json"] else . end),
           effort: .proposal.effort,
           conflicts_with: (.proposal.conflicts_with // []),
-          impact: {
-            # extrapolated collapses to estimated here, and the collapse is
-            # recorded as an assumption rather than silently upgraded.
-            kind: (if .proposal.benefit.kind == "measured" then "measured"
-                   elif .proposal.benefit.kind == "unknown" then "unknown"
-                   else "estimated" end),
-            before_ms: null,
-            after_ms: (.proposal.benefit.critical_path_ms // null),
-            assumptions: ([ ((.proposal.benefit.assumptions // [])
-              + (if .proposal.benefit.kind == "extrapolated" then ["extrapolated from a sample — see the finding"] else [] end)
-              + (if .proposal.benefit.risk_note then ["risk: " + .proposal.benefit.risk_note] else [] end))[]
-              | bounded ])
-          }
+          # risk gets its OWN field. Smuggling it into impact.assumptions
+          # violated the impact contract (an unknown impact with no number
+          # carries no prose) and killed a real audit at validation.
+          risk: (if .proposal.benefit.risk_note then (.proposal.benefit.risk_note | bounded) else null end),
+          impact: (
+            # A finding-level "measured" has no before/after pair — one number
+            # is a single run, not a comparison, so it maps to `estimated`
+            # with that stated. This is the exact upgrade the adversarial wave
+            # flagged in a real consumer audit; the schema is on its side.
+            (if .proposal.benefit.kind == "unknown" then "unknown" else "estimated" end) as $k
+            | {kind: $k, before_ms: null,
+               after_ms: (if $k == "estimated" then (.proposal.benefit.critical_path_ms // null) else null end),
+               assumptions:
+                 (if $k == "unknown" then []
+                  else ([ ((.proposal.benefit.assumptions // [])
+                    + (if .proposal.benefit.kind == "measured" then ["a single measured run, not a before/after comparison — see the finding"] else [] end)
+                    + (if .proposal.benefit.kind == "extrapolated" then ["extrapolated from a sample — see the finding"] else [] end))[]
+                    | bounded ]
+                    | if length == 0 then ["estimate basis stated in the finding"] else . end)
+                  end)})
         }
       ]' <<<"$with_ids_json" 2>/dev/null)" || _finding_actions='[]'
 
@@ -894,6 +901,49 @@ if [[ "$audit_mode" == "full" ]]; then
                          runtime_before_ms:$rt_before, runtime_after_ms:$rt_after,
                          impact_kind:$impact_kind}}
       + $extra')"
+
+
+    # ─── The wall at the boundary: every bounded field, bounded ─────────────
+    # 2.72.2 normalized ONE producer (finding-derived actions) and the next
+    # real audit died on ANOTHER (assumptions fed elsewhere). Per-producer
+    # patches are whack-a-mole; this pass walks the assembled document and
+    # bounds every field the schema bounds — reason, assumptions,
+    # next_measurement, pass_criteria, evidence_refs — regardless of which
+    # producer filled it, today's or a future one. Analyst prose keeps its
+    # full form in the findings file; the decision carries the bounded form.
+    decision_json="$(jq -c '
+      def bare_ref:
+        (capture("^(?<p>[A-Za-z0-9][A-Za-z0-9._/-]*)").p // empty) as $p
+        | (if $p == null or $p == "" then (gsub("[^A-Za-z0-9._/-]"; "-") | sub("^[.-]+"; "")) else $p end)
+        | .[0:300];
+      def bounded:
+        gsub(" /(?=[A-Za-z0-9._-])"; " ")
+        | if length > 500 then .[0:497] + "..." else . end;
+      def bound_refs: [ .[] | bare_ref | select(length > 0) ]
+        | if length == 0 then ["consolidated-findings.json"] else . end;
+      .actions |= map(
+        (.reason // "") as $r | .reason = ($r | bounded)
+        | .evidence_refs |= bound_refs
+        | (if .risk != null then .risk |= bounded else . end)
+        | .impact.assumptions |= map(bounded)
+        # The impact contract, enforced for every producer at once:
+        # unknown with no number carries no prose; estimated states at least
+        # one assumption; measured needs BOTH endpoints or it was never a
+        # comparison and is honestly an estimate.
+        | (if .impact.kind == "unknown" and .impact.before_ms == null
+           then .impact.assumptions = []
+           elif .impact.kind == "estimated" and (.impact.assumptions | length) == 0
+           then .impact.assumptions = ["estimate basis stated in the finding"]
+           elif .impact.kind == "measured" and ((.impact.before_ms == null) or (.impact.after_ms == null))
+           then (.impact.kind = "estimated"
+                 | .impact.assumptions = ((.impact.assumptions + ["a single measured run, not a before/after comparison"]) | map(bounded)))
+           else . end))
+      | .unresolved |= map(if .next_measurement then .next_measurement |= bounded else . end)
+      | .parallelization.lanes |= map(.evidence_refs |= bound_refs)
+      | (if .parallelization.smallest_safe_pilot != null
+         then .parallelization.smallest_safe_pilot.pass_criteria |= map(bounded)
+         else . end)
+    ' <<<"$decision_json")"
 
     aid_test_audit_decision_write "$decision_json" "${output_dir%/}/decision.json" \
       || _die 1 "internal error: the generated decision artifact failed its own schema"

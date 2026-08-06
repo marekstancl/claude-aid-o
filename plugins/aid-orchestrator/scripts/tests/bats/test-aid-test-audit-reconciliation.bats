@@ -1160,3 +1160,43 @@ _finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
   [ "$(jq -r '.reason | length' <<<"$act")" -le 500 ]
   [[ "$(jq -r '.reason' <<<"$act")" == *"..."* ]]
 }
+
+@test "a long risk sentence in assumptions is bounded at assembly — every producer, one wall" {
+  # 2.72.2 normalized one producer (finding-derived actions) and the very next
+  # real audit died on another: adversarial-review agents wrote full-sentence
+  # "risk:" notes and impact.assumptions has a hard 500-char bound. The fix is
+  # a single pass over the assembled document before validation, so it holds
+  # for producers that do not exist yet.
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local long_risk
+  long_risk="$(printf 'if this test is deleted the only coverage of the transition table goes with it and a silent reorder ships %.0s' {1..8})"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" --arg lr "$long_risk" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"parallel_safety", severity:"high",
+                evidence_refs:["resource-maps/x.json"],
+                recommendation:"fix", confidence:"high", falsification_check:"n/a",
+                proposal:{change:"a.bats:359 fixed path -> temp dir",
+                          effort:{bucket:"S"},
+                          benefit:{kind:"unknown", critical_path_ms:null,
+                                   risk_note:$lr,
+                                   assumptions:[$lr, $lr]},
+                          conflicts_with:[]}}],
+     produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/decision.json" ]
+  local act; act="$(jq -c '[.actions[] | select(.change != null)] | .[0]' "$OUT/decision.json")"
+  # The impact contract holds: an unknown benefit with no number carries no
+  # prose — the risk lives in its OWN field, bounded, not smuggled into
+  # assumptions where it killed a real audit at validation.
+  [ "$(jq -r '.impact.kind' <<<"$act")" = "unknown" ]
+  [ "$(jq -r '.impact.assumptions | length' <<<"$act")" = "0" ]
+  [ "$(jq -r '.risk | length' <<<"$act")" -le 500 ]
+  [ "$(jq -r '.risk | length' <<<"$act")" -ge 100 ]
+  # And nothing anywhere in the document exceeds the bound.
+  [ "$(jq -r '[.actions[].impact.assumptions[]? | select(length > 500)] | length' "$OUT/decision.json")" = "0" ]
+}

@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.72.3] — 2026-08-06
+
+> Two consumer audits independently hit — and one independently diagnosed, down
+> to the schema rule — the next boundary: the consolidator smuggled analysts'
+> risk notes into `impact.assumptions`, and the impact contract rightly forbids
+> prose on an unknown impact with no number. 25 of 26 real actions failed on
+> exactly that pattern.
+
+### Fixed
+- **Risk gets its own field instead of violating the impact contract** — a proposal's `risk_note` now lands in `action.risk` (bounded, rendered under the proposal), because it is a consequence of the change, not an assumption about a number. `unknown` impacts carry empty assumptions, as the schema always demanded.
+- **A finding-level "measured" honestly maps to "estimated"** — a single number is a single run, not a before/after comparison; the mapping now states that instead of claiming a measurement. This is the same upgrade an adversarial wave demanded of a fabricating analyst in a real consumer audit — the schema was on its side all along.
+- **The final bounding pass enforces the whole impact contract for every producer** — unknown-with-no-number drops its prose, an estimate with no stated assumptions gains its basis note, a "measured" with a missing endpoint is downgraded to an estimate with that stated. Producers that do not exist yet are covered by the same wall.
+
 ## [2.72.2] — 2026-08-06
 
 > A consumer project (WAN) ran a full audit to the end — three agent waves,
