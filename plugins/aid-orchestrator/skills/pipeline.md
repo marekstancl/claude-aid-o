@@ -213,7 +213,32 @@ HEAD states are handled:
 | Worktree mode (git_dir under `.git/worktrees/`) | skip enforcement (caller controls branch) | — |
 
 The uncommitted-changes guard runs in all modes — dirty workdir is rejected with
-`git status` / `git stash` suggestion before init proceeds.
+`git status` / `git stash` suggestion before init proceeds. (`init`'s own guard is
+deliberately kept: done-advance must attribute a clean diff to the EPIC's work.)
+
+### Which tree must be clean, per command
+
+Clean-tree preflights are scoped to the tree the operation actually mutates —
+never a blanket "the repo must be clean". Commands that only create refs or
+commit objects require NO clean tree at all:
+
+| Command | Tree that must be clean | Why |
+|---------|------------------------|-----|
+| `plan-start` | only its own lifecycle paths (`.aid-lifecycle/manifests/<plan>.yaml`, `.aid-lifecycle/repo-identity.yaml`) | branch creation is ref-only, but the mode write does touch those two tracked files — a targeted, non-forceable preflight asserts them clean before anything is created. Everything else may be dirty. The detached-HEAD refusal stays. |
+| `epic-start` | none | it creates the task branch as a ref only (`git branch`) — no checkout, no tracked writes; an unrelated dirty tracked edit cannot be harmed. The detached-HEAD refusal stays. |
+| `plan-merge-to-main` | none | plumbing-only publish: `merge-tree`/`commit-tree` plus a compare-and-swap `update-ref` against the PM-approved head — no worktree is ever touched, so no worktree content can leak into the merge. |
+| `epic-merge-to-plan` | the tree it checks out and merges in (the resolved project root; the plan worktree once P074 EPIC 2 lands) | the merge really is performed in that tree — a dirty file there could be swept into or collide with the merge. |
+| `plan-finalize` `--stage sync\|freeze\|gates\|inputs` | the tree it merges in, freezes from and derives inputs in (same resolution as above) | a half-applied `prepare-plan` must never be frozen into a candidate, and the C4 inputs must be derived from a clean candidate tree. |
+| `plan-finalize` `--stage review\|c4\|summary\|accept-ancillary` | exempt by design | inside the review boundary a tracked write is a SIGNAL (candidate changed → invalidation), not an operator mistake to stash away. |
+| `aid-fsm.sh init` | the tree init runs in | done-advance needs a clean diff to attribute (after P074 EPIC 2 this is the plan worktree, clean by construction). |
+
+The refusal messages of the plan-FSM checks — `epic-merge-to-plan`,
+`plan-finalize`'s non-exempt stages, and plan-start's targeted lifecycle
+preflight — name the tree they evaluated (`tree evaluated: <path>`), so a
+refusal in a multi-worktree layout is attributable to the right checkout.
+`aid-fsm.sh init`'s dirty guard predates that convention and keeps its
+established message verbatim (`Uncommitted changes present. Commit or stash
+before init:`); it evaluates the tree init runs in.
 
 `fsm-state.yaml.created_at` is stamped at init time (ISO 8601 UTC) and consumed by
 `fsm_check_grandfather()` for the EXECUTE→GATES precondition (§5). Threshold:
@@ -2657,7 +2682,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-06
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

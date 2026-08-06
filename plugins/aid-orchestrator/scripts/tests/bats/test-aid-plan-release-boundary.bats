@@ -2216,15 +2216,23 @@ _pfsm_bootstrap_plan() {
   [[ "$output" == *"CLOSED"* ]]
 }
 
-@test "Error Handling: a dirty worktree at epic-start exits 1 before creating anything" {
+@test "Error Handling (P074 Step 5): a dirty worktree no longer blocks epic-start — the ref is created and the edit survives untouched" {
+  # Until P074 this asserted a refusal. epic-start creates refs only (no
+  # checkout, no tracked writes), so the repo-wide clean-worktree preflight
+  # was removed for it — the same dirty tree now proves the loosening is safe:
+  # the task branch is created and the unrelated edit is neither consumed,
+  # stashed nor reverted.
   _pfsm_bootstrap_plan "P064"
   echo dirty >> "$TEST_PROJECT_ROOT/.gitkeep"
 
   run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"uncommitted changes present"* ]]
   local branch_sha
   branch_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/task/E-064-1_1/main 2>/dev/null || true)"
-  [ -z "$branch_sha" ]
+  [ -n "$branch_sha" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' status --porcelain --untracked-files=no"
+  [[ "$output" == *".gitkeep"* ]]
 }
 
 @test "Error Handling: a detached HEAD at plan-start exits 1 and prints the resolved SHA" {

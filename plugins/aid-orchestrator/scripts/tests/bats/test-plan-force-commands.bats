@@ -54,9 +54,34 @@ _pf() { ( cd "$ROOT" && bash "$PFSM" "$@" ); }
 # exists (or none, when nothing was bypassed). The end-to-end forced-close
 # story belongs to Step 19's integration fixture.
 
-# _dirty — make the worktree dirty in a way the clean-worktree preflight sees
+# _dirty — make the worktree dirty in a way the clean-worktree check sees
 # (a tracked file, since the check runs with --untracked-files=no).
+# P074 Step 5 NOTE: plan-start/epic-start no longer run that check at all —
+# where a test below needs a REFUSING forceable precondition on plan-start it
+# uses the KEPT committed_source_plan preflight (_uncommitted_plan) instead,
+# preserving what each test verifies (refusal, receipt shape, audit records).
 _dirty() { printf 'uncommitted\n' >> "$ROOT/README.md"; }
+
+# _uncommitted_plan — a TRACKED but uncommitted source plan: the kept,
+# forceable committed_source_plan preflight refuses it (P073 Step 11), which
+# is the re-anchor for the force-path tests after P074 Step 5 removed the
+# plan-start/epic-start clean-worktree preflight.
+_uncommitted_plan() {
+  mkdir -p "$ROOT/docs"
+  printf '# Plan\n' > "$ROOT/docs/plan.md"
+  ( cd "$ROOT" && git add docs/plan.md )
+}
+
+# _seed_lifecycle — the plan source + git-tracked lifecycle manifest
+# plan-start's own lifecycle write needs; with it seeded, plan-start and
+# epic-start complete rc=0 in this fixture (the SCOPE NOTE seam above), so
+# the P074 headline assertions can demand full success.
+_seed_lifecycle() {
+  mkdir -p "$ROOT/.aid-o/plans"
+  printf '# P900\n\n**EPIC 1: the delivered one**\n' > "$ROOT/.aid-o/plans/P900-lifecycle.md"
+  ( source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+    aid_lifecycle_ensure_manifest P900 "$ROOT" >/dev/null )
+}
 
 _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l | tr -d ' '; }
 
@@ -101,32 +126,36 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 # ─── 2. the forceable path: refuse without --force, pass with it ──────────
 
-@test "P073 Step 8: plan-start REFUSES on a dirty worktree without --force" {
+@test "P073 Step 8 / P074 Step 5: plan-start ignores a dirty worktree, but a kept forceable precondition still REFUSES without --force" {
   _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode
+  _uncommitted_plan
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"uncommitted changes present"* ]]
+  # The refusal is the KEPT committed-source preflight, never the removed
+  # dirty-tree one.
+  [[ "$output" != *"uncommitted changes present"* ]]
+  [[ "$output" == *"source plan is not committed"* ]]
   [ "$(_receipts)" = "0" ]
 }
 
-@test "P073 Step 8: plan-start PASSES the dirty worktree under --force and mints exactly one receipt" {
-  _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode --force --force-reason "$REASON"
+@test "P073 Step 8 / P074 Step 5: plan-start PASSES the kept committed-source refusal under --force and mints exactly one receipt" {
+  _uncommitted_plan
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
   # The check still printed its own recovery first — the normal path is never
   # hidden behind the force.
-  [[ "$output" == *"uncommitted changes present"* ]]
-  [[ "$output" == *"FORCE: bypassing precondition 'clean_worktree_or_detached_head'"* ]]
+  [[ "$output" == *"source plan is not committed"* ]]
+  [[ "$output" == *"FORCE: bypassing precondition 'committed_source_plan'"* ]]
   [[ "$output" == *"FORCE: recorded at"* ]]
   [ "$(_receipts)" = "1" ]
 }
 
-@test "P073 Step 8: the forced plan-start receipt names the command and the bypass" {
-  _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode --force --force-reason "$REASON"
+@test "P073 Step 8 / P074 Step 5: the forced plan-start receipt names the command and the bypass" {
+  _uncommitted_plan
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
   local w; w="$(find "$ROOT/.aid-o" -name 'waiver-plan-plan-start-*.json' | head -1)"
   [ -n "$w" ]
   [ "$(jq -r '.forced_override' "$w")" = "true" ]
-  [ "$(jq -r '.bypassed_preconditions | join(",")' "$w")" = "clean_worktree_or_detached_head" ]
+  [ "$(jq -r '.bypassed_preconditions | join(",")' "$w")" = "committed_source_plan" ]
   [ "$(jq -r '.waiver.waived_check' "$w")" = "plan-fsm:plan-start" ]
   [ "$(jq -r '.waiver.reason' "$w")" = "$REASON" ]
 }
@@ -157,33 +186,42 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
   [ "$(_receipts)" = "0" ]
 }
 
-@test "P073 Step 8: a forced run mints exactly ONE receipt even though the handler is called after each precondition group" {
+@test "P073 Step 8 / P074 Step 5: a forced run mints exactly ONE receipt even though the handler is called after each precondition group" {
+  # BOTH seams at once: the committed-source group is bypassed (one receipt),
+  # and the dirty tree — a non-event since P074 — must not add a second one.
+  _uncommitted_plan
   _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode --force --force-reason "$REASON"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
   [ "$(_receipts)" = "1" ]
 }
 
 # ─── epic-start ───────────────────────────────────────────────────────────
 
-@test "P073 Step 8: epic-start refuses on a dirty worktree, and passes it under --force" {
+@test "P074 Step 5: epic-start SUCCEEDS on a dirty worktree without --force, and a --force there bypasses nothing" {
+  _seed_lifecycle
   run _pf plan-start P900 --mode legacy_epic_release_mode
+  [ "$status" -eq 0 ]
   _dirty
 
+  # The P074 headline behavior: the removed preflight no longer refuses, and
+  # nothing else in epic-start minds the unrelated tracked edit.
   run _pf epic-start P900 E-900-1_1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"uncommitted changes present"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"uncommitted changes present"* ]]
   [ "$(_receipts)" = "0" ]
 
-  run _pf epic-start P900 E-900-1_1 --force --force-reason "$REASON"
-  [[ "$output" == *"FORCE: bypassing precondition"* ]]
-  [ "$(_receipts)" -ge 1 ]
+  # With nothing left to bypass, a forced epic-start says so and mints
+  # NO receipt — the no-op-flag contract, same as plan-start's.
+  run _pf epic-start P900 E-900-2_1 --force --force-reason "$REASON"
+  [[ "$output" == *"bypassed nothing"* ]]
+  [ "$(_receipts)" = "0" ]
 }
 
 # ─── the audit trail is complete for every forced run ─────────────────────
 
-@test "P073 Step 8: every forced run appends to the cross-plan audit log" {
-  _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode --force --force-reason "$REASON"
+@test "P073 Step 8 / P074 Step 5: every forced run appends to the cross-plan audit log" {
+  _uncommitted_plan
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
   [ -s "$ROOT/.aid-o/work/audit-log.jsonl" ]
   run grep -c 'plan_force_override' "$ROOT/.aid-o/work/audit-log.jsonl"
   [ "$output" -ge 1 ]
@@ -262,9 +300,10 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 @test "P073 Step 8 (review finding 3): the receipt states it records a BYPASS, never that the command completed" {
   # A receipt minted before a later, unrouted precondition fails must not read
-  # as "this operation happened".
-  _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode --force --force-reason "$REASON"
+  # as "this operation happened". (P074 Step 5: re-anchored from the removed
+  # dirty-tree preflight to the kept committed-source one.)
+  _uncommitted_plan
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
   local w; w="$(find "$ROOT/.aid-o" -name 'waiver-plan-plan-start-*.json' | head -1)"
   [ -n "$w" ]
   [ "$(jq -r '.records' "$w")" = "precondition_bypass" ]

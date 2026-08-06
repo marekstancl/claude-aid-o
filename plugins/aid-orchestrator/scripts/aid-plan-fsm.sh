@@ -279,6 +279,12 @@ _pfsm_check_detached_head() {
 # aid-fsm.sh's own dirty-worktree guard (search that file for
 # `git status --porcelain`), same four-path exclusion list, EXTENDED with a
 # fifth: `.aid-o/work/plan-state/` (this plan's own gitignored runtime area).
+#
+# P074 Step 5: this check is SCOPED to the tree the calling command actually
+# checks out and mutates (epic-merge-to-plan; plan-finalize's non-exempt
+# stages) and the message names that tree. plan-start, epic-start and
+# plan-merge-to-main no longer call it at all — they create refs / commit
+# objects only and cannot be harmed by an unrelated dirty tree.
 # ---------------------------------------------------------------------------
 _pfsm_check_clean_worktree() {
   local root="$1"
@@ -286,7 +292,44 @@ _pfsm_check_clean_worktree() {
   dirty="$(git -C "$root" status --porcelain --untracked-files=no \
     | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   if [[ -n "$dirty" ]]; then
+    # The first line is the EXACT historical message (consumers grep the
+    # "commit or stash before" recovery wording); the P074 clarification is a
+    # SEPARATE appended clause, never a rewording of the original.
     echo "PRECONDITION FAIL: uncommitted changes present — commit or stash before plan-start/epic-start:" >&2
+    printf '%s\n' "$dirty" >&2
+    echo "(tree evaluated: ${root}. Since P074 Step 5 this refusal fires only for commands that mutate this tree — epic-merge-to-plan and plan-finalize --stage sync/freeze/gates/inputs; plan-start and epic-start no longer run it.)" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_check_lifecycle_paths_clean <project_root> <plan_id> — P074 Step 5
+# (review finding). plan-start is ref-only in the WORKTREE, but it does write
+# two TRACKED lifecycle paths via aid_lifecycle_set_plan_mode: the plan's
+# manifest, plus repo-identity.yaml on the plan's first lifecycle write — and
+# that routine fail-closes on a staged/unstaged collision (rc 4) AFTER the
+# plan branch and the operation record already exist, leaving a partial
+# mutation. This TARGETED preflight asserts exactly those paths are clean
+# BEFORE anything is created. It is scoped, not repo-wide: an unrelated dirty
+# file anywhere else does not refuse (the P074 headline loosening stands).
+# Classified `hard` at the call site: forcing it would only move the same
+# refusal after the mutation — the very failure shape this check removes.
+# ---------------------------------------------------------------------------
+_pfsm_check_lifecycle_paths_clean() {
+  local root="$1" plan_id="$2"
+  local rels=(".aid-lifecycle/manifests/${plan_id}.yaml" ".aid-lifecycle/repo-identity.yaml")
+  # `--untracked-files=all` is deliberate and differs from every other
+  # clean-tree probe here (review finding): an UNTRACKED colliding manifest is
+  # exactly what ensure_manifest refuses at lib/aid-lifecycle.sh (untracked
+  # manifest differing from canonical), and an untracked repo-identity.yaml is
+  # a file aid_repo_id would overwrite — both must refuse BEFORE any ref
+  # exists, not after. Scoped to these two exact paths, so untracked files
+  # anywhere else still cannot block plan-start.
+  local dirty
+  dirty="$(git -C "$root" status --porcelain --untracked-files=all -- "${rels[@]}" 2>/dev/null || true)"
+  if [[ -n "$dirty" ]]; then
+    echo "PRECONDITION FAIL: the lifecycle path(s) plan-start will write have uncommitted or untracked content — commit, discard or remove them first (AID manages these files; tree evaluated: ${root}):" >&2
     printf '%s\n' "$dirty" >&2
     return 1
   fi
@@ -731,12 +774,22 @@ _pfsm_check_committed_source() {
   return 0
 }
 
-# _pfsm_preflight <project_root> — the shared pair of checks both commands
-# run before creating anything.
+# _pfsm_preflight <project_root> <needs_clean_tree> — the shared preflight
+# both lifecycle-opening commands run before creating anything.
+#
+# P074 Step 5: needs_clean_tree=0|1 is set PER CALLER against what the
+# operation actually touches. plan-start and epic-start pass 0 — grounded:
+# they create refs only (`git branch`; no checkout, no tracked writes), so an
+# unrelated dirty tree cannot be harmed by them and must not block them. The
+# detached-HEAD check stays for every caller (a ref created off a detached
+# HEAD has no branch lineage to record).
 _pfsm_preflight() {
   local root="$1"
+  local needs_clean_tree="${2:-1}"
   _pfsm_check_detached_head "$root" || return 1
-  _pfsm_check_clean_worktree "$root" || return 1
+  if [[ "$needs_clean_tree" == "1" ]]; then
+    _pfsm_check_clean_worktree "$root" || return 1
+  fi
   return 0
 }
 
@@ -951,11 +1004,23 @@ cmd_plan_start() {
       _pfsm_check_committed_source "$project_root" "$plan_file_opt" || exit 1
   fi
 
-  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
-  # bookkeeping obstacle, not a physical impossibility, so an audited
-  # --force may pass it. The check still prints its own recovery first.
-  _pfsm_precondition "clean_worktree_or_detached_head" forceable _pfsm_preflight "$invoke_root" || exit 1
+  # P074 Step 5: plan-start creates refs only (`git branch` below — no
+  # checkout, no tracked writes), so the clean-worktree half of the preflight
+  # is dropped (needs_clean_tree=0): an unrelated dirty tracked edit in the
+  # primary checkout can no longer block opening a second plan. The
+  # detached-HEAD check stays, forceable as before (P073 Step 8) — the check
+  # still prints its own recovery first.
+  _pfsm_precondition "detached_head" forceable _pfsm_preflight "$invoke_root" 0 || exit 1
   _pfsm_commit_force "plan-start" "$plan_id" "$project_root" || exit 1
+
+  # P074 Step 5 (review finding): plan-start's ONE tracked write surface is
+  # the lifecycle manifest (+ repo-identity.yaml on first write) via
+  # aid_lifecycle_set_plan_mode, which fail-closes on a collision AFTER the
+  # branch and op record exist. Assert exactly those paths clean BEFORE any
+  # mutation — targeted, never repo-wide. `hard`: a force would just move the
+  # same refusal to after the partial mutation.
+  _pfsm_precondition "lifecycle_paths_clean" hard \
+    _pfsm_check_lifecycle_paths_clean "$project_root" "$plan_id" || exit 1
 
   # Edge Case: a CLOSED plan is not reopened.
   local cur_state="" src=0
@@ -1180,10 +1245,11 @@ cmd_epic_start() {
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
 
-  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
-  # bookkeeping obstacle, not a physical impossibility, so an audited
-  # --force may pass it. The check still prints its own recovery first.
-  _pfsm_precondition "clean_worktree_or_detached_head" forceable _pfsm_preflight "$invoke_root" || exit 1
+  # P074 Step 5: epic-start creates refs only (`git branch` below — no
+  # checkout, no tracked writes), so the clean-worktree half of the preflight
+  # is dropped (needs_clean_tree=0); the detached-HEAD check stays, forceable
+  # as before (P073 Step 8) — the check still prints its own recovery first.
+  _pfsm_precondition "detached_head" forceable _pfsm_preflight "$invoke_root" 0 || exit 1
   _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
@@ -2000,6 +2066,9 @@ cmd_epic_merge_to_plan() {
   # The checks are about the worktree this command actually CHECKS OUT AND
   # MERGES IN — the main worktree (project_root), not wherever the operator
   # happens to stand (a linked worktree never holds `plan/<plan_id>` here).
+  # P074 Step 5: the clean-worktree check is KEPT (this command really does
+  # check out and merge in a tree) and is evaluated via `git -C` against that
+  # tree — after EPIC 2 project_root resolution makes that the plan worktree.
   _pfsm_check_detached_head "$project_root" || exit 1
   _pfsm_check_no_merge_in_progress "$project_root" || exit 1
   # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
@@ -5463,6 +5532,9 @@ cmd_plan_finalize() {
   # A dirty tree blocks BOTH stages: a half-applied `prepare-plan` (a version
   # file written, the CHANGELOG edit failed) leaves the tree dirty, and
   # refusing here is what guarantees no candidate is frozen over it.
+  # P074 Step 5: the clean-worktree check is KEPT for the non-exempt stages
+  # and evaluated via `git -C` against that tree (project_root) — after
+  # EPIC 2 project_root resolution makes that the plan worktree.
   _pfsm_check_detached_head "$project_root" || exit 1
   _pfsm_check_no_merge_in_progress "$project_root" || exit 1
   # `--stage review` deliberately does NOT take the generic dirty-tree refusal.
@@ -5723,10 +5795,14 @@ cmd_plan_merge_to_main() {
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
 
   _pfsm_check_no_merge_in_progress "$root" || exit 1
-  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
-  # bookkeeping obstacle, not a physical impossibility, so an audited
-  # --force may pass it. The check still prints its own recovery first.
-  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$root" || exit 1
+  # P074 Step 5: the clean-worktree preflight is DROPPED here. This merge is
+  # plumbing-only — merge-tree/commit-tree and a compare-and-swap update-ref
+  # (see the CAS publish below) — it never checks out or writes a worktree, so
+  # a dirty tree cannot leak into the published merge commit; the CAS against
+  # the PM-approved head is the guard that actually protects the target.
+  # PM-confirmed loosening (P074 decision 2), including the merge-with-dirty-
+  # tree product tradeoff. _pfsm_commit_force stays: --force still requires a
+  # recorded reason and mints receipts for any OTHER bypassed precondition.
   _pfsm_commit_force "plan-merge-to-main" "$plan_id" "$root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
