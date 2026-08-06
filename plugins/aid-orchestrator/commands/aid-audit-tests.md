@@ -46,6 +46,17 @@ pre-filled so a bare "ano" is enough:
 > - **měřený** — změří časy, paralelismus neřeší (desítky minut)
 > - **rychlý** — jen soupis testů, nic nespouští (minuty)
 
+**Present the verdict in the user's own language, and never softer than the
+evidence.** The six-part block below stays verbatim (it is the durable record,
+in English), but the controller MUST precede it with a 3–5 sentence summary in
+the language the user has been speaking, and that summary leads with what is
+WRONG: the finding counts by severity, the fixable-blocker count, the gates
+that never complete. A Czech user who reads "Keep as-is (162), Remove: none,
+nothing parallel" above an English appendix listing five high findings has been
+told, in effect, that everything is fine — a real run did exactly this and the
+owner rightly called it worthless. The lead summary may never claim less work
+than the findings imply.
+
 Then run what they confirm. `full` + 180 minutes is the recommended default
 because it is the only mode that fills in the catalog's parallel column, which
 is what makes the test suite fast afterwards.

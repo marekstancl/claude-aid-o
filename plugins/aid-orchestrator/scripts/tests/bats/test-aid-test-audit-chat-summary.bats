@@ -321,3 +321,63 @@ _pc() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"did not complete cleanly"* ]]
 }
+
+# _valid_decision_base [jq-mutation] — a schema-valid decision document,
+# optionally mutated. Hand-rolled partial fixtures fail the validator and turn
+# every assertion below them vacuous.
+_valid_decision_base() {
+  jq -c "${1:-.}" <<'JSON'
+{
+  "schema_version": "aid-test-audit-decision-v1",
+  "audit_id": "audit-20260805-000000",
+  "audit_status": "complete",
+  "current_runtime": {"kind": "unknown", "duration_ms": null, "scope": ["bats:x"]},
+  "actions": [],
+  "parallelization": {"lanes": [], "smallest_safe_pilot": null},
+  "unresolved": [],
+  "portfolio_coverage": {"inventory_count": 1, "assigned_count": 1, "disposition_count": 1,
+                         "missing_run_unit_ids": [], "duplicate_run_unit_ids": []},
+  "portfolio_change": {"current_run_units": 1, "proposed_run_units": 1,
+                       "keep": ["bats:x"], "rewrite_unit": [], "merge_groups": [], "remove": [],
+                       "runtime_before_ms": null, "runtime_after_ms": null, "impact_kind": "unknown"}
+}
+JSON
+}
+
+# ─── The summary must never contradict its own evidence ─────────────────────
+
+@test "non-keep findings WITHOUT proposals surface in section 2, not only in the appendix" {
+  # A real run rendered "Keep as-is (162), Remove: none, nothing parallel"
+  # while its own Technical evidence listed five high findings — the summary
+  # told the owner everything was fine, in layout if not in words. Section 2
+  # must carry the work the findings imply even when no finding brought a
+  # ready-made proposal.
+  local f="$TEST_TMPDIR/findings.json"
+  local d="$TEST_TMPDIR/decision.json"
+  _write_findings "$f" '[
+    {"finding_id":"f1","run_unit_id":"gate:bats_all","category":"catalog_reconciliation_bug","severity":"high","evidence_refs":["r1"],"recommendation":"fix","confidence":"high","falsification_check":"n/a"},
+    {"finding_id":"f2","run_unit_id":"gate:shell_pipeline_smoke","category":"redundant_coverage","severity":"high","evidence_refs":["r2"],"recommendation":"split","confidence":"medium","falsification_check":"n/a"}]'
+  _valid_decision_base > "$d"
+
+  run aid_test_audit_render_chat_summary "$f" "" "full" "$d"
+  [ "$status" -eq 0 ]
+  # Section 2 names the work, before the appendix.
+  [[ "$output" == *"Needs work, no ready-made proposal yet (2"* ]]
+  [[ "$output" == *"fix gate:bats_all"* ]]
+  [[ "$output" == *"split gate:shell_pipeline_smoke"* ]]
+}
+
+@test "'nothing parallel' names the fixable-blocker count instead of implying impossibility" {
+  local f="$TEST_TMPDIR/findings.json"
+  local d="$TEST_TMPDIR/decision.json"
+  _write_findings "$f" '[]'
+  _valid_decision_base '.parallelization.lanes = [
+    {lane_id:"serial-1", disposition:"blocked_pending_fix",
+     run_unit_ids:["bats:a","bats:b","bats:c"],
+     resource_basis:["fixed_path/shared"], evidence_refs:["m1"]}]' > "$d"
+
+  run aid_test_audit_render_chat_summary "$f" "" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"3 unit(s) are blocked by a FIXABLE resource"* ]]
+  [[ "$output" != *"Nothing is proposed to run in parallel on current evidence."* ]]
+}

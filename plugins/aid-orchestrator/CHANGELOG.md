@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.71.1] — 2026-08-05
+
+> A real full audit rendered "Keep as-is (162), Remove: none, nothing parallel"
+> while its own Technical evidence listed five high findings — the summary told
+> the owner everything was fine, in layout if not in words, and he rightly
+> called it worthless. The looks-clean-over-problems defect this renderer
+> exists to prevent, committed by the renderer itself.
+
+### Fixed
+- **Section 2 can no longer stay silent over its own evidence** — findings that recommend a change but carry no ready-made proposal now render in the decision section as a ranked "Needs work" list with severity and unit, instead of appearing only in the technical appendix below the fold.
+- **"Nothing runs in parallel" now says how much is unlockable** — when the same artifact lists units blocked by a FIXABLE resource, the count and the pointer render in the same breath; bare "nothing" read as "parallelism is impossible here" over seventy fixable units.
+- **The verdict must be presented in the user's own language, never softer than the evidence** — the six-part block stays verbatim as the durable record, but the controller now must precede it with a short summary in the language the user speaks, leading with what is wrong: finding counts by severity, fixable-blocker count, gates that never complete. The lead may never claim less work than the findings imply.
+
 ## [2.71.0] — 2026-08-05
 
 > Until now the audit classified, measured and proved — and then told the owner
