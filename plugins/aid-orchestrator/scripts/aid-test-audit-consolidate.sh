@@ -488,7 +488,23 @@ if [[ "$audit_mode" == "full" ]]; then
     # proposal_id so the next audit does not re-propose what was already
     # declined, and with its conflicts carried rather than flattened.
     _finding_actions='[]'
-    _finding_actions="$(jq -c '[ .[]
+    # Analysts write PROSE — annotated citations, quotes, file:line — and the
+    # decision schema's fields are deliberately stricter: evidence_refs is a
+    # bare artifact path, reason is bounded text with a length cap and a ban on
+    # absolute path runs. A real consumer audit (WAN) completed all three agent
+    # waves and its measurements, then died HERE, because this block copied the
+    # analysts' rich text verbatim into the strict fields. Normalizing at the
+    # producer/consumer boundary is the contract fix; the prompts now also stop
+    # inviting annotated refs, but a prompt is advice and this is the wall.
+    _finding_actions="$(jq -c '
+      def bare_ref:
+        (capture("^(?<p>[A-Za-z0-9][A-Za-z0-9._/-]*)").p // empty) as $p
+        | (if $p == null or $p == "" then (gsub("[^A-Za-z0-9._/-]"; "-") | sub("^[.-]+"; "")) else $p end)
+        | .[0:300];
+      def bounded:
+        gsub(" /(?=[A-Za-z0-9._-])"; " ")   # an absolute path run becomes relative — content kept, ban satisfied
+        | if length > 500 then .[0:497] + "..." else . end;
+      [ .[]
       | select((.recommendation // "keep") != "keep")
       | select(.proposal != null)
       | {
@@ -498,9 +514,12 @@ if [[ "$audit_mode" == "full" ]]; then
                      elif .severity == "high" then "high"
                      elif .severity == "medium" then "medium"
                      else "low" end),
-          reason: (.finding + " — " + .proposal.change),
+          reason: ((.finding + " — " + .proposal.change) | bounded),
           change: .proposal.change,
-          evidence_refs: .evidence_refs,
+          evidence_refs: (([.evidence_refs[] | bare_ref | select(length > 0)]
+                           | unique)
+                          # never empty: the findings file itself is a true ref
+                          | if length == 0 then ["consolidated-findings.json"] else . end),
           effort: .proposal.effort,
           conflicts_with: (.proposal.conflicts_with // []),
           impact: {
@@ -511,9 +530,10 @@ if [[ "$audit_mode" == "full" ]]; then
                    else "estimated" end),
             before_ms: null,
             after_ms: (.proposal.benefit.critical_path_ms // null),
-            assumptions: ((.proposal.benefit.assumptions // [])
+            assumptions: ([ ((.proposal.benefit.assumptions // [])
               + (if .proposal.benefit.kind == "extrapolated" then ["extrapolated from a sample — see the finding"] else [] end)
-              + (if .proposal.benefit.risk_note then ["risk: " + .proposal.benefit.risk_note] else [] end))
+              + (if .proposal.benefit.risk_note then ["risk: " + .proposal.benefit.risk_note] else [] end))[]
+              | bounded ])
           }
         }
       ]' <<<"$with_ids_json" 2>/dev/null)" || _finding_actions='[]'

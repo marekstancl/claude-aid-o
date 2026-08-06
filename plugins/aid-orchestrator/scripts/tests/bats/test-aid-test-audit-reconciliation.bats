@@ -1120,3 +1120,43 @@ _finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
   [ "$status" -eq 0 ]
   [ "$(jq -r '[.actions[] | select(.change != null)] | length' "$OUT/decision.json")" = "0" ]
 }
+
+# ─── Analyst prose must survive the strict decision schema ──────────────────
+
+@test "annotated evidence_refs and a long finding text do not kill finalization" {
+  # A real consumer audit (WAN) completed all three agent waves and its
+  # measurements, then died at consolidation: the wave-3 prompts invited
+  # "quote the claim", the analysts wrote annotated citations, and this script
+  # copied them verbatim into decision fields whose schema demands bare paths
+  # and bounded prose. The audit's own content was complete and valuable; the
+  # format killed it three steps after anyone could have named the field.
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local long_text
+  long_text="$(printf 'the gate compares only failure counts so a regression can hide behind an unrelated fix %.0s' {1..12})"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" --arg lt "$long_text" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"weak_oracle", severity:"high",
+                evidence_refs:["agents/1-shard_portfolio-shard-0.json (dispositions 3-7 claim measured but produced_at predates the measurements)",
+                               "measurements.jsonl (rows 4 and 9)"],
+                recommendation:"strengthen", confidence:"high",
+                falsification_check:"n/a",
+                proposal:{change:("a.bats:12 asserts only the exit code; " + $lt),
+                          effort:{bucket:"S"},
+                          benefit:{kind:"unknown", critical_path_ms:null, risk_note:null, assumptions:[]},
+                          conflicts_with:[]}}],
+     produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/decision.json" ]
+  local act; act="$(jq -c '[.actions[] | select(.change != null)] | .[0]' "$OUT/decision.json")"
+  # The refs survived as bare paths — the annotation is gone, the path is not.
+  [ "$(jq -r '.evidence_refs[0]' <<<"$act")" = "agents/1-shard_portfolio-shard-0.json" ]
+  [ "$(jq -r '.evidence_refs[1]' <<<"$act")" = "measurements.jsonl" ]
+  # The long reason was truncated to the schema's bound, not dropped.
+  [ "$(jq -r '.reason | length' <<<"$act")" -le 500 ]
+  [[ "$(jq -r '.reason' <<<"$act")" == *"..."* ]]
+}

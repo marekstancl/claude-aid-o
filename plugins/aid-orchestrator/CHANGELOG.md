@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.72.2] — 2026-08-06
+
+> A consumer project (WAN) ran a full audit to the end — three agent waves,
+> real measurements — and finalization died on format: the wave prompts said
+> "quote the claim", the analysts wrote annotated citations, and the
+> findings-to-actions wiring added in 2.71.0 copied that prose verbatim into
+> decision fields whose schema demands bare paths and bounded text. Complete,
+> valuable content; zero decision artifact.
+
+### Fixed
+- **Analyst prose is normalized at the schema boundary instead of killing the audit** — the schema stays strict on purpose (no secrets in prose, no unbounded text, evidence as bare artifact paths); the consolidator now extracts the bare path from an annotated citation (the annotation lives on in the finding text, where it belongs), truncates over-long reasons honestly, and rewrites an absolute path run in prose as relative. The refs survive; the run survives; nothing is silently dropped.
+- **The prompts stop inviting the collision** — all six analyst prompts now state that `evidence_refs` are bare paths and that quotes belong in the claim text, naming the real consumer failure so the instruction carries its reason.
+
 ## [2.72.1] — 2026-08-05
 
 ### Fixed
