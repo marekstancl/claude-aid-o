@@ -57,6 +57,14 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-plan-manifest.sh" ]]; then
   # shellcheck disable=SC1091
   source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh" || true
 fi
+# P074 Step 6 — generated active.md index + the shared post-boundary sync
+# (aid_active_boundary_sync). Guarded source, same rationale as the manifest
+# lib above: index bookkeeping is best-effort and must never abort the CLI;
+# call sites fall back to the bare Step 4 functions when this lib is absent.
+if [[ -f "${SCRIPT_DIR}/lib/aid-active-index.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-active-index.sh" || true
+fi
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -3336,7 +3344,14 @@ except: pass
   # main-fallback governance (the old single slot let a second init hide this
   # run). Best-effort: never fails init — a crash/failure before the upsert
   # leaves no entry, identical exposure to the old crash-before-pointer-write.
-  upsert_active_run "$state_file" || true
+  # P074 Step 6: init is WRITER 1 of the generated active.md index — the
+  # shared post-boundary helper performs the upsert, the stale-entry sweep,
+  # and the index refresh in one place; a render failure warns, never blocks.
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "$epic_id" init "$state_file" || true
+  else
+    upsert_active_run "$state_file" || true
+  fi
 
   echo "Initialized state: READY" >&2
 }
@@ -5787,9 +5802,15 @@ EOF
   # P074 Step 4: the run's main-fallback governance ends at the release edge —
   # remove ITS OWN active-runs entry (and only its own; concurrent runs keep
   # theirs). Best-effort: bookkeeping must never fail a performed transition.
+  # P074 Step 6: done-advance is WRITER 2 of the generated active.md index —
+  # removal + stale-entry sweep + refresh via the shared boundary helper.
   local _ar_epic_id
   _ar_epic_id=$(yaml_field "$state_file" epic_id)
-  [[ -n "$_ar_epic_id" ]] && { remove_active_run "$_ar_epic_id" "done-advance ${from_phase}->${to_phase}" || true; }
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "${_ar_epic_id:--}" done-advance || true
+  else
+    [[ -n "$_ar_epic_id" ]] && { remove_active_run "$_ar_epic_id" "done-advance ${from_phase}->${to_phase}" || true; }
+  fi
 
   echo "Done phase: $from_phase → $to_phase" >&2
 }
@@ -6170,7 +6191,13 @@ cmd_plan_close() {
   # P074 Step 4: plan-close is a terminal bookkeeping point for this EPIC —
   # drop its active-runs entry (its own only). Best-effort: the marker above
   # is already written; map cleanup must never turn the close into a failure.
-  remove_active_run "$epic_id" "plan-close" || true
+  # P074 Step 6: plan-close is WRITER 3 of the generated active.md index —
+  # removal + stale-entry sweep + refresh via the shared boundary helper.
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$project_root" "$epic_id" plan-close || true
+  else
+    remove_active_run "$epic_id" "plan-close" || true
+  fi
 }
 
 # ─── Queue Dependency Revalidation (P060 Step 7) ─────────────────────────

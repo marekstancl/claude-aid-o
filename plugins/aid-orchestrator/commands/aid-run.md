@@ -326,7 +326,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 
 1. Update `fsm-state.yaml`: `state: DONE`, `done_phase: review` (automatic)
 2. Archive run file → `runs/archive/`
-3. Update `work/active.md`
+3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
 5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
 6. Wait for both to complete → evidence saved to `evidence/{epic_id}/{run_id}/`
@@ -495,4 +495,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-06

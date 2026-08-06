@@ -55,7 +55,7 @@ What would you like to do?
 Interactive 9-step brainstorming flow — collaborate with PM to explore an idea.
 
 ### Step 1: Context
-1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md`, scan `plans/`
+1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md` (generated index of active streams — read-only, never hand-write it), scan `plans/`
 2. If topic provided: use as brainstorming seed; if empty: ask PM
 3. Read `skills/brainstorming.md` for process rules
 4. Detect PM's language → conversation follows PM's language
@@ -294,7 +294,7 @@ Options:
 Write an exhaustive implementation plan from specification or topic.
 
 1. **Input resolution** — read spec file, detect format (EPIC/plan/free-form)
-2. **Context** — read `config/project.yaml`, `work/active.md`, scan related plans
+2. **Context** — read `config/project.yaml`, `work/active.md` (generated index — read-only), scan related plans
 3. **Interim document** — allocate plan ID and create `.aid-o/work/interim-P{NNN}.md`
    with input, context, and analysis notes (same as brainstorm mode)
 4. **Codebase analysis** — identify affected areas, read key files, note patterns

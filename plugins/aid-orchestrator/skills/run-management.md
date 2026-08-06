@@ -13,12 +13,12 @@ user_invocable: false
 
 ## TL;DR - MUST Rules
 
-1. **READ active.md** at EVERY run start (authoritative over platform memory)
+1. **READ active.md** at EVERY run start — a GENERATED index of active streams (auto-refreshed at lifecycle boundaries; never hand-write it)
 2. **READ command-history.md + lessons-learned.md** at EVERY run start
 3. **CREATE run file** for non-trivial work (multi-change, multi-file) — use templates, not invented structure
 4. **RUN = DETAILED WORK PLAN** — evolves with the code, captures what actually happened
 5. **UPDATE run file** after EVERY commit
-6. **UPDATE active.md** at run end (current focus, recent work, next steps)
+6. **NEVER hand-write active.md** — it is regenerated automatically at the four lifecycle boundaries (init, done-advance, plan-close, plan-rollback); current focus / next steps belong in the run file and plan-state
 7. **ARCHIVE completed runs** to `.aid-o/work/tasks/archive/`
 8. **FOLLOW lifecycle protocols** at each transition (brainstorming-end, run-start, phase-end, run-end)
 9. **PHASE-END = HARD STOP** — stop, summarize what was done, wait for PM GO
@@ -95,7 +95,7 @@ between concurrent sessions.
 
 | Type | When | Run File? | Action |
 |------|------|:---------:|--------|
-| Simple Task | < 3 changes, single file | No | TodoList + active.md |
+| Simple Task | < 3 changes, single file | No | TodoList |
 | Standard Run | Multiple changes, clear scope | Yes | Copy template, track progress |
 | Epic Run | 3+ conversations | Yes + Task file | Task breakdown + sub-runs |
 | Verification | E2E testing / QA | Yes | Test scenarios + results |
@@ -107,7 +107,7 @@ between concurrent sessions.
 
 ### Phase 1: Initialization
 
-1. Read `.aid-o/work/active.md` — authoritative current state
+1. Read `.aid-o/work/active.md` — the GENERATED index of active streams (plans, EPIC runs, queue), regenerated at each lifecycle boundary; read-only orientation, per-stream detail lives in `.aid-o/work/plan-state/<plan_id>/`
 2. Read `.aid-o/work/command-history.md` and `.aid-o/work/lessons-learned.md`
 3. Read `.aid-o/config/project.yaml` — if missing or >7 days old, run `/aid-setup`
 4. If NEW run:
@@ -137,7 +137,7 @@ Loop:
 **Before continuing to the next phase, AI MUST:**
 
 1. Update run file (phase = done, commit hash, changes)
-2. Update active.md (progress, decisions)
+2. Record progress and decisions in the run file (active.md is a generated index — it refreshes itself)
 3. Write a summary: 2-3 sentences about what was done
 4. If the phase contains testable changes:
    → Propose manual QA steps (specific, actionable)
@@ -165,7 +165,7 @@ Loop:
 3. [ ] Run Curator agent (post-gate hook)
 4. [ ] Write lessons to `.aid-o/work/backlog.md`
 5. [ ] Archive task file to `.aid-o/tasks/archive/`
-6. [ ] Update `active.md`: remove from current focus, add to Recent Work
+6. [ ] `active.md` refreshes automatically at the done-advance boundary — do not hand-edit it
 
 ### Phase 3: Run-End Protocol
 
@@ -188,7 +188,7 @@ Last epic run:
   Or: issues to resolve? proceed differently?
 ```
 
-6. If PM approves: update active.md, archive run, update task (if last epic run), add entry to run-log.md, commit + merge
+6. If PM approves: archive run, update task (if last epic run), add entry to run-log.md, commit + merge (active.md regenerates itself at the boundary)
 
 ### Phase 4: Handoff (Optional)
 
@@ -208,7 +208,7 @@ Last epic run:
 
 **Quality check:** Handoff is self-contained if next AI can continue without asking questions.
 
-**Where to put:** Run file (Handoff Notes section) + active.md + task file (if epic).
+**Where to put:** Run file (Handoff Notes section) + task file (if epic). Never active.md — it is a generated index.
 
 ---
 
@@ -256,7 +256,7 @@ Workflow: create task file → per-run: create run file with `epic_id` reference
 | YYYY-MM-DD | BUG-XXX | {Title} | High/Med/Low | Open | {Context} |
 ```
 
-Discover → bugs.md → active.md Blockers (if blocking) → continue work → dedicated bug-fix run later.
+Discover → bugs.md → run file Blockers section (if blocking) → continue work → dedicated bug-fix run later.
 
 ---
 
@@ -267,7 +267,7 @@ Discover → bugs.md → active.md Blockers (if blocking) → continue work → 
 | Coding without run file | Create for multi-change work |
 | Shallow run file | Fill with objectives, files, approach, risks |
 | Forgetting run file updates | Update after EVERY commit |
-| Skipping active.md | Read at start, update at end |
+| Skipping active.md | Read at start (generated index — never hand-write it) |
 | Insufficient handoff | Self-contained — no questions needed |
 | Skipping Phase-End HARD STOP | MUST stop and wait for PM GO |
 | Skipping project docs at run-end | ALWAYS run impact analysis |

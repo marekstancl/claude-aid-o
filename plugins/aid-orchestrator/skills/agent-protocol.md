@@ -235,7 +235,7 @@ Full enforcement details: `skills/pipeline.md §7 — Tiered Severity Enforcemen
 ## Run Start — Context Loading Order
 
 **ALWAYS read in this order before starting work:**
-1. `active.md` (`.aid-o/work/active.md`) — current state, recent runs, blockers
+1. `active.md` (`.aid-o/work/active.md`) — GENERATED read-only index of active streams (plans, EPIC runs, queue), auto-refreshed at lifecycle boundaries; never hand-write it — per-stream detail lives in `.aid-o/work/plan-state/<plan_id>/`
 2. `project.yaml` (`.aid-o/config/project.yaml`) — tech stack, conventions, commands
 3. `memory_context` from task input — past patterns and decisions from Qdrant
 4. Determine: NEW task or CONTINUATION? If continuation → load run file + plan.
@@ -302,7 +302,7 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-08-06
 
 ## Agent handoff contract at the plan boundary
 

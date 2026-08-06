@@ -168,6 +168,15 @@ source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# P074 Step 6 — the SAME shared post-boundary helper aid-fsm.sh uses
+# (aid_active_boundary_sync): a direct `aid-plan-fsm.sh plan-close` /
+# `plan-rollback` (invocable without the aid-fsm.sh wrapper) performs
+# identical active-runs cleanup and active.md index refresh. Guarded source:
+# index bookkeeping is best-effort and must never abort this CLI.
+if [[ -f "${SCRIPT_DIR}/lib/aid-active-index.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-active-index.sh" || true
+fi
 
 # ---------------------------------------------------------------------------
 # _pfsm_resolve_invoke_root [given] — `--project-root` if given (resolved to
@@ -6924,6 +6933,15 @@ cmd_plan_close() {
 
   _pfsm_close_release
 
+  # P074 Step 6: the PLAN-layer close is WRITER 3's other entry point — the
+  # SAME shared boundary helper aid-fsm.sh calls, so a direct plan-close
+  # performs identical active-runs cleanup (the sweep removes every terminal
+  # run of this plan) and index refresh. Best-effort: the close is complete
+  # above; a render failure warns and never turns it into a failure.
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$root" "-" plan-close || true
+  fi
+
   echo "$marker"
   if [[ "$close_mode" == "merge" ]]; then
     if [[ "$lifecycle_note" == "closed_pending_receipt" ]]; then
@@ -8916,6 +8934,15 @@ cmd_plan_rollback() {
 
   plan_op_commit "$plan_id" "$rb_op" >/dev/null 2>&1 || true
   _pfsm_rb_release
+
+  # P074 Step 6: plan-rollback is WRITER 4 of the generated active.md index —
+  # the shared boundary helper sweeps the plan's terminal run entries and
+  # refreshes the index (the now-ROLLED_BACK plan drops off it). Best-effort:
+  # the rollback is durable above; a render failure warns, never blocks.
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$root" "-" plan-rollback || true
+  fi
+
   echo "ROLLED BACK: ${plan_id} merged as ${merge_commit:0:8} and was reverted by ${rev_norm:0:8}; ${target_branch} is back at its pre-merge tree (${target_before:0:8}) with both commits still reachable, and the rollback is durable in ${lc_rel} on ${target_branch}. The plan is ROLLED_BACK — not aborted, which would deny the merge, and not closed, which would claim a delivery that is no longer there." >&2
   return 0
 }
