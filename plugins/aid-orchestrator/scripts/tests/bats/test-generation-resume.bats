@@ -44,7 +44,7 @@
 # a path that might not exist (a 127 would write to fd 3 and, with fd 3 closed,
 # destroy this file's whole TAP output).
 # After any edit, verify the result count:
-#   bats --tap test-generation-resume.bats | grep -cE '^(ok|not ok)'   # == 11
+#   bats --tap test-generation-resume.bats | grep -cE '^(ok|not ok)'   # == 12
 
 load test-helpers.bash
 
@@ -396,6 +396,39 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   [ "$(_queue_count)" = "0" ]
 }
 
+# ─── honesty: a gate that CRASHES is not a verdict about the EPIC ────────
+
+@test "a D5 gate that dies without a verdict is reported as a GATE failure, never as a malformed contract" {
+  # GROUNDED (2026-08-06, under artificial CPU load): the gate's own
+  # `_aid_parse_scoping_line | head -1` took SIGPIPE, so it exited 141 with
+  # EMPTY stdout — and the pipeline told the operator their plan.json/EPIC.md
+  # was "malformed" on a contract that passed cleanly on the very next run. The
+  # SIGPIPE is fixed at its source; this test pins the REPORTING, which is what
+  # protects the operator from every other way a gate can die.
+  rm -f "$SHADOW/scripts/gates"
+  mkdir -p "$SHADOW/scripts/gates"
+  local g
+  for g in "$REPO_PLUGIN/scripts/gates"/*; do ln -s "$g" "$SHADOW/scripts/gates/$(basename "$g")"; done
+  rm -f "$SHADOW/scripts/gates/aid-contract-validate.sh"
+  # Exit 141 with nothing on stdout — the exact shape of the observed abort.
+  printf '#!/usr/bin/env bash\nexit 141\n' > "$SHADOW/scripts/gates/aid-contract-validate.sh"
+  chmod +x "$SHADOW/scripts/gates/aid-contract-validate.sh"
+
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  [ "$status" -eq 5 ]                                        # not 4 — no contract verdict exists
+  [[ "$output" == *"could NOT BE RUN"* ]]
+  [[ "$output" == *"killed by signal 13"* ]]
+  [[ "$output" == *"failure of the GATE"* ]]
+  [[ "$output" != *"malformed plan.json/EPIC.md contract"* ]]   # the lie this test forbids
+  [[ "$output" == *"UNKNOWN, not malformed"* ]]                 # ...and what it says instead
+  # The artifact says the same thing in its own bytes — never a blank file.
+  local cv="$PROJ/.aid-o/work/evidence/P099-multi/generation/epics/E-099-1_3/c0/contract-validate.json"
+  [ -s "$cv" ]
+  [ "$(jq -r '.result' "$cv")" = "gate_error" ]
+  [ "$(jq -r '.gate_exit' "$cv")" = "141" ]
+  [ "$(_queue_count)" = "0" ]                                # and nothing was queued on a non-verdict
+}
+
 @test "two CONCURRENT invocations: exactly one generates, the other resumes to a verified no-op, and there are no duplicate artifacts" {
   local o1="$TEST_TMPDIR/c1.log" o2="$TEST_TMPDIR/c2.log" r1=0 r2=0
   ( cd "$PROJ" && bash "$PIPELINE" --plan "$PLAN" --queue-mode chain 3>&- ) >"$o1" 2>&1 &
@@ -404,6 +437,11 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   local p2=$!
   wait "$p1" || r1=$?
   wait "$p2" || r2=$?
+  # On failure, the two logs are the only evidence of the interleaving — bats
+  # shows this block's output, and without it a flake here is undiagnosable.
+  if [ "$r1" -ne 0 ] || [ "$r2" -ne 0 ]; then
+    echo "r1=$r1 r2=$r2"; echo "--- invocation 1"; cat "$o1"; echo "--- invocation 2"; cat "$o2"
+  fi
   [ "$r1" -eq 0 ]
   [ "$r2" -eq 0 ]
 

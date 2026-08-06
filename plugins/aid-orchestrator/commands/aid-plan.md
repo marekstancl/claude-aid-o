@@ -382,12 +382,17 @@ Two files under `.aid-o/work/evidence/<plan_id>/generation/` hold it together:
 | `generation-authority.json` | The CP1 decision, made **once per plan** before any output exists, sealed to the exact plan bytes, target head and phase set. Every phase verifies it instead of re-running the gate. |
 | `transaction.json` | Identity plus one record per phase. Phase status is **derived** by re-hashing the recorded outputs and reading queue membership — the files and the queue are the truth. |
 
-**CP1 blocked the plan.** Generation stops before anything is created and prints
-the blocking conditions. Fix them and rerun — or, when the PM deliberately
-accepts the risk, override with the reason on the record:
+**CP1 blocked the plan.** Generation stops before anything is created. The
+refusal carries one of exactly two AID-owned labels, and the gate's own output
+follows it verbatim:
+
+| Label | What it means | What to do |
+|-------|---------------|-----------|
+| `aid_generation_force_required:` | The failure is a CP1 condition verdict — evidence, adjudicator, C0 review or ledger. A PM may deliberately waive it. | Fix the conditions, or run the force command the label prints (it already carries your `--plan` and `--queue-mode`). |
+| `aid_cp1_blocked:` | The failure is one `--force` cannot cover — the gate was mis-invoked, hit an I/O error, or the plan's own identity is broken. The hard condition is named first. | Fix the named condition. `--force` is **refused in the same place** on this class, not merely unadvertised: it seals no authority, writes no waiver, and says so by name. |
 
 ```bash
-bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --force --reason "<at least 20 characters>"
+bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode> --force --reason "<at least 20 characters>"
 ```
 
 The force is invocation-scoped and audited three ways (timeline event,
@@ -610,18 +615,30 @@ AFTER determining the C0 review and/or ledger budget check actually failed
 — a present override is never touched on a clean pass, so it stays
 available for a run that genuinely needs it. Only once a bypass is
 genuinely required does the gate claim it, renaming it to a
-`.consumed-<epoch>` sibling — the override authorizes exactly one more
-attempt (covering whichever of the two checks failed in that same run),
-never a standing bypass. Using it always leaves the unresolved findings on
-record; it is never a silent pass.
+`.consumed-<epoch>` sibling.
 
-**Gate enforcement.** `aid-cp1-gate.sh` (called by `aid-plan-to-epic.sh`) is
-the mechanical backstop for all of the above: it independently re-checks
-`c0-plan-review.json`'s presence/status/blocking_findings, re-runs
-`aid-c0-plan-review.sh verify` itself (never trusting the file's fields
-alone), and re-checks `aid-cp1-ledger.sh check-budget` — EPIC generation is
-blocked if any of these fail, override or no override for that specific
-failure.
+**Which loop this override belongs to.** It authorizes exactly one more
+GATE INVOCATION (covering whichever of the two checks failed in that same
+run), never a standing bypass — and during PLAN REVIEW that is exactly the
+ledger/recheck loop described above, unchanged. **EPIC GENERATION is a
+different consumer:** `aid-auto-pipeline.sh` runs the gate once per plan
+and seals the result in `generation-authority.json`, which every phase
+verifies, so one authority covers the whole generation and the
+`.consumed-<epoch>` per-invocation claim only bites on standalone
+`aid-plan-to-epic.sh` calls. At generation time the PM's route is the
+pipeline's own `--force --reason` (see "CP1 blocked the plan." above) —
+audited three ways, invocation-scoped, and recorded in the authority with
+every bypassed condition verbatim. Using either always leaves the
+unresolved findings on record; neither is ever a silent pass.
+
+**Gate enforcement.** `aid-cp1-gate.sh` — called once per generation
+transaction by `aid-auto-pipeline.sh`, and per invocation by a standalone
+`aid-plan-to-epic.sh` — is the mechanical backstop for all of the above: it
+independently re-checks `c0-plan-review.json`'s presence/status/blocking_findings,
+re-runs `aid-c0-plan-review.sh verify` itself (never trusting the file's
+fields alone), and re-checks `aid-cp1-ledger.sh check-budget` — EPIC
+generation is blocked if any of these fail, override or no override for
+that specific failure.
 
 **Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
 
@@ -656,7 +673,7 @@ EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L
 - `skills/planner.md` — dependency graph and parallel groups
 - `skills/review-checkpoint-contracts.md` — high-risk pattern definitions and CP1-deep contract
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
-- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called by aid-plan-to-epic.sh)
+- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-c0-plan-review.sh` — C0 cross-provider (Codex) plan review bridge (build-manifest/dispatch/verify)
 - `{plugin_path}/scripts/lib/aid-cp1-ledger.sh` — CP1 revision-limit ledger (init/increment/read/check-budget)
 - `defaults/policies/review-checkpoints.yaml` — `cp1_codex_review` bounded-loop policy (`max_rechecks`)

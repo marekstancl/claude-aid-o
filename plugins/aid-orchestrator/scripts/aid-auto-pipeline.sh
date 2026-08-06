@@ -22,7 +22,11 @@
 # stdout: JSON manifest { plan_id, plan_path, epics, queue_mode, duration_ms }
 # stderr: JSON error on failure; progress messages prefixed with [INFO]
 #
-# Exit codes: 0=success, 1=validation, 2=dependency/missing sub-script, 3=I/O
+# Exit codes: 0=success, 1=validation, 2=dependency/missing sub-script, 3=I/O,
+#             4=D5 contract gate returned a FAIL verdict (the contract really is
+#               malformed), 5=a gate could not be run to a verdict at all (gate
+#               crash/kill — the contract is UNKNOWN, not malformed),
+#             6=lifecycle/plan-branch boundary
 # =============================================================================
 set -euo pipefail
 
@@ -74,13 +78,16 @@ export AID_PROJECT_ROOT
 #                rather than blindly redo.
 #
 # CONCURRENCY ORDERING (the reason the skeleton is written before the gate):
-# the FIRST act after the committed-source preflight is acquiring the
-# transaction lock and writing the IDENTITY-ONLY skeleton; only then does the
-# CP1 gate run and the authority get written, both still under that same
-# serialization point. Two concurrent invocations for one plan can therefore
-# never both observe "no transaction" and double-run CP1 or race the fixed
-# authority path — the loser blocks on the flock, then finds a matching
-# identity and a sealed authority, and resumes.
+# the transaction lock is acquired BEFORE the lifecycle-manifest ensure — i.e.
+# before anything this pipeline does can move the target branch — and the
+# IDENTITY-ONLY skeleton is written under it; only then does the CP1 gate run
+# and the authority get written, both still under that same serialization
+# point. Two concurrent invocations for one plan can therefore never both
+# observe "no transaction" and double-run CP1 or race the fixed authority path,
+# and neither can move target_head under the other's sealed identity — the
+# loser blocks on the flock, then finds a matching identity and a sealed
+# authority, and resumes. See "ONE HOLD FOR THE WHOLE GENERATION" below for
+# the interleaving that forced the acquisition point this far up.
 #
 # HONEST CLASSIFICATION (AID-v3 §1). The authority receipt, like every AID
 # artifact, is forgeable by a Bash-capable actor. The enforcement is NOT actor
@@ -99,6 +106,130 @@ source "${SCRIPT_DIR}/lib/aid-lock.sh"
 AID_GEN_PHASE_DERIVATION_VERSION=1
 AID_GEN_LOCK_TIMEOUT="${AID_GEN_LOCK_TIMEOUT:-60}"
 _GEN_LOCK_FD=""
+
+# =============================================================================
+# P074 Step 18 — HONEST FAILURE LABELS
+# =============================================================================
+# Generation owns EXACTLY TWO labels. Both live here, at their only definition
+# site, and are emitted from the single gate-failure branch below:
+#
+#   aid_cp1_blocked              the failed condition class is one --force
+#                                CANNOT cover — retyping the command with
+#                                --force would fail again in the same place.
+#   aid_generation_force_required  the failure IS a CP1 condition verdict, so a
+#                                deliberate, audited PM override can proceed;
+#                                the exact public command is printed with THIS
+#                                invocation's --plan/--queue-mode values.
+#
+# Everything else that fails is NOT relabelled: the subprocess's own stderr is
+# already inherited verbatim, and the EXIT hook only appends a one-line note
+# when AID's own checks had already passed (see _gen_on_exit).
+#
+# WHY THIS CLASSIFICATION IS DECIDABLE (and not guesswork — PM decision 3
+# dropped the host-error detector precisely because it was). It is read from
+# aid-cp1-gate.sh's own documented exit-code contract plus its three literal
+# pre-verdict error strings:
+#
+#   rc 1  a genuine CP1 CONDITION verdict — missing/empty/field-less CP1-deep
+#         evidence, an adjudicator `verdict: fail|revise`, surviving accepted
+#         blockers, a structurally broken adjudicator key, a missing/
+#         unverifiable/still-blocking C0 plan review, an exhausted CP1 ledger.
+#         All of these are review evidence a PM may deliberately waive.
+#         -> FORCEABLE.
+#   rc 2  usage error ("Unknown argument") — the gate was mis-invoked and never
+#         evaluated a condition. -> HARD.
+#   rc 3  I/O error ("Plan file not found") — same: no verdict was rendered.
+#         -> HARD.
+#   rc 1, but one of the three PLAN-IDENTITY errors the gate raises BEFORE it
+#         ever determines risk: no closing frontmatter `---`, no `id:` field,
+#         or an `id` failing the path-traversal guard. These are not review
+#         evidence at all; forcing past them would seal an authority whose
+#         plan identity is the very thing that is broken. -> HARD.
+#
+# The three hard rc-1 strings are matched literally because they are literal in
+# aid-cp1-gate.sh. If that vocabulary changes, this list changes with it — it
+# is a mapping of one script's strings, never an inference about them.
+AID_GEN_LABEL_BLOCKED="aid_cp1_blocked"
+AID_GEN_LABEL_FORCE_REQUIRED="aid_generation_force_required"
+
+# ---------------------------------------------------------------------------
+# STDERR STAGING — so the label really is the FIRST line of stderr
+# ---------------------------------------------------------------------------
+# The contract is "first line", not "somewhere in the output", and the pipeline
+# emits [INFO]/[WARN] progress to stderr well before the gate is ever consulted
+# ([INFO] Starting pipeline…, plan_source_binding, lifecycle mode, …). Printing
+# the label after that chatter is not the contract, it is a near miss.
+#
+# So the pre-gate window is STAGED: fd 2 is redirected into a temp file, the
+# real stderr is held on fd 9, and the staged bytes are flushed IN ORDER the
+# moment the gate decision is known. On a refusal the label goes straight to
+# fd 9 first, so it lands on line 1 with the run's own chatter beneath it and
+# the gate's stderr beneath that. Nothing is dropped and nothing is reordered.
+#
+# The window is deliberately short (arg validation → gate decision) and every
+# exit inside it flushes: explicitly on the labelled paths, via the EXIT trap
+# on every other. A SIGKILL inside the window loses staged chatter — an
+# accepted trade for a contract that actually holds, and the window contains no
+# state-mutating work whose loss would matter.
+_gen_stderr_buf=""
+_gen_stderr_staged=false
+
+_gen_stage_stderr() {
+  _gen_stderr_buf="$(mktemp "${TMPDIR:-/tmp}/aid-generation-stderr.XXXXXX" 2>/dev/null)" || return 0
+  exec 9>&2
+  exec 2>"$_gen_stderr_buf"
+  _gen_stderr_staged=true
+  return 0
+}
+
+# _gen_flush_stderr — restore the real stderr and emit every staged byte, in
+# order. Idempotent: safe to call on the labelled paths AND from the EXIT trap.
+_gen_flush_stderr() {
+  [[ "$_gen_stderr_staged" == true ]] || return 0
+  _gen_stderr_staged=false
+  exec 2>&9
+  exec 9>&-
+  if [[ -s "$_gen_stderr_buf" ]]; then cat "$_gen_stderr_buf" >&2; fi
+  rm -f "$_gen_stderr_buf" 2>/dev/null || true
+  return 0
+}
+
+# _gen_err_first <line> — write one line to the REAL stderr, ahead of anything
+# still staged. Falls back to plain stderr when staging never started (mktemp
+# failure), so the message is never lost.
+_gen_err_first() {
+  if [[ "$_gen_stderr_staged" == true ]]; then
+    printf '%s\n' "$1" >&9
+  else
+    printf '%s\n' "$1" >&2
+  fi
+  return 0
+}
+
+# _gen_gate_hard_condition <rc> <gate_output>
+#   Echoes the HARD condition (the exit-code reason, or the matched literal
+#   line) when --force could not cover this failure; echoes nothing when the
+#   failure is a forceable CP1 condition verdict.
+#
+#   Mixed output — some forceable conditions plus one hard one — resolves to
+#   HARD, and the echoed text is the hard condition, so the message names it
+#   first: a --force there would not unblock anything.
+_gen_gate_hard_condition() {
+  local rc="$1" out="$2" line=""
+  case "$rc" in
+    2) printf 'the CP1 gate exited 2 (usage error) — it was mis-invoked and never evaluated a CP1 condition'; return 0 ;;
+    3) printf 'the CP1 gate exited 3 (I/O error) — it could not read what it needed and never evaluated a CP1 condition'; return 0 ;;
+  esac
+  while IFS= read -r line; do
+    case "$line" in
+      *"missing closing '---' for frontmatter"*|\
+      *"missing 'id' field in frontmatter"*|\
+      *"contains invalid characters (path traversal guard)"*)
+        printf '%s' "$line"; return 0 ;;
+    esac
+  done <<< "$out"
+  return 0
+}
 
 _gen_dir()              { aid_state_path ".aid-o/work/evidence/${1}/generation"; }
 _gen_authority_path()   { printf '%s/generation-authority.json\n' "$(_gen_dir "$1")"; }
@@ -509,6 +640,13 @@ if [[ "$force_generation" != true && -n "$force_reason" ]]; then
   error_exit "--reason was given without --force — it would record nothing. Pass both, or neither." 1
 fi
 
+# P074 Step 18 — stage stderr from here (the first point at which this run can
+# emit progress chatter) until the CP1 decision is known. The EXIT trap
+# guarantees a flush on every path that leaves the window without one; it is
+# replaced later by _gen_on_exit, which flushes too.
+trap '_gen_flush_stderr' EXIT
+_gen_stage_stderr
+
 # =============================================================================
 # P073 Step 11 — committed-source preflight (P083)
 # =============================================================================
@@ -783,6 +921,83 @@ _generation_depends_for_epic() {
   printf '%s\n' "$result"
 }
 
+# =============================================================================
+# ONE HOLD FOR THE WHOLE GENERATION (Codex round: BLOCKER 2; P074 Step 15 fix)
+# =============================================================================
+# The first cut released this lock as soon as the authority was sealed, keeping
+# only the skeleton/gate/authority critical section. That is not enough. The
+# phase work itself is NOT idempotent-under-concurrency: two same-identity
+# invocations both pass the resume check, then race on the counter, on FSM
+# init, on run rendering, and — worst — one hashes an EPIC/plan.json the other
+# is in the middle of replacing, recording a hash for bytes that no longer
+# exist. "Both verify and converge" holds for the pure re-derivation, never for
+# those steps.
+#
+# WHERE THE HOLD STARTS, AND WHY IT IS HERE RATHER THAN AT THE SEAL. The second
+# cut took the lock just before the transaction skeleton — after the lifecycle
+# block below. That still lost the race, reproducibly (~1 run in 2), because
+# the lifecycle block MUTATES THE TARGET BRANCH: `aid_lifecycle_ensure_manifest`
+# commits the manifest, and the mode stamp is a second isolated commit right
+# after it. target_head is part of the transaction identity AND is re-checked
+# by every phase against the sealed authority. With the hold starting after
+# those commits, two invocations interleaved like this:
+#
+#   A ensure_manifest -> commits, target_head H0 -> H1
+#   B reads target_head = H1 and seals its identity on it
+#   A mode-stamp commit,          target_head H1 -> H2
+#   B takes the lock, writes the skeleton bound to the now-stale H1
+#   B's first phase: sealed H1 != current H2  -> "the target branch moved"
+#   A takes the lock, derives H2, finds B's H1 transaction -> identity mismatch
+#
+# Both runs die, no generation happens, and the surviving artifact is a
+# transaction bound to a head that no longer exists. Neither run did anything
+# wrong under its own hold — the mutation and the read that the hold exists to
+# order both happened OUTSIDE it. So the hold starts before the lifecycle
+# ensure: the branch-mutating commits, the target_head read, the seal and all
+# phase work are one critical section. The loser blocks, and by the time it
+# enters, the manifest is already durable (ensure is then a no-op), target_head
+# is stable, and its identity matches the winner's — the resume path.
+#
+# So the hold spans lifecycle ensure -> skeleton -> gate -> authority -> every
+# phase -> stage 2 -> receipt rewrite, and is released by an EXIT trap (which
+# also covers every error_exit path and any signal-driven death). A second
+# invocation blocks for at most AID_GEN_LOCK_TIMEOUT seconds and then refuses
+# by name, telling the operator which pid holds it — never interleaves.
+# =============================================================================
+
+# P074 Step 18 — the two facts the EXIT hook needs, and nothing more.
+#   _gen_gate_passed        AID's own CP1 decision for this run is a PASS (a
+#                           fresh passing gate, or a reused authority whose
+#                           sealed verdict is `pass`). A FORCED authority does
+#                           NOT set it: AID's checks did not pass there.
+#   _gen_aid_owned_failure  this run is dying on an AID gate of its own (today:
+#                           the D5 contract-validation gate), so the
+#                           not-an-AID-gate note would be a lie.
+_gen_gate_passed=false
+_gen_aid_owned_failure=false
+
+# _gen_on_exit <rc> — release the generation lock, then, when this run is dying
+# on something that is NOT one of AID's own gates AFTER AID's own checks had
+# passed, append one line saying so. The failing subprocess's stderr already
+# reached the terminal verbatim (it is inherited, never captured), so this adds
+# information and rewrites nothing. Before the gate passes the note never
+# fires: AID cannot claim its checks passed when they had not run yet.
+_gen_on_exit() {
+  local rc="${1:-0}"
+  # Anything still staged goes out BEFORE the note, so the note is never
+  # printed above the error it is talking about.
+  _gen_flush_stderr
+  _gen_unlock
+  if [[ "$rc" -ne 0 && "$_gen_gate_passed" == true && "$_gen_aid_owned_failure" != true ]]; then
+    printf "note: AID's own checks passed — this failure is not an AID gate\n" >&2
+  fi
+}
+
+trap '_gen_on_exit $?' EXIT
+if ! _gen_lock "$plan_id"; then
+  error_exit "generation already in progress for ${plan_id} (holder pid $(_gen_lock_holder "$plan_id")); waited ${AID_GEN_LOCK_TIMEOUT}s for $(_gen_transaction_path "$plan_id").lock and nothing was generated. Wait for that run to finish and re-run — a rerun resumes rather than regenerates. If the holder is gone, the lock is already free (flock drops on process death); raise AID_GEN_LOCK_TIMEOUT if the other run is simply slow. Never delete the .lock file — that lets a second writer in alongside the first." 3
+fi
+
 # IMP-232 v2.58.1: create the plan lifecycle manifest at the official scaffold, as
 # part of the normal commit flow (repo identity + manifest committed together via
 # an isolated index — the user's index is never touched). This is what makes the
@@ -932,10 +1147,12 @@ fi
 # before every artifact this pipeline is here to produce.
 #
 # The serialization property Step 13 actually requires is untouched: the lock
-# is acquired FIRST, the identity-only skeleton is written under it, and only
-# then does the CP1 gate run and the authority get written — still under the
-# same hold. Two concurrent invocations can never both observe "no
-# transaction".
+# is acquired FIRST — before the lifecycle ensure, hence before anything can
+# move target_head — the identity is derived and the identity-only skeleton is
+# written under it, and only then does the CP1 gate run and the authority get
+# written, still under the same hold. Two concurrent invocations can never both
+# observe "no transaction", nor derive their identities from two different
+# target heads.
 # =============================================================================
 _gen_plan_sha256="$(_gen_sha256_file "$plan")"
 _gen_target_branch_name="$(_gen_target_branch)"
@@ -946,28 +1163,10 @@ _gen_tx_path="$(_gen_transaction_path "$plan_id")"
 _gen_auth_path="$(_gen_authority_path "$plan_id")"
 mkdir -p "$_gen_dir_path" 2>/dev/null || error_exit "Cannot create the generation evidence directory: $_gen_dir_path" 3
 
-# =============================================================================
-# ONE HOLD FOR THE WHOLE GENERATION (Codex round: BLOCKER 2)
-# =============================================================================
-# The first cut released this lock as soon as the authority was sealed, keeping
-# only the skeleton/gate/authority critical section. That is not enough. The
-# phase work itself is NOT idempotent-under-concurrency: two same-identity
-# invocations both pass the resume check, then race on the counter, on FSM
-# init, on run rendering, and — worst — one hashes an EPIC/plan.json the other
-# is in the middle of replacing, recording a hash for bytes that no longer
-# exist. "Both verify and converge" holds for the pure re-derivation, never for
-# those steps.
-#
-# So the hold spans skeleton -> gate -> authority -> every phase -> stage 2 ->
-# receipt rewrite, and is released by an EXIT trap (which also covers every
-# error_exit path and any signal-driven death). A second invocation blocks for
-# at most AID_GEN_LOCK_TIMEOUT seconds and then refuses by name, telling the
-# operator which pid holds it — never interleaves.
-# =============================================================================
-trap '_gen_unlock' EXIT
-if ! _gen_lock "$plan_id"; then
-  error_exit "generation already in progress for ${plan_id} (holder pid $(_gen_lock_holder "$plan_id")); waited ${AID_GEN_LOCK_TIMEOUT}s for ${_gen_tx_path}.lock and nothing was generated. Wait for that run to finish and re-run — a rerun resumes rather than regenerates. If the holder is gone, the lock is already free (flock drops on process death); raise AID_GEN_LOCK_TIMEOUT if the other run is simply slow. Never delete the .lock file — that lets a second writer in alongside the first." 3
-fi
+# The generation lock is already held here — it was taken above, before the
+# lifecycle-manifest ensure (see "ONE HOLD FOR THE WHOLE GENERATION"). Nothing
+# is acquired at this point; the skeleton/gate/authority section below simply
+# continues inside that same hold.
 
 _gen_resumed=false
 if [[ -f "$_gen_tx_path" ]]; then
@@ -1063,15 +1262,76 @@ if [[ "$_gen_authority_valid" != true ]]; then
   else
     _gen_cp1_out="cp1 gate script not present — no gate to run"
   fi
-  printf '%s\n' "$_gen_cp1_out" >&2
+  # On a PASS the gate's own output goes out here, as it always has. On a
+  # FAILURE it is printed by the labelling branch below INSTEAD — the label has
+  # to be the first line of stderr, and the gate stderr always follows it.
+  if [[ "$_gen_cp1_rc" -eq 0 ]]; then printf '%s\n' "$_gen_cp1_out" >&2; fi
 
   _gen_cp1_json='{"verdict":"pass"}'
   _gen_forced=false
   if [[ "$_gen_cp1_rc" -ne 0 ]]; then
+    # ══ P074 Step 18: CLASSIFY FIRST, THEN decide what --force may do ══════
+    #
+    # The classification runs BEFORE the force branch, and that ORDER is the
+    # whole enforcement. An earlier cut classified only on the non-forced path,
+    # so `aid_cp1_blocked` ("--force does not cover this") was a claim the very
+    # next invocation disproved: re-running with --force skipped the
+    # classification entirely and sealed a forced authority over the same hard
+    # condition. That is AID-v3-principles §1 exactly — a detector whose verdict
+    # nothing enforces is decoration. A hard condition is now non-forceable in
+    # CODE: --force lands in the same branch, fails in the same place, and says
+    # so by name.
+    _gen_first_line="$(printf '%s\n' "$_gen_cp1_out" | head -1)"
+    _gen_prelabelled=false
+    if [[ "$_gen_first_line" == "${AID_GEN_LABEL_BLOCKED}:"* || "$_gen_first_line" == "${AID_GEN_LABEL_FORCE_REQUIRED}:"* ]]; then
+      _gen_prelabelled=true
+    fi
+    _gen_hard="$(_gen_gate_hard_condition "$_gen_cp1_rc" "$_gen_cp1_out")"
+
+    if [[ -n "$_gen_hard" ]]; then
+      # HARD — refused whether or not --force was given. No authority, no
+      # waiver, no audit record: there is nothing to record a bypass OF,
+      # because no bypass happened.
+      _gen_unlock
+      if [[ "$_gen_prelabelled" == true ]]; then
+        _gen_flush_stderr
+        printf '%s\n' "$_gen_cp1_out" >&2
+        exit 1
+      fi
+      _gen_force_note=""
+      if [[ "$force_generation" == true ]]; then
+        _gen_force_note=" --force DOES NOT APPLY to this condition class and changed nothing: no authority was sealed, no waiver was written, and re-running with --force will fail in this same place."
+      fi
+      _gen_err_first "$(printf '%s: %s. Generation for %s stopped before anything was created.%s Fix the named condition and re-run.' \
+        "$AID_GEN_LABEL_BLOCKED" "$_gen_hard" "$plan_id" "$_gen_force_note")"
+      _gen_flush_stderr
+      printf '%s\n' "$_gen_cp1_out" >&2
+      exit 1
+    fi
+
     if [[ "$force_generation" != true ]]; then
       _gen_unlock
-      error_exit "aid_cp1_blocked: the CP1 gate refused generation for ${plan_id} (see the gate output above). Nothing was generated. Resolve the blocking conditions, or override deliberately with: aid-auto-pipeline.sh --plan '${plan}' --force --reason \"<at least 20 characters>\"" 1
+      if [[ "$_gen_prelabelled" == true ]]; then
+        # A wrapper invoked this pipeline through itself: the gate output is
+        # ALREADY labelled. Pass it through untouched — a doubled label reads
+        # as two different refusals for one refusal.
+        _gen_flush_stderr
+        printf '%s\n' "$_gen_cp1_out" >&2
+        exit 1
+      fi
+      # FORCEABLE: the exact public command, with THIS invocation's values,
+      # SHELL-QUOTED so the printed line is executable verbatim. printf %q, not
+      # hand-written single quotes: a plan path like `/work/PM's plan.md`
+      # renders unparseable under naive quoting, and an unquoted queue_mode
+      # would word-split.
+      _gen_err_first "$(printf "%s: the CP1 gate refused generation for %s and nothing was created. Fix the conditions below, or override deliberately with: aid-auto-pipeline.sh --plan %q --queue-mode %q --force --reason %q" \
+        "$AID_GEN_LABEL_FORCE_REQUIRED" "$plan_id" "$plan" "$queue_mode" "<why, at least 20 characters>")"
+      _gen_flush_stderr
+      printf '%s\n' "$_gen_cp1_out" >&2
+      exit 1
     fi
+    _gen_flush_stderr
+    printf '%s\n' "$_gen_cp1_out" >&2
     _gen_forced=true
     # The bypassed conditions, recorded verbatim from the gate's own output —
     # never a paraphrase, and never a rewrite of the CP1 artifacts on disk.
@@ -1203,6 +1463,21 @@ if [[ "$_gen_authority_valid" != true ]]; then
   echo "[INFO] generation_authority: sealed at ${_gen_auth_path} (self_sha256 ${_gen_auth_self})" >&2
 fi
 
+# P074 Step 18 — the decision is made, so the staging window closes here and
+# the rest of the run streams to stderr live. Idempotent: the refusal paths
+# already flushed before they exited, and the authority-reuse path (which never
+# consulted the gate at all) is flushed by this call.
+_gen_flush_stderr
+
+# P074 Step 18 — from here on, AID's own generation checks are settled, and the
+# answer is read from the SEALED authority rather than from a branch variable:
+# it is the same answer for a fresh decision and for a resumed run that never
+# re-consulted the gate. A forced authority carries no `pass` verdict, so a
+# bypassed run never claims AID's checks passed.
+if [[ "$(jq -r '.cp1.verdict // ""' "$_gen_auth_path" 2>/dev/null)" == "pass" ]]; then
+  _gen_gate_passed=true
+fi
+
 # Bind the transaction to the authority it was decided under. Done inside the
 # same lock hold, so the pair can never disagree.
 _gen_auth_sha="$(jq -r '.self_sha256 // ""' "$_gen_auth_path" 2>/dev/null)"
@@ -1325,10 +1600,50 @@ for phase in $(seq 1 "$total_phases"); do
     _cv_exit=0
     _cv_json="$("${SCRIPT_DIR}/gates/aid-contract-validate.sh" "$plan_json_path" "$epic_path" \
       2>>"$_c0_dir/c0-producer.log")" || _cv_exit=$?
-    printf '%s\n' "$_cv_json" > "${_c0_dir}/contract-validate.json"
 
-    if [[ "$_cv_exit" -ne 0 ]]; then
-      error_exit "Contract validation failed for phase ${phase} (${_c0_plan_id}): malformed plan.json/EPIC.md contract — see ${_c0_dir}/contract-validate.json" 4
+    # A VERDICT vs A CRASH — never the same message. The gate speaks in JSON on
+    # stdout; a non-zero exit WITH a JSON document is a real finding about the
+    # generated contract. A non-zero exit with NOTHING (or unparseable bytes) is
+    # the gate itself failing — an interpreter abort, a SIGPIPE inside one of its
+    # own pipelines, an OOM kill, a missing dependency. Reporting that as
+    # "malformed plan.json/EPIC.md contract" tells the operator their EPIC is
+    # broken when in truth nothing at all is known about it, and sends them
+    # editing a file that is fine. (Grounded: under CPU load the D5 gate died of
+    # SIGPIPE with empty stdout and this branch called it malformed — the abort
+    # was even non-deterministic, the very next run passing the same bytes.)
+    _cv_spoke=false
+    if [[ -n "$_cv_json" ]] && jq -e . >/dev/null 2>&1 <<< "$_cv_json"; then
+      _cv_spoke=true
+    fi
+
+    if [[ "$_cv_spoke" == true ]]; then
+      printf '%s\n' "$_cv_json" > "${_c0_dir}/contract-validate.json"
+    else
+      # Never leave a blank file where a verdict belongs: the artifact says, in
+      # its own bytes, that no verdict was reached and why.
+      jq -n --argjson exit_code "$_cv_exit" --arg raw "$_cv_json" \
+        --arg stderr_log "${_c0_dir}/c0-producer.log" \
+        '{result:"gate_error", checks:[], violations:[],
+          detail:"aid-contract-validate.sh exited without emitting a verdict — this file records a GATE failure, NOT a finding about the generated contract",
+          gate_exit:$exit_code, gate_stdout:$raw, gate_stderr_log:$stderr_log}' \
+        > "${_c0_dir}/contract-validate.json"
+    fi
+
+    # No verdict is never a pass either: a gate that exits 0 without saying
+    # anything has validated nothing, and letting the phase through on its
+    # silence is the same dishonesty in the other direction.
+    if [[ "$_cv_exit" -ne 0 || "$_cv_spoke" != true ]]; then
+      # This IS one of AID's own gates (D5), so the EXIT hook must not append
+      # the not-an-AID-gate note to it.
+      _gen_aid_owned_failure=true
+      if [[ "$_cv_spoke" == true ]]; then
+        error_exit "Contract validation failed for phase ${phase} (${_c0_plan_id}): malformed plan.json/EPIC.md contract — see ${_c0_dir}/contract-validate.json" 4
+      fi
+      _cv_how="exited ${_cv_exit}"
+      if [[ "$_cv_exit" -gt 128 && "$_cv_exit" -lt 165 ]]; then
+        _cv_how="was killed by signal $(( _cv_exit - 128 )) (exit ${_cv_exit})"
+      fi
+      error_exit "Contract validation could NOT BE RUN for phase ${phase} (${_c0_plan_id}): the D5 gate ${_cv_how} without emitting a verdict. This is a failure of the GATE, not a finding about the generated EPIC/plan.json — the contract is UNKNOWN, not malformed, and nothing needs editing. Re-run the generation (it resumes; verified phases are not regenerated). Gate stderr: ${_c0_dir}/c0-producer.log; artifact: ${_c0_dir}/contract-validate.json" 5
     fi
 
     # Read enforcement policy (fail-safe: default to observe)
@@ -1381,6 +1696,9 @@ for phase in $(seq 1 "$total_phases"); do
 
     # Enforce policy (blocking mode — E10 / tests only; default is observe)
     if [[ "$_c0_policy" == "blocking" && "$_c0_would_block" == "true" ]]; then
+      # AID's OWN gate, named in its own message — the not-an-AID-gate note
+      # would flatly contradict it.
+      _gen_aid_owned_failure=true
       error_exit "C0 Plan Contract Gate: blocking policy activated with ${_c0_finding_count} findings" 2
     fi
 

@@ -163,7 +163,11 @@ _cp1_calls() { wc -l < "$CP1_COUNT" | tr -d ' '; }
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain" 3>&-
   [ "$status" -ne 0 ]
-  [[ "$output" == *"aid_cp1_blocked"* ]]
+  # P074 Step 18 relabelled this class: the stub's rc-1 refusal IS a CP1
+  # condition verdict, which a deliberate --force CAN cover, so the honest
+  # label is the force-required one. `aid_cp1_blocked` is now reserved for
+  # refusals --force would NOT unblock (see test-generation-labels.bats).
+  [[ "$output" == *"aid_generation_force_required"* ]]
   [[ "$output" == *"--force --reason"* ]]
   # No authority was sealed and no EPIC exists.
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
@@ -302,7 +306,9 @@ _cp1_calls() { wc -l < "$CP1_COUNT" | tr -d ' '; }
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p" high)"
   run bash -c "cd '$TEST_TMPDIR/p' && bash '$REPO_PLUGIN/scripts/aid-auto-pipeline.sh' --plan '$plan' --queue-mode chain" 3>&-
   [ "$status" -ne 0 ]
-  [[ "$output" == *"aid_cp1_blocked"* ]]
+  # Missing CP1-deep evidence is the REAL gate's rc-1 condition verdict, so
+  # P074 Step 18 labels it force-required, not hard-blocked.
+  [[ "$output" == *"aid_generation_force_required"* ]]
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
   run bash -c "ls '$TEST_TMPDIR/p/.aid-o/tasks'/E-099-*.md 2>/dev/null | wc -l"
   [ "$output" = "0" ]

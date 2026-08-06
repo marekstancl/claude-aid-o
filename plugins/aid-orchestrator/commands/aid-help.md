@@ -126,13 +126,17 @@ No FSM, no EPIC, no evidence dir — just implement and log.
 ====================================
 PRE-FLIGHT (bash, before FSM):
   1. generation-readiness validates the source plan + provisional graph
-  2. aid-plan-to-epic.sh → every EPIC file
-  3. aid-epic-to-json.sh → every plan.json + contract validation
-  4. aid-generation-finalize.sh → one generation receipt
-  5. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
+  2. transaction skeleton written under the generation lock
+  3. CP1 gate — ONCE per plan → generation-authority.json
+  4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
+     never re-runs the gate)
+  5. aid-epic-to-json.sh → every plan.json + contract validation
+  6. aid-generation-finalize.sh → one generation receipt
+  7. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
 
-  Generation is two-stage: no FSM state or queue entry exists until the
-  complete EPIC package has been verified and sealed by the receipt.
+  Generation is ONE TRANSACTION: one PM decision covers every phase, a
+  crash resumes instead of duplicating, and no FSM state or queue entry
+  exists until the complete EPIC package has been verified and sealed.
 
 6-State FSM:
   READY → EXECUTE → GATES → DONE

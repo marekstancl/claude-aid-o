@@ -178,23 +178,42 @@ ESCALATION → EXECUTE | GATES | ERROR
 ## §2 PRE-FLIGHT
 
 **No LLM involvement.** Scripts run deterministically, exit non-zero on
-failure, and use two stages: generation is completed and sealed before any
+failure, and generation for one plan is ONE TRANSACTION: the CP1 decision is
+taken once, every phase verifies it, and the whole package is sealed before any
 FSM state or queue entry is created.
 
 ```bash
 aid-generation-readiness.sh <plan.md>           # source grammar + provisional graph
-aid-plan-to-epic.sh … --phase N --total T       # repeat for every phase
+# ── under one lock hold, before any output exists ──
+#    transaction skeleton  → .aid-o/work/evidence/<plan_id>/generation/transaction.json
+aid-cp1-gate.sh …                               # THE ONE CP1 call — once per plan, not per phase
+#    sealed authority      → …/generation/generation-authority.json
+aid-plan-to-epic.sh … --generation-authority … --transaction …   # per phase: VERIFY, never re-gate
 aid-epic-to-json.sh …                           # repeat for every generated EPIC
 aid-contract-validate.sh …                      # validate each generated package
 aid-generation-finalize.sh …                    # seal all phases in one receipt
 aid-json-to-run.sh … --generation-receipt …     # only now create run + FSM state
+aid-queue-add.sh …                              # queue entries, ownership bound to the transaction
 ```
 
 **On generation success:** every phase has an EPIC, `plan.json`, contract
-validation evidence and one plan-global generation receipt. Only then may the
-execution stage create `fsm-state.yaml` with `state: READY` and queue entries.
+validation evidence, a recorded entry in `transaction.json`, and one
+plan-global generation receipt. Only then may the execution stage create
+`fsm-state.yaml` with `state: READY` and queue entries.
 
-**On failure:** Script exits non-zero with JSON error on stderr. `/aid-run` reports to PM.
+**On failure:** the script exits non-zero with its error on stderr and
+`/aid-run` reports it to the PM. Three failure shapes, told apart by their
+first line:
+
+| First line | Meaning |
+|-----------|---------|
+| `aid_generation_force_required:` | The CP1 gate refused, and a deliberate PM override could proceed. The printed `aid-auto-pipeline.sh --plan <path> --queue-mode <mode> --force --reason '<why>'` already carries this invocation's values. |
+| `aid_cp1_blocked:` | The CP1 gate refused with a condition `--force` cannot cover (mis-invocation, I/O, broken plan identity). The hard condition is named first, and `--force` is **refused in the same place** — it seals no authority and writes no waiver. |
+| anything else | Not an AID gate. The failing script's own error is passed through verbatim; when AID's own checks had already passed in that run, one line is appended saying so. |
+
+**On interruption:** rerun the same command. Phases whose recorded outputs still
+re-hash to their recorded values are verified and skipped, ids stay identical,
+and an EPIC already in the queue is an idempotent skip rather than a duplicate.
 
 PRE-FLIGHT does NOT create the git branch — that is done by the command layer before
 calling PRE-FLIGHT.

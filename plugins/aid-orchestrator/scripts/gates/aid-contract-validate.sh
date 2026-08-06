@@ -153,7 +153,17 @@ if [[ "$STEP_COUNT" -gt 1 ]]; then
     _all_blocks_identical="true"
     for (( s=1; s<=STEP_COUNT; s++ )); do
       _bl="$(grep -m1 -F "<!-- step-${s}: files=" "$EPIC_MD")"
-      _files_json="$(_aid_parse_scoping_line "$_bl" "$s" | head -1)"
+      # First line = the files=[...] part. Extracted in pure bash, NEVER via
+      # `... | head -1`: this script runs under `set -euo pipefail`, and with a
+      # pipe `head` can exit as soon as it has line 1 while the writer is still
+      # scheduled to write — the writer takes SIGPIPE, pipefail turns the
+      # substitution into status 141, and errexit kills the gate with EMPTY
+      # stdout. The caller then reports that silent, load-dependent abort as
+      # "malformed plan.json/EPIC.md contract" on a contract that is in fact
+      # clean (measured: ~4% of runs on a loaded box). Same hazard aid-fsm.sh
+      # documents at its own first-line extraction.
+      _parse_out="$(_aid_parse_scoping_line "$_bl" "$s")"
+      _files_json="${_parse_out%%$'\n'*}"
       if ! _block_allowed="$(_aid_allowed_paths_from_files_json "$_files_json" 2>/dev/null)"; then
         _conflict="step ${s}: block contains an ambiguous Files entry (use \`a\` + \`b\` for multiple paths)"
         break

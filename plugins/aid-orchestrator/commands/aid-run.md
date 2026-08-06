@@ -151,11 +151,14 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 3. If stale or missing → re-discover: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh` → update `plugin.yaml`
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
-**Bash pipeline** (using resolved `plugin_path`):
-1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — generate every EPIC (if running from a plan)
-2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse every EPIC → plan.json
-3. `{plugin_path}/scripts/aid-generation-finalize.sh` — verify the complete package and write its receipt.
-4. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt.
+**Bash pipeline** (using resolved `plugin_path`) — when running from a plan,
+steps 1–3 are ONE TRANSACTION held under a single lock:
+1. `{plugin_path}/scripts/aid-cp1-gate.sh` — the ONE CP1 call for the whole plan, before any output exists (skipped when a valid sealed authority already binds this identity).
+2. `generation-authority.json` + `transaction.json` — the sealed decision and the per-phase record, written under `.aid-o/work/evidence/<plan_id>/generation/`.
+3. `{plugin_path}/scripts/aid-plan-to-epic.sh` — generate every EPIC, each VERIFYING the authority rather than re-running the gate
+4. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse every EPIC → plan.json
+5. `{plugin_path}/scripts/aid-generation-finalize.sh` — verify the complete package and write its receipt.
+6. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt.
    When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
    `--streamlined` to this script: `aid-json-to-run.sh … --streamlined`. The
    script forwards it to its Step 18 `aid-fsm.sh init` call, which writes
@@ -167,12 +170,20 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 These are **bash scripts**. No LLM involvement. Exit non-zero → abort with error message.
 PM must fix the underlying issue (missing steps, circular deps, invalid EPIC format).
 
+A refusal from the CP1 call is labelled: `aid_generation_force_required:` when
+a deliberate PM `--force --reason` could proceed (the exact command is printed
+with this invocation's values), `aid_cp1_blocked:` when it could not — and on that class `--force` is refused in the same place rather than merely unadvertised. Anything
+else that fails is passed through verbatim. An interrupted PRE-FLIGHT is
+resumed by rerunning the same command — verified phases are skipped.
+
 ```
 PRE-FLIGHT Pipeline
 ====================================
-  [1] all phases: plan-to-epic + epic-to-json    ✓
-  [2] aid-generation-finalize.sh → receipt       ✓
-  [3] aid-json-to-run.sh → fsm-state.yaml        ✓
+  [1] CP1 gate (once per plan) → authority       ✓
+  [2] transaction.json opened                    ✓
+  [3] all phases: plan-to-epic + epic-to-json    ✓
+  [4] aid-generation-finalize.sh → receipt       ✓
+  [5] aid-json-to-run.sh → fsm-state.yaml        ✓
 
 FSM initialized: READY
 ```
