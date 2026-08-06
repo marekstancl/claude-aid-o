@@ -376,13 +376,14 @@ RULE 3: Delegate plan writing to plan-writing skill (skills/plan-writing.md).
 RULE 4: Pass all approved design details to plan-writing — do not summarize or omit.
         If PM approved a modification, the modified version goes into the document.
 RULE 5: Generate plan IDs per `skills/run-management.md` → ID System section:
-        Plan: P{NNN} (from counter.yaml, pre-allocated at Step 1).
+        Plan: P{NNN} via `bash {plugin_path}/scripts/aid-fsm.sh alloc plan-id`
+        (locked allocator, pre-allocated at Step 1 — never hand-edit counter.yaml).
 RULE 6: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan --epic
         (offered in plan-writing handoff), which delegates file creation to `aid-plan-to-epic.sh`.
 RULE 7: **MVP / multi-phase plans:** If the brainstormed plan has 3+ phases or is explicitly
         an MVP plan:
         (a) This is a ROADMAP, not an executable plan. Save to `docs/plans/`, NOT `.aid-o/plans/`.
-            Do NOT allocate plan ID from counter.yaml. Do NOT write to active.md.
+            Do NOT allocate a plan ID (no `aid-fsm.sh alloc plan-id` call). Do NOT write to active.md.
         (b) Generate commands section at end — per subfáze `/aid-plan write` command + context.
             Each subfáze becomes a separate executable plan with its own P{NNN} ID when PM runs it.
         (c) Generate session prompts file — `docs/plans/{project}-session-prompts.md` with detailed
@@ -504,4 +505,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-06

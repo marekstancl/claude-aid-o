@@ -65,15 +65,26 @@ Run:            R-{EPIC_ID}-{run_number}   (R-005-1_4-1)
 
 ### Allocation Procedure
 
-1. READ counter.yaml → get current value for the ID type
-2. INCREMENT the counter by 1
-3. WRITE incremented value back to counter.yaml **immediately**
-4. USE the incremented value as the new ID
+Plan and EPIC IDs are allocated ONLY through the locked allocator subcommand:
 
-Pre-allocation (e.g., for interim docs in `/aid-plan`) follows the same procedure —
-the counter is incremented at Step 1, not deferred to plan completion. If the plan
-is aborted, the ID is "consumed" (counter is not rolled back). This prevents
-collisions between concurrent sessions.
+```bash
+new_plan_id=$(bash {plugin_path}/scripts/aid-fsm.sh alloc plan-id)   # prints e.g. P075
+new_epic_id=$(bash {plugin_path}/scripts/aid-fsm.sh alloc epic-id)   # prints e.g. E-001
+```
+
+The allocator takes `counter.yaml.lock` (sidecar flock, 5s timeout, fail closed),
+increments the matching counter line, and writes back atomically — two concurrent
+allocations can never mint the same ID. It prints ONLY the new ID on stdout; capture
+it directly. **Manual read-increment-write edits of `counter.yaml` are FORBIDDEN
+during any concurrent activity** (a second session, a background pipeline, a
+worktree run) — they are exactly the race the allocator exists to close. Counter
+*annotations* (the trailing comments on the `plan:`/`epic:` lines) remain a
+human/agent activity: the allocator changes the number, never the annotation.
+
+Pre-allocation (e.g., for interim docs in `/aid-plan`) uses the same allocator call —
+the ID is minted at Step 1, not deferred to plan completion. If the plan is aborted,
+the ID is "consumed" (the counter is not rolled back). This prevents collisions
+between concurrent sessions.
 
 - Run file: `R-005-1_4-1-gui-foundation.md` — branch: `run/R-005-1_4-1-gui-foundation`
 - Frontmatter: `id: R-005-1_4-1`, `epic_id: E-005-1_4`
@@ -277,7 +288,7 @@ For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-08-06
 
 ## Plan-boundary note
 

@@ -15,6 +15,7 @@
 #   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 #   aid-fsm.sh promote-check <check_name> <state_file>
 #   aid-fsm.sh check-promotion-candidates <state_file>
+#   aid-fsm.sh alloc plan-id | alloc epic-id     # locked counter.yaml allocation (P074 Step 3)
 
 set -euo pipefail
 
@@ -6464,6 +6465,102 @@ cmd_queue_revalidate() {
   queue_revalidate "$epic_id" "$@"
 }
 
+# ─── P074 Step 3: locked counter allocation ─────────────────────────────
+# cmd_alloc — `aid-fsm.sh alloc plan-id` / `aid-fsm.sh alloc epic-id`
+#
+# WHY: counter.yaml was the last unprotected shared file in the state layer —
+# no script wrote it; skills/run-management.md instructed the agent to
+# read-increment-write with no lock, so two concurrent sessions could mint the
+# same ID. This subcommand makes allocation a locked CLI operation: it takes
+# `<state_root>/.aid-o/config/counter.yaml.lock` (sidecar flock via
+# lib/aid-lock.sh, 5s timeout, fail closed), increments the matching counter
+# line, and writes back atomically (mktemp + mv in the counter's own dir).
+#
+# CONTRACT:
+#   - Prints ONLY the new ID on stdout (`P<NNN>` / `E-<NNN>`; %03d minimum
+#     width, so the counter at 999 naturally emits P1000 — no three-digit
+#     assumption). All diagnostics go to stderr.
+#   - Only the digits on the matching `^plan:` / `^epic:` line change; every
+#     comment byte — including the long historical annotation trailing the
+#     `plan:` value — is preserved verbatim. Annotations remain a human/agent
+#     activity (documented in skills/run-management.md); the allocator changes
+#     the number, never the annotation.
+#   - Missing counter.yaml: refuse with "run /aid-init first" — NEVER invent
+#     a counter file (an invented counter restarts at 0 and collides with
+#     every existing ID).
+#   - The counter lives under aid_state_root (P074 Step 1), so an allocation
+#     from inside a linked worktree increments the PRIMARY checkout's counter.
+cmd_alloc() {
+  local kind="${1:-}"
+  local key="" prefix=""
+  case "$kind" in
+    plan-id) key="plan"; prefix="P" ;;
+    epic-id) key="epic"; prefix="E-" ;;
+    *)
+      echo "Usage: aid-fsm.sh alloc plan-id | alloc epic-id" >&2
+      exit 1 ;;
+  esac
+
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+
+  local root
+  root="$(aid_state_root)" || exit 2
+  local counter="${root}/.aid-o/config/counter.yaml"
+  if [[ ! -f "$counter" ]]; then
+    echo "ERROR: alloc ${kind}: ${counter} not found — run /aid-init first" >&2
+    exit 1
+  fi
+
+  local lock_path="${counter}.lock"
+  if ! aid_lock_acquire "$lock_path" 5; then
+    # aid_lock_acquire already named the lock path and the holder pid recorded
+    # in the lock file on its own stderr line; this adds the operator action.
+    echo "ERROR: alloc ${kind}: could not acquire ${lock_path} within 5s — a concurrent allocation likely holds it (holder pid is recorded in the lock file); retry once it finishes" >&2
+    exit 1
+  fi
+  local fd="$AID_LOCK_FD"
+
+  local line current
+  line="$(grep -m1 -E "^${key}:" "$counter" || true)"
+  if [[ -z "$line" ]]; then
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: no '${key}:' line in ${counter} — run /aid-init first" >&2
+    exit 1
+  fi
+  # Value must be a bare integer followed only by whitespace or a #comment —
+  # anything else (e.g. "74not-an-integer") fails closed instead of being
+  # silently truncated-and-rewritten.
+  current="$(sed -nE "s/^${key}:[[:space:]]*([0-9]+)[[:space:]]*(#.*)?\$/\1/p" <<<"$line")"
+  if [[ -z "$current" ]]; then
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: malformed counter line (non-integer value): ${line}" >&2
+    exit 1
+  fi
+  local next=$((current + 1))
+
+  # Atomic write preserving every comment byte: sed rewrites ONLY the digits
+  # on the matching line into a temp copy in the SAME directory, then mv
+  # replaces the file in one rename.
+  local tmp
+  if ! tmp="$(mktemp "${counter}.tmp.XXXXXX")"; then
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: mktemp failed next to ${counter}" >&2
+    exit 1
+  fi
+  if ! sed -E "s/^(${key}:[[:space:]]*)[0-9]+/\1${next}/" "$counter" > "$tmp"; then
+    rm -f "$tmp"
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: failed to write updated counter" >&2
+    exit 1
+  fi
+  chmod --reference="$counter" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$counter"
+  aid_lock_release "$fd"
+
+  printf '%s%03d\n' "$prefix" "$next"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -6485,6 +6582,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;
     queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
+    alloc)                      shift; cmd_alloc "$@" ;;   # alloc plan-id | alloc epic-id (P074 Step 3)
     # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the
     # init advisory + docs reference actually exists on aid-fsm.sh.
     plan-reconcile)             shift
@@ -6500,7 +6598,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id> [args...]" >&2
       exit 1 ;;
   esac
 fi

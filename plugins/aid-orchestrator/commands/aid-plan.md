@@ -59,7 +59,8 @@ Interactive 9-step brainstorming flow — collaborate with PM to explore an idea
 2. If topic provided: use as brainstorming seed; if empty: ask PM
 3. Read `skills/brainstorming.md` for process rules
 4. Detect PM's language → conversation follows PM's language
-5. **Create interim document** — allocate plan ID (P{NNN} from counter.yaml) and write
+5. **Create interim document** — allocate plan ID via `bash {plugin_path}/scripts/aid-fsm.sh alloc plan-id`
+   (locked; prints the new P{NNN} — never hand-edit counter.yaml) and write
    `.aid-o/work/interim-P{NNN}.md` with topic, project context, and PM's initial input.
    This doc persists full conversation detail across context window boundaries.
 
@@ -644,7 +645,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-06
 
 ## Plan mode
 
