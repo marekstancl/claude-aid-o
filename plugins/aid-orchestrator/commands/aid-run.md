@@ -455,7 +455,50 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state
 - **`--auto` replaces `/aid-first-aid`** — same autonomous behavior, integrated flag
 - **`--resume` reads fsm-state.yaml** — picks up from last known state after crash/interrupt (legacy `state.yaml` still accepted as fallback)
-- If `$ARGUMENTS` is empty → auto-detect: find single active EPIC or list for selection
+- If `$ARGUMENTS` is empty → **auto-detect over plan streams**, never "the single
+  active EPIC". Read `.aid-o/work/plan-state/*/plan-state.yaml` (phase +
+  `worktree_path`) and `.aid-o/work/active-runs.json` (the map keyed by
+  `epic_id`, carrying `plan_id`, `state`, `branch`) from the state root — the
+  same reads `/aid-status` documents as recipes `plan-rows` / `plan-epics`:
+  - **Zero active plans** — no plan-state entry outside PLAN_MERGING / CLOSED /
+    ABORTED / ROLLED_BACK. Do not start anything. List the plans available in
+    `.aid-o/plans/` and suggest `/aid-plan` or an explicit `/aid-run <epic-id>`.
+  - **One active plan** — today's behaviour, unchanged: pick that stream's next
+    actionable EPIC and proceed (still confirming the target with the PM as
+    before).
+  - **Two or more active plans** — never guess. Print a **named selection list**,
+    one row per active plan in plan-id order: plan id, lifecycle phase, worktree
+    path (with `missing!` when recorded but absent), and the plan's **next
+    actionable EPIC**. Ask the PM which stream to run and wait; `/aid-run
+    <epic-id>` skips the question entirely. Example:
+
+    ```
+    Two active plans — which stream?
+      1) P074 — EPIC_INTEGRATION  worktree .aid-worktrees/plan-P074  next: E-074-2_3  [READY]
+      2) P073 — PLAN_GATES        worktree .aid-worktrees/plan-P073 missing!  next: E-073-4_4  [queue:pending, 1 dep(s) unverified]
+    ```
+  - **"Next actionable EPIC" is one shared, deterministic rule** — defined once
+    in `commands/aid-status.md` ("Next actionable EPIC" + recipe `next-epic`)
+    and used verbatim here, so `/aid-status` and `/aid-run` never name different
+    EPICs for the same plan:
+    1. The plan's entries in `active-runs.json` whose `state` is `READY`,
+       `EXECUTE` or `GATES`, **sorted by `epic_id`, lowest first**. A JSON
+       object's key order is not an ordering and must never be treated as one.
+    2. Otherwise the queue candidate: the first entry **in queue file order**
+       belonging to the plan whose normalized status is `pending` (legacy
+       `queued` reads as `pending`) or `blocked` — the exact claimability test
+       `queue_claim_next` uses (`scripts/lib/aid-queue-write.sh`). It is shown
+       as a candidate with its unverified `depends_on` count, because the full
+       eligibility test includes a live `git merge-base --is-ancestor` check per
+       dependency that only `queue_claim_next` performs — and that function
+       CLAIMS (writes `running`/`blocked`), so selection must not call it. The
+       claim happens when the run actually starts; a candidate can still turn
+       out blocked there, and that is reported, not guessed at selection time.
+    3. Otherwise `(none)`.
+  - A plan whose recorded worktree is missing stays selectable, but the run is
+    refused after selection with the repair line
+    (`plan-state <id> --recreate-worktree --reason`) — selection reports state,
+    it does not repair it.
 - Pipeline references: `pipeline.md §4 EXECUTE` for dispatch, `§5 GATES` for gate execution
 
 ### `--streamlined` mode

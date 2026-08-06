@@ -23,6 +23,29 @@ does not boot, has no real consumer, or does not deliver what the plan promised.
 - **`EPIC-id | git-range`** — an explicit EPIC to review, or a git range
   (e.g. `HEAD~3..HEAD`) to scope the diff.
 
+**Which tree the diff is taken in.** "The current branch's diff" means the
+branch of the tree the *work* lives in, which is not always the tree you invoke
+from. When the target belongs to a plan whose
+`.aid-o/work/plan-state/<plan_id>/plan-state.yaml` records a `worktree_path`,
+take the diff **in that plan worktree** (`git -C <resolved worktree path> diff
+…`) — the primary checkout is on another branch and would yield a diff of
+someone else's stream, or an empty one.
+
+**Resolve the recorded path before using it.** `worktree_path` is normally
+stored RELATIVE (e.g. `.aid-worktrees/plan-P901`), and a relative path in
+`git -C` resolves against the caller's cwd — so from `primary/src/`, or from
+another worktree, the same recording either reports an existing worktree as
+missing or targets a different directory entirely. Resolve it first, using the
+same probe rule `/aid-status` documents for its `missing!` marker: a relative
+`worktree_path` is joined onto the **state root** (the primary checkout,
+`scripts/lib/aid-roots.sh` → `aid_state_root`), an absolute one is used
+verbatim. Probe the resolved path, then pass the resolved path to `git -C`. Two concurrent plans mean two worktrees, so name the
+tree explicitly in the dispatch instead of relying on cwd. If the recorded
+worktree is missing on disk, say so and stop — do not silently fall back to the
+primary checkout, which is exactly how a review of the wrong tree passes.
+Plans with no recorded `worktree_path` (legacy streams) keep today's behaviour:
+the diff is taken where the command runs.
+
 ## What it does
 
 1. **Identify the target.** Resolve the implementation from the current session
@@ -146,4 +169,4 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
   `/aid-verify-implementation` is the manual DONE gut-check the PM fires by hand
   on work that already claims to be complete.
 
-**Last Updated:** 2026-06-28
+**Last Updated:** 2026-08-06
