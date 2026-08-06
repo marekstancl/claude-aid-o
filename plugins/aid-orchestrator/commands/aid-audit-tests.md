@@ -130,6 +130,15 @@ parser's own project-root validation load-bearing rather than advisory.
    the path here previously named a top-level script that does not exist)
    checks every command against
    `aid_test_audit_check_allowed` (Step 13) before it ever reaches `aid-job.sh`.
+4b. **Re-measure what the flat deadline censored.** After the measure pass,
+   every unit whose job ended `timed_out` gets exactly ONE retry at 4× the
+   deadline (bounded by remaining budget). A flat 300s cap censored the six
+   most expensive suites of a real portfolio twice — their true cost stayed
+   unknown across two full audits, which turned section 4 of the report into
+   a list of question marks. One bounded retry converts most of those into
+   real numbers; whatever still times out is reported as a lower bound with
+   the retry recorded.
+
 5. In `measure`/`full` mode, decide what owes a **cost profile** and produce it.
    Both halves are scripted, because "was that slow suite ever diagnosed?" must
    be answerable from the artifacts rather than from what the controller

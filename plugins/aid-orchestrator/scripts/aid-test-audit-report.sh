@@ -75,6 +75,8 @@ disp = []
 for f in glob.glob(f"{D}/agents/*.json"):
     disp += jload(f, {}).get("dispositions") or []
 findings = jload(f"{D}/consolidated-findings.json", {}).get("findings", [])
+scan = jload(f"{D}/content-scan.json", {})
+sc = scan.get("checks", {})
 
 cat_units, cat_safe = [], set()
 try:
@@ -259,15 +261,47 @@ else:
 if censored:
     H.append(f'<tr><td><b>Obří sady</b></td><td>{len(censored)}× utnuto — nejdřív doměřit, pak dělit</td>'
              f'<td class="num">neznámo</td><td>nutné doměřit</td></tr>')
-dupe_f = [f for f in findings if "duplic" in (f.get("category") or "")]
-if dupe_f:
-    H.append(f'<tr><td><b>Duplicitní běhy</b></td><td>{len(dupe_f)} nález(ů) — detail v sekci 6</td>'
-             f'<td class="num">viz nálezy</td><td>z auditu</td></tr>')
+ovl = sc.get("gate_overlap", [])
+if ovl:
+    ex = ovl[0]
+    H.append(f'<tr><td><b>Dvojité běhy bran</b></td>'
+             f'<td>{len(ovl)} kandidátů — např. <code>{esc(ex.get("file","?").split("/")[-1])}</code> '
+             f'běží pod {esc(ex.get("gate_direct"))} i {esc(ex.get("gate_pool"))}</td>'
+             f'<td class="num">až celé druhé spuštění</td><td>mechanický sken</td></tr>')
+elif scan:
+    H.append('<tr><td><b>Dvojité běhy bran</b></td><td class="empty">sken žádný překryv nenašel</td>'
+             '<td class="num">0</td><td>mechanický sken</td></tr>')
+else:
+    H.append('<tr><td><b>Dvojité běhy bran</b></td><td class="empty">content-scan.json chybí — '
+             'sken tento běh neproběhl</td><td class="num">—</td><td>—</td></tr>')
 H.append('</table></div>')
 H.append('<p class="legend">Páka bez čísla není zamlčená — má u sebe napsáno, proč číslo zatím neexistuje.</p>')
 
 # 6 — kvalita
 H.append(sec("6 · Kvalita", "Co o testech víme z jejich obsahu"))
+if scan:
+    H.append('<div class="tablewrap"><table><tr><th>Mechanická kontrola</th><th class="num">Nálezů</th><th>Detail</th></tr>')
+    dup = sc.get("duplicate_test_cases", [])
+    if dup:
+        d0 = dup[0]
+        H.append(f'<tr><td><span class="pill info">duplicitní testy</span></td><td class="num">{len(dup)} dvojic</td>'
+                 f'<td>např. {d0["shared_cases"]}× shodný test: <code>{esc(d0["file_a"].split("/")[-1])}</code> ↔ '
+                 f'<code>{esc(d0["file_b"].split("/")[-1])}</code></td></tr>')
+    else:
+        H.append('<tr><td><span class="pill ok">duplicitní testy</span></td><td class="num">0</td><td class="dim">žádná shoda názvů napříč soubory</td></tr>')
+    wk = sc.get("weak_oracle", [])
+    real_wk = [w for w in wk if not w.get("likely_legitimate")]
+    H.append(f'<tr><td><span class="pill {"warn" if real_wk else "ok"}">slabá orákula</span></td>'
+             f'<td class="num">{len(real_wk)}{" (+" + str(len(wk)-len(real_wk)) + " validátorů, kde je exit kód legitimní)" if len(wk)>len(real_wk) else ""}</td>'
+             f'<td>{esc(", ".join(w["file"].split("/")[-1] for w in real_wk[:3])) or "—"}</td></tr>')
+    unref = sc.get("unreferenced_tests", [])
+    H.append(f'<tr><td><span class="pill {"crit" if unref else "ok"}">nespouštěné soubory</span></td>'
+             f'<td class="num">{len(unref)}</td>'
+             f'<td>{esc(", ".join(u["file"].split("/")[-1] for u in unref[:3])) or "každý soubor na disku někdo spouští"}</td></tr>')
+    H.append('</table></div>')
+else:
+    H.append('<p class="empty">Mechanický sken obsahu tento běh neproběhl (content-scan.json chybí) — '
+             'duplicity, orákula a nespouštěné soubory nejsou ověřeny.</p>')
 if findings:
     H.append('<div class="tablewrap"><table><tr><th>Kategorie</th><th class="num">Nálezů</th><th>Nejzávažnější příklad</th></tr>')
     sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}

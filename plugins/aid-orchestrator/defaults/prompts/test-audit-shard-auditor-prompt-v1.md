@@ -154,6 +154,27 @@ later audit propose it properly.
   quarantine, xfail that now passes: each is a finding with a proposal, because
   they cost collection time and give false comfort.
 
+## Depth over coverage — the sampling rule
+
+Your budget cannot deeply inspect every assigned unit, and skimming all of them
+produces mass "keep — unproved": a real owner watched 176 of 181 units get that
+label twice and correctly called the result worthless. So:
+
+**Pick a DEEP SAMPLE** — the larger of 5 units or 10 % of your shard —
+prioritized by: (1) measured cost, (2) file size, (3) cluster representatives
+(several files exercising the same production script), (4) anything the
+mechanical content scan flagged. For sampled units do the real work: read the
+whole file, name the behaviour, attempt falsification, compare against
+neighbours for duplication, attach proposals.
+
+Units outside the sample keep `keep` + `falsification: unproved` — the report
+counts those as **NOT EXAMINED**, never as health, so abstaining there is
+honest. Abstaining on the sample is not.
+
+**Name your sample.** Emit one finding with category `deep_sample` listing the
+units you actually inspected, so the next round samples elsewhere and the
+examined count grows monotonically instead of resetting.
+
 ## Output contract
 
 **`evidence_refs` are BARE artifact paths, schema-enforced.** `agents/1-shard.json`

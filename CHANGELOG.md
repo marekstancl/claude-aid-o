@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.74.0] — 2026-08-06
+
+> The report page had sections the audit collected no data for: duplicates,
+> weak oracles, gate double-runs had been found exactly once, by hand, after
+> the owner asked where they were. The lesson of the whole week, applied to
+> content: what can be computed is computed, every run, and depth is never
+> traded for the illusion of coverage.
+
+### Added
+- **`aid-test-content-scan.sh` — deterministic content checks in every audit.** Duplicate test-case names across files, weak oracles (≥80 % bare exit-code asserts, validator suites marked legitimate rather than hidden), gate overlap candidates (a file reachable from a direct gate and a pool gate — the double-run cost), and test files no inventory unit references. Runs at finalize with no LLM involved; the report's quality and levers sections consume it, so they are never a template over a void. On this repository it mechanically reproduced every hand-made finding: both duplicate pairs, all four weak oracles, the fsm double-run and the pool overlap.
+
+### Changed
+- **Depth over coverage — the sampling rule for shard analysts.** Skimming every assigned unit produced 176 of 181 "keep — unproved" twice, and the owner correctly called that worthless. Each analyst now deep-inspects a named sample (the larger of 5 units or 10 % of the shard, prioritized by cost, size, cluster representatives and content-scan flags), emits a `deep_sample` finding naming what it actually read, and abstains honestly on the rest — which the report counts as NOT examined. The examined count grows monotonically across rounds instead of resetting.
+- **Censored measurements get one bounded retry.** A flat 300 s deadline censored the six most expensive suites across two full audits, leaving the portfolio's true cost unknown. Every timed-out unit is re-measured once at 4× the deadline, bounded by remaining budget; what still times out is reported as a lower bound with the retry recorded.
+
 ## [2.73.0] — 2026-08-06
 
 > Four days of audits produced fragments — a count here, a cost there, each
