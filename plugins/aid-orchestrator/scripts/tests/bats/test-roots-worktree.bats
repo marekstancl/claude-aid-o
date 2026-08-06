@@ -24,7 +24,7 @@
 # plan-close-check, golden sequence) therefore runs with `3>&-` so no child
 # of the AID script chain can ever hold bats' report fd. After any edit to
 # this file, verify the full result count:
-#   bats --tap test-roots-worktree.bats | grep -cE '^(ok|not ok)'   # == plan count (currently 26)
+#   bats --tap test-roots-worktree.bats | grep -cE '^(ok|not ok)'   # == plan count (currently 28)
 
 load test-helpers.bash
 
@@ -525,6 +525,83 @@ EOF
   layout_b="$(cd "$TEST_TMPDIR/b" && find .aid-o -type f | sort)"
   [ -n "$layout_a" ]
   [ "$layout_a" = "$layout_b" ]
+}
+
+# ─── lifecycle commands (increment-step / done-advance) from the worktree ─
+
+# _mk_run <primary> <epic_id> <run_id> — a minimal live run under the PRIMARY
+# .aid-o: evidence dir, fsm-state.yaml and a seeded timeline.
+_mk_run() {
+  local primary="$1" epic="$2" run="$3" ev
+  ev="$primary/.aid-o/work/evidence/${epic}/${run}"
+  mkdir -p "$ev"
+  cat > "$ev/fsm-state.yaml" <<EOF
+epic_id: ${epic}
+run_id: ${run}
+state: DONE
+done_phase: review
+current_step: 0
+total_steps: 2
+base_commit: HEAD
+branch: p074/wt
+pm_decision: merge
+streamlined_mode: false
+EOF
+  printf '{"ts":"2026-06-23T00:00:00Z","event":"run_started"}\n' > "$ev/timeline.jsonl"
+  printf '%s\n' "$ev"
+}
+
+@test "done-advance review release --force from a worktree writes waiver + audit-log + compliance under the PRIMARY .aid-o (tripwire green)" {
+  # The EPIC-review MAJOR: the forced release edge derived .aid-o and
+  # project_root from \$PWD, so every artifact it produces (the waiver, the
+  # cross-EPIC audit log, compliance.json) forked into a worktree-local
+  # workspace — splitting exactly the state the shared resolver centralizes.
+  _mk_primary "$TEST_TMPDIR/primary"
+  _mk_worktree "$TEST_TMPDIR/primary" "$TEST_TMPDIR/wt"
+  _plant_tripwire "$TEST_TMPDIR/wt"
+  local primary ev
+  primary="$(_phys "$TEST_TMPDIR/primary")"
+  ev="$(_mk_run "$primary" E-905-1_1 R-905)"
+
+  run bash -c "cd '$TEST_TMPDIR/wt' && '$FSM' done-advance review release '$ev/fsm-state.yaml' \
+    --force --reason 'worktree root-migration regression test for the forced release edge'" 3>&-
+  [ "$status" -eq 0 ]
+
+  # The phase actually advanced...
+  grep -q '^done_phase: release' "$ev/fsm-state.yaml"
+  # ...and all three PM-facing artifacts landed in the PRIMARY workspace.
+  ls "$ev"/waiver-review-release-*.json >/dev/null
+  [ -f "$primary/.aid-o/work/audit-log.jsonl" ]
+  grep -q 'fsm_force_override' "$primary/.aid-o/work/audit-log.jsonl"
+  [ -f "$ev/compliance.json" ]
+  # The tripwire FILE is still a file — nothing mkdir'd a worktree .aid-o.
+  [ -f "$TEST_TMPDIR/wt/.aid-o" ]
+  [ ! -d "$TEST_TMPDIR/wt/.aid-o" ]
+}
+
+@test "increment-step --force from a worktree writes its ledger, waiver and audit entry under the PRIMARY .aid-o (tripwire green)" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  _mk_worktree "$TEST_TMPDIR/primary" "$TEST_TMPDIR/wt"
+  _plant_tripwire "$TEST_TMPDIR/wt"
+  local primary ev
+  primary="$(_phys "$TEST_TMPDIR/primary")"
+  ev="$(_mk_run "$primary" E-906-1_1 R-906)"
+  sed -i 's/^state: DONE/state: EXECUTE/' "$ev/fsm-state.yaml"
+  # Step-verify evidence lives ONLY in the primary workspace: the ledger row
+  # below can be written at all only if increment-step READ it from there.
+  printf 'idempotency_token: TOK-906-0\nstep_id: S0\nplan_step_hash: h0\nreviewed_commit: c0\n' \
+    > "$ev/step-0-verify.md"
+
+  run bash -c "cd '$TEST_TMPDIR/wt' && '$FSM' increment-step '$ev/fsm-state.yaml' \
+    --force --reason 'worktree root-migration regression test for the forced step advance'" 3>&-
+  [ "$status" -eq 0 ]
+
+  grep -q '^current_step: 1' "$ev/fsm-state.yaml"
+  grep -q 'TOK-906-0' "$ev/step-transition-ledger.jsonl"
+  ls "$ev"/waiver-step-0-step-1-*.json >/dev/null
+  grep -q 'fsm_force_override' "$primary/.aid-o/work/audit-log.jsonl"
+  [ -f "$TEST_TMPDIR/wt/.aid-o" ]
+  [ ! -d "$TEST_TMPDIR/wt/.aid-o" ]
 }
 
 # ─── guard grep: no unresolved literals sneak back in ────────────────────

@@ -3,28 +3,11 @@
 # AID Orchestrator — version bump check before push
 # Blocks push if feat:/fix: commits exist since last tag without version bump.
 #
-# ── Worktree-safe state root (P074 Step 2 — commented, ready to use) ────────
-# This hook currently reads NO `.aid-o` paths at all: it works purely from git
-# refs/tags/log, which are worktree-safe by construction, so no resolver is
-# wired in and there is NO behavioural change here. But the hook lives in the
-# COMMON .git/hooks and fires from every linked worktree, where `$PWD`-relative
-# `.aid-o` reads MISS (`.aid-o/` is gitignored and exists only in the PRIMARY
-# checkout). Any FUTURE `.aid-o` read added to this hook must therefore start
-# from the resolved state root, not $PWD. Uncomment the helper below and prefix
-# `.aid-o` paths with `"$_AID_ROOT/"` — it is a deliberate tiny COPY of the
-# plugin lib resolver (scripts/lib/aid-roots.sh `aid_state_root`, minus
-# caching; consumer-repo hooks cannot know the plugin cache path, so they
-# cannot source the lib). Falls back to $PWD when git rev-parse fails
-# (pre-`--path-format` git) or no `.aid-o` exists at the derived root.
-#
-#   _aid_state_root() {
-#     local _common _root
-#     _common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-#     _root="${_common%/.git}"
-#     [ -n "$_root" ] && [ -d "$_root/.aid-o" ] || _root="$PWD"
-#     printf '%s\n' "$_root"
-#   }
-#   _AID_ROOT="$(_aid_state_root)"
+# This hook reads NO `.aid-o` paths — it works purely from git refs/tags/log,
+# worktree-safe by construction. It fires from every linked worktree (hooks
+# live in the COMMON .git/hooks), where `$PWD`-relative `.aid-o` reads would
+# MISS, so any `.aid-o` read added here must resolve the state root first —
+# copy the `_aid_state_root` helper from the pre-commit hook.
 
 # ── P068 E-068-1_2 Step 5: plan/* and task/* are EXEMPT ─────────────────────
 # This guard blocks any push carrying feat:/fix: commits since the last tag with
