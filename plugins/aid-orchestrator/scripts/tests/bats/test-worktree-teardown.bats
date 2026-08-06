@@ -24,7 +24,7 @@
 # FD-3 HYGIENE: every plan-FSM invocation runs with `3>&-` (a child holding
 # bats' report fd truncates the TAP stream), and every `run` goes through a
 # `bash -c` helper that can never exit 127 on fd 3. After any edit verify:
-#   bats --tap test-worktree-teardown.bats | grep -cE '^(ok|not ok)'   # == 13
+#   bats --tap test-worktree-teardown.bats | grep -cE '^(ok|not ok)'   # == 14
 
 load test-helpers.bash
 
@@ -202,6 +202,61 @@ _seed_aborted_plan() {
   [ -d "$(_wt P901)" ]
   _registered P901
   git -C "$ROOT" worktree unlock "$(_wt P901)" || true
+}
+
+@test "P074 Step 11: a HELD worktree lock DEFERS the destruction — the close completes, the worktree is left in place, and the recovery is named" {
+  # WHOLE-DIFF REVIEW, BLOCKER 3. Teardown used to treat a lock timeout as a
+  # warning and DELETE ANYWAY, on the reasoning that a terminal operation must
+  # never be blockable. That conflates two things: the CLOSURE is terminal and
+  # must always complete; the DESTRUCTION is cleanup and can wait. Proceeding
+  # to delete reopened the exact race the lock was added to close —
+  # `--recreate-worktree` holds this lock while it creates and records a
+  # replacement, so a concurrent close removed that tree mid-create and the
+  # repair finished by recording a path close had just deleted.
+  _mk_project
+  _seed_aborted_plan P901
+  local lock="$ROOT/.aid-o/work/plan-state/P901/plan-worktree.lock"
+  # A REAL second process holding the REAL lock, writing its pid exactly as
+  # aid_lock_acquire does, so the refusal can be checked to name the holder.
+  bash -c "flock -x 9; echo \$\$ > '$lock'; sleep 8" 9>>"$lock" 3>&- &
+  local holder=$!
+  run bash -c "sleep 1
+    cd '$ROOT'
+    export AID_PLAN_STATE_PROJECT_ROOT='$ROOT' AID_PLAN_MANIFEST_PROJECT_ROOT='$ROOT'
+    export AID_WORKTREE_LOCK_TIMEOUT_S=1
+    exec bash '$PLAN_FSM' plan-close P901 --project-root '$ROOT' \
+      --force --force-reason 'test: a close racing a worktree repair must not delete'" 3>&-
+  local pid_in_lock; pid_in_lock="$(tr -d '[:space:]' < "$lock" 2>/dev/null || true)"
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  # The CLOSURE completed — that is the part that must never block.
+  [ "$status" -eq 0 ]
+  [ -f "$ROOT/.aid-o/work/plan-state/P901/plan-close-complete" ]
+  # The DESTRUCTION was deferred, loudly, naming the holder and the cleanup.
+  [[ "$output" == *"TEARDOWN DEFERRED"* ]]
+  [[ "$output" == *"holder pid ${pid_in_lock}"* ]]
+  [[ "$output" == *"LEFT IN PLACE"* ]]
+  [[ "$output" == *"git worktree remove -f -f $(_wt P901) ; git worktree prune"* ]]
+  [[ "$output" == *"re-run plan-close"* ]]
+  [[ "$output" != *"Execution worktree torn down"* ]]
+  # And the report is TRUE: nothing was deleted, nothing was unregistered, and
+  # the pointer a concurrent repair may be rewriting was not cleared either.
+  [ -d "$(_wt P901)" ]
+  _registered P901
+  [ "$(_recorded P901)" = "$(_wt P901)" ]
+
+  # The deferral is reconcilable: with the lock free, a re-run finishes it.
+  # (The re-run carries the same --force as the first: this fixture's plan has
+  # no delivery report and no candidate binding, so plan-close revalidates the
+  # marker and refuses without it — nothing to do with the teardown.)
+  run _pf plan-close P901 --project-root "$ROOT" \
+    --force --force-reason "test: reconcile the teardown that was deferred while the lock was held"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Execution worktree torn down"* ]]
+  [ ! -d "$(_wt P901)" ]
+  ! _registered P901
+  [ -z "$(_recorded P901)" ]
 }
 
 @test "P074 Step 11: re-running plan-close on an ALREADY CLOSED plan retries the teardown it could not finish" {

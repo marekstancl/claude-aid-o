@@ -21,7 +21,7 @@
 # FD-3 HYGIENE: every pipeline invocation runs with `3>&-`; no `run` is handed
 # a path that might not exist.
 # After any edit, verify the result count:
-#   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 9
+#   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 12
 
 load test-helpers.bash
 
@@ -259,4 +259,100 @@ _incomplete() {
   # Exactly one epoch exists — no second archive was created.
   run bash -c "ls -d '$GEN'/*.superseded-* | sed 's/.*superseded-//' | sort -u | wc -l"
   [ "$output" = "1" ]
+}
+
+@test "a half-archived pair completed by a retry produces the FULL audit trail, not a silent rename" {
+  # WHOLE-DIFF REVIEW, BLOCKER 2. The recovery path renamed the remaining file
+  # and returned SUCCESS having written no forensic record, no timeline event
+  # and no audit-log entry — so "first call's second rename fails, operator
+  # retries" was a supported route to an UNAUDITED supersession, in the one
+  # mechanism whose enforcement surface IS the audit trail.
+  _incomplete
+  local epoch=1750000000
+  mv "$TX" "${TX}.superseded-${epoch}"
+
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' supersede-generation --plan '$PLAN' --reason '$REASON'" 3>&-
+  [ "$status" -eq 0 ]
+  [ -f "${AUTH}.superseded-${epoch}" ]
+
+  # Record 1 — the forensic artifact, under the ORIGINAL epoch, and the
+  # command printed the path it actually wrote.
+  local rec="$GEN/generation-superseded-${epoch}.json"
+  [ -f "$rec" ]
+  [[ "$output" == *"audit record: ${rec}"* ]]
+  [ "$(jq -r '.schema' "$rec")" = "aid-generation-supersede/v1" ]
+  [ "$(jq -r '.reason' "$rec")" = "$REASON" ]
+  [ "$(jq -r '.archived_transaction' "$rec")" = "${TX}.superseded-${epoch}" ]
+  [ "$(jq -r '.archived_authority' "$rec")" = "${AUTH}.superseded-${epoch}" ]
+  [ "$(jq -r '.transaction_sha256' "$rec")" = "$(sha256sum "${TX}.superseded-${epoch}" | awk '{print $1}')" ]
+  [ "$(jq -r '.generated | length' "$rec")" = "3" ]
+
+  # Records 2 and 3 — both carry the SAME epoch, so the trail is joinable.
+  run bash -c "grep -c '\"epoch\":\"${epoch}\"' '$GEN/timeline.jsonl'" 3>&-
+  [ "$output" = "1" ]
+  run bash -c "grep -c '\"epoch\":\"${epoch}\"' '$PROJ/.aid-o/work/audit-log.jsonl'" 3>&-
+  [ "$output" = "1" ]
+
+  # And it is IDEMPOTENT: a third call adds no duplicate records.
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' supersede-generation --plan '$PLAN' --reason '$REASON'" 3>&-
+  run bash -c "grep -c '\"epoch\":\"${epoch}\"' '$PROJ/.aid-o/work/audit-log.jsonl'" 3>&-
+  [ "$output" = "1" ]
+}
+
+@test "with the audit log unwritable, supersede REFUSES and archives nothing at all" {
+  # The other half of BLOCKER 2: the three audit writes were `|| true` while
+  # the success message still printed an audit-record path. An unrecordable
+  # supersession must not happen — and must not leave a half-archived pair
+  # that a later retry would then complete as if it had been audited.
+  _incomplete
+  rm -f "$PROJ/.aid-o/work/audit-log.jsonl"
+  # A directory where a file must be appended: unwritable for EVERY uid,
+  # including root (the shape test-worktree-teardown.bats' F8 case uses).
+  mkdir -p "$PROJ/.aid-o/work/audit-log.jsonl"
+
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' supersede-generation --plan '$PLAN' --reason '$REASON'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"audit-log.jsonl"* ]]
+  [[ "$output" == *"NOTHING was archived"* ]]
+  # Nothing moved, nothing half-moved, and no record claiming otherwise.
+  [ -f "$TX" ]
+  [ -f "$AUTH" ]
+  run bash -c "ls '$GEN'/*.superseded-* 2>/dev/null | wc -l" 3>&-
+  [ "$output" = "0" ]
+  run bash -c "ls '$GEN'/generation-superseded-*.json 2>/dev/null | wc -l" 3>&-
+  [ "$output" = "0" ]
+}
+
+@test "a HELD generation lock makes supersede refuse by name and archive NOTHING" {
+  # WHOLE-DIFF REVIEW, BLOCKER 1. supersede-generation never took the per-plan
+  # generation lock, so while a pipeline held it and was producing phases this
+  # command could rename that run's live transaction and authority out from
+  # under it: the generator then died on its next manifest update having
+  # already created EPIC files and queue entries no transaction records.
+  _incomplete
+  local lock="$GEN/transaction.json.lock"
+  # A REAL second process holding the REAL lock (the shape
+  # test-worktree-teardown.bats uses for the worktree lock), writing its pid
+  # exactly as aid_lock_acquire does so the refusal can name it.
+  bash -c "flock -x 9; echo \$\$ > '$lock'; sleep 8" 9>>"$lock" 3>&- &
+  local holder=$!
+  run bash -c "sleep 1
+    cd '$PROJ'
+    export AID_GEN_LOCK_TIMEOUT=1
+    exec bash '$PIPELINE' supersede-generation --plan '$PLAN' --reason '$REASON'" 3>&-
+  local pid_in_lock; pid_in_lock="$(tr -d '[:space:]' < "$lock" 2>/dev/null || true)"
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"a generation is in progress"* ]]
+  [[ "$output" == *"holder pid ${pid_in_lock}"* ]]
+  [[ "$output" == *"NOTHING was archived"* ]]
+  # It archived nothing and recorded nothing.
+  [ -f "$TX" ]
+  [ -f "$AUTH" ]
+  run bash -c "ls '$GEN'/*.superseded-* 2>/dev/null | wc -l" 3>&-
+  [ "$output" = "0" ]
+  run bash -c "ls '$GEN'/generation-superseded-*.json 2>/dev/null | wc -l" 3>&-
+  [ "$output" = "0" ]
 }

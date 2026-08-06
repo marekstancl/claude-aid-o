@@ -425,6 +425,12 @@ abandoned generation had already produced. **It deletes nothing** — removing
 EPIC files, branches or queue entries stays with `plan-rollback` and the
 queue-removal path.
 
+It takes the same per-plan generation lock the pipeline takes, so it refuses
+by name (`a generation is in progress for <plan_id> (holder pid N)`) while a
+generation for that plan is running, and archives nothing. It also refuses
+when the supersession cannot be recorded — the audit trail is what makes this
+command accountable, so an unrecordable archive is not performed.
+
 ## CP1 Mode Selection
 
 Risk classification runs automatically during CP1 before EPIC generation. It applies to any plan processed by `/aid-plan`.

@@ -1338,6 +1338,11 @@ _pfsm_plan_start_compensate() {
 # It also refuses to act on a recorded path OUTSIDE the repo root (F7's
 # defence in depth): removing "some registered worktree the state file names"
 # is precisely the damage a malformed record could otherwise cause.
+#
+# AND IT NEVER DELETES WITHOUT THE PER-PLAN WORKTREE LOCK. "Terminal
+# operations must complete" applies to the CLOSURE, not to the destruction:
+# on a lock timeout the closure still completes and the worktree is left in
+# place with a named recovery. See the lock block below.
 # ---------------------------------------------------------------------------
 _pfsm_teardown_plan_worktree() {
   local root="$1" plan_id="$2"
@@ -1355,17 +1360,49 @@ _pfsm_teardown_plan_worktree() {
     return 0
   fi
 
+  # ── the per-plan worktree lock, and what a TIMEOUT means (P074 whole-diff
+  #    review, BLOCKER 3) ────────────────────────────────────────────────────
   # Serialize against the audited repair (--recreate-worktree), which takes the
   # same lock: without it a recreate can add a worktree for a plan this close
-  # already tore down. Teardown must NEVER block a durable close, so a lock we
-  # cannot get downgrades to a warning and the teardown proceeds anyway.
+  # already tore down.
+  #
+  # The first cut downgraded a lock timeout to a warning and REMOVED THE TREE
+  # ANYWAY, reasoning that a terminal operation must never be blockable (the
+  # P082 lesson). The goal is right; the implementation reopened precisely the
+  # race the lock was added to close: `--recreate-worktree` holds this lock
+  # while it creates a replacement worktree and records it, so a concurrent
+  # close would delete the tree mid-create and the repair would then finish by
+  # recording a path that no longer exists.
+  #
+  # The two goals are only in conflict if you conflate them. CLOSURE is the
+  # terminal operation that must always complete; DESTRUCTION of the worktree
+  # is a cleanup that can safely wait. So on a timeout teardown MUTATES
+  # NOTHING — no removal, no prune of somebody else's in-flight registration,
+  # and not even the plan-state pointer (clearing it would erase the record a
+  # concurrent repair is in the middle of writing, and would hide the very
+  # path the operator now has to clean up by hand). It reports loudly, names
+  # the holder pid and the verbatim cleanup, and returns 0 so the close
+  # completes. Teardown is idempotent and re-runnable, so a later plan-close
+  # on the already-closed plan reconciles the leftovers.
   local wlock; wlock="$(_pfsm_plan_worktree_lock_path "$plan_id")"
   local wfd=""
-  if aid_lock_acquire "$wlock" "${AID_WORKTREE_LOCK_TIMEOUT_S:-10}" >/dev/null 2>&1; then
-    wfd="$AID_LOCK_FD"
-  else
-    echo "WARNING: teardown could not take the worktree lock ${wlock} for ${plan_id} — proceeding anyway (a close is terminal and never blocks). If a --recreate-worktree is running concurrently, re-run plan-close afterwards to reconcile." >&2
+  if ! aid_lock_acquire "$wlock" "${AID_WORKTREE_LOCK_TIMEOUT_S:-10}" >/dev/null 2>&1; then
+    local wholder; wholder="$(tr -d '[:space:]' < "$wlock" 2>/dev/null || true)"
+    [[ -n "$wholder" ]] || wholder="unknown"
+    echo "WARNING: worktree TEARDOWN DEFERRED for ${plan_id} — the per-plan worktree lock ${wlock} is held (holder pid ${wholder}) and did not free within ${AID_WORKTREE_LOCK_TIMEOUT_S:-10}s. The plan is closed regardless; NOTHING was deleted and no state was changed, because the likely holder is 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree' creating a replacement tree right now, and removing it mid-create is exactly the corruption this lock prevents." >&2
+    # Say only what is true: under contention the tree may not exist YET (a
+    # recreate is mid-flight), and the plan may never have had a pointer.
+    local wstate="not present right now — a concurrent repair may be creating it"
+    if [[ -e "$wt" ]] || _pfsm_worktree_registered "$root" "$wt"; then
+      wstate="still on disk and/or still registered with git"
+    fi
+    echo "  The execution worktree ${wt} was LEFT IN PLACE (${wstate}), and the plan-state pointer was left exactly as it is." >&2
+    echo "  Once the holder (pid ${wholder}) is finished, re-run plan-close (or plan-rollback) — the teardown is idempotent and will finish it." >&2
+    echo "  Or clean up by hand:" >&2
+    echo "  git worktree remove -f -f ${wt} ; git worktree prune" >&2
+    return 0
   fi
+  wfd="$AID_LOCK_FD"
 
   git -C "$root" worktree prune >/dev/null 2>&1 || true
 
