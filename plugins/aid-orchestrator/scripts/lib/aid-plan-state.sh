@@ -157,6 +157,8 @@
 _AID_PLAN_STATE_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${_AID_PLAN_STATE_LIBDIR}/aid-lock.sh"
+# shellcheck disable=SC1091
+source "${_AID_PLAN_STATE_LIBDIR}/aid-roots.sh"   # P074 Step 1 — state-root resolution
 
 AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S=10
 
@@ -273,7 +275,20 @@ _plan_state_require_deps() {
 }
 
 _plan_state_project_root() {
-  printf '%s' "${AID_PLAN_STATE_PROJECT_ROOT:-$(pwd)}"
+  # P074 Step 1: the dedicated env override stays, but passes through
+  # aid_canonicalize_project_root so an override pointing INTO a linked
+  # worktree collapses to the primary checkout instead of forking state.
+  # An override naming a directory that is NEITHER a repo root NOR carries an
+  # .aid-o workspace FAILS LOUDLY (return 2, resolver's message names both
+  # accepted forms) — a silent write to an arbitrary path is never allowed.
+  if [[ -n "${AID_PLAN_STATE_PROJECT_ROOT:-}" ]]; then
+    aid_canonicalize_project_root "$AID_PLAN_STATE_PROJECT_ROOT" || return 2
+    return 0
+  fi
+  # No override: the state root (primary checkout). Outside a git repository
+  # the historic $(pwd) fallback is kept so this layer stays unit-testable
+  # without a repository (see the header's design note).
+  aid_state_root 2>/dev/null || pwd
 }
 
 # _plan_state_dir <plan_id> — the per-plan runtime directory (not part of
@@ -281,12 +296,16 @@ _plan_state_project_root() {
 # matching this codebase's existing convention, e.g. test-cp1-ledger.bats's
 # own `_ledger_file` helper).
 _plan_state_dir() {
-  printf '%s/.aid-o/work/plan-state/%s' "$(_plan_state_project_root)" "$1"
+  local _psd_root
+  _psd_root="$(_plan_state_project_root)" || return 2
+  printf '%s/.aid-o/work/plan-state/%s' "$_psd_root" "$1"
 }
 
 # plan_state_path <plan_id> — the plan state file's canonical path.
 plan_state_path() {
-  printf '%s/plan-state.yaml' "$(_plan_state_dir "$1")"
+  local _psp_dir
+  _psp_dir="$(_plan_state_dir "$1")" || return 2
+  printf '%s/plan-state.yaml' "$_psp_dir"
 }
 
 _plan_ops_path() {

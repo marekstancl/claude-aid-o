@@ -31,6 +31,23 @@ source "${SCRIPT_DIR}/lib/common.sh"
 check_prerequisites
 
 # =============================================================================
+# P074 Step 1 — state-root resolution. Every .aid-o read/write in this file
+# AND every state path handed to a subprocess (aid-plan-to-epic / aid-epic-to-
+# json / aid-json-to-run / aid-queue-add / aid-generation-finalize) resolves
+# under aid_state_root, so a generation started inside a linked worktree
+# writes the PRIMARY checkout's workspace, never a forked one. The resolved
+# root is exported once as AID_PROJECT_ROOT so the entire child chain shares
+# the same canonical root as a belt-and-braces layer (children still resolve
+# through aid-roots.sh themselves).
+# =============================================================================
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+_aid_pipeline_state_root="$(aid_state_root)" \
+  || error_exit "not inside a git repository — AID needs a repo root" 2
+AID_PROJECT_ROOT="$_aid_pipeline_state_root"
+export AID_PROJECT_ROOT
+
+# =============================================================================
 # Parse CLI arguments
 # =============================================================================
 plan=""
@@ -183,14 +200,14 @@ fi
 [[ ! -f "$epic_template" ]] && error_exit "EPIC template not found: $epic_template. Run /aid-init to deploy templates." 2
 [[ ! -f "$plan_schema" ]]   && error_exit "Plan schema not found: $plan_schema" 2
 
-# Config paths (in the workspace, not the plugin)
-counter_yaml=".aid-o/config/counter.yaml"
-queue_yaml=".aid-o/config/queue.yaml"
+# Config paths (in the workspace, not the plugin) — state-root resolved (P074)
+counter_yaml="$(aid_state_path ".aid-o/config/counter.yaml")"
+queue_yaml="$(aid_state_path ".aid-o/config/queue.yaml")"
 
 # Ensure workspace directories exist
-mkdir -p ".aid-o/tasks" 2>/dev/null || error_exit "Cannot create .aid-o/tasks directory" 3
-mkdir -p ".aid-o/work/evidence" 2>/dev/null || error_exit "Cannot create .aid-o/work/evidence directory" 3
-mkdir -p ".aid-o/work/runs" 2>/dev/null || error_exit "Cannot create .aid-o/work/runs directory" 3
+mkdir -p "$(aid_state_path ".aid-o/tasks")" 2>/dev/null || error_exit "Cannot create .aid-o/tasks directory" 3
+mkdir -p "$(aid_state_path ".aid-o/work/evidence")" 2>/dev/null || error_exit "Cannot create .aid-o/work/evidence directory" 3
+mkdir -p "$(aid_state_path ".aid-o/work/runs")" 2>/dev/null || error_exit "Cannot create .aid-o/work/runs directory" 3
 mkdir -p "$(dirname "$queue_yaml")" 2>/dev/null || error_exit "Cannot create queue directory" 3
 
 # =============================================================================
@@ -354,8 +371,8 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
   [[ -z "$_pb_default_mode" ]] && { _pb_default_mode="legacy_epic_release_mode"; _pb_mode_reason="resolver_unavailable"; }
   if [[ "$_pb_default_mode" == "legacy_epic_release_mode" && "$_pb_mode_reason" == *"no_gate_profiles"* ]]; then
     echo "[INFO] plan_branch_unavailable: no_gate_profiles — $plan_id is created in legacy_epic_release_mode. Run the gate-profile bootstrap to enable the plan-final model." >&2
-    mkdir -p ".aid-o/work" 2>/dev/null \
-      && printf '{"plan_id":"%s","event":"plan_branch_unavailable","reason":"no_gate_profiles"}\n' "$plan_id" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
+    mkdir -p "$(aid_state_path ".aid-o/work")" 2>/dev/null \
+      && printf '{"plan_id":"%s","event":"plan_branch_unavailable","reason":"no_gate_profiles"}\n' "$plan_id" >> "$(aid_state_path ".aid-o/work/lifecycle-migration.log")" 2>/dev/null || true
   fi
 
   _lc_rc=0; aid_lifecycle_ensure_manifest "$plan_id" "." >/dev/null 2>&1 || _lc_rc=$?
@@ -405,8 +422,8 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
     # delivery. Message must NOT assert "legacy" — it may be a strict override.
     _lc_mode="legacy"; [[ "${AID_LIFECYCLE_MIGRATION:-}" == "1" ]] && _lc_mode="strict-override"
     echo "[WARN] lifecycle: no durable manifest for plan $plan_id (mode=$_lc_mode, rc=$_lc_rc) — proceeding in AUDITED migration mode; run 'aid-fsm.sh plan-reconcile $plan_id --apply' after delivery. (New plans use the plan template's 'lifecycle_strict: true' + the strict '**EPIC N:**' grammar for fail-closed guarantees.)" >&2
-    mkdir -p ".aid-o/work" 2>/dev/null \
-      && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
+    mkdir -p "$(aid_state_path ".aid-o/work")" 2>/dev/null \
+      && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> "$(aid_state_path ".aid-o/work/lifecycle-migration.log")" 2>/dev/null || true
   fi
 
   # The parent-plan state machine belongs exclusively to plan_branch mode.
@@ -418,7 +435,7 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
   # Only when a plan-branch plan has no state: an existing plan is never
   # migrated mid-run, and plan-start is a no-op guard rather than a
   # re-initialisation.
-  if [[ "$_pb_default_mode" == "plan_branch" && ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
+  if [[ "$_pb_default_mode" == "plan_branch" && ! -f "$(aid_state_path ".aid-o/work/plan-state/${plan_id}/plan-state.yaml")" ]]; then
     _ps_rc=0
     # P073 Step 11: pass the source plan through so plan-start can verify it is
     # committed and stamp its path. The pipeline's own preflight above already
@@ -444,9 +461,9 @@ for phase in $(seq 1 "$total_phases"); do
     --phase "$phase" \
     --total "$total_phases" \
     --epic-template "$epic_template" \
-    --output-dir ".aid-o/tasks" \
+    --output-dir "$(aid_state_path ".aid-o/tasks")" \
     --counter-yaml "$counter_yaml" \
-    --project-root "$(pwd)")"
+    --project-root "$_aid_pipeline_state_root")"
 
   # Extract epic_id from the generated filename
   epic_basename="$(basename "$epic_path")"
@@ -462,7 +479,7 @@ for phase in $(seq 1 "$total_phases"); do
   json_result="$("${SCRIPT_DIR}/aid-epic-to-json.sh" \
     --epic "$epic_path" \
     --schema "$plan_schema" \
-    --output-dir ".aid-o" \
+    --output-dir "$(aid_state_path ".aid-o")" \
     --plan-source "$plan")"
 
   # Extract plan_json path and run_id from the JSON manifest on stdout
@@ -490,7 +507,7 @@ for phase in $(seq 1 "$total_phases"); do
     # N-1, leaving the last graph to masquerade as evidence for the whole plan.
     # The plan-global source graph and C0 bridge remain at their own named
     # generation/ and c0/ paths respectively.
-    _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/generation/epics/${epic_id}/c0"
+    _c0_dir="$(aid_state_path ".aid-o/work/evidence/${_c0_plan_id}/generation/epics/${epic_id}/c0")"
     mkdir -p "$_c0_dir"
 
     # -------------------------------------------------------------------------
@@ -591,7 +608,7 @@ for phase in $(seq 1 "$total_phases"); do
   # -------------------------------------------------------------------------
   # Phase N.c: plan.json -> run.md
   # -------------------------------------------------------------------------
-  run_output_dir=".aid-o/work/runs/${run_id}"
+  run_output_dir="$(aid_state_path ".aid-o/work/runs/${run_id}")"
   mkdir -p "$run_output_dir" 2>/dev/null || true
 
   json_to_run_args=(
@@ -737,7 +754,7 @@ done
 # =============================================================================
 generation_receipt=""
 if [[ "$two_stage" == true ]]; then
-  _generation_dir=".aid-o/work/evidence/${plan_id}/generation"
+  _generation_dir="$(aid_state_path ".aid-o/work/evidence/${plan_id}/generation")"
   mkdir -p "$_generation_dir"
   _generation_manifest="$_generation_dir/generated-epics.json"
   _generation_tmp="${_generation_manifest}.tmp.$$"
@@ -753,7 +770,7 @@ if [[ "$two_stage" == true ]]; then
     _epic_path="$(jq -r '.epic_path' <<< "$_entry")"
     _plan_json_path="$(jq -r '.plan_json' <<< "$_entry")"
     _run_id="$(jq -r '.run_id' <<< "$_entry")"
-    _run_output_dir=".aid-o/work/runs/${_run_id}"
+    _run_output_dir="$(aid_state_path ".aid-o/work/runs/${_run_id}")"
     mkdir -p "$_run_output_dir"
     _j2r_args=(--plan-json "$_plan_json_path" --run-template "$run_template" --epic "$_epic_path" --output-dir "$_run_output_dir" --run-id "$_run_id" --generation-receipt "$generation_receipt")
     [[ "$streamlined" == true ]] && _j2r_args+=(--streamlined)

@@ -200,6 +200,14 @@ _pfsm_resolve_invoke_root() {
 # "the same lineage checks fail identically inside a linked worktree" (Edge
 # Case) actually reachable — a worktree invocation still sees the plan's real
 # manifest, not a trivially-empty one.
+#
+# P074 Step 1 CROSS-REFERENCE: this resolver's contract (common-dir state
+# root + the dogfood escape below) is EXTRACTED into the shared
+# `lib/aid-roots.sh` (`aid_state_root` / `aid_canonicalize_project_root`),
+# which the rest of the plugin sources. This private copy stays deliberately
+# (its argument plumbing predates the lib), but the two MUST NOT drift: any
+# behavioural change here must land in lib/aid-roots.sh too, and vice versa.
+# The worktree bats suite (test-roots-worktree.bats) golden-covers both.
 # ---------------------------------------------------------------------------
 _pfsm_resolve_project_root() {
   local probe_dir; probe_dir="$(_pfsm_resolve_invoke_root "${1:-}")"

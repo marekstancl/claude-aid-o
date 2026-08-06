@@ -22,6 +22,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# P074 Step 1 — shared invoke-root/state-root resolution. State paths
+# (.aid-o/...) resolve through aid_state_path/aid_state_root so an invocation
+# from a linked worktree reads and writes the PRIMARY checkout's workspace;
+# tree checks use aid_invoke_root.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
@@ -195,7 +201,12 @@ derive_timeline() {
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
   if [[ -n "$epic_id" && -n "$run_id" ]]; then
-    echo ".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+    # State-root resolved (P074 Step 1): best-effort contract preserved — when
+    # no root resolves at all (non-repo fixture dirs), the pre-P074
+    # cwd-relative path is kept so timeline logging still lands where it
+    # always did instead of silently disappearing.
+    local _dt_rel=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+    aid_state_path "$_dt_rel" 2>/dev/null || printf '%s\n' "$_dt_rel"
   fi
 }
 
@@ -206,7 +217,12 @@ derive_timeline() {
 # — a historical evidence directory must never act as an IMPLICIT pointer to
 # "the" active run; this file is the only EXPLICIT one.
 active_run_pointer_path() {
-  echo ".aid-o/work/active-run-pointer.json"
+  # State-root resolved (P074 Step 1) so a worktree invocation points at the
+  # PRIMARY checkout's pointer, never a forked one inside the worktree.
+  # Same legacy cwd-relative fallback as derive_timeline when no root
+  # resolves (non-repo fixture dirs).
+  aid_state_path ".aid-o/work/active-run-pointer.json" 2>/dev/null \
+    || printf '%s\n' ".aid-o/work/active-run-pointer.json"
 }
 
 # write_active_run_pointer <state_file> — (re)points the single active-run
@@ -1798,7 +1814,14 @@ check_preconditions() {
   run_dir="$(dirname "$state_file")"
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  # P074 Step 1 (review round 3): state-root resolved — advance-to-gates
+  # writes gates_report.json under the PRIMARY root, so the EXECUTE:GATES
+  # precondition must look for it there too, not under a worktree-local
+  # .aid-o. Same legacy cwd-relative fallback as derive_timeline for
+  # non-resolvable fixture cwds.
+  local evidence_dir
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
 
   case "${from}:${to}" in
     READY:EXECUTE)
@@ -2414,7 +2437,8 @@ cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local evidence_dir
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"
 
   # Phase 2 (P037) — parse optional named flags after 7 positional args.
   # Detect --plan <path> and --force in either order ($8/$9). Both are optional.
@@ -2445,11 +2469,11 @@ cmd_init() {
         local _cur_plan_prefix="P${_cur_plan_num}"
         if [[ -n "$_cur_plan_num" ]]; then
           local _mf _d
-          _mf="$(aid_manifest_path "$_cur_plan_prefix" ".")"
+          _mf="$(aid_manifest_path "$_cur_plan_prefix" "$(aid_state_root)")"
           if [[ -f "$_mf" ]]; then
             while IFS= read -r _d; do
               [[ -z "$_d" || "$_d" == "null" ]] && continue
-              if [[ "$(aid_plan_closure_state "$_d" ".")" != "closed" ]]; then _bplan="$_d"; break; fi
+              if [[ "$(aid_plan_closure_state "$_d" "$(aid_state_root)")" != "closed" ]]; then _bplan="$_d"; break; fi
             done < <(yq -r '.depends_on_plans[]' "$_mf" 2>/dev/null)
           fi
         fi
@@ -2710,7 +2734,7 @@ cmd_init() {
     _sup_json="$(dirname "$state_file")/plan.json"
     _sup_json_sha=""
     [[ -f "$_sup_json" ]] && _sup_json_sha="sha256:$(sha256sum "$_sup_json" | awk '{print $1}')"
-    _sup_dir="${project_root:-.}/.aid-o/work/plan-state"
+    _sup_dir="$(aid_state_path ".aid-o/work/plan-state")"
     for _r in "$_sup_dir"/supersede-"${_pb_plan_id}"-"${epic_id}"-*.json; do
       [[ -f "$_r" ]] || continue
       if [[ "$(jq -r '.plan_id // ""' "$_r" 2>/dev/null)" == "$_pb_plan_id" \
@@ -2747,11 +2771,11 @@ cmd_init() {
   # via the sanctioned --force override).
   if [[ "$force" != "true" && -n "$_cur_plan" ]]; then
     local _manifest _dep _dep_state
-    _manifest="$(aid_manifest_path "$_cur_plan" ".")"
+    _manifest="$(aid_manifest_path "$_cur_plan" "$(aid_state_root)")"
     if [[ -f "$_manifest" ]]; then
       while IFS= read -r _dep; do
         [[ -z "$_dep" || "$_dep" == "null" ]] && continue
-        _dep_state="$(aid_plan_closure_state "$_dep" ".")"
+        _dep_state="$(aid_plan_closure_state "$_dep" "$(aid_state_root)")"
         if [[ "$_dep_state" != "closed" ]]; then
           echo "PRECONDITION FAIL: ${_cur_plan} declares depends_on_plans: ${_dep}, which is not closed (state: ${_dep_state})." >&2
           echo "Close ${_dep} first (all required EPICs delivered + review-accepted), or override (audited):" >&2
@@ -2768,18 +2792,20 @@ cmd_init() {
   # Advisory (non-blocking): ONE actionable summary of plans that are delivered
   # but not yet reconciled, plus a count of legacy-unverifiable plans. Suppressed
   # in machine/CI mode. Never per-EPIC, never a hard block.
-  if [[ -z "${AID_CI:-}" && "${AID_QUIET:-}" != "1" && -d ".aid-o/plans" ]]; then
+  local _plans_dir
+  _plans_dir="$(aid_state_path ".aid-o/plans")"
+  if [[ -z "${AID_CI:-}" && "${AID_QUIET:-}" != "1" && -d "$_plans_dir" ]]; then
     local _pf _pid _pstate _unrec="" _legacy_n=0
     while IFS= read -r _pf; do
       _pid="$(basename "$_pf" | sed -E 's/^(P[0-9]+)-.*/\1/')"
       [[ "$_pid" =~ ^P[0-9]+$ ]] || continue
       [[ "$_pid" == "$_cur_plan" ]] && continue
-      _pstate="$(aid_plan_closure_state "$_pid" "." 2>/dev/null || echo unknown)"
+      _pstate="$(aid_plan_closure_state "$_pid" "$(aid_state_root)" 2>/dev/null || echo unknown)"
       case "$_pstate" in
         delivered-but-unreconciled) _unrec+=" ${_pid}";;
         legacy-unverifiable)        _legacy_n=$((_legacy_n+1));;
       esac
-    done < <(ls .aid-o/plans/P*-*.md 2>/dev/null)
+    done < <(ls "$_plans_dir"/P*-*.md 2>/dev/null)
     if [[ -n "$_unrec" ]]; then
       echo "ADVISORY: plan(s) delivered but not reconciled:${_unrec}. Reconcile with:" >&2
       echo "  aid-fsm.sh plan-reconcile <PNN> --apply" >&2
@@ -2805,7 +2831,8 @@ cmd_init() {
   # Timeline events for forensic visibility:
   #   fsm_branch_mismatch_detected (hard fail case)
   #   fsm_branch_unusual_detected  (warn case)
-  local timeline_path=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+  local timeline_path
+  timeline_path="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl")"
   mkdir -p "$(dirname "$timeline_path")"
 
   # ─── PRE-FLIGHT: Plugin-cache staleness guard — HARD STOP (P060 Step 5) ──
@@ -2896,8 +2923,11 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # still not have its own runtime metrics writes block `init`. Same
   # single-file, non-glob scoping as the two entries above (never a
   # directory-wide glob).
+  # P074 Step 1: the dirty guard is a TREE check — it must evaluate the tree
+  # the command runs in (aid_invoke_root), which inside a linked worktree is
+  # the worktree itself, never the primary checkout.
   local _dirty
-  _dirty="$(git status --porcelain --untracked-files=no \
+  _dirty="$(git -C "$(aid_invoke_root)" status --porcelain --untracked-files=no \
     | aid_ancillary_filter_porcelain --mode legacy4 || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
@@ -2916,13 +2946,15 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # Auto-recover execution.yaml if missing (P032 Step 1).
   # Empty-stacks fallback is harmless and idempotent — pre-deploy projects keep
   # their custom config (the [[ ! -f ... ]] guard ensures we never overwrite).
-  if [[ ! -f .aid-o/config/execution.yaml ]] && [[ -f "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh" ]]; then
+  local _exec_yaml_path
+  _exec_yaml_path="$(aid_state_path ".aid-o/config/execution.yaml")"
+  if [[ ! -f "$_exec_yaml_path" ]] && [[ -f "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh" ]]; then
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh"
     local -a _aid_stacks=()
     mapfile -t _aid_stacks < <(detect_stacks "$PWD")
-    if compose_execution_yaml "$PWD" ".aid-o/config/execution.yaml" "${_aid_stacks[@]}"; then
-      log_info "Lazy-created .aid-o/config/execution.yaml with stacks: ${_aid_stacks[*]:-none}"
+    if compose_execution_yaml "$PWD" "$_exec_yaml_path" "${_aid_stacks[@]}"; then
+      log_info "Lazy-created ${_exec_yaml_path} with stacks: ${_aid_stacks[*]:-none}"
     fi
   fi
 
@@ -3014,12 +3046,15 @@ EOF
   # reads the queue; it is deliberately NON-FATAL to init — a blocked/unresolved
   # dep is a queue-scheduling signal for the consumer (pipeline §12 / /aid-run
   # pre-start), not an init failure. Missing queue / no entry / no deps = no-op.
-  if [[ -f .aid-o/config/queue.yaml ]]; then
-    queue_revalidate "$epic_id" ".aid-o/config/queue.yaml" "$timeline_path" >/dev/null 2>&1 || true
+  local _queue_yaml_path
+  _queue_yaml_path="$(aid_state_path ".aid-o/config/queue.yaml")"
+  if [[ -f "$_queue_yaml_path" ]]; then
+    queue_revalidate "$epic_id" "$_queue_yaml_path" "$timeline_path" >/dev/null 2>&1 || true
   fi
 
   # Validate plan.json step content (warning only)
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local evidence_dir
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"
   local plan_json="${evidence_dir}/plan.json"
   if [[ -f "$plan_json" ]] && command -v python3 &>/dev/null; then
     local empty_steps
@@ -3206,7 +3241,13 @@ cmd_advance_to_gates() {
   current_state=$(yaml_field "$state_file" state)
   current_step=$(yaml_field "$state_file" current_step)
   total_steps=$(yaml_field "$state_file" total_steps)
-  evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  # P074 Step 1 (review round 2): the WHOLE advance-to-gates path chain —
+  # evidence_dir, plan.json, gates_report.json — resolves under the state
+  # root, so a worktree invocation hands the gate runner the PRIMARY paths.
+  # Same legacy cwd-relative fallback as derive_timeline for non-resolvable
+  # fixture cwds.
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
   timeline=$(derive_timeline "$state_file") || true
 
   # Validate numeric step fields (defensive — malformed fsm-state.yaml caught early).
@@ -3226,7 +3267,13 @@ cmd_advance_to_gates() {
   fi
 
   # Resolve execution.yaml + report path (matches /aid-run gate dispatch convention).
-  local execution_yaml="${AID_PROJECT_ROOT:-$(pwd)}/.aid-o/config/execution.yaml"
+  # P074 Step 1: state-root resolved (AID_PROJECT_ROOT is honoured — and
+  # canonicalized — inside aid_state_root; the old $(pwd) fallback forked
+  # state when invoked from a linked worktree). An invalid AID_PROJECT_ROOT
+  # (neither a repo root nor an .aid-o workspace carrier) fails loudly here
+  # via the resolver's own exit-2 error — no silent arbitrary path.
+  local execution_yaml
+  execution_yaml="$(aid_state_root)/.aid-o/config/execution.yaml"
   if [[ ! -f "$execution_yaml" ]]; then
     echo "ERROR: execution.yaml not found at $execution_yaml. Set AID_PROJECT_ROOT or cd to project root." >&2
     exit 1
@@ -3325,7 +3372,11 @@ cmd_advance_to_gates() {
       if [[ -f "$_d0_script" ]]; then
         local _d0_base_sha _d0_output _d0_exit=0
         _d0_base_sha=$(yaml_field "$state_file" base_commit)
-        local _d0_project_root="${AID_PROJECT_ROOT:-$(pwd)}"
+        # P074 Step 1 (review round 2): canonicalize before exporting to the
+        # D0 subprocess — a raw worktree path must never be handed down as
+        # AID_PROJECT_ROOT. Legacy expression kept only when nothing resolves.
+        local _d0_project_root
+        _d0_project_root="$(aid_state_root 2>/dev/null || printf '%s' "${AID_PROJECT_ROOT:-$(pwd)}")"
         _d0_output=$(
           DELIVERY_GATE_POLICY="$_d0_policy" \
           AID_EVIDENCE_BASE="${_d0_project_root}/.aid-o/work/evidence" \
@@ -6131,7 +6182,7 @@ _dep_evidence_state() {
     st=$(yaml_field "$f" state)
     if [[ "$st" == "DONE" ]]; then echo "DONE"; return 0; fi
     [[ -z "$found" && -n "$st" ]] && found="$st"
-  done < <(find ".aid-o/work/evidence/${dep}" -name fsm-state.yaml 2>/dev/null)
+  done < <(find "$(aid_state_path ".aid-o/work/evidence/${dep}" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${dep}")" -name fsm-state.yaml 2>/dev/null)
   echo "$found"
 }
 
@@ -6143,7 +6194,7 @@ _dep_evidence_branch() {
   while IFS= read -r f; do
     br=$(yaml_field "$f" branch)
     [[ -n "$br" ]] && { echo "$br"; return 0; }
-  done < <(find ".aid-o/work/evidence/${dep}" -name fsm-state.yaml 2>/dev/null)
+  done < <(find "$(aid_state_path ".aid-o/work/evidence/${dep}" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${dep}")" -name fsm-state.yaml 2>/dev/null)
   echo ""
 }
 
@@ -6356,8 +6407,11 @@ _revalidate_one_dep() {
 # Missing-queue / no-entry are NEVER fail-loud (D8): they are a clean no-op.
 queue_revalidate() {
   local epic_id="$1"
-  local queue_file="${2:-.aid-o/config/queue.yaml}"
-  local timeline_path="${3:-.aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl}"
+  # P074 Step 1: defaults resolve under the state root (with the same legacy
+  # cwd-relative fallback as derive_timeline for non-resolvable fixture cwds);
+  # explicit caller-provided paths are honoured as given.
+  local queue_file="${2:-$(aid_state_path ".aid-o/config/queue.yaml" 2>/dev/null || printf '%s' ".aid-o/config/queue.yaml")}"
+  local timeline_path="${3:-$(aid_state_path ".aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl")}"
 
   # scenario f: missing queue file → no-op, no event
   [[ -f "$queue_file" ]] || { echo "noop"; return 0; }

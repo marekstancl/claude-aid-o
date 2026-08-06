@@ -224,6 +224,8 @@ _AID_PLAN_MANIFEST_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-lock.sh"
 # shellcheck disable=SC1091
 source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-gate-profile.sh"
+# shellcheck disable=SC1091
+source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-roots.sh"   # P074 Step 1 — state-root resolution
 
 AID_PLAN_MANIFEST_DEFAULT_LOCK_TIMEOUT_S=10
 AID_PLAN_MANIFEST_PRODUCER="aid-plan-manifest.sh@1.0.0"
@@ -261,7 +263,18 @@ _plan_manifest_require_jq() {
 }
 
 _plan_manifest_project_root() {
-  printf '%s' "${AID_PLAN_MANIFEST_PROJECT_ROOT:-${AID_PLAN_STATE_PROJECT_ROOT:-$(pwd)}}"
+  # P074 Step 1: same override + fallback treatment as aid-plan-state.sh's
+  # _plan_state_project_root — env override canonicalized (worktree override
+  # collapses to the primary checkout; an override that is neither a repo
+  # root nor an .aid-o workspace carrier FAILS LOUDLY, return 2), no-override
+  # case resolves the state root, non-repo cwd keeps the historic $(pwd)
+  # fallback for repository-free unit tests.
+  local _given="${AID_PLAN_MANIFEST_PROJECT_ROOT:-${AID_PLAN_STATE_PROJECT_ROOT:-}}"
+  if [[ -n "$_given" ]]; then
+    aid_canonicalize_project_root "$_given" || return 2
+    return 0
+  fi
+  aid_state_root 2>/dev/null || pwd
 }
 
 # _plan_manifest_dir <plan_id> — the per-plan runtime directory (same
@@ -269,12 +282,16 @@ _plan_manifest_project_root() {
 # the required public API, matching aid-plan-state.sh's own `_plan_state_dir`
 # convention).
 _plan_manifest_dir() {
-  printf '%s/.aid-o/work/plan-state/%s' "$(_plan_manifest_project_root)" "$1"
+  local _pmd_root
+  _pmd_root="$(_plan_manifest_project_root)" || return 2
+  printf '%s/.aid-o/work/plan-state/%s' "$_pmd_root" "$1"
 }
 
 # plan_manifest_path <plan_id> — the manifest's canonical path.
 plan_manifest_path() {
-  printf '%s/plan-boundary-manifest.json' "$(_plan_manifest_dir "$1")"
+  local _pmp_dir
+  _pmp_dir="$(_plan_manifest_dir "$1")" || return 2
+  printf '%s/plan-boundary-manifest.json' "$_pmp_dir"
 }
 
 _pm_lock_path() {
