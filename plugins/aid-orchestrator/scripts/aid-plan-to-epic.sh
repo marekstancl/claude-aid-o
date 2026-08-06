@@ -938,12 +938,17 @@ for sn in "${phase_steps[@]}"; do
   # Build Steps table row
   # Collapse multi-line objective to single line for table
   safe_objective="$(echo "$objective" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')"
-  # Escape pipe characters in objective
-  safe_objective="${safe_objective//|/\\|}"
-  # Truncate to reasonable length for table
+  # Truncate to reasonable length for table BEFORE escaping, so an escape
+  # sequence can never be split in half by the cut (P074 Step 17).
   if [[ "${#safe_objective}" -gt 100 ]]; then
     safe_objective="${safe_objective:0:97}..."
   fi
+  # Two-rule escape grammar (P074 Step 17), unambiguous by construction:
+  # literal backslash → \\ FIRST, then literal pipe → \|. Escaping only pipes
+  # left `\|` ambiguous between "escaped pipe" and "field-final backslash +
+  # delimiter". Decoded by the character-walk splitter in aid-epic-to-json.sh.
+  safe_objective="${safe_objective//\\/\\\\}"
+  safe_objective="${safe_objective//|/\\|}"
 
   # Determine depends_on for this step within the phase. `---` here is the
   # GENERATED-CANONICAL no-dependency marker, reached only when the author

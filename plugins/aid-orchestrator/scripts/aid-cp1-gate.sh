@@ -516,8 +516,47 @@ fi
 # We look for `accepted_blockers:` followed by either:
 #   accepted_blockers: []        → empty list = pass
 #   accepted_blockers: [...]     → non-empty = fail
-#   accepted_blockers:           (block scalar with list items below) → fail
-accepted_blockers_line="$(grep -n "^accepted_blockers:" "$adjudicator_file" 2>/dev/null | head -1 || echo "")"
+#   accepted_blockers:           (block scalar) → items decide (P074 Step 17):
+#     the canonical empty forms `- []`, `- none`, `- (none)` (case-insensitive,
+#     whitespace-tolerant) parse as EMPTY; any genuine `- <text>` item fails.
+# An INDENTED/nested occurrence of the key with NO top-level key was previously
+# a silent "no field" pass — it is now a loud structural error (P074 Step 17).
+
+# _cp1_blocker_empty_item <item-text> — 0 iff the list item text is one of the
+# canonical empty forms: `[]`, `none`, `(none)` (case-insensitive, trimmed).
+_cp1_blocker_empty_item() {
+  local t
+  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ "$t" == "[]" || "$t" == "none" || "$t" == "(none)" ]]
+}
+
+# _cp1_toplevel_key_line <key> — echoes the `lineno:key: value` of the first
+# TOP-LEVEL occurrence of <key> (or nothing when absent). ANY indented/nested
+# occurrence of the key is a structural error naming its line — whether or not
+# a top-level key also exists: the gate reads exclusively top-level keys, so a
+# nested key is either a silent "no field" pass (no top-level) or a shadowed
+# duplicate the gate would silently ignore (top-level present). Exit 1 either
+# way.
+_cp1_toplevel_key_line() {
+  local key="$1" top nested
+  nested="$(grep -nE "^[[:space:]]+${key}:" "$adjudicator_file" 2>/dev/null | head -1 || true)"
+  if [[ -n "$nested" ]]; then
+    cat >&2 <<ERRMSG
+ERROR: CP1-deep adjudicator has an INDENTED/nested '${key}:' key at line ${nested%%:*}.
+The gate reads only a top-level '${key}:' — a nested key would be silently ignored (as "no field" when no top-level key exists, or as a shadowed duplicate when one does).
+Remove the nested key or move it to column 0 in: ${adjudicator_file}
+ERRMSG
+    exit 1
+  fi
+  top="$(grep -n "^${key}:" "$adjudicator_file" 2>/dev/null | head -1 || true)"
+  printf '%s' "$top"
+}
+
+# rejected_blockers is not consulted for pass/fail, but the same structural
+# nested-key trap applies to its read: nested-only is a loud error, not silence.
+_cp1_toplevel_key_line "rejected_blockers" >/dev/null || exit 1
+
+accepted_blockers_line="$(_cp1_toplevel_key_line "accepted_blockers")" || exit 1
 
 if [[ -z "$accepted_blockers_line" ]]; then
   # verdict:pass already confirmed above; no accepted_blockers field = no blockers.
@@ -530,20 +569,45 @@ accepted_value="$(echo "$accepted_blockers_line" | sed 's/^[0-9]*:accepted_block
 accepted_value="$(echo "$accepted_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
 if [[ "$accepted_value" == "[]" || -z "$accepted_value" ]]; then
-  # Check if it's a block scalar — look at the line after "accepted_blockers:"
+  # Block-scalar walk: consume the list region below the key. Empty forms
+  # (`- []`, `- none`, `- (none)`) parse as EMPTY; a genuine item fails.
+  # Blank lines and `#` comment lines INSIDE the region are SKIPPED, never
+  # terminators — otherwise `- []` + blank line + `- <real blocker>` would
+  # report EMPTY and pass the gate. The region ends only at a line starting
+  # a new key at the parent indent (column 0, the key's own level) or EOF.
   line_num="$(echo "$accepted_blockers_line" | cut -d: -f1)"
-  next_line_num=$(( line_num + 1 ))
-  next_line="$(sed -n "${next_line_num}p" "$adjudicator_file" 2>/dev/null || echo "")"
-  next_line="$(echo "$next_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-
-  if [[ "$next_line" =~ ^-[[:space:]] ]]; then
-    cat >&2 <<ERRMSG
+  # Newline-terminator-agnostic read: mapfile keeps an unterminated final
+  # line, where a `wc -l` upper bound silently drops it — a real blocker on a
+  # no-final-newline last line must not bypass the walk (Codex round 2).
+  mapfile -t _adj_lines < "$adjudicator_file"
+  item_idx=$(( line_num ))  # 0-based index of the first line AFTER the key line
+  while [[ "$item_idx" -lt "${#_adj_lines[@]}" ]]; do
+    raw_line="${_adj_lines[$item_idx]}"
+    next_line="$(echo "$raw_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if [[ -z "$next_line" || "$next_line" == \#* ]]; then
+      # blank/comment inside the list region — skip, do not terminate
+      item_idx=$(( item_idx + 1 ))
+      continue
+    fi
+    if [[ "$raw_line" =~ ^[^[:space:]] ]]; then
+      # a new key/content at the parent indent level — the region ends here
+      break
+    fi
+    if [[ "$next_line" =~ ^-([[:space:]]+(.*))?$ ]]; then
+      item_text="${BASH_REMATCH[2]:-}"
+      if ! _cp1_blocker_empty_item "$item_text"; then
+        cat >&2 <<ERRMSG
 ERROR: CP1-deep adjudicator has unresolved blockers (block scalar list).
+First blocker item: - ${item_text}
 Resolve blockers or escalate to PM before EPIC generation.
 Adjudicator file: ${adjudicator_file}
 ERRMSG
-    exit 1
-  fi
+        exit 1
+      fi
+    fi
+    # indented non-item lines (map continuations of an item) are skipped
+    item_idx=$(( item_idx + 1 ))
+  done
 
   echo "CP1-gate: adjudicator accepted_blockers is empty. PASS." >&2
   _cp1_c0_and_ledger_gate "$plan_id" "$project_root"

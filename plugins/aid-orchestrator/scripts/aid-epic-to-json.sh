@@ -169,23 +169,51 @@ if [[ -z "$table_data" ]]; then
   error_exit "EPIC Steps table has no data rows" 1
 fi
 
+# _split_table_row <stripped-row> — character-walk splitter honouring the
+# producer's two-rule escape grammar (aid-plan-to-epic.sh, P074 Step 17):
+# `\\` decodes to a literal backslash, `\|` to a literal pipe; an unescaped
+# `|` is the field delimiter. A backslash before any other character (and a
+# field-final backslash) is plain data and passes through verbatim, so legacy
+# rows containing neither escape decode byte-identically to the old IFS split.
+# Populates the global `fields` array.
+_split_table_row() {
+  local s="$1" ch="" cur="" i esc=0
+  fields=()
+  for (( i=0; i<${#s}; i++ )); do
+    ch="${s:i:1}"
+    if (( esc )); then
+      case "$ch" in
+        '|'|'\') cur+="$ch" ;;
+        *)       cur+="\\$ch" ;;
+      esac
+      esc=0
+    elif [[ "$ch" == '\' ]]; then
+      esc=1
+    elif [[ "$ch" == '|' ]]; then
+      fields+=("$cur"); cur=""
+    else
+      cur+="$ch"
+    fi
+  done
+  (( esc )) && cur+='\'
+  fields+=("$cur")
+}
+
 row_count=0
 while IFS= read -r row; do
   [[ -z "$row" ]] && continue
 
-  # Split on | — row looks like: | 1 | backend | Objective text | 1, 2 | group-1 |
+  # Split on unescaped | — row looks like: | 1 | backend | Objective text | 1, 2 | group-1 |
   # Remove leading/trailing |
   stripped="$(echo "$row" | sed 's/^[[:space:]]*|//; s/|[[:space:]]*$//')"
 
-  # Split into fields on |
-  IFS='|' read -ra fields <<< "$stripped"
+  declare -a fields=()
+  _split_table_row "$stripped"
 
-  # We need at least 5 fields
-  if [[ "${#fields[@]}" -lt 5 ]]; then
-    # Try with fewer fields; pad with dashes
-    while [[ "${#fields[@]}" -lt 5 ]]; do
-      fields+=("---")
-    done
+  # Hard arity check (P074 Step 17). The old path silently padded short rows
+  # with `---`, which masked genuinely broken rows as no-dependency steps.
+  if [[ "${#fields[@]}" -ne 5 ]]; then
+    error_exit "EPIC Steps table row has ${#fields[@]} fields, expected 5 (| # | Role | Objective | Depends On | Parallel Group |): ${row}" 1
   fi
 
   # Trim whitespace from each field

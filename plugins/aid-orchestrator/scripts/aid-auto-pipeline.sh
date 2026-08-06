@@ -403,6 +403,27 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
       echo "[WARN] lifecycle: the mode stamp for $plan_id is not committed (rc=$_lc_rc2) — the plan runs legacy, which is what the uncommitted state already implies." >&2
     fi
     echo "[INFO] lifecycle manifest ensured for $plan_id (.aid-lifecycle/manifests/${plan_id}.yaml), mode=${_pb_default_mode} (${_pb_mode_reason})" >&2
+  elif [[ "$_lc_rc" -eq 3 ]] \
+      && { [[ "$_pb_default_mode" == "plan_branch" ]] \
+           || grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan" 2>/dev/null; } \
+      && { _pb_cur_branch="$(git branch --show-current 2>/dev/null || true)"; \
+           _pb_lc_target="$(aid_target_branch)"; \
+           [[ "$_pb_cur_branch" != "$_pb_lc_target" ]]; }; then
+    # P074 Step 17 — checked FIRST and terminal: rc=3 combined with HEAD not
+    # on the lifecycle target branch (_aid_lc_require_target_branch) is a
+    # BRANCH problem, diagnosed as exactly that, with NO grammar advice. This
+    # holds regardless of AID_LIFECYCLE_MIGRATION (Codex round 2: the
+    # migration override must not reroute an off-target strict run into a
+    # message carrying strict-EPIC grammar advice — being on the wrong branch
+    # is not a migration concern). Two deliberate narrowings: (a)
+    # ensure_manifest also returns 3 for a plan file it cannot resolve, hence
+    # the explicit branch-mismatch re-check — an on-branch rc=3 falls through
+    # to the existing messages unchanged; (b) a LEGACY (non-strict,
+    # non-plan_branch) plan off target_branch keeps its P073 Step 6 contract
+    # of proceeding — but its WARN below is likewise branch-diagnosed and
+    # grammar-free on this rc.
+    [[ -z "$_pb_cur_branch" ]] && _pb_cur_branch="<detached>"
+    error_exit "you are on '${_pb_cur_branch}' but lifecycle writes require '${_pb_lc_target}' — run: git checkout ${_pb_lc_target}, or run generation for a worktree-recorded plan from its plan worktree" 6
   elif [[ "$_pb_default_mode" == "plan_branch" && "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
     # P068 Step 7 — THE ESCAPE HATCH IS CLOSED UNDER plan_branch.
     # This path used to WARN and proceed whenever the plan did not opt into
@@ -421,7 +442,17 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
     # loud WARN + a logged marker (never a silent skip). Reconcilable after
     # delivery. Message must NOT assert "legacy" — it may be a strict override.
     _lc_mode="legacy"; [[ "${AID_LIFECYCLE_MIGRATION:-}" == "1" ]] && _lc_mode="strict-override"
-    echo "[WARN] lifecycle: no durable manifest for plan $plan_id (mode=$_lc_mode, rc=$_lc_rc) — proceeding in AUDITED migration mode; run 'aid-fsm.sh plan-reconcile $plan_id --apply' after delivery. (New plans use the plan template's 'lifecycle_strict: true' + the strict '**EPIC N:**' grammar for fail-closed guarantees.)" >&2
+    _pb_cur_branch="$(git branch --show-current 2>/dev/null || true)"
+    _pb_lc_target="$(aid_target_branch)"
+    if [[ "$_lc_rc" -eq 3 && "$_pb_cur_branch" != "$_pb_lc_target" ]]; then
+      # P074 Step 17 — same rc=3 branch diagnosis as the fail-closed path
+      # above, WARN-grade because a legacy plan proceeds here (P073 Step 6
+      # contract). The branch message, never grammar advice, on this rc.
+      [[ -z "$_pb_cur_branch" ]] && _pb_cur_branch="<detached>"
+      echo "[WARN] lifecycle: no durable manifest for plan $plan_id (mode=$_lc_mode, rc=3) — you are on '${_pb_cur_branch}' but lifecycle writes require '${_pb_lc_target}' — run: git checkout ${_pb_lc_target}, or run generation for a worktree-recorded plan from its plan worktree; proceeding in AUDITED migration mode; run 'aid-fsm.sh plan-reconcile $plan_id --apply' after delivery." >&2
+    else
+      echo "[WARN] lifecycle: no durable manifest for plan $plan_id (mode=$_lc_mode, rc=$_lc_rc) — proceeding in AUDITED migration mode; run 'aid-fsm.sh plan-reconcile $plan_id --apply' after delivery. (New plans use the plan template's 'lifecycle_strict: true' + the strict '**EPIC N:**' grammar for fail-closed guarantees.)" >&2
+    fi
     mkdir -p "$(aid_state_path ".aid-o/work")" 2>/dev/null \
       && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> "$(aid_state_path ".aid-o/work/lifecycle-migration.log")" 2>/dev/null || true
   fi
