@@ -551,15 +551,56 @@ _fsm_worktree_is_linked() {
 
 # _fsm_plan_worktree_recorded <plan_id> <state_root> — the ABSOLUTE recorded
 # path, or empty (legacy plan / no state file / no plan-state lib).
+#
+# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read":
+#   0 + a path  -> the plan records that worktree
+#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
+#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
+#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
+#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
+#                  other non-0/1 rc such as a lock timeout)
+#
+# The distinction is load-bearing. Callers treat "definitively none" as a
+# legacy plan, and "none BUT a worktree exists at the canonical path" as the
+# plan-start crash window — a hard refusal that asserts a FACT about how the
+# plan was created. Collapsing an unreadable state file into "records none"
+# made that refusal fire on a missing `yq`, telling the operator plan-start had
+# been killed mid-transaction (and pointing at --recreate-worktree) when the
+# real fault was a missing dependency. Never diagnose from an answer you did
+# not get.
 _fsm_plan_worktree_recorded() {
-  local plan_id="$1" root="$2" rec=""
+  local plan_id="$1" root="$2" rec="" rc=0
   [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || { printf ''; return 0; }
   rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" \
-    bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rec=""
+    bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
+  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
+  # the field is absent. Both are real answers. Anything else is not.
+  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
+    printf ''
+    return 2
+  fi
   [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
   [[ -z "$rec" ]] && { printf ''; return 0; }
   [[ "$rec" == /* ]] || rec="${root}/${rec}"
   printf '%s' "$rec"
+}
+
+# _fsm_plan_worktree_canonical_if_live <state_root> <plan_id> — the canonical
+# `.aid-worktrees/plan-<id>` path when it EXISTS and git knows it as a linked
+# worktree, empty otherwise.
+#
+# Used only where the plan-state record is unreadable (rc 2 above). The
+# directory name is fixed by Step 7 precisely so the enforcer can derive it
+# without reading state, and git's own registration is the corroboration: a
+# registered linked worktree at the plan's canonical path is physical evidence
+# that this plan is worktree-mode, independent of any parser.
+_fsm_plan_worktree_canonical_if_live() {
+  local root="$1" plan_id="$2" canonical
+  canonical="${root}/.aid-worktrees/plan-${plan_id}"
+  [[ -d "$canonical" ]] || { printf ''; return 0; }
+  _fsm_worktree_registered "$root" "$canonical" || { printf ''; return 0; }
+  _fsm_worktree_is_linked "$root" "$canonical" || { printf ''; return 0; }
+  printf '%s' "$canonical"
 }
 
 # _fsm_plan_worktree_for_epic <epic_id> — the healthy recorded worktree of the
@@ -567,12 +608,16 @@ _fsm_plan_worktree_recorded() {
 # (no derivable plan id), a legacy plan, or a plan whose worktree is broken —
 # the enforcer below is the only place that turns "broken" into a refusal.
 _fsm_plan_worktree_for_epic() {
-  local epic_id="${1:-}" nnn plan_id root rec
+  local epic_id="${1:-}" nnn plan_id root rec rc=0
   nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   [[ -n "$nnn" ]] || { printf ''; return 0; }
   plan_id="P${nnn}"
   root="$(aid_state_root 2>/dev/null || pwd)"
-  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")"
+  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")" || rc=$?
+  # Unreadable record: fall back to the physical evidence, so branch topology
+  # inside a live plan worktree does not silently revert to the foreign-worktree
+  # skip just because `yq` is missing or the state file is corrupt.
+  [[ "$rc" -eq 2 ]] && rec="$(_fsm_plan_worktree_canonical_if_live "$root" "$plan_id")"
   [[ -n "$rec" && -d "$rec" ]] || { printf ''; return 0; }
   _fsm_worktree_registered "$root" "$rec" || { printf ''; return 0; }
   # A record naming the primary checkout is a lie, never "the plan's worktree"
@@ -695,13 +740,26 @@ _fsm_resolve_state_file() {
 # Exits non-zero on refusal (this file's convention); the re-exec never returns.
 # ---------------------------------------------------------------------------
 _fsm_require_plan_worktree() {
-  local epic_id="${1:-}" nnn plan_id root rec canonical here want
+  local epic_id="${1:-}" nnn plan_id root rec canonical here want rc=0
   nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   [[ -n "$nnn" ]] || return 0
   plan_id="P${nnn}"
   root="$(aid_state_root 2>/dev/null || pwd)"
   canonical="${root}/.aid-worktrees/plan-${plan_id}"
-  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")"
+  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")" || rc=$?
+
+  # UNREADABLE record (missing yq/jq, corrupt state file, lock timeout). The
+  # crash-window refusal below must NOT fire here: it asserts that plan-start
+  # was killed between registering the worktree and recording it, and that is a
+  # claim about a record we could not read. Use the physical evidence instead —
+  # a git-registered linked worktree at the canonical path IS the plan's tree,
+  # so the command still runs where it belongs and then fails closed on its own
+  # dependency/mode preconditions (which name the real fault). With no such
+  # worktree there is nothing to redirect to, and behaviour is unchanged.
+  if [[ "$rc" -eq 2 ]]; then
+    rec="$(_fsm_plan_worktree_canonical_if_live "$root" "$plan_id")"
+    [[ -n "$rec" ]] || return 0
+  fi
 
   if [[ -z "$rec" ]]; then
     if [[ -d "$canonical" ]] || _fsm_worktree_registered "$root" "$canonical"; then
@@ -4911,6 +4969,17 @@ _fsm_declared_plan_mode() {
   [[ -n "$nnn" ]] || { printf 'legacy_epic_release_mode\t\tno_plan_id_derivable\n'; return 0; }
   plan_id="P${nnn}"
   relpath=".aid-lifecycle/manifests/${plan_id}.yaml"
+  # P074 Step 8: plan-linked commands re-execute with cwd = the PLAN worktree,
+  # which carries its own checkout of the tracked manifest — or none at all,
+  # when the plan branch was cut before the manifest was committed. The
+  # working-tree GUARD below must keep watching the ONE tree the PM edits and
+  # every state authority resolves to (the state root), or a redirected
+  # done-advance silently stops guarding anything: an unreadable declaration in
+  # the PM's checkout would be answered from the committed copy — exactly the
+  # "silently satisfied from elsewhere" hazard the guard exists to prevent.
+  # `relpath` itself stays REPO-relative: Step 2 uses it as a git pathspec.
+  local wt_path
+  wt_path="$(aid_state_root 2>/dev/null || pwd)/${relpath}"
 
   declare -F aid_lifecycle_plan_mode >/dev/null 2>&1 || {
     printf 'unresolved\t%s\tlifecycle_lib_unavailable\n' "$plan_id"; return 0; }
@@ -4923,15 +4992,15 @@ _fsm_declared_plan_mode() {
   # elsewhere is the hazard the old working-tree preference existed to avoid.
   # A readable, parseable working-tree copy contributes nothing beyond passing
   # this guard — Step 2 is the only place an ANSWER comes from.
-  if [[ -e "$relpath" ]]; then
+  if [[ -e "$wt_path" ]]; then
     wt_present=true
-    if [[ ! -f "$relpath" || ! -r "$relpath" ]]; then
+    if [[ ! -f "$wt_path" || ! -r "$wt_path" ]]; then
       printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
     fi
     if ! command -v yq >/dev/null 2>&1; then
       printf 'unresolved\t%s\tyq_unavailable\n' "$plan_id"; return 0
     fi
-    if ! yq -r '.' "$relpath" >/dev/null 2>&1; then
+    if ! yq -r '.' "$wt_path" >/dev/null 2>&1; then
       printf 'unresolved\t%s\tmanifest_unparseable\n' "$plan_id"; return 0
     fi
   fi
