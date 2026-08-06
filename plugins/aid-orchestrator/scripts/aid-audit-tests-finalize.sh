@@ -250,6 +250,16 @@ fi
   # Advisory on purpose: a catalog that cannot be updated must not sink an
   # otherwise complete audit, and the operator still has to approve whatever
   # comes out. But it is never silent.
+  # ─── Stage 1d: the report page — the ONE fixed-form output ───────────────
+  # Four days of fragments taught the lesson: the owner gets one page, all
+  # nine sections, every time. A failure here is loud but does not kill the
+  # audit — the decision artifact already exists, and a presentation bug must
+  # never eat a completed audit again.
+  if ! bash "${SCRIPT_DIR}/aid-test-audit-report.sh" \
+       --audit-dir "$output_dir" --project-root "${project_root:-.}" >/dev/null 2>&2; then
+    echo "WARN: aid-audit-tests-finalize.sh: report.html could not be generated — the audit stands, but the fixed-form page is missing; run aid-test-audit-report.sh by hand and report the error" >&2
+  fi
+
   _proposed_catalog="${output_dir%/}/test-catalog.proposed.yaml"
   if [[ -f "$_proposed_catalog" && -n "$project_root" ]]; then
     _apply_args=(--catalog "$_proposed_catalog" --decision "$decision_path" --project-root "$project_root")

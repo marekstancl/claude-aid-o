@@ -343,6 +343,29 @@ label attached, so it can never be read as a measured one.
 - Never writes to `.aid-o/config/test-catalog.yaml` directly — that is the
   separate, explicit catalog-approval step's job.
 
+### The report page — the canonical, fixed form
+
+Every full audit produces `<output-dir>/report.html` — ONE page, NINE sections,
+ALWAYS all of them. A section whose data is missing still renders and says what
+is missing and why; an absent section reads as "nothing to see here", and that
+lie by omission is what four days of fragmented outputs taught. The sections:
+
+1. **Hlavní čísla** — units, examined vs NOT examined, measured cost, parallel
+2. **Prověřenost** — "keep — unproved" is named as *not examined*, never as health
+3. **Skupiny** — the portfolio grouped so a human can hold it
+4. **Co žere čas** — top costs and every timeout-censored unit
+5. **Kolik ušetříme čím** — levers, each labeled measured/estimated/unknown
+6. **Kvalita** — duplicates, weak oracles, uncollected tests
+7. **Akce a plán** — ranked actions with effort and risk, and the standing goal
+8. **Nedokázáno** — what remains unproved, with its named next step
+9. **Zdroje** — which artifact every number came from
+
+**The controller MUST publish this page as an Artifact and lead the closing
+message with its link** — the page IS the audit's answer; the six-part text
+block below it is the durable record. Then, in this order: offer the catalog
+approval, then offer the remediation plan. The lead sentence is in the user's
+language and never claims less work than the findings imply.
+
 ### Closing the loop: OFFER the approval, do not make the user find it
 
 The approval boundary stays — the catalog is an execution allowlist and a human
@@ -394,4 +417,4 @@ never re-proposed. Contradicting proposals reference each other via
 shows the top slice ranked by priority and evidence strength; the full set
 stays in `decision.json`.
 
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-06

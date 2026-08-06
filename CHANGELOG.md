@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.73.0] — 2026-08-06
+
+> Four days of audits produced fragments — a count here, a cost there, each
+> shown only after the owner complained about its absence. The requirement was
+> always the opposite: one page, every section, every time, automatically.
+
+### Added
+- **`aid-test-audit-report.sh` — the ONE fixed-form report page every full audit produces.** Nine canonical sections: hlavní čísla, prověřenost, skupiny, co žere čas, kolik ušetříme čím, kvalita, akce a plán, nedokázáno, zdroje. The contract is completeness: a section whose data is missing still renders and says what is missing and why, because an absent section reads as "nothing to see here". A "keep" with unproved falsification is counted and displayed as **not examined**, never as health — the number the six-part summary used to hide is the second stat on the page. Generated automatically at the end of every full audit (a presentation failure warns loudly but never eats a completed audit), and the controller must publish it as an Artifact and lead the closing message with its link — the page is the audit's answer; the text block is the durable record.
+
 ## [2.72.4] — 2026-08-06
 
 ### Fixed
