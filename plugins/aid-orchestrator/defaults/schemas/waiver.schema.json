@@ -38,16 +38,56 @@
           "description": "ISO-8601 UTC timestamp with Z suffix."
         },
         "scope": {
-          "enum": ["run", "epic"]
+          "enum": [
+            "run",
+            "epic"
+          ]
         },
         "visible": {
           "const": true,
           "description": "A waiver is always visible — it can never be hidden from the PM surface."
         }
       },
-      "required": ["waived_check", "reason", "waived_by", "waived_at", "scope", "visible"],
+      "required": [
+        "waived_check",
+        "reason",
+        "waived_by",
+        "waived_at",
+        "scope",
+        "visible"
+      ],
       "additionalProperties": false
+    },
+    "forced_override": {
+      "type": "boolean",
+      "description": "True when this waiver records a PM --force bypass rather than an ordinary release-blocker waiver. Optional: an ordinary waiver omits it.",
+      "$comment": "P073 Step 7 — declared here so the field is documented and validated; it is a TOP-LEVEL artifact field because `additionalProperties: false` applies to the `waiver` subobject only."
+    },
+    "bypassed_preconditions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "description": "Names of the forceable preconditions this force bypassed, in the order they failed. Present only on a force waiver, and never empty — a force that bypassed nothing writes no waiver at all.",
+      "$comment": "P073 Step 7 — top-level for the same reason as forced_override."
+    },
+    "candidate_sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The frozen plan-final candidate this force was recorded against, when one exists.",
+      "$comment": "P073 Step 7 — optional; null before a freeze."
     }
   },
-  "required": ["waiver"]
+  "required": [
+    "waiver"
+  ],
+  "dependentRequired": {
+    "bypassed_preconditions": [
+      "forced_override"
+    ]
+  }
 }

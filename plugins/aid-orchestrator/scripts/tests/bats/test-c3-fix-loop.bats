@@ -587,7 +587,7 @@ _drive_two_attempts() {
 
 # ─── AC3 (cont): "escalated" once recheck_count reaches the policy budget ───
 
-@test "loop-summary.json outcome == escalated once recheck_count reaches c3_fix_loop.max_rechecks while still blocking (no policy override — default max_rechecks:2)" {
+@test "loop-summary.json outcome == escalated once recheck_count reaches c3_fix_loop.max_rechecks while still blocking (no policy override — default max_rechecks:4)" {
   # DELIBERATELY DISTINCT finding text per attempt — each recheck's "fix"
   # genuinely changes what's blocking (a fresh finding each time), so this
   # test isolates budget-exhaustion escalation from the SEPARATE
@@ -596,7 +596,7 @@ _drive_two_attempts() {
   # round early — this bit this suite for real (E-065-6_7 DONE-review round 4).
   local heads=() bhs=()
   local i head bh
-  for i in 1 2 3; do
+  for i in 1 2 3 4 5; do
     head="$(_commit_change "$i")"
     heads+=("$head")
     _build_manifest "$BASE_SHA" "$head"
@@ -610,19 +610,20 @@ _drive_two_attempts() {
   done
 
   local SUM="$TEST_EVIDENCE_DIR/c3/loop-summary.json"
-  run jq -r '.attempts | length' "$SUM"; [ "$output" = "3" ]
-  # attempt-01 = initial audit (not a recheck), attempt-02/03 = the 2 rechecks
-  # the default policy's c3_fix_loop.max_rechecks:2 allows → recheck_count=2.
-  run jq -r '.recheck_count' "$SUM"; [ "$output" = "2" ]
+  run jq -r '.attempts | length' "$SUM"; [ "$output" = "5" ]
+  # attempt-01 = initial audit (not a recheck), attempt-02..05 = the 4 rechecks
+  # the default policy's c3_fix_loop.max_rechecks:4 allows → recheck_count=4
+  # (P073 Step 1 raised this budget from 2 rechecks / 3 Codex runs).
+  run jq -r '.recheck_count' "$SUM"; [ "$output" = "4" ]
   run jq -r '.outcome' "$SUM"; [ "$output" = "escalated" ]
   run jq -r '.escalation_reason' "$SUM"; [ "$output" = "budget_exhausted" ]
 
   # Every attempt's own report still holds status:fail (never silently
-  # rewritten to look clean) — canonical == the LAST (3rd) attempt.
+  # rewritten to look clean) — canonical == the LAST (5th) attempt.
   run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
   [ "$output" = "fail" ]
   run jq -r '.audit_report.reviewed_head' "$TEST_EVIDENCE_DIR/audit-report.json"
-  [ "$output" = "${heads[2]}" ]
+  [ "$output" = "${heads[4]}" ]
 }
 
 # ─── DONE-review C3 finding fixes: escalation-terminal enforcement + ────────
@@ -637,13 +638,13 @@ _drive_two_attempts() {
 # canonical-copy could report overall dispatch success (exit 0) even when
 # the recheck/escalation audit trail was never actually written.
 
-@test "escalation is terminal: a 4th dispatch after outcome==escalated is rejected without an override" {
+@test "escalation is terminal: a 6th dispatch after outcome==escalated is rejected without an override" {
   # DISTINCT finding text per attempt — see the comment on the
   # budget-exhaustion test above for why (avoids tripping the SEPARATE
   # same-fingerprint-survives auto-escalation one round early).
   local heads=() bhs=()
   local i head bh
-  for i in 1 2 3; do
+  for i in 1 2 3 4 5; do
     head="$(_commit_change "$i")"
     heads+=("$head")
     _build_manifest "$BASE_SHA" "$head"
@@ -658,18 +659,18 @@ _drive_two_attempts() {
   run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
   [ "$output" = "escalated" ]
 
-  # A 4th attempt (no PM-authorized override) must be rejected BEFORE any
-  # codex invocation or evidence write for attempt-04.
-  local head4; head4="$(_commit_change 4)"
-  _build_manifest "$BASE_SHA" "$head4"
-  local bh4; bh4="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
-  export FAKE_C3_HEAD="$head4" FAKE_C3_BRIEF_HASH="$bh4" FAKE_C3_THREAD_ID="thread-term-4" \
+  # A 6th attempt (no PM-authorized override) must be rejected BEFORE any
+  # codex invocation or evidence write for attempt-06.
+  local head6; head6="$(_commit_change 6)"
+  _build_manifest "$BASE_SHA" "$head6"
+  local bh6; bh6="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head6" FAKE_C3_BRIEF_HASH="$bh6" FAKE_C3_THREAD_ID="thread-term-6" \
          FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
-  AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  AID_C3_ATTEMPT=6 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"escalated"* ]]
-  [ ! -d "$TEST_EVIDENCE_DIR/c3/attempt-04" ]
+  [ ! -d "$TEST_EVIDENCE_DIR/c3/attempt-06" ]
 
   # The loop-summary and canonical report are UNCHANGED by the rejected call.
   run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
@@ -678,15 +679,15 @@ _drive_two_attempts() {
   [ "$output" = "fail" ]
 
   # A short (< 20 char) override is ALSO rejected — the reason must be real.
-  AID_C3_FORCE_BEYOND_ESCALATION="too short" AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  AID_C3_FORCE_BEYOND_ESCALATION="too short" AID_C3_ATTEMPT=6 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
 
-  # A genuine, >=20-char, PM-authorized override DOES let the 4th attempt through.
-  AID_C3_FORCE_BEYOND_ESCALATION="PM approved a 4th recheck 2026-07-17 per manual review" \
-    AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  # A genuine, >=20-char, PM-authorized override DOES let the 6th attempt through.
+  AID_C3_FORCE_BEYOND_ESCALATION="PM approved a 6th recheck 2026-07-17 per manual review" \
+    AID_C3_ATTEMPT=6 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
-  [ -d "$TEST_EVIDENCE_DIR/c3/attempt-04" ]
+  [ -d "$TEST_EVIDENCE_DIR/c3/attempt-06" ]
   run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
   [ "$output" = "pass" ]
 }
@@ -829,11 +830,11 @@ _drive_two_attempts() {
   # validation each time (reviewed_head mismatch → _process_response writes an
   # unverifiable report) — attempts[].outcome=="dispatched" for every one of
   # these, so recheck_count DOES advance, and once it reaches max_rechecks
-  # (default 2) the loop must escalate exactly like the "fail" path already
+  # (default 4) the loop must escalate exactly like the "fail" path already
   # does, subjecting further attempts to the same terminal guard.
   local WRONG_HEAD="0000000000000000000000000000000000dead"
   local i head bh
-  for i in 1 2 3; do
+  for i in 1 2 3 4 5; do
     head="$(_commit_change "$i")"
     _build_manifest "$BASE_SHA" "$head"
     bh="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
@@ -849,21 +850,21 @@ _drive_two_attempts() {
   run jq -r '[.attempts[].outcome] | unique | .[]' "$SUM"
   [ "$output" = "dispatched" ]
   run jq -r '.recheck_count' "$SUM"
-  [ "$output" = "2" ]
+  [ "$output" = "4" ]
   run jq -r '.outcome' "$SUM"
   [ "$output" = "escalated" ]
   run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
   [ "$output" = "unverifiable" ]
 
-  # A 4th attempt (no override) is now rejected by the SAME terminal guard
+  # A 6th attempt (no override) is now rejected by the SAME terminal guard
   # rounds 1-2 built for "escalated" — no new code path, just a correctly
   # populated outcome field reaching it.
-  local head4; head4="$(_commit_change 4)"
-  _build_manifest "$BASE_SHA" "$head4"
-  local bh4; bh4="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
-  export FAKE_C3_HEAD="$head4" FAKE_C3_BRIEF_HASH="$bh4" FAKE_C3_THREAD_ID="thread-inval-4" \
+  local head6; head6="$(_commit_change 6)"
+  _build_manifest "$BASE_SHA" "$head6"
+  local bh6; bh6="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head6" FAKE_C3_BRIEF_HASH="$bh6" FAKE_C3_THREAD_ID="thread-inval-6" \
          FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
-  AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  AID_C3_ATTEMPT=6 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"escalated"* ]]
@@ -882,7 +883,7 @@ _drive_two_attempts() {
 # cannot make — the new `escalate` subcommand gives the controller a durable
 # way to record that judgment so the SAME terminal guard picks it up.
 
-@test "same fingerprint surviving a recheck escalates immediately, even with budget remaining (recheck_count 1 of 2)" {
+@test "same fingerprint surviving a recheck escalates immediately, even with budget remaining (recheck_count 1 of 4)" {
   local head1; head1="$(_commit_change 1)"
   _build_manifest "$BASE_SHA" "$head1"
   local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
@@ -896,8 +897,8 @@ _drive_two_attempts() {
 
   # Attempt 2: the "fix" was ineffective — Codex reports the EXACT SAME
   # finding again (same severity/area/finding/recommendation → same
-  # fingerprint). Budget (max_rechecks:2) is nowhere near exhausted
-  # (recheck_count would only be 1 of 2) — the fingerprint match alone must
+  # fingerprint). Budget (max_rechecks:4) is nowhere near exhausted
+  # (recheck_count would only be 1 of 4) — the fingerprint match alone must
   # still force escalation immediately.
   local head2; head2="$(_commit_change 2)"
   _build_manifest "$BASE_SHA" "$head2"

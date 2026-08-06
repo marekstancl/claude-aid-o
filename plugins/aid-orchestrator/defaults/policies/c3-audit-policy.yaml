@@ -64,7 +64,10 @@ c3_executor:
 # PM-approved only, never automatic). See pipeline.md DONE §6, step "6a" for the full
 # orchestration (entry condition, loop body, exit conditions, error handling).
 c3_fix_loop:
-  max_rechecks: 2                        # initial audit + up to 2 rechecks = 3 Codex runs max
+  max_rechecks: 4                        # initial audit + up to 4 rechecks = 5 Codex runs max
+                                          # (P073 Step 1). This key IS read mechanically by
+                                          # scripts/lib/aid-c3-dispatch.sh, which fails closed
+                                          # to 4 when this file is missing or malformed.
   eligible_severities: [critical, high]  # a blocking finding outside this list is never
                                           # auto-fixed by this loop (C3 blocks only on
                                           # critical/high anyway); surfaced to the PM as before

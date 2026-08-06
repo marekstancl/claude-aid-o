@@ -19,6 +19,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
@@ -231,6 +234,41 @@ is_worktree() {
   local git_dir
   git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 1
   [[ "$git_dir" == *.git/worktrees/* ]]
+}
+
+# ─── Human step rendering (P073 Step 4) ─────────────────────────────────
+#
+# `current_step` is 0-BASED and counts COMPLETED steps, so an operator reading
+# "current_step=2" for the third step has to do the arithmetic themselves —
+# and repeatedly got it wrong. Machine surfaces (fsm-state.yaml, `verify-state`
+# JSON, evidence filenames) stay 0-based and are frozen compatibility
+# surfaces; only the human-facing MESSAGES gain a suffix, appended AFTER the
+# machine values so existing greps on those messages still match.
+#
+# _fsm_human_step <current> <total> — echoes " (human: ...)" or nothing.
+#   current >= total  -> "step T of T complete" (all done; there is no N+1)
+#   total == 0        -> nothing (degenerate plan: machine values only)
+#   non-integer input -> nothing (the caller's own malformed-state error fires)
+_fsm_human_step() {
+  local current="${1:-}" total="${2:-}"
+  [[ "$current" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 0
+  [[ "$total" -gt 0 ]] || return 0
+  if [[ "$current" -ge "$total" ]]; then
+    printf ' (human: step %s of %s complete)' "$total" "$total"
+  else
+    printf ' (human: step %s of %s is next)' "$((current + 1))" "$total"
+  fi
+}
+
+# _aid_sup_restore — EXIT trap installed while a supersede reservation is held
+# (P073 EPIC 2 review). Puts the reservation back under its original name so a
+# failed init does not burn the PM's one authorisation. A no-op once the
+# finalize has cleared _AID_SUP_RESERVED.
+_AID_SUP_RESERVED=""
+_AID_SUP_RECORD=""
+_aid_sup_restore() {
+  [[ -n "${_AID_SUP_RESERVED:-}" && -f "${_AID_SUP_RESERVED}" ]] || return 0
+  mv "${_AID_SUP_RESERVED}" "${_AID_SUP_RECORD}" 2>/dev/null || true
 }
 
 # Print a multi-line error to stderr and exit 1.
@@ -1784,7 +1822,7 @@ check_preconditions() {
       current=$(yaml_field "$state_file" current_step)
       total=$(yaml_field "$state_file" total_steps)
       [[ "$current" -lt "$total" ]] || {
-        echo "PRECONDITION FAIL: current_step=${current} == total_steps=${total}. All steps done — use EXECUTE→GATES." >&2
+        echo "PRECONDITION FAIL: current_step=${current} == total_steps=${total}$(_fsm_human_step "$current" "$total"). All steps done — use EXECUTE→GATES." >&2
         return 1
       }
       ;;
@@ -1796,7 +1834,7 @@ check_preconditions() {
       total=$(yaml_field "$state_file" total_steps)
       [[ "$current" -ge "$total" ]] || {
         _PRECONDITION_FAIL_REASON="steps_incomplete"
-        echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}. Not all steps completed." >&2
+        echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}$(_fsm_human_step "$current" "$total"). Not all steps completed." >&2
         return 1
       }
 
@@ -2254,6 +2292,124 @@ EOF
 
 # ─── Commands ───────────────────────────────────────────────────────────
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PM ESCALATION OVERRIDE — the producer (P073 Step 10)
+#
+# One artifact schema for BOTH bounded review loops. Housed here as an
+# aid-fsm.sh subcommand rather than a new script: this is the operator's
+# existing entry point, and the override is a lifecycle action, not a review
+# internal.
+#
+#   aid-fsm.sh pm-override grant <c0|c3> <plan_id> --reason "<text >=20>"
+#              [--project-root <path>] [--evidence-root <path>]
+#
+# C0 writes .aid-o/work/evidence/<plan_id>/cp1-pm-escalation-override.json —
+# the EXISTING path and the existing `{pm_ref}` shape, extended additively so
+# aid-cp1-gate.sh's and aid-cp1-ledger.sh's `jq -r .pm_ref` reads are
+# untouched. C3 writes c3-pm-escalation-override.json with the identical
+# shape. Both are claimed atomically and exactly once by their consumer.
+#
+# THE ARTIFACT IS NOT WRITTEN BY AGENTS. It is the PM's decision made
+# physical; an agent creating one would be forging the authorisation it is
+# meant to be bounded by.
+# ═══════════════════════════════════════════════════════════════════════════
+cmd_pm_override() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    grant) : ;;
+    ""|-h|--help)
+      echo "Usage: aid-fsm.sh pm-override grant <c0|c3> <plan_id> --reason '<text>' [--project-root <path>] [--evidence-root <path>]" >&2
+      exit 1 ;;
+    *)
+      echo "ERROR: pm-override: unknown action '${action}' (only 'grant' exists)." >&2
+      exit 2 ;;
+  esac
+
+  local target="${1:-}"; shift || true
+  local plan_id="${1:-}"; shift || true
+  local reason="" project_root="." evidence_root=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason)        reason="${2:-}"; shift 2 ;;
+      --project-root)  project_root="${2:-}"; shift 2 ;;
+      --evidence-root) evidence_root="${2:-}"; shift 2 ;;
+      --*) echo "ERROR: pm-override grant: unknown flag: $1" >&2; exit 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  case "$target" in
+    c0|c3) : ;;
+    *) echo "ERROR: pm-override grant: target must be 'c0' or 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
+  esac
+  [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || {
+    echo "ERROR: pm-override grant: plan_id must match ^P[0-9]{3}\$ (got '${plan_id:-<empty>}')." >&2
+    exit 2
+  }
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: pm-override grant: --reason must be at least 20 characters (got ${#reason})." >&2
+    echo "  The reason IS the authorisation record — a bounded review loop that can be" >&2
+    echo "  reopened without a stated reason is not bounded at all." >&2
+    exit 2
+  fi
+  command -v jq >/dev/null 2>&1 || { echo "ERROR: pm-override grant: jq is required." >&2; exit 2; }
+
+  # Resolve where the consumer will look. C0's root is the plan evidence root;
+  # C3's is the run evidence dir recorded in the loop state, which the caller
+  # supplies with --evidence-root when it is not the default.
+  local dir fname
+  if [[ -n "$evidence_root" ]]; then
+    dir="$evidence_root"
+  else
+    dir="${project_root}/.aid-o/work/evidence/${plan_id}"
+  fi
+  case "$target" in
+    c0) fname="cp1-pm-escalation-override.json" ;;
+    c3) fname="c3-pm-escalation-override.json" ;;
+  esac
+  local out="${dir}/${fname}"
+
+  if [[ ! -d "$dir" ]]; then
+    mkdir -p "$dir" 2>/dev/null || {
+      echo "ERROR: pm-override grant: cannot create the evidence root ${dir}. Pass --evidence-root if the consumer looks elsewhere." >&2
+      exit 1
+    }
+  fi
+  # Never overwrite an unconsumed grant: two grants in flight would let one
+  # PM decision authorise two attempts.
+  if [[ -e "$out" ]]; then
+    echo "ERROR: pm-override grant: an UNCONSUMED override already exists at ${out}. It authorises exactly one further attempt; let it be claimed before granting another." >&2
+    exit 1
+  fi
+
+  local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp="${out}.tmp.$$"
+  jq -n --arg ref "$reason" --arg plan "$plan_id" --arg t "$target" --arg now "$now" \
+    --arg op "${USER:-unknown}" \
+    '{schema_version:"aid-2.0", artifact_type:"pm_escalation_override",
+      target:$t, plan_id:$plan, pm_ref:$ref, created_at:$now,
+      origin:"grant", granted_by:$op}' > "$tmp" 2>/dev/null || {
+    rm -f "$tmp" 2>/dev/null || true
+    echo "ERROR: pm-override grant: could not write ${out}." >&2
+    exit 1
+  }
+  # ATOMIC PUBLISH, same shape as the claim primitive. A plain `mv` overwrites
+  # its destination, so two PMs granting concurrently both passed the existence
+  # check above, both wrote, and the later one silently replaced the earlier
+  # artifact while BOTH commands printed "Granted" — one PM decision lost
+  # without a trace (adversarial-review finding). `mv -n` plus the mandatory
+  # tmp-gone post-check makes the loser say so instead. The post-check is not
+  # optional: on the installed coreutils 9.1 a SKIPPED `mv -n` still exits 0.
+  if ! mv -n "$tmp" "$out" 2>/dev/null || [[ -e "$tmp" ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "ERROR: pm-override grant: an override for ${plan_id} was granted concurrently and is already at ${out} — NOTHING was written by this call. It authorises exactly one further attempt; let it be claimed before granting another." >&2
+    exit 1
+  fi
+  echo "Granted a single-use ${target} escalation override for ${plan_id} at ${out}" >&2
+  echo "$out"
+}
+
+
 cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
@@ -2303,9 +2459,34 @@ cmd_init() {
           ${_bepic:+--blocking-epic "$_bepic"} ${_bplan:+--blocking-plan "$_bplan"}
         force="true"
         ;;
+      --*)
+        # P073 Step 9: this was a SILENT sink. The comment claimed unknown
+        # flags past $8 were "safe to ignore", which made a typo'd or a
+        # misplaced flag indistinguishable from one that was honoured — the
+        # same class of failure as a silently swallowed --force. Every
+        # sanctioned caller passes only documented flags, so an undocumented
+        # one now surfaces loudly, which is the point.
+        #
+        # ONE carve-out, and it is a WHITELIST. --force already consumed
+        # "${@:i+1}" above as its own payload, and rejecting those here would
+        # reject the very reason the call just used — but a blanket "accept
+        # anything after --force" restored exactly the silent sink this step
+        # removed (`init ... --force --reason '...' --typo` was accepted;
+        # whole-EPIC review finding). Only the payload flags
+        # fsm_handle_force_override actually parses are tolerated.
+        if [[ "$force" == "true" ]] \
+           && [[ "${!i}" == "--reason" || "${!i}" == "--blocked-checks" \
+                 || "${!i}" == "--blocking-epic" || "${!i}" == "--blocking-plan" ]]; then
+          : # a known force-payload flag, already consumed above
+        else
+          echo "ERROR: Unknown flag for init: ${!i}" >&2
+          echo "  init accepts: --plan <path>, --streamlined, --force --reason <text>" >&2
+          exit 2
+        fi
+        ;;
       *)
-        # Unknown flag at this position — preserved as before; existing callers don't
-        # pass anything past $8 unless it's --force, so safe to ignore here.
+        # A non-flag positional past $8 is still ignored: the positional
+        # contract is fixed at eight and callers have never passed more.
         ;;
     esac
     i=$((i + 1))
@@ -2493,6 +2674,63 @@ cmd_init() {
     exit 1
   fi
 
+  # ── P073 Step 13: the ONE narrow supersede exception ─────────────────────
+  # The rejection above stays unconditional — it is what stops a re-init from
+  # silently losing a live run's history. This branch is reached only when the
+  # live state file is ABSENT because `plan-state --supersede-epic` archived
+  # it, and it opens for exactly one specific re-initialisation.
+  #
+  # FIVE-FIELD BINDING, all of it re-derived from disk rather than trusted:
+  # the record must name THIS plan and epic, its old_run_id must be the run
+  # directory the archive actually sits in, its old_state_sha256 must equal the
+  # hash of the newest archived sibling, and its new_plan_json_sha256 must
+  # equal the hash of the plan.json being initialised from NOW. (old_run_id was
+  # missing from a first cut: with two archives of identical content, an OLDER
+  # record could then authorise an init against the NEWER archive —
+  # adversarial-review finding.)
+  #
+  # VERIFY HERE, CONSUME LATER. The claim is deliberately NOT taken at this
+  # point: every remaining init gate still has to pass, and consuming first
+  # meant a later gate failure burned the PM's one authorisation with no state
+  # file written and no way to re-supersede (there is no live state left to
+  # archive). The record is claimed only once the state file exists.
+  local _sup_archive="" _sup_record="" _sup_verified=0
+  _sup_archive="$(ls -1t "${state_file}".superseded-* 2>/dev/null | head -1 || true)"
+  if [[ -n "$_sup_archive" && -f "$_sup_archive" ]]; then
+    # An archive with no derivable plan id must NOT fall through to a normal
+    # init: that bypassed the whole authorisation check for any EPIC id from
+    # which no plan id derives (adversarial-review finding).
+    if [[ -z "${_pb_plan_id:-}" ]] || ! command -v jq >/dev/null 2>&1; then
+      echo "ERROR: ${epic_id} has an archived superseded state ($(basename "$_sup_archive")) but its supersede record cannot be checked here (no plan id derives from '${epic_id}', or jq is unavailable) — refusing to re-init unauthorised." >&2
+      exit 1
+    fi
+    local _sup_arch_sha _sup_arch_run _sup_json _sup_json_sha _sup_dir _r
+    _sup_arch_sha="sha256:$(sha256sum "$_sup_archive" | awk '{print $1}')"
+    _sup_arch_run="$(basename "$(dirname "$_sup_archive")")"
+    _sup_json="$(dirname "$state_file")/plan.json"
+    _sup_json_sha=""
+    [[ -f "$_sup_json" ]] && _sup_json_sha="sha256:$(sha256sum "$_sup_json" | awk '{print $1}')"
+    _sup_dir="${project_root:-.}/.aid-o/work/plan-state"
+    for _r in "$_sup_dir"/supersede-"${_pb_plan_id}"-"${epic_id}"-*.json; do
+      [[ -f "$_r" ]] || continue
+      if [[ "$(jq -r '.plan_id // ""' "$_r" 2>/dev/null)" == "$_pb_plan_id" \
+         && "$(jq -r '.epic_id // ""' "$_r" 2>/dev/null)" == "$epic_id" \
+         && "$(jq -r '.old_run_id // ""' "$_r" 2>/dev/null)" == "$_sup_arch_run" \
+         && "$(jq -r '.old_state_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_arch_sha" \
+         && -n "$_sup_json_sha" \
+         && "$(jq -r '.new_plan_json_sha256 // ""' "$_r" 2>/dev/null)" == "$_sup_json_sha" ]]; then
+        _sup_record="$_r"
+        break
+      fi
+    done
+    if [[ -z "$_sup_record" ]]; then
+      echo "ERROR: ${epic_id} has an archived superseded state ($(basename "$_sup_archive")) but no supersede record matching BOTH that archive and the current plan.json — re-run 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --supersede-epic ${epic_id} --reason ...' against the current package." >&2
+      exit 1
+    fi
+    _sup_verified=1
+    echo "aid-fsm: ${epic_id} re-init authorised by $(basename "$_sup_record") (archived state: $(basename "$_sup_archive")); the record is claimed once the new state file exists." >&2
+  fi
+
   # ── D1 (IMP-232 v2.58.0): dependency-scoped init gate + advisory ──────────
   # An independent plan's state NEVER hard-blocks another plan's init. A hard
   # block occurs ONLY when THIS plan declares a STRUCTURED depends_on_plans
@@ -2660,7 +2898,7 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # directory-wide glob).
   local _dirty
   _dirty="$(git status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy4 || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
        git status   # review
@@ -2691,6 +2929,33 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   mkdir -p "$(dirname "$state_file")"
   local _now_iso
   _now_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  # P073 EPIC 2 (whole-EPIC review): RESERVE the supersede record immediately
+  # before the state-file write. Verifying early and consuming at the very end
+  # fixed one problem and created another: two concurrent inits could both
+  # VERIFY the same unconsumed record while no state file existed, both write
+  # one, and only then race the rename — so the loser errored after it had
+  # already mutated state. A reservation closes that: the winner is decided
+  # BEFORE anything is written, and the loser refuses having changed nothing.
+  #
+  # The reservation is restored on a failed write (below), so a failure here
+  # still does not burn the PM's one authorisation.
+  local _sup_reserved=""
+  if [[ "${_sup_verified:-0}" -eq 1 ]]; then
+    _sup_reserved="${_sup_record}.reserved-$$-$(date -u +%s)"
+    if ! mv -n "$_sup_record" "$_sup_reserved" 2>/dev/null || [[ -f "$_sup_record" ]]; then
+      echo "ERROR: the supersede record for ${epic_id} could not be reserved (a concurrent init took it) — refusing to re-init; nothing was written." >&2
+      exit 1
+    fi
+    # This script runs under `set -e`, so a failed write below aborts on the
+    # spot and never reaches the finalize — orphaning the reservation and
+    # burning the PM's one authorisation. An EXIT trap is the only thing that
+    # survives every abort path between here and the finalize; the finalize
+    # clears it once the outcome is decided.
+    _AID_SUP_RESERVED="$_sup_reserved"
+    _AID_SUP_RECORD="$_sup_record"
+    trap _aid_sup_restore EXIT
+  fi
+
   cat > "$state_file" << EOF
 epic_id: $epic_id
 run_id: $run_id
@@ -2714,6 +2979,24 @@ EOF
   # runs already passed the hard-stop above and record nothing here. Appended
   # here (before the steps[] block below) so scalar fields stay grouped and the
   # steps[] sequence remains the trailing YAML node. Never blocks init.
+  # P073 Step 13: finalize the reservation taken just before the write. The
+  # authorisation is spent only once the new state file demonstrably exists;
+  # if the write failed, the reservation goes back under its original name so
+  # the PM can simply retry rather than having to re-supersede (there would be
+  # no live state left to archive).
+  if [[ "${_sup_verified:-0}" -eq 1 ]]; then
+    if [[ ! -s "$state_file" ]]; then
+      mv "$_sup_reserved" "$_sup_record" 2>/dev/null || true
+      echo "ERROR: ${epic_id}'s state file was not written — the supersede record is left unclaimed so the re-init can simply be retried." >&2
+      exit 1
+    fi
+    mv "$_sup_reserved" "${_sup_record}.consumed-$(date -u +%s)" 2>/dev/null \
+      && echo "aid-fsm: supersede record $(basename "$_sup_record") consumed — it authorises no further init." >&2
+    # Outcome decided: the restore trap must not fire for anything after this.
+    _AID_SUP_RESERVED=""
+    trap - EXIT
+  fi
+
   run_cache_preflight "$state_file" "$timeline_path" || true
 
   # Audit trail
@@ -2928,7 +3211,7 @@ cmd_advance_to_gates() {
 
   # Validate numeric step fields (defensive — malformed fsm-state.yaml caught early).
   if [[ ! "$current_step" =~ ^[0-9]+$ ]] || [[ ! "$total_steps" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: malformed fsm-state.yaml — current_step=$current_step total_steps=$total_steps must be integers" >&2
+    echo "ERROR: malformed fsm-state.yaml — current_step=$current_step total_steps=$total_steps must be integers (current_step is 0-based and counts COMPLETED steps)" >&2
     exit 1
   fi
 
@@ -2938,7 +3221,7 @@ cmd_advance_to_gates() {
     exit 1
   fi
   if (( current_step < total_steps )); then
-    echo "ERROR: advance-to-gates requires current_step ($current_step) >= total_steps ($total_steps). Not all steps completed." >&2
+    echo "ERROR: advance-to-gates requires current_step ($current_step) >= total_steps ($total_steps)$(_fsm_human_step "$current_step" "$total_steps"). Not all steps completed." >&2
     exit 1
   fi
 
@@ -5403,6 +5686,26 @@ cmd_check_promotion_candidates() {
 # Skips are logged to audit-log.jsonl with rationale.
 # Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 cmd_plan_close() {
+  # P073 Step 9: this function took three positionals and NOTHING else, so the
+  # dispatcher's `"$@"` handed it any `--force --reason ...` the operator
+  # typed and it vanished — worse than a rejection, because the operator
+  # believed they had forced something. Flags are now peeled first, in the
+  # same shape cmd_transition uses, and an unknown one is refused by name.
+  # The three positionals keep their exact legacy meaning and order.
+  local -a _pc_positional=()
+  local _pc_force="false" _pc_reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force)  _pc_force="true"; shift ;;
+      --reason) _pc_reason="${2:-}"; shift 2 ;;
+      --*)      echo "ERROR: Unknown flag for plan-close: $1" >&2
+                echo "  plan-close accepts: <epic_id> <evidence_dir> <project_root> [--force --reason <text>]" >&2
+                exit 2 ;;
+      *)        _pc_positional+=("$1"); shift ;;
+    esac
+  done
+  set -- "${_pc_positional[@]:-}"
+
   local epic_id="${1:-}"
   local evidence_dir="${2:-}"
   local project_root="${3:-}"
@@ -5410,6 +5713,19 @@ cmd_plan_close() {
   [[ -z "$epic_id" ]]       && echo "Missing: epic_id"       >&2 && exit 1
   [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
   [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
+
+  # Route the force through the SAME audited path every other force in this
+  # file uses. fsm_handle_force_override validates the reason (>= 20 chars)
+  # and writes the three records; a --force with no reason dies there, exactly
+  # as it does for transition/increment-step/done-advance.
+  if [[ "$_pc_force" == "true" ]]; then
+    local run_id="${evidence_dir##*/}"
+    fsm_handle_force_override "plan-close" "closed" "" "plan-close" \
+      --reason "$_pc_reason" --blocked-checks "plan_close_bookkeeping"
+  elif [[ -n "$_pc_reason" ]]; then
+    echo "ERROR: plan-close: --reason was supplied without --force — it bypasses nothing and must not look like it did." >&2
+    exit 2
+  fi
 
   # Derive plan_id through the ONE shared helper (`_fsm_epic_plan_nnn`, top of
   # this file): E-046-2_3 -> 046 -> P046, E-013-1 -> 013 -> P013. This used to
@@ -6125,11 +6441,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     plan-record-delivery)       shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-record-delivery <epic_id> [root]" >&2; exit 1; }
                                 aid_lifecycle_record_delivery "$1" "${2:-.}" ;;
+    pm-override)                shift; cmd_pm_override "$@" ;;
     plan-state)                 shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
       exit 1 ;;
   esac
 fi

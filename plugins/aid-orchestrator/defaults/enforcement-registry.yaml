@@ -1648,3 +1648,195 @@ enforcements:
     description: "P072 Step 26 — a ledger proving no run unit is executed twice within one gate run. FOUR emission paths, not three: the bats lane, the aggregate runner, the scheduler, and — critically — `aid-run-gates.sh` itself for any gate whose command invokes a runner directly. Instrumenting only the three fan-out points would have recorded ONE entry for `gate:bats_fsm` (which runs a file the pool also runs) and reported zero duplicates, certifying as clean the exact defect the ledger exists to detect. There is deliberately NO membership exemption: it was built, and it silenced that same defect, because each dispatch point appends once per execution it actually performs — so two entries under two gate ids are two executions. FAIL-CLOSED throughout (PM review 2026-08-04): once a gate run has opened a ledger, a failed open, a failed append, a named-but-absent ledger file, or a close that cannot be evaluated each fail the whole gate run — the `|| true` that used to wrap the emission paths is gone, and a failed open no longer degrades silently to running unaccounted. A ledger with a gap is indistinguishable from one showing no duplication, so it is never permitted to read as one. The ONE permitted no-op is a dispatch point carrying no ledger path at all — a developer invoking a suite by hand, where there is no accounted run to record against. The scheduler is the fourth real emission path and appends BEFORE launching each unit — a failed append cancels that dispatch, since running a unit no ledger will record is the gap this refuses to produce. Deliberate repeats are declared at the time they happen via `execution_kind` (normal|retry|escalation; `AID_EXECUTION_KIND` declares a whole subprocess, which is how P069 escalation marks itself) and are reported as `deliberate_repeats` instead of failing; the default is `normal`, so an undeclared repeat is still a double execution. Containment NEVER suppresses a finding."
     recovery: "The close names the unit and both gates. Remove the unit from one of them — usually by dropping the standalone gate whose file the pool already covers — or, if both dispatches are deliberate, split them across profiles so no single run does both."
     test: "scripts/tests/bats/test-aid-test-execution-ledger.bats"
+
+  - id: plan_source_committed_preflight
+    type: 1
+    source: "scripts/aid-auto-pipeline.sh (committed-source preflight, before any git mutation); scripts/aid-plan-fsm.sh:_pfsm_check_committed_source (via plan-start --plan-file)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 11 (P083) — refuses to create a plan branch, task branch or lifecycle manifest while the source plan is absent from the target branch or differs from the worktree bytes being generated from. The gap was end-to-end: aid-auto-pipeline.sh checked only disk existence, cmd_plan_start never saw a path at all, and the clean-worktree preflight runs with --untracked-files=no, so a plan that was never `git add`ed was invisible to every layer. Generation then bound a whole plan lifecycle, via the manifest's source_plan_sha, to bytes that existed in exactly one worktree. The check runs BEFORE any git mutation, at the production caller that actually knows the path. The gitignored carve-out is deliberate and logged, not a loophole: this repository gitignores `.aid-o/plans/`, so a hard tracked-only rule would break the plugin's own dogfood workflow — there the manifest's source_plan_sha IS the binding, and the run says so. Classified `forceable`, so a PM who knowingly accepts an unshared source proceeds with an audited receipt rather than being stranded."
+    recovery: "The refusal names the target branch: commit the plan there and rerun generation. If the plan is deliberately unshared, --force --force-reason records that decision."
+    test: "scripts/tests/bats/test-committed-source.bats"
+
+  - id: epic_supersede_bound_reinit
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_plan_state_supersede (producer); scripts/aid-fsm.sh cmd_init (the narrow supersede exception to the unconditional duplicate-init rejection)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 13 — a PM-audited transaction that retires a stale EPIC FSM run and authorises exactly ONE re-initialisation. `aid-fsm.sh init` rejects a duplicate init unconditionally, which is correct — silently re-initialising over a live run loses its history — but it left a PM whose run went stale with no supported way forward except hand-deleting state, the unaudited surgery this plan exists to replace. `plan-state --supersede-epic` archives the state file to `.superseded-<epoch>` and writes a record binding FIVE fields: plan_id, epic_id, the run directory the archive sits in, the archived file's content hash, and the hash of the plan.json the re-init must present. Init re-derives all five from disk rather than trusting the record, so a stale record (a second supersede leaving the first lying around), a forged one, or one written for a different package authorises nothing and the unconditional rejection simply stands. Consumption renames the record to `.consumed-<epoch>`, so one PM decision authorises one init and never a second. The record is written BEFORE the archive: a record with no archive authorises nothing, while an archive with no record would strand the run. Evidence ARTIFACTS are never touched; the state file is archived in place beside them, never removed. The record is VERIFIED before the remaining init gates run but CONSUMED only once the new state file exists, so a later gate failure cannot burn the PM's one authorisation. Deliberately NOT forceable — this IS the audited transaction a force would otherwise be used to fake, and a forceable repair tool could fabricate the very records other commands trust."
+    recovery: "The refusal names which binding failed. Re-run 'aid-plan-fsm.sh plan-state <plan_id> --supersede-epic <epic_id> --reason ...' against the CURRENT package; the record binds one exact transition by design."
+    test: "scripts/tests/bats/test-supersede-recovery.bats"
+
+  - id: attest_recomputes_base_unconditionally
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_plan_state_attest (IMP-267 ancestry re-derivation)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 13 — the moved-task-branch recovery. The plan specified a NEW `--recompute-base` flag for attestation; implementing it would have been decoration, because IMP-267 already made the recomputation UNCONDITIONAL: attestation re-derives epic_base_commit (and epic_merge_commit) from real Git ancestry with the same primitives epic-merge-to-plan uses, and fails closed when the ancestry cannot be proven, rather than promoting a stored value --repair may have left wrong. A flag toggling behaviour that already always happens would be a detector without an enforcement point (AID-v3-principles §1). This row records the capability where the plan expected the flag, so the absence is a documented decision rather than a gap; the covering test asserts a genuinely rebased task branch attests to the recomputed base."
+    recovery: "Attestation itself is the recovery: 'aid-plan-fsm.sh plan-state <plan_id> --attest-source-ref <ref> --reason <text> --epic <epic_id>'. It refuses rather than attesting ancestry it cannot prove."
+    test: "scripts/tests/bats/test-supersede-recovery.bats"
+
+  - id: release_changelog_entry_validation
+    type: 1
+    source: "scripts/aid-release.sh:_release_validate_changelog_entry"
+    instruction: "docs/extending-aid.md — release preparation contract (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 3 — refuses a release whose CHANGELOG section for the new version is a placeholder or empty. The release script previously accepted any section that merely EXISTED, so a run could tag and publish a version whose changelog said nothing about it; the entry is the only human-readable record of what shipped, and an empty one is indistinguishable afterwards from a release nobody documented."
+    recovery: "The refusal names the version and the file: write the real entry under the ## [X.Y.Z] header in BOTH changelogs (they must stay identical) and rerun."
+    test: "scripts/tests/bats/test-release-changelog-entry.bats"
+
+  - id: release_detection_exit_triage
+    type: 1
+    source: "scripts/aid-release.sh:_release_probe_first"
+    instruction: "docs/extending-aid.md — release preparation contract (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 3 — distinguishes 'the pattern is genuinely absent' from 'the probe itself failed'. The previous `grep ... | head -1` construction took SIGPIPE on large inputs (measured: 20/20 aborts at ~290KB) and the aborted probe read as a clean absence, so the release script silently skipped work it believed unnecessary. The probe now uses `grep -m1` and triages grep's exit code, treating anything other than found/not-found as a hard failure rather than as 'not found'."
+    recovery: "The failure names the probed file and grep's exit code — fix the unreadable input rather than rerunning."
+    test: "scripts/tests/bats/test-release-detection.bats"
+
+  - id: dependency_token_grammar_hard_fail
+    type: 1
+    source: "scripts/aid-json-to-run.sh (dependency token grammar)"
+    instruction: "docs/extending-aid.md — plan generation grammar (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 5 — an unparseable dependency token is a hard failure, not a silently dropped edge. A dropped dependency edge produces a run order that looks complete and executes steps against work that does not exist yet; failing at generation time is the only point where the author is still present to fix the token."
+    recovery: "The failure names the offending token and the step it was declared on."
+    test: "scripts/tests/bats/test-dep-grammar.bats"
+
+  - id: branch_restore_hard_stop
+    type: 1
+    source: "scripts/aid-fsm.sh (branch restore after a failed transition)"
+    instruction: "docs/extending-aid.md — recovery transactions (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 6 — a failed branch restore stops the run instead of continuing on whatever branch the worktree happens to be on. Continuing after a failed restore means every subsequent command operates on an unintended branch while believing it is on the intended one — the worst kind of silent divergence, because each individual command succeeds."
+    recovery: "The stop names the branch it could not restore; restore it manually and rerun."
+    test: "scripts/tests/bats/test-branch-restore.bats"
+
+  - id: plan_force_framework
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_precondition / _pfsm_handle_force / _pfsm_commit_force / _pfsm_force_arg_check"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Steps 7-8 — every plan-level precondition is classified `forceable` or `hard` at its call site, and a forced pass is FAIL-CLOSED: the waiver receipt is written before the command proceeds, and a receipt that cannot be written refuses the force rather than passing it unrecorded. `hard` preconditions (identity, evidence integrity, PM authorization) cannot be forced at all — a force that could fake an authorization would be the backdoor this framework exists to replace. --force without --force-reason is a usage error, so no waiver is ever anonymous."
+    recovery: "The refusal prints the precondition's own recovery FIRST; --force --force-reason '<why>' is offered only for forceable ones."
+    test: "scripts/tests/bats/test-plan-force.bats; scripts/tests/bats/test-plan-force-commands.bats; scripts/tests/bats/test-force-anomalies.bats"
+
+  - id: init_strict_flag_rejection
+    type: 1
+    source: "scripts/aid-fsm.sh cmd_init (strict flag parsing); scripts/aid-release.sh (--force reason gate)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 9 — an unrecognised flag is rejected rather than ignored. A silently ignored flag is a request the operator believes was honoured; combined with --force it means a release proceeding under an option nobody applied. The release --force additionally requires a reason, so no forced release is anonymous."
+    recovery: "The rejection names the unrecognised flag and prints the accepted set."
+    test: "scripts/tests/bats/test-pm-override.bats"
+
+  - id: pm_override_single_use_claim
+    type: 1
+    source: "scripts/aid-fsm.sh (C3 PM-override grant producer and single-use claim)"
+    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 10 — a PM override is claimed exactly once, via `mv -n` PLUS a mandatory source-gone post-check. The post-check is not belt-and-braces: coreutils 9.1 exits 0 when `mv -n` SKIPS the move, so the claim would otherwise report success while the grant stayed on disk and authorised a second consumer. One PM decision authorises one action."
+    recovery: "A refused claim names the grant path; a fresh PM decision produces a fresh grant."
+    test: "scripts/tests/bats/test-pm-override.bats"
+
+  - id: ancillary_path_classifier
+    type: 1
+    source: "scripts/lib/aid-ancillary.sh (the single classifier); defaults/policies/plan-final-policy.yaml"
+    instruction: "docs/extending-aid.md — ancillary paths and review equivalence (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 14 — ONE classifier replaces four verbatim copies of the same dirty-worktree exception regex. The mode argument (legacy5 / legacy4 / policy) is MANDATORY so no caller silently inherits a wider exception set, and an unreadable or malformed policy FAILS CLOSED to the five legacy runtime paths rather than treating 'I could not read the rules' as 'everything is ancillary'. The legacy modes match strictly, reproducing the four anchored regexes rather than approximating them — measured, the permissive rule would have exempted three paths the old regexes blocked."
+    recovery: "A policy that cannot be read is named in a one-per-process warning; the filter continues on the legacy floor."
+    test: "scripts/tests/bats/test-ancillary-classifier.bats"
+
+  - id: protected_surface_at_freeze
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_finalize_freeze; scripts/lib/aid-plan-manifest.sh:plan_manifest_freeze_candidate"
+    instruction: "docs/extending-aid.md — ancillary paths and review equivalence (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 15 — freezing a candidate stores the PROTECTED PATH SET (every step's allowed_paths, the source plan, the lifecycle manifest, the close-consumed receipts) in the same atomic write as the candidate pair. A set that cannot be completed is recorded as PARTIAL, and a partial set can never authorise an acceptance — equivalence is simply unavailable and the plan behaves exactly as it did before P073. The set is NUL-delimited end to end because a path containing a newline would otherwise silently split into two shorter, wrong entries."
+    recovery: "The freeze names each EPIC whose plan.json it could not locate; the plan still freezes, only equivalence is unavailable."
+    test: "scripts/tests/bats/test-protected-surface.bats"
+
+  - id: review_equivalence_predicate
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:plan_final_review_equivalent / _pfsm_equivalence_classify / _pfsm_path_is_protected"
+    instruction: "docs/extending-aid.md — ancillary paths and review equivalence (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 16 — decides whether a moved plan head still describes the reviewed delivery. THREE states, not two: equivalent, not equivalent, and UNAVAILABLE — a caller that collapsed unavailable into equivalent would accept a head nobody compared. The predicate is pure (asserted by test), classifies with `--no-renames` because git's default rename detection hides a delivery file moved into an ancillary directory, gives the protected set precedence over the ancillary globs in BOTH the committed diff and the worktree, and treats a failed git invocation as UNAVAILABLE rather than as 'nothing changed'."
+    recovery: "The refusal names every offending path with its classification; a protected-surface change is a fix — re-sync, re-freeze, re-review."
+    test: "scripts/tests/bats/test-review-equivalence.bats"
+
+  - id: review_equivalence_acceptance
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_finalize_accept_ancillary; scripts/lib/aid-plan-manifest.sh:plan_manifest_set_accepted_head"
+    instruction: "docs/extending-aid.md — ancillary paths and review equivalence (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 16 — acceptance is a SEPARATE deliberate act from the check, so a drift check can never quietly change state. The whole decision runs under one lock (check, receipt, manifest binding), the head is re-verified immediately before the binding, and the manifest write is a compare-and-swap on the frozen candidate and the prior accepted head — the `-N` receipt suffix scan is not a lock and two acceptances would otherwise race. Re-accepting the same head verifies the bound receipt still exists and still hashes to the recorded digest instead of trusting the manifest field alone."
+    recovery: "Every refusal names what it could not prove; a fresh `--stage accept-ancillary` re-runs the whole decision."
+    test: "scripts/tests/bats/test-review-equivalence.bats"
+
+  - id: drift_equivalence_wiring
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_review_candidate_drift (consumed by --stage review pre/post and --stage c4)"
+    instruction: "docs/extending-aid.md — ancillary paths and review equivalence (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 17 — the single choke point all three plan-final consumers call. The head may sit at the candidate or at a RECEIPTED accepted head whose receipt names this candidate and this head; one commit past the accepted head still invalidates. A plan frozen before the protected set existed keeps the five legacy paths and the old any-movement rule byte for byte. The accept-ancillary recovery hint is emitted only when the difference really is ancillary-only, because offering it for a protected-surface change would send the operator into a refusal loop."
+    recovery: "The invalidation message carries the recovery: `plan-finalize <plan> --stage accept-ancillary` where it can work."
+    test: "scripts/tests/bats/test-drift-equivalence.bats"
+
+  - id: merge_equivalence_reverification
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:cmd_plan_merge_to_main (head-leg alternative + live re-verification); _pfsm_seal_plan_final_close_evidence"
+    instruction: "docs/extending-aid.md — ancillary paths and review equivalence (P073)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P073 Step 18 — the ONE place the target branch moves. The PM-decision leg is unchanged and hard: the decision still names the frozen candidate. The head leg accepts the exact accepted head only after the receipt verifies AND equivalence is RE-VERIFIED LIVE against the CURRENT policy — a stale receipt is not a licence, and a policy tightened since the acceptance refuses the merge at the moment of the irreversible action. The published merge takes the accepted head as its second parent, so the durable close receipt's merged_head describes a merge that actually happened."
+    recovery: "Every refusal leaves the target branch byte-identical and names what failed; re-accept or re-freeze as the message directs."
+    test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (P073 Step 18 cases)"

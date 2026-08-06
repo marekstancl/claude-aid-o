@@ -166,6 +166,8 @@ source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 
 # ---------------------------------------------------------------------------
 # _pfsm_resolve_invoke_root [given] — `--project-root` if given (resolved to
@@ -274,10 +276,448 @@ _pfsm_check_clean_worktree() {
   local root="$1"
   local dirty
   dirty="$(git -C "$root" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   if [[ -n "$dirty" ]]; then
     echo "PRECONDITION FAIL: uncommitted changes present — commit or stash before plan-start/epic-start:" >&2
     printf '%s\n' "$dirty" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PM FORCE BACKDOOR (P073 Step 7)
+#
+# WHY: aid-plan-fsm.sh hard-rejects `--force` on every subcommand, so a
+# defective bookkeeping path could strand the PM with no supported way to
+# finish a plan (the P082 stranding). aid-fsm.sh already implements an audited
+# force with a three-record pattern; this ports that EXACT pattern to the plan
+# FSM with one added field rather than inventing a fourth persistence
+# mechanism.
+#
+# THREE RECORDS PER FORCE (all of them, or the force does not happen):
+#   1. a `plan_force_override` timeline event in the plan-final run's timeline
+#      (a silent no-op when no attempt exists yet — matching aid-fsm.sh);
+#   2. an append to the cross-plan `.aid-o/work/audit-log.jsonl` (best-effort,
+#      matching fsm_emit_audit_log's own `|| true` contract, because the
+#      waiver artifact below is the authoritative record);
+#   3. a HEAD-bound protocol-v2 waiver artifact the C4 aggregator surfaces in
+#      `waivers_applied[]`. This one is FAIL-CLOSED: if it cannot be written,
+#      the force itself fails and state is left unchanged — a silent bypass is
+#      worse than a blocked command.
+#
+# WHAT A FORCE RECEIPT RECORDS — and does not. It records that named
+# preconditions WERE BYPASSED (`records: "precondition_bypass"`, with
+# `status: "blocked"` and `verdict.ready: false`); it does NOT assert that the
+# command went on to complete. A command that mints a receipt and then fails a
+# later, unrouted precondition leaves a truthful record of the bypass and no
+# claim of success (adversarial-review finding: the receipt must not be read
+# as "this operation happened"). It is never a consumable authorization. The consumable-grant concept exists only for the
+# C0/C3 PM-override artifacts, which are claimed atomically and single-use.
+#
+# FORCEABLE vs HARD: every precondition a public command runs is classified in
+# CODE (see _pfsm_precondition), not in prose. `hard` is reserved for physical
+# git impossibilities — an unresolvable merge state, a missing branch or
+# commit object, an unreadable repository. Force can never bypass those,
+# because there is nothing on the other side of them to complete.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Set by _pfsm_precondition when a forceable check is bypassed; consumed by
+# _pfsm_handle_force. Comma-separated check names.
+_PFSM_BYPASSED=""
+# PROVENANCE for the above. _pfsm_precondition is the only writer, and it
+# records a name here ONLY on the forceable branch. _pfsm_handle_force refuses
+# to mint a receipt for any name that is not present, so a caller that sets
+# _PFSM_BYPASSED directly — including with a `hard` check's name — gets a
+# refusal rather than a receipt claiming that check was bypassed. Without this
+# the hard/forceable split would be convention only (adversarial-review
+# finding on the first cut of this step).
+_PFSM_BYPASS_PROVENANCE=""
+# Set to 1 by a command's argument loop when --force was passed.
+_PFSM_FORCE=0
+# The --reason value for the force (>= 20 chars, validated at use).
+_PFSM_FORCE_REASON=""
+
+# ---------------------------------------------------------------------------
+# _pfsm_force_evidence_dir <root> <plan_id>
+#   Where the waiver artifact goes. The plan-final run's evidence dir when the
+#   manifest records one (that is where the C4 aggregator scans), else a
+#   fallback the freeze allocator later sweeps into the first real attempt dir
+#   — see _pfsm_finalize_freeze, so a pre-attempt force receipt is never lost.
+# ---------------------------------------------------------------------------
+_pfsm_force_evidence_dir() {
+  local root="$1" plan_id="$2" rel=""
+  rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || rel=""
+  # Defence in depth (adversarial-review finding): the manifest VALIDATOR
+  # already enforces this containment, but this function reads the field
+  # directly, so a hand-edited manifest that never went through the validator
+  # must not be able to steer a force receipt outside the plan's own evidence
+  # tree. An absolute path or any `..` component falls back to the safe
+  # default rather than being honoured.
+  if [[ -n "$rel" && "$rel" != "null" ]]; then
+    if [[ "$rel" == ".aid-o/work/evidence/${plan_id}/"* && "$rel" != *".."* && "$rel" != /* ]]; then
+      printf '%s/%s' "$root" "$rel"
+      return 0
+    fi
+    echo "WARNING: manifest plan_final_evidence_dir '${rel}' is not contained in .aid-o/work/evidence/${plan_id}/ — writing the force receipt to the default location instead." >&2
+  fi
+  printf '%s/.aid-o/work/plan-final/%s' "$root" "$plan_id"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_precondition <name> <forceable|hard> <check-fn> [args...]
+#
+# Runs <check-fn>. On success, returns 0. On failure it ALWAYS lets the check
+# print its own recovery message first (the normal path is never hidden behind
+# the force), and then:
+#   - `hard`, or force not active  -> returns 1; the caller refuses as before.
+#   - `forceable` and force active -> records <name> in _PFSM_BYPASSED, prints
+#     that the bypass is being recorded, and returns 0 so the command
+#     continues.
+# A `hard` failure under --force additionally says that force cannot bypass
+# it, so the operator is not left guessing.
+# ---------------------------------------------------------------------------
+_pfsm_precondition() {
+  local name="$1" class="$2"; shift 2
+  if "$@"; then
+    return 0
+  fi
+  case "$class" in
+    forceable)
+      if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+        _PFSM_BYPASSED="${_PFSM_BYPASSED:+${_PFSM_BYPASSED},}${name}"
+        _PFSM_BYPASS_PROVENANCE="${_PFSM_BYPASS_PROVENANCE:+${_PFSM_BYPASS_PROVENANCE},}${name}"
+        echo "FORCE: bypassing precondition '${name}' — recorded in the force receipt." >&2
+        return 0
+      fi
+      return 1
+      ;;
+    hard)
+      if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+        echo "FORCE CANNOT BYPASS '${name}': it is a physical repository state, not a bookkeeping check — there is nothing on the other side of it to complete. Repair the repository (or use plan-rollback) and retry." >&2
+      fi
+      return 1
+      ;;
+    *)
+      echo "INTERNAL: _pfsm_precondition called with unknown class '${class}' for '${name}' — refusing (fail closed)." >&2
+      return 1
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_handle_force <command> <plan_id> <root> [from_state] [to_state]
+#
+# Writes the three records for the bypasses accumulated in _PFSM_BYPASSED.
+# Returns 0 when the force is recorded, 1 when it must not proceed.
+#
+# A force whose preconditions ALL passed is a no-op flag: nothing was
+# bypassed, so no waiver artifact is written (a receipt for nothing would be
+# noise in waivers_applied[]); the timeline gets a `force_unused` note.
+# ---------------------------------------------------------------------------
+_pfsm_handle_force() {
+  local command="$1" plan_id="$2" root="$3" from_state="${4:-}" to_state="${5:-}"
+  local reason="$_PFSM_FORCE_REASON"
+  local bypassed="$_PFSM_BYPASSED"
+  local operator="${USER:-unknown}"
+  local now; now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  local head_sha; head_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)"
+
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: --force requires --reason with at least 20 characters (got ${#reason}). The force receipt is a forensic record; an empty or throwaway reason defeats its whole purpose." >&2
+    return 1
+  fi
+
+  local evidence_dir; evidence_dir="$(_pfsm_force_evidence_dir "$root" "$plan_id")"
+  local timeline="${evidence_dir}/timeline.jsonl"
+
+  # A force that bypassed nothing writes no waiver — see the header note.
+  if [[ -z "$bypassed" ]]; then
+    echo "FORCE: every precondition passed — --force bypassed nothing and no waiver was written." >&2
+    return 0
+  fi
+
+  # PROVENANCE GATE (adversarial-review finding): every accumulated name must
+  # have come through _pfsm_precondition's forceable branch. A name that did
+  # not — a `hard` check's name written directly into the global, or any other
+  # hand-set value — gets a refusal instead of a receipt asserting it was
+  # legitimately bypassed.
+  local _bp
+  while IFS= read -r _bp; do
+    [[ -n "$_bp" ]] || continue
+    if [[ ",${_PFSM_BYPASS_PROVENANCE}," != *",${_bp},"* ]]; then
+      echo "PRECONDITION FAIL: refusing to mint a force receipt for '${_bp}' — it was never bypassed through the forceable precondition path (a 'hard' precondition, or a hand-set value). No records were written." >&2
+      return 1
+    fi
+  done <<< "${bypassed//,/$'\n'}"
+
+  # ORDER MATTERS (adversarial-review finding): the authoritative, fail-closed
+  # waiver artifact is written FIRST. The earlier cut wrote the timeline event
+  # and the audit-log entry before it, so a failed receipt write left a
+  # forensic trail describing an override that was actually refused. Nothing
+  # is recorded anywhere until the receipt is durably on disk.
+  command -v jq >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: cannot write force receipt — jq is unavailable; refusing a silent bypass." >&2
+    return 1
+  }
+  mkdir -p "$evidence_dir" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot write force receipt — ${evidence_dir} is not creatable; refusing a silent bypass." >&2
+    return 1
+  }
+
+  local candidate_sha=""
+  candidate_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate_sha=""
+  [[ "$candidate_sha" == "null" ]] && candidate_sha=""
+
+  # COLLISION-PROOF NAME. Second precision plus a plain `mv` meant two forces
+  # inside one second left ONE audit record — reproduced by an independent
+  # review. The first free suffix is chosen, and the publish below is `mv -n`
+  # plus a source-gone post-check, so an existing receipt is never overwritten.
+  local fname_ts; fname_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
+  local safe_cmd; safe_cmd="$(printf '%s' "$command" | tr -c 'A-Za-z0-9._-' '_')"
+  local wbase="${evidence_dir}/waiver-plan-${safe_cmd}-${fname_ts}"
+  local wfile="${wbase}.json" _wn=0
+  while [[ -e "$wfile" ]]; do
+    _wn=$(( _wn + 1 ))
+    if [[ "$_wn" -gt 100 ]]; then
+      echo "PRECONDITION FAIL: cannot find a free force-receipt name under ${evidence_dir} — refusing a silent bypass." >&2
+      return 1
+    fi
+    wfile="${wbase}-${_wn}.json"
+  done
+
+  local payload hash json
+  payload="$(jq -nc --arg wc "plan-fsm:${command}" --arg rs "$reason" \
+    --arg wb "$operator" --arg wa "$now" \
+    '{waived_check:$wc, reason:$rs, waived_by:$wb, waived_at:$wa, scope:"run", visible:true}')" || payload=""
+  [[ -n "$payload" ]] || {
+    echo "PRECONDITION FAIL: cannot render force receipt payload — refusing a silent bypass." >&2
+    return 1
+  }
+  hash="$(printf '%s' "$payload" | jq -Sc . 2>/dev/null | sha256sum 2>/dev/null | cut -c1-64)" \
+    || hash="0000000000000000000000000000000000000000000000000000000000000000"
+
+  local project_id; project_id="$(basename "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || echo "$root")")"
+  json="$(jq -n \
+    --arg created_at "$now" \
+    --arg project_id "${project_id:-unknown}" \
+    --arg plan_id "$plan_id" \
+    --arg run_id "$command" \
+    --arg head_sha "$head_sha" \
+    --arg candidate_sha "$candidate_sha" \
+    --arg subject_hash "sha256:${hash}" \
+    --arg by "$bypassed" \
+    --argjson waiver "$payload" \
+    '{
+      schema_version: "aid-2.0",
+      artifact_type: "waiver",
+      producer: "aid-plan-fsm.sh@force-override",
+      created_at: $created_at,
+      control_protocol: "aid-2.0",
+      identity: {project_id: $project_id, epic_id: $plan_id, run_id: $run_id, step_id: null},
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "blocked",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-plan-fsm.sh"},
+      waiver: $waiver,
+      forced_override: true,
+      records: "precondition_bypass",
+      candidate_sha: (if $candidate_sha == "" then null else $candidate_sha end),
+      bypassed_preconditions: ($by | split(","))
+    }')" || json=""
+  [[ -n "$json" ]] || {
+    echo "PRECONDITION FAIL: cannot render force receipt — refusing a silent bypass." >&2
+    return 1
+  }
+  local tmp="${wfile}.tmp.$$"
+  if ! printf '%s\n' "$json" > "$tmp" 2>/dev/null || ! mv -n "$tmp" "$wfile" 2>/dev/null || [[ -e "$tmp" ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "PRECONDITION FAIL: cannot write force receipt at ${wfile} — refusing a silent bypass." >&2
+    return 1
+  fi
+
+  # The receipt is durable. Now, and only now, the two supporting records.
+  #
+  # Record 2 — timeline. Written only when the run dir exists, exactly like
+  # aid-fsm.sh's log_event no-op contract (the mkdir above guarantees it does
+  # by this point).
+  local ev
+  ev="$(jq -nc --arg ts "$now" --arg ev "plan_force_override" --arg cmd "$command" \
+    --arg plan "$plan_id" --arg reason "$reason" --arg op "$operator" \
+    --arg from "$from_state" --arg to "$to_state" --arg by "$bypassed" \
+    --arg receipt "$(basename "$wfile")" \
+    '{ts:$ts, event:$ev, command:$cmd, plan_id:$plan, from:$from, to:$to,
+      reason:$reason, operator:$op, receipt:$receipt,
+      bypassed_preconditions: ($by | split(","))}' 2>/dev/null)" || ev=""
+  [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "$timeline" 2>/dev/null || true
+
+  # Record 3 — cross-plan audit log (best-effort by contract: the waiver
+  # artifact above is the authoritative record).
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "$plan_id" --run-id "${command}" \
+    --event "plan_force_override" \
+    --command "$command" --plan-id "$plan_id" \
+    --reason "$reason" --operator "$operator" \
+    --from "$from_state" --to "$to_state" \
+    --receipt "$(basename "$wfile")" \
+    --bypassed-preconditions-array "$bypassed" \
+    --output "${root}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
+
+  # CONSUME. The accumulated bypasses belong to the receipt just minted, so a
+  # command that calls this after each precondition group never mints a second
+  # receipt for the same ones.
+  _PFSM_BYPASSED=""
+  _PFSM_BYPASS_PROVENANCE=""
+
+  echo "FORCE: recorded at ${wfile} — bypassed: ${bypassed}" >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_commit_force <command> <plan_id> <root> [from] [to]
+#   Call after a command's preconditions and BEFORE its first mutation. A
+#   no-op when --force was not passed. Refuses the command (returns 1) when
+#   the receipt cannot be minted, so a bypass is never silently taken.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _pfsm_force_arg_check <command>
+#   Call right after a command's argument loop. A force reason supplied
+#   WITHOUT --force used to be parsed and silently discarded, which is exactly
+#   the "operator believes they forced something" failure this plan is fixing
+#   elsewhere (adversarial-review finding).
+# ---------------------------------------------------------------------------
+# Commands whose preconditions are not yet routed through _pfsm_precondition.
+# --force is PARSED there (universality of the flag is the PM decision) but can
+# currently bypass nothing, so saying so out loud is the honest contract: an
+# operator must never believe they forced something that was never forceable
+# (adversarial-review finding).
+_PFSM_UNROUTED_COMMANDS="epic-complete plan-close plan-rollback"
+
+_pfsm_force_arg_check() {
+  local command="$1"
+  if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+    # The reason requirement applies the moment --force is passed, on every
+    # command — not only where a bypass happens to be available.
+    if [[ "${#_PFSM_FORCE_REASON}" -lt 20 ]]; then
+      echo "ERROR: ${command}: --force requires a reason of at least 20 characters (--force-reason '<text>'). The force receipt is a forensic record; a throwaway reason defeats its purpose." >&2
+      return 1
+    fi
+    if [[ " ${_PFSM_UNROUTED_COMMANDS} " == *" ${command} "* ]]; then
+      echo "NOTICE: ${command} accepts --force, but none of its preconditions is wired to the forceable classifier yet, so this --force will bypass NOTHING and write no receipt. If ${command} is refusing, the refusal is not one force can lift — repair the underlying record, or use plan-state's audited recovery tools." >&2
+    fi
+  fi
+  if [[ "$_PFSM_FORCE" -ne 1 && -n "$_PFSM_FORCE_REASON" ]]; then
+    echo "ERROR: ${command}: a force reason was supplied without --force. Pass --force as well, or drop the reason — a reason on its own bypasses nothing and must not look like it did." >&2
+    return 1
+  fi
+  return 0
+}
+
+_pfsm_commit_force() {
+  [[ "$_PFSM_FORCE" -eq 1 ]] || return 0
+  _pfsm_handle_force "$@" || return 1
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_parse_force_flag <flag> <value-getter...>
+#   Shared shape for the eight public commands' argument loops. Kept as a
+#   comment rather than a function because each loop owns its own `shift`
+#   discipline:
+#       --force)  _PFSM_FORCE=1; shift ;;
+#       --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+#   plan-rollback is the ONE exception: its `--reason` already carries the
+#   rollback business reason, so its force path uses `--force-reason`.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# _pfsm_check_committed_source <project_root> <plan_file>  — P073 Step 11 (P083)
+#
+# A plan that was never `git add`ed is invisible to the clean-worktree
+# preflight (it runs `--untracked-files=no`), so generation would create a
+# plan branch, task branches and a lifecycle manifest from bytes that exist in
+# ONE worktree, with the manifest's source_plan_sha binding the plan to a
+# source nobody else can read.
+#
+# The gitignored carve-out is deliberate: this repository gitignores
+# `.aid-o/plans/`, so a hard tracked-only rule would break the plugin's own
+# dogfood workflow. There the manifest's source_plan_sha IS the binding, and
+# the difference is logged rather than assumed.
+# ---------------------------------------------------------------------------
+_pfsm_check_committed_source() {
+  local root="$1" plan_file="$2"
+  [[ -n "$plan_file" ]] || return 0
+  if [[ ! -f "$plan_file" ]]; then
+    echo "PRECONDITION FAIL: --plan-file '${plan_file}' does not exist." >&2
+    return 1
+  fi
+  local repo_root; repo_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || echo "")"
+  if [[ -z "$repo_root" ]]; then
+    echo "plan_source_binding: source_plan_sha (this workspace is not a git repository)" >&2
+    return 0
+  fi
+  # SCOPE: only a plan INSIDE this workspace's repository has a target-branch
+  # relationship to verify. A plan from a shared library or a test fixture has
+  # none, and refusing it would be an over-block (found when a first cut broke
+  # every pipeline fixture).
+  #
+  # Containment is decided on the LEXICAL path (--no-symlinks), and the
+  # symlink case is then refused explicitly rather than exempted. Deciding it
+  # on the canonical path let `repo/plans/x.md -> /tmp/x.md` resolve outside
+  # the repo and take the "lives outside" skip — so a plan invoked through a
+  # repository path, with a valid target branch, could still bind the
+  # lifecycle to local-only bytes. That is precisely the unshared source this
+  # check exists to refuse (adversarial-review finding).
+  local plan_lex plan_real
+  plan_lex="$(realpath -m --no-symlinks -- "$plan_file" 2>/dev/null || echo "$plan_file")"
+  plan_real="$(realpath -m -- "$plan_file" 2>/dev/null || echo "$plan_lex")"
+  if [[ "$plan_lex" != "$repo_root"/* ]]; then
+    echo "plan_source_binding: source_plan_sha (${plan_file} lives outside this workspace's repository)" >&2
+    return 0
+  fi
+  if [[ "$plan_real" != "$plan_lex" && "$plan_real" != "$repo_root"/* ]]; then
+    echo "PRECONDITION FAIL: ${plan_file} is a repository path but resolves through a symlink to ${plan_real}, outside the repository — the lifecycle would bind source_plan_sha to bytes this repository does not contain. Commit the plan inside the repository, or gitignore it and accept the source_plan_sha binding deliberately." >&2
+    return 1
+  fi
+
+  # ONE repo-relative path for every git call below. Deriving it from the
+  # canonical path rather than reusing the caller's (possibly relative)
+  # argument fixes a real inconsistency: with --project-root pointing somewhere
+  # other than the caller's CWD, `git -C "$root" check-ignore -- "$plan_file"`
+  # tested a doubled path, so a genuinely ignored plan missed its deliberate
+  # skip and was refused as absent from the target branch — while the pipeline,
+  # running git from the workspace with an absolute path, skipped it. The same
+  # plan must not depend on which entry point the operator used
+  # (adversarial-review finding).
+  local rel="${plan_lex#"$repo_root"/}"
+
+  if git -C "$root" check-ignore -q -- "$rel" 2>/dev/null; then
+    echo "plan_source_binding: source_plan_sha (${rel} is gitignored — the committed manifest's source_plan_sha is the binding)" >&2
+    return 0
+  fi
+
+  local target
+  target="$(aid_target_branch 2>/dev/null || echo "")"
+  if [[ -z "$target" ]] || ! git -C "$root" rev-parse --verify --quiet "$target" >/dev/null 2>&1; then
+    # See the pipeline's copy of this rule: refuse only for an already-TRACKED
+    # plan (the fresh-repo case the plan names); an untracked plan in a
+    # workspace with no integration branch has nothing to verify against.
+    if git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
+      echo "PRECONDITION FAIL: source plan ${plan_file} is tracked but the target branch '${target:-<unresolved>}' does not exist — create and commit the target branch first, or gitignore the plan if it is deliberately unshared." >&2
+      return 1
+    fi
+    echo "plan_source_binding: source_plan_sha (no target branch '${target:-<unresolved>}' exists to verify ${plan_file} against)" >&2
+    return 0
+  fi
+  local git_err=""
+  if ! git_err="$(git -C "$root" cat-file -e "${target}:${rel}" 2>&1)"; then
+    echo "PRECONDITION FAIL: source plan is not committed on ${target} (or differs from the worktree copy) — commit the plan on ${target} and rerun generation." >&2
+    [[ -n "$git_err" ]] && printf '%s\n' "$git_err" >&2
+    return 1
+  fi
+  if ! git -C "$root" show "${target}:${rel}" 2>/dev/null | cmp -s - "$plan_lex"; then
+    echo "PRECONDITION FAIL: source plan is not committed on ${target} (or differs from the worktree copy) — commit the plan on ${target} and rerun generation." >&2
     return 1
   fi
   return 0
@@ -433,18 +873,41 @@ _pfsm_plan_final_installed() {
 # dispatcher (i.e. when P068 lands them).
 # =============================================================================
 cmd_plan_start() {
-  local plan_id="" mode="" project_root_opt="" op_id_opt=""
+  local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode="${2:-}"; shift 2 ;;
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
+      # P073 Step 11 (P083): the path of the source plan this lifecycle is
+      # being created FROM. Optional so legacy callers are unchanged; the
+      # production caller (aid-auto-pipeline.sh) always passes it, and it is
+      # what lets this command verify the source is committed before it
+      # creates a branch or a manifest.
+      --plan-file) plan_file_opt="${2:-}"; shift 2 ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-start: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-start: unexpected argument: $1" >&2; exit 2; fi
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-start" || exit 2
   if [[ -z "$plan_id" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -471,7 +934,20 @@ cmd_plan_start() {
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
 
-  _pfsm_preflight "$invoke_root" || exit 1
+  # P073 Step 11 (P083): refuse BEFORE any git mutation when the source plan
+  # is absent from the target branch or differs from the worktree bytes this
+  # lifecycle is about to be generated from. Forceable — a PM who knowingly
+  # accepts an unshared source can proceed with an audited receipt.
+  if [[ -n "$plan_file_opt" ]]; then
+    _pfsm_precondition "committed_source_plan" forceable \
+      _pfsm_check_committed_source "$project_root" "$plan_file_opt" || exit 1
+  fi
+
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree_or_detached_head" forceable _pfsm_preflight "$invoke_root" || exit 1
+  _pfsm_commit_force "plan-start" "$plan_id" "$project_root" || exit 1
 
   # Edge Case: a CLOSED plan is not reopened.
   local cur_state="" src=0
@@ -652,6 +1128,20 @@ cmd_epic_start() {
       --run-id) run_id_opt="${2:-}"; shift 2 ;;
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: epic-start: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -660,6 +1150,9 @@ cmd_epic_start() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "epic-start" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
     echo "Usage: aid-plan-fsm.sh epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -679,7 +1172,11 @@ cmd_epic_start() {
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
 
-  _pfsm_preflight "$invoke_root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree_or_detached_head" forceable _pfsm_preflight "$invoke_root" || exit 1
+  _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
@@ -710,7 +1207,11 @@ cmd_epic_start() {
 
   if [[ "$branch_exists" -eq 0 ]]; then
     if [[ -n "$entry_json" ]]; then
-      _pfsm_verify_epic_lineage "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
+      # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+      # bookkeeping obstacle, not a physical impossibility, so an audited
+      # --force may pass it. The check still prints its own recovery first.
+      _pfsm_precondition "epic_lineage" forceable _pfsm_verify_epic_lineage "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
+      _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
       exit 0
     fi
 
@@ -1055,6 +1556,13 @@ cmd_epic_complete() {
       --op-id)
         _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
+      # P073 Step 8: this command already owns `--reason` for its own business
+      # meaning, so the force path uses the unambiguous `--force-reason`.
+      # Passing --force without it dies naming both flags.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason)
+        _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
       --*) echo "ERROR: epic-complete: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -1063,6 +1571,9 @@ cmd_epic_complete() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "epic-complete" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
     echo "Usage: aid-plan-fsm.sh epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -1435,6 +1946,20 @@ cmd_epic_merge_to_plan() {
       --op-id)
         _pfsm_require_optval "epic-merge-to-plan" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: epic-merge-to-plan: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -1443,6 +1968,9 @@ cmd_epic_merge_to_plan() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "epic-merge-to-plan" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
     echo "Usage: aid-plan-fsm.sh epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -1466,7 +1994,11 @@ cmd_epic_merge_to_plan() {
   # happens to stand (a linked worktree never holds `plan/<plan_id>` here).
   _pfsm_check_detached_head "$project_root" || exit 1
   _pfsm_check_no_merge_in_progress "$project_root" || exit 1
-  _pfsm_check_clean_worktree "$project_root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$project_root" || exit 1
+  _pfsm_commit_force "epic-merge-to-plan" "$plan_id" "$project_root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
@@ -2249,6 +2781,37 @@ _pfsm_finalize_freeze() {
     return 1
   }
 
+  # P073 Step 7: sweep any force receipt written BEFORE this plan had an
+  # attempt dir into the newly allocated one. The C4 aggregator scans
+  # `waiver-*.json` only under the CURRENT attempt's evidence dir, so a
+  # pre-attempt force (e.g. a forced plan-start) would otherwise be invisible
+  # in waivers_applied[]. Moved, never copied, so a receipt is never
+  # double-counted across two attempts.
+  local _force_fallback="${root}/.aid-o/work/plan-final/${plan_id}"
+  if [[ -d "$_force_fallback" ]]; then
+    local _fw
+    for _fw in "$_force_fallback"/waiver-plan-*.json; do
+      [[ -e "$_fw" ]] || continue
+      # `mv -n` plus a source-gone post-check: on coreutils 9.1 a skipped
+      # `mv -n` still exits 0, so the exit code alone would report a sweep that
+      # did not happen and could mask an existing receipt of the same name
+      # (adversarial-review finding).
+      if mv -n "$_fw" "${run_dir_abs}/" 2>/dev/null && [[ ! -e "$_fw" ]]; then
+        echo "plan-finalize --stage freeze: swept pre-attempt force receipt $(basename "$_fw") into ${run_dir_rel}" >&2
+      else
+        echo "WARNING: pre-attempt force receipt $(basename "$_fw") was NOT swept — a file of that name already exists in ${run_dir_rel}. The receipt is left at ${_fw} and must be reconciled by hand; nothing was overwritten." >&2
+      fi
+    done
+    # The pre-attempt force also logged its timeline event in the fallback
+    # dir. Fold it into the attempt's timeline rather than orphaning it —
+    # JSONL appends cleanly, so no record is lost or overwritten.
+    if [[ -s "${_force_fallback}/timeline.jsonl" ]]; then
+      cat "${_force_fallback}/timeline.jsonl" >> "${run_dir_abs}/timeline.jsonl" 2>/dev/null \
+        && rm -f "${_force_fallback}/timeline.jsonl" 2>/dev/null || true
+    fi
+    rmdir "$_force_fallback" 2>/dev/null || true
+  fi
+
   # P068 Step 5: `prepare-plan` runs BEFORE this stage, so it cannot write into
   # a run directory that does not exist yet — it records the resolved version
   # (or the literal `none`) in the plan's runtime state directory. Copy that
@@ -2260,13 +2823,131 @@ _pfsm_finalize_freeze() {
     cp -p "$prep_src" "${run_dir_abs}/release-prep.json" 2>/dev/null || true
   fi
 
+  # ── P073 Step 15: compute the PROTECTED PATH SET ────────────────────────
+  # The delivery surface this freeze's review will describe. Step 16's
+  # equivalence predicate refuses any commit that touches it, so getting it
+  # wrong in either direction matters: too small and a delivery change rides
+  # through a frozen review; too large and nothing is ever equivalent.
+  #
+  # `allowed_paths` in plan.json is the machine-readable delivery contract
+  # that already drives the pre-commit scope hook and gates/scope-check.sh —
+  # reusing it means the protected set and the scope guard can never disagree
+  # about what a step was allowed to touch.
+  # NUL-DELIMITED, because a delivery path may contain anything but NUL.
+  # Newline delimiting silently split such a path into two wrong entries.
+  local _prot_file="${run_dir_abs}/.protected-paths.nul"
+  local _prot_complete=true
+  : > "$_prot_file"
+
+  # The lifecycle paths are the floor.
+  {
+    printf '%s\0' ".aid-lifecycle/manifests/${plan_id}.yaml"
+    printf '%s\0' ".aid-lifecycle/receipts/${plan_id}.yaml"
+  } >> "$_prot_file"
+
+  # The source plan. Step 11 stamps its repo-relative path at lifecycle
+  # creation; a legacy manifest without the field falls back to a
+  # deterministic glob, and a miss is recorded rather than assumed away.
+  local _src_path=""
+  _src_path="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.source_plan_path' 2>/dev/null)" || _src_path=""
+  if [[ -z "$_src_path" || "$_src_path" == "null" ]]; then
+    # AMBIGUITY IS NOT RESOLVED BY GLOB ORDER. Taking the first match made the
+    # protected set depend on locale/readdir order, which could protect the
+    # wrong source plan (adversarial-review finding). Two matches means the
+    # set is incomplete and equivalence is off for this freeze.
+    local _g; local -a _src_matches=()
+    for _g in "${root}/.aid-o/plans/${plan_id}"-*.md; do
+      [[ -f "$_g" ]] || continue
+      _src_matches+=("${_g#"${root}/"}")
+    done
+    if [[ "${#_src_matches[@]}" -eq 1 ]]; then
+      _src_path="${_src_matches[0]}"
+    elif [[ "${#_src_matches[@]}" -gt 1 ]]; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${#_src_matches[@]} files match .aid-o/plans/${plan_id}-*.md and no source_plan_path is recorded, so which one the plan was generated from is not decidable: ${_src_matches[*]}" >&2
+      _src_path=""
+    fi
+  fi
+  if [[ -n "$_src_path" && "$_src_path" != "null" ]]; then
+    printf '%s\0' "$_src_path" >> "$_prot_file"
+  else
+    _prot_complete=false
+    echo "WARNING: protected set incomplete — no source plan path recorded for ${plan_id} and no .aid-o/plans/${plan_id}-*.md matched." >&2
+  fi
+
+  # Every EPIC's plan.json allowed_paths, read from the evidence dir the
+  # manifest records for that run.
+  local _e_id _e_dir _e_json _e_paths
+  while IFS=$'\t' read -r _e_id _e_dir; do
+    [[ -n "$_e_id" ]] || continue
+    if [[ -z "$_e_dir" ]]; then
+      # An empty evidence_dir used to probe "${root}//plan.json", which
+      # resolves to a repository-root plan.json — an unrelated file whose
+      # allowed_paths would have been protected instead of the EPIC's
+      # (adversarial-review finding).
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${_e_id} has no evidence_dir recorded in the manifest" >&2
+      continue
+    fi
+    _e_json="${root}/${_e_dir}/plan.json"
+    if [[ ! -r "$_e_json" ]]; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${_e_id} plan.json unlocatable at ${_e_dir}/plan.json" >&2
+      continue
+    fi
+    # A jq FAILURE (malformed plan.json) must mark the set incomplete, not be
+    # swallowed: `|| true` left the EPIC's paths out while the freeze still
+    # claimed to be complete.
+    # BASE64, not a NUL-delimited jq stream. Two separate reasons, both
+    # MEASURED on this repo's jq 1.6: a jq filter appending a NUL escape emits
+    # NO byte at all for it, and bash command substitution would strip the byte
+    # even if jq produced one. Either way every allowed_path was concatenated into ONE blob —
+    # `src/app.sh` + `docs/release-notes.md` became `src/app.shdocs/release-notes.md`,
+    # so NEITHER path was protected while the freeze still recorded
+    # protected_paths_complete=true. A delivery-path change could then be
+    # classified ancillary, accepted, and merged without a review covering it.
+    # One base64 token per line survives every byte a path can contain,
+    # including newlines, and this loop writes the NUL separators itself.
+    if ! _e_paths="$(jq -r '.steps[]?.allowed_paths[]? // empty | @base64' "$_e_json" 2>/dev/null)"; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — ${_e_id} plan.json at ${_e_dir}/plan.json is malformed or unreadable by jq" >&2
+      continue
+    fi
+    local _e_b64 _e_one _e_decode_failed=0
+    while IFS= read -r _e_b64; do
+      [[ -n "$_e_b64" ]] || continue
+      if ! _e_one="$(printf '%s' "$_e_b64" | base64 -d 2>/dev/null)" || [[ -z "$_e_one" ]]; then
+        _e_decode_failed=1
+        continue
+      fi
+      printf '%s\0' "$_e_one" >> "$_prot_file"
+    done <<< "$_e_paths"
+    if [[ "$_e_decode_failed" -eq 1 ]]; then
+      _prot_complete=false
+      echo "WARNING: protected set incomplete — at least one allowed_path in ${_e_dir}/plan.json could not be decoded" >&2
+    fi
+  done < <(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs[]? | [.epic_id, (.evidence_dir // "")] | @tsv' 2>/dev/null || true)
+
+  # The overlap between the ancillary policy and this set is EXPECTED —
+  # close-consumed evidence lives under `.aid-o/work/`, itself an ancillary
+  # glob. Warn so the precedence is visible; protection wins at the path level.
+  # The warner reads newline records, so hand it a newline projection of the
+  # NUL file rather than teaching two readers about two formats.
+  tr '\0' '\n' < "$_prot_file" > "${_prot_file}.lines" 2>/dev/null || true
+  aid_ancillary_overlap_warn "${_prot_file}.lines" "$root" || true
+  rm -f "${_prot_file}.lines" 2>/dev/null || true
+
+  if [[ "$_prot_complete" != true ]]; then
+    echo "WARNING: ${plan_id} freezes with protected_paths_complete=false — review EQUIVALENCE is unavailable for this freeze, so any movement after it invalidates exactly as before P073." >&2
+  fi
+
   # ── The atomic two-field freeze write ───────────────────────────────────
   # candidate_sha + candidate_frozen_at land in the SAME manifest write (with
   # the target head, the run id/dir and plan_state), so the manifest is never
   # observable with one of the pair set and the other absent.
   local wrc=0
   plan_manifest_freeze_candidate "$plan_id" "$plan_head" "$target_head" \
-    "$run_id" "$run_dir_rel" "$frozen_at" >/dev/null || wrc=$?
+    "$run_id" "$run_dir_rel" "$frozen_at" "$_prot_file" "$_prot_complete" >/dev/null || wrc=$?
   if [[ "$wrc" -ne 0 ]]; then
     rmdir "$run_dir_abs" 2>/dev/null || true
     echo "PRECONDITION FAIL: could not record the candidate freeze for ${plan_id} (rc=${wrc}) — NO candidate is recorded; nothing was half-written." >&2
@@ -3056,17 +3737,544 @@ _pfsm_verify_plan_final_skeleton_envelope() {
 # untracked, and every review output lands in it. Only a TRACKED write is a
 # candidate-changing fix.
 # ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# REVIEW EQUIVALENCE (P073 Step 16)
+#
+# The problem: after freeze, ANY tracked write threw away a completed review.
+# An audit-log append or a rendered report cost a full re-review cycle even
+# though nothing about the delivery had changed.
+#
+# The model: a plan-branch head that DIFFERS from the frozen candidate only in
+# ANCILLARY paths still describes the same delivery, so the review it received
+# still applies. Anything touching the PROTECTED set is a fix and costs the
+# review, exactly as before.
+#
+# ── A PURE PREDICATE, AND A SEPARATE DELIBERATE ACCEPTANCE ──────────────────
+# `plan_final_review_equivalent` performs NO writes. The drift consumers need
+# to ask the question freely; minting a receipt is a distinct controller act
+# with its own subcommand. Collapsing the two would mean every drift check
+# quietly changed state.
+#
+# ── HONEST ENFORCEMENT CLASSIFICATION (AID-v3-principles §1) ────────────────
+# "Controller-only" is an INSTRUCTION-ONLY rule: agents have Bash and no
+# actor-identity guard exists in either FSM script, so nothing mechanically
+# stops an agent from running the acceptance. What IS mechanical are the
+# EFFECT BOUNDS, and they are what make the instruction safe to ship:
+#   * the predicate cannot pass a protected-surface change, so acceptance
+#     cannot widen what equivalence permits;
+#   * the receipt durably records who accepted what, when, and which paths;
+#   * merge RE-VERIFIES live (Step 18), so a stale or rogue acceptance is
+#     caught at the irreversible moment rather than trusted.
+# A rogue acceptance is therefore detectable and bounded, not prevented.
+#
+# ── NO CONTENT DIGEST ──────────────────────────────────────────────────────
+# An earlier design hashed the protected surface. It was dropped: acceptance
+# writes `accepted_head` INTO the manifest, so any digest covering the manifest
+# would invalidate itself. A git SHA already proves content; ancestry plus a
+# PATH set is sufficient and cannot self-invalidate.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ---------------------------------------------------------------------------
+# _pfsm_equivalence_classify <root> <plan_id> <candidate> <head>
+#   Prints one line per changed path, classified. Used by the predicate for
+#   its failure output, so the operator sees exactly which path cost them the
+#   review rather than "drift".
+# ---------------------------------------------------------------------------
+_pfsm_equivalence_classify() {
+  local root="$1" plan_id="$2" candidate="$3" head="$4"
+  local prot_json path
+  prot_json="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || prot_json='[]'
+  [[ -n "$prot_json" && "$prot_json" != "null" ]] || prot_json='[]'
+
+  # `--no-renames` is LOAD-BEARING, not tidiness. With git's default rename
+  # detection a delivery file moved into an ancillary directory is reported
+  # under its NEW name only — measured: renaming `scripts/a.sh` to
+  # `.aid-o/work/a.sh` printed just the ancillary destination, so the
+  # disappearance of a protected delivery path was invisible and the move
+  # classified as ancillary-only. `-z` removes the C-quoting git applies to
+  # paths with newlines, which would otherwise arrive as a different string
+  # than the protected set stores.
+  # Via a TEMP FILE, not `$(...)`: command substitution silently drops NUL
+  # bytes, so capturing `-z` output in a variable would glue every path into
+  # one string. A temp file keeps the delimiters AND keeps git's exit status
+  # observable, which a pipe or process substitution would hide.
+  local raw_f="" grc=0
+  raw_f="$(mktemp "${TMPDIR:-/tmp}/aid-eqdiff.XXXXXX")" || {
+    echo "equivalence unavailable: cannot create a temporary file to read the diff" >&2
+    return 2
+  }
+  git -C "$root" diff --no-renames --name-only -z "$candidate".."$head" > "$raw_f" 2>/dev/null || grc=$?
+  if [[ "$grc" -ne 0 ]]; then
+    rm -f "$raw_f"
+    # A FAILED diff is not "no changes". Returning an empty classification here
+    # would read as ancillary-only and accept a head nobody compared.
+    echo "equivalence unavailable: git diff ${candidate}..${head} failed (exit ${grc}) — an unreadable diff is never treated as 'nothing changed'" >&2
+    return 2
+  fi
+
+  while IFS= read -r -d '' path; do
+    [[ -n "$path" ]] || continue
+    if _pfsm_path_is_protected "$path" "$prot_json"; then
+      printf 'PROTECTED  %s\n' "$path"
+    elif aid_ancillary_match "$path" "$root"; then
+      printf 'ancillary  %s\n' "$path"
+    else
+      printf 'DELIVERY   %s\n' "$path"
+    fi
+  done < "$raw_f"
+  rm -f "$raw_f"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_path_is_protected <path> <protected_json>
+#   Uses the SAME matcher as the ancillary classifier so protected-set matching
+#   and scope checking can never diverge on the same entry, with the
+#   permissive directory-prefix semantics the pre-commit hook uses.
+# ---------------------------------------------------------------------------
+_pfsm_path_is_protected() {
+  local path="$1" prot_json="$2" entry
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    _aid_ancillary_glob_match "$path" "$entry" && return 0
+  done < <(jq -r '.[]? // empty' <<<"$prot_json" 2>/dev/null)
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# plan_final_review_equivalent <root> <plan_id>
+#
+# RETURN CODES:
+#   0 — the plan head is review-equivalent to the frozen candidate
+#   1 — it is NOT (the classification is printed, naming every offender)
+#   2 — equivalence is UNAVAILABLE (no candidate, a legacy freeze with no
+#       protected set, or a partial one). Callers treat 2 exactly like today's
+#       invalidation path: a partial protected set can never mint a receipt.
+#
+# SIDE EFFECTS: none. This is asserted by a test that runs it against a
+# read-only tree.
+# ---------------------------------------------------------------------------
+plan_final_review_equivalent() {
+  local root="$1" plan_id="$2"
+
+  local candidate="" prot_json="" prot_complete=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate=""
+  [[ -n "$candidate" && "$candidate" != "null" ]] || {
+    echo "equivalence unavailable: no frozen candidate for ${plan_id}" >&2
+    return 2
+  }
+  prot_json="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || prot_json=""
+  prot_complete="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths_complete' 2>/dev/null)" || prot_complete=""
+  if [[ -z "$prot_json" || "$prot_json" == "null" ]]; then
+    echo "equivalence unavailable: ${plan_id} was frozen before the protected path set existed — any movement invalidates, exactly as before P073" >&2
+    return 2
+  fi
+  if [[ "$prot_complete" != "true" ]]; then
+    echo "equivalence unavailable: ${plan_id}'s protected set is PARTIAL (protected_paths_complete=false) — a partial surface can never authorise an acceptance" >&2
+    return 2
+  fi
+
+  local head=""
+  head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null)" || head=""
+  if [[ -z "$head" ]]; then
+    echo "equivalence unavailable: plan/${plan_id} does not resolve" >&2
+    return 2
+  fi
+  # NOTE: an unmoved head is NOT an early return. The worktree check below
+  # still has to run — a delivery file modified but not yet committed is
+  # exactly the drift the existing detector treats as invalidating, and
+  # short-circuiting on `head == candidate` would have reported "equivalent"
+  # while a delivery change sat uncommitted in the tree (caught by this step's
+  # own test).
+  if [[ "$head" != "$candidate" ]]; then
+
+  # (1) ANCESTRY. The candidate must still be reachable from the head — a
+  # force-pushed or rewritten branch is not "the same delivery plus a note".
+  if ! git -C "$root" merge-base --is-ancestor "$candidate" "$head" 2>/dev/null; then
+    echo "not equivalent: the frozen candidate ${candidate} is not an ancestor of plan/${plan_id} (${head}) — the branch was rewritten, not appended to" >&2
+    return 1
+  fi
+
+  # (2)+(3) EVERY changed path must be ancillary, and none may be protected.
+  # Protected takes precedence at the PATH level, so a path that is both is
+  # protected — that is what keeps close-consumed evidence under .aid-o/work/
+  # safe despite the ancillary glob covering it.
+  local offenders="" line classified="" crc=0
+  # Captured, not piped: a process substitution hides the classifier's exit
+  # status, which is exactly how a failed diff became "equivalent".
+  classified="$(_pfsm_equivalence_classify "$root" "$plan_id" "$candidate" "$head")" || crc=$?
+  if [[ "$crc" -ne 0 ]]; then
+    return 2
+  fi
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == ancillary* ]] || offenders+="  ${line}"$'\n'
+  done <<< "$classified"
+  if [[ -n "$offenders" ]]; then
+    echo "not equivalent: plan/${plan_id} moved from ${candidate} to ${head} and the difference is not ancillary-only:" >&2
+    printf '%s' "$offenders" >&2
+    return 1
+  fi
+
+  fi  # end: head != candidate
+
+  # (4) The worktree must carry no tracked dirt on the protected surface or
+  # outside the ancillary policy.
+  #
+  # PROTECTED FIRST, deliberately. The shared ancillary filter alone is wrong
+  # here: close-consumed receipts live under `.aid-o/work/`, which IS an
+  # ancillary glob, so an uncommitted edit to a protected receipt would be
+  # filtered away as ancillary and the head accepted. The committed-diff
+  # classifier already gives protected precedence; the worktree must use the
+  # same order or the two disagree about the same path.
+  local status_f="" src=0
+  status_f="$(mktemp "${TMPDIR:-/tmp}/aid-eqstat.XXXXXX")" || {
+    echo "equivalence unavailable: cannot create a temporary file to read the worktree status" >&2
+    return 2
+  }
+  git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+  if [[ "$src" -ne 0 ]]; then
+    rm -f "$status_f"
+    echo "equivalence unavailable: git status failed (exit ${src}) — an unreadable worktree is never treated as clean" >&2
+    return 2
+  fi
+
+  local dirty="" entry xy wpath
+  # `-z` porcelain: `XY <path>\0`, and for R/C a second `\0`-terminated field
+  # carries the ORIGINAL path. Both names are classified — a rename away from
+  # a protected path is exactly the case `--no-renames` covers for commits.
+  while IFS= read -r -d '' entry; do
+    [[ -n "$entry" ]] || continue
+    xy="${entry:0:2}"
+    wpath="${entry:3}"
+    if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+      dirty+="  PROTECTED  ${xy} ${wpath}"$'\n'
+    elif ! aid_ancillary_match "$wpath" "$root"; then
+      dirty+="  DELIVERY   ${xy} ${wpath}"$'\n'
+    fi
+    if [[ "$xy" == R* || "$xy" == C* ]]; then
+      local orig=""
+      IFS= read -r -d '' orig || true
+      if [[ -n "$orig" ]]; then
+        if _pfsm_path_is_protected "$orig" "$prot_json"; then
+          dirty+="  PROTECTED  ${xy} ${orig} (renamed from)"$'\n'
+        elif ! aid_ancillary_match "$orig" "$root"; then
+          dirty+="  DELIVERY   ${xy} ${orig} (renamed from)"$'\n'
+        fi
+      fi
+    fi
+  done < "$status_f"
+  rm -f "$status_f"
+
+  if [[ -n "$dirty" ]]; then
+    echo "not equivalent: uncommitted TRACKED changes on the protected surface or outside the ancillary policy:" >&2
+    printf '%s' "$dirty" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_accept_ancillary <root> <plan_id>  — the `accept-ancillary`
+# stage. The controller runs it after a deliberate ancillary commit.
+#
+# `candidate_sha` NEVER MOVES. The PM authorised a review of that exact
+# commit; equivalence means that review still describes the delivery, not that
+# a different commit was reviewed.
+# ---------------------------------------------------------------------------
+_pfsm_finalize_accept_ancillary() {
+  local root="$1" plan_id="$2"
+
+  # ONE LOCK around check → receipt → manifest binding. Without it the head
+  # could advance between the equivalence check and the receipt (binding a head
+  # nobody compared), and two concurrent acceptances could each pick a free
+  # `-N` receipt name and race the manifest binding — the suffix scan is not a
+  # lock. The manifest CAS below is the second half of the same guarantee.
+  local _aa_lock_path _aa_fd=""
+  _aa_lock_path="${root}/.aid-o/work/plan-state/${plan_id}/accept-ancillary.lock"
+  mkdir -p "$(dirname "$_aa_lock_path")" 2>/dev/null || true
+  if declare -F aid_lock_acquire >/dev/null 2>&1; then
+    aid_lock_acquire "$_aa_lock_path" "${AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S:-30}" || {
+      echo "PRECONDITION FAIL: another accept-ancillary is in progress for ${plan_id} — acceptance is serialised so two decisions can never bind different receipts." >&2
+      _aa_unlock; return 1
+    }
+    _aa_fd="$AID_LOCK_FD"
+  fi
+  _aa_unlock() { [[ -n "${_aa_fd:-}" ]] && aid_lock_release "$_aa_fd" 2>/dev/null; _aa_fd=""; }
+
+  local candidate=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || candidate=""
+  if [[ -z "$candidate" || "$candidate" == "null" ]]; then
+    echo "PRECONDITION FAIL: nothing is frozen — accept-ancillary is meaningful only between freeze and merge." >&2
+    _aa_unlock; return 1
+  fi
+
+  local erc=0
+  plan_final_review_equivalent "$root" "$plan_id" || erc=$?
+  if [[ "$erc" -eq 2 ]]; then
+    echo "PRECONDITION FAIL: equivalence is unavailable for ${plan_id} (see above) — acceptance is impossible, and any movement invalidates the review as before." >&2
+    _aa_unlock; return 1
+  fi
+  if [[ "$erc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan/${plan_id} is not review-equivalent to the frozen candidate — the offending paths are named above. A protected-surface change is a FIX: re-sync, re-freeze and re-review." >&2
+    _aa_unlock; return 1
+  fi
+
+  local head run_dir_rel run_dir_abs
+  head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head=""
+  if [[ -z "$head" ]]; then
+    echo "PRECONDITION FAIL: plan/${plan_id} does not resolve — nothing to accept." >&2
+    _aa_unlock; return 1
+  fi
+  # An UNMOVED head has nothing to accept. Minting a receipt here was measured
+  # to make the C4 record report review_equivalence:true for a plan whose head
+  # never left the candidate — a decision surface claiming a loosening that was
+  # never used.
+  if [[ "$head" == "$candidate" ]]; then
+    echo "accept-ancillary: plan/${plan_id} is still AT the frozen candidate ${candidate} — there is nothing to accept, and no receipt was written. The review is already bound to this head." >&2
+    printf '%s\n' "$head"
+    _aa_unlock; return 0
+  fi
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
+  if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
+    echo "PRECONDITION FAIL: no plan-final run directory recorded for ${plan_id} — nowhere to write the acceptance receipt." >&2
+    _aa_unlock; return 1
+  fi
+  run_dir_abs="${root}/${run_dir_rel}"
+  mkdir -p "$run_dir_abs" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot create ${run_dir_rel} for the acceptance receipt." >&2
+    _aa_unlock; return 1
+  }
+
+  local prior_accepted=""
+  prior_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || prior_accepted=""
+  [[ "$prior_accepted" == "null" ]] && prior_accepted=""
+
+  # IDEMPOTENT: accepting the same head twice writes no second receipt. A
+  # no-op acceptance that minted a duplicate would make the audit trail lie
+  # about how many decisions were taken.
+  if [[ -n "$prior_accepted" && "$prior_accepted" == "$head" ]]; then
+    # Trusting the field alone would report "accepted" over a receipt that was
+    # deleted or edited after the fact. The binding is only meaningful if the
+    # file it names still exists and still hashes to the recorded digest.
+    local bnd_path bnd_sha cur_sha
+    bnd_path="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || bnd_path=""
+    bnd_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || bnd_sha=""
+    [[ "$bnd_path" == "null" ]] && bnd_path=""
+    [[ "$bnd_sha" == "null" ]] && bnd_sha=""
+    if [[ -z "$bnd_path" || ! -r "${root}/${bnd_path}" ]]; then
+      echo "PRECONDITION FAIL: ${plan_id} records accepted_head ${head} but its receipt (${bnd_path:-<none>}) is missing — the acceptance cannot be proven. Re-freeze and re-review." >&2
+      _aa_unlock; return 1
+    fi
+    cur_sha="sha256:$(sha256sum "${root}/${bnd_path}" | awk '{print $1}')"
+    if [[ "$cur_sha" != "$bnd_sha" ]]; then
+      echo "PRECONDITION FAIL: ${plan_id}'s acceptance receipt ${bnd_path} no longer hashes to the recorded ${bnd_sha} (now ${cur_sha}) — the audit trail was altered." >&2
+      _aa_unlock; return 1
+    fi
+    echo "accept-ancillary: plan/${plan_id} head ${head} is already the accepted head, and its receipt ${bnd_path} still verifies — nothing to do." >&2
+    printf '%s\n' "$head"
+    _aa_unlock; return 0
+  fi
+
+  # A second acceptance appends a suffixed receipt; the superseded ones remain
+  # as audit history. The MANIFEST binding names the authoritative one, never a
+  # directory listing.
+  # NOTE: two `local` declarations, not one. Bash expands every word of a
+  # single `local` before running it, so `local a=x b="${a}"` reads `a` while
+  # it is still unset — fatal under `set -u`.
+  local rbase="${run_dir_abs}/review-equivalence-receipt"
+  local rfile="${rbase}.json" n=0
+  while [[ -e "$rfile" ]]; do
+    n=$(( n + 1 ))
+    if [[ "$n" -gt 100 ]]; then
+      echo "PRECONDITION FAIL: cannot find a free acceptance-receipt name under ${run_dir_rel}." >&2
+      _aa_unlock; return 1
+    fi
+    rfile="${rbase}-${n}.json"
+  done
+
+  local changed_json policy_sha run_id now
+  changed_json="$(git -C "$root" diff --name-only "$candidate".."$head" 2>/dev/null | jq -Rn '[inputs | select(length > 0)]')" || changed_json='[]'
+  policy_sha="unknown"
+  if [[ -n "${_AID_ANCILLARY_POLICY_FILE:-}" && -r "${_AID_ANCILLARY_POLICY_FILE}" ]]; then
+    policy_sha="sha256:$(sha256sum "${_AID_ANCILLARY_POLICY_FILE}" | awk '{print $1}')"
+  fi
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id' 2>/dev/null)" || run_id=""
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  local prot_count
+  prot_count="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths | length' 2>/dev/null)" || prot_count=0
+
+  local json tmp
+  json="$(jq -n \
+    --arg sv "aid-2.0" --arg plan "$plan_id" --arg run "$run_id" \
+    --arg cand "$candidate" --arg prior "$prior_accepted" --arg head "$head" \
+    --argjson changed "$changed_json" --arg psha "$policy_sha" \
+    --argjson pcount "${prot_count:-0}" --arg op "${USER:-unknown}" --arg now "$now" \
+    '{schema_version:$sv, artifact_type:"review_equivalence_receipt",
+      plan_id:$plan, run_id:$run,
+      candidate_sha:$cand,
+      prior_accepted_head:(if $prior == "" then null else $prior end),
+      accepted_head:$head,
+      changed_paths:$changed,
+      ancillary_policy_sha256:$psha,
+      protected_paths_count:$pcount,
+      operator:$op, created_at:$now}')" || {
+    echo "PRECONDITION FAIL: cannot render the acceptance receipt." >&2
+    _aa_unlock; return 1
+  }
+  tmp="${rfile}.tmp.$$"
+  if ! printf '%s\n' "$json" > "$tmp" 2>/dev/null || ! mv -n "$tmp" "$rfile" 2>/dev/null || [[ -e "$tmp" ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "PRECONDITION FAIL: cannot write the acceptance receipt at ${rfile}." >&2
+    _aa_unlock; return 1
+  fi
+
+  # THE RECEIPT EXISTS FIRST, then the manifest points at it — the mutator is
+  # never run against a receipt that is not on disk.
+  local rsha rrel
+  rsha="sha256:$(sha256sum "$rfile" | awk '{print $1}')"
+  rrel="${rfile#"${root}/"}"
+  # Last check before the binding: the branch must not have moved while the
+  # receipt was rendered, and the CAS re-verifies both frozen values under the
+  # manifest lock.
+  local head_now=""
+  head_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head_now=""
+  if [[ "$head_now" != "$head" ]]; then
+    echo "PRECONDITION FAIL: plan/${plan_id} moved from ${head} to ${head_now:-<unresolvable>} while the acceptance receipt was written — nothing was bound. Re-run accept-ancillary." >&2
+    _aa_unlock; return 1
+  fi
+  if ! plan_manifest_set_accepted_head "$plan_id" "$head" "$rrel" "$rsha" "$candidate" "$prior_accepted" >/dev/null; then
+    echo "PRECONDITION FAIL: the acceptance receipt was written at ${rrel} but the manifest could not record it — the review is NOT accepted; rerun the stage." >&2
+    _aa_unlock; return 1
+  fi
+
+  echo "accept-ancillary: plan/${plan_id} head ${head} accepted as review-equivalent to the frozen candidate ${candidate} (receipt ${rrel}). candidate_sha is unchanged." >&2
+  printf '%s\n' "$head"
+  _aa_unlock
+  return 0
+}
+
 _pfsm_review_candidate_drift() {
   local root="$1" plan_id="$2" candidate="$3"
   local plan_head=""
   plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null)" || plan_head=""
+
+  # ── P073 Step 17: the head may also sit at a RECEIPTED accepted head ──────
+  # Two positions are legitimate: the candidate itself, and the exact head a
+  # deliberate `--stage accept-ancillary` recorded. Anything else invalidates
+  # as before — including one commit PAST the accepted head, because only the
+  # head that was actually compared carries a receipt.
+  local accepted="" acc_receipt="" acc_sha=""
+  accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || accepted=""
+  [[ "$accepted" == "null" ]] && accepted=""
+
   if [[ "$plan_head" != "$candidate" ]]; then
-    printf 'plan/%s moved from the frozen candidate %s to %s' "$plan_id" "$candidate" "${plan_head:-<unresolvable>}"
-    return 1
+    local via_equivalence=0
+    if [[ -n "$accepted" && "$plan_head" == "$accepted" ]]; then
+      # The manifest field is state; the receipt is the proof. A binding whose
+      # receipt vanished or changed keeps NO review alive — otherwise deleting
+      # a file would be enough to launder an unreviewed head.
+      acc_receipt="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || acc_receipt=""
+      acc_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || acc_sha=""
+      [[ "$acc_receipt" == "null" ]] && acc_receipt=""
+      [[ "$acc_sha" == "null" ]] && acc_sha=""
+      # The hash alone proves the receipt is unaltered, NOT that it describes
+      # this freeze. A mixed or hand-edited manifest can carry an acceptance
+      # from an earlier candidate; the sanctioned re-freeze clears these fields,
+      # but the detector must not depend on every writer having done so.
+      # Equivalence must also be AVAILABLE at all — an incomplete protected set
+      # can never have authorised an acceptance, so one recorded against it is
+      # not honoured here either.
+      local acc_complete=""
+      acc_complete="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths_complete' 2>/dev/null)" || acc_complete=""
+      if [[ "$acc_complete" == "true" && -n "$acc_receipt" && -r "${root}/${acc_receipt}" ]]; then
+        local now_sha r_cand r_head
+        now_sha="sha256:$(sha256sum "${root}/${acc_receipt}" | awk '{print $1}')"
+        r_cand="$(jq -r '.candidate_sha // ""' "${root}/${acc_receipt}" 2>/dev/null)" || r_cand=""
+        r_head="$(jq -r '.accepted_head // ""' "${root}/${acc_receipt}" 2>/dev/null)" || r_head=""
+        if [[ "$now_sha" == "$acc_sha" && "$r_cand" == "$candidate" && "$r_head" == "$plan_head" ]]; then
+          via_equivalence=1
+        fi
+      fi
+      if [[ "$via_equivalence" -eq 0 ]]; then
+        printf 'plan/%s is at the recorded accepted head %s but its review-equivalence receipt (%s) is missing or altered — the acceptance cannot be proven' \
+          "$plan_id" "$plan_head" "${acc_receipt:-<none>}"
+        return 1
+      fi
+      echo "review preserved via review-equivalence receipt ${acc_receipt}: plan/${plan_id} is at the accepted head ${plan_head}, which differs from the frozen candidate ${candidate} in ancillary paths only." >&2
+    else
+      # THE HINT IS CONDITIONAL. Offering `accept-ancillary` for a
+      # protected-surface change would send the operator into a refusal loop:
+      # acceptance re-runs the same predicate and refuses again. It is offered
+      # only when the predicate says the difference really is ancillary-only.
+      local erc=0
+      plan_final_review_equivalent "$root" "$plan_id" >/dev/null 2>&1 || erc=$?
+      printf 'plan/%s moved from the frozen candidate %s to %s' "$plan_id" "$candidate" "${plan_head:-<unresolvable>}"
+      if [[ "$erc" -eq 0 ]]; then
+        printf ' — the difference is ancillary-only, so this review can be preserved: run plan-finalize %s --stage accept-ancillary' "$plan_id"
+      fi
+      return 1
+    fi
   fi
+
+  # ── Dirt: the full ancillary policy, PROTECTED FIRST ─────────────────────
+  # Which classifier applies depends on what the freeze recorded. A plan frozen
+  # before the protected set existed keeps the five legacy runtime paths and
+  # the old any-movement rule, byte for byte — widening the exception set for a
+  # manifest that cannot name its own delivery surface would loosen exactly
+  # where there is no evidence to loosen against.
+  local prot_json="" prot_complete=""
+  prot_json="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || prot_json=""
+  prot_complete="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.protected_paths_complete' 2>/dev/null)" || prot_complete=""
+  [[ "$prot_json" == "null" ]] && prot_json=""
+
   local dirty=""
-  dirty="$(git -C "$root" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+  if [[ -z "$prot_json" || "$prot_complete" != "true" ]]; then
+    dirty="$(git -C "$root" status --porcelain --untracked-files=no \
+      | aid_ancillary_filter_porcelain --mode legacy5 || true)"
+  else
+    local status_f="" src=0
+    status_f="$(mktemp "${TMPDIR:-/tmp}/aid-driftstat.XXXXXX")" || {
+      printf 'cannot read the worktree status for the candidate %s' "$candidate"
+      return 1
+    }
+    git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+    if [[ "$src" -ne 0 ]]; then
+      rm -f "$status_f"
+      printf 'git status failed (exit %s) — an unreadable worktree is never treated as clean' "$src"
+      return 1
+    fi
+    local entry xy wpath orig
+    while IFS= read -r -d '' entry; do
+      [[ -n "$entry" ]] || continue
+      xy="${entry:0:2}"
+      wpath="${entry:3}"
+      if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+        dirty+="PROTECTED ${xy} ${wpath}"$'\n'
+      elif ! aid_ancillary_match "$wpath" "$root"; then
+        dirty+="${xy} ${wpath}"$'\n'
+      fi
+      # X-column only, deliberately. Measured on this git: an UNSTAGED rename
+      # is reported as ` D <old>` plus `?? <new>`, never ` R`, and only a
+      # STAGED rename emits the second NUL-delimited original path. Matching
+      # R/C in the Y column would consume the NEXT record whenever git did not
+      # emit an original path — the very desynchronisation it would aim to fix.
+      if [[ "$xy" == R* || "$xy" == C* ]]; then
+        orig=""
+        IFS= read -r -d '' orig || true
+        if [[ -n "$orig" ]]; then
+          if _pfsm_path_is_protected "$orig" "$prot_json"; then
+            dirty+="PROTECTED ${xy} ${orig}"$'\n'
+          elif ! aid_ancillary_match "$orig" "$root"; then
+            dirty+="${xy} ${orig}"$'\n'
+          fi
+        fi
+      fi
+    done < "$status_f"
+    rm -f "$status_f"
+  fi
+
   if [[ -n "$dirty" ]]; then
     printf 'uncommitted TRACKED changes against the candidate %s: %s' "$candidate" "$(printf '%s' "$dirty" | tr '\n' ';')"
     return 1
@@ -3251,7 +4459,16 @@ _pfsm_validate_plan_final_close_receipt_json() {
   local json="$1"
   jq -e '
     (type == "object") and
-    ((keys | sort) == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort)) and
+    # P073 Step 18: TWO exact key sets, not a relaxed superset. A receipt
+    # merged at the candidate keeps the legacy shape byte for byte; one merged
+    # via review equivalence additionally carries merged_head and
+    # review_equivalence. Both are exact — an unexpected key is still refused.
+    ((keys | sort) as $k
+      | ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort))
+        or ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","merged_head","review_equivalence","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort))) and
+    (if has("merged_head")
+       then (.merged_head | test("^[0-9a-f]{40}$")) and (.review_equivalence == true)
+       else true end) and
     (.schema_version == "aid-plan-final-close-evidence-1") and
     (.artifact_type == "plan_final_close_evidence_receipt") and
     (.plan_id | test("^P[0-9]{3}$")) and
@@ -3275,6 +4492,10 @@ _pfsm_seal_plan_final_close_evidence() {
   local root="$1" plan_id="$2" candidate="$3" run_id="$4" target="$5" target_head_before="$6" merge_commit="$7" merged_tree="$8" tag="$9"
   shift 9
   local gates_report="$1" c4_decision_file="$2" c4_dual_run_file="$3" pm_decision_file="$4"
+  # P073 Step 18: OPTIONAL, and deliberately so. Omitted (the candidate path)
+  # the receipt keeps its pre-P073 bytes exactly, which is what lets the
+  # existing merge tests pass unmodified.
+  local merged_head_arg="${5:-}" review_equiv_arg="${6:-}"
   local ref receipt tmp blob tree commit existing existing_receipt expected_hash actual_hash
 
   [[ -s "$gates_report" ]] && jq -e '.overall == "pass"' "$gates_report" >/dev/null 2>&1 || { echo "PRECONDITION FAIL: refusing to seal close evidence — gates_report.json is missing or not overall pass." >&2; return 1; }
@@ -3298,7 +4519,9 @@ _pfsm_seal_plan_final_close_evidence() {
   receipt="$(jq -nc --arg plan "$plan_id" --arg candidate "$candidate" --arg run "$run_id" --arg target "$target" \
     --arg thb "$target_head_before" --arg mc "$merge_commit" --arg mt "$merged_tree" --arg tag "$tag" \
     --argjson blockers "$c4_blockers" --arg pmh "$pm_hash" \
-    '{schema_version:"aid-plan-final-close-evidence-1",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers,dual_run_match:true},pm_decision:{decision:"MERGE",sha256:$pmh}}')" || { rm -f "$tmp"; return 1; }
+    --arg mh "$merged_head_arg" --arg req "$review_equiv_arg" \
+    '{schema_version:"aid-plan-final-close-evidence-1",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers,dual_run_match:true},pm_decision:{decision:"MERGE",sha256:$pmh}}
+     + (if $req == "true" then {merged_head:$mh, review_equivalence:true} else {} end)')" || { rm -f "$tmp"; return 1; }
   _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: refusing to seal a non-public-safe plan-final close receipt." >&2; rm -f "$tmp"; return 1; }
   printf '%s\n' "$receipt" > "$tmp" || { rm -f "$tmp"; return 1; }
   expected_hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
@@ -3322,7 +4545,7 @@ _pfsm_seal_plan_final_close_evidence() {
   tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)" || return 1
   commit="$(git -C "$root" commit-tree "$tree" -m "aid: seal plan-final close evidence ${plan_id} ${run_id}")" || return 1
   if ! git -C "$root" update-ref "$ref" "$commit" ''; then
-    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$c4_dual_run_file" "$pm_decision_file"
+    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$c4_dual_run_file" "$pm_decision_file" "$merged_head_arg" "$review_equiv_arg"
     return $?
   fi
   actual_hash="sha256:$(git -C "$root" show "${ref}:receipt.json" | sha256sum | awk '{print $1}')"
@@ -4040,12 +5263,21 @@ _pfsm_finalize_c4() {
       return 1
     }
 
+  # P073 Step 17: the PM surface must show when a review survived on
+  # equivalence rather than on an unmoved head. Both fields are ADDITIVE —
+  # existing consumers read by key and ignore them.
+  local c4_accepted=""
+  c4_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || c4_accepted=""
+  [[ "$c4_accepted" == "null" ]] && c4_accepted=""
+
   local c4_json
   c4_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg thead "$target_head" \
     --arg enf "$enforcement" --argjson rr "$release_ready" --argjson bn "$blockers_n" \
-    --argjson m "$match" --arg div "$divergence" \
+    --argjson m "$match" --arg div "$divergence" --arg ah "$c4_accepted" \
     '{run_id:$run, candidate_sha:$cand, target_head_sha:$thead, enforcement:$enf,
-      release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div}}')"
+      release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div},
+      accepted_head:(if $ah == "" then null else $ah end),
+      review_equivalence:($ah != "" and $ah != $cand)}')"
   plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_c4 = ${c4_json}" >/dev/null || {
     echo "PRECONDITION FAIL: the plan-final C4 decision for ${plan_id} was written to ${run_dir_rel}/release-decision.json, but the result could not be recorded in the manifest. Re-run '--stage c4' — the aggregator is deterministic at a fixed candidate." >&2
     return 1
@@ -4149,7 +5381,7 @@ _pfsm_finalize_summary() {
 }
 
 # =============================================================================
-# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>]
+# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>]
 #                    [--execution-yaml <path>] [--substitute-receipt <gate>=<path>]
 #                    [--project-root <path>]
 # =============================================================================
@@ -4174,6 +5406,14 @@ cmd_plan_finalize() {
       --frozen-at)
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         frozen_at="$2"; shift 2 ;;
+      # P073 Step 8 — see the note on plan-start's loop.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
+      --reason)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
       --project-root)
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         project_root_opt="$2"; shift 2 ;;
@@ -4184,9 +5424,12 @@ cmd_plan_finalize() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-finalize" || exit 2
 
   if [[ -z "$plan_id" || -z "$stage" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -4194,7 +5437,7 @@ cmd_plan_finalize() {
     exit 2
   fi
   case "$stage" in
-    sync|freeze|gates|inputs|review|c4|summary) ;;
+    sync|freeze|gates|inputs|review|c4|summary|accept-ancillary) ;;
     *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates', 'inputs', 'review', 'c4' or 'summary' (got '${stage}')" >&2; exit 2 ;;
   esac
   if [[ "$stage" != "gates" && ${#substitute_receipts[@]} -gt 0 ]]; then
@@ -4226,8 +5469,15 @@ cmd_plan_finalize() {
   # inside the review->decision->summary boundary a tracked write MEANS the candidate
   # changed, and `_pfsm_finalize_c4` turns that into an invalidation rather than a
   # "commit or stash first" that would hide it.
-  if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" ]]; then
-    _pfsm_check_clean_worktree "$project_root" || exit 1
+  # P073 Step 16: `accept-ancillary` joins the dirty-tree exemption. A dirty
+  # tree is its INPUT, not a refusal condition — the whole point is to classify
+  # what moved rather than demand it be stashed away first.
+  if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" && "$stage" != "accept-ancillary" ]]; then
+    # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+    # bookkeeping obstacle, not a physical impossibility, so an audited
+    # --force may pass it. The check still prints its own recovery first.
+    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$project_root" || exit 1
+    _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || exit 1
   fi
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
@@ -4268,6 +5518,7 @@ cmd_plan_finalize() {
       ;;
     c4)      _pfsm_finalize_c4 "$project_root" "$plan_id" || rc=$? ;;
     summary) _pfsm_finalize_summary "$project_root" "$plan_id" || rc=$? ;;
+    accept-ancillary) _pfsm_finalize_accept_ancillary "$project_root" "$plan_id" || rc=$? ;;
   esac
   exit "$rc"
 }
@@ -4423,6 +5674,20 @@ cmd_plan_merge_to_main() {
         _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
       --push) do_push=1; shift ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-merge-to-main: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -4430,6 +5695,9 @@ cmd_plan_merge_to_main() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-merge-to-main" || exit 2
 
   if [[ -z "$plan_id" || -z "$decision_file" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]" >&2
@@ -4447,7 +5715,11 @@ cmd_plan_merge_to_main() {
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
 
   _pfsm_check_no_merge_in_progress "$root" || exit 1
-  _pfsm_check_clean_worktree "$root" || exit 1
+  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
+  # bookkeeping obstacle, not a physical impossibility, so an audited
+  # --force may pass it. The check still prints its own recovery first.
+  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$root" || exit 1
+  _pfsm_commit_force "plan-merge-to-main" "$plan_id" "$root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
@@ -4573,9 +5845,67 @@ cmd_plan_merge_to_main() {
     echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} not found — ${target_branch} is unchanged." >&2
     exit 1
   fi
-  if [[ "$d_cand" != "$candidate" || "$plan_head" != "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-merge-to-main: candidate mismatch — the decision names ${d_cand}, the manifest's frozen candidate is ${candidate}, and ${plan_branch} is at ${plan_head}. All three must be identical. ${target_branch} is unchanged and no Git action was taken." >&2
+  # ── The DECISION leg is untouched and hard ───────────────────────────────
+  # The PM authorized the review of the FROZEN candidate. Equivalence means
+  # that review still describes the delivery surface — it never means the PM
+  # authorized some other candidate. This binding does not loosen.
+  if [[ "$d_cand" != "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: candidate mismatch — the decision names ${d_cand} but the manifest's frozen candidate is ${candidate}. ${target_branch} is unchanged and no Git action was taken." >&2
     exit 1
+  fi
+
+  # ── The HEAD leg gains exactly ONE alternative ───────────────────────────
+  # P073 Step 18: the head may be the candidate (unchanged path) or the exact
+  # accepted head — and in the latter case equivalence is RE-VERIFIED LIVE
+  # here, against the CURRENT policy, immediately before the irreversible
+  # action. A stale acceptance receipt is not a licence: acceptance proves what
+  # was true when it ran, the merge must prove what is true now.
+  local merged_head="$candidate" review_equivalence="false"
+  if [[ "$plan_head" != "$candidate" ]]; then
+    local m_accepted="" m_rpath="" m_rsha=""
+    m_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || m_accepted=""
+    [[ "$m_accepted" == "null" ]] && m_accepted=""
+    if [[ -z "$m_accepted" || "$plan_head" != "$m_accepted" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} is at ${plan_head}, which is neither the frozen candidate ${candidate} nor a recorded review-equivalent accepted head${m_accepted:+ (${m_accepted})}. ${target_branch} is unchanged and no Git action was taken." >&2
+      exit 1
+    fi
+
+    m_rpath="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || m_rpath=""
+    m_rsha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || m_rsha=""
+    [[ "$m_rpath" == "null" ]] && m_rpath=""
+    [[ "$m_rsha" == "null" ]] && m_rsha=""
+    if [[ -z "$m_rpath" || ! -r "${root}/${m_rpath}" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: accepted_head ${m_accepted} is recorded but its receipt (${m_rpath:-<none>}) is missing — never merge on manifest state alone. Rerun plan-finalize ${plan_id} --stage accept-ancillary. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    local m_now_sha
+    m_now_sha="sha256:$(sha256sum "${root}/${m_rpath}" | awk '{print $1}')"
+    if [[ "$m_now_sha" != "$m_rsha" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the acceptance receipt ${m_rpath} no longer hashes to the recorded ${m_rsha} — the audit trail was altered. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    # The receipt must describe THIS decision: the same frozen candidate and
+    # the same accepted head the manifest binds.
+    local r_cand r_head
+    r_cand="$(jq -r '.candidate_sha // ""' "${root}/${m_rpath}" 2>/dev/null)" || r_cand=""
+    r_head="$(jq -r '.accepted_head // ""' "${root}/${m_rpath}" 2>/dev/null)" || r_head=""
+    if [[ "$r_cand" != "$candidate" || "$r_head" != "$m_accepted" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the acceptance receipt ${m_rpath} describes candidate ${r_cand:-<none>} / head ${r_head:-<none>}, not ${candidate} / ${m_accepted}. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+
+    # LIVE re-verification, same predicate as the acceptance stage — no
+    # merge-local variant that could drift from it. This closes both the
+    # stale-receipt window and a policy tightened since the acceptance.
+    local merc=0
+    plan_final_review_equivalent "$root" "$plan_id" || merc=$?
+    if [[ "$merc" -ne 0 ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} at ${plan_head} is no longer review-equivalent to the frozen candidate ${candidate} (the classification is above). Nothing was merged and the review was NOT invalidated — the merge is read-only until its git action." >&2
+      exit 1
+    fi
+    merged_head="$plan_head"
+    review_equivalence="true"
+    echo "plan-merge-to-main: merging the review-equivalent accepted head ${plan_head} (frozen candidate ${candidate}, receipt ${m_rpath}); equivalence was re-verified live against the current policy." >&2
   fi
   if [[ "$d_target" != "$target_branch" ]]; then
     echo "PRECONDITION FAIL: plan-merge-to-main: the decision authorizes a merge into '${d_target}', but ${plan_id}'s target branch is '${target_branch}'. Nothing was merged." >&2
@@ -4602,7 +5932,12 @@ cmd_plan_merge_to_main() {
   # a resume of the same candidate keeps the identical key (determinism holds),
   # while a different candidate is a different operation. The candidate sha never
   # contains ':', so the key stays parseable.
-  local op_id="${op_id_opt:-$(plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "$candidate")}"
+  # P073 Step 18: the key covers the head being MERGED, not only the candidate.
+  # A candidate-path merge and an accepted-head merge of the same candidate are
+  # different immutable operations; sharing a key would let a resume of one be
+  # read as a resume of the other. `$merged_head` equals `$candidate` on the
+  # normal path, so pre-P073 keys are unchanged there.
+  local op_id="${op_id_opt:-$(plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "${candidate}.${merged_head}")}"
   local phase="none" prc=0
   phase="$(plan_op_reconcile "$plan_id" "$op_id")" || prc=$?
   local resumed_merge=""
@@ -4693,15 +6028,49 @@ cmd_plan_merge_to_main() {
     # Already published by an earlier attempt of THIS op — never a second merge.
     merge_commit="$resumed_merge"
     merged_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null)"
-    echo "RESUME: the plan merge ${merge_commit} is already published on ${target_branch} — skipping the merge and continuing with the lifecycle bindings, the tag and the push." >&2
+
+    # P073 Step 18: PROVE the published merge is the one we would publish now,
+    # before sealing anything that describes it. Without this, a resume seals
+    # `merged_head`/`review_equivalence` computed from the CURRENT plan head
+    # while the published merge may have had the other second parent — the
+    # close receipt would then attest a merge that never happened. Two concrete
+    # ways that happens: a candidate merge published, then the plan branch
+    # accepts an ancillary head before the resume; or an accepted-head merge
+    # published, then the plan ref reset back to the candidate.
+    local rp_line rp_p1 rp_p2 rp_rest rp_expected_tree rp_mt rp_rc=0
+    rp_line="$(git -C "$root" rev-list --parents -n1 "$merge_commit" 2>/dev/null)" || rp_line=""
+    read -r _ rp_p1 rp_p2 rp_rest <<< "$rp_line"
+    # ANCHOR ON THE FROZEN TARGET HEAD, not the live one. `$target_head` is
+    # read fresh from the branch, and on a resume the branch has ALREADY moved
+    # — to the merge itself and then past it, over the lifecycle commit. The
+    # first parent to expect is therefore the head the candidate was frozen
+    # against, which is exactly what the fresh merge used (the
+    # stale-authorization check makes the two equal at merge time). Comparing
+    # against the live head made every successful resume refuse itself.
+    if [[ "$rp_p1" != "$target_head_frozen" || "$rp_p2" != "$merged_head" || -n "${rp_rest:-}" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has parents (${rp_p1:-<none>}, ${rp_p2:-<none>}), not the (${target_head_frozen}, ${merged_head}) this run would publish — refusing to seal close evidence describing a merge that was not made. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    rp_mt="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head_frozen" "$merged_head" 2>&1)" || rp_rc=$?
+    rp_expected_tree="$(printf '%s' "$rp_mt" | head -1 | tr -d '[:space:]')"
+    if [[ "$rp_rc" -ne 0 || ! "$rp_expected_tree" =~ ^[0-9a-f]{40}$ || "$rp_expected_tree" != "$merged_tree" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the already-published merge ${merge_commit} has tree ${merged_tree:-<unresolved>}, not the deterministic merge tree for (${target_head_frozen}, ${merged_head}) — refusing to attest it. ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    echo "RESUME: the plan merge ${merge_commit} is already published on ${target_branch} with the expected parents and tree — skipping the merge and continuing with the lifecycle bindings, the tag and the push." >&2
   else
     # Merge TREE first — no ref moves, no worktree is touched, no MERGE_HEAD is
     # created, so a conflict costs nothing and leaves nothing to abort.
     local mt_out="" mt_rc=0
-    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$candidate" 2>&1)" || mt_rc=$?
+    # P073 Step 18: `$merged_head` is the candidate on the normal path and the
+    # accepted head on the equivalence path. Merging `$candidate` here while the
+    # close receipt recorded `merged_head` as the accepted head would publish a
+    # tree that does NOT contain the accepted commit — the receipt would
+    # describe a merge that never happened. Caught by this step's ancestry test.
+    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$merged_head" 2>&1)" || mt_rc=$?
     if [[ "$mt_rc" -ne 0 ]]; then
       _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
-      echo "MERGE CONFLICT: ${plan_branch} (${candidate}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage sync'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
+      echo "MERGE CONFLICT: ${plan_branch} (${merged_head}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage sync'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
       printf '%s\n' "$mt_out" >&2
       exit 4
     fi
@@ -4712,7 +6081,7 @@ cmd_plan_merge_to_main() {
     fi
 
     local msg="merge(plan): ${plan_id} — ${plan_branch} into ${target_branch}"
-    merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$candidate" -m "$msg" 2>/dev/null)" || merge_commit=""
+    merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$merged_head" -m "$msg" 2>/dev/null)" || merge_commit=""
     if [[ -z "$merge_commit" ]]; then
       echo "PRECONDITION FAIL: plan-merge-to-main: could not build the merge commit for ${plan_id} — no ref was moved and ${target_branch} is unchanged." >&2
       exit 1
@@ -4798,7 +6167,8 @@ cmd_plan_merge_to_main() {
   close_sealed="$(_pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target_branch" \
     "$target_head_frozen" "$merge_commit" "$merged_tree" "$tag_status" \
     "${run_dir_abs}/gates_report.json" "${run_dir_abs}/release-decision.json" \
-    "${run_dir_abs}/release-decision-dual-run.json" "$decision_file")" || {
+    "${run_dir_abs}/release-decision-dual-run.json" "$decision_file" \
+    "$merged_head" "$review_equivalence")" || {
     echo "WARN: plan-merge-to-main: the merge ${merge_commit} is published, but its durable close-evidence receipt could not be sealed — plan-close will require the runtime evidence directory until this is resolved (re-run plan-merge-to-main; sealing is idempotent)." >&2
     close_sealed=""
   }
@@ -4973,6 +6343,151 @@ _pfsm_close_marker_path() {
   printf '%s/plan-close-complete' "$(dirname "$(plan_state_path "$1")")"
 }
 
+# ---------------------------------------------------------------------------
+# _pfsm_render_close_projections <root> <plan_id>  — P073 Step 12 (P082)
+#
+# The Reporter used to be told to COMMIT its delivery report and boundary
+# manifest, which was unexecutable three ways over: pipeline.md invalidates the
+# review on any tracked write during it, the ordered path `.aid-o/reports/` is
+# gitignored, and the reporter contract said so itself two paragraphs later.
+# The Reporter now writes run-scoped evidence only, and the CONTROLLER renders
+# the human/CI projections HERE — after merge and close, outside any freeze
+# window, so the projection can never cost a review.
+#
+# NEVER A CLOSE BLOCKER. `delivery-report.json` in the run evidence dir is the
+# authoritative artifact; these are derived files with no history value. A
+# missing JSON, an unparseable one, or an unwritable reports directory each
+# produce a WARNING and close proceeds. (Whether the JSON must EXIST at all is
+# a close-check concern, forceable per Step 8 — not this renderer's.)
+# ---------------------------------------------------------------------------
+_pfsm_render_close_projections() {
+  local root="$1" plan_id="$2"
+  # POST-CLOSE ONLY, verified rather than assumed. The caller reaches here
+  # after the CLOSED transition, but the manifest mirror update just above it
+  # is best-effort — so an unexpected state here means the plan may still be
+  # pre-close with a review open, and writing into .aid-o/reports/ would be
+  # exactly the tracked write this whole step exists to keep out of a freeze
+  # window (adversarial-review finding).
+  # plan_state_get REQUIRES the field name; calling it without one returns 1
+  # and an empty value, which would have made this guard silently inert.
+  local _state; _state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || echo "")"
+  if [[ -n "$_state" && "$_state" != "not_found" && "$_state" != "CLOSED" ]]; then
+    echo "WARNING: ${plan_id} is ${_state}, not CLOSED — human projection not rendered (a projection is only ever written after the review boundary has closed)." >&2
+    return 0
+  fi
+  local run_dir_rel src reports_dir
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
+  if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
+    echo "WARNING: no plan-final run directory recorded for ${plan_id} — human projection not rendered." >&2
+    return 0
+  fi
+  src="${root}/${run_dir_rel}/delivery-report.json"
+  if [[ ! -s "$src" ]]; then
+    echo "WARNING: no verified delivery-report.json in ${run_dir_rel} — human projection not rendered." >&2
+    return 0
+  fi
+  if ! jq -e 'type == "object"' "$src" >/dev/null 2>&1; then
+    echo "WARNING: ${run_dir_rel}/delivery-report.json is not a JSON object — human projection not rendered." >&2
+    return 0
+  fi
+
+  reports_dir="${root}/.aid-o/reports"
+  if ! mkdir -p "$reports_dir" 2>/dev/null; then
+    echo "WARNING: cannot create ${reports_dir} — human projection not rendered; ${run_dir_rel}/delivery-report.json remains authoritative." >&2
+    return 0
+  fi
+
+  # Deterministic transform, so a re-close after a forced close overwrites
+  # idempotently rather than accumulating variants.
+  local delivery="${reports_dir}/${plan_id}-delivery.md"
+  local boundary="${reports_dir}/${plan_id}-boundary.md"
+  local run_id="${run_dir_rel##*/}"
+
+  # EVERY SECTION IS BUILT AND CHECKED BEFORE ANYTHING IS PUBLISHED.
+  # An earlier cut ran the formatting `jq` calls inside the redirection group
+  # with their errors sent to /dev/null, and a trailing printf made the group
+  # succeed — so a report whose `.epics` was, say, a string instead of an array
+  # was published WITHOUT its verdict section, misrepresenting the
+  # authoritative JSON as a complete projection (adversarial-review finding).
+  # A malformed report now yields NO projection and a warning.
+  local sec_summary sec_epics sec_paths
+  if ! sec_summary="$(jq -r '.summary // "(no summary recorded)"' "$src" 2>&1)" \
+     || ! sec_epics="$(jq -r '(.epics // []) | if (type != "array") then error("epics is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>&1)" \
+     || ! sec_paths="$(jq -r '(.delivered_paths // []) | if (type != "array") then error("delivered_paths is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.)") end' "$src" 2>&1)"; then
+    echo "WARNING: ${run_dir_rel}/delivery-report.json does not have the expected shape — human projection not rendered (a partial projection would misrepresent it as complete)." >&2
+    return 0
+  fi
+
+  # EVERY INTERPOLATED SCALAR IS EMITTED AS A jq-QUOTED STRING. A raw value
+  # containing a newline used to inject a second frontmatter key — e.g. a
+  # `head` of "abc\nboundary_complete: false" — so a downstream YAML consumer
+  # read a different document than the one that was rendered
+  # (adversarial-review finding).
+  local y_plan y_src y_head y_cand y_run y_now
+  y_plan="$(jq -rn --arg v "$plan_id" '$v|@json')"
+  y_src="$(jq -rn --arg v "${run_dir_rel}/delivery-report.json" '$v|@json')"
+  y_run="$(jq -rn --arg v "$run_id" '$v|@json')"
+  y_now="$(jq -rn --arg v "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$v|@json')"
+  # `Head:` IS REQUIRED, in BOTH projections. aid-plan-close-check.sh check2
+  # reads it from the frontmatter of exactly these two paths to verify
+  # freshness, and refuses a report that has none. A first cut emitted it only
+  # when the JSON happened to carry one, and never in the boundary manifest —
+  # so rendering here OVERWROTE reports that had it and broke the very close
+  # this renderer runs inside (regression caught by the plan-final boundary
+  # suite's crash-recovery case, which passes at the pre-P073 baseline).
+  #
+  # Preference order is honest, not convenient: the delivery report's own head
+  # when it records one — that is the head the delivery was VERIFIED at, and if
+  # it is stale check2 correctly says so — otherwise the live HEAD, which is
+  # what a file rendered at this instant genuinely describes.
+  y_head="$(jq -r '(.head // .Head // "") | @json' "$src" 2>/dev/null || echo '""')"
+  if [[ "$y_head" == '""' ]]; then
+    local _live_head; _live_head="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
+    [[ -n "$_live_head" ]] && y_head="$(jq -rn --arg v "$_live_head" '$v|@json')"
+  fi
+  y_cand="$(jq -r '(.candidate_sha // "") | @json' "$src" 2>/dev/null || echo '""')"
+
+  {
+    printf -- '---\n'
+    printf 'plan_id: %s\n' "$y_plan"
+    printf 'rendered_by: "aid-plan-fsm.sh plan-close"\n'
+    printf 'rendered_at: %s\n' "$y_now"
+    printf 'source: %s\n' "$y_src"
+    printf 'Head: %s\n' "$y_head"
+    printf -- '---\n\n'
+    printf '# Delivery report — %s\n\n' "$plan_id"
+    printf 'This file is a PROJECTION rendered at close from the run-scoped\n'
+    printf 'delivery-report.json, which remains the authoritative artifact. It is\n'
+    printf 'derived: regenerating it is always safe.\n\n'
+    printf '## Summary\n\n%s\n' "$sec_summary"
+    printf '\n## Per-EPIC verdicts\n\n%s\n' "$sec_epics"
+    printf '\n## Delivered paths\n\n%s\n' "$sec_paths"
+  } > "${delivery}.tmp.$$" 2>/dev/null && mv "${delivery}.tmp.$$" "$delivery" 2>/dev/null || {
+    rm -f "${delivery}.tmp.$$" 2>/dev/null || true
+    echo "WARNING: cannot write ${delivery} — projection skipped; the run-scoped JSON remains authoritative." >&2
+    return 0
+  }
+
+  {
+    printf -- '---\n'
+    printf 'plan_id: %s\n' "$y_plan"
+    printf 'generated_at: %s\n' "$y_now"
+    printf 'boundary_complete: true\n'
+    printf 'Head: %s\n' "$y_head"
+    printf 'run_id: %s\n' "$y_run"
+    [[ "$y_cand" != '""' ]] && printf 'candidate_sha: %s\n' "$y_cand"
+    printf 'delivery_report: "%s-delivery.md"\n' "$plan_id"
+    printf -- '---\n'
+  } > "${boundary}.tmp.$$" 2>/dev/null && mv "${boundary}.tmp.$$" "$boundary" 2>/dev/null || {
+    rm -f "${boundary}.tmp.$$" 2>/dev/null || true
+    echo "WARNING: cannot write ${boundary} — projection skipped." >&2
+    return 0
+  }
+
+  echo "plan-close: rendered human projections ${plan_id}-delivery.md and ${plan_id}-boundary.md from ${run_dir_rel}/delivery-report.json" >&2
+  return 0
+}
+
 # _pfsm_lock_held <path> — 0 iff a non-blocking flock acquire FAILS, i.e. the
 # advisory lock is still held by a live open file description. Existence of the
 # sidecar is deliberately NOT the signal (flock releases on descriptor close,
@@ -5033,6 +6548,20 @@ cmd_plan_close() {
       # It relaxes the delivery-report EXISTENCE requirement only; every other
       # check still runs, exactly as the legacy path already treats this toggle.
       --skip-delivery-report) skip_delivery_report=1; shift ;;
+      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
+      # every state-TRANSITION command; what it can BYPASS is bounded by the
+      # forceable/hard classification in _pfsm_precondition.
+      #
+      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
+      # commands and is never ambiguous. `--reason` is accepted as a synonym
+      # only on the commands that have no business `--reason` of their own;
+      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
+      # already own `--reason`, so there it is deliberately absent. The plan
+      # named only plan-rollback as the collision — epic-complete is a second
+      # one, found while wiring.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -5040,6 +6569,9 @@ cmd_plan_close() {
         shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-close" || exit 2
 
   if [[ -z "$plan_id" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]" >&2
@@ -5113,6 +6645,19 @@ cmd_plan_close() {
                      --close-op-id "$op_id")
   [[ "$skip_delivery_report" -eq 1 ]] && _cc_args+=(--skip-delivery-report)
   ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "${_cc_args[@]}" 2>&1)" || ccrc=$?
+  # P073 Step 8: the close-check is BOOKKEEPING COMPLETENESS — unreachable
+  # receipts, missing delivery records. It is the exact check that stranded
+  # P082: plan-close is the terminal operation a PM must always be able to
+  # complete, and a plan that cannot be closed cannot be abandoned either.
+  # Classified forceable, so the PM proceeds with an audited waiver instead of
+  # hand-editing state. The full check output is still printed FIRST, forced or
+  # not: the force is offered as the second route, never as a way to not look.
+  if [[ "$ccrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
+    printf '%s\n' "$ccout" >&2
+    if _pfsm_precondition "close_check_complete" forceable false; then
+      ccrc=0
+    fi
+  fi
   if [[ "$ccrc" -ne 0 ]]; then
     _pfsm_close_release
     if [[ -f "$marker" ]]; then
@@ -5123,6 +6668,18 @@ cmd_plan_close() {
     printf '%s\n' "$ccout" >&2
     exit 1
   fi
+
+  # P073 Step 8: mint the waiver BEFORE the durable close work, not after.
+  # A bypass that completes the operation and only then tries to record itself
+  # would, on a failed receipt write, leave a plan closed with nothing saying
+  # why — the exact "detector without enforcement" shape. Refusing here costs
+  # nothing yet: no marker, no commit, no state change has happened.
+  #
+  # NOTE: this runs unconditionally, not only when something was bypassed.
+  # `_pfsm_commit_force` returns 0 immediately when --force is absent, and
+  # `_pfsm_handle_force` itself reports "bypassed nothing" when the force was
+  # a no-op — the two cases stay distinguishable in the operator's output.
+  _pfsm_commit_force "plan-close" "$plan_id" "$root" || { _pfsm_close_release; exit 1; }
 
   # ── 3. intent (op_id was derived above, for the check's exclusion) ────────
   local phase="none" prc=0
@@ -5155,12 +6712,36 @@ cmd_plan_close() {
       # plan-branch plan's MANDATORY receipt into an optional one and closed the
       # plan with no durable proof. This command only ever closes plan-branch
       # plans, so the absence is a blocking defect, not a legacy shape.
-      _pfsm_close_release
-      echo "PRECONDITION FAIL: plan-close: ${plan_id} has no .aid-lifecycle manifest at ${lc_manifest}, but the receipt is MANDATORY for a plan-branch close — refusing to declare the plan closed with no durable proof. NO marker was written and ${plan_id} stays ${cur_state}." >&2
-      exit 1
-    else
+      # P073 Step 8: forceable — this IS the stranding scenario the backdoor
+      # exists for (a manually deleted manifest, a branch removed by hand). The
+      # close still records what it could not prove.
+      if [[ "$_PFSM_FORCE" -eq 1 ]] && _pfsm_precondition "lifecycle_manifest_present" forceable false; then
+        lifecycle_note="closed_pending_receipt"
+        applied_sha="$target_head"
+        echo "RECONCILIATION REQUIRED: ${plan_id} has no .aid-lifecycle manifest, so this close carries NO durable receipt and is recorded as closed_pending_receipt. The force waiver names the bypass; restore the manifest and re-run plan-close to converge." >&2
+      else
+        _pfsm_close_release
+        echo "PRECONDITION FAIL: plan-close: ${plan_id} has no .aid-lifecycle manifest at ${lc_manifest}, but the receipt is MANDATORY for a plan-branch close — refusing to declare the plan closed with no durable proof. NO marker was written and ${plan_id} stays ${cur_state}." >&2
+        exit 1
+      fi
+    fi
+    if [[ -f "$lc_manifest" ]]; then
       local lrc=0 lout=""
       lout="$(aid_lifecycle_plan_close "$plan_id" "$root" "$target_head" 2>&1)" || lrc=$?
+      if [[ "$lrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
+        printf '%s\n' "$lout" >&2
+        if _pfsm_precondition "lifecycle_receipt_committed" forceable false; then
+          # LIFECYCLE TRUTHFULNESS. `aid-lifecycle.sh` defines `closed` as
+          # receipt-committed-and-reachable, so a forced close whose receipt
+          # write is the broken operation must NOT claim it. It records
+          # `closed_pending_receipt` — a real terminal state for the FSM, and an
+          # honest one for the lifecycle: the follow-up receipt commit flips it
+          # to `closed` once the write path is repaired.
+          lrc=0
+          lifecycle_note="closed_pending_receipt"
+          echo "RECONCILIATION REQUIRED: the lifecycle receipt for ${plan_id} could NOT be committed, so this close is recorded as closed_pending_receipt, not closed. The force waiver is written locally; attach the receipt once the write path is repaired (re-running plan-close converges)." >&2
+        fi
+      fi
       if [[ "$lrc" -ne 0 ]]; then
         _pfsm_close_release
         echo "PRECONDITION FAIL: plan-close: the lifecycle receipt for ${plan_id} was NOT committed (rc=${lrc}) — for a plan_branch plan the receipt is MANDATORY, not best-effort, so NO close marker was written and ${plan_id} stays ${cur_state}. Detail: ${lout}" >&2
@@ -5246,6 +6827,11 @@ cmd_plan_close() {
       exit 1
     fi
     plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
+
+    # P073 Step 12 (P082): the controller renders the committed/worktree
+    # projections HERE — after merge and close, outside any freeze window, so
+    # a projection can never cost a review. Never a close blocker.
+    _pfsm_render_close_projections "$root" "$plan_id" || true
   fi
 
   local crc=0
@@ -5256,7 +6842,14 @@ cmd_plan_close() {
 
   echo "$marker"
   if [[ "$close_mode" == "merge" ]]; then
-    echo "CLOSED: ${plan_id} is closed (${lifecycle_note}); the merge ${merge_commit:-<none>} is published on ${target_branch} and the close marker is bound to ${applied_sha}." >&2
+    if [[ "$lifecycle_note" == "closed_pending_receipt" ]]; then
+      # NEVER the word "closed" alone here. `aid-lifecycle.sh` defines closed as
+      # receipt-committed-and-reachable; saying it while the receipt is missing
+      # would be the one contradiction this whole path exists to avoid.
+      echo "CLOSED PENDING RECEIPT: ${plan_id} is terminal, but its lifecycle receipt is NOT committed — the durable proof is missing and the force waiver records why. The merge ${merge_commit:-<none>} is published on ${target_branch}; re-run plan-close once the receipt path is repaired to converge to closed." >&2
+    else
+      echo "CLOSED: ${plan_id} is closed (${lifecycle_note}); the merge ${merge_commit:-<none>} is published on ${target_branch} and the close marker is bound to ${applied_sha}." >&2
+    fi
   else
     echo "CLOSED (ABORTED): ${plan_id} closed by abort (${lifecycle_note}); ${target_branch} is unchanged at ${applied_sha}, the abandoned candidate was ${candidate}, and the abort record is in ${run_dir_rel}/." >&2
   fi
@@ -5268,10 +6861,14 @@ cmd_plan_close() {
 #                [--project-root ...]
 # =============================================================================
 cmd_plan_state() {
-  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt=""
+  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
+      # P073 Step 13: the supported recovery for a stale EPIC run. Deliberately
+      # NOT forceable — see the supersede header: this IS the audited
+      # transaction force would otherwise be used to fake.
+      --supersede-epic) supersede_epic="${2:-}"; shift 2 ;;
       --attest-source-ref) attest_ref="${2:-}"; shift 2 ;;
       --reason) attest_reason="${2:-}"; shift 2 ;;
       --epic) attest_epic="${2:-}"; shift 2 ;;
@@ -5283,7 +6880,7 @@ cmd_plan_state() {
     esac
   done
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -5295,6 +6892,12 @@ cmd_plan_state() {
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  if [[ -n "$supersede_epic" ]]; then
+    local src=0
+    _pfsm_plan_state_supersede "$plan_id" "$project_root" "$supersede_epic" "$attest_reason" || src=$?
+    exit "$src"
+  fi
 
   if [[ -n "$attest_ref" || -n "$attest_reason" || -n "$attest_epic" ]]; then
     local arc=0
@@ -5352,6 +6955,219 @@ cmd_plan_state() {
 # anything, so re-attesting an already-proven entry, or an entry that was
 # never marked unproven, is rejected rather than silently no-op'd.
 # ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# SUPERSEDE — the supported recovery for a stale EPIC FSM run (P073 Step 13)
+#
+# `aid-fsm.sh init` rejects a duplicate init unconditionally, which is right:
+# silently re-initialising over a live run would lose its history. But it left
+# a PM whose EPIC run went stale — a regenerated plan.json, an abandoned
+# attempt — with no supported way forward except hand-deleting state, which is
+# exactly the unaudited surgery this plan exists to replace.
+#
+# THE RECORD BINDS ONE EXACT TRANSITION, four fields deep:
+#   old_state_sha256      the archived state file's content hash
+#   old_run_id            which run is being retired
+#   new_plan_json_sha256  the plan.json the re-init must present
+#   plan_id + epic_id     whose run this is
+# So a record authorises exactly ONE specific re-initialisation. It cannot be
+# replayed against a different plan.json, and a forged or stale record — one
+# whose hashes do not match what is actually on disk — authorises nothing.
+#
+# WHAT IT TOUCHES, precisely. The run's EVIDENCE ARTIFACTS — step outputs,
+# reports, transcripts — are never read, moved or deleted. The one file that
+# does change is the state file itself, and it is ARCHIVED IN PLACE beside
+# them as `fsm-state.yaml.superseded-<epoch>`, never removed. (An earlier
+# comment here claimed the evidence directory was untouched full stop, which
+# was not true of the directory: adversarial-review finding.)
+#
+# WHY NOT --force: force is a bypass with a receipt. This is a TRANSACTION: it
+# archives the old state, records what it archived, and lets exactly one
+# matching init through. `plan-state` is deliberately NON-forceable for the
+# same reason (see the Scope note in the force framework header) — a forced
+# repair tool could fabricate the very records other commands trust.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _pfsm_supersede_record_dir <project_root>
+_pfsm_supersede_record_dir() {
+  printf '%s/.aid-o/work/plan-state' "$1"
+}
+
+# _pfsm_epic_state_file <project_root> <epic_id>
+#   The EPIC FSM's state file. Its run directory is not recorded anywhere the
+#   plan layer can read, so it is discovered — there is at most one live
+#   fsm-state.yaml per EPIC by construction (init refuses a second).
+_pfsm_epic_state_file() {
+  local root="$1" epic_id="$2"
+  local base="${root}/.aid-o/work/evidence/${epic_id}"
+  [[ -d "$base" ]] || return 1
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    printf '%s' "$f"
+    return 0
+  done < <(find "$base" -maxdepth 2 -name 'fsm-state.yaml' -type f 2>/dev/null | sort)
+  return 1
+}
+
+# _pfsm_plan_state_supersede <plan_id> <project_root> <epic_id> <reason>
+_pfsm_plan_state_supersede() {
+  local plan_id="$1" project_root="$2" epic_id="$3" reason="$4"
+  local _sup_lock_fd=
+
+  if [[ -z "$epic_id" || -z "$reason" ]]; then
+    echo "ERROR: plan-state --supersede-epic requires --reason, both non-empty." >&2
+    return 2
+  fi
+  if ! _pfsm_validate_epic_id "$epic_id"; then
+    echo "ERROR: plan-state --supersede-epic must match ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}')" >&2
+    return 2
+  fi
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: plan-state --supersede-epic: --reason must be at least 20 characters (got ${#reason}). The record is the audit trail for retiring a run; a throwaway reason defeats it." >&2
+    return 2
+  fi
+  command -v jq >/dev/null 2>&1 || { echo "ERROR: plan-state --supersede-epic requires jq." >&2; return 2; }
+
+  local path; path="$(plan_manifest_path "$plan_id")"
+  if [[ ! -f "$path" ]]; then
+    echo "PRECONDITION FAIL: no manifest for ${plan_id} — nothing to supersede." >&2
+    return 1
+  fi
+
+  local entry_json="" erc=0
+  entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || erc=$?
+  if [[ "$erc" -eq 5 ]]; then
+    echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt." >&2
+    return 5
+  fi
+  if [[ -z "$entry_json" ]]; then
+    echo "PRECONDITION FAIL: no epic_runs entry for ${epic_id} in ${plan_id}'s manifest — supersede operates on a recorded EPIC run." >&2
+    return 1
+  fi
+
+  # A MERGED EPIC IS HISTORY, NOT A STALE RUN. Its work is already on the plan
+  # branch; retiring its state would invite a re-run that re-merges it.
+  local status=""
+  status="$(jq -r '.status // ""' <<<"$entry_json" 2>/dev/null)"
+  if [[ "$status" == "merged_to_plan" ]]; then
+    echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan — a merged EPIC is history, not a stale run. Supersede is for a run that never landed; to undo a merge use plan-rollback." >&2
+    return 1
+  fi
+
+  local state_file=""
+  if ! state_file="$(_pfsm_epic_state_file "$project_root" "$epic_id")"; then
+    echo "PRECONDITION FAIL: no fsm-state.yaml found for ${epic_id} — nothing to supersede." >&2
+    return 1
+  fi
+
+  local old_sha old_run_id
+  old_sha="sha256:$(sha256sum "$state_file" | awk '{print $1}')"
+  old_run_id="$(basename "$(dirname "$state_file")")"
+
+  # The plan.json the re-init will present. Same run directory as the state
+  # file — that is the package the superseded run was initialised from, and
+  # the record binds the NEXT init to whatever is there NOW (the regenerated
+  # one), which is the whole point of the transaction.
+  local plan_json="$(dirname "$state_file")/plan.json"
+  local new_json_sha=""
+  if [[ -f "$plan_json" ]]; then
+    new_json_sha="sha256:$(sha256sum "$plan_json" | awk '{print $1}')"
+  else
+    echo "PRECONDITION FAIL: no plan.json beside ${state_file} — the record must bind the exact package the re-init will present, and there is none to bind to. Regenerate the EPIC package first." >&2
+    return 1
+  fi
+
+  local rec_dir; rec_dir="$(_pfsm_supersede_record_dir "$project_root")"
+  mkdir -p "$rec_dir" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot create ${rec_dir} for the supersede record." >&2
+    return 1
+  }
+
+  # ── THE WHOLE TRANSACTION IS SERIALIZED, per plan+EPIC ───────────────────
+  # An independent review reproduced the failure this closes: four concurrent
+  # supersedes left ONE archived state and ZERO records — the exact stranding
+  # this recovery exists to prevent. The old shape checked "does the record
+  # exist", then wrote it with a plain `mv` (which overwrites), then archived;
+  # so two callers both passed the check, the second clobbered the first's
+  # record, and when its own archive failed (the state file was already gone)
+  # its error path deleted the record they were BOTH relying on.
+  #
+  # A lock is the honest fix rather than more atomic primitives: this is a
+  # two-file transaction (record + archive) with a cross-file invariant, and
+  # no single rename can express that. Scoped per plan+EPIC so unrelated
+  # supersedes never serialize against each other.
+  local lockfile="${rec_dir}/.supersede-${plan_id}-${epic_id}.lock"
+  touch "$lockfile" 2>/dev/null || {
+    echo "PRECONDITION FAIL: cannot create the supersede lock at ${lockfile}." >&2
+    return 1
+  }
+  exec {_sup_lock_fd}<>"$lockfile" || {
+    echo "PRECONDITION FAIL: cannot open the supersede lock at ${lockfile}." >&2
+    return 1
+  }
+  if ! flock -x -w 10 "$_sup_lock_fd"; then
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: another supersede for ${epic_id} holds the lock (waited 10s) — rerun once it finishes." >&2
+    return 1
+  fi
+
+  # RE-CHECK UNDER THE LOCK. A racer that won the lock first may already have
+  # archived the state file, so the pre-lock reads above can be stale.
+  if [[ ! -f "$state_file" ]]; then
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: ${epic_id} was superseded by a concurrent call while this one waited — nothing was done here. Check .aid-o/work/plan-state/ for the record it wrote." >&2
+    return 1
+  fi
+
+  # ONE epoch for both names, so the archive and its record pair 1:1 and a
+  # second supersede can never collide with or overwrite the first.
+  local epoch; epoch="$(date -u +%s)"
+  local archive="${state_file}.superseded-${epoch}"
+  local record="${rec_dir}/supersede-${plan_id}-${epic_id}-${epoch}.json"
+  if [[ -e "$archive" || -e "$record" ]]; then
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: a supersede for ${epic_id} was already recorded in this same second — rerun in a moment so the archive and its record keep their 1:1 pairing." >&2
+    return 1
+  fi
+
+  # RECORD FIRST, then archive. A record with no archive authorises nothing
+  # (the init-side verifier requires a matching archived file), whereas an
+  # archive with no record would strand the run with no way to re-init.
+  local tmp="${record}.tmp.$$"
+  jq -n --arg plan "$plan_id" --arg epic "$epic_id" \
+    --arg oldsha "$old_sha" --arg oldrun "$old_run_id" \
+    --arg newsha "$new_json_sha" --arg reason "$reason" \
+    --arg op "${USER:-unknown}" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:"aid-2.0", artifact_type:"epic_supersede_record",
+      plan_id:$plan, epic_id:$epic,
+      old_state_sha256:$oldsha, old_run_id:$oldrun,
+      new_plan_json_sha256:$newsha,
+      reason:$reason, operator:$op, created_at:$now}' > "$tmp" 2>/dev/null \
+    && mv -n "$tmp" "$record" 2>/dev/null && [[ ! -e "$tmp" ]] || {
+      rm -f "$tmp" 2>/dev/null || true
+      eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+      echo "PRECONDITION FAIL: cannot write the supersede record at ${record} — nothing was archived." >&2
+      return 1
+    }
+
+  if ! mv "$state_file" "$archive" 2>/dev/null; then
+    # Safe under the lock: this record is provably ours (it did not exist when
+    # we took the lock, and `mv -n` proved we created it), so removing it
+    # cannot strand a concurrent caller the way the unlocked version did.
+    rm -f "$record" 2>/dev/null || true
+    eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+    echo "PRECONDITION FAIL: cannot archive ${state_file} — the record was removed again, so nothing is half-done." >&2
+    return 1
+  fi
+  eval "exec ${_sup_lock_fd}>&-" 2>/dev/null || true
+
+  echo "superseded ${epic_id}: archived $(basename "$archive"), record $(basename "$record")" >&2
+  echo "  Evidence artifacts are untouched; the state file is archived in place beside them." >&2
+  echo "  Re-init with the plan.json this record binds ($(basename "$plan_json")) to continue." >&2
+  printf '%s\n' "$record"
+  return 0
+}
+
 _pfsm_plan_state_attest() {
   local plan_id="$1" project_root="$2" ref="$3" reason="$4" epic_id="$5"
 
@@ -5667,13 +7483,45 @@ _pfsm_recover_plan_final_receipt() {
   #    candidate`, i.e. its first parent is the exact frozen target head and
   #    its second parent is exactly the candidate. Anything less exact is
   #    refused rather than guessed. ──────────────────────────────────────────
+  # P073 Step 18: an equivalence-path merge has SECOND PARENT = the accepted
+  # head, not the candidate. Recovery must look for the head that was actually
+  # merged, or it would refuse to recognise a merge it published itself — the
+  # candidate is still what proves reachability, and the accepted head is only
+  # honoured when the manifest recorded one.
+  local rec_head="$candidate" rec_accepted=""
+  rec_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || rec_accepted=""
+  [[ "$rec_accepted" == "null" ]] && rec_accepted=""
+  if [[ -n "$rec_accepted" && "$rec_accepted" != "$candidate" ]] \
+     && git -C "$root" merge-base --is-ancestor "$candidate" "$rec_accepted" 2>/dev/null; then
+    # Ancestry alone is not enough: it would let ANY descendant recorded in the
+    # manifest redefine which merge shape recovery looks for. The receipt must
+    # exist, hash to the recorded digest, and name this candidate and this head
+    # — the same proof the merge itself demanded.
+    local rec_rp rec_rs rec_now rec_rc rec_rh
+    rec_rp="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_path' 2>/dev/null)" || rec_rp=""
+    rec_rs="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.equivalence_receipt_sha256' 2>/dev/null)" || rec_rs=""
+    [[ "$rec_rp" == "null" ]] && rec_rp=""
+    [[ "$rec_rs" == "null" ]] && rec_rs=""
+    if [[ -n "$rec_rp" && -r "${root}/${rec_rp}" ]]; then
+      rec_now="sha256:$(sha256sum "${root}/${rec_rp}" | awk '{print $1}')"
+      rec_rc="$(jq -r '.candidate_sha // ""' "${root}/${rec_rp}" 2>/dev/null)" || rec_rc=""
+      rec_rh="$(jq -r '.accepted_head // ""' "${root}/${rec_rp}" 2>/dev/null)" || rec_rh=""
+      if [[ "$rec_now" == "$rec_rs" && "$rec_rc" == "$candidate" && "$rec_rh" == "$rec_accepted" ]]; then
+        rec_head="$rec_accepted"
+      fi
+    fi
+    if [[ "$rec_head" == "$candidate" ]]; then
+      echo "NOTE: ${plan_id} records accepted_head ${rec_accepted} but no receipt proves it here (a fresh clone carries no runtime acceptance binding) — recovery looks for a merge of the CANDIDATE. If the published merge used the accepted head, recovery will refuse rather than guess." >&2
+    fi
+  fi
+
   local merged=0 merge_commit="" merge_tag="none"
   if git -C "$root" merge-base --is-ancestor "$candidate" "$target_now" 2>/dev/null; then
     merged=1
     local mline mc mp1 mp2 mmatches=0
     while IFS=' ' read -r mc mp1 mp2 _rest; do
       [[ -n "$mc" ]] || continue
-      [[ "$mp1" == "$target_head" && "$mp2" == "$candidate" && -z "$_rest" ]] || continue
+      [[ "$mp1" == "$target_head" && "$mp2" == "$rec_head" && -z "$_rest" ]] || continue
       mmatches=$((mmatches + 1)); merge_commit="$mc"
     done < <(git -C "$root" rev-list --parents "${target_head}..${target_now}" 2>/dev/null)
     [[ "$mmatches" -eq 1 ]] || { echo "PRECONDITION FAIL: ${plan_id} candidate ${candidate} is reachable from ${target} but no single commit uniquely matches this plan's merge shape (matches=${mmatches}) — refusing to guess the merge commit." >&2; return 1; }
@@ -5684,7 +7532,7 @@ _pfsm_recover_plan_final_receipt() {
     # commit's tree to equal it, exactly as the live merge's own tree-identity
     # check does.
     local expected_tree actual_merge_tree mt_out mt_rc=0
-    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$candidate" 2>&1)" || mt_rc=$?
+    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$rec_head" 2>&1)" || mt_rc=$?
     expected_tree="$(printf '%s' "$mt_out" | head -1 | tr -d '[:space:]')"
     [[ "$mt_rc" -eq 0 && "$expected_tree" =~ ^[0-9a-f]{40}$ ]] || { echo "PRECONDITION FAIL: ${plan_id} candidate ${candidate} does not merge cleanly into ${target_head} — the discovered merge commit cannot be the deterministic plan merge; refusing to trust it." >&2; return 1; }
     actual_merge_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null || true)"
@@ -6656,12 +8504,22 @@ cmd_plan_rollback() {
                       reason="$2"; shift 2 ;;
       --op-id)        _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
                       op_id_opt="$2"; shift 2 ;;
+      # P073 Step 8: this command already owns `--reason` for its own business
+      # meaning, so the force path uses the unambiguous `--force-reason`.
+      # Passing --force without it dies naming both flags.
+      --force) _PFSM_FORCE=1; shift ;;
+      --force-reason)
+        _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
+        _PFSM_FORCE_REASON="$2"; shift 2 ;;
       --*) echo "ERROR: plan-rollback: unknown flag: $1" >&2; exit 2 ;;
       *) if [[ -z "$plan_id" ]]; then plan_id="$1"
          else echo "ERROR: plan-rollback: unexpected argument: $1" >&2; exit 2; fi
          shift ;;
     esac
   done
+  # P073 Step 8 (review finding): a force reason without --force is an
+  # error, never a silently discarded argument.
+  _pfsm_force_arg_check "plan-rollback" || exit 2
   if [[ -z "$plan_id" || -z "$revert_commit" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
@@ -6987,7 +8845,7 @@ Subcommands:
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
-  plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
+  plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]

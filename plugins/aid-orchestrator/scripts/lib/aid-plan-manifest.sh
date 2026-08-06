@@ -499,6 +499,41 @@ _pm_check_invariants() {
     echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — runtime run/directory must be paired; durable receipt ref/hash are either both absent before review or both present after review" >&2
     return 1
   fi
+  # ── P073 Step 15: the protected set is bound to the CANDIDATE ────────────
+  # It is non-empty exactly when a candidate is frozen, and cleared with it.
+  # A half-cleared manifest — a protected set with no candidate, or a
+  # candidate with none — would let Step 16's equivalence predicate reason
+  # about a surface nobody froze, which is worse than having no predicate.
+  # LEGACY TOLERANCE: a manifest frozen before this field existed has neither,
+  # and Step 16 reports "equivalence unavailable" for it rather than guessing.
+  if ! jq -e '
+      .plan_boundary_manifest as $m
+      | ($m.protected_paths == null and $m.protected_paths_complete == null)
+        or (($m.candidate_sha != null)
+            and ($m.protected_paths | type == "array")
+            and ($m.protected_paths | length > 0)
+            and ($m.protected_paths_complete | type == "boolean"))
+    ' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — protected_paths must be a non-empty array with a boolean protected_paths_complete exactly when candidate_sha is set, and cleared together with it" >&2
+    return 1
+  fi
+  # accepted_head (Step 16) may exist only alongside a frozen candidate, and
+  # its receipt path/hash travel together — the manifest binding names the
+  # authoritative receipt, never a directory listing.
+  if ! jq -e '
+      .plan_boundary_manifest as $m
+      | ($m.accepted_head == null)
+        or (($m.candidate_sha != null)
+            and ($m.accepted_head | type == "string")
+            and ($m.accepted_head | test("^[0-9a-f]{40}$"))
+            and ($m.equivalence_receipt_path | type == "string")
+            and ($m.equivalence_receipt_path | length > 0)
+            and ($m.equivalence_receipt_sha256 | type == "string")
+            and ($m.equivalence_receipt_sha256 | test("^(sha256:)?[0-9a-f]{64}$")))
+    ' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — accepted_head requires a frozen candidate and a receipt path+sha256 recorded with it" >&2
+    return 1
+  fi
   if ! jq -e '(.plan_boundary_manifest.plan_final_evidence_ref == null) or (.plan_boundary_manifest.plan_final_evidence_ref as $r | ($r | type == "string") and ($r | test("^refs/heads/aid-evidence/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$")))' "$file" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — plan_final_evidence_ref is malformed" >&2
     return 1
@@ -1236,7 +1271,8 @@ plan_manifest_raise_final_profile() {
 # ===========================================================================
 plan_manifest_freeze_candidate() {
   local plan_id="$1" candidate_sha="$2" target_head="$3" run_id="$4" \
-        evidence_dir="$5" frozen_at="${6:-}"
+        evidence_dir="$5" frozen_at="${6:-}" protected_file="${7:-}" \
+        protected_complete="${8:-true}"
 
   _plan_manifest_require_jq || return 2
   _pm_validate_plan_id_charset "$plan_id" || return 1
@@ -1260,17 +1296,65 @@ plan_manifest_freeze_candidate() {
     return 1
   fi
 
+  # P073 Step 15: the PROTECTED PATH SET is written in the SAME atomic mutate
+  # as the candidate pair. It is the delivery surface the frozen review
+  # describes — every step's plan.json allowed_paths, the source plan, the
+  # lifecycle manifest, the close-consumed receipts — and Step 16's equivalence
+  # predicate refuses any commit that touches it. Storing it here rather than
+  # recomputing at read time is what makes it a property OF THIS FREEZE: a
+  # later plan.json edit cannot retroactively change what was protected.
+  #
+  # The caller passes a NUL-DELIMITED file. Paths are arbitrary strings: an
+  # argv list breaks on the first odd one, and newline delimiting corrupts a
+  # path that CONTAINS a newline — one delivery path silently becomes two
+  # entries, neither of which is the real path (adversarial-review finding).
+  # NUL is the only separator git itself guarantees cannot occur in a path.
+  local protected_json='[]'
+  if [[ -z "$protected_file" ]]; then
+    # The pre-P073 six-argument call. Accepting it silently would store a
+    # deliberately too-small protected set and mark the freeze complete, so it
+    # is refused by name instead.
+    _pm_warn "plan_manifest_freeze_candidate: a protected-paths file is REQUIRED (7th argument). A freeze with no protected set cannot support review equivalence and must not look as if it does."
+    return 1
+  fi
+  if [[ ! -r "$protected_file" ]]; then
+    _pm_warn "plan_manifest_freeze_candidate: protected-paths file '${protected_file}' is not readable"
+    return 1
+  fi
+  protected_json="$(jq -sR '[splits("\u0000") | select(length > 0)] | sort | unique' < "$protected_file" 2>/dev/null)" || protected_json='[]'
+  if [[ -z "$protected_json" ]]; then protected_json='[]'; fi
+  case "$protected_complete" in
+    true|false) ;;
+    *) _pm_warn "plan_manifest_freeze_candidate: protected_paths_complete must be true or false (got '${protected_complete}')"; return 1 ;;
+  esac
+  # The three lifecycle paths are the FLOOR: the set is never silently empty,
+  # because an empty protected set would make every commit look ancillary.
+  if [[ "$(jq 'length' <<<"$protected_json")" -eq 0 ]]; then
+    protected_json="$(jq -n --arg p "$plan_id" '[
+        (".aid-lifecycle/manifests/" + $p + ".yaml"),
+        (".aid-lifecycle/receipts/" + $p + ".yaml")
+      ] | sort | unique')"
+    protected_complete=false
+  fi
+
   local filter='
     .plan_boundary_manifest.candidate_sha = $candidate_sha
     | .plan_boundary_manifest.candidate_frozen_at = $frozen_at
     | .plan_boundary_manifest.target_branch_head_at_candidate_freeze = $target_head
     | .plan_boundary_manifest.plan_final_run_id = $run_id
     | .plan_boundary_manifest.plan_final_evidence_dir = $evidence_dir
+    | .plan_boundary_manifest.protected_paths = $protected_paths
+    | .plan_boundary_manifest.protected_paths_complete = ($protected_complete == "true")
+    | .plan_boundary_manifest.accepted_head = null
+    | .plan_boundary_manifest.equivalence_receipt_path = null
+    | .plan_boundary_manifest.equivalence_receipt_sha256 = null
     | .plan_boundary_manifest.candidate_invalidation_reason = null
     | .plan_boundary_manifest.plan_state = "PLAN_GATES"
   '
 
   _plan_manifest_atomic_mutate "$plan_id" "$filter" \
+    --argjson protected_paths "$protected_json" \
+    --arg protected_complete "$protected_complete" \
     --arg candidate_sha "$candidate_sha" \
     --arg frozen_at "$frozen_at" \
     --arg target_head "$target_head" \
@@ -1333,12 +1417,84 @@ plan_manifest_clear_candidate() {
     | .plan_boundary_manifest.plan_final_close_evidence_ref = null
     | .plan_boundary_manifest.plan_final_close_evidence_receipt_sha256 = null
     | .plan_boundary_manifest.plan_final_inputs = null
+    | .plan_boundary_manifest.protected_paths = null
+    | .plan_boundary_manifest.protected_paths_complete = null
+    | .plan_boundary_manifest.accepted_head = null
+    | .plan_boundary_manifest.equivalence_receipt_path = null
+    | .plan_boundary_manifest.equivalence_receipt_sha256 = null
     | .plan_boundary_manifest.candidate_invalidation_reason = $reason
     | .plan_boundary_manifest.plan_state = $target_state
   '
 
   _plan_manifest_atomic_mutate "$plan_id" "$filter" \
     --arg reason "$reason" --arg target_state "$target_state"
+}
+
+# ===========================================================================
+# plan_manifest_set_accepted_head <plan_id> <accepted_head> <receipt_path>
+#                                  <receipt_sha256>
+#
+# P073 Step 16 — the ONE sanctioned mutator for review-equivalence acceptance.
+# All three fields move together in a single atomic mutate: the manifest
+# binding is what names the AUTHORITATIVE receipt, so a head without its
+# receipt (or a receipt hash that does not travel with the path) would leave
+# the merge unable to tell which of several receipt files authorised it.
+#
+# candidate_sha is deliberately NOT touched. The PM authorised a review of
+# that exact commit; equivalence asserts the review still describes the
+# delivery, never that something else was reviewed.
+#
+# Returns: 0 success, 1 bad args / invariant violation, 2 missing jq,
+# 3 lock timeout, 5 corrupt.
+# ===========================================================================
+plan_manifest_set_accepted_head() {
+  local plan_id="$1" head="$2" receipt_path="$3" receipt_sha="$4"
+  # COMPARE-AND-SWAP inputs. `_plan_manifest_atomic_mutate` re-reads the file
+  # under its lock, so a guard expressed in the jq filter is a true CAS: the
+  # second of two racing acceptances sees the first one's committed result and
+  # refuses instead of overwriting it. Callers that pass neither degrade to the
+  # old unguarded set, so the guard is opt-in but the FSM always passes it.
+  local expect_candidate="${5:-}" expect_prior="${6:-}"
+
+  _plan_manifest_require_jq || return 2
+  _pm_validate_plan_id_charset "$plan_id" || return 1
+  if ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+    _pm_warn "plan_manifest_set_accepted_head: accepted_head must be a 40-hex sha (got '${head:-<empty>}')"
+    return 1
+  fi
+  if [[ -z "$receipt_path" ]]; then
+    _pm_warn "plan_manifest_set_accepted_head: a receipt path is required — the manifest binding is what names the authoritative receipt"
+    return 1
+  fi
+  if ! [[ "$receipt_sha" =~ ^(sha256:)?[0-9a-f]{64}$ ]]; then
+    _pm_warn "plan_manifest_set_accepted_head: receipt sha256 is malformed (got '${receipt_sha:-<empty>}')"
+    return 1
+  fi
+
+  local guard=""
+  if [[ -n "$expect_candidate" ]]; then
+    guard='
+    (if (.plan_boundary_manifest.candidate_sha // "") != $ecand
+       then error("CAS FAILED: candidate_sha is now \(.plan_boundary_manifest.candidate_sha // "null"), not the \($ecand) this acceptance was decided against")
+       else . end)
+    | (if ((.plan_boundary_manifest.accepted_head // "") != $eprior)
+       then error("CAS FAILED: accepted_head is now \(.plan_boundary_manifest.accepted_head // "null"), not the \(if $eprior == "" then "null" else $eprior end) this acceptance saw — another acceptance won the race")
+       else . end)
+    | '
+  fi
+
+  # The write touches ONLY the three acceptance fields. candidate_sha,
+  # protected_paths and the frozen review binding are read by the guard and
+  # never assigned — an acceptance must not be able to move the thing it is
+  # being compared against.
+  local filter="${guard}"'
+    .plan_boundary_manifest.accepted_head = $head
+    | .plan_boundary_manifest.equivalence_receipt_path = $rpath
+    | .plan_boundary_manifest.equivalence_receipt_sha256 = $rsha
+  '
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" \
+    --arg head "$head" --arg rpath "$receipt_path" --arg rsha "$receipt_sha" \
+    --arg ecand "$expect_candidate" --arg eprior "$expect_prior"
 }
 
 # ===========================================================================

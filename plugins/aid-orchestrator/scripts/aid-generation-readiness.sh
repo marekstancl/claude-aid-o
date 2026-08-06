@@ -33,7 +33,7 @@ if ! lint_out="$("${SCRIPT_DIR}/aid-plan-lint.sh" "$plan" 2>&1)"; then
 fi
 if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   printf '%s\n' "${_aid_spg_error:-dependency grammar is invalid}" >&2
-  echo "READINESS: FAIL — canonical dependencies are 'Depends on: Step N[, Steps X-Y]'." >&2
+  echo "READINESS: FAIL — canonical dependencies are 'Depends on: Step N[, Steps X-Y]', or one of the two no-dependency markers 'none' (authoring form) and '---' (generated-canonical form); an optional ' — annotation' after the references is ignored." >&2
   exit 1
 fi
 if [[ -n "$out" ]]; then

@@ -1,23 +1,23 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/plan-boundary-manifest.schema.json",
-  "title": "AID Protocol v2 \u2014 PlanBoundaryManifest (P064 E-064-1_2)",
-  "$comment": "producer: FSM (plan-branch lifecycle), consumers: [lib/aid-plan-manifest.sh, C4, PM brief]. Descriptive/documentation contract only \u2014 NOT loaded or enforced by aid-protocol-validate.sh (that script only proves payload-key presence, step 12, exit 12). The conditional invariants noted below are enforced by a LATER step (lib/aid-plan-manifest.sh, hand-written jq -e checks), not by this schema.",
-  "description": "Type-specific schema for plan-boundary-manifest.json \u2014 the record tracking a plan branch's EPICs, task branches, and integration heads through the plan-branch lifecycle (plan/Pxxx as the integration branch for a plan's EPICs). Path: .aid-o/work/plan-state/<plan_id>/plan-boundary-manifest.json.",
+  "title": "AID Protocol v2 — PlanBoundaryManifest (P064 E-064-1_2)",
+  "$comment": "producer: FSM (plan-branch lifecycle), consumers: [lib/aid-plan-manifest.sh, C4, PM brief]. Descriptive/documentation contract only — NOT loaded or enforced by aid-protocol-validate.sh (that script only proves payload-key presence, step 12, exit 12). The conditional invariants noted below are enforced by a LATER step (lib/aid-plan-manifest.sh, hand-written jq -e checks), not by this schema.",
+  "description": "Type-specific schema for plan-boundary-manifest.json — the record tracking a plan branch's EPICs, task branches, and integration heads through the plan-branch lifecycle (plan/Pxxx as the integration branch for a plan's EPICs). Path: .aid-o/work/plan-state/<plan_id>/plan-boundary-manifest.json.",
   "type": "object",
   "allOf": [
     {
-      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only \u2014 not a resolved $ref)"
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
     }
   ],
   "properties": {
     "artifact_type": {
       "const": "plan_boundary_manifest",
-      "$comment": "enforced \u2014 must equal this type"
+      "$comment": "enforced — must equal this type"
     },
     "plan_boundary_manifest": {
       "type": "object",
-      "$comment": "enforced \u2014 payload-key presence only (step 12, exit 12). Field-level shape below is descriptive/documentation, not runtime-enforced by aid-protocol-validate.sh.",
+      "$comment": "enforced — payload-key presence only (step 12, exit 12). Field-level shape below is descriptive/documentation, not runtime-enforced by aid-protocol-validate.sh.",
       "properties": {
         "plan_id": {
           "type": "string",
@@ -65,7 +65,7 @@
               "type": "null"
             }
           ],
-          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh). Non-null ALSO requires candidate_frozen_at non-null, and vice versa (P068 Step 1) \u2014 the pair is written and cleared atomically by lib/aid-plan-manifest.sh, which is the sole owner of both fields."
+          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh). Non-null ALSO requires candidate_frozen_at non-null, and vice versa (P068 Step 1) — the pair is written and cleared atomically by lib/aid-plan-manifest.sh, which is the sole owner of both fields."
         },
         "candidate_frozen_at": {
           "oneOf": [
@@ -77,7 +77,7 @@
               "type": "null"
             }
           ],
-          "description": "P068 Step 1. RFC 3339 UTC ('Z') instant at which candidate_sha was frozen \u2014 the AUTHORITATIVE freeze-time source a PM decision artifact's decided_at is validated against (Step 5). Deliberately lives HERE, in the RUNTIME plan-boundary manifest, and NOT in the .aid-lifecycle manifest: only this artifact's write path can establish atomicity with candidate_sha. Nullable under exactly the same rule as candidate_sha \u2014 the two are legal only together, so a refreeze rewrites both and an invalidation clears both. NOT enforced here \u2014 see lib/aid-plan-manifest.sh (_pm_check_invariants)."
+          "description": "P068 Step 1. RFC 3339 UTC ('Z') instant at which candidate_sha was frozen — the AUTHORITATIVE freeze-time source a PM decision artifact's decided_at is validated against (Step 5). Deliberately lives HERE, in the RUNTIME plan-boundary manifest, and NOT in the .aid-lifecycle manifest: only this artifact's write path can establish atomicity with candidate_sha. Nullable under exactly the same rule as candidate_sha — the two are legal only together, so a refreeze rewrites both and an invalidation clears both. NOT enforced here — see lib/aid-plan-manifest.sh (_pm_check_invariants)."
         },
         "candidate_invalidation_reason": {
           "oneOf": [
@@ -89,7 +89,7 @@
               "type": "null"
             }
           ],
-          "description": "P068 Step 1. Free-text reason recorded by plan_final_invalidate when a frozen candidate is discarded (e.g. candidate_changed_after_freeze, stale_pm_authorization). Cleared on the next successful freeze. Purely informational \u2014 no invariant depends on it."
+          "description": "P068 Step 1. Free-text reason recorded by plan_final_invalidate when a frozen candidate is discarded (e.g. candidate_changed_after_freeze, stale_pm_authorization). Cleared on the next successful freeze. Purely informational — no invariant depends on it."
         },
         "plan_state": {
           "enum": [
@@ -123,7 +123,7 @@
         },
         "active_epics": {
           "type": "array",
-          "description": "Must be a subset of epics. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh).",
+          "description": "Must be a subset of epics. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh).",
           "items": {
             "type": "string",
             "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$"
@@ -132,11 +132,11 @@
         "total_epics": {
           "type": "integer",
           "minimum": 0,
-          "description": "Must equal epics length. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "Must equal epics length. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "is_plan_final": {
           "type": "boolean",
-          "description": "True only in PLAN_SYNC or later. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "True only in PLAN_SYNC or later. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "epic_required_profile": {
           "enum": [
@@ -155,7 +155,7 @@
             "full",
             "release"
           ],
-          "description": "Monotonically non-decreasing relative to epic_required_profile. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "Monotonically non-decreasing relative to epic_required_profile. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "epic_runs": {
           "type": "array",
@@ -165,7 +165,7 @@
               "epic_id": {
                 "type": "string",
                 "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$",
-                "description": "Must be a member of epics. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
+                "description": "Must be a member of epics. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
               },
               "run_id": {
                 "type": "string",
@@ -203,7 +203,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "Non-null requires status: merged_to_plan. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
+                "description": "Non-null requires status: merged_to_plan. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
               },
               "evidence_dir": {
                 "type": "string",
@@ -242,7 +242,7 @@
               "type": "null"
             }
           ],
-          "description": "Non-null requires plan_final_evidence_dir non-null and vice versa. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "Non-null requires plan_final_evidence_dir non-null and vice versa. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "plan_final_evidence_dir": {
           "oneOf": [
@@ -258,29 +258,49 @@
         },
         "plan_final_evidence_ref": {
           "oneOf": [
-            {"type": "string", "pattern": "^refs/heads/aid-evidence/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$"},
-            {"type": "null"}
+            {
+              "type": "string",
+              "pattern": "^refs/heads/aid-evidence/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Immutable AID-generated sidecar ref containing the public-safe technical receipt for this reviewed candidate/run."
         },
         "plan_final_evidence_receipt_sha256": {
           "oneOf": [
-            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-            {"type": "null"}
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "SHA-256 of receipt.json read from plan_final_evidence_ref."
         },
         "plan_final_close_evidence_ref": {
           "oneOf": [
-            {"type": "string", "pattern": "^refs/heads/aid-evidence-close/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$"},
-            {"type": "null"}
+            {
+              "type": "string",
+              "pattern": "^refs/heads/aid-evidence-close/P[0-9]{3}/[0-9a-f]{40}/[A-Za-z0-9._-]+$"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Immutable AID-generated sidecar ref containing the public-safe gates/C4/PM/merge receipt sealed at plan-merge-to-main time (IMP-466 item 4)."
         },
         "plan_final_close_evidence_receipt_sha256": {
           "oneOf": [
-            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-            {"type": "null"}
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "SHA-256 of receipt.json read from plan_final_close_evidence_ref."
         },
@@ -289,17 +309,89 @@
             {
               "type": "object",
               "properties": {
-                "plan_diff_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-                "candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-                "run_id": {"type": "string", "minLength": 1},
-                "ac_lens_required": {"type": "boolean"},
-                "plan_diff_verdict": {"type": "string", "enum": ["present", "absent", "skipped"]}
+                "plan_diff_sha256": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "candidate_sha": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "run_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ac_lens_required": {
+                  "type": "boolean"
+                },
+                "plan_diff_verdict": {
+                  "type": "string",
+                  "enum": [
+                    "present",
+                    "absent",
+                    "skipped"
+                  ]
+                }
               },
-              "required": ["plan_diff_sha256", "candidate_sha", "run_id", "ac_lens_required", "plan_diff_verdict"]
+              "required": [
+                "plan_diff_sha256",
+                "candidate_sha",
+                "run_id",
+                "ac_lens_required",
+                "plan_diff_verdict"
+              ]
             },
-            {"type": "null"}
+            {
+              "type": "null"
+            }
           ],
           "description": "IMP-464 (D2): the C3 plan-AC verdict hash produced by --stage inputs BEFORE review dispatch, atomically bound to this candidate/run. plan_diff_verdict distinguishes an armed AC lens's present/absent from an explicit, non-required skip — never silently read as a pass."
+        },
+        "source_plan_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Repo-relative path of the source plan this lifecycle was created from (P073 Step 11). Optional: absent on a manifest predating the committed-source preflight, and Step 15 then falls back to a deterministic glob."
+        },
+        "protected_paths": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The delivery surface the frozen review describes: every step's plan.json allowed_paths, the source plan, the lifecycle manifest and the close-consumed receipts, sorted and de-duplicated (P073 Step 15). Non-empty exactly when candidate_sha is set; cleared with it."
+        },
+        "protected_paths_complete": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "False when a plan.json could not be located at freeze, so the set is partial. Review equivalence is then UNAVAILABLE — a partial protected set can never mint an acceptance receipt (P073 Step 15)."
+        },
+        "accepted_head": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A plan-branch head, descended from candidate_sha, whose difference from the candidate is entirely ancillary and has been explicitly accepted (P073 Step 16). candidate_sha itself never moves."
+        },
+        "equivalence_receipt_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Path of the acceptance receipt that authorised accepted_head. The manifest binding names the authoritative receipt — never a directory listing (P073 Step 16)."
+        },
+        "equivalence_receipt_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "sha256 of the acceptance receipt at equivalence_receipt_path, so a later read can prove it is the one that was accepted (P073 Step 16)."
         }
       },
       "required": [

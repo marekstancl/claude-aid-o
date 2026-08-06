@@ -1096,37 +1096,39 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════
 
 @test "FINDING 2: increment at attempts==max with a new hash is REJECTED and ledger unchanged" {
-  # Setup: init ledger and manually advance it to max (3).
+  # Setup: init ledger and manually advance it to max (5 since P073 Step 1).
+  local h
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2"
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:ccc >/dev/null
-  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts')" = "3" ]
+  for h in aaa bbb ccc ddd eee; do
+    bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" "sha256:$h" >/dev/null
+  done
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts')" = "5" ]
 
   # Attempt to increment with a NEW hash while at max — must fail.
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:ddd
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:fff
   [ "$status" -ne 0 ]
 
-  # Proof: the ledger must be UNCHANGED (still at attempts=3).
-  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts')" = "3" ]
-  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts_log | length')" = "3" ]
+  # Proof: the ledger must be UNCHANGED (still at attempts=5).
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts')" = "5" ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts_log | length')" = "5" ]
 }
 
 @test "FINDING 2: increment at attempts==max with the SAME hash is still a no-op (not rejected)" {
-  # Setup: init and advance to max with three different hashes.
+  # Setup: init and advance to max with five different hashes.
+  local h
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop"
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:aaa >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:bbb >/dev/null
-  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:ccc >/dev/null
-  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "3" ]
+  for h in aaa bbb ccc ddd eee; do
+    bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" "sha256:$h" >/dev/null
+  done
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "5" ]
 
   # Re-run with the LAST hash (unchanged) — must succeed and be a no-op.
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:ccc
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:eee
   [ "$status" -eq 0 ]
 
-  # Proof: attempts still 3, no new entry in log.
-  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "3" ]
-  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts_log | length')" = "3" ]
+  # Proof: attempts still 5, no new entry in log.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "5" ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts_log | length')" = "5" ]
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

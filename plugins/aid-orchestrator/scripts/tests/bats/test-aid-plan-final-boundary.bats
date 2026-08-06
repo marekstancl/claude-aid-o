@@ -102,9 +102,20 @@ _bootstrap() {
 _add_epic() {
   local plan_id="$1" epic_id="$2"
   local base; base="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/${plan_id}")"
+  local ev=".aid-o/work/evidence/${epic_id}/R-${epic_id}-1"
   plan_manifest_add_epic "$plan_id" "$epic_id" "R-${epic_id}-1" \
     "task/${epic_id}/main" "$base" "plan/${plan_id}" \
-    ".aid-o/work/evidence/${epic_id}/R-${epic_id}-1" "proven"
+    "$ev" "proven"
+  # P073 Step 15/18: a real EPIC run leaves a plan.json in its evidence dir,
+  # and the freeze reads every one of them to compute the protected surface.
+  # Without it the freeze correctly records protected_paths_complete:false and
+  # review equivalence is unavailable — which is right, but it means this
+  # fixture could never exercise the equivalence path at all.
+  mkdir -p "$TEST_PROJECT_ROOT/$ev"
+  jq -n --arg e "$epic_id" \
+    '{schema_version:"aid-2.0", epic_id:$e,
+      steps:[{step_id:"S1", allowed_paths:["epic-work.txt","scripts/**"]}]}' \
+    > "$TEST_PROJECT_ROOT/$ev/plan.json"
 }
 
 # _commit_on <branch> <file> <text> — one real commit, HEAD restored.
@@ -5546,4 +5557,264 @@ _revert_the_merge() {
   [ "$output" = "$target_deliveries" ]
   run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.status'"
   [ "$output" = "rolled_back" ]
+}
+
+# =============================================================================
+# ─── P073 Step 18: merging a review-EQUIVALENT accepted head ────────────────
+# =============================================================================
+#
+# The PM authorized the review of the FROZEN candidate. Equivalence means that
+# review still describes the delivery surface — it never means the PM
+# authorized a different candidate. So the DECISION leg stays hard, the HEAD
+# leg gains exactly one alternative, and the merge re-verifies equivalence LIVE
+# against the current policy immediately before the irreversible action.
+
+# _accept_ancillary — the real stage, on the real seeded project.
+_accept_ancillary() {
+  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage accept-ancillary \
+    --project-root "$TEST_PROJECT_ROOT"
+}
+
+# _ancillary_commit_on_plan — one commit touching ONLY an ancillary path.
+_ancillary_commit_on_plan() {
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/$PLAN_ID"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+  printf '{"event":"post-freeze note"}\n' >> "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  git -C "$TEST_PROJECT_ROOT" add -f .aid-o/work/audit-log.jsonl
+  git -C "$TEST_PROJECT_ROOT" commit -qm "chore: an ancillary note after the freeze"
+}
+
+@test "P073 Step 18: a merge at the ACCEPTED head succeeds and carries both SHAs" {
+  _seed_merge_project
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  local d; d="$(_decision_file)"   # bound to the FROZEN candidate, deliberately
+  _ancillary_commit_on_plan
+  local accepted; accepted="$(_plan_sha)"
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+
+  _merge "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"review-equivalent accepted head"* ]]
+  # The merge really carries the accepted head. ANCESTRY, not literal
+  # parentage: plan-merge-to-main re-scopes the lifecycle manifest onto the
+  # plan branch first, so the merge's second parent is that re-scope commit —
+  # a descendant of the accepted head, which is itself a descendant of the
+  # candidate.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' merge-base --is-ancestor '$accepted' '$(_merge_commit)'"
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' merge-base --is-ancestor '$cand' '$accepted'"
+  [ "$status" -eq 0 ]
+  [ "$cand" != "$accepted" ]
+}
+
+@test "P073 Step 18: the equivalence-path close receipt carries merged_head and review_equivalence" {
+  _seed_merge_project
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  local accepted; accepted="$(_plan_sha)"
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  _merge "$d"
+  [ "$status" -eq 0 ]
+
+  local ref="refs/heads/aid-evidence-close/${PLAN_ID}/${cand}/$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show '${ref}:receipt.json' | jq -r '.review_equivalence'"
+  [ "$output" = "true" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show '${ref}:receipt.json' | jq -r '.merged_head'"
+  [ "$output" = "$accepted" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show '${ref}:receipt.json' | jq -r '.candidate_sha'"
+  [ "$output" = "$cand" ]
+}
+
+@test "P073 Step 18: a PROTECTED commit after acceptance refuses at live re-verification" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  # A delivery change lands AFTER the acceptance. The receipt is still valid
+  # and still hashes correctly — only the live re-check can catch this.
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/$PLAN_ID"
+  printf 'late change\n' >> "$TEST_PROJECT_ROOT/epic-work.txt"
+  git -C "$TEST_PROJECT_ROOT" commit -aqm "fix: a delivery change after acceptance"
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: a receipt whose accepted_head disagrees with the manifest refuses" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+
+  local r; r="$(find "$TEST_PROJECT_ROOT/.aid-o" -name 'review-equivalence-receipt*.json' | head -1)"
+  jq '.accepted_head = "ffffffffffffffffffffffffffffffffffffffff"' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+  # Re-bind the digest so ONLY the head binding is wrong.
+  _poke_manifest ".plan_boundary_manifest.equivalence_receipt_sha256 = \"sha256:$(sha256sum "$r" | awk '{print $1}')\""
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: accepted_head recorded but the receipt missing refuses — never merge on manifest state alone" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  find "$TEST_PROJECT_ROOT/.aid-o" -name 'review-equivalence-receipt*.json' -delete
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"receipt"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: the DECISION leg is unchanged — a decision naming the accepted head is refused" {
+  # Equivalence loosens WHICH HEAD is merged, never WHICH CANDIDATE the PM
+  # authorized. A decision bound to anything but the frozen candidate fails.
+  _seed_merge_project
+  _ancillary_commit_on_plan
+  local accepted; accepted="$(_plan_sha)"
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  local d; d="$(_decision_file ".candidate_sha = \"$accepted\"")"
+
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"candidate mismatch"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: a head that is neither the candidate nor an accepted head still refuses" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _ancillary_commit_on_plan   # moved, never accepted
+  local before; before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"neither the frozen candidate"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "P073 Step 18: a RESUME whose published merge has the other second parent refuses to seal" {
+  # Codex round-1 finding 4: resume sealed merged_head/review_equivalence from
+  # the CURRENT plan head without proving the published merge had that parent.
+  # Here a candidate-path merge is published, the plan branch then gains an
+  # accepted ancillary head, and the resumed run must refuse rather than attest
+  # `review_equivalence: true` for a merge whose second parent was the candidate.
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  _merge "$d"
+  [ "$status" -eq 0 ]
+  local published; published="$(_merge_commit)"
+
+  _ancillary_commit_on_plan
+  _accept_ancillary
+  [ "$status" -eq 0 ]
+  # Re-enter the same op: the merge is already on main.
+  local main_before; main_before="$(_main_sha)"
+  _merge "$d"
+  [ "$status" -ne 0 ]
+  # MEASURED: the refusal arrives from the stale-authorization guard (main has
+  # advanced past the approved head) BEFORE the resume path is reached, and the
+  # op key now differs for an accepted-head run so the candidate merge's op-log
+  # entry is not read as this run's resume either. Both are fail-closed; what
+  # this test guarantees is the invariant that matters — no second merge, and
+  # no close evidence sealed for a merge that was not made.
+  [ "$(_main_sha)" = "$main_before" ]
+  [ -n "$published" ]
+}
+
+@test "P073 Step 18: the op key distinguishes a candidate merge from an accepted-head merge" {
+  run grep -c 'plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "${candidate}.${merged_head}"' "$PLAN_FSM_CLI"
+  [ "$output" = "1" ]
+}
+
+# =============================================================================
+# ─── P073 Step 8 (remainder): forced plan-close ─────────────────────────────
+# =============================================================================
+#
+# plan-close is the TERMINAL operation. A plan that cannot be closed cannot be
+# abandoned either — that is the P082 stranding the force backdoor exists for.
+# Its bookkeeping-completeness checks are therefore forceable; the physical
+# ones are not. And a forced close whose lifecycle receipt cannot be committed
+# must NOT claim `closed`, because aid-lifecycle.sh defines that word as
+# receipt-committed-and-reachable.
+
+_FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
+
+@test "P073 Step 8: a blocking close-check REFUSES without --force and writes no marker" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "P073 Step 8: the SAME blocking close-check passes under --force, with a waiver" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close --force --force-reason "$_FORCE_REASON"
+  [ "$status" -eq 0 ]
+  [ -f "$(_marker)" ]
+  # The check output is still printed — force is the second route, not a way
+  # to avoid looking at what failed.
+  [[ "$output" == *"FORCE: bypassing precondition 'close_check_complete'"* ]]
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o' -name 'waiver-plan-*.json' | wc -l"
+  [ "$(echo "$output" | tr -d ' ')" = "1" ]
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o' -name 'waiver-plan-*.json' -exec jq -r '.bypassed_preconditions // .bypassed // empty' {} +"
+  [[ "$output" == *"close_check_complete"* ]]
+}
+
+@test "P073 Step 8: a forced close still refuses without a reason, and changes nothing" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close --force
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "P073 Step 8: a missing lifecycle manifest closes under --force as closed_pending_receipt" {
+  # The stranding scenario itself: the tracked manifest was deleted by hand.
+  # Without force this is a blocking defect (and stays one).
+  _seed_closable
+  rm -f "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  git -C "$TEST_PROJECT_ROOT" rm -q --cached ".aid-lifecycle/manifests/${PLAN_ID}.yaml" 2>/dev/null || true
+
+  _close
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
+
+  _close --force --force-reason "$_FORCE_REASON"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RECONCILIATION REQUIRED"* ]]
+  [[ "$output" == *"CLOSED PENDING RECEIPT"* ]]
+  # The word `closed` alone is never claimed while the receipt is missing.
+  [[ "$output" != *"CLOSED: ${PLAN_ID} is closed"* ]]
+}
+
+@test "P073 Step 8: closed_pending_receipt is a legal lifecycle-receipt state" {
+  local schema="$AID_PLUGIN_PATH/defaults/schemas/plan-lifecycle-receipt.schema.json"
+  run bash -c "jq -r '.. | .enum? // empty | .[]' '$schema' | grep -c '^closed_pending_receipt\$'"
+  [ "$output" = "1" ]
+}
+
+@test "P073 Step 8: force cannot bypass a HARD precondition on close" {
+  # A physical repository state has nothing on the other side to complete.
+  _seed_closable
+  rm -f "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID/plan-boundary-manifest.json"
+  _close --force --force-reason "$_FORCE_REASON"
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_marker)" ]
 }

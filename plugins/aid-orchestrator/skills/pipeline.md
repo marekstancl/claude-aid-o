@@ -1032,7 +1032,8 @@ otherwise silently never run and still report pass — OBS-20260702-05).
 **Present to PM:**
 ```
 ESCALATION — {trigger_reason}
-EPIC: {epic_id} | Progress: {current_step}/{total_steps}
+EPIC: {epic_id} | Progress: {executing_step}/{total_steps}
+
 State: {failed_state}
 
 {per-type context block — see below}
@@ -1046,6 +1047,9 @@ Options:
 
 Recommendation: {auto-generated}
 ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 
 In FIRST AID mode, add option D: "Continue manual".
 
@@ -1318,6 +1322,19 @@ review output stop being authoritative and the plan returns to `PLAN_FIX`. This 
 tree here has a defined meaning, and hiding it behind "commit or stash first" would lose it.
 Untracked writes into the run directory are the normal case and never invalidate anything.
 
+**THE PLAN-FINAL BOUNDARY RULE (stated once, referenced everywhere).** After
+freeze, plan-final agents write only run-scoped evidence. A tracked candidate
+write is a FIX and requires a new candidate and a new review. The controller
+alone renders committed or worktree projections, and only after merge/close —
+outside any freeze window, where a projection cannot cost a review.
+
+Role cards and agent contracts REFERENCE this paragraph rather than restating
+it. Restating it is how the P082 contradiction survived: `agents/reporter.md`
+ordered its outputs to be committed, this rule invalidated the review on
+exactly that write, and the ordered path (`.aid-o/reports/`) is gitignored, so
+the order was unexecutable in three independent ways at once — and the reporter
+contract itself said so, two paragraphs below the order.
+
 C3 applicability is unchanged: the single plan-level Auditor dispatch is always recorded, but
 whether C3 **blocks** stays governed by `defaults/policies/c3-audit-policy.yaml`.
 
@@ -1359,6 +1376,139 @@ mismatched one is refused, not treated as "C3 never read it". A forgotten
 `build-manifest` itself stayed silent. Omitting `AID_C3_PLAN_ID`, on the other hand, is NOT
 silent — the resulting `audit-report.json` will fail `--stage review`'s plan-identity check
 outright, exactly as it should for evidence that never proved which plan it belongs to.
+
+### Review equivalence — an ancillary commit does NOT cost the review (P073)
+
+A completed plan-level review used to die to ANY tracked write after the freeze:
+an audit-log append or a rendered report threw away the whole review even though
+nothing about the delivery had changed. It no longer does.
+
+**Preconditions — all three are required for acceptance. An unmoved head is a
+no-op; the other two REFUSE:**
+
+1. The plan has a FROZEN candidate (`--stage freeze` ran).
+2. The plan branch head MOVED off that candidate. Acceptance at an unmoved head
+   is a no-op and writes nothing.
+3. The freeze recorded a COMPLETE protected path set. A plan frozen before P073,
+   or one whose EPIC `plan.json` files could not all be located, reports
+   equivalence UNAVAILABLE — any movement then invalidates exactly as it always
+   did, and no force changes that.
+
+Acceptance is worth running at the moment a drift refusal costs you a review:
+between `--stage review` and `plan-merge-to-main`. It does not require the
+review to have completed — it preserves whatever review the frozen candidate
+already carries — but if no review has run yet, re-freezing is cheaper.
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage accept-ancillary
+```
+
+That records the moved head as review-equivalent to the frozen candidate: one
+receipt in the plan-final run directory, bound in the manifest, and
+`candidate_sha` left byte-identical. `--stage review` and `--stage c4` then
+proceed, and `plan-merge-to-main` merges the accepted head after re-verifying
+equivalence live against the current policy.
+
+**Read the refusal before reaching for it.** The recovery hint appears ONLY when
+the difference really is ancillary-only, so its presence is a reliable green
+light. Its ABSENCE is not one single diagnosis — read what the message actually
+says:
+
+- It names PROTECTED paths → the change touched the delivery surface. That is a
+  FIX, and the full recovery chain below applies.
+- It says equivalence is UNAVAILABLE → nothing is wrong with your change; this
+  freeze simply cannot support acceptance (legacy freeze, or a protected set
+  that could not be completed). Re-freeze, or accept that any movement
+  invalidates for this plan.
+- Anything else → the message names its own repair. Do that, not this.
+
+For a protected-surface FIX, the recovery is the FULL stage chain against the
+new candidate — `inputs` is not optional, `--stage review` refuses without it:
+
+```
+--stage sync → --stage freeze → --stage gates → --stage inputs → --stage review
+```
+
+Two more things worth knowing:
+
+- Only the EXACT accepted head is tolerated. One further commit — even another
+  ancillary one — invalidates again and needs a fresh acceptance.
+- Acceptance is idempotent on the same head, and it verifies its own receipt: a
+  deleted or edited receipt is refused, not reported as still accepted.
+
+### The PM force backdoor (P073)
+
+**Exactly eight commands accept `--force`.** No other command does, and
+`plan-state` (repair/attest/supersede) deliberately does not — it IS the audited
+recovery mechanism a force would otherwise be used to fake:
+
+```
+plan-start   epic-start   epic-complete   epic-merge-to-plan
+plan-finalize   plan-merge-to-main   plan-close   plan-rollback
+```
+
+`--force-reason "<text>"` works on all eight. `--reason` is accepted as a
+synonym only on the six that own no business `--reason` of their own;
+`epic-complete` and `plan-rollback` already use `--reason` for their own
+meaning, so there you MUST use `--force-reason`.
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-close {plan_id} \
+  --force --force-reason "why this must proceed despite the refusal"
+```
+
+The reason is mandatory and at least 20 characters. When a precondition is
+actually bypassed, the waiver receipt is written BEFORE the command proceeds, so
+a force that cannot be recorded is refused rather than performed silently. A reason without `--force` is an error,
+never a silently discarded argument.
+
+**Do not try to predict what is forceable.** Each precondition is classified
+`forceable` (bookkeeping — a dirty worktree, an unshared source plan, an
+incomplete close) or `hard` (identity, evidence integrity, PM authorization),
+and **the refusal message is the only authority**. Run the command normally
+first and read what it says:
+
+- It names its own recovery → do that. Force is the second route, never the
+  first.
+- It prints `FORCE CANNOT BYPASS '<name>'` → stop. There is nothing on the other
+  side to complete; the message names the repair.
+- Force succeeded but printed `bypassed nothing` → no waiver was written,
+  because nothing was actually overridden.
+
+**`closed_pending_receipt`.** A forced `plan-close` whose lifecycle receipt
+write is itself the broken operation ends the plan as `closed_pending_receipt`,
+not `closed` — the plan is terminal, but the durable proof is missing. Re-running
+`plan-close` does NOT fix this: once the close marker exists, `plan-close` is a
+no-op and says `ALREADY CLOSED`. Converge it instead by repairing what broke
+(usually a missing `.aid-lifecycle/manifests/<plan_id>.yaml`) and then running
+the lifecycle's own reconciliation:
+
+```bash
+bash {plugin_path}/scripts/aid-lifecycle.sh plan-reconcile {plan_id} --apply
+```
+
+It prints `state: closed` when the receipt is committed and reachable. Anything
+else means it is not converged yet.
+
+### Retiring a stale EPIC run (P073)
+
+Use this ONLY when `aid-fsm.sh init` refuses a specific EPIC as a duplicate AND
+that EPIC's run is genuinely stale (abandoned, superseded by a re-plan). It is
+not a general cleanup tool. Do NOT delete state files by hand:
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-state {plan_id} --supersede-epic {epic_id}
+```
+
+This archives the state file beside its evidence and authorises exactly ONE
+re-initialisation, bound to the `plan.json` the re-init must present. Evidence
+artifacts are never touched.
+
+The authorisation is consumed only once the new state file exists, so an init
+that fails a LATER gate does not burn it — fix the gate and re-run `init`. If
+the init fails because the package itself is wrong (a different `plan.json` than
+the one recorded), the record no longer matches and a fresh
+`--supersede-epic` is required.
 
 ### Plan Boundary: Scanner Memory Scan
 
@@ -1580,8 +1730,9 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    blocking C3 finding only got flagged in the PM Summary (step 12) and the PM decided ABORT
    manually — C3 now gets the same bounded auto-repair loop CP2/CP3 already have
    (`review-checkpoints.yaml` `fix_loop.max_iterations: 2`), read here from
-   `c3-audit-policy.yaml` → `c3_fix_loop` (`max_rechecks: 2`, `eligible_severities: [critical,
-   high]`; policy unreadable → fail-closed to `max_rechecks: 2`).
+   `c3-audit-policy.yaml` → `c3_fix_loop` (`max_rechecks: 4`, `eligible_severities: [critical,
+   high]`; policy unreadable → fail-closed to `max_rechecks: 4`). Initial audit + up to 4
+   rechecks = 5 genuinely dispatched Codex sessions (P073 Step 1).
 
    **Entry condition:** the report is genuinely `dispatched` (a real Codex run — check
    `c3/c3-dispatch.json` `.dispatch.outcome == "dispatched"`, NOT the `degraded_advisory`
@@ -1656,9 +1807,17 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    **Exit conditions (exactly one applies):**
    - **Clean** → proceed to Curator dispatch (step 6's closing paragraph) and the merge
      decision as normal.
-   - **`c3_recheck_count == max_rechecks (2)` and still blocking** → **ESCALATION**: surfaced to
-     the PM in step 12's summary as blocking (never silently merged); a 3rd recheck / 4th total
+   - **`c3_recheck_count == max_rechecks (4)` and still blocking** → **ESCALATION**: surfaced to
+     the PM in step 12's summary as blocking (never silently merged); a 5th recheck / 6th total
      Codex run is PM-approved only, never automatic re-entry into this loop.
+
+     **THE PM route is** `aid-fsm.sh pm-override grant c3 <plan_id> --reason "<text, >= 20
+     chars>"`, which writes a single-use `c3-pm-escalation-override.json` that the exhaustion
+     gate claims ATOMICALLY — one grant authorises exactly one further attempt (P073 Step 10,
+     the same mechanism C0 uses). **Agents never create this artifact and never set an override
+     environment variable.** The legacy `AID_C3_FORCE_BEYOND_ESCALATION` still works for one
+     more release: it is converted into the same single-use artifact with a deprecation warning,
+     once per plan, so a lingering export can no longer authorise attempt after attempt.
    - **Same fingerprint survives a recheck** (auto-detected, see step 3 above) **or conflicting
      findings** (controller calls `escalate`, see step 3 above) → **ESCALATION** immediately,
      regardless of remaining budget.
@@ -2303,9 +2462,13 @@ aid-fsm.sh get-state <state_file>   # Returns current state
 
 **Manual mode:** do not auto-resume after a crash. Report to PM:
 ```
-Stale state detected: {state} at step {current_step}/{total_steps}.
+Stale state detected: {state} at step {executing_step}/{total_steps}.
+
 Resume with: /aid-run --resume {run_id}
 ```
+
+**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+
 
 **Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume
 from the last mechanically confirmed boundary. Route ambiguous technical recovery to Codex
@@ -2494,7 +2657,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-05
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

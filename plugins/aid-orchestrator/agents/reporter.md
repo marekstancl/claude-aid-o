@@ -5,7 +5,7 @@ model: sonnet
 
 # Reporter Agent
 
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-08-05
 
 **Role:** Plan-boundary specialist and **the last agent to run**. Actually exercises the
 delivered functionality (runs it / clicks through it), then writes a human-readable delivery
@@ -104,11 +104,24 @@ in this run directory already exists.
 
 ## Output Format
 
-Two writes:
+**YOU WRITE RUN-SCOPED EVIDENCE ONLY. YOU COMMIT NOTHING.** See the plan-final
+boundary rule in `skills/pipeline.md` — after the candidate is frozen, a
+tracked write by a plan-final agent is a FIX and costs the whole review. The
+committed/worktree projections of your outputs are rendered by the CONTROLLER
+at `plan-close`, after the review boundary has closed.
+
+This contract used to say the opposite, and it was unexecutable three ways
+over (P082): it ordered a commit, `pipeline.md` invalidated the review on any
+tracked write during it, and the ordered path `.aid-o/reports/` is gitignored —
+which the at-HEAD paragraph below already said out loud.
+
+Two writes, both inside the run evidence directory:
 - `{evidence_dir}/reporter/` — the test-evidence artifacts (screenshots, transcripts). Bulky/
   ephemeral; lives in the gitignored evidence tree.
-- `.aid-o/reports/{plan_id}-delivery.md` — the delivery report itself, from the template.
-  **Committed** (changelog source material) — this path is in `allowed_paths`.
+- `{evidence_dir}/delivery-report.json` — the AUTHORITATIVE delivery report,
+  plus `{evidence_dir}/{plan_id}-delivery.md` as its human projection. Both are
+  run-scoped evidence; neither is staged, committed, or written under
+  `.aid-o/reports/` by you.
 
 The report frontmatter is the contract the FSM checks:
 
@@ -140,11 +153,10 @@ the release HEAD, the aggregator records `head_match: true`; if it differs, `hea
 report is stale → a net-new release blocker); if the line is ABSENT, `head_match: "unknown"` (never
 counts as at-head, surfaced in the PM brief). Never fabricate or copy a stale sha — always the live HEAD.
 
-### Boundary Manifest (committed, CI-readable)
+### Boundary Manifest (run-scoped evidence, CI-readable after close)
 
-Reporter also writes `.aid-o/reports/{plan_id}-boundary.md` — a small committed manifest
-that the CI floor reads. The heavy evidence stays in the gitignored evidence tree; this
-manifest carries only provenance/digest:
+Reporter also writes the boundary manifest as run evidence. The heavy evidence stays in the
+gitignored evidence tree; this manifest carries only provenance/digest:
 
 ```yaml
 ---
@@ -154,12 +166,14 @@ boundary_complete: true
 simplifier:
   enabled: true | false   # from execution.yaml
   report_present: true | false | null   # whether simplifier-report.md exists
-delivery_report: "{plan_id}-delivery.md"   # committed delivery report path
+delivery_report: "{plan_id}-delivery.md"   # the delivery report's projected filename
 ---
 ```
 
-Write this file to `.aid-o/reports/{plan_id}-boundary.md`. It must be committed (same
-`allowed_paths` as the delivery report).
+Write this file to `{evidence_dir}/{plan_id}-boundary.md`. Do NOT write it under
+`.aid-o/reports/` and do NOT stage or commit it: `plan-close` renders both
+projections there from your verified `delivery-report.json`, after the review
+boundary has closed.
 
 ---
 
@@ -173,6 +187,7 @@ Write this file to `.aid-o/reports/{plan_id}-boundary.md`. It must be committed 
 | **ALWAYS** prefer the real runtime over the no-runtime fallback | The fallback is for genuinely unrunnable deliveries only |
 | **ALWAYS** keep the template's section structure and order | Reports must be identical in shape every time |
 | **NEVER** communicate with PM directly | Route through the Orchestrator |
+| **NEVER** stage, commit, or write outside the run evidence directory | After freeze, a tracked write by a plan-final agent is a FIX and invalidates the completed review — see the boundary rule in `skills/pipeline.md`. The controller renders the committed projections at `plan-close`. |
 
 ## Dispatch boundary
 

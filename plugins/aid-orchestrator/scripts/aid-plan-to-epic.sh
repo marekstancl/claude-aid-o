@@ -422,6 +422,23 @@ parse_step_deps() {
   local raw="$1"
   local result=()
 
+  # P073 Step 5 — one dependency grammar, shared with the canonical parser in
+  # lib/aid-source-plan-graph.sh:
+  #   * everything from the FIRST annotation separator on (em dash, en dash,
+  #     a SPACED ASCII hyphen — unspaced would collide with `Steps 1-3` — or a
+  #     space-preceded opening parenthesis) is human prose, discarded before
+  #     parsing;
+  #   * `none` (authoring form) and `---` (generated-canonical form) are the
+  #     two accepted no-dependency markers;
+  #   * every remaining token must be recognised IN FULL (the patterns are
+  #     end-anchored) — an unrecognised one used to be silently dropped, which
+  #     turned a typo into "no dependency", and an unanchored match silently
+  #     discarded the tail, so `Steps 1-3 and 5` lost the 5.
+  raw="$(printf '%s' "$raw" | sed 's/[—–].*$//; s/ - .*$//; s/ (.*$//')"
+  case "$(printf '%s' "$raw" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+    ---|none|'') return 0 ;;
+  esac
+
   # Tokenize by splitting on commas first, then process each token.
   # We use a while-read loop with newlines as separators after replacing commas.
   local tokens
@@ -433,7 +450,7 @@ parse_step_deps() {
     [[ -z "$token" ]] && continue
 
     # Match range pattern: "Steps M-N" or "steps M-N" (with optional trailing text)
-    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
       local range_start="${BASH_REMATCH[1]}"
       local range_end="${BASH_REMATCH[2]}"
 
@@ -447,13 +464,13 @@ parse_step_deps() {
       done
 
     # Match singular pattern: "Step N" (with optional trailing text)
-    elif [[ "$token" =~ ^[Ss]tep[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       result+=("${BASH_REMATCH[1]}")
 
     # Match "Task" range — plans that use "## Task N:" headers reference deps
     # the same way (e.g. "Depends on: Tasks 3-5"). Mirror the Steps logic so
     # Task-style dependency lines are not silently dropped.
-    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
       local range_start="${BASH_REMATCH[1]}"
       local range_end="${BASH_REMATCH[2]}"
 
@@ -467,14 +484,20 @@ parse_step_deps() {
       done
 
     # Match "Task N" singular
-    elif [[ "$token" =~ ^[Tt]ask[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       result+=("${BASH_REMATCH[1]}")
 
-    # Match bare number (possibly left after earlier processing)
-    elif [[ "$token" =~ ^([0-9]+) ]]; then
+    # Match bare number (possibly left after earlier processing). Anchored
+    # too: `2 and 5` must not silently become `2`.
+    elif [[ "$token" =~ ^([0-9]+)[[:space:]]*$ ]]; then
       result+=("${BASH_REMATCH[1]}")
+
+    else
+      # P073 Step 5: loud, not silent. The message names the step and the
+      # offending token verbatim so the author can fix the exact line.
+      echo "ERROR: step ${step_counter:-?}: unrecognised dependency token '${token}' — accepted: 'Step N', 'Steps N-M', 'none', '---', comma-separated, optionally followed by an annotation after ' — ', ' – ', ' - ' or ' ('" >&2
+      return 1
     fi
-    # Anything else (pure text without step reference) is silently ignored
   done <<< "$tokens"
 
   # Deduplicate and sort numerically, then join with ", "
@@ -870,7 +893,15 @@ for sn in "${phase_steps[@]}"; do
   #   - Reversed ranges: "Steps 14-1" -> warning + empty
   step_deps=""
   if [[ -n "$raw_dep_line" ]]; then
-    step_deps="$(parse_step_deps "$raw_dep_line")"
+    # P073 Step 5: an unrecognised token aborts generation. The previous code
+    # mapped an unparseable declaration to `---` further down and carried on,
+    # so a typo silently became "no dependency" in the generated EPIC. No EPIC
+    # file has been written for this plan at this point, so there is no
+    # partial output to clean up.
+    if ! step_deps="$(parse_step_deps "$raw_dep_line")"; then
+      echo "ERROR: EPIC generation aborted — repair the dependency declaration above and rerun. Full grammar: skills/plan-writing.md" >&2
+      exit 1
+    fi
   fi
 
   # Strip cross-phase dependencies: remove any step numbers that fall
@@ -914,7 +945,11 @@ for sn in "${phase_steps[@]}"; do
     safe_objective="${safe_objective:0:97}..."
   fi
 
-  # Determine depends_on for this step within the phase
+  # Determine depends_on for this step within the phase. `---` here is the
+  # GENERATED-CANONICAL no-dependency marker, reached only when the author
+  # genuinely declared none (or every reference was cross-phase and stripped)
+  # — never as a fallback for an unparseable declaration, which now aborts
+  # generation in parse_step_deps (P073 Step 5).
   depends_on_str="---"
   if [[ -n "$step_deps" ]]; then
     # parse_step_deps already returns "N, M, ..." format — use as-is

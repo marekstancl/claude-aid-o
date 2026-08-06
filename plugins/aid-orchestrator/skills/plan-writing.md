@@ -291,9 +291,41 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 **Dependency grammar (enforced before EPIC generation).** Put dependencies in
 the `**Dependencies:**` block as `Depends on: Step N`, `Depends on: Step N,
 Step M`, or `Depends on: Steps N-M`. The value may continue on an indented
-line. A missing step, duplicate, self-reference, forward reference, reversed
-range, or unrecognised declaration blocks generation; it is never interpreted
-as “no dependency”. Run `aid-generation-readiness.sh <plan> --total <N>` after
+line.
+
+There are exactly two accepted ways to say “no dependency”, and both mean the
+same thing: **`Depends on: none`** is the authoring form, and **`Depends on:
+---`** is the generated-canonical form that EPIC generation emits. Nothing
+else counts — `Depends on: nothing`, an empty value, or a marker mixed with a
+real reference (`none, Step 3`) all block generation.
+
+An optional human annotation may follow the references, introduced by an em
+dash, an en dash, a spaced ASCII hyphen, or an opening parenthesis — all four
+of these are equivalent:
+
+```
+- Depends on: Step 2 — needs the force helper
+- Depends on: Step 2 – needs the force helper
+- Depends on: Step 2 - needs the force helper
+- Depends on: Step 2 (needs the force helper)
+```
+
+Both parsers split on the FIRST separator, grade only the reference list to
+its left, and ignore the annotation. An UNSPACED hyphen is never a separator —
+it is the range form, so `Steps 1-3` stays a range.
+
+Every token to the left must be recognised IN FULL. `Depends on: Step 2,
+banana` fails loudly rather than silently becoming `Step 2`, and
+`Depends on: Steps 1-3 and 5` fails rather than silently dropping the 5 — put
+that kind of prose in an annotation instead.
+
+`Blocks:` lines live in the same block and are never folded into the depends
+set, even when indented. A `Depends on:` line whose ANNOTATION happens to
+mention "Blocks:" keeps its dependency.
+
+A missing step, duplicate, self-reference, forward reference, reversed range,
+or unrecognised token blocks generation; it is never interpreted as “no
+dependency”. Run `aid-generation-readiness.sh <plan> --total <N>` after
 writing and repair its exact diagnostics before CP1/C0.
 
 **Acceptance Criteria:**
@@ -1101,7 +1133,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-04
 
 ## Plan-boundary note
 

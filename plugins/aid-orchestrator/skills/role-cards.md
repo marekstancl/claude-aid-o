@@ -558,7 +558,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-08-05
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note
@@ -568,3 +568,9 @@ Under `plan_branch` the Auditor, Curator, Simplifier and Reporter are
 frozen candidate. CP2 and CP3 remain per EPIC. Under
 `legacy_epic_release_mode` the previous per-EPIC cadence is unchanged. Mode is
 read from the plan's committed lifecycle manifest, never inferred.
+
+**Write boundary — see `skills/pipeline.md`, "THE PLAN-FINAL BOUNDARY RULE".**
+Plan-final specialists write run-scoped evidence only and commit nothing; the
+controller renders committed projections at `plan-close`. The rule is stated
+in exactly one place on purpose: the P082 contradiction survived precisely
+because a second copy of it, in `agents/reporter.md`, said the opposite.

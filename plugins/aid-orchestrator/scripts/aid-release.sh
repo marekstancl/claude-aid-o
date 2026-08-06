@@ -53,6 +53,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+
 # Find repo root (walk up from CWD, not from script location)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
@@ -61,15 +64,37 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # `${1:?...}` still fires identically when the script is called with no
 # arguments, because the legacy dispatch arm forwards "$@" unchanged.
 _release_parse_args_and_resolve_bump() {
-BUMP_TYPE="${1:?Usage: aid-release.sh <auto|patch|minor|major> [--dry-run] [--force]}"
+BUMP_TYPE="${1:?Usage: aid-release.sh <auto|patch|minor|major> [--dry-run] [--force --reason <text>]}"
 DRY_RUN=false
 FORCE=false
-for arg in "${@:2}"; do
-  case "$arg" in
+FORCE_REASON=""
+# P073 Step 9: this was the ONE unaudited bypass in the system — the FSM guard
+# below even RECOMMENDED `--force` with no reason and no record anywhere. It
+# now requires a reason and writes the same audit records every other force in
+# this codebase writes.
+local local_i=2
+while [[ "$local_i" -le "$#" ]]; do
+  case "${!local_i}" in
     --dry-run) DRY_RUN=true ;;
     --force) FORCE=true ;;
+    --reason)
+      local_i=$(( local_i + 1 ))
+      FORCE_REASON="${!local_i:-}"
+      ;;
   esac
+  local_i=$(( local_i + 1 ))
 done
+if [[ "$FORCE" == "true" && "${#FORCE_REASON}" -lt 20 ]]; then
+  echo "ERROR: --force requires --reason with at least 20 characters (got ${#FORCE_REASON})." >&2
+  echo "       A release-gate bypass with no recorded reason is the one unaudited" >&2
+  echo "       override this codebase had; it is now a forensic record like every other." >&2
+  echo "  aid-release.sh ${BUMP_TYPE} --force --reason '<why bypassing the FSM guard is correct here>'" >&2
+  exit 1
+fi
+if [[ "$FORCE" != "true" && -n "$FORCE_REASON" ]]; then
+  echo "ERROR: --reason was supplied without --force — it bypasses nothing and must not look like it did." >&2
+  exit 1
+fi
 
 # ─── Auto-detection from conventional commits ────────────────────────────
 
@@ -147,20 +172,181 @@ if [[ -z "$STATE_FILE" && -d "$REPO_ROOT/.aid-o/work/evidence/" ]]; then
   STATE_FILE=$(find "$REPO_ROOT/.aid-o/work/evidence/" -name "fsm-state.yaml" -exec grep -l "state: EXECUTE\|state: GATES\|state: READY" {} \; 2>/dev/null | head -1)
 fi
 
-if [[ -n "$STATE_FILE" && "$FORCE" != "true" ]]; then
+# P073: decide WOULD-HAVE-BLOCKED independently of --force. The old shape read
+# the state only on the non-forced path, so a forced run never learned whether
+# the guard was actually going to block — and then recorded a waiver claiming
+# fsm_release_guard was bypassed whenever ANY state file existed. An
+# independent review reproduced that: a DONE/release run under `runs/` (the
+# first `find` has no state filter) produced an audit record asserting a bypass
+# that never happened.
+FSM_WOULD_BLOCK=false
+if [[ -n "$STATE_FILE" ]]; then
   FSM_STATE=$(grep '^state:' "$STATE_FILE" | awk '{print $2}' || true)
   DONE_PHASE=$(grep '^done_phase:' "$STATE_FILE" | awk '{print $2}' || true)
+  if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
+    FSM_WOULD_BLOCK=true
+  elif [[ "$FSM_STATE" =~ ^(READY|EXECUTE|GATES|ESCALATION)$ ]]; then
+    FSM_WOULD_BLOCK=true
+  fi
+fi
 
+if [[ "$FSM_WOULD_BLOCK" == "true" && "$FORCE" != "true" ]]; then
   if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
     echo "ERROR: FSM state is DONE but done_phase=${DONE_PHASE:-<not set>}." >&2
-    echo "Or use --force to bypass." >&2
+    echo "Finish the run's release phase, or bypass with an audited, recorded reason:" >&2
+    echo "  aid-release.sh ${BUMP_TYPE} --force --reason '<why this bypass is correct>'" >&2
     exit 1
   elif [[ "$FSM_STATE" =~ ^(READY|EXECUTE|GATES|ESCALATION)$ ]]; then
     echo "ERROR: FSM state is ${FSM_STATE} — run still in progress." >&2
-    echo "Or use --force to bypass." >&2
+    echo "Finish the run, or bypass with an audited, recorded reason:" >&2
+    echo "  aid-release.sh ${BUMP_TYPE} --force --reason '<why this bypass is correct>'" >&2
     exit 1
   fi
 fi
+
+# P073 Step 9: a force that actually bypassed a live FSM guard writes the same
+# three-record trail every other force in this codebase writes. Recorded only
+# when the guard WOULD HAVE BLOCKED — the mere existence of a state file is not
+# a bypass, and claiming one that never happened corrupts the audit trail in
+# the opposite direction from the hole this step closed.
+if [[ "$FORCE" == "true" && "$FSM_WOULD_BLOCK" == "true" ]]; then
+  _release_record_force "$STATE_FILE"
+fi
+}
+
+# ---------------------------------------------------------------------------
+# _release_record_force <state_file> — the audited record for the legacy
+# --force. Fail-closed on the artifact, matching the plan-FSM force: a bypass
+# that cannot be recorded does not happen.
+# ---------------------------------------------------------------------------
+_release_record_force() {
+  local state_file="$1"
+  local operator="${USER:-unknown}"
+  local now; now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  local fname_ts; fname_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
+  local head_sha; head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  local fsm_state; fsm_state="$(grep '^state:' "$state_file" 2>/dev/null | awk '{print $2}' || echo unknown)"
+
+  # Where the receipt goes: the active run's evidence dir when there is one,
+  # else a repo-root-adjacent file with a stderr note — never silently skipped.
+  local dir="" wbase=""
+  dir="$(dirname "$state_file")"
+  if [[ -d "$dir" && -w "$dir" ]]; then
+    wbase="${dir}/waiver-release-force-${fname_ts}"
+  elif [[ -d "$REPO_ROOT/.aid-o/work" ]]; then
+    wbase="${REPO_ROOT}/.aid-o/work/release-force-${fname_ts}"
+    echo "NOTE: no writable run evidence dir — recording the release force under ${wbase}" >&2
+  else
+    wbase="${REPO_ROOT}/.aid-release-force-${fname_ts}"
+    echo "NOTE: no .aid-o workspace — recording the release force under ${wbase}" >&2
+  fi
+  # Second precision plus a plain `mv` let two forces inside one second leave a
+  # single audit record. Pick the first free name and publish with `mv -n`.
+  local wfile="${wbase}.json" _wn=0
+  while [[ -e "$wfile" ]]; do
+    _wn=$(( _wn + 1 ))
+    if [[ "$_wn" -gt 100 ]]; then
+      echo "ERROR: cannot find a free release force-receipt name — refusing a silent bypass." >&2
+      exit 1
+    fi
+    wfile="${wbase}-${_wn}.json"
+  done
+
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: cannot record the release force — jq is unavailable; refusing a silent bypass." >&2
+    exit 1
+  }
+  local payload json
+  payload="$(jq -nc --arg wc "aid-release:fsm_guard" --arg rs "$FORCE_REASON" \
+    --arg wb "$operator" --arg wa "$now" \
+    '{waived_check:$wc, reason:$rs, waived_by:$wb, waived_at:$wa, scope:"run", visible:true}')" || {
+      echo "ERROR: cannot render the release force receipt — refusing a silent bypass." >&2
+      exit 1
+    }
+  json="$(jq -n --arg created_at "$now" --arg head_sha "$head_sha" \
+    --arg state "$fsm_state" --arg sf "$state_file" --argjson waiver "$payload" \
+    '{
+      schema_version: "aid-2.0",
+      artifact_type: "waiver",
+      producer: "aid-release.sh@force-override",
+      created_at: $created_at,
+      control_protocol: "aid-2.0",
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "blocked",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-release.sh"},
+      waiver: $waiver,
+      forced_override: true,
+      records: "precondition_bypass",
+      bypassed_preconditions: ["fsm_release_guard"],
+      bypassed_state: $state,
+      bypassed_state_file: $sf
+    }')" || {
+      echo "ERROR: cannot render the release force receipt — refusing a silent bypass." >&2
+      exit 1
+    }
+  printf '%s\n' "$json" > "${wfile}.tmp.$$" 2>/dev/null && mv -n "${wfile}.tmp.$$" "$wfile" 2>/dev/null && [[ ! -e "${wfile}.tmp.$$" ]] || {
+    rm -f "${wfile}.tmp.$$" 2>/dev/null || true
+    echo "ERROR: cannot write the release force receipt at ${wfile} — refusing a silent bypass." >&2
+    exit 1
+  }
+
+  # BEST-EFFORT BY DESIGN, and stated here so it is never mistaken for a
+  # fail-closed guarantee (an adversarial review read it as one). Two
+  # authorities are deliberately different: the WAIVER RECEIPT above is the
+  # authoritative record and IS fail-closed — a bypass that cannot be
+  # receipted does not happen. The cross-plan audit log is a convenience
+  # index, and every other force in this codebase appends to it with the same
+  # `|| true` contract (see fsm_emit_audit_log). Making this one abort the
+  # release would make an unwritable index file — a condition that loses no
+  # evidence, since the receipt is already durable — block a PM's last resort.
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "release" --run-id "aid-release.sh" \
+    --event "release_force_override" \
+    --reason "$FORCE_REASON" --operator "$operator" \
+    --bypassed-state "$fsm_state" --receipt "$(basename "$wfile")" \
+    --output "${REPO_ROOT}/.aid-o/work/audit-log.jsonl" 2>/dev/null || true
+
+  echo "FORCE: FSM release guard bypassed (state ${fsm_state}) — recorded at ${wfile}" >&2
+}
+
+# ─── Version-probe primitive (P073 Step 2) ──────────────────────────────
+#
+# Every "optional" version probe in this script goes through here. Three
+# distinct outcomes, none of them silent:
+#   - a match      -> _PROBE_RESULT holds the FIRST match, return 0
+#   - no match     -> _PROBE_RESULT is empty, return 0 (the caller's own
+#                     downstream logic decides what that means)
+#   - unreadable / a genuine grep error -> an ERROR naming the file, return 1
+#                     (callers `|| exit 1`)
+#
+# Two things this deliberately does NOT do:
+#   - it does not pipe through `head -1`. Closing the pipe early can leave
+#     grep killed by SIGPIPE, and under `set -o pipefail` that non-zero
+#     status is indistinguishable from "no match" — a `|| VAR=""` fallback
+#     would then DISCARD a match that was genuinely found. Measured on this
+#     machine: a ~290 KB CHANGELOG reproduces exit 141 on 20/20 runs.
+#     `grep -m1` keeps the probe a single process with meaningful exit codes.
+#   - it does not blanket-mask the exit status. grep distinguishes 1 (no
+#     match) from >=2 (a real error, including a file that became unreadable
+#     after the `-r` test), and only the former is treated as "no match".
+_PROBE_RESULT=""
+_release_probe_first() {
+  local file="$1" pattern="$2" out rc
+  _PROBE_RESULT=""
+  if [[ ! -r "$file" ]]; then
+    echo "ERROR: cannot read $file while detecting version" >&2
+    return 1
+  fi
+  out="$(grep -m1 -oP "$pattern" "$file")" && rc=0 || rc=$?
+  if [[ "$rc" -ge 2 ]]; then
+    echo "ERROR: failed to read $file while detecting version (grep exit $rc)" >&2
+    return 1
+  fi
+  # `-o` can emit more than one match from the single matched line; the
+  # callers all want the first.
+  _PROBE_RESULT="${out%%$'\n'*}"
+  return 0
 }
 
 # ─── Detect version source (single source of truth) ─────────────────────
@@ -183,9 +369,14 @@ CHANGELOG_HEADER=""
 RELEASED_VERSION=""
 CURRENT=""
 
-# Read newest CHANGELOG header (if exists)
+# Read newest CHANGELOG header (if exists).
+# P073 Step 2: this script runs under `set -euo pipefail`, so a grep that
+# simply finds nothing returned 1 and used to kill the run BEFORE the explicit
+# "Cannot detect version" diagnostic below could ever print. See
+# _release_probe_first for the three-way outcome this now has.
 if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
-  CHANGELOG_HEADER=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1)
+  _release_probe_first "$REPO_ROOT/CHANGELOG.md" '## \[\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  CHANGELOG_HEADER="$_PROBE_RESULT"
 fi
 
 # Read actually released version from JSON sources (preferred over CHANGELOG)
@@ -206,7 +397,11 @@ done
 
 # Fallback to pyproject.toml if no JSON found
 if [[ -z "$RELEASED_VERSION" && -f "$REPO_ROOT/pyproject.toml" ]]; then
-  RELEASED_VERSION=$(grep -oP '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/pyproject.toml" | head -1)
+  # P073 Step 2: a pyproject.toml with no top-level `version = "X.Y.Z"` line
+  # (a workspace root, a poetry file using a different key) must FALL THROUGH
+  # to the diagnostic below, not abort the script here.
+  _release_probe_first "$REPO_ROOT/pyproject.toml" '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  RELEASED_VERSION="$_PROBE_RESULT"
   [[ -n "$RELEASED_VERSION" ]] && VERSION_SOURCE="pyproject.toml"
 fi
 
@@ -243,6 +438,14 @@ _release_update_files() {
 TODAY=$(date +%Y-%m-%d)
 UPDATED=()
 
+# P073 EPIC 1: record which paths were ALREADY dirty before this run touched
+# anything, so a later refusal can roll back exactly what IT changed and never
+# clobber an operator's pre-existing edit. See _release_rollback_updated.
+_RELEASE_PREDIRTY=""
+if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  _RELEASE_PREDIRTY="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | sed 's/^...//')"
+fi
+
 # IMP-093 fix: CHANGELOG header logic depends on whether it's pre-written
 # for the upcoming release (header == NEW_VERSION) or stale at the previously
 # released version (header == CURRENT). Skip rename in either case.
@@ -250,8 +453,13 @@ UPDATED=()
 update_changelog() {
   local file="$1"
   [[ -f "$file" ]] || return 0
+  # P073 Step 2: a CHANGELOG with no version ledger at all (a landing page)
+  # must reach the prepend branch below, not abort the release mid-update —
+  # and a SIGPIPE-truncated probe must never make a populated CHANGELOG look
+  # headerless (which would prepend a duplicate entry).
   local header
-  header=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$file" | head -1)
+  _release_probe_first "$file" '## \[\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  header="$_PROBE_RESULT"
   if [[ "$header" == "$NEW_VERSION" ]]; then
     # Pre-written entry for upcoming release — header already correct, no-op.
     echo "Skipped: $file (header already $NEW_VERSION — pre-written entry)"
@@ -413,10 +621,146 @@ echo ""
 echo "Updated ${#UPDATED[@]} files total."
 }
 
+# ─── CHANGELOG entry validation (P073 Step 3) ───────────────────────────
+#
+# `update_changelog` writes the literal placeholder below when it PREPENDS a
+# new section, and until now nothing ever read it back — a release could be
+# committed, tagged and published with "fill in entry content" as its entire
+# user-facing description. This is the checker; the two call sites are
+# `cmd_prepare_plan` (whose commit becomes the frozen, reviewed candidate —
+# the high-value hook) and the legacy `_release_commit_and_tag`.
+#
+# Blocking conditions, all three about the TARGET version's own section:
+#   - the section is absent (including "the file uses a heading format this
+#     script cannot locate" — never a silent pass)
+#   - the section still contains the exact generated placeholder line
+#   - the section has no CONTENT at all (e.g. only a `### Changed` heading).
+#     Deliberately format-agnostic: a nested list, a table, prose, or a bullet
+#     whose first word is italic (`- _Breaking_: ...`) are all legitimate
+#     user-facing entries. An earlier, stricter form required a top-level
+#     `- ` bullet and would have blocked every one of them — a false refusal
+#     is exactly what this plan's loosening directive forbids.
+# A placeholder in an OLDER section is historical debt: reported on stderr,
+# never blocking.
+_RELEASE_CHANGELOG_PLACEHOLDER='- _PM/agent: fill in entry content_'
+
+# _release_changelog_section <file> <version> — prints the target section's
+# body (everything between `## [<version>]` and the next `## [` heading).
+_release_changelog_section() {
+  local file="$1" version="$2"
+  awk -v ver="$version" '
+    index($0, "## [" ver "]") == 1 { inblock = 1; next }
+    inblock && index($0, "## [") == 1 { exit }
+    inblock { print }
+  ' "$file"
+}
+
+# _release_validate_changelog_entry <file> <version> — 0 = entry is real,
+# 1 = blocked (message on stderr naming file, version and the required edit).
+_release_validate_changelog_entry() {
+  local file="$1" version="$2"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -qF "## [${version}]" "$file"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — no '## [${version}]' section was found (this script locates entries by that exact heading form); add the section with a real user-facing description and rerun" >&2
+    return 1
+  fi
+
+  local block
+  block="$(_release_changelog_section "$file" "$version")"
+
+  # `--` is required: the placeholder literal starts with "- ", which grep
+  # would otherwise parse as an option.
+  if grep -qxF -- "$_RELEASE_CHANGELOG_PLACEHOLDER" <<<"$block"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — replace the placeholder with a real user-facing description and rerun" >&2
+    return 1
+  fi
+
+  # At least one line of real content: anything that is neither blank nor a
+  # Markdown heading. The exact generated placeholder was already rejected
+  # above, so this only has to catch the empty-section case (a bare
+  # `### Changed` with nothing under it).
+  if ! grep -qE -- '^[[:space:]]*[^[:space:]#]' <<<"$block"; then
+    echo "PRECONDITION FAIL: CHANGELOG entry for ${version} in ${file} is incomplete — the section has no content; add a real user-facing description and rerun" >&2
+    return 1
+  fi
+
+  # Historical placeholders elsewhere in the file: debt, reported once per
+  # offending section, never blocking this release.
+  local stale
+  stale="$(awk -v ver="$version" -v ph="$_RELEASE_CHANGELOG_PLACEHOLDER" '
+    index($0, "## [") == 1 { section = $0; intarget = (index($0, "## [" ver "]") == 1); next }
+    !intarget && $0 == ph && section != "" && !(section in seen) { seen[section] = 1; print section }
+  ' "$file")"
+  if [[ -n "$stale" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      echo "WARNING: historical placeholder in section ${line%% —*} of ${file} — debt, not blocking" >&2
+    done <<<"$stale"
+  fi
+  return 0
+}
+
+# _release_rollback_updated — undo this run's version-file edits.
+#
+# P073 EPIC 1 (whole-EPIC review finding). Step 3's CHANGELOG gate refuses
+# AFTER _release_update_files has already rewritten plugin.json/marketplace.json
+# and prepended the CHANGELOG section. Because this script derives CURRENT from
+# those very files, the refusal used to leave a half-applied bump: the operator
+# filled in the 2.0.1 entry the message asked for, reran, and the tool released
+# 2.0.2 — silently orphaning the entry they had just written. Measured on a
+# fixture before this rollback existed.
+#
+# Only paths this run made dirty are restored: anything already dirty when the
+# run started is left exactly as the operator had it.
+_release_rollback_updated() {
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || {
+    echo "WARNING: not a git repository — the version-file edits from this run were left in place and must be reverted by hand before rerunning" >&2
+    return 0
+  }
+  local f rel restored=""
+  for f in "${UPDATED[@]:-}"; do
+    [[ -n "$f" ]] || continue
+    rel="$(realpath -m --relative-to="$REPO_ROOT" -- "$f" 2>/dev/null)" || rel="$f"
+    # Already dirty before this run → not ours to revert.
+    grep -qxF -- "$rel" <<<"$_RELEASE_PREDIRTY" && continue
+    git -C "$REPO_ROOT" checkout -- "$rel" 2>/dev/null && restored+="${rel} "
+  done
+  if [[ -n "$restored" ]]; then
+    echo "Rolled back this run's version-file edits so a rerun bumps from the same base: ${restored}" >&2
+  fi
+}
+
+# _release_validate_updated_changelogs <version> — runs the check over every
+# CHANGELOG.md in the current UPDATED[] set. Returns 1 if ANY is incomplete.
+_release_validate_updated_changelogs() {
+  local version="$1" f rc=0
+  # Scope: the CHANGELOGs this release actually touched. A CHANGELOG.md that
+  # is not part of the version registry is deliberately NOT validated — that
+  # would be a new blocking gate on repositories the release path never wrote
+  # to, which the plan's loosening directive forbids.
+  for f in "${UPDATED[@]:-}"; do
+    [[ -n "$f" ]] || continue
+    [[ "$(basename "$f")" == "CHANGELOG.md" ]] || continue
+    _release_validate_changelog_entry "$f" "$version" || rc=1
+  done
+  return "$rc"
+}
+
 # ─── Git commit + tag (LEGACY path only) ─────────────────────────────────
 
 _release_commit_and_tag() {
 cd "$REPO_ROOT"
+
+# P073 Step 3: refuse to commit or tag a release whose own CHANGELOG entry is
+# still the generated placeholder. Exits BEFORE the commit, so the edits stay
+# in the worktree for correction.
+if ! _release_validate_updated_changelogs "$NEW_VERSION"; then
+  _release_rollback_updated
+  echo "No release commit and no tag were created. If the generated placeholder section was rolled back with the rest of this run's edits, add a '## [${NEW_VERSION}]' section with a real user-facing description to your CHANGELOG and rerun — the rerun will bump from the same base." >&2
+  exit 1
+fi
+
 git add "${UPDATED[@]}" 2>/dev/null || true
 # Also add any files updated in the config loop (may have been missed)
 git add -u
@@ -595,7 +939,7 @@ cmd_prepare_plan() {
   #    "dirty" by design are not real blockers.
   local dirty
   dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+    | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   if [[ -n "$dirty" ]]; then
     echo "PRECONDITION FAIL: prepare-plan refuses to run with modified tracked files — they would be swept into the commit that is about to become the frozen, reviewed candidate. Commit or stash first:" >&2
     printf '%s\n' "$dirty" >&2
@@ -626,6 +970,16 @@ cmd_prepare_plan() {
   fi
 
   _release_update_files
+
+  # P073 Step 3: this commit becomes the frozen, REVIEWED candidate, so a
+  # placeholder entry here would be reviewed and released as the release's
+  # user-facing description. Exits before any `git add`, leaving the worktree
+  # uncommitted for correction — matching the precondition style below.
+  if ! _release_validate_updated_changelogs "$NEW_VERSION"; then
+    _release_rollback_updated
+    echo "PRECONDITION FAIL: prepare-plan will not freeze a candidate whose CHANGELOG entry is incomplete — nothing was staged or committed. Add a '## [${NEW_VERSION}]' section with a real user-facing description and rerun; the rerun bumps from the same base." >&2
+    exit 1
+  fi
 
   # ── Explicit staging only (guarantee 2) ─────────────────────────────────
   if [[ ${#UPDATED[@]} -eq 0 ]]; then

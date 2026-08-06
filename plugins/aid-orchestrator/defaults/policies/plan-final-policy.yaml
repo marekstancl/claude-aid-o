@@ -1,0 +1,62 @@
+# =============================================================================
+# plan-final-policy.yaml — review-equivalent ancillary writes (P073 EPIC 3)
+# =============================================================================
+# WHY THIS EXISTS: after a plan-final candidate is frozen, ANY tracked write
+# threw away a completed review and forced a full re-review cycle — even a
+# harmless one, like appending to the audit log or writing a report. That cost
+# is real and it is what this policy loosens.
+#
+# THE MODEL: a path is either ANCILLARY (a runtime record with no bearing on
+# what was reviewed) or it is part of the DELIVERY SURFACE. A commit touching
+# only ancillary paths is REVIEW-EQUIVALENT: the review still describes the
+# delivery, so it survives. A commit touching anything else is a FIX and costs
+# the review, exactly as before.
+#
+# ── PRECEDENCE: PROTECTED ALWAYS WINS ───────────────────────────────────────
+# The protected path set computed at freeze (every step's plan.json
+# allowed_paths, the source plan, the lifecycle manifest, the close-consumed
+# receipts) takes precedence over every glob below, at the PATH level. A path
+# that is protected is never ancillary, no matter which glob would match it.
+#
+# That rule exists because close-consumed evidence lives under `.aid-o/work/`,
+# which is itself an ancillary glob. The alternative — rejecting any policy
+# whose globs overlap a protected path — would forbid the very defaults this
+# file ships. Overlaps are therefore expected, warned about at freeze, and
+# resolved in favour of protection.
+#
+# ── NO `docs/**` DEFAULT, DELIBERATELY ──────────────────────────────────────
+# Documentation is frequently part of what a plan delivers. Shipping it as
+# ancillary would let a delivery change ride through a frozen review unnoticed.
+# A project that genuinely treats docs as ancillary can add it to its own copy
+# at `.aid-o/config/policies/plan-final-policy.yaml`, as a decision it owns.
+#
+# ── FAIL-CLOSED ─────────────────────────────────────────────────────────────
+# An unreadable or malformed policy NEVER widens the filter: the classifier
+# falls back to the five legacy runtime paths and warns once. Widening on a
+# parse error would silently turn "I could not read the rules" into "everything
+# is ancillary".
+# =============================================================================
+schema_version: "aid-2.0"
+
+plan_final:
+  # Paths whose movement after freeze does NOT invalidate the review.
+  ancillary_paths:
+    # ── the five legacy runtime paths ───────────────────────────────────────
+    # These are the exact five the dirty-worktree exceptions have carried for
+    # releases, duplicated verbatim at four call sites before this policy
+    # existed. They are the FLOOR: the preflight callers keep them even if a
+    # project removes them here, because losing the queue.yaml exception alone
+    # would deadlock routine operation.
+    - ".aid-o/config/queue.yaml"
+    - ".aid-o/work/audit-log.jsonl"
+    - ".aid-o/metrics/gate-runtime-baselines.yaml"
+    - ".aid-o/metrics/gate-runtime-baselines.yaml.lock"
+    - ".aid-o/work/plan-state/**"
+
+    # ── the broader runtime areas ───────────────────────────────────────────
+    # Everything under these is orchestration bookkeeping, not delivery. The
+    # protected-set precedence above is what keeps close-consumed evidence
+    # under `.aid-o/work/` safe despite the wildcard.
+    - ".aid-o/work/**"
+    - ".aid-o/reports/**"
+    - ".aid-o/metrics/**"
