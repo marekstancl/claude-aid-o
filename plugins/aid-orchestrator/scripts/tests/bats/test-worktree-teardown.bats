@@ -24,7 +24,7 @@
 # FD-3 HYGIENE: every plan-FSM invocation runs with `3>&-` (a child holding
 # bats' report fd truncates the TAP stream), and every `run` goes through a
 # `bash -c` helper that can never exit 127 on fd 3. After any edit verify:
-#   bats --tap test-worktree-teardown.bats | grep -cE '^(ok|not ok)'   # == 14
+#   bats --tap test-worktree-teardown.bats | grep -cE '^(ok|not ok)'   # == 15
 
 load test-helpers.bash
 
@@ -377,6 +377,47 @@ _seed_aborted_plan() {
   # registration the `rm -rf` left behind is still there — only a prune or a
   # real repair clears it, and this refusal ran neither.)
   [ ! -d "$(_wt P901)" ]
+}
+
+@test "P074 Step 11: a close landing INSIDE a repair makes the repair refuse and undo — a terminal plan never ends up holding a worktree" {
+  # ROUND-2 BLOCKER 2. The worktree lock does NOT serialize this repair
+  # against a close's terminal STATE TRANSITION: close flips plan_state under
+  # the PLAN-STATE lock and only then attempts the worktree lock, and on a
+  # timeout it defers its teardown and returns success without ever holding
+  # it. So a close can land entirely between this repair's OPEN check and its
+  # record, and the repair would then hand a CLOSED plan a fresh, recorded
+  # worktree that survives until someone runs another close.
+  #
+  # The interleaving is made DETERMINISTIC rather than raced: a post-checkout
+  # hook flips the state to CLOSED from inside `git worktree add`, which is
+  # exactly the window — after the precondition read, before the record. The
+  # fix is a compare-and-set inside the plan-state critical section that does
+  # the write, so no window is left for a re-check to miss.
+  _mk_project
+  _seed_open_plan P901
+  rm -rf "$(_wt P901)"
+  # Start from NO pointer, so "nothing recorded" below means this repair
+  # recorded nothing, not that it happened to rewrite the same value.
+  _in_root "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-state.sh'
+            plan_state_set_worktree_path P901 ''"
+  cat > "$ROOT/.git/hooks/post-checkout" <<EOF
+#!/usr/bin/env bash
+yq -i '.plan_state = "CLOSED"' '$ROOT/.aid-o/work/plan-state/P901/plan-state.yaml' 2>/dev/null || true
+exit 0
+EOF
+  chmod +x "$ROOT/.git/hooks/post-checkout"
+
+  run _pf plan-state P901 --recreate-worktree --project-root "$ROOT" \
+    --reason "repairing the worktree while a close lands in the middle of it"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reached a terminal state"* ]]
+  [[ "$output" == *"removed again"* ]]
+  [[ "$output" != *"RECREATED"* ]]
+  # Nothing recorded, and the tree it had just created is gone: the CLOSED
+  # plan holds no execution worktree.
+  [ -z "$(_recorded P901)" ]
+  [ ! -d "$(_wt P901)" ]
+  ! _registered P901
 }
 
 @test "P074 Step 11: --recreate-worktree fails loudly when the repair CANNOT be audited" {

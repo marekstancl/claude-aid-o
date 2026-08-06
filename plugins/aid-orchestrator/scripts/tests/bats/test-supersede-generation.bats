@@ -21,7 +21,7 @@
 # FD-3 HYGIENE: every pipeline invocation runs with `3>&-`; no `run` is handed
 # a path that might not exist.
 # After any edit, verify the result count:
-#   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 12
+#   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 13
 
 load test-helpers.bash
 
@@ -321,6 +321,46 @@ _incomplete() {
   [ "$output" = "0" ]
   run bash -c "ls '$GEN'/generation-superseded-*.json 2>/dev/null | wc -l" 3>&-
   [ "$output" = "0" ]
+}
+
+@test "TWO PLANS superseding under the SAME epoch each get their own verified audit-log entry" {
+  # ROUND-2 BLOCKER 1. The audit log is CROSS-PLAN and the epoch is only
+  # second-resolution, while two plans superseding at the same moment hold
+  # DIFFERENT per-plan generation locks and genuinely run concurrently. An
+  # epoch-only verification let plan B match plan A's line, skip its own
+  # append, and report success with no entry of its own — an unaudited
+  # supersession produced by the very code meant to make one impossible.
+  #
+  # The shared epoch is made deterministic (not raced) by driving both plans
+  # through the half-archived recovery path, which records under the epoch
+  # already on disk.
+  _incomplete
+  local epoch=1750000000
+  mv "$TX" "${TX}.superseded-${epoch}"
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' supersede-generation --plan '$PLAN' --reason '$REASON'" 3>&-
+  [ "$status" -eq 0 ]
+
+  # A SECOND plan whose own half-archived pair carries the SAME epoch.
+  local other="$PROJ/.aid-o/plans/P098-other.md"
+  sed 's/^id: P099$/id: P098/' "$PLAN" > "$other"
+  local gen2="$PROJ/.aid-o/work/evidence/P098/generation"
+  mkdir -p "$gen2"
+  jq '.plan_id = "P098"' "${TX}.superseded-${epoch}" > "${gen2}/transaction.json.superseded-${epoch}"
+  cp "${AUTH}.superseded-${epoch}" "${gen2}/generation-authority.json"
+
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' supersede-generation --plan '$other' --reason '$REASON'" 3>&-
+  [ "$status" -eq 0 ]
+  [ -f "${gen2}/generation-authority.json.superseded-${epoch}" ]
+
+  # Each plan has its OWN record and its OWN audit-log entry under that epoch.
+  [ -f "$GEN/generation-superseded-${epoch}.json" ]
+  [ -f "${gen2}/generation-superseded-${epoch}.json" ]
+  [ "$(jq -r '.plan_id' "${gen2}/generation-superseded-${epoch}.json")" = "P098" ]
+  local alog="$PROJ/.aid-o/work/audit-log.jsonl"
+  run bash -c "grep -c '\"plan_id\":\"P099\".*\"epoch\":\"${epoch}\"' '$alog'" 3>&-
+  [ "$output" = "1" ]
+  run bash -c "grep -c '\"plan_id\":\"P098\".*\"epoch\":\"${epoch}\"' '$alog'" 3>&-
+  [ "$output" = "1" ]
 }
 
 @test "a HELD generation lock makes supersede refuse by name and archive NOTHING" {

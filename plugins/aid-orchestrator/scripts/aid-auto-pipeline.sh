@@ -504,6 +504,38 @@ _gen_supersede_audit_preflight() {
 }
 
 # ---------------------------------------------------------------------------
+# _gen_supersede_record_present <file> <plan_id> <epoch>
+#
+# "Is THIS plan's supersession for THIS epoch already recorded in <file>?"
+#
+# KEYED ON plan_id AND epoch AND event, never on epoch alone (round-2
+# BLOCKER 1). `audit-log.jsonl` is CROSS-PLAN and the epoch is only
+# second-resolution, while two plans superseding at the same moment hold
+# DIFFERENT per-plan locks and genuinely run concurrently. An epoch-only match
+# therefore let plan B read plan A's line as its own, skip its append, and
+# report success with no entry of its own — the exact unaudited supersession
+# the fail-closed rewrite exists to prevent.
+#
+# PARSED, NOT PATTERN-MATCHED. `reason` is free operator text on the same
+# line, so a substring match could be satisfied by a reason that merely
+# CONTAINS the key. Each line is parsed and its fields compared exactly; a
+# line that is not valid JSON is skipped rather than aborting the scan, so one
+# pre-existing corrupt line in an append-only log cannot make every later
+# supersession unverifiable.
+# ---------------------------------------------------------------------------
+_gen_supersede_record_present() {
+  local file="$1" plan_id="$2" epoch="$3"
+  [[ -f "$file" ]] || return 1
+  jq -e -nR --arg p "$plan_id" --arg e "$epoch" '
+    any(inputs;
+      ((try fromjson catch null) // null) as $j
+      | $j != null
+        and ($j.event? == "generation_superseded")
+        and ($j.plan_id? == $p)
+        and ((($j.epoch? // "") | tostring) == $e))' "$file" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
 # _gen_supersede_audit <plan_id> <plan_path> <reason> <operator> <epoch> \
 #                      <gdir> <txp> <auth> <identity> <generated_json>
 #
@@ -525,7 +557,6 @@ _gen_supersede_audit() {
   local alog; alog="$(_gen_audit_log_path)"
   local now; now="$(_gen_now)"
   local head_sha; head_sha="$(git -C "$_aid_pipeline_state_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-  local grep_key="\"event\":\"generation_superseded\".*\"epoch\":\"${epoch}\""
 
   # The archived names are deterministic, so the record can be rendered
   # whichever side of the rename we are called from: hash the file under
@@ -563,21 +594,24 @@ _gen_supersede_audit() {
     _gen_write_atomic "$rec_file" "$rec" \
       || { echo "[ERROR] supersede-generation: cannot write the supersession record ${rec_file}." >&2; return 3; }
   fi
-  jq -e '.schema == "aid-generation-supersede/v1" and .plan_id != null' "$rec_file" >/dev/null 2>&1 \
-    || { echo "[ERROR] supersede-generation: the supersession record ${rec_file} could not be read back as a valid record." >&2; return 3; }
+  # Read back keyed on THIS plan, for the same reason the JSONL checks are
+  # (round-2 BLOCKER 1): a record that belongs to another plan is not this
+  # plan's evidence, even when it sits at the expected path.
+  jq -e --arg p "$plan_id" '.schema == "aid-generation-supersede/v1" and .plan_id == $p' "$rec_file" >/dev/null 2>&1 \
+    || { echo "[ERROR] supersede-generation: the supersession record ${rec_file} could not be read back as a valid record for ${plan_id}." >&2; return 3; }
 
   # Record 2 — the per-plan timeline event.
-  if ! grep -q "$grep_key" "$tl" 2>/dev/null; then
+  if ! _gen_supersede_record_present "$tl" "$plan_id" "$epoch"; then
     printf '%s\n' "$(jq -nc --arg ts "$now" --arg ev "generation_superseded" --arg plan "$plan_id" \
       --arg reason "$reason" --arg op "$operator" --arg epoch "$epoch" --arg id "$identity" \
       '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, epoch:$epoch, archived_identity:$id}')" \
       >> "$tl" 2>/dev/null || true
   fi
-  grep -q "$grep_key" "$tl" 2>/dev/null \
-    || { echo "[ERROR] supersede-generation: the generation_superseded timeline event for epoch ${epoch} could not be read back from ${tl}." >&2; return 3; }
+  _gen_supersede_record_present "$tl" "$plan_id" "$epoch" \
+    || { echo "[ERROR] supersede-generation: the generation_superseded timeline event for ${plan_id} epoch ${epoch} could not be read back from ${tl}." >&2; return 3; }
 
   # Record 3 — the cross-plan audit log, VERIFIED BY READING IT BACK.
-  if ! grep -q "$grep_key" "$alog" 2>/dev/null; then
+  if ! _gen_supersede_record_present "$alog" "$plan_id" "$epoch"; then
     bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
       --epic-id "$plan_id" --run-id "supersede-generation" \
       --event "generation_superseded" \
@@ -585,8 +619,8 @@ _gen_supersede_audit() {
       --archived-identity "$identity" --epoch "$epoch" \
       --output "$alog" >/dev/null 2>&1 || true
   fi
-  grep -q "$grep_key" "$alog" 2>/dev/null \
-    || { echo "[ERROR] supersede-generation: the generation_superseded entry for epoch ${epoch} could not be read back from ${alog}." >&2; return 3; }
+  _gen_supersede_record_present "$alog" "$plan_id" "$epoch" \
+    || { echo "[ERROR] supersede-generation: the generation_superseded entry for ${plan_id} epoch ${epoch} could not be read back from ${alog}." >&2; return 3; }
 
   printf '%s' "$rec_file"
   return 0

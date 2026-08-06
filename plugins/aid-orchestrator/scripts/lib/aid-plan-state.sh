@@ -566,7 +566,7 @@ plan_state_get() {
 }
 
 # ===========================================================================
-# plan_state_set_worktree_path <plan_id> <path|"">
+# plan_state_set_worktree_path <plan_id> <path|""> [require_non_terminal]
 #
 # P074 Step 7/11 — records (or, with an EMPTY second argument, clears) the
 # plan's execution worktree path. Goes through the SAME locked read → validate
@@ -581,11 +581,30 @@ plan_state_get() {
 # path must be inside the state root — so the documented "repo-root-relative
 # or absolute" contract is a check rather than a comment (P074 review F7).
 #
+# THE OPTIONAL THIRD ARGUMENT — `require_non_terminal` — makes the write a
+# COMPARE-AND-SET against `plan_state`, in the same critical section, exactly
+# as plan_state_transition re-verifies its from-state under the lock. It
+# exists because a worktree record and a terminal close race on THIS file, not
+# on the worktree lock: a repair can read `plan_state: OPEN`, and a plan-close
+# can then flip the state and (correctly) defer its teardown, before the
+# repair records its path — leaving a recorded execution worktree on a plan
+# that is already CLOSED. A separate re-check by the caller cannot close that
+# window; only a guard inside this lock can. With the guard requested, a
+# terminal plan_state writes NOTHING and returns 6, so the caller can undo
+# what it created. Two modes, because the two writers have different rules
+# about what "terminal" means: `require_non_terminal` (CLOSED / ABORTED /
+# ROLLED_BACK) is the repair's, `require_not_closed` (CLOSED only) mirrors
+# plan-start's own precondition, which deliberately reopens an ABORTED or
+# ROLLED_BACK plan. The guard is ignored when CLEARING the path — removing a
+# record from a terminal plan is exactly what teardown must always be able to
+# do.
+#
 # Returns: 0 written, 1 bad args / no state file / write failure,
-# 2 missing jq/yq, 3 lock timeout, 5 corrupt state file.
+# 2 missing jq/yq, 3 lock timeout, 5 corrupt state file,
+# 6 guard refused (plan is terminal; nothing was written).
 # ===========================================================================
 plan_state_set_worktree_path() {
-  local plan_id="$1" wt_path="${2-}"
+  local plan_id="$1" wt_path="${2-}" guard="${3-}"
 
   _plan_state_require_deps || return 2
   _validate_plan_id "$plan_id" || return 1
@@ -641,6 +660,36 @@ plan_state_set_worktree_path() {
   if [[ "$rc" -ne 0 ]]; then
     aid_lock_release "$fd"
     return 5
+  fi
+
+  # The compare-and-set guard, INSIDE the lock and before the render, so a
+  # close that flipped the state either lands entirely before this (we refuse)
+  # or entirely after it (our record is already visible to its teardown).
+  if [[ -n "$guard" && -n "$wt_path" ]]; then
+    local _pswp_state _pswp_bad=""
+    _pswp_state="$(jq -r '.plan_state // ""' <<<"$json" 2>/dev/null)"
+    case "$guard" in
+      # The repair's rule: no execution worktree on a plan with no execution
+      # left to do.
+      require_non_terminal)
+        case "$_pswp_state" in CLOSED|ABORTED|ROLLED_BACK) _pswp_bad=1 ;; esac ;;
+      # plan-start's rule, mirrored EXACTLY: it reopens an ABORTED or
+      # ROLLED_BACK plan on purpose and refuses only CLOSED, so the guard
+      # refuses only CLOSED too — a guard that is stricter than its caller's
+      # own precondition would break a supported flow instead of closing a
+      # race.
+      require_not_closed)
+        case "$_pswp_state" in CLOSED) _pswp_bad=1 ;; esac ;;
+      *)
+        aid_lock_release "$fd"
+        _plan_warn "plan_state_set_worktree_path: unknown guard '$guard' (expected require_non_terminal or require_not_closed)"
+        return 1 ;;
+    esac
+    if [[ -n "$_pswp_bad" ]]; then
+      aid_lock_release "$fd"
+      _plan_warn "plan_state_set_worktree_path: $plan_id is $_pswp_state — refusing to record an execution worktree on it (nothing was written)"
+      return 6
+    fi
   fi
 
   local new_json

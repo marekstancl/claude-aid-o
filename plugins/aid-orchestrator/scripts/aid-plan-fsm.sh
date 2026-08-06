@@ -1201,10 +1201,20 @@ _pfsm_ensure_plan_worktree() {
     echo "NOTE: adopting the already-registered worktree ${canonical} for ${plan_id} — a previous plan-start was killed between registering it and recording it (verified: its HEAD is ${plan_branch})." >&2
   fi
 
+  # The same compare-and-set the repair uses (round-2 BLOCKER 2), in
+  # plan-start's own terms: it refuses only CLOSED (an ABORTED or ROLLED_BACK
+  # plan is deliberately restartable), so the guard refuses only CLOSED. It
+  # closes the identical window — plan-start passes its CLOSED check, a close
+  # commits, and the record would otherwise land on a plan that is already
+  # closed and whose teardown has already run.
   local src=0
-  plan_state_set_worktree_path "$plan_id" "$canonical" || src=$?
+  plan_state_set_worktree_path "$plan_id" "$canonical" "require_not_closed" || src=$?
   if [[ "$src" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: the execution worktree for ${plan_id} could not be recorded in plan-state (rc=${src})." >&2
+    if [[ "$src" -eq 6 ]]; then
+      echo "PRECONDITION FAIL: ${plan_id} was CLOSED while this plan-start was creating its execution worktree — nothing was recorded, so a closed plan is not left holding one." >&2
+    else
+      echo "PRECONDITION FAIL: the execution worktree for ${plan_id} could not be recorded in plan-state (rc=${src})." >&2
+    fi
     if [[ "$created" -eq 1 ]]; then
       git -C "$root" worktree remove --force "$canonical" >/dev/null 2>&1 || true
       git -C "$root" worktree prune >/dev/null 2>&1 || true
@@ -8314,11 +8324,16 @@ _pfsm_plan_state_recreate_worktree() {
   # ── THE WHOLE REPAIR IS ONE LOCKED TRANSACTION (P074 review F4) ──────────
   # Without this, two concurrent recreates both saw "no worktree", and the
   # loser's add-failure cleanup force-removed the WINNER's tree while the
-  # winner went on to record a path nothing was registered at. A concurrent
-  # plan-close could equally pass the OPEN check below, close and tear down,
-  # and then let this command hand a terminal plan a fresh worktree. Teardown
-  # takes the same lock, and the OPEN check is re-read INSIDE it, so both
-  # races are closed at once. `_pfsm_rw_done` is the single release point.
+  # winner went on to record a path nothing was registered at. Teardown takes
+  # the same lock, so no two processes ever touch the TREE at once, and
+  # `_pfsm_rw_done` is the single release point.
+  #
+  # WHAT THIS LOCK DOES NOT DO (round-2 BLOCKER 2): it does not serialize this
+  # repair against a plan-close's terminal STATE TRANSITION. Close flips
+  # plan_state under the PLAN-STATE lock and only then attempts this one — and
+  # on a timeout it defers its teardown and returns success, never having held
+  # this lock at all. So the OPEN check below is a precondition, not a
+  # guarantee; the guarantee is the compare-and-set at the record step.
   # (`AID_WORKTREE_LOCK_TIMEOUT_S` shortens the wait for the suite that
   # asserts the refusal; production never sets it.)
   local _rw_lock; _rw_lock="$(_pfsm_plan_worktree_lock_path "$plan_id")"
@@ -8351,7 +8366,7 @@ _pfsm_plan_state_recreate_worktree() {
   case "$cur_state" in
     CLOSED|ABORTED|ROLLED_BACK)
       _pfsm_rw_done
-      echo "PRECONDITION FAIL: ${plan_id} is ${cur_state} — a terminal plan has no execution left to do, and its worktree was torn down on purpose. --recreate-worktree operates on an OPEN plan only." >&2
+      echo "PRECONDITION FAIL: ${plan_id} is ${cur_state} — a terminal plan has no execution left to do, so it gets no execution worktree. --recreate-worktree operates on an OPEN plan only. If a worktree for this plan is still on disk, that close's teardown was DEFERRED rather than skipped: re-run 'aid-plan-fsm.sh plan-close ${plan_id}' to finish it — never re-create it." >&2
       return 1
       ;;
   esac
@@ -8403,8 +8418,38 @@ _pfsm_plan_state_recreate_worktree() {
     fi
   fi
 
+  # ── THE RECORD IS A COMPARE-AND-SET AGAINST plan_state (round-2 BLOCKER 2)
+  # The OPEN check above is NOT sufficient on its own, and the worktree lock
+  # does not make it so: this repair and a plan-close do not serialize on the
+  # worktree lock at all — they serialize on PLAN-STATE, which is what close
+  # mutates and what the check above reads. Close flips the state under the
+  # plan-state lock and then only ATTEMPTS the worktree lock; on a timeout it
+  # correctly defers its teardown and returns success. So a close could land
+  # entirely inside this transaction — after the OPEN read, before the record
+  # — and this command would hand a CLOSED plan a fresh, recorded worktree
+  # that survives until someone runs another close.
+  #
+  # A second re-check here would only shrink the window, not close it. The
+  # guard therefore lives INSIDE the plan-state critical section that performs
+  # the write (`require_non_terminal`, rc 6): the state read and the
+  # worktree_path write are now one atomic step, so the close either happens
+  # entirely before (we refuse and undo) or entirely after (our record is
+  # visible to its teardown, deferred or not). The lock nesting is unchanged —
+  # worktree lock OUTSIDE, plan-state lock INSIDE, the same direction every
+  # other worktree mutation uses.
   local wrc=0
-  plan_state_set_worktree_path "$plan_id" "$wt" || wrc=$?
+  plan_state_set_worktree_path "$plan_id" "$wt" "require_non_terminal" || wrc=$?
+  if [[ "$wrc" -eq 6 ]]; then
+    local undo_note=" (this repair adopted an existing tree, so nothing was created and nothing was removed)"
+    if [[ "$action" == "recreated" ]]; then
+      git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+      git -C "$root" worktree prune >/dev/null 2>&1 || true
+      undo_note=" and the worktree this repair had just created at ${wt} was removed again"
+    fi
+    _pfsm_rw_done
+    echo "PRECONDITION FAIL: ${plan_id} reached a terminal state (closed or rolled back) WHILE this repair was running — between its precondition check and its record. Nothing was recorded${undo_note}, so a terminal plan is never left holding an execution worktree. If that close reported a DEFERRED teardown naming this repair as the likely lock holder, re-run plan-close to finish it." >&2
+    return 1
+  fi
   if [[ "$wrc" -ne 0 ]]; then
     if [[ "$action" == "recreated" ]]; then
       git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
