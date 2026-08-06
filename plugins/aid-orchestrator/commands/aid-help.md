@@ -231,4 +231,4 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-08-06

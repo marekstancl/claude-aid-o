@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 363          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 397          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -1909,3 +1909,425 @@ enforcements:
     description: "P074 Step 5 — plan-merge-to-main's clean-worktree preflight is REMOVED. Grounded: the merge is plumbing-only (merge-tree/commit-tree plus a compare-and-swap update-ref) and never touches a worktree, so no worktree content — dirty or clean — can leak into the published merge commit. Replacement guards: plan_merge_cas (the CAS against the PM-approved head is what actually protects the target branch), the no-merge-in-progress check, and merge_equivalence_reverification all stay. The merge-with-a-dirty-tree product tradeoff was PM-confirmed (P074 decision 2)."
     recovery: "n/a — the refusal no longer exists. A stale or raced target head still refuses via the CAS with the target branch byte-identical."
     test: "scripts/tests/bats/test-scoped-preflights.bats"
+
+  # ══ P074 EPIC 2: the per-plan execution worktree ═════════════════════════
+  # Every row below is enforced TWICE — once in aid-plan-fsm.sh (`_pfsm_*`,
+  # plan-side) and once in aid-fsm.sh (`_fsm_*`, EPIC-side). The duplication is
+  # deliberate and documented at aid-fsm.sh:649 ("DELIBERATE DUPLICATE"): the
+  # two CLIs cannot source each other, and a plan-linked command that reached
+  # the wrong tree would corrupt the diff attribution of everything after it.
+  # Shared instruction home: skills/pipeline.md ("Where a plan-linked command
+  # runs: redirect or refuse") + skills/agent-protocol.md ("Which tree an EPIC
+  # works in").
+
+  - id: plan_worktree_required
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_require_plan_worktree (callers: cmd_epic_merge_to_plan, cmd_plan_finalize) + scripts/aid-fsm.sh:_fsm_require_plan_worktree (callers: cmd_init, done-advance)"
+    instruction: "skills/pipeline.md (grep: 'Where a plan-linked command runs: redirect or refuse')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 8 — a plan-linked command that touches a TREE (epic-merge-to-plan, the plan-finalize stages, aid-fsm.sh init, done-advance) re-executes itself with cwd = the plan's recorded execution worktree, or refuses. The redirect preserves argv verbatim except that operator-relative path arguments are absolutized first (_aid_wt_rewrite_args), because the cwd changes underneath them. 'The controller dispatches agents with the right cwd' was previously a promise an instruction file made and nothing checked; a direct operator call from the primary checkout hijacked the PM's own tree, which is exactly the single-stream behaviour P074 removes. Sourced-context callers cannot re-exec and are refused with the manual `cd` instead."
+    recovery: "None needed on the happy path — the command re-runs itself in the right tree and prints one NOTE saying so. The four sibling rows below cover every case where it refuses instead."
+    test: "scripts/tests/bats/test-worktree-enforcement.bats"
+
+  - id: plan_worktree_missing
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_require_plan_worktree (recorded-but-absent leg) + scripts/aid-fsm.sh:_fsm_require_plan_worktree"
+    instruction: "skills/pipeline.md (grep: 'Recorded worktree that is missing')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 8 — a recorded `worktree_path` that is absent on disk or no longer registered with git REFUSES; the primary checkout is never a silent substitute. `git worktree prune` runs first so a hand-deleted directory is diagnosed as missing rather than as a stale registration."
+    recovery: "aid-plan-fsm.sh plan-state <plan_id> --recreate-worktree --reason \"<why it went missing>\" — the audited Step 11 repair, named verbatim in the refusal."
+    test: "scripts/tests/bats/test-worktree-enforcement.bats + scripts/tests/bats/test-plan-worktree-create.bats"
+
+  - id: plan_worktree_unrecorded_present
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_require_plan_worktree (crash-window leg, gated on _pfsm_recorded_worktree rc in {0,1}) + scripts/aid-fsm.sh:_fsm_require_plan_worktree"
+    instruction: "skills/pipeline.md (grep: 'No `worktree_path` recorded, but')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 8 — a worktree present at `.aid-worktrees/plan-<id>` with NO plan-state record is the crash window between `git worktree add` and the state write, and is refused rather than passed off as a legacy plan (which would run in the primary checkout while a live execution tree sat next to it). PRECONDITION NARROWED (v2.73.0, commit 63008a1 + the plan-side mirror): the refusal fires ONLY when plan-state was actually READ and definitively records none — `plan_state_get` rc 0 with an empty/null value, or rc 1 `not_found`. Any other rc (2 = jq/yq missing, 5 = corrupt state file, a lock timeout) means the answer is UNKNOWN, and the enforcer falls back to the physical evidence (`_pfsm_canonical_worktree_if_live` / `_fsm_plan_worktree_canonical_if_live`: a git-registered LINKED worktree at the canonical path) instead of asserting a mid-transaction kill. Before the narrowing a missing `yq` produced a false forensic claim — 'your plan-start was killed' — and pointed at --recreate-worktree for what was a missing dependency."
+    recovery: "Resume the interrupted transaction: aid-plan-fsm.sh plan-start <plan_id> --mode <mode> (it adopts and records the existing worktree), or repair with plan-state <plan_id> --recreate-worktree --reason \"<why>\"."
+    test: "scripts/tests/bats/test-worktree-enforcement.bats (the crash-window case AND the 'plan-state that cannot be READ' regression)"
+
+  - id: plan_worktree_not_linked
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_worktree_is_linked (checked in _pfsm_require_plan_worktree and _pfsm_plan_tree_root) + scripts/aid-fsm.sh:_fsm_worktree_is_linked"
+    instruction: "skills/pipeline.md (grep: 'not a LINKED worktree')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 8 (review F6) — `git worktree list` includes the PRIMARY checkout, so a `worktree_path` recorded as the state root satisfies every existence and registration probe and then matches the cwd as 'already there': every checkout and merge would run in the PM's own tree while the command reported isolation, with the loop guard unreachable because no redirect is ever attempted. Linkedness (git dir under `<common>/worktrees/`) is therefore checked BEFORE the cwd comparison, and a record naming the primary checkout is refused as a metadata lie."
+    recovery: "aid-plan-fsm.sh plan-state <plan_id> --recreate-worktree --reason \"<why the recorded path is wrong>\"."
+    test: "scripts/tests/bats/test-worktree-enforcement.bats"
+
+  - id: plan_worktree_redirect_loop
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_require_plan_worktree (AID_WT_REDIRECTED guard) + scripts/aid-fsm.sh:_fsm_require_plan_worktree"
+    instruction: "skills/pipeline.md (grep: 'Loop guard')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 8 — a process that was already re-executed once and is STILL outside the recorded tree terminates instead of recursing: plan-state is describing a place that is not where it says it is, and recursing would fork-bomb. The guard is cleared once the process is genuinely inside the tree, so a nested invocation for a DIFFERENT plan can still legitimately redirect."
+    recovery: "aid-plan-fsm.sh plan-state <plan_id> --recreate-worktree --reason \"<why>\"."
+    test: "scripts/tests/bats/test-worktree-enforcement.bats"
+
+  - id: plan_worktree_teardown_self
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_refuse_inside_plan_worktree (callers: cmd_plan_close, cmd_plan_rollback)"
+    instruction: "skills/pipeline.md (grep: 'get the **inverse**')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 11 — the INVERSE of the enforcer. plan-close and plan-rollback REMOVE the execution worktree, and `git worktree remove` on the directory the process stands in leaves the caller in a deleted cwd (and is refused outright on some platforms). There is no sane redirect for 'delete the tree you are in', so both refuse from inside it and name the one correct move; their own lifecycle work goes through state-root paths, so running from the state root costs nothing."
+    recovery: "cd <state_root> && <the same command> — printed verbatim in the refusal."
+    test: "scripts/tests/bats/test-worktree-enforcement.bats + scripts/tests/bats/test-worktree-teardown.bats"
+
+  - id: plan_worktree_branch_topology
+    type: 1
+    source: "scripts/aid-fsm.sh:cmd_init (the _fsm_in_plan_worktree gate over the is_worktree branch-enforcement skip; task branch created from plan/<id>)"
+    instruction: "skills/pipeline.md (grep: '### Branch Enforcement')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 9 — before this, `is_worktree` made branch enforcement skip WHOLESALE in any linked worktree, which is precisely where every EPIC now runs. The skip is narrowed to worktrees that are NOT the plan's recorded one: inside a plan's own execution worktree `plan/<id>` is an accepted starting HEAD, and a `task/<epic>/main` created there is cut from the PLAN BRANCH head — so a second EPIC starts from the advanced plan head, never from main. Standing on another EPIC's task branch still dies; an unusual branch still emits the advisory."
+    recovery: "The refusal names the branch found and the branch expected; `git -C <worktree> checkout plan/<plan_id>` restores the accepted starting point."
+    test: "scripts/tests/bats/test-worktree-topology.bats"
+
+  - id: plan_worktree_base_ref_missing
+    type: 1
+    source: "scripts/aid-fsm.sh:cmd_init (in-plan-worktree leg: plan/<id> missing -> die)"
+    instruction: "skills/pipeline.md (grep: 'plan worktree whose')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 9 — inside a plan worktree whose `plan/<id>` branch has been deleted, init HARD-FAILS naming BRANCH repair and states explicitly that --recreate-worktree is NOT the remedy: the worktree is intact, its base ref is not. Proceeding would create a task branch with no plan lineage in a tree nobody owns, and every later diff attribution would be wrong."
+    recovery: "Restore the plan branch (git reflog / git branch plan/<id> <sha>) — the refusal says this and says --recreate-worktree will not help."
+    test: "scripts/tests/bats/test-worktree-topology.bats"
+
+  - id: plan_worktree_create_transaction
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_create_plan_worktree + _pfsm_ensure_plan_worktree + _pfsm_plan_start_compensate"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 7 — the ONE creation sequence, shared by plan-start and the audited repair, never duplicated. Its refusals, all in this row: a directory at the canonical path that git does NOT manage (never deleted — this command owns only what it created); a registered worktree whose HEAD is not `plan/<id>` (somebody else's tree at this plan's path: NOT adopted, NOT deleted); a record pointing at a different registered tree; a `git worktree add` failure, whose git stderr is printed VERBATIM with any partial admin entry cleaned up so a retry starts from nothing. It never degrades to checkout-hijack mode. A plan-state write failure after a successful `worktree add` COMPENSATES (removes what this run created) and reports precisely what SURVIVED rather than claiming a clean rollback it did not achieve."
+    recovery: "Each refusal prints its own exact recovery (git worktree remove, git checkout plan/<id>, or --recreate-worktree)."
+    test: "scripts/tests/bats/test-plan-worktree-create.bats"
+
+  - id: plan_worktree_path_containment
+    type: 4
+    source: "scripts/lib/aid-plan-state.sh:plan_state_set_worktree_path (+ the validator leg in _plan_state_validate_json)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 7 (review F7) — `worktree_path` is documented as repo-root-relative or absolute, and that is now ENFORCED at the writer AND re-validated at every read: single-line, no `..` component, and an absolute path must resolve inside the state root. Before this, `../outside` was accepted and every consumer acted on it — teardown most dangerously, since it would then remove a directory with nothing to do with the plan. A record that violates it reads back as a corrupt state file naming the offending key, not as a usable path."
+    recovery: "plan-state <plan_id> --recreate-worktree --reason \"<why the record is wrong>\" rewrites the pointer through the checked writer."
+    test: "scripts/tests/bats/test-plan-worktree-create.bats"
+
+  - id: plan_worktree_repair_transaction
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_plan_state_recreate_worktree (plan-state <id> --recreate-worktree --reason) + _pfsm_teardown_plan_worktree"
+    instruction: "skills/pipeline.md (grep: '--recreate-worktree')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 11 — the audited repair for a damaged, deleted or unrecorded execution worktree. `--reason` is mandatory and >=20 characters (the record IS the repair's whole audit trail), the whole transaction runs under a per-plan WORKTREE lock (review F4/F5: a recreate can otherwise race a close's teardown into removing the winner's tree), and it refuses a corrupt state file, a plan with no state, a terminal plan, and a plan whose branch no longer exists ('this plan needs no worktree'). It writes through the P073 audit PRIMITIVES deliberately — a repair log, not a force waiver: there is no `forced_override` and no C4 waiver, because nothing here bypasses a precondition. Teardown takes the same lock and is idempotent, ALWAYS returns 0 (a stuck worktree must never block a durable close) and refuses to act on a recorded path outside the repo."
+    recovery: "The refusals name their own next step; an unauditable repair says so loudly rather than reporting success."
+    test: "scripts/tests/bats/test-worktree-teardown.bats"
+
+  # ══ P074 EPIC 1: concurrency foundations ═════════════════════════════════
+
+  - id: plan_id_locked_allocation
+    type: 4
+    source: "scripts/aid-fsm.sh:cmd_alloc (`alloc plan-id` | `alloc epic-id`)"
+    instruction: "skills/run-management.md (grep: 'Manual read-increment-write edits of')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 3 — `counter.yaml` was the last unprotected shared file in the state layer: no script wrote it, the agent was instructed to read-increment-write it by hand, and two concurrent sessions could mint the same plan id. Allocation now goes through a CLI that takes the `counter.yaml.lock` sidecar (lib/aid-lock.sh, 5s, fail closed), rewrites ONLY the digits on the matching line via mktemp+mv so every comment byte survives, prints ONLY the new id, and fails closed on a missing counter file ('run /aid-init first' — it never invents one), a missing counter line, or a non-integer value. The counter resolves under the state root, so allocating from a linked worktree increments the PRIMARY counter rather than forking one."
+    recovery: "The refusal names the malformed line or the missing file and points at /aid-init; the lock-timeout refusal names the .lock path and the recorded holder."
+    test: "scripts/tests/bats/test-alloc-lock.bats"
+
+  - id: active_runs_map_governance
+    type: 1
+    source: "scripts/aid-fsm.sh:upsert_active_run / remove_active_run / prune_active_runs / cmd_active_runs — consumed by defaults/hooks/pre-commit (main-branch governance guard)"
+    instruction: "commands/aid-run.md (grep: 'active-runs.json')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 4 — the single-slot `active-run-pointer.json` could only ever remember the MOST RECENT run, so a second init hid the first and a rogue commit on main went through while an older run still governed it. The locked, atomically written `active-runs.json` map is keyed by epic_id and the pre-commit guard enumerates EVERY entry with governs_main=true. Degradation is explicit and ordered: a parseable map (including `{}`) is AUTHORITATIVE; an unparseable or zero-byte one falls back to the legacy pointer; with neither usable the hook fails OPEN with a warning, because a false block is worse than a missed one. The writers are deliberately best-effort (a map failure must never fail an init), the guard is not. `active-runs prune` sweeps entries whose state file is gone or whose run is terminal and names what it removed; done-advance and plan-close remove exactly their OWN entry."
+    recovery: "aid-fsm.sh active-runs list shows what governs main; active-runs prune clears entries whose runs are gone. A corrupt map is left byte-identical and named in the writer's refusal."
+    test: "scripts/tests/bats/test-active-runs-map.bats"
+
+  - id: hook_worktree_state_root_resolution
+    type: 1
+    source: "defaults/hooks/pre-commit:_aid_state_root (inline copy of lib/aid-roots.sh:aid_state_root via `git rev-parse --git-common-dir`)"
+    instruction: "commands/aid-init.md (hook upgrade note)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 2 — the shared pre-commit hook read `.aid-o` relative to the checkout it ran in, so from a linked worktree (which is now where every EPIC runs) the commit-scope guard and the main-branch governance guard found no workspace and silently no-opped: an unguarded commit that LOOKED guarded. The hook now resolves the state root through the git common dir, keeps scope entries root-relative, and discloses in one stderr line when there is genuinely no workspace. The hook's fail-open contract is preserved — a failed resolution falls back to $PWD, never worse than pre-P074. A separate ADVISORY warns from the plan side (_pfsm_warn_stale_hooks) when the installed hook predates this resolver; it warns and never blocks, because refusing to open a plan over an old hook would be a worse failure than an unguarded commit."
+    recovery: "Re-run /aid-init to reinstall the hooks; the warning says exactly that."
+    test: "scripts/tests/bats/test-hooks-worktree.bats"
+
+  - id: state_root_no_forked_workspace
+    type: 4
+    source: "scripts/lib/aid-roots.sh:aid_state_root / aid_state_path / aid_invoke_root / aid_canonicalize_project_root"
+    instruction: "docs/extending-aid.md (grep: 'state root')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 1 — the substrate the whole plan rests on. Two roots are now distinct and named: the STATE root (the ONE `.aid-o`, resolved through the git common dir so every linked worktree reaches the same workspace) and the INVOKE root (the tree the command operates on). Every migrated `.aid-o` read/write goes through aid_state_path, so a command run from a plan worktree can no longer create a second, forked workspace that later reads as missing state. AID_PROJECT_ROOT is canonicalized rather than trusted verbatim. Not a refusal, so it is recorded as a resolution contract with a regression gate rather than as a gate itself."
+    recovery: "n/a — resolution failure outside a repository fails loudly and names both the resolver and the override."
+    test: "scripts/tests/bats/test-roots-worktree.bats"
+
+  - id: active_index_named_writers
+    type: 9
+    source: "scripts/lib/aid-active-index.sh:aid_active_index_refresh / aid_active_boundary_sync"
+    instruction: "skills/run-management.md (grep: 'active.md')"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 6 — `work/active.md` becomes a GENERATED index with four named writers, locked and atomically replaced, instead of hand-maintained prose that drifted from the state it claimed to describe. Deliberately fail-SOFT at every step (no state root, no yq/jq, unwritable dir, lock unavailable): each failure WARNs and leaves the previous index in place, because an index failure must never affect the lifecycle operation that triggered it."
+    recovery: "The warning names the cause; the previous index is never destroyed."
+    test: "scripts/tests/bats/test-active-index.bats"
+
+  # ══ P074 EPIC 3: generation as one transaction ═══════════════════════════
+
+  - id: generation_cp1_once_per_plan
+    type: 2
+    source: "scripts/aid-auto-pipeline.sh (the single aid-cp1-gate.sh call per generation + the sealed generation-authority.json consumed by every phase)"
+    instruction: "skills/pipeline.md (grep: 'generation authority')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 13 (D26) — CP1 used to be consulted once PER PHASE, so a three-phase plan asked for the same approval three times and a rerun asked again from the top. The gate is now consulted EXACTLY ONCE per generation and its decision is sealed into a plan-scoped `generation-authority.json` (schema aid-generation-authority/v1, canonical-JSON self-hash) bound to the plan bytes, the target branch and head, the phase-derivation version and the phase count. Every phase VERIFIES that receipt instead of re-running the gate. Honestly classified: the receipt is forgeable by anyone who can write the evidence directory — the enforcement is hash + transaction binding and audit detectability, not actor impossibility."
+    recovery: "n/a on the happy path. A refused gate prints its own labelled failure (generation_failure_label_classification)."
+    test: "scripts/tests/bats/test-generation-authority.bats"
+
+  - id: generation_authority_verification
+    type: 2
+    source: "scripts/aid-plan-to-epic.sh:_verify_generation_authority (--generation-authority + --transaction, both-or-neither)"
+    instruction: "skills/review-checkpoint-contracts.md (grep: 'transaction')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 14 — the per-phase generator, when driven by the pipeline, replaces its own CP1 gate call with a VERIFICATION of the sealed authority: jq present (fail closed), both files readable, both schema-valid against defaults/schemas/, the authority's self_sha256 recomputed, the plan bytes re-hashed against plan_sha256, target branch and head, phase range, phase-derivation version, the transaction->authority linkage (tx.authority_sha256 == auth.self_sha256), plan_id agreement, the full identity tuple, and the per-phase record with its re-derived epic_id/run_id. A leaked authority is therefore useless outside its own transaction and its own plan bytes. A STANDALONE invocation keeps the real gate — there is never a gate-less path."
+    recovery: "Each verification failure names the field that disagreed; supersede-generation archives an authority that no longer matches its plan."
+    test: "scripts/tests/bats/test-authority-verify.bats"
+
+  - id: generation_transaction_identity
+    type: 2
+    source: "scripts/aid-auto-pipeline.sh (identity = plan_sha256|target_head|phase_derivation_version|total_phases; the incomplete-transaction mismatch refusal)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 15 — an existing INCOMPLETE transaction whose recorded identity differs from this invocation's derives from DIFFERENT plan bytes (or a different target head, phase count or derivation version), and mixing artifacts from two derivations is exactly how the 2026-08-04 run stranded phases 2..N. The rerun refuses, printing both identities and the tuple's field names, and names supersede-generation. A MATCHING identity resumes: status per phase is DERIVED by re-hashing the recorded outputs and reading queue membership, never stored as an enum, so the files and the queue are the truth and the manifest is only the binding that lets a rerun VERIFY rather than blindly redo."
+    recovery: "aid-auto-pipeline.sh supersede-generation --plan <plan> --reason \"<at least 20 characters>\"."
+    test: "scripts/tests/bats/test-generation-resume.bats"
+
+  - id: queue_add_transaction_owned_skip
+    type: 4
+    source: "scripts/lib/aid-queue-write.sh:_queue_tx_owns (consumed under the queue lock by queue_append_entry) + scripts/aid-queue-add.sh --transaction"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 15 — a resumed generation must neither duplicate a queue entry nor die on its own earlier one (the 2026-08-04 failure). An existing entry is skipped as ALREADY OURS only when ownership is proven, and ownership is IDENTITY-bound, not name-bound: the transaction must record a phase with this epic_id, tx.plan_path and the entry's plan_ref must resolve to the same realpath, and EITHER the transaction itself recorded `queued: true` for that phase OR the entry's added_at falls within this transaction's lifetime (the crash window between a durable queue-add and the manifest update). A pre-supersede or pre-rollover entry matches the epic_id and the plan path and still fails both legs — so it is refused, not adopted. The decision is taken by the LOCKED writer; the unlocked pre-check in aid-queue-add.sh deliberately defers to it rather than exiting 0 on its own."
+    recovery: "The refusal names the conflicting entry; supersede-generation plus queue removal is the sanctioned path for a genuinely stale one."
+    test: "scripts/tests/bats/test-generation-resume.bats + scripts/tests/bats/test-supersede-generation.bats"
+
+  - id: generation_rollover_stale_queue_entries
+    type: 4
+    source: "scripts/aid-auto-pipeline.sh (pre-rollover queue scan over the completed transaction's epic ids)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 15 — before a COMPLETE transaction rolls over for edited plan bytes, any queue entry carrying one of that transaction's EPIC ids blocks the rollover BEFORE anything is archived or regenerated, whatever that entry's status is. The queue holds one entry per epic id, so the old row would otherwise silently come to stand for regenerated content it was never queued for."
+    recovery: "Remove or complete the naming queue entries, then re-run; the refusal lists them."
+    test: "scripts/tests/bats/test-generation-resume.bats"
+
+  - id: generation_supersede_transaction
+    type: 4
+    source: "scripts/aid-auto-pipeline.sh:_gen_supersede (subcommand `supersede-generation --plan <path> --reason <text>`)"
+    instruction: "skills/pipeline.md (grep: 'supersede-generation')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 16 — the audited recovery for an incomplete transaction whose plan changed underneath it, kept as a SEPARATE deliberate invocation rather than an automatic behaviour of the pipeline. It archives the transaction/authority PAIR to `.superseded-<epoch>` siblings with a forensic record plus timeline and audit-log entries, and it DELETES NOTHING — cleanup of already-generated EPICs and queue entries stays with plan-rollback and queue removal, where it is visible. Refuses: a reason under 20 characters, a --plan naming a different plan than the transaction records, a missing transaction, and a COMPLETE transaction (which rolls over automatically instead). A half-archived pair from an interrupted run is completed under the ORIGINAL epoch rather than re-archived under a new one."
+    recovery: "The refusal names which precondition failed; a half-archived pair is named as its own failure mode with the epoch to complete."
+    test: "scripts/tests/bats/test-supersede-generation.bats"
+
+  - id: generation_force_override_audit
+    type: 2
+    source: "scripts/aid-auto-pipeline.sh (public --force --reason over the plan-level CP1 gate: waiver artifact + timeline event + audit-log entry, all fail-closed)"
+    instruction: "commands/aid-plan.md (grep: '--force') + skills/planner.md + commands/aid-run.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 13 — the override an operator actually needs is a PUBLIC, invocation-scoped flag with a mandatory >=20-character reason and the full P073 three-record audit, replacing the undocumented environment variable it used to take. Deliberately STRICTER than P073's best-effort audit-log contract: every one of the three records must be durable or the force aborts and the partial waiver is removed, and the audit-log entry is verified by READING IT BACK, because aid-audit-log.sh always returns 0. A gate that PASSES with --force present writes no waiver and records force_unused: true — a force that changed nothing must not read as a bypass."
+    recovery: "The abort names which record could not be written; nothing was authorized."
+    test: "scripts/tests/bats/test-generation-authority.bats"
+
+  - id: generation_force_audit_before_authority
+    type: 2
+    source: "scripts/aid-auto-pipeline.sh (write ordering: the three force-audit records precede the generation-authority write)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 13 — the ORDERING half of generation_force_override_audit, recorded separately because it is a distinct failure mode with its own regression gate. The authority is the LAST write of the block: a kill between the two would otherwise leave a valid `forced_override: true` authority on disk with no audit record, and every later resume would accept it without re-consulting the gate — making the bypass permanent and invisible. Records first, fail-closed; authority last."
+    recovery: "n/a — an unwritable audit path aborts the generation before any authority exists."
+    test: "scripts/tests/bats/test-generation-authority.bats"
+
+  - id: generation_single_hold_lock
+    type: 4
+    source: "scripts/aid-auto-pipeline.sh:_gen_lock / _gen_unlock / _gen_lock_holder (one hold for the whole generation, released by the EXIT trap)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 15 — the whole generation runs under ONE re-entrant hold of a per-plan lock, so two concurrent invocations for the same plan can never interleave phase writes into one transaction. A second invocation waits (AID_GEN_LOCK_TIMEOUT, default 60s) and then refuses BY NAME with the holder's pid, having generated nothing; the message states explicitly that the .lock file must never be deleted to 'fix' it."
+    recovery: "Wait for the holder to finish, or investigate the named pid. Never delete the lock file."
+    test: "scripts/tests/bats/test-generation-resume.bats"
+
+  - id: generation_transaction_vanished_mid_run
+    type: 4
+    source: "scripts/aid-auto-pipeline.sh:_gen_tx_update (manifest missing at update time)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 15 — the transaction manifest disappearing mid-run (superseded or removed underneath the process) aborts immediately and states that nothing further was recorded, instead of continuing to generate against a binding that no longer exists."
+    recovery: "Re-run the generation; the identity check decides whether it resumes or refuses."
+    test: "scripts/tests/bats/test-generation-resume.bats"
+
+  - id: generation_receipt_rewrite_binding
+    type: 4
+    source: "scripts/aid-generation-finalize.sh (--rewrite: receipt must exist and match schema aid-generation-receipt/v1 AND plan_sha256)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 15 — the receipt's per-EPIC `queue_status` used to stay at the placeholder `pending_receipt` forever, because nothing rewrote it after queueing. The post-queue rewrite is a single writer that re-canonicalizes and atomically replaces the receipt, preserving created_at and adding updated_at — and it verifies the existing receipt's schema and plan_sha256 first, so it can never silently overwrite a receipt belonging to a different plan or a different generation. The completion short-circuit fires only AFTER this rewrite, so a crash anywhere before it always leaves the transaction resumable."
+    recovery: "Re-run the pipeline; the transaction finishes the rewrite without regenerating anything."
+    test: "scripts/tests/bats/test-generation-resume.bats"
+
+  - id: generation_steps_table_arity
+    type: 4
+    source: "scripts/aid-epic-to-json.sh:_split_table_row (character-walk splitter, hard arity error) + scripts/aid-plan-to-epic.sh (the two-rule backslash/pipe escape grammar that produces the rows)"
+    instruction: "skills/plan-writing.md (grep: 'Steps table')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 17 — a Steps-table row whose cell contained an escaped pipe was split into the wrong number of columns, and the converter PADDED the short row with `---` — producing a plausible, wrong step with no dependencies instead of an error. The producer now emits a two-rule escape grammar (truncate-before-escape, then `\\\\`, then `\\|`) and the consumer walks it character by character, failing with the arity it actually found. Legacy rows decode byte-identically."
+    recovery: "The error names the row and the field count found versus expected."
+    test: "scripts/tests/bats/test-generation-parsers.bats"
+
+  - id: cp1_adjudicator_nested_key_structural_error
+    type: 4
+    source: "scripts/aid-cp1-gate.sh:_cp1_toplevel_key_line (+ _cp1_blocker_empty_item for the empty-list forms)"
+    instruction: "skills/review-checkpoint-contracts.md (grep: 'adjudication')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 17 — an INDENTED (nested) `accepted_blockers:` / `rejected_blockers:` key used to read as 'no field' and pass silently, or to shadow a valid top-level key: an adjudication the PM wrote and the gate never saw. A nested key is now a loud structural error naming its line, whether or not a valid top-level key also exists. The same fix makes `- []`, `- none` and `- (none)` parse as genuinely EMPTY instead of as one blocker named 'none', and terminates the key walk correctly on blank/comment lines and on a final line without a trailing newline."
+    recovery: "The error names the offending line; move the key to column 0."
+    test: "scripts/tests/bats/test-generation-parsers.bats"
+
+  - id: lifecycle_rc3_branch_diagnosis
+    type: 4
+    source: "scripts/aid-auto-pipeline.sh (aid_lifecycle_ensure_manifest rc=3 + HEAD not on the lifecycle target branch)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 17 — rc=3 from the lifecycle manifest writer was reported with grammar advice about the plan file when the actual cause was standing on the wrong branch. The branch condition is now checked FIRST and is terminal: it names the branch found, the branch required and the exact `git checkout`, with zero grammar advice, and it is independent of AID_LIFECYCLE_MIGRATION because being on the wrong branch is not a migration concern. Fail-closed on the strict/plan_branch path; legacy plans keep the P073 proceed-with-WARN contract."
+    recovery: "git checkout <target_branch> — printed verbatim."
+    test: "scripts/tests/bats/test-generation-parsers.bats"
+
+  - id: generation_failure_label_classification
+    type: 2
+    source: "scripts/aid-auto-pipeline.sh:_gen_gate_hard_condition + the labelled refusal branch (labels: aid_cp1_blocked, aid_generation_force_required)"
+    instruction: "commands/aid-plan.md + skills/pipeline.md + skills/planner.md + commands/aid-run.md + skills/review-checkpoint-contracts.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 18 — exactly TWO AID-owned failure labels, printed as line 1 of stderr, and one of them carries a copy-pasteable force command. The load-bearing property is the ORDER: classification runs BEFORE the force branch, so a HARD class is non-forceable IN CODE, not merely by documentation — a --force over it lands in the same branch, fails in the same place, seals no authority and writes no waiver, and the message says so by name. Hard classes: gate rc 2 (usage), rc 3 (I/O), and three plan-identity failures (missing closing `---`, missing `id:`, the path-traversal guard). A mixed forceable+hard condition resolves to HARD. Output that already carries a label is passed through, never double-labelled."
+    recovery: "aid_generation_force_required prints the exact `--force --reason` invocation; aid_cp1_blocked names the blockers to adjudicate. A hard class names itself as unforceable and what to fix."
+    test: "scripts/tests/bats/test-generation-labels.bats"
+
+  - id: generation_not_an_aid_gate_note
+    type: 9
+    source: "scripts/aid-auto-pipeline.sh:_gen_on_exit (gated on _gen_gate_passed, set from the sealed authority's cp1.verdict == pass)"
+    instruction: "skills/pipeline.md (grep: 'not an AID gate')"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 18 — when a generation dies AFTER AID's own CP1 decision passed and the failure is not an AID-owned gate, one honest line is appended saying the failure is not an AID gate. It rewrites nothing: the failing subprocess's stderr is inherited verbatim. It never fires before the gate passes, never on an AID-owned gate failure, and never on a FORCED authority (the flag is set from the sealed verdict, not from 'we got past the gate'). The deliberately UNSHIPPED third class is host_permission_or_session_blocked: no reliable signature exists today, and a guessing detector would relabel other people's errors."
+    recovery: "n/a — advisory only."
+    test: "scripts/tests/bats/test-generation-labels.bats"
+
+  - id: contract_validate_sigpipe_hazard
+    type: 4
+    source: "scripts/gates/aid-contract-validate.sh (first-line extraction via bash parameter expansion, never `... | head -1`)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 Step 17 sibling fix — under `set -euo pipefail` a `| head -1` probe could take SIGPIPE and abort the gate with empty stdout, which the caller then reported as a MALFORMED plan.json/EPIC.md contract: a false diagnosis on a clean contract, measured at roughly 4% of runs on a loaded box. First-line extraction is now pure bash, and a gate that dies without a verdict is reported as a GATE failure rather than as a bad contract."
+    recovery: "n/a — the false diagnosis is removed; a genuine gate crash now names itself."
+    test: "scripts/tests/bats/test-generation-resume.bats"
+
+  - id: test_aggregate_truncated_tap
+    type: 9
+    source: "scripts/tests/run-all-tests.sh (TRUNCATED_SUITES: the TAP plan line is held as a contract)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P074 EPIC 1 — a bats suite whose TAP plan line `1..N` promises more results than actually arrive (classically a child process holding bats' fd 3, or a `run` child exiting 127) used to disappear silently while the aggregate run still exited 0: tests vanished and the portfolio reported green. The plan line is now a contract, and a truncated stream fails the aggregate and is listed by name."
+    recovery: "The summary names the truncated suites; the usual cause is a child inheriting fd 3 (close it with `3>&-`)."
+    test: "self-testing — the aggregate runner is the gate"

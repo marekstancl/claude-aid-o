@@ -1482,3 +1482,148 @@ scope.
 re-freeze, re-review. The invalidation message says so, and it offers the
 `accept-ancillary` recovery only when the difference really is ancillary-only —
 offering it otherwise would send the operator into a refusal loop.
+
+## Two roots, per-plan worktrees, and the generation transaction (P074)
+
+P074 is what made it possible to work on two things at once. Before it,
+everything shared one checkout: opening a plan refused on an unrelated
+uncommitted edit, starting an EPIC moved the branch under whatever you were
+reading, and generating a second plan while the first was being implemented was
+not something the tooling had a shape for. Three mechanisms carry that, and if
+you add anything that resolves state, touches a tree, or generates EPICs, you
+have to know all three.
+
+### The roots contract: state root vs invoke root
+
+There are now two roots, and conflating them is the whole failure mode:
+
+- **The state root** — the ONE `.aid-o` workspace, resolved through the git
+  common directory (`git rev-parse --path-format=absolute --git-common-dir`),
+  so every linked worktree of a repository reaches the same workspace.
+- **The invoke root** — the tree the command operates ON. In a plan worktree it
+  is that worktree; in the primary checkout it is the checkout.
+
+```bash
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+state_file="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}/fsm-state.yaml")"
+tree="$(aid_invoke_root)"
+```
+
+**Every `.aid-o` read and write goes through `aid_state_path`.** A cwd-relative
+`.aid-o/...` was harmless while there was one checkout; from a linked worktree
+it silently creates a SECOND workspace, and the run that wrote it is the only
+thing that will ever find it. `AID_PROJECT_ROOT` is honoured but canonicalized
+rather than trusted verbatim.
+
+Two consumers of the same contract live outside the scripts: the installed
+`pre-commit` hook carries an inline copy of the resolver (a hook cannot source
+the plugin), and `aid-plan-fsm.sh` keeps its own private resolver — deliberately
+not migrated, because its resolution order is bound to `--project-root`.
+
+### The per-plan execution worktree
+
+`plan-start` creates `.aid-worktrees/plan-<id>` checked out on `plan/<id>` and
+records the absolute path in plan-state. The path is CANONICAL by design: it
+stays derivable without reading any state, which is what lets an enforcer fall
+back to physical evidence when the state file cannot be read.
+
+Lifecycle, in the order a contributor meets it:
+
+| Stage | Mechanism | What it refuses |
+|-------|-----------|-----------------|
+| create | `_pfsm_create_plan_worktree` (shared by plan-start and the repair) | a foreign directory at the path, a registered tree on the wrong branch, a failed `worktree add` (git's stderr verbatim) |
+| enforce | `_pfsm_require_plan_worktree` / `_fsm_require_plan_worktree` | a missing or unregistered recorded tree, a recorded path that is not a LINKED worktree, the plan-start crash window, a redirect that did not land |
+| teardown | `_pfsm_teardown_plan_worktree` at plan-close / plan-rollback | nothing — teardown ALWAYS returns 0, because a stuck worktree must never block a durable close; the inverse guard refuses running it from INSIDE the tree |
+| repair | `plan-state <id> --recreate-worktree --reason "<why>"` | a reason under 20 characters, a corrupt or terminal plan, a concurrent worktree transaction (it holds the per-plan worktree lock) |
+
+**The enforcer redirects by default and refuses only when the worktree is
+broken.** A plan-linked command that touches a tree re-executes itself with the
+worktree as cwd, preserving argv verbatim except that operator-relative path
+arguments are absolutized first — the cwd changes underneath them, so a
+`--execution-yaml config/exec.yaml` would otherwise resolve inside the worktree
+where it does not exist. If you add a path-taking flag to either CLI, add it to
+the enumerated list in `_aid_wt_rewrite_args`; a flag missing from it breaks
+silently, only after a redirect.
+
+**Two mistakes that are easy to make and cost real time:**
+
+1. *"Registered with git" is not "is the plan's tree."* `git worktree list`
+   includes the PRIMARY checkout, so a `worktree_path` recorded as the state
+   root passes every existence and registration probe, then matches the cwd as
+   "already there" — and every checkout and merge runs in the PM's tree while
+   the command reports isolation. Check LINKEDNESS (`<common>/worktrees/…`)
+   before comparing cwd.
+2. *Never diagnose from an answer you did not get.* `plan_state_get` returns rc
+   2 when jq/yq is missing and rc 5 when the state file is corrupt. Collapsing
+   those into "the plan records no worktree" made the crash-window refusal fire
+   on a missing dependency, telling the operator their plan-start had been
+   killed mid-transaction. Cannot-read is a THIRD state, and on it the enforcer
+   uses physical evidence: a git-registered linked worktree at the canonical
+   path.
+
+Fixtures that simulate a pruned workspace must remove the registration too.
+Deleting only the state record while the registered worktree survives is a
+DIFFERENT scenario — it is exactly the crash window, and the enforcer refuses it
+on purpose.
+
+### The generation transaction
+
+Generation is one transaction per plan, not N independent phase runs.
+
+- **Authority.** CP1 is consulted ONCE and its decision is sealed into
+  `generation-authority.json`, bound to the plan bytes, the target branch and
+  head, the phase-derivation version and the phase count, with a canonical-JSON
+  self-hash. Every phase VERIFIES that receipt (`_verify_generation_authority`)
+  instead of re-running the gate; a standalone generator invocation still runs
+  the real gate, so there is never a gate-less path. Classified honestly: the
+  receipt is forgeable by anyone who can write the evidence directory. The
+  enforcement is hash and transaction binding plus audit detectability, not
+  actor impossibility.
+- **Manifest.** `transaction.json` records each phase's outputs and their
+  hashes. Phase status is **derived**, never stored: a rerun re-hashes the
+  recorded outputs and reads queue membership, so the files and the queue are
+  the truth and the manifest is only the binding that lets a rerun VERIFY
+  rather than blindly redo.
+- **Resume.** Identity is `plan_sha256|target_head|phase_derivation_version|
+  total_phases`. A matching identity resumes; a mismatch over an INCOMPLETE
+  transaction refuses, naming both identities, because artifacts from two
+  derivations are never mixed.
+- **Supersede.** `aid-auto-pipeline.sh supersede-generation --plan <path>
+  --reason "<>=20 chars>"` archives the transaction/authority pair with a
+  forensic record. It deletes nothing — cleanup of generated EPICs and queue
+  entries stays with plan-rollback and queue removal, where it is visible.
+
+Who consumes the transaction, and what each is allowed to conclude from it:
+
+| Consumer | Behaviour |
+|----------|-----------|
+| `aid-plan-to-epic.sh --generation-authority --transaction` | verifies the sealed authority against schema, self-hash, plan bytes, target head, phase range and transaction linkage; both flags or neither |
+| `aid-epic-to-json.sh` | ordinary converter — the transaction records its output hash, it reads nothing from it |
+| `aid-queue-add.sh --transaction` (unlocked pre-check) | never decides; defers to the locked writer |
+| `lib/aid-queue-write.sh:_queue_tx_owns` | the ONLY place an existing queue entry is judged ours: IDENTITY-bound (same plan path, and either this transaction recorded the queueing or the entry was added within its lifetime) |
+| `aid-generation-finalize.sh --rewrite` | rewrites `queue_status` only over a receipt whose schema and `plan_sha256` still match |
+| the pipeline's own resume path | skips a phase only when its recorded hashes still verify |
+
+**Ownership is identity-bound, not name-bound.** A queue entry with the right
+epic_id and the right plan path, added before this transaction existed, is a
+STALE entry — it is refused, not adopted. That distinction is the difference
+between resuming and silently blessing somebody else's leftovers.
+
+**Write order is load-bearing in two places.** A phase's outputs are recorded in
+the manifest AFTER they are on disk and contract-validated (a crash before that
+regenerates the phase; a crash after resumes at the next one). And the three
+force-audit records are written BEFORE the forced authority exists — a kill
+between them would otherwise leave a valid `forced_override` authority that
+every later resume accepts without re-consulting the gate, making the bypass
+permanent and invisible.
+
+### Adding to this area
+
+Anything new that resolves state goes through `lib/aid-roots.sh`. Anything new
+that touches a tree in a plan-linked command sits BEHIND the enforcer, never
+beside it. Anything new that generates or queues per phase reads its ownership
+from the transaction, not from the epic id. And every refusal you add gets a row
+in `defaults/enforcement-registry.yaml` with its enforcement mechanism named at
+design time — a detector without enforcement is decoration.
+
+**Last Updated:** 2026-08-06

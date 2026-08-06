@@ -1010,13 +1010,56 @@ _pfsm_plan_worktree_lock_path() {
 # empty when the plan records none (legacy plan, or the crash window between
 # registration and the record). A recorded relative path is resolved against
 # the state root, which is what the schema documents.
+#
+# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read"
+# (mirrors aid-fsm.sh's _fsm_plan_worktree_recorded — the same defect was
+# fixed there first):
+#   0 + a path  -> the plan records that worktree
+#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
+#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
+#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
+#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
+#                  other non-0/1 rc such as a lock timeout)
+#
+# The distinction is load-bearing. `_pfsm_require_plan_worktree` turns
+# "records none BUT a worktree exists at the canonical path" into the
+# plan-start CRASH-WINDOW refusal — a hard claim that plan-start was killed
+# between `git worktree add` and the state write, pointing the operator at
+# `--recreate-worktree`. Collapsing an unreadable state file into "records
+# none" made that refusal fire on a missing `yq`: a false diagnosis of a
+# corrupted transaction when the real fault was a missing dependency. Never
+# diagnose from an answer you did not get.
 _pfsm_recorded_worktree() {
-  local root="$1" plan_id="$2" rec=""
-  rec="$(plan_state_get "$plan_id" "worktree_path" 2>/dev/null)" || rec=""
+  local root="$1" plan_id="$2" rec="" rc=0
+  rec="$(plan_state_get "$plan_id" "worktree_path" 2>/dev/null)" || rc=$?
+  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
+  # the field is absent. Both are real answers. Anything else is not.
+  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
+    printf ''
+    return 2
+  fi
   [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
   [[ -z "$rec" ]] && return 0
   [[ "$rec" == /* ]] || rec="${root}/${rec}"
   printf '%s' "$rec"
+}
+
+# _pfsm_canonical_worktree_if_live <root> <plan_id> — the canonical
+# `.aid-worktrees/plan-<id>` path when it EXISTS and git knows it as a LINKED
+# worktree, empty otherwise.
+#
+# Used only where the plan-state record is unreadable (rc 2 above). The
+# directory name is fixed by Step 7 precisely so it stays derivable without
+# reading state, and git's own registration is the corroboration: a registered
+# linked worktree at the plan's canonical path is physical evidence that this
+# plan is worktree-mode, independent of any parser.
+_pfsm_canonical_worktree_if_live() {
+  local root="$1" plan_id="$2" canonical
+  canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  [[ -d "$canonical" ]] || { printf ''; return 0; }
+  _pfsm_worktree_registered "$root" "$canonical" || { printf ''; return 0; }
+  _pfsm_worktree_is_linked "$root" "$canonical" || { printf ''; return 0; }
+  printf '%s' "$canonical"
 }
 
 # _pfsm_warn_stale_hooks <root> — the installed pre-commit hook predates P074
@@ -1409,8 +1452,12 @@ _PFSM_ORIG_ARGS=()
 # refusal to report, not a resolution error to raise from every git call.
 # ---------------------------------------------------------------------------
 _pfsm_plan_tree_root() {
-  local root="$1" plan_id="$2" rec=""
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  local root="$1" plan_id="$2" rec="" rc=0
+  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")" || rc=$?
+  # Unreadable record: fall back to the physical evidence, so a live plan
+  # worktree is not silently demoted to "run in the state root" just because
+  # `yq` is missing or the state file is corrupt.
+  [[ "$rc" -eq 2 ]] && rec="$(_pfsm_canonical_worktree_if_live "$root" "$plan_id")"
   if [[ -n "$rec" && -d "$rec" ]] && _pfsm_worktree_registered "$root" "$rec" \
      && _pfsm_worktree_is_linked "$root" "$rec"; then
     printf '%s' "$rec"
@@ -1569,9 +1616,23 @@ _pfsm_wt_abs_args() { _aid_wt_rewrite_args "$@"; }
 # ---------------------------------------------------------------------------
 _pfsm_require_plan_worktree() {
   local plan_id="$1" root="$2"
-  local canonical rec here want
+  local canonical rec here want rc=0
   canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")" || rc=$?
+
+  # UNREADABLE record (missing yq/jq, corrupt state file, lock timeout). The
+  # crash-window refusal below must NOT fire here: it asserts that plan-start
+  # was killed between registering the worktree and recording it, and that is
+  # a claim about a record we could not read. Use the physical evidence
+  # instead — a git-registered LINKED worktree at the canonical path IS the
+  # plan's tree, so the command still runs where it belongs and then fails
+  # closed on its own dependency/mode preconditions, which name the real
+  # fault. With no such worktree there is nothing to redirect to, and
+  # behaviour is unchanged.
+  if [[ "$rc" -eq 2 ]]; then
+    rec="$(_pfsm_canonical_worktree_if_live "$root" "$plan_id")"
+    [[ -n "$rec" ]] || return 0
+  fi
 
   if [[ -z "$rec" ]]; then
     if [[ -d "$canonical" ]] || _pfsm_worktree_registered "$root" "$canonical"; then
@@ -9119,6 +9180,34 @@ _pfsm_plan_state_repair() {
     plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "EPIC_INTEGRATION"' >/dev/null || true
   fi
 
+  # ── The execution worktree pointer (P074) ────────────────────────────────
+  # A rebuilt plan-state file has no `worktree_path`, and EVERY plan-linked
+  # command then reads "records NO execution worktree, but one exists at
+  # <canonical>" and refuses with the plan-start CRASH-WINDOW diagnosis —
+  # blaming a killed plan-start for something --repair itself did. Repair
+  # re-derives the pointer from the SAME physical evidence the enforcer
+  # trusts: a directory at the canonical path that git knows as a LINKED
+  # worktree AND that is checked out on this plan's branch. That is not a
+  # guess — the path is fixed by Step 7 and the branch identity is what
+  # distinguishes this plan's tree from somebody else's tree at that path
+  # (P074 review F6). Anything short of all three is NOT adopted, and then
+  # repair SAYS SO with the exact command, instead of leaving the operator to
+  # discover it from a refusal that describes the wrong cause.
+  local _rep_wt="" _rep_rc=0
+  _rep_wt="$(_pfsm_recorded_worktree "$project_root" "$plan_id")" || _rep_rc=$?
+  if [[ "$_rep_rc" -eq 0 && -z "$_rep_wt" ]]; then
+    local _rep_canonical; _rep_canonical="$(_pfsm_canonical_worktree_if_live "$project_root" "$plan_id")"
+    if [[ -n "$_rep_canonical" ]] && _pfsm_worktree_head_is "$_rep_canonical" "$plan_branch"; then
+      if plan_state_set_worktree_path "$plan_id" "$_rep_canonical" >/dev/null 2>&1; then
+        echo "REPAIR: restored ${plan_id}'s execution worktree pointer to ${_rep_canonical} (a registered linked worktree checked out on ${plan_branch})." >&2
+      else
+        echo "REPAIR INCOMPLETE: ${plan_id}'s execution worktree at ${_rep_canonical} could NOT be recorded in plan-state — every plan-linked command will refuse until it is. Record it with: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"restore the worktree pointer lost with the pruned workspace\"" >&2
+      fi
+    else
+      echo "NOTE: ${plan_id}'s execution worktree pointer was NOT restored — there is no registered linked worktree on ${plan_branch} at $(_pfsm_plan_worktree_path "$project_root" "$plan_id") to derive it from. If this plan runs in a worktree, restore it with: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"restore the worktree lost with the pruned workspace\" — if it predates worktree mode, nothing is missing." >&2
+    fi
+  fi
+
   local crc=0
   plan_op_commit "$plan_id" "$op_id" || crc=$?
   if [[ "$crc" -ne 0 ]]; then
@@ -9760,8 +9849,19 @@ cmd_plan_rollback() {
     # reconciled. No other state is touched: only this terminal one can have a
     # half-finished rollback behind it.
     if [[ "$cur_state" == "ROLLED_BACK" ]]; then
-      echo "ALREADY ROLLED BACK: ${plan_id} is ROLLED_BACK — nothing to roll back again; reconciling its execution worktree only." >&2
+      # The idempotent teardown always runs — that is what this branch is for.
+      # But exit 0 is only honest when the caller asked for the rollback that
+      # ACTUALLY happened. A scripted caller asking "roll back with revert X"
+      # against a plan rolled back with revert Y was being told "success" for a
+      # request nothing satisfied: the ledger stayed correct, the exit code lied.
       _pfsm_teardown_plan_worktree "$root" "$plan_id"
+      local _rb_recorded=""
+      _rb_recorded="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_rollback.revert_commit' 2>/dev/null)" || _rb_recorded=""
+      if [[ -n "${revert_commit:-}" && -n "$_rb_recorded" && "$revert_commit" != "$_rb_recorded" ]]; then
+        echo "PRECONDITION FAIL: plan-rollback: ${plan_id} is already ROLLED_BACK, but with revert ${_rb_recorded} — you asked for ${revert_commit}. Its execution worktree was reconciled; nothing else was written and no record was changed." >&2
+        exit 1
+      fi
+      echo "ALREADY ROLLED BACK: ${plan_id} is ROLLED_BACK${_rb_recorded:+ with revert ${_rb_recorded}} — nothing to roll back again; reconciling its execution worktree only." >&2
       exit 0
     fi
     echo "PRECONDITION FAIL: plan-rollback: ${plan_id} is '${cur_state:-<none>}' — a rollback closes a plan whose merge WAS published, which is PLAN_MERGING. Nothing was written." >&2

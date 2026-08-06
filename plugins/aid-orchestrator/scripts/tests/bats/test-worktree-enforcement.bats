@@ -23,7 +23,7 @@
 # helper that can never itself be a missing command — a `run` child exiting 127
 # writes a bats warning to fd 3, which with `3>&-` destroys the whole file's
 # output. After any edit verify:
-#   bats --tap test-worktree-enforcement.bats | grep -cE '^(ok|not ok)'  # == 19
+#   bats --tap test-worktree-enforcement.bats | grep -cE '^(ok|not ok)'  # == 24
 
 load test-helpers.bash
 
@@ -448,4 +448,130 @@ _seed_completed_epic() {
   [[ "$output" == *"gates"* ]]
   [[ "$output" == *"task/E-941-1_1/main"* ]]
   [[ "$output" != *"${ROOT}/task/E-941-1_1/main"* ]]
+}
+
+# ─── 20-23. an UNREADABLE plan-state is never a DIAGNOSIS ──────────────────
+#
+# `plan_state_get` answers rc 2 when yq/jq is missing and rc 5 when the state
+# file is corrupt. Collapsing either into "the plan records NO worktree" made
+# the crash-window refusal fire on a missing dependency: it told the operator
+# their plan-start had been killed mid-transaction and pointed at
+# `--recreate-worktree`, which is a claim about a record nobody could read.
+# Cannot-read now falls back to PHYSICAL evidence — a git-registered LINKED
+# worktree at the canonical path — which Step 7 keeps derivable without state.
+
+# _path_without_yq — a PATH carrying everything the CLI needs EXCEPT `yq`,
+# built by mirroring the real PATH as symlinks and dropping that one name, so
+# the fixture degrades like a machine that never installed yq rather than like
+# a machine with no tools at all.
+_path_without_yq() {
+  local shim="$TEST_TMPDIR/nobin" d f b
+  mkdir -p "$shim"
+  local oldifs="$IFS"; IFS=:
+  for d in $PATH; do
+    IFS="$oldifs"
+    [[ -d "$d" ]] || continue
+    for f in "$d"/*; do
+      [[ -f "$f" && -x "$f" ]] || continue
+      b="${f##*/}"
+      [[ "$b" == "yq" ]] && continue
+      [[ -e "$shim/$b" ]] && continue
+      ln -s "$f" "$shim/$b" 2>/dev/null || true
+    done
+    IFS=:
+  done
+  IFS="$oldifs"
+  printf '%s' "$shim"
+}
+
+# _from_no_yq <dir> <script> <args...> — as _from, but with yq off the PATH.
+# `bash` is invoked by ABSOLUTE path so the child can never be a missing
+# command (a `run` child exiting 127 writes to fd 3 and, with 3>&-, truncates
+# the whole file's TAP output).
+_from_no_yq() {
+  local d="$1" prog="$2"; shift 2
+  local q="" a
+  for a in "$@"; do q+=" '${a}'"; done
+  local shim; shim="$(_path_without_yq)"
+  local bashbin; bashbin="$(command -v bash)"
+  bash -c "cd '$d' && PATH='$shim' exec '$bashbin' '$prog'${q}" 3>&-
+}
+
+@test "P074 A1: a plan-state that cannot be READ (no yq) is not reported as the plan-start crash window" {
+  command -v yq >/dev/null 2>&1 || skip "yq is not installed, so 'yq missing' cannot be distinguished from the baseline"
+  _mk_project
+  _seed_plan 1
+  local shim; shim="$(_path_without_yq)"
+  [ -n "$shim" ]
+  run bash -c "cd '$ROOT' && PATH='$shim' command -v yq" 3>&-
+  [ "$status" -ne 0 ] || skip "yq is still reachable through the shim PATH — the degradation cannot be staged here"
+
+  run _from_no_yq "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  # THE ASSERTION: no false forensics. It must not claim a killed plan-start,
+  # and must not name --recreate-worktree as the repair for a missing binary.
+  [[ "$output" != *"records NO execution worktree"* ]]
+  [[ "$output" != *"killed between registering the worktree and recording it"* ]]
+  # And the physical evidence still put the command in the plan's own tree.
+  [[ "$output" == *"executes in its own worktree"* ]]
+}
+
+@test "P074 A1: with no yq AND no worktree anywhere, behaviour is unchanged (no crash-window claim)" {
+  command -v yq >/dev/null 2>&1 || skip "yq is not installed, so 'yq missing' cannot be distinguished from the baseline"
+  _mk_project
+  _seed_plan 0
+  local before_branch; before_branch="$(_primary_branch)"
+  run _from_no_yq "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  [[ "$output" != *"records NO execution worktree"* ]]
+  [[ "$output" != *"executes in its own worktree"* ]]
+  # Nothing was redirected and the PM's checkout never moved.
+  [ "$(_primary_branch)" = "$before_branch" ]
+}
+
+@test "P074 A1: the unit contract — _pfsm_recorded_worktree returns 2 (unknown), not 0 (records none), when the state cannot be read" {
+  _mk_project
+  _seed_plan 1
+  # Corrupt the state file: plan_state_get answers rc 5, which is a read
+  # FAILURE, not the answer "no worktree recorded".
+  printf 'this is: [not valid\n' > "$ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-state.yaml"
+  run bash -c "cd '$ROOT'
+    export AID_PLAN_STATE_PROJECT_ROOT='$ROOT'
+    source '$PLAN_FSM'
+    rc=0; out=\"\$(_pfsm_recorded_worktree '$ROOT' '$PLAN_ID')\" || rc=\$?
+    printf 'rc=%s out=[%s]\n' \"\$rc\" \"\$out\"" 3>&-
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rc=2"* ]]
+  [[ "$output" == *"out=[]"* ]]
+}
+
+@test "P074 A2: plan-state --repair restores the execution worktree pointer from the live worktree" {
+  _mk_project
+  _seed_plan 1
+  # The prune this repairs: the runtime plan-state tree is gone, the git
+  # worktree is not.
+  rm -rf "$ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  [ -d "$(_wt)" ]
+
+  run _from "$ROOT" "$PLAN_FSM" plan-state "$PLAN_ID" --repair --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"restored ${PLAN_ID}'s execution worktree pointer"* ]]
+  # The pointer is really back, so the next plan-linked command redirects
+  # instead of firing the crash-window refusal.
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"executes in its own worktree"* ]]
+  [[ "$output" != *"records NO execution worktree"* ]]
+}
+
+@test "P074 A2: when there is no worktree to derive from, --repair SAYS the pointer was not restored and names the command" {
+  _mk_project
+  _seed_plan 1
+  rm -rf "$ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  # Both the registration and the directory are gone — nothing to derive.
+  git -C "$ROOT" worktree remove --force "$(_wt)" >/dev/null 2>&1 || rm -rf "$(_wt)"
+  git -C "$ROOT" worktree prune >/dev/null 2>&1 || true
+
+  run _from "$ROOT" "$PLAN_FSM" plan-state "$PLAN_ID" --repair --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"execution worktree pointer was NOT restored"* ]]
+  [[ "$output" == *"--recreate-worktree"* ]]
 }
