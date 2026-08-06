@@ -266,7 +266,10 @@ aid_test_audit_render_chat_summary() {
       ([.actions[]? | select(.change != null)]) as $props
       | ([$props[] | select(.declined_previously == true)]) as $declined
       | ([$props[] | select(.declined_previously != true)]
-         | sort_by((["critical","high","medium","low"] | index(.priority)),
+         # `.priority as $p` FIRST: after the pipe into the literal array, `.`
+         # is the array, so `.priority` indexed an array with a string and the
+         # whole ranked section rendered empty over 33 real actions.
+         | sort_by((.priority as $p | ["critical","high","medium","low"] | index($p)),
                    (if .impact.kind == "measured" then 0 elif .impact.kind == "estimated" then 1 else 2 end))) as $live
       | if ($props | length) == 0 then
           # NEVER "nothing to do" over findings that say otherwise. A real run

@@ -381,3 +381,32 @@ JSON
   [[ "$output" == *"3 unit(s) are blocked by a FIXABLE resource"* ]]
   [[ "$output" != *"Nothing is proposed to run in parallel on current evidence."* ]]
 }
+
+@test "the ranked proposals section actually renders, critical first" {
+  # v2.72.3's sort piped into a literal array before reading .priority, so jq
+  # indexed an array with a string and the ONE section this whole feature
+  # exists for came out empty — over 33 real actions in a real audit.
+  local f="$TEST_TMPDIR/findings.json"
+  local d="$TEST_TMPDIR/decision.json"
+  _write_findings "$f" '[]'
+  _valid_decision_base '.actions = [
+    {action:"fix", targets:["bats:low"], priority:"low",
+     reason:"r", change:"low change", evidence_refs:["e"],
+     effort:{bucket:"S"}, conflicts_with:[], risk:null, proposal_id:"aaaaaaaaaaaaaaaa",
+     impact:{kind:"unknown", before_ms:null, after_ms:null, assumptions:[]}},
+    {action:"fix", targets:["bats:crit"], priority:"critical",
+     reason:"r", change:"critical change", evidence_refs:["e"],
+     effort:{bucket:"S"}, conflicts_with:[], risk:"the only coverage goes", proposal_id:"bbbbbbbbbbbbbbbb",
+     impact:{kind:"unknown", before_ms:null, after_ms:null, assumptions:[]}}]' > "$d"
+
+  run aid_test_audit_render_chat_summary "$f" "" "full" "$d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"critical change"* ]]
+  [[ "$output" == *"low change"* ]]
+  [[ "$output" == *"risk: the only coverage goes"* ]]
+  # critical renders before low
+  local out_crit out_low
+  out_crit="$(printf '%s' "$output" | grep -n "critical change" | head -1 | cut -d: -f1)"
+  out_low="$(printf '%s' "$output" | grep -n "low change" | head -1 | cut -d: -f1)"
+  [ "$out_crit" -lt "$out_low" ]
+}

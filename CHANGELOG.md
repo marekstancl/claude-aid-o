@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.72.4] — 2026-08-06
+
+### Fixed
+- **The ranked "Proposed changes" section rendered empty over 33 real actions** — the sort piped into a literal priority array before reading `.priority`, so jq indexed an array with a string and the one section this whole feature exists for silently died (`Cannot index array with string "priority"`). Bind first, then index; a regression test now asserts the section renders with critical first.
+
 ## [2.72.3] — 2026-08-06
 
 > Two consumer audits independently hit — and one independently diagnosed, down
