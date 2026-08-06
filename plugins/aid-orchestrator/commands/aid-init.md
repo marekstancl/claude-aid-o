@@ -459,6 +459,15 @@ controller-side companion in `aid-fsm.sh` re-checks the same scope at each step 
 (`jq`/`yq`) or unreadable config warns, passes, and emits a `commit_guard_disclosure` event rather
 than hard-blocking.
 
+**Worktree-safe since P074:** the template resolves the `.aid-o` state root inline via
+`git rev-parse --git-common-dir` (falling back to `$PWD` on old git), so the guard genuinely
+fires from linked `git worktree` checkouts — pre-P074 templates read `.aid-o` relative to
+`$PWD` and silently no-opped there. **Upgrade note for existing projects:** hook installation
+is a template copy, so projects initialized with an older plugin version keep the
+worktree-blind hook until they re-run `/aid-init` (the marker-block upgrade path above
+picks up the new template automatically). Re-run `/aid-init` after upgrading the plugin,
+especially before using worktree-based execution.
+
 ### pre-push (version bump check)
 
 1. **Source template:** `{plugin_path}/defaults/hooks/pre-push`
@@ -466,6 +475,11 @@ than hard-blocking.
 3. **Logic:** Same copy/append/upgrade flow as pre-commit, but matched on pre-push's OWN marker `AID-ORCHESTRATOR-PREPUSH-START` (NOT the pre-commit `AID-ORCHESTRATOR-HOOK-START`) — idempotency depends on using the correct marker.
 
 **What the hook does:** Blocks push if `feat:` or `fix:` commits exist since last git tag without a corresponding `release:` commit. Suggests running `aid-release.sh auto`. Bypass: `git push --no-verify`.
+
+**Worktree note (P074):** this hook reads no `.aid-o` paths (it works purely from git refs/tags/log,
+worktree-safe by construction), so it needed no resolver wiring — the template only carries the
+inline state-root resolver as a commented, ready-to-use helper for any future `.aid-o` read.
+The same `/aid-init` re-run upgrade note as pre-commit applies.
 
 ## Config Defaults Installation
 
@@ -630,7 +644,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-08-06
 
 ## Plan mode
 

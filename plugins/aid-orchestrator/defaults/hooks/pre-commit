@@ -24,6 +24,27 @@
 #
 # Fail-open philosophy: absent tooling (jq/yq) or unreadable config never
 # hard-blocks a commit — it warns, passes, and emits a disclosure event.
+# Fail-open covers MISSING TOOLING only — "wrong directory" is handled by the
+# state-root resolver below and is no longer a silent pass (P074 Step 2).
+
+# ── Worktree-safe state root (P074 Step 2) ──────────────────────────────────
+# This hook lives in the COMMON .git/hooks and therefore fires from every
+# linked worktree — but `.aid-o/` is gitignored and exists only in the PRIMARY
+# checkout, so a $PWD-relative read from a worktree misses it and the fail-open
+# design silently no-ops the guard. `_aid_state_root` is a deliberate tiny COPY
+# of the plugin lib resolver (scripts/lib/aid-roots.sh `aid_state_root`, minus
+# caching): a consumer-repo hook cannot know the plugin cache path, so it
+# cannot source the lib. If `git rev-parse` fails (pre-`--path-format` git,
+# hostile environment) or no `.aid-o` exists at the derived root, fall back to
+# $PWD — behaviour identical to the pre-P074 hook, never worse.
+_aid_state_root() {
+  local _common _root
+  _common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  _root="${_common%/.git}"
+  [[ -n "$_root" && -d "$_root/.aid-o" ]] || _root="$PWD"
+  printf '%s\n' "$_root"
+}
+_AID_ROOT="$(_aid_state_root)"
 
 _AID_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 
@@ -35,6 +56,14 @@ done < <(git diff --cached --name-only -z 2>/dev/null)
 
 # Nothing staged → nothing to guard (also covers non-commit invocations).
 [[ ${#_AID_STAGED[@]} -eq 0 ]] && exit 0
+
+# Degenerate deleted-workspace case (P074 Step 2): the hook is installed but NO
+# `.aid-o` exists at the resolved root — every read below no-ops and the guard
+# passes fail-open. Disclose that skip in one stderr line instead of passing
+# silently; NO output is added to any path where `.aid-o` exists.
+if [[ ! -d "$_AID_ROOT/.aid-o" ]]; then
+  echo "AID pre-commit: no .aid-o workspace found at $_AID_ROOT — guard skipped (fail-open)" >&2
+fi
 
 # _aid_emit <timeline> <event> [k=v ...] — best-effort JSONL disclosure event.
 # No lib dependency; never fails the commit.
@@ -94,13 +123,16 @@ _aid_run_scope_check() {
   _cs=$(grep '^current_step:' "$_sf" 2>/dev/null | awk '{print $2}')
   _plan="${_evd}/plan.json"
 
-  # Evidence dir is always in scope.
-  _AID_SCOPE=("$_evd")
+  # Evidence dir is always in scope. Scope entries are matched against staged
+  # paths, which git reports RELATIVE to the invoking tree — strip the resolved
+  # state root so the (now absolute) evidence dir keeps matching staged
+  # evidence files exactly as the pre-P074 relative scan did.
+  _AID_SCOPE=("${_evd#"$_AID_ROOT"/}")
 
   # DONE/release derives its whitelist from project.yaml versioning (needs yq),
   # NOT from plan.json — handle it before the jq gate.
   if [[ "$_st" == "DONE" && "$_dp" == "release" ]]; then
-    local _proj=".aid-o/config/project.yaml"
+    local _proj="$_AID_ROOT/.aid-o/config/project.yaml"
     if ! command -v yq >/dev/null 2>&1 || [[ ! -r "$_proj" ]]; then
       echo "AID HOOK: warning — versioning config unavailable (yq/project.yaml); passing commit." >&2
       _aid_emit "$_tl" commit_guard_disclosure reason=versioning_absent state="$_st" done_phase="$_dp"
@@ -172,7 +204,7 @@ _aid_run_scope_check() {
 # outcome never depends on find(1)'s incidental filesystem traversal order.
 _AID_STATE_FILE=""
 _AID_ALL_STATE_FILES=()
-for _dir in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
+for _dir in "$_AID_ROOT/.aid-o/work/runs/" "$_AID_ROOT/.aid-o/work/evidence/"; do
   [[ -d "$_dir" ]] || continue
   while IFS= read -r _sf; do
     _AID_ALL_STATE_FILES+=("$_sf")
@@ -215,9 +247,13 @@ done
 _AID_MAIN_ACTIVE=""       # pointer's run, if currently EXECUTE/GATES (main-block source)
 _AID_MAIN_RELEASE=""      # pointer's run, if currently DONE/release (main version-whitelist)
 if [[ "$_AID_BRANCH" == "main" ]] && command -v jq >/dev/null 2>&1; then
-  _AID_PTR=".aid-o/work/active-run-pointer.json"
+  _AID_PTR="$_AID_ROOT/.aid-o/work/active-run-pointer.json"
   if [[ -r "$_AID_PTR" ]]; then
     _AID_PTR_SF=$(jq -r '.state_file // empty' "$_AID_PTR" 2>/dev/null)
+    # A relative state_file in the pointer historically resolved against $PWD
+    # (== the state root for every primary-checkout commit); resolve it against
+    # the state root explicitly so the read stays correct off the primary root.
+    [[ -n "$_AID_PTR_SF" && "$_AID_PTR_SF" != /* ]] && _AID_PTR_SF="$_AID_ROOT/$_AID_PTR_SF"
     if [[ -n "$_AID_PTR_SF" && -r "$_AID_PTR_SF" ]]; then
       _AID_PTR_ST=$(grep '^state:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}')
       _AID_PTR_DP=$(grep '^done_phase:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}' | tr -d '"')
