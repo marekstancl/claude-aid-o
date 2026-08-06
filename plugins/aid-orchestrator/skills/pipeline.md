@@ -201,16 +201,25 @@ calling PRE-FLIGHT.
 
 ### Branch Enforcement
 
-`aid-fsm.sh init` validates the git branch context before writing `fsm-state.yaml`. Five
+`aid-fsm.sh init` validates the git branch context before writing `fsm-state.yaml`. Six
 HEAD states are handled:
 
 | HEAD state | Action | Timeline event |
 |------------|--------|----------------|
 | `task/{epic_id}/main` (resume) | log_info, accept (continuing previous session) | — |
 | `main` / `master` / `develop` | auto-checkout `task/{epic_id}/main` (creates branch) | — |
+| **plan worktree on `plan/{plan_id}`** (P074) | auto-checkout `task/{epic_id}/main`, **created from the plan branch head** — so a second EPIC starts from the plan head the first one advanced, never from main | — |
+| **plan worktree whose `plan/{plan_id}` no longer exists** | **hard fail** — every EPIC branch here is cut from the plan branch, so a missing base ref leaves an unowned tree with broken diff attribution. The message names branch repair; `--recreate-worktree` is explicitly NOT the remedy (the worktree is intact, its base ref is not). | — |
 | `task/<other_epic>/main` (mismatch) | hard fail with copy-paste cleanup command | `fsm_branch_mismatch_detected` |
-| anything else (`feat/*`, detached HEAD, …) | log_warn, accept (PM context-aware) | `fsm_branch_unusual_detected` |
-| Worktree mode (git_dir under `.git/worktrees/`) | skip enforcement (caller controls branch) | — |
+| anything else (`feat/*`, detached HEAD, …) | log_warn, accept (PM context-aware); inside the plan worktree the warning names the expected topology | `fsm_branch_unusual_detected` |
+| FOREIGN worktree (git_dir under `.git/worktrees/`, not the plan's recorded one) | skip enforcement (caller controls branch) | — |
+
+The worktree skip is no longer blanket. A plan's OWN execution worktree
+(`.aid-worktrees/plan-<id>`, recorded in plan-state) is that plan's "main": it
+is exactly where its EPICs are supposed to run, so enforcement RUNS there.
+Skipping it would leave init sitting on `plan/<id>` with no task branch, and
+done-advance would then attribute an empty diff to the EPIC. Only worktrees
+that are NOT the plan's recorded one keep the old skip.
 
 The uncommitted-changes guard runs in all modes — dirty workdir is rejected with
 `git status` / `git stash` suggestion before init proceeds. (`init`'s own guard is
@@ -227,10 +236,58 @@ commit objects require NO clean tree at all:
 | `plan-start` | only its own lifecycle paths (`.aid-lifecycle/manifests/<plan>.yaml`, `.aid-lifecycle/repo-identity.yaml`) | branch creation is ref-only, but the mode write does touch those two tracked files — a targeted, non-forceable preflight asserts them clean before anything is created. Everything else may be dirty. The detached-HEAD refusal stays. |
 | `epic-start` | none | it creates the task branch as a ref only (`git branch`) — no checkout, no tracked writes; an unrelated dirty tracked edit cannot be harmed. The detached-HEAD refusal stays. |
 | `plan-merge-to-main` | none | plumbing-only publish: `merge-tree`/`commit-tree` plus a compare-and-swap `update-ref` against the PM-approved head — no worktree is ever touched, so no worktree content can leak into the merge. |
-| `epic-merge-to-plan` | the tree it checks out and merges in (the resolved project root; the plan worktree once P074 EPIC 2 lands) | the merge really is performed in that tree — a dirty file there could be swept into or collide with the merge. |
+| `epic-merge-to-plan` | the tree it checks out and merges in — the plan's execution worktree when it has one, the state root for a legacy plan | the merge really is performed in that tree — a dirty file there could be swept into or collide with the merge. |
 | `plan-finalize` `--stage sync\|freeze\|gates\|inputs` | the tree it merges in, freezes from and derives inputs in (same resolution as above) | a half-applied `prepare-plan` must never be frozen into a candidate, and the C4 inputs must be derived from a clean candidate tree. |
 | `plan-finalize` `--stage review\|c4\|summary\|accept-ancillary` | exempt by design | inside the review boundary a tracked write is a SIGNAL (candidate changed → invalidation), not an operator mistake to stash away. |
-| `aid-fsm.sh init` | the tree init runs in | done-advance needs a clean diff to attribute (after P074 EPIC 2 this is the plan worktree, clean by construction). |
+| `aid-fsm.sh init` | the tree init runs in — the plan worktree for a worktree-recorded plan (clean by construction), the primary checkout otherwise | done-advance needs a clean diff to attribute. |
+
+### Where a plan-linked command runs: redirect or refuse
+
+Which tree a lifecycle command operates on is **enforced, not documented**. A
+plan whose plan-state records an execution worktree (`.aid-worktrees/plan-<id>`,
+created by `plan-start`) has ONE place its tree operations may happen, and every
+plan-linked command that touches a tree checks before it touches one:
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Recorded worktree, invoked from anywhere else | **REDIRECT** — the command re-executes itself verbatim with the worktree as its working directory, printing `NOTE: <plan> executes in its own worktree — re-running this command in <path>`. Existing scripts and muscle memory keep working. |
+| Recorded worktree, already invoked inside it | no-op, zero overhead |
+| Recorded worktree that is missing or no longer git-registered | **REFUSE**, naming `plan-state <id> --recreate-worktree --reason "<why>"`. Never a silent fallback to the primary checkout. |
+| Recorded path that is not a LINKED worktree (typically the primary checkout itself) | **REFUSE** the same way. `git worktree list` includes the primary checkout, so "registered" alone would accept a record naming the state root — and the cwd check would then pass it as "already there", running every checkout and merge in the PM's own tree while reporting isolation. Linkedness is validated **before** the cwd comparison. |
+| No `worktree_path` recorded, but `.aid-worktrees/plan-<id>` exists or is registered | **REFUSE** — the crash window between `worktree add` and the state write. Names plan-start resume and `--recreate-worktree`; never a legacy pass. |
+| No worktree recorded and none present (legacy plan) | one-line notice, runs in the state root exactly as before P074 |
+
+Commands that get the redirect: `epic-merge-to-plan`, `plan-finalize` (every
+stage), `aid-fsm.sh init`, `aid-fsm.sh done-advance`. Deliberately excluded:
+`plan-merge-to-main` (plumbing-only, touches no tree) and `plan-start` (runs
+before the worktree exists by definition).
+
+`plan-close` and `plan-rollback` get the **inverse**: they REMOVE the worktree,
+so invoked from inside it they refuse with the exact `cd <state_root>`
+instruction — deleting the tree you are standing in is never redirected around.
+
+**Relative paths survive the redirect.** The cwd changes, so the re-exec rewrites
+relative path arguments against the operator's original cwd: every flag
+documented as taking a path is enumerated (`--project-root`,
+`--execution-yaml`, `--decision`, `--plan-file`, `--plan`, `--state-file`,
+`--report-file`, `--output`, plus the `<key>=<path>` value half of
+`--substitute-receipt`), and bare positionals such as `init`'s state-file
+argument are rewritten only when they look like in-repo paths and git cannot
+resolve them as a ref — so `plan/P074` and `task/E-074-1_1/main` pass through
+untouched. State files given relative are additionally re-anchored to the state
+root by `aid-fsm.sh init` and `done-advance` themselves, so a DIRECT in-worktree
+invocation reads and writes the primary `.aid-o` rather than forking one.
+
+**Loop guard.** The redirect sets `AID_WT_REDIRECTED=1`. If a re-executed
+process still finds itself outside the recorded tree, plan-state is describing
+a place it is not, and the command terminates with `worktree redirect loop`
+instead of recursing. The guard is cleared once the cwd check passes, so a
+nested command for a DIFFERENT plan can still redirect legitimately.
+
+**Agent dispatch.** For a worktree-recorded plan the controller dispatches
+implementer and specialist agents **with cwd = the plan worktree**. State reads
+still resolve to the primary `.aid-o` (the roots contract), so nothing about
+evidence or plan-state changes; only the tree the agent edits does.
 
 The refusal messages of the plan-FSM checks — `epic-merge-to-plan`,
 `plan-finalize`'s non-exempt stages, and plan-start's targeted lifecycle
@@ -1352,6 +1409,17 @@ freeze, plan-final agents write only run-scoped evidence. A tracked candidate
 write is a FIX and requires a new candidate and a new review. The controller
 alone renders committed or worktree projections, and only after merge/close —
 outside any freeze window, where a projection cannot cost a review.
+
+**WHICH TREE the rule is about (P074 Step 10).** For a plan with an execution
+worktree, the fix signal is a tracked write **IN THE PLAN WORKTREE**
+(`.aid-worktrees/plan-<id>`) — that is where the candidate lives, where the
+review/c4 stages run after the Step 8 redirect, and the only tree the drift
+check reads. **The PM's primary checkout is free during a review window**: an
+unrelated tracked edit there does not invalidate anything, which is the whole
+point of per-plan worktrees. Using the plan worktree for a deliberate manual
+fix during `PLAN_FIX` is supported — that IS the fix workflow, and the next
+freeze happens from that tree's state. Legacy plans (no recorded worktree) keep
+today's behaviour exactly: the state root is the tree evaluated.
 
 Role cards and agent contracts REFERENCE this paragraph rather than restating
 it. Restating it is how the P082 contradiction survived: `agents/reporter.md`

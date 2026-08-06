@@ -15,6 +15,13 @@
 # Legacy v1 structure
 .aid-o/04-engine/
 
+# Per-plan execution worktrees (P074) — `plan-start` creates
+# .aid-worktrees/plan-<id> as a linked git worktree on plan/<id> and
+# plan-close/plan-rollback remove it. Deliberately top-level, NOT under
+# .aid-o/: execution trees and AID state stay separated, so tearing a
+# worktree down never touches plan state.
+.aid-worktrees/
+
 # UI fidelity runtime outputs (capture sessions, not fixture data)
 .aid-o/work/**/ui/
 

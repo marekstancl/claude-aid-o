@@ -55,7 +55,21 @@ Appended to project root `.gitignore` (or created if missing). Content:
 
 # Legacy v1 structure
 .aid-o/04-engine/
+
+# Per-plan execution worktrees (P074)
+.aid-worktrees/
 ```
+
+**Upgrade note (P074):** `.aid-worktrees/` is new. `plan-start` creates the plan's
+execution worktree at `.aid-worktrees/plan-<id>` (a linked git worktree checked out on
+`plan/<id>`), and `plan-close` / `plan-rollback` remove it again. It is top-level rather
+than under `.aid-o/` on purpose — execution trees and AID state stay separated, so
+tearing a worktree down can never touch plan state. Existing projects pick the ignore
+line up through the per-line backfill below on their next `/aid-init` run; until they do,
+the worktree directory shows up as untracked. Re-running `/aid-init` also refreshes the
+git hooks, which matters here: hooks installed before P074 cannot resolve `.aid-o` from
+inside a linked worktree, so `plan-start` prints a warning that commits made from the
+plan worktree are unguarded until the hooks are re-installed.
 
 **Note:** If the project's root `.gitignore` contains a `.aid-o/` blanket exclusion,
 replace it with the following four lines so that boundary manifests and delivery reports

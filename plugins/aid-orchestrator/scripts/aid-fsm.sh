@@ -66,6 +66,12 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-active-index.sh" ]]; then
   source "${SCRIPT_DIR}/lib/aid-active-index.sh" || true
 fi
 
+# P074 Step 8 — the verbatim argv of this process, captured by the dispatcher
+# at the bottom of this file before any parsing, so the plan-worktree redirect
+# can re-execute this invocation with no argument drift. Declared here so a
+# SOURCED aid-fsm.sh under `set -u` never sees it unset.
+_AID_FSM_ORIG_ARGS=()
+
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
 # Valid transitions map: "FROM:TO" pairs
@@ -483,6 +489,271 @@ is_worktree() {
   local git_dir
   git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 1
   [[ "$git_dir" == *.git/worktrees/* ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PER-PLAN EXECUTION WORKTREE — the EPIC-layer view (P074 Steps 8 + 9)
+#
+# `plan-start` gives every plan_branch plan its own linked worktree at
+# `.aid-worktrees/plan-<id>` and records the path in plan-state (Step 7). The
+# EPIC layer has to honour that in two places:
+#
+#   Step 8 — `init` and `done-advance` are plan-linked TREE operations driven
+#            by cwd. Invoked from the primary checkout for a worktree-recorded
+#            plan they would create the task branch in, and attribute the EPIC
+#            diff of, the WRONG tree. They now re-execute themselves in the
+#            plan worktree (or refuse, when it is broken).
+#   Step 9 — inside that worktree, branch enforcement RUNS (it is the plan's
+#            "main"), instead of taking is_worktree()'s blanket skip.
+#
+# WHY A SMALL LOCAL COPY OF THE STATE PROBE AND NOT aid-plan-fsm.sh's helpers:
+# sourcing aid-plan-fsm.sh here would import cmd_plan_close, cmd_plan_state and
+# several other names this file ALSO defines, silently replacing them. The
+# probe is deliberately tiny (read one field, ask git for the registration) and
+# reads plan-state through its public CLI, so there is no schema knowledge to
+# drift. The authority for creating, repairing and tearing worktrees down stays
+# in aid-plan-fsm.sh; nothing below ever writes.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Physical path if it exists, the input otherwise — `git worktree list` reports
+# physical paths, so every comparison has to go through this or a symlinked
+# fixture root compares unequal to itself. (Mirrors _pfsm_phys.)
+_fsm_phys() {
+  local p="${1:-}"
+  if [[ -d "$p" ]]; then (cd "$p" 2>/dev/null && pwd -P) || printf '%s' "$p"
+  else printf '%s' "$p"; fi
+}
+
+# _fsm_worktree_registered <root> <path> — does git know <path> as a worktree?
+_fsm_worktree_registered() {
+  local root="$1" want line
+  want="$(_fsm_phys "$2")"
+  while IFS= read -r line; do
+    [[ "$line" == worktree\ * ]] || continue
+    [[ "$(_fsm_phys "${line#worktree }")" == "$want" ]] && return 0
+  done < <(git -C "$root" worktree list --porcelain 2>/dev/null)
+  return 1
+}
+
+# _fsm_worktree_is_linked <state_root> <path> — is <path> a LINKED worktree
+# rather than the primary checkout? `git worktree list` includes the primary,
+# so registration alone would accept a `worktree_path` recorded as the state
+# root, and the enforcer's cwd comparison would then pass it as "already
+# there" — running init/done-advance in the PM's own tree while reporting
+# isolation, with no redirect and therefore no loop guard. Mirrors
+# aid-plan-fsm.sh's _pfsm_worktree_is_linked and this file's own is_worktree.
+_fsm_worktree_is_linked() {
+  local root="$1" path="$2" gd=""
+  [[ "$(_fsm_phys "$path")" != "$(_fsm_phys "$root")" ]] || return 1
+  gd="$(git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  [[ "$gd" == */worktrees/* ]]
+}
+
+# _fsm_plan_worktree_recorded <plan_id> <state_root> — the ABSOLUTE recorded
+# path, or empty (legacy plan / no state file / no plan-state lib).
+_fsm_plan_worktree_recorded() {
+  local plan_id="$1" root="$2" rec=""
+  [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || { printf ''; return 0; }
+  rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" \
+    bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rec=""
+  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
+  [[ -z "$rec" ]] && { printf ''; return 0; }
+  [[ "$rec" == /* ]] || rec="${root}/${rec}"
+  printf '%s' "$rec"
+}
+
+# _fsm_plan_worktree_for_epic <epic_id> — the healthy recorded worktree of the
+# EPIC's owning plan, or empty. Prints nothing and succeeds for an ad-hoc EPIC
+# (no derivable plan id), a legacy plan, or a plan whose worktree is broken —
+# the enforcer below is the only place that turns "broken" into a refusal.
+_fsm_plan_worktree_for_epic() {
+  local epic_id="${1:-}" nnn plan_id root rec
+  nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || { printf ''; return 0; }
+  plan_id="P${nnn}"
+  root="$(aid_state_root 2>/dev/null || pwd)"
+  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")"
+  [[ -n "$rec" && -d "$rec" ]] || { printf ''; return 0; }
+  _fsm_worktree_registered "$root" "$rec" || { printf ''; return 0; }
+  # A record naming the primary checkout is a lie, never "the plan's worktree"
+  # — without this, Step 9's topology would be applied in the PM's own tree.
+  _fsm_worktree_is_linked "$root" "$rec" || { printf ''; return 0; }
+  printf '%s' "$rec"
+}
+
+# _fsm_in_plan_worktree <epic_id> — true when cwd is the EPIC's plan worktree
+# (Step 9's "this is the plan's own worktree, not a foreign one" test).
+_fsm_in_plan_worktree() {
+  local rec here want
+  rec="$(_fsm_plan_worktree_for_epic "${1:-}")"
+  [[ -n "$rec" ]] || return 1
+  here="$(_fsm_phys "$PWD")"; want="$(_fsm_phys "$rec")"
+  [[ "$here" == "$want" || "$here" == "$want"/* ]]
+}
+
+# _fsm_wt_abs_args <arg>... — one absolutized argument per line.
+#
+# Same two rules as aid-plan-fsm.sh's `_pfsm_wt_abs_args` (see its header for
+# the full reasoning): enumerated path FLAGS are absolutized by declaration,
+# and the residue of bare positionals only when relative, containing a `/`,
+# with an existing first component, and unresolvable by git as a ref — so
+# `init`'s state-file positional is rewritten (it does not exist yet, which is
+# why existence cannot be the test) while its branch argument
+# (`task/E-.../main`, `plan/P...`) is left alone.
+#
+# DELIBERATE DUPLICATE. aid-fsm.sh cannot source aid-plan-fsm.sh — both define
+# `cmd_plan_close`, `cmd_plan_state` and others, so sourcing would silently
+# replace this file's own versions. The two copies are kept byte-parallel and
+# cross-referenced instead; the flag list below covers THIS CLI's path flags.
+_AID_WT_PATH_FLAGS=" --plan --project-root --state-file --report-file --execution-yaml --output "
+_AID_WT_KV_FLAGS=" --substitute-receipt "
+
+_aid_wt_abs_one() {
+  local v="${1:-}"
+  [[ -n "$v" && "$v" != /* ]] || { printf '%s' "$v"; return 0; }
+  printf '%s/%s' "$(pwd)" "$v"
+}
+
+_aid_wt_abs_positional() {
+  local a="${1:-}" first="${1%%/*}"
+  if [[ "$a" == */* && "$a" != /* && -d "$first" ]] \
+     && ! git rev-parse --verify --quiet "$a" >/dev/null 2>&1; then
+    printf '%s/%s' "$(pwd)" "$a"
+  else
+    printf '%s' "$a"
+  fi
+}
+
+_aid_wt_rewrite_args() {
+  local expect="" a
+  for a in "$@"; do
+    case "$expect" in
+      path) printf '%s\n' "$(_aid_wt_abs_one "$a")"; expect=""; continue ;;
+      kv)
+        if [[ "$a" == *=* ]]; then
+          printf '%s=%s\n' "${a%%=*}" "$(_aid_wt_abs_one "${a#*=}")"
+        else
+          printf '%s\n' "$a"
+        fi
+        expect=""; continue ;;
+    esac
+    if [[ "$_AID_WT_PATH_FLAGS" == *" $a "* ]]; then
+      printf '%s\n' "$a"; expect="path"; continue
+    fi
+    if [[ "$_AID_WT_KV_FLAGS" == *" $a "* ]]; then
+      printf '%s\n' "$a"; expect="kv"; continue
+    fi
+    if [[ "$a" == --*=* ]]; then
+      local f="${a%%=*}"
+      if [[ "$_AID_WT_PATH_FLAGS" == *" $f "* ]]; then
+        printf '%s=%s\n' "$f" "$(_aid_wt_abs_one "${a#*=}")"; continue
+      fi
+    fi
+    if [[ "$a" == -* ]]; then printf '%s\n' "$a"; continue; fi
+    printf '%s\n' "$(_aid_wt_abs_positional "$a")"
+  done
+}
+
+_fsm_wt_abs_args() { _aid_wt_rewrite_args "$@"; }
+
+# ---------------------------------------------------------------------------
+# _fsm_resolve_state_file <path> — the state file, resolved through the STATE
+# root when it was given relative.
+#
+# WHY: `.aid-o/` is gitignored, so it exists ONLY in the primary checkout. Every
+# caller passes the state file relative (`.aid-o/work/evidence/<epic>/<run>/
+# fsm-state.yaml`), which is correct from the primary checkout and resolves to
+# NOTHING from inside the plan worktree. Without this, `done-advance` invoked in
+# the worktree — the whole point of worktree mode — died on "state_file not
+# found" before the enforcer could even run, and `init` would have created a
+# second, forked `.aid-o` inside the worktree.
+#
+# `aid_state_path` returns a relative input UNCHANGED when the caller already
+# stands at the state root, so every primary-checkout invocation (and the
+# golden byte-identity fixtures) is untouched; only worktree and subdirectory
+# invocations get the absolute primary path. Outside a resolvable repository it
+# fails and the original value is kept — the historic degenerate behaviour.
+# ---------------------------------------------------------------------------
+_fsm_resolve_state_file() {
+  local sf="${1:-}" r=""
+  if [[ -n "$sf" && "$sf" != /* ]]; then
+    r="$(aid_state_path "$sf" 2>/dev/null)" || r=""
+    [[ -n "$r" ]] && sf="$r"
+  fi
+  printf '%s' "$sf"
+}
+
+# ---------------------------------------------------------------------------
+# _fsm_require_plan_worktree <epic_id>
+#
+# The Step 8 enforcer, EPIC side. Same four outcomes as aid-plan-fsm.sh's
+# _pfsm_require_plan_worktree, same loop guard, same refusals:
+#   legacy plan / ad-hoc EPIC -> return (byte-identical to pre-P074)
+#   unrecorded but a worktree exists at the canonical path -> REFUSE
+#   recorded but missing/unregistered -> REFUSE naming --recreate-worktree
+#   recorded and healthy -> no-op when already inside it, else RE-EXEC there
+# Exits non-zero on refusal (this file's convention); the re-exec never returns.
+# ---------------------------------------------------------------------------
+_fsm_require_plan_worktree() {
+  local epic_id="${1:-}" nnn plan_id root rec canonical here want
+  nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || return 0
+  plan_id="P${nnn}"
+  root="$(aid_state_root 2>/dev/null || pwd)"
+  canonical="${root}/.aid-worktrees/plan-${plan_id}"
+  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")"
+
+  if [[ -z "$rec" ]]; then
+    if [[ -d "$canonical" ]] || _fsm_worktree_registered "$root" "$canonical"; then
+      echo "PRECONDITION FAIL: ${plan_id} records NO execution worktree, but one exists at ${canonical} — a plan-start killed between registering it and recording it leaves exactly this. Refusing to run ${epic_id} against ${root} as if the plan were legacy: that operates on the wrong tree silently. Resume 'aid-plan-fsm.sh plan-start ${plan_id} --mode <mode>' (it adopts and records the existing worktree), or repair with 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"'." >&2
+      exit 1
+    fi
+    return 0
+  fi
+
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  if [[ ! -d "$rec" ]] || ! _fsm_worktree_registered "$root" "$rec"; then
+    echo "PRECONDITION FAIL: ${plan_id} records the execution worktree ${rec}, but it is missing or is no longer registered with git — ${epic_id} has no tree to execute in, and the primary checkout is not a substitute. Repair it: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why it went missing>\"" >&2
+    exit 1
+  fi
+
+  # Checked BEFORE the cwd comparison: see _fsm_worktree_is_linked's header —
+  # a record naming the state root would otherwise be accepted as "already
+  # there" and every tree operation would run in the PM's checkout.
+  if ! _fsm_worktree_is_linked "$root" "$rec"; then
+    echo "PRECONDITION FAIL: ${plan_id} records ${rec} as its execution worktree, but that is not a LINKED worktree — it is the primary checkout (${root}) or a directory git does not manage as a separate tree. ${epic_id} can never execute in the state root. Repair the record: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why the recorded path is wrong>\"" >&2
+    exit 1
+  fi
+
+  here="$(_fsm_phys "$PWD")"; want="$(_fsm_phys "$rec")"
+  if [[ "$here" == "$want" || "$here" == "$want"/* ]]; then
+    # Already there. Clearing the guard keeps a legitimate nested redirect for
+    # a DIFFERENT plan possible.
+    unset AID_WT_REDIRECTED
+    return 0
+  fi
+
+  if [[ -n "${AID_WT_REDIRECTED:-}" ]]; then
+    echo "ERROR: worktree redirect loop for ${plan_id}. plan-state records ${rec}, but after re-executing with that as the working directory the invocation is STILL outside it (cwd: ${here}). The recorded path does not describe the tree it claims to. Fix plan-state: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"" >&2
+    exit 1
+  fi
+
+  if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "PRECONDITION FAIL: ${epic_id} executes in ${rec}, but aid-fsm.sh is being used as a sourced library here, so it cannot re-execute itself. Run: cd ${rec} && <the same command>" >&2
+    exit 1
+  fi
+
+  local self
+  self="$(cd "$(dirname "$0")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$0")")" || self="$0"
+  local -a fwd=()
+  mapfile -t fwd < <(_fsm_wt_abs_args "${_AID_FSM_ORIG_ARGS[@]+"${_AID_FSM_ORIG_ARGS[@]}"}")
+
+  echo "NOTE: ${plan_id} executes in its own worktree — re-running this command in ${rec} (was: ${here})." >&2
+  cd "$want" || {
+    echo "PRECONDITION FAIL: cannot enter the execution worktree ${want} for ${plan_id} (permissions? unmounted filesystem?)." >&2
+    exit 1
+  }
+  AID_WT_REDIRECTED=1 exec bash "$self" "${fwd[@]+"${fwd[@]}"}"
 }
 
 # ─── Human step rendering (P073 Step 4) ─────────────────────────────────
@@ -2699,6 +2970,20 @@ cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
+  # ── P074 Step 8: run where the plan's tree is ────────────────────────────
+  # FIRST statement of the command, before the flag loop, deliberately: --force
+  # writes an audit record as it is parsed, and a redirect after that point
+  # would write it twice. Nothing has happened yet when this returns, so the
+  # re-executed process is the only one with side effects.
+  _fsm_require_plan_worktree "$epic_id"
+
+  # P074 Step 8: `.aid-o` lives only in the primary checkout, so a RELATIVE
+  # state-file argument must be re-anchored to the state root. Without it an
+  # `init` executed inside the plan worktree would create a second, forked
+  # workspace there (the redirect path is already covered by argv rewriting;
+  # this covers a DIRECT in-worktree invocation).
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+
   local evidence_dir
   evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"
 
@@ -3108,16 +3393,71 @@ cmd_init() {
     exit 1
   fi
 
-  if is_worktree; then
+  # ── P074 Step 9: the plan worktree is NOT a foreign worktree ─────────────
+  # is_worktree()'s blanket skip exists for worktrees whose branch the CALLER
+  # controls (superpowers:using-git-worktrees and friends). The plan's OWN
+  # execution worktree is the opposite: it is that plan's "main", the one place
+  # its EPICs are supposed to run, and skipping enforcement there would leave
+  # init sitting on `plan/<id>` with no task branch — so done-advance would
+  # attribute an empty diff to the EPIC. Inside it, enforcement RUNS, with two
+  # differences from the primary checkout: `plan/<id>` is an accepted starting
+  # HEAD, and a task branch auto-created there is based on the PLAN branch head
+  # rather than on whatever the current branch happens to be.
+  local _wt_plan_branch=""
+  if _fsm_in_plan_worktree "$epic_id"; then
+    _wt_plan_branch="plan/P$(_fsm_epic_plan_nnn "$epic_id")"
+    # THE BASE REF MUST EXIST. Inside the plan worktree every task branch is
+    # cut from `plan/<id>`; if manual surgery deleted it the worktree is left
+    # detached, which used to fall through to the "unusual branch" warn-and-
+    # accept arm — init would proceed with NO task branch on an unowned
+    # detached tree, and done-advance would then attribute a meaningless diff.
+    # That is a hard fail: the topology this worktree exists to serve is gone.
+    #
+    # `--recreate-worktree` is deliberately NOT the remedy and is not offered:
+    # the worktree is intact, its BASE REF is missing. Recreating the tree would
+    # fail on the same missing ref and would look like the operator had tried
+    # the sanctioned repair.
+    if ! git -C "$PWD" rev-parse --verify --quiet "refs/heads/${_wt_plan_branch}" >/dev/null 2>&1; then
+      die "ERROR: ${_wt_plan_branch} does not exist, but this is ${_wt_plan_branch#plan/}'s execution worktree and every EPIC branch here is cut from it.
+
+Reason: the plan branch was deleted (manual surgery, or a post-merge cleanup that ran early). Without it there is no base for task/${epic_id}/main and no integration target for done-advance — continuing would execute on an unowned tree with broken diff attribution.
+
+Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge or candidate sha>', or 'git reflog' to find its last position), then retry.
+       This is NOT a worktree problem: the worktree is intact, so 'plan-state ${_wt_plan_branch#plan/} --recreate-worktree' is the wrong tool. Repair the branch, or the plan-state record naming it."
+    fi
+  fi
+
+  if is_worktree && [[ -z "$_wt_plan_branch" ]]; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
     local current_branch expected_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || die "Not in a git repository"
     expected_branch="task/${epic_id}/main"
+    # A sentinel, never a real branch name, so the case arm below is inert when
+    # we are NOT in the plan worktree (an empty pattern would match an empty
+    # current_branch).
+    local _wt_plan_case="${_wt_plan_branch:-__aid_no_plan_worktree__}"
 
     case "$current_branch" in
       "$expected_branch")
         log_info "Resume case: HEAD already on $expected_branch"
+        ;;
+      "$_wt_plan_case")
+        # The plan worktree at rest sits on `plan/<id>` — this is the fresh-init
+        # case there, and the direct analogue of `main` in the primary checkout.
+        if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
+          log_info "Resume case: checking out existing $expected_branch in the plan worktree"
+          git checkout "$expected_branch" >/dev/null 2>&1 \
+            || die "Failed to checkout existing branch $expected_branch in the plan worktree $PWD (check 'git status' for details)"
+        else
+          log_info "Auto-creating branch: $expected_branch from ${_wt_plan_branch} (plan worktree)"
+          # Explicit base: a second EPIC of the same plan must start from the
+          # ADVANCED plan head (after the first EPIC merged), never from main.
+          git checkout -b "$expected_branch" "$_wt_plan_branch" >/dev/null 2>&1 \
+            || die "Failed to create branch $expected_branch from ${_wt_plan_branch} in the plan worktree $PWD.
+Reason: the plan branch must exist and be resolvable — this is the base every EPIC of ${_wt_plan_branch#plan/} starts from.
+If ${_wt_plan_branch} is gone, --recreate-worktree is NOT the remedy: the worktree is fine, its base ref is not. Repair the plan branch (or the plan-state record naming it) first."
+        fi
         ;;
       main|master|develop)
         # P040 Component E: if the EPIC's task branch already exists (e.g. a
@@ -3150,7 +3490,13 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
         # PM context-aware (e.g., manual exploration on feat/ branch) — accept with warning.
         log_event "$timeline_path" "fsm_branch_unusual_detected" \
           current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
-        log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
+        if [[ -n "$_wt_plan_branch" ]]; then
+          # P074 Step 9: inside the plan worktree the expected topology is
+          # known exactly, so the warning names it instead of shrugging.
+          log_warn "Unusual branch in the plan worktree: $current_branch. The expected topology here is ${_wt_plan_branch} at rest and ${expected_branch} while ${epic_id} runs. Continuing — PM-controlled context assumed."
+        else
+          log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
+        fi
         ;;
     esac
   fi
@@ -4666,7 +5012,24 @@ cmd_done_advance() {
   local force="false"
   [[ "${4:-}" == "--force" ]] && force="true"
 
+  # P074 Step 8: re-anchor a RELATIVE state file to the state root BEFORE the
+  # existence test. `.aid-o` exists only in the primary checkout, so the old
+  # order made an in-worktree `done-advance` — the normal case in worktree mode
+  # — die "state_file not found" before the enforcer could run at all.
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
+
+  # ── P074 Step 8: run where the plan's tree is ────────────────────────────
+  # done-advance is a plan-linked TREE operation driven by cwd: `_tree_root`
+  # (below) is aid_invoke_root, and the C3/C4 checks read HEAD and the
+  # base..HEAD diff from it. Run from the primary checkout for a
+  # worktree-recorded plan it would attribute a completely different tree's
+  # diff to the EPIC. Placed before the first tree read, and after the state
+  # file exists (the EPIC id is read FROM it) — the redirect absolutizes the
+  # relative state_file path every caller passes, so it still resolves to the
+  # PRIMARY .aid-o on the other side.
+  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
 
   # Must be in DONE state
   local current_state
@@ -4794,6 +5157,22 @@ cmd_done_advance() {
     log_event "$_pb_mode_timeline" "done_advance_plan_branch_mode" \
       epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" mode="plan_branch" \
       forced="$force" skipped_stages="$_pb_stages_json"
+
+    # ── P074 Step 9: name the tree and the merge target ───────────────────
+    # A plan_branch EPIC never merges into the target branch here; the merge
+    # that matters is `task/<epic>/main` -> `plan/<id>`, performed by
+    # `aid-plan-fsm.sh epic-merge-to-plan` in the plan's own worktree. The
+    # Step 8 enforcer above has already put THIS process in that tree, so the
+    # diff attributed to the EPIC below is the worktree's. Say so: the single
+    # most confusing thing about a two-tree setup is not knowing which tree a
+    # message is about.
+    local _pb_wt
+    _pb_wt="$(_fsm_plan_worktree_for_epic "$_pb_epic_id")"
+    if [[ -n "$_pb_wt" ]]; then
+      echo "NOTE: ${_pb_epic_id} is a plan_branch EPIC of ${_pb_mode_plan} — this advance evaluates the PLAN WORKTREE ${_pb_wt} (its HEAD and its base..HEAD diff), and the next step merges task/${_pb_epic_id}/main into plan/${_pb_mode_plan} THERE, not into the target branch." >&2
+      log_event "$_pb_mode_timeline" "done_advance_plan_worktree" \
+        epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" worktree_path="$_pb_wt"
+    fi
   fi
 
   # Precondition checks (skip with --force)
@@ -6940,6 +7319,9 @@ cmd_alloc() {
 # fabrication.bats `_load_aid_fsm` shim) can pull in cmd_* + verify_provenance
 # functions without the unknown-arg exit 1 killing the test process.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # P074 Step 8: captured BEFORE the dispatch shift so the worktree redirect
+  # re-executes the ORIGINAL invocation, subcommand included.
+  _AID_FSM_ORIG_ARGS=("$@")
   case "${1:-}" in
     init)              shift; cmd_init "$@" ;;
     transition)        shift; cmd_transition "$@" ;;

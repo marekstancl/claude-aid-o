@@ -154,7 +154,7 @@
 # pipefail` (no `-e`) still guards against unset variables and swallowed
 # pipeline failures wherever a pipeline's exit code IS checked below.
 #
-# **Last Updated:** 2026-07-25
+# **Last Updated:** 2026-08-06
 # =============================================================================
 
 set -uo pipefail
@@ -927,6 +927,746 @@ _pfsm_plan_final_installed() {
   return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PER-PLAN EXECUTION WORKTREE (P074 Steps 7 + 11)
+#
+# WHY: with more than one plan open, a single checkout serializes everything —
+# opening plan B means abandoning plan A's tree. `plan-start` therefore creates
+# the plan its OWN linked worktree at `.aid-worktrees/plan-<id>`, checked out on
+# `plan/<id>`, and records the path in plan-state; `plan-close` / `plan-rollback`
+# tear it down; `plan-state <id> --recreate-worktree --reason` repairs it.
+#
+# `.aid-worktrees/` is TOP-LEVEL, deliberately NOT under `.aid-o/`: state and
+# execution trees stay separated, so tearing a worktree down can never touch
+# plan state. It is gitignored through the `/aid-init` template
+# (`defaults/.gitignore`).
+#
+# The directory name is EXACTLY `plan-<id>` — no slug — so a consumer can derive
+# it from the plan id alone without reading state (the degenerate lookup case
+# the Step 8 enforcer needs).
+#
+# CREATION IS TRANSACTIONAL. A live `plan/<id>` ref without its execution
+# worktree would strand every later plan-linked command, so anything that fails
+# mid-creation compensates in reverse of what succeeded — INCLUDING the plan-op
+# ledger record, because deleting the branch while the ledger still says
+# `git_applied` would make the very next plan-start hard-fail at the exit-5
+# consistency check instead of converging.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _pfsm_plan_worktree_path <root> <plan_id> — the canonical location. Pure
+# string derivation, no I/O: every consumer must agree on it without state.
+_pfsm_plan_worktree_path() {
+  printf '%s/.aid-worktrees/plan-%s' "$1" "$2"
+}
+
+# _pfsm_phys <path> — physical path if it exists, the input otherwise. `git
+# worktree list` reports physical paths, so every comparison against a
+# registration has to go through this or a symlinked fixture root (macOS
+# /tmp, and mktemp -d under it) compares unequal to itself.
+_pfsm_phys() {
+  local p="$1"
+  if [[ -d "$p" ]]; then (cd "$p" 2>/dev/null && pwd -P) || printf '%s' "$p"
+  else printf '%s' "$p"; fi
+}
+
+# _pfsm_worktree_registered <root> <path> — is <path> a worktree git knows
+# about? Reads `git worktree list --porcelain` rather than probing for a
+# `.git` file, because the admin entry is what `worktree add` collides with.
+_pfsm_worktree_registered() {
+  local root="$1" want; want="$(_pfsm_phys "$2")"
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == worktree\ * ]] || continue
+    [[ "$(_pfsm_phys "${line#worktree }")" == "$want" ]] && return 0
+  done < <(git -C "$root" worktree list --porcelain 2>/dev/null)
+  return 1
+}
+
+# _pfsm_worktree_head_is <path> <branch> — is the worktree at <path> actually
+# checked out on <branch>? Registration alone is NOT enough (P074 review F6):
+# a directory manually created at the canonical path on some other branch is
+# registered like any other worktree, and adopting it would give the plan a
+# path pointer to a tree that is not its execution tree at all. A detached
+# HEAD answers "no" — `symbolic-ref` fails, which is the correct verdict here.
+_pfsm_worktree_head_is() {
+  local wt="$1" branch="$2" head=""
+  [[ -d "$wt" ]] || return 1
+  head="$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null)" || return 1
+  [[ "$head" == "$branch" ]]
+}
+
+# _pfsm_plan_worktree_lock_path <plan_id> — the per-plan WORKTREE-transaction
+# lock (P074 review F4/F5). Deliberately its own sidecar rather than the
+# plan-state lock: `plan_state_set_worktree_path` takes that one itself, and
+# flock on a second descriptor in the same process would self-deadlock. Every
+# mutation of a plan's execution worktree — the audited repair and both
+# teardown paths — serializes on THIS file, so a recreate can never race a
+# close's teardown (or another recreate) into removing the winner's tree.
+_pfsm_plan_worktree_lock_path() {
+  printf '%s/plan-worktree.lock' "$(dirname "$(plan_state_path "$1")")"
+}
+
+# _pfsm_recorded_worktree <root> <plan_id> — the ABSOLUTE recorded path, or
+# empty when the plan records none (legacy plan, or the crash window between
+# registration and the record). A recorded relative path is resolved against
+# the state root, which is what the schema documents.
+_pfsm_recorded_worktree() {
+  local root="$1" plan_id="$2" rec=""
+  rec="$(plan_state_get "$plan_id" "worktree_path" 2>/dev/null)" || rec=""
+  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
+  [[ -z "$rec" ]] && return 0
+  [[ "$rec" == /* ]] || rec="${root}/${rec}"
+  printf '%s' "$rec"
+}
+
+# _pfsm_warn_stale_hooks <root> — the installed pre-commit hook predates P074
+# Step 2's state-root resolver, so its `.aid-o` reads would miss from a linked
+# worktree and the commit-scope guard would silently no-op there. WARN, never
+# block: that matches the hooks' own fail-open contract, and refusing to open a
+# plan because a hook is old would be a worse failure than an unguarded commit.
+_pfsm_warn_stale_hooks() {
+  local root="$1" common="" hook=""
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  hook="${common}/hooks/pre-commit"
+  [[ -f "$hook" ]] || return 0
+  grep -q '_aid_state_root' "$hook" 2>/dev/null && return 0
+  echo "WARNING: installed hooks predate worktree support — commits from the plan worktree are unguarded until you re-run /aid-init" >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_create_plan_worktree <root> <plan_id> <plan_branch>
+#
+# THE ONE creation sequence — shared by plan-start (Step 7) and
+# `plan-state --recreate-worktree` (Step 11), never duplicated.
+#
+# Prints the created worktree path on stdout. Returns:
+#   0 created (or already registered at the right place — idempotent)
+#   1 `git worktree add` failed; the underlying git stderr is printed VERBATIM
+#     and any partial admin entry is cleaned up (remove --force + prune), so a
+#     retry starts from nothing. Never degrades to checkout-hijack mode.
+#   4 a directory exists at the path that git does NOT know about — reported
+#     with its exact recovery. This command never deletes a directory it did
+#     not create.
+# ---------------------------------------------------------------------------
+_pfsm_create_plan_worktree() {
+  local root="$1" plan_id="$2" plan_branch="$3"
+  local wt; wt="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+
+  # Hand-deleted directories leave the registration behind; pruning first makes
+  # that harmless (Edge Case) and is a no-op otherwise.
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+
+  if _pfsm_worktree_registered "$root" "$wt"; then
+    if [[ -d "$wt" ]]; then
+      printf '%s' "$wt"
+      return 0
+    fi
+    # Registered but the directory is gone even after prune (locked entry).
+    echo "PRECONDITION FAIL: ${wt} is registered as a worktree but the directory is missing, and 'git worktree prune' did not clear it (a locked worktree?). Run: git worktree remove -f -f '${wt}' ; git worktree prune — then retry." >&2
+    return 4
+  fi
+
+  if [[ -e "$wt" ]]; then
+    echo "PRECONDITION FAIL: ${wt} already exists but is NOT a registered worktree (a crash plus a manual prune leaves exactly this). plan-start never deletes a directory it did not create. Recover with: git worktree prune  (then re-run), or 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"' once you have removed or moved ${wt}." >&2
+    return 4
+  fi
+
+  mkdir -p "$(dirname "$wt")" 2>/dev/null || true
+
+  local add_err="" arc=0
+  add_err="$(git -C "$root" worktree add "$wt" "$plan_branch" 2>&1)" || arc=$?
+  if [[ "$arc" -ne 0 ]]; then
+    # Disk-space / network-mount failures can leave a partial admin entry
+    # behind; clear it so the compensating branch delete is not blocked and a
+    # retry starts clean.
+    git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    git -C "$root" worktree prune >/dev/null 2>&1 || true
+    echo "PRECONDITION FAIL: git worktree add '${wt}' ${plan_branch} failed (rc=${arc}). git said:" >&2
+    printf '%s\n' "$add_err" >&2
+    echo "Existing worktrees (a duplicate checkout of ${plan_branch} is the usual cause):" >&2
+    git -C "$root" worktree list >&2 2>/dev/null || true
+    return 1
+  fi
+
+  _pfsm_warn_stale_hooks "$root"
+  printf '%s' "$wt"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_ensure_plan_worktree <root> <plan_id> <plan_branch>
+#
+# plan-start's idempotent wrapper around the creation function. Four cases:
+#   recorded + registered      -> skip (a resumed plan-start is a no-op here)
+#   recorded + missing         -> REFUSE, naming --recreate-worktree
+#   unrecorded + registered    -> ADOPT: complete the record (the kill window
+#                                between registration and the state write; the
+#                                plan must never masquerade as legacy)
+#   unrecorded + absent        -> create, then record
+#
+# On a state-write failure after a fresh create, the worktree it just created
+# is removed again before returning — the caller's compensation then only has
+# the branch and the ledger left to roll back.
+# Returns 0 on success, non-zero on any refusal/failure (already reported).
+# ---------------------------------------------------------------------------
+_pfsm_ensure_plan_worktree() {
+  local root="$1" plan_id="$2" plan_branch="$3"
+  local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  local rec; rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+
+  if [[ -n "$rec" ]]; then
+    git -C "$root" worktree prune >/dev/null 2>&1 || true
+    if [[ -d "$rec" ]] && _pfsm_worktree_registered "$root" "$rec"; then
+      # P074 review F6: registration is not identity. The recorded tree must be
+      # the CANONICAL one and must actually be checked out on plan/<id>; a
+      # pointer at some other registered worktree (or at the right path on the
+      # wrong branch) is a plan with no execution tree, silently.
+      if [[ "$(_pfsm_phys "$rec")" != "$(_pfsm_phys "$canonical")" ]]; then
+        echo "PRECONDITION FAIL: ${plan_id} records the execution worktree ${rec}, but this plan's worktree is ${canonical} — the record points at a different tree and plan-start will not run against it. Repair it with an audited transaction: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why the record points elsewhere>\"" >&2
+        return 1
+      fi
+      if ! _pfsm_worktree_head_is "$rec" "$plan_branch"; then
+        echo "PRECONDITION FAIL: ${plan_id} records the execution worktree ${rec}, and it is registered — but its HEAD is not ${plan_branch} (got '$(git -C "$rec" symbolic-ref --short HEAD 2>/dev/null || echo '<detached or unreadable>')'). Running the plan there would build it on the wrong branch. Restore it with: git -C ${rec} checkout ${plan_branch} — or repair with: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why the tree left its branch>\"" >&2
+        return 1
+      fi
+      return 0
+    fi
+    echo "PRECONDITION FAIL: ${plan_id} records the execution worktree ${rec}, but it is missing or no longer registered with git. plan-start will not silently re-create it — repair it with an audited transaction: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why it went missing>\"" >&2
+    return 1
+  fi
+
+  # Unrecorded. A registered worktree at the canonical path CHECKED OUT ON THE
+  # PLAN BRANCH means a previous run was killed between `worktree add` and the
+  # state write: complete the record instead of treating the plan as legacy.
+  # Anything else at that path is NOT this plan's tree and is never adopted
+  # (P074 review F6).
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  local created=0
+  if [[ -d "$canonical" ]] && _pfsm_worktree_registered "$root" "$canonical" \
+     && ! _pfsm_worktree_head_is "$canonical" "$plan_branch"; then
+    echo "PRECONDITION FAIL: ${canonical} is a registered worktree, but its HEAD is not ${plan_branch} (got '$(git -C "$canonical" symbolic-ref --short HEAD 2>/dev/null || echo '<detached or unreadable>')') — that is somebody else's tree at this plan's path, not a half-finished plan-start, so it is NOT adopted and NOT deleted. Move it aside (git worktree remove '${canonical}') and re-run plan-start." >&2
+    return 1
+  fi
+  if ! { [[ -d "$canonical" ]] && _pfsm_worktree_registered "$root" "$canonical"; }; then
+    local out="" crc=0
+    out="$(_pfsm_create_plan_worktree "$root" "$plan_id" "$plan_branch")" || crc=$?
+    [[ "$crc" -ne 0 ]] && return "$crc"
+    canonical="$out"
+    created=1
+  else
+    echo "NOTE: adopting the already-registered worktree ${canonical} for ${plan_id} — a previous plan-start was killed between registering it and recording it (verified: its HEAD is ${plan_branch})." >&2
+  fi
+
+  local src=0
+  plan_state_set_worktree_path "$plan_id" "$canonical" || src=$?
+  if [[ "$src" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: the execution worktree for ${plan_id} could not be recorded in plan-state (rc=${src})." >&2
+    if [[ "$created" -eq 1 ]]; then
+      git -C "$root" worktree remove --force "$canonical" >/dev/null 2>&1 || true
+      git -C "$root" worktree prune >/dev/null 2>&1 || true
+      echo "  The worktree this run created was removed again — nothing is half-created." >&2
+    fi
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_plan_start_compensate <root> <plan_id> <plan_branch> <op_id>
+#                             <created_branch> <created_state>
+#
+# Reverse-order compensation for a failed plan-start. Only ever undoes what
+# THIS invocation created (<created_branch>/<created_state> are 1 only on the
+# fresh path), so a resumed plan-start can never delete a branch or a state
+# file it found already there.
+#
+# The LEDGER rollback is part of it, not an afterthought: an `aborted` record
+# is appended for the op so `plan_op_reconcile` no longer answers
+# `git_applied` for a branch that no longer exists — without it the next
+# plan-start would hard-fail at the exit-5 consistency check instead of
+# converging (asserted by the re-run acceptance case).
+#
+# EVERY STEP IS CHECKED, and the verdict is what the checks found (P074 review
+# F2/F3). The old version fired each undo with `|| true` and then announced
+# "nothing survives" unconditionally — under a locked worktree or a read-only
+# state directory that sentence was simply false, and the ledger rollback it
+# claimed could silently not have happened. Two ordering rules follow from the
+# same honesty requirement:
+#   * the `aborted` record is appended ONLY once the branch is verified gone.
+#     A ledger saying aborted while plan/<id> still exists is a worse lie than
+#     no record at all.
+#   * if the branch IS gone and the record cannot be written, that is reported
+#     LOUDLY with the exact manual command, because the next plan-start will
+#     otherwise hard-fail at the exit-5 consistency check.
+# ---------------------------------------------------------------------------
+_pfsm_plan_start_compensate() {
+  local root="$1" plan_id="$2" plan_branch="$3" op_id="$4" \
+        created_branch="${5:-0}" created_state="${6:-0}"
+
+  local -a undone=() survived=()
+
+  # ── 1. the worktree ──────────────────────────────────────────────────────
+  local wt; wt="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  if _pfsm_worktree_registered "$root" "$wt"; then
+    git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    git -C "$root" worktree prune >/dev/null 2>&1 || true
+    if _pfsm_worktree_registered "$root" "$wt"; then
+      survived+=("the worktree registration for ${wt} — remove it with: git worktree remove -f -f '${wt}' ; git worktree prune")
+    else
+      undone+=("the worktree ${wt}")
+    fi
+  else
+    git -C "$root" worktree prune >/dev/null 2>&1 || true
+  fi
+
+  # ── 2. plan state ────────────────────────────────────────────────────────
+  local state_path; state_path="$(plan_state_path "$plan_id")"
+  if [[ "$created_state" -eq 1 ]]; then
+    rm -f "$state_path" 2>/dev/null || true
+    if [[ -e "$state_path" ]]; then
+      survived+=("the plan-state file this run created (${state_path}) — delete it with: rm -f '${state_path}'")
+    else
+      undone+=("the plan-state file")
+    fi
+  else
+    # The state file predates this run: leave it, but never leave OUR pointer.
+    local ptr; ptr="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+    if [[ -n "$ptr" ]]; then
+      local prc=0
+      plan_state_set_worktree_path "$plan_id" "" >/dev/null 2>&1 || prc=$?
+      if [[ "$prc" -ne 0 ]] && [[ -n "$(_pfsm_recorded_worktree "$root" "$plan_id")" ]]; then
+        survived+=("the worktree pointer in ${state_path} (rc=${prc}) — clear it once the state directory is writable again")
+      else
+        undone+=("the worktree pointer in plan-state")
+      fi
+    fi
+  fi
+
+  # ── 3. the branch, then (only then) the ledger ───────────────────────────
+  if [[ "$created_branch" -eq 1 ]]; then
+    git -C "$root" branch -D "$plan_branch" >/dev/null 2>&1 || true
+    if git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" >/dev/null 2>&1; then
+      survived+=("the branch ${plan_branch} — delete it with: git -C '${root}' branch -D '${plan_branch}' (a still-registered worktree checked out on it blocks this; clear that first). The operation ledger still records this branch as applied, which is CORRECT while it exists.")
+    else
+      undone+=("the branch ${plan_branch}")
+      local arc=0
+      _plan_op_append "$plan_id" "$op_id" "plan-start" "$plan_id" "aborted" "" "" >/dev/null 2>&1 || arc=$?
+      if [[ "$arc" -ne 0 ]]; then
+        survived+=("THE LEDGER ROLLBACK (rc=${arc}): ${plan_branch} is deleted but the last operation record for op '${op_id}' still says git_applied. The NEXT plan-start will hard-fail (exit 5) on that contradiction. Once $(dirname "$state_path") is writable again, append the missing record: bash '${SCRIPT_DIR}/lib/aid-plan-state.sh' op-append-aborted '${plan_id}' '${op_id}' plan-start '${plan_id}'")
+      else
+        undone+=("the operation ledger record (now: aborted)")
+      fi
+    fi
+  fi
+
+  local u
+  if [[ "${#survived[@]}" -eq 0 ]]; then
+    echo "COMPENSATED: nothing from this plan-start survives — no worktree, no ${plan_branch}, no plan-state entry. Fix the cause above and re-run plan-start." >&2
+    return 0
+  fi
+
+  echo "PARTIALLY COMPENSATED: this plan-start could not undo everything it did. Do NOT re-run plan-start until the items below are cleared by hand — it would report a state it cannot reconcile." >&2
+  for u in ${undone[@]+"${undone[@]}"}; do echo "  undone:   ${u}" >&2; done
+  for u in ${survived[@]+"${survived[@]}"}; do echo "  SURVIVED: ${u}" >&2; done
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_teardown_plan_worktree <root> <plan_id>   (P074 Step 11)
+#
+# plan-close / plan-rollback teardown. ALWAYS returns 0: a close is a
+# terminal, durable transaction and a stuck worktree must never block it — a
+# failure downgrades to a warning that prints the manual cleanup VERBATIM
+# (the doubled `-f` is required for a LOCKED worktree; a single one is not
+# enough, which is exactly the case an operator hits here).
+#
+# `prune` runs first (a hand-deleted directory leaves only a registration,
+# which prune clears) and again after the removal (a half-removed admin entry
+# would otherwise block the next plan that wants this path).
+#
+# IDEMPOTENT AND RE-RUNNABLE (P074 review F5). A kill after the close became
+# durable but before teardown used to leak the worktree permanently, because
+# the re-run took plan-close's "ALREADY CLOSED … no-op" exit and never came
+# back here. Both terminal commands now call this on their already-terminal
+# re-run path, so it must be safe with nothing left to do: when there is no
+# directory, no registration and no pointer it says so and returns.
+#
+# It also refuses to act on a recorded path OUTSIDE the repo root (F7's
+# defence in depth): removing "some registered worktree the state file names"
+# is precisely the damage a malformed record could otherwise cause.
+# ---------------------------------------------------------------------------
+_pfsm_teardown_plan_worktree() {
+  local root="$1" plan_id="$2"
+  local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  local wt; wt="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  local had_pointer=0
+  [[ -n "$wt" ]] && had_pointer=1
+  [[ -n "$wt" ]] || wt="$canonical"
+
+  local phys_wt phys_root
+  phys_wt="$(_pfsm_phys "$wt")"; phys_root="$(_pfsm_phys "$root")"
+  if [[ "$phys_wt" != "$phys_root"/* ]]; then
+    echo "WARNING: ${plan_id} records the execution worktree ${wt}, which is OUTSIDE this repository (${root}) — teardown will not remove a tree it cannot show belongs to this plan. The pointer is cleared; inspect and clean up ${wt} by hand if it really was this plan's." >&2
+    plan_state_set_worktree_path "$plan_id" "" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  # Serialize against the audited repair (--recreate-worktree), which takes the
+  # same lock: without it a recreate can add a worktree for a plan this close
+  # already tore down. Teardown must NEVER block a durable close, so a lock we
+  # cannot get downgrades to a warning and the teardown proceeds anyway.
+  local wlock; wlock="$(_pfsm_plan_worktree_lock_path "$plan_id")"
+  local wfd=""
+  if aid_lock_acquire "$wlock" "${AID_WORKTREE_LOCK_TIMEOUT_S:-10}" >/dev/null 2>&1; then
+    wfd="$AID_LOCK_FD"
+  else
+    echo "WARNING: teardown could not take the worktree lock ${wlock} for ${plan_id} — proceeding anyway (a close is terminal and never blocks). If a --recreate-worktree is running concurrently, re-run plan-close afterwards to reconcile." >&2
+  fi
+
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+
+  local failed=0 acted=0
+  if [[ -e "$wt" ]] || _pfsm_worktree_registered "$root" "$wt"; then
+    acted=1
+    local rm_err="" rrc=0
+    rm_err="$(git -C "$root" worktree remove --force "$wt" 2>&1)" || rrc=$?
+    git -C "$root" worktree prune >/dev/null 2>&1 || true
+    if [[ "$rrc" -ne 0 ]] && { [[ -e "$wt" ]] || _pfsm_worktree_registered "$root" "$wt"; }; then
+      failed=1
+      echo "WARNING: could not remove the execution worktree ${wt} (rc=${rrc}). git said: ${rm_err}" >&2
+      echo "  The plan is closed regardless — teardown never blocks it. Clean up manually with:" >&2
+      echo "  git worktree remove -f -f ${wt} ; git worktree prune" >&2
+      echo "  Re-running plan-close (or plan-rollback) retries this teardown — it is idempotent." >&2
+    fi
+  fi
+
+  # The pointer is cleared whether or not the directory went: a stale pointer
+  # to a tree that is gone would make every later reader name a repair for a
+  # plan that no longer needs one. The canonical path is still reconciled on a
+  # re-run without it, which is what makes the retry above true.
+  if [[ "$had_pointer" -eq 1 ]]; then
+    plan_state_set_worktree_path "$plan_id" "" >/dev/null 2>&1 || true
+  fi
+
+  [[ -n "$wfd" ]] && aid_lock_release "$wfd" >/dev/null 2>&1
+
+  if [[ "$failed" -eq 0 ]]; then
+    if [[ "$acted" -eq 1 || "$had_pointer" -eq 1 ]]; then
+      echo "Execution worktree torn down: ${wt}" >&2
+    else
+      echo "No execution worktree to tear down for ${plan_id} (nothing at ${wt}, nothing registered, no pointer)." >&2
+    fi
+  fi
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WORKTREE ENFORCEMENT (P074 Step 8)
+#
+# WHY COMMAND-LEVEL, NOT PROSE. Dispatching agents "with cwd = the plan
+# worktree" is a promise an instruction file makes and nothing checks. The
+# lifecycle commands below really do check out branches and merge in a tree,
+# so a direct operator call from the primary checkout would hijack THAT tree —
+# exactly the single-stream failure P074 exists to remove. So every plan-linked
+# command that touches a tree asks plan-state where the plan's tree is and
+# either goes there itself (the default) or refuses with the repair.
+#
+# REDIRECT IS THE DEFAULT, refusal the exception. Redirect keeps every existing
+# script and muscle-memory invocation working; refusal happens only when the
+# recorded worktree is broken, because silently falling back to the primary
+# checkout is the one outcome that must never happen.
+#
+# TWO ROOTS, deliberately different:
+#   project_root (state root)  — where `.aid-o` lives. NEVER the worktree.
+#   tree_root    (_pfsm_plan_tree_root) — the tree whose HEAD/index/worktree
+#                the command mutates. The plan worktree when one is recorded
+#                and healthy, the state root otherwise (legacy plans).
+# Refs and objects are shared by every worktree of a repository, so a `git -C`
+# swapped from one to the other changes ONLY the tree/HEAD legs — which is
+# precisely the intended effect.
+#
+# WHICH COMMANDS. epic-merge-to-plan and plan-finalize (every stage) get the
+# enforcer. `plan-merge-to-main` deliberately does NOT — Step 5 established it
+# writes no tracked file (pure plumbing), so redirecting it would be ceremony.
+# `plan-start` runs pre-worktree by definition. `plan-close` and `plan-rollback`
+# get the INVERSE (_pfsm_refuse_inside_plan_worktree): they REMOVE the tree, and
+# nothing may delete the directory it is standing in.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# The verbatim argv of this process, captured before any parsing (see the
+# bottom-of-file entrypoint guard). Declared here so a SOURCED aid-plan-fsm.sh
+# under `set -u` never sees it unset.
+_PFSM_ORIG_ARGS=()
+
+# ---------------------------------------------------------------------------
+# _pfsm_plan_tree_root <state_root> <plan_id>
+#
+# The tree a plan-linked command operates ON. The recorded execution worktree
+# when the plan has one AND it is healthy (present + git-registered); the state
+# root otherwise, which is byte-identical to pre-P074 behaviour for every
+# legacy plan. Deliberately NEVER fails: a broken worktree is the enforcer's
+# refusal to report, not a resolution error to raise from every git call.
+# ---------------------------------------------------------------------------
+_pfsm_plan_tree_root() {
+  local root="$1" plan_id="$2" rec=""
+  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  if [[ -n "$rec" && -d "$rec" ]] && _pfsm_worktree_registered "$root" "$rec" \
+     && _pfsm_worktree_is_linked "$root" "$rec"; then
+    printf '%s' "$rec"
+    return 0
+  fi
+  printf '%s' "$root"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_worktree_is_linked <state_root> <path>
+#
+# Is <path> a LINKED worktree — i.e. a real second tree — rather than the
+# primary checkout itself?
+#
+# WHY THIS IS A SEPARATE, MANDATORY CHECK. "Registered with git" is NOT
+# sufficient: `git worktree list` includes the PRIMARY checkout as its first
+# entry, so a `worktree_path` recorded as the state root passes every existence
+# and registration probe, and then passes the enforcer's cwd comparison as
+# "already there" — leaving finalize, epic-merge-to-plan and init running their
+# checkouts and merges in the PM's own tree while claiming isolation, with the
+# loop guard unreachable because no redirect is ever attempted. A recorded path
+# equal to the state root is a metadata LIE, not a degenerate-but-valid setup:
+# a plan can never execute in the state root once it has declared worktree mode.
+#
+# The probe is git's own definition: a linked worktree's git dir lives under
+# `<common>/worktrees/<name>` (exactly what aid-fsm.sh's `is_worktree` tests),
+# whereas the primary's is the common dir itself.
+# ---------------------------------------------------------------------------
+_pfsm_worktree_is_linked() {
+  local root="$1" path="$2"
+  [[ "$(_pfsm_phys "$path")" != "$(_pfsm_phys "$root")" ]] || return 1
+  local gd=""
+  gd="$(git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  [[ "$gd" == */worktrees/* ]]
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_wt_abs_args <arg>... — prints one absolutized argument per line.
+#
+# The redirect preserves argv VERBATIM in the sense that matters (no flag is
+# re-parsed, reordered, added or dropped) — but a relative path argument is
+# resolved against the cwd, and the redirect changes the cwd. A
+# `--execution-yaml config/exec.yaml` or a `--substitute-receipt
+# bats_all=receipts/pass.json` handed in by the operator would resolve inside
+# the PLAN WORKTREE on the other side, where it does not exist.
+#
+# TWO RULES, in this order:
+#
+#  1. ENUMERATED PATH FLAGS — the reliable half. Every flag this CLI documents
+#     as taking a path is listed below, in both spellings (`--flag value` and
+#     `--flag=value`), plus the `<key>=<path>` shape `--substitute-receipt`
+#     uses, where only the VALUE half is a path. Their values are absolutized
+#     unconditionally when relative: they are paths by declaration, so no
+#     guessing from string shape is involved. Keep this list in sync with the
+#     usage text — a path flag missing from it silently breaks after a
+#     redirect, which is why they are enumerated rather than sniffed.
+#
+#  2. BARE POSITIONALS — the residue (`aid-fsm.sh`'s state-file positional is
+#     the only real member). Rewritten only when relative, containing a `/`,
+#     with an existing directory as its FIRST component, and unresolvable by
+#     git as a ref. That accepts `.aid-o/work/.../x.yaml` (existing or not) and
+#     rejects every branch-shaped argument — `plan/P074`,
+#     `task/E-074-1_1/main` — which is the collision worth engineering against,
+#     since these CLIs take both kinds. Ids, phase names and flags contain no
+#     `/` and pass through untouched.
+# ---------------------------------------------------------------------------
+
+# The flags whose VALUE is a path. `_AID_WT_KV_FLAGS` take `<key>=<path>`.
+_AID_WT_PATH_FLAGS=" --project-root --execution-yaml --decision --plan-file --plan --output --state-file --report-file "
+_AID_WT_KV_FLAGS=" --substitute-receipt "
+
+# _aid_wt_abs_one <path> — absolute form against the CURRENT cwd (called
+# before the cd, always). An already-absolute path is returned unchanged.
+_aid_wt_abs_one() {
+  local v="${1:-}"
+  [[ -n "$v" && "$v" != /* ]] || { printf '%s' "$v"; return 0; }
+  printf '%s/%s' "$(pwd)" "$v"
+}
+
+# _aid_wt_abs_positional <arg> — rule 2 above.
+_aid_wt_abs_positional() {
+  local a="${1:-}" first="${1%%/*}"
+  if [[ "$a" == */* && "$a" != /* && -d "$first" ]] \
+     && ! git rev-parse --verify --quiet "$a" >/dev/null 2>&1; then
+    printf '%s/%s' "$(pwd)" "$a"
+  else
+    printf '%s' "$a"
+  fi
+}
+
+# _aid_wt_rewrite_args <arg>... — the shared walker (identical logic in
+# aid-fsm.sh; the two CLIs cannot source each other, see that copy's note).
+_aid_wt_rewrite_args() {
+  local expect=""   # "" | path | kv — what the PREVIOUS argument promised
+  local a
+  for a in "$@"; do
+    case "$expect" in
+      path) printf '%s\n' "$(_aid_wt_abs_one "$a")"; expect=""; continue ;;
+      kv)
+        if [[ "$a" == *=* ]]; then
+          printf '%s=%s\n' "${a%%=*}" "$(_aid_wt_abs_one "${a#*=}")"
+        else
+          printf '%s\n' "$a"
+        fi
+        expect=""; continue ;;
+    esac
+    if [[ "$_AID_WT_PATH_FLAGS" == *" $a "* ]]; then
+      printf '%s\n' "$a"; expect="path"; continue
+    fi
+    if [[ "$_AID_WT_KV_FLAGS" == *" $a "* ]]; then
+      printf '%s\n' "$a"; expect="kv"; continue
+    fi
+    if [[ "$a" == --*=* ]]; then
+      local f="${a%%=*}"
+      if [[ "$_AID_WT_PATH_FLAGS" == *" $f "* ]]; then
+        printf '%s=%s\n' "$f" "$(_aid_wt_abs_one "${a#*=}")"; continue
+      fi
+      if [[ "$_AID_WT_KV_FLAGS" == *" $f "* ]]; then
+        local kv="${a#*=}"
+        if [[ "$kv" == *=* ]]; then
+          printf '%s=%s=%s\n' "$f" "${kv%%=*}" "$(_aid_wt_abs_one "${kv#*=}")"
+        else
+          printf '%s\n' "$a"
+        fi
+        continue
+      fi
+    fi
+    # Any other flag: verbatim, and it promises nothing about the next argument.
+    if [[ "$a" == -* ]]; then printf '%s\n' "$a"; continue; fi
+    printf '%s\n' "$(_aid_wt_abs_positional "$a")"
+  done
+}
+
+_pfsm_wt_abs_args() { _aid_wt_rewrite_args "$@"; }
+
+# ---------------------------------------------------------------------------
+# _pfsm_require_plan_worktree <plan_id> <state_root>
+#
+# Four outcomes, in the order they are decided:
+#
+#   1. No `worktree_path` recorded AND no `.aid-worktrees/plan-<id>` directory
+#      or registration -> TRUE LEGACY PLAN. One-line notice, return 0,
+#      behaviour byte-identical to pre-P074.
+#   2. No `worktree_path` recorded BUT the directory/registration exists ->
+#      the crash window between `worktree add` and the state write. REFUSED,
+#      never a legacy pass: running in the primary checkout while a live
+#      execution tree sits next to it is the exact silent-wrong-tree outcome
+#      this whole step removes.
+#   3. Recorded but missing/unregistered -> REFUSED, naming
+#      `--recreate-worktree` (the audited Step 11 repair).
+#   4. Recorded and healthy -> if we already stand inside it, no-op (zero
+#      overhead for a PM who cd'd there). Otherwise RE-EXEC there.
+#
+# Returns 0 to continue, 1 to refuse (the caller exits). The re-exec never
+# returns.
+# ---------------------------------------------------------------------------
+_pfsm_require_plan_worktree() {
+  local plan_id="$1" root="$2"
+  local canonical rec here want
+  canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+
+  if [[ -z "$rec" ]]; then
+    if [[ -d "$canonical" ]] || _pfsm_worktree_registered "$root" "$canonical"; then
+      echo "PRECONDITION FAIL: ${plan_id} records NO execution worktree, but one exists at ${canonical} — a plan-start killed between registering the worktree and recording it leaves exactly this. Refusing to run against ${root} as if the plan were a legacy one: that would operate on the wrong tree silently. Resume with 'aid-plan-fsm.sh plan-start ${plan_id} --mode <mode>' (it adopts and records the existing worktree), or repair with 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"'." >&2
+      return 1
+    fi
+    echo "NOTE: ${plan_id} has no execution worktree (a plan opened before worktree mode) — running against ${root}, exactly as before P074." >&2
+    return 0
+  fi
+
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  if [[ ! -d "$rec" ]] || ! _pfsm_worktree_registered "$root" "$rec"; then
+    echo "PRECONDITION FAIL: ${plan_id} records the execution worktree ${rec}, but it is missing or is no longer registered with git — there is no tree to run in, and the primary checkout is not a substitute. Repair it with the audited transaction: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why it went missing>\"" >&2
+    return 1
+  fi
+
+  # THE RECORDED PATH MUST BE A LINKED WORKTREE, checked BEFORE the cwd
+  # comparison below. `git worktree list` includes the primary checkout, so a
+  # record naming the state root would otherwise pass the registration probe
+  # AND then match the cwd as "already there" — every tree operation would run
+  # in the PM's own checkout while the command reported isolation, and the loop
+  # guard could never fire because no redirect is attempted. Refuse the lie.
+  if ! _pfsm_worktree_is_linked "$root" "$rec"; then
+    echo "PRECONDITION FAIL: ${plan_id} records ${rec} as its execution worktree, but that is not a LINKED worktree — it is the primary checkout (${root}) or a directory git does not manage as a separate tree. A plan can never execute in the state root: doing so is exactly the wrong-tree outcome worktree mode exists to prevent. Repair the record: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why the recorded path is wrong>\"" >&2
+    return 1
+  fi
+
+  here="$(_pfsm_phys "$PWD")"
+  want="$(_pfsm_phys "$rec")"
+  if [[ "$here" == "$want" || "$here" == "$want"/* ]]; then
+    # Already there. Clear the loop guard so a NESTED invocation for a
+    # DIFFERENT plan can still legitimately redirect (Edge Case).
+    unset AID_WT_REDIRECTED
+    return 0
+  fi
+
+  # LOOP GUARD. We were re-executed once and are still outside the recorded
+  # tree — plan-state is describing a place that is not where it says it is
+  # (classically: worktree_path pointing at the primary root, which is
+  # registered as a worktree but is never the plan's own). Recursing would
+  # fork-bomb; terminate with the repair instead.
+  if [[ -n "${AID_WT_REDIRECTED:-}" ]]; then
+    echo "ERROR: worktree redirect loop for ${plan_id}. plan-state records ${rec}, but after re-executing with that as the working directory the invocation is STILL outside it (cwd: ${here}). The recorded path does not describe the tree it claims to. Fix plan-state: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"" >&2
+    return 1
+  fi
+
+  # SOURCED CONTEXT. `exec bash "$0"` would re-run the SOURCING program (a test
+  # harness, an interactive shell), not this CLI. Refuse with the manual step.
+  if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "PRECONDITION FAIL: ${plan_id} executes in ${rec}, but aid-plan-fsm.sh is being used as a sourced library here, so it cannot re-execute itself. Run: cd ${rec} && <the same command>" >&2
+    return 1
+  fi
+
+  # `$0` is resolved BEFORE the cd — a relative `./scripts/aid-plan-fsm.sh`
+  # would otherwise be looked up inside the worktree, where the plugin is not.
+  local self
+  self="$(cd "$(dirname "$0")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$0")")" || self="$0"
+  local -a fwd=()
+  mapfile -t fwd < <(_pfsm_wt_abs_args "${_PFSM_ORIG_ARGS[@]+"${_PFSM_ORIG_ARGS[@]}"}")
+
+  echo "NOTE: ${plan_id} executes in its own worktree — re-running this command in ${rec} (was: ${here})." >&2
+  cd "$want" || {
+    echo "PRECONDITION FAIL: cannot enter the execution worktree ${want} for ${plan_id} (permissions? unmounted filesystem?)." >&2
+    return 1
+  }
+  AID_WT_REDIRECTED=1 exec bash "$self" "${fwd[@]+"${fwd[@]}"}"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_refuse_inside_plan_worktree <plan_id> <state_root>
+#
+# THE INVERSE of the enforcer, for plan-close and plan-rollback. They tear the
+# execution worktree DOWN, and `git worktree remove` on the directory the
+# process is standing in leaves the caller in a deleted cwd — with the removal
+# itself refused on some platforms. There is no sane redirect for "delete the
+# tree you are in", so this refuses and names the one correct move. Their own
+# lifecycle-file work goes through state-root/plumbing paths, so running from
+# the state root costs nothing.
+#
+# Returns 0 to continue, 1 to refuse.
+# ---------------------------------------------------------------------------
+_pfsm_refuse_inside_plan_worktree() {
+  local plan_id="$1" root="$2" cmd="${3:-this command}"
+  local rec here want
+  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  [[ -n "$rec" ]] || rec="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  here="$(_pfsm_phys "$PWD")"
+  want="$(_pfsm_phys "$rec")"
+  if [[ "$here" == "$want" || "$here" == "$want"/* ]]; then
+    echo "PRECONDITION FAIL: ${cmd} removes ${plan_id}'s execution worktree, and you are standing inside it (${here}). Deleting the tree under your own feet is never redirected around. Run: cd ${root} && <the same command>" >&2
+    return 1
+  fi
+  return 0
+}
+
 # =============================================================================
 # cmd_plan_start <plan_id> --mode <...> [--project-root ...] [--op-id ...]
 #
@@ -1067,6 +1807,11 @@ cmd_plan_start() {
     branch_exists=0
   fi
 
+  # P074 Step 7 — what THIS invocation created, so compensation can never undo
+  # something it merely found (a resumed plan-start must not delete a branch or
+  # a state file that predates it).
+  local _pfsm_created_branch=0 _pfsm_created_state=0
+
   if [[ "$branch_exists" -eq 0 ]]; then
     # ── Existing plan branch: idempotent-resume verification ──────────────
     local manifest_base="" mrc=0
@@ -1083,6 +1828,12 @@ cmd_plan_start() {
         exit 1
       fi
       if [[ "$actual_base" == "$manifest_base" ]]; then
+        # P074 Step 7: the resume path still has to answer for the worktree —
+        # skip when it is recorded and registered, complete the record when a
+        # kill left it registered-but-unrecorded, refuse (naming
+        # --recreate-worktree) when the recorded one is gone. Nothing was
+        # created here, so a refusal compensates nothing: it just refuses.
+        _pfsm_ensure_plan_worktree "$project_root" "$plan_id" "$plan_branch" || exit 1
         echo "$plan_branch"
         exit 0
       fi
@@ -1106,6 +1857,42 @@ cmd_plan_start() {
         echo "PRECONDITION FAIL: ${plan_branch} exists but its SHA does not match the crash-recorded resulting_sha for op ${op_id} — cannot verify lineage." >&2
         exit 1
       fi
+    elif [[ "$reconcile_status" == "intent" ]]; then
+      # P074 review F1 — THE KILL WINDOW BETWEEN `git branch` AND
+      # `plan_op_mark_git_applied`. The branch exists, the ledger's last word
+      # for this op is `intent`, and there is no manifest. Refusing here (the
+      # old behaviour) made that window non-resumable: the operator was left
+      # with a stranded `plan/<id>` that no command would either finish or
+      # clean up. It is instead COMPLETED forward, because the branch a killed
+      # plan-start left is exactly the branch this run would create.
+      #
+      # WHAT MAKES THAT SAFE: the branch must still be pristine — its tip
+      # reachable from the target branch, i.e. it was created at a target head
+      # and never advanced. Anything else is not this window (someone worked on
+      # the branch, or created it by hand) and is still refused.
+      local branch_sha=""
+      branch_sha="$(git -C "$project_root" rev-parse "$plan_branch" 2>/dev/null)" || branch_sha=""
+      if [[ -z "$branch_sha" ]]; then
+        echo "PRECONDITION FAIL: ${plan_branch} exists but its SHA is unreadable — cannot verify lineage." >&2
+        exit 1
+      fi
+      if ! git -C "$project_root" merge-base --is-ancestor "$plan_branch" "$target_branch" >/dev/null 2>&1; then
+        echo "PRECONDITION FAIL: ${plan_branch} exists and this run's operation record is still at 'intent' (a plan-start killed between creating the branch and recording it), but ${plan_branch} (${branch_sha}) is NOT contained in ${target_branch} — it carries work, so it is not the pristine branch that window leaves and this command will not adopt it. Inspect it, then either delete it (git branch -D ${plan_branch}) and re-run plan-start, or keep it and reconcile by hand." >&2
+        exit 1
+      fi
+      echo "NOTE: completing a plan-start that was killed between creating ${plan_branch} and recording it — the branch is unchanged at ${branch_sha}, so this run finishes the same operation instead of refusing." >&2
+      target_head="$branch_sha"
+      local igrc=0
+      plan_op_mark_git_applied "$plan_id" "$op_id" "$target_head" || igrc=$?
+      if [[ "$igrc" -ne 0 ]]; then
+        echo "PRECONDITION FAIL: could not record git_applied for the resumed ${plan_branch} (rc=${igrc}) — nothing else was touched, retry converges." >&2
+        exit "$igrc"
+      fi
+      # Deliberately NOT marked as created-by-this-invocation: a later failure
+      # compensates the worktree and the state pointer, but never deletes a
+      # branch this run merely found. The ledger now says git_applied, which
+      # is TRUE, and the next re-run takes the git_applied path above.
+      # fall through to the shared write tail below.
     else
       echo "PRECONDITION FAIL: ${plan_branch} already exists with no manifest and no matching in-flight operation record — cannot verify lineage (manually created?)." >&2
       exit 1
@@ -1153,6 +1940,7 @@ cmd_plan_start() {
     fi
 
     aid_lock_release "$fd"
+    _pfsm_created_branch=1
 
     local grc=0
     plan_op_mark_git_applied "$plan_id" "$op_id" "$target_head" || grc=$?
@@ -1178,6 +1966,19 @@ cmd_plan_start() {
       echo "PRECONDITION FAIL: plan_state_init failed for ${plan_id} (rc=${sirc})." >&2
       exit "$sirc"
     fi
+    _pfsm_created_state=1
+  fi
+
+  # ── P074 Step 7: the plan's execution worktree ──────────────────────────
+  # Placed here, after the state file exists (the record has nowhere to go
+  # before that) and BEFORE the manifest is initialised, so a failure has the
+  # smallest possible surface to compensate. A failure at ANY point below
+  # leaves nothing: no worktree, no plan branch, no plan-state entry, and no
+  # ledger record claiming a branch that is gone.
+  if ! _pfsm_ensure_plan_worktree "$project_root" "$plan_id" "$plan_branch"; then
+    _pfsm_plan_start_compensate "$project_root" "$plan_id" "$plan_branch" "$op_id" \
+      "$_pfsm_created_branch" "$_pfsm_created_state"
+    exit 1
   fi
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
@@ -2072,18 +2873,28 @@ cmd_epic_merge_to_plan() {
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
 
+  # ── P074 Step 8: run where the plan's tree is ────────────────────────────
+  # This command checks out `plan/<id>` and merges in a tree. Before it touches
+  # one it re-executes itself inside the plan's execution worktree (or refuses
+  # naming the repair). Placed AFTER parsing (it needs plan_id) and BEFORE
+  # every preflight that inspects a tree.
+  _pfsm_require_plan_worktree "$plan_id" "$project_root" || exit 1
+
   # The checks are about the worktree this command actually CHECKS OUT AND
-  # MERGES IN — the main worktree (project_root), not wherever the operator
-  # happens to stand (a linked worktree never holds `plan/<plan_id>` here).
+  # MERGES IN. P074 Step 8: that is `tree_root` — the plan's execution
+  # worktree when it has one, the state root for a legacy plan. `project_root`
+  # stays the STATE root (`.aid-o` never moves into a worktree); refs and
+  # objects are shared, so only the tree/HEAD legs of these git calls change.
   # P074 Step 5: the clean-worktree check is KEPT (this command really does
-  # check out and merge in a tree) and is evaluated via `git -C` against that
-  # tree — after EPIC 2 project_root resolution makes that the plan worktree.
-  _pfsm_check_detached_head "$project_root" || exit 1
-  _pfsm_check_no_merge_in_progress "$project_root" || exit 1
+  # check out and merge in a tree) and is evaluated via `git -C` against it.
+  local tree_root
+  tree_root="$(_pfsm_plan_tree_root "$project_root" "$plan_id")"
+  _pfsm_check_detached_head "$tree_root" || exit 1
+  _pfsm_check_no_merge_in_progress "$tree_root" || exit 1
   # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
   # bookkeeping obstacle, not a physical impossibility, so an audited
   # --force may pass it. The check still prints its own recovery first.
-  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$project_root" || exit 1
+  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || exit 1
   _pfsm_commit_force "epic-merge-to-plan" "$plan_id" "$project_root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
@@ -2204,7 +3015,7 @@ cmd_epic_merge_to_plan() {
     fi
     # The tip TODAY must be the tip completion verified.
     local _mg_tip=""
-    _mg_tip="$(git -C "$project_root" rev-parse --verify --quiet "refs/heads/task/${epic_id}/main" 2>/dev/null || true)"
+    _mg_tip="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/task/${epic_id}/main" 2>/dev/null || true)"
     if [[ -z "$_mg_tip" ]]; then
       echo "PRECONDITION FAIL: epic_completion_stale: task/${epic_id}/main does not resolve, so the completed commit ${_mg_csha:0:8} cannot be confirmed as its tip. Nothing was merged." >&2
       exit 1
@@ -2217,7 +3028,7 @@ cmd_epic_merge_to_plan() {
 
   local plan_branch="plan/${plan_id}" task_branch="task/${epic_id}/main"
   local plan_head=""
-  plan_head="$(git -C "$project_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  plan_head="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
   if [[ -z "$plan_head" ]]; then
     echo "PRECONDITION FAIL: ${plan_branch} not found — run plan-start first." >&2
     exit 1
@@ -2226,7 +3037,7 @@ cmd_epic_merge_to_plan() {
   # The concurrent-writer guard, BEFORE anything is recorded or merged.
   if [[ -n "$expected_sha" ]]; then
     local expected_norm=""
-    expected_norm="$(git -C "$project_root" rev-parse --verify --quiet "${expected_sha}^{commit}" 2>/dev/null)" || expected_norm="$expected_sha"
+    expected_norm="$(git -C "$tree_root" rev-parse --verify --quiet "${expected_sha}^{commit}" 2>/dev/null)" || expected_norm="$expected_sha"
     if [[ "$expected_norm" != "$plan_head" ]]; then
       echo "PRECONDITION FAIL: --expected-plan-sha ${expected_sha} does not match the observed ${plan_branch} head ${plan_head} — another writer moved the plan branch; refusing before the merge." >&2
       exit 1
@@ -2243,13 +3054,13 @@ cmd_epic_merge_to_plan() {
   # commit while `epic_merge_commit` keeps naming the first one — which is
   # what Step 7's queue writer mirrors — is the one outcome not allowed.
   if [[ "$cur_status" == "merged_to_plan" ]]; then
-    if [[ -z "$recorded_mc" ]] || ! _pfsm_is_ancestor "$project_root" "$recorded_mc" "$plan_branch"; then
+    if [[ -z "$recorded_mc" ]] || ! _pfsm_is_ancestor "$tree_root" "$recorded_mc" "$plan_branch"; then
       echo "PRECONDITION FAIL: ${epic_id} is already 'merged_to_plan' but its recorded merge commit '${recorded_mc:-<none>}' is not an ancestor of ${plan_branch} — the manifest status is terminal and this command will not create a second merge; reconcile the manifest against Git by hand." >&2
       exit 1
     fi
     local merged_tip=""
-    merged_tip="$(git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" 2>/dev/null)" || merged_tip=""
-    if [[ -n "$merged_tip" ]] && ! _pfsm_is_ancestor "$project_root" "$merged_tip" "$plan_branch"; then
+    merged_tip="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${task_branch}" 2>/dev/null)" || merged_tip=""
+    if [[ -n "$merged_tip" ]] && ! _pfsm_is_ancestor "$tree_root" "$merged_tip" "$plan_branch"; then
       echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan at ${recorded_mc} but its task branch has moved to ${merged_tip}, which is not contained in ${plan_branch}; the manifest status is terminal and this command will not create a second merge. Land the newer work through its own EPIC." >&2
       exit 1
     fi
@@ -2284,8 +3095,8 @@ cmd_epic_merge_to_plan() {
   # ── The task branch is gone ──────────────────────────────────────────────
   # Branch deletion is not evidence by itself, but it does not invalidate a
   # merge that is already proven.
-  if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
-    if [[ -n "$recorded_mc" ]] && _pfsm_is_ancestor "$project_root" "$recorded_mc" "$plan_branch"; then
+  if ! git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
+    if [[ -n "$recorded_mc" ]] && _pfsm_is_ancestor "$tree_root" "$recorded_mc" "$plan_branch"; then
       local wrc=0
       _pfsm_record_merged "$plan_id" "$epic_id" "$recorded_mc" "$cur_status" || wrc=$?
       [[ "$wrc" -ne 0 ]] && exit "$wrc"
@@ -2297,7 +3108,7 @@ cmd_epic_merge_to_plan() {
   fi
 
   local task_tip
-  task_tip="$(git -C "$project_root" rev-parse "$task_branch" 2>/dev/null)" || task_tip=""
+  task_tip="$(git -C "$tree_root" rev-parse "$task_branch" 2>/dev/null)" || task_tip=""
   if [[ -z "$task_tip" ]]; then
     echo "PRECONDITION FAIL: cannot resolve ${task_branch}." >&2
     exit 1
@@ -2309,7 +3120,7 @@ cmd_epic_merge_to_plan() {
   if [[ "$reconcile_status" == "git_applied" ]]; then
     local resulting_sha=""
     resulting_sha="$(_pfsm_last_resulting_sha "$plan_id" "$op_id")"
-    if [[ -z "$resulting_sha" ]] || ! _pfsm_is_ancestor "$project_root" "$resulting_sha" "$plan_branch"; then
+    if [[ -z "$resulting_sha" ]] || ! _pfsm_is_ancestor "$tree_root" "$resulting_sha" "$plan_branch"; then
       echo "PRECONDITION FAIL: operation record for ${plan_id}/${epic_id} claims git_applied with resulting_sha '${resulting_sha:-<none>}', which is not an ancestor of ${plan_branch} — state/Git divergence, manual reconciliation required." >&2
       exit 5
     fi
@@ -2328,12 +3139,12 @@ cmd_epic_merge_to_plan() {
   fi
 
   # ── Already merged: converge, never a second merge commit ────────────────
-  if _pfsm_is_ancestor "$project_root" "$task_tip" "$plan_branch"; then
+  if _pfsm_is_ancestor "$tree_root" "$task_tip" "$plan_branch"; then
     local proven=""
-    if [[ -n "$recorded_mc" ]] && _pfsm_is_ancestor "$project_root" "$recorded_mc" "$plan_branch"; then
+    if [[ -n "$recorded_mc" ]] && _pfsm_is_ancestor "$tree_root" "$recorded_mc" "$plan_branch"; then
       proven="$recorded_mc"
     else
-      proven="$(_pfsm_find_merge_commit "$project_root" "$task_branch" "$plan_branch")" || proven=""
+      proven="$(_pfsm_find_merge_commit "$tree_root" "$task_branch" "$plan_branch")" || proven=""
     fi
     if [[ -z "$proven" ]]; then
       echo "PRECONDITION FAIL: unproven_merge — ${task_branch} is contained in ${plan_branch} but through no merge commit (fast-forward or identical tip), so there is nothing to record as ancestry proof." >&2
@@ -2384,7 +3195,7 @@ cmd_epic_merge_to_plan() {
   # Re-read the plan head under the lock — the same concurrent-writer guard,
   # now against a racer that moved the branch since the pre-lock read.
   local locked_head=""
-  locked_head="$(git -C "$project_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || locked_head=""
+  locked_head="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || locked_head=""
   if [[ "$locked_head" != "$plan_head" ]]; then
     aid_lock_release "$fd"
     echo "PRECONDITION FAIL: ${plan_branch} moved from ${plan_head} to ${locked_head:-<gone>} while acquiring the lock — retry." >&2
@@ -2392,16 +3203,16 @@ cmd_epic_merge_to_plan() {
   fi
 
   local orig_branch=""
-  orig_branch="$(git -C "$project_root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+  orig_branch="$(git -C "$tree_root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
 
-  if ! git -C "$project_root" checkout -q "$plan_branch" >/dev/null 2>&1; then
+  if ! git -C "$tree_root" checkout -q "$plan_branch" >/dev/null 2>&1; then
     aid_lock_release "$fd"
     echo "PRECONDITION FAIL: cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged, op stays at intent." >&2
     exit 1
   fi
 
   local merge_out="" mrc=0
-  merge_out="$(git -C "$project_root" merge --no-ff --no-edit \
+  merge_out="$(git -C "$tree_root" merge --no-ff --no-edit \
     -m "merge(epic): ${epic_id} into ${plan_branch}" "$task_branch" 2>&1)" || mrc=$?
 
   if [[ "$mrc" -ne 0 ]]; then
@@ -2414,24 +3225,24 @@ cmd_epic_merge_to_plan() {
     # controller branching on exit 4 would run a conflict-resolution path
     # against an operator-hygiene problem `git merge --abort` cannot fix.
     local git_dir="" is_conflict=0
-    git_dir="$(git -C "$project_root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || git_dir=""
+    git_dir="$(git -C "$tree_root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || git_dir=""
     if [[ -n "$git_dir" && -f "${git_dir}/MERGE_HEAD" ]]; then
       is_conflict=1
-    elif [[ -n "$(git -C "$project_root" ls-files --unmerged 2>/dev/null)" ]]; then
+    elif [[ -n "$(git -C "$tree_root" ls-files --unmerged 2>/dev/null)" ]]; then
       is_conflict=1
     fi
 
     if [[ "$is_conflict" -eq 1 ]]; then
       local abort_out="" arc=0
-      abort_out="$(git -C "$project_root" merge --abort 2>&1)" || arc=$?
+      abort_out="$(git -C "$tree_root" merge --abort 2>&1)" || arc=$?
       if [[ "$arc" -ne 0 ]]; then
-        echo "ERROR: 'git merge --abort' failed (rc=${arc}) in ${project_root} — the worktree is STILL mid-merge and needs manual cleanup:" >&2
+        echo "ERROR: 'git merge --abort' failed (rc=${arc}) in ${tree_root} — that tree is STILL mid-merge and needs manual cleanup:" >&2
         printf '%s\n' "$abort_out" >&2
       fi
     fi
 
     # Loud, never swallowed: if HEAD cannot go back, say where it really is.
-    _pfsm_restore_head "$project_root" "$orig_branch" || true
+    _pfsm_restore_head "$tree_root" "$orig_branch" || true
     aid_lock_release "$fd"
     # `aborted` has no public plan_op_* setter (the library exposes begin /
     # git_applied / commit only); the append helper is the single writer for
@@ -2452,10 +3263,10 @@ cmd_epic_merge_to_plan() {
   fi
 
   local merge_commit=""
-  merge_commit="$(git -C "$project_root" rev-parse "$plan_branch" 2>/dev/null)" || merge_commit=""
+  merge_commit="$(git -C "$tree_root" rev-parse "$plan_branch" 2>/dev/null)" || merge_commit=""
   # A failed restore does not invalidate the merge that just landed, but it is
   # never silent — the operator is told where HEAD actually is.
-  _pfsm_restore_head "$project_root" "$orig_branch" || true
+  _pfsm_restore_head "$tree_root" "$orig_branch" || true
   aid_lock_release "$fd"
 
   if [[ -z "$merge_commit" || "$merge_commit" == "$plan_head" ]]; then
@@ -2473,7 +3284,7 @@ cmd_epic_merge_to_plan() {
 
   # Ancestry proof — the ONLY accepted evidence, checked against Git itself
   # rather than against what we believe we just did.
-  if ! _pfsm_is_ancestor "$project_root" "$merge_commit" "$plan_branch"; then
+  if ! _pfsm_is_ancestor "$tree_root" "$merge_commit" "$plan_branch"; then
     echo "PRECONDITION FAIL: ${merge_commit} is not an ancestor of ${plan_branch} after the merge — state/Git divergence, manual reconciliation required." >&2
     exit 5
   fi
@@ -2632,6 +3443,12 @@ plan_final_invalidate() {
 # ---------------------------------------------------------------------------
 _pfsm_finalize_sync() {
   local root="$1" plan_id="$2"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   local plan_branch="plan/${plan_id}"
 
   local target_branch=""
@@ -2685,13 +3502,13 @@ _pfsm_finalize_sync() {
   fi
 
   local plan_head=""
-  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
   if [[ -z "$plan_head" ]]; then
     echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_branch} not found — run plan-start first." >&2
     return 1
   fi
   local target_head=""
-  target_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
+  target_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
   if [[ -z "$target_head" ]]; then
     echo "PRECONDITION FAIL: plan-finalize --stage sync: target branch ${target_branch} not found." >&2
     return 1
@@ -2705,19 +3522,19 @@ _pfsm_finalize_sync() {
   fi
 
   local orig_branch=""
-  orig_branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+  orig_branch="$(git -C "$troot" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
   # CP2 F1 (2026-07-25): on a DETACHED HEAD `symbolic-ref` fails, which left
   # orig_branch empty — the checkout below still ran, but the guarded restore was
   # skipped, silently stranding the caller on the plan branch. Fall back to the
   # exact commit; `git checkout <sha>` restores a detached HEAD faithfully.
-  [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${root}" rev-parse HEAD 2>/dev/null || echo "")"
-  if ! git -C "$root" checkout -q "$plan_branch" >/dev/null 2>&1; then
+  [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${troot}" rev-parse HEAD 2>/dev/null || echo "")"
+  if ! git -C "$troot" checkout -q "$plan_branch" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-finalize --stage sync: cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged." >&2
     return 1
   fi
 
   local merge_out="" mrc=0
-  merge_out="$(git -C "$root" merge --no-ff --no-edit \
+  merge_out="$(git -C "$troot" merge --no-ff --no-edit \
     -m "merge(plan-final): ${target_branch} into ${plan_branch}" "$target_branch" 2>&1)" || mrc=$?
 
   if [[ "$mrc" -ne 0 ]]; then
@@ -2727,16 +3544,16 @@ _pfsm_finalize_sync() {
     # way — leaves nothing to resolve and must not send an automated
     # controller down the conflict-resolution path.
     local git_dir="" is_conflict=0
-    git_dir="$(git -C "$root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || git_dir=""
+    git_dir="$(git -C "$troot" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || git_dir=""
     if [[ -n "$git_dir" && -f "${git_dir}/MERGE_HEAD" ]]; then
       is_conflict=1
-    elif [[ -n "$(git -C "$root" ls-files --unmerged 2>/dev/null)" ]]; then
+    elif [[ -n "$(git -C "$troot" ls-files --unmerged 2>/dev/null)" ]]; then
       is_conflict=1
     fi
     if [[ "$is_conflict" -eq 1 ]]; then
-      git -C "$root" merge --abort >/dev/null 2>&1 || true
+      git -C "$troot" merge --abort >/dev/null 2>&1 || true
     fi
-    _pfsm_restore_head "$root" "$orig_branch" || true
+    _pfsm_restore_head "$troot" "$orig_branch" || true
     if [[ "$is_conflict" -eq 1 ]]; then
       _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
       echo "MERGE CONFLICT: ${target_branch} does not merge cleanly into ${plan_branch} — plan state is CONFLICT, ${plan_branch} unchanged." >&2
@@ -2749,8 +3566,8 @@ _pfsm_finalize_sync() {
   fi
 
   local new_head=""
-  new_head="$(git -C "$root" rev-parse "$plan_branch" 2>/dev/null)" || new_head=""
-  _pfsm_restore_head "$root" "$orig_branch" || true
+  new_head="$(git -C "$troot" rev-parse "$plan_branch" 2>/dev/null)" || new_head=""
+  _pfsm_restore_head "$troot" "$orig_branch" || true
   if [[ -z "$new_head" ]]; then
     echo "PRECONDITION FAIL: cannot resolve ${plan_branch} after the merge." >&2
     return 5
@@ -2768,6 +3585,12 @@ _pfsm_finalize_sync() {
 # ---------------------------------------------------------------------------
 _pfsm_finalize_freeze() {
   local root="$1" plan_id="$2" frozen_at="${3:-}"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   local plan_branch="plan/${plan_id}"
 
   local target_branch=""
@@ -2778,8 +3601,8 @@ _pfsm_finalize_freeze() {
   fi
 
   local plan_head="" target_head=""
-  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
-  target_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
+  plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  target_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
   if [[ -z "$plan_head" || -z "$target_head" ]]; then
     echo "PRECONDITION FAIL: plan-finalize --stage freeze: cannot resolve ${plan_branch} and/or ${target_branch}." >&2
     return 1
@@ -3213,6 +4036,12 @@ _pfsm_validate_substitute_receipt() {
 # ---------------------------------------------------------------------------
 _pfsm_finalize_gates() {
   local root="$1" plan_id="$2" execution_yaml="$3"; shift 3
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   local -a subs=("$@")
 
   _pfsm_gates_require_tools || return 1
@@ -3253,7 +4082,7 @@ _pfsm_finalize_gates() {
 
   # ── The candidate must still be the plan branch head ─────────────────────
   local plan_head=""
-  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
   if [[ "$plan_head" != "$candidate" ]]; then
     echo "PRECONDITION FAIL: plan-finalize --stage gates: ${plan_branch} is at ${plan_head:-<unresolvable>} but the frozen candidate is ${candidate} — refusing to gate a head that is not the candidate. Re-run '--stage freeze' (it invalidates the stale binding) before gating." >&2
     return 1
@@ -3264,15 +4093,15 @@ _pfsm_finalize_gates() {
   # the candidate while they run. Check out the plan branch when it is not
   # already checked out, and put HEAD back afterwards either way.
   local orig_branch="" head_now=""
-  head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || head_now=""
+  head_now="$(git -C "$troot" rev-parse HEAD 2>/dev/null)" || head_now=""
   if [[ "$head_now" != "$candidate" ]]; then
-    orig_branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+    orig_branch="$(git -C "$troot" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
   # CP2 F1 (2026-07-25): on a DETACHED HEAD `symbolic-ref` fails, which left
   # orig_branch empty — the checkout below still ran, but the guarded restore was
   # skipped, silently stranding the caller on the plan branch. Fall back to the
   # exact commit; `git checkout <sha>` restores a detached HEAD faithfully.
-    [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${root}" rev-parse HEAD 2>/dev/null || echo "")"
-    if ! git -C "$root" checkout -q "$plan_branch" 2>/dev/null; then
+    [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${troot}" rev-parse HEAD 2>/dev/null || echo "")"
+    if ! git -C "$troot" checkout -q "$plan_branch" 2>/dev/null; then
       echo "PRECONDITION FAIL: plan-finalize --stage gates: cannot check out ${plan_branch} (checked out in another worktree?) — no gates were run." >&2
       return 1
     fi
@@ -3283,7 +4112,7 @@ _pfsm_finalize_gates() {
     "$base_commit" "$run_id" "$run_dir_rel" "$required_profile" "${subs[@]+"${subs[@]}"}" || rc=$?
 
   if [[ -n "$orig_branch" ]]; then
-    _pfsm_restore_head "$root" "$orig_branch" || rc="${rc:-1}"
+    _pfsm_restore_head "$troot" "$orig_branch" || rc="${rc:-1}"
   fi
   return "$rc"
 }
@@ -3293,6 +4122,12 @@ _pfsm_finalize_gates() {
 _pfsm_finalize_gates_body() {
   local root="$1" plan_id="$2" execution_yaml="$3" candidate="$4" \
         base_commit="$5" run_id="$6" run_dir_rel="$7" required_profile="$8"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   shift 8
   local -a subs=("$@")
 
@@ -3385,7 +4220,7 @@ _pfsm_finalize_gates_body() {
   else
     ran_now=1
     local grc=0
-    ( cd "$root" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$execution_yaml" \
+    ( cd "$troot" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$execution_yaml" \
         "$plan_id" "$run_id" "$timeline_file" \
         --report-file "$report_file" \
         --profile "$effective_profile" \
@@ -4070,6 +4905,12 @@ plan_final_review_equivalent() {
 # ---------------------------------------------------------------------------
 _pfsm_finalize_accept_ancillary() {
   local root="$1" plan_id="$2"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
 
   # ONE LOCK around check → receipt → manifest binding. Without it the head
   # could advance between the equivalence check and the receipt (binding a head
@@ -4107,7 +4948,7 @@ _pfsm_finalize_accept_ancillary() {
   fi
 
   local head run_dir_rel run_dir_abs
-  head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head=""
+  head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head=""
   if [[ -z "$head" ]]; then
     echo "PRECONDITION FAIL: plan/${plan_id} does not resolve — nothing to accept." >&2
     _aa_unlock; return 1
@@ -4180,7 +5021,7 @@ _pfsm_finalize_accept_ancillary() {
   done
 
   local changed_json policy_sha run_id now
-  changed_json="$(git -C "$root" diff --name-only "$candidate".."$head" 2>/dev/null | jq -Rn '[inputs | select(length > 0)]')" || changed_json='[]'
+  changed_json="$(git -C "$troot" diff --name-only "$candidate".."$head" 2>/dev/null | jq -Rn '[inputs | select(length > 0)]')" || changed_json='[]'
   policy_sha="unknown"
   if [[ -n "${_AID_ANCILLARY_POLICY_FILE:-}" && -r "${_AID_ANCILLARY_POLICY_FILE}" ]]; then
     policy_sha="sha256:$(sha256sum "${_AID_ANCILLARY_POLICY_FILE}" | awk '{print $1}')"
@@ -4225,7 +5066,7 @@ _pfsm_finalize_accept_ancillary() {
   # receipt was rendered, and the CAS re-verifies both frozen values under the
   # manifest lock.
   local head_now=""
-  head_now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head_now=""
+  head_now="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/plan/${plan_id}")" || head_now=""
   if [[ "$head_now" != "$head" ]]; then
     echo "PRECONDITION FAIL: plan/${plan_id} moved from ${head} to ${head_now:-<unresolvable>} while the acceptance receipt was written — nothing was bound. Re-run accept-ancillary." >&2
     _aa_unlock; return 1
@@ -4243,8 +5084,14 @@ _pfsm_finalize_accept_ancillary() {
 
 _pfsm_review_candidate_drift() {
   local root="$1" plan_id="$2" candidate="$3"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   local plan_head=""
-  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null)" || plan_head=""
+  plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/plan/${plan_id}" 2>/dev/null)" || plan_head=""
 
   # ── P073 Step 17: the head may also sit at a RECEIPTED accepted head ──────
   # Two positions are legitimate: the candidate itself, and the exact head a
@@ -4317,7 +5164,7 @@ _pfsm_review_candidate_drift() {
 
   local dirty=""
   if [[ -z "$prot_json" || "$prot_complete" != "true" ]]; then
-    dirty="$(git -C "$root" status --porcelain --untracked-files=no \
+    dirty="$(git -C "$troot" status --porcelain --untracked-files=no \
       | aid_ancillary_filter_porcelain --mode legacy5 || true)"
   else
     local status_f="" src=0
@@ -4325,7 +5172,7 @@ _pfsm_review_candidate_drift() {
       printf 'cannot read the worktree status for the candidate %s' "$candidate"
       return 1
     }
-    git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+    git -C "$troot" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
     if [[ "$src" -ne 0 ]]; then
       rm -f "$status_f"
       printf 'git status failed (exit %s) — an unreadable worktree is never treated as clean' "$src"
@@ -4664,6 +5511,12 @@ _pfsm_verify_plan_final_close_receipt() {
 
 _pfsm_finalize_review() {
   local root="$1" plan_id="$2" execution_yaml="$3"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
 
   command -v jq >/dev/null 2>&1 || {
     echo "PRECONDITION FAIL: plan-finalize --stage review requires jq — refusing to validate review outputs without the tool that reads them." >&2
@@ -4730,9 +5583,9 @@ _pfsm_finalize_review() {
   # exit-7 and the validating invocation, so it — not this stage — must place the
   # worktree on the candidate and keep it there for the whole review boundary.
   local head_now=""
-  head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
+  head_now="$(git -C "$troot" rev-parse HEAD 2>/dev/null || echo "")"
   if [[ "$head_now" != "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage review requires the worktree to BE the frozen candidate, but HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. The plan-level specialists review this worktree, and the drift check is baselined on it. Run 'git -C ${root} checkout plan/${plan_id}' (the candidate is its head) before dispatching the reviewers, and stay there until '--stage review' returns 0." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage review requires ${plan_id}'s PLAN WORKTREE (${troot}) to BE the frozen candidate, but its HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. The plan-level specialists review THAT tree and the drift check is baselined on it — your primary checkout is not involved and is free to carry unrelated work. Run 'git -C ${troot} checkout plan/${plan_id}' (the candidate is its head) before dispatching the reviewers, and leave that tree alone until '--stage review' returns 0." >&2
     return 1
   fi
 
@@ -5239,6 +6092,12 @@ _pfsm_c4_enforcement() {
 # ---------------------------------------------------------------------------
 _pfsm_finalize_c4() {
   local root="$1" plan_id="$2"
+  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
+  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
+  # moves). Refs/objects are shared between worktrees, so only the
+  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
+  # back to `$root` and behave byte-identically to pre-P074.
+  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
 
   command -v jq >/dev/null 2>&1 || {
     echo "PRECONDITION FAIL: plan-finalize --stage c4 requires jq — refusing to produce a release decision without the tool that reads its inputs." >&2
@@ -5281,9 +6140,9 @@ _pfsm_finalize_c4() {
   # Same worktree rule as `--stage review`: the decision's inputs are read at the
   # candidate, and aid-evidence-verify.sh --at-head compares against the worktree.
   local head_now=""
-  head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
+  head_now="$(git -C "$troot" rev-parse HEAD 2>/dev/null || echo "")"
   if [[ "$head_now" != "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage c4 requires the worktree to BE the frozen candidate, but HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. Run 'git -C ${root} checkout plan/${plan_id}' before the C4 stage." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage c4 requires ${plan_id}'s PLAN WORKTREE (${troot}) to BE the frozen candidate, but its HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. Run 'git -C ${troot} checkout plan/${plan_id}' before the C4 stage; your primary checkout is not involved." >&2
     return 1
   fi
 
@@ -5542,10 +6401,18 @@ cmd_plan_finalize() {
   # file written, the CHANGELOG edit failed) leaves the tree dirty, and
   # refusing here is what guarantees no candidate is frozen over it.
   # P074 Step 5: the clean-worktree check is KEPT for the non-exempt stages
-  # and evaluated via `git -C` against that tree (project_root) — after
-  # EPIC 2 project_root resolution makes that the plan worktree.
-  _pfsm_check_detached_head "$project_root" || exit 1
-  _pfsm_check_no_merge_in_progress "$project_root" || exit 1
+  # and evaluated via `git -C` against the tree the stage really acts on.
+  #
+  # P074 Step 8/10: that tree is the PLAN WORKTREE. Every stage — sync, freeze,
+  # gates, inputs, review, c4, summary, accept-ancillary — re-executes itself
+  # there first (or refuses naming the repair), so the review/c4 "stay on the
+  # candidate" contract binds the plan's own tree and the PM's primary checkout
+  # is free during the review window. `project_root` remains the STATE root.
+  _pfsm_require_plan_worktree "$plan_id" "$project_root" || exit 1
+  local tree_root
+  tree_root="$(_pfsm_plan_tree_root "$project_root" "$plan_id")"
+  _pfsm_check_detached_head "$tree_root" || exit 1
+  _pfsm_check_no_merge_in_progress "$tree_root" || exit 1
   # `--stage review` deliberately does NOT take the generic dirty-tree refusal.
   # For sync/freeze/gates a dirty tree is an operator mistake to be corrected
   # before anything is frozen. During the review boundary it is a SIGNAL with a
@@ -5565,7 +6432,7 @@ cmd_plan_finalize() {
     # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
     # bookkeeping obstacle, not a physical impossibility, so an audited
     # --force may pass it. The check still prints its own recovery first.
-    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$project_root" || exit 1
+    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || exit 1
     _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || exit 1
   fi
 
@@ -6681,6 +7548,13 @@ cmd_plan_close() {
   export AID_PLAN_STATE_PROJECT_ROOT="$root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
 
+  # P074 Step 8 (INVERSE enforcement): plan-close tears the execution worktree
+  # down. Everything it writes goes through state-root/plumbing paths, so it
+  # never needs to stand in that tree — and it must not, because removing the
+  # directory you are standing in strands the caller in a deleted cwd. No
+  # redirect exists for this; refuse and name the one correct move.
+  _pfsm_refuse_inside_plan_worktree "$plan_id" "$root" "plan-close" || exit 1
+
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: plan-close: no plan-boundary-manifest for ${plan_id} — there is nothing to close." >&2
     exit 1
@@ -6696,7 +7570,14 @@ cmd_plan_close() {
     ABORTED)      close_mode="abort" ;;
     CLOSED)
       if [[ -f "$marker" ]]; then
-        echo "ALREADY CLOSED: ${plan_id} is CLOSED and ${marker} is present — plan-close is a no-op." >&2
+        # P074 review F5: a kill AFTER the close became durable but BEFORE the
+        # teardown left the worktree and its registration behind forever —
+        # this exit is where every retry landed, and it never came back to the
+        # teardown. It does now: the teardown is idempotent and says so when
+        # there is nothing left, so a genuine no-op stays a no-op while a
+        # leaked worktree is finally reconciled.
+        echo "ALREADY CLOSED: ${plan_id} is CLOSED and ${marker} is present — plan-close is a no-op (the execution worktree is reconciled below)." >&2
+        _pfsm_teardown_plan_worktree "$root" "$plan_id"
         exit 0
       fi
       close_mode="merge" ;;
@@ -6933,6 +7814,12 @@ cmd_plan_close() {
 
   _pfsm_close_release
 
+  # P074 Step 11: the plan is terminal, so its execution worktree has no reason
+  # to exist. Teardown NEVER blocks the close — every failure downgrades to a
+  # warning naming the manual cleanup (see _pfsm_teardown_plan_worktree), which
+  # is why this runs after the close is durable rather than as part of it.
+  _pfsm_teardown_plan_worktree "$root" "$plan_id"
+
   # P074 Step 6: the PLAN-layer close is WRITER 3's other entry point — the
   # SAME shared boundary helper aid-fsm.sh calls, so a direct plan-close
   # performs identical active-runs cleanup (the sweep removes every terminal
@@ -6959,14 +7846,20 @@ cmd_plan_close() {
 }
 
 # =============================================================================
-# cmd_plan_state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>]
+# cmd_plan_state <plan_id> [--repair] [--recreate-worktree --reason <text>]
+#                [--attest-source-ref <ref> --reason <text> --epic <epic_id>]
 #                [--project-root ...]
 # =============================================================================
 cmd_plan_state() {
-  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic=""
+  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
+      # P074 Step 11: the audited repair for a damaged, deleted or unrecorded
+      # execution worktree. Like --supersede-epic it is a TRANSACTION, not a
+      # force: nothing is bypassed, so it writes no waiver and sets no
+      # forced_override — just a repair log.
+      --recreate-worktree) recreate_wt=1; shift ;;
       # P073 Step 13: the supported recovery for a stale EPIC run. Deliberately
       # NOT forceable — see the supersede header: this IS the audited
       # transaction force would otherwise be used to fake.
@@ -6982,7 +7875,7 @@ cmd_plan_state() {
     esac
   done
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--recreate-worktree --reason <text>] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -6999,6 +7892,15 @@ cmd_plan_state() {
     local src=0
     _pfsm_plan_state_supersede "$plan_id" "$project_root" "$supersede_epic" "$attest_reason" || src=$?
     exit "$src"
+  fi
+
+  # P074 Step 11 — checked BEFORE the attestation branch, which also owns
+  # `--reason`: a recreate carries a reason of its own and must never be
+  # mistaken for a half-specified attestation.
+  if [[ "$recreate_wt" -eq 1 ]]; then
+    local wrc=0
+    _pfsm_plan_state_recreate_worktree "$plan_id" "$project_root" "$attest_reason" || wrc=$?
+    exit "$wrc"
   fi
 
   if [[ -n "$attest_ref" || -n "$attest_reason" || -n "$attest_epic" ]]; then
@@ -7268,6 +8170,217 @@ _pfsm_plan_state_supersede() {
   echo "  Re-init with the plan.json this record binds ($(basename "$plan_json")) to continue." >&2
   printf '%s\n' "$record"
   return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RECREATE WORKTREE — the audited repair for a plan's execution worktree
+# (P074 Step 11)
+#
+# A plan whose `.aid-worktrees/plan-<id>` was deleted, corrupted, or never
+# recorded (a state-file loss plus a `plan_state_init` reconstruction, which
+# cannot know the path) has nowhere to execute, and plan-start deliberately
+# refuses to silently re-create it. This is the supported way back.
+#
+# WHY IT IS NOT A FORCE, and writes no waiver. Nothing is bypassed here: no
+# precondition is skipped, no gate is waived, no state jumps. Recreating a
+# worktree restores the setup the plan already declared. So it records the
+# repair through the P073 audit PRIMITIVES directly — a `plan_worktree_recreated`
+# timeline event plus a cross-plan audit-log append — and deliberately NOT
+# through _pfsm_handle_force: no `forced_override: true`, no C4 waiver artifact
+# in `waivers_applied[]`. A waiver claiming a bypass that never happened would
+# be a false forensic record, and the C4 aggregator would surface it as one.
+# The actor semantics are stated honestly for the same reason: the reason text
+# is INSTRUCTION-ONLY — a human-written explanation, not a machine-verified
+# claim about anything.
+#
+# TWO REPAIR SHAPES, one command:
+#   ADOPT   — a matching worktree IS git-registered at the canonical path but
+#             plan-state lost its record. Verified through `git worktree list`
+#             and re-recorded; nothing is created or destroyed.
+#   RECREATE— nothing is registered. The Step 7 creation sequence
+#             (_pfsm_create_plan_worktree, shared with plan-start — there is no
+#             second copy of that logic) runs against the existing plan/<id>.
+# ═══════════════════════════════════════════════════════════════════════════
+_pfsm_plan_state_recreate_worktree() {
+  local plan_id="$1" root="$2" reason="$3"
+
+  if [[ -z "$reason" ]]; then
+    echo "ERROR: plan-state --recreate-worktree requires --reason." >&2
+    return 2
+  fi
+  if [[ "${#reason}" -lt 20 ]]; then
+    echo "ERROR: plan-state --recreate-worktree: --reason must be at least 20 characters (got ${#reason}). The record is the repair's whole audit trail; a throwaway reason defeats it." >&2
+    return 2
+  fi
+
+  # ── THE WHOLE REPAIR IS ONE LOCKED TRANSACTION (P074 review F4) ──────────
+  # Without this, two concurrent recreates both saw "no worktree", and the
+  # loser's add-failure cleanup force-removed the WINNER's tree while the
+  # winner went on to record a path nothing was registered at. A concurrent
+  # plan-close could equally pass the OPEN check below, close and tear down,
+  # and then let this command hand a terminal plan a fresh worktree. Teardown
+  # takes the same lock, and the OPEN check is re-read INSIDE it, so both
+  # races are closed at once. `_pfsm_rw_done` is the single release point.
+  # (`AID_WORKTREE_LOCK_TIMEOUT_S` shortens the wait for the suite that
+  # asserts the refusal; production never sets it.)
+  local _rw_lock; _rw_lock="$(_pfsm_plan_worktree_lock_path "$plan_id")"
+  local _rw_fd=""
+  if aid_lock_acquire "$_rw_lock" "${AID_WORKTREE_LOCK_TIMEOUT_S:-30}"; then
+    _rw_fd="$AID_LOCK_FD"
+  else
+    echo "PRECONDITION FAIL: --recreate-worktree could not take the worktree lock ${_rw_lock} for ${plan_id} — another worktree transaction (a repair, or a close's teardown) is in flight. Nothing was done; retry when it finishes." >&2
+    return 3
+  fi
+  _pfsm_rw_done() { [[ -n "${_rw_fd:-}" ]] && aid_lock_release "$_rw_fd" >/dev/null 2>&1; _rw_fd=""; return 0; }
+
+  # ── The plan must be OPEN ────────────────────────────────────────────────
+  # A terminal plan has no execution left to do; handing it a fresh worktree
+  # would resurrect a tree the close/rollback deliberately tore down. Read
+  # INSIDE the lock: a close that started before us has already made its state
+  # durable by the time it reaches teardown, so this sees it.
+  local cur_state="" src=0
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || src=$?
+  if [[ "$src" -eq 5 ]]; then
+    _pfsm_rw_done
+    echo "PRECONDITION FAIL: plan-state.yaml for ${plan_id} is corrupt — refusing --recreate-worktree." >&2
+    return 5
+  fi
+  if [[ "$src" -ne 0 || -z "$cur_state" || "$cur_state" == "not_found" ]]; then
+    _pfsm_rw_done
+    echo "PRECONDITION FAIL: no plan state for ${plan_id} — there is no open plan to give a worktree to. Run plan-start first." >&2
+    return 1
+  fi
+  case "$cur_state" in
+    CLOSED|ABORTED|ROLLED_BACK)
+      _pfsm_rw_done
+      echo "PRECONDITION FAIL: ${plan_id} is ${cur_state} — a terminal plan has no execution left to do, and its worktree was torn down on purpose. --recreate-worktree operates on an OPEN plan only." >&2
+      return 1
+      ;;
+  esac
+
+  local plan_branch="plan/${plan_id}"
+  if ! git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" >/dev/null 2>&1; then
+    _pfsm_rw_done
+    echo "PRECONDITION FAIL: the plan branch ${plan_branch} is gone — nothing to execute; this plan needs no worktree. (Post-merge cleanup deletes it; if that was premature, restore the branch first.)" >&2
+    return 1
+  fi
+
+  # Hand-deleted directory, stale registration: prune makes both harmless and
+  # is the first thing both teardown and recreate do.
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+
+  local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+  local action="" wt=""
+  if [[ -d "$canonical" ]] && _pfsm_worktree_registered "$root" "$canonical"; then
+    # P074 review F6: registration alone does not make it THIS plan's tree.
+    # An adopt whose HEAD is some other branch would record a path pointer to
+    # a tree the plan can never execute in — refused, never silently taken
+    # over and never deleted (this command owns repairs, not other people's
+    # checkouts).
+    if ! _pfsm_worktree_head_is "$canonical" "$plan_branch"; then
+      _pfsm_rw_done
+      echo "PRECONDITION FAIL: ${canonical} is registered as a worktree, but its HEAD is '$(git -C "$canonical" symbolic-ref --short HEAD 2>/dev/null || echo '<detached or unreadable>')', not ${plan_branch} — that is not ${plan_id}'s execution tree, so it is neither adopted nor removed. Put it back on the plan branch (git -C '${canonical}' checkout ${plan_branch}), or move it aside (git worktree remove '${canonical}') and re-run this repair." >&2
+      return 1
+    fi
+    action="adopted"
+    wt="$canonical"
+  else
+    local out="" crc=0
+    out="$(_pfsm_create_plan_worktree "$root" "$plan_id" "$plan_branch")" || crc=$?
+    if [[ "$crc" -ne 0 ]]; then
+      _pfsm_rw_done
+      echo "PRECONDITION FAIL: --recreate-worktree could not restore the execution worktree for ${plan_id} (rc=${crc}) — nothing was recorded." >&2
+      return 1
+    fi
+    action="recreated"
+    wt="$out"
+    # The creation sequence is idempotent about an existing registration, so
+    # verify what we are about to record really is on the plan branch.
+    if ! _pfsm_worktree_head_is "$wt" "$plan_branch"; then
+      git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+      git -C "$root" worktree prune >/dev/null 2>&1 || true
+      _pfsm_rw_done
+      echo "PRECONDITION FAIL: --recreate-worktree created ${wt} but its HEAD is not ${plan_branch} — it was removed again and nothing was recorded." >&2
+      return 1
+    fi
+  fi
+
+  local wrc=0
+  plan_state_set_worktree_path "$plan_id" "$wt" || wrc=$?
+  if [[ "$wrc" -ne 0 ]]; then
+    if [[ "$action" == "recreated" ]]; then
+      git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+      git -C "$root" worktree prune >/dev/null 2>&1 || true
+    fi
+    _pfsm_rw_done
+    echo "PRECONDITION FAIL: --recreate-worktree could not record ${wt} in plan-state for ${plan_id} (rc=${wrc}) — the worktree it created was removed again, so nothing is half-done." >&2
+    return 1
+  fi
+
+  # ── The audit trail: two records, both through the P073 primitives ───────
+  # BOTH ARE CHECKED (P074 review F8). They used to be `|| true`, so a repair
+  # whose entire audit trail failed to write still announced "Repair logged" —
+  # a claim about forensics that were not there. The repair itself is NOT
+  # undone when they fail (a recorded, working worktree is better than a
+  # rollback nobody asked for), but the command fails loudly and prints what
+  # is missing, so the operator can record it before continuing.
+  local operator="${USER:-unknown}"
+  local now; now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  local head_sha; head_sha="$(git -C "$root" rev-parse "$plan_branch" 2>/dev/null || echo unknown)"
+  local evidence_dir; evidence_dir="$(_pfsm_force_evidence_dir "$root" "$plan_id")"
+  mkdir -p "$evidence_dir" 2>/dev/null || true
+  local ev="" tl_ok=0
+  ev="$(jq -nc --arg ts "$now" --arg ev "plan_worktree_recreated" --arg plan "$plan_id" \
+    --arg action "$action" --arg wt "$wt" --arg branch "$plan_branch" \
+    --arg head "$head_sha" --arg reason "$reason" --arg op "$operator" \
+    '{ts:$ts, event:$ev, plan_id:$plan, action:$action, worktree_path:$wt,
+      plan_branch:$branch, plan_branch_head:$head, reason:$reason,
+      operator:$op, actor_semantics:"instruction_only", forced_override:false}' 2>/dev/null)" || ev=""
+  if [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "${evidence_dir}/timeline.jsonl" 2>/dev/null; then
+    tl_ok=1
+  fi
+
+  # The audit-log helper swallows its own write failures by design (an audit
+  # append must never abort a primary FSM operation), so its EXIT CODE cannot
+  # answer "was this repair recorded". The file itself is asked instead: it
+  # has to have grown, and to carry this event.
+  local al_ok=0 al_file="${root}/.aid-o/work/audit-log.jsonl" al_before=0 al_after=0
+  [[ -f "$al_file" ]] && al_before="$(wc -l < "$al_file" 2>/dev/null || echo 0)"
+  if bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "$plan_id" --run-id "plan-state" \
+    --event "plan_worktree_recreated" \
+    --command "plan-state --recreate-worktree" --plan-id "$plan_id" \
+    --action "$action" --worktree-path "$wt" --plan-branch "$plan_branch" \
+    --plan-branch-head "$head_sha" \
+    --reason "$reason" --operator "$operator" \
+    --actor-semantics "instruction_only" \
+    --output "$al_file" >/dev/null 2>&1; then
+    [[ -f "$al_file" ]] && al_after="$(wc -l < "$al_file" 2>/dev/null || echo 0)"
+    if [[ "$al_after" -gt "$al_before" ]] && grep -Fq 'plan_worktree_recreated' "$al_file" 2>/dev/null; then
+      al_ok=1
+    fi
+  fi
+
+  _pfsm_rw_done
+
+  if [[ "$action" == "adopted" ]]; then
+    echo "ADOPTED: ${wt} was already registered with git but unrecorded; ${plan_id} now records it. Nothing was created or destroyed." >&2
+  else
+    echo "RECREATED: ${wt} is a fresh worktree on ${plan_branch} (${head_sha:0:8}), recorded for ${plan_id}." >&2
+  fi
+
+  if [[ "$tl_ok" -eq 1 && "$al_ok" -eq 1 ]]; then
+    echo "  Repair logged (timeline + audit-log). This is NOT a force: nothing was bypassed, so no waiver was written." >&2
+    printf '%s\n' "$wt"
+    return 0
+  fi
+
+  echo "AUDIT INCOMPLETE: the repair was applied and recorded in plan-state, but its audit trail was NOT fully written — this repair is UNAUDITED until you fix that." >&2
+  [[ "$tl_ok" -eq 0 ]] && echo "  missing: the timeline event in ${evidence_dir}/timeline.jsonl" >&2
+  [[ "$al_ok" -eq 0 ]] && echo "  missing: the audit-log append in ${root}/.aid-o/work/audit-log.jsonl" >&2
+  echo "  Make the paths above writable and re-run the same command: an already-adopted worktree takes the ADOPT path, so the retry writes the records without touching the tree." >&2
+  printf '%s\n' "$wt"
+  return 1
 }
 
 _pfsm_plan_state_attest() {
@@ -8632,8 +9745,25 @@ cmd_plan_rollback() {
   export AID_PLAN_STATE_PROJECT_ROOT="$root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
 
+  # P074 Step 8 (INVERSE enforcement) — same reasoning as plan-close: this is
+  # the other command that removes the execution worktree, so it refuses to run
+  # from inside it instead of deleting the tree under its own feet.
+  _pfsm_refuse_inside_plan_worktree "$plan_id" "$root" "plan-rollback" || exit 1
+
   local cur_state; cur_state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || true)"
   if [[ "$cur_state" != "PLAN_MERGING" ]]; then
+    # P074 review F5: the rollback's own teardown runs after the state is
+    # already ROLLED_BACK, so a kill in between used to leak the worktree with
+    # no command left that would remove it — every re-run stopped right here.
+    # An ALREADY-ROLLED-BACK plan therefore gets the idempotent teardown before
+    # the refusal; it stays a refusal (nothing else is re-run), but the leak is
+    # reconciled. No other state is touched: only this terminal one can have a
+    # half-finished rollback behind it.
+    if [[ "$cur_state" == "ROLLED_BACK" ]]; then
+      echo "ALREADY ROLLED BACK: ${plan_id} is ROLLED_BACK — nothing to roll back again; reconciling its execution worktree only." >&2
+      _pfsm_teardown_plan_worktree "$root" "$plan_id"
+      exit 0
+    fi
     echo "PRECONDITION FAIL: plan-rollback: ${plan_id} is '${cur_state:-<none>}' — a rollback closes a plan whose merge WAS published, which is PLAN_MERGING. Nothing was written." >&2
     exit 1
   fi
@@ -8935,6 +10065,10 @@ cmd_plan_rollback() {
   plan_op_commit "$plan_id" "$rb_op" >/dev/null 2>&1 || true
   _pfsm_rb_release
 
+  # P074 Step 11: a rolled-back plan is terminal too — same teardown, same
+  # never-blocks contract as plan-close.
+  _pfsm_teardown_plan_worktree "$root" "$plan_id"
+
   # P074 Step 6: plan-rollback is WRITER 4 of the generated active.md index —
   # the shared boundary helper sweeps the plan's terminal run entries and
   # refreshes the index (the now-ROLLED_BACK plan drops off it). Best-effort:
@@ -8961,7 +10095,7 @@ Subcommands:
   plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
   inventory [--apply] [--plan <id>] [--project-root <path>]
-  plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
+  plan-state <plan_id> [--repair] [--recreate-worktree --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }
 
@@ -9006,5 +10140,8 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # P074 Step 8: captured BEFORE any parsing so the worktree redirect can
+  # re-execute this invocation verbatim, with no argument re-parsing drift.
+  _PFSM_ORIG_ARGS=("$@")
   main "$@"
 fi
