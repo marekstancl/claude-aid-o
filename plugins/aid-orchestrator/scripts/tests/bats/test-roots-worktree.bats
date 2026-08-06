@@ -231,7 +231,7 @@ _plant_tripwire() {
   [ -f "$state_file" ]
   # State artefacts landed in the PRIMARY workspace...
   [ -f "$primary/.aid-o/work/evidence/E-901-1_1/R-901/timeline.jsonl" ]
-  [ -f "$primary/.aid-o/work/active-run-pointer.json" ]
+  [ -f "$primary/.aid-o/work/active-runs.json" ]
   # ...and the worktree carries NO forked workspace (tripwire file untouched).
   [ -f "$TEST_TMPDIR/wt/.aid-o" ]
   [ ! -d "$TEST_TMPDIR/wt/.aid-o" ]
@@ -312,7 +312,7 @@ _plant_tripwire() {
   # Historic layout intact.
   [ -f "$primary/$state_file" ]
   [ -f "$primary/.aid-o/work/evidence/E-910-1_1/R-910/timeline.jsonl" ]
-  [ -f "$primary/.aid-o/work/active-run-pointer.json" ]
+  [ -f "$primary/.aid-o/work/active-runs.json" ]
   [[ "$output" == *READY* ]]
 }
 

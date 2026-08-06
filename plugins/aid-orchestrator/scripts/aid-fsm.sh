@@ -16,6 +16,7 @@
 #   aid-fsm.sh promote-check <check_name> <state_file>
 #   aid-fsm.sh check-promotion-candidates <state_file>
 #   aid-fsm.sh alloc plan-id | alloc epic-id     # locked counter.yaml allocation (P074 Step 3)
+#   aid-fsm.sh active-runs list | active-runs prune   # multi-run map read / stale-entry sweep (P074 Step 4)
 
 set -euo pipefail
 
@@ -211,12 +212,12 @@ derive_timeline() {
   fi
 }
 
-# active_run_pointer_path — canonical location of the single "which run
-# currently governs main" pointer (OBS-20260712-01 hotfix). Consumed by
-# defaults/hooks/pre-commit's commit-scope guard for its two main-fallback
-# checks (EXECUTE/GATES rogue-commit block, DONE/release version whitelist)
-# — a historical evidence directory must never act as an IMPLICIT pointer to
-# "the" active run; this file is the only EXPLICIT one.
+# active_run_pointer_path — location of the LEGACY single "which run
+# currently governs main" pointer (OBS-20260712-01 hotfix). Since P074 Step 4
+# this file is READ-ONLY compatibility surface, tolerated for one release:
+# the writer that produced it (`write_active_run_pointer`) is replaced by the
+# multi-run map below, and nothing here ever writes, migrates or deletes the
+# legacy file (fallback retirement is tracked in the backlog, plan Step 19).
 active_run_pointer_path() {
   # State-root resolved (P074 Step 1) so a worktree invocation points at the
   # PRIMARY checkout's pointer, never a forked one inside the worktree.
@@ -226,22 +227,245 @@ active_run_pointer_path() {
     || printf '%s\n' ".aid-o/work/active-run-pointer.json"
 }
 
-# write_active_run_pointer <state_file> — (re)points the single active-run
-# slot at this run. Called once, at the very end of cmd_init. Single global
-# slot, always OVERWRITTEN by the next run's init — self-expiring by
-# construction (a run superseded by a newer init can never re-emerge as "the"
-# active run again, however long its own evidence directory survives on
-# disk). Best-effort: a write failure here must never block init itself.
-write_active_run_pointer() {
+# ── P074 Step 4: multi-run active-runs map ──────────────────────────────
+# <state_root>/.aid-o/work/active-runs.json — a JSON OBJECT keyed by epic_id,
+# one entry per live run:
+#   { state_file, run_id, state, branch, plan_id, governs_main, updated_at }
+# It replaces the single-slot pointer above, which was always OVERWRITTEN by
+# the next run's init — run B's init made run A invisible to the pre-commit
+# main-fallback guard. The map keeps the consumer contract (the hook still
+# resolves state_file and re-reads state/done_phase LIVE at commit time; the
+# `state` stored here is informational, stamped at upsert) and only
+# multiplies the slots.
+# governs_main is computed at upsert from the run's DECLARED plan mode
+# (_fsm_declared_plan_mode): a plan_branch EPIC's merge target is
+# plan/<plan_id>, not main → false; legacy_epic_release_mode / unresolved /
+# ad-hoc EPICs → true — the runs whose merge target is main, exactly as the
+# old pointer semantics define.
+# Lifecycle: cmd_init upserts its entry; done-advance (the review→release
+# edge) and plan-close remove their OWN entry; `aid-fsm.sh active-runs prune`
+# sweeps entries whose state file is gone or whose live state is terminal
+# (NEW vs the pointer, which expired only by init-overwrite; invoked by the
+# Step 6 active-index refresh). All writes happen under a lib/aid-lock.sh
+# sidecar flock and land atomically (mktemp + mv in the map's own dir).
+# Fail-closed on corruption: an unparseable map is NEVER clobbered — every
+# writer refuses, naming the file. ABSENT file and a PARSEABLE empty map
+# ({}) both mean "no active runs"; a present-but-zero-byte file is a
+# TRUNCATED write and is refused like any other unparseable content.
+active_runs_map_path() {
+  aid_state_path ".aid-o/work/active-runs.json" 2>/dev/null \
+    || printf '%s\n' ".aid-o/work/active-runs.json"
+}
+
+# _active_runs_read_object <map> — prints the map as compact JSON ('{}' when
+# the file is ABSENT). Unparseable / non-object content — INCLUDING a
+# present-but-zero-byte file (a truncated write, not an empty map; only a
+# parseable {} means "no active runs") — errors naming the file, rc 1:
+# callers must fail closed, never clobber. Call under the map lock.
+_active_runs_read_object() {
+  local map="$1" doc=""
+  if [[ ! -e "$map" ]]; then printf '{}'; return 0; fi
+  if ! doc="$(jq -ce 'if type == "object" then . else error("not an object") end' "$map" 2>/dev/null)" \
+     || [[ -z "$doc" ]]; then
+    echo "ERROR: active-runs: ${map} is not a parseable JSON object — refusing to touch it (fix or remove the file; nothing was written)" >&2
+    return 1
+  fi
+  printf '%s' "$doc"
+}
+
+# _active_runs_write <map> <json> — atomic replace (mktemp + mv, same dir).
+_active_runs_write() {
+  local map="$1" doc="$2" tmp=""
+  tmp="$(mktemp "${map}.tmp.XXXXXX")" || {
+    echo "ERROR: active-runs: mktemp failed next to ${map}" >&2; return 1; }
+  if ! printf '%s\n' "$doc" | jq '.' > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    echo "ERROR: active-runs: failed to write ${map}" >&2
+    return 1
+  fi
+  mv "$tmp" "$map"
+}
+
+# _active_runs_governs_main <epic_id> — "true" unless the run's declared plan
+# mode is plan_branch (whose merge target is plan/<plan_id>, never main).
+_active_runs_governs_main() {
+  local epic_id="$1" mode=""
+  mode="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
+  mode="${mode%%$'\t'*}"
+  if [[ "$mode" == "plan_branch" ]]; then printf 'false'; else printf 'true'; fi
+}
+
+# upsert_active_run <state_file> — (re)writes THIS run's entry in the map.
+# Called once, at the very end of cmd_init. Best-effort at the call site
+# (`|| true`): a failure must never block init — a run with no entry is
+# exactly as exposed as a pre-P074 crash-before-pointer-write (the on-branch
+# hook path still guards it). The legacy single-slot pointer is deliberately
+# NOT written here.
+upsert_active_run() {
   local state_file="$1"
-  local ptr; ptr=$(active_run_pointer_path)
-  local epic_id run_id
+  command -v jq >/dev/null 2>&1 || {
+    echo "WARNING: active-runs: jq not found — no entry recorded for ${state_file}" >&2
+    return 1; }
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  local epic_id run_id branch state nnn plan_id governs now
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
-  local now; now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  mkdir -p "$(dirname "$ptr")" 2>/dev/null || true
-  jq -n --arg sf "$state_file" --arg e "$epic_id" --arg r "$run_id" --arg t "$now" \
-    '{state_file: $sf, epic_id: $e, run_id: $r, written_at: $t}' > "$ptr" 2>/dev/null || true
+  branch=$(yaml_field "$state_file" branch)
+  state=$(yaml_field "$state_file" state)
+  if [[ -z "$epic_id" ]]; then
+    echo "WARNING: active-runs: no epic_id in ${state_file} — no entry recorded" >&2
+    return 1
+  fi
+  nnn="$(_fsm_epic_plan_nnn "$epic_id" 2>/dev/null || true)"
+  plan_id=""
+  [[ -n "$nnn" ]] && plan_id="P${nnn}"
+  governs="$(_active_runs_governs_main "$epic_id")"
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$map")" 2>/dev/null || true
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "WARNING: active-runs: could not lock ${map}.lock — no entry recorded for ${epic_id}" >&2
+    return 1; }
+  local fd="$AID_LOCK_FD"
+  local doc
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  if ! doc="$(jq -c --arg e "$epic_id" --arg sf "$state_file" --arg r "$run_id" \
+        --arg st "$state" --arg br "$branch" --arg p "$plan_id" \
+        --argjson gm "$governs" --arg t "$now" \
+        '.[$e] = {state_file: $sf, run_id: $r, state: $st, branch: $br,
+                  plan_id: (if $p == "" then null else $p end),
+                  governs_main: $gm, updated_at: $t}' <<<"$doc")"; then
+    aid_lock_release "$fd"
+    echo "WARNING: active-runs: jq upsert failed for ${epic_id}" >&2
+    return 1
+  fi
+  local rc=0
+  _active_runs_write "$map" "$doc" || rc=1
+  aid_lock_release "$fd"
+  return "$rc"
+}
+
+# remove_active_run <epic_id> [context] — deletes exactly this EPIC's entry
+# (concurrent runs keep theirs). No map, or no entry: silent no-op. The
+# legacy pointer file is never touched.
+remove_active_run() {
+  local epic_id="$1" why="${2:-}"
+  command -v jq >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  [[ -e "$map" ]] || return 0   # a PRESENT zero-byte file is refused below
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "WARNING: active-runs: could not lock ${map}.lock — entry ${epic_id} not removed" >&2
+    return 1; }
+  local fd="$AID_LOCK_FD" doc rc=0
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  if [[ "$(jq -r --arg e "$epic_id" 'has($e)' <<<"$doc")" == "true" ]]; then
+    doc="$(jq -c --arg e "$epic_id" 'del(.[$e])' <<<"$doc")"
+    if _active_runs_write "$map" "$doc"; then
+      echo "active-runs: removed entry ${epic_id}${why:+ (${why})}" >&2
+    else
+      rc=1
+    fi
+  fi
+  aid_lock_release "$fd"
+  return "$rc"
+}
+
+# prune_active_runs — sweep mode: removes entries whose state file is GONE
+# (killed run whose evidence was cleaned, or a state file deleted manually)
+# or whose LIVE state is terminal (DONE/ERROR), logging which entry was
+# removed and why. Exposed as `aid-fsm.sh active-runs prune` — the
+# invocation surface for the P074 Step 6 active-index refresh.
+prune_active_runs() {
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: active-runs prune: jq is required" >&2; return 1; }
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  if [[ ! -e "$map" ]]; then
+    echo "active-runs prune: no map at ${map} — nothing to prune" >&2
+    return 0
+  fi
+  local root
+  root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "ERROR: active-runs prune: could not lock ${map}.lock" >&2; return 1; }
+  local fd="$AID_LOCK_FD" doc rc=0 removed=0
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  local epic sf abs state reason
+  while IFS=$'\t' read -r epic sf; do
+    [[ -n "$epic" ]] || continue
+    reason=""
+    if [[ -z "$sf" ]]; then
+      reason="entry has no state_file"
+    else
+      abs="$sf"
+      [[ "$abs" != /* ]] && abs="${root}/${abs}"
+      if [[ ! -f "$abs" ]]; then
+        reason="state file gone: ${sf}"
+      else
+        state="$(yaml_field "$abs" state)"
+        case "$state" in
+          DONE|ERROR) reason="terminal state ${state}" ;;
+        esac
+      fi
+    fi
+    if [[ -n "$reason" ]]; then
+      doc="$(jq -c --arg e "$epic" 'del(.[$e])' <<<"$doc")"
+      echo "active-runs prune: removed ${epic} (${reason})" >&2
+      removed=$((removed + 1))
+    fi
+  done < <(jq -r 'to_entries[] | [.key, (.value.state_file // "")] | @tsv' <<<"$doc")
+  if [[ "$removed" -gt 0 ]]; then
+    _active_runs_write "$map" "$doc" || rc=1
+  fi
+  aid_lock_release "$fd"
+  echo "active-runs prune: ${removed} entry(ies) removed" >&2
+  return "$rc"
+}
+
+# cmd_active_runs — `aid-fsm.sh active-runs <list|prune>` (P074 Step 4).
+# `list` prints the map; when the map is ABSENT it presents the legacy
+# single-slot pointer READ-ONLY in map shape (the one-release fallback —
+# never materialized to disk). `prune` sweeps stale entries (see above).
+cmd_active_runs() {
+  local verb="${1:-}"
+  case "$verb" in
+    prune) prune_active_runs ;;
+    list)
+      command -v jq >/dev/null 2>&1 || {
+        echo "ERROR: active-runs list: jq is required" >&2; exit 1; }
+      local map; map="$(active_runs_map_path)"
+      if [[ -e "$map" ]]; then
+        local doc
+        doc="$(_active_runs_read_object "$map")" || exit 1
+        printf '%s\n' "$doc" | jq '.'
+      else
+        local ptr; ptr="$(active_run_pointer_path)"
+        if [[ -s "$ptr" ]] && jq -e 'type == "object"' "$ptr" >/dev/null 2>&1; then
+          jq '{((.epic_id // "unknown")): {state_file: (.state_file // null),
+               run_id: (.run_id // null), state: null, branch: null,
+               plan_id: null, governs_main: true,
+               updated_at: (.written_at // null), legacy_pointer: true}}' "$ptr"
+        else
+          echo '{}'
+        fi
+      fi ;;
+    *)
+      echo "Usage: aid-fsm.sh active-runs <list|prune>" >&2
+      exit 1 ;;
+  esac
 }
 
 # True if the working tree is a git worktree (git_dir under .git/worktrees/).
@@ -3107,9 +3331,12 @@ except: pass
     done
   } >> "$state_file"
 
-  # OBS-20260712-01 hotfix: this run becomes the sole explicit pointer the
-  # commit-scope guard consults for main-fallback governance. Never fails init.
-  write_active_run_pointer "$state_file"
+  # OBS-20260712-01 → P074 Step 4: this run becomes ONE ENTRY in the
+  # multi-run active-runs map the commit-scope guard consults for
+  # main-fallback governance (the old single slot let a second init hide this
+  # run). Best-effort: never fails init — a crash/failure before the upsert
+  # leaves no entry, identical exposure to the old crash-before-pointer-write.
+  upsert_active_run "$state_file" || true
 
   echo "Initialized state: READY" >&2
 }
@@ -5557,6 +5784,13 @@ EOF
   timeline=$(derive_timeline "$state_file") || true
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance" from_phase="$from_phase" to_phase="$to_phase"
 
+  # P074 Step 4: the run's main-fallback governance ends at the release edge —
+  # remove ITS OWN active-runs entry (and only its own; concurrent runs keep
+  # theirs). Best-effort: bookkeeping must never fail a performed transition.
+  local _ar_epic_id
+  _ar_epic_id=$(yaml_field "$state_file" epic_id)
+  [[ -n "$_ar_epic_id" ]] && { remove_active_run "$_ar_epic_id" "done-advance ${from_phase}->${to_phase}" || true; }
+
   echo "Done phase: $from_phase → $to_phase" >&2
 }
 
@@ -5932,6 +6166,11 @@ cmd_plan_close() {
   fi
 
   touch "${evidence_dir}/ca-review-complete"
+
+  # P074 Step 4: plan-close is a terminal bookkeeping point for this EPIC —
+  # drop its active-runs entry (its own only). Best-effort: the marker above
+  # is already written; map cleanup must never turn the close into a failure.
+  remove_active_run "$epic_id" "plan-close" || true
 }
 
 # ─── Queue Dependency Revalidation (P060 Step 7) ─────────────────────────
@@ -6583,6 +6822,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     plan-close)                 shift; cmd_plan_close "$@" ;;
     queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
     alloc)                      shift; cmd_alloc "$@" ;;   # alloc plan-id | alloc epic-id (P074 Step 3)
+    active-runs)                shift; cmd_active_runs "$@" ;;   # active-runs list | active-runs prune (P074 Step 4)
     # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the
     # init advisory + docs reference actually exists on aid-fsm.sh.
     plan-reconcile)             shift
@@ -6598,7 +6838,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune> [args...]" >&2
       exit 1 ;;
   esac
 fi

@@ -452,6 +452,17 @@ matches by branch, and enforces that staged files stay within the state-appropri
 
 **`main`-guard is NEW template behavior.** Previously "all other branches pass unconditionally";
 now a rogue commit on `main` while a run is mid-`EXECUTE`/`GATES` is **blocked** (OBS-20260709-04).
+Since P074, `main`-fallback governance reads the **multi-run active-runs map**
+(`.aid-o/work/active-runs.json`, a JSON object keyed by `epic_id`, maintained by `aid-fsm.sh`:
+`init` upserts an entry per run, `done-advance`/`plan-close` remove their own, and
+`aid-fsm.sh active-runs prune` sweeps entries whose state file is gone or terminal). The commit
+is blocked when **any** entry with `governs_main: true` references a run whose live state is
+`EXECUTE`/`GATES` — two concurrent runs are both visible, unlike the pre-P074 single-slot
+`active-run-pointer.json`, which the next run's `init` overwrote (run B's init hid run A from
+the guard). The legacy pointer file is still read as a fallback when the map is absent
+(tolerated read-only for one release); an unparseable map — including a zero-byte truncated
+file — warns, tries the legacy pointer, then fails open — never a false block. An absent map
+or a parseable empty map (`{}`) means "no active runs".
 `main` is NOT blocked during `DONE/review` (OBS-20260702-06 — the run is still *discovered* on `main`,
 it is just not *blocked* there). Commits made with `--no-verify` bypass this hook, but the
 controller-side companion in `aid-fsm.sh` re-checks the same scope at each step boundary and emits a
