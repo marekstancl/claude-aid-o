@@ -150,6 +150,49 @@ Flags:
   --epic    Specify EPIC ID
 ```
 
+### Topic: plan
+
+```
+/aid-plan — Brainstorm, Write, Generate
+====================================
+Three modes, auto-detected from what you pass:
+  /aid-plan "topic"        → brainstorm (9 steps, interactive)
+  /aid-plan write spec.md  → write a plan from a spec
+  /aid-plan epic plan.md   → generate EPICs from a plan
+
+Plan IDs come from the locked allocator, never a hand edit:
+  aid-fsm.sh alloc plan-id     → prints the next P{NNN}
+
+WORKING ON TWO THINGS AT ONCE
+Each plan implements in its own git worktree:
+
+  <your checkout>                     you, on your branch, your edits
+  .aid-worktrees/plan-P080/           plan P080, on plan/P080
+  .aid-worktrees/plan-P081/           plan P081, on plan/P081
+
+So you can write and fully generate a new plan while another one
+implements — with uncommitted work in your checkout, and without your
+HEAD moving. An edit you make during another plan's review window no
+longer invalidates that review.
+
+Plan-linked commands find the right tree themselves; you never cd.
+The exception is plan-close and plan-rollback, which refuse to run from
+INSIDE the worktree they are about to remove — run those from your own
+checkout.
+
+See what is running:
+  /aid-status                          both streams, per plan
+  git worktree list                    every tree, including yours
+  aid-fsm.sh active-runs list          which EPICs are live
+
+If a plan's worktree is missing or broken:
+  aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"
+
+NOT YET SUPPORTED
+Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
+while another stream is live does not — that is a known limitation.
+```
+
 ### Topic: gates
 
 ```
@@ -231,4 +274,4 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-07

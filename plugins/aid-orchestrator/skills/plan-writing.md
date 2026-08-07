@@ -22,6 +22,22 @@ The plan-writing skill is invoked in two modes:
 **Input:** Approved design sections from brainstorming OR specification document + codebase analysis
 **Output:** Exhaustive plan document (`.aid-o/plans/P{NNN}-{topic}.md`)
 
+### Writing a plan while another one is live
+
+Never gate plan writing on another plan's state or on the PM's uncommitted
+work. Each plan implements in its own git worktree (`.aid-worktrees/plan-<id>`),
+so an active plan holds neither the PM's checkout nor its branch, and
+`plan-start` no longer refuses on an unrelated dirty tree.
+
+Orient once, from `git worktree list`, `.aid-o/work/plan-state/*/plan-state.yaml`
+and `.aid-o/work/active-runs.json`, then report what is running and continue.
+`commands/aid-plan.md` § "Working while another plan is live" carries the full
+situation table (missing worktree, unregistered directory, three-plus streams).
+
+One limit worth naming to the PM up front: concurrent plan GENERATION is
+supported; *starting* a newly generated plan's EPIC while another stream is
+live is not yet.
+
 ### Plan Types — Roadmap vs Executable
 
 | Type | What it is | Where it lives | Plan ID? | Runs via /aid-run? |
@@ -1133,7 +1149,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-07
 
 ## Plan-boundary note
 

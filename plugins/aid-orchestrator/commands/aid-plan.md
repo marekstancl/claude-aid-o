@@ -50,11 +50,49 @@ What would you like to do?
   (C) Generate EPIC — create EPICs from this plan
 ```
 
+## Working while another plan is live
+
+Planning a new plan never has to wait for another one. Each plan implements in
+its own git worktree under `.aid-worktrees/plan-<id>`, so an active plan does
+not hold the PM's checkout, and the PM's own uncommitted work does not block
+plan creation. Say so plainly rather than asking the PM to stash or wait.
+
+**Orient before Step 1.** Three reads, all cheap:
+
+```bash
+git worktree list                       # every tree: the PM's, and one per active plan
+ls .aid-o/work/plan-state/*/plan-state.yaml 2>/dev/null   # which plans exist and their phase
+cat .aid-o/work/active-runs.json 2>/dev/null              # which EPICs are actually running
+```
+
+`/aid-status`'s `plan-rows` and `next-epic` recipes render exactly this; reuse
+them rather than writing a second reader.
+
+**What to tell the PM, by what you find:**
+
+| What the reads show | What to say and do |
+|---|---|
+| No plan-state files, no `.aid-worktrees/` | Nothing else is running. Proceed silently — do not narrate an empty check. |
+| Another plan active, its worktree present | Name it and its phase, say this plan can be written and generated anyway, proceed. |
+| PM's checkout has uncommitted work | Irrelevant to planning and to `plan-start`. Do not ask them to clean it. |
+| A plan records `worktree_path` but the directory is gone | Name it and the repair — `aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"` — then continue; a broken sibling does not block a new plan. |
+| A worktree directory exists that `git worktree list` does not know | Leftover from a crash plus a manual prune. Name it and `git worktree prune`; do not delete a directory you did not create. |
+| `git worktree list` shows trees OUTSIDE `.aid-worktrees/` | Not AID's. Someone else's branch checkout, another session, a sibling clone. AID neither manages nor tears these down. Name them once so the PM knows what else is checked out, note which branch each is on, and leave them alone — in particular, a branch checked out there cannot be checked out again, which is the one way they can make a later `plan-start` or `--recreate-worktree` fail. |
+| Three or more streams already active | Say how many and which, and ask whether to add another — this is a PM capacity question, not a technical limit. |
+
+**The one real limit.** Concurrent plan GENERATION is supported; starting a
+newly generated plan's EPIC while another stream is live is not yet. If the PM
+intends to run this plan immediately alongside another, say that up front.
+
 ## Mode: Brainstorm
 
 Interactive 9-step brainstorming flow — collaborate with PM to explore an idea.
 
 ### Step 1: Context
+0. **Orient on the other streams first** — see "Working while another plan is
+   live" below. Run the three reads, and if anything is active, tell the PM
+   what is running and that this plan can proceed anyway. Never ask them to
+   clean up or wait without a reason from those reads.
 1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md` (generated index of active streams — read-only, never hand-write it), scan `plans/`
 2. If topic provided: use as brainstorming seed; if empty: ask PM
 3. Read `skills/brainstorming.md` for process rules
@@ -716,7 +754,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-07
 
 ## Plan mode
 
