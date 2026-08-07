@@ -50,7 +50,7 @@
 # outright (the bats warning is written to fd 3, which `3>&-` has closed). So
 # every invocation runs with `3>&-` and every `run` goes through a `bash -c`,
 # which can never itself be a missing command. After any edit verify:
-#   bats --tap test-p074-integration.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-p074-integration.bats | grep -cE '^(ok|not ok)'   # == 9
 
 load test-helpers.bash
 
@@ -676,52 +676,95 @@ $output" -- _contains "$output" "3 queued"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 6. THE DIRTY PM EDIT: WHAT IT NO LONGER BLOCKS, AND WHERE IT STILL STOPS
+# 6. THE DIRTY PM EDIT, THE RESTORE CONTRACT, AND THE WIRED epic-start
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# READ THIS BEFORE CHANGING THE TWO PINS BELOW. The Step 5 loosening is real
+# READ THIS BEFORE CHANGING THE THREE TESTS BELOW. The Step 5 loosening is real
 # and is asserted positively here: with an unrelated dirty TRACKED edit in the
 # primary checkout, plan-start, epic-start, the locked allocation and the whole
 # generation phase loop all proceed, and the edit survives byte-identically.
 # Every one of those used to refuse on the repo-wide clean-worktree preflight.
 #
-# But the promise does NOT yet hold all the way to a queued EPIC, and this
-# fixture is the plan's acceptance instrument, so it says so rather than being
-# arranged around it. The pipeline's SECOND stage initialises an FSM run per
-# generated phase (aid-json-to-run.sh -> aid-fsm.sh init), and that is where a
-# second stream still stops today — differently in each configuration:
+# Until P075 the promise did NOT hold all the way to a queued EPIC, and this
+# section pinned two open gaps. BOTH are now closed, and what replaced each pin
+# is the behaviour that closed it:
 #
 #   LEGACY plan B (the default, no gate profiles: no execution worktree)
 #     `aid-fsm.sh init` runs in the PRIMARY checkout, auto-creates and CHECKS
 #     OUT `task/<epic>/main` there, and only then hits its own uncommitted-
 #     changes guard — the one Step 5 deliberately KEPT, because done-advance
-#     needs a clean diff to attribute. Two consequences, both pinned below:
-#     the second stream is blocked by the PM's unrelated edit after all, and
-#     the primary checkout is LEFT on the task branch it just created — the
-#     exact "borrowed the PM's tree" outcome this plan set out to remove.
+#     needs a clean diff to attribute. That refusal is DESIGN, not a gap, and
+#     it stays. What was a gap is what happened next: `aid-json-to-run.sh` runs
+#     under `set -e`, so the refusal aborted it at the init call, BEFORE the
+#     branch restore, leaving the PM's checkout parked on the task branch init
+#     had just created — the "borrowed the PM's tree" outcome, produced by the
+#     very check that was protecting it. init's status is now captured, the
+#     restore runs either way, and only then is the failure re-raised. That is
+#     the BRANCH-RESTORE CONTRACT, and the first test below is its case: a
+#     genuinely failing init with the caller's branch handed back.
 #
 #   PLAN_BRANCH plan B (with the gate table, so plan-start gives it a worktree)
-#     `init` correctly redirects INTO plan B's own worktree, where the tree is
-#     clean and the PM's edit is irrelevant — and then refuses on the
-#     plan-branch lineage check, because the pipeline never runs `epic-start`
-#     for the EPICs it has just generated. So the configuration in which the
-#     dirty-tree promise WOULD hold cannot reach a queued EPIC at all.
+#     `init` redirects INTO plan B's own worktree, where the tree is clean and
+#     the PM's edit is irrelevant — and then used to refuse on the plan-branch
+#     lineage check, because nothing ever ran `epic-start` for the EPICs the
+#     pipeline had just generated. `epic-start` is now a named stage of the
+#     generation chain (aid-json-to-run.sh, gated on --plan-mode plan_branch),
+#     so the lineage check is satisfied and the EPIC initialises. The second
+#     test below asserts the registration ITSELF — the ledger and the
+#     production log line — not merely the absence of the old refusal.
 #
-# Neither of these is P074 behaviour to be "fixed" in a test. Both are pinned
-# with their exact production messages so they are facts under review, and so
-# the day either is wired the pin goes red and has to be updated deliberately.
+# ONE GAP REMAINS, AND IT IS PINNED RATHER THAN AVOIDED. init leaves the plan
+# worktree on the phase's task branch, and the restore returns the CALLER's
+# checkout (the primary one, which never moved). So phase 2 of a MULTI-phase
+# plan_branch plan redirects into a worktree still on phase 1's task branch and
+# hard-fails the cross-EPIC mismatch. Phase 1 completes; phase 2 does not. The
+# second test pins that with its production message; the third test proves the
+# path is otherwise sound by running a SINGLE-phase plan_branch plan green.
+#
+# WHICH PATH EACH TEST TAKES IS ASSERTED, NOT ASSUMED. `plan_branch` is only
+# reachable when the fixture has BOTH the policy default AND a `gate_profiles`
+# table (see _plan_branch_default) — without the table the mode resolver
+# downgrades to legacy and a test meaning to exercise the plan-branch path
+# would silently exercise the legacy one. Every test below reads the mode back
+# out of the COMMITTED lifecycle manifest, which is the same source the
+# pipeline's own resolver uses, and fails by name if it is not the intended one.
 
-@test "P074: a dirty tracked edit no longer blocks the second stream's planning or generation, and survives it byte-identically" {
+# _b_recorded_mode — plan B's mode as the pipeline's own resolver reads it:
+# from the COMMITTED lifecycle manifest on the target branch, never from the
+# default-mode resolver (which answers a different question and downgrades).
+_b_recorded_mode() {
+  git -C "$ROOT" show "main:.aid-lifecycle/manifests/${PLAN_B}.yaml" 2>/dev/null \
+    | yq -r '.mode // "none"' 2>/dev/null || printf 'none'
+}
+
+# _b_epic_start_ops — how many epic-start records plan B's operation ledger
+# carries. The ledger is the durable receipt; the log line is the narration.
+_b_epic_start_ops() {
+  local f="$ROOT/.aid-o/work/plan-state/${PLAN_B}/operations.jsonl"
+  [[ -f "$f" ]] || { printf '0'; return 0; }
+  jq -r 'select(.command == "epic-start") | .subject' "$f" 2>/dev/null \
+    | sort -u | wc -l | tr -d ' '
+}
+
+@test "P074/P075: a dirty tracked edit no longer blocks the second stream's planning or generation, and the kept init guard now hands the caller's branch back before it reports" {
   _mk_primary
   _a_start
   _a_dirty_pm_edit
   local dirty_before; dirty_before="$(cat "$ROOT/pm-notes.txt")"
+  local head0; head0="$(_head)"
 
   # Every command here used to refuse on the repo-wide clean-tree preflight.
   _a_epic_midexecution
   _b_allocate
   _b_write_plan
   _b_generate_unbracketed "dirty-tree"
+
+  # THE PATH UNDER TEST: plan B is a DEFAULT plan, so no gate_profiles table,
+  # so legacy mode — init runs in the PRIMARY checkout and the PM's edit is in
+  # the tree it evaluates. Asserted, because a plan_branch plan B would take
+  # the redirect and never reach the guard this test is about.
+  _ok B fixture "dirty-tree" "plan B is not the legacy plan this test needs (recorded mode: $(_b_recorded_mode))" -- _absent "$(_b_recorded_mode)" "plan_branch"
+  _ok B fixture "dirty-tree" "plan B got an execution worktree, so init would redirect out of the PM's tree" -- [ ! -d "$ROOT/.aid-worktrees/plan-${PLAN_B}" ]
 
   # Stage 1 — the generation itself — completes with the edit in place.
   _ok B generation "dirty-tree" "the CP1 authority was not sealed with a dirty tree present" -- [ -f "$GEN_B/generation-authority.json" ]
@@ -734,39 +777,122 @@ $output" -- _contains "$output" "3 queued"
   run bash -c "git -C '$ROOT' status --porcelain" 3>&-
   _ok "A+B" fixture "dirty-tree" "the PM's edit is no longer reported as modified: $output" -- _contains "$output" "pm-notes.txt"
 
-  # PIN 1 (open gap, not desired behaviour): run initialisation for a LEGACY
-  # plan B still refuses on the PM's unrelated edit — and leaves the primary
-  # checkout on the task branch it auto-created on the way.
-  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "stage 2 no longer refuses on the PM's unrelated edit — the gap is closed and this pin must be updated" -- [ "$B_STATUS" -ne 0 ]
+  # THE KEPT GUARD, WHICH IS DESIGN: init refuses on the dirty tree it runs in,
+  # because done-advance must attribute a clean diff to the EPIC's work. The
+  # failure is still REPORTED — the restore must not swallow it.
+  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "stage 2 stopped reporting the kept dirty guard as a failure — the restore is swallowing init's status" -- [ "$B_STATUS" -ne 0 ]
   _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "the refusal is not the kept dirty guard: $B_OUTPUT" -- _contains "$B_OUTPUT" "Uncommitted changes present"
+
+  # THE BRANCH-RESTORE CONTRACT: init really did create and check out the task
+  # branch on its way to refusing — so the restore was real work, not a no-op —
+  # and the caller's branch is back, with the failure line saying so.
+  run bash -c "git -C '$ROOT' rev-parse --verify --quiet 'task/E-942-1_3/main'" 3>&-
+  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "init never created the task branch, so this run does not exercise the restore at all" -- [ -n "$output" ]
   run bash -c "git -C '$ROOT' symbolic-ref HEAD" 3>&-
-  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "the primary checkout was restored — the HEAD-left-moved gap is closed and this pin must be updated" -- _contains "$output" "task/E-942-1_3/main"
+  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "the primary checkout was LEFT on a task branch after a failing init (got: $output)" -- _eq "$output" "refs/heads/main"
+  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "HEAD is on main but not where the run started" -- _eq "$(_head)" "$head0"
+  _ok B "aid-fsm.sh init (stage 2)" "dirty-tree" "the failure does not report that the checkout was restored first: $B_OUTPUT" -- _contains "$B_OUTPUT" "the checkout was restored to 'main' first"
 }
 
-@test "P074: with plan B worktree-backed, stage 2 redirects into ITS OWN worktree and stops on the un-wired epic-start instead" {
+@test "P075: with plan B worktree-backed, epic-start registers the task branch and stage 2 initialises the EPIC inside plan B's own worktree" {
   _mk_primary
   _plan_branch_default
   _a_start
   _a_epic_midexecution
   _a_dirty_pm_edit
+  local dirty_before; dirty_before="$(cat "$ROOT/pm-notes.txt")"
   local head0; head0="$(_head)"
   _b_allocate
   _b_write_plan
   _b_generate "plan-branch-B"
 
-  # The worktree exists and stage 2 went there — so the PM's dirty edit is
-  # genuinely irrelevant to plan B's run initialisation in this configuration.
+  # THE PATH UNDER TEST, read from the same source the pipeline's resolver uses.
+  # Without the gate_profiles table in _plan_branch_default this reads `legacy`
+  # and the whole test would silently exercise the wrong path.
+  _ok B fixture "plan-branch-B" "plan B is not plan_branch (recorded mode: $(_b_recorded_mode)) — the gate_profiles table is what makes the mode reachable" -- _eq "$(_b_recorded_mode)" "plan_branch"
   _ok B plan-start "plan-branch-B" "plan B got no execution worktree" -- [ -d "$ROOT/.aid-worktrees/plan-${PLAN_B}" ]
   _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "stage 2 did not redirect into plan B's worktree: $B_OUTPUT" -- _contains "$B_OUTPUT" "executes in its own worktree"
   _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "the dirty-tree guard fired despite the redirect: $B_OUTPUT" -- _absent "$B_OUTPUT" "Uncommitted changes present"
 
-  # PIN 2 (open gap, not desired behaviour): the pipeline never epic-starts the
-  # EPICs it generated, so the plan-branch lineage check refuses.
-  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "stage 2 now completes for a plan_branch plan — the gap is closed and this pin must be updated" -- [ "$B_STATUS" -ne 0 ]
-  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "the refusal is not the lineage check: $B_OUTPUT" -- _contains "$B_OUTPUT" "plan-branch lineage check failed"
-  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "the refusal does not name epic-start as the fix: $B_OUTPUT" -- _contains "$B_OUTPUT" "epic-start"
+  # epic-start ACTUALLY RAN. Two independent witnesses, because the absence of
+  # the old lineage refusal would prove nothing on its own: the production log
+  # line, and the durable operation ledger.
+  _ok B epic-start "plan-branch-B" "the generation chain never reported registering the task branch: $B_OUTPUT" -- _contains "$B_OUTPUT" "P075: epic-start registered task/E-942-1_3/main for ${PLAN_B} before FSM init"
+  _ok B epic-start "plan-branch-B" "plan B's operation ledger records no epic-start (found $(_b_epic_start_ops))" -- [ "$(_b_epic_start_ops)" -ge 1 ]
+  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "the plan-branch lineage check still refuses — epic-start did not satisfy it: $B_OUTPUT" -- _absent "$B_OUTPUT" "plan-branch lineage check failed"
 
-  # The headline guarantee still holds through the failure: the PM's checkout
-  # never moved, because the redirect took the branch work elsewhere.
-  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "the primary checkout moved despite the redirect" -- _eq "$(_head)" "$head0"
+  # AND THE EPIC IS INITIALISED. The run's state file exists and is READY.
+  run bash -c "find '$ROOT/.aid-o/work/evidence/E-942-1_3' -name fsm-state.yaml | head -1" 3>&-
+  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "no fsm-state.yaml was written for E-942-1_3" -- [ -n "$output" ]
+  run bash -c "yq -r '.state' \"\$(find '$ROOT/.aid-o/work/evidence/E-942-1_3' -name fsm-state.yaml | head -1)\"" 3>&-
+  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "E-942-1_3's run is not READY (got: $output)" -- _eq "$output" "READY"
+
+  # The task branch is checked out in the PLAN's worktree — never in the PM's.
+  run bash -c "git -C '$ROOT' rev-parse --verify --quiet 'task/E-942-1_3/main'" 3>&-
+  _ok B epic-start "plan-branch-B" "task/E-942-1_3/main does not exist as a ref" -- [ -n "$output" ]
+  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "the task branch was checked out in the PM's own tree" -- _eq "$(_head)" "$head0"
+  _ok "A+B" fixture "plan-branch-B" "the PM's uncommitted edit was altered" -- _eq "$(cat "$ROOT/pm-notes.txt")" "$dirty_before"
+
+  # EVERY phase, not just the first. init leaves the plan worktree on that
+  # phase's task branch; without a worktree-side restore the next phase
+  # redirected into a tree still on the previous phase's branch and died on the
+  # cross-EPIC mismatch. This asserts the whole multi-phase generation, which is
+  # what a real plan looks like — a single-phase run cannot detect the gap.
+  _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "a MULTI-phase plan_branch generation did not complete: $B_OUTPUT" -- [ "$B_STATUS" -eq 0 ]
+  local _ph
+  for _ph in 1 2 3; do
+    run bash -c "find '$ROOT/.aid-o/work/evidence/E-942-${_ph}_3' -name fsm-state.yaml 2>/dev/null | head -1" 3>&-
+    _ok B "aid-fsm.sh init (stage 2)" "plan-branch-B" "phase ${_ph}/3 has no fsm-state.yaml — the multi-phase chain stopped early" -- [ -n "$output" ]
+    run bash -c "git -C '$ROOT' rev-parse --verify --quiet 'task/E-942-${_ph}_3/main'" 3>&-
+    _ok B epic-start "plan-branch-B" "task/E-942-${_ph}_3/main was never registered" -- [ -n "$output" ]
+  done
+
+  # Between phases the plan worktree rests on the plan branch — that IS the
+  # restore, and it is why phase 2 finds a usable tree.
+  run bash -c "git -C '$ROOT/.aid-worktrees/plan-${PLAN_B}' symbolic-ref --short HEAD" 3>&-
+  _ok B "aid-json-to-run.sh" "plan-branch-B" "plan B's worktree did not come to rest on its plan branch (got: $output)" -- _eq "$output" "plan/${PLAN_B}"
+  _ok B "aid-json-to-run.sh" "plan-branch-B" "the worktree restore was never reported: $B_OUTPUT" -- _contains "$B_OUTPUT" "restored plan worktree to 'plan/${PLAN_B}'"
+}
+
+@test "P075: a SINGLE-phase plan_branch plan B generates AND initialises green while plan A implements, with the PM's tree dirty and untouched" {
+  _mk_primary
+  _plan_branch_default
+  _a_start
+  _a_epic_midexecution
+  _a_dirty_pm_edit
+  local dirty_before; dirty_before="$(cat "$ROOT/pm-notes.txt")"
+  local head0; head0="$(_head)"
+  _b_allocate
+
+  # One phase, so the multi-phase worktree-restore gap is out of the way and
+  # what is left is the wiring itself: register, init, queue — all green.
+  PLAN_B_FILE="$ROOT/.aid-o/plans/${PLAN_B}-single-phase.md"
+  sed "s/P-TEST-001/${PLAN_B}/g" "$FIXTURES/minimal-plan.md" > "$PLAN_B_FILE"
+  export PLAN_B_FILE
+  GEN_B="$ROOT/.aid-o/work/evidence/${PLAN_B}/generation"
+  QUEUE="$ROOT/.aid-o/config/queue.yaml"
+  export GEN_B QUEUE
+
+  _b_generate "single-phase-B"
+  _ok B fixture "single-phase-B" "plan B is not plan_branch (recorded mode: $(_b_recorded_mode))" -- _eq "$(_b_recorded_mode)" "plan_branch"
+  _ok B generation "single-phase-B" "the pipeline failed: $B_OUTPUT" -- [ "$B_STATUS" -eq 0 ]
+
+  # epic-start ran, and the EPIC is initialised and queued.
+  _ok B epic-start "single-phase-B" "the generation chain never reported registering the task branch: $B_OUTPUT" -- _contains "$B_OUTPUT" "P075: epic-start registered task/E-942-1_1/main for ${PLAN_B} before FSM init"
+  _ok B epic-start "single-phase-B" "plan B's operation ledger records no epic-start (found $(_b_epic_start_ops))" -- [ "$(_b_epic_start_ops)" -ge 1 ]
+  run bash -c "yq -r '.state' \"\$(find '$ROOT/.aid-o/work/evidence/E-942-1_1' -name fsm-state.yaml | head -1)\"" 3>&-
+  _ok B "aid-fsm.sh init (stage 2)" "single-phase-B" "E-942-1_1's run is not READY (got: $output)" -- _eq "$output" "READY"
+  run bash -c "grep -c 'epic_id: \"E-942-1_1\"' '$QUEUE'" 3>&-
+  _ok B queue "single-phase-B" "E-942-1_1 was not queued (got: $output)" -- _eq "$output" "1"
+
+  # The branch work happened in plan B's worktree; the PM's tree is untouched.
+  run bash -c "git -C '$ROOT' rev-parse --verify --quiet 'task/E-942-1_1/main'" 3>&-
+  _ok B epic-start "single-phase-B" "task/E-942-1_1/main was never registered" -- [ -n "$output" ]
+  # The worktree comes to rest on the plan branch after init, the same restore
+  # a multi-phase run depends on between phases.
+  run bash -c "git -C '$ROOT/.aid-worktrees/plan-${PLAN_B}' symbolic-ref --short HEAD" 3>&-
+  _ok B "aid-json-to-run.sh" "single-phase-B" "plan B's worktree did not come to rest on its plan branch (got: $output)" -- _eq "$output" "plan/${PLAN_B}"
+  _ok B "aid-fsm.sh init (stage 2)" "single-phase-B" "the primary checkout moved" -- _eq "$(_head)" "$head0"
+  _ok "A+B" fixture "single-phase-B" "the PM's uncommitted edit was altered" -- _eq "$(cat "$ROOT/pm-notes.txt")" "$dirty_before"
+  _ok A fixture "single-phase-B" "stream A left its own task branch" -- [ -d "$(_wt_a)" ]
 }

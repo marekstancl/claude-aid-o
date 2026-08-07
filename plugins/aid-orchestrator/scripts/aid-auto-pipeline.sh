@@ -253,6 +253,24 @@ _gen_target_head() {
   git -C "$_aid_pipeline_state_root" rev-parse --verify --quiet "$(_gen_target_branch)^{commit}" 2>/dev/null || true
 }
 
+# _gen_plan_recorded_mode <plan_id> — the mode THIS plan actually declares, read
+# from the committed lifecycle manifest.
+#
+# Deliberately not `_pb_default_mode`, which answers a different question: the
+# mode a NEW plan would be created with, resolved from policy and downgraded to
+# legacy when the project has no gate_profiles table. A plan explicitly
+# plan-started with `--mode plan_branch` in such a project records plan_branch
+# while the default resolver still says legacy — and `init`'s lineage check
+# consults the manifest, not the default. Asking the default would put the
+# generation chain and init on two different answers.
+_gen_plan_recorded_mode() {
+  local pid="${1:-}" m=""
+  [[ -n "$pid" ]] || { printf ''; return 0; }
+  m="$(git -C "$_aid_pipeline_state_root" show "$(_gen_target_branch):.aid-lifecycle/manifests/${pid}.yaml" 2>/dev/null \
+       | yq -r '.mode // ""' 2>/dev/null || true)"
+  printf '%s' "$m"
+}
+
 # ── ID derivation ──────────────────────────────────────────────────────────
 # THE derivation lives in lib/aid-generation-ids.sh and is shared with
 # aid-plan-to-epic.sh (which re-derives these ids at verify time) and
@@ -1922,6 +1940,11 @@ for phase in $(seq 1 "$total_phases"); do
   )
   [[ "$streamlined" == "true" ]] && json_to_run_args+=(--streamlined)
   [[ -n "$force_init_reason" ]] && json_to_run_args+=(--force-init-reason "$force_init_reason")
+  # The plan's identity and resolved mode, so aid-json-to-run.sh can register
+  # the EPIC's task branch (epic-start) before init needs it. Generation is the
+  # only place both are known: the plan file has been parsed and the mode
+  # resolved, while aid-json-to-run.sh sees one plan.json and no plan context.
+  json_to_run_args+=(--plan-id "$plan_id" --plan-mode "$(_gen_plan_recorded_mode "$plan_id")")
   # P073 Step 6: exit 4 from aid-json-to-run.sh means generation SUCCEEDED but
   # the checkout could not be restored to the branch this run started on.
   # (4, not 3 — that script already uses 3 for ordinary I/O failures.)
@@ -2077,6 +2100,7 @@ if [[ "$two_stage" == true ]]; then
     _j2r_args=(--plan-json "$_plan_json_path" --run-template "$run_template" --epic "$_epic_path" --output-dir "$_run_output_dir" --run-id "$_run_id" --generation-receipt "$generation_receipt")
     [[ "$streamlined" == true ]] && _j2r_args+=(--streamlined)
     [[ -n "$force_init_reason" ]] && _j2r_args+=(--force-init-reason "$force_init_reason")
+    _j2r_args+=(--plan-id "$plan_id" --plan-mode "$(_gen_plan_recorded_mode "$plan_id")")
     # P073 Step 6: same hard stop in the batch (post-receipt) loop — a failed
     # restore must not let the NEXT phase initialise on the wrong branch.
     _j2r_rc=0

@@ -131,6 +131,11 @@ It does **not** write `execution.yaml` or `run.md`. Those come later: `aid-json-
 writes `run.md` and initialises the FSM state (`fsm-state.yaml`); `execution.yaml` (the gates
 config) is a separate `.aid-o/config/` file consumed by `aid-run-gates.sh`. See `pipeline.md` §2.
 
+For a **`plan_branch`** plan one step sits between the two: `aid-json-to-run.sh`
+runs `aid-plan-fsm.sh epic-start` before FSM init, registering `task/<epic>/main`
+as a ref with lineage back to `plan/<plan_id>` — without it init's plan-branch
+lineage check refuses. Legacy plans skip it. Full chain in `pipeline.md` §2.
+
 ---
 
 ## Input: the EPIC Steps table
@@ -286,4 +291,4 @@ is a single run.
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-07

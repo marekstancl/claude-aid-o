@@ -192,9 +192,55 @@ aid-plan-to-epic.sh … --generation-authority … --transaction …   # per pha
 aid-epic-to-json.sh …                           # repeat for every generated EPIC
 aid-contract-validate.sh …                      # validate each generated package
 aid-generation-finalize.sh …                    # seal all phases in one receipt
+aid-plan-fsm.sh epic-start <plan> <epic> …      # plan_branch plans only: register task/<epic>/main
 aid-json-to-run.sh … --generation-receipt …     # only now create run + FSM state
 aid-queue-add.sh …                              # queue entries, ownership bound to the transaction
 ```
+
+**`epic-start`, and why it is a step of this chain.** For a **`plan_branch`**
+plan, `aid-fsm.sh init` will not adopt `task/<epic>/main` unless that branch is
+a registered ref with recorded lineage back to `plan/<plan_id>` — that is the
+plan-branch lineage check, and it refuses on a task branch nobody registered.
+`epic-start` is what performs the registration: it creates the branch as a ref
+(no checkout, no tracked writes) and records its lineage in the plan's
+lifecycle manifest. So it must run **after** the phase's `plan.json` and
+contract validation — the EPIC id it registers is only final once the package
+verifies — and **before** `aid-json-to-run.sh` drives init, which is the first
+consumer of the registration.
+
+`aid-json-to-run.sh` runs it itself, from `--plan-id` / `--plan-mode` passed by
+`aid-auto-pipeline.sh`, because generation is the only layer that knows both
+values. It runs **only** when the mode is `plan_branch`: a legacy plan has no
+plan branch to descend from, and `epic-start` rightly refuses without a
+plan-boundary manifest. The mode is read from the plan's **committed lifecycle
+manifest** — the mode this plan actually declares — never from the default-mode
+resolver, which answers "what mode would a NEW plan get" and downgrades to
+legacy in a project without `gate_profiles`, putting generation and init on two
+different authorities.
+
+The call is **best-effort by design**: a non-zero is reported and left to
+`init`, which owns the verdict. An already-registered branch is the normal
+resumed-generation case, and failing the chain on it would make a resume
+impossible.
+
+**Every phase, not only the first.** `init` runs inside the plan's execution
+worktree and leaves it on that phase's `task/<epic>/main`. The caller-side
+restore below cannot help: for a redirected init the caller's checkout is the
+primary one and never moved. So `aid-json-to-run.sh` also returns the PLAN
+WORKTREE to `plan/<id>` after init — between EPICs that is where it rests, and
+it is why phase 2 finds a usable tree instead of one still sitting on phase 1's
+branch (`ERROR: Currently on task/<epic-1>/main, expected task/<epic-2>/main.`).
+A failed worktree restore stops the run with exit 4 and the exact `git -C`
+command, for the same reason the caller-side one does: every later phase would
+otherwise generate against a tree nobody chose.
+
+**The branch-restore contract.** A **failing** `init` still hands the caller's
+branch back before the failure is reported. `aid-json-to-run.sh` captures
+init's exit status rather than dying on it, runs the branch restore, and only
+then exits with init's status. Without this an init that auto-creates and
+checks out `task/<epic>/main` on its way to refusing would leave the
+operator's own checkout parked on that task branch — the "borrowed the PM's
+tree" outcome the plan-branch topology exists to remove.
 
 **On generation success:** every phase has an EPIC, `plan.json`, contract
 validation evidence, a recorded entry in `transaction.json`, and one
@@ -2769,7 +2815,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-07
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

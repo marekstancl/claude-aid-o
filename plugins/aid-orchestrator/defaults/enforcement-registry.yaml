@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 397          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 399          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2331,3 +2331,29 @@ enforcements:
     description: "P074 EPIC 1 — a bats suite whose TAP plan line `1..N` promises more results than actually arrive (classically a child process holding bats' fd 3, or a `run` child exiting 127) used to disappear silently while the aggregate run still exited 0: tests vanished and the portfolio reported green. The plan line is now a contract, and a truncated stream fails the aggregate and is listed by name."
     recovery: "The summary names the truncated suites; the usual cause is a child inheriting fd 3 (close it with `3>&-`)."
     test: "self-testing — the aggregate runner is the gate"
+
+  # ══ P075: the generation chain's missing link ═════════════════════════════
+
+  - id: generation_epic_start_registration
+    type: 2
+    source: "scripts/aid-json-to-run.sh (the `aid-plan-fsm.sh epic-start` call before FSM init, gated on --plan-mode == plan_branch) + scripts/aid-auto-pipeline.sh:_gen_plan_recorded_mode (both call sites pass --plan-id/--plan-mode)"
+    instruction: "skills/pipeline.md (grep: 'why it is a step of this chain')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P075 — `epic-start` was a fully built, tested command with NO production caller: the plan-branch lifecycle was assembled across P064/P068 and this link was never wired. `aid-fsm.sh init` will not adopt `task/<epic>/main` for a plan_branch plan unless that branch is a registered ref with recorded lineage back to `plan/<plan_id>`, and nothing registered it. Single-stream runs never noticed, because init ran in the operator's own checkout where the lineage precondition was not reached; once P074 made init redirect into the plan's own worktree the precondition began to be evaluated for real and refused — correctly — on an unregistered task branch, so a second stream could not reach a queued EPIC at all. The registration is now a named stage of the generation chain, placed AFTER per-phase plan.json/contract validation (the epic_id is only final once the package verifies) and BEFORE `aid-json-to-run.sh` drives init (the first consumer). The mode is read from the plan's COMMITTED lifecycle manifest, never from the default-mode resolver: the resolver answers 'what mode would a NEW plan get' and downgrades to legacy without a gate_profiles table, which would put generation and init on two different authorities. Deliberately best-effort: a non-zero is reported and left to init, which owns the verdict, because an already-registered branch is the normal resumed-generation case and failing on it would make a resume impossible. Legacy plans skip it entirely — they have no plan branch to descend from and epic-start rightly refuses without a plan-boundary manifest. Every phase is covered, not only the first: init leaves the plan's execution worktree on that phase's task branch, so `aid-json-to-run.sh` returns the worktree to `plan/<plan_id>` after each init (the caller-side restore cannot help — for a redirected init the caller's checkout never moved). Without it phase 2 redirected into a tree still on phase 1's branch and hard-failed the cross-EPIC mismatch."
+    recovery: "A refusing init names the plan-branch lineage check and `epic-start` as the fix; the pipeline's own line reports whether the registration ran and what it returned."
+    test: "scripts/tests/bats/test-p074-integration.bats"
+
+  - id: json_to_run_branch_restore_before_failure
+    type: 4
+    source: "scripts/aid-json-to-run.sh (fsm_init_rc captures init's status instead of dying under `set -e`; the restore block runs, then the status is re-raised)"
+    instruction: "skills/pipeline.md (grep: 'The branch-restore contract')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P075 — the branch restore after FSM init only ever ran when init SUCCEEDED. `aid-json-to-run.sh` runs under `set -euo pipefail`, so a refusing init aborted the script at the call site, before the restore, and left the operator's own checkout parked on the `task/<epic>/main` that init had auto-created on its way to refusing — the 'borrowed the PM's tree' outcome the plan-branch topology exists to remove, produced by the very check that was protecting it. Init's exit status is now captured, the existing restore block runs whether init succeeded or refused, and only then is init's own failure re-raised with a line stating the checkout was restored first. The restore's OWN failure keeps its distinct exit 4 and its git-checkout recovery instruction; it is not swallowed by the new path."
+    recovery: "The failure line names the branch the checkout was restored to. A restore that itself fails still exits 4 with the exact `git checkout` command."
+    test: "scripts/tests/bats/test-p074-integration.bats"
