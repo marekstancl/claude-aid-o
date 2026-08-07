@@ -3,6 +3,39 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.77.0] — 2026-08-07
+
+> P074 gave each plan its own worktree, and in doing so exposed something older:
+> `epic-start` — the command that registers an EPIC's task branch with lineage —
+> had been built, tested and documented, and never given a caller. Nobody noticed
+> while everything ran in one checkout, because the lineage check was never
+> reached there. The moment a plan implemented in its own tree, generation
+> refused on a branch nothing had registered. This wires it, and restores every
+> tree an init moves.
+
+### Added
+- **`epic-start` in the generation chain** — each EPIC's `task/<epic>/main` is registered with lineage back to `plan/<id>` before `init` needs it, for plan_branch plans. The mode is read from the plan's committed lifecycle manifest, never from the default-mode resolver, which answers a different question and downgrades to legacy without a gate_profiles table — that split would put generation and init on two different authorities. A standalone caller deriving neither flag gets the same registration, so it does not depend on who invoked the script.
+
+### Fixed
+- **A refusing `init` no longer parks you on a task branch** — `aid-json-to-run.sh` runs under `set -euo pipefail`, so a failing init aborted the script and skipped the branch-restore block directly below it, leaving the operator's checkout on the `task/<epic>/main` that init had auto-created on its way to refusing. The status is captured, the branch handed back, and only then is the failure reported.
+- **Multi-phase generation completes** — `init` leaves the plan's worktree on that phase's task branch, and the pre-existing restore only ever inspected the caller's checkout, which does not move for a redirected init. Phase 2 then met a worktree still on phase 1's branch and hard-failed the cross-EPIC mismatch. The plan worktree is now returned to `plan/<id>` after each init; without it the wiring closed phase 1 only, and every real plan is multi-phase.
+
+## [2.76.0] — 2026-08-07
+
+> The owner's question was exact: "do we even have the data to fill the
+> contract Codex expanded?" For most of it, yes — it was sitting in git and in
+> the gate-run history, uncollected. Now it is collected every run.
+> (Version 2.75.0 is a concurrent session's tag on another branch; skipped.)
+
+### Added
+- **Risk coverage collector** — every tracked source file no test references, churn-weighted from git history. "Unreferenced" is a necessary condition of no coverage, not proof, and the page says so. First run on this repository: 273 unreferenced files, led by one changed 8 times in 90 days.
+- **Reliability collector** — gate pass rates from the real run history in `gate-runtime-baselines.yaml`. First run surfaced a gate with a 0 % pass rate over 14 recorded runs that nobody had noticed. Suite-level flakiness stays a named open gap until `--repeat` runs exist.
+- **Trend between rounds** — every report writes `round-summary.json` and the next report leads with the diff: examined up or down, measured cost, censored count. Rounds stop being isolated snapshots.
+- **Test freshness and ownership** — last meaningful change and top author per test file, from git.
+
+### Changed
+- **The canonical report grows to eleven sections** — Rizika and Spolehlivost join the nine, each with its collector, and the section list in the command contract is updated to match.
+
 ## [2.75.0] — 2026-08-07
 
 > You could only work on one thing at a time. Not because AID said so, but

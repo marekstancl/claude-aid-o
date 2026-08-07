@@ -19,8 +19,8 @@ teardown() { teardown_test_evidence_dir; }
 _sections_present() {   # <file>
   local s
   for s in "1 · Hlavní čísla" "2 · Prověřenost" "3 · Skupiny" "4 · Co žere čas" \
-           "5 · Kolik ušetříme čím" "6 · Kvalita" "7 · Akce a plán" \
-           "8 · Nedokázáno" "9 · Zdroje"; do
+           "5 · Kolik ušetříme čím" "6 · Kvalita" "7 · Rizika" "8 · Spolehlivost" \
+           "9 · Akce a plán" "10 · Nedokázáno" "11 · Zdroje"; do
     grep -q "$s" "$1" || { echo "chybí sekce: $s"; return 1; }
   done
 }
@@ -70,4 +70,28 @@ _sections_present() {   # <file>
   [ "$status" -eq 0 ]
   # 1 unit, 0 examined, 1 unexamined — the page carries the honest split.
   grep -q "<b>0</b> prověřeno s důkazem, <b>1</b>" "$AD/report.html"
+}
+
+@test "risk and reliability sections consume the content scan when present" {
+  printf '{"schema_version":"1.0.0","generated_at":"t","runner_families":["bats"],"entries":[]}' > "$AD/inventory.json"
+  jq -n '{schema_version:"aid-test-content-scan-v1",
+    checks:{duplicate_test_cases:[],weak_oracle:[],gate_overlap:[],unreferenced_tests:[],
+      untested_surfaces:[{file:"src/pay/charge.ts",changes_90d:9}],
+      test_freshness:{stale_180d:0,files:[]},
+      gate_stability:[{gate:"plan_diff",samples:14,pass_rate:0,censored:0}]},
+    counts:{untested_surfaces:1}}' > "$AD/content-scan.json"
+  run bash "$REPORT" --audit-dir "$AD" --project-root "$PROJ"
+  [ "$status" -eq 0 ]
+  grep -q "src/pay/charge.ts" "$AD/report.html"
+  grep -q "nikdy neprošla" "$AD/report.html"
+}
+
+@test "the second round shows a trend against the first" {
+  mkdir -p "$TEST_TMPDIR/rounds/r1" "$TEST_TMPDIR/rounds/r2"
+  printf '{"audit_id":"R1","units":10,"examined":2,"unexamined":8,"measured_min":5.0,"censored":3,"parallel_safe":1,"actions":4}'     > "$TEST_TMPDIR/rounds/r1/round-summary.json"
+  printf '{"schema_version":"1.0.0","generated_at":"t","runner_families":["bats"],"entries":[]}' > "$TEST_TMPDIR/rounds/r2/inventory.json"
+  run bash "$REPORT" --audit-dir "$TEST_TMPDIR/rounds/r2" --project-root "$PROJ"
+  [ "$status" -eq 0 ]
+  grep -q "Trend od minulého kola" "$TEST_TMPDIR/rounds/r2/report.html"
+  grep -q "R1" "$TEST_TMPDIR/rounds/r2/report.html"
 }

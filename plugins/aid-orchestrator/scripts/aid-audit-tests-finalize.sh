@@ -258,6 +258,7 @@ fi
   if ! bash "${SCRIPT_DIR}/aid-test-content-scan.sh" \
        --project-root "${project_root:-.}" \
        --inventory "${output_dir%/}/inventory.json" \
+       --catalog "${project_root:-.}/.aid-o/config/test-catalog.yaml" \
        --output "${output_dir%/}/content-scan.json" >/dev/null 2>&2; then
     echo "WARN: aid-audit-tests-finalize.sh: content scan failed — the report's quality and overlap sections will say so instead of standing empty" >&2
   fi

@@ -77,6 +77,14 @@ for f in glob.glob(f"{D}/agents/*.json"):
 findings = jload(f"{D}/consolidated-findings.json", {}).get("findings", [])
 scan = jload(f"{D}/content-scan.json", {})
 sc = scan.get("checks", {})
+# previous round, for the trend line
+prev = {}
+parent = os.path.dirname(D)
+try:
+    sibs = sorted(d for d in glob.glob(parent + "/*/round-summary.json")
+                  if os.path.dirname(d) != D)
+    if sibs: prev = jload(sibs[-1], {})
+except Exception: pass
 
 cat_units, cat_safe = [], set()
 try:
@@ -203,6 +211,15 @@ H.append(f'<div class="stat bad"><b>{n_unexamined}</b><span>zatím neprověřeno
 H.append(f'<div class="stat"><b>{total_s/60:.0f}&nbsp;min</b><span>změřená cena ({len(measured)} sad)</span></div>')
 H.append(f'<div class="stat good"><b>{len(cat_safe)}</b><span>smí běžet paralelně</span></div>')
 H.append('</div>')
+if prev:
+    d_ex = n_examined - prev.get("examined", 0)
+    d_cost = total_s/60 - prev.get("measured_min", 0)
+    H.append(f'<p class="legend"><b>Trend od minulého kola</b> ({esc(prev.get("audit_id","?"))}): '
+             f'prověřeno {"+" if d_ex>=0 else ""}{d_ex}, '
+             f'změřená cena {"+" if d_cost>=0 else ""}{d_cost:.0f} min, '
+             f'utnuto {prev.get("censored","?")} → {len(censored)}.</p>')
+else:
+    H.append('<p class="legend">Trend: první kolo se záznamem — příští report ukáže rozdíl.</p>')
 
 # 2 — prověřenost
 H.append(sec("2 · Prověřenost", "Kolik sad někdo doopravdy otevřel"))
@@ -317,8 +334,46 @@ else:
     H.append('<p class="empty">Žádné kvalitativní nálezy — u portfolia s '
              f'{n_unexamined} neprověřenými sadami to znamená „nehledalo se“, ne „nic tam není“.</p>')
 
-# 7 — akce a plán
-H.append(sec("7 · Akce a plán", "Co udělat, v pořadí"))
+# 7 — rizika: co není pokryté
+H.append(sec("7 · Rizika", "Co v produkci žádný test nereferencuje"))
+unt = sc.get("untested_surfaces", [])
+if unt:
+    hot = [u for u in unt if u.get("changes_90d", 0) > 0]
+    H.append(f'<p><b>{scan.get("counts",{}).get("untested_surfaces","?")} zdrojových souborů</b> '
+             f'nereferencuje žádný test, z toho <b>{len(hot)}</b> se za posledních 90 dní měnilo. '
+             f'„Nereferencováno“ je nutná podmínka nepokrytí, ne důkaz — ale soubor, který se mění '
+             f'týdně a nesahá na něj žádný test, je největší riziko v tomhle reportu.</p>')
+    H.append('<div class="tablewrap"><table><tr><th class="num">Změn/90 d</th><th>Soubor</th></tr>')
+    for u in unt[:10]:
+        H.append(f'<tr><td class="num">{u.get("changes_90d",0)}</td><td><code>{esc(u["file"])}</code></td></tr>')
+    H.append('</table></div>')
+elif scan:
+    H.append('<p class="empty">Sken nenašel žádný zdrojový soubor bez referencujícího testu.</p>')
+else:
+    H.append('<p class="empty">Sken rizik tento běh neproběhl (content-scan.json chybí).</p>')
+
+# 8 — spolehlivost
+H.append(sec("8 · Spolehlivost", "Jak často věci reálně procházejí"))
+gs = sc.get("gate_stability", [])
+if gs:
+    bad = sorted(gs, key=lambda g: g.get("pass_rate", 1))
+    H.append('<div class="tablewrap"><table><tr><th>Brána</th><th class="num">Úspěšnost</th><th class="num">Běhů</th><th></th></tr>')
+    for g in bad[:8]:
+        pr = g.get("pass_rate", 0)
+        pill = "crit" if pr < 0.5 else ("warn" if pr < 0.9 else "ok")
+        note = "nikdy neprošla — mrtvá nebo rozbitá" if pr == 0 else ("" if pr >= 0.9 else "nestabilní")
+        H.append(f'<tr><td>{esc(g["gate"])}</td>'
+                 f'<td class="num"><span class="pill {pill}">{pr*100:.0f} %</span></td>'
+                 f'<td class="num">{g.get("samples","?")}</td><td class="dim">{note}</td></tr>')
+    H.append('</table></div>')
+    H.append('<p class="legend">Zdroj: historie skutečných běhů bran. Flakiness jednotlivých sad '
+             'zůstává neznámá — vyžaduje opakované běhy (<code>--repeat</code>), které se zatím '
+             'nevešly do rozpočtu; to je pojmenovaná mezera, ne opomenutí.</p>')
+else:
+    H.append('<p class="empty">Žádná historie běhů — spolehlivost nelze vyčíslit, dokud brány neběží opakovaně.</p>')
+
+# 9 — akce a plán
+H.append(sec("9 · Akce a plán", "Co udělat, v pořadí"))
 if acts:
     H.append('<div class="tablewrap"><table><tr><th></th><th>Akce</th><th>Cíl</th>'
              '<th>Pracnost</th><th>Riziko</th></tr>')
@@ -341,8 +396,8 @@ else:
     H.append('<p class="empty">Tento běh nevydal žádné akce. Pokud zároveň existují nálezy, '
              'je to chyba auditu, ne stav portfolia.</p>')
 
-# 8 — nedokázáno
-H.append(sec("8 · Nedokázáno", "Co zůstává neprokázané, a jaký je další krok"))
+# 10 — nedokázáno
+H.append(sec("10 · Nedokázáno", "Co zůstává neprokázané, a jaký je další krok"))
 if unresolved:
     H.append('<div class="tablewrap"><table><tr><th>Jednotka</th><th>Proč</th><th>Další krok</th></tr>')
     for u in unresolved:
@@ -353,16 +408,23 @@ if unresolved:
 else:
     H.append('<p class="empty">Rozhodnutí neeviduje žádné nedokázané body.</p>')
 
-# 9 — zdroje
-H.append(sec("9 · Zdroje", "Odkud každé číslo je"))
+# 11 — zdroje
+H.append(sec("11 · Zdroje", "Odkud každé číslo je"))
 H.append('<p class="legend">inventura: <code>inventory.json</code> · měření: '
          '<code>measurements.jsonl</code> · verdikty analytiků: <code>agents/*.json</code> · '
          'nálezy: <code>consolidated-findings.json</code> · akce a nedokázané: '
-         '<code>decision.json</code> · paralelismus: schválený katalog '
+         '<code>decision.json</code> · mechanický sken (duplicity, rizika, stabilita): '
+         '<code>content-scan.json</code> · paralelismus: schválený katalog '
          '<code>.aid-o/config/test-catalog.yaml</code>. Vše v adresáři auditu; '
          'nic v tomto reportu nevzniklo mimo tyto soubory.</p>')
 
 with open(OUT, "w") as f:
     f.write("\n".join(H))
+# the round summary the NEXT report diffs against — the trend has a collector too
+with open(f"{D}/round-summary.json", "w") as f:
+    json.dump({"audit_id": audit_id, "units": n_units, "examined": n_examined,
+               "unexamined": n_unexamined, "measured_min": round(total_s/60, 1),
+               "censored": len(censored), "parallel_safe": len(cat_safe),
+               "actions": len(actions)}, f, indent=1)
 print(OUT)
 PY
