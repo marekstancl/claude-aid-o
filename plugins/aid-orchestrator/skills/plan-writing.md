@@ -26,8 +26,8 @@ The plan-writing skill is invoked in two modes:
 
 | Type | What it is | Where it lives | Plan ID? | Runs via /aid-run? |
 |------|-----------|---------------|----------|-------------------|
-| **Executable plan** | Single-phase implementation plan, spustitelný přes FSM | `.aid-o/plans/P{NNN}-{topic}.md` | YES (from counter.yaml) | YES |
-| **Roadmap / MVP plan** | Multi-phase master plan with subfáze; NOT directly executable | `docs/plans/{project}-{topic}.md` | NO — no counter increment | NO — subfáze become executable plans |
+| **Executable plan** | Single-phase implementation plan, spustitelný přes FSM | `.aid-o/plans/P{NNN}-{topic}.md` | YES — via `aid-fsm.sh alloc plan-id` (locked; never hand-edit counter.yaml) | YES |
+| **Roadmap / MVP plan** | Multi-phase master plan with subfáze; NOT directly executable | `docs/plans/{project}-{topic}.md` | NO — no allocator call | NO — subfáze become executable plans |
 
 **Detection:** If the brainstormed plan has 3+ phases (MVP phases, milestones), it is a **roadmap**.
 Roadmaps are saved to `docs/plans/`, do NOT consume a plan ID, and are NOT tracked in `active.md`.
@@ -134,7 +134,7 @@ verbatim, same as GitHub TSX/CSS source.
 
 When brainstorming produces a multi-phase MVP plan (detected by: 4+ weeks effort, 3+ phases, or PM explicitly requests "MVP plan"):
 
-1. **Save to `docs/plans/`** — NOT `.aid-o/plans/`. MVP plans are roadmap documents, not executable plans. Do NOT allocate plan ID from counter.yaml.
+1. **Save to `docs/plans/`** — NOT `.aid-o/plans/`. MVP plans are roadmap documents, not executable plans. Do NOT allocate a plan ID (no `aid-fsm.sh alloc plan-id` call).
 2. **Session prompts section** — after all phases, include `## Session Prompts for Detailed Plans`:
    - Per subfáze: `/aid-plan write {mvp-plan-path} {phase} {subfáze}` command
    - Context line for writer: 2-3 sentences describing scope, key references, gaps addressed
@@ -1133,7 +1133,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-06
 
 ## Plan-boundary note
 

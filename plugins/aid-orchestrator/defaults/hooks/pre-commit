@@ -6,10 +6,11 @@
 # discovers that run by an exact `branch:` match across guard-active states
 # (EXECUTE|GATES|DONE — scanning is safe here, branch names are unique by
 # construction). On `main`, main-fallback governance (rogue-commit block +
-# DONE/release version whitelist) instead reads ONE explicit, FSM-managed
-# pointer (`.aid-o/work/active-run-pointer.json`, written by `aid-fsm.sh`'s
-# `cmd_init`) rather than scanning historical evidence directories — see
-# OBS-20260712-01 below. Either way, staged files must stay within the
+# DONE/release version whitelist) instead reads the explicit, FSM-managed
+# multi-run map (`.aid-o/work/active-runs.json`, upserted by `aid-fsm.sh`'s
+# `cmd_init`; legacy single-slot `active-run-pointer.json` read as fallback
+# for one release) rather than scanning historical evidence directories —
+# see OBS-20260712-01 / P074 below. Either way, staged files must stay within the
 # state-appropriate scope:
 #   EXECUTE      → current step's allowed_paths (plan.json) ∪ evidence dir
 #   GATES        → union of ALL steps' allowed_paths     ∪ evidence dir
@@ -24,6 +25,27 @@
 #
 # Fail-open philosophy: absent tooling (jq/yq) or unreadable config never
 # hard-blocks a commit — it warns, passes, and emits a disclosure event.
+# Fail-open covers MISSING TOOLING only — "wrong directory" is handled by the
+# state-root resolver below and is no longer a silent pass (P074 Step 2).
+
+# ── Worktree-safe state root (P074 Step 2) ──────────────────────────────────
+# This hook lives in the COMMON .git/hooks and therefore fires from every
+# linked worktree — but `.aid-o/` is gitignored and exists only in the PRIMARY
+# checkout, so a $PWD-relative read from a worktree misses it and the fail-open
+# design silently no-ops the guard. `_aid_state_root` is a deliberate tiny COPY
+# of the plugin lib resolver (scripts/lib/aid-roots.sh `aid_state_root`, minus
+# caching): a consumer-repo hook cannot know the plugin cache path, so it
+# cannot source the lib. If `git rev-parse` fails (pre-`--path-format` git,
+# hostile environment) or no `.aid-o` exists at the derived root, fall back to
+# $PWD — behaviour identical to the pre-P074 hook, never worse.
+_aid_state_root() {
+  local _common _root
+  _common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  _root="${_common%/.git}"
+  [[ -n "$_root" && -d "$_root/.aid-o" ]] || _root="$PWD"
+  printf '%s\n' "$_root"
+}
+_AID_ROOT="$(_aid_state_root)"
 
 _AID_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 
@@ -35,6 +57,14 @@ done < <(git diff --cached --name-only -z 2>/dev/null)
 
 # Nothing staged → nothing to guard (also covers non-commit invocations).
 [[ ${#_AID_STAGED[@]} -eq 0 ]] && exit 0
+
+# Degenerate deleted-workspace case (P074 Step 2): the hook is installed but NO
+# `.aid-o` exists at the resolved root — every read below no-ops and the guard
+# passes fail-open. Disclose that skip in one stderr line instead of passing
+# silently; NO output is added to any path where `.aid-o` exists.
+if [[ ! -d "$_AID_ROOT/.aid-o" ]]; then
+  echo "AID pre-commit: no .aid-o workspace found at $_AID_ROOT — guard skipped (fail-open)" >&2
+fi
 
 # _aid_emit <timeline> <event> [k=v ...] — best-effort JSONL disclosure event.
 # No lib dependency; never fails the commit.
@@ -94,13 +124,16 @@ _aid_run_scope_check() {
   _cs=$(grep '^current_step:' "$_sf" 2>/dev/null | awk '{print $2}')
   _plan="${_evd}/plan.json"
 
-  # Evidence dir is always in scope.
-  _AID_SCOPE=("$_evd")
+  # Evidence dir is always in scope. Scope entries are matched against staged
+  # paths, which git reports RELATIVE to the invoking tree — strip the resolved
+  # state root so the (now absolute) evidence dir keeps matching staged
+  # evidence files exactly as the pre-P074 relative scan did.
+  _AID_SCOPE=("${_evd#"$_AID_ROOT"/}")
 
   # DONE/release derives its whitelist from project.yaml versioning (needs yq),
   # NOT from plan.json — handle it before the jq gate.
   if [[ "$_st" == "DONE" && "$_dp" == "release" ]]; then
-    local _proj=".aid-o/config/project.yaml"
+    local _proj="$_AID_ROOT/.aid-o/config/project.yaml"
     if ! command -v yq >/dev/null 2>&1 || [[ ! -r "$_proj" ]]; then
       echo "AID HOOK: warning — versioning config unavailable (yq/project.yaml); passing commit." >&2
       _aid_emit "$_tl" commit_guard_disclosure reason=versioning_absent state="$_st" done_phase="$_dp"
@@ -172,7 +205,7 @@ _aid_run_scope_check() {
 # outcome never depends on find(1)'s incidental filesystem traversal order.
 _AID_STATE_FILE=""
 _AID_ALL_STATE_FILES=()
-for _dir in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
+for _dir in "$_AID_ROOT/.aid-o/work/runs/" "$_AID_ROOT/.aid-o/work/evidence/"; do
   [[ -d "$_dir" ]] || continue
   while IFS= read -r _sf; do
     _AID_ALL_STATE_FILES+=("$_sf")
@@ -188,43 +221,86 @@ for _sf in "${_AID_ALL_STATE_FILES[@]}"; do
   fi
 done
 
-# ── Active-run pointer for MAIN-governance fallback (OBS-20260712-01) ──────
+# ── Active-runs map for MAIN-governance fallback (OBS-20260712-01 → P074) ──
 #
 # E-052-1_1 false positive: a run merged and DONE for weeks permanently
 # blocked plain commits on main to its own stale version whitelist, because
 # the old scan here picked whichever DONE/release state find(1) happened to
-# return FIRST across every evidence directory ever created — no check that
-# the run was still current, non-deterministic pick order. A historical
-# evidence directory must never act as an IMPLICIT pointer to "the" active
-# run for main-governance purposes (unlike the exact-branch-match above,
-# which is inherently precise and untouched by this fix).
+# return FIRST across every evidence directory ever created. The
+# OBS-20260712-01 fix replaced the scan with ONE explicit FSM-managed pointer
+# (`active-run-pointer.json`) — a single global slot, overwritten by every
+# init. That single slot had its own blind spot (P074 Step 4): run B's init
+# made run A INVISIBLE to this guard, so a rogue main commit passed while run
+# A was still mid-EXECUTE.
 #
-# Fix: main-fallback governance now reads ONE explicit, FSM-managed pointer
-# (`aid-fsm.sh`'s `write_active_run_pointer`, called once at the end of every
-# `cmd_init`) instead of scanning. The pointer is a single global slot,
-# always overwritten by the NEXT run's init — self-expiring by construction:
-# a run superseded by a newer init can never re-emerge as "the" active run
-# again, however long its own evidence directory survives on disk. Runs
-# created before this mechanism existed (no pointer entry at all) simply
-# never govern main via this path — fail-open, matching "no active run".
-#
-# Fail-open on anything not exactly right: missing pointer file, unreadable,
-# malformed JSON, absent jq, or a state_file the pointer references that no
-# longer exists/is unreadable. An invalid pointer must never itself become a
-# new way to accidentally block unrelated commits.
-_AID_MAIN_ACTIVE=""       # pointer's run, if currently EXECUTE/GATES (main-block source)
-_AID_MAIN_RELEASE=""      # pointer's run, if currently DONE/release (main version-whitelist)
+# Fix: main-fallback governance now reads a MULTI-RUN map
+# (`.aid-o/work/active-runs.json`, maintained by `aid-fsm.sh`: init upserts,
+# done-advance/plan-close remove their own entry, `active-runs prune` sweeps
+# stale ones). A main commit is blocked when ANY entry with
+# `governs_main == true` references a run whose LIVE state (re-read from its
+# state_file here, at commit time) is EXECUTE/GATES; DONE/release feeds the
+# version whitelist as before. A parseable map is AUTHORITATIVE — absent
+# file and present-but-empty map both mean "no active runs" (guard passes).
+# The LEGACY single-slot pointer is read as a fallback for one release: when
+# the map file does not exist at all, or when it is unparseable ("guard
+# cannot evaluate" — warn, try legacy, then fail open with a warning; an
+# invalid map must never itself become a new way to block unrelated commits).
+_AID_MAIN_ACTIVE=""       # a governs_main run currently EXECUTE/GATES (main-block source)
+_AID_MAIN_RELEASE=""      # a governs_main run currently DONE/release (main version-whitelist)
 if [[ "$_AID_BRANCH" == "main" ]] && command -v jq >/dev/null 2>&1; then
-  _AID_PTR=".aid-o/work/active-run-pointer.json"
-  if [[ -r "$_AID_PTR" ]]; then
-    _AID_PTR_SF=$(jq -r '.state_file // empty' "$_AID_PTR" 2>/dev/null)
-    if [[ -n "$_AID_PTR_SF" && -r "$_AID_PTR_SF" ]]; then
-      _AID_PTR_ST=$(grep '^state:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}')
-      _AID_PTR_DP=$(grep '^done_phase:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}' | tr -d '"')
-      case "$_AID_PTR_ST" in
-        EXECUTE|GATES) _AID_MAIN_ACTIVE="$_AID_PTR_SF" ;;
-        DONE) [[ "$_AID_PTR_DP" == "release" ]] && _AID_MAIN_RELEASE="$_AID_PTR_SF" ;;
-      esac
+  _AID_MAP="$_AID_ROOT/.aid-o/work/active-runs.json"
+  _AID_TRY_LEGACY=0
+  _AID_MAP_BROKEN=0
+  if [[ -e "$_AID_MAP" ]]; then
+    if [[ -s "$_AID_MAP" ]] && jq -e 'type == "object"' "$_AID_MAP" >/dev/null 2>&1; then
+      # Parseable map — AUTHORITATIVE, even when empty ({}). The legacy
+      # pointer is NOT consulted on this path. ONE jq pass tolerant of
+      # non-object entry values: a single junk value must never abort the
+      # enumeration and hide the valid entries next to it (that would be a
+      # silent pass on a rogue main commit).
+      while IFS=$'\t' read -r _m_epic _m_sf; do
+        [[ -n "$_m_sf" ]] || continue
+        # A relative state_file resolves against the state root (same rule
+        # the legacy pointer read used).
+        [[ "$_m_sf" != /* ]] && _m_sf="$_AID_ROOT/$_m_sf"
+        [[ -r "$_m_sf" ]] || continue   # dangling entry: fail open, prune's job
+        _m_st=$(grep '^state:' "$_m_sf" 2>/dev/null | awk '{print $2}')
+        _m_dp=$(grep '^done_phase:' "$_m_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+        case "$_m_st" in
+          EXECUTE|GATES) [[ -z "$_AID_MAIN_ACTIVE" ]] && _AID_MAIN_ACTIVE="$_m_sf" ;;
+          DONE) [[ "$_m_dp" == "release" && -z "$_AID_MAIN_RELEASE" ]] && _AID_MAIN_RELEASE="$_m_sf" ;;
+        esac
+      done < <(jq -r 'to_entries[] | select((.value|type) == "object") | select(.value.governs_main == true) | [.key, (.value.state_file // "")] | @tsv' "$_AID_MAP" 2>/dev/null)
+    else
+      # Unparseable map — INCLUDING a present-but-zero-byte file (a truncated
+      # write, not an empty map; only a parseable {} means "no active runs"):
+      # guard cannot evaluate it — fall back to the legacy pointer below,
+      # then fail open (never a false block).
+      _AID_MAP_BROKEN=1
+      _AID_TRY_LEGACY=1
+    fi
+  else
+    _AID_TRY_LEGACY=1   # no map yet → legacy single-slot read (one release)
+  fi
+  if [[ "$_AID_TRY_LEGACY" -eq 1 ]]; then
+    _AID_PTR="$_AID_ROOT/.aid-o/work/active-run-pointer.json"
+    if [[ -r "$_AID_PTR" ]]; then
+      _AID_PTR_SF=$(jq -r '.state_file // empty' "$_AID_PTR" 2>/dev/null)
+      # A relative state_file in the pointer historically resolved against $PWD
+      # (== the state root for every primary-checkout commit); resolve it against
+      # the state root explicitly so the read stays correct off the primary root.
+      [[ -n "$_AID_PTR_SF" && "$_AID_PTR_SF" != /* ]] && _AID_PTR_SF="$_AID_ROOT/$_AID_PTR_SF"
+      if [[ -n "$_AID_PTR_SF" && -r "$_AID_PTR_SF" ]]; then
+        _AID_PTR_ST=$(grep '^state:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}')
+        _AID_PTR_DP=$(grep '^done_phase:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}' | tr -d '"')
+        case "$_AID_PTR_ST" in
+          EXECUTE|GATES) _AID_MAIN_ACTIVE="$_AID_PTR_SF" ;;
+          DONE) [[ "$_AID_PTR_DP" == "release" ]] && _AID_MAIN_RELEASE="$_AID_PTR_SF" ;;
+        esac
+      fi
+    fi
+    if [[ "$_AID_MAP_BROKEN" -eq 1 && -z "$_AID_MAIN_ACTIVE" && -z "$_AID_MAIN_RELEASE" ]]; then
+      echo "AID pre-commit: active-runs map at $_AID_MAP is unparseable — guard cannot evaluate it and the legacy pointer gave no verdict; failing open (fix or remove the map file)" >&2
     fi
   fi
 fi

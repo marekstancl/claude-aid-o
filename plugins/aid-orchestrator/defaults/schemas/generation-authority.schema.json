@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "aid-generation-authority/v1",
+  "title": "AID Generation Authority Receipt",
+  "description": "The SEALED, plan-scoped CP1 decision written once per plan by aid-auto-pipeline.sh before any generation output exists, and verified (never re-decided) by every phase generator via aid-plan-to-epic.sh --generation-authority. HONEST CLASSIFICATION (AID-v3 principles §1): this receipt is forgeable by a Bash-capable actor. The enforcement is the binding — plan bytes, target head, phase set, and the owning transaction's authority_sha256 — plus audit detectability, never actor impossibility.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "plan_id",
+    "plan_sha256",
+    "target_branch",
+    "target_head",
+    "mode",
+    "total_phases",
+    "phase_derivation_version",
+    "cp1",
+    "forced_override",
+    "invoker",
+    "created_at",
+    "self_sha256"
+  ],
+  "properties": {
+    "schema": { "const": "aid-generation-authority/v1" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "plan_path": { "type": "string" },
+    "plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the exact plan bytes the decision was made over."
+    },
+    "target_branch": { "type": "string" },
+    "target_head": {
+      "type": "string",
+      "description": "Commit the target branch pointed at when the decision was sealed. EMPTY IS LEGITIMATE: fixture repos and fresh workspaces have no integration branch, and the verifier compares the sealed value against the freshly resolved one."
+    },
+    "mode": { "type": "string", "description": "queue mode the generation runs under (chain|separate|custom)." },
+    "total_phases": { "type": "integer", "minimum": 1 },
+    "phase_derivation_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Literal constant, bumped only when the pipeline's phase-detection algorithm changes semantically, so a resumed transaction can detect that a plugin upgrade changed how phases would be derived."
+    },
+    "cp1": {
+      "type": "object",
+      "description": "Either a clean verdict, or the bypassed conditions with their evidence references. A low-risk plan (gate exits 0 fast) carries a verdict, so the transaction contract is uniform across risk levels.",
+      "properties": {
+        "verdict": { "type": "string" },
+        "force_unused": { "type": "boolean" },
+        "gate_exit": { "type": "integer" },
+        "bypassed_conditions": { "type": "array", "items": { "type": "string" } },
+        "evidence_refs": {
+          "type": "array",
+          "description": "Audit provenance at decision time: the paths of the C0 plan review and the cp1-deep evidence dir with their sha256s. The gate already validated those files; verification re-checks bytes only for the authority itself.",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "forced_override": { "type": "boolean" },
+    "force_reason": {
+      "type": ["string", "null"],
+      "description": "The public --reason (>= 20 chars) recorded alongside the three P073 audit records. Null when the run was not forced."
+    },
+    "invoker": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "self_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 over the canonical JSON of this document with this field NULLED (`jq -S -c '.self_sha256 = null' | sha256sum`). A stated convention: nothing else in the tree hashes an embedded-self-field envelope, so producer and verifier both spell it out."
+    }
+  }
+}

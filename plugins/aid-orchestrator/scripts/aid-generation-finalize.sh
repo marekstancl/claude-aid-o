@@ -15,16 +15,31 @@ source "${SCRIPT_DIR}/lib/aid-source-plan-graph.sh"
 check_prerequisites
 
 usage() {
-  echo "Usage: $0 --plan PLAN --total N --epics-json FILE --output RECEIPT" >&2
+  echo "Usage: $0 --plan PLAN --total N --epics-json FILE --output RECEIPT [--rewrite]" >&2
 }
 
-plan="" total="" epics_file="" output=""
+# --rewrite (P074 Step 15): recompose an EXISTING receipt from an updated
+# epics manifest. The grounded defect it fixes: the receipt was composed
+# before stage 2, so every per-EPIC `queue_status` stayed at the placeholder
+# `pending_receipt` forever. The pipeline re-invokes this same composer after
+# the last queue-add with the real statuses — ONE writer, a full
+# re-canonicalize, an atomic replace, never a surgical in-place patch.
+#
+# The rewrite is GUARDED rather than blind: the receipt must already exist and
+# must already bind the same plan bytes, so a rewrite can never silently
+# replace a receipt belonging to a different plan or a different generation.
+# `created_at` is preserved (the receipt keeps its original creation identity)
+# and `updated_at` is added. The frozen consumer fields aid-json-to-run.sh
+# reads (schema, plan_sha256, per-EPIC epic_id + plan_json_sha256) are
+# recomputed from the same files and are therefore unchanged by construction.
+plan="" total="" epics_file="" output="" rewrite=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plan) plan="${2:-}"; shift 2 ;;
     --total) total="${2:-}"; shift 2 ;;
     --epics-json) epics_file="${2:-}"; shift 2 ;;
     --output) output="${2:-}"; shift 2 ;;
+    --rewrite) rewrite=true; shift 1 ;;
     *) usage; exit 2 ;;
   esac
 done
@@ -116,12 +131,25 @@ for phase in $(seq 1 "$total"); do
     '. + [$e + {epic_sha256:$es, plan_json_sha256:$ps, contract_validate_sha256:$cs}]' <<< "$artifact_entries")"
 done
 
+created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+updated_at="null"
+if [[ "$rewrite" == true ]]; then
+  [[ -f "$output" ]] || { echo "ERROR: --rewrite needs an existing receipt at $output; there is nothing to rewrite" >&2; exit 1; }
+  jq -e --arg sha "$plan_sha" '.schema == "aid-generation-receipt/v1" and .plan_sha256 == $sha' "$output" >/dev/null 2>&1 \
+    || { echo "ERROR: --rewrite refused: $output is not a receipt for this plan's bytes (a rewrite never replaces another generation's receipt)" >&2; exit 1; }
+  created_at="$(jq -r '.created_at' "$output")"
+  updated_at="\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+fi
+
 mkdir -p "$(dirname "$output")"
 tmp="${output}.tmp.$$"
 jq -n --arg schema "aid-generation-receipt/v1" --arg plan "$plan_abs" --arg plan_sha "$plan_sha" \
   --arg provisional_sha "sha256:$(sha256sum "$provisional" | awk '{print $1}')" \
   --arg final_sha "sha256:$(printf '%s' "$final_canonical" | sha256sum | awk '{print $1}')" \
-  --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson graph "$graph" --argjson epics "$artifact_entries" \
-  '{schema:$schema, plan_path:$plan, plan_sha256:$plan_sha, provisional_graph_sha256:$provisional_sha, final_graph_sha256:$final_sha, created_at:$created, final_graph:$graph, epics:$epics}' > "$tmp"
+  --arg created "$created_at" --argjson updated "$updated_at" \
+  --argjson graph "$graph" --argjson epics "$artifact_entries" \
+  '{schema:$schema, plan_path:$plan, plan_sha256:$plan_sha, provisional_graph_sha256:$provisional_sha, final_graph_sha256:$final_sha, created_at:$created}
+   + (if $updated == null then {} else {updated_at:$updated} end)
+   + {final_graph:$graph, epics:$epics}' > "$tmp"
 mv "$tmp" "$output"
 printf '%s\n' "$output"

@@ -39,6 +39,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 check_prerequisites
 
+# P074 Step 1 — shared state-root resolution: this entrypoint's own .aid-o
+# reads/writes (Step 18 FSM evidence dir) resolve under aid_state_root so an
+# invocation from a linked worktree initialises the PRIMARY checkout's FSM
+# state, never a forked workspace inside the worktree.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+
 # =============================================================================
 # Parse CLI arguments
 # =============================================================================
@@ -641,7 +648,7 @@ fi
 # aid-json-to-run.sh now initializes the FSM directly so no manual
 # `aid-fsm.sh init` call is required before /aid-run.
 # Compute FSM init parameters from in-scope variables.
-fsm_evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"  # MUST match aid-fsm.sh cmd_init evidence_dir derivation
+fsm_evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"  # MUST match aid-fsm.sh cmd_init evidence_dir derivation (both resolve via aid-roots.sh)
 mkdir -p "$fsm_evidence_dir"
 fsm_state_file="${fsm_evidence_dir}/fsm-state.yaml"
 fsm_mode="full"

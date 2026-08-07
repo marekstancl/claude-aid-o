@@ -1335,17 +1335,34 @@ actually need PM authority.
 
 ## 16a. Validated follow-up — one PM force for the whole EPIC-generation transaction
 
-> **Plan written: P074 (EPIC 3)** — D26 generation-authority receipt + public
-> `--force --reason`, D27 transaction manifest/resume, and the three 2026-08-04
-> generation defects (adjudicator empty-list parse, escaped-pipe table parser,
-> target-branch diagnosis) are tracked in
+> **DELIVERED: P074 (EPIC 3), v2.73.0 (2026-08-06)** — D26 generation-authority
+> receipt + public `--force --reason`, D27 transaction manifest/resume, and the
+> three 2026-08-04 generation defects (adjudicator empty-list parse,
+> escaped-pipe table parser, target-branch diagnosis) all shipped; the plan is
 > `.aid-o/plans/P074-project-concurrency-generation-transaction.md` (2026-08-05).
+> Added beyond the four items below: `supersede-generation` as a separate
+> audited invocation, the stale-`queue_status` receipt-rewrite fix, and the
+> identity-bound queue-ownership rule (a queue entry is only "ours" when the
+> transaction can prove it, never by epic id alone).
 >
 > **STILL OPEN after P074:** delivery item 4's `host_permission_or_session_blocked`
 > class — P074 deliberately ships only the two AID-owned labels
 > (`aid_cp1_blocked`, `aid_generation_force_required`) plus verbatim passthrough
 > of unrecognized subprocess failures; a reliable host-error detector has no
 > defined signature today and would be guesswork.
+>
+> **ALSO STILL OPEN (found by P074's own two-stream acceptance fixture,
+> `test-p074-integration.bats`):** generation completes stage 1 (authority once,
+> every phase generated and recorded) but the pipeline's stage 2 — the per-phase
+> run initialisation — does not reach a queued EPIC in either configuration once
+> a second stream is genuinely in play. For a LEGACY plan, `aid-fsm.sh init`
+> runs in the primary checkout, auto-creates and checks out `task/<epic>/main`
+> there, and only then refuses on its own (deliberately kept) uncommitted-changes
+> guard — leaving the PM's checkout on that task branch. For a `plan_branch`
+> plan it correctly redirects into the plan's own worktree and then refuses on
+> the plan-branch lineage check, because the pipeline never runs `epic-start`
+> for the EPICs it has just generated. Both are pinned as tests with their exact
+> production messages.
 
 ### Confirmed current failure
 
@@ -1450,12 +1467,15 @@ misdiagnosed as an AID gate.
 
 ## 17. PM requirement — project-level concurrency: plan while implementing
 
-> **Plan written: P074 (EPIC 1 + EPIC 2)** — scoped preflights, locked plan-ID
-> allocation, active-runs map, shared root resolver + worktree-safe hooks
-> (EPIC 1), and per-plan execution worktrees with command-level enforcement,
-> in-worktree branch topology, teardown/repair and a two-stream status surface
-> (EPIC 2) are tracked in
+> **DELIVERED: P074 (EPIC 1 + EPIC 2), v2.73.0 (2026-08-06)** — scoped
+> preflights, locked plan-ID allocation, active-runs map, shared root resolver
+> + worktree-safe hooks (EPIC 1), and per-plan execution worktrees with
+> command-level enforcement, in-worktree branch topology, teardown/repair and a
+> two-stream status surface (EPIC 2) all shipped; the plan is
 > `.aid-o/plans/P074-project-concurrency-generation-transaction.md` (2026-08-05).
+> Also delivered, beyond the EPIC 1/2 headline: `work/active.md` as a generated
+> index with named writers, and the audited `plan-state --recreate-worktree`
+> repair.
 > This is NOT the archived intra-plan parallelism plan
 > (`docs/plans/archive/AID-parallelism-re-enable-plan.md`, multiple agents
 > inside one plan) — that remains deferred.
@@ -1464,7 +1484,21 @@ misdiagnosed as an AID gate.
 > `git rev-parse --show-toplevel` (each already honours the `AID_PROJECT_ROOT`
 > override, now canonicalized) — deferred to a later normalization sweep;
 > stale line cites in this section (init dirty guard is at `aid-fsm.sh:2824-2825`,
-> not `:2661`).
+> not `:2661`); the legacy `active-run-pointer.json` fallback reader, kept for
+> one release and due for removal after it.
+>
+> **ALSO STILL OPEN — the concurrency promise stops at run initialisation.**
+> P074's own two-stream fixture (`test-p074-integration.bats`) proves plan B can
+> be allocated, written and GENERATED from the primary checkout while plan A
+> implements in its worktree, with the primary checkout's HEAD byte-identical
+> across every plan-B command. It also proves the promise does not yet reach a
+> queued EPIC when a second stream is live: for a legacy plan, `aid-fsm.sh init`
+> still refuses on the PM's unrelated dirty tracked edit AND leaves the primary
+> checkout on the `task/<epic>/main` branch it auto-created; for a `plan_branch`
+> plan it redirects into the plan's own worktree (where the dirty edit is
+> irrelevant, as designed) and then refuses because the pipeline never
+> `epic-start`s the EPICs it just generated. See §16a for the same two gaps from
+> the generation side.
 
 ### User story
 

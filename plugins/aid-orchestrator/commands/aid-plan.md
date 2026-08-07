@@ -55,11 +55,12 @@ What would you like to do?
 Interactive 9-step brainstorming flow — collaborate with PM to explore an idea.
 
 ### Step 1: Context
-1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md`, scan `plans/`
+1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md` (generated index of active streams — read-only, never hand-write it), scan `plans/`
 2. If topic provided: use as brainstorming seed; if empty: ask PM
 3. Read `skills/brainstorming.md` for process rules
 4. Detect PM's language → conversation follows PM's language
-5. **Create interim document** — allocate plan ID (P{NNN} from counter.yaml) and write
+5. **Create interim document** — allocate plan ID via `bash {plugin_path}/scripts/aid-fsm.sh alloc plan-id`
+   (locked; prints the new P{NNN} — never hand-edit counter.yaml) and write
    `.aid-o/work/interim-P{NNN}.md` with topic, project context, and PM's initial input.
    This doc persists full conversation detail across context window boundaries.
 
@@ -293,7 +294,7 @@ Options:
 Write an exhaustive implementation plan from specification or topic.
 
 1. **Input resolution** — read spec file, detect format (EPIC/plan/free-form)
-2. **Context** — read `config/project.yaml`, `work/active.md`, scan related plans
+2. **Context** — read `config/project.yaml`, `work/active.md` (generated index — read-only), scan related plans
 3. **Interim document** — allocate plan ID and create `.aid-o/work/interim-P{NNN}.md`
    with input, context, and analysis notes (same as brainstorm mode)
 4. **Codebase analysis** — identify affected areas, read key files, note patterns
@@ -370,6 +371,65 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - `/aid-run` — start execution
 - `/aid-run --auto` — start autonomous execution
 - Review created files
+
+### Generation is one transaction
+
+Generation for a plan is a single transaction, not N independent phase runs.
+Two files under `.aid-o/work/evidence/<plan_id>/generation/` hold it together:
+
+| File | What it is |
+|------|-----------|
+| `generation-authority.json` | The CP1 decision, made **once per plan** before any output exists, sealed to the exact plan bytes, target head and phase set. Every phase verifies it instead of re-running the gate. |
+| `transaction.json` | Identity plus one record per phase. Phase status is **derived** by re-hashing the recorded outputs and reading queue membership — the files and the queue are the truth. |
+
+**CP1 blocked the plan.** Generation stops before anything is created. The
+refusal carries one of exactly two AID-owned labels, and the gate's own output
+follows it verbatim:
+
+| Label | What it means | What to do |
+|-------|---------------|-----------|
+| `aid_generation_force_required:` | The failure is a CP1 condition verdict — evidence, adjudicator, C0 review or ledger. A PM may deliberately waive it. | Fix the conditions, or run the force command the label prints (it already carries your `--plan` and `--queue-mode`). |
+| `aid_cp1_blocked:` | The failure is one `--force` cannot cover — the gate was mis-invoked, hit an I/O error, or the plan's own identity is broken. The hard condition is named first. | Fix the named condition. `--force` is **refused in the same place** on this class, not merely unadvertised: it seals no authority, writes no waiver, and says so by name. |
+
+```bash
+bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode> --force --reason "<at least 20 characters>"
+```
+
+The force is invocation-scoped and audited three ways (timeline event,
+cross-plan audit log, HEAD-bound waiver artifact). The CP1 evidence on disk is
+never rewritten as clean. A `--force` on a plan that passes anyway is recorded
+as unused and writes no waiver.
+
+**A run was interrupted.** Just rerun the same command. Phases whose outputs
+still verify are skipped, only what fails verification is regenerated, ids stay
+identical, and an EPIC already in the queue is a verified idempotent skip rather
+than a duplicate error.
+
+**The plan changed.** A different identity (plan bytes, target head, phase
+count, or derivation version) is never mixed with the old one:
+
+- the previous transaction was **complete** → it rolls over automatically, the
+  finished pair is archived to `.completed-<epoch>` siblings, and a fresh
+  transaction starts;
+- the previous transaction was **incomplete** → generation refuses, naming both
+  identities. Archive it deliberately first:
+
+```bash
+bash {plugin_path}/scripts/aid-auto-pipeline.sh supersede-generation \
+  --plan <path> --reason "<at least 20 characters>"
+```
+
+`supersede-generation` archives the authority/transaction pair to
+`.superseded-<epoch>` siblings, writes the audit record, and prints what the
+abandoned generation had already produced. **It deletes nothing** — removing
+EPIC files, branches or queue entries stays with `plan-rollback` and the
+queue-removal path.
+
+It takes the same per-plan generation lock the pipeline takes, so it refuses
+by name (`a generation is in progress for <plan_id> (holder pid N)`) while a
+generation for that plan is running, and archives nothing. It also refuses
+when the supersession cannot be recorded — the audit trail is what makes this
+command accountable, so an unrecordable archive is not performed.
 
 ## CP1 Mode Selection
 
@@ -561,18 +621,30 @@ AFTER determining the C0 review and/or ledger budget check actually failed
 — a present override is never touched on a clean pass, so it stays
 available for a run that genuinely needs it. Only once a bypass is
 genuinely required does the gate claim it, renaming it to a
-`.consumed-<epoch>` sibling — the override authorizes exactly one more
-attempt (covering whichever of the two checks failed in that same run),
-never a standing bypass. Using it always leaves the unresolved findings on
-record; it is never a silent pass.
+`.consumed-<epoch>` sibling.
 
-**Gate enforcement.** `aid-cp1-gate.sh` (called by `aid-plan-to-epic.sh`) is
-the mechanical backstop for all of the above: it independently re-checks
-`c0-plan-review.json`'s presence/status/blocking_findings, re-runs
-`aid-c0-plan-review.sh verify` itself (never trusting the file's fields
-alone), and re-checks `aid-cp1-ledger.sh check-budget` — EPIC generation is
-blocked if any of these fail, override or no override for that specific
-failure.
+**Which loop this override belongs to.** It authorizes exactly one more
+GATE INVOCATION (covering whichever of the two checks failed in that same
+run), never a standing bypass — and during PLAN REVIEW that is exactly the
+ledger/recheck loop described above, unchanged. **EPIC GENERATION is a
+different consumer:** `aid-auto-pipeline.sh` runs the gate once per plan
+and seals the result in `generation-authority.json`, which every phase
+verifies, so one authority covers the whole generation and the
+`.consumed-<epoch>` per-invocation claim only bites on standalone
+`aid-plan-to-epic.sh` calls. At generation time the PM's route is the
+pipeline's own `--force --reason` (see "CP1 blocked the plan." above) —
+audited three ways, invocation-scoped, and recorded in the authority with
+every bypassed condition verbatim. Using either always leaves the
+unresolved findings on record; neither is ever a silent pass.
+
+**Gate enforcement.** `aid-cp1-gate.sh` — called once per generation
+transaction by `aid-auto-pipeline.sh`, and per invocation by a standalone
+`aid-plan-to-epic.sh` — is the mechanical backstop for all of the above: it
+independently re-checks `c0-plan-review.json`'s presence/status/blocking_findings,
+re-runs `aid-c0-plan-review.sh verify` itself (never trusting the file's
+fields alone), and re-checks `aid-cp1-ledger.sh check-budget` — EPIC
+generation is blocked if any of these fail, override or no override for
+that specific failure.
 
 **Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
 
@@ -607,7 +679,7 @@ EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L
 - `skills/planner.md` — dependency graph and parallel groups
 - `skills/review-checkpoint-contracts.md` — high-risk pattern definitions and CP1-deep contract
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
-- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called by aid-plan-to-epic.sh)
+- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-c0-plan-review.sh` — C0 cross-provider (Codex) plan review bridge (build-manifest/dispatch/verify)
 - `{plugin_path}/scripts/lib/aid-cp1-ledger.sh` — CP1 revision-limit ledger (init/increment/read/check-budget)
 - `defaults/policies/review-checkpoints.yaml` — `cp1_codex_review` bounded-loop policy (`max_rechecks`)
@@ -644,7 +716,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-06
 
 ## Plan mode
 

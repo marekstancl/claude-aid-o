@@ -102,6 +102,8 @@ parse_suite_result() {
 VERBOSE=0
 UNPARSED_SUITES=()
 INCONSISTENT_SUITES=()
+# Suites whose TAP plan promised more results than arrived (P074 EPIC 1).
+TRUNCATED_SUITES=()
 for arg in "$@"; do
   case "$arg" in
     --verbose|-v)
@@ -295,6 +297,20 @@ for suite in "${SUITES[@]}"; do
     # If run count wasn't in TAP plan line, infer from pass+fail
     if [[ "$suite_run" -eq 0 ]]; then
       suite_run=$(( suite_passed + suite_failed + suite_skipped ))
+    else
+      # P074 EPIC 1 — TRUNCATED TAP IS A FAILURE, NOT A GREEN RUN.
+      # bats announces its plan (`1..N`) before running anything and reports
+      # each result over fd 3. A child process that inherits and holds that
+      # fd open truncates the result stream: the plan still says N, only M<N
+      # results arrive, and bats still exits 0 — so a suite can lose its last
+      # tests (exactly the assertions a step added) while CI reports success.
+      # The plan line is a contract; hold the suite to it.
+      _tap_reported=$(( suite_passed + suite_failed + suite_skipped ))
+      if [[ "$_tap_reported" -lt "$suite_run" ]]; then
+        TRUNCATED_SUITES+=("${suite_name} (plan ${suite_run}, reported ${_tap_reported})")
+        suite_failed=$(( suite_failed + suite_run - _tap_reported ))
+        suite_exit=1
+      fi
     fi
     # bats never ran at all (missing binary, no AID_ALLOW_MISSING_BATS) —
     # there is no TAP output to parse; report one explicit failed test
@@ -378,6 +394,12 @@ if [[ "${#INCONSISTENT_SUITES[@]}" -gt 0 ]]; then
   echo "  INCONSISTENT suites (more passes than tests — mixed units in one line):"
   for _i in "${INCONSISTENT_SUITES[@]}"; do echo "    - $_i"; done
 fi
+if [[ "${#TRUNCATED_SUITES[@]}" -gt 0 ]]; then
+  echo ""
+  echo "  TRUNCATED suites (TAP plan promised more results than arrived — tests"
+  echo "  silently disappeared; usually a child process holding bats' fd 3):"
+  for _t in "${TRUNCATED_SUITES[@]}"; do echo "    - $_t"; done
+fi
 echo "  Total:   $TOTAL_TESTS tests across $SUITES_RUN suites"
 echo ""
 
@@ -386,6 +408,15 @@ echo ""
 # zero unparsed and zero inconsistent.
 if [[ "${AID_ALLOW_UNPARSED_SUITES:-0}" != "1" && "${#UNPARSED_SUITES[@]}" -gt 0 ]]; then
   echo "RESULT: FAIL — ${#UNPARSED_SUITES[@]} suite(s) produced no readable Results line; their tests are not counted in the totals above"
+  echo ""
+  exit 1
+fi
+
+# A truncated suite is never acceptable: the missing results are exactly the
+# tests nobody would notice losing. No opt-out env var — unlike an unparsed
+# legacy suite, this is always a defect in the suite or its children.
+if [[ "${#TRUNCATED_SUITES[@]}" -gt 0 ]]; then
+  echo "RESULT: FAIL — ${#TRUNCATED_SUITES[@]} suite(s) reported fewer results than their TAP plan announced; those tests did not run or their results were lost"
   echo ""
   exit 1
 fi

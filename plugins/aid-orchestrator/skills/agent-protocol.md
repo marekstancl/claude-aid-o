@@ -235,7 +235,7 @@ Full enforcement details: `skills/pipeline.md §7 — Tiered Severity Enforcemen
 ## Run Start — Context Loading Order
 
 **ALWAYS read in this order before starting work:**
-1. `active.md` (`.aid-o/work/active.md`) — current state, recent runs, blockers
+1. `active.md` (`.aid-o/work/active.md`) — GENERATED read-only index of active streams (plans, EPIC runs, queue), auto-refreshed at lifecycle boundaries; never hand-write it — per-stream detail lives in `.aid-o/work/plan-state/<plan_id>/`
 2. `project.yaml` (`.aid-o/config/project.yaml`) — tech stack, conventions, commands
 3. `memory_context` from task input — past patterns and decisions from Qdrant
 4. Determine: NEW task or CONTINUATION? If continuation → load run file + plan.
@@ -257,7 +257,28 @@ When you see a file reference without full path:
 All AID bash scripts live in the **plugin directory**, not the target project.
 1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
 2. Execute: `bash {plugin_path}/scripts/X.sh [args]`
-3. CWD: always the **project root** (where `.aid-o/` lives)
+3. CWD: the **project root** (where `.aid-o/` lives) — **except** for an EPIC
+   belonging to a plan that records an execution worktree, where the working
+   directory is the **plan worktree** (`.aid-worktrees/plan-<id>`).
+
+### Which tree an EPIC works in
+
+A plan opened with worktree mode gets its own linked git worktree, and that is
+where its EPICs are implemented: task branches are created there, commits land
+there, `done-advance` reads its diff there. State does NOT move — every
+`.aid-o/` read and write still resolves to the PRIMARY checkout through the
+roots contract, so evidence, plan-state and run files are exactly where they
+always were.
+
+**The mechanical backstop, stated honestly.** Nothing prevents an agent from
+editing the wrong tree at the moment it does so. What is enforced is that
+`aid-fsm.sh init` and `done-advance` re-execute themselves in the plan worktree
+(or refuse), so the EPIC's task branch is created there and its diff is
+attributed there. Work committed to the wrong tree therefore surfaces as an
+**empty task-branch diff at done-advance** — a loud, late failure rather than a
+silent wrong-tree success. Check with `git rev-parse --show-toplevel` if you
+are unsure which tree you are in; the lifecycle commands print the worktree
+path whenever they redirect.
 
 ---
 
@@ -302,7 +323,7 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-08-06
 
 ## Agent handoff contract at the plan boundary
 

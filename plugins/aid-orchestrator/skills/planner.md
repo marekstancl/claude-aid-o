@@ -36,24 +36,59 @@ normal valid plan; `aid-plan-to-epic.sh` runs the same readiness check itself.
 ## The pipeline (full chain)
 
 ```
-Plan.md ── readiness ──► all EPIC.md + all plan.json ── finalizer/receipt ──► run.md + FSM + queue
-   ▲ written per plan-writing.md      ▲ Steps (Role Pipeline) table     ▲ steps/deps/
-   │ (### Step N + AID Role + deps)   │                                 │ parallel_groups/gates
+Plan.md ── readiness ──► CP1 ONCE ──► authority ──► all EPIC.md + all plan.json ── receipt ──► run.md + FSM + queue
+   ▲ written per plan-writing.md       ▲ sealed to      ▲ Steps (Role Pipeline)          ▲ steps/deps/
+   │ (### Step N + AID Role + deps)    │ plan bytes     │ table, per phase               │ parallel_groups/gates
 ```
 
-For a normal multi-phase plan, generation is **two-stage**: AID creates every
-EPIC and `plan.json`, validates the whole package against the source graph,
-then writes one generation receipt. Only after that receipt exists does it
-initialise FSM state or write queue entries. Do not call `aid-json-to-run.sh`
-directly for a strict/high-risk plan unless you also provide the receipt.
+**Generation for a plan is ONE transaction, not N independent phase runs.**
+Under a single lock hold, `aid-auto-pipeline.sh` writes a transaction skeleton,
+calls the CP1 gate exactly once, and seals the decision into
+`generation-authority.json` — bound to the exact plan bytes, target branch and
+head, mode, phase count and derivation version. Only then do the phases run,
+and each one VERIFIES that authority rather than re-running the gate.
+
+Two files under `.aid-o/work/evidence/<plan_id>/generation/` hold it together:
+
+| File | What it is |
+|------|-----------|
+| `generation-authority.json` | The sealed CP1 decision (verdict, or the audited bypass with every bypassed condition verbatim) plus a self-hash over its own canonical JSON. |
+| `transaction.json` | Identity plus one record per phase. Phase status is **derived** by re-hashing the recorded outputs and reading queue membership — never stored as an enum. |
+
+Because status is derived, an interrupted run **resumes**: rerun the same
+command and only what fails verification is regenerated, with identical ids and
+no duplicate queue entries. A second concurrent invocation for the same plan
+does not interleave — it refuses by name with the holder pid.
+
+Generation is still **two-stage**: AID creates every EPIC and `plan.json`,
+validates the whole package against the source graph, then writes one
+generation receipt. Only after that receipt exists does it initialise FSM state
+or write queue entries. Do not call `aid-json-to-run.sh` directly for a
+strict/high-risk plan unless you also provide the receipt.
 
 ### Stage 1 — `aid-plan-to-epic.sh` (Plan.md → EPIC.md)
 
 ```bash
 aid-plan-to-epic.sh \
   --plan <plan.md> --phase <N> --total <T> \
-  --epic-template <path> --output-dir <path> --counter-yaml <path>
+  --epic-template <path> --output-dir <path> --counter-yaml <path> \
+  [--generation-authority <path> --transaction <path>]
 ```
+
+**Two invocation modes, and they differ in exactly one thing — who decides CP1:**
+
+- **Inside a transaction** (both `--generation-authority` and `--transaction`
+  given, which is how `aid-auto-pipeline.sh` always calls it): the script does
+  NOT run the CP1 gate. It VERIFIES the pair — both documents against their
+  schemas, the authority's self-hash, the plan bytes, the target branch and
+  head, the identity tuple across authority/transaction/invocation, and the
+  re-derived `epic_id`/`run_id` for this phase — and refuses on any mismatch.
+- **Standalone** (neither flag): unchanged from before — the full CP1 gate runs
+  per invocation.
+
+The receipt is forgeable by any Bash-capable actor. What it buys is BINDING and
+AUDIT DETECTABILITY (hash + transaction linkage + audit records), never actor
+impossibility — do not describe it as the latter.
 
 Reads the Plan's `### Step N:` subsections (written per `plan-writing.md` §Implementation
 Steps) and **generates the EPIC's `## Steps (Role Pipeline)` table** — one row per step in
@@ -228,6 +263,12 @@ is a single run.
 | EPIC ID could not be extracted | EPIC heading/frontmatter malformed — fix the EPIC title |
 | `aid-plan-to-epic.sh`: missing step headers | Plan lacks `### Step N:` — fix per `plan-writing.md` |
 | `aid-plan-to-epic.sh`: missing args / phase out of range | Stage-1 invocation bug — fix `--phase`/`--total` |
+| `aid_generation_force_required: …` | The CP1 gate refused a forceable condition. Show the PM the printed conditions; the printed `--force --reason` command is the PM's decision to make, never the LLM's. |
+| `aid_cp1_blocked: …` | The CP1 gate refused something `--force` cannot cover (mis-invocation, I/O, broken plan identity). Fix the named hard condition — do not suggest `--force`. |
+| `generation authority` verification failure (self-hash, plan bytes, target head, identity tuple, re-derived id) | The authority does not bind this invocation. Never hand-edit it: rerun the pipeline (it re-seals from a fresh gate decision), or archive the pair with `supersede-generation --reason`. |
+| `generation transaction identity mismatch` | The plan changed while an INCOMPLETE transaction was open. Archive it deliberately: `aid-auto-pipeline.sh supersede-generation --plan <path> --reason "<≥20 chars>"`. Artifacts from two derivations are never mixed. |
+| `generation already in progress for <plan_id> (holder pid N)` | A second invocation for the same plan. Wait for the holder and rerun — the rerun resumes. Never delete the `.lock` file. |
+| any other error, with `note: AID's own checks passed …` | Not an AID gate. The failing script's own message above the note is the real error — read that, not the note. |
 
 ---
 
@@ -245,4 +286,4 @@ is a single run.
 
 ---
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-06
