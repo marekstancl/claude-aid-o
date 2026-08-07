@@ -158,7 +158,8 @@ steps 1–3 are ONE TRANSACTION held under a single lock:
 3. `{plugin_path}/scripts/aid-plan-to-epic.sh` — generate every EPIC, each VERIFYING the authority rather than re-running the gate
 4. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse every EPIC → plan.json
 5. `{plugin_path}/scripts/aid-generation-finalize.sh` — verify the complete package and write its receipt.
-6. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt.
+6. `{plugin_path}/scripts/aid-plan-fsm.sh epic-start` — register each EPIC's `task/<epic>/main` as a ref with lineage back to `plan/<id>`. plan_branch plans only, and driven by `aid-json-to-run.sh` from the plan's COMMITTED mode; `init` is the first consumer of that lineage and refuses without it. Legacy plans skip it — they have no plan branch to descend from.
+7. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt. A **failing** init still hands the caller's branch back before the failure is reported, and the plan worktree is returned to `plan/<id>` after each init so the next phase does not meet a tree still on the previous phase's task branch.
    When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
    `--streamlined` to this script: `aid-json-to-run.sh … --streamlined`. The
    script forwards it to its Step 18 `aid-fsm.sh init` call, which writes

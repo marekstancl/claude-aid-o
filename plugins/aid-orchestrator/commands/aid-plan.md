@@ -80,9 +80,13 @@ them rather than writing a second reader.
 | `git worktree list` shows trees OUTSIDE `.aid-worktrees/` | Not AID's. Someone else's branch checkout, another session, a sibling clone. AID neither manages nor tears these down. Name them once so the PM knows what else is checked out, note which branch each is on, and leave them alone — in particular, a branch checked out there cannot be checked out again, which is the one way they can make a later `plan-start` or `--recreate-worktree` fail. |
 | Three or more streams already active | Say how many and which, and ask whether to add another — this is a PM capacity question, not a technical limit. |
 
-**The one real limit.** Concurrent plan GENERATION is supported; starting a
-newly generated plan's EPIC while another stream is live is not yet. If the PM
-intends to run this plan immediately alongside another, say that up front.
+**Generating AND starting both work.** A newly generated plan's EPICs are
+registered (`epic-start`) and initialised inside that plan's own worktree, so a
+second stream can be taken all the way to a queued, READY EPIC while the first
+one implements — with the PM's checkout dirty and its HEAD unmoved throughout.
+What still serializes is agent DISPATCH, not the streams: `dispatch.max_parallel`
+is 1 per controller session, so two streams progress by alternating or from two
+sessions, never by one session dispatching into both at once.
 
 ## Mode: Brainstorm
 

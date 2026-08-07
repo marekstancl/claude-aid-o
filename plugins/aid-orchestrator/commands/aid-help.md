@@ -132,11 +132,18 @@ PRE-FLIGHT (bash, before FSM):
      never re-runs the gate)
   5. aid-epic-to-json.sh → every plan.json + contract validation
   6. aid-generation-finalize.sh → one generation receipt
-  7. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
+  7. aid-plan-fsm.sh epic-start → plan_branch plans ONLY: registers
+     task/<epic>/main as a ref with lineage back to plan/<plan_id>,
+     which init's lineage check requires (legacy plans skip this)
+  8. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
 
   Generation is ONE TRANSACTION: one PM decision covers every phase, a
   crash resumes instead of duplicating, and no FSM state or queue entry
   exists until the complete EPIC package has been verified and sealed.
+
+  A FAILING init still restores the caller's branch before the failure
+  is reported — the PM's checkout is never left on a task branch init
+  auto-created on its way to refusing.
 
 6-State FSM:
   READY → EXECUTE → GATES → DONE
