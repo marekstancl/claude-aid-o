@@ -14,9 +14,8 @@
 #                                   --force is REFUSED IN THE SAME PLACE
 #                                   rather than merely not advertised.
 #
-# THE HONESTY PROPERTIES, and why each is tested the hard way (a Codex
-# adversarial round found the earlier version of this file asserting all four
-# of these too weakly to mean anything):
+# THE HONESTY PROPERTIES, and why each is tested the hard way — asserted any
+# more weakly than this, none of the four means anything:
 #
 #   1. LINE 1, not "somewhere". The label must be the FIRST line of stderr.
 #      Asserted with `head -1`, never with a substring search over the whole
@@ -49,74 +48,29 @@
 #   bats --tap test-generation-labels.bats | grep -cE '^(ok|not ok)'   # == 15
 
 load test-helpers.bash
+load generation-fixture.bash
 
 setup() {
-  export AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1
-  REPO_PLUGIN="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  FIXTURES="$REPO_PLUGIN/scripts/tests/fixtures"
-  TEST_TMPDIR="$(mktemp -d)"
-  export REPO_PLUGIN FIXTURES TEST_TMPDIR
-  unset AID_PROJECT_ROOT AID_PLAN_STATE_PROJECT_ROOT AID_PLAN_MANIFEST_PROJECT_ROOT
-  unset AID_TEST_CP1_RC AID_TEST_CP1_OUT
+  gen_setup
+  gen_shadow_farm
+  _stub_cp1_configurable
   REASON="the PM accepts this bypass because the blocking condition is a known false positive"
   export REASON
-  _mk_shadow
 }
 
-teardown() {
-  cd /
-  [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
-}
+teardown() { gen_teardown; }
 
-# _mk_shadow — symlink farm over the real plugin with a CP1 gate stub whose
-# exit code and output the test dictates. Symlinks, not a copy, so every other
-# script is byte-identical to the shipped one and the pipeline under test is
-# the real one.
-_mk_shadow() {
-  SHADOW="$TEST_TMPDIR/plugin"
-  mkdir -p "$SHADOW/scripts"
-  local f b
-  for f in "$REPO_PLUGIN/scripts"/*; do
-    b="$(basename "$f")"
-    [[ "$b" == "tests" ]] && continue
-    ln -s "$f" "$SHADOW/scripts/$b"
-  done
-  ln -s "$REPO_PLUGIN/defaults" "$SHADOW/defaults"
-  _stub aid-cp1-gate.sh <<'STUB'
+# _stub_cp1_configurable — this suite's own CP1 gate stub: the test dictates
+# its exit code and its output, so one stub stands in for every real gate
+# outcome in the vocabulary this suite classifies.
+_stub_cp1_configurable() {
+  gen_stub aid-cp1-gate.sh <<'STUB'
 #!/usr/bin/env bash
-# Configurable CP1 gate stub. AID_TEST_CP1_OUT is emitted verbatim (\n honoured)
-# and AID_TEST_CP1_RC is the exit code — together they stand in for any real
-# gate outcome from the vocabulary this suite classifies.
+# AID_TEST_CP1_OUT is emitted verbatim (\n honoured) and AID_TEST_CP1_RC is the
+# exit code.
 [[ -n "${AID_TEST_CP1_OUT:-}" ]] && printf '%b\n' "$AID_TEST_CP1_OUT" >&2
 exit "${AID_TEST_CP1_RC:-0}"
 STUB
-  PIPELINE="$SHADOW/scripts/aid-auto-pipeline.sh"
-  export SHADOW PIPELINE
-}
-
-# _stub <script-name> — replace one script in the shadow farm with stdin.
-_stub() {
-  rm -f "$SHADOW/scripts/$1"
-  cat > "$SHADOW/scripts/$1"
-  chmod +x "$SHADOW/scripts/$1"
-}
-
-# _mk_project <dir> — a committed AID workspace with .aid-o gitignored.
-_mk_project() {
-  local d="$1"
-  mkdir -p "$d/.aid-o/plans" "$d/.aid-o/tasks" "$d/.aid-o/config" \
-           "$d/.aid-o/work/evidence" "$d/.aid-o/work/runs"
-  printf 'counter: 0\n' > "$d/.aid-o/config/counter.yaml"
-  printf '.aid-o/\n' > "$d/.gitignore"
-  printf 'seed\n' > "$d/README.md"
-  (
-    cd "$d"
-    git init -q -b main 2>/dev/null || { git init -q; git checkout -q -b main 2>/dev/null || git branch -m main; }
-    git config user.email aid-test@example.com
-    git config user.name "AID Test"
-    git add -A
-    git commit -q -m "seed"
-  )
 }
 
 # _seed_plan <project> — a HOSTILE plan path: a space AND an apostrophe. Naive
@@ -154,7 +108,7 @@ _printed_force_command() {
 # ─── forceable: the label is line 1, and the command it prints WORKS ──────
 
 @test "a forceable CP1 refusal puts aid_generation_force_required on stderr LINE 1" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.\nMissing files in .aid-o/work/evidence/P099/cp1-deep/:\n  - cp1-lens-L1-behavior.md'
@@ -174,7 +128,7 @@ _printed_force_command() {
 }
 
 @test "the printed force command re-parses to the EXACT hostile plan path (space + apostrophe)" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.'
@@ -196,7 +150,7 @@ _printed_force_command() {
 @test "EXECUTING the printed force command proceeds: it parses, and it seals a forced authority" {
   # The honesty property: the label does not merely LOOK like a command. It is
   # extracted, its reason placeholder replaced with a real reason, and RUN.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.'
@@ -223,7 +177,7 @@ _printed_force_command() {
 }
 
 @test "the gate's own stderr follows the label verbatim — the label adds, never replaces" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT='ERROR: CP1 revision-limit ledger blocks EPIC generation for plan P099.\naid-cp1-ledger.sh check-budget rc=1: attempts 5 >= max 5'
@@ -244,7 +198,7 @@ _printed_force_command() {
 @test "a gate exit 2 (usage error) is aid_cp1_blocked on LINE 1 and offers no force command" {
   # rc 2 means the gate was mis-invoked and never evaluated a CP1 condition —
   # there is no verdict to waive, so --force covers nothing.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=2
   export AID_TEST_CP1_OUT='{"error": "Unknown argument: --nonsense", "code": 2}'
@@ -261,7 +215,7 @@ _printed_force_command() {
   # AID-v3-principles §1. If --force sailed past a condition the label calls
   # uncoverable, the label would be decoration — a claim the very next
   # invocation disproves.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=2
   export AID_TEST_CP1_OUT='{"error": "Unknown argument: --nonsense", "code": 2}'
@@ -279,7 +233,7 @@ _printed_force_command() {
 }
 
 @test "HARD IS UNFORCEABLE: --force on a gate exit 3 (I/O) fails in the same place and seals NO authority" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=3
   export AID_TEST_CP1_OUT='{"error": "Plan file not found: /nowhere/plan.md", "code": 3}'
@@ -299,7 +253,7 @@ _printed_force_command() {
 @test "HARD IS UNFORCEABLE: --force on a broken plan identity (exit 1) fails in the same place" {
   # An rc-1 failure the gate raises BEFORE it determines risk. Forcing past it
   # would seal an authority whose plan identity is the broken thing.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT="{\"error\": \"Plan id 'P099/../etc' contains invalid characters (path traversal guard)\", \"code\": 1}"
@@ -321,7 +275,7 @@ _printed_force_command() {
 }
 
 @test "some forceable conditions plus one hard one: aid_cp1_blocked wins, names the hard one first, stays unforceable" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.\nERROR: CP1 revision-limit ledger blocks EPIC generation for plan P099.\nPlan file missing closing '"'"'---'"'"' for frontmatter block.'
@@ -344,7 +298,7 @@ _printed_force_command() {
 @test "gate stderr that already starts with a label is passed through, never double-labelled" {
   # The wrapper double-invocation case: a labelled refusal must not come back
   # wearing two labels, which would read as two different refusals for one.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
   export AID_TEST_CP1_OUT='aid_cp1_blocked: an inner invocation already decided this\nsupporting detail from the inner run'
@@ -359,11 +313,11 @@ _printed_force_command() {
 # ─── foreign failures: verbatim, and the note only when it is true ────────
 
 @test "a subprocess crash AFTER the gate passed prints verbatim plus the not-an-AID-gate note" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=0
   export AID_TEST_CP1_OUT='CP1-gate: plan P099 is low-risk — CP1-deep not required. Proceeding.'
-  _stub aid-epic-to-json.sh <<'STUB'
+  gen_stub aid-epic-to-json.sh <<'STUB'
 #!/usr/bin/env bash
 echo "jq: error (at <stdin>:0): Cannot index number with string \"steps\"" >&2
 exit 5
@@ -386,7 +340,7 @@ STUB
   # The D5 contract-validation gate is AID's own. Appending "this failure is
   # not an AID gate" to a gate that names itself in its own message would be a
   # flat contradiction.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=0
   # `gates/` is itself a SYMLINK in the shadow farm (it is an entry under
@@ -415,7 +369,7 @@ STUB
   # aid-plan-fsm.sh plan-start, is deliberately non-fatal), so the pre-gate
   # failure exercised here is AID's own transaction-identity abort — which is
   # the point: the note must not fire when AID's checks had not passed yet.
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P099/generation"
   mkdir -p "$gen"

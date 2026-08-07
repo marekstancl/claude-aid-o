@@ -2,7 +2,7 @@
 # test-generation-resume.bats — P074 Step 15: the transaction manifest,
 # hash-derived resume, and the one-hold concurrency contract.
 #
-# THE GROUNDED FAILURES (F3/F4, live 2026-08-04): a rerun regenerated from
+# THE FAILURES THIS PINS, both observed live on 2026-08-04: a rerun regenerated from
 # phase 1, silently overwrote the outputs, and then DIED on phase 1's queue
 # duplicate — leaving phases 2..N stranded with no state to resume from. And
 # the generation receipt's per-EPIC `queue_status` stayed at the placeholder
@@ -15,11 +15,11 @@
 # short-circuit fires only AFTER the receipt's queue-status rewrite, so a crash
 # anywhere before it always leaves the transaction resumable.
 #
-# ── HOW THE KILLS ARE INDUCED (Codex round: finding 5) ─────────────────────
-# The first cut ran a SUCCESSFUL pipeline and then hand-deleted artifacts to
-# fabricate the post-crash state. That can only ever confirm the fabrication —
-# it cannot expose a real write-ordering window, because no write ever raced
-# anything. Every kill here is a REAL SIGKILL of the REAL pipeline process at a
+# ── HOW THE KILLS ARE INDUCED ──────────────────────────────────────────────
+# Running a SUCCESSFUL pipeline and then hand-deleting artifacts to fabricate
+# the post-crash state can only ever confirm the fabrication — it cannot expose
+# a real write-ordering window, because no write ever raced anything. Every
+# kill here is a REAL SIGKILL of the REAL pipeline process at a
 # specific write boundary, delivered from inside a child the pipeline itself
 # invokes: the shadow plugin substitutes a wrapper that runs the GENUINE script
 # and then `kill -9 $PPID`. That parent IS the pipeline shell — these children
@@ -47,23 +47,15 @@
 #   bats --tap test-generation-resume.bats | grep -cE '^(ok|not ok)'   # == 12
 
 load test-helpers.bash
+load generation-fixture.bash
 
 setup() {
-  export AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1
-  REPO_PLUGIN="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  FIXTURES="$REPO_PLUGIN/scripts/tests/fixtures"
-  TEST_TMPDIR="$(mktemp -d)"
-  export REPO_PLUGIN FIXTURES TEST_TMPDIR
-  unset AID_PROJECT_ROOT AID_PLAN_STATE_PROJECT_ROOT AID_PLAN_MANIFEST_PROJECT_ROOT
-  unset AID_TEST_KILL_EPIC_TO_JSON AID_TEST_KILL_QUEUE_ADD AID_TEST_KILL_FINALIZE_REWRITE
+  gen_setup
   _mk_shadow
-  CP1_COUNT="$TEST_TMPDIR/cp1.count"; : > "$CP1_COUNT"
-  export CP1_COUNT
-  export AID_TEST_CP1_COUNTER="$CP1_COUNT"
   export AID_TEST_E2J_COUNT="$TEST_TMPDIR/e2j.count"
   export AID_TEST_QADD_COUNT="$TEST_TMPDIR/qadd.count"
   PROJ="$TEST_TMPDIR/p"
-  _mk_project "$PROJ"
+  gen_mk_project "$PROJ"
   PLAN="$PROJ/.aid-o/plans/P099-multi.md"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$PLAN"
   GEN="$PROJ/.aid-o/work/evidence/P099/generation"
@@ -72,32 +64,14 @@ setup() {
   export PROJ PLAN GEN TX QUEUE
 }
 
-teardown() {
-  cd /
-  [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
-}
+teardown() { gen_teardown; }
 
-# _mk_shadow — a symlink farm over the real plugin (cheap: no 32 MB copy) with
-# a counting CP1 stub and three kill wrappers. Every wrapper runs the GENUINE
+# _mk_shadow — the shared symlink farm and counting CP1 stub, plus the three
+# kill wrappers that belong to THIS suite alone. Every wrapper runs the GENUINE
 # script; the only thing it adds is the signal.
 _mk_shadow() {
-  SHADOW="$TEST_TMPDIR/plugin"
-  mkdir -p "$SHADOW/scripts"
-  local f b
-  for f in "$REPO_PLUGIN/scripts"/*; do
-    b="$(basename "$f")"
-    [[ "$b" == "tests" ]] && continue
-    ln -s "$f" "$SHADOW/scripts/$b"
-  done
-  ln -s "$REPO_PLUGIN/defaults" "$SHADOW/defaults"
-
-  rm -f "$SHADOW/scripts/aid-cp1-gate.sh"
-  cat > "$SHADOW/scripts/aid-cp1-gate.sh" <<'STUB'
-#!/usr/bin/env bash
-[[ -n "${AID_TEST_CP1_COUNTER:-}" ]] && printf 'call\n' >> "$AID_TEST_CP1_COUNTER"
-echo "CP1 GATE: low-risk plan, no CP1-deep evidence required"
-exit 0
-STUB
+  gen_shadow_farm
+  gen_cp1_counting_stub
 
   rm -f "$SHADOW/scripts/aid-epic-to-json.sh"
   cat > "$SHADOW/scripts/aid-epic-to-json.sh" <<STUB
@@ -148,34 +122,14 @@ fi
 exec "$REPO_PLUGIN/scripts/aid-generation-finalize.sh" "\$@"
 STUB
 
-  chmod +x "$SHADOW/scripts/aid-cp1-gate.sh" "$SHADOW/scripts/aid-epic-to-json.sh" \
+  chmod +x "$SHADOW/scripts/aid-epic-to-json.sh" \
            "$SHADOW/scripts/aid-queue-add.sh" "$SHADOW/scripts/aid-generation-finalize.sh"
-  PIPELINE="$SHADOW/scripts/aid-auto-pipeline.sh"
-  export SHADOW PIPELINE
-}
-
-_mk_project() {
-  local d="$1"
-  mkdir -p "$d/.aid-o/plans" "$d/.aid-o/tasks" "$d/.aid-o/config" \
-           "$d/.aid-o/work/evidence" "$d/.aid-o/work/runs"
-  printf 'counter: 0\n' > "$d/.aid-o/config/counter.yaml"
-  printf '.aid-o/\n' > "$d/.gitignore"
-  printf 'seed\n' > "$d/README.md"
-  (
-    cd "$d"
-    git init -q -b main 2>/dev/null || { git init -q; git checkout -q -b main 2>/dev/null || git branch -m main; }
-    git config user.email aid-test@example.com
-    git config user.name "AID Test"
-    git add -A
-    git commit -q -m "seed"
-  )
 }
 
 _run_pipeline() { ( cd "$PROJ" && bash "$PIPELINE" --plan "$PLAN" --queue-mode chain 3>&- ); }
 # _run_killable — a run that is EXPECTED to die; its exit status is captured,
 # never propagated (a killed process must not abort the test).
 _run_killable() { local rc=0; ( cd "$PROJ" && bash "$PIPELINE" --plan "$PLAN" --queue-mode chain 3>&- ) >/dev/null 2>&1 || rc=$?; printf '%s' "$rc"; }
-_cp1_calls() { wc -l < "$CP1_COUNT" | tr -d ' '; }
 _queue_count() { grep -c 'epic_id: "E-099' "$QUEUE" 2>/dev/null || echo 0; }
 _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d ' '; }
 
@@ -201,7 +155,7 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   [ "$(jq -r '.phases["2"].run_id' "$TX")" = "R-E099-2" ]
   [ "$(_epic_count)" = "3" ]
   [ "$(_queue_count)" = "3" ]
-  [ "$(_cp1_calls)" = "0" ]                                             # sealed authority reused
+  [ "$(gen_cp1_calls)" = "0" ]                                             # sealed authority reused
 }
 
 # ─── real kill 2: queue entry durable, manifest unaware (adoption) ────────
@@ -224,7 +178,7 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   [ "$(jq -r '.phases["1"].queued' "$TX")" = "true" ]
   [ "$(_queue_count)" = "3" ]
   [ "$(_epic_count)" = "3" ]
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
 }
 
 # ─── real kill 3: receipt rewrite never happened ─────────────────────────
@@ -247,7 +201,7 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   [ "$(jq -S -c '.phases | with_entries(.value |= del(.queued))' "$TX")" = "$before" ]
   [ "$(jq -r '[.epics[].queue_status] | unique | join(",")' "$GEN/receipt.json")" = "pending" ]
   [ "$(_queue_count)" = "3" ]
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
 }
 
 # ─── corrupted output ────────────────────────────────────────────────────
@@ -315,7 +269,7 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
 }
 
 @test "STALE-IDENTITY ADOPTION IS REFUSED: a completed generation whose queue entries still exist blocks the rollover before anything is regenerated" {
-  # Codex round, BLOCKER 3: the new transaction derives the SAME epic ids from
+  # The new transaction derives the SAME epic ids from
   # the same plan file, so the pre-rollover entries used to look "owned" and
   # were silently skipped — leaving queue entries standing for content
   # regenerated under a different identity.
@@ -373,7 +327,7 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
 # ─── concurrency: ONE hold for the whole generation ──────────────────────
 
 @test "a second invocation while the transaction lock is held refuses by name, with the holder pid, and generates nothing" {
-  # Codex round, BLOCKER 2: the lock used to be dropped once the authority was
+  # Dropping the lock once the authority is
   # sealed, so a second invocation walked straight into the phase work and
   # raced the first on the counter, FSM init and the very files it hashes.
   mkdir -p "$GEN"
@@ -456,7 +410,7 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   # No interleaving: one gate call, three EPICs, three queue entries, and every
   # recorded hash still matches the file on disk (a race would have recorded a
   # hash for bytes the other run replaced).
-  [ "$(_cp1_calls)" = "1" ]
+  [ "$(gen_cp1_calls)" = "1" ]
   [ "$(_epic_count)" = "3" ]
   [ "$(_queue_count)" = "3" ]
   local pj

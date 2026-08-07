@@ -578,7 +578,7 @@ if [[ "$accepted_value" == "[]" || -z "$accepted_value" ]]; then
   line_num="$(echo "$accepted_blockers_line" | cut -d: -f1)"
   # Newline-terminator-agnostic read: mapfile keeps an unterminated final
   # line, where a `wc -l` upper bound silently drops it — a real blocker on a
-  # no-final-newline last line must not bypass the walk (Codex round 2).
+  # no-final-newline last line must not bypass the walk.
   mapfile -t _adj_lines < "$adjudicator_file"
   item_idx=$(( line_num ))  # 0-based index of the first line AFTER the key line
   while [[ "$item_idx" -lt "${#_adj_lines[@]}" ]]; do

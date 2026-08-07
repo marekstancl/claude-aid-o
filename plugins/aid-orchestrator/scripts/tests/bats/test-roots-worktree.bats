@@ -17,7 +17,7 @@
 # on it and abort the pipeline — so a green end-to-end run PROVES no member
 # touched a worktree-local workspace at any point.
 #
-# FD-3 HYGIENE (P074 review round 2): bats reports test results over fd 3; a
+# FD-3 HYGIENE: bats reports test results over fd 3; a
 # spawned child that inherits and holds that fd open silently truncates the
 # suite's TAP output (tests appear green because missing results still exit
 # 0). Every heavyweight invocation below (FSM init, pipeline chain,

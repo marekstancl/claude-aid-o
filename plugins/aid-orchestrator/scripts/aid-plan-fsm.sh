@@ -983,8 +983,8 @@ _pfsm_worktree_registered() {
 }
 
 # _pfsm_worktree_head_is <path> <branch> — is the worktree at <path> actually
-# checked out on <branch>? Registration alone is NOT enough (P074 review F6):
-# a directory manually created at the canonical path on some other branch is
+# checked out on <branch>? Registration alone is NOT enough: a directory
+# manually created at the canonical path on some other branch is
 # registered like any other worktree, and adopting it would give the plan a
 # path pointer to a tree that is not its execution tree at all. A detached
 # HEAD answers "no" — `symbolic-ref` fails, which is the correct verdict here.
@@ -996,7 +996,7 @@ _pfsm_worktree_head_is() {
 }
 
 # _pfsm_plan_worktree_lock_path <plan_id> — the per-plan WORKTREE-transaction
-# lock (P074 review F4/F5). Deliberately its own sidecar rather than the
+# lock. Deliberately its own sidecar rather than the
 # plan-state lock: `plan_state_set_worktree_path` takes that one itself, and
 # flock on a second descriptor in the same process would self-deadlock. Every
 # mutation of a plan's execution worktree — the audited repair and both
@@ -1161,7 +1161,7 @@ _pfsm_ensure_plan_worktree() {
   if [[ -n "$rec" ]]; then
     git -C "$root" worktree prune >/dev/null 2>&1 || true
     if [[ -d "$rec" ]] && _pfsm_worktree_registered "$root" "$rec"; then
-      # P074 review F6: registration is not identity. The recorded tree must be
+      # Registration is not identity. The recorded tree must be
       # the CANONICAL one and must actually be checked out on plan/<id>; a
       # pointer at some other registered worktree (or at the right path on the
       # wrong branch) is a plan with no execution tree, silently.
@@ -1182,8 +1182,7 @@ _pfsm_ensure_plan_worktree() {
   # Unrecorded. A registered worktree at the canonical path CHECKED OUT ON THE
   # PLAN BRANCH means a previous run was killed between `worktree add` and the
   # state write: complete the record instead of treating the plan as legacy.
-  # Anything else at that path is NOT this plan's tree and is never adopted
-  # (P074 review F6).
+  # Anything else at that path is NOT this plan's tree and is never adopted.
   git -C "$root" worktree prune >/dev/null 2>&1 || true
   local created=0
   if [[ -d "$canonical" ]] && _pfsm_worktree_registered "$root" "$canonical" \
@@ -1201,8 +1200,7 @@ _pfsm_ensure_plan_worktree() {
     echo "NOTE: adopting the already-registered worktree ${canonical} for ${plan_id} — a previous plan-start was killed between registering it and recording it (verified: its HEAD is ${plan_branch})." >&2
   fi
 
-  # The same compare-and-set the repair uses (round-2 BLOCKER 2), in
-  # plan-start's own terms: it refuses only CLOSED (an ABORTED or ROLLED_BACK
+  # The same compare-and-set the repair uses, in plan-start's own terms: it refuses only CLOSED (an ABORTED or ROLLED_BACK
   # plan is deliberately restartable), so the guard refuses only CLOSED. It
   # closes the identical window — plan-start passes its CLOSED check, a close
   # commits, and the record would otherwise land on a plan that is already
@@ -1240,11 +1238,11 @@ _pfsm_ensure_plan_worktree() {
 # plan-start would hard-fail at the exit-5 consistency check instead of
 # converging (asserted by the re-run acceptance case).
 #
-# EVERY STEP IS CHECKED, and the verdict is what the checks found (P074 review
-# F2/F3). The old version fired each undo with `|| true` and then announced
-# "nothing survives" unconditionally — under a locked worktree or a read-only
-# state directory that sentence was simply false, and the ledger rollback it
-# claimed could silently not have happened. Two ordering rules follow from the
+# EVERY STEP IS CHECKED, and the verdict is what the checks found. Firing each
+# undo with `|| true` and then announcing "nothing survives" unconditionally
+# makes that sentence simply false under a locked worktree or a read-only state
+# directory, and the ledger rollback it claims could silently not have
+# happened. Two ordering rules follow from the
 # same honesty requirement:
 #   * the `aborted` record is appended ONLY once the branch is verified gone.
 #     A ledger saying aborted while plan/<id> still exists is a worse lie than
@@ -1338,15 +1336,14 @@ _pfsm_plan_start_compensate() {
 # which prune clears) and again after the removal (a half-removed admin entry
 # would otherwise block the next plan that wants this path).
 #
-# IDEMPOTENT AND RE-RUNNABLE (P074 review F5). A kill after the close became
-# durable but before teardown used to leak the worktree permanently, because
-# the re-run took plan-close's "ALREADY CLOSED … no-op" exit and never came
-# back here. Both terminal commands now call this on their already-terminal
+# IDEMPOTENT AND RE-RUNNABLE. A kill after the close became durable but before
+# teardown leaks the worktree permanently if the re-run takes plan-close's
+# "ALREADY CLOSED … no-op" exit and never comes back here. Both terminal commands now call this on their already-terminal
 # re-run path, so it must be safe with nothing left to do: when there is no
 # directory, no registration and no pointer it says so and returns.
 #
-# It also refuses to act on a recorded path OUTSIDE the repo root (F7's
-# defence in depth): removing "some registered worktree the state file names"
+# It also refuses to act on a recorded path OUTSIDE the repo root (defence in
+# depth): removing "some registered worktree the state file names"
 # is precisely the damage a malformed record could otherwise cause.
 #
 # AND IT NEVER DELETES WITHOUT THE PER-PLAN WORKTREE LOCK. "Terminal
@@ -1370,16 +1367,15 @@ _pfsm_teardown_plan_worktree() {
     return 0
   fi
 
-  # ── the per-plan worktree lock, and what a TIMEOUT means (P074 whole-diff
-  #    review, BLOCKER 3) ────────────────────────────────────────────────────
+  # ── the per-plan worktree lock, and what a TIMEOUT means ─────────────────
   # Serialize against the audited repair (--recreate-worktree), which takes the
   # same lock: without it a recreate can add a worktree for a plan this close
   # already tore down.
   #
-  # The first cut downgraded a lock timeout to a warning and REMOVED THE TREE
-  # ANYWAY, reasoning that a terminal operation must never be blockable (the
-  # P082 lesson). The goal is right; the implementation reopened precisely the
-  # race the lock was added to close: `--recreate-worktree` holds this lock
+  # A lock timeout must NOT be downgraded to a warning that removes the tree
+  # anyway. Reasoning that a terminal operation must never be blockable (the
+  # P082 lesson) has the right goal, but that implementation reopens precisely
+  # the race the lock exists to close: `--recreate-worktree` holds this lock
   # while it creates a replacement worktree and records it, so a concurrent
   # close would delete the tree mid-create and the repair would then finish by
   # recording a path that no longer exists.
@@ -1966,10 +1962,10 @@ cmd_plan_start() {
         exit 1
       fi
     elif [[ "$reconcile_status" == "intent" ]]; then
-      # P074 review F1 — THE KILL WINDOW BETWEEN `git branch` AND
-      # `plan_op_mark_git_applied`. The branch exists, the ledger's last word
-      # for this op is `intent`, and there is no manifest. Refusing here (the
-      # old behaviour) made that window non-resumable: the operator was left
+      # THE KILL WINDOW BETWEEN `git branch` AND `plan_op_mark_git_applied`.
+      # The branch exists, the ledger's last word for this op is `intent`, and
+      # there is no manifest. Refusing here would make that window
+      # non-resumable: the operator was left
       # with a stranded `plan/<id>` that no command would either finish or
       # clean up. It is instead COMPLETED forward, because the branch a killed
       # plan-start left is exactly the branch this run would create.
@@ -7678,7 +7674,7 @@ cmd_plan_close() {
     ABORTED)      close_mode="abort" ;;
     CLOSED)
       if [[ -f "$marker" ]]; then
-        # P074 review F5: a kill AFTER the close became durable but BEFORE the
+        # A kill AFTER the close became durable but BEFORE the
         # teardown left the worktree and its registration behind forever —
         # this exit is where every retry landed, and it never came back to the
         # teardown. It does now: the teardown is idempotent and says so when
@@ -8321,14 +8317,14 @@ _pfsm_plan_state_recreate_worktree() {
     return 2
   fi
 
-  # ── THE WHOLE REPAIR IS ONE LOCKED TRANSACTION (P074 review F4) ──────────
-  # Without this, two concurrent recreates both saw "no worktree", and the
-  # loser's add-failure cleanup force-removed the WINNER's tree while the
-  # winner went on to record a path nothing was registered at. Teardown takes
+  # ── THE WHOLE REPAIR IS ONE LOCKED TRANSACTION ───────────────────────────
+  # Without this, two concurrent recreates both see "no worktree", and the
+  # loser's add-failure cleanup force-removes the WINNER's tree while the
+  # winner goes on to record a path nothing was registered at. Teardown takes
   # the same lock, so no two processes ever touch the TREE at once, and
   # `_pfsm_rw_done` is the single release point.
   #
-  # WHAT THIS LOCK DOES NOT DO (round-2 BLOCKER 2): it does not serialize this
+  # WHAT THIS LOCK DOES NOT DO: it does not serialize this
   # repair against a plan-close's terminal STATE TRANSITION. Close flips
   # plan_state under the PLAN-STATE lock and only then attempts this one — and
   # on a timeout it defers its teardown and returns success, never having held
@@ -8385,7 +8381,7 @@ _pfsm_plan_state_recreate_worktree() {
   local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
   local action="" wt=""
   if [[ -d "$canonical" ]] && _pfsm_worktree_registered "$root" "$canonical"; then
-    # P074 review F6: registration alone does not make it THIS plan's tree.
+    # Registration alone does not make it THIS plan's tree.
     # An adopt whose HEAD is some other branch would record a path pointer to
     # a tree the plan can never execute in — refused, never silently taken
     # over and never deleted (this command owns repairs, not other people's
@@ -8418,7 +8414,7 @@ _pfsm_plan_state_recreate_worktree() {
     fi
   fi
 
-  # ── THE RECORD IS A COMPARE-AND-SET AGAINST plan_state (round-2 BLOCKER 2)
+  # ── THE RECORD IS A COMPARE-AND-SET AGAINST plan_state ───────────────────
   # The OPEN check above is NOT sufficient on its own, and the worktree lock
   # does not make it so: this repair and a plan-close do not serialize on the
   # worktree lock at all — they serialize on PLAN-STATE, which is what close
@@ -8461,9 +8457,9 @@ _pfsm_plan_state_recreate_worktree() {
   fi
 
   # ── The audit trail: two records, both through the P073 primitives ───────
-  # BOTH ARE CHECKED (P074 review F8). They used to be `|| true`, so a repair
-  # whose entire audit trail failed to write still announced "Repair logged" —
-  # a claim about forensics that were not there. The repair itself is NOT
+  # BOTH ARE CHECKED. As `|| true` they would let a repair whose entire audit
+  # trail failed to write still announce "Repair logged" — a claim about
+  # forensics that are not there. The repair itself is NOT
   # undone when they fail (a recorded, working worktree is better than a
   # rollback nobody asked for), but the command fails loudly and prints what
   # is missing, so the operator can record it before continuing.
@@ -9272,7 +9268,7 @@ _pfsm_plan_state_repair() {
   # worktree AND that is checked out on this plan's branch. That is not a
   # guess — the path is fixed by Step 7 and the branch identity is what
   # distinguishes this plan's tree from somebody else's tree at that path
-  # (P074 review F6). Anything short of all three is NOT adopted, and then
+  # Anything short of all three is NOT adopted, and then
   # repair SAYS SO with the exact command, instead of leaving the operator to
   # discover it from a refusal that describes the wrong cause.
   local _rep_wt="" _rep_rc=0
@@ -9923,7 +9919,7 @@ cmd_plan_rollback() {
 
   local cur_state; cur_state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || true)"
   if [[ "$cur_state" != "PLAN_MERGING" ]]; then
-    # P074 review F5: the rollback's own teardown runs after the state is
+    # The rollback's own teardown runs after the state is
     # already ROLLED_BACK, so a kill in between used to leak the worktree with
     # no command left that would remove it — every re-run stopped right here.
     # An ALREADY-ROLLED-BACK plan therefore gets the idempotent teardown before

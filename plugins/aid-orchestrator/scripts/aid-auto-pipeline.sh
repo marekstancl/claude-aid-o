@@ -54,14 +54,14 @@ export AID_PROJECT_ROOT
 # =============================================================================
 # P074 EPIC 3 (Steps 13/15/16) — GENERATION IS ONE TRANSACTION
 # =============================================================================
-# THE GROUNDED FAILURES THIS REPLACES (2026-08-04, live):
-#   F2  the CP1 gate ran once PER PHASE, because aid-plan-to-epic.sh calls it
-#       unconditionally per invocation and its one-shot override memo is
-#       function-local — a 3-phase plan demanded 3 PM artifacts.
-#   F3  a rerun regenerated from phase 1, silently overwrote outputs, and died
-#       on the queue duplicate, leaving phases 2..N stranded.
-#   F4  the receipt's per-EPIC `queue_status` stayed at `pending_receipt`
-#       forever, because nothing rewrote it after stage 2.
+# THE FAILURES THIS REPLACES, all three observed live on 2026-08-04:
+#   * the CP1 gate ran once PER PHASE, because aid-plan-to-epic.sh calls it
+#     unconditionally per invocation and its one-shot override memo is
+#     function-local — a 3-phase plan demanded 3 PM artifacts.
+#   * a rerun regenerated from phase 1, silently overwrote outputs, and died
+#     on the queue duplicate, leaving phases 2..N stranded.
+#   * the receipt's per-EPIC `queue_status` stayed at `pending_receipt`
+#     forever, because nothing rewrote it after stage 2.
 #
 # THE MECHANISM. One plan-scoped decision (`generation-authority.json`) and one
 # durable manifest (`transaction.json`) live side by side under
@@ -98,12 +98,8 @@ export AID_PROJECT_ROOT
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lock.sh"
 
-# phase_derivation_version — a LITERAL CONSTANT, bumped only when the phase
-# detection algorithm below ("Detect phase count from plan") changes
-# semantically. It exists so a resumed transaction can detect that a plugin
-# upgrade changed how phases would be derived, instead of silently mixing
-# artifacts from two derivations.
-AID_GEN_PHASE_DERIVATION_VERSION=1
+# AID_GEN_PHASE_DERIVATION_VERSION is defined with the derivation it versions,
+# in lib/aid-generation-ids.sh (sourced below).
 AID_GEN_LOCK_TIMEOUT="${AID_GEN_LOCK_TIMEOUT:-60}"
 _GEN_LOCK_FD=""
 
@@ -258,22 +254,14 @@ _gen_target_head() {
 }
 
 # ── ID derivation ──────────────────────────────────────────────────────────
-# DELIBERATE DUPLICATE of aid-plan-to-epic.sh's plan_num/epic_id derivation and
-# aid-epic-to-json.sh's run_id derivation. The transaction pre-registers every
-# phase's ids in the skeleton (before any generator runs), so the verifier can
-# compare a RE-DERIVED id against a RECORDED one and catch derivation drift
-# between plugin versions at verify time instead of at queue time. Keep the
-# three copies in step; the resume + authority-verify suites fail on drift.
-_gen_plan_num() { printf '%s\n' "$1" | sed 's/^P//; s/^-//'; }
-_gen_epic_id()  { printf 'E-%s-%s_%s\n' "$(_gen_plan_num "$1")" "$2" "$3"; }
-_gen_run_id() {
-  local epic_id="$1"
-  if [[ "$epic_id" =~ ^E-([0-9]+)-([0-9]+)_([0-9]+)$ ]]; then
-    printf 'R-E%s-%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-  else
-    printf 'R-%s-1\n' "$(printf '%s' "$epic_id" | sed 's/[^a-zA-Z0-9]//g')"
-  fi
-}
+# THE derivation lives in lib/aid-generation-ids.sh and is shared with
+# aid-plan-to-epic.sh (which re-derives these ids at verify time) and
+# aid-epic-to-json.sh. The transaction pre-registers every phase's ids in the
+# skeleton, before any generator runs, so the verifier compares a RE-DERIVED id
+# against a RECORDED one — two independent inputs — and catches derivation
+# drift between plugin versions at verify time instead of at queue time.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
 
 _gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 # Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent
@@ -466,8 +454,8 @@ _gen_plan_id_of() {
 # ---------------------------------------------------------------------------
 # _gen_supersede_audit_preflight <gdir>
 #
-# WHY A PREFLIGHT AND NOT "WRITE, THEN CHECK" (P074 whole-diff review,
-# BLOCKER 2). The three records are the enforcement surface for this mechanism
+# WHY A PREFLIGHT AND NOT "WRITE, THEN CHECK". The three records are the
+# enforcement surface for this mechanism
 # — the enforcement registry says so — so a supersession that cannot be
 # recorded must not happen at all. Two of the three sinks are APPEND-ONLY
 # (timeline.jsonl, audit-log.jsonl): once a line is in them it cannot be taken
@@ -508,8 +496,8 @@ _gen_supersede_audit_preflight() {
 #
 # "Is THIS plan's supersession for THIS epoch already recorded in <file>?"
 #
-# KEYED ON plan_id AND epoch AND event, never on epoch alone (round-2
-# BLOCKER 1). `audit-log.jsonl` is CROSS-PLAN and the epoch is only
+# KEYED ON plan_id AND epoch AND event, never on epoch alone.
+# `audit-log.jsonl` is CROSS-PLAN and the epoch is only
 # second-resolution, while two plans superseding at the same moment hold
 # DIFFERENT per-plan locks and genuinely run concurrently. An epoch-only match
 # therefore let plan B read plan A's line as its own, skip its append, and
@@ -594,9 +582,9 @@ _gen_supersede_audit() {
     _gen_write_atomic "$rec_file" "$rec" \
       || { echo "[ERROR] supersede-generation: cannot write the supersession record ${rec_file}." >&2; return 3; }
   fi
-  # Read back keyed on THIS plan, for the same reason the JSONL checks are
-  # (round-2 BLOCKER 1): a record that belongs to another plan is not this
-  # plan's evidence, even when it sits at the expected path.
+  # Read back keyed on THIS plan, for the same reason the JSONL checks are:
+  # a record that belongs to another plan is not this plan's evidence, even
+  # when it sits at the expected path.
   jq -e --arg p "$plan_id" '.schema == "aid-generation-supersede/v1" and .plan_id == $p' "$rec_file" >/dev/null 2>&1 \
     || { echo "[ERROR] supersede-generation: the supersession record ${rec_file} could not be read back as a valid record for ${plan_id}." >&2; return 3; }
 
@@ -652,7 +640,7 @@ _gen_supersede() {
   txp="${gdir}/transaction.json"
   auth="${gdir}/generation-authority.json"
 
-  # ── THE GENERATION LOCK (P074 whole-diff review, BLOCKER 1) ───────────────
+  # ── THE GENERATION LOCK ───────────────────────────────────────────────────
   # Archiving the transaction and the authority is a MUTATION OF EXACTLY THE
   # STATE the per-plan generation lock protects, so it takes that same lock,
   # for the whole transaction, with the same bounded timeout and the same
@@ -683,14 +671,14 @@ _gen_supersede() {
     half_epoch="${cand##*.superseded-}"
   done
   if [[ -n "$half_epoch" ]] && { [[ -f "$txp" && ! -e "${txp}.superseded-${half_epoch}" ]] || [[ -f "$auth" && ! -e "${auth}.superseded-${half_epoch}" ]]; }; then
-    # SAME AUDIT AS THE NORMAL PATH (BLOCKER 2). This path used to rename the
-    # remaining file and return SUCCESS with no forensic record, no timeline
-    # event and no audit-log entry — so "first call's second rename fails,
-    # operator retries" was a supported, documented route to a completely
-    # UNAUDITED supersession, in the one mechanism whose enforcement surface
-    # IS the audit trail. The trail is now written here too, under the
-    # original epoch, and idempotently: whatever the failed first call already
-    # recorded is verified rather than duplicated.
+    # SAME AUDIT AS THE NORMAL PATH. Renaming the remaining file and returning
+    # SUCCESS with no forensic record, no timeline event and no audit-log entry
+    # would make "first call's second rename fails, operator retries" a
+    # supported route to a completely UNAUDITED supersession, in the one
+    # mechanism whose enforcement surface IS the audit trail. The trail is
+    # written here too, under the original epoch, and idempotently: whatever
+    # the failed first call already recorded is verified rather than
+    # duplicated.
     _gen_supersede_audit_preflight "$gdir" \
       || error_exit "supersede-generation: the supersession cannot be recorded (see above), so the half-archived pair for ${sup_plan_id} was LEFT AS IT IS — nothing was renamed. Repair the audit sinks and re-run; the retry completes the rename and writes the trail under the original epoch ${half_epoch}." 3
     [[ -f "$txp"  && ! -e "${txp}.superseded-${half_epoch}"  ]] && mv -- "$txp"  "${txp}.superseded-${half_epoch}"
@@ -736,7 +724,7 @@ _gen_supersede() {
   local generated
   generated="$(jq -c '[.phases | to_entries[] | {phase: .key, epic_id: .value.epic_id, run_id: .value.run_id, epic_path: (.value.epic_path // null), generated: ((.value.epic_sha256 // "") != "")}] | sort_by(.phase)' "$txp" 2>/dev/null || echo '[]')"
 
-  # AUDIT BEFORE ARCHIVE (BLOCKER 2). The audit trail is this mechanism's
+  # AUDIT BEFORE ARCHIVE. The audit trail is this mechanism's
   # enforcement surface, so an unrecordable supersession must not happen.
   # Two of the three sinks are append-only, so the check that CAN fail
   # harmlessly is a preflight, not a rollback — see
@@ -848,12 +836,11 @@ _gen_stage_stderr
 # manifest's source_plan_sha then bound the whole plan to a source nobody else
 # could ever read. That is P083.
 #
-# SCOPE, learned the hard way: the check is about THIS WORKSPACE's repository
-# and the plan's relationship to its target branch. A first cut resolved the
-# repo from the plan's own directory and hard-failed when no target branch
-# resolved, which refused every plan living outside the workspace (the test
-# fixtures, and any shared plan library) — an over-block the loosening
-# directive forbids. Three cases are therefore skipped WITH A LOG LINE rather
+# SCOPE: the check is about THIS WORKSPACE's repository and the plan's
+# relationship to its target branch. Resolving the repo from the plan's own
+# directory and hard-failing when no target branch resolves would refuse every
+# plan living outside the workspace (the test fixtures, and any shared plan
+# library) — an over-block the loosening directive forbids. Three cases are therefore skipped WITH A LOG LINE rather
 # than refused, because none of them has a target-branch relationship to
 # verify: the workspace is not a git repo, the plan is not inside it, or the
 # plan is gitignored. In each the manifest's source_plan_sha IS the binding.
@@ -861,7 +848,7 @@ _gen_stage_stderr
 # explicitly rather than exempted: deciding it on the canonical path let
 # `repo/plans/x.md -> /tmp/x.md` resolve outside the repo and take the "lives
 # outside" skip, so a plan invoked through a repository path could still bind
-# the lifecycle to local-only bytes (adversarial-review finding).
+# the lifecycle to local-only bytes.
 _p083_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
 _p083_plan_abs="$(realpath -m --no-symlinks -- "$plan" 2>/dev/null || echo "$plan")"
 _p083_plan_real="$(realpath -m -- "$plan" 2>/dev/null || echo "$_p083_plan_abs")"
@@ -1112,11 +1099,11 @@ _generation_depends_for_epic() {
 }
 
 # =============================================================================
-# ONE HOLD FOR THE WHOLE GENERATION (Codex round: BLOCKER 2; P074 Step 15 fix)
+# ONE HOLD FOR THE WHOLE GENERATION (P074 Step 15)
 # =============================================================================
-# The first cut released this lock as soon as the authority was sealed, keeping
-# only the skeleton/gate/authority critical section. That is not enough. The
-# phase work itself is NOT idempotent-under-concurrency: two same-identity
+# The lock is NOT released once the authority is sealed — holding only the
+# skeleton/gate/authority critical section is not enough. The phase work itself
+# is NOT idempotent-under-concurrency: two same-identity
 # invocations both pass the resume check, then race on the counter, on FSM
 # init, on run rendering, and — worst — one hashes an EPIC/plan.json the other
 # is in the middle of replacing, recording a hash for bytes that no longer
@@ -1250,10 +1237,9 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
     # P074 Step 17 — checked FIRST and terminal: rc=3 combined with HEAD not
     # on the lifecycle target branch (_aid_lc_require_target_branch) is a
     # BRANCH problem, diagnosed as exactly that, with NO grammar advice. This
-    # holds regardless of AID_LIFECYCLE_MIGRATION (Codex round 2: the
-    # migration override must not reroute an off-target strict run into a
-    # message carrying strict-EPIC grammar advice — being on the wrong branch
-    # is not a migration concern). Two deliberate narrowings: (a)
+    # holds regardless of AID_LIFECYCLE_MIGRATION: the migration override must
+    # not reroute an off-target strict run into a message carrying strict-EPIC
+    # grammar advice — being on the wrong branch is not a migration concern. Two deliberate narrowings: (a)
     # ensure_manifest also returns 3 for a plan file it cannot resolve, hence
     # the explicit branch-mismatch re-check — an on-branch rc=3 falls through
     # to the existing messages unchanged; (b) a LEGACY (non-strict,
@@ -1365,7 +1351,7 @@ if [[ -f "$_gen_tx_path" ]]; then
     _gen_resumed=true
     echo "[INFO] generation_transaction: resuming the existing transaction for ${plan_id} (identity unchanged) — verified phases are skipped, only what fails verification is regenerated." >&2
   elif _gen_tx_complete "$plan_id" "$(jq -r '.total_phases // 0' "$_gen_tx_path" 2>/dev/null || echo 0)" "$queue_yaml" "${_gen_dir_path}/receipt.json"; then
-    # ROLLOVER PRECONDITION (Codex round: BLOCKER 3). A new transaction for
+    # ROLLOVER PRECONDITION. A new transaction for
     # edited plan bytes derives the SAME epic ids from the same plan file, so
     # the previous generation's queue entries would look adoptable while
     # standing for content from a DIFFERENT identity. The ownership test in the
@@ -1409,8 +1395,8 @@ if [[ "$_gen_resumed" != true ]]; then
   # stay absent until each phase's outputs exist (schema allows that).
   _gen_phases_json="{}"
   for _gp in $(seq 1 "$total_phases"); do
-    _gp_epic="$(_gen_epic_id "$plan_id" "$_gp" "$total_phases")"
-    _gen_phases_json="$(jq -c --arg k "$_gp" --arg e "$_gp_epic" --arg r "$(_gen_run_id "$_gp_epic")" \
+    _gp_epic="$(aid_gen_epic_id "$plan_id" "$_gp" "$total_phases")"
+    _gen_phases_json="$(jq -c --arg k "$_gp" --arg e "$_gp_epic" --arg r "$(aid_gen_run_id "$_gp_epic")" \
       '. + {($k): {epic_id: $e, run_id: $r}}' <<< "$_gen_phases_json")"
   done
   _gen_skeleton="$(jq -n \
@@ -1561,14 +1547,14 @@ if [[ "$_gen_authority_valid" != true ]]; then
   _gen_auth_final="$(jq --arg h "$_gen_auth_self" '.self_sha256 = $h' <<< "$_gen_auth_draft")"
 
   # ==========================================================================
-  # ORDER: EVERY AUDIT RECORD FIRST, THEN THE AUTHORITY (Codex round: BLOCKER 1)
+  # ORDER: EVERY AUDIT RECORD FIRST, THEN THE AUTHORITY
   # ==========================================================================
-  # The first cut wrote the authority first and treated the timeline and
-  # audit-log writes as best-effort (`|| true`, P073's contract for them). On a
-  # forced run that is a hole with teeth: a kill or an I/O error between the
-  # two left a VALID `forced_override: true` authority on disk with no P073
-  # trail at all — and resume ACCEPTS a valid authority without re-consulting
-  # the gate, so the bypass became permanent and invisible.
+  # Writing the authority first and treating the timeline and audit-log writes
+  # as best-effort (`|| true`, P073's contract for them) is a hole with teeth on
+  # a forced run: a kill or an I/O error between the two leaves a VALID
+  # `forced_override: true` authority on disk with no P073 trail at all — and
+  # resume ACCEPTS a valid authority without re-consulting the gate, so the
+  # bypass would become permanent and invisible.
   #
   # The authority is the thing that authorizes generation, so it is now the
   # LAST write of this block: all three records must be durable before it

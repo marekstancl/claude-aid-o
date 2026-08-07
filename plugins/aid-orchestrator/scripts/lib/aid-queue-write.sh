@@ -1055,13 +1055,13 @@ _queue_validate_entry_block() {
 # _queue_tx_owns <epic_id> <transaction_path> <queue_file>
 #   Does <transaction_path> own the queue entry that already carries <epic_id>?
 #
-#   IDENTITY, NOT JUST THE ID (Codex round: BLOCKER 3). The first cut asked
-#   only "does the transaction record this epic_id, and is its plan_path the
-#   entry's plan_ref". After an automatic rollover both are still true — a new
-#   transaction for EDITED plan bytes derives the SAME epic ids from the same
-#   plan file — so the pre-rollover entries looked owned and were silently
-#   skipped. The queue then pointed at entries standing for content generated
-#   under a DIFFERENT identity.
+#   IDENTITY, NOT JUST THE ID. Asking only "does the transaction record this
+#   epic_id, and is its plan_path the entry's plan_ref" is not enough: after an
+#   automatic rollover both are still true — a new transaction for EDITED plan
+#   bytes derives the SAME epic ids from the same plan file — so pre-rollover
+#   entries would look owned and be silently skipped, leaving the queue
+#   pointing at entries standing for content generated under a DIFFERENT
+#   identity.
 #
 #   The queue entry shape is a frozen machine-compatibility surface, so the
 #   binding is built from fields that already exist:

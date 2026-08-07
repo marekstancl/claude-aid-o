@@ -22,67 +22,15 @@
 #   bats --tap test-authority-verify.bats | grep -cE '^(ok|not ok)'   # == 14
 
 load test-helpers.bash
+load generation-fixture.bash
 
 setup() {
-  export AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1
-  REPO_PLUGIN="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  FIXTURES="$REPO_PLUGIN/scripts/tests/fixtures"
-  TEST_TMPDIR="$(mktemp -d)"
-  export REPO_PLUGIN FIXTURES TEST_TMPDIR
-  unset AID_PROJECT_ROOT AID_PLAN_STATE_PROJECT_ROOT AID_PLAN_MANIFEST_PROJECT_ROOT
-  unset AID_TEST_CP1_FAIL
-  _mk_shadow
-  CP1_COUNT="$TEST_TMPDIR/cp1.count"; : > "$CP1_COUNT"
-  export CP1_COUNT
-  export AID_TEST_CP1_COUNTER="$CP1_COUNT"
+  gen_setup
+  gen_shadow_farm
+  gen_cp1_counting_stub
 }
 
-teardown() {
-  cd /
-  [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
-}
-
-_mk_shadow() {
-  SHADOW="$TEST_TMPDIR/plugin"
-  mkdir -p "$SHADOW/scripts"
-  local f b
-  for f in "$REPO_PLUGIN/scripts"/*; do
-    b="$(basename "$f")"
-    [[ "$b" == "tests" ]] && continue
-    ln -s "$f" "$SHADOW/scripts/$b"
-  done
-  ln -s "$REPO_PLUGIN/defaults" "$SHADOW/defaults"
-  rm -f "$SHADOW/scripts/aid-cp1-gate.sh"
-  cat > "$SHADOW/scripts/aid-cp1-gate.sh" <<'STUB'
-#!/usr/bin/env bash
-[[ -n "${AID_TEST_CP1_COUNTER:-}" ]] && printf 'call\n' >> "$AID_TEST_CP1_COUNTER"
-echo "CP1 GATE: low-risk plan, no CP1-deep evidence required"
-exit 0
-STUB
-  chmod +x "$SHADOW/scripts/aid-cp1-gate.sh"
-  PIPELINE="$SHADOW/scripts/aid-auto-pipeline.sh"
-  P2E="$SHADOW/scripts/aid-plan-to-epic.sh"
-  export SHADOW PIPELINE P2E
-}
-
-_mk_project() {
-  local d="$1"
-  mkdir -p "$d/.aid-o/plans" "$d/.aid-o/tasks" "$d/.aid-o/config" \
-           "$d/.aid-o/work/evidence" "$d/.aid-o/work/runs"
-  printf 'counter: 0\n' > "$d/.aid-o/config/counter.yaml"
-  printf '.aid-o/\n' > "$d/.gitignore"
-  printf 'seed\n' > "$d/README.md"
-  (
-    cd "$d"
-    git init -q -b main 2>/dev/null || { git init -q; git checkout -q -b main 2>/dev/null || git branch -m main; }
-    git config user.email aid-test@example.com
-    git config user.name "AID Test"
-    git add -A
-    git commit -q -m "seed"
-  )
-}
-
-_cp1_calls() { wc -l < "$CP1_COUNT" | tr -d ' '; }
+teardown() { gen_teardown; }
 
 # _seal <project> <plan> — hand-build a VALID authority/transaction pair for
 # the 3-phase numeric fixture, exactly as the pipeline would seal it.
@@ -114,7 +62,7 @@ _seal() {
 }
 
 _setup_sealed() {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   PLAN="$TEST_TMPDIR/p/.aid-o/plans/P099-multi.md"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$PLAN"
   GEN="$(_seal "$TEST_TMPDIR/p" "$PLAN")"
@@ -131,12 +79,12 @@ _setup_sealed() {
     --project-root '$TEST_TMPDIR/p' \
     --generation-authority '$GEN/generation-authority.json' --transaction '$GEN/transaction.json'" 3>&-
   [ "$status" -eq 0 ]
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
   [[ "$output" == *"E-099-1_3"* ]]
 }
 
 @test "the pipeline path verifies ONE authority across 3 phases — the gate is called once, for the seal only" {
-  _mk_project "$TEST_TMPDIR/p"
+  gen_mk_project "$TEST_TMPDIR/p"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/p/.aid-o/plans/P099-multi.md"
   run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$TEST_TMPDIR/p/.aid-o/plans/P099-multi.md' --queue-mode chain" 3>&-
   [ "$status" -eq 0 ]
@@ -144,7 +92,7 @@ _setup_sealed() {
   # is not parseable from here.
   [ "$(ls "$TEST_TMPDIR/p/.aid-o/tasks"/E-099-*.md | wc -l | tr -d ' ')" = "3" ]
   # One call — the plan-scoped seal. Phases 1..3 verified it instead.
-  [ "$(_cp1_calls)" = "1" ]
+  [ "$(gen_cp1_calls)" = "1" ]
 }
 
 @test "standalone invocation WITHOUT the flags still runs the CP1 gate (legacy callers unchanged)" {
@@ -154,7 +102,7 @@ _setup_sealed() {
     --output-dir '$TEST_TMPDIR/p/.aid-o/tasks' --counter-yaml '$TEST_TMPDIR/p/.aid-o/config/counter.yaml' \
     --project-root '$TEST_TMPDIR/p'" 3>&-
   [ "$status" -eq 0 ]
-  [ "$(_cp1_calls)" = "1" ]
+  [ "$(gen_cp1_calls)" = "1" ]
 }
 
 # ─── every mismatch dies NAMING the exact field ──────────────────────────
@@ -248,7 +196,7 @@ _setup_sealed() {
 }
 
 @test "a document that violates its SCHEMA is rejected by the schema check, naming the offending path" {
-  # Codex round, MAJOR 4: field-presence spot checks let an unknown field, a
+  # Field-presence spot checks would let an unknown field, a
   # wrong type, or a missing required key through. Both documents are now
   # validated against the shipped schemas (required / type / const / pattern /
   # additionalProperties: false), so "fails its schema" is a real statement.
@@ -270,7 +218,7 @@ _setup_sealed() {
   [[ "$output" == *"fails its schema"* ]]
   [[ "$output" == *"smuggled_field"* ]]
   [[ "$output" == *"additionalProperties"* ]]
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
 
   # And a MISSING required key is caught too.
   draft="$(jq 'del(.invoker) | .self_sha256 = null' "$GEN/generation-authority.json")"
@@ -308,7 +256,7 @@ _setup_sealed() {
 }
 
 @test "a TRANSACTION carrying a stale identity is rejected even though the authority itself is intact and linked" {
-  # Codex round, MAJOR 4: authority_sha256 only proves the transaction NAMES
+  # authority_sha256 only proves the transaction NAMES
   # this authority. A transaction whose own identity tuple has drifted — a
   # hand-edited or stale manifest — used to pass on that linkage alone.
   _setup_sealed
@@ -322,7 +270,7 @@ _setup_sealed() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"transaction identity"* ]]
   [[ "$output" == *"does not match authority identity"* ]]
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
 }
 
 @test "--generation-authority without --transaction dies (both or neither)" {
@@ -334,7 +282,7 @@ _setup_sealed() {
     --generation-authority '$GEN/generation-authority.json'" 3>&-
   [ "$status" -ne 0 ]
   [[ "$output" == *"must be passed together"* ]]
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
 }
 
 @test "an authority whose transaction file was DELETED between phases dies naming the missing path — never a gate-less fallback" {
@@ -350,5 +298,5 @@ _setup_sealed() {
   [[ "$output" == *"$GEN/transaction.json"* ]]
   [[ "$output" == *"never implicitly recreated"* ]]
   # Fail-closed: the gate was NOT quietly run instead.
-  [ "$(_cp1_calls)" = "0" ]
+  [ "$(gen_cp1_calls)" = "0" ]
 }

@@ -176,7 +176,14 @@ if { [[ -n "$generation_authority" ]] && [[ -z "$generation_transaction" ]]; } \
   error_exit "--generation-authority and --transaction must be passed together (a receipt without its owning transaction proves nothing, and a transaction without its receipt has no sealed decision). Run generation through aid-auto-pipeline.sh." 1
 fi
 
-AID_GEN_PHASE_DERIVATION_VERSION=1   # keep in step with aid-auto-pipeline.sh
+# THE id derivation, shared with aid-auto-pipeline.sh (which SEALS these ids
+# into the transaction) and aid-epic-to-json.sh — plus the version that
+# derivation is stamped with. Sourcing it is what makes the verification below
+# a comparison between the RECORDED value and a FRESHLY DERIVED one rather
+# than a comparison between two hand-maintained copies that could drift apart
+# silently.
+# shellcheck source=lib/aid-generation-ids.sh
+source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
 
 # _validate_against_schema <document> <schema.json> <label>
 #   A small, dependency-free draft-07 subset validator: `required`, `type`,
@@ -250,9 +257,9 @@ _verify_generation_authority() {
 
   # SCHEMA VALIDATION of BOTH documents against the shipped schemas: every
   # `required` key present with the declared type, and `additionalProperties:
-  # false` honoured. Field-presence spot checks were not enough (Codex round:
-  # MAJOR 4) — a document could carry an unknown field, a wrong type, or a
-  # missing required key and still pass. The schemas are the source of truth;
+  # false` honoured. Field-presence spot checks are not enough — a document
+  # could carry an unknown field, a wrong type, or a missing required key and
+  # still pass. The schemas are the source of truth;
   # jq walks them so no external validator is required (and a missing
   # validator can never become a silent skip).
   local schema_dir="${SCRIPT_DIR}/../defaults/schemas"
@@ -307,8 +314,8 @@ _verify_generation_authority() {
 
   # THE FULL IDENTITY TUPLE, both documents. The linkage hash alone only proves
   # the transaction NAMES this authority; a transaction whose own recorded
-  # identity has drifted (a hand-edited or stale manifest) would still pass
-  # (Codex round: MAJOR 4). Identity is (plan_sha256, target_head,
+  # identity has drifted (a hand-edited or stale manifest) would otherwise
+  # still pass. Identity is (plan_sha256, target_head,
   # phase_derivation_version, total_phases) — the exact tuple the authority
   # seals — so the two can never disagree about what is being generated.
   local a_id t_id
@@ -319,18 +326,20 @@ _verify_generation_authority() {
   [[ "$t_id" == "${plan_now}|${head_now}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total}" ]] \
     || error_exit "the sealed identity '${t_id}' does not describe this invocation ('${plan_now}|${head_now}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total}')." 1
 
-  # per-phase ids: RE-DERIVED here from plan_num+phase (the same derivation the
-  # generator itself uses below) and compared against the recorded entry, so
-  # derivation drift between plugin versions is caught at verify time rather
-  # than at queue time.
-  local d_num d_epic d_run r_epic r_run
-  d_num="$(printf '%s\n' "$plan_id" | sed 's/^P//; s/^-//')"
-  d_epic="E-${d_num}-${phase}_${total}"
-  if [[ "$d_epic" =~ ^E-([0-9]+)-([0-9]+)_([0-9]+)$ ]]; then
-    d_run="R-E${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
-  else
-    d_run="R-$(printf '%s' "$d_epic" | sed 's/[^a-zA-Z0-9]//g')-1"
-  fi
+  # per-phase ids: RE-DERIVED here, NOW, from plan_id+phase+total and compared
+  # against what the transaction recorded, so derivation drift between plugin
+  # versions is caught at verify time rather than at queue time.
+  #
+  # THE TWO SIDES REMAIN INDEPENDENT even though one function produces both:
+  # the recorded id was written by an earlier process from a possibly different
+  # plugin version into a file an actor can edit, and the derived id is
+  # computed here from this invocation's arguments. The sealed
+  # phase_derivation_version (checked above) is what rules out the remaining
+  # case — a transaction recorded under a DIFFERENT derivation — before these
+  # ids are compared at all.
+  local d_epic d_run r_epic r_run
+  d_epic="$(aid_gen_epic_id "$plan_id" "$phase" "$total")"
+  d_run="$(aid_gen_run_id "$d_epic")"
   r_epic="$(jq -r --arg p "$phase" '.phases[$p].epic_id // ""' "$tx")"
   r_run="$(jq -r --arg p "$phase" '.phases[$p].run_id // ""' "$tx")"
   [[ -n "$r_epic" ]] \
@@ -353,17 +362,12 @@ elif [[ -f "$CP1_GATE_SCRIPT" ]]; then
   fi
 fi
 
-# Extract plan number (strip leading P, then any leading "-" — a plan id
-# like P-TEST-999 would otherwise leave "-TEST-999", producing a double-dash
-# epic_id "E--TEST-999-..." that breaks aid-auto-pipeline.sh's EPIC-ID regex;
-# curator IMP-166, discovered during Step 4, latent since all real plan ids
-# today are numeric-only).
-plan_num="$(echo "$plan_id" | sed 's/^P//; s/^-//')"
+plan_num="$(aid_gen_plan_num "$plan_id")"
 
 # ---------------------------------------------------------------------------
 # Step 2: Generate EPIC ID and slug
 # ---------------------------------------------------------------------------
-epic_id="E-${plan_num}-${phase}_${total}"
+epic_id="$(aid_gen_epic_id "$plan_id" "$phase" "$total")"
 
 # Extract plan title from H1 header
 # Supports two formats:

@@ -1256,7 +1256,7 @@ fsm_check_cp4_curator_validation() {
   local evidence_dir="$1"
   local project_root="$2"
   local state_file="${3:-}"
-  # P074 Step 1 (EPIC review): this helper is MIXED — it reads project STATE
+  # P074 Step 1: this helper is MIXED — it reads project STATE
   # (.aid-o/config/execution.yaml, below) and it runs TREE git commands whose
   # `HEAD` is branch-specific. Since done-advance's project_root is now the
   # PRIMARY state root, the tree the run's commits actually live on is passed
@@ -1589,7 +1589,7 @@ Then retry with --reason."
 fsm_emit_audit_log() {
   local event_type="$1"; shift
   # project_root may be unset in callers that don't set it (e.g. cmd_transition
-  # --force). P074 Step 1 (EPIC review): the old `${project_root:-.}` fallback
+  # --force). P074 Step 1: the old `${project_root:-.}` fallback
   # made the CROSS-EPIC audit log cwd-relative, so a force issued from inside a
   # linked worktree appended to a forked worktree-local audit-log.jsonl. The
   # fallback now resolves the state root — with the same legacy cwd-relative
@@ -2932,7 +2932,7 @@ cmd_pm_override() {
 
   local target="${1:-}"; shift || true
   local plan_id="${1:-}"; shift || true
-  # P074 Step 1 (EPIC review): the DEFAULT project root is STATE — the grant
+  # P074 Step 1: the DEFAULT project root is STATE — the grant
   # artifact must land where its consumer (aid-cp1-gate.sh / aid-cp1-ledger.sh)
   # looks, i.e. under the PRIMARY .aid-o, not in whatever tree the PM happened
   # to stand in. An explicit --project-root still wins verbatim. Legacy "."
@@ -3812,7 +3812,7 @@ cmd_transition() {
     local epic_id run_id evidence_dir
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    # P074 Step 1 (EPIC review): the force waiver + timeline land in the
+    # P074 Step 1: the force waiver + timeline land in the
     # PRIMARY evidence dir, never a worktree-local fork. Same legacy
     # cwd-relative fallback as derive_timeline for non-resolvable fixture cwds.
     evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
@@ -4216,7 +4216,7 @@ cmd_increment_step() {
   step=$(yaml_field "$state_file" current_step)
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
-  # P074 Step 1 (EPIC review): increment-step's whole evidence chain — the
+  # P074 Step 1: increment-step's whole evidence chain — the
   # step-verify file, the transition ledger, the force waiver and the audit
   # log — is STATE and must resolve under the PRIMARY checkout, so a step
   # advanced from inside a linked worktree does not fork a second workspace.
@@ -5145,7 +5145,7 @@ cmd_done_advance() {
   local _pb_epic_id _pb_run_id _pb_mode_timeline
   _pb_epic_id=$(yaml_field "$state_file" epic_id)
   _pb_run_id=$(yaml_field "$state_file" run_id)
-  # P074 Step 1 (EPIC review): state-root resolved — the plan-mode telemetry
+  # P074 Step 1: state-root resolved — the plan-mode telemetry
   # (and the mkdir -p that precedes each write to it) must land in the PRIMARY
   # run evidence dir, not a worktree-local fork. Same legacy cwd-relative
   # fallback as derive_timeline for non-resolvable fixture cwds.
@@ -5176,7 +5176,7 @@ cmd_done_advance() {
       # fsm_emit_audit_log and are not declared until the force branch below, so
       # bind them here (both branches re-declare + reassign them from the state
       # file afterwards, so this cannot leak a stale value into them).
-      # P074 Step 1 (EPIC review): the audit log is STATE — state-root resolved
+      # P074 Step 1: the audit log is STATE — state-root resolved
       # so this named override is recorded in the PRIMARY audit-log.jsonl.
       local epic_id="$_pb_epic_id" run_id="$_pb_run_id" project_root
       project_root="$(aid_state_root 2>/dev/null || pwd)"
@@ -5247,10 +5247,9 @@ cmd_done_advance() {
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
     local epic_id run_id evidence_dir
-    # P074 Step 1 (EPIC review): THE reviewer's headline case —
-    # `done-advance review release --force` from inside a linked worktree used
-    # to write its waiver, its audit-log entry and its compliance-recovery
-    # marker into a worktree-local .aid-o. Both roots are STATE here (the
+    # P074 Step 1: `done-advance review release --force` from inside a linked
+    # worktree used to write its waiver, its audit-log entry and its
+    # compliance-recovery marker into a worktree-local .aid-o. Both roots are STATE here (the
     # force path runs no tree git command), so both resolve to the PRIMARY
     # checkout, with the usual legacy cwd-relative fallback.
     local project_root
@@ -5274,7 +5273,7 @@ cmd_done_advance() {
     # Check preconditions for review → release
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
       local epic_id run_id evidence_dir errors=0
-      # P074 Step 1 (EPIC review): TWO roots, deliberately, because this branch
+      # P074 Step 1: TWO roots, deliberately, because this branch
       # mixes both kinds of work.
       #   project_root — STATE: every .aid-o read/write below (severity
       #     registry, compliance.json, audit log, recovery marker) and every
@@ -5581,7 +5580,7 @@ EOF
       }
 
       # EPIC task file must be archived (moved to tasks/archive/)
-      # P074 Step 1 (EPIC review): STATE read. Cwd-relative, this searched a
+      # P074 Step 1: STATE read. Cwd-relative, this searched a
       # worktree-local tasks/ that never exists — the check then found nothing
       # and passed silently, which is the failure direction that matters for a
       # precondition. Same legacy fallback as derive_timeline; aid_state_path
@@ -6312,7 +6311,7 @@ EOF
     local epic_id run_id evidence_dir project_root
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    # P074 Step 1 (EPIC review): compliance.json + epic-summary.md are STATE —
+    # P074 Step 1: compliance.json + epic-summary.md are STATE —
     # both land in the PRIMARY evidence dir even when the release edge is
     # crossed (forced or not) from inside a linked worktree. Same legacy
     # cwd-relative fallback as derive_timeline.
@@ -6384,7 +6383,7 @@ cmd_promote_check() {
     exit 1
   }
 
-  # P074 Step 1 (EPIC review): the severity registry and the audit-log entry
+  # P074 Step 1: the severity registry and the audit-log entry
   # this command writes are project STATE — resolved to the PRIMARY checkout so
   # a promotion performed from a worktree mutates the one real registry.
   local project_root
@@ -6452,7 +6451,7 @@ cmd_promote_check() {
 #   epic_count >= 5 AND force_override_rate < 0.05
 # Read-only: prints a text table. PM eyes-on input for `promote-check`.
 cmd_check_promotion_candidates() {
-  # P074 Step 1 (EPIC review): read-only, but it reads STATE — registry, audit
+  # P074 Step 1: read-only, but it reads STATE — registry, audit
   # log and the evidence tree all live under the PRIMARY checkout, so from a
   # worktree this used to report an empty history for every check.
   local project_root
@@ -6565,7 +6564,7 @@ cmd_plan_close() {
   [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
   [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
 
-  # P074 Step 1 (EPIC review): project_root arrives from the caller and is then
+  # P074 Step 1: project_root arrives from the caller and is then
   # (a) used to build .aid-o STATE paths and (b) handed to two subprocesses as
   # `--project-root`. A caller standing in a linked worktree passes the
   # worktree path, so canonicalize it to the PRIMARY checkout before either

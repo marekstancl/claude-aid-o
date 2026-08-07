@@ -24,20 +24,14 @@
 #   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 13
 
 load test-helpers.bash
+load generation-fixture.bash
 
 setup() {
-  export AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1
-  REPO_PLUGIN="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  FIXTURES="$REPO_PLUGIN/scripts/tests/fixtures"
-  TEST_TMPDIR="$(mktemp -d)"
-  export REPO_PLUGIN FIXTURES TEST_TMPDIR
-  unset AID_PROJECT_ROOT AID_PLAN_STATE_PROJECT_ROOT AID_PLAN_MANIFEST_PROJECT_ROOT
-  _mk_shadow
-  CP1_COUNT="$TEST_TMPDIR/cp1.count"; : > "$CP1_COUNT"
-  export CP1_COUNT
-  export AID_TEST_CP1_COUNTER="$CP1_COUNT"
+  gen_setup
+  gen_shadow_farm
+  gen_cp1_counting_stub
   PROJ="$TEST_TMPDIR/p"
-  _mk_project "$PROJ"
+  gen_mk_project "$PROJ"
   PLAN="$PROJ/.aid-o/plans/P099-multi.md"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$PLAN"
   GEN="$PROJ/.aid-o/work/evidence/P099/generation"
@@ -47,49 +41,7 @@ setup() {
   export PROJ PLAN GEN TX AUTH REASON
 }
 
-teardown() {
-  cd /
-  [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
-}
-
-_mk_shadow() {
-  SHADOW="$TEST_TMPDIR/plugin"
-  mkdir -p "$SHADOW/scripts"
-  local f b
-  for f in "$REPO_PLUGIN/scripts"/*; do
-    b="$(basename "$f")"
-    [[ "$b" == "tests" ]] && continue
-    ln -s "$f" "$SHADOW/scripts/$b"
-  done
-  ln -s "$REPO_PLUGIN/defaults" "$SHADOW/defaults"
-  rm -f "$SHADOW/scripts/aid-cp1-gate.sh"
-  cat > "$SHADOW/scripts/aid-cp1-gate.sh" <<'STUB'
-#!/usr/bin/env bash
-[[ -n "${AID_TEST_CP1_COUNTER:-}" ]] && printf 'call\n' >> "$AID_TEST_CP1_COUNTER"
-echo "CP1 GATE: low-risk plan, no CP1-deep evidence required"
-exit 0
-STUB
-  chmod +x "$SHADOW/scripts/aid-cp1-gate.sh"
-  PIPELINE="$SHADOW/scripts/aid-auto-pipeline.sh"
-  export SHADOW PIPELINE
-}
-
-_mk_project() {
-  local d="$1"
-  mkdir -p "$d/.aid-o/plans" "$d/.aid-o/tasks" "$d/.aid-o/config" \
-           "$d/.aid-o/work/evidence" "$d/.aid-o/work/runs"
-  printf 'counter: 0\n' > "$d/.aid-o/config/counter.yaml"
-  printf '.aid-o/\n' > "$d/.gitignore"
-  printf 'seed\n' > "$d/README.md"
-  (
-    cd "$d"
-    git init -q -b main 2>/dev/null || { git init -q; git checkout -q -b main 2>/dev/null || git branch -m main; }
-    git config user.email aid-test@example.com
-    git config user.name "AID Test"
-    git add -A
-    git commit -q -m "seed"
-  )
-}
+teardown() { gen_teardown; }
 
 _run_pipeline() { ( cd "$PROJ" && bash "$PIPELINE" --plan "$PLAN" --queue-mode chain 3>&- ); }
 
@@ -175,7 +127,7 @@ _incomplete() {
 
   # Supersede deletes nothing, so the abandoned generation's queue entries are
   # still there. They belong to the OLD identity, and a new transaction must
-  # never silently adopt them (Codex round, BLOCKER 3) — the command's own
+  # never silently adopt them — the command's own
   # output says cleanup stays with plan-rollback / queue removal.
   run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
   [ "$status" -ne 0 ]
@@ -262,11 +214,11 @@ _incomplete() {
 }
 
 @test "a half-archived pair completed by a retry produces the FULL audit trail, not a silent rename" {
-  # WHOLE-DIFF REVIEW, BLOCKER 2. The recovery path renamed the remaining file
-  # and returned SUCCESS having written no forensic record, no timeline event
-  # and no audit-log entry — so "first call's second rename fails, operator
-  # retries" was a supported route to an UNAUDITED supersession, in the one
-  # mechanism whose enforcement surface IS the audit trail.
+  # A recovery path that renames the remaining file and returns SUCCESS having
+  # written no forensic record, no timeline event and no audit-log entry makes
+  # "first call's second rename fails, operator retries" a route to an
+  # UNAUDITED supersession, in the one mechanism whose enforcement surface IS
+  # the audit trail.
   _incomplete
   local epoch=1750000000
   mv "$TX" "${TX}.superseded-${epoch}"
@@ -300,8 +252,8 @@ _incomplete() {
 }
 
 @test "with the audit log unwritable, supersede REFUSES and archives nothing at all" {
-  # The other half of BLOCKER 2: the three audit writes were `|| true` while
-  # the success message still printed an audit-record path. An unrecordable
+  # The other half of the same contract: the three audit writes must not be
+  # `|| true` while the success message prints an audit-record path. An unrecordable
   # supersession must not happen — and must not leave a half-archived pair
   # that a later retry would then complete as if it had been audited.
   _incomplete
@@ -324,12 +276,12 @@ _incomplete() {
 }
 
 @test "TWO PLANS superseding under the SAME epoch each get their own verified audit-log entry" {
-  # ROUND-2 BLOCKER 1. The audit log is CROSS-PLAN and the epoch is only
-  # second-resolution, while two plans superseding at the same moment hold
-  # DIFFERENT per-plan generation locks and genuinely run concurrently. An
-  # epoch-only verification let plan B match plan A's line, skip its own
-  # append, and report success with no entry of its own — an unaudited
-  # supersession produced by the very code meant to make one impossible.
+  # The audit log is CROSS-PLAN and the epoch is only second-resolution, while
+  # two plans superseding at the same moment hold DIFFERENT per-plan generation
+  # locks and genuinely run concurrently. An epoch-only verification lets plan B
+  # match plan A's line, skip its own append, and report success with no entry
+  # of its own — an unaudited supersession produced by the very code meant to
+  # make one impossible.
   #
   # The shared epoch is made deterministic (not raced) by driving both plans
   # through the half-archived recovery path, which records under the epoch
@@ -364,10 +316,9 @@ _incomplete() {
 }
 
 @test "a HELD generation lock makes supersede refuse by name and archive NOTHING" {
-  # WHOLE-DIFF REVIEW, BLOCKER 1. supersede-generation never took the per-plan
-  # generation lock, so while a pipeline held it and was producing phases this
-  # command could rename that run's live transaction and authority out from
-  # under it: the generator then died on its next manifest update having
+  # Without taking the per-plan generation lock, this command could rename a
+  # running pipeline's live transaction and authority out from under it while
+  # that pipeline was producing phases: the generator then died on its next manifest update having
   # already created EPIC files and queue entries no transaction records.
   _incomplete
   local lock="$GEN/transaction.json.lock"

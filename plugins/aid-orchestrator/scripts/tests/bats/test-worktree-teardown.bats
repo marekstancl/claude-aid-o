@@ -205,7 +205,7 @@ _seed_aborted_plan() {
 }
 
 @test "P074 Step 11: a HELD worktree lock DEFERS the destruction — the close completes, the worktree is left in place, and the recovery is named" {
-  # WHOLE-DIFF REVIEW, BLOCKER 3. Teardown used to treat a lock timeout as a
+  # Teardown must not treat a lock timeout as a
   # warning and DELETE ANYWAY, on the reasoning that a terminal operation must
   # never be blockable. That conflates two things: the CLOSURE is terminal and
   # must always complete; the DESTRUCTION is cleanup and can wait. Proceeding
@@ -380,7 +380,7 @@ _seed_aborted_plan() {
 }
 
 @test "P074 Step 11: a close landing INSIDE a repair makes the repair refuse and undo — a terminal plan never ends up holding a worktree" {
-  # ROUND-2 BLOCKER 2. The worktree lock does NOT serialize this repair
+  # The worktree lock does NOT serialize this repair
   # against a close's terminal STATE TRANSITION: close flips plan_state under
   # the PLAN-STATE lock and only then attempts the worktree lock, and on a
   # timeout it defers its teardown and returns success without ever holding

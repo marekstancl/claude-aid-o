@@ -21,6 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"  # _aid_parse_scoping_line, _aid_split_path_entry, _aid_allowed_paths_from_files_json (shared with gates/aid-contract-validate.sh, v2.58.0 IMP-232)
+source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"  # aid_gen_run_id — THE run_id derivation, shared with aid-auto-pipeline.sh (which seals it into the transaction) and aid-plan-to-epic.sh (which re-derives and verifies it)
 check_prerequisites
 
 # =============================================================================
@@ -931,15 +932,7 @@ fi
 # =============================================================================
 # Step 15: Generate run_id and evidence directory
 # =============================================================================
-# Build run_id from epic_id: E-018-1_3 -> R-E018-1
-# Format: R-E{plan_num}-{phase} (matches README directory convention)
-if [[ "$epic_id" =~ ^E-([0-9]+)-([0-9]+)_([0-9]+)$ ]]; then
-  run_id="R-E${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
-else
-  # Fallback for legacy/non-standard IDs: sanitize and append run counter
-  run_epic_part="$(echo "$epic_id" | sed 's/[^a-zA-Z0-9]//g')"
-  run_id="R-${run_epic_part}-1"
-fi
+run_id="$(aid_gen_run_id "$epic_id")"
 
 evidence_dir="${output_dir}/work/evidence/${epic_id}/${run_id}"
 mkdir -p "$evidence_dir" 2>/dev/null || error_exit "Cannot create evidence directory: $evidence_dir" 3

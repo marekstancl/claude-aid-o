@@ -405,8 +405,8 @@ _plan_state_validate_json() {
   # deleted must get a named repair (--recreate-worktree), not a "your state
   # file is corrupt" verdict on every read.
   #
-  # `..` IS a corruption verdict, not a consumer problem (P074 review F7): a
-  # traversing path is never something this library wrote, and every consumer
+  # `..` IS a corruption verdict, not a consumer problem: a traversing path is
+  # never something this library wrote, and every consumer
   # of it (teardown above all) would act on a directory outside the plan.
   # Containment inside the state root is enforced on the WRITE path
   # (plan_state_set_worktree_path) where the root is unambiguous.
@@ -579,7 +579,7 @@ plan_state_get() {
 # writing a file that its own validator would then call corrupt. This is also
 # the layer that ENFORCES containment — no `..` component, and an absolute
 # path must be inside the state root — so the documented "repo-root-relative
-# or absolute" contract is a check rather than a comment (P074 review F7).
+# or absolute" contract is a check rather than a comment.
 #
 # THE OPTIONAL THIRD ARGUMENT — `require_non_terminal` — makes the write a
 # COMPARE-AND-SET against `plan_state`, in the same critical section, exactly
@@ -612,11 +612,11 @@ plan_state_set_worktree_path() {
     _plan_warn "plan_state_set_worktree_path: worktree_path must be a single-line path (got a multi-line value)"
     return 1
   fi
-  # P074 review F7 — the documented contract is "repo-root-relative or
-  # absolute", and it is ENFORCED here, not merely written down. Before this
-  # check `../outside` (or any other escaping string) was accepted, and every
-  # consumer of the record — teardown most dangerously — would then act on a
-  # directory that has nothing to do with the plan. Empty is the explicit
+  # The documented contract is "repo-root-relative or absolute", and it is
+  # ENFORCED here, not merely written down. Without this check `../outside` (or
+  # any other escaping string) is accepted, and every consumer of the record —
+  # teardown most dangerously — then acts on a directory that has nothing to do
+  # with the plan. Empty is the explicit
   # clear and skips the check.
   if [[ -n "$wt_path" ]]; then
     if _plan_path_has_dotdot "$wt_path"; then
@@ -1125,8 +1125,8 @@ main() {
     op-git-applied)   plan_op_mark_git_applied "$@"; exit $? ;;
     op-commit)        plan_op_commit "$@"; exit $? ;;
     op-reconcile)     plan_op_reconcile "$@"; exit $? ;;
-    # P074 review F2/F3 — the MANUAL half of a compensation whose ledger
-    # rollback could not be written (read-only state directory, full disk).
+    # The MANUAL half of a compensation whose ledger rollback could not be
+    # written (read-only state directory, full disk).
     # plan-start's compensation prints this exact invocation, so an operator
     # never has to hand-craft a JSONL record.
     # Usage: op-append-aborted <plan_id> <op_id> <command> <subject>
