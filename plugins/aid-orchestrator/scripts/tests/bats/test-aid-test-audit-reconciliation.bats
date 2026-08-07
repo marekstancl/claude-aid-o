@@ -1120,3 +1120,83 @@ _finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
   [ "$status" -eq 0 ]
   [ "$(jq -r '[.actions[] | select(.change != null)] | length' "$OUT/decision.json")" = "0" ]
 }
+
+# ─── Analyst prose must survive the strict decision schema ──────────────────
+
+@test "annotated evidence_refs and a long finding text do not kill finalization" {
+  # A real consumer audit (WAN) completed all three agent waves and its
+  # measurements, then died at consolidation: the wave-3 prompts invited
+  # "quote the claim", the analysts wrote annotated citations, and this script
+  # copied them verbatim into decision fields whose schema demands bare paths
+  # and bounded prose. The audit's own content was complete and valuable; the
+  # format killed it three steps after anyone could have named the field.
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local long_text
+  long_text="$(printf 'the gate compares only failure counts so a regression can hide behind an unrelated fix %.0s' {1..12})"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" --arg lt "$long_text" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"weak_oracle", severity:"high",
+                evidence_refs:["agents/1-shard_portfolio-shard-0.json (dispositions 3-7 claim measured but produced_at predates the measurements)",
+                               "measurements.jsonl (rows 4 and 9)"],
+                recommendation:"strengthen", confidence:"high",
+                falsification_check:"n/a",
+                proposal:{change:("a.bats:12 asserts only the exit code; " + $lt),
+                          effort:{bucket:"S"},
+                          benefit:{kind:"unknown", critical_path_ms:null, risk_note:null, assumptions:[]},
+                          conflicts_with:[]}}],
+     produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/decision.json" ]
+  local act; act="$(jq -c '[.actions[] | select(.change != null)] | .[0]' "$OUT/decision.json")"
+  # The refs survived as bare paths — the annotation is gone, the path is not.
+  [ "$(jq -r '.evidence_refs[0]' <<<"$act")" = "agents/1-shard_portfolio-shard-0.json" ]
+  [ "$(jq -r '.evidence_refs[1]' <<<"$act")" = "measurements.jsonl" ]
+  # The long reason was truncated to the schema's bound, not dropped.
+  [ "$(jq -r '.reason | length' <<<"$act")" -le 500 ]
+  [[ "$(jq -r '.reason' <<<"$act")" == *"..."* ]]
+}
+
+@test "a long risk sentence in assumptions is bounded at assembly — every producer, one wall" {
+  # 2.72.2 normalized one producer (finding-derived actions) and the very next
+  # real audit died on another: adversarial-review agents wrote full-sentence
+  # "risk:" notes and impact.assumptions has a hard 500-char bound. The fix is
+  # a single pass over the assembled document before validation, so it holds
+  # for producers that do not exist yet.
+  _inventory "bats:a"
+  _manifest "bats:a"
+  local long_risk
+  long_risk="$(printf 'if this test is deleted the only coverage of the transition table goes with it and a silent reorder ships %.0s' {1..8})"
+  local art="$ART/1-shard_portfolio-shard-0.json"
+  jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" --arg lr "$long_risk" '
+    {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
+     findings:[{run_unit_id:"bats:a", category:"parallel_safety", severity:"high",
+                evidence_refs:["resource-maps/x.json"],
+                recommendation:"fix", confidence:"high", falsification_check:"n/a",
+                proposal:{change:"a.bats:359 fixed path -> temp dir",
+                          effort:{bucket:"S"},
+                          benefit:{kind:"unknown", critical_path_ms:null,
+                                   risk_note:$lr,
+                                   assumptions:[$lr, $lr]},
+                          conflicts_with:[]}}],
+     produced_at:"2026-08-05T00:00:00Z",
+     producer_agent_dispatch_id:"d0", dispositions:$d}' > "$art"
+
+  run _run_full
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/decision.json" ]
+  local act; act="$(jq -c '[.actions[] | select(.change != null)] | .[0]' "$OUT/decision.json")"
+  # The impact contract holds: an unknown benefit with no number carries no
+  # prose — the risk lives in its OWN field, bounded, not smuggled into
+  # assumptions where it killed a real audit at validation.
+  [ "$(jq -r '.impact.kind' <<<"$act")" = "unknown" ]
+  [ "$(jq -r '.impact.assumptions | length' <<<"$act")" = "0" ]
+  [ "$(jq -r '.risk | length' <<<"$act")" -le 500 ]
+  [ "$(jq -r '.risk | length' <<<"$act")" -ge 100 ]
+  # And nothing anywhere in the document exceeds the bound.
+  [ "$(jq -r '[.actions[].impact.assumptions[]? | select(length > 500)] | length' "$OUT/decision.json")" = "0" ]
+}

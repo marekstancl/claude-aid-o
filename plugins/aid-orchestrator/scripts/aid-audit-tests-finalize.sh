@@ -250,6 +250,28 @@ fi
   # Advisory on purpose: a catalog that cannot be updated must not sink an
   # otherwise complete audit, and the operator still has to approve whatever
   # comes out. But it is never silent.
+  # ─── Stage 1c2: deterministic content scan — mechanical checks, no LLM ───
+  # Duplicates, weak oracles, gate overlap, unreferenced files. These sections
+  # of the report had no collector: the findings existed exactly once, made by
+  # hand after the owner asked where they were. Mechanical work is not left to
+  # an analyst's diligence — the same lesson as the whole abstention problem.
+  if ! bash "${SCRIPT_DIR}/aid-test-content-scan.sh" \
+       --project-root "${project_root:-.}" \
+       --inventory "${output_dir%/}/inventory.json" \
+       --output "${output_dir%/}/content-scan.json" >/dev/null 2>&2; then
+    echo "WARN: aid-audit-tests-finalize.sh: content scan failed — the report's quality and overlap sections will say so instead of standing empty" >&2
+  fi
+
+  # ─── Stage 1d: the report page — the ONE fixed-form output ───────────────
+  # Four days of fragments taught the lesson: the owner gets one page, all
+  # nine sections, every time. A failure here is loud but does not kill the
+  # audit — the decision artifact already exists, and a presentation bug must
+  # never eat a completed audit again.
+  if ! bash "${SCRIPT_DIR}/aid-test-audit-report.sh" \
+       --audit-dir "$output_dir" --project-root "${project_root:-.}" >/dev/null 2>&2; then
+    echo "WARN: aid-audit-tests-finalize.sh: report.html could not be generated — the audit stands, but the fixed-form page is missing; run aid-test-audit-report.sh by hand and report the error" >&2
+  fi
+
   _proposed_catalog="${output_dir%/}/test-catalog.proposed.yaml"
   if [[ -f "$_proposed_catalog" && -n "$project_root" ]]; then
     _apply_args=(--catalog "$_proposed_catalog" --decision "$decision_path" --project-root "$project_root")

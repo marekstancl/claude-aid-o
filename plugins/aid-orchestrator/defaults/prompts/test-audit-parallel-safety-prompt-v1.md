@@ -111,6 +111,13 @@ later audit propose it properly.
   findings with proposals, not as parallelism labels.
 
 ## Output contract
+
+**`evidence_refs` are BARE artifact paths, schema-enforced.** `agents/1-shard.json`
+passes; `agents/1-shard.json (dispositions 3-7 claim measured)` kills the whole
+finalization three steps later, in a validator that cannot name your finding.
+Quotes and annotations belong in the finding/claim TEXT — that is what it is
+for. A real consumer audit completed every wave and died exactly here.
+
 Emit exactly one JSON document matching the output schema: `schema_version` (const `"1.0.0"`),
 `focus: "parallel_safety"`, `wave`, `shard_id: null`, `findings[]`, `produced_at`,
 `producer_agent_dispatch_id`. No prose outside this document.

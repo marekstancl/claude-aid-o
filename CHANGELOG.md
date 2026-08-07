@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.73.0] — 2026-08-06
+## [2.75.0] — 2026-08-07
 
 > You could only work on one thing at a time. Not because AID said so, but
 > because everything shared one checkout: opening a plan refused on an unrelated
@@ -49,6 +49,66 @@ before `init` and are not currently started by the generation pipeline. Both
 paths are pinned by the two-stream integration fixture with their exact
 production messages, so the day either is wired the pin goes red.
 
+## [2.74.0] — 2026-08-06
+
+> The report page had sections the audit collected no data for: duplicates,
+> weak oracles, gate double-runs had been found exactly once, by hand, after
+> the owner asked where they were. The lesson of the whole week, applied to
+> content: what can be computed is computed, every run, and depth is never
+> traded for the illusion of coverage.
+
+### Added
+- **`aid-test-content-scan.sh` — deterministic content checks in every audit.** Duplicate test-case names across files, weak oracles (≥80 % bare exit-code asserts, validator suites marked legitimate rather than hidden), gate overlap candidates (a file reachable from a direct gate and a pool gate — the double-run cost), and test files no inventory unit references. Runs at finalize with no LLM involved; the report's quality and levers sections consume it, so they are never a template over a void. On this repository it mechanically reproduced every hand-made finding: both duplicate pairs, all four weak oracles, the fsm double-run and the pool overlap.
+
+### Changed
+- **Depth over coverage — the sampling rule for shard analysts.** Skimming every assigned unit produced 176 of 181 "keep — unproved" twice, and the owner correctly called that worthless. Each analyst now deep-inspects a named sample (the larger of 5 units or 10 % of the shard, prioritized by cost, size, cluster representatives and content-scan flags), emits a `deep_sample` finding naming what it actually read, and abstains honestly on the rest — which the report counts as NOT examined. The examined count grows monotonically across rounds instead of resetting.
+- **Censored measurements get one bounded retry.** A flat 300 s deadline censored the six most expensive suites across two full audits, leaving the portfolio's true cost unknown. Every timed-out unit is re-measured once at 4× the deadline, bounded by remaining budget; what still times out is reported as a lower bound with the retry recorded.
+
+## [2.73.0] — 2026-08-06
+
+> Four days of audits produced fragments — a count here, a cost there, each
+> shown only after the owner complained about its absence. The requirement was
+> always the opposite: one page, every section, every time, automatically.
+
+### Added
+- **`aid-test-audit-report.sh` — the ONE fixed-form report page every full audit produces.** Nine canonical sections: hlavní čísla, prověřenost, skupiny, co žere čas, kolik ušetříme čím, kvalita, akce a plán, nedokázáno, zdroje. The contract is completeness: a section whose data is missing still renders and says what is missing and why, because an absent section reads as "nothing to see here". A "keep" with unproved falsification is counted and displayed as **not examined**, never as health — the number the six-part summary used to hide is the second stat on the page. Generated automatically at the end of every full audit (a presentation failure warns loudly but never eats a completed audit), and the controller must publish it as an Artifact and lead the closing message with its link — the page is the audit's answer; the text block is the durable record.
+
+## [2.72.4] — 2026-08-06
+
+### Fixed
+- **The ranked "Proposed changes" section rendered empty over 33 real actions** — the sort piped into a literal priority array before reading `.priority`, so jq indexed an array with a string and the one section this whole feature exists for silently died (`Cannot index array with string "priority"`). Bind first, then index; a regression test now asserts the section renders with critical first.
+
+## [2.72.3] — 2026-08-06
+
+> Two consumer audits independently hit — and one independently diagnosed, down
+> to the schema rule — the next boundary: the consolidator smuggled analysts'
+> risk notes into `impact.assumptions`, and the impact contract rightly forbids
+> prose on an unknown impact with no number. 25 of 26 real actions failed on
+> exactly that pattern.
+
+### Fixed
+- **Risk gets its own field instead of violating the impact contract** — a proposal's `risk_note` now lands in `action.risk` (bounded, rendered under the proposal), because it is a consequence of the change, not an assumption about a number. `unknown` impacts carry empty assumptions, as the schema always demanded.
+- **A finding-level "measured" honestly maps to "estimated"** — a single number is a single run, not a before/after comparison; the mapping now states that instead of claiming a measurement. This is the same upgrade an adversarial wave demanded of a fabricating analyst in a real consumer audit — the schema was on its side all along.
+- **The final bounding pass enforces the whole impact contract for every producer** — unknown-with-no-number drops its prose, an estimate with no stated assumptions gains its basis note, a "measured" with a missing endpoint is downgraded to an estimate with that stated. Producers that do not exist yet are covered by the same wall.
+
+## [2.72.2] — 2026-08-06
+
+> A consumer project (WAN) ran a full audit to the end — three agent waves,
+> real measurements — and finalization died on format: the wave prompts said
+> "quote the claim", the analysts wrote annotated citations, and the
+> findings-to-actions wiring added in 2.71.0 copied that prose verbatim into
+> decision fields whose schema demands bare paths and bounded text. Complete,
+> valuable content; zero decision artifact.
+
+### Fixed
+- **Analyst prose is normalized at the schema boundary instead of killing the audit** — the schema stays strict on purpose (no secrets in prose, no unbounded text, evidence as bare artifact paths); the consolidator now extracts the bare path from an annotated citation (the annotation lives on in the finding text, where it belongs), truncates over-long reasons honestly, and rewrites an absolute path run in prose as relative. The refs survive; the run survives; nothing is silently dropped.
+- **The prompts stop inviting the collision** — all six analyst prompts now state that `evidence_refs` are bare paths and that quotes belong in the claim text, naming the real consumer failure so the instruction carries its reason.
+
+## [2.72.1] — 2026-08-05
+
+### Fixed
+- **Merges v2.71.1's renderer honesty fixes into the 2.72 line** — v2.72.0 was cut from a branch that predates them, so a summary could still read "all fine" over its own high findings there. No new behaviour beyond v2.71.1; see that entry below.
+
 ## [2.72.0] — 2026-08-05
 
 > Three EPICs of loosening. AID was refusing work it had no physical reason to
@@ -79,6 +139,19 @@ production messages, so the day either is wired the pin goes red.
 - **Placeholder release entries** — a release whose CHANGELOG section for the new version is empty or a placeholder is refused; the entry is the only human-readable record of what shipped.
 - **Reporter plan-boundary contradiction** — a Reporter round no longer moves the candidate it is reporting on.
 - **Branch-restore continuation** — a failed branch restore stops the run instead of continuing on whatever branch the worktree happens to be on, where every subsequent command succeeds while operating on the wrong branch.
+
+## [2.71.1] — 2026-08-05
+
+> A real full audit rendered "Keep as-is (162), Remove: none, nothing parallel"
+> while its own Technical evidence listed five high findings — the summary told
+> the owner everything was fine, in layout if not in words, and he rightly
+> called it worthless. The looks-clean-over-problems defect this renderer
+> exists to prevent, committed by the renderer itself.
+
+### Fixed
+- **Section 2 can no longer stay silent over its own evidence** — findings that recommend a change but carry no ready-made proposal now render in the decision section as a ranked "Needs work" list with severity and unit, instead of appearing only in the technical appendix below the fold.
+- **"Nothing runs in parallel" now says how much is unlockable** — when the same artifact lists units blocked by a FIXABLE resource, the count and the pointer render in the same breath; bare "nothing" read as "parallelism is impossible here" over seventy fixable units.
+- **The verdict must be presented in the user's own language, never softer than the evidence** — the six-part block stays verbatim as the durable record, but the controller now must precede it with a short summary in the language the user speaks, leading with what is wrong: finding counts by severity, fixable-blocker count, gates that never complete. The lead may never claim less work than the findings imply.
 ## [2.71.0] — 2026-08-05
 
 > Until now the audit classified, measured and proved — and then told the owner

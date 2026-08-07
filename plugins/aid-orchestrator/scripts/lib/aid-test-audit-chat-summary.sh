@@ -236,6 +236,25 @@ aid_test_audit_render_chat_summary() {
   fi
 
 
+# _tacs_unproposed_findings — findings that recommend a change but carry no
+  # proposal. Rendered HERE, in the decision section, not only in the technical
+  # appendix: a summary whose top half says "keep everything" while its bottom
+  # half lists five high findings is lying by layout.
+  _tacs_unproposed_findings() {
+    jq -r '
+      ([.findings[]? | select((.recommendation // "keep") != "keep") | select(.proposal == null)]) as $f
+      | if ($f | length) == 0 then ""
+        else
+          "\n**Needs work, no ready-made proposal yet (" + ($f | length | tostring) + " finding(s) — detail in Technical evidence):**\n"
+          + ([ $f
+               | sort_by(if .severity == "critical" then 0 elif .severity == "high" then 1 elif .severity == "medium" then 2 else 3 end)
+               | .[:8][]
+               | "- [" + .severity + "] " + .recommendation + " " + .run_unit_id + " — " + (.category // "") ]
+             | join("\n"))
+          + (if ($f | length) > 8 then "\n- … and " + (($f | length) - 8 | tostring) + " more" else "" end)
+        end' "$findings_path"
+  }
+
   # _tacs_proposed_actions — the concrete remediation list, ranked and capped.
   # An audit emitting four hundred proposals has produced zero; the artifact
   # keeps everything, the render shows the top slice and says how many more
@@ -247,10 +266,18 @@ aid_test_audit_render_chat_summary() {
       ([.actions[]? | select(.change != null)]) as $props
       | ([$props[] | select(.declined_previously == true)]) as $declined
       | ([$props[] | select(.declined_previously != true)]
-         | sort_by((["critical","high","medium","low"] | index(.priority)),
+         # `.priority as $p` FIRST: after the pipe into the literal array, `.`
+         # is the array, so `.priority` indexed an array with a string and the
+         # whole ranked section rendered empty over 33 real actions.
+         | sort_by((.priority as $p | ["critical","high","medium","low"] | index($p)),
                    (if .impact.kind == "measured" then 0 elif .impact.kind == "estimated" then 1 else 2 end))) as $live
       | if ($props | length) == 0 then
-          "No concrete remediation was proposed — findings that could not carry an honest change/benefit/effort stayed findings."
+          # NEVER "nothing to do" over findings that say otherwise. A real run
+          # rendered "Keep as-is (162), Remove: none, nothing parallel" while
+          # its own Technical evidence listed five high findings — the exact
+          # looks-clean-over-problems defect this renderer exists to prevent,
+          # this time committed by the renderer itself.
+          "No finding carried a ready-made proposal (change/effort/benefit)."
         else
           ( [ $live[:$cap][]
               | "- **" + .action + "** " + (.targets | join(", "))
@@ -264,6 +291,7 @@ aid_test_audit_render_chat_summary() {
                    else "" end)
                 + (if ((.conflicts_with // []) | length) > 0 then " — CONFLICTS with " + (.conflicts_with | join(", ")) else "" end)
                 + "\n  " + (.change // .reason)
+                + (if .risk then "\n  risk: " + .risk else "" end)
             ] | join("\n") )
           + (if ($live | length) > $cap then "\n- … and " + (($live | length) - $cap | tostring) + " more in decision.json" else "" end)
           + (if ($declined | length) > 0 then "\n- (" + ($declined | length | tostring) + " previously declined — kept in decision.json, not re-proposed)" else "" end)
@@ -411,8 +439,13 @@ Treat every one of them as unexamined, not as healthy."
   if [[ "$_have_decision" == "true" ]]; then
     section_parallel="$(jq -r '
       [ .parallelization.lanes[]? | select(.disposition == "proposed_parallel") ] as $l
+      | ([ .parallelization.lanes[]? | select(.disposition == "blocked_pending_fix") | .run_unit_ids[] ] | unique | length) as $fixable
       | if ($l | length) == 0
-        then "Nothing is proposed to run in parallel on current evidence."
+        # "Nothing" alone reads as "parallelism is impossible here" — while the
+        # very next section may list seventy units blocked by a FIXABLE
+        # resource. The unlockable count belongs in the same breath.
+        then ("Nothing runs in parallel on current evidence"
+              + (if $fixable > 0 then " — but " + ($fixable | tostring) + " unit(s) are blocked by a FIXABLE resource (see section 4); fixing those is what opens the pool." else "." end))
         else ($l | map("- " + .lane_id + ": " + (.run_unit_ids | join(", "))
                        + " (evidence: " + ((.evidence_refs // []) | join(", ")) + ")") | join("\n"))
         end' "$_d" 2>/dev/null)"
@@ -466,6 +499,7 @@ ${removal_line}
 **Proposed changes** (ranked; the full set is in decision.json):
 
 $(_tacs_proposed_actions)
+$(_tacs_unproposed_findings)
 
 ## 3. What can run in parallel
 
