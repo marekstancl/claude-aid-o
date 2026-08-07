@@ -26,12 +26,13 @@
 set -euo pipefail
 _die() { echo "aid-test-content-scan.sh: $2" >&2; exit "$1"; }
 
-project_root="" output="" inventory="" execution_yaml=""
+project_root="" output="" inventory="" execution_yaml="" catalog=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root)   [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     --inventory)      [[ $# -ge 2 ]] || _die 2 "--inventory requires a value"; inventory="$2"; shift 2 ;;
     --execution-yaml) [[ $# -ge 2 ]] || _die 2 "--execution-yaml requires a value"; execution_yaml="$2"; shift 2 ;;
+    --catalog)        [[ $# -ge 2 ]] || _die 2 "--catalog requires a value"; catalog="$2"; shift 2 ;;
     --output)         [[ $# -ge 2 ]] || _die 2 "--output requires a value"; output="$2"; shift 2 ;;
     *) _die 2 "unknown argument '$1'" ;;
   esac
@@ -41,8 +42,9 @@ done
 [[ -n "$execution_yaml" ]] || execution_yaml="${project_root%/}/.aid-o/config/execution.yaml"
 command -v python3 >/dev/null 2>&1 || _die 2 "python3 is required"
 
+[[ -n "$catalog" ]] || catalog="${project_root%/}/.aid-o/config/test-catalog.yaml"
 PROJECT_ROOT="$project_root" OUTPUT="$output" INVENTORY="${inventory:-}" \
-EXEC_YAML="$execution_yaml" python3 - <<'PY'
+EXEC_YAML="$execution_yaml" CATALOG="${catalog:-}" python3 - <<'PY'
 import json, os, re, glob, collections
 
 ROOT = os.environ["PROJECT_ROOT"].rstrip("/")
@@ -138,6 +140,83 @@ for f in bats:
     if referenced and not any(stem in x or x in stem for x in referenced):
         unreferenced.append({"file": r})
 
+# ── 5. untested production surfaces (risk coverage) ───────────────────────
+# Which tracked source files does NO test unit reference? Weighted by churn,
+# because an untested file nobody touches is a smaller risk than an untested
+# file changed weekly. Mechanical and honest: "referenced by a test" is a
+# necessary condition of coverage, not proof of it — the report says so.
+import subprocess
+def git(*a):
+    try:
+        return subprocess.run(["git","-C",ROOT,*a],capture_output=True,text=True,timeout=60).stdout
+    except Exception:
+        return ""
+untested = []
+referenced_src = set()
+try:
+    import yaml as _y
+    _cat = _y.safe_load(open(os.environ.get("CATALOG",""))) or {}
+    for u in _cat.get("run_units", []):
+        for k in ("source_paths","production_surfaces"):
+            for pth in (u.get(k) or []):
+                referenced_src.add(pth)
+except Exception:
+    pass
+if INV and os.path.exists(INV):
+    try:
+        for e in json.load(open(INV)).get("entries", []):
+            uid = e.get("run_unit_id","")
+            _,_,pth = uid.partition(":")
+            if pth: referenced_src.add(pth)
+    except Exception: pass
+tracked = [l for l in git("ls-files").splitlines()
+           if re.search(r"\.(sh|ts|tsx|py|js)$", l)
+           and "/tests/" not in l and not re.search(r"(^|/)test[-_.]", os.path.basename(l))
+           and "/node_modules/" not in l]
+# test file contents also reference scripts directly — count those too
+ref_blob = " ".join(referenced_src)
+for f in bats:
+    try: ref_blob += open(f, errors="ignore").read()
+    except Exception: pass
+churn_raw = git("log","--since=90 days ago","--name-only","--pretty=format:")
+churn = collections.Counter(l for l in churn_raw.splitlines() if l.strip())
+for src in tracked:
+    base = os.path.basename(src)
+    if base and base not in ref_blob and src not in ref_blob:
+        untested.append({"file": src, "changes_90d": churn.get(src, 0)})
+untested.sort(key=lambda x: -x["changes_90d"])
+
+# ── 6. freshness + owner per test file ─────────────────────────────────────
+fresh = []
+for f in bats[:400]:
+    r = rel(f)
+    out = git("log","-1","--format=%as|%an","--",r)
+    if out.strip():
+        d,_,a = out.strip().partition("|")
+        fresh.append({"file": r, "last_change": d, "author": a})
+stale_cut = ""
+try:
+    import datetime as _dt
+    stale_cut = (_dt.date.today()-_dt.timedelta(days=180)).isoformat()
+except Exception: pass
+stale = [x for x in fresh if stale_cut and x["last_change"] < stale_cut]
+
+# ── 7. gate stability from runtime baselines ───────────────────────────────
+gate_stability = []
+try:
+    import yaml as _y2
+    bl = _y2.safe_load(open(f"{ROOT}/.aid-o/metrics/gate-runtime-baselines.yaml")) or {}
+    for g, v in (bl.get("gates") or bl or {}).items():
+        if not isinstance(v, dict): continue
+        samples = v.get("recent_samples") or []
+        if not samples: continue
+        ok = sum(1 for x in samples if x.get("exit_code") == 0)
+        gate_stability.append({"gate": g, "samples": len(samples),
+                               "pass_rate": round(ok/len(samples), 2),
+                               "censored": sum(1 for x in samples if x.get("censored"))})
+except Exception:
+    pass
+
 doc = {
     "schema_version": "aid-test-content-scan-v1",
     "checks": {
@@ -145,6 +224,9 @@ doc = {
         "weak_oracle": weak,
         "gate_overlap": overlap,
         "unreferenced_tests": unreferenced,
+        "untested_surfaces": untested[:50],
+        "test_freshness": {"stale_180d": len(stale), "files": stale[:20]},
+        "gate_stability": gate_stability,
     },
     "counts": {
         "bats_files_scanned": len(bats),
@@ -152,6 +234,9 @@ doc = {
         "weak_oracle_files": len(weak),
         "gate_overlap_candidates": len(overlap),
         "unreferenced": len(unreferenced),
+        "untested_surfaces": len(untested),
+        "stale_tests_180d": len(stale),
+        "gates_with_history": len(gate_stability),
     },
 }
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)

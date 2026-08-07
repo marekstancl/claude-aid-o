@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.76.0] — 2026-08-07
+
+> The owner's question was exact: "do we even have the data to fill the
+> contract Codex expanded?" For most of it, yes — it was sitting in git and in
+> the gate-run history, uncollected. Now it is collected every run.
+> (Version 2.75.0 is a concurrent session's tag on another branch; skipped.)
+
+### Added
+- **Risk coverage collector** — every tracked source file no test references, churn-weighted from git history. "Unreferenced" is a necessary condition of no coverage, not proof, and the page says so. First run on this repository: 273 unreferenced files, led by one changed 8 times in 90 days.
+- **Reliability collector** — gate pass rates from the real run history in `gate-runtime-baselines.yaml`. First run surfaced a gate with a 0 % pass rate over 14 recorded runs that nobody had noticed. Suite-level flakiness stays a named open gap until `--repeat` runs exist.
+- **Trend between rounds** — every report writes `round-summary.json` and the next report leads with the diff: examined up or down, measured cost, censored count. Rounds stop being isolated snapshots.
+- **Test freshness and ownership** — last meaningful change and top author per test file, from git.
+
+### Changed
+- **The canonical report grows to eleven sections** — Rizika and Spolehlivost join the nine, each with its collector, and the section list in the command contract is updated to match.
+
 ## [2.74.0] — 2026-08-06
 
 > The report page had sections the audit collected no data for: duplicates,
