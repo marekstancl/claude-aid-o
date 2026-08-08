@@ -160,21 +160,58 @@ try:
     gate_cmds = [ (str((v or {}).get("command") or "")) for v in (_ey.get("gates") or {}).values() ]
 except Exception:
     pass
+# wrapper resolution, one level deep: a gate whose command is a shell script is
+# opaque to path-token matching, so every file behind it counted as "unrun".
+# A verification agent measured the real number at less than half of what this
+# check reported — the overshoot was entirely wrapper opacity. Reading the
+# wrapper's own text closes most of it.
+_runner_line = re.compile(r"\b(pytest|vitest|jest|bats|playwright\s+test)\b|npm\s+(run\s+)?test\b|npx\s+vitest")
+gate_texts = []
+for cmd in gate_cmds:
+    text = cmd
+    for sh in re.findall(r"[\w./-]+\.sh\b", cmd):
+        for cand in (os.path.join(ROOT, sh.lstrip("./")), sh):
+            try:
+                body = open(cand, errors="ignore").read()
+            except Exception:
+                continue
+            # only lines that actually INVOKE a runner count — a wrapper that
+            # merely mentions test paths (a registry checker looping over
+            # tests/integration/*.py) must not mark those paths as run
+            text += "\n" + "\n".join(l for l in body.splitlines() if _runner_line.search(l))
+            break
+    gate_texts.append(text)
+_all_text = "\n".join(gate_texts)
+# a bare js/ts runner invocation collects every matching file by convention —
+# assume reachable; whether the runner's config actually collects them is the
+# separate npm-collects-1-of-24 class of finding, not this one
+_ts_runner = bool(re.search(r"\b(vitest|jest)\b|npm (run )?test\b|npx vitest", _all_text))
+_pw_runner = bool(re.search(r"\bplaywright\s+test\b", _all_text))
 def _reachable(rl, content):
     stem = re.sub(r"\.(bats|py|ts|tsx)$", "", rl)
     if referenced and any(stem in x or x in stem for x in referenced):
         return True
-    for cmd in gate_cmds:
+    if rl.endswith((".ts", ".tsx")):
+        if ".spec." in rl and "/e2e/" in rl:
+            return _pw_runner
+        if _ts_runner:
+            return True
+    for cmd in gate_texts:
         toks = re.findall(r"[\w./-]+", cmd)
         path_toks = [t for t in toks if "/" in t and not t.endswith(".sh")]
         markers = re.findall(r"-m\s+([\w]+)", cmd)
+        if markers:
+            # a marker-filtered gate runs ONLY opted-in files — a path match
+            # proves nothing (the exact overshoot-then-undershoot a verifying
+            # agent measured: the truth was files without the marker)
+            if any(f"pytest.mark.{mk}" in content or
+                   ("pytestmark" in content and mk in content) for mk in markers if mk):
+                return True
+            continue
         if any(rl.startswith(t.rstrip("/") + "/") or rl == t for t in path_toks):
             return True
         if rl + "" in cmd:
             return True
-        for mk in markers:
-            if mk and (f"pytest.mark.{mk}" in content or f'pytestmark' in content and mk in content):
-                return True
     return False
 unreferenced = []
 for f in all_tests:
@@ -338,6 +375,27 @@ if INV and os.path.exists(INV):
                     fabricated.append({"run_unit_id": uid, "claimed_ms": claimed,
                                        "actual_ms": actual, "problem": "claimed measured, receipt disagrees"})
 
+# ── 11. does CI run any tests at all? ─────────────────────────────────────
+# A verification agent found the project's single most serious hole in a place
+# this audit never looked: the CI workflow's test step was commented out, so a
+# merge to main verified NOTHING. Commented lines do not count as coverage.
+_runner_re = re.compile(r"\b(pytest|vitest|jest|bats|playwright\s+test|go\s+test|cargo\s+test)\b|npm\s+(run\s+)?test\b|npx\s+vitest")
+ci_files = sorted(glob.glob(f"{ROOT}/.github/workflows/*.yml")
+                  + glob.glob(f"{ROOT}/.github/workflows/*.yaml")
+                  + glob.glob(f"{ROOT}/.gitlab-ci.yml"))
+ci_evidence, ci_commented = [], []
+for cf in ci_files:
+    try: lines = open(cf, errors="ignore").read().splitlines()
+    except Exception: continue
+    for i, ln in enumerate(lines, 1):
+        if not _runner_re.search(ln): continue
+        rec = f"{rel(cf)}:{i}: {ln.strip()[:120]}"
+        (ci_commented if ln.lstrip().startswith("#") else ci_evidence).append(rec)
+ci = {"workflows": len(ci_files),
+      "runs_tests": bool(ci_evidence),
+      "evidence": ci_evidence[:10],
+      "commented_out": ci_commented[:10]}
+
 doc = {
     "schema_version": "aid-test-content-scan-v1",
     "checks": {
@@ -355,6 +413,7 @@ doc = {
                         "files": case_counts},
         "naming": naming,
         "fabricated_measured": fabricated,
+        "ci": ci,
         "scope": {"bats_files": len(bats), "py_test_files": len(py_tests),
                   "ts_test_files": len(ts_tests)},
     },

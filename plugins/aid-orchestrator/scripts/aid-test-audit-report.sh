@@ -109,9 +109,12 @@ examined = [d for d in disp
 n_examined = len(examined)
 n_unexamined = max(0, len(disp) - n_examined)
 
-measured = [m for m in meas if m.get("duration_ms")]
+# per UNIT, last record wins — a re-measurement appended after a timed-out
+# first attempt must replace it, not add to the totals next to it
+_unit_meas = list(by_unit_meas.values())
+measured = [m for m in _unit_meas if m.get("duration_ms")]
 total_s = sum(m["duration_ms"] for m in measured) / 1000
-censored = [m for m in meas if m.get("state") == "timed_out"]
+censored = [m for m in _unit_meas if m.get("state") == "timed_out"]
 top = sorted(measured, key=lambda m: -m["duration_ms"])[:10]
 
 # structural groups: runner + directory of the unit id
@@ -230,7 +233,16 @@ if cases_total:
 H.append(f'<div class="stat bad"><b>{n_unexamined}</b><span>zatím neprověřeno do hloubky</span></div>')
 H.append(f'<div class="stat"><b>{total_s/60:.0f}&nbsp;min</b><span>změřená cena ({len(measured)} sad)</span></div>')
 H.append(f'<div class="stat good"><b>{len(cat_safe)}</b><span>smí běžet paralelně</span></div>')
+_unref_n = len(sc.get("unreferenced_tests") or [])
+_files_n = sum((sc.get("scope") or {}).get(k) or 0
+               for k in ("bats_files", "py_test_files", "ts_test_files"))
+if _unref_n and _files_n:
+    H.append(f'<div class="stat bad"><b>{_unref_n}</b><span>test. souborů (z {_files_n}) žádná brána nespouští</span></div>')
 H.append('</div>')
+_ci_top = sc.get("ci") or {}
+if _ci_top.get("workflows") and not _ci_top.get("runs_tests"):
+    H.append('<div class="note crit"><b>CI nespouští žádné testy.</b> Workflow na main kontroluje '
+             'jen lint a formality — merge neprověří ani jeden test. Detail v sekci 6.</div>')
 if cases_total and (((sc.get("case_counts") or {}).get("by_runner")) or {}).get("py"):
     H.append('<p class="legend">Počet pytest případů je statická spodní mez — '
              'parametrizované testy se za běhu násobí, skutečný počet je vyšší.</p>')
@@ -257,13 +269,15 @@ else:
 H.append(sec("3 · Skupiny", "Z čeho se portfolio skládá"))
 if groups:
     H.append('<div class="tablewrap"><table><tr><th>Skupina (typ · umístění)</th>'
-             '<th class="num">Sad</th><th class="num">Případů</th><th class="num">Cena</th><th class="num">Paralelně</th>'
+             '<th class="num">Sad</th><th class="num">Případů</th><th class="num">Cena</th><th class="num">s/případ</th><th class="num">Paralelně</th>'
              '<th class="num">Utnuto</th></tr>')
     for (kind, d), g in sorted(groups.items(), key=lambda x: -x[1]["cost"]):
+        _per = f'{g["cost"]/g["cases"]:.2f}' if g["cases"] and g["cost"] else "—"
         H.append(f'<tr><td><b>{esc(kind)}</b> · {esc(d)}</td>'
                  f'<td class="num">{g["n"]}</td>'
                  f'<td class="num">{g["cases"] or "—"}</td>'
                  f'<td class="num">{g["cost"]/60:.1f}&nbsp;min</td>'
+                 f'<td class="num">{_per}</td>'
                  f'<td class="num">{g["par"]}</td>'
                  f'<td class="num">{g["to"] or "—"}</td></tr>')
     H.append('</table></div>')
@@ -344,6 +358,17 @@ if scan:
     H.append('<div class="tablewrap"><table><tr><th>Mechanická kontrola</th><th class="num">Nálezů</th><th>Detail</th></tr>')
     scope = sc.get("scope") or {}
     bats_n = scope.get("bats_files", None)
+    _ci = sc.get("ci") or {}
+    if _ci.get("workflows"):
+        if not _ci.get("runs_tests"):
+            _co = _ci.get("commented_out") or []
+            H.append(f'<tr><td><span class="pill crit">CI bez testů</span></td><td class="num">{_ci["workflows"]} workflow</td>'
+                     f'<td>žádný CI workflow nespouští jediný test — merge do main neprověří nic'
+                     f'{" (test. krok je zakomentovaný: " + esc(_co[0]) + ")" if _co else ""}</td></tr>')
+        else:
+            _ev = _ci.get("evidence") or []
+            H.append(f'<tr><td><span class="pill ok">CI spouští testy</span></td><td class="num">{len(_ev)}</td>'
+                     f'<td>např. {esc(_ev[0]) if _ev else ""}</td></tr>')
     fab = sc.get("fabricated_measured") or []
     if fab:
         f0 = fab[0]

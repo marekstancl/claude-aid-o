@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.78.0] — 2026-08-08
+
+> A verification agent with a one-line prompt out-delivered this audit by
+> asking "what exists" where the audit asked "what do gates run". Its edge is
+> now mechanical: the audit reads CI, reads through wrappers, and prices tests
+> apiece.
+
+### Added
+- **CI Test-Execution Check** — the scan reads CI workflow files and reports whether any of them actually runs a test, with commented-out test steps quoted as evidence; a project whose merges verify nothing gets a critical banner in the report headline (found live: a consumer CI whose pytest step had been commented out for a week).
+- **Unrun Test Files In the Headline** — the count of test files no gate ever runs, out of the total on disk, is a headline stat instead of a buried table row.
+- **Per-Test Cost Column** — the groups table shows seconds per test case where both cost and case counts are known, making "run the cheap unit tests more often" a number instead of an instinct.
+
+### Fixed
+- **Wrapper-Aware, Marker-Exact Reachability** — gate wrapper scripts are read one level deep but only their runner-invoking lines count (a registry checker that merely LOOPS over test paths no longer marks them as run), and a marker-filtered pytest gate grants reachability only to files carrying the marker, never by path overlap; on the consumer project this moved the unrun-files count from a false 364, then a false 22, to 162 — independently verified as 153 backend files plus 9 playwright scenarios.
+- **Re-Measurements Replace Censored Receipts** — the report derives totals, censored counts and the top-10 from the LAST measurement per unit, so a suite re-measured at a higher deadline replaces its timed-out receipt instead of being double-counted next to it.
+
 ## [2.77.4] — 2026-08-08
 
 > The owner asked "kolik testů máme" and the WAN report answered with a dash:
