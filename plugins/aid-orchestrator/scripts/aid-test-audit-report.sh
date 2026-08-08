@@ -119,7 +119,8 @@ def gkey(uid):
     kind, _, rest = uid.partition(":")
     parts = rest.split("/")
     return (kind, "/".join(parts[:-1]) if len(parts) > 1 else "(kořen)")
-groups = collections.defaultdict(lambda: {"n": 0, "cost": 0.0, "par": 0, "to": 0})
+_all_cases = {c["file"]: c["cases"] for c in ((sc.get("case_counts") or {}).get("top") or [])}
+groups = collections.defaultdict(lambda: {"n": 0, "cost": 0.0, "par": 0, "to": 0, "cases": 0})
 for e in inv:
     uid = e["run_unit_id"]
     g = groups[gkey(uid)]
@@ -129,6 +130,11 @@ for e in inv:
     if m and m.get("duration_ms"):
         g["cost"] += m["duration_ms"] / 1000
         if m.get("state") == "timed_out": g["to"] += 1
+    _, _, _rest = uid.partition(":")
+    for _cf, _cn in _all_cases.items():
+        if _rest and _rest in _cf:
+            g["cases"] += _cn
+            break
 
 actions = dec.get("actions", [])
 prio_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -158,7 +164,8 @@ CSS = """
 --accent:#7FAECB;--crit:#E07A6E;--ok:#6FBF8B;--warn:#D3A24C;--soft:#1C2228;}
 :root[data-theme="light"]{--paper:#FAFAF7;--ink:#1C2126;--muted:#5C6672;--line:#D8DAD4;
 --accent:#2E5E7E;--crit:#B3352B;--ok:#2E7D4F;--warn:#9A6B15;--soft:#F0F1EC;}
-html{background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;}
+html,body{background:var(--paper);color:var(--ink);}
+html{font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;}
 body{max-width:56rem;margin:0 auto;padding:2.5rem 1.25rem 5rem;}
 h1{font-size:1.85rem;line-height:1.15;margin:.2rem 0 .3rem;letter-spacing:-.015em;text-wrap:balance;}
 .sub{color:var(--muted);margin:0 0 2rem;}
@@ -207,6 +214,10 @@ H.append(f'<p class="sub">Audit <code>{esc(audit_id)}</code> · sestaveno '
 H.append(sec("1 · Hlavní čísla", "Portfolio v kostce"))
 H.append('<div class="stats">')
 H.append(f'<div class="stat"><b>{n_units}</b><span>testovacích sad</span></div>')
+cases_total = (scan.get("counts") or {}).get("total_cases_countable")
+if cases_total:
+    fc = ((sc.get("case_counts") or {}).get("files_counted")) or 0
+    H.append(f'<div class="stat"><b>{cases_total}</b><span>testovacích případů (spočítáno v {fc} souborech)</span></div>')
 H.append(f'<div class="stat bad"><b>{n_unexamined}</b><span>zatím neprověřeno do hloubky</span></div>')
 H.append(f'<div class="stat"><b>{total_s/60:.0f}&nbsp;min</b><span>změřená cena ({len(measured)} sad)</span></div>')
 H.append(f'<div class="stat good"><b>{len(cat_safe)}</b><span>smí běžet paralelně</span></div>')
@@ -234,11 +245,12 @@ else:
 H.append(sec("3 · Skupiny", "Z čeho se portfolio skládá"))
 if groups:
     H.append('<div class="tablewrap"><table><tr><th>Skupina (typ · umístění)</th>'
-             '<th class="num">Sad</th><th class="num">Cena</th><th class="num">Paralelně</th>'
+             '<th class="num">Sad</th><th class="num">Případů</th><th class="num">Cena</th><th class="num">Paralelně</th>'
              '<th class="num">Utnuto</th></tr>')
     for (kind, d), g in sorted(groups.items(), key=lambda x: -x[1]["cost"]):
         H.append(f'<tr><td><b>{esc(kind)}</b> · {esc(d)}</td>'
                  f'<td class="num">{g["n"]}</td>'
+                 f'<td class="num">{g["cases"] or "—"}</td>'
                  f'<td class="num">{g["cost"]/60:.1f}&nbsp;min</td>'
                  f'<td class="num">{g["par"]}</td>'
                  f'<td class="num">{g["to"] or "—"}</td></tr>')
@@ -273,8 +285,24 @@ if cat_safe and safe_cost > 0:
              f'sériově stojí {safe_cost/60:.0f} min</td>'
              f'<td class="num">~{est/60:.0f} min/běh</td><td>odhad při 4 bězích vedle sebe</td></tr>')
 else:
-    H.append('<tr><td><b>Paralelismus</b></td><td class="empty">žádná sada zatím nemá důkaz '
-             'o bezpečném souběhu</td><td class="num">—</td><td>—</td></tr>')
+    blockers = collections.Counter()
+    for l in (dec.get("parallelization", {}).get("lanes") or []):
+        if l.get("disposition") in ("blocked_pending_fix", "keep_serial"):
+            for rb in (l.get("resource_basis") or []):
+                blockers[rb] += len(l.get("run_unit_ids") or [])
+    for u in unresolved:
+        t = (u.get("next_measurement") or "") + (u.get("missing_proof") or "")
+        if "parallel" in t.lower() or "sweep" in t.lower() or "leak" in t.lower():
+            blockers["(detail v Nedokázáno)"] += 1
+    if blockers:
+        tb = blockers.most_common(1)[0]
+        H.append(f'<tr><td><b>Paralelismus</b></td>'
+                 f'<td>zatím 0 s důkazem — největší blokátor <code>{esc(tb[0])}</code> '
+                 f'drží {tb[1]} jednotek; JEHO oprava otevře pool (viz Akce a Nedokázáno)</td>'
+                 f'<td class="num">odemkne se opravou</td><td>z lanes a nedokázaného</td></tr>')
+    else:
+        H.append('<tr><td><b>Paralelismus</b></td><td class="empty">0 s důkazem a žádný pojmenovaný '
+                 'blokátor — to je mezera auditu, ne stav portfolia</td><td class="num">—</td><td>—</td></tr>')
 if censored:
     H.append(f'<tr><td><b>Obří sady</b></td><td>{len(censored)}× utnuto — nejdřív doměřit, pak dělit</td>'
              f'<td class="num">neznámo</td><td>nutné doměřit</td></tr>')
@@ -312,6 +340,12 @@ if scan:
              f'<td class="num">{len(real_wk)}{" (+" + str(len(wk)-len(real_wk)) + " validátorů, kde je exit kód legitimní)" if len(wk)>len(real_wk) else ""}</td>'
              f'<td>{esc(", ".join(w["file"].split("/")[-1] for w in real_wk[:3])) or "—"}</td></tr>')
     unref = sc.get("unreferenced_tests", [])
+    nm_ = sc.get("naming") or {}
+    outl = nm_.get("outlier_count", 0)
+    dom = ", ".join(f'{d["prefix"]} ({d["files"]}x)' for d in (nm_.get("dominant_prefixes") or [])[:3])
+    H.append(f'<tr><td><span class="pill {"warn" if outl else "ok"}">konvence názvů</span></td>'
+             f'<td class="num">{outl} mimo vzor</td>'
+             f'<td>převažuje: {esc(dom) or "žádný vzor"} — návrh: sjednotit, seznam v content-scan.json</td></tr>')
     H.append(f'<tr><td><span class="pill {"crit" if unref else "ok"}">nespouštěné soubory</span></td>'
              f'<td class="num">{len(unref)}</td>'
              f'<td>{esc(", ".join(u["file"].split("/")[-1] for u in unref[:3])) or "každý soubor na disku někdo spouští"}</td></tr>')

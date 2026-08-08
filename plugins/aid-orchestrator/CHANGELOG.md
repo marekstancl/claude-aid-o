@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.77.2] — 2026-08-08
+
+### Fixed
+- **The report page was unreadable in mixed themes** — tokens flipped to dark while the page ground stayed light, producing black tiles on a white page. Background now binds to both `html` and `body`, so the artifact wrapper's own reset cannot split the themes.
+- **"Kolik testů" finally answers in test CASES, not suites** — a mechanical counter totals `@test` cases per file (3 179 on this repository) and the groups table carries a per-group case column; where cases are uncountable (a gate wrapping an opaque command) the page says so instead of passing the suite count off as the test count.
+- **An empty parallelism lever must name its blocker** — "nothing runs in parallel" with no cause read as "parallelisation is impossible"; the lever now aggregates the blocking resources from lanes and unresolved entries and names the one whose fix opens the pool, and when it cannot name one it says that is the audit's gap, not the portfolio's state.
+- **Naming conventions are measured** — dominant name prefixes and the files outside any recognised pattern (50 on this repository), with the rename candidates listed in content-scan.json.
+
 ## [2.77.1] — 2026-08-08
 
 ### Fixed

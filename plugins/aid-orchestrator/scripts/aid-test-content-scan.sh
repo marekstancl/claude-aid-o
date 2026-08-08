@@ -217,6 +217,35 @@ try:
 except Exception:
     pass
 
+# ── 8. case counts — how many TESTS, not just suites ──────────────────────
+# The owner's first question was "kolik testů máme" and every answer so far
+# counted SUITES. Cases are countable mechanically for bats; where they are
+# not countable (a gate wrapping an opaque command), the report says
+# "uncounted" instead of pretending the suite count is the test count.
+case_counts = []
+total_cases = 0
+for f in bats:
+    try: n = len(re.findall(r"@test ", open(f, errors="ignore").read()))
+    except Exception: continue
+    total_cases += n
+    case_counts.append({"file": rel(f), "cases": n})
+case_counts.sort(key=lambda x: -x["cases"])
+
+# ── 9. naming conventions ─────────────────────────────────────────────────
+# "aktuálně totál bordel bez konvence" — measurable: what prefixes dominate,
+# and which files follow no recognisable pattern. The proposal writes itself:
+# the dominant pattern IS the convention candidate, outliers are the renames.
+def name_tokens(f):
+    b = os.path.basename(f)
+    b = re.sub(r"\.bats$", "", b)
+    b = re.sub(r"^test[-_]?", "", b)
+    return b.split("-")[0] if "-" in b else (b.split("_")[0] if "_" in b else b)
+prefix_freq = collections.Counter(name_tokens(f) for f in bats)
+dominant = [p for p, n in prefix_freq.most_common(8) if n >= 3]
+outliers = [rel(f) for f in bats if name_tokens(f) not in dominant]
+naming = {"dominant_prefixes": [{"prefix": p, "files": prefix_freq[p]} for p in dominant],
+          "outliers": outliers[:30], "outlier_count": len(outliers)}
+
 doc = {
     "schema_version": "aid-test-content-scan-v1",
     "checks": {
@@ -227,6 +256,10 @@ doc = {
         "untested_surfaces": untested[:50],
         "test_freshness": {"stale_180d": len(stale), "files": stale[:20]},
         "gate_stability": gate_stability,
+        "case_counts": {"total_countable": total_cases,
+                        "files_counted": len(case_counts),
+                        "top": case_counts[:15]},
+        "naming": naming,
     },
     "counts": {
         "bats_files_scanned": len(bats),
@@ -237,6 +270,8 @@ doc = {
         "untested_surfaces": len(untested),
         "stale_tests_180d": len(stale),
         "gates_with_history": len(gate_stability),
+        "total_cases_countable": total_cases,
+        "naming_outliers": len(outliers),
     },
 }
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
