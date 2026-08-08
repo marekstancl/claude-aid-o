@@ -131,7 +131,11 @@ for e in inv:
     if m and m.get("duration_ms"):
         g["cost"] += m["duration_ms"] / 1000
         if m.get("state") == "timed_out": g["to"] += 1
-    _, _, _rest = uid.partition(":")
+    _kind, _, _rest = uid.partition(":")
+    # gate unit ids are gate NAMES, not file paths — substring-matching them
+    # against test files produces accidental hits, never a real mapping
+    if _kind == "gate":
+        continue
     for _cf, _cn in _all_cases.items():
         if _rest and _rest in _cf:
             g["cases"] += _cn
