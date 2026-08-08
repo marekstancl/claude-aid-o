@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.76.1] — 2026-08-08
+
+### Fixed
+- **Showing the report page to the owner no longer depends on an agent's obedience** — the page was generated on disk every run and the owner kept receiving the text wall, because publishing it was an instruction in a command doc the presenting agent never re-read. The mandate now travels INSIDE the rendered summary itself, as its first banner, naming the exact report path: an agent that pastes the block verbatim — which is the one behaviour agents demonstrably exhibit — pastes the order to publish the page first. The same instruction-without-enforcement defect this whole line of work exists to remove, rebuilt at the last step in front of the owner, now removed there too.
+
 ## [2.76.0] — 2026-08-07
 
 > The owner's question was exact: "do we even have the data to fill the
