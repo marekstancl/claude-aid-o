@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.77.3] — 2026-08-08
+
+> An independent review of a real consumer report found the technical core
+> correct — and two numbers whole sections stood on provably wrong, because
+> the content scanner was written for bats and pointed at a pytest project.
+> Every finding of that review lands here.
+
+### Fixed
+- **The scanner reads tests of every runner** — py/ts/tsx test files join bats in reference detection, and sources are matched by dotted module form too (`wan/api/scan.py` ↔ `wan.api.scan`), so a file 42 tests import is no longer "untested". The review's exact counterexamples now pass.
+- **Unreachable test files are found across runners** — reachability walks gate commands' path tokens and pytest markers; the review's 153-file hole this check previously reported as "0" now surfaces, labelled as candidates where an opaque wrapper gate cannot be read.
+- **Fabricated "measured" costs are arithmetic now, not diligence** — every disposition claiming `cost.kind: measured` is compared against the actual measurement receipt; mismatches and claims with no receipt render as a critical row. Caught 3 of the review's 5 on the spot (the other two sit inside a 10 % tolerance).
+- **A green zero must mean "checked and clean", never "not applicable"** — bats-only checks on a bats-less project render "nehodnoceno" instead of an ok-pill zero, which the review rightly read as a contradiction.
+- **The sources section stops naming a catalog that does not exist** — it now states whether an approved catalog was actually read, and that a zero parallel column is correct when none exists.
+- **Reliability measures today's gates** — history of gates deleted from the current `execution.yaml` moves to a labelled footnote instead of rendering "0 % — dead" over a renamed gate, and every row carries this run's own outcome, so a gate that failed today cannot appear as 100 %.
+
 ## [2.77.2] — 2026-08-08
 
 ### Fixed

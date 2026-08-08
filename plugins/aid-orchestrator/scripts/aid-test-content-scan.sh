@@ -58,6 +58,22 @@ def rel(p): return os.path.relpath(p, ROOT)
 bats = sorted(glob.glob(f"{ROOT}/**/*.bats", recursive=True))
 bats = [f for f in bats if "/.git/" not in f and "/node_modules/" not in f]
 
+# test files of EVERY runner — the first cut scanned only bats, was pointed at
+# a pytest project, and produced garbage in both directions: 813 "untested"
+# sources that 42 tests import, and "0 unreferenced" over 153 test files no
+# gate runs. An independent review caught both. Never again bats-only.
+def _clean(paths):
+    return [f for f in paths if "/.git/" not in f and "/node_modules/" not in f
+            and "/.venv/" not in f and "/venv/" not in f]
+py_tests = _clean(sorted(set(
+    glob.glob(f"{ROOT}/**/test_*.py", recursive=True)
+    + glob.glob(f"{ROOT}/**/*_test.py", recursive=True))))
+ts_tests = _clean(sorted(set(
+    glob.glob(f"{ROOT}/**/*.test.ts", recursive=True)
+    + glob.glob(f"{ROOT}/**/*.test.tsx", recursive=True)
+    + glob.glob(f"{ROOT}/**/*.spec.ts", recursive=True))))
+all_tests = bats + py_tests + ts_tests
+
 # ── 1. duplicate test cases ────────────────────────────────────────────────
 cases = collections.defaultdict(list)
 for f in bats:
@@ -133,11 +149,39 @@ if INV and os.path.exists(INV):
             _, _, path = uid.partition(":")
             if path: referenced.add(path.rstrip("/") )
     except Exception: pass
+# reachability: a test file counts as RUN when the inventory names it, or a
+# gate command's path token covers it, or — for marker-gated pytest commands —
+# the file actually carries that marker. An independent review found 153 test
+# files no gate runs while this check said "0", because it only looked at bats.
+gate_cmds = []
+try:
+    import yaml as _y3
+    _ey = _y3.safe_load(open(EXY)) or {}
+    gate_cmds = [ (str((v or {}).get("command") or "")) for v in (_ey.get("gates") or {}).values() ]
+except Exception:
+    pass
+def _reachable(rl, content):
+    stem = re.sub(r"\.(bats|py|ts|tsx)$", "", rl)
+    if referenced and any(stem in x or x in stem for x in referenced):
+        return True
+    for cmd in gate_cmds:
+        toks = re.findall(r"[\w./-]+", cmd)
+        path_toks = [t for t in toks if "/" in t and not t.endswith(".sh")]
+        markers = re.findall(r"-m\s+([\w]+)", cmd)
+        if any(rl.startswith(t.rstrip("/") + "/") or rl == t for t in path_toks):
+            return True
+        if rl + "" in cmd:
+            return True
+        for mk in markers:
+            if mk and (f"pytest.mark.{mk}" in content or f'pytestmark' in content and mk in content):
+                return True
+    return False
 unreferenced = []
-for f in bats:
+for f in all_tests:
     r = rel(f)
-    stem = r[:-5] if r.endswith(".bats") else r
-    if referenced and not any(stem in x or x in stem for x in referenced):
+    try: content = open(f, errors="ignore").read()
+    except Exception: content = ""
+    if (referenced or gate_cmds) and not _reachable(r, content):
         unreferenced.append({"file": r})
 
 # ── 5. untested production surfaces (risk coverage) ───────────────────────
@@ -175,14 +219,19 @@ tracked = [l for l in git("ls-files").splitlines()
            and "/node_modules/" not in l]
 # test file contents also reference scripts directly — count those too
 ref_blob = " ".join(referenced_src)
-for f in bats:
+for f in all_tests:
     try: ref_blob += open(f, errors="ignore").read()
     except Exception: pass
 churn_raw = git("log","--since=90 days ago","--name-only","--pretty=format:")
 churn = collections.Counter(l for l in churn_raw.splitlines() if l.strip())
 for src in tracked:
     base = os.path.basename(src)
-    if base and base not in ref_blob and src not in ref_blob:
+    # a Python test references wan/api/scan.py as `wan.api.scan` — the dotted
+    # module form, which the basename check can never see
+    module = re.sub(r"\.(py|ts|tsx|js|sh)$", "", src).replace("/", ".")
+    mod_tail = ".".join(module.split(".")[-3:])
+    if base and base not in ref_blob and src not in ref_blob \
+       and module not in ref_blob and mod_tail not in ref_blob:
         untested.append({"file": src, "changes_90d": churn.get(src, 0)})
 untested.sort(key=lambda x: -x["changes_90d"])
 
@@ -246,6 +295,37 @@ outliers = [rel(f) for f in bats if name_tokens(f) not in dominant]
 naming = {"dominant_prefixes": [{"prefix": p, "files": prefix_freq[p]} for p in dominant],
           "outliers": outliers[:30], "outlier_count": len(outliers)}
 
+# ── 10. measured-claims cross-check ───────────────────────────────────────
+# An analyst wrote cost.kind="measured" with numbers invented BEFORE the
+# measurements ran — twice, in two different projects, and an independent
+# review showed the audit undercounted its own finding (5 of 5 wrong, reported
+# as 4 of 10). The adversarial wave caught it by diligence; this makes it
+# arithmetic: every "measured" claim is compared against the actual receipt.
+fabricated = []
+if INV and os.path.exists(INV):
+    adir = os.path.dirname(INV)
+    real = {}
+    try:
+        with open(os.path.join(adir, "measurements.jsonl")) as f:
+            for l in f:
+                m = json.loads(l)
+                if m.get("duration_ms"): real[m.get("run_unit_id")] = m["duration_ms"]
+    except Exception:
+        pass
+    for af in glob.glob(os.path.join(adir, "agents", "*.json")):
+        for d in (jload_ := (lambda p: (json.load(open(p)) if os.path.exists(p) else {})))(af).get("dispositions") or []:
+            c = d.get("cost") or {}
+            if c.get("kind") == "measured" and c.get("duration_ms") is not None:
+                uid = d.get("run_unit_id")
+                actual = real.get(uid)
+                claimed = c["duration_ms"]
+                if actual is None:
+                    fabricated.append({"run_unit_id": uid, "claimed_ms": claimed,
+                                       "actual_ms": None, "problem": "claimed measured, no measurement exists"})
+                elif abs(actual - claimed) > max(2000, actual * 0.1):
+                    fabricated.append({"run_unit_id": uid, "claimed_ms": claimed,
+                                       "actual_ms": actual, "problem": "claimed measured, receipt disagrees"})
+
 doc = {
     "schema_version": "aid-test-content-scan-v1",
     "checks": {
@@ -260,6 +340,9 @@ doc = {
                         "files_counted": len(case_counts),
                         "top": case_counts[:15]},
         "naming": naming,
+        "fabricated_measured": fabricated,
+        "scope": {"bats_files": len(bats), "py_test_files": len(py_tests),
+                  "ts_test_files": len(ts_tests)},
     },
     "counts": {
         "bats_files_scanned": len(bats),
@@ -272,6 +355,8 @@ doc = {
         "gates_with_history": len(gate_stability),
         "total_cases_countable": total_cases,
         "naming_outliers": len(outliers),
+        "fabricated_measured": len(fabricated),
+        "test_files_all_runners": len(all_tests),
     },
 }
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)

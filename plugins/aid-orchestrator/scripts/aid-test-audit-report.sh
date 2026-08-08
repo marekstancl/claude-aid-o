@@ -49,7 +49,7 @@ done
 
 command -v python3 >/dev/null 2>&1 || _die 2 "python3 is required to assemble the report"
 
-AUDIT_DIR="$audit_dir" CATALOG="$catalog" OUTPUT="$output" python3 - <<'PY'
+AUDIT_DIR="$audit_dir" CATALOG="$catalog" OUTPUT="$output" PROJECT_ROOT="$project_root" python3 - <<'PY'
 import json, os, glob, html, collections, datetime
 
 D = os.environ["AUDIT_DIR"].rstrip("/")
@@ -326,17 +326,34 @@ H.append('<p class="legend">Páka bez čísla není zamlčená — má u sebe na
 H.append(sec("6 · Kvalita", "Co o testech víme z jejich obsahu"))
 if scan:
     H.append('<div class="tablewrap"><table><tr><th>Mechanická kontrola</th><th class="num">Nálezů</th><th>Detail</th></tr>')
+    scope = sc.get("scope") or {}
+    bats_n = scope.get("bats_files", None)
+    fab = sc.get("fabricated_measured") or []
+    if fab:
+        f0 = fab[0]
+        H.append(f'<tr><td><span class="pill crit">vymyšlená „měření“</span></td><td class="num">{len(fab)}</td>'
+                 f'<td>dispozice tvrdí „measured“ a účtenka nesouhlasí — např. '
+                 f'{esc(nm(f0.get("run_unit_id","?")))}: tvrzeno {f0.get("claimed_ms")} ms, '
+                 f'reálně {f0.get("actual_ms") if f0.get("actual_ms") is not None else "žádné měření"}</td></tr>')
     dup = sc.get("duplicate_test_cases", [])
-    if dup:
+    if bats_n == 0:
+        # A green zero over a project with no bats files reads as "checked and
+        # clean"; an independent review called exactly this contradiction out.
+        H.append('<tr><td><span class="pill info">duplicitní testy (bats)</span></td><td class="num">—</td>'
+                 '<td class="dim">nehodnoceno — projekt nemá bats soubory; duplicity jiných runnerů zatím neumíme mechanicky</td></tr>')
+        H.append('<tr><td><span class="pill info">slabá orákula (bats)</span></td><td class="num">—</td>'
+                 '<td class="dim">nehodnoceno — totéž</td></tr>')
+    elif dup:
         d0 = dup[0]
         H.append(f'<tr><td><span class="pill info">duplicitní testy</span></td><td class="num">{len(dup)} dvojic</td>'
                  f'<td>např. {d0["shared_cases"]}× shodný test: <code>{esc(d0["file_a"].split("/")[-1])}</code> ↔ '
                  f'<code>{esc(d0["file_b"].split("/")[-1])}</code></td></tr>')
     else:
         H.append('<tr><td><span class="pill ok">duplicitní testy</span></td><td class="num">0</td><td class="dim">žádná shoda názvů napříč soubory</td></tr>')
-    wk = sc.get("weak_oracle", [])
+    wk = sc.get("weak_oracle", []) if bats_n != 0 else []
     real_wk = [w for w in wk if not w.get("likely_legitimate")]
-    H.append(f'<tr><td><span class="pill {"warn" if real_wk else "ok"}">slabá orákula</span></td>'
+    if bats_n != 0:
+        H.append(f'<tr><td><span class="pill {"warn" if real_wk else "ok"}">slabá orákula</span></td>'
              f'<td class="num">{len(real_wk)}{" (+" + str(len(wk)-len(real_wk)) + " validátorů, kde je exit kód legitimní)" if len(wk)>len(real_wk) else ""}</td>'
              f'<td>{esc(", ".join(w["file"].split("/")[-1] for w in real_wk[:3])) or "—"}</td></tr>')
     unref = sc.get("unreferenced_tests", [])
@@ -348,7 +365,8 @@ if scan:
              f'<td>převažuje: {esc(dom) or "žádný vzor"} — návrh: sjednotit, seznam v content-scan.json</td></tr>')
     H.append(f'<tr><td><span class="pill {"crit" if unref else "ok"}">nespouštěné soubory</span></td>'
              f'<td class="num">{len(unref)}</td>'
-             f'<td>{esc(", ".join(u["file"].split("/")[-1] for u in unref[:3])) or "každý soubor na disku někdo spouští"}</td></tr>')
+             f'<td>{esc(", ".join(u["file"].split("/")[-1] for u in unref[:3])) or "každý soubor na disku někdo spouští"}'
+             f'{" — kandidáti: brány s neprůhledným wrapperem se nedají přečíst, ověř vzorek" if unref else ""}</td></tr>')
     H.append('</table></div>')
 else:
     H.append('<p class="empty">Mechanický sken obsahu tento běh neproběhl (content-scan.json chybí) — '
@@ -389,6 +407,25 @@ else:
 # 8 — spolehlivost
 H.append(sec("8 · Spolehlivost", "Jak často věci reálně procházejí"))
 gs = sc.get("gate_stability", [])
+# gates that still exist — history of a DELETED gate measures an artifact, not
+# a broken gate; an independent review caught "0 % / dead" over a renamed one.
+current_gates = set()
+try:
+    import yaml as _y4
+    _ey2 = _y4.safe_load(open(os.path.join(os.environ.get("PROJECT_ROOT","."), ".aid-o/config/execution.yaml"))) or {}
+    current_gates = set((_ey2.get("gates") or {}).keys())
+except Exception:
+    pass
+this_run = {}
+for m in meas:
+    uid = m.get("run_unit_id") or ""
+    if uid.startswith("gate:"):
+        this_run[uid[5:]] = m.get("state")
+if current_gates:
+    removed = [g for g in gs if g["gate"] not in current_gates]
+    gs = [g for g in gs if g["gate"] in current_gates]
+else:
+    removed = []
 if gs:
     bad = sorted(gs, key=lambda g: g.get("pass_rate", 1))
     H.append('<div class="tablewrap"><table><tr><th>Brána</th><th class="num">Úspěšnost</th><th class="num">Běhů</th><th></th></tr>')
@@ -396,10 +433,18 @@ if gs:
         pr = g.get("pass_rate", 0)
         pill = "crit" if pr < 0.5 else ("warn" if pr < 0.9 else "ok")
         note = "nikdy neprošla — mrtvá nebo rozbitá" if pr == 0 else ("" if pr >= 0.9 else "nestabilní")
+        tr = this_run.get(g["gate"])
+        tr_txt = {"terminal_pass": "prošla", "terminal_fail": "SPADLA", "timed_out": "utnuta"}.get(tr, "neběžela")
+        if tr == "terminal_fail": note = (note + " · v TOMTO běhu spadla").strip(" ·")
         H.append(f'<tr><td>{esc(g["gate"])}</td>'
                  f'<td class="num"><span class="pill {pill}">{pr*100:.0f} %</span></td>'
-                 f'<td class="num">{g.get("samples","?")}</td><td class="dim">{note}</td></tr>')
+                 f'<td class="num">{g.get("samples","?")}</td>'
+                 f'<td class="dim">{tr_txt} · {note}</td></tr>')
     H.append('</table></div>')
+    if removed:
+        H.append(f'<p class="legend">Mimo tabulku: {len(removed)} bran s historií, které v aktuální '
+                 f'konfiguraci už neexistují ({esc(", ".join(r["gate"] for r in removed[:4]))}'
+                 f'{"…" if len(removed) > 4 else ""}) — jejich čísla měří artefakt, ne dnešní stav.</p>')
     H.append('<p class="legend">Zdroj: historie skutečných běhů bran. Flakiness jednotlivých sad '
              'zůstává neznámá — vyžaduje opakované běhy (<code>--repeat</code>), které se zatím '
              'nevešly do rozpočtu; to je pojmenovaná mezera, ne opomenutí.</p>')
@@ -444,12 +489,13 @@ else:
 
 # 11 — zdroje
 H.append(sec("11 · Zdroje", "Odkud každé číslo je"))
+cat_note = ("schválený katalog <code>.aid-o/config/test-catalog.yaml</code>" if cat_units
+            else "SCHVÁLENÝ KATALOG NEEXISTUJE — paralelismus je z návrhu/ničeho a sloupec Paralelně je nula právem")
 H.append('<p class="legend">inventura: <code>inventory.json</code> · měření: '
          '<code>measurements.jsonl</code> · verdikty analytiků: <code>agents/*.json</code> · '
          'nálezy: <code>consolidated-findings.json</code> · akce a nedokázané: '
          '<code>decision.json</code> · mechanický sken (duplicity, rizika, stabilita): '
-         '<code>content-scan.json</code> · paralelismus: schválený katalog '
-         '<code>.aid-o/config/test-catalog.yaml</code>. Vše v adresáři auditu; '
+         '<code>content-scan.json</code> · paralelismus: ' + cat_note + '. Vše v adresáři auditu; '
          'nic v tomto reportu nevzniklo mimo tyto soubory.</p>')
 
 with open(OUT, "w") as f:
