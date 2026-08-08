@@ -375,6 +375,73 @@ if INV and os.path.exists(INV):
                     fabricated.append({"run_unit_id": uid, "claimed_ms": claimed,
                                        "actual_ms": actual, "problem": "claimed measured, receipt disagrees"})
 
+# ── 10b. gate overview — what each suite is FOR ───────────────────────────
+# The owner's standing question nobody answered: "k čemu ty sady vlastně jsou
+# a proč je máme?" Mechanically derivable: which files a gate runs, what topics
+# those files cover, which profiles include it, and — where the name is an EPIC
+# codename (p070, p077...) — a purpose-based name proposal. Codenames tell a
+# reader nothing a week after the EPIC merges.
+_case_by_file = {c["file"]: c["cases"] for c in case_counts}
+_profiles = {}
+try:
+    for pn, pv in ((_ey.get("gate_profiles") or {}).items()):
+        for gname in ((pv or {}).get("include") or []):
+            _profiles.setdefault(str(gname), []).append(pn)
+except Exception:
+    pass
+_generic = {"test", "tests", "integration", "unit", "e2e", "py", "ts", "check", "gate"}
+gate_overview = []
+try:
+    for gname, gv in ((_ey.get("gates") or {}).items()):
+        cmd = str((gv or {}).get("command") or "")
+        text = cmd
+        for sh in re.findall(r"[\w./-]+\.sh\b", cmd):
+            try: text += "\n" + "\n".join(
+                l for l in open(os.path.join(ROOT, sh.lstrip("./")), errors="ignore").read().splitlines()
+                if _runner_line.search(l))
+            except Exception: pass
+        gfiles = sorted({t for t in re.findall(r"[\w./-]+\.(?:py|bats|ts|tsx)\b", text)
+                         if t in _case_by_file})
+        # a path-only WHOLE argument (pytest tests/unit/) runs a directory;
+        # substrings of explicit file paths must never expand to their parent
+        for arg in re.findall(r"\S+", text):
+            arg = arg.rstrip("/")
+            if "/" not in arg or re.search(r"\.(py|bats|ts|tsx|sh)$", arg): continue
+            if os.path.isdir(os.path.join(ROOT, arg)):
+                gfiles += [f for f in _case_by_file if f.startswith(arg + "/") and f not in gfiles]
+        # a bare js/ts runner collects every matching file; a marker-filtered
+        # pytest gate runs exactly the files carrying the marker
+        if not gfiles and re.search(r"\b(vitest|jest)\b|npm\s+(run\s+)?test\b|npx\s+vitest", text):
+            gfiles = [rel(f) for f in ts_tests if "/e2e/" not in rel(f)]
+        for mk in re.findall(r"-m\s+([\w]+)", text):
+            for f in py_tests:
+                r2 = rel(f)
+                if r2 in gfiles: continue
+                try: c2 = open(f, errors="ignore").read()
+                except Exception: continue
+                if f"pytest.mark.{mk}" in c2 or ("pytestmark" in c2 and mk in c2):
+                    gfiles.append(r2)
+        cases = sum(_case_by_file.get(f, 0) for f in gfiles)
+        toks = collections.Counter()
+        for f in gfiles:
+            b = re.sub(r"\.(py|bats|ts|tsx)$", "", os.path.basename(f))
+            b = re.sub(r"^test[-_]?|[-_]?test$", "", b)
+            for t in re.split(r"[-_.]", b):
+                if len(t) > 2 and t not in _generic: toks[t] += 1
+        topics = [t for t, _ in toks.most_common(4)]
+        codename = bool(re.match(r"^p\d+", gname))
+        suggested = ""
+        if codename and topics:
+            suggested = "_".join(topics[:2])
+        gate_overview.append({
+            "gate": gname, "files": len(gfiles), "cases": cases,
+            "topics": topics, "profiles": sorted(_profiles.get(gname, [])),
+            "required": bool((gv or {}).get("required")),
+            "codename": codename, "suggested_name": suggested,
+            "noop": cmd.strip().startswith("true")})
+except Exception:
+    pass
+
 # ── 11. does CI run any tests at all? ─────────────────────────────────────
 # A verification agent found the project's single most serious hole in a place
 # this audit never looked: the CI workflow's test step was commented out, so a
@@ -414,6 +481,7 @@ doc = {
         "naming": naming,
         "fabricated_measured": fabricated,
         "ci": ci,
+        "gate_overview": gate_overview,
         "scope": {"bats_files": len(bats), "py_test_files": len(py_tests),
                   "ts_test_files": len(ts_tests)},
     },

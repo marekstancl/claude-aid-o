@@ -245,12 +245,31 @@ _aid_inventory_reconcile() {
             # on the catalog/allowlist at dispatch time), so the candidate set
             # is recorded with membership: "runtime_partitioned" rather than
             # asserted as exact.
-            {gate: $g.run_unit_id, kind: "catalog_pool_runner",
-             partition: (if ($cmd | test("--dedicated-only")) then "dedicated"
-                         elif ($cmd | test("--pool-only")) then "pool"
-                         else "all" end),
-             membership: "runtime_partitioned",
-             run_unit_ids: ($tests | map(select(.runner == "bats") | .run_unit_id))}
+            #
+            # `--dedicated-only` does NOT get the full bats set: it only ever
+            # runs the 2 boundary files hard-coded in
+            # aid-bats-parallel-lane.sh:74-77 (BOUNDARY_RELATIVE_PATHS) — kept
+            # in sync here by literal cross-reference, not re-derived, so a
+            # future edit to that list needs a matching edit here. Giving
+            # gate:bats_boundary the same 132-member candidate set as
+            # gate:bats_all made every reconciliation reader believe it
+            # re-runs the whole pool (P075 Step 3).
+            ["plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary",
+             "plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary"] as $boundary_ids
+            | ($boundary_ids | map("bats:" + .)) as $boundary_run_unit_ids
+            | {gate: $g.run_unit_id, kind: "catalog_pool_runner",
+               partition: (if ($cmd | test("--dedicated-only")) then "dedicated"
+                           elif ($cmd | test("--pool-only")) then "pool"
+                           else "all" end),
+               membership: "runtime_partitioned",
+               run_unit_ids: (
+                 if ($cmd | test("--dedicated-only"))
+                 then $boundary_run_unit_ids
+                 elif ($cmd | test("--pool-only"))
+                 then ($tests | map(select(.runner == "bats") | .run_unit_id)
+                              | map(select(. as $id | ($boundary_run_unit_ids | index($id)) | not)))
+                 else ($tests | map(select(.runner == "bats") | .run_unit_id))
+                 end)}
           else
             # Plain substring containment, not a regex: a source path is full
             # of `/` and `.`, which as a pattern would match far more than the

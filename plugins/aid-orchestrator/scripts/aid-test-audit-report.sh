@@ -290,6 +290,32 @@ if groups:
 else:
     H.append('<p class="empty">Inventura chybí — bez ní nejde portfolio seskupit.</p>')
 
+# 3b — sady jmenovitě: k čemu každá je
+_gov = sc.get("gate_overview") or []
+if _gov:
+    H.append(sec("3b · Sady jmenovitě", "K čemu každá sada je a proč ji máme"))
+    H.append('<div class="tablewrap"><table><tr><th>Sada</th><th>K čemu je (podle obsahu)</th>'
+             '<th class="num">Souborů</th><th class="num">Případů</th><th>Profily</th><th>Poznámka</th></tr>')
+    for g in sorted(_gov, key=lambda x: -x["cases"]):
+        notes = []
+        if g.get("noop"):
+            notes.append('příkaz <code>true</code> — nemůže spadnout, nic neověřuje')
+        if g.get("codename") and g.get("suggested_name"):
+            notes.append(f'kódové jméno z EPICu — návrh: <code>{esc(g["suggested_name"])}</code>')
+        if g.get("required") and not g.get("profiles"):
+            notes.append('required, ale není v žádném profilu — nikdy se nespustí')
+        topics = ", ".join(g.get("topics") or [])
+        H.append(f'<tr><td><code>{esc(g["gate"])}</code></td>'
+                 f'<td>{esc(topics) or "<span class=dim>—</span>"}</td>'
+                 f'<td class="num">{g["files"] or "—"}</td>'
+                 f'<td class="num">{g["cases"] or "—"}</td>'
+                 f'<td class="dim">{esc(", ".join(g.get("profiles") or [])) or "žádný"}</td>'
+                 f'<td>{" · ".join(notes) or ""}</td></tr>')
+    H.append('</table></div>')
+    H.append('<p class="legend">„K čemu je“ odvozeno mechanicky z názvů souborů, které sada spouští — '
+             'témata jsou nejčastější slova po odstranění test-prefixů. Návrhy jmen nahrazují '
+             'kódová jména EPICů (p070…), která po merge nikomu nic neřeknou.</p>')
+
 # 4 — co žere čas
 H.append(sec("4 · Co žere čas", "Deset nejdražších a všechno utnuté"))
 if measured:

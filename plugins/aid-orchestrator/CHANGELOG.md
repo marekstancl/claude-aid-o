@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.79.0] — 2026-08-08
+
+> "K čemu ty sady vlastně jsou a proč je máme?" had no answer in any artifact.
+> Now it is a section: every gate named, its purpose derived from what it
+> actually runs, EPIC codenames get purpose-based rename proposals.
+
+### Added
+- **Suite Overview Section (3b · Sady jmenovitě)** — the report lists every gate with its mechanically derived purpose (dominant topics of the files it runs), file and case counts, profile membership, and flags: no-op commands (`true`), required-but-in-no-profile orphans, and EPIC codenames (p070…) with purpose-based rename proposals (e.g. `p077_confirmations → cancel_confirmation`).
+- **Gate File Resolution** — the scan resolves which test files each gate runs through explicit arguments, whole-argument directory expansion, bare js/ts runner conventions, and pytest markers — substrings of listed file paths never expand to their parent directory.
+- **IMP-469 Backlog Entry** — standalone parallel test runner so the proven-safe lanes speed up ANY caller (agent, CI, terminal), not only the AID gate runner; recorded with enforcement named at design time.
+
 ## [2.78.0] — 2026-08-08
 
 > A verification agent with a one-line prompt out-delivered this audit by

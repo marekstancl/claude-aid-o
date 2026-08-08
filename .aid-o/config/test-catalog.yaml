@@ -13832,11 +13832,8 @@ run_units:
     behavior_claims: []
     confidence: low
     command:
-      type: argv
-      argv:
-        - npm
-        - run
-        - test
+      type: shell
+      shell: npm run build -w @aid/contract && npm run test --workspaces --if-present
     runtime:
       fingerprint: sha256:c8359b56a31a
     parallel:
