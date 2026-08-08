@@ -48,6 +48,19 @@
 #   created_at         string   ISO-8601 UTC
 #   current_operation  string|null
 #   plan_final_attempt integer  >= 0
+#   worktree_path      string|null  OPTIONAL (P074 Step 7). The plan's
+#                                execution worktree (`.aid-worktrees/plan-<id>`,
+#                                created by plan-start, torn down by
+#                                plan-close/plan-rollback). Absent or null on
+#                                a legacy plan that predates worktree mode.
+#                                Validated as a PATH SHAPE only — a non-empty,
+#                                single-line string, repo-root-relative or
+#                                absolute. Whether that path still EXISTS and
+#                                is git-registered is a consumer's question
+#                                (aid-plan-fsm.sh's worktree helpers), never
+#                                this schema's: a deleted worktree must make
+#                                the consumer name the repair, not make the
+#                                whole state file read as corrupt.
 #
 # `mode` IS NOT AN AUTHORITY HERE. Per the plan doc: "`plan_state.yaml` caches
 # it for speed, but `plan_state_get <plan_id> mode` re-reads
@@ -151,12 +164,14 @@
 #   exact contract, since "not found" and "corrupt" must stay distinguishable
 #   on stdout even though both can return non-zero.
 #
-# **Last Updated:** 2026-07-20
+# **Last Updated:** 2026-08-06
 # =============================================================================
 
 _AID_PLAN_STATE_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${_AID_PLAN_STATE_LIBDIR}/aid-lock.sh"
+# shellcheck disable=SC1091
+source "${_AID_PLAN_STATE_LIBDIR}/aid-roots.sh"   # P074 Step 1 — state-root resolution
 
 AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S=10
 
@@ -273,7 +288,20 @@ _plan_state_require_deps() {
 }
 
 _plan_state_project_root() {
-  printf '%s' "${AID_PLAN_STATE_PROJECT_ROOT:-$(pwd)}"
+  # P074 Step 1: the dedicated env override stays, but passes through
+  # aid_canonicalize_project_root so an override pointing INTO a linked
+  # worktree collapses to the primary checkout instead of forking state.
+  # An override naming a directory that is NEITHER a repo root NOR carries an
+  # .aid-o workspace FAILS LOUDLY (return 2, resolver's message names both
+  # accepted forms) — a silent write to an arbitrary path is never allowed.
+  if [[ -n "${AID_PLAN_STATE_PROJECT_ROOT:-}" ]]; then
+    aid_canonicalize_project_root "$AID_PLAN_STATE_PROJECT_ROOT" || return 2
+    return 0
+  fi
+  # No override: the state root (primary checkout). Outside a git repository
+  # the historic $(pwd) fallback is kept so this layer stays unit-testable
+  # without a repository (see the header's design note).
+  aid_state_root 2>/dev/null || pwd
 }
 
 # _plan_state_dir <plan_id> — the per-plan runtime directory (not part of
@@ -281,12 +309,16 @@ _plan_state_project_root() {
 # matching this codebase's existing convention, e.g. test-cp1-ledger.bats's
 # own `_ledger_file` helper).
 _plan_state_dir() {
-  printf '%s/.aid-o/work/plan-state/%s' "$(_plan_state_project_root)" "$1"
+  local _psd_root
+  _psd_root="$(_plan_state_project_root)" || return 2
+  printf '%s/.aid-o/work/plan-state/%s' "$_psd_root" "$1"
 }
 
 # plan_state_path <plan_id> — the plan state file's canonical path.
 plan_state_path() {
-  printf '%s/plan-state.yaml' "$(_plan_state_dir "$1")"
+  local _psp_dir
+  _psp_dir="$(_plan_state_dir "$1")" || return 2
+  printf '%s/plan-state.yaml' "$_psp_dir"
 }
 
 _plan_ops_path() {
@@ -309,6 +341,28 @@ _plan_state_write_json() {
   printf '%s' "$json" | yq -p=json -o=yaml '.' > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -- "$tmp" "$path" || { rm -f "$tmp"; return 1; }
   return 0
+}
+
+# _plan_path_has_dotdot <path> — true when ANY component of <path> is `..`.
+# String-only (no filesystem access), so it answers the same for a path that
+# does not exist yet, which is exactly when the recorded worktree is written.
+_plan_path_has_dotdot() {
+  local p="$1"
+  [[ "$p" == ".." || "$p" == "../"* || "$p" == *"/.." || "$p" == *"/../"* ]]
+}
+
+# _plan_path_inside_root <path> <root> — is <path> the root itself or under
+# it? Compares the literal prefix first and then, when both ends exist, the
+# PHYSICAL paths, because a symlinked fixture root (macOS /tmp) would
+# otherwise compare unequal to itself.
+_plan_path_inside_root() {
+  local p="$1" root="$2"
+  [[ -n "$root" ]] || return 1
+  [[ "$p" == "$root" || "$p" == "$root"/* ]] && return 0
+  local pp="$p" rp="$root"
+  if [[ -d "$root" ]]; then rp="$( (cd "$root" && pwd -P) 2>/dev/null || printf '%s' "$root")"; fi
+  if [[ -d "$p" ]]; then pp="$( (cd "$p" && pwd -P) 2>/dev/null || printf '%s' "$p")"; fi
+  [[ "$pp" == "$rp" || "$pp" == "$rp"/* ]]
 }
 
 # _plan_state_validate_json <json> <plan_id> — the FULL corruption check:
@@ -342,6 +396,40 @@ _plan_state_validate_json() {
     echo "PRECONDITION FAIL: plan state file for $plan_id is corrupt — offending key: plan_state (unrecognized value '$state')" >&2
     return 5
   fi
+
+  # P074 Step 7 — `worktree_path` is OPTIONAL: absent or null is the legacy
+  # (pre-worktree) plan and always valid. When PRESENT it must be a path
+  # SHAPE: a string, non-empty, single-line, and free of `..` components.
+  # Deliberately nothing more on the READ path — existence and git
+  # registration are checked by consumers, because a plan whose worktree was
+  # deleted must get a named repair (--recreate-worktree), not a "your state
+  # file is corrupt" verdict on every read.
+  #
+  # `..` IS a corruption verdict, not a consumer problem: a traversing path is
+  # never something this library wrote, and every consumer
+  # of it (teardown above all) would act on a directory outside the plan.
+  # Containment inside the state root is enforced on the WRITE path
+  # (plan_state_set_worktree_path) where the root is unambiguous.
+  local wt_type wt_val
+  wt_type="$(jq -r 'if has("worktree_path") then (.worktree_path | type) else "absent" end' <<<"$json" 2>/dev/null)"
+  case "$wt_type" in
+    absent|null) ;;
+    string)
+      wt_val="$(jq -r '.worktree_path' <<<"$json" 2>/dev/null)"
+      if [[ -z "$wt_val" || "$wt_val" == *$'\n'* ]]; then
+        echo "PRECONDITION FAIL: plan state file for $plan_id is corrupt — offending key: worktree_path (must be a non-empty single-line path string when present)" >&2
+        return 5
+      fi
+      if _plan_path_has_dotdot "$wt_val"; then
+        echo "PRECONDITION FAIL: plan state file for $plan_id is corrupt — offending key: worktree_path ('$wt_val' contains a '..' component; the recorded execution worktree is repo-root-relative or absolute, never a traversal)" >&2
+        return 5
+      fi
+      ;;
+    *)
+      echo "PRECONDITION FAIL: plan state file for $plan_id is corrupt — offending key: worktree_path (must be a string or null, got ${wt_type})" >&2
+      return 5
+      ;;
+  esac
 
   return 0
 }
@@ -474,6 +562,151 @@ plan_state_get() {
     return 1
   fi
   printf '%s\n' "$val"
+  return 0
+}
+
+# ===========================================================================
+# plan_state_set_worktree_path <plan_id> <path|""> [require_non_terminal]
+#
+# P074 Step 7/11 — records (or, with an EMPTY second argument, clears) the
+# plan's execution worktree path. Goes through the SAME locked read → validate
+# → tmp+mv write path as plan_state_transition; it is deliberately a separate
+# entry point rather than a generic field setter, so the only fields this
+# library can write remain the ones it declares.
+#
+# Path shape is validated HERE too (not only in the validator): a caller
+# passing a multi-line or whitespace-only value gets a refusal instead of
+# writing a file that its own validator would then call corrupt. This is also
+# the layer that ENFORCES containment — no `..` component, and an absolute
+# path must be inside the state root — so the documented "repo-root-relative
+# or absolute" contract is a check rather than a comment.
+#
+# THE OPTIONAL THIRD ARGUMENT — `require_non_terminal` — makes the write a
+# COMPARE-AND-SET against `plan_state`, in the same critical section, exactly
+# as plan_state_transition re-verifies its from-state under the lock. It
+# exists because a worktree record and a terminal close race on THIS file, not
+# on the worktree lock: a repair can read `plan_state: OPEN`, and a plan-close
+# can then flip the state and (correctly) defer its teardown, before the
+# repair records its path — leaving a recorded execution worktree on a plan
+# that is already CLOSED. A separate re-check by the caller cannot close that
+# window; only a guard inside this lock can. With the guard requested, a
+# terminal plan_state writes NOTHING and returns 6, so the caller can undo
+# what it created. Two modes, because the two writers have different rules
+# about what "terminal" means: `require_non_terminal` (CLOSED / ABORTED /
+# ROLLED_BACK) is the repair's, `require_not_closed` (CLOSED only) mirrors
+# plan-start's own precondition, which deliberately reopens an ABORTED or
+# ROLLED_BACK plan. The guard is ignored when CLEARING the path — removing a
+# record from a terminal plan is exactly what teardown must always be able to
+# do.
+#
+# Returns: 0 written, 1 bad args / no state file / write failure,
+# 2 missing jq/yq, 3 lock timeout, 5 corrupt state file,
+# 6 guard refused (plan is terminal; nothing was written).
+# ===========================================================================
+plan_state_set_worktree_path() {
+  local plan_id="$1" wt_path="${2-}" guard="${3-}"
+
+  _plan_state_require_deps || return 2
+  _validate_plan_id "$plan_id" || return 1
+  if [[ -n "$wt_path" && "$wt_path" == *$'\n'* ]]; then
+    _plan_warn "plan_state_set_worktree_path: worktree_path must be a single-line path (got a multi-line value)"
+    return 1
+  fi
+  # The documented contract is "repo-root-relative or absolute", and it is
+  # ENFORCED here, not merely written down. Without this check `../outside` (or
+  # any other escaping string) is accepted, and every consumer of the record —
+  # teardown most dangerously — then acts on a directory that has nothing to do
+  # with the plan. Empty is the explicit
+  # clear and skips the check.
+  if [[ -n "$wt_path" ]]; then
+    if _plan_path_has_dotdot "$wt_path"; then
+      _plan_warn "plan_state_set_worktree_path: worktree_path must not contain a '..' component (got '$wt_path') — the record is repo-root-relative or absolute, never a traversal"
+      return 1
+    fi
+    local _pswp_root
+    _pswp_root="$(_plan_state_project_root)" || _pswp_root=""
+    if [[ -z "$_pswp_root" ]]; then
+      _plan_warn "plan_state_set_worktree_path: cannot resolve the state root, so '$wt_path' cannot be shown to be inside it — refusing to record it"
+      return 1
+    fi
+    if [[ "$wt_path" == /* ]] && ! _plan_path_inside_root "$wt_path" "$_pswp_root"; then
+      _plan_warn "plan_state_set_worktree_path: an absolute worktree_path must be inside the state root $_pswp_root (got '$wt_path')"
+      return 1
+    fi
+  fi
+
+  local path
+  path="$(plan_state_path "$plan_id")"
+  if [[ ! -f "$path" ]]; then
+    _plan_warn "plan_state_set_worktree_path: no state file for $plan_id at $path — run plan_state_init first"
+    return 1
+  fi
+
+  local lock_path
+  lock_path="$(_plan_lock_path "$plan_id")"
+  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || return 3
+  local fd="$AID_LOCK_FD"
+
+  local json rc
+  json="$(_plan_state_read_raw_json "$path")"
+  if [[ -z "$json" ]]; then
+    aid_lock_release "$fd"
+    echo "PRECONDITION FAIL: plan state file for $plan_id at $path is unreadable or unparseable YAML — offending key: plan_state" >&2
+    return 5
+  fi
+
+  _plan_state_validate_json "$json" "$plan_id"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    aid_lock_release "$fd"
+    return 5
+  fi
+
+  # The compare-and-set guard, INSIDE the lock and before the render, so a
+  # close that flipped the state either lands entirely before this (we refuse)
+  # or entirely after it (our record is already visible to its teardown).
+  if [[ -n "$guard" && -n "$wt_path" ]]; then
+    local _pswp_state _pswp_bad=""
+    _pswp_state="$(jq -r '.plan_state // ""' <<<"$json" 2>/dev/null)"
+    case "$guard" in
+      # The repair's rule: no execution worktree on a plan with no execution
+      # left to do.
+      require_non_terminal)
+        case "$_pswp_state" in CLOSED|ABORTED|ROLLED_BACK) _pswp_bad=1 ;; esac ;;
+      # plan-start's rule, mirrored EXACTLY: it reopens an ABORTED or
+      # ROLLED_BACK plan on purpose and refuses only CLOSED, so the guard
+      # refuses only CLOSED too — a guard that is stricter than its caller's
+      # own precondition would break a supported flow instead of closing a
+      # race.
+      require_not_closed)
+        case "$_pswp_state" in CLOSED) _pswp_bad=1 ;; esac ;;
+      *)
+        aid_lock_release "$fd"
+        _plan_warn "plan_state_set_worktree_path: unknown guard '$guard' (expected require_non_terminal or require_not_closed)"
+        return 1 ;;
+    esac
+    if [[ -n "$_pswp_bad" ]]; then
+      aid_lock_release "$fd"
+      _plan_warn "plan_state_set_worktree_path: $plan_id is $_pswp_state — refusing to record an execution worktree on it (nothing was written)"
+      return 6
+    fi
+  fi
+
+  local new_json
+  new_json="$(jq --arg wt "$wt_path" \
+    '.worktree_path = (if $wt == "" then null else $wt end)' <<<"$json" 2>/dev/null)"
+  if [[ -z "$new_json" ]]; then
+    aid_lock_release "$fd"
+    _plan_warn "plan_state_set_worktree_path: cannot render the updated state JSON for $plan_id"
+    return 1
+  fi
+  if ! _plan_state_write_json "$path" "$new_json"; then
+    aid_lock_release "$fd"
+    _plan_warn "plan_state_set_worktree_path: cannot write state file to $path"
+    return 1
+  fi
+
+  aid_lock_release "$fd"
   return 0
 }
 
@@ -867,12 +1100,14 @@ Subcommands:
   state-path <plan_id>
   init <plan_id> <mode> <plan_branch> <target_branch>
   get <plan_id> <field>
+  set-worktree-path <plan_id> <path|"">
   transition <plan_id> <from> <to>
   op-key <command> <plan_id> <stage> <attempt> <subject>
   op-begin <plan_id> <op_id> <command> <subject> <expected_before_sha>
   op-git-applied <plan_id> <op_id> <resulting_sha>
   op-commit <plan_id> <op_id>
   op-reconcile <plan_id> <op_id>
+  op-append-aborted <plan_id> <op_id> <command> <subject>
 EOF
 }
 
@@ -883,12 +1118,19 @@ main() {
     state-path)      plan_state_path "$@"; exit $? ;;
     init)             plan_state_init "$@"; exit $? ;;
     get)              plan_state_get "$@"; exit $? ;;
+    set-worktree-path) plan_state_set_worktree_path "$@"; exit $? ;;
     transition)       plan_state_transition "$@"; exit $? ;;
     op-key)           plan_op_key "$@"; exit $? ;;
     op-begin)         plan_op_begin "$@"; exit $? ;;
     op-git-applied)   plan_op_mark_git_applied "$@"; exit $? ;;
     op-commit)        plan_op_commit "$@"; exit $? ;;
     op-reconcile)     plan_op_reconcile "$@"; exit $? ;;
+    # The MANUAL half of a compensation whose ledger rollback could not be
+    # written (read-only state directory, full disk).
+    # plan-start's compensation prints this exact invocation, so an operator
+    # never has to hand-craft a JSONL record.
+    # Usage: op-append-aborted <plan_id> <op_id> <command> <subject>
+    op-append-aborted) _plan_op_append "$1" "$2" "$3" "$4" "aborted" "" ""; exit $? ;;
     -h|--help|"")
       _aid_plan_state_usage
       [[ -z "$sub" ]] && exit 2

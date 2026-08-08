@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-06
 
 ## False-Green Guardrails
 
@@ -154,7 +154,11 @@ Before EPIC generation for a high-risk plan, all 4 files must exist, be non-empt
 - `cp1-lens-L3-enforcement.md` — must contain `stop_rule_blockers:` at line-start
 - `cp1-adjudicator.md` — must contain `verdict:` at line-start
 
-Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation. Called as subprocess by `scripts/aid-plan-to-epic.sh`. As of P065 Step 20, the same gate ALSO enforces the C0 cross-provider plan review and the CP1 ledger budget below — both are additional, independent requirements checked AFTER the 4-file/adjudicator check above passes.
+Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation.
+
+**Where the gate is called from — once per TRANSACTION, never once per phase.** A plan's generation is one transaction. `scripts/aid-auto-pipeline.sh` calls this gate exactly ONCE per plan, before any EPIC, `plan.json`, run, FSM state or queue entry exists, and seals the decision into `.aid-o/work/evidence/<plan_id>/generation/generation-authority.json`. Every phase then VERIFIES that sealed authority (schema, self-hash, plan bytes, target head, phase range, re-derived ids) instead of re-running the gate. A STANDALONE `scripts/aid-plan-to-epic.sh` invocation — one given neither `--generation-authority` nor `--transaction` — still runs the full gate per invocation; that is the only surface where a per-invocation gate call remains.
+
+As of P065 Step 20, the same gate ALSO enforces the C0 cross-provider plan review and the CP1 ledger budget below — both are additional, independent requirements checked AFTER the 4-file/adjudicator check above passes.
 
 ### C0 Cross-Provider Plan Review — Adjudicator MUST-Consume Contract
 
@@ -244,11 +248,28 @@ artifact — see "Bounded Loop" below.
   The artifact is a `cp1-pm-escalation-override.json`
   at the plan's evidence root, containing a non-empty `pm_ref` (>= 20
   characters, mirroring this project's `AID_C3_FORCE_BEYOND_ESCALATION`
-  reasoned-override convention). `aid-cp1-gate.sh` consumes it EXACTLY
-  ONCE — after using it to bypass a failing check, it renames the artifact
-  to a `.consumed-<epoch>` sibling so it cannot silently authorize a second
-  bypass. Using it always records the override AND the unresolved findings
-  in the gate's own log output — never a silent pass.
+  reasoned-override convention). `aid-cp1-gate.sh` claims it EXACTLY ONCE
+  PER GATE INVOCATION — after using it to bypass a failing check, it renames
+  the artifact to a `.consumed-<epoch>` sibling so it cannot silently
+  authorize a second bypass. Because the pipeline calls the gate once per
+  generation TRANSACTION, one override artifact covers a whole plan's
+  generation, however many phases it has; the per-invocation claim only ever
+  bites on standalone `aid-plan-to-epic.sh` runs. Using it always records
+  the override AND the unresolved findings in the gate's own log output —
+  never a silent pass.
+
+  **At generation time the PM's route is the pipeline's own audited force,
+  not this artifact.** When the gate refuses a plan under
+  `aid-auto-pipeline.sh`, the refusal is labelled
+  `aid_generation_force_required:` and prints the exact command:
+  `aid-auto-pipeline.sh --plan <path> --queue-mode <mode> --force --reason
+  '<why, at least 20 characters>'`. That force is invocation-scoped, writes
+  three audit records BEFORE the authority exists, and records every bypassed
+  condition verbatim in the authority. A refusal `--force` cannot cover (the
+  gate mis-invoked, an I/O failure, or a broken plan identity) is labelled
+  `aid_cp1_blocked:` instead and names the hard condition first. On that
+  class `--force` is REFUSED IN THE SAME PLACE — it seals no authority and
+  writes no waiver, so the label is enforcement rather than advice.
 
 **Evidence retention:** raw Codex evidence files (dispatch.json, codex-events.jsonl,
 codex-last-message.json) are not preserved per-attempt; each dispatch run

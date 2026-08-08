@@ -5255,6 +5255,41 @@ _revert_the_merge() {
   [ -f "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-rollback-complete" ]
 }
 
+@test "P074 F5: re-rolling back an ALREADY ROLLED BACK plan reconciles the worktree — exit 0 only when the requested revert is the one that happened" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev" --reason "dogfood rollback drill"
+  [ "$status" -eq 0 ]
+
+  # The idempotent re-run: same revert, nothing left to do, the worktree (if
+  # any survived a kill) is reconciled. This is the P074 Step 11 F5 path — it
+  # had NO test anywhere; `grep -rn "ALREADY ROLLED BACK"` hit only the source.
+  _rollback "$rev" --reason "re-running the identical rollback request"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ALREADY ROLLED BACK"* ]]
+  [[ "$output" == *"$rev"* ]]           # it names the revert it actually has
+
+  # A DIFFERENT revert is a request nothing satisfied. The ledger stays honest
+  # either way, but the exit code must not claim success for it: a scripted
+  # caller asking "roll back with X" against a plan rolled back with Y was
+  # being told 0.
+  # The merge commit is a real, different commit in this history — asking to
+  # roll back "with the merge" against a plan rolled back with the revert.
+  local other; other="$(_merge_commit)"
+  [ "$other" != "$rev" ]
+  _rollback "$other" --reason "asking for a revert that never happened here"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"already ROLLED_BACK"* ]]
+  [[ "$output" == *"$rev"* ]]           # names what is recorded
+  [[ "$output" == *"$other"* ]]         # and what was asked for
+
+  # Neither call rewrote the record.
+  local m="${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
+  [ "$(jq -r '.plan_boundary_manifest.plan_final_rollback.revert_commit' "$m")" = "$rev" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ROLLED_BACK" ]
+}
+
 @test "AC13: rollback REFUSES while the delivery is still on the target branch" {
   _seed_closable
   # No revert performed: the plan's files are still there, so there is nothing
@@ -5467,17 +5502,54 @@ _revert_the_merge() {
   local rev; rev="$(_revert_the_merge)"
   _rollback "$rev"
   [ "$status" -eq 0 ]
-
-  # Re-running against a DIFFERENT revert must not be satisfied by the record
-  # already present: the resume compares all five fields, not just one, so a
-  # partial match is a different record and must not be treated as done.
   local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
-  local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:${rel}")"
-  _commit_on main after.txt "chore: later work"
-  _rollback "$(_main_sha)"
+
+  # Tamper with the AUTHORITATIVE record — the copy on the target ref, which is
+  # the one the read-back reads (the worktree copy is only ever a scratch buffer
+  # the command materialises from the ledger and throws away). One of the five
+  # fields is falsified; the other four still match.
+  ( cd "$TEST_PROJECT_ROOT" \
+    && orig="$(git symbolic-ref --short HEAD)" \
+    && git checkout -q main \
+    && yq -i '.rollback.revert_commit = "0000000000000000000000000000000000000000"' "$rel" \
+    && git add -- "$rel" \
+    && git commit -q -m "chore: unrelated ledger edit" \
+    && git checkout -q "$orig" )
+  local tampered; tampered="$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:${rel}")"
+
+  # A crash between the durable write and the state change leaves the plan in
+  # PLAN_MERGING with a record already on the target — the resume this exercises.
+  sed -i 's/^plan_state: ROLLED_BACK$/plan_state: PLAN_MERGING/' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-state.yaml"
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_MERGING" ]
+
+  # Deny the correcting write the ability to land, so the read-back is answered
+  # by the tampered record rather than by the record just written. This is the
+  # failure the read-back exists for: what a clean clone would read differs from
+  # what this run believes it recorded.
+  local hook="${TEST_PROJECT_ROOT}/.git/hooks/reference-transaction"
+  mkdir -p "$(dirname "$hook")"
+  printf '#!/bin/sh\nwhile read -r o n r; do case "$r" in refs/heads/main) exit 1;; esac; done\nexit 0\n' > "$hook"
+  chmod +x "$hook"
+
+  _rollback "$rev" --op-id "ac15-tamper"
   [ "$status" -ne 0 ]
-  # The durable record is untouched by the refused run.
-  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:${rel}")" = "$before" ]
+  # It failed AT the read-back, naming the tampered SHA as what it read back —
+  # not at some earlier precondition that would make this test pass for the
+  # wrong reason. The five-field compare is what caught it: the falsified
+  # revert_commit alone is a different record.
+  [[ "$output" == *"read back from main:${rel} does not match what was written"* ]]
+  [[ "$output" == *"read:"*"0000000000000000000000000000000000000000"* ]]
+  # ...and the tampered record was NOT silently accepted as an already-durable
+  # resume, which is what a status-only or single-field compare would have done.
+  [[ "$output" != *"this is a resume"* ]]
+
+  # Nothing was written: the durable record is as the tamper left it, and the
+  # plan did not advance to ROLLED_BACK on a record it could not verify.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:${rel}")" = "$tampered" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_MERGING" ]
 }
 
 @test "AC15: a plan_branch plan with NO lifecycle manifest is refused — no state, no marker" {

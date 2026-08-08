@@ -15,6 +15,8 @@
 #   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 #   aid-fsm.sh promote-check <check_name> <state_file>
 #   aid-fsm.sh check-promotion-candidates <state_file>
+#   aid-fsm.sh alloc plan-id | alloc epic-id     # locked counter.yaml allocation (P074 Step 3)
+#   aid-fsm.sh active-runs list | active-runs prune   # multi-run map read / stale-entry sweep (P074 Step 4)
 
 set -euo pipefail
 
@@ -22,6 +24,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# P074 Step 1 — shared invoke-root/state-root resolution. State paths
+# (.aid-o/...) resolve through aid_state_path/aid_state_root so an invocation
+# from a linked worktree reads and writes the PRIMARY checkout's workspace;
+# tree checks use aid_invoke_root.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
@@ -49,6 +57,20 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-plan-manifest.sh" ]]; then
   # shellcheck disable=SC1091
   source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh" || true
 fi
+# P074 Step 6 — generated active.md index + the shared post-boundary sync
+# (aid_active_boundary_sync). Guarded source, same rationale as the manifest
+# lib above: index bookkeeping is best-effort and must never abort the CLI;
+# call sites fall back to the bare Step 4 functions when this lib is absent.
+if [[ -f "${SCRIPT_DIR}/lib/aid-active-index.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-active-index.sh" || true
+fi
+
+# P074 Step 8 — the verbatim argv of this process, captured by the dispatcher
+# at the bottom of this file before any parsing, so the plan-worktree redirect
+# can re-execute this invocation with no argument drift. Declared here so a
+# SOURCED aid-fsm.sh under `set -u` never sees it unset.
+_AID_FSM_ORIG_ARGS=()
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -195,36 +217,269 @@ derive_timeline() {
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
   if [[ -n "$epic_id" && -n "$run_id" ]]; then
-    echo ".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+    # State-root resolved (P074 Step 1): best-effort contract preserved — when
+    # no root resolves at all (non-repo fixture dirs), the pre-P074
+    # cwd-relative path is kept so timeline logging still lands where it
+    # always did instead of silently disappearing.
+    local _dt_rel=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+    aid_state_path "$_dt_rel" 2>/dev/null || printf '%s\n' "$_dt_rel"
   fi
 }
 
-# active_run_pointer_path — canonical location of the single "which run
-# currently governs main" pointer (OBS-20260712-01 hotfix). Consumed by
-# defaults/hooks/pre-commit's commit-scope guard for its two main-fallback
-# checks (EXECUTE/GATES rogue-commit block, DONE/release version whitelist)
-# — a historical evidence directory must never act as an IMPLICIT pointer to
-# "the" active run; this file is the only EXPLICIT one.
+# active_run_pointer_path — location of the LEGACY single "which run
+# currently governs main" pointer (OBS-20260712-01 hotfix). Since P074 Step 4
+# this file is READ-ONLY compatibility surface, tolerated for one release:
+# the writer that produced it (`write_active_run_pointer`) is replaced by the
+# multi-run map below, and nothing here ever writes, migrates or deletes the
+# legacy file (fallback retirement is tracked in the backlog, plan Step 19).
 active_run_pointer_path() {
-  echo ".aid-o/work/active-run-pointer.json"
+  # State-root resolved (P074 Step 1) so a worktree invocation points at the
+  # PRIMARY checkout's pointer, never a forked one inside the worktree.
+  # Same legacy cwd-relative fallback as derive_timeline when no root
+  # resolves (non-repo fixture dirs).
+  aid_state_path ".aid-o/work/active-run-pointer.json" 2>/dev/null \
+    || printf '%s\n' ".aid-o/work/active-run-pointer.json"
 }
 
-# write_active_run_pointer <state_file> — (re)points the single active-run
-# slot at this run. Called once, at the very end of cmd_init. Single global
-# slot, always OVERWRITTEN by the next run's init — self-expiring by
-# construction (a run superseded by a newer init can never re-emerge as "the"
-# active run again, however long its own evidence directory survives on
-# disk). Best-effort: a write failure here must never block init itself.
-write_active_run_pointer() {
+# ── P074 Step 4: multi-run active-runs map ──────────────────────────────
+# <state_root>/.aid-o/work/active-runs.json — a JSON OBJECT keyed by epic_id,
+# one entry per live run:
+#   { state_file, run_id, state, branch, plan_id, governs_main, updated_at }
+# It replaces the single-slot pointer above, which was always OVERWRITTEN by
+# the next run's init — run B's init made run A invisible to the pre-commit
+# main-fallback guard. The map keeps the consumer contract (the hook still
+# resolves state_file and re-reads state/done_phase LIVE at commit time; the
+# `state` stored here is informational, stamped at upsert) and only
+# multiplies the slots.
+# governs_main is computed at upsert from the run's DECLARED plan mode
+# (_fsm_declared_plan_mode): a plan_branch EPIC's merge target is
+# plan/<plan_id>, not main → false; legacy_epic_release_mode / unresolved /
+# ad-hoc EPICs → true — the runs whose merge target is main, exactly as the
+# old pointer semantics define.
+# Lifecycle: cmd_init upserts its entry; done-advance (the review→release
+# edge) and plan-close remove their OWN entry; `aid-fsm.sh active-runs prune`
+# sweeps entries whose state file is gone or whose live state is terminal
+# (NEW vs the pointer, which expired only by init-overwrite; invoked by the
+# Step 6 active-index refresh). All writes happen under a lib/aid-lock.sh
+# sidecar flock and land atomically (mktemp + mv in the map's own dir).
+# Fail-closed on corruption: an unparseable map is NEVER clobbered — every
+# writer refuses, naming the file. ABSENT file and a PARSEABLE empty map
+# ({}) both mean "no active runs"; a present-but-zero-byte file is a
+# TRUNCATED write and is refused like any other unparseable content.
+active_runs_map_path() {
+  aid_state_path ".aid-o/work/active-runs.json" 2>/dev/null \
+    || printf '%s\n' ".aid-o/work/active-runs.json"
+}
+
+# _active_runs_read_object <map> — prints the map as compact JSON ('{}' when
+# the file is ABSENT). Unparseable / non-object content — INCLUDING a
+# present-but-zero-byte file (a truncated write, not an empty map; only a
+# parseable {} means "no active runs") — errors naming the file, rc 1:
+# callers must fail closed, never clobber. Call under the map lock.
+_active_runs_read_object() {
+  local map="$1" doc=""
+  if [[ ! -e "$map" ]]; then printf '{}'; return 0; fi
+  if ! doc="$(jq -ce 'if type == "object" then . else error("not an object") end' "$map" 2>/dev/null)" \
+     || [[ -z "$doc" ]]; then
+    echo "ERROR: active-runs: ${map} is not a parseable JSON object — refusing to touch it (fix or remove the file; nothing was written)" >&2
+    return 1
+  fi
+  printf '%s' "$doc"
+}
+
+# _active_runs_write <map> <json> — atomic replace (mktemp + mv, same dir).
+_active_runs_write() {
+  local map="$1" doc="$2" tmp=""
+  tmp="$(mktemp "${map}.tmp.XXXXXX")" || {
+    echo "ERROR: active-runs: mktemp failed next to ${map}" >&2; return 1; }
+  if ! printf '%s\n' "$doc" | jq '.' > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    echo "ERROR: active-runs: failed to write ${map}" >&2
+    return 1
+  fi
+  mv "$tmp" "$map"
+}
+
+# _active_runs_governs_main <epic_id> — "true" unless the run's declared plan
+# mode is plan_branch (whose merge target is plan/<plan_id>, never main).
+_active_runs_governs_main() {
+  local epic_id="$1" mode=""
+  mode="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
+  mode="${mode%%$'\t'*}"
+  if [[ "$mode" == "plan_branch" ]]; then printf 'false'; else printf 'true'; fi
+}
+
+# upsert_active_run <state_file> — (re)writes THIS run's entry in the map.
+# Called once, at the very end of cmd_init. Best-effort at the call site
+# (`|| true`): a failure must never block init — a run with no entry is
+# exactly as exposed as a pre-P074 crash-before-pointer-write (the on-branch
+# hook path still guards it). The legacy single-slot pointer is deliberately
+# NOT written here.
+upsert_active_run() {
   local state_file="$1"
-  local ptr; ptr=$(active_run_pointer_path)
-  local epic_id run_id
+  command -v jq >/dev/null 2>&1 || {
+    echo "WARNING: active-runs: jq not found — no entry recorded for ${state_file}" >&2
+    return 1; }
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  local epic_id run_id branch state nnn plan_id governs now
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
-  local now; now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  mkdir -p "$(dirname "$ptr")" 2>/dev/null || true
-  jq -n --arg sf "$state_file" --arg e "$epic_id" --arg r "$run_id" --arg t "$now" \
-    '{state_file: $sf, epic_id: $e, run_id: $r, written_at: $t}' > "$ptr" 2>/dev/null || true
+  branch=$(yaml_field "$state_file" branch)
+  state=$(yaml_field "$state_file" state)
+  if [[ -z "$epic_id" ]]; then
+    echo "WARNING: active-runs: no epic_id in ${state_file} — no entry recorded" >&2
+    return 1
+  fi
+  nnn="$(_fsm_epic_plan_nnn "$epic_id" 2>/dev/null || true)"
+  plan_id=""
+  [[ -n "$nnn" ]] && plan_id="P${nnn}"
+  governs="$(_active_runs_governs_main "$epic_id")"
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$map")" 2>/dev/null || true
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "WARNING: active-runs: could not lock ${map}.lock — no entry recorded for ${epic_id}" >&2
+    return 1; }
+  local fd="$AID_LOCK_FD"
+  local doc
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  if ! doc="$(jq -c --arg e "$epic_id" --arg sf "$state_file" --arg r "$run_id" \
+        --arg st "$state" --arg br "$branch" --arg p "$plan_id" \
+        --argjson gm "$governs" --arg t "$now" \
+        '.[$e] = {state_file: $sf, run_id: $r, state: $st, branch: $br,
+                  plan_id: (if $p == "" then null else $p end),
+                  governs_main: $gm, updated_at: $t}' <<<"$doc")"; then
+    aid_lock_release "$fd"
+    echo "WARNING: active-runs: jq upsert failed for ${epic_id}" >&2
+    return 1
+  fi
+  local rc=0
+  _active_runs_write "$map" "$doc" || rc=1
+  aid_lock_release "$fd"
+  return "$rc"
+}
+
+# remove_active_run <epic_id> [context] — deletes exactly this EPIC's entry
+# (concurrent runs keep theirs). No map, or no entry: silent no-op. The
+# legacy pointer file is never touched.
+remove_active_run() {
+  local epic_id="$1" why="${2:-}"
+  command -v jq >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  [[ -e "$map" ]] || return 0   # a PRESENT zero-byte file is refused below
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "WARNING: active-runs: could not lock ${map}.lock — entry ${epic_id} not removed" >&2
+    return 1; }
+  local fd="$AID_LOCK_FD" doc rc=0
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  if [[ "$(jq -r --arg e "$epic_id" 'has($e)' <<<"$doc")" == "true" ]]; then
+    doc="$(jq -c --arg e "$epic_id" 'del(.[$e])' <<<"$doc")"
+    if _active_runs_write "$map" "$doc"; then
+      echo "active-runs: removed entry ${epic_id}${why:+ (${why})}" >&2
+    else
+      rc=1
+    fi
+  fi
+  aid_lock_release "$fd"
+  return "$rc"
+}
+
+# prune_active_runs — sweep mode: removes entries whose state file is GONE
+# (killed run whose evidence was cleaned, or a state file deleted manually)
+# or whose LIVE state is terminal (DONE/ERROR), logging which entry was
+# removed and why. Exposed as `aid-fsm.sh active-runs prune` — the
+# invocation surface for the P074 Step 6 active-index refresh.
+prune_active_runs() {
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: active-runs prune: jq is required" >&2; return 1; }
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  if [[ ! -e "$map" ]]; then
+    echo "active-runs prune: no map at ${map} — nothing to prune" >&2
+    return 0
+  fi
+  local root
+  root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "ERROR: active-runs prune: could not lock ${map}.lock" >&2; return 1; }
+  local fd="$AID_LOCK_FD" doc rc=0 removed=0
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  local epic sf abs state reason
+  while IFS=$'\t' read -r epic sf; do
+    [[ -n "$epic" ]] || continue
+    reason=""
+    if [[ -z "$sf" ]]; then
+      reason="entry has no state_file"
+    else
+      abs="$sf"
+      [[ "$abs" != /* ]] && abs="${root}/${abs}"
+      if [[ ! -f "$abs" ]]; then
+        reason="state file gone: ${sf}"
+      else
+        state="$(yaml_field "$abs" state)"
+        case "$state" in
+          DONE|ERROR) reason="terminal state ${state}" ;;
+        esac
+      fi
+    fi
+    if [[ -n "$reason" ]]; then
+      doc="$(jq -c --arg e "$epic" 'del(.[$e])' <<<"$doc")"
+      echo "active-runs prune: removed ${epic} (${reason})" >&2
+      removed=$((removed + 1))
+    fi
+  done < <(jq -r 'to_entries[] | [.key, (.value.state_file // "")] | @tsv' <<<"$doc")
+  if [[ "$removed" -gt 0 ]]; then
+    _active_runs_write "$map" "$doc" || rc=1
+  fi
+  aid_lock_release "$fd"
+  echo "active-runs prune: ${removed} entry(ies) removed" >&2
+  return "$rc"
+}
+
+# cmd_active_runs — `aid-fsm.sh active-runs <list|prune>` (P074 Step 4).
+# `list` prints the map; when the map is ABSENT it presents the legacy
+# single-slot pointer READ-ONLY in map shape (the one-release fallback —
+# never materialized to disk). `prune` sweeps stale entries (see above).
+cmd_active_runs() {
+  local verb="${1:-}"
+  case "$verb" in
+    prune) prune_active_runs ;;
+    list)
+      command -v jq >/dev/null 2>&1 || {
+        echo "ERROR: active-runs list: jq is required" >&2; exit 1; }
+      local map; map="$(active_runs_map_path)"
+      if [[ -e "$map" ]]; then
+        local doc
+        doc="$(_active_runs_read_object "$map")" || exit 1
+        printf '%s\n' "$doc" | jq '.'
+      else
+        local ptr; ptr="$(active_run_pointer_path)"
+        if [[ -s "$ptr" ]] && jq -e 'type == "object"' "$ptr" >/dev/null 2>&1; then
+          jq '{((.epic_id // "unknown")): {state_file: (.state_file // null),
+               run_id: (.run_id // null), state: null, branch: null,
+               plan_id: null, governs_main: true,
+               updated_at: (.written_at // null), legacy_pointer: true}}' "$ptr"
+        else
+          echo '{}'
+        fi
+      fi ;;
+    *)
+      echo "Usage: aid-fsm.sh active-runs <list|prune>" >&2
+      exit 1 ;;
+  esac
 }
 
 # True if the working tree is a git worktree (git_dir under .git/worktrees/).
@@ -234,6 +489,329 @@ is_worktree() {
   local git_dir
   git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 1
   [[ "$git_dir" == *.git/worktrees/* ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PER-PLAN EXECUTION WORKTREE — the EPIC-layer view (P074 Steps 8 + 9)
+#
+# `plan-start` gives every plan_branch plan its own linked worktree at
+# `.aid-worktrees/plan-<id>` and records the path in plan-state (Step 7). The
+# EPIC layer has to honour that in two places:
+#
+#   Step 8 — `init` and `done-advance` are plan-linked TREE operations driven
+#            by cwd. Invoked from the primary checkout for a worktree-recorded
+#            plan they would create the task branch in, and attribute the EPIC
+#            diff of, the WRONG tree. They now re-execute themselves in the
+#            plan worktree (or refuse, when it is broken).
+#   Step 9 — inside that worktree, branch enforcement RUNS (it is the plan's
+#            "main"), instead of taking is_worktree()'s blanket skip.
+#
+# WHY A SMALL LOCAL COPY OF THE STATE PROBE AND NOT aid-plan-fsm.sh's helpers:
+# sourcing aid-plan-fsm.sh here would import cmd_plan_close, cmd_plan_state and
+# several other names this file ALSO defines, silently replacing them. The
+# probe is deliberately tiny (read one field, ask git for the registration) and
+# reads plan-state through its public CLI, so there is no schema knowledge to
+# drift. The authority for creating, repairing and tearing worktrees down stays
+# in aid-plan-fsm.sh; nothing below ever writes.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Physical path if it exists, the input otherwise — `git worktree list` reports
+# physical paths, so every comparison has to go through this or a symlinked
+# fixture root compares unequal to itself. (Mirrors _pfsm_phys.)
+_fsm_phys() {
+  local p="${1:-}"
+  if [[ -d "$p" ]]; then (cd "$p" 2>/dev/null && pwd -P) || printf '%s' "$p"
+  else printf '%s' "$p"; fi
+}
+
+# _fsm_worktree_registered <root> <path> — does git know <path> as a worktree?
+_fsm_worktree_registered() {
+  local root="$1" want line
+  want="$(_fsm_phys "$2")"
+  while IFS= read -r line; do
+    [[ "$line" == worktree\ * ]] || continue
+    [[ "$(_fsm_phys "${line#worktree }")" == "$want" ]] && return 0
+  done < <(git -C "$root" worktree list --porcelain 2>/dev/null)
+  return 1
+}
+
+# _fsm_worktree_is_linked <state_root> <path> — is <path> a LINKED worktree
+# rather than the primary checkout? `git worktree list` includes the primary,
+# so registration alone would accept a `worktree_path` recorded as the state
+# root, and the enforcer's cwd comparison would then pass it as "already
+# there" — running init/done-advance in the PM's own tree while reporting
+# isolation, with no redirect and therefore no loop guard. Mirrors
+# aid-plan-fsm.sh's _pfsm_worktree_is_linked and this file's own is_worktree.
+_fsm_worktree_is_linked() {
+  local root="$1" path="$2" gd=""
+  [[ "$(_fsm_phys "$path")" != "$(_fsm_phys "$root")" ]] || return 1
+  gd="$(git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  [[ "$gd" == */worktrees/* ]]
+}
+
+# _fsm_plan_worktree_recorded <plan_id> <state_root> — the ABSOLUTE recorded
+# path, or empty (legacy plan / no state file / no plan-state lib).
+#
+# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read":
+#   0 + a path  -> the plan records that worktree
+#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
+#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
+#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
+#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
+#                  other non-0/1 rc such as a lock timeout)
+#
+# The distinction is load-bearing. Callers treat "definitively none" as a
+# legacy plan, and "none BUT a worktree exists at the canonical path" as the
+# plan-start crash window — a hard refusal that asserts a FACT about how the
+# plan was created. Collapsing an unreadable state file into "records none"
+# made that refusal fire on a missing `yq`, telling the operator plan-start had
+# been killed mid-transaction (and pointing at --recreate-worktree) when the
+# real fault was a missing dependency. Never diagnose from an answer you did
+# not get.
+_fsm_plan_worktree_recorded() {
+  local plan_id="$1" root="$2" rec="" rc=0
+  [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || { printf ''; return 0; }
+  rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" \
+    bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
+  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
+  # the field is absent. Both are real answers. Anything else is not.
+  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
+    printf ''
+    return 2
+  fi
+  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
+  [[ -z "$rec" ]] && { printf ''; return 0; }
+  [[ "$rec" == /* ]] || rec="${root}/${rec}"
+  printf '%s' "$rec"
+}
+
+# _fsm_plan_worktree_canonical_if_live <state_root> <plan_id> — the canonical
+# `.aid-worktrees/plan-<id>` path when it EXISTS and git knows it as a linked
+# worktree, empty otherwise.
+#
+# Used only where the plan-state record is unreadable (rc 2 above). The
+# directory name is fixed by Step 7 precisely so the enforcer can derive it
+# without reading state, and git's own registration is the corroboration: a
+# registered linked worktree at the plan's canonical path is physical evidence
+# that this plan is worktree-mode, independent of any parser.
+_fsm_plan_worktree_canonical_if_live() {
+  local root="$1" plan_id="$2" canonical
+  canonical="${root}/.aid-worktrees/plan-${plan_id}"
+  [[ -d "$canonical" ]] || { printf ''; return 0; }
+  _fsm_worktree_registered "$root" "$canonical" || { printf ''; return 0; }
+  _fsm_worktree_is_linked "$root" "$canonical" || { printf ''; return 0; }
+  printf '%s' "$canonical"
+}
+
+# _fsm_plan_worktree_for_epic <epic_id> — the healthy recorded worktree of the
+# EPIC's owning plan, or empty. Prints nothing and succeeds for an ad-hoc EPIC
+# (no derivable plan id), a legacy plan, or a plan whose worktree is broken —
+# the enforcer below is the only place that turns "broken" into a refusal.
+_fsm_plan_worktree_for_epic() {
+  local epic_id="${1:-}" nnn plan_id root rec rc=0
+  nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || { printf ''; return 0; }
+  plan_id="P${nnn}"
+  root="$(aid_state_root 2>/dev/null || pwd)"
+  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")" || rc=$?
+  # Unreadable record: fall back to the physical evidence, so branch topology
+  # inside a live plan worktree does not silently revert to the foreign-worktree
+  # skip just because `yq` is missing or the state file is corrupt.
+  [[ "$rc" -eq 2 ]] && rec="$(_fsm_plan_worktree_canonical_if_live "$root" "$plan_id")"
+  [[ -n "$rec" && -d "$rec" ]] || { printf ''; return 0; }
+  _fsm_worktree_registered "$root" "$rec" || { printf ''; return 0; }
+  # A record naming the primary checkout is a lie, never "the plan's worktree"
+  # — without this, Step 9's topology would be applied in the PM's own tree.
+  _fsm_worktree_is_linked "$root" "$rec" || { printf ''; return 0; }
+  printf '%s' "$rec"
+}
+
+# _fsm_in_plan_worktree <epic_id> — true when cwd is the EPIC's plan worktree
+# (Step 9's "this is the plan's own worktree, not a foreign one" test).
+_fsm_in_plan_worktree() {
+  local rec here want
+  rec="$(_fsm_plan_worktree_for_epic "${1:-}")"
+  [[ -n "$rec" ]] || return 1
+  here="$(_fsm_phys "$PWD")"; want="$(_fsm_phys "$rec")"
+  [[ "$here" == "$want" || "$here" == "$want"/* ]]
+}
+
+# _fsm_wt_abs_args <arg>... — one absolutized argument per line.
+#
+# Same two rules as aid-plan-fsm.sh's `_pfsm_wt_abs_args` (see its header for
+# the full reasoning): enumerated path FLAGS are absolutized by declaration,
+# and the residue of bare positionals only when relative, containing a `/`,
+# with an existing first component, and unresolvable by git as a ref — so
+# `init`'s state-file positional is rewritten (it does not exist yet, which is
+# why existence cannot be the test) while its branch argument
+# (`task/E-.../main`, `plan/P...`) is left alone.
+#
+# DELIBERATE DUPLICATE. aid-fsm.sh cannot source aid-plan-fsm.sh — both define
+# `cmd_plan_close`, `cmd_plan_state` and others, so sourcing would silently
+# replace this file's own versions. The two copies are kept byte-parallel and
+# cross-referenced instead; the flag list below covers THIS CLI's path flags.
+_AID_WT_PATH_FLAGS=" --plan --project-root --state-file --report-file --execution-yaml --output "
+_AID_WT_KV_FLAGS=" --substitute-receipt "
+
+_aid_wt_abs_one() {
+  local v="${1:-}"
+  [[ -n "$v" && "$v" != /* ]] || { printf '%s' "$v"; return 0; }
+  printf '%s/%s' "$(pwd)" "$v"
+}
+
+_aid_wt_abs_positional() {
+  local a="${1:-}" first="${1%%/*}"
+  if [[ "$a" == */* && "$a" != /* && -d "$first" ]] \
+     && ! git rev-parse --verify --quiet "$a" >/dev/null 2>&1; then
+    printf '%s/%s' "$(pwd)" "$a"
+  else
+    printf '%s' "$a"
+  fi
+}
+
+_aid_wt_rewrite_args() {
+  local expect="" a
+  for a in "$@"; do
+    case "$expect" in
+      path) printf '%s\n' "$(_aid_wt_abs_one "$a")"; expect=""; continue ;;
+      kv)
+        if [[ "$a" == *=* ]]; then
+          printf '%s=%s\n' "${a%%=*}" "$(_aid_wt_abs_one "${a#*=}")"
+        else
+          printf '%s\n' "$a"
+        fi
+        expect=""; continue ;;
+    esac
+    if [[ "$_AID_WT_PATH_FLAGS" == *" $a "* ]]; then
+      printf '%s\n' "$a"; expect="path"; continue
+    fi
+    if [[ "$_AID_WT_KV_FLAGS" == *" $a "* ]]; then
+      printf '%s\n' "$a"; expect="kv"; continue
+    fi
+    if [[ "$a" == --*=* ]]; then
+      local f="${a%%=*}"
+      if [[ "$_AID_WT_PATH_FLAGS" == *" $f "* ]]; then
+        printf '%s=%s\n' "$f" "$(_aid_wt_abs_one "${a#*=}")"; continue
+      fi
+    fi
+    if [[ "$a" == -* ]]; then printf '%s\n' "$a"; continue; fi
+    printf '%s\n' "$(_aid_wt_abs_positional "$a")"
+  done
+}
+
+_fsm_wt_abs_args() { _aid_wt_rewrite_args "$@"; }
+
+# ---------------------------------------------------------------------------
+# _fsm_resolve_state_file <path> — the state file, resolved through the STATE
+# root when it was given relative.
+#
+# WHY: `.aid-o/` is gitignored, so it exists ONLY in the primary checkout. Every
+# caller passes the state file relative (`.aid-o/work/evidence/<epic>/<run>/
+# fsm-state.yaml`), which is correct from the primary checkout and resolves to
+# NOTHING from inside the plan worktree. Without this, `done-advance` invoked in
+# the worktree — the whole point of worktree mode — died on "state_file not
+# found" before the enforcer could even run, and `init` would have created a
+# second, forked `.aid-o` inside the worktree.
+#
+# `aid_state_path` returns a relative input UNCHANGED when the caller already
+# stands at the state root, so every primary-checkout invocation (and the
+# golden byte-identity fixtures) is untouched; only worktree and subdirectory
+# invocations get the absolute primary path. Outside a resolvable repository it
+# fails and the original value is kept — the historic degenerate behaviour.
+# ---------------------------------------------------------------------------
+_fsm_resolve_state_file() {
+  local sf="${1:-}" r=""
+  if [[ -n "$sf" && "$sf" != /* ]]; then
+    r="$(aid_state_path "$sf" 2>/dev/null)" || r=""
+    [[ -n "$r" ]] && sf="$r"
+  fi
+  printf '%s' "$sf"
+}
+
+# ---------------------------------------------------------------------------
+# _fsm_require_plan_worktree <epic_id>
+#
+# The Step 8 enforcer, EPIC side. Same four outcomes as aid-plan-fsm.sh's
+# _pfsm_require_plan_worktree, same loop guard, same refusals:
+#   legacy plan / ad-hoc EPIC -> return (byte-identical to pre-P074)
+#   unrecorded but a worktree exists at the canonical path -> REFUSE
+#   recorded but missing/unregistered -> REFUSE naming --recreate-worktree
+#   recorded and healthy -> no-op when already inside it, else RE-EXEC there
+# Exits non-zero on refusal (this file's convention); the re-exec never returns.
+# ---------------------------------------------------------------------------
+_fsm_require_plan_worktree() {
+  local epic_id="${1:-}" nnn plan_id root rec canonical here want rc=0
+  nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || return 0
+  plan_id="P${nnn}"
+  root="$(aid_state_root 2>/dev/null || pwd)"
+  canonical="${root}/.aid-worktrees/plan-${plan_id}"
+  rec="$(_fsm_plan_worktree_recorded "$plan_id" "$root")" || rc=$?
+
+  # UNREADABLE record (missing yq/jq, corrupt state file, lock timeout). The
+  # crash-window refusal below must NOT fire here: it asserts that plan-start
+  # was killed between registering the worktree and recording it, and that is a
+  # claim about a record we could not read. Use the physical evidence instead —
+  # a git-registered linked worktree at the canonical path IS the plan's tree,
+  # so the command still runs where it belongs and then fails closed on its own
+  # dependency/mode preconditions (which name the real fault). With no such
+  # worktree there is nothing to redirect to, and behaviour is unchanged.
+  if [[ "$rc" -eq 2 ]]; then
+    rec="$(_fsm_plan_worktree_canonical_if_live "$root" "$plan_id")"
+    [[ -n "$rec" ]] || return 0
+  fi
+
+  if [[ -z "$rec" ]]; then
+    if [[ -d "$canonical" ]] || _fsm_worktree_registered "$root" "$canonical"; then
+      echo "PRECONDITION FAIL: ${plan_id} records NO execution worktree, but one exists at ${canonical} — a plan-start killed between registering it and recording it leaves exactly this. Refusing to run ${epic_id} against ${root} as if the plan were legacy: that operates on the wrong tree silently. Resume 'aid-plan-fsm.sh plan-start ${plan_id} --mode <mode>' (it adopts and records the existing worktree), or repair with 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"'." >&2
+      exit 1
+    fi
+    return 0
+  fi
+
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  if [[ ! -d "$rec" ]] || ! _fsm_worktree_registered "$root" "$rec"; then
+    echo "PRECONDITION FAIL: ${plan_id} records the execution worktree ${rec}, but it is missing or is no longer registered with git — ${epic_id} has no tree to execute in, and the primary checkout is not a substitute. Repair it: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why it went missing>\"" >&2
+    exit 1
+  fi
+
+  # Checked BEFORE the cwd comparison: see _fsm_worktree_is_linked's header —
+  # a record naming the state root would otherwise be accepted as "already
+  # there" and every tree operation would run in the PM's checkout.
+  if ! _fsm_worktree_is_linked "$root" "$rec"; then
+    echo "PRECONDITION FAIL: ${plan_id} records ${rec} as its execution worktree, but that is not a LINKED worktree — it is the primary checkout (${root}) or a directory git does not manage as a separate tree. ${epic_id} can never execute in the state root. Repair the record: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why the recorded path is wrong>\"" >&2
+    exit 1
+  fi
+
+  here="$(_fsm_phys "$PWD")"; want="$(_fsm_phys "$rec")"
+  if [[ "$here" == "$want" || "$here" == "$want"/* ]]; then
+    # Already there. Clearing the guard keeps a legitimate nested redirect for
+    # a DIFFERENT plan possible.
+    unset AID_WT_REDIRECTED
+    return 0
+  fi
+
+  if [[ -n "${AID_WT_REDIRECTED:-}" ]]; then
+    echo "ERROR: worktree redirect loop for ${plan_id}. plan-state records ${rec}, but after re-executing with that as the working directory the invocation is STILL outside it (cwd: ${here}). The recorded path does not describe the tree it claims to. Fix plan-state: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"" >&2
+    exit 1
+  fi
+
+  if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "PRECONDITION FAIL: ${epic_id} executes in ${rec}, but aid-fsm.sh is being used as a sourced library here, so it cannot re-execute itself. Run: cd ${rec} && <the same command>" >&2
+    exit 1
+  fi
+
+  local self
+  self="$(cd "$(dirname "$0")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$0")")" || self="$0"
+  local -a fwd=()
+  mapfile -t fwd < <(_fsm_wt_abs_args "${_AID_FSM_ORIG_ARGS[@]+"${_AID_FSM_ORIG_ARGS[@]}"}")
+
+  echo "NOTE: ${plan_id} executes in its own worktree — re-running this command in ${rec} (was: ${here})." >&2
+  cd "$want" || {
+    echo "PRECONDITION FAIL: cannot enter the execution worktree ${want} for ${plan_id} (permissions? unmounted filesystem?)." >&2
+    exit 1
+  }
+  AID_WT_REDIRECTED=1 exec bash "$self" "${fwd[@]+"${fwd[@]}"}"
 }
 
 # ─── Human step rendering (P073 Step 4) ─────────────────────────────────
@@ -678,6 +1256,14 @@ fsm_check_cp4_curator_validation() {
   local evidence_dir="$1"
   local project_root="$2"
   local state_file="${3:-}"
+  # P074 Step 1: this helper is MIXED — it reads project STATE
+  # (.aid-o/config/execution.yaml, below) and it runs TREE git commands whose
+  # `HEAD` is branch-specific. Since done-advance's project_root is now the
+  # PRIMARY state root, the tree the run's commits actually live on is passed
+  # separately. Optional and defaulting to project_root, so every existing
+  # caller (and every fixture that passes a repo path as project_root while
+  # standing somewhere else) keeps its exact previous behaviour.
+  local tree_root="${4:-$project_root}"
   local curator_report="${evidence_dir}/curator-report.md"
 
   # No curator commit = no CP4 needed; skip silently.
@@ -742,7 +1328,7 @@ fsm_check_cp4_curator_validation() {
   # `|| true` guards against set -euo pipefail aborting when grep finds no match
   # (exit 1) — the no-touch case is the legitimate skip path, not an error.
   local touched_prod
-  touched_prod=$(git -C "$project_root" diff --name-only "${base_commit}..HEAD" 2>/dev/null \
+  touched_prod=$(git -C "$tree_root" diff --name-only "${base_commit}..HEAD" 2>/dev/null \
                    | grep -E "^(${prod_paths})" | head -1 || true)
 
   if [[ -z "$touched_prod" ]]; then
@@ -787,11 +1373,11 @@ fsm_check_cp4_curator_validation() {
 
   # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
   # (caller `return 1` unreachable — helper dies internally). Observe telemetry
-  # (sampling-bias fix) before the hard-exit; no gate behavior change. project_root
-  # is param $2 of this function.
+  # (sampling-bias fix) before the hard-exit; no gate behavior change. tree_root
+  # is param $4 of this function (defaulting to project_root, param $2).
   log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
     gate="cp4_curator" \
-    head_sha="$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+    head_sha="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo unknown)"
   die "missing_cp4_curator_validation"
 }
 
@@ -1003,8 +1589,20 @@ Then retry with --reason."
 fsm_emit_audit_log() {
   local event_type="$1"; shift
   # project_root may be unset in callers that don't set it (e.g. cmd_transition
-  # --force) — derive from CWD with the :- guard so `set -u` doesn't abort here.
-  local audit_log_file="${project_root:-.}/.aid-o/work/audit-log.jsonl"
+  # --force). P074 Step 1: the old `${project_root:-.}` fallback
+  # made the CROSS-EPIC audit log cwd-relative, so a force issued from inside a
+  # linked worktree appended to a forked worktree-local audit-log.jsonl. The
+  # fallback now resolves the state root — with the same legacy cwd-relative
+  # last resort as derive_timeline for cwds no root can be derived from, and
+  # aid_state_path keeps the historic RELATIVE form when the caller already
+  # stands at the state root.
+  local audit_log_file
+  if [[ -n "${project_root:-}" ]]; then
+    audit_log_file="${project_root}/.aid-o/work/audit-log.jsonl"
+  else
+    audit_log_file="$(aid_state_path ".aid-o/work/audit-log.jsonl" 2>/dev/null \
+      || printf '%s' ".aid-o/work/audit-log.jsonl")"
+  fi
   bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
     --epic-id "${epic_id:-unknown}" \
     --run-id  "${run_id:-unknown}" \
@@ -1798,7 +2396,14 @@ check_preconditions() {
   run_dir="$(dirname "$state_file")"
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  # P074 Step 1 (review round 3): state-root resolved — advance-to-gates
+  # writes gates_report.json under the PRIMARY root, so the EXECUTE:GATES
+  # precondition must look for it there too, not under a worktree-local
+  # .aid-o. Same legacy cwd-relative fallback as derive_timeline for
+  # non-resolvable fixture cwds.
+  local evidence_dir
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
 
   case "${from}:${to}" in
     READY:EXECUTE)
@@ -2327,11 +2932,20 @@ cmd_pm_override() {
 
   local target="${1:-}"; shift || true
   local plan_id="${1:-}"; shift || true
-  local reason="" project_root="." evidence_root=""
+  # P074 Step 1: the DEFAULT project root is STATE — the grant
+  # artifact must land where its consumer (aid-cp1-gate.sh / aid-cp1-ledger.sh)
+  # looks, i.e. under the PRIMARY .aid-o, not in whatever tree the PM happened
+  # to stand in. An explicit --project-root still wins verbatim. Legacy "."
+  # kept as the last resort for cwds no root can be derived from.
+  local reason="" project_root="" evidence_root=""
+  project_root="$(aid_state_root 2>/dev/null || printf '%s' ".")"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reason)        reason="${2:-}"; shift 2 ;;
-      --project-root)  project_root="${2:-}"; shift 2 ;;
+      # An explicit root is canonicalized exactly like AID_PROJECT_ROOT: a flag
+      # pointing into a linked worktree must reach the primary state, never
+      # recreate a worktree-local .aid-o.
+      --project-root)  project_root="$(aid_canonicalize_project_root "${2:-}" 2>/dev/null || printf '%s' "${2:-}")"; shift 2 ;;
       --evidence-root) evidence_root="${2:-}"; shift 2 ;;
       --*) echo "ERROR: pm-override grant: unknown flag: $1" >&2; exit 2 ;;
       *) shift ;;
@@ -2414,7 +3028,22 @@ cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  # ── P074 Step 8: run where the plan's tree is ────────────────────────────
+  # FIRST statement of the command, before the flag loop, deliberately: --force
+  # writes an audit record as it is parsed, and a redirect after that point
+  # would write it twice. Nothing has happened yet when this returns, so the
+  # re-executed process is the only one with side effects.
+  _fsm_require_plan_worktree "$epic_id"
+
+  # P074 Step 8: `.aid-o` lives only in the primary checkout, so a RELATIVE
+  # state-file argument must be re-anchored to the state root. Without it an
+  # `init` executed inside the plan worktree would create a second, forked
+  # workspace there (the redirect path is already covered by argv rewriting;
+  # this covers a DIRECT in-worktree invocation).
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+
+  local evidence_dir
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"
 
   # Phase 2 (P037) — parse optional named flags after 7 positional args.
   # Detect --plan <path> and --force in either order ($8/$9). Both are optional.
@@ -2445,11 +3074,11 @@ cmd_init() {
         local _cur_plan_prefix="P${_cur_plan_num}"
         if [[ -n "$_cur_plan_num" ]]; then
           local _mf _d
-          _mf="$(aid_manifest_path "$_cur_plan_prefix" ".")"
+          _mf="$(aid_manifest_path "$_cur_plan_prefix" "$(aid_state_root)")"
           if [[ -f "$_mf" ]]; then
             while IFS= read -r _d; do
               [[ -z "$_d" || "$_d" == "null" ]] && continue
-              if [[ "$(aid_plan_closure_state "$_d" ".")" != "closed" ]]; then _bplan="$_d"; break; fi
+              if [[ "$(aid_plan_closure_state "$_d" "$(aid_state_root)")" != "closed" ]]; then _bplan="$_d"; break; fi
             done < <(yq -r '.depends_on_plans[]' "$_mf" 2>/dev/null)
           fi
         fi
@@ -2710,7 +3339,7 @@ cmd_init() {
     _sup_json="$(dirname "$state_file")/plan.json"
     _sup_json_sha=""
     [[ -f "$_sup_json" ]] && _sup_json_sha="sha256:$(sha256sum "$_sup_json" | awk '{print $1}')"
-    _sup_dir="${project_root:-.}/.aid-o/work/plan-state"
+    _sup_dir="$(aid_state_path ".aid-o/work/plan-state")"
     for _r in "$_sup_dir"/supersede-"${_pb_plan_id}"-"${epic_id}"-*.json; do
       [[ -f "$_r" ]] || continue
       if [[ "$(jq -r '.plan_id // ""' "$_r" 2>/dev/null)" == "$_pb_plan_id" \
@@ -2747,11 +3376,11 @@ cmd_init() {
   # via the sanctioned --force override).
   if [[ "$force" != "true" && -n "$_cur_plan" ]]; then
     local _manifest _dep _dep_state
-    _manifest="$(aid_manifest_path "$_cur_plan" ".")"
+    _manifest="$(aid_manifest_path "$_cur_plan" "$(aid_state_root)")"
     if [[ -f "$_manifest" ]]; then
       while IFS= read -r _dep; do
         [[ -z "$_dep" || "$_dep" == "null" ]] && continue
-        _dep_state="$(aid_plan_closure_state "$_dep" ".")"
+        _dep_state="$(aid_plan_closure_state "$_dep" "$(aid_state_root)")"
         if [[ "$_dep_state" != "closed" ]]; then
           echo "PRECONDITION FAIL: ${_cur_plan} declares depends_on_plans: ${_dep}, which is not closed (state: ${_dep_state})." >&2
           echo "Close ${_dep} first (all required EPICs delivered + review-accepted), or override (audited):" >&2
@@ -2768,18 +3397,20 @@ cmd_init() {
   # Advisory (non-blocking): ONE actionable summary of plans that are delivered
   # but not yet reconciled, plus a count of legacy-unverifiable plans. Suppressed
   # in machine/CI mode. Never per-EPIC, never a hard block.
-  if [[ -z "${AID_CI:-}" && "${AID_QUIET:-}" != "1" && -d ".aid-o/plans" ]]; then
+  local _plans_dir
+  _plans_dir="$(aid_state_path ".aid-o/plans")"
+  if [[ -z "${AID_CI:-}" && "${AID_QUIET:-}" != "1" && -d "$_plans_dir" ]]; then
     local _pf _pid _pstate _unrec="" _legacy_n=0
     while IFS= read -r _pf; do
       _pid="$(basename "$_pf" | sed -E 's/^(P[0-9]+)-.*/\1/')"
       [[ "$_pid" =~ ^P[0-9]+$ ]] || continue
       [[ "$_pid" == "$_cur_plan" ]] && continue
-      _pstate="$(aid_plan_closure_state "$_pid" "." 2>/dev/null || echo unknown)"
+      _pstate="$(aid_plan_closure_state "$_pid" "$(aid_state_root)" 2>/dev/null || echo unknown)"
       case "$_pstate" in
         delivered-but-unreconciled) _unrec+=" ${_pid}";;
         legacy-unverifiable)        _legacy_n=$((_legacy_n+1));;
       esac
-    done < <(ls .aid-o/plans/P*-*.md 2>/dev/null)
+    done < <(ls "$_plans_dir"/P*-*.md 2>/dev/null)
     if [[ -n "$_unrec" ]]; then
       echo "ADVISORY: plan(s) delivered but not reconciled:${_unrec}. Reconcile with:" >&2
       echo "  aid-fsm.sh plan-reconcile <PNN> --apply" >&2
@@ -2805,7 +3436,8 @@ cmd_init() {
   # Timeline events for forensic visibility:
   #   fsm_branch_mismatch_detected (hard fail case)
   #   fsm_branch_unusual_detected  (warn case)
-  local timeline_path=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+  local timeline_path
+  timeline_path="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl")"
   mkdir -p "$(dirname "$timeline_path")"
 
   # ─── PRE-FLIGHT: Plugin-cache staleness guard — HARD STOP (P060 Step 5) ──
@@ -2819,16 +3451,71 @@ cmd_init() {
     exit 1
   fi
 
-  if is_worktree; then
+  # ── P074 Step 9: the plan worktree is NOT a foreign worktree ─────────────
+  # is_worktree()'s blanket skip exists for worktrees whose branch the CALLER
+  # controls (superpowers:using-git-worktrees and friends). The plan's OWN
+  # execution worktree is the opposite: it is that plan's "main", the one place
+  # its EPICs are supposed to run, and skipping enforcement there would leave
+  # init sitting on `plan/<id>` with no task branch — so done-advance would
+  # attribute an empty diff to the EPIC. Inside it, enforcement RUNS, with two
+  # differences from the primary checkout: `plan/<id>` is an accepted starting
+  # HEAD, and a task branch auto-created there is based on the PLAN branch head
+  # rather than on whatever the current branch happens to be.
+  local _wt_plan_branch=""
+  if _fsm_in_plan_worktree "$epic_id"; then
+    _wt_plan_branch="plan/P$(_fsm_epic_plan_nnn "$epic_id")"
+    # THE BASE REF MUST EXIST. Inside the plan worktree every task branch is
+    # cut from `plan/<id>`; if manual surgery deleted it the worktree is left
+    # detached, which used to fall through to the "unusual branch" warn-and-
+    # accept arm — init would proceed with NO task branch on an unowned
+    # detached tree, and done-advance would then attribute a meaningless diff.
+    # That is a hard fail: the topology this worktree exists to serve is gone.
+    #
+    # `--recreate-worktree` is deliberately NOT the remedy and is not offered:
+    # the worktree is intact, its BASE REF is missing. Recreating the tree would
+    # fail on the same missing ref and would look like the operator had tried
+    # the sanctioned repair.
+    if ! git -C "$PWD" rev-parse --verify --quiet "refs/heads/${_wt_plan_branch}" >/dev/null 2>&1; then
+      die "ERROR: ${_wt_plan_branch} does not exist, but this is ${_wt_plan_branch#plan/}'s execution worktree and every EPIC branch here is cut from it.
+
+Reason: the plan branch was deleted (manual surgery, or a post-merge cleanup that ran early). Without it there is no base for task/${epic_id}/main and no integration target for done-advance — continuing would execute on an unowned tree with broken diff attribution.
+
+Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge or candidate sha>', or 'git reflog' to find its last position), then retry.
+       This is NOT a worktree problem: the worktree is intact, so 'plan-state ${_wt_plan_branch#plan/} --recreate-worktree' is the wrong tool. Repair the branch, or the plan-state record naming it."
+    fi
+  fi
+
+  if is_worktree && [[ -z "$_wt_plan_branch" ]]; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
     local current_branch expected_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || die "Not in a git repository"
     expected_branch="task/${epic_id}/main"
+    # A sentinel, never a real branch name, so the case arm below is inert when
+    # we are NOT in the plan worktree (an empty pattern would match an empty
+    # current_branch).
+    local _wt_plan_case="${_wt_plan_branch:-__aid_no_plan_worktree__}"
 
     case "$current_branch" in
       "$expected_branch")
         log_info "Resume case: HEAD already on $expected_branch"
+        ;;
+      "$_wt_plan_case")
+        # The plan worktree at rest sits on `plan/<id>` — this is the fresh-init
+        # case there, and the direct analogue of `main` in the primary checkout.
+        if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
+          log_info "Resume case: checking out existing $expected_branch in the plan worktree"
+          git checkout "$expected_branch" >/dev/null 2>&1 \
+            || die "Failed to checkout existing branch $expected_branch in the plan worktree $PWD (check 'git status' for details)"
+        else
+          log_info "Auto-creating branch: $expected_branch from ${_wt_plan_branch} (plan worktree)"
+          # Explicit base: a second EPIC of the same plan must start from the
+          # ADVANCED plan head (after the first EPIC merged), never from main.
+          git checkout -b "$expected_branch" "$_wt_plan_branch" >/dev/null 2>&1 \
+            || die "Failed to create branch $expected_branch from ${_wt_plan_branch} in the plan worktree $PWD.
+Reason: the plan branch must exist and be resolvable — this is the base every EPIC of ${_wt_plan_branch#plan/} starts from.
+If ${_wt_plan_branch} is gone, --recreate-worktree is NOT the remedy: the worktree is fine, its base ref is not. Repair the plan branch (or the plan-state record naming it) first."
+        fi
         ;;
       main|master|develop)
         # P040 Component E: if the EPIC's task branch already exists (e.g. a
@@ -2861,7 +3548,13 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
         # PM context-aware (e.g., manual exploration on feat/ branch) — accept with warning.
         log_event "$timeline_path" "fsm_branch_unusual_detected" \
           current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
-        log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
+        if [[ -n "$_wt_plan_branch" ]]; then
+          # P074 Step 9: inside the plan worktree the expected topology is
+          # known exactly, so the warning names it instead of shrugging.
+          log_warn "Unusual branch in the plan worktree: $current_branch. The expected topology here is ${_wt_plan_branch} at rest and ${expected_branch} while ${epic_id} runs. Continuing — PM-controlled context assumed."
+        else
+          log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
+        fi
         ;;
     esac
   fi
@@ -2896,8 +3589,11 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # still not have its own runtime metrics writes block `init`. Same
   # single-file, non-glob scoping as the two entries above (never a
   # directory-wide glob).
+  # P074 Step 1: the dirty guard is a TREE check — it must evaluate the tree
+  # the command runs in (aid_invoke_root), which inside a linked worktree is
+  # the worktree itself, never the primary checkout.
   local _dirty
-  _dirty="$(git status --porcelain --untracked-files=no \
+  _dirty="$(git -C "$(aid_invoke_root)" status --porcelain --untracked-files=no \
     | aid_ancillary_filter_porcelain --mode legacy4 || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
@@ -2916,13 +3612,15 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # Auto-recover execution.yaml if missing (P032 Step 1).
   # Empty-stacks fallback is harmless and idempotent — pre-deploy projects keep
   # their custom config (the [[ ! -f ... ]] guard ensures we never overwrite).
-  if [[ ! -f .aid-o/config/execution.yaml ]] && [[ -f "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh" ]]; then
+  local _exec_yaml_path
+  _exec_yaml_path="$(aid_state_path ".aid-o/config/execution.yaml")"
+  if [[ ! -f "$_exec_yaml_path" ]] && [[ -f "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh" ]]; then
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh"
     local -a _aid_stacks=()
     mapfile -t _aid_stacks < <(detect_stacks "$PWD")
-    if compose_execution_yaml "$PWD" ".aid-o/config/execution.yaml" "${_aid_stacks[@]}"; then
-      log_info "Lazy-created .aid-o/config/execution.yaml with stacks: ${_aid_stacks[*]:-none}"
+    if compose_execution_yaml "$PWD" "$_exec_yaml_path" "${_aid_stacks[@]}"; then
+      log_info "Lazy-created ${_exec_yaml_path} with stacks: ${_aid_stacks[*]:-none}"
     fi
   fi
 
@@ -3014,12 +3712,15 @@ EOF
   # reads the queue; it is deliberately NON-FATAL to init — a blocked/unresolved
   # dep is a queue-scheduling signal for the consumer (pipeline §12 / /aid-run
   # pre-start), not an init failure. Missing queue / no entry / no deps = no-op.
-  if [[ -f .aid-o/config/queue.yaml ]]; then
-    queue_revalidate "$epic_id" ".aid-o/config/queue.yaml" "$timeline_path" >/dev/null 2>&1 || true
+  local _queue_yaml_path
+  _queue_yaml_path="$(aid_state_path ".aid-o/config/queue.yaml")"
+  if [[ -f "$_queue_yaml_path" ]]; then
+    queue_revalidate "$epic_id" "$_queue_yaml_path" "$timeline_path" >/dev/null 2>&1 || true
   fi
 
   # Validate plan.json step content (warning only)
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local evidence_dir
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"
   local plan_json="${evidence_dir}/plan.json"
   if [[ -f "$plan_json" ]] && command -v python3 &>/dev/null; then
     local empty_steps
@@ -3071,9 +3772,19 @@ except: pass
     done
   } >> "$state_file"
 
-  # OBS-20260712-01 hotfix: this run becomes the sole explicit pointer the
-  # commit-scope guard consults for main-fallback governance. Never fails init.
-  write_active_run_pointer "$state_file"
+  # OBS-20260712-01 → P074 Step 4: this run becomes ONE ENTRY in the
+  # multi-run active-runs map the commit-scope guard consults for
+  # main-fallback governance (the old single slot let a second init hide this
+  # run). Best-effort: never fails init — a crash/failure before the upsert
+  # leaves no entry, identical exposure to the old crash-before-pointer-write.
+  # P074 Step 6: init is WRITER 1 of the generated active.md index — the
+  # shared post-boundary helper performs the upsert, the stale-entry sweep,
+  # and the index refresh in one place; a render failure warns, never blocks.
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "$epic_id" init "$state_file" || true
+  else
+    upsert_active_run "$state_file" || true
+  fi
 
   echo "Initialized state: READY" >&2
 }
@@ -3101,7 +3812,11 @@ cmd_transition() {
     local epic_id run_id evidence_dir
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    # P074 Step 1: the force waiver + timeline land in the
+    # PRIMARY evidence dir, never a worktree-local fork. Same legacy
+    # cwd-relative fallback as derive_timeline for non-resolvable fixture cwds.
+    evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+      || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
     fsm_handle_force_override "$from" "$to" "$state_file" "transition" "${@:5}"
     force="true"
   fi
@@ -3206,7 +3921,13 @@ cmd_advance_to_gates() {
   current_state=$(yaml_field "$state_file" state)
   current_step=$(yaml_field "$state_file" current_step)
   total_steps=$(yaml_field "$state_file" total_steps)
-  evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  # P074 Step 1 (review round 2): the WHOLE advance-to-gates path chain —
+  # evidence_dir, plan.json, gates_report.json — resolves under the state
+  # root, so a worktree invocation hands the gate runner the PRIMARY paths.
+  # Same legacy cwd-relative fallback as derive_timeline for non-resolvable
+  # fixture cwds.
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
   timeline=$(derive_timeline "$state_file") || true
 
   # Validate numeric step fields (defensive — malformed fsm-state.yaml caught early).
@@ -3226,7 +3947,13 @@ cmd_advance_to_gates() {
   fi
 
   # Resolve execution.yaml + report path (matches /aid-run gate dispatch convention).
-  local execution_yaml="${AID_PROJECT_ROOT:-$(pwd)}/.aid-o/config/execution.yaml"
+  # P074 Step 1: state-root resolved (AID_PROJECT_ROOT is honoured — and
+  # canonicalized — inside aid_state_root; the old $(pwd) fallback forked
+  # state when invoked from a linked worktree). An invalid AID_PROJECT_ROOT
+  # (neither a repo root nor an .aid-o workspace carrier) fails loudly here
+  # via the resolver's own exit-2 error — no silent arbitrary path.
+  local execution_yaml
+  execution_yaml="$(aid_state_root)/.aid-o/config/execution.yaml"
   if [[ ! -f "$execution_yaml" ]]; then
     echo "ERROR: execution.yaml not found at $execution_yaml. Set AID_PROJECT_ROOT or cd to project root." >&2
     exit 1
@@ -3325,7 +4052,11 @@ cmd_advance_to_gates() {
       if [[ -f "$_d0_script" ]]; then
         local _d0_base_sha _d0_output _d0_exit=0
         _d0_base_sha=$(yaml_field "$state_file" base_commit)
-        local _d0_project_root="${AID_PROJECT_ROOT:-$(pwd)}"
+        # P074 Step 1 (review round 2): canonicalize before exporting to the
+        # D0 subprocess — a raw worktree path must never be handed down as
+        # AID_PROJECT_ROOT. Legacy expression kept only when nothing resolves.
+        local _d0_project_root
+        _d0_project_root="$(aid_state_root 2>/dev/null || pwd)"
         _d0_output=$(
           DELIVERY_GATE_POLICY="$_d0_policy" \
           AID_EVIDENCE_BASE="${_d0_project_root}/.aid-o/work/evidence" \
@@ -3485,8 +4216,15 @@ cmd_increment_step() {
   step=$(yaml_field "$state_file" current_step)
   epic_id=$(yaml_field "$state_file" epic_id)
   run_id=$(yaml_field "$state_file" run_id)
-  evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-  project_root="$PWD"
+  # P074 Step 1: increment-step's whole evidence chain — the
+  # step-verify file, the transition ledger, the force waiver and the audit
+  # log — is STATE and must resolve under the PRIMARY checkout, so a step
+  # advanced from inside a linked worktree does not fork a second workspace.
+  # Same legacy cwd-relative fallback as derive_timeline for cwds no root can
+  # be derived from; aid_state_path keeps the historic RELATIVE form at root.
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
+  project_root="$(aid_state_root 2>/dev/null || pwd)"
 
   # P040 Component D: streamlined mode skips per-step CP2 verifier enforcement.
   local streamlined
@@ -4231,6 +4969,17 @@ _fsm_declared_plan_mode() {
   [[ -n "$nnn" ]] || { printf 'legacy_epic_release_mode\t\tno_plan_id_derivable\n'; return 0; }
   plan_id="P${nnn}"
   relpath=".aid-lifecycle/manifests/${plan_id}.yaml"
+  # P074 Step 8: plan-linked commands re-execute with cwd = the PLAN worktree,
+  # which carries its own checkout of the tracked manifest — or none at all,
+  # when the plan branch was cut before the manifest was committed. The
+  # working-tree GUARD below must keep watching the ONE tree the PM edits and
+  # every state authority resolves to (the state root), or a redirected
+  # done-advance silently stops guarding anything: an unreadable declaration in
+  # the PM's checkout would be answered from the committed copy — exactly the
+  # "silently satisfied from elsewhere" hazard the guard exists to prevent.
+  # `relpath` itself stays REPO-relative: Step 2 uses it as a git pathspec.
+  local wt_path
+  wt_path="$(aid_state_root 2>/dev/null || pwd)/${relpath}"
 
   declare -F aid_lifecycle_plan_mode >/dev/null 2>&1 || {
     printf 'unresolved\t%s\tlifecycle_lib_unavailable\n' "$plan_id"; return 0; }
@@ -4243,15 +4992,15 @@ _fsm_declared_plan_mode() {
   # elsewhere is the hazard the old working-tree preference existed to avoid.
   # A readable, parseable working-tree copy contributes nothing beyond passing
   # this guard — Step 2 is the only place an ANSWER comes from.
-  if [[ -e "$relpath" ]]; then
+  if [[ -e "$wt_path" ]]; then
     wt_present=true
-    if [[ ! -f "$relpath" || ! -r "$relpath" ]]; then
+    if [[ ! -f "$wt_path" || ! -r "$wt_path" ]]; then
       printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
     fi
     if ! command -v yq >/dev/null 2>&1; then
       printf 'unresolved\t%s\tyq_unavailable\n' "$plan_id"; return 0
     fi
-    if ! yq -r '.' "$relpath" >/dev/null 2>&1; then
+    if ! yq -r '.' "$wt_path" >/dev/null 2>&1; then
       printf 'unresolved\t%s\tmanifest_unparseable\n' "$plan_id"; return 0
     fi
   fi
@@ -4332,7 +5081,24 @@ cmd_done_advance() {
   local force="false"
   [[ "${4:-}" == "--force" ]] && force="true"
 
+  # P074 Step 8: re-anchor a RELATIVE state file to the state root BEFORE the
+  # existence test. `.aid-o` exists only in the primary checkout, so the old
+  # order made an in-worktree `done-advance` — the normal case in worktree mode
+  # — die "state_file not found" before the enforcer could run at all.
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
+
+  # ── P074 Step 8: run where the plan's tree is ────────────────────────────
+  # done-advance is a plan-linked TREE operation driven by cwd: `_tree_root`
+  # (below) is aid_invoke_root, and the C3/C4 checks read HEAD and the
+  # base..HEAD diff from it. Run from the primary checkout for a
+  # worktree-recorded plan it would attribute a completely different tree's
+  # diff to the EPIC. Placed before the first tree read, and after the state
+  # file exists (the EPIC id is read FROM it) — the redirect absolutizes the
+  # relative state_file path every caller passes, so it still resolves to the
+  # PRIMARY .aid-o on the other side.
+  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
 
   # Must be in DONE state
   local current_state
@@ -4379,7 +5145,12 @@ cmd_done_advance() {
   local _pb_epic_id _pb_run_id _pb_mode_timeline
   _pb_epic_id=$(yaml_field "$state_file" epic_id)
   _pb_run_id=$(yaml_field "$state_file" run_id)
-  _pb_mode_timeline=".aid-o/work/evidence/${_pb_epic_id}/${_pb_run_id}/timeline.jsonl"
+  # P074 Step 1: state-root resolved — the plan-mode telemetry
+  # (and the mkdir -p that precedes each write to it) must land in the PRIMARY
+  # run evidence dir, not a worktree-local fork. Same legacy cwd-relative
+  # fallback as derive_timeline for non-resolvable fixture cwds.
+  _pb_mode_timeline="$(aid_state_path ".aid-o/work/evidence/${_pb_epic_id}/${_pb_run_id}/timeline.jsonl" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${_pb_epic_id}/${_pb_run_id}/timeline.jsonl")"
   IFS=$'\t' read -r _pb_mode _pb_mode_plan _pb_mode_reason \
     < <(_fsm_declared_plan_mode "$_pb_epic_id") || true
   [[ "$_pb_mode" == "plan_branch" ]] && _pb_plan_branch="true"
@@ -4405,7 +5176,10 @@ cmd_done_advance() {
       # fsm_emit_audit_log and are not declared until the force branch below, so
       # bind them here (both branches re-declare + reassign them from the state
       # file afterwards, so this cannot leak a stale value into them).
-      local epic_id="$_pb_epic_id" run_id="$_pb_run_id" project_root="$PWD"
+      # P074 Step 1: the audit log is STATE — state-root resolved
+      # so this named override is recorded in the PRIMARY audit-log.jsonl.
+      local epic_id="$_pb_epic_id" run_id="$_pb_run_id" project_root
+      project_root="$(aid_state_root 2>/dev/null || pwd)"
       fsm_emit_audit_log "plan_mode_unresolved_override" \
         --from "$from_phase" --to "$to_phase" --caller "done-advance" \
         --operator "${USER:-unknown}" \
@@ -4452,15 +5226,38 @@ cmd_done_advance() {
     log_event "$_pb_mode_timeline" "done_advance_plan_branch_mode" \
       epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" mode="plan_branch" \
       forced="$force" skipped_stages="$_pb_stages_json"
+
+    # ── P074 Step 9: name the tree and the merge target ───────────────────
+    # A plan_branch EPIC never merges into the target branch here; the merge
+    # that matters is `task/<epic>/main` -> `plan/<id>`, performed by
+    # `aid-plan-fsm.sh epic-merge-to-plan` in the plan's own worktree. The
+    # Step 8 enforcer above has already put THIS process in that tree, so the
+    # diff attributed to the EPIC below is the worktree's. Say so: the single
+    # most confusing thing about a two-tree setup is not knowing which tree a
+    # message is about.
+    local _pb_wt
+    _pb_wt="$(_fsm_plan_worktree_for_epic "$_pb_epic_id")"
+    if [[ -n "$_pb_wt" ]]; then
+      echo "NOTE: ${_pb_epic_id} is a plan_branch EPIC of ${_pb_mode_plan} — this advance evaluates the PLAN WORKTREE ${_pb_wt} (its HEAD and its base..HEAD diff), and the next step merges task/${_pb_epic_id}/main into plan/${_pb_mode_plan} THERE, not into the target branch." >&2
+      log_event "$_pb_mode_timeline" "done_advance_plan_worktree" \
+        epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" worktree_path="$_pb_wt"
+    fi
   fi
 
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
     local epic_id run_id evidence_dir
-    local project_root="$PWD"
+    # P074 Step 1: `done-advance review release --force` from inside a linked
+    # worktree used to write its waiver, its audit-log entry and its
+    # compliance-recovery marker into a worktree-local .aid-o. Both roots are STATE here (the
+    # force path runs no tree git command), so both resolve to the PRIMARY
+    # checkout, with the usual legacy cwd-relative fallback.
+    local project_root
+    project_root="$(aid_state_root 2>/dev/null || pwd)"
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+      || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
     fsm_handle_force_override "$from_phase" "$to_phase" "$state_file" "done-advance" "${@:5}"
     echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
 
@@ -4476,10 +5273,24 @@ cmd_done_advance() {
     # Check preconditions for review → release
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
       local epic_id run_id evidence_dir errors=0
-      local project_root="$PWD"
+      # P074 Step 1: TWO roots, deliberately, because this branch
+      # mixes both kinds of work.
+      #   project_root — STATE: every .aid-o read/write below (severity
+      #     registry, compliance.json, audit log, recovery marker) and every
+      #     AID_PROJECT_ROOT exported to a child process, canonicalized to the
+      #     PRIMARY checkout so a worktree run cannot fork the workspace.
+      #   _tree_root   — TREE: the tree this run's commits are actually on.
+      #     `HEAD` is branch-specific, so the git probes below must NOT ask the
+      #     primary checkout (which sits on a different branch) what HEAD is.
+      # Both keep a legacy fallback — neither may turn a best-effort telemetry
+      # path into a hard failure.
+      local project_root _tree_root
+      project_root="$(aid_state_root 2>/dev/null || pwd)"
+      _tree_root="$(aid_invoke_root 2>/dev/null || printf '%s' "$PWD")"
       epic_id=$(yaml_field "$state_file" epic_id)
       run_id=$(yaml_field "$state_file" run_id)
-      evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+      evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+        || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
 
       # P040 Component D: integration-review file existence (streamlined contract)
       if ! fsm_check_streamlined_integration_review "$evidence_dir" "$state_file"; then
@@ -4739,7 +5550,7 @@ EOF
           # Observe telemetry (sampling-bias fix) — no gate behavior change.
           log_event "$_timeline" "release_policy_preempted" \
             gate="tiered_compliance" \
-            head_sha="$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+            head_sha="$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo unknown)"
 
           exit 2
         fi
@@ -4769,11 +5580,17 @@ EOF
       }
 
       # EPIC task file must be archived (moved to tasks/archive/)
-      local task_file
-      task_file=$(find .aid-o/tasks/ -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
+      # P074 Step 1: STATE read. Cwd-relative, this searched a
+      # worktree-local tasks/ that never exists — the check then found nothing
+      # and passed silently, which is the failure direction that matters for a
+      # precondition. Same legacy fallback as derive_timeline; aid_state_path
+      # keeps the RELATIVE form (and both message strings) intact at root.
+      local task_file _tasks_dir
+      _tasks_dir="$(aid_state_path ".aid-o/tasks" 2>/dev/null || printf '%s' ".aid-o/tasks")"
+      task_file=$(find "${_tasks_dir}/" -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
       if [[ -n "$task_file" ]]; then
         echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
-        echo "Move to tasks/archive/ before advancing: mv $task_file .aid-o/tasks/archive/" >&2
+        echo "Move to tasks/archive/ before advancing: mv $task_file ${_tasks_dir}/archive/" >&2
         errors=$((errors + 1))
       fi
 
@@ -4866,7 +5683,9 @@ EOF
       if [[ "$_pb_plan_branch" != "true" ]]; then
 
       # P040 Component C: CP4 enforcement (must run before existing curator-report check)
-      if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file"; then
+      # MIXED helper: project_root supplies its STATE read (execution.yaml
+      # cp4_production_paths), _tree_root its base_commit..HEAD diff.
+      if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file" "$_tree_root"; then
         return 1  # die() already called inside
       fi
 
@@ -4874,7 +5693,9 @@ EOF
       # is the primary gate, but CP4 / review-phase commits can land AFTER DONE and
       # move HEAD past the reviewed CP3 head — this re-check catches that class.
       # Grandfather + policy (default BLOCKING, D9) handled inside.
-      if ! fsm_check_cp3_freshness "$evidence_dir" "$state_file" "$project_root"; then
+      # PURE TREE consumer (every use of its third arg is a git probe against
+      # the reviewed HEAD) — it gets the invoking tree, not the state root.
+      if ! fsm_check_cp3_freshness "$evidence_dir" "$state_file" "$_tree_root"; then
         log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
           check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
         return 1
@@ -5144,7 +5965,7 @@ EOF
           [[ $c3_manifest_hash_ec -ne 0 ]] && c3_manifest_hash=""
           c3_head_sha=$(jq -r '.revision.head_sha // empty' "$c3_report_file" 2>/dev/null) || c3_head_sha_ec=$?
           [[ $c3_head_sha_ec -ne 0 ]] && c3_head_sha=""
-          c3_current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
+          c3_current_head=$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo "")
 
           # P065 Step 15 (E-065-5_7) — ADDITIVE ONLY: detect a degraded_advisory
           # same-provider Claude fallback report (agents/auditor.md `c3_advisory` mode,
@@ -5307,7 +6128,7 @@ EOF
           [[ $_rp_ec -ne 0 ]] && _r_pid=""
           _r_reviewed_head=$(jq -r '.audit_report.reviewed_head // ""' "$c3_report_file" 2>/dev/null) || _rrh_ec=$?
           [[ $_rrh_ec -ne 0 ]] && _r_reviewed_head=""
-          _c3_dp_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
+          _c3_dp_head=$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo "")
 
           if [[ "$_d_invoked" != "true" || "$_d_exit" != "0" || "$_d_outcome" != "dispatched" \
                 || "$_d_events" != "true" || -z "$_d_session" || "$_d_session" == "null" ]]; then
@@ -5373,7 +6194,7 @@ EOF
       # forced advance structurally NEVER reaches this hook / emits dual_run.
       local _c4_timeline="${evidence_dir}/timeline.jsonl"
       local _c4_head_sha _c4_legacy_errors="$errors" _c4_legacy_ready
-      _c4_head_sha=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "unknown")
+      _c4_head_sha=$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo "unknown")
       [[ "$_c4_legacy_errors" -eq 0 ]] && _c4_legacy_ready="true" || _c4_legacy_ready="false"
 
       # Resolve enforcement (fail-safe observe). RELEASE_DECISION_POLICY = test/CI seam.
@@ -5490,8 +6311,13 @@ EOF
     local epic_id run_id evidence_dir project_root
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-    project_root="$PWD"
+    # P074 Step 1: compliance.json + epic-summary.md are STATE —
+    # both land in the PRIMARY evidence dir even when the release edge is
+    # crossed (forced or not) from inside a linked worktree. Same legacy
+    # cwd-relative fallback as derive_timeline.
+    evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+      || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
+    project_root="$(aid_state_root 2>/dev/null || pwd)"
     write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
 
     # IMP-090: best-effort epic-summary.md generation after compliance write.
@@ -5504,6 +6330,19 @@ EOF
   local timeline
   timeline=$(derive_timeline "$state_file") || true
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance" from_phase="$from_phase" to_phase="$to_phase"
+
+  # P074 Step 4: the run's main-fallback governance ends at the release edge —
+  # remove ITS OWN active-runs entry (and only its own; concurrent runs keep
+  # theirs). Best-effort: bookkeeping must never fail a performed transition.
+  # P074 Step 6: done-advance is WRITER 2 of the generated active.md index —
+  # removal + stale-entry sweep + refresh via the shared boundary helper.
+  local _ar_epic_id
+  _ar_epic_id=$(yaml_field "$state_file" epic_id)
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "${_ar_epic_id:--}" done-advance || true
+  else
+    [[ -n "$_ar_epic_id" ]] && { remove_active_run "$_ar_epic_id" "done-advance ${from_phase}->${to_phase}" || true; }
+  fi
 
   echo "Done phase: $from_phase → $to_phase" >&2
 }
@@ -5544,7 +6383,11 @@ cmd_promote_check() {
     exit 1
   }
 
-  local project_root="$PWD"
+  # P074 Step 1: the severity registry and the audit-log entry
+  # this command writes are project STATE — resolved to the PRIMARY checkout so
+  # a promotion performed from a worktree mutates the one real registry.
+  local project_root
+  project_root="$(aid_state_root 2>/dev/null || pwd)"
   local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
 
   [[ -f "$severity_yaml" ]] || {
@@ -5608,7 +6451,11 @@ cmd_promote_check() {
 #   epic_count >= 5 AND force_override_rate < 0.05
 # Read-only: prints a text table. PM eyes-on input for `promote-check`.
 cmd_check_promotion_candidates() {
-  local project_root="$PWD"
+  # P074 Step 1: read-only, but it reads STATE — registry, audit
+  # log and the evidence tree all live under the PRIMARY checkout, so from a
+  # worktree this used to report an empty history for every check.
+  local project_root
+  project_root="$(aid_state_root 2>/dev/null || pwd)"
   local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
   local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
 
@@ -5646,8 +6493,11 @@ cmd_check_promotion_candidates() {
 
     # epic_count = distinct EPICs whose compliance.json failures[] contains $check
     local epic_count=0
-    if [[ -d ".aid-o/work/evidence" ]]; then
-      epic_count=$(find .aid-o/work/evidence -maxdepth 3 -name 'compliance.json' 2>/dev/null \
+    local _evidence_base
+    _evidence_base="$(aid_state_path ".aid-o/work/evidence" 2>/dev/null \
+      || printf '%s' ".aid-o/work/evidence")"
+    if [[ -d "$_evidence_base" ]]; then
+      epic_count=$(find "$_evidence_base" -maxdepth 3 -name 'compliance.json' 2>/dev/null \
         | while read -r f; do
             jq -r --arg c "$check" 'select((.failures // []) | map(.check) | index($c)) | .epic_id // empty' "$f" 2>/dev/null || true
           done \
@@ -5713,6 +6563,16 @@ cmd_plan_close() {
   [[ -z "$epic_id" ]]       && echo "Missing: epic_id"       >&2 && exit 1
   [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
   [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
+
+  # P074 Step 1: project_root arrives from the caller and is then
+  # (a) used to build .aid-o STATE paths and (b) handed to two subprocesses as
+  # `--project-root`. A caller standing in a linked worktree passes the
+  # worktree path, so canonicalize it to the PRIMARY checkout before either
+  # use. BEST-EFFORT by design: a fixture root that is neither a repo root nor
+  # a plan-state carrier keeps the caller's value verbatim rather than turning
+  # this into a new hard failure.
+  project_root="$(aid_canonicalize_project_root "$project_root" 2>/dev/null \
+    || printf '%s' "$project_root")"
 
   # Route the force through the SAME audited path every other force in this
   # file uses. fsm_handle_force_override validates the reason (>= 20 chars)
@@ -5880,6 +6740,17 @@ cmd_plan_close() {
   fi
 
   touch "${evidence_dir}/ca-review-complete"
+
+  # P074 Step 4: plan-close is a terminal bookkeeping point for this EPIC —
+  # drop its active-runs entry (its own only). Best-effort: the marker above
+  # is already written; map cleanup must never turn the close into a failure.
+  # P074 Step 6: plan-close is WRITER 3 of the generated active.md index —
+  # removal + stale-entry sweep + refresh via the shared boundary helper.
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$project_root" "$epic_id" plan-close || true
+  else
+    remove_active_run "$epic_id" "plan-close" || true
+  fi
 }
 
 # ─── Queue Dependency Revalidation (P060 Step 7) ─────────────────────────
@@ -6131,7 +7002,7 @@ _dep_evidence_state() {
     st=$(yaml_field "$f" state)
     if [[ "$st" == "DONE" ]]; then echo "DONE"; return 0; fi
     [[ -z "$found" && -n "$st" ]] && found="$st"
-  done < <(find ".aid-o/work/evidence/${dep}" -name fsm-state.yaml 2>/dev/null)
+  done < <(find "$(aid_state_path ".aid-o/work/evidence/${dep}" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${dep}")" -name fsm-state.yaml 2>/dev/null)
   echo "$found"
 }
 
@@ -6143,7 +7014,7 @@ _dep_evidence_branch() {
   while IFS= read -r f; do
     br=$(yaml_field "$f" branch)
     [[ -n "$br" ]] && { echo "$br"; return 0; }
-  done < <(find ".aid-o/work/evidence/${dep}" -name fsm-state.yaml 2>/dev/null)
+  done < <(find "$(aid_state_path ".aid-o/work/evidence/${dep}" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${dep}")" -name fsm-state.yaml 2>/dev/null)
   echo ""
 }
 
@@ -6356,8 +7227,11 @@ _revalidate_one_dep() {
 # Missing-queue / no-entry are NEVER fail-loud (D8): they are a clean no-op.
 queue_revalidate() {
   local epic_id="$1"
-  local queue_file="${2:-.aid-o/config/queue.yaml}"
-  local timeline_path="${3:-.aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl}"
+  # P074 Step 1: defaults resolve under the state root (with the same legacy
+  # cwd-relative fallback as derive_timeline for non-resolvable fixture cwds);
+  # explicit caller-provided paths are honoured as given.
+  local queue_file="${2:-$(aid_state_path ".aid-o/config/queue.yaml" 2>/dev/null || printf '%s' ".aid-o/config/queue.yaml")}"
+  local timeline_path="${3:-$(aid_state_path ".aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl")}"
 
   # scenario f: missing queue file → no-op, no event
   [[ -f "$queue_file" ]] || { echo "noop"; return 0; }
@@ -6410,6 +7284,102 @@ cmd_queue_revalidate() {
   queue_revalidate "$epic_id" "$@"
 }
 
+# ─── P074 Step 3: locked counter allocation ─────────────────────────────
+# cmd_alloc — `aid-fsm.sh alloc plan-id` / `aid-fsm.sh alloc epic-id`
+#
+# WHY: counter.yaml was the last unprotected shared file in the state layer —
+# no script wrote it; skills/run-management.md instructed the agent to
+# read-increment-write with no lock, so two concurrent sessions could mint the
+# same ID. This subcommand makes allocation a locked CLI operation: it takes
+# `<state_root>/.aid-o/config/counter.yaml.lock` (sidecar flock via
+# lib/aid-lock.sh, 5s timeout, fail closed), increments the matching counter
+# line, and writes back atomically (mktemp + mv in the counter's own dir).
+#
+# CONTRACT:
+#   - Prints ONLY the new ID on stdout (`P<NNN>` / `E-<NNN>`; %03d minimum
+#     width, so the counter at 999 naturally emits P1000 — no three-digit
+#     assumption). All diagnostics go to stderr.
+#   - Only the digits on the matching `^plan:` / `^epic:` line change; every
+#     comment byte — including the long historical annotation trailing the
+#     `plan:` value — is preserved verbatim. Annotations remain a human/agent
+#     activity (documented in skills/run-management.md); the allocator changes
+#     the number, never the annotation.
+#   - Missing counter.yaml: refuse with "run /aid-init first" — NEVER invent
+#     a counter file (an invented counter restarts at 0 and collides with
+#     every existing ID).
+#   - The counter lives under aid_state_root (P074 Step 1), so an allocation
+#     from inside a linked worktree increments the PRIMARY checkout's counter.
+cmd_alloc() {
+  local kind="${1:-}"
+  local key="" prefix=""
+  case "$kind" in
+    plan-id) key="plan"; prefix="P" ;;
+    epic-id) key="epic"; prefix="E-" ;;
+    *)
+      echo "Usage: aid-fsm.sh alloc plan-id | alloc epic-id" >&2
+      exit 1 ;;
+  esac
+
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+
+  local root
+  root="$(aid_state_root)" || exit 2
+  local counter="${root}/.aid-o/config/counter.yaml"
+  if [[ ! -f "$counter" ]]; then
+    echo "ERROR: alloc ${kind}: ${counter} not found — run /aid-init first" >&2
+    exit 1
+  fi
+
+  local lock_path="${counter}.lock"
+  if ! aid_lock_acquire "$lock_path" 5; then
+    # aid_lock_acquire already named the lock path and the holder pid recorded
+    # in the lock file on its own stderr line; this adds the operator action.
+    echo "ERROR: alloc ${kind}: could not acquire ${lock_path} within 5s — a concurrent allocation likely holds it (holder pid is recorded in the lock file); retry once it finishes" >&2
+    exit 1
+  fi
+  local fd="$AID_LOCK_FD"
+
+  local line current
+  line="$(grep -m1 -E "^${key}:" "$counter" || true)"
+  if [[ -z "$line" ]]; then
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: no '${key}:' line in ${counter} — run /aid-init first" >&2
+    exit 1
+  fi
+  # Value must be a bare integer followed only by whitespace or a #comment —
+  # anything else (e.g. "74not-an-integer") fails closed instead of being
+  # silently truncated-and-rewritten.
+  current="$(sed -nE "s/^${key}:[[:space:]]*([0-9]+)[[:space:]]*(#.*)?\$/\1/p" <<<"$line")"
+  if [[ -z "$current" ]]; then
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: malformed counter line (non-integer value): ${line}" >&2
+    exit 1
+  fi
+  local next=$((current + 1))
+
+  # Atomic write preserving every comment byte: sed rewrites ONLY the digits
+  # on the matching line into a temp copy in the SAME directory, then mv
+  # replaces the file in one rename.
+  local tmp
+  if ! tmp="$(mktemp "${counter}.tmp.XXXXXX")"; then
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: mktemp failed next to ${counter}" >&2
+    exit 1
+  fi
+  if ! sed -E "s/^(${key}:[[:space:]]*)[0-9]+/\1${next}/" "$counter" > "$tmp"; then
+    rm -f "$tmp"
+    aid_lock_release "$fd"
+    echo "ERROR: alloc ${kind}: failed to write updated counter" >&2
+    exit 1
+  fi
+  chmod --reference="$counter" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$counter"
+  aid_lock_release "$fd"
+
+  printf '%s%03d\n' "$prefix" "$next"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -6417,6 +7387,9 @@ cmd_queue_revalidate() {
 # fabrication.bats `_load_aid_fsm` shim) can pull in cmd_* + verify_provenance
 # functions without the unknown-arg exit 1 killing the test process.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # P074 Step 8: captured BEFORE the dispatch shift so the worktree redirect
+  # re-executes the ORIGINAL invocation, subcommand included.
+  _AID_FSM_ORIG_ARGS=("$@")
   case "${1:-}" in
     init)              shift; cmd_init "$@" ;;
     transition)        shift; cmd_transition "$@" ;;
@@ -6431,6 +7404,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;
     queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
+    alloc)                      shift; cmd_alloc "$@" ;;   # alloc plan-id | alloc epic-id (P074 Step 3)
+    active-runs)                shift; cmd_active_runs "$@" ;;   # active-runs list | active-runs prune (P074 Step 4)
     # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the
     # init advisory + docs reference actually exists on aid-fsm.sh.
     plan-reconcile)             shift
@@ -6446,7 +7421,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune> [args...]" >&2
       exit 1 ;;
   esac
 fi

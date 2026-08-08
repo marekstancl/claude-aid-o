@@ -151,11 +151,15 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 3. If stale or missing → re-discover: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh` → update `plugin.yaml`
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
-**Bash pipeline** (using resolved `plugin_path`):
-1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — generate every EPIC (if running from a plan)
-2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse every EPIC → plan.json
-3. `{plugin_path}/scripts/aid-generation-finalize.sh` — verify the complete package and write its receipt.
-4. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt.
+**Bash pipeline** (using resolved `plugin_path`) — when running from a plan,
+steps 1–3 are ONE TRANSACTION held under a single lock:
+1. `{plugin_path}/scripts/aid-cp1-gate.sh` — the ONE CP1 call for the whole plan, before any output exists (skipped when a valid sealed authority already binds this identity).
+2. `generation-authority.json` + `transaction.json` — the sealed decision and the per-phase record, written under `.aid-o/work/evidence/<plan_id>/generation/`.
+3. `{plugin_path}/scripts/aid-plan-to-epic.sh` — generate every EPIC, each VERIFYING the authority rather than re-running the gate
+4. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse every EPIC → plan.json
+5. `{plugin_path}/scripts/aid-generation-finalize.sh` — verify the complete package and write its receipt.
+6. `{plugin_path}/scripts/aid-plan-fsm.sh epic-start` — register each EPIC's `task/<epic>/main` as a ref with lineage back to `plan/<id>`. plan_branch plans only, and driven by `aid-json-to-run.sh` from the plan's COMMITTED mode; `init` is the first consumer of that lineage and refuses without it. Legacy plans skip it — they have no plan branch to descend from.
+7. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt. A **failing** init still hands the caller's branch back before the failure is reported, and the plan worktree is returned to `plan/<id>` after each init so the next phase does not meet a tree still on the previous phase's task branch.
    When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
    `--streamlined` to this script: `aid-json-to-run.sh … --streamlined`. The
    script forwards it to its Step 18 `aid-fsm.sh init` call, which writes
@@ -167,12 +171,20 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 These are **bash scripts**. No LLM involvement. Exit non-zero → abort with error message.
 PM must fix the underlying issue (missing steps, circular deps, invalid EPIC format).
 
+A refusal from the CP1 call is labelled: `aid_generation_force_required:` when
+a deliberate PM `--force --reason` could proceed (the exact command is printed
+with this invocation's values), `aid_cp1_blocked:` when it could not — and on that class `--force` is refused in the same place rather than merely unadvertised. Anything
+else that fails is passed through verbatim. An interrupted PRE-FLIGHT is
+resumed by rerunning the same command — verified phases are skipped.
+
 ```
 PRE-FLIGHT Pipeline
 ====================================
-  [1] all phases: plan-to-epic + epic-to-json    ✓
-  [2] aid-generation-finalize.sh → receipt       ✓
-  [3] aid-json-to-run.sh → fsm-state.yaml        ✓
+  [1] CP1 gate (once per plan) → authority       ✓
+  [2] transaction.json opened                    ✓
+  [3] all phases: plan-to-epic + epic-to-json    ✓
+  [4] aid-generation-finalize.sh → receipt       ✓
+  [5] aid-json-to-run.sh → fsm-state.yaml        ✓
 
 FSM initialized: READY
 ```
@@ -326,7 +338,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 
 1. Update `fsm-state.yaml`: `state: DONE`, `done_phase: review` (automatic)
 2. Archive run file → `runs/archive/`
-3. Update `work/active.md`
+3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
 5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
 6. Wait for both to complete → evidence saved to `evidence/{epic_id}/{run_id}/`
@@ -455,7 +467,50 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state
 - **`--auto` replaces `/aid-first-aid`** — same autonomous behavior, integrated flag
 - **`--resume` reads fsm-state.yaml** — picks up from last known state after crash/interrupt (legacy `state.yaml` still accepted as fallback)
-- If `$ARGUMENTS` is empty → auto-detect: find single active EPIC or list for selection
+- If `$ARGUMENTS` is empty → **auto-detect over plan streams**, never "the single
+  active EPIC". Read `.aid-o/work/plan-state/*/plan-state.yaml` (phase +
+  `worktree_path`) and `.aid-o/work/active-runs.json` (the map keyed by
+  `epic_id`, carrying `plan_id`, `state`, `branch`) from the state root — the
+  same reads `/aid-status` documents as recipes `plan-rows` / `plan-epics`:
+  - **Zero active plans** — no plan-state entry outside PLAN_MERGING / CLOSED /
+    ABORTED / ROLLED_BACK. Do not start anything. List the plans available in
+    `.aid-o/plans/` and suggest `/aid-plan` or an explicit `/aid-run <epic-id>`.
+  - **One active plan** — today's behaviour, unchanged: pick that stream's next
+    actionable EPIC and proceed (still confirming the target with the PM as
+    before).
+  - **Two or more active plans** — never guess. Print a **named selection list**,
+    one row per active plan in plan-id order: plan id, lifecycle phase, worktree
+    path (with `missing!` when recorded but absent), and the plan's **next
+    actionable EPIC**. Ask the PM which stream to run and wait; `/aid-run
+    <epic-id>` skips the question entirely. Example:
+
+    ```
+    Two active plans — which stream?
+      1) P074 — EPIC_INTEGRATION  worktree .aid-worktrees/plan-P074  next: E-074-2_3  [READY]
+      2) P073 — PLAN_GATES        worktree .aid-worktrees/plan-P073 missing!  next: E-073-4_4  [queue:pending, 1 dep(s) unverified]
+    ```
+  - **"Next actionable EPIC" is one shared, deterministic rule** — defined once
+    in `commands/aid-status.md` ("Next actionable EPIC" + recipe `next-epic`)
+    and used verbatim here, so `/aid-status` and `/aid-run` never name different
+    EPICs for the same plan:
+    1. The plan's entries in `active-runs.json` whose `state` is `READY`,
+       `EXECUTE` or `GATES`, **sorted by `epic_id`, lowest first**. A JSON
+       object's key order is not an ordering and must never be treated as one.
+    2. Otherwise the queue candidate: the first entry **in queue file order**
+       belonging to the plan whose normalized status is `pending` (legacy
+       `queued` reads as `pending`) or `blocked` — the exact claimability test
+       `queue_claim_next` uses (`scripts/lib/aid-queue-write.sh`). It is shown
+       as a candidate with its unverified `depends_on` count, because the full
+       eligibility test includes a live `git merge-base --is-ancestor` check per
+       dependency that only `queue_claim_next` performs — and that function
+       CLAIMS (writes `running`/`blocked`), so selection must not call it. The
+       claim happens when the run actually starts; a candidate can still turn
+       out blocked there, and that is reported, not guessed at selection time.
+    3. Otherwise `(none)`.
+  - A plan whose recorded worktree is missing stays selectable, but the run is
+    refused after selection with the repair line
+    (`plan-state <id> --recreate-worktree --reason`) — selection reports state,
+    it does not repair it.
 - Pipeline references: `pipeline.md §4 EXECUTE` for dispatch, `§5 GATES` for gate execution
 
 ### `--streamlined` mode
@@ -495,4 +550,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-06

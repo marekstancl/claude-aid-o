@@ -2,6 +2,12 @@
 # AID-ORCHESTRATOR-PREPUSH-START (do not edit this block manually)
 # AID Orchestrator — version bump check before push
 # Blocks push if feat:/fix: commits exist since last tag without version bump.
+#
+# This hook reads NO `.aid-o` paths — it works purely from git refs/tags/log,
+# worktree-safe by construction. It fires from every linked worktree (hooks
+# live in the COMMON .git/hooks), where `$PWD`-relative `.aid-o` reads would
+# MISS, so any `.aid-o` read added here must resolve the state root first —
+# copy the `_aid_state_root` helper from the pre-commit hook.
 
 # ── P068 E-068-1_2 Step 5: plan/* and task/* are EXEMPT ─────────────────────
 # This guard blocks any push carrying feat:/fix: commits since the last tag with

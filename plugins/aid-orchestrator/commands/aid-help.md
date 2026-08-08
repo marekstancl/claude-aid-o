@@ -126,13 +126,24 @@ No FSM, no EPIC, no evidence dir — just implement and log.
 ====================================
 PRE-FLIGHT (bash, before FSM):
   1. generation-readiness validates the source plan + provisional graph
-  2. aid-plan-to-epic.sh → every EPIC file
-  3. aid-epic-to-json.sh → every plan.json + contract validation
-  4. aid-generation-finalize.sh → one generation receipt
-  5. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
+  2. transaction skeleton written under the generation lock
+  3. CP1 gate — ONCE per plan → generation-authority.json
+  4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
+     never re-runs the gate)
+  5. aid-epic-to-json.sh → every plan.json + contract validation
+  6. aid-generation-finalize.sh → one generation receipt
+  7. aid-plan-fsm.sh epic-start → plan_branch plans ONLY: registers
+     task/<epic>/main as a ref with lineage back to plan/<plan_id>,
+     which init's lineage check requires (legacy plans skip this)
+  8. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
 
-  Generation is two-stage: no FSM state or queue entry exists until the
-  complete EPIC package has been verified and sealed by the receipt.
+  Generation is ONE TRANSACTION: one PM decision covers every phase, a
+  crash resumes instead of duplicating, and no FSM state or queue entry
+  exists until the complete EPIC package has been verified and sealed.
+
+  A FAILING init still restores the caller's branch before the failure
+  is reported — the PM's checkout is never left on a task branch init
+  auto-created on its way to refusing.
 
 6-State FSM:
   READY → EXECUTE → GATES → DONE
@@ -144,6 +155,49 @@ Flags:
   --auto    Autonomous mode (S-effort auto-fix, L-effort always escalates)
   --resume  Resume from fsm-state.yaml after crash
   --epic    Specify EPIC ID
+```
+
+### Topic: plan
+
+```
+/aid-plan — Brainstorm, Write, Generate
+====================================
+Three modes, auto-detected from what you pass:
+  /aid-plan "topic"        → brainstorm (9 steps, interactive)
+  /aid-plan write spec.md  → write a plan from a spec
+  /aid-plan epic plan.md   → generate EPICs from a plan
+
+Plan IDs come from the locked allocator, never a hand edit:
+  aid-fsm.sh alloc plan-id     → prints the next P{NNN}
+
+WORKING ON TWO THINGS AT ONCE
+Each plan implements in its own git worktree:
+
+  <your checkout>                     you, on your branch, your edits
+  .aid-worktrees/plan-P080/           plan P080, on plan/P080
+  .aid-worktrees/plan-P081/           plan P081, on plan/P081
+
+So you can write and fully generate a new plan while another one
+implements — with uncommitted work in your checkout, and without your
+HEAD moving. An edit you make during another plan's review window no
+longer invalidates that review.
+
+Plan-linked commands find the right tree themselves; you never cd.
+The exception is plan-close and plan-rollback, which refuse to run from
+INSIDE the worktree they are about to remove — run those from your own
+checkout.
+
+See what is running:
+  /aid-status                          both streams, per plan
+  git worktree list                    every tree, including yours
+  aid-fsm.sh active-runs list          which EPICs are live
+
+If a plan's worktree is missing or broken:
+  aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"
+
+NOT YET SUPPORTED
+Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
+while another stream is live does not — that is a known limitation.
 ```
 
 ### Topic: gates
@@ -227,4 +281,4 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-08-07

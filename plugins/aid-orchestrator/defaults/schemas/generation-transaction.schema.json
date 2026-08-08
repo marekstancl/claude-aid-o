@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "aid-generation-transaction/v1",
+  "title": "AID Generation Transaction Manifest",
+  "description": "The durable manifest that makes one plan's generation ONE transaction. Written as an identity-only skeleton under the transaction lock before the CP1 gate runs, then extended phase by phase. STATUS IS NEVER STORED: a rerun derives each phase's status by re-hashing the recorded outputs and reading queue membership, so the files and the queue are the truth and this manifest is only the binding that lets a rerun verify rather than blindly redo.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "plan_id",
+    "plan_sha256",
+    "target_head",
+    "phase_derivation_version",
+    "total_phases",
+    "phases",
+    "created_at"
+  ],
+  "properties": {
+    "schema": { "const": "aid-generation-transaction/v1" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "plan_path": {
+      "type": "string",
+      "description": "The plan this generation ran from. Used by the queue-add ownership check to prove a transaction-owned duplicate belongs to the same plan the queued entry was added for."
+    },
+    "plan_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "target_branch": { "type": "string" },
+    "target_head": { "type": "string" },
+    "phase_derivation_version": { "type": "integer", "minimum": 1 },
+    "total_phases": { "type": "integer", "minimum": 1 },
+    "authority_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "The self_sha256 of the generation authority this transaction was decided under. Null only in the skeleton written before the authority is sealed; every phase verifier requires the match, which is what makes a leaked authority useless outside its own transaction."
+    },
+    "phases": {
+      "type": "object",
+      "description": "Map of phase number (as a string key) to that phase's record. Every phase's ids are pre-derived in the skeleton, so the verifier compares a RE-DERIVED id against a RECORDED one; the two hashes stay absent until that phase's outputs exist.",
+      "propertyNames": { "pattern": "^[0-9]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["epic_id", "run_id"],
+        "properties": {
+          "epic_id": { "type": "string", "minLength": 1 },
+          "run_id": { "type": "string", "minLength": 1 },
+          "epic_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "plan_json_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "epic_path": {
+            "type": "string",
+            "description": "Where the generated EPIC landed. Recorded so resume can re-hash the exact file rather than guess it back from a slugified title."
+          },
+          "plan_json": {
+            "type": "string",
+            "description": "Where the generated plan.json landed (same reason as epic_path)."
+          },
+          "contract_validate": {
+            "type": "string",
+            "description": "This phase's contract-validation evidence. Resume requires it to still be a pass; a phase whose evidence is gone is regenerated."
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "Set when stage 2 has put this phase's EPIC in the queue — including by the adopt-from-queue path, where a crash between queue-add and the manifest update left the queue ahead of the manifest."
+          }
+        }
+      }
+    },
+    "created_at": { "type": "string", "minLength": 1 },
+    "updated_at": { "type": "string" }
+  }
+}

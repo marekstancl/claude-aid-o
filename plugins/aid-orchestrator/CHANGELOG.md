@@ -3,11 +3,32 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.77.1] — 2026-08-08
+
+### Fixed
+- **Merges v2.76.1 into the 2.77 line** — the publish-the-page mandate embedded in the rendered summary; see v2.76.1 below. No behaviour beyond it.
+
+## [2.77.0] — 2026-08-07
+
+> P074 gave each plan its own worktree, and in doing so exposed something older:
+> `epic-start` — the command that registers an EPIC's task branch with lineage —
+> had been built, tested and documented, and never given a caller. Nobody noticed
+> while everything ran in one checkout, because the lineage check was never
+> reached there. The moment a plan implemented in its own tree, generation
+> refused on a branch nothing had registered. This wires it, and restores every
+> tree an init moves.
+
+### Added
+- **`epic-start` in the generation chain** — each EPIC's `task/<epic>/main` is registered with lineage back to `plan/<id>` before `init` needs it, for plan_branch plans. The mode is read from the plan's committed lifecycle manifest, never from the default-mode resolver, which answers a different question and downgrades to legacy without a gate_profiles table — that split would put generation and init on two different authorities. A standalone caller deriving neither flag gets the same registration, so it does not depend on who invoked the script.
+
+### Fixed
+- **A refusing `init` no longer parks you on a task branch** — `aid-json-to-run.sh` runs under `set -euo pipefail`, so a failing init aborted the script and skipped the branch-restore block directly below it, leaving the operator's checkout on the `task/<epic>/main` that init had auto-created on its way to refusing. The status is captured, the branch handed back, and only then is the failure reported.
+- **Multi-phase generation completes** — `init` leaves the plan's worktree on that phase's task branch, and the pre-existing restore only ever inspected the caller's checkout, which does not move for a redirected init. Phase 2 then met a worktree still on phase 1's branch and hard-failed the cross-EPIC mismatch. The plan worktree is now returned to `plan/<id>` after each init; without it the wiring closed phase 1 only, and every real plan is multi-phase.
+
 ## [2.76.1] — 2026-08-08
 
 ### Fixed
 - **Showing the report page to the owner no longer depends on an agent's obedience** — the page was generated on disk every run and the owner kept receiving the text wall, because publishing it was an instruction in a command doc the presenting agent never re-read. The mandate now travels INSIDE the rendered summary itself, as its first banner, naming the exact report path: an agent that pastes the block verbatim — which is the one behaviour agents demonstrably exhibit — pastes the order to publish the page first. The same instruction-without-enforcement defect this whole line of work exists to remove, rebuilt at the last step in front of the owner, now removed there too.
-
 ## [2.76.0] — 2026-08-07
 
 > The owner's question was exact: "do we even have the data to fill the
@@ -23,6 +44,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **The canonical report grows to eleven sections** — Rizika and Spolehlivost join the nine, each with its collector, and the section list in the command contract is updated to match.
+
+## [2.75.0] — 2026-08-07
+
+> You could only work on one thing at a time. Not because AID said so, but
+> because everything shared one checkout: opening a plan refused on an unrelated
+> uncommitted edit, starting an EPIC moved the branch under whatever you were
+> reading, and a second plan could not be written while the first was being
+> implemented. Generation had the same shape one level down — a killed run
+> regenerated from the top, asked for the same approval again, and died on its
+> own duplicate. This release gives each plan its own execution tree and turns
+> generation into a transaction you can resume.
+
+### Added
+- **Per-plan execution worktrees** — `plan-start` creates `.aid-worktrees/plan-<id>` checked out on `plan/<id>` and records it; every plan-linked command re-executes itself there rather than borrowing the tree you are standing in, so implementing one plan never moves the branch you are planning the next one on. A broken or unrecorded worktree refuses and names the audited repair instead of quietly falling back.
+- **Locked plan-ID and EPIC-ID allocation** — `aid-fsm.sh alloc plan-id` / `alloc epic-id` serialize on a counter lock and rewrite only the digits, so two sessions can no longer mint the same id; every comment byte in `counter.yaml` survives.
+- **Active-runs map** — `.aid-o/work/active-runs.json` holds one entry per live run instead of a single slot that only ever remembered the most recent one, and the main-branch guard reads all of them; `active-runs prune` removes entries whose run is gone or terminal and names what it removed.
+- **Generation as one resumable transaction** — a `transaction.json` binds the plan bytes, the target head and the phase count into one identity, and every phase's status is DERIVED by re-hashing its outputs and reading queue membership rather than stored. A killed generation re-verifies what survived and continues from there; an already-queued entry is adopted, never duplicated.
+- **One generation authority per plan** — CP1 runs once for the whole generation and seals a `generation-authority.json` receipt the per-phase converter verifies, instead of asking for the same approval at every phase.
+- **Public `--force --reason` for generation** — the override an operator actually needs is a documented flag with a ≥20-character reason and the full three-record audit, replacing the undocumented environment variable it used to take.
+- **`supersede-generation --plan --reason`** — an audited way to retire an incomplete transaction whose plan has changed underneath it. It archives, and deliberately deletes nothing.
+- **Shared root resolver** — `lib/aid-roots.sh` separates the STATE root (one `.aid-o`, resolved through the git common directory) from the INVOKE root (the tree a command operates on), so state never forks per worktree.
+- **`work/active.md` as a generated index** — written by named writers from live state instead of being hand-maintained prose that drifted.
+
+### Changed
+- **Preflights scoped to what a command actually touches** — `plan-start`, `epic-start` and `plan-merge-to-main` no longer refuse on a repo-wide dirty tree, because none of them can be harmed by one; `plan-start` instead asserts exactly its two tracked lifecycle paths are clean before any mutation. `epic-merge-to-plan` and the plan-finalize stages keep the check, evaluated against the tree they really check out, with that tree named in the refusal.
+- **`/aid-status` shows both streams** — one block per active plan with its worktree, its EPIC rows and its queue rows, a `Closing:` bucket, and a deterministic next-EPIC rule; the plan-less layout is unchanged for projects that have no plan open.
+- **Git hooks resolve the state root** — the pre-commit guard reads `.aid-o` through the git common directory, so a commit made from inside a plan worktree is guarded exactly like one made from the primary checkout instead of silently unguarded.
+- **`/aid-run` selects among multiple active runs** — with more than one live stream it asks which, rather than assuming the only one it can see is the one you meant.
+
+### Fixed
+- **Adjudicator empty-list parse** — an empty adjudication list was read as malformed input; a genuinely nested key now fails loudly with the key named instead of being silently accepted.
+- **Escaped-pipe table split** — a step table cell containing an escaped `|` was split into the wrong number of columns and the row was padded with `---` to hide it; the splitter now walks the escape grammar and fails with the arity it actually found.
+- **Target-branch diagnosis** — an unresolvable target branch exited with a bare code and no advice; it now says which branch could not be resolved and what to do about it.
+- **Stale `queue_status` in the generation receipt** — every EPIC stayed at the `pending_receipt` placeholder forever because nothing rewrote it after queueing.
+- **Contract-gate SIGPIPE reported as a malformed contract** — a probe taking SIGPIPE on a large contract aborted the gate, and the abort was reported as the contract being invalid; the failure now names itself.
+- **Unreadable plan-state diagnosed as a killed plan-start** — with `yq` missing, "the plan records no worktree" and "the record could not be read" were the same answer, so the crash-window refusal fired and told the operator their plan-start had died mid-transaction. Cannot-read is now distinct from definitively-none and falls back to the physical evidence; `plan-state --repair` also restores the worktree pointer it used to leave behind, or says plainly that it could not and names the command that does.
+
+### Known limitation
+
+P074 supports concurrent plan generation while another plan executes, but does
+not yet support *starting* a newly generated plan's EPIC while another stream is
+live. Legacy-mode generated EPICs may leave the primary checkout on
+`task/<epic>/main`; plan-branch generated EPICs require `aid-fsm.sh epic-start`
+before `init` and are not currently started by the generation pipeline. Both
+paths are pinned by the two-stream integration fixture with their exact
+production messages, so the day either is wired the pin goes red.
 
 ## [2.74.0] — 2026-08-06
 

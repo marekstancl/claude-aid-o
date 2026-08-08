@@ -22,12 +22,28 @@ The plan-writing skill is invoked in two modes:
 **Input:** Approved design sections from brainstorming OR specification document + codebase analysis
 **Output:** Exhaustive plan document (`.aid-o/plans/P{NNN}-{topic}.md`)
 
+### Writing a plan while another one is live
+
+Never gate plan writing on another plan's state or on the PM's uncommitted
+work. Each plan implements in its own git worktree (`.aid-worktrees/plan-<id>`),
+so an active plan holds neither the PM's checkout nor its branch, and
+`plan-start` no longer refuses on an unrelated dirty tree.
+
+Orient once, from `git worktree list`, `.aid-o/work/plan-state/*/plan-state.yaml`
+and `.aid-o/work/active-runs.json`, then report what is running and continue.
+`commands/aid-plan.md` § "Working while another plan is live" carries the full
+situation table (missing worktree, unregistered directory, three-plus streams).
+
+One limit worth naming to the PM up front: concurrent plan GENERATION is
+supported; *starting* a newly generated plan's EPIC while another stream is
+live is not yet.
+
 ### Plan Types — Roadmap vs Executable
 
 | Type | What it is | Where it lives | Plan ID? | Runs via /aid-run? |
 |------|-----------|---------------|----------|-------------------|
-| **Executable plan** | Single-phase implementation plan, spustitelný přes FSM | `.aid-o/plans/P{NNN}-{topic}.md` | YES (from counter.yaml) | YES |
-| **Roadmap / MVP plan** | Multi-phase master plan with subfáze; NOT directly executable | `docs/plans/{project}-{topic}.md` | NO — no counter increment | NO — subfáze become executable plans |
+| **Executable plan** | Single-phase implementation plan, spustitelný přes FSM | `.aid-o/plans/P{NNN}-{topic}.md` | YES — via `aid-fsm.sh alloc plan-id` (locked; never hand-edit counter.yaml) | YES |
+| **Roadmap / MVP plan** | Multi-phase master plan with subfáze; NOT directly executable | `docs/plans/{project}-{topic}.md` | NO — no allocator call | NO — subfáze become executable plans |
 
 **Detection:** If the brainstormed plan has 3+ phases (MVP phases, milestones), it is a **roadmap**.
 Roadmaps are saved to `docs/plans/`, do NOT consume a plan ID, and are NOT tracked in `active.md`.
@@ -134,7 +150,7 @@ verbatim, same as GitHub TSX/CSS source.
 
 When brainstorming produces a multi-phase MVP plan (detected by: 4+ weeks effort, 3+ phases, or PM explicitly requests "MVP plan"):
 
-1. **Save to `docs/plans/`** — NOT `.aid-o/plans/`. MVP plans are roadmap documents, not executable plans. Do NOT allocate plan ID from counter.yaml.
+1. **Save to `docs/plans/`** — NOT `.aid-o/plans/`. MVP plans are roadmap documents, not executable plans. Do NOT allocate a plan ID (no `aid-fsm.sh alloc plan-id` call).
 2. **Session prompts section** — after all phases, include `## Session Prompts for Detailed Plans`:
    - Per subfáze: `/aid-plan write {mvp-plan-path} {phase} {subfáze}` command
    - Context line for writer: 2-3 sentences describing scope, key references, gaps addressed
@@ -1133,7 +1149,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-07
 
 ## Plan-boundary note
 

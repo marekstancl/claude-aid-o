@@ -1768,6 +1768,47 @@ _pfsm_bootstrap_plan() {
   [ "$status" -eq 0 ]
 }
 
+# _pfsm_plan_tree <plan_id> — the tree in which `plan/<plan_id>` is checked out.
+#
+# P074 EPIC 2 (Step 7): plan-start now gives EVERY plan — both modes — its own
+# execution worktree at `.aid-worktrees/plan-<id>` and leaves `plan/<id>`
+# checked out THERE. Git refuses the same branch in two trees, so a fixture
+# that needs a REAL merge onto the plan branch can no longer `git -C
+# "$TEST_PROJECT_ROOT" checkout plan/<id>`; it operates in the plan worktree.
+# Plans bootstrapped without one (or a future mode that skips it) fall back to
+# the primary checkout, so the helper is safe everywhere.
+_pfsm_plan_tree() {
+  local wt="$TEST_PROJECT_ROOT/.aid-worktrees/plan-$1"
+  if [[ -d "$wt" ]]; then printf '%s' "$wt"; else printf '%s' "$TEST_PROJECT_ROOT"; fi
+}
+
+# _pfsm_drop_plan_worktree <plan_id> — remove the plan's execution worktree AND
+# its git registration, leaving the plan in the shape a genuinely fresh
+# checkout has: refs present, no `.aid-worktrees/` (it is gitignored), nothing
+# registered. Fixtures that simulate a pruned/recovered workspace by deleting
+# `.aid-o/work` must use this too — deleting only the state record while the
+# registered worktree survives is a DIFFERENT scenario (the plan-start crash
+# window), which the P074 Step 8 enforcer deliberately refuses.
+# _pfsm_stdout_tail — the LAST line of the previous `run`'s capture.
+#
+# P074 Step 8 prints a one-line redirect NOTE ("<plan> executes in its own
+# worktree — re-running this command in …") on STDERR whenever a plan-linked
+# command re-executes itself in the plan worktree, and bats' `run` folds
+# stderr into `$output`. Commands whose CONTRACT is "one SHA on stdout"
+# (epic-merge-to-plan) are therefore read from the tail rather than from the
+# whole capture — the contract itself is unchanged, only the capture is noisier.
+_pfsm_stdout_tail() {
+  printf '%s' "${lines[$(( ${#lines[@]} - 1 ))]}"
+}
+
+_pfsm_drop_plan_worktree() {
+  local wt="$TEST_PROJECT_ROOT/.aid-worktrees/plan-$1"
+  git -C "$TEST_PROJECT_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  rm -rf "$wt"
+  git -C "$TEST_PROJECT_ROOT" worktree prune >/dev/null 2>&1 || true
+  return 0
+}
+
 @test "AC1: plan-start creates plan/<plan_id> at exactly the recorded target SHA and is a no-op on re-run" {
   _write_legacy_plan "P064"
   local target_sha; target_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
@@ -1992,8 +2033,11 @@ _pfsm_bootstrap_plan() {
   echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
   git -C "$TEST_PROJECT_ROOT" add epic-1.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-064-1_1/main -m "Merge branch 'task/E-064-1_1/main' into plan/P064"
+  # The merge happens where plan/P064 is checked out — the plan worktree since
+  # P074 EPIC 2 (see _pfsm_plan_tree).
+  local ptree; ptree="$(_pfsm_plan_tree P064)"
+  git -C "$ptree" checkout -q plan/P064
+  git -C "$ptree" merge --no-ff -q task/E-064-1_1/main -m "Merge branch 'task/E-064-1_1/main' into plan/P064"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
 
   # E-064-1_2: a live, unmerged branch that was never actually run through
@@ -2003,6 +2047,9 @@ _pfsm_bootstrap_plan() {
 
   # Prune: delete the entire runtime tree (simulates a fresh checkout).
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P064
 
   run bash "$PLAN_FSM_CLI" plan-state P064 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
@@ -2110,11 +2157,14 @@ _pfsm_bootstrap_plan() {
   echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
   git -C "$TEST_PROJECT_ROOT" add epic-1.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
+  git -C "$(_pfsm_plan_tree P900)" checkout -q plan/P900
+  git -C "$(_pfsm_plan_tree P900)" merge --no-ff -q task/E-900-1_1/main -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
   run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
@@ -2133,6 +2183,9 @@ _pfsm_bootstrap_plan() {
   [ "$status" -eq 0 ]
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
 
   # Drive repair in-process so we can force the per-entry writer to fail
   # exactly the way an unwritable manifest would. The `|| true` that IMP-258
@@ -2155,11 +2208,14 @@ _pfsm_bootstrap_plan() {
   echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
   git -C "$TEST_PROJECT_ROOT" add epic-1.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
+  git -C "$(_pfsm_plan_tree P900)" checkout -q plan/P900
+  git -C "$(_pfsm_plan_tree P900)" merge --no-ff -q task/E-900-1_1/main -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
   run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
@@ -2216,15 +2272,23 @@ _pfsm_bootstrap_plan() {
   [[ "$output" == *"CLOSED"* ]]
 }
 
-@test "Error Handling: a dirty worktree at epic-start exits 1 before creating anything" {
+@test "Error Handling (P074 Step 5): a dirty worktree no longer blocks epic-start — the ref is created and the edit survives untouched" {
+  # Until P074 this asserted a refusal. epic-start creates refs only (no
+  # checkout, no tracked writes), so the repo-wide clean-worktree preflight
+  # was removed for it — the same dirty tree now proves the loosening is safe:
+  # the task branch is created and the unrelated edit is neither consumed,
+  # stashed nor reverted.
   _pfsm_bootstrap_plan "P064"
   echo dirty >> "$TEST_PROJECT_ROOT/.gitkeep"
 
   run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"uncommitted changes present"* ]]
   local branch_sha
   branch_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/task/E-064-1_1/main 2>/dev/null || true)"
-  [ -z "$branch_sha" ]
+  [ -n "$branch_sha" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' status --porcelain --untracked-files=no"
+  [[ "$output" == *".gitkeep"* ]]
 }
 
 @test "Error Handling: a detached HEAD at plan-start exits 1 and prints the resolved SHA" {
@@ -2458,8 +2522,21 @@ _pfsm_bootstrap_plan() {
   local args; args="$(build_default_init_args E-064-1_1)"
   run "$FSM" init $args
   [ "$status" -eq 0 ]
+
+  # P074 EPIC 2 (Steps 7-9): plan-start gives EVERY plan — legacy_epic_release_mode
+  # included — its own execution worktree, and `init` re-executes itself there,
+  # creating task/<epic>/main from the plan head and leaving the PM's checkout
+  # exactly where it was. The pre-P074 assertion (the PRIMARY checkout ends on
+  # the task branch) described the single-checkout topology this EPIC replaced;
+  # what "unchanged" means for this test is that the legacy plan still reaches
+  # READY on its own task branch, which is asserted below in the tree that now
+  # owns it.
+  local plan_tree; plan_tree="$(_pfsm_plan_tree P064)"
+  [ "$plan_tree" != "$TEST_PROJECT_ROOT" ]
+  local wt_branch; wt_branch="$(git -C "$plan_tree" rev-parse --abbrev-ref HEAD)"
+  [ "$wt_branch" = "task/E-064-1_1/main" ]
   local current_branch; current_branch="$(git -C "$TEST_PROJECT_ROOT" rev-parse --abbrev-ref HEAD)"
-  [ "$current_branch" = "task/E-064-1_1/main" ]
+  [ "$current_branch" = "main" ]
 }
 
 @test "AC3: deleting the runtime plan-boundary-manifest.json does NOT downgrade to legacy — fails closed with plan_manifest_missing, mode still reads plan_branch from the lifecycle manifest" {
@@ -2966,9 +3043,15 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
   run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
-  # Prune .aid-o/work to simulate a recovered workspace (evidence lost)
+  # Prune .aid-o/work to simulate a recovered workspace (evidence lost). The
+  # execution worktree goes with it: `.aid-worktrees/` is gitignored, so a
+  # recovered checkout has neither the directory nor its git registration.
+  # Leaving a REGISTERED worktree behind while deleting its state record would
+  # simulate the plan-start crash window instead, which P074 Step 8 refuses
+  # before init ever reaches the lineage check this test is about.
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work"
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+  _pfsm_drop_plan_worktree P064
 
   # Run plan-state --repair to rebuild entries from Git evidence
   # The repaired entry has lineage:unproven + epic_source_ref:null
@@ -3060,8 +3143,8 @@ _f2_assert_init_blocked() {
   echo decoy > "$TEST_PROJECT_ROOT/decoy.txt"
   git -C "$TEST_PROJECT_ROOT" add decoy.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "decoy work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q decoy \
+  git -C "$(_pfsm_plan_tree P900)" checkout -q plan/P900
+  git -C "$(_pfsm_plan_tree P900)" merge --no-ff -q decoy \
     -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
   git -C "$TEST_PROJECT_ROOT" branch -q -D decoy
@@ -3071,6 +3154,9 @@ _f2_assert_init_blocked() {
   git -C "$TEST_PROJECT_ROOT" branch task/E-900-1_1/main main
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
   run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
@@ -3093,13 +3179,16 @@ _f2_assert_init_blocked() {
   echo fixup > "$TEST_PROJECT_ROOT/fixup.txt"
   git -C "$TEST_PROJECT_ROOT" add fixup.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "fixup work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main-fixup \
+  git -C "$(_pfsm_plan_tree P900)" checkout -q plan/P900
+  git -C "$(_pfsm_plan_tree P900)" merge --no-ff -q task/E-900-1_1/main-fixup \
     -m "Merge branch 'task/E-900-1_1/main-fixup' into plan/P900"
   local sibling_merge; sibling_merge="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P900)"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
   run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
@@ -3152,8 +3241,8 @@ _f2_assert_init_blocked() {
   echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
   git -C "$TEST_PROJECT_ROOT" add epic-1.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main \
+  git -C "$(_pfsm_plan_tree P900)" checkout -q plan/P900
+  git -C "$(_pfsm_plan_tree P900)" merge --no-ff -q task/E-900-1_1/main \
     -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
 
@@ -3161,6 +3250,9 @@ _f2_assert_init_blocked() {
   git -C "$TEST_PROJECT_ROOT" branch task/E-900-1_2/main plan/P900
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
   run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
@@ -3190,6 +3282,9 @@ _f2_assert_init_blocked() {
   [ "$status" -eq 0 ]
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
+  # _pfsm_drop_plan_worktree.
+  _pfsm_drop_plan_worktree P900
   run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   run _f2_repaired_field P900 E-900-1_1 lineage
@@ -3320,7 +3415,7 @@ _pfsm_merge_commit_count() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  local merge_commit="$output"
+  local merge_commit; merge_commit="$(_pfsm_stdout_tail)"
 
   # main is untouched, byte for byte.
   local main_after; main_after="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
@@ -3366,9 +3461,9 @@ _pfsm_merge_commit_count() {
   # Simulate the crash: intent + the real Git merge + git_applied recorded,
   # but the manifest status write never ran.
   plan_op_begin "P064" "$op_id" "epic-merge-to-plan" "E-064-1_1" "$plan_before"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-064-1_1/main -m "merge(epic): E-064-1_1 into plan/P064"
-  local merge_commit; merge_commit="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  git -C "$(_pfsm_plan_tree P064)" checkout -q plan/P064
+  git -C "$(_pfsm_plan_tree P064)" merge --no-ff -q task/E-064-1_1/main -m "merge(epic): E-064-1_1 into plan/P064"
+  local merge_commit; merge_commit="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
   plan_op_mark_git_applied "P064" "$op_id" "$merge_commit"
 
@@ -3379,7 +3474,7 @@ _pfsm_merge_commit_count() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  [ "$output" = "$merge_commit" ]
+  [ "$(_pfsm_stdout_tail)" = "$merge_commit" ]
 
   # Exactly ONE merge commit — the resume performed only the state write.
   run _pfsm_merge_commit_count plan/P064
@@ -3401,11 +3496,11 @@ _pfsm_merge_commit_count() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  local merge_commit="$output"
+  local merge_commit; merge_commit="$(_pfsm_stdout_tail)"
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  [ "$output" = "$merge_commit" ]
+  [ "$(_pfsm_stdout_tail)" = "$merge_commit" ]
 
   run _pfsm_merge_commit_count plan/P064
   [ "$output" = "1" ]
@@ -3419,7 +3514,12 @@ _pfsm_merge_commit_count() {
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
 
-  echo dirty >> "$TEST_PROJECT_ROOT/.gitkeep"
+  # P074 EPIC 2: the pre-merge cleanliness check evaluates the tree the merge
+  # will run in — the PLAN worktree. Dirtying the PM's own checkout is exactly
+  # what this EPIC made harmless (that is the headline concurrency win), so the
+  # fixture dirties the tree the guard is actually about.
+  local ptree; ptree="$(_pfsm_plan_tree P064)"
+  echo dirty >> "$ptree/.gitkeep"
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 1 ]
@@ -3436,7 +3536,11 @@ _pfsm_merge_commit_count() {
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
 
-  git -C "$TEST_PROJECT_ROOT" rev-parse main > "$TEST_PROJECT_ROOT/.git/MERGE_HEAD"
+  # A linked worktree keeps MERGE_HEAD in ITS git dir (.git/worktrees/<name>),
+  # which is the one the merge consults after the P074 Step 8 redirect.
+  local ptree; ptree="$(_pfsm_plan_tree P064)"
+  git -C "$TEST_PROJECT_ROOT" rev-parse main \
+    > "$(git -C "$ptree" rev-parse --absolute-git-dir)/MERGE_HEAD"
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 1 ]
@@ -3454,10 +3558,11 @@ _pfsm_merge_commit_count() {
 
   # A stage-2 index entry with no stage-0 counterpart — an unmerged path
   # without a MERGE_HEAD, so the MERGE_HEAD guard cannot be what fires.
-  local blob; blob="$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$TEST_PROJECT_ROOT/.gitkeep")"
+  local ptree; ptree="$(_pfsm_plan_tree P064)"
+  local blob; blob="$(git -C "$ptree" hash-object -w "$ptree/.gitkeep")"
   printf '100644 %s 2\t.gitkeep\n' "$blob" \
-    | git -C "$TEST_PROJECT_ROOT" update-index --index-info
-  [ -n "$(git -C "$TEST_PROJECT_ROOT" ls-files --unmerged)" ]
+    | git -C "$ptree" update-index --index-info
+  [ -n "$(git -C "$ptree" ls-files --unmerged)" ]
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 1 ]
@@ -3525,7 +3630,7 @@ _pfsm_merge_commit_count() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  local merge_commit="$output"
+  local merge_commit; merge_commit="$(_pfsm_stdout_tail)"
 
   git -C "$TEST_PROJECT_ROOT" branch -D task/E-064-1_1/main
   run git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/task/E-064-1_1/main
@@ -3533,7 +3638,7 @@ _pfsm_merge_commit_count() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  [ "$output" = "$merge_commit" ]
+  [ "$(_pfsm_stdout_tail)" = "$merge_commit" ]
   run _pfsm_merge_commit_count plan/P064
   [ "$output" = "1" ]
 }
@@ -3544,10 +3649,11 @@ _pfsm_merge_commit_count() {
   _pfsm_epic_with_commit "P064" "E-064-1_1" "conflicted.txt" "from the task branch"
 
   # A competing change to the SAME file directly on the plan branch.
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  echo "from the plan branch" > "$TEST_PROJECT_ROOT/conflicted.txt"
-  git -C "$TEST_PROJECT_ROOT" add conflicted.txt
-  git -C "$TEST_PROJECT_ROOT" commit -qm "plan-side change to the same file"
+  local ptree; ptree="$(_pfsm_plan_tree P064)"
+  git -C "$ptree" checkout -q plan/P064
+  echo "from the plan branch" > "$ptree/conflicted.txt"
+  git -C "$ptree" add conflicted.txt
+  git -C "$ptree" commit -qm "plan-side change to the same file"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
 
   local main_before; main_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
@@ -3564,7 +3670,9 @@ _pfsm_merge_commit_count() {
   [ "$output" = "null" ]
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$main_before" ]
-  [ ! -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD" ]
+  # The merge runs in the PLAN worktree (P074 Step 8), so its merge state — if
+  # any leaked — would live in THAT tree's git dir, not the common one.
+  [ ! -f "$(git -C "$(_pfsm_plan_tree P064)" rev-parse --absolute-git-dir)/MERGE_HEAD" ]
   run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
   [ "$output" = "main" ]
 
@@ -3781,7 +3889,7 @@ _pfsm_force_unproven() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  local first_merge="$output"
+  local first_merge; first_merge="$(_pfsm_stdout_tail)"
 
   # More work lands on the task branch AFTER the merge, so its tip is no
   # longer contained in plan/P064 — the pre-fix command took the real-merge
@@ -3848,7 +3956,7 @@ _pfsm_force_unproven() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  local merge_commit="$output"
+  local merge_commit; merge_commit="$(_pfsm_stdout_tail)"
 
   # `plan-state --repair` rebuilds merged EPICs at merged_to_plan with EVERY
   # entry lineage:unproven. Re-confirming that already-recorded fact must not
@@ -3859,7 +3967,7 @@ _pfsm_force_unproven() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
-  [ "$output" = "$merge_commit" ]
+  [ "$(_pfsm_stdout_tail)" = "$merge_commit" ]
 
   run cmp -s "$BATS_TEST_TMPDIR/manifest-before.json" "$manifest"
   [ "$status" -eq 0 ]
@@ -3878,7 +3986,10 @@ _pfsm_force_unproven() {
   # refuses BEFORE writing anything — so no MERGE_HEAD and no unmerged index
   # entry ever exists. The pre-fix command called this a MERGE CONFLICT, drove
   # the plan to CONFLICT and exited 4.
-  echo "untracked local scratch" > "$TEST_PROJECT_ROOT/collide.txt"
+  # P074 EPIC 2: planted in the PLAN worktree — the tree the merge writes into
+  # after the Step 8 redirect. An untracked file in the PM's own checkout is
+  # exactly what this EPIC made irrelevant to the merge.
+  echo "untracked local scratch" > "$(_pfsm_plan_tree P064)/collide.txt"
 
   local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
   local main_before; main_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
@@ -3900,7 +4011,9 @@ _pfsm_force_unproven() {
   [ "$output" = "running" ]
   run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
   [ "$output" = "null" ]
-  [ ! -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD" ]
+  # The merge runs in the PLAN worktree (P074 Step 8), so its merge state — if
+  # any leaked — would live in THAT tree's git dir, not the common one.
+  [ ! -f "$(git -C "$(_pfsm_plan_tree P064)" rev-parse --absolute-git-dir)/MERGE_HEAD" ]
   run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
   [ "$output" = "main" ]
   local op_id; op_id="$(plan_op_key "epic-merge-to-plan" "P064" "-" "0" "E-064-1_1")"
@@ -3917,26 +4030,36 @@ _pfsm_force_unproven() {
 @test "Error Handling: a checkout-back that fails on the conflict path is reported loudly, never claimed as restored" {
   _pfsm_bootstrap_plan "P064"
 
-  # A file tracked on main and ABSENT from plan/P064 — checking out main again
-  # therefore has to write it.
+  # A file tracked on main and ABSENT from plan/P064 — and, because it is on
+  # NEITHER side of the merge, one the merge itself never touches. That is what
+  # makes it a pure RESTORE blocker: a file the merge does carry (anything on
+  # the task branch) makes git refuse the merge outright, which is a different
+  # error path than the one under test.
   echo "only on main" > "$TEST_PROJECT_ROOT/only-main.txt"
   git -C "$TEST_PROJECT_ROOT" add only-main.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "main-only file"
 
   _pfsm_epic_with_commit "P064" "E-064-1_1" "conflicted.txt" "from the task branch"
 
-  # The same add/add conflict as the AC5 case.
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  echo "from the plan branch" > "$TEST_PROJECT_ROOT/conflicted.txt"
-  git -C "$TEST_PROJECT_ROOT" add conflicted.txt
-  git -C "$TEST_PROJECT_ROOT" commit -qm "plan-side change to the same file"
-  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  # The same add/add conflict as the AC5 case, committed where plan/P064 now
+  # lives: the plan worktree (P074 EPIC 2).
+  local ptree; ptree="$(_pfsm_plan_tree P064)"
+  echo "from the plan branch" > "$ptree/conflicted.txt"
+  git -C "$ptree" add conflicted.txt
+  git -C "$ptree" commit -qm "plan-side change to the same file"
+
+  # P074 EPIC 2: the merge runs in the PLAN worktree, so the position it must
+  # restore is THAT tree's HEAD, not the PM's. Park it on a branch carrying
+  # only-main.txt — the direct analogue of the pre-P074 fixture, where the
+  # position to restore was `main` in the single checkout.
+  git -C "$ptree" checkout -q -b wt-detour main
 
   # Installed LAST so it only fires inside the command under test: the moment
   # the command lands on plan/P064 it plants an untracked only-main.txt, which
-  # makes the checkout BACK to main fail ("would be overwritten by checkout").
-  # The pre-fix command swallowed that failure and still told the operator its
-  # position was restored.
+  # makes the checkout BACK to wt-detour fail ("would be overwritten by
+  # checkout"). The pre-fix command swallowed that failure and still told the
+  # operator its position was restored. Hooks live in the COMMON git dir, so
+  # this one fires inside the plan worktree too.
   cat > "$TEST_PROJECT_ROOT/.git/hooks/post-checkout" <<'HOOK'
 #!/bin/sh
 if [ "$(git symbolic-ref --short HEAD 2>/dev/null)" = "plan/P064" ]; then
@@ -3955,7 +4078,10 @@ HOOK
   # The restore failure is stated, and names where HEAD really is.
   [[ "$output" == *"HEAD NOT RESTORED"* ]]
   [[ "$output" == *"plan/P064"* ]]
+  # The PM's own checkout never moved; the worktree is the one left stranded.
   run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
+  [ "$output" = "main" ]
+  run git -C "$ptree" symbolic-ref --short HEAD
   [ "$output" = "plan/P064" ]
 
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
@@ -4599,8 +4725,8 @@ YAML
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   # Land the work on plan/P064 (own plan branch) AND on main (target branch),
   # so both legal anchors are genuine ancestors.
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "merge(epic): E-064-1_1 into plan/P064" task/E-064-1_1/main
+  git -C "$(_pfsm_plan_tree P064)" checkout -q plan/P064
+  git -C "$(_pfsm_plan_tree P064)" merge -q --no-ff -m "merge(epic): E-064-1_1 into plan/P064" task/E-064-1_1/main
   git -C "$TEST_PROJECT_ROOT" checkout -q main
   git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "release plan/P064" plan/P064
 
@@ -4747,8 +4873,8 @@ YAML
   # plan_id is still refused fail-closed — corruption is not trusted, one field
   # cannot vouch for another.
   git -C "$TEST_PROJECT_ROOT" branch plan/P064-real task/E-064-1_1/main 2>/dev/null || true
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "merge(epic): E-064-1_1 into plan/P064" task/E-064-1_1/main
+  git -C "$(_pfsm_plan_tree P064)" checkout -q plan/P064
+  git -C "$(_pfsm_plan_tree P064)" merge -q --no-ff -m "merge(epic): E-064-1_1 into plan/P064" task/E-064-1_1/main
   git -C "$TEST_PROJECT_ROOT" checkout -q main
   _qw_write_queue <<'YAML'
 paused: false
@@ -5053,8 +5179,8 @@ YAML
   echo dep > "$TEST_PROJECT_ROOT/dep.txt"
   git -C "$TEST_PROJECT_ROOT" add dep.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "E-064-1_1: work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "merge E-064-1_1" feature/odd-name
+  git -C "$(_pfsm_plan_tree P064)" checkout -q plan/P064
+  git -C "$(_pfsm_plan_tree P064)" merge -q --no-ff -m "merge E-064-1_1" feature/odd-name
   git -C "$TEST_PROJECT_ROOT" checkout -q main
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-064-1_1/R-1"
   printf 'epic_id: E-064-1_1\nstate: DONE\nbranch: feature/odd-name\n' \
@@ -5113,8 +5239,8 @@ YAML
   echo dep2 > "$TEST_PROJECT_ROOT/dep2.txt"
   git -C "$TEST_PROJECT_ROOT" add dep2.txt
   git -C "$TEST_PROJECT_ROOT" commit -qm "E-064-1_2: work"
-  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
-  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "merge E-064-1_2" _wip
+  git -C "$(_pfsm_plan_tree P064)" checkout -q plan/P064
+  git -C "$(_pfsm_plan_tree P064)" merge -q --no-ff -m "merge E-064-1_2" _wip
   git -C "$TEST_PROJECT_ROOT" checkout -q main
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-064-1_2/R-1"
   printf 'epic_id: E-064-1_2\nstate: DONE\nbranch: _wip\n' \
@@ -6606,6 +6732,8 @@ YAML
   _pfsm_bootstrap_plan P064 plan_branch
   _pfsm_epic_with_commit P064 E-064-1_1
   # Stay on main, where the manifest IS in the working tree, then deny reads.
+  # The guard is bound to the STATE ROOT (this tree) even after P074 Step 8
+  # redirects done-advance into the plan worktree — see _fsm_declared_plan_mode.
   chmod 000 "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
   local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
 

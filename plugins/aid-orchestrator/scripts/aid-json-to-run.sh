@@ -39,6 +39,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 check_prerequisites
 
+# P074 Step 1 — shared state-root resolution: this entrypoint's own .aid-o
+# reads/writes (Step 18 FSM evidence dir) resolve under aid_state_root so an
+# invocation from a linked worktree initialises the PRIMARY checkout's FSM
+# state, never a forked workspace inside the worktree.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+
 # =============================================================================
 # Parse CLI arguments
 # =============================================================================
@@ -51,6 +58,8 @@ streamlined=false   # P040 Component D activation flag (CP3 gap fix); forwarded 
 force_init_reason="" # PM-authorized, audited cross-plan force-init reason; forwarded to aid-fsm.sh init in Step 18 (invocation-scoped, no env export)
 generation_receipt="" # Complete-package receipt required by strict/high-risk source plans.
 defer_init=false       # Generation stage may render run.md before the package receipt exists.
+plan_id=""             # The owning plan, passed by generation; empty for standalone callers.
+plan_mode=""           # plan_branch | legacy_epic_release_mode — decides whether epic-start runs.
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,6 +72,8 @@ while [[ $# -gt 0 ]]; do
     --force-init-reason) force_init_reason="$2"; shift 2 ;;
     --generation-receipt) generation_receipt="$2"; shift 2 ;;
     --defer-init)       defer_init=true;      shift 1 ;;
+    --plan-id)          plan_id="$2";         shift 2 ;;
+    --plan-mode)        plan_mode="$2";       shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -641,7 +652,7 @@ fi
 # aid-json-to-run.sh now initializes the FSM directly so no manual
 # `aid-fsm.sh init` call is required before /aid-run.
 # Compute FSM init parameters from in-scope variables.
-fsm_evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"  # MUST match aid-fsm.sh cmd_init evidence_dir derivation
+fsm_evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}")"  # MUST match aid-fsm.sh cmd_init evidence_dir derivation (both resolve via aid-roots.sh)
 mkdir -p "$fsm_evidence_dir"
 fsm_state_file="${fsm_evidence_dir}/fsm-state.yaml"
 fsm_mode="full"
@@ -704,6 +715,53 @@ elif [[ ! -f "$fsm_state_file" ]]; then
     echo "P040 Component E: --force-init-reason set — forwarding SANCTIONED --force to FSM init (cross-plan DONE gate waived, audited). Reason: ${force_init_reason}" >&2
     fsm_force_args=(--force --reason "${force_init_reason}")
   fi
+  # REGISTER THE TASK BRANCH BEFORE INIT NEEDS IT.
+  #
+  # `epic-start` creates `task/<epic>/main` as a ref with recorded lineage. It
+  # is a fully built, tested command that until now had NO production caller:
+  # the plan-branch lifecycle was assembled across P064/P068 and this link was
+  # never wired. Single-stream runs did not notice, because init ran in the
+  # operator's own checkout where the lineage precondition was not reached.
+  # Once P074 made init redirect into the plan's own worktree, the precondition
+  # started being evaluated for real and refused — correctly — on a task branch
+  # nobody had registered.
+  #
+  # Only for plan_branch: a legacy plan has no plan branch to descend from, and
+  # epic-start rightly refuses without a plan-boundary manifest. Best-effort by
+  # design — an ALREADY-registered branch is the normal resumed-generation case,
+  # so a non-zero here is reported and left to init, which owns the verdict.
+  # A STANDALONE caller passes neither flag (the documented single-EPIC
+  # interface at the top of this file). Deriving both here rather than trusting
+  # the caller is what keeps the registration from depending on who invoked us:
+  # init derives the same plan id from the same epic id and consults the same
+  # committed manifest, so a standalone init of a plan_branch EPIC would
+  # otherwise refuse on lineage nobody registered.
+  if [[ -z "$plan_id" ]]; then
+    _jr_nnn="${epic_id%%_*}"
+    [[ "$_jr_nnn" =~ ^E-([0-9]+) ]] && plan_id="P${BASH_REMATCH[1]}"
+  fi
+  if [[ -z "$plan_mode" && -n "$plan_id" ]]; then
+    plan_mode="$(git show "$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo main):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null \
+                 | yq -r '.mode // ""' 2>/dev/null || true)"
+  fi
+
+  if [[ "$plan_mode" == "plan_branch" && -n "$plan_id" ]]; then
+    _es_rc=0
+    bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "$plan_id" "$epic_id" \
+      --run-id "$run_id" >&2 || _es_rc=$?
+    if [[ "$_es_rc" -eq 0 ]]; then
+      echo "P075: epic-start registered task/${epic_id}/main for ${plan_id} before FSM init" >&2
+    else
+      echo "P075: epic-start for ${epic_id} returned ${_es_rc} — continuing to init, which decides whether the branch state is usable (already-registered is the normal resume case)" >&2
+    fi
+  fi
+
+  # A FAILING init must still hand the caller's branch back. This script runs
+  # under `set -e`, so a non-zero init used to abort right here — skipping the
+  # restore below and leaving the operator's checkout on the `task/<epic>/main`
+  # that init had just auto-created on its way to refusing. Capture the status,
+  # restore, and only then fail with it.
+  fsm_init_rc=0
   if [[ "$streamlined" == "true" ]]; then
     bash "${SCRIPT_DIR}/aid-fsm.sh" init \
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
@@ -711,15 +769,47 @@ elif [[ ! -f "$fsm_state_file" ]]; then
       "$fsm_state_file" \
       ${fsm_plan_path:+--plan "$fsm_plan_path"} \
       "${fsm_force_args[@]}" \
-      --streamlined
+      --streamlined || fsm_init_rc=$?
   else
     bash "${SCRIPT_DIR}/aid-fsm.sh" init \
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
       "$fsm_state_file" \
       ${fsm_plan_path:+--plan "$fsm_plan_path"} \
-      "${fsm_force_args[@]}"
+      "${fsm_force_args[@]}" || fsm_init_rc=$?
   fi
+  # RESTORE THE TREE INIT ACTUALLY USED, not only the caller's.
+  #
+  # The restore below exists for a reason stated in this file since P040:
+  # generation calls this script once per EPIC in a batch, so a workdir left on
+  # one phase's task branch makes the NEXT phase's init see a cross-EPIC
+  # mismatch and hard-fail. That reasoning never knew about worktrees. Since
+  # P074 a plan_branch init REDIRECTS into `.aid-worktrees/plan-<id>` and
+  # leaves THAT tree on `task/<epic>/main`, while the caller's checkout — the
+  # only tree the block below inspects — never moved. Phase 2 then redirects
+  # into a worktree still sitting on phase 1's branch and dies on exactly the
+  # mismatch the original restore was written to prevent.
+  #
+  # Same contract, applied to the tree that moved: between EPICs the plan
+  # worktree rests on `plan/<id>`.
+  if [[ "$plan_mode" == "plan_branch" && -n "$plan_id" ]]; then
+    _jr_wt="$(aid_state_path ".aid-worktrees/plan-${plan_id}")"
+    if [[ -d "$_jr_wt" ]]; then
+      _jr_wt_branch="$(git -C "$_jr_wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+      _jr_plan_branch="plan/${plan_id}"
+      if [[ -n "$_jr_wt_branch" && "$_jr_wt_branch" != "$_jr_plan_branch" ]]; then
+        _jr_wt_err=""
+        if _jr_wt_err="$(git -C "$_jr_wt" checkout "$_jr_plan_branch" 2>&1)"; then
+          echo "P075: restored plan worktree to '${_jr_plan_branch}' after FSM init (was on '${_jr_wt_branch}') so the next phase does not meet a cross-EPIC mismatch" >&2
+        else
+          echo "P075: ERROR — the plan worktree ${_jr_wt} is on '${_jr_wt_branch}' instead of '${_jr_plan_branch}' and could not be restored — run: git -C ${_jr_wt} checkout ${_jr_plan_branch} ; then rerun" >&2
+          printf '%s\n' "$_jr_wt_err" >&2
+          exit 4
+        fi
+      fi
+    fi
+  fi
+
   fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then
     # P073 Step 6: capture the failure text from the FIRST and ONLY attempt.
@@ -747,6 +837,13 @@ elif [[ ! -f "$fsm_state_file" ]]; then
       printf '%s\n' "$fsm_restore_err" >&2
       exit 4
     fi
+  fi
+  # The branch is back where the caller left it; now surface init's own
+  # failure. Doing it here rather than at the call site is the whole point:
+  # the operator's checkout is restored whether init succeeded or refused.
+  if [[ "$fsm_init_rc" -ne 0 ]]; then
+    echo "P040 Component E: FSM init failed (exit ${fsm_init_rc}) — the checkout was restored to '${fsm_branch}' first, so nothing is left on a task branch." >&2
+    exit "$fsm_init_rc"
   fi
 else
   echo "P040 Component E: fsm-state.yaml already exists at $fsm_state_file; skipping init (idempotent)" >&2

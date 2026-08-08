@@ -27,6 +27,16 @@ agent-file frontmatter). See `pipeline.md` §4.
 It is currently capped globally at 1 by `orchestration.yaml → dispatch.max_parallel: 1` (sequential
 execution enforced until the Agent SDK migration), so the per-role values are aspirational today.
 
+What the cap governs, precisely: **how many worker agents one controller session dispatches at a
+time**. It is 1, and P074 does not change it — parallel dispatch inside a run stays out of scope.
+P074 gives each plan its own git worktree and its own state files; that isolates the plans' TREES
+and bookkeeping, which is not the same thing as authorizing concurrent agent dispatch.
+
+So, plainly: **two plan streams may be worked at the same time**, each from its own plan worktree
+via its own `/aid-run` invocation (isolation = separate worktrees + per-plan `plan-state` + the
+`active-runs.json` map). Within any one of those streams, dispatch remains strictly sequential —
+one worker at a time — exactly as before.
+
 See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of this file.
 
 ---
@@ -558,7 +568,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-06
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

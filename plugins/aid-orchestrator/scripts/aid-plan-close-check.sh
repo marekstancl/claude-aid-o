@@ -35,6 +35,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AID_FSM="${SCRIPT_DIR}/aid-fsm.sh"
+# P074 Step 1 — shared state-root resolution (PROJECT_ROOT default below).
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
 
 # ─────────────────────────────────────────────────────────────────────────
 # Check 2 classification regex — anything NOT matching this allow-list is
@@ -95,7 +98,11 @@ EOF
 }
 
 PLAN_ID=""
-PROJECT_ROOT="$(pwd)"
+# P074 Step 1: default to the STATE root (primary checkout) rather than $(pwd),
+# so an invocation from a linked worktree checks the primary .aid-o workspace.
+# Outside a git repository the old cwd default is kept — the explicit
+# `git rev-parse` guard below still owns the not-a-repo failure path.
+PROJECT_ROOT="$(aid_state_root 2>/dev/null || pwd)"
 AUTO_ANNOTATE=0
 SKIP_DELIVERY_REPORT=0
 PLAN_BRANCH_MODE=0
@@ -164,6 +171,9 @@ if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
 fi
 
 PLAN_NUM="${PLAN_ID#P}"
+# These are PROJECT_ROOT-relative by construction: the `cd "$PROJECT_ROOT"`
+# above pins the cwd to the resolved state root (P074 Step 1), so ACTIVE_FILE
+# and friends follow PROJECT_ROOT wherever the script was invoked from.
 REPORTS_DIR=".aid-o/reports"
 QUEUE_FILE=".aid-o/config/queue.yaml"
 ACTIVE_FILE=".aid-o/work/active.md"

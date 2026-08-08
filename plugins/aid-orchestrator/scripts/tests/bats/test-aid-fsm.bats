@@ -1398,6 +1398,12 @@ YAML
 @test "D0 gate point: advance-to-gates logs d0_delivery_gate event (observe, non-blocking)" {
   local td; td="$(mktemp -d)"
   mkdir -p "$td/.aid-o/work/evidence/E-D0/R-D0T/gates"
+  # P074 Step 1: $td is passed as AID_PROJECT_ROOT below. It is a legitimate
+  # standalone dogfood state root (not a git repo), so it must carry the
+  # plan-state dir that lib/aid-roots.sh's dogfood escape keys on — the
+  # resolver deliberately refuses roots identifiable by neither repo nor
+  # plan-state.
+  mkdir -p "$td/.aid-o/work/plan-state"
   cat > "$td/.aid-o/work/evidence/E-D0/R-D0T/fsm-state.yaml" <<'EOF'
 epic_id: E-D0
 run_id: R-D0T
