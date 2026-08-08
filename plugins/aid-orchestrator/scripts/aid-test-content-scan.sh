@@ -273,11 +273,23 @@ except Exception:
 # "uncounted" instead of pretending the suite count is the test count.
 case_counts = []
 total_cases = 0
-for f in bats:
-    try: n = len(re.findall(r"@test ", open(f, errors="ignore").read()))
+cases_by_runner = {"bats": 0, "py": 0, "ts": 0}
+def _count_cases(f):
+    if f in bats:
+        return "bats", len(re.findall(r"@test ", open(f, errors="ignore").read()))
+    if f in py_tests:
+        # pytest collects test functions AND test methods; parametrize multiplies
+        # at runtime, so this is a static lower bound — the report says so.
+        return "py", len(re.findall(r"^\s*(?:async\s+)?def\s+test_",
+                                    open(f, errors="ignore").read(), re.M))
+    return "ts", len(re.findall(r"\b(?:it|test)(?:\.each\([^)]*\))?\s*\(",
+                                open(f, errors="ignore").read()))
+for f in all_tests:
+    try: runner, n = _count_cases(f)
     except Exception: continue
     total_cases += n
-    case_counts.append({"file": rel(f), "cases": n})
+    cases_by_runner[runner] += n
+    case_counts.append({"file": rel(f), "runner": runner, "cases": n})
 case_counts.sort(key=lambda x: -x["cases"])
 
 # ── 9. naming conventions ─────────────────────────────────────────────────
@@ -338,7 +350,9 @@ doc = {
         "gate_stability": gate_stability,
         "case_counts": {"total_countable": total_cases,
                         "files_counted": len(case_counts),
-                        "top": case_counts[:15]},
+                        "by_runner": cases_by_runner,
+                        "top": case_counts[:15],
+                        "files": case_counts},
         "naming": naming,
         "fabricated_measured": fabricated,
         "scope": {"bats_files": len(bats), "py_test_files": len(py_tests),

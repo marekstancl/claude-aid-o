@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.77.4] — 2026-08-08
+
+> The owner asked "kolik testů máme" and the WAN report answered with a dash:
+> the case counter only knew bats, in a pytest project. Counting is now
+> runner-aware, like every other collector already had to learn to be.
+
+### Fixed
+- **Case Counter Counts Every Runner** — test-case counting now covers pytest functions and js/ts `it()`/`test()` cases in addition to bats `@test`, with a per-runner breakdown in the headline stat (WAN: dash → 6603 cases) and a static-lower-bound caveat for parametrized pytest tests.
+- **Group Case Mapping Uses the Full File List** — the report mapped suite case counts from only the top-15 files of the scan; the scan now emits the full per-file list and the report consumes it, so group case columns no longer undercount.
+
+### Changed
+- **Groups Legend Explains Unmapped Cases** — when every group shows zero mappable cases (gates calling tests through opaque wrappers), the groups table says so and points to the portfolio total instead of leaving a silent dash.
+
 ## [2.77.3] — 2026-08-08
 
 > An independent review of a real consumer report found the technical core

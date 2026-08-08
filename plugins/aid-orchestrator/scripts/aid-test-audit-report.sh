@@ -119,7 +119,8 @@ def gkey(uid):
     kind, _, rest = uid.partition(":")
     parts = rest.split("/")
     return (kind, "/".join(parts[:-1]) if len(parts) > 1 else "(kořen)")
-_all_cases = {c["file"]: c["cases"] for c in ((sc.get("case_counts") or {}).get("top") or [])}
+_cc = sc.get("case_counts") or {}
+_all_cases = {c["file"]: c["cases"] for c in (_cc.get("files") or _cc.get("top") or [])}
 groups = collections.defaultdict(lambda: {"n": 0, "cost": 0.0, "par": 0, "to": 0, "cases": 0})
 for e in inv:
     uid = e["run_unit_id"]
@@ -217,11 +218,18 @@ H.append(f'<div class="stat"><b>{n_units}</b><span>testovacích sad</span></div>
 cases_total = (scan.get("counts") or {}).get("total_cases_countable")
 if cases_total:
     fc = ((sc.get("case_counts") or {}).get("files_counted")) or 0
-    H.append(f'<div class="stat"><b>{cases_total}</b><span>testovacích případů (spočítáno v {fc} souborech)</span></div>')
+    br = ((sc.get("case_counts") or {}).get("by_runner")) or {}
+    parts = [f"{lbl} {br[k]}" for k, lbl in
+             (("py", "pytest"), ("bats", "bats"), ("ts", "js/ts")) if br.get(k)]
+    detail = " · ".join(parts) if len(parts) > 1 else f"spočítáno v {fc} souborech"
+    H.append(f'<div class="stat"><b>{cases_total}</b><span>testovacích případů ({detail})</span></div>')
 H.append(f'<div class="stat bad"><b>{n_unexamined}</b><span>zatím neprověřeno do hloubky</span></div>')
 H.append(f'<div class="stat"><b>{total_s/60:.0f}&nbsp;min</b><span>změřená cena ({len(measured)} sad)</span></div>')
 H.append(f'<div class="stat good"><b>{len(cat_safe)}</b><span>smí běžet paralelně</span></div>')
 H.append('</div>')
+if cases_total and (((sc.get("case_counts") or {}).get("by_runner")) or {}).get("py"):
+    H.append('<p class="legend">Počet pytest případů je statická spodní mez — '
+             'parametrizované testy se za běhu násobí, skutečný počet je vyšší.</p>')
 if prev:
     d_ex = n_examined - prev.get("examined", 0)
     d_cost = total_s/60 - prev.get("measured_min", 0)
@@ -255,8 +263,12 @@ if groups:
                  f'<td class="num">{g["par"]}</td>'
                  f'<td class="num">{g["to"] or "—"}</td></tr>')
     H.append('</table></div>')
+    _unmapped = cases_total and all(g["cases"] == 0 for g in groups.values())
     H.append('<p class="legend">Skupiny jsou strukturální (typ běžce a adresář). '
-             'Pojmenování podle účelu doplňuje průvodce auditem při prezentaci.</p>')
+             'Pojmenování podle účelu doplňuje průvodce auditem při prezentaci.'
+             + (' Případy na jednotlivé brány nejdou mechanicky přiřadit (brány volají '
+                'testy přes wrapper) — celkový počet případů je v sekci 1.' if _unmapped else '')
+             + '</p>')
 else:
     H.append('<p class="empty">Inventura chybí — bez ní nejde portfolio seskupit.</p>')
 
