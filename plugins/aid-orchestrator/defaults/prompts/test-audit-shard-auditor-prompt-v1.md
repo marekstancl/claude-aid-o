@@ -154,6 +154,18 @@ later audit propose it properly.
   quarantine, xfail that now passes: each is a finding with a proposal, because
   they cost collection time and give false comfort.
 
+## Collection claims must be executed, never grepped
+
+A finding that claims a runner COLLECTS the wrong set ("this config picks up
+1 of 24 test files") is only evidence if you ran the runner's own listing mode
+(`vitest list`, `pytest --collect-only`, `bats --count`) and quote its output.
+Static reading of configs is not evidence: a real remediation implementer
+discovered a high-priority "widen vitest collection" finding was a FALSE
+POSITIVE — the audit's grep missed `vitest.workspace.ts` and the runner had
+been collecting all 24 files all along. An entire remediation step was planned
+for a defect that did not exist. If you cannot execute the listing command,
+downgrade the claim to `confidence: low` and say the check that would settle it.
+
 ## Depth over coverage — the sampling rule
 
 Your budget cannot deeply inspect every assigned unit, and skimming all of them

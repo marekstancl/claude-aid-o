@@ -410,3 +410,18 @@ JSON
   out_low="$(printf '%s' "$output" | grep -n "low change" | head -1 | cut -d: -f1)"
   [ "$out_crit" -lt "$out_low" ]
 }
+
+@test "the rendered summary ITSELF orders the controller to publish the report page first" {
+  # Four days of runs ended as a wall of text in front of the owner because
+  # publishing the page was an instruction in a doc the presenting agent never
+  # re-read. Now the mandate travels inside the output the agent demonstrably
+  # pastes — an instruction without enforcement, enforced by placement.
+  local f="$TEST_TMPDIR/findings.json"
+  _write_findings "$f" '[]'
+  run aid_test_audit_render_chat_summary "$f"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PRVNÍ KROK PRO CONTROLLER"* ]]
+  [[ "$output" == *"report.html"* ]]
+  # ...and it names the actual path next to the findings file.
+  [[ "$output" == *"$TEST_TMPDIR"* ]]
+}

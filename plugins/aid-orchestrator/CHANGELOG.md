@@ -3,6 +3,88 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.79.2] — 2026-08-08
+
+### Fixed
+- **C4 Plan-Diff Vocabulary Mismatch Blocked Every Real Plan** — the plan-mode C4 release decision required plan-diff's overall_verdict to be present/absent, a vocabulary the producer only uses one level down (per-AC); the real overall vocabulary is pass/fail/partial/skipped, so every genuine plan-diff — verdict "pass" included — was blocked as "not bound to the frozen plan candidate"; the checker now speaks the producer's language (armed AC lens demands pass/fail; partial/skipped stay non-blocking only when no lens is armed, and never report as a pass). Found by finally reading the CI red streak: AC4 of the plan-final boundary suite had been failing since the vocabularies diverged.
+
+## [2.79.1] — 2026-08-08
+
+### Changed
+- **P075 Remediation Rode Along (attribution)** — the P075 test-audit remediation steps implemented in this worktree (inventory bats_boundary reconciliation, resource-map string-literal guard, catalog npm:test build dependency + per-workspace split, CI jsonschema installs, live --state-file check) were swept into the v2.79.0 and v2.79.1 release commits by their `git add -A`; all 50 affected suite tests verified green post-push. Recorded here so the CHANGELOG matches what actually shipped.
+
+### Fixed
+- **Audit-Scoped Findings No Longer Block the Write-Plan Handoff** — the bridge required every cited run_unit_id to resolve in the current catalog, but findings about the audit run itself (`audit:<id>` — fabricated measured costs, missing repeat-run evidence) can never — correctly — appear in a catalog of test suites, so ANY audit with at least one audit-level finding was permanently blocked; audit-scoped ids are now exempt from catalog resolution while gate/suite ids stay strictly checked (found live by the WAN consumer, regression-tested).
+
+## [2.79.0] — 2026-08-08
+
+> "K čemu ty sady vlastně jsou a proč je máme?" had no answer in any artifact.
+> Now it is a section: every gate named, its purpose derived from what it
+> actually runs, EPIC codenames get purpose-based rename proposals.
+
+### Added
+- **Suite Overview Section (3b · Sady jmenovitě)** — the report lists every gate with its mechanically derived purpose (dominant topics of the files it runs), file and case counts, profile membership, and flags: no-op commands (`true`), required-but-in-no-profile orphans, and EPIC codenames (p070…) with purpose-based rename proposals (e.g. `p077_confirmations → cancel_confirmation`).
+- **Gate File Resolution** — the scan resolves which test files each gate runs through explicit arguments, whole-argument directory expansion, bare js/ts runner conventions, and pytest markers — substrings of listed file paths never expand to their parent directory.
+- **IMP-469 Backlog Entry** — standalone parallel test runner so the proven-safe lanes speed up ANY caller (agent, CI, terminal), not only the AID gate runner; recorded with enforcement named at design time.
+
+## [2.78.0] — 2026-08-08
+
+> A verification agent with a one-line prompt out-delivered this audit by
+> asking "what exists" where the audit asked "what do gates run". Its edge is
+> now mechanical: the audit reads CI, reads through wrappers, and prices tests
+> apiece.
+
+### Added
+- **CI Test-Execution Check** — the scan reads CI workflow files and reports whether any of them actually runs a test, with commented-out test steps quoted as evidence; a project whose merges verify nothing gets a critical banner in the report headline (found live: a consumer CI whose pytest step had been commented out for a week).
+- **Unrun Test Files In the Headline** — the count of test files no gate ever runs, out of the total on disk, is a headline stat instead of a buried table row.
+- **Per-Test Cost Column** — the groups table shows seconds per test case where both cost and case counts are known, making "run the cheap unit tests more often" a number instead of an instinct.
+
+### Fixed
+- **Wrapper-Aware, Marker-Exact Reachability** — gate wrapper scripts are read one level deep but only their runner-invoking lines count (a registry checker that merely LOOPS over test paths no longer marks them as run), and a marker-filtered pytest gate grants reachability only to files carrying the marker, never by path overlap; on the consumer project this moved the unrun-files count from a false 364, then a false 22, to 162 — independently verified as 153 backend files plus 9 playwright scenarios.
+- **Re-Measurements Replace Censored Receipts** — the report derives totals, censored counts and the top-10 from the LAST measurement per unit, so a suite re-measured at a higher deadline replaces its timed-out receipt instead of being double-counted next to it.
+
+## [2.77.4] — 2026-08-08
+
+> The owner asked "kolik testů máme" and the WAN report answered with a dash:
+> the case counter only knew bats, in a pytest project. Counting is now
+> runner-aware, like every other collector already had to learn to be.
+
+### Fixed
+- **Case Counter Counts Every Runner** — test-case counting now covers pytest functions and js/ts `it()`/`test()` cases in addition to bats `@test`, with a per-runner breakdown in the headline stat (WAN: dash → 6603 cases) and a static-lower-bound caveat for parametrized pytest tests.
+- **Gate Names Never Masquerade As Case Counts** — gate unit ids are names, not file paths; the report no longer substring-matches them against test files, which had produced accidental case counts on gate rows.
+- **Group Case Mapping Uses the Full File List** — the report mapped suite case counts from only the top-15 files of the scan; the scan now emits the full per-file list and the report consumes it, so group case columns no longer undercount.
+
+### Changed
+- **Groups Legend Explains Unmapped Cases** — when every group shows zero mappable cases (gates calling tests through opaque wrappers), the groups table says so and points to the portfolio total instead of leaving a silent dash.
+
+## [2.77.3] — 2026-08-08
+
+> An independent review of a real consumer report found the technical core
+> correct — and two numbers whole sections stood on provably wrong, because
+> the content scanner was written for bats and pointed at a pytest project.
+> Every finding of that review lands here.
+
+### Fixed
+- **The scanner reads tests of every runner** — py/ts/tsx test files join bats in reference detection, and sources are matched by dotted module form too (`wan/api/scan.py` ↔ `wan.api.scan`), so a file 42 tests import is no longer "untested". The review's exact counterexamples now pass.
+- **Unreachable test files are found across runners** — reachability walks gate commands' path tokens and pytest markers; the review's 153-file hole this check previously reported as "0" now surfaces, labelled as candidates where an opaque wrapper gate cannot be read.
+- **Fabricated "measured" costs are arithmetic now, not diligence** — every disposition claiming `cost.kind: measured` is compared against the actual measurement receipt; mismatches and claims with no receipt render as a critical row. Caught 3 of the review's 5 on the spot (the other two sit inside a 10 % tolerance).
+- **A green zero must mean "checked and clean", never "not applicable"** — bats-only checks on a bats-less project render "nehodnoceno" instead of an ok-pill zero, which the review rightly read as a contradiction.
+- **The sources section stops naming a catalog that does not exist** — it now states whether an approved catalog was actually read, and that a zero parallel column is correct when none exists.
+- **Reliability measures today's gates** — history of gates deleted from the current `execution.yaml` moves to a labelled footnote instead of rendering "0 % — dead" over a renamed gate, and every row carries this run's own outcome, so a gate that failed today cannot appear as 100 %.
+
+## [2.77.2] — 2026-08-08
+
+### Fixed
+- **The report page was unreadable in mixed themes** — tokens flipped to dark while the page ground stayed light, producing black tiles on a white page. Background now binds to both `html` and `body`, so the artifact wrapper's own reset cannot split the themes.
+- **"Kolik testů" finally answers in test CASES, not suites** — a mechanical counter totals `@test` cases per file (3 179 on this repository) and the groups table carries a per-group case column; where cases are uncountable (a gate wrapping an opaque command) the page says so instead of passing the suite count off as the test count.
+- **An empty parallelism lever must name its blocker** — "nothing runs in parallel" with no cause read as "parallelisation is impossible"; the lever now aggregates the blocking resources from lanes and unresolved entries and names the one whose fix opens the pool, and when it cannot name one it says that is the audit's gap, not the portfolio's state.
+- **Naming conventions are measured** — dominant name prefixes and the files outside any recognised pattern (50 on this repository), with the rename candidates listed in content-scan.json.
+
+## [2.77.1] — 2026-08-08
+
+### Fixed
+- **Merges v2.76.1 into the 2.77 line** — the publish-the-page mandate embedded in the rendered summary; see v2.76.1 below. No behaviour beyond it.
+
 ## [2.77.0] — 2026-08-07
 
 > P074 gave each plan its own worktree, and in doing so exposed something older:
@@ -20,6 +102,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **A refusing `init` no longer parks you on a task branch** — `aid-json-to-run.sh` runs under `set -euo pipefail`, so a failing init aborted the script and skipped the branch-restore block directly below it, leaving the operator's checkout on the `task/<epic>/main` that init had auto-created on its way to refusing. The status is captured, the branch handed back, and only then is the failure reported.
 - **Multi-phase generation completes** — `init` leaves the plan's worktree on that phase's task branch, and the pre-existing restore only ever inspected the caller's checkout, which does not move for a redirected init. Phase 2 then met a worktree still on phase 1's branch and hard-failed the cross-EPIC mismatch. The plan worktree is now returned to `plan/<id>` after each init; without it the wiring closed phase 1 only, and every real plan is multi-phase.
 
+## [2.76.1] — 2026-08-08
+
+### Fixed
+- **Showing the report page to the owner no longer depends on an agent's obedience** — the page was generated on disk every run and the owner kept receiving the text wall, because publishing it was an instruction in a command doc the presenting agent never re-read. The mandate now travels INSIDE the rendered summary itself, as its first banner, naming the exact report path: an agent that pastes the block verbatim — which is the one behaviour agents demonstrably exhibit — pastes the order to publish the page first. The same instruction-without-enforcement defect this whole line of work exists to remove, rebuilt at the last step in front of the owner, now removed there too.
 ## [2.76.0] — 2026-08-07
 
 > The owner's question was exact: "do we even have the data to fill the

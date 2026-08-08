@@ -243,6 +243,36 @@ _inv_out() {
   [ "$output" = "dedicated" ]
 }
 
+@test "P075 Step 3: gate:bats_boundary contains exactly the 2 boundary files, and gate:bats_all excludes them" {
+  # Before this fix, both gates shared the identical 132-member bats set,
+  # differing only in `partition` — a reader of inventory.json would wrongly
+  # conclude gate:bats_boundary re-runs the whole pool (P075 Step 3).
+  local repo out boundary_a boundary_b
+  repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  out="$(_inv_out "$repo")"
+  boundary_a="bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary"
+  boundary_b="bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary"
+
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_boundary") | .run_unit_ids | length' "$out/inventory.json"
+  [ "$output" = "2" ]
+  run jq -e --arg a "$boundary_a" --arg b "$boundary_b" \
+    '.reconciliation.contains[] | select(.gate=="gate:bats_boundary")
+     | (.run_unit_ids | index($a)) != null and (.run_unit_ids | index($b)) != null' \
+    "$out/inventory.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+
+  # The flip side of the same bug: gate:bats_all must NOT also claim the 2
+  # boundary files (both directions have to hold, or the "complementary
+  # partitions" claim above is only half-true).
+  run jq -e --arg a "$boundary_a" --arg b "$boundary_b" \
+    '.reconciliation.contains[] | select(.gate=="gate:bats_all")
+     | (.run_unit_ids | index($a)) == null and (.run_unit_ids | index($b)) == null' \
+    "$out/inventory.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
 @test "P072 Step 10: a candidate set is marked runtime_partitioned, never asserted as exact" {
   local repo out
   repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"

@@ -35,6 +35,11 @@ jobs:
             sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
             sudo chmod +x /usr/local/bin/yq
           }
+          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
+          # each skip (not fail) their assertions when python3-jsonschema is
+          # absent — install it so a lost package reads as a red build, not a
+          # silently growing skip count (P075 Step 4).
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
       - name: Run bash test suite
         # 2026-08-02: this job's own real CI run only reached suite 53/131 in
         # its 20-minute budget (last measured a while ago at a much smaller
@@ -66,6 +71,11 @@ jobs:
             sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
             sudo chmod +x /usr/local/bin/yq
           }
+          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
+          # each skip (not fail) their assertions when python3-jsonschema is
+          # absent — install it so a lost package reads as a red build, not a
+          # silently growing skip count (P075 Step 4).
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
       - name: Run plan boundary suite
         # 2026-08-02: this suite has grown to 267 tests (the "15 min" budget
         # above dates from a much smaller count); a real run reached test
@@ -92,6 +102,11 @@ jobs:
             sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
             sudo chmod +x /usr/local/bin/yq
           }
+          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
+          # each skip (not fail) their assertions when python3-jsonschema is
+          # absent — install it so a lost package reads as a red build, not a
+          # silently growing skip count (P075 Step 4).
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
       - name: Run plan-final boundary suite
         # 245 tests as of P066/D1-D5 (was ~15 min budget at a smaller count); the
         # 2026-08-01 CI run measured ~5.4s/test average, i.e. ~22 min for the full
@@ -117,6 +132,11 @@ jobs:
             sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
             sudo chmod +x /usr/local/bin/yq
           }
+          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
+          # each skip (not fail) their assertions when python3-jsonschema is
+          # absent — install it so a lost package reads as a red build, not a
+          # silently growing skip count (P075 Step 4).
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
       - name: Run isolation-experiment suite
         # 11 tests; all assertions genuinely pass (confirmed: two clean local
         # reproductions both exited 0, ~6 min each) — this suite's own real

@@ -1,6 +1,6 @@
 schema_version: 1.0.0
-generated_at: "2026-08-05T06:11:25Z"
-status: approved
+generated_at: "2026-08-06T02:40:50Z"
+status: proposed
 run_units:
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-cli
     runner: bats
@@ -412,7 +412,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:33:01Z"
+        verified_at: "2026-08-06T04:55:26Z"
         method: migrated_p071_step3
         source_sha256: 03ff92ecd5b8f964623c8a485098194f475d0ae3209bf549b98c4d7df261b9d9
         resource_digest: 7a247a7b8ede05d8366cd151200c2b0c1ff67667ebf32f0a2300da1c86552e3d
@@ -993,7 +993,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:33:04Z"
+        verified_at: "2026-08-06T04:55:28Z"
         method: migrated_p071_step3
         source_sha256: 974e91b02fe4831725319b7483760090c0b353ae21b35b11f9bf4bdc6be66288
         resource_digest: 1a789b5fded17c9a1c9ef59ce20e293628246008a7dc2e8773dae52e454643ce
@@ -1124,7 +1124,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:33:35Z"
+        verified_at: "2026-08-06T04:55:31Z"
         method: migrated_p071_step3
         source_sha256: cbc2c1c0ca580b0f82ad499e1c9e7f4e547348f19d1a406d4436c9db39fd7d35
         resource_digest: ae613731cc6ab6de7a63f4aae9314da2106acf3077a0ebfb93d323b4fadaf6a8
@@ -1582,7 +1582,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:25Z"
+        verified_at: "2026-08-06T04:55:33Z"
         method: migrated_p071_step3
         source_sha256: e71b081f4ab1472ac1b15310fe72d91383af4e225485c8b9db3b3ee919ba1be9
         resource_digest: 9b84e62202876272a7b75a1ee15c11fa00dddc66f6b739dea257f3f512e315d3
@@ -1776,7 +1776,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:31Z"
+        verified_at: "2026-08-06T04:55:37Z"
         method: migrated_p071_step3
         source_sha256: df60ef333b1537d4adaed5b51c02c349a171f2d0b65c8103a6026167d77d1e3e
         resource_digest: 95a2b25ae18840f435f3cece551f8788786f7209d26e56a623e2af584cefa55c
@@ -1861,7 +1861,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:37Z"
+        verified_at: "2026-08-06T04:55:43Z"
         method: migrated_p071_step3
         source_sha256: fc727a628c7a346b1e93144913a2a3c22a6bf77bd036fcb7166d3448468867b4
         resource_digest: 34cf00b153e521afe1271f4b241e182343f09420e8d58eaa2b6573d2f02f45c1
@@ -1937,7 +1937,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:40Z"
+        verified_at: "2026-08-06T04:55:45Z"
         method: migrated_p071_step3
         source_sha256: feaaf099c714d8b95d94aaae03d74c63a951a3d0d58de3e1440ed2ab78119547
         resource_digest: a805400d8379270c56a140d4f5b3cac53af0978a9b43b502ba2f21c103ac9cf3
@@ -2049,7 +2049,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:45Z"
+        verified_at: "2026-08-06T04:55:49Z"
         method: migrated_p071_step3
         source_sha256: 35e051a490b2a232369d94ef1ecbc48f2e2486c156da442a036e6b2b867e94b5
         resource_digest: 4a7af62ba94fe9c2ce201ba32de7d68606c7e195833d71ec857477fffdb57dfd
@@ -2153,7 +2153,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:48Z"
+        verified_at: "2026-08-06T04:55:52Z"
         method: migrated_p071_step3
         source_sha256: b20c1579eb081f2294f76365af63aaa3109fb337721d99d0b5aa45fdc1248133
         resource_digest: 461377b757f858ec8e8fed2970de9865a53399083582715b57a2d65e857b8920
@@ -2278,7 +2278,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:53Z"
+        verified_at: "2026-08-06T04:55:57Z"
         method: migrated_p071_step3
         source_sha256: 84e06e6fab6174213a39b5f627c571fea8fe2f86ec8d93f004b35169bd560694
         resource_digest: 4ecf514fa027df42406006a2eae86350d5fc24a9b5b026cde4b567a35f568137
@@ -2357,7 +2357,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:56Z"
+        verified_at: "2026-08-06T04:55:59Z"
         method: migrated_p071_step3
         source_sha256: e201401c424a7c2b00449b7addb605a8fff2c1d3c3f9f29b933a38af8a2104cd
         resource_digest: 8d218dbcb2d8286e6c328bf944791e95ffa7b1e85a68a2fa6691585a62a138a9
@@ -2460,7 +2460,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:34:59Z"
+        verified_at: "2026-08-06T04:56:02Z"
         method: migrated_p071_step3
         source_sha256: ccf5ee1881de89289d87c791e80a5af84c2ed8701a38eb88d1d35fda26faf5a9
         resource_digest: c2f44fd3b8beeca2f82736da94f8b3998de8ac1f908131c18a1338fabf909753
@@ -3370,6 +3370,51 @@ run_units:
       - test_case_id: ac16-the-rollback-preserves-deliveries-the-target-has-and-the-plan-branch-does-not
         name: 'AC16: the rollback preserves deliveries the target has and the plan branch does not'
         filter_expression: 'AC16: the rollback preserves deliveries the target has and the plan branch does not'
+      - test_case_id: p073-step-18-a-merge-at-the-accepted-head-succeeds-and-carries-both-shas
+        name: 'P073 Step 18: a merge at the ACCEPTED head succeeds and carries both SHAs'
+        filter_expression: 'P073 Step 18: a merge at the ACCEPTED head succeeds and carries both SHAs'
+      - test_case_id: p073-step-18-the-equivalence-path-close-receipt-carries-merged-head-and-review-equivalence
+        name: 'P073 Step 18: the equivalence-path close receipt carries merged_head and review_equivalence'
+        filter_expression: 'P073 Step 18: the equivalence-path close receipt carries merged_head and review_equivalence'
+      - test_case_id: p073-step-18-a-protected-commit-after-acceptance-refuses-at-live-re-verification
+        name: 'P073 Step 18: a PROTECTED commit after acceptance refuses at live re-verification'
+        filter_expression: 'P073 Step 18: a PROTECTED commit after acceptance refuses at live re-verification'
+      - test_case_id: p073-step-18-a-receipt-whose-accepted-head-disagrees-with-the-manifest-refuses
+        name: 'P073 Step 18: a receipt whose accepted_head disagrees with the manifest refuses'
+        filter_expression: 'P073 Step 18: a receipt whose accepted_head disagrees with the manifest refuses'
+      - test_case_id: p073-step-18-accepted-head-recorded-but-the-receipt-missing-refuses-never-merge-on-manifest-state-alone
+        name: 'P073 Step 18: accepted_head recorded but the receipt missing refuses — never merge on manifest state alone'
+        filter_expression: 'P073 Step 18: accepted_head recorded but the receipt missing refuses — never merge on manifest state alone'
+      - test_case_id: p073-step-18-the-decision-leg-is-unchanged-a-decision-naming-the-accepted-head-is-refused
+        name: 'P073 Step 18: the DECISION leg is unchanged — a decision naming the accepted head is refused'
+        filter_expression: 'P073 Step 18: the DECISION leg is unchanged — a decision naming the accepted head is refused'
+      - test_case_id: p073-step-18-a-head-that-is-neither-the-candidate-nor-an-accepted-head-still-refuses
+        name: 'P073 Step 18: a head that is neither the candidate nor an accepted head still refuses'
+        filter_expression: 'P073 Step 18: a head that is neither the candidate nor an accepted head still refuses'
+      - test_case_id: p073-step-18-a-resume-whose-published-merge-has-the-other-second-parent-refuses-to-seal
+        name: 'P073 Step 18: a RESUME whose published merge has the other second parent refuses to seal'
+        filter_expression: 'P073 Step 18: a RESUME whose published merge has the other second parent refuses to seal'
+      - test_case_id: p073-step-18-the-op-key-distinguishes-a-candidate-merge-from-an-accepted-head-merge
+        name: 'P073 Step 18: the op key distinguishes a candidate merge from an accepted-head merge'
+        filter_expression: 'P073 Step 18: the op key distinguishes a candidate merge from an accepted-head merge'
+      - test_case_id: p073-step-8-a-blocking-close-check-refuses-without-force-and-writes-no-marker
+        name: 'P073 Step 8: a blocking close-check REFUSES without --force and writes no marker'
+        filter_expression: 'P073 Step 8: a blocking close-check REFUSES without --force and writes no marker'
+      - test_case_id: p073-step-8-the-same-blocking-close-check-passes-under-force-with-a-waiver
+        name: 'P073 Step 8: the SAME blocking close-check passes under --force, with a waiver'
+        filter_expression: 'P073 Step 8: the SAME blocking close-check passes under --force, with a waiver'
+      - test_case_id: p073-step-8-a-forced-close-still-refuses-without-a-reason-and-changes-nothing
+        name: 'P073 Step 8: a forced close still refuses without a reason, and changes nothing'
+        filter_expression: 'P073 Step 8: a forced close still refuses without a reason, and changes nothing'
+      - test_case_id: p073-step-8-a-missing-lifecycle-manifest-closes-under-force-as-closed-pending-receipt
+        name: 'P073 Step 8: a missing lifecycle manifest closes under --force as closed_pending_receipt'
+        filter_expression: 'P073 Step 8: a missing lifecycle manifest closes under --force as closed_pending_receipt'
+      - test_case_id: p073-step-8-closed-pending-receipt-is-a-legal-lifecycle-receipt-state
+        name: 'P073 Step 8: closed_pending_receipt is a legal lifecycle-receipt state'
+        filter_expression: 'P073 Step 8: closed_pending_receipt is a legal lifecycle-receipt state'
+      - test_case_id: p073-step-8-force-cannot-bypass-a-hard-precondition-on-close
+        name: 'P073 Step 8: force cannot bypass a HARD precondition on close'
+        filter_expression: 'P073 Step 8: force cannot bypass a HARD precondition on close'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary
@@ -4247,7 +4292,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:02Z"
+        verified_at: "2026-08-06T04:56:04Z"
         method: migrated_p071_step3
         source_sha256: e1328610dadd029c41d5494d73219ade2ed82905b8e0315be24a256f06762f7b
         resource_digest: 2d926760cc99cf22170ebacdc9d1e8493b5367b7f5c1a5f4ac2a2c07e0342926
@@ -4293,7 +4338,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:06Z"
+        verified_at: "2026-08-06T04:56:07Z"
         method: migrated_p071_step3
         source_sha256: 0a1d44cae480c02a6f04876032532d7231ed05e3dbfbf7e592c509227679accc
         resource_digest: fedcc396534dc752299b8de4e785fd48c03e70222ca458f5ff1f77b7da656d8b
@@ -4928,7 +4973,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:23Z"
+        verified_at: "2026-08-06T04:56:12Z"
         method: migrated_p071_step3
         source_sha256: afbd5f0598c9de963988f025ff5e4f48400c1f98ba72555ef46f4757984cd528
         resource_digest: e41318402441a15a3c8f9d840a799f06d0c7108e979472b2c136f9157c5d2647
@@ -5122,7 +5167,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:30Z"
+        verified_at: "2026-08-06T04:56:17Z"
         method: migrated_p071_step3
         source_sha256: 48ee70ce70a78713b40ed55032ad90b9f4df101e1a4d83f305058e84eab68a49
         resource_digest: bfab41fb83e467a046cac833d3e1858c51b4e748364490be7f40dbb699d58e85
@@ -5189,7 +5234,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:36Z"
+        verified_at: "2026-08-06T04:56:23Z"
         method: migrated_p071_step3
         source_sha256: 4e0d75c5acf85aad8258bffcad24a7420bddc9a62385ed944e5cc6c3b004f05b
         resource_digest: 557054e097c2b282c84131f0d5e442abad9116aef8132ed11658763d1ddd4bb9
@@ -5247,7 +5292,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:43Z"
+        verified_at: "2026-08-06T04:56:28Z"
         method: migrated_p071_step3
         source_sha256: a0393d8a8429102d08b1a6ad04dab42da7d479b20d10d3f54c1d8c6602dbefd9
         resource_digest: a7d503e0039df52b42b2656d18c0d85541b5a51e2161c01a45cb124ebeca3558
@@ -5492,6 +5537,12 @@ run_units:
       - test_case_id: a-durable-record-persist-failure-is-explained-on-stdout-not-only-stderr
         name: a durable-record persist failure is explained on STDOUT, not only stderr
         filter_expression: a durable-record persist failure is explained on STDOUT, not only stderr
+      - test_case_id: non-keep-findings-without-proposals-surface-in-section-2-not-only-in-the-appendix
+        name: non-keep findings WITHOUT proposals surface in section 2, not only in the appendix
+        filter_expression: non-keep findings WITHOUT proposals surface in section 2, not only in the appendix
+      - test_case_id: nothing-parallel-names-the-fixable-blocker-count-instead-of-implying-impossibility
+        name: '''nothing parallel'' names the fixable-blocker count instead of implying impossibility'
+        filter_expression: '''nothing parallel'' names the fixable-blocker count instead of implying impossibility'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-command-allowlist
@@ -5642,7 +5693,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:35:59Z"
+        verified_at: "2026-08-06T04:56:32Z"
         method: migrated_p071_step3
         source_sha256: 9adfec6bdf8f0e28e17a4c7f3472e3044670d2f9297e45f3a69ab31e1df80956
         resource_digest: a282d784f993498c7290c929b8d7f2017ce2f619741443a1a2a45f3733b064b9
@@ -5739,7 +5790,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: pilots/lane-final.json
-        verified_at: "2026-08-05T14:12:28Z"
+        verified_at: "2026-08-06T04:56:34Z"
         method: resource_map_plus_pilot
         source_sha256: 275b10c150ed0606452c4b308adb27e9a61d92a64ff58cbc2ab15299c3607800
         resource_digest: 8d27786e6e83cb147d564a7e38256dcc4bb62da8706b37e79d61b0bfaf9cabdd
@@ -5896,7 +5947,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:36:04Z"
+        verified_at: "2026-08-06T04:56:39Z"
         method: migrated_p071_step3
         source_sha256: ed46e64f9cd642561d1beb83a89758c1433959b40f46da502513973a38ff2d4b
         resource_digest: 0173482ab5e79175274ffdb9860ff64fbce9b5072db704333529ef4775074e4d
@@ -6317,6 +6368,21 @@ run_units:
       - test_case_id: source-signals-are-recorded-as-signals-never-as-an-attributed-share-of-the-time
         name: source signals are recorded as SIGNALS, never as an attributed share of the time
         filter_expression: source signals are recorded as SIGNALS, never as an attributed share of the time
+      - test_case_id: a-real-profiler-receipt-validates-against-the-real-schema-both-branches
+        name: a REAL profiler receipt validates against the REAL schema, both branches
+        filter_expression: a REAL profiler receipt validates against the REAL schema, both branches
+      - test_case_id: the-profiler-fails-on-a-receipt-its-own-schema-rejects-rather-than-exiting-0
+        name: the profiler FAILS on a receipt its own schema rejects, rather than exiting 0
+        filter_expression: the profiler FAILS on a receipt its own schema rejects, rather than exiting 0
+      - test_case_id: a-unit-whose-catalog-and-execution-yaml-commands-disagree-is-refused
+        name: a unit whose catalog and execution.yaml commands DISAGREE is refused
+        filter_expression: a unit whose catalog and execution.yaml commands DISAGREE is refused
+      - test_case_id: evidence-deleted-during-a-profiling-run-is-restored-and-the-run-continues
+        name: evidence deleted DURING a profiling run is restored, and the run continues
+        filter_expression: evidence deleted DURING a profiling run is restored, and the run continues
+      - test_case_id: an-ordinary-run-records-no-evidence-loss
+        name: an ordinary run records no evidence loss
+        filter_expression: an ordinary run records no evidence loss
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-prompts-golden
@@ -6625,6 +6691,21 @@ run_units:
       - test_case_id: step-13-with-no-profiles-directory-the-audit-still-completes-with-no-actions
         name: 'STEP 13: with no profiles directory the audit still completes, with no actions'
         filter_expression: 'STEP 13: with no profiles directory the audit still completes, with no actions'
+      - test_case_id: a-portfolio-larger-than-a-single-argv-argument-still-consolidates
+        name: a portfolio larger than a single argv argument still consolidates
+        filter_expression: a portfolio larger than a single argv argument still consolidates
+      - test_case_id: a-finding-with-a-proposal-becomes-a-decision-action-carrying-change-effort-and-identity
+        name: a finding with a proposal becomes a decision action carrying change, effort and identity
+        filter_expression: a finding with a proposal becomes a decision action carrying change, effort and identity
+      - test_case_id: a-previously-declined-proposal-is-marked-kept-and-never-silently-re-litigated
+        name: a previously declined proposal is marked, kept, and never silently re-litigated
+        filter_expression: a previously declined proposal is marked, kept, and never silently re-litigated
+      - test_case_id: a-remove-and-a-fix-sharing-a-target-carry-the-conflict-on-both-sides
+        name: a remove and a fix sharing a target carry the conflict on BOTH sides
+        filter_expression: a remove and a fix sharing a target carry the conflict on BOTH sides
+      - test_case_id: a-finding-with-no-proposal-produces-no-action-a-bare-verb-is-not-remediation
+        name: a finding with NO proposal produces no action — a bare verb is not remediation
+        filter_expression: a finding with NO proposal produces no action — a bare verb is not remediation
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-state
@@ -6653,7 +6734,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:36:15Z"
+        verified_at: "2026-08-06T04:56:44Z"
         method: migrated_p071_step3
         source_sha256: bc79062433a847541edf6dcbfc1d1b0953d4f3a757c8bac36e40f77276f26921
         resource_digest: ec6697f26cb3299996505d464db99a7063936c98e919cd7f289f457de2255f3c
@@ -6751,7 +6832,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:36:21Z"
+        verified_at: "2026-08-06T04:56:50Z"
         method: migrated_p071_step3
         source_sha256: 5d1cb5d854313b46084fe50a0a5165b7b3106c7bfca3999640d3eb1ebeb4c622
         resource_digest: 66d8e04036248970e0d72572188950f65bbc1b9eced0128b6a504e6d81ef54b0
@@ -6823,6 +6904,61 @@ run_units:
       - test_case_id: p072-the-decision-gate-runs-before-the-verdict-check-an-incomplete-audit-with-a-clean-verdict-reports-audit-incomplete
         name: 'P072: the decision gate runs BEFORE the verdict check (an incomplete audit with a clean verdict reports audit_incomplete)'
         filter_expression: 'P072: the decision gate runs BEFORE the verdict check (an incomplete audit with a clean verdict reports audit_incomplete)'
+    provenance:
+      - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:a6504acb3cac
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: a-proposed-parallel-lane-promotes-its-units-to-safe-bound-to-their-content
+        name: a proposed_parallel lane promotes its units to safe, bound to their content
+        filter_expression: a proposed_parallel lane promotes its units to safe, bound to their content
+      - test_case_id: keep-serial-blocked-pending-fix-and-context-required-promote-nothing
+        name: keep_serial, blocked_pending_fix and context_required promote NOTHING
+        filter_expression: keep_serial, blocked_pending_fix and context_required promote NOTHING
+      - test_case_id: evidence-from-the-previous-approved-catalog-is-carried-into-the-new-one
+        name: evidence from the previous approved catalog is carried into the new one
+        filter_expression: evidence from the previous approved catalog is carried into the new one
+      - test_case_id: evidence-is-not-carried-when-the-unit-s-content-has-moved
+        name: evidence is NOT carried when the unit's content has moved
+        filter_expression: evidence is NOT carried when the unit's content has moved
+      - test_case_id: a-unit-the-previous-catalog-knew-but-the-new-one-does-not-is-simply-absent
+        name: a unit the previous catalog knew but the new one does not is simply absent
+        filter_expression: a unit the previous catalog knew but the new one does not is simply absent
+      - test_case_id: a-result-that-fails-the-catalog-schema-is-never-written
+        name: a result that fails the catalog schema is never written
+        filter_expression: a result that fails the catalog schema is never written
+      - test_case_id: it-reports-what-it-did-in-counts
+        name: it reports what it did, in counts
+        filter_expression: it reports what it did, in counts
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-provenance
@@ -6951,7 +7087,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:36:25Z"
+        verified_at: "2026-08-06T04:56:53Z"
         method: migrated_p071_step3
         source_sha256: edbed22ee1382deb10ad0de93481f5d01f7b38e03afc5a3d8b74d1a10b286d6f
         resource_digest: 21baf588c98ca445f6d2089bdefeee4de5bf47718a8e42ccf56b0501eb11f0b7
@@ -7526,7 +7662,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:36:27Z"
+        verified_at: "2026-08-06T04:56:56Z"
         method: migrated_p071_step3
         source_sha256: bf4629e95bc43a1ceaa941dad2681d122c77cbf16f31b518604fce4b954050b9
         resource_digest: c2f44fd3b8beeca2f82736da94f8b3998de8ac1f908131c18a1338fabf909753
@@ -7774,7 +7910,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: pilots/lane-final.json
-        verified_at: "2026-08-05T14:12:29Z"
+        verified_at: "2026-08-06T04:56:58Z"
         method: resource_map_plus_pilot
         source_sha256: 501d806227b3579a63495c3973559511f7545e0bf5a2db65d83a14182b1a8029
         resource_digest: ebfdb7571ac2b743a671ebb1e61da9b9a1564ce670a1849c43d53d2056ac1f25
@@ -7985,6 +8121,100 @@ run_units:
       - test_case_id: live-the-recorded-fixture-still-matches-what-the-installed-bats-emits
         name: 'LIVE: the recorded fixture still matches what the installed bats emits'
         filter_expression: 'LIVE: the recorded fixture still matches what the installed bats emits'
+    provenance:
+      - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:3807d40b724e
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage:
+        - lock_target: printf '%s' '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/'
+          resolved_scope: shared-or-unresolved
+        - lock_target: printf '%s' '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$'
+          resolved_scope: shared-or-unresolved
+        - lock_target: M .aid-o/metrics/gate-runtime-baselines.yaml.lock
+          resolved_scope: shared-or-unresolved
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: p073-step-14-mode-legacy5-filters-byte-identically-to-the-original-inline-regex
+        name: 'P073 Step 14: --mode legacy5 filters BYTE-IDENTICALLY to the original inline regex'
+        filter_expression: 'P073 Step 14: --mode legacy5 filters BYTE-IDENTICALLY to the original inline regex'
+      - test_case_id: p073-step-14-mode-legacy4-filters-byte-identically-to-aid-fsm-sh-s-four-entry-variant
+        name: 'P073 Step 14: --mode legacy4 filters BYTE-IDENTICALLY to aid-fsm.sh''s four-entry variant'
+        filter_expression: 'P073 Step 14: --mode legacy4 filters BYTE-IDENTICALLY to aid-fsm.sh''s four-entry variant'
+      - test_case_id: p073-step-14-legacy5-and-legacy4-differ-by-exactly-the-plan-state-entry
+        name: 'P073 Step 14: legacy5 and legacy4 differ by EXACTLY the plan-state entry'
+        filter_expression: 'P073 Step 14: legacy5 and legacy4 differ by EXACTLY the plan-state entry'
+      - test_case_id: p073-step-14-mode-policy-widens-to-the-loaded-globs
+        name: 'P073 Step 14: --mode policy widens to the loaded globs'
+        filter_expression: 'P073 Step 14: --mode policy widens to the loaded globs'
+      - test_case_id: p073-step-14-a-missing-mode-is-a-usage-error-never-a-silent-default
+        name: 'P073 Step 14: a MISSING --mode is a usage error, never a silent default'
+        filter_expression: 'P073 Step 14: a MISSING --mode is a usage error, never a silent default'
+      - test_case_id: p073-step-14-an-unknown-mode-is-refused-too
+        name: 'P073 Step 14: an unknown --mode is refused too'
+        filter_expression: 'P073 Step 14: an unknown --mode is refused too'
+      - test_case_id: p073-step-14-aid-ancillary-match-matches-an-exact-path-and-a-directory-prefix
+        name: 'P073 Step 14: aid_ancillary_match matches an exact path and a directory prefix'
+        filter_expression: 'P073 Step 14: aid_ancillary_match matches an exact path and a directory prefix'
+      - test_case_id: p073-step-14-aid-ancillary-match-does-not-match-delivery-paths
+        name: 'P073 Step 14: aid_ancillary_match does NOT match delivery paths'
+        filter_expression: 'P073 Step 14: aid_ancillary_match does NOT match delivery paths'
+      - test_case_id: p073-step-14-the-shipped-policy-deliberately-ships-no-docs-default
+        name: 'P073 Step 14: the shipped policy deliberately ships NO docs/** default'
+        filter_expression: 'P073 Step 14: the shipped policy deliberately ships NO docs/** default'
+      - test_case_id: p073-step-14-a-malformed-project-policy-falls-back-to-the-five-legacy-paths-and-warns-once
+        name: 'P073 Step 14: a MALFORMED project policy falls back to the five legacy paths and warns once'
+        filter_expression: 'P073 Step 14: a MALFORMED project policy falls back to the five legacy paths and warns once'
+      - test_case_id: p073-step-14-a-project-policy-that-removes-entries-is-honoured-for-classification
+        name: 'P073 Step 14: a project policy that REMOVES entries is honoured for classification'
+        filter_expression: 'P073 Step 14: a project policy that REMOVES entries is honoured for classification'
+      - test_case_id: p073-step-14-an-overlap-between-a-glob-and-a-protected-path-warns-naming-both-sides
+        name: 'P073 Step 14: an overlap between a glob and a protected path warns, naming BOTH sides'
+        filter_expression: 'P073 Step 14: an overlap between a glob and a protected path warns, naming BOTH sides'
+      - test_case_id: p073-step-14-overlaps-are-warned-never-rejected-the-shipped-defaults-themselves-overlap
+        name: 'P073 Step 14: overlaps are WARNED, never rejected — the shipped defaults themselves overlap'
+        filter_expression: 'P073 Step 14: overlaps are WARNED, never rejected — the shipped defaults themselves overlap'
+      - test_case_id: p073-step-14-zero-inline-gate-runtime-baselines-regexes-remain-outside-the-shared-lib
+        name: 'P073 Step 14: zero inline gate-runtime-baselines regexes remain outside the shared lib'
+        filter_expression: 'P073 Step 14: zero inline gate-runtime-baselines regexes remain outside the shared lib'
+      - test_case_id: p073-step-14-all-four-call-sites-go-through-the-shared-filter-with-an-explicit-mode
+        name: 'P073 Step 14: all four call sites go through the shared filter with an explicit mode'
+        filter_expression: 'P073 Step 14: all four call sites go through the shared filter with an explicit mode'
+      - test_case_id: p073-step-14-review-finding-the-legacy-modes-are-anchored-a-descendant-of-a-bare-entry-still-blocks
+        name: 'P073 Step 14 (review finding): the legacy modes are ANCHORED — a descendant of a bare entry still blocks'
+        filter_expression: 'P073 Step 14 (review finding): the legacy modes are ANCHORED — a descendant of a bare entry still blocks'
+      - test_case_id: p073-step-14-review-finding-the-bare-directory-of-a-prefix-entry-still-blocks-under-legacy
+        name: 'P073 Step 14 (review finding): the bare directory of a prefix entry still blocks under legacy'
+        filter_expression: 'P073 Step 14 (review finding): the bare directory of a prefix entry still blocks under legacy'
+      - test_case_id: p073-step-14-review-finding-policy-mode-keeps-the-permissive-rule-which-is-what-its-globs-want
+        name: 'P073 Step 14 (review finding): POLICY mode keeps the permissive rule, which is what its globs want'
+        filter_expression: 'P073 Step 14 (review finding): POLICY mode keeps the permissive rule, which is what its globs want'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-anti-fabrication
@@ -8425,7 +8655,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:37:46Z"
+        verified_at: "2026-08-06T04:57:02Z"
         method: migrated_p071_step3
         source_sha256: 4e48ce72c1b13bbfe0317bd00043b9b57f693a0153e97707b68ea8aaf45c3b85
         resource_digest: 9e2dd70b7044451b0b47db55e745f35ae5e030f1deb66d1d51a6b73047ab45c2
@@ -8561,7 +8791,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:37:50Z"
+        verified_at: "2026-08-06T04:57:06Z"
         method: migrated_p071_step3
         source_sha256: 3dd6dedde2c57297f7ecff46772b29d69b1a9d7687c26c5c4ec653106041f0ab
         resource_digest: 86917cde8131aef1b2d81a5e27d6a704d00957fcb961a2f50cb199a6c14330d6
@@ -8737,7 +8967,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:15Z"
+        verified_at: "2026-08-06T04:57:16Z"
         method: migrated_p071_step3
         source_sha256: 58c5160cc2def785bf0b9eb4b6b22a16169258eac4844a228952710873fc5b37
         resource_digest: 76cd4fd788ca2008d7c31364243a731136ff42493b2a47780e97ce943e8c08c3
@@ -9060,7 +9290,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:34Z"
+        verified_at: "2026-08-06T04:57:20Z"
         method: migrated_p071_step3
         source_sha256: 44fe47d8b2635853aa752741c2d60cf5b95b35e76e7057260f77f04c29c0bc37
         resource_digest: f86ddc5c0045a2188f367d9c6df7c2af3c83441c0d206d9ffe7ac358d1247605
@@ -9124,7 +9354,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:37Z"
+        verified_at: "2026-08-06T04:57:22Z"
         method: migrated_p071_step3
         source_sha256: 437dcb9d1f744da99724903405f8304df911827eac999e6dc742fc57b3d9af13
         resource_digest: 1534869c21167cd6a6f48e987b6c2a449ecea6141b903c56ba15cb704e3a2b00
@@ -9255,7 +9485,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:42Z"
+        verified_at: "2026-08-06T04:57:24Z"
         method: migrated_p071_step3
         source_sha256: 84bf8f7cd791c7fcf32f1675ca986f9af11dc66442e3f5d20cd5e2c9bbfc1430
         resource_digest: c6955e3ab1df8828fe81c62849a17e64f06d1522d3e18945a1e891094936a8cf
@@ -9307,7 +9537,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:46Z"
+        verified_at: "2026-08-06T04:57:28Z"
         method: migrated_p071_step3
         source_sha256: 7015bd363475b5ced80588062bfa9fe61b02af410818640921cda0ce167154b2
         resource_digest: 6ada10f2b3c65e0d21abee312a15876c4b14c84c130beb0f5f302cbe346ba820
@@ -9541,7 +9771,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:51Z"
+        verified_at: "2026-08-06T04:57:33Z"
         method: migrated_p071_step3
         source_sha256: 87a45c0cee0fb8d1235ed41b9d6359d974d91bc5e5261fdb5789a77286082a71
         resource_digest: f70f2a17f77ecf044e2182f2d4e11b5ad7b5de842e734edd3fa1dfa3196468f9
@@ -9845,7 +10075,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:38:59Z"
+        verified_at: "2026-08-06T04:57:36Z"
         method: migrated_p071_step3
         source_sha256: 4b178fcf224f412386c05912e24860d25e0b250ba173051c687653f5cf79ed3f
         resource_digest: 4c1f517bb5d3cc6a6305728061455da0b8511737c0e4dddb1c5a450c6e7c2a52
@@ -10050,6 +10280,100 @@ run_units:
         filter_expression: 'P073 Step 5: parse_step_deps honours the same four annotation separators and anchoring'
     provenance:
       - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:d61e31852b13
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: p073-step-17-an-unmoved-head-still-passes-the-detector
+        name: 'P073 Step 17: an unmoved head still passes the detector'
+        filter_expression: 'P073 Step 17: an unmoved head still passes the detector'
+      - test_case_id: p073-step-17-a-head-at-the-accepted-head-passes-naming-the-receipt
+        name: 'P073 Step 17: a head at the ACCEPTED head passes, naming the receipt'
+        filter_expression: 'P073 Step 17: a head at the ACCEPTED head passes, naming the receipt'
+      - test_case_id: p073-step-17-a-head-moved-without-acceptance-still-invalidates
+        name: 'P073 Step 17: a head moved WITHOUT acceptance still invalidates'
+        filter_expression: 'P073 Step 17: a head moved WITHOUT acceptance still invalidates'
+      - test_case_id: p073-step-17-an-ancillary-shaped-failure-carries-the-accept-ancillary-hint
+        name: 'P073 Step 17: an ancillary-shaped failure carries the accept-ancillary hint'
+        filter_expression: 'P073 Step 17: an ancillary-shaped failure carries the accept-ancillary hint'
+      - test_case_id: p073-step-17-a-delivery-shaped-failure-carries-no-accept-ancillary-hint
+        name: 'P073 Step 17: a DELIVERY-shaped failure carries NO accept-ancillary hint'
+        filter_expression: 'P073 Step 17: a DELIVERY-shaped failure carries NO accept-ancillary hint'
+      - test_case_id: p073-step-17-the-head-one-commit-past-the-accepted-head-invalidates
+        name: 'P073 Step 17: the head one commit PAST the accepted head invalidates'
+        filter_expression: 'P073 Step 17: the head one commit PAST the accepted head invalidates'
+      - test_case_id: p073-step-17-an-accepted-head-whose-receipt-is-gone-invalidates
+        name: 'P073 Step 17: an accepted head whose RECEIPT is gone invalidates'
+        filter_expression: 'P073 Step 17: an accepted head whose RECEIPT is gone invalidates'
+      - test_case_id: p073-step-17-dirt-on-a-policy-ancillary-path-no-longer-invalidates
+        name: 'P073 Step 17: dirt on a POLICY-ancillary path no longer invalidates'
+        filter_expression: 'P073 Step 17: dirt on a POLICY-ancillary path no longer invalidates'
+      - test_case_id: p073-step-17-dirt-on-a-protected-path-invalidates-even-though-it-is-ancillary-globbed
+        name: 'P073 Step 17: dirt on a PROTECTED path invalidates even though it is ancillary-globbed'
+        filter_expression: 'P073 Step 17: dirt on a PROTECTED path invalidates even though it is ancillary-globbed'
+      - test_case_id: p073-step-17-dirt-on-a-plain-delivery-path-invalidates
+        name: 'P073 Step 17: dirt on a plain delivery path invalidates'
+        filter_expression: 'P073 Step 17: dirt on a plain delivery path invalidates'
+      - test_case_id: p073-step-17-untracked-files-never-invalidate
+        name: 'P073 Step 17: untracked files never invalidate'
+        filter_expression: 'P073 Step 17: untracked files never invalidate'
+      - test_case_id: p073-step-17-legacy-a-legacy-freeze-still-invalidates-on-any-head-movement
+        name: 'P073 Step 17 (legacy): a legacy freeze still invalidates on ANY head movement'
+        filter_expression: 'P073 Step 17 (legacy): a legacy freeze still invalidates on ANY head movement'
+      - test_case_id: p073-step-17-legacy-a-legacy-freeze-cannot-be-rescued-by-acceptance
+        name: 'P073 Step 17 (legacy): a legacy freeze cannot be rescued by acceptance'
+        filter_expression: 'P073 Step 17 (legacy): a legacy freeze cannot be rescued by acceptance'
+      - test_case_id: p073-step-17-legacy-a-legacy-freeze-still-tolerates-the-five-runtime-paths
+        name: 'P073 Step 17 (legacy): a legacy freeze still tolerates the five runtime paths'
+        filter_expression: 'P073 Step 17 (legacy): a legacy freeze still tolerates the five runtime paths'
+      - test_case_id: p073-step-17-legacy-a-legacy-freeze-still-invalidates-on-delivery-dirt
+        name: 'P073 Step 17 (legacy): a legacy freeze still invalidates on delivery dirt'
+        filter_expression: 'P073 Step 17 (legacy): a legacy freeze still invalidates on delivery dirt'
+      - test_case_id: p073-step-17-the-c4-manifest-record-carries-accepted-head-and-review-equivalence
+        name: 'P073 Step 17: the C4 manifest record carries accepted_head and review_equivalence'
+        filter_expression: 'P073 Step 17: the C4 manifest record carries accepted_head and review_equivalence'
+      - test_case_id: p073-step-17-f1-an-accepted-head-whose-receipt-names-another-candidate-is-not-honoured
+        name: 'P073 Step 17 (F1): an accepted head whose receipt names ANOTHER candidate is not honoured'
+        filter_expression: 'P073 Step 17 (F1): an accepted head whose receipt names ANOTHER candidate is not honoured'
+      - test_case_id: p073-step-17-f1-an-acceptance-recorded-against-a-partial-protected-set-is-not-honoured
+        name: 'P073 Step 17 (F1): an acceptance recorded against a PARTIAL protected set is not honoured'
+        filter_expression: 'P073 Step 17 (F1): an acceptance recorded against a PARTIAL protected set is not honoured'
+      - test_case_id: p073-step-17-f3-acceptance-at-an-unmoved-head-writes-no-receipt
+        name: 'P073 Step 17 (F3): acceptance at an UNMOVED head writes no receipt'
+        filter_expression: 'P073 Step 17 (F3): acceptance at an UNMOVED head writes no receipt'
+      - test_case_id: p073-step-17-f3-the-c4-flag-compares-accepted-head-against-the-candidate
+        name: 'P073 Step 17 (F3): the C4 flag compares accepted_head against the candidate'
+        filter_expression: 'P073 Step 17 (F3): the C4 flag compares accepted_head against the candidate'
+    provenance:
+      - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-e2e-evidence-clean
     runner: bats
     source_paths:
@@ -10076,7 +10400,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:32Z"
+        verified_at: "2026-08-06T04:57:38Z"
         method: migrated_p071_step3
         source_sha256: da131cf13f72165a8343419e02bdbc5b62ec03824d33d84c39d07af5dd06224b
         resource_digest: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
@@ -10155,7 +10479,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: pilots/lane-final.json
-        verified_at: "2026-08-05T14:12:32Z"
+        verified_at: "2026-08-06T04:57:40Z"
         method: resource_map_plus_pilot
         source_sha256: b802cef316ad0cb6585d2a79d0fdc06885a13fadf41532d50f5498d3e45cbd17
         resource_digest: 96cd4b7998a93d291ead24eea48565dba5e1596c16a537967662b4f580de3316
@@ -10285,6 +10609,12 @@ run_units:
       - test_case_id: p073-step-9-review-finding-the-code-states-which-of-the-two-records-is-authoritative
         name: 'P073 Step 9 (review finding): the code states which of the two records is authoritative'
         filter_expression: 'P073 Step 9 (review finding): the code states which of the two records is authoritative'
+      - test_case_id: p073-independent-review-no-waiver-is-written-when-the-fsm-guard-would-not-have-blocked
+        name: 'P073 (independent review): no waiver is written when the FSM guard would not have blocked'
+        filter_expression: 'P073 (independent review): no waiver is written when the FSM guard would not have blocked'
+      - test_case_id: p073-independent-review-a-waiver-is-still-written-when-the-guard-genuinely-blocked
+        name: 'P073 (independent review): a waiver IS still written when the guard genuinely blocked'
+        filter_expression: 'P073 (independent review): a waiver IS still written when the guard genuinely blocked'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-dg07-observe
@@ -10313,7 +10643,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:35Z"
+        verified_at: "2026-08-06T04:57:43Z"
         method: migrated_p071_step3
         source_sha256: 2c78e4e421cb6abe234f0766a338a2ecbd06e3de32840aa21d40db4c0f4fb842
         resource_digest: 6b70987eadc15b1dc50cb50b2b0fd1c18aed47ac0b51af13506e24dcc51f082a
@@ -10420,7 +10750,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:38Z"
+        verified_at: "2026-08-06T04:57:45Z"
         method: migrated_p071_step3
         source_sha256: 5e411e95592b04f1757246d73c5098b416113c0d11f89da9e97469d2b336c315
         resource_digest: 92f03c62f3f04ee7e919b57f42445bdc4db4d5c6a027e0ba63fc1d07a2bd8072
@@ -10492,7 +10822,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:43Z"
+        verified_at: "2026-08-06T04:57:50Z"
         method: migrated_p071_step3
         source_sha256: 0b99d7dfa888e34754dfd1260cb6f5267fb04ff0a82746fce7596228803ac926
         resource_digest: 9d4fe8ea147856077fd6c6a79bbdfe459b9fdd145bb58f513311970eca26cb07
@@ -10586,7 +10916,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:47Z"
+        verified_at: "2026-08-06T04:57:53Z"
         method: migrated_p071_step3
         source_sha256: 13ad0207a27f8b9622fff3681e23f45000fdfa385861f4c1cb8b8fc3b24fb55a
         resource_digest: 181349df3cc3ca9df5e2169640b134dae79591c21e03a0714b6103cf6a5582b2
@@ -10668,7 +10998,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:50Z"
+        verified_at: "2026-08-06T04:57:56Z"
         method: migrated_p071_step3
         source_sha256: efac2f27d65cf0edb3f47ac7858c2ab343486f8bae9ce8a55f4f85317e682ed9
         resource_digest: 1ba01ff9bfd278ffdaa52f5f009e88ea300beb59dee1fa1e983284d23a5d7d0a
@@ -10727,6 +11057,82 @@ run_units:
         filter_expression: 'target-branch: reads config, default main'
     provenance:
       - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:f55287f442e8
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: p073-integration-an-ancillary-commit-travels-drift-accept-drift-without-a-second-review
+        name: 'P073 integration: an ancillary commit travels drift -> accept -> drift without a second review'
+        filter_expression: 'P073 integration: an ancillary commit travels drift -> accept -> drift without a second review'
+      - test_case_id: p073-integration-a-protected-change-fails-at-the-predicate-at-acceptance-and-at-drift
+        name: 'P073 integration: a protected change fails at the predicate, at acceptance AND at drift'
+        filter_expression: 'P073 integration: a protected change fails at the predicate, at acceptance AND at drift'
+      - test_case_id: p073-integration-a-close-consumed-receipt-is-protected-even-though-it-is-ancillary-globbed
+        name: 'P073 integration: a close-consumed receipt is protected even though it is ancillary-globbed'
+        filter_expression: 'P073 integration: a close-consumed receipt is protected even though it is ancillary-globbed'
+      - test_case_id: p073-integration-a-legacy-freeze-behaves-exactly-as-before-p073
+        name: 'P073 integration: a legacy freeze behaves exactly as before P073'
+        filter_expression: 'P073 integration: a legacy freeze behaves exactly as before P073'
+      - test_case_id: p073-integration-the-pre-commit-scope-guard-is-unchanged-ancillary-is-not-a-scope-exemption
+        name: 'P073 integration: the pre-commit scope guard is unchanged — ancillary is not a scope exemption'
+        filter_expression: 'P073 integration: the pre-commit scope guard is unchanged — ancillary is not a scope exemption'
+      - test_case_id: p073-integration-the-release-script-keeps-the-legacy-five-path-filter
+        name: 'P073 integration: the release script keeps the LEGACY five-path filter'
+        filter_expression: 'P073 integration: the release script keeps the LEGACY five-path filter'
+      - test_case_id: p073-integration-aid-fsm-sh-keeps-its-four-entry-legacy-set
+        name: 'P073 integration: aid-fsm.sh keeps its FOUR-entry legacy set'
+        filter_expression: 'P073 integration: aid-fsm.sh keeps its FOUR-entry legacy set'
+      - test_case_id: p073-integration-plan-close-check-accepts-both-close-receipt-shapes-and-nothing-else
+        name: 'P073 integration: plan-close-check accepts BOTH close-receipt shapes and nothing else'
+        filter_expression: 'P073 integration: plan-close-check accepts BOTH close-receipt shapes and nothing else'
+      - test_case_id: p073-integration-the-ancillary-filter-mode-is-mandatory-at-every-call-site
+        name: 'P073 integration: the ancillary filter mode is mandatory at every call site'
+        filter_expression: 'P073 integration: the ancillary filter mode is mandatory at every call site'
+      - test_case_id: p073-integration-the-cp1-review-budget-is-5-and-legacy-ledgers-keep-their-cap
+        name: 'P073 integration: the CP1 review budget is 5, and legacy ledgers keep their cap'
+        filter_expression: 'P073 integration: the CP1 review budget is 5, and legacy ledgers keep their cap'
+      - test_case_id: p073-integration-force-without-force-reason-is-a-usage-error
+        name: 'P073 integration: --force without --force-reason is a usage error'
+        filter_expression: 'P073 integration: --force without --force-reason is a usage error'
+      - test_case_id: p073-integration-every-p073-enforcement-is-registered
+        name: 'P073 integration: every P073 enforcement is registered'
+        filter_expression: 'P073 integration: every P073 enforcement is registered'
+      - test_case_id: p073-integration-whole-diff-a-multi-path-plan-json-stores-every-path-separately
+        name: 'P073 integration (whole-diff): a MULTI-path plan.json stores every path separately'
+        filter_expression: 'P073 integration (whole-diff): a MULTI-path plan.json stores every path separately'
+      - test_case_id: p073-integration-whole-diff-the-freeze-no-longer-emits-nul-through-jq
+        name: 'P073 integration (whole-diff): the freeze no longer emits NUL through jq'
+        filter_expression: 'P073 integration (whole-diff): the freeze no longer emits NUL through jq'
+    provenance:
+      - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-pipeline-c3-dispatch
     runner: bats
     source_paths:
@@ -10753,7 +11159,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:53Z"
+        verified_at: "2026-08-06T04:57:58Z"
         method: migrated_p071_step3
         source_sha256: 47bff0b74867c709c44defba9e71e00b13662d905a0b7f29308e9b6a58c1df70
         resource_digest: 37691b251581bbcf77384fd43dbee213593883cd962e2ce3acba2694da78918e
@@ -10832,7 +11238,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:55Z"
+        verified_at: "2026-08-06T04:58:01Z"
         method: migrated_p071_step3
         source_sha256: 6a36d8d3653fb9caac103e6e6337dddb589690e6cf0950d7c4b39271f88c335c
         resource_digest: 5b9db27b0dab4eb47934c964b2328d9b4f782f3f9657990a71ba5847fa0d06ec
@@ -10896,7 +11302,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:39:59Z"
+        verified_at: "2026-08-06T04:58:04Z"
         method: migrated_p071_step3
         source_sha256: f1d06a17cd9b71295133519791512750776980da386b74201ebac6bf49eb808f
         resource_digest: 22a0d731d7a58756b310eda4557eef93f671c1bb3758817102c7fe04d580bb05
@@ -11150,6 +11556,9 @@ run_units:
       - test_case_id: p073-step-7-review-finding-4-a-hard-refusal-records-nothing-so-no-receipt-is-even-possible
         name: 'P073 Step 7 (review finding 4): a HARD refusal records nothing, so no receipt is even possible'
         filter_expression: 'P073 Step 7 (review finding 4): a HARD refusal records nothing, so no receipt is even possible'
+      - test_case_id: p073-independent-review-two-force-receipts-in-the-same-second-both-survive
+        name: 'P073 (independent review): two force receipts in the SAME second both survive'
+        filter_expression: 'P073 (independent review): two force receipts in the SAME second both survive'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-lint
@@ -11178,7 +11587,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:01Z"
+        verified_at: "2026-08-06T04:58:06Z"
         method: migrated_p071_step3
         source_sha256: ccbf0931f37482df4c8076736ab00b65dc26d75139b7fc0f3ca9f7887b7ead06
         resource_digest: 5e9dc738d6f3f6856ebf8320992da32f807e7cfbf6437f19a64fe27e28bf6e62
@@ -11266,7 +11675,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:03Z"
+        verified_at: "2026-08-06T04:58:07Z"
         method: migrated_p071_step3
         source_sha256: 0bff0907b158e371935d3c9fdd41faf2b3249f142448fbb9cfd43d910ad80e3a
         resource_digest: dcca71d14115a3648c1f6fa170909ba600372d34e8dd5114738762130ecabbe1
@@ -11324,7 +11733,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:06Z"
+        verified_at: "2026-08-06T04:58:10Z"
         method: migrated_p071_step3
         source_sha256: ca8d1e457f80e277863aea859bd65e3445d1b7c47a125fc59544b94705dc8317
         resource_digest: 5b1c6b3911233ddabedd79252dba5ed84772cb631a6b7463276fe363008ce35a
@@ -11492,6 +11901,97 @@ run_units:
         filter_expression: 'P073 Step 10 (review finding): the single artifact left by a concurrent race is a valid, claimable grant'
     provenance:
       - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:6823ed876b09
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: p073-step-15-freeze-stores-the-protected-set-sorted-and-de-duplicated
+        name: 'P073 Step 15: freeze stores the protected set, sorted and de-duplicated'
+        filter_expression: 'P073 Step 15: freeze stores the protected set, sorted and de-duplicated'
+      - test_case_id: p073-step-15-the-set-lands-in-the-same-write-as-the-candidate-never-one-without-the-other
+        name: 'P073 Step 15: the set lands in the SAME write as the candidate — never one without the other'
+        filter_expression: 'P073 Step 15: the set lands in the SAME write as the candidate — never one without the other'
+      - test_case_id: p073-step-15-an-empty-protected-file-still-yields-the-lifecycle-floor-and-marks-the-set-incomplete
+        name: 'P073 Step 15: an EMPTY protected file still yields the lifecycle floor, and marks the set incomplete'
+        filter_expression: 'P073 Step 15: an EMPTY protected file still yields the lifecycle floor, and marks the set incomplete'
+      - test_case_id: p073-step-15-paths-with-spaces-odd-characters-and-newlines-survive-the-round-trip
+        name: 'P073 Step 15: paths with spaces, odd characters AND newlines survive the round trip'
+        filter_expression: 'P073 Step 15: paths with spaces, odd characters AND newlines survive the round trip'
+      - test_case_id: p073-step-15-invalidate-clears-candidate-and-protected-set-together
+        name: 'P073 Step 15: invalidate clears candidate and protected set together'
+        filter_expression: 'P073 Step 15: invalidate clears candidate and protected set together'
+      - test_case_id: p073-step-15-a-half-cleared-manifest-is-rejected-by-validation
+        name: 'P073 Step 15: a HALF-CLEARED manifest is rejected by validation'
+        filter_expression: 'P073 Step 15: a HALF-CLEARED manifest is rejected by validation'
+      - test_case_id: p073-step-15-a-candidate-with-no-protected-set-is-rejected-too
+        name: 'P073 Step 15: a candidate with NO protected set is rejected too'
+        filter_expression: 'P073 Step 15: a candidate with NO protected set is rejected too'
+      - test_case_id: p073-step-15-a-legacy-manifest-with-neither-field-stays-valid
+        name: 'P073 Step 15: a LEGACY manifest with neither field stays valid'
+        filter_expression: 'P073 Step 15: a LEGACY manifest with neither field stays valid'
+      - test_case_id: p073-step-15-accepted-head-without-its-receipt-binding-is-rejected
+        name: 'P073 Step 15: accepted_head without its receipt binding is rejected'
+        filter_expression: 'P073 Step 15: accepted_head without its receipt binding is rejected'
+      - test_case_id: p073-step-15-freeze-resets-accepted-head-and-its-receipt-binding
+        name: 'P073 Step 15: freeze resets accepted_head and its receipt binding'
+        filter_expression: 'P073 Step 15: freeze resets accepted_head and its receipt binding'
+      - test_case_id: p073-step-15-all-six-new-manifest-fields-are-declared-in-the-schema-as-optional
+        name: 'P073 Step 15: all six new manifest fields are DECLARED in the schema, as optional'
+        filter_expression: 'P073 Step 15: all six new manifest fields are DECLARED in the schema, as optional'
+      - test_case_id: p073-step-15-an-overlap-between-the-ancillary-policy-and-a-protected-path-warns-at-freeze
+        name: 'P073 Step 15: an overlap between the ancillary policy and a protected path warns at freeze'
+        filter_expression: 'P073 Step 15: an overlap between the ancillary policy and a protected path warns at freeze'
+      - test_case_id: p073-step-15-the-freeze-body-computes-the-set-from-plan-json-allowed-paths
+        name: 'P073 Step 15: the freeze body computes the set from plan.json allowed_paths'
+        filter_expression: 'P073 Step 15: the freeze body computes the set from plan.json allowed_paths'
+      - test_case_id: p073-step-15-review-finding-the-old-six-argument-freeze-call-is-refused-not-silently-accepted
+        name: 'P073 Step 15 (review finding): the OLD six-argument freeze call is refused, not silently accepted'
+        filter_expression: 'P073 Step 15 (review finding): the OLD six-argument freeze call is refused, not silently accepted'
+      - test_case_id: p073-step-15-review-finding-an-unreadable-protected-paths-file-is-refused
+        name: 'P073 Step 15 (review finding): an unreadable protected-paths file is refused'
+        filter_expression: 'P073 Step 15 (review finding): an unreadable protected-paths file is refused'
+      - test_case_id: p073-step-15-review-finding-accepted-head-with-an-empty-receipt-path-is-rejected
+        name: 'P073 Step 15 (review finding): accepted_head with an EMPTY receipt path is rejected'
+        filter_expression: 'P073 Step 15 (review finding): accepted_head with an EMPTY receipt path is rejected'
+      - test_case_id: p073-step-15-review-finding-accepted-head-with-a-malformed-sha256-is-rejected
+        name: 'P073 Step 15 (review finding): accepted_head with a malformed sha256 is rejected'
+        filter_expression: 'P073 Step 15 (review finding): accepted_head with a malformed sha256 is rejected'
+      - test_case_id: p073-step-15-review-finding-a-well-formed-acceptance-binding-validates
+        name: 'P073 Step 15 (review finding): a WELL-FORMED acceptance binding validates'
+        filter_expression: 'P073 Step 15 (review finding): a WELL-FORMED acceptance binding validates'
+      - test_case_id: p073-step-15-review-finding-the-freeze-body-marks-the-set-incomplete-on-a-malformed-plan-json-an-empty-evidence-dir-and-an-ambiguous-source-glob
+        name: 'P073 Step 15 (review finding): the freeze body marks the set incomplete on a malformed plan.json, an empty evidence_dir and an ambiguous source glob'
+        filter_expression: 'P073 Step 15 (review finding): the freeze body marks the set incomplete on a malformed plan.json, an empty evidence_dir and an ambiguous source glob'
+    provenance:
+      - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-queue-revalidation
     runner: bats
     source_paths:
@@ -11518,7 +12018,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:10Z"
+        verified_at: "2026-08-06T04:58:13Z"
         method: migrated_p071_step3
         source_sha256: 2d729951ab35ecfdca491aa114cc962a088a69bb206a396a7ad34a72a51b71fc
         resource_digest: 5130a22774d11e14c6da02295a80d48219daff0422095709132d7ecafc6d591f
@@ -11582,7 +12082,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:11Z"
+        verified_at: "2026-08-06T04:58:15Z"
         method: migrated_p071_step3
         source_sha256: aa337a481c9fc1dd4c14264e1f5fe3313b0c2d2631bb2bccd15ec50ab8166d2a
         resource_digest: c24778b0e6193608673004f13a82d36280f9322528a1038c43d0e9cf8e87a538
@@ -11792,7 +12292,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:13Z"
+        verified_at: "2026-08-06T04:58:16Z"
         method: migrated_p071_step3
         source_sha256: 4cdd32524940709e692f49b95b5adb47750c522df72e157cee933bbf25703022
         resource_digest: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
@@ -12178,6 +12678,130 @@ run_units:
       - test_case_id: p073-step-12-review-finding-3-the-renderer-refuses-to-write-while-the-plan-is-not-closed
         name: 'P073 Step 12 (review finding 3): the renderer refuses to write while the plan is not CLOSED'
         filter_expression: 'P073 Step 12 (review finding 3): the renderer refuses to write while the plan is not CLOSED'
+      - test_case_id: p073-step-12-regression-both-projections-always-carry-a-head-field
+        name: 'P073 Step 12 (regression): BOTH projections always carry a Head field'
+        filter_expression: 'P073 Step 12 (regression): BOTH projections always carry a Head field'
+      - test_case_id: p073-step-12-regression-a-report-json-with-no-head-still-yields-a-head-field-from-the-live-head
+        name: 'P073 Step 12 (regression): a report JSON with NO head still yields a Head field, from the live HEAD'
+        filter_expression: 'P073 Step 12 (regression): a report JSON with NO head still yields a Head field, from the live HEAD'
+      - test_case_id: p073-step-12-regression-the-report-s-own-head-wins-over-the-live-head-so-a-stale-report-still-reads-stale
+        name: 'P073 Step 12 (regression): the report''s OWN head wins over the live HEAD, so a stale report still reads stale'
+        filter_expression: 'P073 Step 12 (regression): the report''s OWN head wins over the live HEAD, so a stale report still reads stale'
+    provenance:
+      - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:a60b73694c38
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: p073-step-16-an-unmoved-head-is-trivially-equivalent
+        name: 'P073 Step 16: an unmoved head is trivially equivalent'
+        filter_expression: 'P073 Step 16: an unmoved head is trivially equivalent'
+      - test_case_id: p073-step-16-an-ancillary-only-commit-is-equivalent
+        name: 'P073 Step 16: an ANCILLARY-only commit is equivalent'
+        filter_expression: 'P073 Step 16: an ANCILLARY-only commit is equivalent'
+      - test_case_id: p073-step-16-a-delivery-commit-is-not-equivalent-and-the-offending-path-is-named
+        name: 'P073 Step 16: a DELIVERY commit is not equivalent, and the offending path is named'
+        filter_expression: 'P073 Step 16: a DELIVERY commit is not equivalent, and the offending path is named'
+      - test_case_id: p073-step-16-a-mixed-commit-ancillary-protected-is-not-equivalent
+        name: 'P073 Step 16: a MIXED commit (ancillary + protected) is not equivalent'
+        filter_expression: 'P073 Step 16: a MIXED commit (ancillary + protected) is not equivalent'
+      - test_case_id: p073-step-16-a-non-ancestor-head-rewritten-branch-is-not-equivalent
+        name: 'P073 Step 16: a NON-ANCESTOR head (rewritten branch) is not equivalent'
+        filter_expression: 'P073 Step 16: a NON-ANCESTOR head (rewritten branch) is not equivalent'
+      - test_case_id: p073-step-16-an-untracked-only-worktree-does-not-break-equivalence
+        name: 'P073 Step 16: an UNTRACKED-only worktree does not break equivalence'
+        filter_expression: 'P073 Step 16: an UNTRACKED-only worktree does not break equivalence'
+      - test_case_id: p073-step-16-tracked-dirt-outside-the-ancillary-policy-is-not-equivalent
+        name: 'P073 Step 16: tracked dirt OUTSIDE the ancillary policy is not equivalent'
+        filter_expression: 'P073 Step 16: tracked dirt OUTSIDE the ancillary policy is not equivalent'
+      - test_case_id: p073-step-16-a-legacy-freeze-with-no-protected-set-reports-unavailable-not-equivalent
+        name: 'P073 Step 16: a LEGACY freeze with no protected set reports UNAVAILABLE, not equivalent'
+        filter_expression: 'P073 Step 16: a LEGACY freeze with no protected set reports UNAVAILABLE, not equivalent'
+      - test_case_id: p073-step-16-a-partial-protected-set-reports-unavailable-it-can-never-authorise-acceptance
+        name: 'P073 Step 16: a PARTIAL protected set reports UNAVAILABLE — it can never authorise acceptance'
+        filter_expression: 'P073 Step 16: a PARTIAL protected set reports UNAVAILABLE — it can never authorise acceptance'
+      - test_case_id: p073-step-16-no-frozen-candidate-reports-unavailable
+        name: 'P073 Step 16: no frozen candidate reports UNAVAILABLE'
+        filter_expression: 'P073 Step 16: no frozen candidate reports UNAVAILABLE'
+      - test_case_id: p073-step-16-the-predicate-writes-nothing-manifest-bytes-and-file-count-unchanged
+        name: 'P073 Step 16: the predicate writes nothing — manifest bytes and file count unchanged'
+        filter_expression: 'P073 Step 16: the predicate writes nothing — manifest bytes and file count unchanged'
+      - test_case_id: p073-step-16-acceptance-writes-one-receipt-and-records-accepted-head
+        name: 'P073 Step 16: acceptance writes ONE receipt and records accepted_head'
+        filter_expression: 'P073 Step 16: acceptance writes ONE receipt and records accepted_head'
+      - test_case_id: p073-step-16-candidate-sha-is-byte-identical-before-and-after-acceptance-only-accepted-head-changes
+        name: 'P073 Step 16: candidate_sha is BYTE-IDENTICAL before and after acceptance — only accepted_head changes'
+        filter_expression: 'P073 Step 16: candidate_sha is BYTE-IDENTICAL before and after acceptance — only accepted_head changes'
+      - test_case_id: p073-step-16-acceptance-refuses-a-protected-surface-change-naming-every-offender
+        name: 'P073 Step 16: acceptance REFUSES a protected-surface change, naming every offender'
+        filter_expression: 'P073 Step 16: acceptance REFUSES a protected-surface change, naming every offender'
+      - test_case_id: p073-step-16-acceptance-with-nothing-frozen-is-refused
+        name: 'P073 Step 16: acceptance with NOTHING frozen is refused'
+        filter_expression: 'P073 Step 16: acceptance with NOTHING frozen is refused'
+      - test_case_id: p073-step-16-a-second-ancillary-commit-gets-a-second-acceptance-and-a-suffixed-receipt
+        name: 'P073 Step 16: a SECOND ancillary commit gets a second acceptance and a suffixed receipt'
+        filter_expression: 'P073 Step 16: a SECOND ancillary commit gets a second acceptance and a suffixed receipt'
+      - test_case_id: p073-step-16-accepting-the-same-head-twice-is-idempotent-no-duplicate-receipt
+        name: 'P073 Step 16: accepting the SAME head twice is idempotent — no duplicate receipt'
+        filter_expression: 'P073 Step 16: accepting the SAME head twice is idempotent — no duplicate receipt'
+      - test_case_id: p073-step-16-acceptance-on-an-unavailable-plan-is-refused-never-silently-granted
+        name: 'P073 Step 16: acceptance on an UNAVAILABLE plan is refused, never silently granted'
+        filter_expression: 'P073 Step 16: acceptance on an UNAVAILABLE plan is refused, never silently granted'
+      - test_case_id: p073-step-16-the-resulting-manifest-passes-validation
+        name: 'P073 Step 16: the resulting manifest passes validation'
+        filter_expression: 'P073 Step 16: the resulting manifest passes validation'
+      - test_case_id: p073-step-16-the-stage-is-dispatchable-and-documented-in-the-usage
+        name: 'P073 Step 16: the stage is dispatchable and documented in the usage'
+        filter_expression: 'P073 Step 16: the stage is dispatchable and documented in the usage'
+      - test_case_id: p073-step-16-f2-a-rename-of-a-delivery-file-into-an-ancillary-directory-is-not-equivalent
+        name: 'P073 Step 16 (F2): a RENAME of a delivery file INTO an ancillary directory is not equivalent'
+        filter_expression: 'P073 Step 16 (F2): a RENAME of a delivery file INTO an ancillary directory is not equivalent'
+      - test_case_id: p073-step-16-f3-a-failing-diff-reports-unavailable-never-nothing-changed
+        name: 'P073 Step 16 (F3): a FAILING diff reports UNAVAILABLE, never ''nothing changed'''
+        filter_expression: 'P073 Step 16 (F3): a FAILING diff reports UNAVAILABLE, never ''nothing changed'''
+      - test_case_id: p073-step-16-f1-uncommitted-dirt-on-a-protected-path-that-is-also-ancillary-is-not-equivalent
+        name: 'P073 Step 16 (F1): uncommitted dirt on a PROTECTED path that is ALSO ancillary is not equivalent'
+        filter_expression: 'P073 Step 16 (F1): uncommitted dirt on a PROTECTED path that is ALSO ancillary is not equivalent'
+      - test_case_id: p073-step-16-f4-the-manifest-binding-is-a-cas-a-moved-candidate-refuses-the-write
+        name: 'P073 Step 16 (F4): the manifest binding is a CAS — a moved candidate refuses the write'
+        filter_expression: 'P073 Step 16 (F4): the manifest binding is a CAS — a moved candidate refuses the write'
+      - test_case_id: p073-step-16-f4-the-cas-also-refuses-when-another-acceptance-already-won
+        name: 'P073 Step 16 (F4): the CAS also refuses when another acceptance already won'
+        filter_expression: 'P073 Step 16 (F4): the CAS also refuses when another acceptance already won'
+      - test_case_id: p073-step-16-f6-a-deleted-acceptance-receipt-is-refused-not-reported-as-accepted
+        name: 'P073 Step 16 (F6): a DELETED acceptance receipt is refused, not reported as accepted'
+        filter_expression: 'P073 Step 16 (F6): a DELETED acceptance receipt is refused, not reported as accepted'
+      - test_case_id: p073-step-16-f6-a-tampered-acceptance-receipt-is-refused
+        name: 'P073 Step 16 (F6): a TAMPERED acceptance receipt is refused'
+        filter_expression: 'P073 Step 16 (F6): a TAMPERED acceptance receipt is refused'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-run-all-tests-result-grammar
@@ -12379,7 +13003,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:16Z"
+        verified_at: "2026-08-06T04:58:19Z"
         method: migrated_p071_step3
         source_sha256: 80f32d8c0497c24ffd9b8c60c278a3da8e33174bcbc3de53e68e1dd2ea2fab70
         resource_digest: 42220b53c8b22cb9a3fab79db9099b0c4121b9a4eb7e19bfe831586bb34d8965
@@ -12414,6 +13038,121 @@ run_units:
         filter_expression: the output is deterministic and reproducible across repeated runs (ignoring generated_at)
     provenance:
       - bats
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery
+    runner: bats
+    source_paths:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery.bats
+    production_surfaces:
+      - plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery.bats
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      argv:
+        - bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery.bats
+      type: argv
+    runtime:
+      fingerprint: sha256:a7a24bea98df
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases:
+      - test_case_id: p073-step-13-supersede-archives-the-state-file-and-writes-a-four-field-record
+        name: 'P073 Step 13: supersede archives the state file and writes a four-field record'
+        filter_expression: 'P073 Step 13: supersede archives the state file and writes a four-field record'
+      - test_case_id: p073-step-13-the-archive-and-its-record-share-one-epoch-so-they-pair-1-1
+        name: 'P073 Step 13: the archive and its record share one epoch, so they pair 1:1'
+        filter_expression: 'P073 Step 13: the archive and its record share one epoch, so they pair 1:1'
+      - test_case_id: p073-step-13-the-evidence-directory-is-preserved-byte-for-byte
+        name: 'P073 Step 13: the evidence directory is preserved byte-for-byte'
+        filter_expression: 'P073 Step 13: the evidence directory is preserved byte-for-byte'
+      - test_case_id: p073-step-13-supersede-after-the-epic-merged-is-refused-a-merged-epic-is-history
+        name: 'P073 Step 13: supersede after the EPIC merged is REFUSED — a merged EPIC is history'
+        filter_expression: 'P073 Step 13: supersede after the EPIC merged is REFUSED — a merged EPIC is history'
+      - test_case_id: p073-step-13-supersede-with-no-state-file-to-archive-is-refused
+        name: 'P073 Step 13: supersede with no state file to archive is refused'
+        filter_expression: 'P073 Step 13: supersede with no state file to archive is refused'
+      - test_case_id: p073-step-13-supersede-with-no-plan-json-to-bind-to-is-refused-and-archives-nothing
+        name: 'P073 Step 13: supersede with no plan.json to bind to is refused, and archives nothing'
+        filter_expression: 'P073 Step 13: supersede with no plan.json to bind to is refused, and archives nothing'
+      - test_case_id: p073-step-13-a-short-reason-is-refused-the-record-is-the-audit-trail
+        name: 'P073 Step 13: a short reason is refused — the record is the audit trail'
+        filter_expression: 'P073 Step 13: a short reason is refused — the record is the audit trail'
+      - test_case_id: p073-step-13-supersede-of-an-epic-with-no-manifest-entry-is-refused
+        name: 'P073 Step 13: supersede of an EPIC with no manifest entry is refused'
+        filter_expression: 'P073 Step 13: supersede of an EPIC with no manifest entry is refused'
+      - test_case_id: p073-step-13-after-a-supersede-a-re-init-with-the-same-package-is-authorised-once
+        name: 'P073 Step 13: after a supersede, a re-init with the SAME package is authorised once'
+        filter_expression: 'P073 Step 13: after a supersede, a re-init with the SAME package is authorised once'
+      - test_case_id: p073-step-13-a-re-init-with-a-different-plan-json-is-rejected-the-record-binds-one-exact-package
+        name: 'P073 Step 13: a re-init with a DIFFERENT plan.json is rejected — the record binds one exact package'
+        filter_expression: 'P073 Step 13: a re-init with a DIFFERENT plan.json is rejected — the record binds one exact package'
+      - test_case_id: p073-step-13-a-forged-record-wrong-old-state-sha256-authorises-nothing
+        name: 'P073 Step 13: a FORGED record (wrong old_state_sha256) authorises nothing'
+        filter_expression: 'P073 Step 13: a FORGED record (wrong old_state_sha256) authorises nothing'
+      - test_case_id: p073-step-13-a-record-for-a-different-epic-never-authorises-this-one
+        name: 'P073 Step 13: a record for a DIFFERENT epic never authorises this one'
+        filter_expression: 'P073 Step 13: a record for a DIFFERENT epic never authorises this one'
+      - test_case_id: p073-step-13-with-no-archived-state-the-unconditional-duplicate-init-rejection-is-unchanged
+        name: 'P073 Step 13: with NO archived state, the unconditional duplicate-init rejection is unchanged'
+        filter_expression: 'P073 Step 13: with NO archived state, the unconditional duplicate-init rejection is unchanged'
+      - test_case_id: p073-step-13-two-consecutive-supersede-cycles-each-need-their-own-record
+        name: 'P073 Step 13: two consecutive supersede cycles each need their OWN record'
+        filter_expression: 'P073 Step 13: two consecutive supersede cycles each need their OWN record'
+      - test_case_id: p073-step-13-attestation-re-derives-epic-base-commit-from-git-unconditionally-no-flag-needed
+        name: 'P073 Step 13: attestation re-derives epic_base_commit from Git unconditionally — no flag needed'
+        filter_expression: 'P073 Step 13: attestation re-derives epic_base_commit from Git unconditionally — no flag needed'
+      - test_case_id: p073-step-13-attestation-fails-closed-when-the-ancestry-cannot-be-proven
+        name: 'P073 Step 13: attestation FAILS CLOSED when the ancestry cannot be proven'
+        filter_expression: 'P073 Step 13: attestation FAILS CLOSED when the ancestry cannot be proven'
+      - test_case_id: p073-step-13-both-recovery-transactions-are-registered
+        name: 'P073 Step 13: both recovery transactions are registered'
+        filter_expression: 'P073 Step 13: both recovery transactions are registered'
+      - test_case_id: p073-step-13-review-finding-1-a-later-init-gate-failure-does-not-burn-the-pm-s-authorisation
+        name: 'P073 Step 13 (review finding 1): a later init gate failure does NOT burn the PM''s authorisation'
+        filter_expression: 'P073 Step 13 (review finding 1): a later init gate failure does NOT burn the PM''s authorisation'
+      - test_case_id: p073-step-13-review-finding-2-an-epic-with-no-derivable-plan-id-cannot-bypass-the-check
+        name: 'P073 Step 13 (review finding 2): an EPIC with no derivable plan id cannot bypass the check'
+        filter_expression: 'P073 Step 13 (review finding 2): an EPIC with no derivable plan id cannot bypass the check'
+      - test_case_id: p073-step-13-review-finding-3-an-older-record-cannot-authorise-the-newer-archive
+        name: 'P073 Step 13 (review finding 3): an OLDER record cannot authorise the NEWER archive'
+        filter_expression: 'P073 Step 13 (review finding 3): an OLDER record cannot authorise the NEWER archive'
+      - test_case_id: p073-step-13-review-finding-4-evidence-artifacts-survive-and-the-state-file-is-archived-in-place
+        name: 'P073 Step 13 (review finding 4): evidence ARTIFACTS survive and the state file is archived in place'
+        filter_expression: 'P073 Step 13 (review finding 4): evidence ARTIFACTS survive and the state file is archived in place'
+      - test_case_id: p073-epic-2-review-finding-concurrent-re-inits-exactly-one-wins-the-loser-writes-nothing
+        name: 'P073 EPIC 2 (review finding): concurrent re-inits — exactly one wins, the loser writes nothing'
+        filter_expression: 'P073 EPIC 2 (review finding): concurrent re-inits — exactly one wins, the loser writes nothing'
+      - test_case_id: p073-epic-2-review-finding-a-failed-state-file-write-restores-the-reservation-for-a-retry
+        name: 'P073 EPIC 2 (review finding): a failed state-file write RESTORES the reservation for a retry'
+        filter_expression: 'P073 EPIC 2 (review finding): a failed state-file write RESTORES the reservation for a retry'
+      - test_case_id: p073-epic-2-review-finding-init-s-strict-flag-check-is-not-disabled-by-force
+        name: 'P073 EPIC 2 (review finding): init''s strict flag check is NOT disabled by --force'
+        filter_expression: 'P073 EPIC 2 (review finding): init''s strict flag check is NOT disabled by --force'
+      - test_case_id: p073-epic-2-review-finding-the-known-force-payload-flags-are-still-accepted-after-force
+        name: 'P073 EPIC 2 (review finding): the KNOWN force payload flags are still accepted after --force'
+        filter_expression: 'P073 EPIC 2 (review finding): the KNOWN force payload flags are still accepted after --force'
+      - test_case_id: p073-independent-review-concurrent-supersedes-leave-one-archive-record-pair-and-never-strand-the-run
+        name: 'P073 (independent review): concurrent SUPERSEDES leave one archive/record pair and never strand the run'
+        filter_expression: 'P073 (independent review): concurrent SUPERSEDES leave one archive/record pair and never strand the run'
+      - test_case_id: p073-independent-review-a-supersede-that-loses-the-lock-race-says-so-and-changes-nothing
+        name: 'P073 (independent review): a supersede that loses the lock race says so and changes nothing'
+        filter_expression: 'P073 (independent review): a supersede that loses the lock race says so and changes nothing'
+    provenance:
+      - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-tiered-severity
     runner: bats
     source_paths:
@@ -12440,7 +13179,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:20Z"
+        verified_at: "2026-08-06T04:58:22Z"
         method: migrated_p071_step3
         source_sha256: 333eb84a5a50d649519d5aab48f3f98706db3879515ecfd23f0bd26f52c0aac5
         resource_digest: 5de05be738d30f5b8237c22c5802e639f36a61d17efe7ca487048b3b5de26ef7
@@ -12531,7 +13270,7 @@ run_units:
       internal_parallelism: false
       provenance:
         evidence_ref: 'P071 Step 3 pilot, audit-20260802-070629: 72 bats files piloted, out of 74 bats run units in the catalog and 106 .bats files in the tree at migration time. (The retiring allowlist header''s figure of 83 was wrong in both directions and is not reproduced here.)'
-        verified_at: "2026-08-05T13:40:22Z"
+        verified_at: "2026-08-06T04:58:24Z"
         method: migrated_p071_step3
         source_sha256: 16a1978c55de13a60f5c248156c59d0c064332ad00f5f7508563b078edefc723
         resource_digest: 9baef682e2c2cdbba899503a8c6ca7f67eae3721f954866a9d6a18f4bc25bb3a
@@ -14743,56 +15482,56 @@ source_pattern_mappings:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates
     classification: production
     precedence: 1
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-diff.sh
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-plan-diff
     classification: production
     precedence: 2
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-release-policy.sh
     target_run_unit_ids:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy
     classification: production
     precedence: 3
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-fsm.sh
     target_run_unit_ids:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm
     classification: production
     precedence: 4
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-prefilter.sh
     target_run_unit_ids:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter
     classification: production
     precedence: 5
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-evidence-verify.sh
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-evidence-verify
     classification: production
     precedence: 6
-    status: approved
+    status: proposed
   - match_type: prefix
     path_pattern: plugins/aid-orchestrator/defaults/schemas/
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-protocol-validate
     classification: production
     precedence: 7
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/delivery-gate.yaml
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-delivery-gate
     classification: production
     precedence: 8
-    status: approved
+    status: proposed
   - match_type: prefix
     path_pattern: plugins/aid-orchestrator/lib/ui-fidelity/
     target_run_unit_ids:
@@ -14800,1089 +15539,1116 @@ source_pattern_mappings:
       - sh:plugins/aid-orchestrator/scripts/tests/test-fsm-ui-fidelity
     classification: production
     precedence: 9
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/.gitignore
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/check-severity.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/ci/plan-boundary-required-check.yml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/config/bats-parallel-safe-allowlist.txt
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/config/test-audit.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/enforcement-registry.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/bash.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/go.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/python.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/rust.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/typescript.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/hooks/pre-commit
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/hooks/pre-push
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/integrations.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/orchestration.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/c0-contract.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/permissions.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/plan-boundary-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
+  - match_type: exact
+    path_pattern: plugins/aid-orchestrator/defaults/policies/plan-final-policy.yaml
+    target_run_unit_ids: []
+    classification: unknown_production
+    precedence: 1000
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/review-profiles.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/semantic-review.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/pre-filter-rules.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/c0-plan-review-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/c3-audit-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/c3-audit-prompt-v2.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-adversarial-review-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-consolidator-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-flake-isolation-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-parallel-safety-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-performance-cost-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-shard-auditor-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/standards/general.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/standards/vulcan.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/delivery-report.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/design-sections.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/epic-example.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/epic.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/inputs-readme.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/plan.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/plan.schema.json
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/review-profile-template.json
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-bug-fix.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-exploration.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-new-feature.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-refactoring.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/step-verify-template.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/ui-change-contract.example.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/verification-summary-template.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/verifier-output-template.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-acceptance-evidence.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-audit-log.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-audit-tests-cli-parse.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-audit-tests-finalize.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-c0-contract.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-check-deps.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-compliance-backfill.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-compliance-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-consumption-proof.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-cp1-gate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-delivery-gate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-diagnostic.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-emit-dispatch.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-epic-summary.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-epic-to-json.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-gate-runtime-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-gate-waiver.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-generation-finalize.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-generation-readiness.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-init-upgrade-test-audit.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-job.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-json-to-run.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-lifecycle.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-lint-skill.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-close-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-fsm.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-lint.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-pm-brief.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-promote-checks.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-protocol-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-quarantine-decision-record.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-queue-add.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-registry-ttl-guard.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-release.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-scheduler-overlay-approve.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-scheduler-rollout-gate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-select-tests.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-self-host-migrate-p071-gates.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-consolidate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-dispatch.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-profile-select.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-profile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
+  - match_type: exact
+    path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-report.sh
+    target_run_unit_ids: []
+    classification: unknown_production
+    precedence: 1000
+    status: proposed
+  - match_type: exact
+    path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-apply-evidence.sh
+    target_run_unit_ids: []
+    classification: unknown_production
+    precedence: 1000
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-approve.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-confirm-mapping.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-migrate-p071-allowlist.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-selector-snapshot.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
+  - match_type: exact
+    path_pattern: plugins/aid-orchestrator/scripts/aid-test-content-scan.sh
+    target_run_unit_ids: []
+    classification: unknown_production
+    precedence: 1000
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-divergence-campaign.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-execution-ledger.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-inventory.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-isolation-experiment.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-parallel-pilot.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-resource-map.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-schedule-divergence-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-scheduler.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/gates/aid-contract-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/gates/scope-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/gates/ui-contract-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-adjudication.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
+  - match_type: exact
+    path_pattern: plugins/aid-orchestrator/scripts/lib/aid-ancillary.sh
+    target_run_unit_ids: []
+    classification: unknown_production
+    precedence: 1000
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-audit-independence.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-audit-mode.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-cache-preflight.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-contract-hash.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-delivery-map.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-delivery-profile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-execution-unit-membership.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-finding-fingerprint.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-finding-merge.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-gate-runtime-baseline.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-gitignore-backfill.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-init-execution-yaml.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-invalidation-map.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-lock.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-plan-graph.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-profile-hash.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-render-prompt.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-review-signals.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-run-gates-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-scoping.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-source-plan-graph.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-stage-log.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-bats.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-contract.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-declared-command.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-package-script.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-shell-suite.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-chat-summary.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-command-allowlist.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-config.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-decision.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-measure.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-state.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-write-plan-bridge.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-catalog-provenance.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-catalog-selector-mappings.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-execution-unit.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-lane-input-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-profile-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-scheduler-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-timing-bats.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-token-count.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/common.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg01-dependency-consistency.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg02-build.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg03-typecheck.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg04-test.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg05-consumer-compile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg06-removed-dep.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg07-state-consistency.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg08-runtime-env.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg09-static-coverage.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg10-startup-smoke.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg11-build-config.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg12-authority.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg15-route-resolve.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg17-independent-oracle-nodrop.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg18-acceptance-struct.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/review-profile-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
 mapping_approval:
-  status: approved
-  approved_by: operator
-  approved_at: "2026-08-05T13:14:55Z"
-  reviewed_diff_hash: sha256:ec90c7d493e1496ca6439a57bb6e74979ac73ed7635896202f6fc222b1a655db
+  status: proposed

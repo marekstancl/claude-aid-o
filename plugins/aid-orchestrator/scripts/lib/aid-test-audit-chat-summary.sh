@@ -81,6 +81,9 @@ _tacs_classify_verdict() {
 #   "clean" verdict.
 aid_test_audit_render_chat_summary() {
   local findings_path="$1" changed_text="${2:-nothing (no separately approved step ran)}"
+  # The report page lives beside the findings — the banner above the summary
+  # names it so even a verbatim paste carries the pointer.
+  local _tacs_report_path; _tacs_report_path="$(dirname "$findings_path")/report.html"
   # P072 Step 3 — the mode the audit actually ran in, recorded into the
   # durable record so the write-plan bridge can refuse a caller that
   # relabels a full audit as `measure` to slip past the decision gate.
@@ -483,6 +486,13 @@ Treat every one of them as unexamined, not as healthy."
   fi
 
   cat <<EOF
+> ⚠️ **PRVNÍ KROK PRO CONTROLLER, NEŽ COKOLI JINÉHO:** zveřejni
+> \`${_tacs_report_path}\` nástrojem Artifact a začni odpověď uživateli
+> odkazem na ni. Ta stránka JE výstup auditu; tento textový blok je jen
+> trvalý záznam pod ní. Odpověď bez odkazu na stránku je neúplná — čtyři
+> dny běhů skončily u uživatele jako zeď textu přesně proto, že tenhle
+> krok visel na dobré vůli. Teď je součástí výstupu samotného.
+
 ## 1. What to do now
 
 ${section_now}

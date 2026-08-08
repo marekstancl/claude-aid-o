@@ -58,6 +58,22 @@ def rel(p): return os.path.relpath(p, ROOT)
 bats = sorted(glob.glob(f"{ROOT}/**/*.bats", recursive=True))
 bats = [f for f in bats if "/.git/" not in f and "/node_modules/" not in f]
 
+# test files of EVERY runner — the first cut scanned only bats, was pointed at
+# a pytest project, and produced garbage in both directions: 813 "untested"
+# sources that 42 tests import, and "0 unreferenced" over 153 test files no
+# gate runs. An independent review caught both. Never again bats-only.
+def _clean(paths):
+    return [f for f in paths if "/.git/" not in f and "/node_modules/" not in f
+            and "/.venv/" not in f and "/venv/" not in f]
+py_tests = _clean(sorted(set(
+    glob.glob(f"{ROOT}/**/test_*.py", recursive=True)
+    + glob.glob(f"{ROOT}/**/*_test.py", recursive=True))))
+ts_tests = _clean(sorted(set(
+    glob.glob(f"{ROOT}/**/*.test.ts", recursive=True)
+    + glob.glob(f"{ROOT}/**/*.test.tsx", recursive=True)
+    + glob.glob(f"{ROOT}/**/*.spec.ts", recursive=True))))
+all_tests = bats + py_tests + ts_tests
+
 # ── 1. duplicate test cases ────────────────────────────────────────────────
 cases = collections.defaultdict(list)
 for f in bats:
@@ -133,11 +149,76 @@ if INV and os.path.exists(INV):
             _, _, path = uid.partition(":")
             if path: referenced.add(path.rstrip("/") )
     except Exception: pass
+# reachability: a test file counts as RUN when the inventory names it, or a
+# gate command's path token covers it, or — for marker-gated pytest commands —
+# the file actually carries that marker. An independent review found 153 test
+# files no gate runs while this check said "0", because it only looked at bats.
+gate_cmds = []
+try:
+    import yaml as _y3
+    _ey = _y3.safe_load(open(EXY)) or {}
+    gate_cmds = [ (str((v or {}).get("command") or "")) for v in (_ey.get("gates") or {}).values() ]
+except Exception:
+    pass
+# wrapper resolution, one level deep: a gate whose command is a shell script is
+# opaque to path-token matching, so every file behind it counted as "unrun".
+# A verification agent measured the real number at less than half of what this
+# check reported — the overshoot was entirely wrapper opacity. Reading the
+# wrapper's own text closes most of it.
+_runner_line = re.compile(r"\b(pytest|vitest|jest|bats|playwright\s+test)\b|npm\s+(run\s+)?test\b|npx\s+vitest")
+gate_texts = []
+for cmd in gate_cmds:
+    text = cmd
+    for sh in re.findall(r"[\w./-]+\.sh\b", cmd):
+        for cand in (os.path.join(ROOT, sh.lstrip("./")), sh):
+            try:
+                body = open(cand, errors="ignore").read()
+            except Exception:
+                continue
+            # only lines that actually INVOKE a runner count — a wrapper that
+            # merely mentions test paths (a registry checker looping over
+            # tests/integration/*.py) must not mark those paths as run
+            text += "\n" + "\n".join(l for l in body.splitlines() if _runner_line.search(l))
+            break
+    gate_texts.append(text)
+_all_text = "\n".join(gate_texts)
+# a bare js/ts runner invocation collects every matching file by convention —
+# assume reachable; whether the runner's config actually collects them is the
+# separate npm-collects-1-of-24 class of finding, not this one
+_ts_runner = bool(re.search(r"\b(vitest|jest)\b|npm (run )?test\b|npx vitest", _all_text))
+_pw_runner = bool(re.search(r"\bplaywright\s+test\b", _all_text))
+def _reachable(rl, content):
+    stem = re.sub(r"\.(bats|py|ts|tsx)$", "", rl)
+    if referenced and any(stem in x or x in stem for x in referenced):
+        return True
+    if rl.endswith((".ts", ".tsx")):
+        if ".spec." in rl and "/e2e/" in rl:
+            return _pw_runner
+        if _ts_runner:
+            return True
+    for cmd in gate_texts:
+        toks = re.findall(r"[\w./-]+", cmd)
+        path_toks = [t for t in toks if "/" in t and not t.endswith(".sh")]
+        markers = re.findall(r"-m\s+([\w]+)", cmd)
+        if markers:
+            # a marker-filtered gate runs ONLY opted-in files — a path match
+            # proves nothing (the exact overshoot-then-undershoot a verifying
+            # agent measured: the truth was files without the marker)
+            if any(f"pytest.mark.{mk}" in content or
+                   ("pytestmark" in content and mk in content) for mk in markers if mk):
+                return True
+            continue
+        if any(rl.startswith(t.rstrip("/") + "/") or rl == t for t in path_toks):
+            return True
+        if rl + "" in cmd:
+            return True
+    return False
 unreferenced = []
-for f in bats:
+for f in all_tests:
     r = rel(f)
-    stem = r[:-5] if r.endswith(".bats") else r
-    if referenced and not any(stem in x or x in stem for x in referenced):
+    try: content = open(f, errors="ignore").read()
+    except Exception: content = ""
+    if (referenced or gate_cmds) and not _reachable(r, content):
         unreferenced.append({"file": r})
 
 # ── 5. untested production surfaces (risk coverage) ───────────────────────
@@ -175,14 +256,19 @@ tracked = [l for l in git("ls-files").splitlines()
            and "/node_modules/" not in l]
 # test file contents also reference scripts directly — count those too
 ref_blob = " ".join(referenced_src)
-for f in bats:
+for f in all_tests:
     try: ref_blob += open(f, errors="ignore").read()
     except Exception: pass
 churn_raw = git("log","--since=90 days ago","--name-only","--pretty=format:")
 churn = collections.Counter(l for l in churn_raw.splitlines() if l.strip())
 for src in tracked:
     base = os.path.basename(src)
-    if base and base not in ref_blob and src not in ref_blob:
+    # a Python test references wan/api/scan.py as `wan.api.scan` — the dotted
+    # module form, which the basename check can never see
+    module = re.sub(r"\.(py|ts|tsx|js|sh)$", "", src).replace("/", ".")
+    mod_tail = ".".join(module.split(".")[-3:])
+    if base and base not in ref_blob and src not in ref_blob \
+       and module not in ref_blob and mod_tail not in ref_blob:
         untested.append({"file": src, "changes_90d": churn.get(src, 0)})
 untested.sort(key=lambda x: -x["changes_90d"])
 
@@ -217,6 +303,166 @@ try:
 except Exception:
     pass
 
+# ── 8. case counts — how many TESTS, not just suites ──────────────────────
+# The owner's first question was "kolik testů máme" and every answer so far
+# counted SUITES. Cases are countable mechanically for bats; where they are
+# not countable (a gate wrapping an opaque command), the report says
+# "uncounted" instead of pretending the suite count is the test count.
+case_counts = []
+total_cases = 0
+cases_by_runner = {"bats": 0, "py": 0, "ts": 0}
+def _count_cases(f):
+    if f in bats:
+        return "bats", len(re.findall(r"@test ", open(f, errors="ignore").read()))
+    if f in py_tests:
+        # pytest collects test functions AND test methods; parametrize multiplies
+        # at runtime, so this is a static lower bound — the report says so.
+        return "py", len(re.findall(r"^\s*(?:async\s+)?def\s+test_",
+                                    open(f, errors="ignore").read(), re.M))
+    return "ts", len(re.findall(r"\b(?:it|test)(?:\.each\([^)]*\))?\s*\(",
+                                open(f, errors="ignore").read()))
+for f in all_tests:
+    try: runner, n = _count_cases(f)
+    except Exception: continue
+    total_cases += n
+    cases_by_runner[runner] += n
+    case_counts.append({"file": rel(f), "runner": runner, "cases": n})
+case_counts.sort(key=lambda x: -x["cases"])
+
+# ── 9. naming conventions ─────────────────────────────────────────────────
+# "aktuálně totál bordel bez konvence" — measurable: what prefixes dominate,
+# and which files follow no recognisable pattern. The proposal writes itself:
+# the dominant pattern IS the convention candidate, outliers are the renames.
+def name_tokens(f):
+    b = os.path.basename(f)
+    b = re.sub(r"\.bats$", "", b)
+    b = re.sub(r"^test[-_]?", "", b)
+    return b.split("-")[0] if "-" in b else (b.split("_")[0] if "_" in b else b)
+prefix_freq = collections.Counter(name_tokens(f) for f in bats)
+dominant = [p for p, n in prefix_freq.most_common(8) if n >= 3]
+outliers = [rel(f) for f in bats if name_tokens(f) not in dominant]
+naming = {"dominant_prefixes": [{"prefix": p, "files": prefix_freq[p]} for p in dominant],
+          "outliers": outliers[:30], "outlier_count": len(outliers)}
+
+# ── 10. measured-claims cross-check ───────────────────────────────────────
+# An analyst wrote cost.kind="measured" with numbers invented BEFORE the
+# measurements ran — twice, in two different projects, and an independent
+# review showed the audit undercounted its own finding (5 of 5 wrong, reported
+# as 4 of 10). The adversarial wave caught it by diligence; this makes it
+# arithmetic: every "measured" claim is compared against the actual receipt.
+fabricated = []
+if INV and os.path.exists(INV):
+    adir = os.path.dirname(INV)
+    real = {}
+    try:
+        with open(os.path.join(adir, "measurements.jsonl")) as f:
+            for l in f:
+                m = json.loads(l)
+                if m.get("duration_ms"): real[m.get("run_unit_id")] = m["duration_ms"]
+    except Exception:
+        pass
+    for af in glob.glob(os.path.join(adir, "agents", "*.json")):
+        for d in (jload_ := (lambda p: (json.load(open(p)) if os.path.exists(p) else {})))(af).get("dispositions") or []:
+            c = d.get("cost") or {}
+            if c.get("kind") == "measured" and c.get("duration_ms") is not None:
+                uid = d.get("run_unit_id")
+                actual = real.get(uid)
+                claimed = c["duration_ms"]
+                if actual is None:
+                    fabricated.append({"run_unit_id": uid, "claimed_ms": claimed,
+                                       "actual_ms": None, "problem": "claimed measured, no measurement exists"})
+                elif abs(actual - claimed) > max(2000, actual * 0.1):
+                    fabricated.append({"run_unit_id": uid, "claimed_ms": claimed,
+                                       "actual_ms": actual, "problem": "claimed measured, receipt disagrees"})
+
+# ── 10b. gate overview — what each suite is FOR ───────────────────────────
+# The owner's standing question nobody answered: "k čemu ty sady vlastně jsou
+# a proč je máme?" Mechanically derivable: which files a gate runs, what topics
+# those files cover, which profiles include it, and — where the name is an EPIC
+# codename (p070, p077...) — a purpose-based name proposal. Codenames tell a
+# reader nothing a week after the EPIC merges.
+_case_by_file = {c["file"]: c["cases"] for c in case_counts}
+_profiles = {}
+try:
+    for pn, pv in ((_ey.get("gate_profiles") or {}).items()):
+        for gname in ((pv or {}).get("include") or []):
+            _profiles.setdefault(str(gname), []).append(pn)
+except Exception:
+    pass
+_generic = {"test", "tests", "integration", "unit", "e2e", "py", "ts", "check", "gate"}
+gate_overview = []
+try:
+    for gname, gv in ((_ey.get("gates") or {}).items()):
+        cmd = str((gv or {}).get("command") or "")
+        text = cmd
+        for sh in re.findall(r"[\w./-]+\.sh\b", cmd):
+            try: text += "\n" + "\n".join(
+                l for l in open(os.path.join(ROOT, sh.lstrip("./")), errors="ignore").read().splitlines()
+                if _runner_line.search(l))
+            except Exception: pass
+        gfiles = sorted({t for t in re.findall(r"[\w./-]+\.(?:py|bats|ts|tsx)\b", text)
+                         if t in _case_by_file})
+        # a path-only WHOLE argument (pytest tests/unit/) runs a directory;
+        # substrings of explicit file paths must never expand to their parent
+        for arg in re.findall(r"\S+", text):
+            arg = arg.rstrip("/")
+            if "/" not in arg or re.search(r"\.(py|bats|ts|tsx|sh)$", arg): continue
+            if os.path.isdir(os.path.join(ROOT, arg)):
+                gfiles += [f for f in _case_by_file if f.startswith(arg + "/") and f not in gfiles]
+        # a bare js/ts runner collects every matching file; a marker-filtered
+        # pytest gate runs exactly the files carrying the marker
+        if not gfiles and re.search(r"\b(vitest|jest)\b|npm\s+(run\s+)?test\b|npx\s+vitest", text):
+            gfiles = [rel(f) for f in ts_tests if "/e2e/" not in rel(f)]
+        for mk in re.findall(r"-m\s+([\w]+)", text):
+            for f in py_tests:
+                r2 = rel(f)
+                if r2 in gfiles: continue
+                try: c2 = open(f, errors="ignore").read()
+                except Exception: continue
+                if f"pytest.mark.{mk}" in c2 or ("pytestmark" in c2 and mk in c2):
+                    gfiles.append(r2)
+        cases = sum(_case_by_file.get(f, 0) for f in gfiles)
+        toks = collections.Counter()
+        for f in gfiles:
+            b = re.sub(r"\.(py|bats|ts|tsx)$", "", os.path.basename(f))
+            b = re.sub(r"^test[-_]?|[-_]?test$", "", b)
+            for t in re.split(r"[-_.]", b):
+                if len(t) > 2 and t not in _generic: toks[t] += 1
+        topics = [t for t, _ in toks.most_common(4)]
+        codename = bool(re.match(r"^p\d+", gname))
+        suggested = ""
+        if codename and topics:
+            suggested = "_".join(topics[:2])
+        gate_overview.append({
+            "gate": gname, "files": len(gfiles), "cases": cases,
+            "topics": topics, "profiles": sorted(_profiles.get(gname, [])),
+            "required": bool((gv or {}).get("required")),
+            "codename": codename, "suggested_name": suggested,
+            "noop": cmd.strip().startswith("true")})
+except Exception:
+    pass
+
+# ── 11. does CI run any tests at all? ─────────────────────────────────────
+# A verification agent found the project's single most serious hole in a place
+# this audit never looked: the CI workflow's test step was commented out, so a
+# merge to main verified NOTHING. Commented lines do not count as coverage.
+_runner_re = re.compile(r"\b(pytest|vitest|jest|bats|playwright\s+test|go\s+test|cargo\s+test)\b|npm\s+(run\s+)?test\b|npx\s+vitest")
+ci_files = sorted(glob.glob(f"{ROOT}/.github/workflows/*.yml")
+                  + glob.glob(f"{ROOT}/.github/workflows/*.yaml")
+                  + glob.glob(f"{ROOT}/.gitlab-ci.yml"))
+ci_evidence, ci_commented = [], []
+for cf in ci_files:
+    try: lines = open(cf, errors="ignore").read().splitlines()
+    except Exception: continue
+    for i, ln in enumerate(lines, 1):
+        if not _runner_re.search(ln): continue
+        rec = f"{rel(cf)}:{i}: {ln.strip()[:120]}"
+        (ci_commented if ln.lstrip().startswith("#") else ci_evidence).append(rec)
+ci = {"workflows": len(ci_files),
+      "runs_tests": bool(ci_evidence),
+      "evidence": ci_evidence[:10],
+      "commented_out": ci_commented[:10]}
+
 doc = {
     "schema_version": "aid-test-content-scan-v1",
     "checks": {
@@ -227,6 +473,17 @@ doc = {
         "untested_surfaces": untested[:50],
         "test_freshness": {"stale_180d": len(stale), "files": stale[:20]},
         "gate_stability": gate_stability,
+        "case_counts": {"total_countable": total_cases,
+                        "files_counted": len(case_counts),
+                        "by_runner": cases_by_runner,
+                        "top": case_counts[:15],
+                        "files": case_counts},
+        "naming": naming,
+        "fabricated_measured": fabricated,
+        "ci": ci,
+        "gate_overview": gate_overview,
+        "scope": {"bats_files": len(bats), "py_test_files": len(py_tests),
+                  "ts_test_files": len(ts_tests)},
     },
     "counts": {
         "bats_files_scanned": len(bats),
@@ -237,6 +494,10 @@ doc = {
         "untested_surfaces": len(untested),
         "stale_tests_180d": len(stale),
         "gates_with_history": len(gate_stability),
+        "total_cases_countable": total_cases,
+        "naming_outliers": len(outliers),
+        "fabricated_measured": len(fabricated),
+        "test_files_all_runners": len(all_tests),
     },
 }
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)

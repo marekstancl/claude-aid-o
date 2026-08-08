@@ -304,3 +304,13 @@ gate_profiles:
       - bats_all
       - targeted_tests
       - docs_updated
+
+# P069 scheduler rollout (PM approval 2026-08-08, delegated in chat: "co se
+# aidu týká udělej vše ty"): catalog TAUD-20260806-0440 approved (181 units,
+# 54 parallel-safe with resource_map_plus_pilot evidence). observe_parallel
+# stays gated by aid-scheduler-rollout-gate.sh — it activates only with 3
+# qualifying divergence artifacts at the current commit, else fails closed
+# to sequential.
+test_audit:
+  scheduler:
+    mode: observe_parallel
