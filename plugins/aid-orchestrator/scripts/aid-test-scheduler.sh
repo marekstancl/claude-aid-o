@@ -203,11 +203,19 @@ cmd_dispatch() {
   local catalog_path="${project_root}/.aid-o/config/test-catalog.yaml"
   [[ -f "$catalog_path" ]] || _die 3 "dispatch: no approved catalog at $catalog_path"
   local catalog_json; catalog_json="$(yq -o=json '.' "$catalog_path")"
+  # A real approved catalog (181 units, >1 MB as JSON) exceeds Linux's
+  # 128 KB per-argument limit — `--argjson cat "$catalog_json"` dies with
+  # "Argument list too long" the moment the catalog is real. Same class as
+  # the resource-map and consolidator overflows before it: pass big JSON
+  # via a file and --slurpfile, never argv.
+  local catalog_tmp; catalog_tmp="$(mktemp)"
+  printf '%s' "$catalog_json" > "$catalog_tmp"
 
   # Stale membership_binding rejection — identical treatment to a missing stamp.
   local stale stale_count
-  stale="$(jq -c --argjson cat "$catalog_json" '
-    ($cat.run_units | map({(.run_unit_id): .runtime.fingerprint}) | add // {}) as $fp
+  stale="$(jq -c --slurpfile catsf "$catalog_tmp" '
+    $catsf[0] as $cat
+    | ($cat.run_units | map({(.run_unit_id): .runtime.fingerprint}) | add // {}) as $fp
     | [.[] | select((.membership_binding.catalog_fingerprint // null) != ($fp[.unit_id] // null))]
   ' <<<"$units_json")"
   stale_count="$(jq 'length' <<<"$stale")"
@@ -242,15 +250,17 @@ cmd_dispatch() {
   [[ -n "$eff_map_json" ]] || eff_map_json='{}'
 
   local units_status_json
-  units_status_json="$(jq -c --argjson cat "$catalog_json" --argjson eff "$eff_map_json" --argjson lm "$locks_map_json" '
-    ($cat.run_units | map({(.run_unit_id): .}) | add) as $by_id
+  units_status_json="$(jq -c --slurpfile catsf "$catalog_tmp" --argjson eff "$eff_map_json" --argjson lm "$locks_map_json" '
+    $catsf[0] as $cat
+    | ($cat.run_units | map({(.run_unit_id): .}) | add) as $by_id
     | [ .[] | .unit_id as $uid
         | ($by_id[$uid]) as $ru
         | (if $ru == null then error("dispatch: unit_id not found in catalog: " + $uid) else $ru end) as $ru
         | { unit_id: $uid, effective_status: ($eff[$uid] // "unknown"),
             resolved_locks: [ ($ru.parallel.exclusive_resources // [])[] | ($lm[.] // .) ] }
       ] | sort_by(.unit_id)
-  ' <<<"$units_json")" || exit 1
+  ' <<<"$units_json")" || { rm -f "$catalog_tmp"; exit 1; }
+  rm -f "$catalog_tmp"
 
   local batches_json
   batches_json="$(_sched_plan_batches "$mode" "$units_status_json" "$max_workers")"

@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.79.3] — 2026-08-08
+
+### Fixed
+- **Scheduler Dispatch Dies On a Real Catalog** — `aid-test-scheduler.sh` passed the whole approved catalog (181 units, >1 MB as JSON) to jq via `--argjson`, exceeding Linux's 128 KB per-argument limit the moment the catalog was real — the observe_parallel divergence campaign could therefore never dispatch; the catalog now travels via a temp file and `--slurpfile`, the same fix this class of overflow already required in the resource map, the consolidator and the write-plan bridge.
+
 ## [2.79.2] — 2026-08-08
 
 ### Fixed
