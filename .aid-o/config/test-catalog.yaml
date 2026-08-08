@@ -13819,12 +13819,12 @@ run_units:
         filter_expression: direct invocation as script works
     provenance:
       - bats
-  - run_unit_id: npm:test
+  - run_unit_id: npm:test:contract
     runner: package-script
     source_paths:
-      - package.json
+      - packages/aid-contract/package.json
     production_surfaces:
-      - package.json
+      - packages/aid-contract/package.json
     test_level: suite
     risk_tags: []
     profiles:
@@ -13833,9 +13833,73 @@ run_units:
     confidence: low
     command:
       type: shell
-      shell: npm run build -w @aid/contract && npm run test --workspaces --if-present
+      shell: npm run build -w @aid/contract && npm run test -w @aid/contract
     runtime:
-      fingerprint: sha256:c8359b56a31a
+      fingerprint: sha256:f3cad636dda9
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases: []
+    provenance:
+      - package-script
+  - run_unit_id: npm:test:server
+    runner: package-script
+    source_paths:
+      - packages/aid-server/package.json
+    production_surfaces:
+      - packages/aid-server/package.json
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      type: shell
+      shell: npm run test -w @aid/server
+    runtime:
+      fingerprint: sha256:8592b9563274
+    parallel:
+      status: unknown
+      exclusive_resources: []
+      max_workers: null
+      internal_parallelism: false
+    isolation:
+      temp_workspace: unknown
+      fixed_ports: []
+      shared_paths: []
+      lock_usage: []
+      adapter_confidence: static_parse
+    recommendation: keep
+    test_cases: []
+    provenance:
+      - package-script
+  - run_unit_id: npm:test:gui
+    runner: package-script
+    source_paths:
+      - packages/aid-gui/package.json
+    production_surfaces:
+      - packages/aid-gui/package.json
+    test_level: suite
+    risk_tags: []
+    profiles:
+      - default
+    behavior_claims: []
+    confidence: low
+    command:
+      type: shell
+      shell: npm run build -w @aid/contract && npm run test -w @aid/gui
+    runtime:
+      fingerprint: sha256:b340aa040168
     parallel:
       status: unknown
       exclusive_resources: []

@@ -85,6 +85,41 @@ EOF
   [ "$(jq -r '[.resources[] | select(.kind == "lock" and .namespace == "shared")] | length' <<<"$doc")" -ge 1 ]
 }
 
+@test "P075 Step 5: a quoted-string flock reference WRITTEN as fixture data is not a live lock finding" {
+  # The real false positive: a test authors bats/shell source as a quoted
+  # string argument to a fixture-writing helper (this repo's own
+  # test-aid-catalog-parallel-authority.bats:114-121 does exactly this via its
+  # _file helper). The literal text "flock /var/lock/x.lock" here is DATA
+  # being printf'd into another file — this .bats file itself never invokes
+  # flock — so it must not be reported as a live shared-lock resource.
+  cat > "$PROJ/tests/c.bats" <<EOF
+_write_fixture() { printf '%s' "\$2" > "\$1"; }
+${AT} "a unit whose source gained a lock falls out of the pool" {
+  _write_fixture "\$BATS_TEST_TMPDIR/gen.bats" "${AT} \"a\" { flock /var/lock/x.lock true; }"
+  [ -f "\$BATS_TEST_TMPDIR/gen.bats" ]
+}
+EOF
+  _catalog "bats:tests/c" "tests/c.bats"
+  local doc; doc="$(_map "bats:tests/c")"
+  [ "$(jq -r '[.resources[] | select(.kind == "lock")] | length' <<<"$doc")" = "0" ]
+}
+
+@test "P075 Step 5: a REAL flock call is still reported even in a file that ALSO writes fixture strings" {
+  # The other direction of the same fix: suppressing the string-literal case
+  # must not suppress a genuine, executed flock call elsewhere in the same
+  # file.
+  cat > "$PROJ/tests/d.bats" <<EOF
+_write_fixture() { printf '%s' "\$2" > "\$1"; }
+${AT} "writes a fixture string AND takes a real lock" {
+  _write_fixture "\$BATS_TEST_TMPDIR/gen.bats" "not code, just flock text"
+  flock /var/lock/real.lock echo hi
+}
+EOF
+  _catalog "bats:tests/d" "tests/d.bats"
+  local doc; doc="$(_map "bats:tests/d")"
+  [ "$(jq -r '[.resources[] | select(.kind == "lock" and .namespace == "shared")] | length' <<<"$doc")" -ge 1 ]
+}
+
 @test "isolation living in a SOURCED helper is followed, credited and cited" {
   # The plan's central case. The mktemp is in another file, reached by `load`,
   # and called from setup() — so it is per-test, and the entry names the helper

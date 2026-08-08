@@ -226,9 +226,16 @@ aid_test_audit_write_plan_bridge_check() {
   catalog_tmp="$(mktemp)"
   printf '%s' "$catalog_json" > "$catalog_tmp"
   local stale_id
+  # "audit:<id>" is the id of the audit RUN itself — the scope of findings
+  # about the whole audit (fabricated measured costs, missing repeat-run
+  # evidence). The catalog will never — correctly — contain an audit: entry,
+  # so requiring it to resolve there blocked EVERY audit that produced at
+  # least one audit-level finding. Audit-scoped ids are exempt from catalog
+  # resolution; gate/suite ids stay strictly checked.
   stale_id="$(jq -r --slurpfile catalog "$catalog_tmp" '
     (($catalog[0].run_units // []) | map(.run_unit_id)) as $live |
-    [.items[] | select(.run_unit_id as $r | $live | index($r) == null) | .run_unit_id] | .[0] // empty
+    [.items[] | select(.run_unit_id as $r |
+       ($r | startswith("audit:") | not) and ($live | index($r) == null)) | .run_unit_id] | .[0] // empty
   ' <<<"$brief_doc")" || { rm -f "$catalog_tmp"; jq -nc '{ready:false, reason:"internal error: stale run_unit_id check failed to evaluate"}'; return 0; }
   rm -f "$catalog_tmp"
   if [[ -n "$stale_id" ]]; then

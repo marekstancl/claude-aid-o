@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.79.1] — 2026-08-08
+
+### Fixed
+- **Audit-Scoped Findings No Longer Block the Write-Plan Handoff** — the bridge required every cited run_unit_id to resolve in the current catalog, but findings about the audit run itself (`audit:<id>` — fabricated measured costs, missing repeat-run evidence) can never — correctly — appear in a catalog of test suites, so ANY audit with at least one audit-level finding was permanently blocked; audit-scoped ids are now exempt from catalog resolution while gate/suite ids stay strictly checked (found live by the WAN consumer, regression-tested).
+
 ## [2.79.0] — 2026-08-08
 
 > "K čemu ty sady vlastně jsou a proč je máme?" had no answer in any artifact.

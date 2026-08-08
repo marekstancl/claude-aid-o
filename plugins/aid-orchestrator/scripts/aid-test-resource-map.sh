@@ -619,6 +619,36 @@ _setup_cwd_for_file() {
   printf '%s' "${v:-none}"
 }
 
+# _in_dquote_string_literal <line> <matched_text>
+#   True if <matched_text>'s first verbatim occurrence in <line> falls inside
+#   an open (unescaped) double-quoted string on that line — i.e. this test's
+#   own SOURCE is writing <matched_text> as fixture DATA (e.g. `_file a
+#   "... flock /var/lock/x.lock ..."` — the bats fixture-content helper this
+#   repo's test suite uses to author bats/shell source as a string), not
+#   invoking it as CODE this .bats/.sh file itself executes. This is a
+#   single-pass unescaped-quote count before the match's start position, not a
+#   real shell parser — it does not track heredoc bodies or single-quoted
+#   strings, only the double-quoted-argument pattern this repo's fixture
+#   helpers actually use (P075 Step 5; the P066/TAUD-20260805 false-positive
+#   class this closes). On any ambiguity (needle not found verbatim, e.g. it
+#   was reconstructed from a regex across a line this function isn't given)
+#   the default is "not a string literal" — false — so an unmatched case
+#   still gets the OLD, safer-by-over-reporting behavior instead of a new
+#   false negative.
+_in_dquote_string_literal() {
+  local line="$1" needle="$2" prefix
+  [[ -n "$needle" ]] || return 1
+  prefix="${line%%"$needle"*}"
+  [[ "$prefix" != "$line" ]] || return 1
+  local i ch prev="" count=0
+  for (( i = 0; i < ${#prefix}; i++ )); do
+    ch="${prefix:$i:1}"
+    [[ "$ch" == '"' && "$prev" != '\' ]] && count=$((count + 1))
+    prev="$ch"
+  done
+  (( count % 2 == 1 ))
+}
+
 # ─── Pass 3: emit ───────────────────────────────────────────────────────────
 current_via=""
 _emit() {
@@ -713,7 +743,12 @@ _scan_for_resources() {
       [[ "$code" == *mktemp* ]] && _emit "temp_path" "$scope" "mktemp" "$rel" "$lineno"
 
       # ── git ────────────────────────────────────────────────────────────
-      if [[ "$code" =~ (^|[^[:alnum:]_])git[[:space:]] || "$code" == *GIT_DIR=* || "$code" == *GIT_WORK_TREE=* ]]; then
+      local _git_trigger=""
+      if [[ "$code" =~ (^|[^[:alnum:]_])git[[:space:]] ]]; then _git_trigger="${BASH_REMATCH[0]}"
+      elif [[ "$code" == *GIT_DIR=* ]]; then _git_trigger="GIT_DIR="
+      elif [[ "$code" == *GIT_WORK_TREE=* ]]; then _git_trigger="GIT_WORK_TREE="
+      fi
+      if [[ -n "$_git_trigger" ]] && ! _in_dquote_string_literal "$code" "$_git_trigger"; then
         # An explicit repository selector decides regardless of the working
         # directory: `git -C <real repo>` inside a temp-rooted test mutates the
         # real repository, and was being reported as private.
@@ -752,7 +787,8 @@ _scan_for_resources() {
       # ── locks ──────────────────────────────────────────────────────────
       # What is invoked, not what is mentioned. A test NAMED "...lock..." is
       # not a lock user; `flock` is. That is the literal P066 false positive.
-      if [[ "$code" =~ (localhost|127\.0\.0\.1):([0-9]{2,5}) ]]; then
+      if [[ "$code" =~ (localhost|127\.0\.0\.1):([0-9]{2,5}) ]] \
+         && ! _in_dquote_string_literal "$code" "${BASH_REMATCH[0]}"; then
         _emit "port" "shared" "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}" "$rel" "$lineno"
       fi
 
@@ -778,9 +814,11 @@ _scan_for_resources() {
         # WHICH lock, not merely "a lock". Two different locks are two
         # different sharing propositions, and a detail of just "flock" made
         # them indistinguishable to anything comparing resources.
-        if [[ "$_seg" =~ (^|[^[:alnum:]_])flock[[:space:]]+(-[^[:space:]]+[[:space:]]+)*([^[:space:]]+) ]]; then
+        if [[ "$_seg" =~ (^|[^[:alnum:]_])flock[[:space:]]+(-[^[:space:]]+[[:space:]]+)*([^[:space:]]+) ]] \
+           && ! _in_dquote_string_literal "$_seg" "${BASH_REMATCH[0]}"; then
           _emit "lock" "shared" "flock ${BASH_REMATCH[3]}" "$rel" "$lineno"
-        elif [[ "$_seg" =~ (^|[^[:alnum:]_])flock([[:space:]]|$) ]]; then
+        elif [[ "$_seg" =~ (^|[^[:alnum:]_])flock([[:space:]]|$) ]] \
+             && ! _in_dquote_string_literal "$_seg" "${BASH_REMATCH[0]}"; then
           _emit "lock" "shared" "flock (target not statically resolvable)" "$rel" "$lineno"
         fi
 

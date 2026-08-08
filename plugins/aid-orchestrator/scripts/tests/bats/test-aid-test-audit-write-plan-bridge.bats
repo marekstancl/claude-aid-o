@@ -131,6 +131,24 @@ _write_valid_findings_and_brief() {
   [[ "$output" == *"stale run_unit_id"* ]]
 }
 
+@test "an audit-scoped run_unit_id (audit:<id>) is exempt from catalog resolution and does NOT block the handoff" {
+  local findings_path="${OUTPUT_DIR}/consolidated-findings.json"
+  jq -n '{schema_version:"1.0.0", audit_id:"a1", generated_at:"2026-07-30T00:00:00Z", findings:[
+    {finding_id:"f1", run_unit_id:"audit:a1", category:"cost", severity:"high", evidence_refs:["r1"], recommendation:"fix", confidence:"medium", falsification_check:"x"}
+  ]}' > "$findings_path"
+  local hash
+  hash="sha256:$(sha256sum "$findings_path" | cut -d' ' -f1)"
+  jq -n --arg hash "$hash" '{audit_id:"a1", verdict:"remediation recommended", items:[
+    {finding_id:"f1", run_unit_id:"audit:a1", category:"cost", proposed_action:"fix", evidence_refs:["r1"], owner:"unassigned"}
+  ], generated_from_hash:$hash}' > "${OUTPUT_DIR}/implementation-plan-brief.json"
+  echo "# brief" > "${OUTPUT_DIR}/implementation-plan-brief.md"
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG" full
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.ready == true' >/dev/null
+}
+
 @test "a stale run_unit_id result is verified (via a mock controller harness) to block any downstream /aid-plan write invocation" {
   local findings_path="${OUTPUT_DIR}/consolidated-findings.json"
   jq -n '{schema_version:"1.0.0", audit_id:"a1", generated_at:"2026-07-30T00:00:00Z", findings:[

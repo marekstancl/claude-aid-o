@@ -112,13 +112,24 @@ else
   exit 1
 fi
 
-# 1c. real aid-run-gates.sh must NOT advertise --state-file (drift detection)
+# 1c. real aid-run-gates.sh must advertise --state-file with the CURRENT
+#     invocation shape (drift detection, inverted P075 Step 6). This check
+#     used to assert the OPPOSITE — that --state-file did NOT exist, per the
+#     historical P035 C1 case documented in plan-writing.md #17e. That drift
+#     already happened (aid-run-gates.sh gained --state-file as a real,
+#     intentional flag) and the old assertion had permanently taken its SKIP
+#     branch ever since, asserting nothing. The baseline is now "HAS
+#     --state-file" — assert against THAT, so a future drift (the flag
+#     disappearing, or its usage-header shape changing) fails loudly instead
+#     of silently SKIPping a second time.
 GATES_SCRIPT="$PLUGIN_DIR/scripts/aid-run-gates.sh"
 if [[ -f "$GATES_SCRIPT" ]]; then
-  if head -100 "$GATES_SCRIPT" | grep -q -- "--state-file"; then
-    echo "  SKIP: aid-run-gates.sh now exposes --state-file (interface changed); 17e baseline shifted"
+  GATES_USAGE="$(head -20 "$GATES_SCRIPT")"
+  if grep -q -- "--state-file" <<<"$GATES_USAGE"; then
+    echo "  ✓ aid-run-gates.sh advertises --state-file (current baseline, matches plan-writing.md #17e's documented CURRENT interface)"
   else
-    echo "  ✓ aid-run-gates.sh does NOT advertise --state-file → would flag REVISE_REQUIRED"
+    echo "FAIL: aid-run-gates.sh no longer advertises --state-file in its usage header — the interface drifted again; update this check's baseline AND plan-writing.md #17e's example to match the new reality (do not silently SKIP a second time)"
+    exit 1
   fi
 else
   echo "  SKIP: aid-run-gates.sh not present (older checkout?)"
