@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.79.1] — 2026-08-08
 
+### Changed
+- **P075 Remediation Rode Along (attribution)** — the P075 test-audit remediation steps implemented in this worktree (inventory bats_boundary reconciliation, resource-map string-literal guard, catalog npm:test build dependency + per-workspace split, CI jsonschema installs, live --state-file check) were swept into the v2.79.0 and v2.79.1 release commits by their `git add -A`; all 50 affected suite tests verified green post-push. Recorded here so the CHANGELOG matches what actually shipped.
+
 ### Fixed
 - **Audit-Scoped Findings No Longer Block the Write-Plan Handoff** — the bridge required every cited run_unit_id to resolve in the current catalog, but findings about the audit run itself (`audit:<id>` — fabricated measured costs, missing repeat-run evidence) can never — correctly — appear in a catalog of test suites, so ANY audit with at least one audit-level finding was permanently blocked; audit-scoped ids are now exempt from catalog resolution while gate/suite ids stay strictly checked (found live by the WAN consumer, regression-tested).
 
