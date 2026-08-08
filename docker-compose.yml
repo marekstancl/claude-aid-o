@@ -18,17 +18,19 @@ services:
     ports:
       - "${AID_PORT:-3911}:3911"
     volumes:
-      # Mount the project directory so the server can read .aid-o/
-      - .:/project:ro
-      # Mount .aid-o/ read-write for ideas, decisions, schedule writes
-      - ./.aid-o:/project/.aid-o
+      # Cross-project discovery root — every project with an .aid-o/ workspace.
+      # Read-write: the cockpit writes ideas, decisions and schedule into .aid-o/
+      - ${AID_HOST_ROOT:-/opt/eco/projects}:/projects
       # Mount Claude credentials for AI Companion (AI SDK + CLI fallback)
       # Read-write needed: Agent SDK writes debug logs to ~/.claude/debug/
       - ${HOME}/.claude:/root/.claude
     environment:
       - AID_PORT=3911
       - AID_HOST=0.0.0.0
-      - AID_PROJECT_ROOT=/project
+      # Container-side discovery root + its host equivalent, so emitted links
+      # and evidence paths translate back to real host paths
+      - AID_PROJECTS_ROOT=/projects
+      - AID_HOST_ROOT=${AID_HOST_ROOT:-/opt/eco/projects}
       - AID_CORS_ORIGINS=*
       # Whisper přes LiteLLM proxy (D-082) — dedikovaný virtual key, ne přímo OpenAI
       - LITELLM_API_KEY=${AID_LITELLM_KEY:-}
