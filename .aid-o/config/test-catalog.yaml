@@ -1,6 +1,6 @@
 schema_version: 1.0.0
 generated_at: "2026-08-06T02:40:50Z"
-status: approved
+status: proposed
 run_units:
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-cli
     runner: bats
@@ -13819,12 +13819,12 @@ run_units:
         filter_expression: direct invocation as script works
     provenance:
       - bats
-  - run_unit_id: npm:test:contract
+  - run_unit_id: npm:test
     runner: package-script
     source_paths:
-      - packages/aid-contract/package.json
+      - package.json
     production_surfaces:
-      - packages/aid-contract/package.json
+      - package.json
     test_level: suite
     risk_tags: []
     profiles:
@@ -13832,74 +13832,13 @@ run_units:
     behavior_claims: []
     confidence: low
     command:
-      type: shell
-      shell: npm run build -w @aid/contract && npm run test -w @aid/contract
+      type: argv
+      argv:
+        - npm
+        - run
+        - test
     runtime:
-      fingerprint: sha256:f3cad636dda9
-    parallel:
-      status: unknown
-      exclusive_resources: []
-      max_workers: null
-      internal_parallelism: false
-    isolation:
-      temp_workspace: unknown
-      fixed_ports: []
-      shared_paths: []
-      lock_usage: []
-      adapter_confidence: static_parse
-    recommendation: keep
-    test_cases: []
-    provenance:
-      - package-script
-  - run_unit_id: npm:test:server
-    runner: package-script
-    source_paths:
-      - packages/aid-server/package.json
-    production_surfaces:
-      - packages/aid-server/package.json
-    test_level: suite
-    risk_tags: []
-    profiles:
-      - default
-    behavior_claims: []
-    confidence: low
-    command:
-      type: shell
-      shell: npm run test -w @aid/server
-    runtime:
-      fingerprint: sha256:8592b9563274
-    parallel:
-      status: unknown
-      exclusive_resources: []
-      max_workers: null
-      internal_parallelism: false
-    isolation:
-      temp_workspace: unknown
-      fixed_ports: []
-      shared_paths: []
-      lock_usage: []
-      adapter_confidence: static_parse
-    recommendation: keep
-    test_cases: []
-    provenance:
-      - package-script
-  - run_unit_id: npm:test:gui
-    runner: package-script
-    source_paths:
-      - packages/aid-gui/package.json
-    production_surfaces:
-      - packages/aid-gui/package.json
-    test_level: suite
-    risk_tags: []
-    profiles:
-      - default
-    behavior_claims: []
-    confidence: low
-    command:
-      type: shell
-      shell: npm run build -w @aid/contract && npm run test -w @aid/gui
-    runtime:
-      fingerprint: sha256:b340aa040168
+      fingerprint: sha256:c8359b56a31a
     parallel:
       status: unknown
       exclusive_resources: []
@@ -15543,56 +15482,56 @@ source_pattern_mappings:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates
     classification: production
     precedence: 1
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-diff.sh
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-plan-diff
     classification: production
     precedence: 2
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-release-policy.sh
     target_run_unit_ids:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy
     classification: production
     precedence: 3
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-fsm.sh
     target_run_unit_ids:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm
     classification: production
     precedence: 4
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-prefilter.sh
     target_run_unit_ids:
       - bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter
     classification: production
     precedence: 5
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-evidence-verify.sh
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-evidence-verify
     classification: production
     precedence: 6
-    status: approved
+    status: proposed
   - match_type: prefix
     path_pattern: plugins/aid-orchestrator/defaults/schemas/
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-protocol-validate
     classification: production
     precedence: 7
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/delivery-gate.yaml
     target_run_unit_ids:
       - sh:plugins/aid-orchestrator/scripts/tests/test-delivery-gate
     classification: production
     precedence: 8
-    status: approved
+    status: proposed
   - match_type: prefix
     path_pattern: plugins/aid-orchestrator/lib/ui-fidelity/
     target_run_unit_ids:
@@ -15600,1119 +15539,1116 @@ source_pattern_mappings:
       - sh:plugins/aid-orchestrator/scripts/tests/test-fsm-ui-fidelity
     classification: production
     precedence: 9
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/.gitignore
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/check-severity.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/ci/plan-boundary-required-check.yml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/config/bats-parallel-safe-allowlist.txt
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/config/test-audit.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/enforcement-registry.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/bash.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/go.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/python.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/rust.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/typescript.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/hooks/pre-commit
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/hooks/pre-push
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/integrations.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/orchestration.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/c0-contract.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/permissions.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/plan-boundary-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/plan-final-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/review-profiles.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/policies/semantic-review.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/pre-filter-rules.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/c0-plan-review-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/c3-audit-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/c3-audit-prompt-v2.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-adversarial-review-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-consolidator-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-flake-isolation-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-parallel-safety-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-performance-cost-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/prompts/test-audit-shard-auditor-prompt-v1.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/standards/general.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/standards/vulcan.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/delivery-report.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/design-sections.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/epic-example.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/epic.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/inputs-readme.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/plan.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/plan.schema.json
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/review-profile-template.json
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-bug-fix.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-exploration.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-new-feature.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/run-refactoring.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/step-verify-template.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/ui-change-contract.example.yaml
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/verification-summary-template.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/templates/verifier-output-template.md
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-acceptance-evidence.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-audit-log.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-audit-tests-cli-parse.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-audit-tests-finalize.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-c0-contract.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-check-deps.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-compliance-backfill.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-compliance-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-consumption-proof.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-cp1-gate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-delivery-gate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-diagnostic.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-emit-dispatch.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-epic-summary.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-epic-to-json.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-gate-runtime-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-gate-waiver.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-generation-finalize.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-generation-readiness.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-init-upgrade-test-audit.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-job.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-json-to-run.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-lifecycle.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-lint-skill.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-close-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-fsm.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-lint.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-pm-brief.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-promote-checks.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-protocol-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-quarantine-decision-record.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-queue-add.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-registry-ttl-guard.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-release.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-scheduler-overlay-approve.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-scheduler-rollout-gate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-select-tests.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-self-host-migrate-p071-gates.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-consolidate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-dispatch.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-profile-select.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-profile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-audit-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-apply-evidence.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-approve.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-confirm-mapping.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-migrate-p071-allowlist.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-catalog-selector-snapshot.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-content-scan.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-divergence-campaign.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-execution-ledger.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-inventory.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-isolation-experiment.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-parallel-pilot.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-resource-map.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-schedule-divergence-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/aid-test-scheduler.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/gates/aid-contract-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/gates/scope-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/gates/ui-contract-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-adjudication.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-ancillary.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-audit-independence.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-audit-mode.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-cache-preflight.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-contract-hash.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-delivery-map.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-delivery-profile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-execution-unit-membership.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-finding-fingerprint.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-finding-merge.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-gate-runtime-baseline.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-gitignore-backfill.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-init-execution-yaml.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-invalidation-map.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-lock.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-plan-graph.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-profile-hash.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-render-prompt.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-review-signals.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-run-gates-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-scoping.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-source-plan-graph.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-stage-log.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-bats.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-contract.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-declared-command.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-package-script.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-adapter-shell-suite.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-chat-summary.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-command-allowlist.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-config.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-decision.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-measure.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-state.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-audit-write-plan-bridge.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-catalog-provenance.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-catalog-selector-mappings.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-execution-unit.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-lane-input-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-profile-validate.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-scheduler-report.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-test-timing-bats.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/aid-token-count.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/common.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg01-dependency-consistency.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg02-build.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg03-typecheck.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg04-test.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg05-consumer-compile.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg06-removed-dep.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg07-state-consistency.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg08-runtime-env.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg09-static-coverage.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg10-startup-smoke.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg11-build-config.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg12-authority.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg15-route-resolve.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg17-independent-oracle-nodrop.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/delivery-checks/dg18-acceptance-struct.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/scripts/lib/review-profile-check.sh
     target_run_unit_ids: []
     classification: unknown_production
     precedence: 1000
-    status: approved
+    status: proposed
 mapping_approval:
-  status: approved
-  approved_by: Marek Stancl
-  approved_at: "2026-08-08T05:54:30Z"
-  reviewed_diff_hash: sha256:08ab0f335b9b91b78404bd75429342cc84a00425462c4920adc867600c288cf2
+  status: proposed
