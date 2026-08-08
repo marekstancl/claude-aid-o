@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **Case Counter Counts Every Runner** — test-case counting now covers pytest functions and js/ts `it()`/`test()` cases in addition to bats `@test`, with a per-runner breakdown in the headline stat (WAN: dash → 6603 cases) and a static-lower-bound caveat for parametrized pytest tests.
+- **Gate Names Never Masquerade As Case Counts** — gate unit ids are names, not file paths; the report no longer substring-matches them against test files, which had produced accidental case counts on gate rows.
 - **Group Case Mapping Uses the Full File List** — the report mapped suite case counts from only the top-15 files of the scan; the scan now emits the full per-file list and the report consumes it, so group case columns no longer undercount.
 
 ### Changed
