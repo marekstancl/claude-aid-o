@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.79.2] — 2026-08-08
+
+### Fixed
+- **C4 Plan-Diff Vocabulary Mismatch Blocked Every Real Plan** — the plan-mode C4 release decision required plan-diff's overall_verdict to be present/absent, a vocabulary the producer only uses one level down (per-AC); the real overall vocabulary is pass/fail/partial/skipped, so every genuine plan-diff — verdict "pass" included — was blocked as "not bound to the frozen plan candidate"; the checker now speaks the producer's language (armed AC lens demands pass/fail; partial/skipped stay non-blocking only when no lens is armed, and never report as a pass). Found by finally reading the CI red streak: AC4 of the plan-final boundary suite had been failing since the vocabularies diverged.
+
 ## [2.79.1] — 2026-08-08
 
 ### Changed

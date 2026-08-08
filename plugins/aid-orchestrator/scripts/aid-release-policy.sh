@@ -747,11 +747,19 @@ main() {
       pd_base="$(jq -r '.base_commit // ""' "$pd" 2>/dev/null || true)"
       pd_head="$(jq -r '.head_commit // ""' "$pd" 2>/dev/null || true)"
       pd_verdict="$(jq -r '.overall_verdict // ""' "$pd" 2>/dev/null || true)"
+      # aid-plan-diff.sh's OVERALL vocabulary is pass/fail/partial/skipped
+      # (present/absent are its PER-AC verdicts, one level down). This check
+      # originally required present/absent here — a vocabulary that the
+      # producer never emits at this level — so every real plan-diff, verdict
+      # "pass" included, was blocked as unbound. Caught by AC4 of the boundary
+      # suite once CI's red streak was finally read.
       local pd_verdict_ok=0
       if [[ "$ac_lens_required_rp" == "true" ]]; then
-        [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" ]] && pd_verdict_ok=1
+        # an armed AC lens demands a REAL evaluation: pass or fail,
+        # never a skipped/partial non-answer
+        [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] && pd_verdict_ok=1
       else
-        [[ "$pd_verdict" == "present" || "$pd_verdict" == "absent" || "$pd_verdict" == "skipped" ]] && pd_verdict_ok=1
+        case "$pd_verdict" in pass|fail|partial|skipped) pd_verdict_ok=1 ;; esac
       fi
       if [[ "$pd_base" != "$PLAN_BASE_SHA" || "$pd_head" != "$CANDIDATE_SHA" ]] \
          || [[ "$pd_verdict_ok" -ne 1 ]] \
@@ -759,19 +767,22 @@ main() {
         add_input plan_diff "plan-diff.json" "blocked" "plan-diff is not a complete verdict for this plan base/candidate" false
         add_blocker plan_diff "blocking" "plan-diff is not bound to the frozen plan candidate"
       else
-        # "skipped" is a legitimate, non-blocking classification when no AC
-        # lens is armed — but it is NOT a passed AC check, and recording it as
-        # verdict "pass" is exactly the silent upgrade the contract forbids.
-        # Only a real "present" verdict is reported as a pass; "absent" is
+        # "skipped"/"partial" are legitimate, non-blocking classifications when
+        # no AC lens is armed — but neither is a passed AC check, and recording
+        # one as verdict "pass" is exactly the silent upgrade the contract
+        # forbids. Only a real "pass" verdict is reported as a pass; "fail" is
         # reported as blocked (the blocker below is what actually stops the
         # release, but the row itself must not claim "pass" either).
         local pd_row_verdict="pass"
         case "$pd_verdict" in
-          skipped) pd_row_verdict="not_required_skipped" ;;
-          absent)  pd_row_verdict="blocked" ;;
+          skipped|partial) pd_row_verdict="not_required_skipped" ;;
+          fail)            pd_row_verdict="blocked" ;;
         esac
         add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict} (ac_lens_required=${ac_lens_required_rp})" true
-        [[ "$pd_verdict" == "present" || "$pd_verdict" == "skipped" ]] || add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria"
+        case "$pd_verdict" in
+          pass|skipped|partial) : ;;
+          *) add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
+        esac
       fi
     fi
   fi
