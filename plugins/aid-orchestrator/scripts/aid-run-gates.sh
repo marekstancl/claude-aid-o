@@ -281,6 +281,105 @@ _bg_fail_row() {
       job_state:"none"}'
 }
 
+# ─── P076 Step 4 — the eager continuation pointer ───────────────────────────
+# One artifact per RUN (one path), written BEFORE a background job is spawned
+# and deleted only once the run's LAST outstanding background job has been
+# collected. It exists because a controller that dies mid-EXECUTE cannot write
+# anything on its way out: "a resume is required" must be derivable from what
+# the controller provably LEFT BEHIND. `awaiting_host_resume` is therefore never
+# stored anywhere — consumers derive it from (artifact exists) AND (no liveness
+# signal). These globals are populated once in run_all_gates(); they are read
+# (never written) inside run_background_gate, which runs in a command
+# substitution subshell.
+AID_RESUME_ARTIFACT_BASENAME="auto_resume_required.json"
+_RESUME_ARTIFACT=""
+_RESUME_PLAN_ID=""
+_RESUME_EPIC_ID=""
+_RESUME_RUN_ID=""
+_RESUME_SAFE_NEXT_ACTION=""
+# aid-job.sh's terminal vocabulary, verbatim (see its `_derive_state` / the
+# states its result.json records). Never re-derived, never abbreviated.
+AID_JOB_TERMINAL_STATES='["terminal_pass","terminal_fail","timed_out","cancelled"]'
+
+# _job_head_drifted <recorded_head> <current_head>
+#   THE single revision-drift judgement in this file, shared by the two places
+#   that need it: re-attaching a supervised job, and restoring a checkpointed
+#   gate row. Returns 0 (drifted) only when both heads are known, the recorded
+#   one is a real sha ("none" is the supervisor's own no-git marker), and they
+#   differ. Unknowable → not drifted: a repo with no git is not a moved tree.
+_job_head_drifted() {
+  local rec="$1" cur="$2"
+  [[ -n "$rec" && -n "$cur" && "$rec" != "none" && "$rec" != "$cur" ]]
+}
+
+# _resume_artifact_write <job_id> <gate_name> <fingerprint> <jobs_dir>
+#   Atomic (mktemp + mv) rewrite of the run's ONE continuation pointer.
+#   rc 1 on any failure — the caller must then refuse to leave a background job
+#   running that nothing points at.
+_resume_artifact_write() {
+  local job_id="$1" gate_name="$2" fp="$3" jobs_dir="$4"
+  [[ -n "$_RESUME_ARTIFACT" ]] || return 1
+  # The schema forbids '<' in safe_next_action so an unresolved placeholder can
+  # never persist. Enforce it at the writer too: a pointer that would not
+  # validate is not written, and the gate refuses rather than spawning.
+  [[ "$_RESUME_SAFE_NEXT_ACTION" != *"<"* ]] || return 1
+  [[ -n "$_RESUME_SAFE_NEXT_ACTION" ]] || return 1
+  local dir; dir="$(dirname "$_RESUME_ARTIFACT")"
+  [[ -d "$dir" ]] || return 1
+  local tmp
+  tmp="$(mktemp "${_RESUME_ARTIFACT}.XXXXXX" 2>/dev/null)" || return 1
+  if ! jq -nc \
+        --arg plan "${_RESUME_PLAN_ID:-unknown}" \
+        --arg epic "$_RESUME_EPIC_ID" \
+        --arg run "$_RESUME_RUN_ID" \
+        --arg job "$job_id" \
+        --arg jobs "$jobs_dir" \
+        --arg gate "$gate_name" \
+        --arg fp "$fp" \
+        --argjson terminal "$AID_JOB_TERMINAL_STATES" \
+        --arg next "$_RESUME_SAFE_NEXT_ACTION" \
+        --arg now "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+        '{schema:"aid-auto-resume/1", plan_id:$plan, epic_id:$epic, run_id:$run,
+          job_id:$job, jobs_dir:$jobs, gate:$gate, command_fingerprint:$fp,
+          expected_terminal_states:$terminal, safe_next_action:$next,
+          created_at:$now}' > "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+  fi
+  mv -f "$tmp" "$_RESUME_ARTIFACT" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  return 0
+}
+
+# _resume_map_field <field> <value>
+#   Best-effort pointer maintenance on the active-runs entry. The ARTIFACT is
+#   authoritative; the map is presentation, so a failure here warns and never
+#   fails the gate (the accepted error-handling split for this step).
+_resume_map_field() {
+  local field="$1" value="$2"
+  [[ -n "$_RESUME_EPIC_ID" ]] || return 0
+  [[ -f "${SCRIPT_DIR}/aid-fsm.sh" ]] || return 0
+  if ! bash "${SCRIPT_DIR}/aid-fsm.sh" active-runs set "$_RESUME_EPIC_ID" "$field" "$value" >/dev/null 2>&1; then
+    echo "WARNING: aid-run-gates.sh: could not update active-runs field '${field}' for ${_RESUME_EPIC_ID} — the resume artifact at ${_RESUME_ARTIFACT} remains authoritative" >&2
+  fi
+  return 0
+}
+
+# _resume_jobs_still_live <jobs_dir>
+#   Cheap `aid-job.sh status` sweep over the run's jobs dir. rc 0 iff at least
+#   one supervised job is still started/running — i.e. the continuation pointer
+#   must NOT be deleted yet.
+_resume_jobs_still_live() {
+  local jobs_dir="$1" d id st
+  [[ -d "$jobs_dir" ]] || return 1
+  for d in "$jobs_dir"/*/; do
+    [[ -f "${d}job.json" ]] || continue
+    id="$(basename "$d")"
+    st="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$id" 2>/dev/null || echo unknown)"
+    case "$st" in started|running) return 0 ;; esac
+  done
+  return 1
+}
+
 # run_background_gate <gate_name> <resolved_cmd> <timeout_s> <attempt>
 #                     <jobs_dir> <timeline_file> <repo>
 #   Drop-in replacement for run_gate() on a background gate: emits ONE gate-row
@@ -343,7 +442,7 @@ run_background_gate() {
     cur_head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
     if [[ "$rec_fp" != "$fp" ]]; then
       drift_reason="command_fingerprint_mismatch"
-    elif [[ -n "$cur_head" && -n "$rec_head" && "$rec_head" != "none" && "$rec_head" != "$cur_head" ]]; then
+    elif _job_head_drifted "$rec_head" "$cur_head"; then
       # Same command, but the tree moved since the job started. Re-attaching
       # would answer a question about a revision nobody is asking about any
       # more — the same judgement `collect --require-current` makes.
@@ -374,6 +473,21 @@ run_background_gate() {
     fi
   fi
 
+  # ── P076 Step 4: PRE-SPAWN pointer ───────────────────────────────────────
+  # Written BEFORE aid-job.sh is asked to start anything, carrying job_id
+  # "pending" plus the jobs_dir and the command fingerprint. That closes the
+  # only crash window that could produce a started job nothing points at: a
+  # death between this write and the spawn leaves a pointer that says "a job
+  # with THIS fingerprint was about to be started HERE", which a resume can
+  # resolve by scanning the jobs dir (found → collect; none → nothing ran).
+  # An unwritable evidence directory refuses the gate HERE — before the spawn —
+  # because an unresumable background job must never come into existence.
+  if ! _resume_artifact_write "pending" "$gate_name" "$fp" "$jobs_dir"; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — could not write the continuation pointer at '${_RESUME_ARTIFACT:-<unset>}'; refusing to spawn a background job nothing can resume" >&2
+    _bg_fail_row "$gate_name" "resume_artifact_write_failed" "could not write ${_RESUME_ARTIFACT:-<unset>} — no background job was started" "$job_id"
+    return 1
+  fi
+
   if (( reattach )); then
     local pre_state
     pre_state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo unknown)"
@@ -400,6 +514,30 @@ run_background_gate() {
       job_id="$job_id" attempt="$attempt" deadline_sec="$timeout_s" \
       jobs_dir="$jobs_dir"
   fi
+
+  # ── P076 Step 4: POST-SPAWN rewrite ──────────────────────────────────────
+  # Immediately after the job exists, the same single path is atomically
+  # rewritten with the REAL job id. A crash in the window between the spawn and
+  # this line still leaves the pending pointer, and the fingerprint scan covers
+  # it — so no window produces a job without a pointer, only a pointer that is
+  # one field less precise.
+  #
+  # If THIS write fails the job is already running, so refusing is not enough:
+  # the just-started job is CANCELLED (fail closed WITH cleanup — an
+  # unresumable background job must not keep running). A cancel that also fails
+  # is reported with the exact manual command.
+  if ! _resume_artifact_write "$job_id" "$gate_name" "$fp" "$jobs_dir"; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — could not rewrite the continuation pointer at '${_RESUME_ARTIFACT:-<unset>}' with job id '${job_id}'; cancelling the job rather than leaving it unresumable" >&2
+    local _cancel_rc=0
+    bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || _cancel_rc=$?
+    if (( _cancel_rc != 0 )); then
+      echo "ERROR: aid-run-gates.sh: the compensating cancel ALSO failed (exit ${_cancel_rc}). Cancel it by hand: bash ${job_sh} cancel --jobs-dir ${jobs_dir} --id ${job_id}" >&2
+    fi
+    _bg_fail_row "$gate_name" "resume_artifact_write_failed" "could not record job ${job_id} in ${_RESUME_ARTIFACT:-<unset>}; job cancelled (cancel exit ${_cancel_rc})" "$job_id"
+    return 1
+  fi
+  # Pointer maintenance on the live map entry — warn-only by design.
+  _resume_map_field resume_artifact "$_RESUME_ARTIFACT"
 
   # ── poll to completion, inside THIS invocation ────────────────────────────
   local poll_start=$SECONDS last_heartbeat=$SECONDS state=""
@@ -454,26 +592,59 @@ run_background_gate() {
   # was watching is simply collected.
   bash "$job_sh" collect --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || true
 
+  # ── P076 Step 4: the pointer's only deletion site ─────────────────────────
+  # A SUCCESSFUL collect means the job reached one of the supervisor's terminal
+  # states. The pointer then goes away — but only if no OTHER background job of
+  # this run is still live (checked with the cheap `status` sweep), because one
+  # artifact serves the whole run. A `lost` job is deliberately NOT a successful
+  # collect: the pointer stays so a resume reports the truth about it.
+  case "$state" in
+    terminal_pass|terminal_fail|timed_out|cancelled)
+      if ! _resume_jobs_still_live "$jobs_dir"; then
+        rm -f "$_RESUME_ARTIFACT" 2>/dev/null || true
+        _resume_map_field resume_artifact ""
+        # Only an AUTO run may be re-asserted as `active`: a manual run's
+        # controller is a human, and stamping `active` over `manual` would be
+        # this map claiming an autonomous controller that does not exist.
+        if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then
+          _resume_map_field auto_controller active
+        fi
+      fi
+      ;;
+  esac
+
   local row row_rc=0
   row="$(gate_row_from_job "$gate_name" "$job_dir" "$job_id" "$state")" || row_rc=$?
   printf '%s\n' "$row"
   return "$row_rc"
 }
 
-# _gate_row_checkpoint <rows_dir> <gate_name> <row_json>
+# _gate_row_checkpoint <rows_dir> <gate_name> <row_json> <head>
 #   Durable incremental checkpoint (P076 Step 2). As each gate COMPLETES, its
 #   row is written beside the run's evidence with an atomic tmp+mv. This is
 #   what a rerun after a crash assembles from — and what Step 5's resume writes
 #   into. Never brings the evidence directory into being (the same discipline
 #   the execution ledger follows): a gate run must not dirty a working tree.
+#
+#   P076 Step 4 (CP2 carry-over): the row is BOUND to the revision it was
+#   produced at, in an additive `_checkpoint` envelope. Without that binding a
+#   row file written before a code change would replay, unchallenged, as a PASS
+#   for a gate that never ran against current HEAD. The restore pass below
+#   refuses any row whose binding is missing or whose HEAD has moved, using the
+#   same `_job_head_drifted` judgement the job re-attach path uses.
 _gate_row_checkpoint() {
-  local rows_dir="$1" gate_name="$2" row_json="$3"
+  local rows_dir="$1" gate_name="$2" row_json="$3" head="${4:-}"
   [[ -n "$rows_dir" ]] || return 0
   # The gate name becomes a filename — never let it become a path.
   case "$gate_name" in */*|*..*|"") return 0 ;; esac
   mkdir -p "$rows_dir" 2>/dev/null || return 0
   local dest="${rows_dir}/${gate_name}.json" tmp
   tmp="$(mktemp "${dest}.XXXXXX" 2>/dev/null)" || return 0
+  local bound
+  bound="$(jq -c --arg h "$head" --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+             '. + {_checkpoint: {head: $h, written_at: $t}}' <<<"$row_json" 2>/dev/null)" \
+    || bound=""
+  [[ -n "$bound" ]] && row_json="$bound"
   if printf '%s\n' "$row_json" > "$tmp" 2>/dev/null; then
     mv -f "$tmp" "$dest" 2>/dev/null || rm -f "$tmp" 2>/dev/null
   else
@@ -838,6 +1009,24 @@ run_all_gates() {
     _rows_dir="${_evidence_dir}/gates_rows"
   fi
 
+  # The revision every row produced by THIS invocation is bound to, and the one
+  # a restored row's binding is compared against (P076 Step 4 / AC4).
+  local _rows_head
+  _rows_head="$(git -C "$_plugin_project_root" rev-parse HEAD 2>/dev/null || echo "")"
+
+  # ─── P076 Step 4 — continuation pointer identity, resolved ONCE ──────────
+  # `safe_next_action` is stored FULLY RESOLVED: this plugin's real path (never
+  # a {plugin_path} token), the literal epic and run ids, the real execution.yaml
+  # and report paths. The schema forbids '<' in the field precisely so no
+  # '<epic_id>'-style placeholder can survive into a continuation instruction.
+  _RESUME_EPIC_ID="$epic_id"
+  _RESUME_RUN_ID="$run_id"
+  _RESUME_PLAN_ID="unknown"
+  [[ "$epic_id" =~ ^E-([0-9]+) ]] && _RESUME_PLAN_ID="P${BASH_REMATCH[1]}"
+  _RESUME_ARTIFACT=""
+  [[ -d "$_evidence_dir" ]] && _RESUME_ARTIFACT="${_evidence_dir}/${AID_RESUME_ARTIFACT_BASENAME}"
+  _RESUME_SAFE_NEXT_ACTION="bash ${SCRIPT_DIR}/aid-run-gates.sh run-all ${execution_yaml} ${epic_id} ${run_id} --report-file ${report_path}"
+
   # ─── Execution ledger (P072 Step 26) ─────────────────────────────────────
   # The gate runner owns the ledger's LIFECYCLE only; the dispatch points own
   # its content. It cannot see run units for a fan-out command — `run_gate`
@@ -892,6 +1081,16 @@ run_all_gates() {
     # silently-lost gate so the defined==processed integrity assert below can be
     # exercised end-to-end (OBS-20260708-07 F4c).
     if [[ -n "${AID_TEST_DROP_GATE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE}" ]]; then
+      continue
+    fi
+
+    # Test-only fault injection (never set in production), P076 Step 4: skip a
+    # gate's iteration to simulate a runner that DIED before reaching it.
+    # Unlike AID_TEST_DROP_GATE above, this seam deliberately does NOT suppress
+    # the checkpoint-restore pass — a crashed run's un-iterated gate is exactly
+    # what that pass exists for, and it is unreachable from a normal run
+    # (every ordinary path emits a row), which is why it shipped unexercised.
+    if [[ -n "${AID_TEST_DROP_GATE_RESTORE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE_RESTORE}" ]]; then
       continue
     fi
 
@@ -1184,7 +1383,7 @@ run_all_gates() {
     processed=$((processed+1))
 
     # P076 Step 2 — durable incremental checkpoint of the COMPLETED row.
-    _gate_row_checkpoint "$_rows_dir" "$gate_name" "$merged_row"
+    _gate_row_checkpoint "$_rows_dir" "$gate_name" "$merged_row" "$_rows_head"
 
     # ─── command_log entry (P032 Step 3 provenance) ──────────────────
     local exit_code dur_ms
@@ -1215,8 +1414,18 @@ run_all_gates() {
   # no longer declares is not this run's business, and counting it would break
   # the defined==processed assert below. The membership test is anchored by the
   # opening quote (`"name":`), so gate `a` never matches inside gate `ba`.
+  #
+  # P076 Step 4 (CP2 carry-over, AC4): a row file is authoritative only for the
+  # REVISION it was produced at. Every checkpoint carries a `_checkpoint.head`
+  # binding, and a row whose binding is missing (written by an older runner, or
+  # a jq failure at write time) or whose HEAD has since moved is NEVER restored
+  # as a pass. It is replaced by an explicit `gate_row_stale` FAIL row, which
+  # still counts toward `processed` — so the defined==processed integrity assert
+  # keeps holding — and still forces overall=fail when the gate is required.
+  # Refusal, not silence: "this gate has no current result" must look different
+  # from "this gate passed".
   if [[ -n "$_rows_dir" && -d "$_rows_dir" ]]; then
-    local _rf _rg _rrow
+    local _rf _rg _rrow _rec_head _stale_reason _required_rg
     for _rf in "$_rows_dir"/*.json; do
       [[ -f "$_rf" ]] || continue
       _rg="$(basename "$_rf" .json)"
@@ -1227,14 +1436,39 @@ run_all_gates() {
       [[ -n "${AID_TEST_DROP_GATE:-}" && "$_rg" == "${AID_TEST_DROP_GATE}" ]] && continue
       _rrow="$(jq -c '.' "$_rf" 2>/dev/null)" || continue
       [[ -z "$_rrow" || "$_rrow" == "null" ]] && continue
+
+      _rec_head="$(jq -r '._checkpoint.head // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _stale_reason=""
+      if [[ -z "$_rec_head" ]]; then
+        _stale_reason="row_not_bound_to_a_revision"
+      elif _job_head_drifted "$_rec_head" "$_rows_head"; then
+        _stale_reason="start_head_moved"
+      fi
+
+      _required_rg="$(yq ".gates.\"${_rg}\".required // false" "$execution_yaml")"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${_rg}\":${_rrow}"
-      processed=$((processed+1))
-      log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf"
-      if [[ "$(jq -r '.result // ""' <<<"$_rrow")" == "fail" ]] \
-         && [[ "$(yq ".gates.\"${_rg}\".required // false" "$execution_yaml")" == "true" ]]; then
-        overall="fail"
+      if [[ -n "$_stale_reason" ]]; then
+        gates_json+="\"${_rg}\":$(jq -nc --arg g "$_rg" --arg sr "$_stale_reason" \
+          --arg rec "$_rec_head" --arg cur "$_rows_head" --arg src "$_rf" \
+          '{gate:$g, result:"fail", exit_code:1, duration_ms:0, attempts:0,
+            output:("checkpointed gate row at " + $src + " is not valid for the current revision (" + $sr + "); the gate did not run in this invocation"),
+            reason:"gate_row_stale", stale_reason:$sr,
+            recorded_head:(if $rec == "" then null else $rec end),
+            current_head:(if $cur == "" then null else $cur end)}')"
+        processed=$((processed+1))
+        log_event "$timeline_file" "gate_row_stale" gate="$_rg" source="$_rf" \
+          reason="$_stale_reason" recorded_head="$_rec_head" current_head="$_rows_head"
+        if [[ "$_required_rg" == "true" ]]; then overall="fail"; fi
+      else
+        gates_json+="\"${_rg}\":${_rrow}"
+        processed=$((processed+1))
+        log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf" \
+          head="$_rec_head"
+        if [[ "$(jq -r '.result // ""' <<<"$_rrow")" == "fail" ]] \
+           && [[ "$_required_rg" == "true" ]]; then
+          overall="fail"
+        fi
       fi
     done
   fi

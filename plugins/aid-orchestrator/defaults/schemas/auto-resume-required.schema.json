@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator/schemas/auto-resume-required-v1",
+  "title": "aid-auto-resume/1",
+  "description": "The single authoritative continuation pointer for a run that handed work to a background job supervisor. Written EAGERLY — before aid-job.sh spawns anything — and deleted only when the last outstanding background job of the run has been collected. It exists because a controller that dies mid-EXECUTE cannot write anything on its way out: the truth about 'is a resume required?' has to be derivable from what the controller provably left behind, never from a state a dying process was supposed to store. Consumers therefore DERIVE `awaiting_host_resume` as 'this artifact exists AND there is no liveness signal within the stall threshold'; the state is never stored anywhere.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "plan_id",
+    "epic_id",
+    "run_id",
+    "job_id",
+    "jobs_dir",
+    "gate",
+    "command_fingerprint",
+    "expected_terminal_states",
+    "safe_next_action",
+    "created_at"
+  ],
+  "properties": {
+    "schema": {
+      "const": "aid-auto-resume/1"
+    },
+    "plan_id": {
+      "description": "Plan this run belongs to (e.g. P076), or the literal 'unknown' when the epic id carries no plan number.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "epic_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "job_id": {
+      "description": "The supervised job this pointer refers to, OR the literal 'pending' — the value the PRE-SPAWN write carries. 'pending' is not a gap in the record: it says 'a job was about to be started in jobs_dir with command_fingerprint', which is exactly what the recovery scan needs to decide whether one actually was.",
+      "type": "string",
+      "pattern": "^(pending|[A-Za-z0-9][A-Za-z0-9._-]*)$"
+    },
+    "jobs_dir": {
+      "description": "Directory holding the run's supervised job records — the directory the pending-recovery scan walks.",
+      "type": "string",
+      "minLength": 1
+    },
+    "gate": {
+      "description": "Gate whose command was delegated to the supervisor.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "command_fingerprint": {
+      "description": "aid-job.sh's own sha256-over-NUL-joined-argv fingerprint. This is what a pending-recovery scan MATCHES ON when job_id is still 'pending' (or when the crash landed between spawn and rewrite): it identifies the job the dead controller meant to start, without trusting a job id that was never written.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "expected_terminal_states": {
+      "description": "aid-job.sh's terminal vocabulary, verbatim. A resume that finds the job in one of these states collects it; anything else means the job is still in flight or was lost.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "terminal_pass",
+          "terminal_fail",
+          "timed_out",
+          "cancelled"
+        ]
+      }
+    },
+    "safe_next_action": {
+      "description": "The exact command to run, FULLY RESOLVED at write time — real plugin path, literal epic and run ids. The pattern forbids '<' so no '<epic_id>'-style placeholder can ever persist here: a continuation instruction a human has to fill in is not a continuation instruction.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^<]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  }
+}

@@ -309,6 +309,107 @@ _active_runs_governs_main() {
   if [[ "$mode" == "plan_branch" ]]; then printf 'false'; else printf 'true'; fi
 }
 
+# ── P076 Step 4: the two optional live-controller fields ────────────────────
+# `auto_controller` records what a LIVE writer can honestly assert about this
+# run's controller. The stored vocabulary is deliberately CLOSED to three
+# values — active, manual, blocked_for_pm — and `awaiting_host_resume` is NOT
+# among them, by design: a controller that has died cannot store anything, so
+# "awaiting host resume" is a DERIVED state (the run's resume artifact exists
+# AND there is no liveness signal within the stall threshold), computed by
+# every consumer, never written by anyone. `blocked_for_pm` is defined here and
+# written by the escalation ladder's terminus in a later plan step.
+# `resume_artifact` is a pure POINTER at the authoritative continuation
+# artifact; the artifact is the truth, the map is presentation.
+AID_ACTIVE_RUN_FIELDS="auto_controller resume_artifact"
+AID_AUTO_CONTROLLER_VALUES="active manual blocked_for_pm"
+AID_RESUME_ARTIFACT_BASENAME="auto_resume_required.json"
+
+# _active_runs_auto_controller — the value init may honestly stamp. An AUTO
+# controller announces itself with AID_AUTO_MODE=1; anything else is a manual
+# run (the conservative default: claiming an autonomous controller that does
+# not exist is the failure this whole step is about).
+_active_runs_auto_controller() {
+  if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then printf 'active'; else printf 'manual'; fi
+}
+
+# _active_runs_resume_artifact <state_file> — the run's continuation-artifact
+# path when one is ALREADY on disk beside the state file, else empty (→ null).
+# Init normally yields empty; the gate runner sets it when it writes one.
+_active_runs_resume_artifact() {
+  local state_file="$1" dir cand root abs
+  [[ -n "$state_file" ]] || return 0
+  dir="$(dirname "$state_file")"
+  cand="${dir}/${AID_RESUME_ARTIFACT_BASENAME}"
+  abs="$cand"
+  if [[ "$abs" != /* ]]; then
+    root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+    abs="${root}/${cand}"
+  fi
+  [[ -f "$abs" ]] && printf '%s' "$cand"
+  return 0
+}
+
+# update_active_run_field <epic_id> <field> <value> — the ONE writer for a
+# single field of a LIVE entry. Same discipline as upsert_active_run: sidecar
+# flock, fail-closed on an unparseable map (never clobbered), atomic replace.
+# Unlike the upsert it mutates exactly one key, so it can be called repeatedly
+# during a run without racing the entry's other fields.
+#   • unknown field                → error, nothing written
+#   • auto_controller outside the closed vocabulary → error, naming why
+#     `awaiting_host_resume` in particular is not storable
+#   • empty value                  → JSON null (clears the pointer)
+#   • no entry for this epic       → warning, rc 0 (nothing to update; the
+#     artifact, not the map, is authoritative)
+update_active_run_field() {
+  local epic_id="$1" field="$2" value="${3:-}"
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: active-runs: jq is required to update ${field}" >&2; return 1; }
+  if [[ -z "$epic_id" ]]; then
+    echo "ERROR: active-runs: update requires an epic_id" >&2; return 1
+  fi
+  case " ${AID_ACTIVE_RUN_FIELDS} " in
+    *" ${field} "*) ;;
+    *) echo "ERROR: active-runs: '${field}' is not an updatable entry field (allowed: ${AID_ACTIVE_RUN_FIELDS})" >&2; return 1 ;;
+  esac
+  if [[ "$field" == "auto_controller" ]]; then
+    if [[ "$value" == "awaiting_host_resume" ]]; then
+      echo "ERROR: active-runs: 'awaiting_host_resume' is a DERIVED state and is never stored — a dying controller cannot write it, so consumers compute it from (resume artifact exists) AND (no liveness signal). Storable values: ${AID_AUTO_CONTROLLER_VALUES}" >&2
+      return 1
+    fi
+    case " ${AID_AUTO_CONTROLLER_VALUES} " in
+      *" ${value} "*) ;;
+      *) echo "ERROR: active-runs: auto_controller must be one of: ${AID_AUTO_CONTROLLER_VALUES} (got '${value}')" >&2; return 1 ;;
+    esac
+  fi
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-lock.sh"
+  local map; map="$(active_runs_map_path)"
+  mkdir -p "$(dirname "$map")" 2>/dev/null || true
+  aid_lock_acquire "${map}.lock" 5 || {
+    echo "WARNING: active-runs: could not lock ${map}.lock — ${field} not updated for ${epic_id}" >&2
+    return 1; }
+  local fd="$AID_LOCK_FD" doc rc=0
+  if ! doc="$(_active_runs_read_object "$map")"; then
+    aid_lock_release "$fd"
+    return 1
+  fi
+  if [[ "$(jq -r --arg e "$epic_id" 'has($e)' <<<"$doc")" != "true" ]]; then
+    aid_lock_release "$fd"
+    echo "WARNING: active-runs: no entry for ${epic_id} — ${field} not recorded" >&2
+    return 0
+  fi
+  local now; now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  if ! doc="$(jq -c --arg e "$epic_id" --arg f "$field" --arg v "$value" --arg t "$now" \
+        '.[$e][$f] = (if $v == "" then null else $v end) | .[$e].updated_at = $t' <<<"$doc")"; then
+    aid_lock_release "$fd"
+    echo "WARNING: active-runs: jq update failed for ${epic_id}.${field}" >&2
+    return 1
+  fi
+  _active_runs_write "$map" "$doc" || rc=1
+  aid_lock_release "$fd"
+  return "$rc"
+}
+
 # upsert_active_run <state_file> — (re)writes THIS run's entry in the map.
 # Called once, at the very end of cmd_init. Best-effort at the call site
 # (`|| true`): a failure must never block init — a run with no entry is
@@ -337,6 +438,14 @@ upsert_active_run() {
   [[ -n "$nnn" ]] && plan_id="P${nnn}"
   governs="$(_active_runs_governs_main "$epic_id")"
   now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  # P076 Step 4 — the two OPTIONAL live-controller fields. They are stamped by
+  # the upsert ITSELF rather than by a post-init write, because the upsert
+  # replaces an entry WHOLESALE: a separate second write would race it and
+  # could be silently discarded. Every later change goes through
+  # update_active_run_field, which mutates one key under the same lock.
+  local auto_controller resume_artifact
+  auto_controller="$(_active_runs_auto_controller)"
+  resume_artifact="$(_active_runs_resume_artifact "$state_file")"
   mkdir -p "$(dirname "$map")" 2>/dev/null || true
   aid_lock_acquire "${map}.lock" 5 || {
     echo "WARNING: active-runs: could not lock ${map}.lock — no entry recorded for ${epic_id}" >&2
@@ -350,9 +459,12 @@ upsert_active_run() {
   if ! doc="$(jq -c --arg e "$epic_id" --arg sf "$state_file" --arg r "$run_id" \
         --arg st "$state" --arg br "$branch" --arg p "$plan_id" \
         --argjson gm "$governs" --arg t "$now" \
+        --arg ac "$auto_controller" --arg ra "$resume_artifact" \
         '.[$e] = {state_file: $sf, run_id: $r, state: $st, branch: $br,
                   plan_id: (if $p == "" then null else $p end),
-                  governs_main: $gm, updated_at: $t}' <<<"$doc")"; then
+                  governs_main: $gm, updated_at: $t,
+                  auto_controller: $ac,
+                  resume_artifact: (if $ra == "" then null else $ra end)}' <<<"$doc")"; then
     aid_lock_release "$fd"
     echo "WARNING: active-runs: jq upsert failed for ${epic_id}" >&2
     return 1
@@ -457,6 +569,15 @@ cmd_active_runs() {
   local verb="${1:-}"
   case "$verb" in
     prune) prune_active_runs ;;
+    set)
+      # active-runs set <epic_id> <field> <value>  (P076 Step 4)
+      shift
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: active-runs set: usage: active-runs set <epic_id> <field> <value>" >&2
+        exit 1
+      fi
+      update_active_run_field "$1" "$2" "${3:-}" || exit 1
+      ;;
     list)
       command -v jq >/dev/null 2>&1 || {
         echo "ERROR: active-runs list: jq is required" >&2; exit 1; }
@@ -477,7 +598,7 @@ cmd_active_runs() {
         fi
       fi ;;
     *)
-      echo "Usage: aid-fsm.sh active-runs <list|prune>" >&2
+      echo "Usage: aid-fsm.sh active-runs <list|prune|set <epic_id> <field> <value>>" >&2
       exit 1 ;;
   esac
 }
@@ -3024,6 +3145,50 @@ cmd_pm_override() {
 }
 
 
+# _fsm_resume_artifact_preflight <epic_id> — P076 Step 4.
+#   Every run of this EPIC that handed work to the background supervisor left
+#   exactly one continuation artifact behind. Before a NEW controller starts:
+#     • the referenced job is STILL LIVE → REFUSE. Two controllers over one job
+#       is the ambiguity this whole mechanism exists to remove, and the honest
+#       instruction is to resume the existing run, not to start a second one.
+#     • the referenced job is dead (or was never started — job_id "pending") →
+#       proceed, ARCHIVING the artifact as `.superseded-<epoch>`. Archived, not
+#       deleted: it is the only record of what the dead controller was waiting
+#       for.
+_fsm_resume_artifact_preflight() {
+  local epic_id="$1"
+  command -v jq >/dev/null 2>&1 || return 0
+  local ev_root; ev_root="$(aid_state_path ".aid-o/work/evidence/${epic_id}" 2>/dev/null)" || return 0
+  [[ -d "$ev_root" ]] || return 0
+  local job_sh="${SCRIPT_DIR}/aid-job.sh"
+  local art jobs_dir job_id st root abs
+  root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  for art in "$ev_root"/*/"${AID_RESUME_ARTIFACT_BASENAME}"; do
+    [[ -f "$art" ]] || continue
+    jobs_dir="$(jq -r '.jobs_dir // ""' "$art" 2>/dev/null || echo "")"
+    job_id="$(jq -r '.job_id // ""' "$art" 2>/dev/null || echo "")"
+    st="unknown"
+    if [[ -n "$jobs_dir" && -n "$job_id" && "$job_id" != "pending" && -f "$job_sh" ]]; then
+      abs="$jobs_dir"
+      [[ "$abs" != /* ]] && abs="${root}/${jobs_dir}"
+      st="$(bash "$job_sh" status --jobs-dir "$abs" --id "$job_id" 2>/dev/null || echo unknown)"
+    fi
+    case "$st" in
+      started|running)
+        echo "ERROR: aid-fsm.sh init: ${epic_id} still has a LIVE background job ('${job_id}', state ${st}) recorded in ${art}." >&2
+        echo "  Refusing to start a second controller over the same job." >&2
+        echo "  Resume the existing run instead — the safe next action recorded in that artifact is:" >&2
+        echo "    $(jq -r '.safe_next_action // "(none recorded)"' "$art" 2>/dev/null)" >&2
+        echo "  (or cancel the job: bash ${job_sh} cancel --jobs-dir ${jobs_dir} --id ${job_id})" >&2
+        exit 2
+        ;;
+    esac
+    mv "$art" "${art}.superseded-$(date -u +%s)" 2>/dev/null || true
+    echo "aid-fsm.sh init: archived a stale continuation artifact (${art} — referenced job '${job_id}' is ${st})" >&2
+  done
+  return 0
+}
+
 cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
@@ -3135,6 +3300,11 @@ cmd_init() {
     echo "Run: bash \$AID_PLUGIN_PATH/scripts/aid-check-deps.sh  for full dependency report." >&2
     exit 1
   fi
+
+  # P076 Step 4 — a continuation artifact left by an EARLIER run of this EPIC.
+  # Two controllers over ONE live job is the failure to prevent; a dead job is
+  # merely history and must not block a fresh run.
+  _fsm_resume_artifact_preflight "$epic_id"
 
   # ── P064 E-064-1_2 Step 5: plan-branch lineage precondition ───────────────
   # Runs BEFORE the duplicate-state guard below (not after) so a resumed run
