@@ -20,6 +20,13 @@
 #      drives both the writer and the FSM's refusal
 #   6. MAJOR — init's live-job refusal renders safe_next_action inert
 #   7. MAJOR — `active-runs stalled` never interpolates an unvalidated map key
+#   9. BLOCKING (round 2) — a background gate whose own command writes a tracked
+#      file must PASS: the tree has no veto over a result this invocation
+#      watched being produced
+#  10. BLOCKING (round 2) — …and neither does an unrelated concurrent writer;
+#      the disturbance is recorded on the row, never substituted for the verdict
+#  11. MINOR (round 2) — the gate-row key's lifecycle: a copied evidence
+#      directory carries the key but no authority
 
 setup() {
   export TZ=UTC
@@ -312,6 +319,131 @@ YAML
   run jq -r '.gates.critical_security_gate.stale_reason' "$REPORT"
   [ "$output" = "row_not_written_by_this_run" ]
   run jq -r '.overall' "$REPORT"
+  [ "$output" = "fail" ]
+}
+
+@test "case 9: a background gate whose command WRITES a tracked file still passes" {
+  init_project
+  printf 'old\n' > "$PROJ/report-bg.out"
+  printf 'old\n' > "$PROJ/report-fg.out"
+  ( cd "$PROJ" && git add README.md .gitignore report-bg.out report-fg.out \
+      && git commit -qm base )
+  cat > "$PROJ/exec.yaml" <<YAML
+gates:
+  bg:
+    command: "echo generated > '$PROJ/report-bg.out'; echo done"
+    required: true
+    timeout_seconds: 60
+    max_retries: 0
+    run_mode: background
+  fg:
+    command: "echo generated > '$PROJ/report-fg.out'; echo done"
+    required: true
+    timeout_seconds: 60
+    max_retries: 0
+YAML
+
+  run run_gates
+  echo "stderr: $(cat "$WORK/stderr.txt")"
+
+  # The fixture is genuine: the gate really did move the tracked tree.
+  run bash -c "cd '$PROJ' && git status --porcelain report-bg.out"
+  [[ "$output" == *report-bg.out* ]]
+
+  # THE assertion: a command that exited 0 reports pass. Writing a file is
+  # something a gate is allowed to do, and it is allowed to do it in EITHER mode
+  # — the background flip changes where the work is supervised, never whether
+  # the same command passes. Pre-fix the background gate reported
+  # `job_result_not_current` while its foreground twin passed, and no retry could
+  # ever converge because every attempt re-dirtied the tree the same way.
+  run jq -r '.gates.bg.result' "$REPORT"
+  [ "$output" = "pass" ]
+  run jq -r '.gates.fg.result' "$REPORT"
+  [ "$output" = "pass" ]
+  run jq -r '.gates.bg.reason // "none"' "$REPORT"
+  [ "$output" != "job_result_not_current" ]
+  run jq -r '.overall' "$REPORT"
+  [ "$output" = "pass" ]
+  [ "$status" -eq 0 ] || true
+}
+
+@test "case 10: an unrelated writer during a background gate does not overturn its result" {
+  init_project
+  ( cd "$PROJ" && git add README.md .gitignore && git commit -qm base )
+  cat > "$PROJ/exec.yaml" <<'YAML'
+gates:
+  bg:
+    command: "sleep 6; echo done"
+    required: true
+    timeout_seconds: 60
+    max_retries: 0
+    run_mode: background
+YAML
+
+  # An editor save, a formatter, a stray watcher — one byte appended to a tracked
+  # file, repeatedly, for the whole supervised window.
+  ( while :; do printf 'x\n' >> "$PROJ/README.md"; sleep 1; done ) &
+  local writer=$!
+
+  run run_gates
+  kill -KILL "$writer" 2>/dev/null || true
+  wait "$writer" 2>/dev/null || true
+  echo "stderr: $(cat "$WORK/stderr.txt")"
+
+  # THE assertion: the row reports what the COMMAND returned. This invocation
+  # spawned the job, watched it and collected it; a tree that moved underneath a
+  # watched run is not a verdict about it. Pre-fix this was a required-gate FAIL
+  # with `job_result_not_current`, for a command that exited 0.
+  run jq -r '.gates.bg.result' "$REPORT"
+  [ "$output" = "pass" ]
+  run jq -r '.gates.bg.reason // "none"' "$REPORT"
+  [ "$output" != "job_result_not_current" ]
+  run jq -r '.overall' "$REPORT"
+  [ "$output" = "pass" ]
+
+  # …and the disturbance is RECORDED, on the row and on the timeline, so a later
+  # inconsistency has something to be explained by.
+  run jq -r '.gates.bg.tree_moved_during_run' "$REPORT"
+  [ "$output" = "true" ]
+  run jq -se 'any(.[]; .event == "gate_job_tree_moved")' "$TIMELINE"
+  [[ "$output" == *true* ]]
+}
+
+@test "case 11: a COPIED evidence directory carries no authority — its rows are refused" {
+  init_project
+  ( cd "$PROJ" && git add README.md .gitignore && git commit -qm base )
+  cat > "$PROJ/exec.yaml" <<'YAML'
+gates:
+  critical_security_gate:
+    command: "exit 1"
+    required: true
+    timeout_seconds: 30
+YAML
+
+  # A genuine row, written by the run itself, with a genuine key beside it.
+  run run_gates
+  [ -f "$ROWS/critical_security_gate.json" ]
+  [ -f "$PROJ/$EVID/.gate_row_key" ]
+
+  # The whole project — repo, evidence, rows AND the key file — copied verbatim.
+  # HEAD and the tree hash are identical in the copy, so the revision half of the
+  # binding matches; only the directory the checkpoint calls home has changed.
+  local copy="$WORK/copy"
+  cp -a "$PROJ" "$copy"
+  [ -f "$copy/$EVID/.gate_row_key" ]
+
+  ( cd "$copy" && AID_TEST_DROP_GATE_RESTORE=critical_security_gate \
+      "$RUN_GATES" run-all exec.yaml "$EPIC" R-1 \
+      --report-file "$EVID/gates/gates_report.json" \
+      >"$WORK/copy-stdout.txt" 2>"$WORK/copy-stderr.txt" ) || true
+  echo "stderr: $(cat "$WORK/copy-stderr.txt")"
+
+  # THE assertion: the key travelled, and it is inert. A row is authoritative
+  # only where it was written — which is what bounds the key's lifetime to the
+  # evidence directory it lives in.
+  run jq -r '.gates.critical_security_gate.stale_reason' "$copy/$EVID/gates/gates_report.json"
+  [ "$output" = "row_not_written_by_this_run" ]
+  run jq -r '.overall' "$copy/$EVID/gates/gates_report.json"
   [ "$output" = "fail" ]
 }
 

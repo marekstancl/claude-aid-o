@@ -66,8 +66,13 @@ process and no repository/evidence progress for 5 minutes, resume or diagnose au
 iterates every defined gate, so it produces its own row for that gate: for a background gate it
 re-attaches to the SAME supervised job and *collects* its terminal result rather than re-executing
 the suite (that, not the checkpoint, is what makes a crash cost zero re-execution), and it then
-overwrites the checkpoint with the row it derived. The two rows are byte-identical by construction,
-so the outcome is the same either way. The runner's restore-from-checkpoint pass is a fail-closed
+overwrites the checkpoint with the row it derived. One condition bounds the re-attach, and only the
+re-attach: a result produced by an EARLIER invocation is replayed only while the working tree has
+not moved since — otherwise the job is superseded and the gate genuinely re-runs, which is what lets
+a fix loop converge. A job this invocation supervised to completion is never second-guessed that
+way: what its command returned is what the row says, and a tree that moved underneath it is recorded
+on the row (`tree_moved_during_run`) rather than substituted for the verdict. The two rows are
+byte-identical by construction, so the outcome is the same either way. The runner's restore-from-checkpoint pass is a fail-closed
 safety net for a defined gate that produced no row at all in an invocation; no ordinary path through
 the gate loop leaves a gate rowless, and a row it cannot verify against this run's own keyed binding
 becomes an explicit `gate_row_stale` FAIL, never a pass.

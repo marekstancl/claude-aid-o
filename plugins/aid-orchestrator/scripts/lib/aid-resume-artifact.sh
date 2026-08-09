@@ -14,9 +14,11 @@
 #   AID_RESUME_ARTIFACT_BASENAME   the run's ONE continuation pointer filename
 #   AID_GATE_ROW_KEY_BASENAME      the per-run gate-row secret's filename
 #   aid_repo_revision              <repo>            -> "<head> <tree>"
+#   aid_gate_row_revision          <repo>            -> "<head> <tree>", normalized
 #   aid_resume_resolve_pending     <jobs_dir> <fp>   -> job id | ""
 #   aid_gate_row_run_key           <evidence_dir>    -> 64-hex secret | ""
-#   aid_gate_row_binding_key       <key> <gate> <head> <tree> -> 64-hex | ""
+#   aid_gate_row_home              <evidence_dir>    -> canonical dir | ""
+#   aid_gate_row_binding_key       <key> <gate> <head> <tree> <home> -> 64-hex | ""
 #
 # Sourced, never executed. Re-source safe.
 # =============================================================================
@@ -53,6 +55,28 @@ aid_repo_revision() {
   printf '%s' "$out"
 }
 
+# aid_gate_row_revision <repo> — THE (head, tree) pair a gate-row checkpoint is
+# bound to, for BOTH writers: the in-line one in aid-run-gates.sh and the
+# resume-time one in aid-fsm.sh. `aid_repo_revision` above answers the raw
+# question; this adds the ONE normalization the binding depends on — the
+# supervisor's "none"/"nogit" markers mean "no revision", and a row bound to the
+# literal string "none" would compare equal to any other repo that has no git.
+#
+# It exists because the normalization used to be copied into both writers, and
+# the copies had already drifted: the resume-side one fell back to
+# `git rev-parse HEAD` in the CALLER's working directory when the job record
+# named no repo, so a resume run from a different checkout could bind a row to a
+# head the runner would never compare against. There is now no fallback: the
+# revision of a row is always the revision of the repo the JOB ran in, and
+# "unknowable" stays empty rather than borrowing the caller's.
+aid_gate_row_revision() {
+  local repo="${1:-}" rev head tree
+  rev="$(aid_repo_revision "$repo")"
+  head="${rev%% *}"; tree="${rev##* }"
+  [[ "$head" == "none" || "$head" == "nogit" ]] && head=""
+  printf '%s %s' "$head" "$tree"
+}
+
 # aid_resume_resolve_pending <jobs_dir_abs> <command_fingerprint>
 #   THE resolution of a `pending` (PRE-SPAWN) pointer, shared by `resume` and by
 #   `init`'s live-job preflight. `pending` is not a gap in the record: it says
@@ -72,8 +96,41 @@ aid_resume_resolve_pending() {
   printf '%s' "$cand"
 }
 
-# aid_gate_row_run_key <evidence_dir> — the run's own gate-row secret, created
-# on first use and reused for the life of the run's evidence directory.
+# aid_gate_row_home <evidence_dir> — the canonical, symlink-resolved absolute
+# path of the directory a gate-row binding belongs to, or nothing when that
+# directory does not exist. The runner addresses its evidence directory
+# RELATIVELY (from the project root) and `resume` addresses the same directory
+# ABSOLUTELY, so the raw strings are not comparable and only the physical path
+# is. Nothing here creates a directory.
+aid_gate_row_home() {
+  local d="${1:-}"
+  [[ -n "$d" && -d "$d" ]] || return 0
+  ( cd "$d" 2>/dev/null && pwd -P ) || true
+}
+
+# aid_gate_row_run_key <evidence_dir> — the run's own gate-row secret.
+#
+# LIFECYCLE, stated in full because the previous version had none:
+#   created      — on first use, by whichever of the two writers (`run-all` or
+#                  `resume`) reaches an EXISTING evidence directory first.
+#   reused       — by every later invocation of that run: a re-run, a resume and
+#                  the restore pass all have to agree, and re-keying mid-run
+#                  would invalidate every row the run already wrote.
+#   regenerated  — never. A key file that is not a key is refused, not replaced
+#                  (see below), and a valid one is never rewritten.
+#   removed      — never on its own, and deliberately so: the key is the binding
+#                  for the `gates_rows/*.json` checkpoints beside it, so deleting
+#                  it while they exist would silently invalidate a crashed run's
+#                  own evidence — the one case the checkpoints exist for. Its
+#                  lifetime is the evidence directory's, and it dies with it.
+#   copied       — inert. The binding below is taken over the checkpoint's HOME
+#                  directory, so a key that travels with an archived or copied
+#                  evidence tree verifies nothing at the new path: every row in
+#                  the copy is refused as `row_not_written_by_this_run`. Nothing
+#                  in this codebase copies the file — the two archive sites move
+#                  a job directory (`jobs/<id>.superseded-*`) and the pointer
+#                  (`.claimed-*`), neither of which is near it — and if a future
+#                  one does, it carries no authority with it.
 #
 # WHY: a checkpointed gate row is replayed into a report as a gate RESULT, and
 # `_checkpoint.head` alone cannot establish that the run's own writers produced
@@ -118,15 +175,21 @@ aid_gate_row_run_key() {
   return 0
 }
 
-# aid_gate_row_binding_key <run_key> <gate> <head> <tree> — the value stored as
-# `_checkpoint.key` and re-derived by the restore pass. Keyed over the run
-# secret AND the gate name AND the revision, so a row cannot be moved between
-# gates or between revisions either. Empty run key → EMPTY result, so a run that
-# could not establish a key can neither write a binding nor accept one (the
-# restore pass refuses on an empty expectation — fail closed, never fail open).
+# aid_gate_row_binding_key <run_key> <gate> <head> <tree> <home> — the value
+# stored as `_checkpoint.key` and re-derived by the restore pass. Keyed over the
+# run secret AND the gate name AND the revision AND the checkpoint's home
+# directory, so a row cannot be moved between gates, between revisions, or
+# between directories. Empty run key → EMPTY result, so a run that could not
+# establish a key can neither write a binding nor accept one (the restore pass
+# refuses on an empty expectation — fail closed, never fail open).
+#
+# `home` is what makes a copied evidence tree inert rather than portable. It is
+# NOT an answer to the accepted residual (an actor that can read the key file can
+# still forge a row in place, and that is a deliberate stopping point) — it is
+# the lifecycle property: authority does not travel with a copy.
 aid_gate_row_binding_key() {
-  local key="${1:-}" gate="${2:-}" head="${3:-}" tree="${4:-}"
+  local key="${1:-}" gate="${2:-}" head="${3:-}" tree="${4:-}" home="${5:-}"
   [[ -n "$key" ]] || return 0
-  printf '%s\0%s\0%s\0%s\0' "$key" "$gate" "$head" "$tree" \
+  printf '%s\0%s\0%s\0%s\0%s\0' "$key" "$gate" "$head" "$tree" "$home" \
     | sha256sum 2>/dev/null | cut -d' ' -f1
 }

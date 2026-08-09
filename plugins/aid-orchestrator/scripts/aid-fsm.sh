@@ -3696,7 +3696,8 @@ _resume_write_row() {
   # restore pass refuses anything it cannot verify, so a differently-shaped row
   # would be discarded by the very run-all this exists to feed.
   rkey="$(aid_gate_row_run_key "$evidence_dir")"
-  ckey="$(aid_gate_row_binding_key "$rkey" "$gate" "$head" "$tree")"
+  ckey="$(aid_gate_row_binding_key "$rkey" "$gate" "$head" "$tree" \
+            "$(aid_gate_row_home "$evidence_dir")")"
   bound="$(jq -c --arg h "$head" --arg tr "$tree" --arg k "$ckey" \
              --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
              '. + {_checkpoint: {head: $h, tree: $tr, key: $k, written_at: $t}}' \
@@ -4013,14 +4014,18 @@ cmd_resume() {
 
   local attempts=1
   [[ "$job_id" =~ -attempt-([0-9]+)$ ]] && attempts="${BASH_REMATCH[1]}"
-  # HEAD *and* tree, from the supervisor's own `revision` — the same pair the
-  # in-line checkpoint writer binds to, so the two writers cannot disagree about
-  # what revision a row was produced at.
+  # HEAD *and* tree, through the SHARED derivation the in-line checkpoint writer
+  # uses (aid_gate_row_revision), from the repo the JOB ran in. One function, one
+  # normalization, one root — the two writers cannot disagree about what revision
+  # a row was produced at.
+  #
+  # There is deliberately no `git rev-parse HEAD` fallback here any more: it read
+  # the CALLER's working directory, so a resume run from a different checkout
+  # could stamp a row with a head the runner would never compare against. An
+  # unknowable revision stays empty, and the restore pass refuses an unbound row.
   local _rev head="" tree=""
-  _rev="$(aid_repo_revision "${repo:-}")"
+  _rev="$(aid_gate_row_revision "${repo:-}")"
   head="${_rev%% *}"; tree="${_rev##* }"
-  [[ "$head" == "none" || "$head" == "nogit" ]] && head=""
-  [[ -z "$head" ]] && head="$(git rev-parse HEAD 2>/dev/null || echo "")"
 
   # The gate's own configuration, as named by the artifact's resolved
   # instruction — the template argument the baseline sample needs (AC4).
