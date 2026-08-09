@@ -214,6 +214,19 @@ resolve_run_mode() {
   yq ".gates.\"${gate}\".run_mode // \"foreground\"" "$file"
 }
 
+# _run_mode_declared <execution_yaml> <gate_name>
+#   True iff the gate DECLARES a run_mode key at all. Not a second run_mode
+#   reader — it resolves no value and applies no default; resolve_run_mode above
+#   stays the only place that turns config into a mode. It exists because
+#   resolve_run_mode deliberately collapses "absent" and "explicit foreground"
+#   into the same answer, and the P076 Step 3 advice must stay silent for BOTH
+#   explicit values: a PM who already wrote `run_mode: foreground` has made the
+#   decision this advice exists to prompt.
+_run_mode_declared() {
+  local file="$1" gate="$2"
+  [[ "$(yq ".gates.\"${gate}\" | has(\"run_mode\")" "$file" 2>/dev/null)" == "true" ]]
+}
+
 # validate_all_run_modes <execution_yaml>
 #   Fail-loud sweep over EVERY defined gate, run BEFORE any gate command is
 #   spawned — exactly like the gate-profile validation above it. A typo
@@ -796,6 +809,13 @@ run_all_gates() {
   # never re-queries gates that were profile_excluded/skipped/never run this
   # round, and never re-fetches the same gate's baseline twice.
   declare -a baseline_summary_gates=()
+  # P076 Step 3 — gates whose own telemetry recommends `background` while their
+  # config declares no run_mode at all. Appended EXACTLY ONCE per gate, at the
+  # single post-retry merge point below (never per attempt), from the
+  # runtime_baseline JSON already fetched there — no second baseline pass.
+  # Emitted after the run as one named timeline event per gate, observe-only:
+  # flipping a gate stays a one-line human edit (P069 observe-then-promote).
+  declare -a run_mode_advice_gates=()
 
   # P069 Step 14 — targeted_tests escalation (exit 3 unknown_production /
   # exit 11 mapping_gap). Set inline when that gate's FINAL result settles
@@ -1142,6 +1162,20 @@ run_all_gates() {
     [[ -z "$runtime_baseline_json" ]] && runtime_baseline_json='null'
     runtime_baseline_nc=$(jq -r '.non_censored_samples_count // 0' <<<"$runtime_baseline_json" 2>/dev/null)
     [[ "$runtime_baseline_nc" =~ ^[0-9]+$ ]] && (( runtime_baseline_nc >= 5 )) && baseline_summary_gates+=("$gate_name")
+
+    # ─── P076 Step 3 — run_mode advice collection (observe-only) ───────────
+    # Same already-fetched runtime_baseline_json, no extra read. The
+    # recommendation itself carries the library's rules (>= 5 non-censored
+    # samples AND p95 > 10 min → "background"; anything else → null or
+    # "foreground"), so nothing is re-derived here. An unreadable/absent
+    # baseline yields null → no advice, no failure (fail-open telemetry).
+    local _advice_rec _advice_p95
+    _advice_rec=$(jq -r '.run_mode_recommended // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
+    if [[ "$_advice_rec" == "background" ]] && ! _run_mode_declared "$execution_yaml" "$gate_name"; then
+      _advice_p95=$(jq -r '.p95_ms // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
+      [[ "$_advice_p95" =~ ^[0-9]+$ ]] || _advice_p95="null"
+      run_mode_advice_gates+=("${gate_name}|${_advice_p95}")
+    fi
     $first || gates_json+=","
     first=false
     local merged_row
@@ -1486,6 +1520,34 @@ run_all_gates() {
     local baseline_summary_gate
     for baseline_summary_gate in "${baseline_summary_gates[@]}"; do
       gate_baseline_show "$baseline_summary_gate" >&2
+    done
+  fi
+
+  # ─── run_mode advice (P076 Step 3) ─────────────────────────────────────
+  # The first behavioural consumer of gate_baseline_recommend_run_mode, and
+  # deliberately the mildest one: a named timeline event carrying the exact
+  # one-line edit, once per gate per run. It changes NOTHING about how any gate
+  # ran — the run is already over at this point, the report is written, and the
+  # decision to flip stays a human one. The edit string is built from the gate
+  # name alone, so it is copy-pasteable in any consumer project.
+  if (( ${#run_mode_advice_gates[@]} > 0 )); then
+    local _advice_entry _advice_gate_name _advice_gate_p95
+    for _advice_entry in "${run_mode_advice_gates[@]}"; do
+      _advice_gate_name="${_advice_entry%|*}"
+      _advice_gate_p95="${_advice_entry##*|}"
+      # Once per gate per RUN, not per invocation: a targeted pass that
+      # escalates re-enters this script as a subprocess writing to the SAME
+      # run timeline, and a gate present in both passes must still be advised
+      # exactly once. Cheap because the advice list is normally empty.
+      if [[ -f "$timeline_file" ]] && jq -se --exit-status --arg g "$_advice_gate_name" \
+           'any(.[]; .event == "gate_run_mode_advice" and .gate == $g)' \
+           "$timeline_file" >/dev/null 2>&1; then
+        continue
+      fi
+      log_event "$timeline_file" "gate_run_mode_advice" \
+        gate="$_advice_gate_name" \
+        p95_ms="$_advice_gate_p95" \
+        edit="set gates.${_advice_gate_name}.run_mode: background in .aid-o/config/execution.yaml"
     done
   fi
 
