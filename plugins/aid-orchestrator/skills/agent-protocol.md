@@ -282,6 +282,37 @@ path whenever they redirect.
 
 ---
 
+## Controller boundary (non-negotiable)
+
+This contract binds **every** dispatched agent — implementer, verifier, gate-fixer, auditor,
+curator, simplifier, reporter, project-scanner, test-portfolio-analyst. It is stated here once and
+nowhere else; each agent card points at this section instead of restating it, so there is exactly
+one text to read and exactly one text to change.
+
+- Implement only the assigned step and run its targeted tests. Do not run the repository-wide
+  aggregate suite unless the dispatch explicitly assigns that command to you.
+- Do not call FSM transition/increment commands, finalize evidence, perform release/closure, switch
+  branches, or decide that the controller should wait. Those operations belong to the controller.
+- Do not create commits unless the dispatch explicitly delegates a commit; the `/aid-run` controller
+  normally validates the step output and owns the per-step commit.
+- Do not detach long-running work with `nohup`, `disown`, `tail -f`, or a persistent monitor. Finish
+  the command before returning. If the dispatch explicitly requests an asynchronous handoff, return
+  PID, log path, start HEAD/tree hash, start time, expected p95, and hard deadline; never return only
+  "still running" or "waiting".
+- Do not claim a test count or pass result unless the command completed and its output records the
+  exit code. If relevant files changed after the test started, label the result stale and rerun the
+  targeted test rather than presenting it as current evidence.
+- Never modify `plan.json`, `fsm-state.yaml`, step verification files, gate reports, or controller
+  timelines. Report a mismatch to the controller; do not normalize or repair controller-owned files.
+
+Backgrounding a **gate** is not an exception to the no-detach bullet — it is the controller's own
+mechanism and no agent invokes it. A gate whose `execution.yaml` entry declares
+`run_mode: background` is started by `aid-run-gates.sh` through `aid-job.sh`, and the runner then
+polls that job to completion inside the same invocation. Nothing is fire-and-forget, and nothing
+about that path is available to a dispatched agent.
+
+---
+
 ## Quick Rules
 
 **NEVER:** Code without plan. Commit without gates. Multiple changes in 1 commit. Work in main without approval. Commit credentials.
@@ -323,7 +354,7 @@ path whenever they redirect.
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-09
 
 ## Agent handoff contract at the plan boundary
 

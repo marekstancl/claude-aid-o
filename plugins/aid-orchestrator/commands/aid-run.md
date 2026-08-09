@@ -41,6 +41,46 @@ Escalation rules for `--auto`:
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 If not set, `--auto` prints a warning and falls back to manual mode.
 
+### What `--auto` records about itself — the four run states
+
+Read this before starting an AUTO run — it is what you, or the next controller, reason from after
+an interruption.
+
+Every live EPIC has an entry in `.aid-o/work/active-runs.json`. The entry's `auto_controller` field
+is stamped whenever the entry is (re)written at a lifecycle boundary — `init` first — and
+`aid-fsm.sh active-runs set <epic> auto_controller <value>` is the only single-field writer. Three
+values are **storable**, and the fourth state is never stored at all.
+
+| State | Stored? | What it means | Who sets it |
+|-------|---------|---------------|-------------|
+| `active` | yes | An autonomous controller is alive and owns this run. | Any entry (re)write while `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
+| `manual` | yes | No autonomous controller — a human drives this run. The conservative default for any entry write that is not AUTO. | Any entry (re)write without `AID_AUTO_MODE=1` |
+| `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | *Nothing writes it yet.* The value is accepted by the writer and reserved for the escalation ladder's terminus, which is a later plan step. Treat it today as vocabulary, not as observed state. |
+| `awaiting_host_resume` | **never** | A background gate was handed off and the controller then died: the run's continuation artifact is still on disk and nothing has signalled liveness. | Nobody. It is **derived** at read time. |
+
+`awaiting_host_resume` is derived rather than stored for one reason: a controller that has died
+cannot write anything on its way out, so any stored flag would be written by the one party that is
+by definition unable to write. The writer enforces this — passing `awaiting_host_resume` to
+`active-runs set` is rejected with an error naming why. Consumers compute it instead, from two
+facts the dead controller provably left behind:
+
+1. the run's continuation artifact `<evidence_dir>/auto_resume_required.json` still exists (it is
+   written *before* a background job spawns and deleted only on a clean terminal collect), and
+2. no liveness signal is recent enough. `aid-fsm.sh active-runs stalled` is the shipped derivation
+   of that half — newest of the entry's `updated_at` and the run timeline's newest event, against
+   `AID_ACTIVE_RUN_STALL_SEC` (default 2100 s) — and `/aid-status` renders its verdict as the
+   `STALLED?` marker plus the recovery line. No command prints the string `awaiting_host_resume`;
+   it is the name for the two facts holding together, not a value any surface emits.
+
+**The resume flow.** When both hold, run `bash {plugin_path}/scripts/aid-fsm.sh resume <epic_id>`.
+It claims the artifact exactly once, collects the referenced job's terminal result, records it as a
+durable gate-row checkpoint under `<evidence_dir>/gates_rows/<gate>.json` (the next `run-all`
+assembles it — `resume` never edits a final report), updates the active-runs entry, and prints
+three lines: what it found, what it recorded, and the next action. It never fabricates a result: a
+missing job record, a `lost` job and a `stale` result are each reported verbatim with the rerun
+instruction. A job still in flight is a read-only status report — nothing is claimed, the artifact
+stays valid. Executing the printed next action is the controller's job, not the command's.
+
 ### AUTO liveness and ownership contract
 
 `--auto` is a terminal-outcome contract, not merely automatic approval at READY. The controller
@@ -135,6 +175,16 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 - Do NOT ask PM about context management
 - With 1M token window, context is not a concern — continue working
 - Do NOT pause between EPICs to "check context" — proceed to next EPIC immediately
+
+**The one carve-out.** The rules above forbid ending a turn to talk about context, and the AUTO
+liveness contract forbids ending a turn on "waiting". Neither is a licence to hide a real handoff.
+The one legitimate turn-ending message is the `awaiting_host_resume` card: the artifact exists, the
+resume command is printed, and nothing false is claimed. The card has four parts, in order:
+**what stopped** (derived from the artifact plus the missing liveness signal), **the impact** (what
+is consequently not done), **the recommended action**, and **the exact command**
+`bash {plugin_path}/scripts/aid-fsm.sh resume <epic_id>`. A card that omits the artifact path, omits
+the command, or asserts a gate result nobody collected is not this carve-out — it is the failure the
+carve-out exists to distinguish itself from.
 
 ### Gate execution:
 - Use `--state-file` and `--report-file` flags with `aid-run-gates.sh`:

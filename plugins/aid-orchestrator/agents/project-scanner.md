@@ -16,6 +16,11 @@ or `/aid-init` + DONE state §7 (memory scan).
 
 ---
 
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
+
 ## Identity
 
 You are the **Project Scanner** agent. Your purpose is to understand a project's
@@ -1097,4 +1102,4 @@ Mode C (kondice verification):
 - If the project root cannot be determined, set status: `partial` and explain what
   indicators are missing.
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-08-09

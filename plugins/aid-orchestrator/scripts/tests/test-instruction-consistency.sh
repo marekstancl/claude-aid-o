@@ -272,15 +272,19 @@ assert_instruction "$PLUGIN_DIR/commands/aid-run.md" \
 assert_instruction "$PLUGIN_DIR/skills/pipeline.md" \
   'Only the controller mutates FSM state,' \
   "pipeline assigns FSM ownership to controller"
-assert_instruction "$PLUGIN_DIR/agents/implementer.md" \
+# P076 Step 7: the Controller-boundary contract MOVED out of implementer.md into
+# skills/agent-protocol.md, where all nine agent cards reference it. These two
+# assertions follow the contract to its single source; that every card still
+# points at it is enforced by bats/test-instruction-closure.bats.
+assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'Do not call FSM transition/increment commands' \
-  "implementer cannot advance FSM"
+  "dispatched agents cannot advance FSM"
 assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'the controller normally owns commits after validating agent output.' \
   "agent protocol assigns orchestrated commits to controller"
-assert_instruction "$PLUGIN_DIR/agents/implementer.md" \
+assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'Do not detach long-running work with `nohup`, `disown`, `tail -f`' \
-  "implementer cannot orphan long-running work"
+  "dispatched agents cannot orphan long-running work"
 assert_instruction "$PLUGIN_DIR/agents/verifier.md" \
   'Review an immutable revision in an isolated worktree' \
   "verifier reviews immutable isolated revision"
