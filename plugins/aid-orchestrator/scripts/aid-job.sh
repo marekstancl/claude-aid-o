@@ -19,6 +19,10 @@
 #   watchdog  Queryable AUTO-liveness check: no live owned job + no progress for
 #             the interval => `resume_needed` (not a daemon).
 #   redgreen  Validate a paired baseline(fail)/fixed(pass) receipt set.
+#   fingerprint  Read-only: echo the command fingerprint (sha256 over NUL-joined
+#             argv) this supervisor would record for `-- <cmd...>`. Exposed so a
+#             caller can decide whether an existing job dir belongs to the SAME
+#             command without re-implementing the computation.
 #   __wrap    INTERNAL — the supervised wrapper process. Not a public command.
 #
 # Design invariants:
@@ -133,6 +137,10 @@ _atomic_write() {
 
 _need() { command -v "$1" >/dev/null 2>&1 || _die "required tool not found: $1" 2; }
 
+# Command fingerprint: sha256 over NUL-joined argv. THE definition — `run`
+# records it, `fingerprint` exposes it, and no caller may compute its own.
+_command_fingerprint() { printf '%s\0' "$@" | sha256sum | cut -d' ' -f1; }
+
 # ── run ──────────────────────────────────────────────────────────────────────
 cmd_run() {
   local jobs_dir="" job_id="" label="" owner="" repo=""
@@ -181,7 +189,7 @@ cmd_run() {
 
   # Command fingerprint: sha256 over NUL-joined argv (never re-executed from record).
   local fingerprint cmd_json
-  fingerprint="$(printf '%s\0' "${command[@]}" | sha256sum | cut -d' ' -f1)"
+  fingerprint="$(_command_fingerprint "${command[@]}")"
   cmd_json="$(_argv_to_json "${command[@]}")"
 
   local rev head_sha tree_hash
@@ -721,6 +729,24 @@ cmd_redgreen() {
   exit 5
 }
 
+# ── fingerprint ──────────────────────────────────────────────────────────────
+# Read-only. Echoes the command fingerprint `run` would record for the same
+# argv. Touches no filesystem state and starts no process. Exists so a caller
+# that needs to ask "does this existing job dir belong to THIS command?" reads
+# the answer from the one implementation instead of copying the formula.
+cmd_fingerprint() {
+  local -a command=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --) shift; command=("$@"); break;;
+      *) _die "fingerprint: unknown arg '$1' (usage: fingerprint -- <cmd...>)" 1;;
+    esac
+  done
+  [[ ${#command[@]} -gt 0 ]] || _die "fingerprint: command required after --" 1
+  _need sha256sum
+  _command_fingerprint "${command[@]}"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 main() {
   local sub="${1:-}"; shift || true
@@ -731,11 +757,12 @@ main() {
     cancel)   cmd_cancel "$@";;
     watchdog) cmd_watchdog "$@";;
     redgreen) cmd_redgreen "$@";;
+    fingerprint) cmd_fingerprint "$@";;
     __wrap)   cmd_wrap "$@";;
     ""|-h|--help|help)
-      sed -n '3,45p' "$SELF" | sed 's/^# \{0,1\}//'
+      sed -n '3,49p' "$SELF" | sed 's/^# \{0,1\}//'
       exit 0;;
-    *) _die "unknown subcommand: $sub (run|status|collect|cancel|watchdog|redgreen)" 1;;
+    *) _die "unknown subcommand: $sub (run|status|collect|cancel|watchdog|redgreen|fingerprint)" 1;;
   esac
 }
 main "$@"

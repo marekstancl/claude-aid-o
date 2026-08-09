@@ -66,6 +66,8 @@ source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
 source "${SCRIPT_DIR}/lib/aid-test-scheduler-report.sh"
 # shellcheck source=lib/aid-run-gates-report.sh
 source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
+# shellcheck source=lib/aid-gate-row.sh
+source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
 
@@ -174,6 +176,297 @@ run_gate() {
   [[ "$log_file" != "/dev/null" ]] && echo "$json" >> "$log_file"
 
   [[ $exit_code -eq 0 ]] && return 0 || return 1
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 2 — the background gate path.
+#
+# A gate declaring `run_mode: background` (Step 1's field) does NOT run under a
+# bare `timeout` in this shell. It runs through aid-job.sh, which already owns
+# every piece this runner would otherwise have to re-implement: a session/
+# process-group of its own (so a cancelled gate leaves no surviving child), a
+# PID-reuse-safe liveness check, a hard deadline timer, and a terminal result
+# bound to the HEAD/tree it started from. NOTHING here spawns, supervises or
+# reaps a process itself — the registry's no-second-supervisor grep guard stays
+# green by construction.
+#
+# The semantics are supervised-resumable-SYNCHRONOUS: the runner polls the job
+# to completion inside its own invocation. Nothing is fire-and-return, there is
+# no daemon and no cron. What background buys is not concurrency — it is that a
+# runner killed mid-gate leaves a job that is still alive and still recording,
+# so the next invocation re-attaches by command fingerprint and collects the
+# result instead of paying for the whole suite a second time.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Poll cadence, heartbeat cadence, and the grace period added to a gate's own
+# timeout before the runner stops believing the job's deadline timer. The
+# defaults are the specified 5 s / 60 s / 30 s; the env vars exist so a test can
+# exercise a full poll-and-heartbeat cycle in seconds instead of minutes.
+AID_GATE_POLL_INTERVAL_SEC="${AID_GATE_POLL_INTERVAL_SEC:-5}"
+AID_GATE_HEARTBEAT_SEC="${AID_GATE_HEARTBEAT_SEC:-60}"
+AID_GATE_DEADLINE_GRACE_SEC="${AID_GATE_DEADLINE_GRACE_SEC:-30}"
+
+# resolve_run_mode <execution_yaml> <gate_name>
+#   Step 1's field, read here for the first time. Absent/null → "foreground",
+#   which is what makes every pre-P076 consumer config behave identically.
+resolve_run_mode() {
+  local file="$1" gate="$2"
+  yq ".gates.\"${gate}\".run_mode // \"foreground\"" "$file"
+}
+
+# validate_all_run_modes <execution_yaml>
+#   Fail-loud sweep over EVERY defined gate, run BEFORE any gate command is
+#   spawned — exactly like the gate-profile validation above it. A typo
+#   (`backgroud`) must never degrade silently to the default: a background
+#   declaration is a contract, and a run that quietly ignored it would produce
+#   an unowned gate with no job record while reporting success.
+validate_all_run_modes() {
+  local file="$1" gate mode
+  while IFS= read -r gate; do
+    [[ -z "$gate" ]] && continue
+    mode="$(resolve_run_mode "$file" "$gate")"
+    case "$mode" in
+      foreground|background) ;;
+      *)
+        echo "ERROR: aid-run-gates.sh: gate '${gate}' has invalid run_mode: '${mode}' (accepted values: foreground, background)" >&2
+        return 1
+        ;;
+    esac
+  done < <(yq '.gates | keys | .[]' "$file")
+  return 0
+}
+
+# _gate_expect_p95_seconds <gate_name>
+#   The gate's runtime-baseline p95 in SECONDS for aid-job.sh's --expect-p95,
+#   but only once the baseline holds >= 3 non-censored samples (the same
+#   "enough data to quote" threshold gate_baseline_recommend_timeout uses).
+#   Echoes nothing for a young gate, so the flag is simply omitted and the job
+#   record legitimately lacks the field.
+_gate_expect_p95_seconds() {
+  local gate_name="$1" bj p95 nc
+  bj="$(gate_baseline_report_json "$gate_name" 2>/dev/null || true)"
+  [[ -z "$bj" || "$bj" == "null" ]] && return 0
+  p95="$(jq -r '.p95_ms // "null"' <<<"$bj" 2>/dev/null || echo null)"
+  nc="$(jq -r '.non_censored_samples_count // 0' <<<"$bj" 2>/dev/null || echo 0)"
+  [[ "$p95" =~ ^[0-9]+$ ]] || return 0
+  [[ "$nc" =~ ^[0-9]+$ ]] || return 0
+  if (( nc < 3 )); then return 0; fi
+  printf '%s' "$(( (p95 + 999) / 1000 ))"
+  return 0
+}
+
+# _bg_fail_row <gate_name> <reason> <message> [job_id]
+#   The gate row for a background gate that never got a supervised job at all.
+#   Deliberately a plain `fail` in the existing vocabulary — the reason field
+#   says WHY, and no consumer needs a new result enum to handle it.
+_bg_fail_row() {
+  local gate_name="$1" reason="$2" message="$3" job_id="${4:-}"
+  jq -nc --arg g "$gate_name" --arg r "$reason" --arg o "$message" \
+        --arg jid "$job_id" \
+    '{gate:$g, result:"fail", exit_code:1, duration_ms:0, output:$o,
+      reason:$r, job_id:(if $jid == "" then null else $jid end),
+      job_state:"none"}'
+}
+
+# run_background_gate <gate_name> <resolved_cmd> <timeout_s> <attempt>
+#                     <jobs_dir> <timeline_file> <repo>
+#   Drop-in replacement for run_gate() on a background gate: emits ONE gate-row
+#   JSON object on stdout with the same shape every other row has (plus job_id
+#   and job_state), returns 0 iff the gate passed.
+#
+#   Branch outcomes, exhaustively:
+#     • a job dir for THIS attempt exists, same fingerprint, same start HEAD
+#         – still live      → re-attach and poll
+#         – already terminal → `collect` idempotently; the suite NEVER re-runs
+#     • a job dir exists but the fingerprint or the start HEAD moved
+#                           → cancel it, ARCHIVE the dir to `.superseded-<epoch>`
+#                             (aid-job.sh run refuses an existing dir, so the
+#                             deterministic id has to be freed), start fresh
+#     • no job dir          → start fresh
+#
+#   The id is ALWAYS the deterministic `<gate>-attempt-<N>`: that keeps the jobs
+#   root FLAT (`jobs/<gate>-attempt-N/`), which is the only topology the
+#   supervisor's watchdog can scan (it reads immediate children only), and it
+#   keeps each retry attempt a distinct job — so a failed terminal job is never
+#   re-attached as the NEXT attempt's result.
+run_background_gate() {
+  local gate_name="$1" command="$2" timeout_s="$3" attempt="$4" \
+        jobs_dir="$5" timeline_file="$6" repo="$7"
+
+  local job_sh="${SCRIPT_DIR}/aid-job.sh"
+  if [[ ! -f "$job_sh" ]]; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' declares run_mode: background but the supervisor is unavailable at ${job_sh} — refusing to fall back to the unowned foreground path" >&2
+    _bg_fail_row "$gate_name" "job_supervisor_unavailable" "aid-job.sh not found at ${job_sh}"
+    return 1
+  fi
+
+  mkdir -p "$jobs_dir" 2>/dev/null || true
+  local job_id="${gate_name}-attempt-${attempt}"
+  local job_dir="${jobs_dir}/${job_id}"
+
+  # The EXACT argv the supervisor will run — and therefore the exact argv the
+  # fingerprint has to cover. Computed by aid-job.sh itself: one definition of
+  # the sha256-over-NUL-joined-argv formula, never a copy of it here.
+  local -a job_argv=(bash -c "$command")
+  # stdout and stderr captured SEPARATELY via a temp file — an assignment made
+  # inside a command substitution happens in a subshell and would never reach
+  # this scope.
+  local fp="" fp_err="" fp_rc=0 fp_errfile
+  fp_errfile="$(mktemp)"
+  fp="$(bash "$job_sh" fingerprint -- "${job_argv[@]}" 2>"$fp_errfile")" || fp_rc=$?
+  fp_err="$(cat "$fp_errfile" 2>/dev/null || true)"
+  rm -f "$fp_errfile"
+  if (( fp_rc != 0 )) || [[ -z "$fp" ]]; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — aid-job.sh fingerprint failed (exit ${fp_rc}): ${fp_err}" >&2
+    _bg_fail_row "$gate_name" "job_fingerprint_failed" "${fp_err}" "$job_id"
+    return 1
+  fi
+
+  local reattach=0
+  if [[ -d "$job_dir" && -f "$job_dir/job.json" ]]; then
+    local rec_fp rec_head cur_head drift_reason=""
+    rec_fp="$(jq -r '.command_fingerprint // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
+    rec_head="$(jq -r '.start_head // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
+    cur_head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
+    if [[ "$rec_fp" != "$fp" ]]; then
+      drift_reason="command_fingerprint_mismatch"
+    elif [[ -n "$cur_head" && -n "$rec_head" && "$rec_head" != "none" && "$rec_head" != "$cur_head" ]]; then
+      # Same command, but the tree moved since the job started. Re-attaching
+      # would answer a question about a revision nobody is asking about any
+      # more — the same judgement `collect --require-current` makes.
+      drift_reason="start_head_moved"
+    fi
+    if [[ -n "$drift_reason" ]]; then
+      local sup_ts sup_dir sup_log
+      sup_ts="$(date -u +%s)"
+      sup_dir="${job_dir}.superseded-${sup_ts}"
+      sup_log="${jobs_dir}/${job_id}.superseded-${sup_ts}.log"
+      {
+        echo "aid-run-gates.sh: gate '${gate_name}' job '${job_id}' superseded (${drift_reason})"
+        echo "  recorded fingerprint: ${rec_fp}"
+        echo "  current fingerprint:  ${fp}"
+        echo "  recorded start_head:  ${rec_head}"
+        echo "  current HEAD:         ${cur_head}"
+        echo "-- cancel --"
+        bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" 2>&1 || true
+        echo "-- archive to ${sup_dir} --"
+        mv "$job_dir" "$sup_dir" 2>&1 || true
+      } >"$sup_log" 2>&1 || true
+      log_event "$timeline_file" "gate_job_superseded" gate="$gate_name" \
+        job_id="$job_id" reason="$drift_reason" archived_to="$sup_dir" log="$sup_log"
+      # If the archive did not happen the id is still occupied; `run` below
+      # fails loudly rather than pretending a stale job is this attempt.
+    else
+      reattach=1
+    fi
+  fi
+
+  if (( reattach )); then
+    local pre_state
+    pre_state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo unknown)"
+    log_event "$timeline_file" "gate_job_reattached" gate="$gate_name" \
+      job_id="$job_id" state="$pre_state" attempt="$attempt"
+  else
+    local -a run_args=(run --jobs-dir "$jobs_dir" --id "$job_id"
+                       --label "$gate_name" --deadline "$timeout_s")
+    local p95_sec
+    p95_sec="$(_gate_expect_p95_seconds "$gate_name")"
+    [[ -n "$p95_sec" ]] && run_args+=(--expect-p95 "$p95_sec")
+    run_args+=(-- "${job_argv[@]}")
+
+    local start_err start_rc=0
+    start_err="$(bash "$job_sh" "${run_args[@]}" 2>&1 >/dev/null)" || start_rc=$?
+    if (( start_rc != 0 )); then
+      # A background declaration is a contract. The supervisor's own stderr is
+      # surfaced verbatim; there is deliberately NO fallback to run_gate().
+      echo "ERROR: aid-run-gates.sh: gate '${gate_name}' run_mode: background — aid-job.sh run failed (exit ${start_rc}): ${start_err}" >&2
+      _bg_fail_row "$gate_name" "job_start_failed" "aid-job.sh run exit ${start_rc}: ${start_err}" "$job_id"
+      return 1
+    fi
+    log_event "$timeline_file" "gate_job_started" gate="$gate_name" \
+      job_id="$job_id" attempt="$attempt" deadline_sec="$timeout_s" \
+      jobs_dir="$jobs_dir"
+  fi
+
+  # ── poll to completion, inside THIS invocation ────────────────────────────
+  local poll_start=$SECONDS last_heartbeat=$SECONDS state=""
+  local grace_budget=$(( timeout_s + AID_GATE_DEADLINE_GRACE_SEC ))
+  while true; do
+    state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo unknown)"
+    case "$state" in
+      terminal_pass|terminal_fail|timed_out|cancelled) break ;;
+      lost)
+        # The owned process vanished without a terminal record. That proves no
+        # outcome, so it is never a pass and never an ordinary command failure.
+        break
+        ;;
+    esac
+
+    local elapsed=$(( SECONDS - poll_start ))
+    # The deadline is the JOB's, not this invocation's: a re-attached job that
+    # has already been running for an hour must not be handed a fresh timeout
+    # window. Measured from the job's own started_epoch when it is readable,
+    # falling back to this poll loop's elapsed time.
+    local job_started job_elapsed="$elapsed"
+    job_started="$(jq -r '.started_epoch // empty' "$job_dir/job.json" 2>/dev/null || true)"
+    if [[ "$job_started" =~ ^[0-9]+$ ]]; then
+      job_elapsed=$(( $(date -u +%s) - job_started ))
+    fi
+    if (( timeout_s > 0 && job_elapsed > grace_budget )); then
+      # The job's OWN deadline timer is authoritative for killing. Being this
+      # far past due with no terminal result means that timer did not land, so
+      # the runner takes over: cancel (group-owned — no child survives) and
+      # read whatever terminal record that produced.
+      log_event "$timeline_file" "gate_job_deadline_exceeded" gate="$gate_name" \
+        job_id="$job_id" elapsed_sec="$job_elapsed" poll_elapsed_sec="$elapsed" \
+        deadline_sec="$timeout_s" grace_sec="$AID_GATE_DEADLINE_GRACE_SEC"
+      bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || true
+      state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo lost)"
+      break
+    fi
+
+    if (( SECONDS - last_heartbeat >= AID_GATE_HEARTBEAT_SEC )); then
+      last_heartbeat=$SECONDS
+      # The progress signal a stall consumer reads: a long gate that is still
+      # polling is WORKING, not hung.
+      log_event "$timeline_file" "gate_job_heartbeat" gate="$gate_name" \
+        job_id="$job_id" state="$state" elapsed_sec="$elapsed"
+    fi
+
+    sleep "$AID_GATE_POLL_INTERVAL_SEC"
+  done
+
+  # `collect` is the idempotent terminal read — it NEVER relaunches, which is
+  # what makes a crash cost zero re-execution: a job that finished while nobody
+  # was watching is simply collected.
+  bash "$job_sh" collect --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || true
+
+  local row row_rc=0
+  row="$(gate_row_from_job "$gate_name" "$job_dir" "$job_id" "$state")" || row_rc=$?
+  printf '%s\n' "$row"
+  return "$row_rc"
+}
+
+# _gate_row_checkpoint <rows_dir> <gate_name> <row_json>
+#   Durable incremental checkpoint (P076 Step 2). As each gate COMPLETES, its
+#   row is written beside the run's evidence with an atomic tmp+mv. This is
+#   what a rerun after a crash assembles from — and what Step 5's resume writes
+#   into. Never brings the evidence directory into being (the same discipline
+#   the execution ledger follows): a gate run must not dirty a working tree.
+_gate_row_checkpoint() {
+  local rows_dir="$1" gate_name="$2" row_json="$3"
+  [[ -n "$rows_dir" ]] || return 0
+  # The gate name becomes a filename — never let it become a path.
+  case "$gate_name" in */*|*..*|"") return 0 ;; esac
+  mkdir -p "$rows_dir" 2>/dev/null || return 0
+  local dest="${rows_dir}/${gate_name}.json" tmp
+  tmp="$(mktemp "${dest}.XXXXXX" 2>/dev/null)" || return 0
+  if printf '%s\n' "$row_json" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$dest" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  else
+    rm -f "$tmp" 2>/dev/null
+  fi
+  return 0
 }
 
 # Verify yq is the mikefarah Go-based variant.
@@ -368,6 +661,12 @@ run_all_gates() {
 
   require_yq_mikefarah
 
+  # ─── run_mode validation (P076 Step 2) ─────────────────────────────────
+  # Swept over EVERY defined gate here, before a single gate command is
+  # spawned — a typo on the third gate must not be discovered after the first
+  # two have already run.
+  validate_all_run_modes "$execution_yaml" || exit 1
+
   # One-time-per-clone lazy bootstrap (P063 Step 2) — see
   # aid_gate_baseline_ensure_gitignored above. Called once per run (not per
   # gate/attempt): idempotent, and there's nothing gate-specific about it.
@@ -508,6 +807,17 @@ run_all_gates() {
   local escalation_triggered=false
   local escalation_reason=""
 
+  # ─── Background job + row-checkpoint locations (P076 Step 2) ─────────────
+  # Both live under THIS run's evidence directory. Resolved once, and only when
+  # that directory already exists — the gate runner writes into evidence, it
+  # never invents evidence directories (same rule the execution ledger follows).
+  local _evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local _jobs_dir="" _rows_dir=""
+  if [[ -d "$_evidence_dir" ]]; then
+    _jobs_dir="${_evidence_dir}/jobs"
+    _rows_dir="${_evidence_dir}/gates_rows"
+  fi
+
   # ─── Execution ledger (P072 Step 26) ─────────────────────────────────────
   # The gate runner owns the ledger's LIFECYCLE only; the dispatch points own
   # its content. It cannot see run units for a fan-out command — `run_gate`
@@ -583,12 +893,15 @@ run_all_gates() {
       continue
     fi
 
-    local cmd required max_retries timeout_s pass_criteria
+    local cmd required max_retries timeout_s pass_criteria run_mode
     cmd=$(yq ".gates.\"${gate_name}\".command" "$execution_yaml")
     required=$(yq ".gates.\"${gate_name}\".required // false" "$execution_yaml")
     max_retries=$(yq ".gates.\"${gate_name}\".max_retries // 1" "$execution_yaml")
     timeout_s=$(yq ".gates.\"${gate_name}\".timeout_seconds // 60" "$execution_yaml")
     pass_criteria=$(yq ".gates.\"${gate_name}\".pass_criteria // \"\"" "$execution_yaml")
+    # P076 Step 2 — already validated for every gate above; re-read here as the
+    # per-gate dispatch input. Absent → "foreground" → the untouched code path.
+    run_mode=$(resolve_run_mode "$execution_yaml" "$gate_name")
 
     if [[ -z "$cmd" || "$cmd" == "null" ]]; then
       # A null-command gate must leave an explicit skip row — never a bare
@@ -669,6 +982,18 @@ run_all_gates() {
       gate_exit=0
       if $use_scheduled_dispatch; then
         gate_result=$(run_scheduled_targeted_tests "$gate_name" "$rollout_effective_mode" "$base_commit_resolved" "$plugin_path_resolved" "$epic_id" "$run_id" "$_plugin_project_root" "$timeout_s" "$attempt") || gate_exit=$?
+      elif [[ "$run_mode" == "background" ]]; then
+        # P076 Step 2 — delegated, group-owned, re-attachable. Each RETRY gets
+        # its own deterministic job id (`<gate>-attempt-<N>`), so the existing
+        # retry budget and code path are untouched: this branch declares how an
+        # attempt runs, it never rewires how many attempts there are.
+        if [[ -z "$_jobs_dir" ]]; then
+          echo "ERROR: aid-run-gates.sh: gate '${gate_name}' declares run_mode: background but there is no evidence directory at '${_evidence_dir}' to hold its job record — refusing to run it unowned" >&2
+          gate_result=$(_bg_fail_row "$gate_name" "no_jobs_dir" "no evidence directory at ${_evidence_dir}")
+          gate_exit=1
+        else
+          gate_result=$(run_background_gate "$gate_name" "$resolved_cmd" "$timeout_s" "$attempt" "$_jobs_dir" "$timeline_file" "$_plugin_project_root") || gate_exit=$?
+        fi
       else
         gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       fi
@@ -819,8 +1144,13 @@ run_all_gates() {
     [[ "$runtime_baseline_nc" =~ ^[0-9]+$ ]] && (( runtime_baseline_nc >= 5 )) && baseline_summary_gates+=("$gate_name")
     $first || gates_json+=","
     first=false
-    gates_json+="\"${gate_name}\":$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" ". + {\"attempts\":${attempt}, \"runtime_baseline\": \$rb}")"
+    local merged_row
+    merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" ". + {\"attempts\":${attempt}, \"runtime_baseline\": \$rb}")
+    gates_json+="\"${gate_name}\":${merged_row}"
     processed=$((processed+1))
+
+    # P076 Step 2 — durable incremental checkpoint of the COMPLETED row.
+    _gate_row_checkpoint "$_rows_dir" "$gate_name" "$merged_row"
 
     # ─── command_log entry (P032 Step 3 provenance) ──────────────────
     local exit_code dur_ms
@@ -839,6 +1169,41 @@ run_all_gates() {
     fi
   done <<< "$gate_names"
   unset AID_CURRENT_GATE_ID
+
+  # ─── restore checkpointed rows this invocation did not produce (P076 S2) ──
+  # The other half of the incremental checkpoint: the in-memory rows above are
+  # read exactly as before, AND any gate that already has a durable row file
+  # but produced no row in THIS invocation is restored from it, verbatim and
+  # authoritative. That is what a rerun after a crash assembles from — the
+  # finished suite is not re-executed to reproduce a row that already exists.
+  #
+  # Only DEFINED gates are restored: a row file for a gate that execution.yaml
+  # no longer declares is not this run's business, and counting it would break
+  # the defined==processed assert below. The membership test is anchored by the
+  # opening quote (`"name":`), so gate `a` never matches inside gate `ba`.
+  if [[ -n "$_rows_dir" && -d "$_rows_dir" ]]; then
+    local _rf _rg _rrow
+    for _rf in "$_rows_dir"/*.json; do
+      [[ -f "$_rf" ]] || continue
+      _rg="$(basename "$_rf" .json)"
+      [[ "$gates_json" == *"\"${_rg}\":"* ]] && continue
+      grep -qxF "$_rg" <<< "$gate_names" || continue
+      # The lost-gate fault injection simulates a row that was never produced;
+      # restoring one from an earlier run would defeat the very assert it feeds.
+      [[ -n "${AID_TEST_DROP_GATE:-}" && "$_rg" == "${AID_TEST_DROP_GATE}" ]] && continue
+      _rrow="$(jq -c '.' "$_rf" 2>/dev/null)" || continue
+      [[ -z "$_rrow" || "$_rrow" == "null" ]] && continue
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"${_rg}\":${_rrow}"
+      processed=$((processed+1))
+      log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf"
+      if [[ "$(jq -r '.result // ""' <<<"$_rrow")" == "fail" ]] \
+         && [[ "$(yq ".gates.\"${_rg}\".required // false" "$execution_yaml")" == "true" ]]; then
+        overall="fail"
+      fi
+    done
+  fi
 
   # ─── Close the ledger, and evaluate it ───────────────────────────────────
   # `close` is where the duplicate check actually runs. Opening a ledger and
