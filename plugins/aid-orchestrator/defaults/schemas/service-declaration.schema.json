@@ -22,9 +22,23 @@
       ],
       "properties": {
         "start_cmd": {
-          "description": "The command that starts the service. It MUST remain the foreground process of its job — no `&`, no `nohup`, no self-daemonising fork. The supervisor owns the process group; a command that backgrounds itself hands back a pid that owns nothing, and the run loses the ability to stop what it started.",
+          "description": "The command that starts the service. It MUST remain the foreground process of its job — no `&`, no `nohup`, no self-daemonising fork. The supervisor owns the process group; a command that backgrounds itself hands back a pid that owns nothing, and the run loses the ability to stop what it started. That MUST is now partly checked rather than merely stated, and the limit of the check is stated with it: the two `not`/`pattern` clauses below are a SYNTACTIC lint that refuses the obvious backgrounding forms — a trailing `&` (a trailing `&&` is not one), and `nohup`, `disown` or `setsid` used as a command word. It cannot see a command that daemonises INSIDE itself (`npm start` invoking a wrapper that forks and exits, a `docker run -d` hidden behind a script). That residual case is not left uncovered, it is simply not coverable here: it is caught at runtime, by the rule that a TERMINAL job whose probe still reports healthy is a daemonised start_cmd. Treat a clean validation as 'no obvious backgrounding syntax', never as 'proven foreground'.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "allOf": [
+            {
+              "$comment": "No trailing `&`. `(^|[^&])&\\s*$` deliberately lets a trailing `&&` through — that is a syntax error for the shell to reject, not a backgrounding form.",
+              "not": {
+                "pattern": "(^|[^&])&\\s*$"
+              }
+            },
+            {
+              "$comment": "No `nohup` / `disown` / `setsid` as a command word (start of string, or after whitespace, `;`, `&`, `|` or `(`).",
+              "not": {
+                "pattern": "(^|[\\s;&|(])(nohup|disown|setsid)\\s"
+              }
+            }
+          ]
         },
         "probe_cmd": {
           "description": "The health probe. Exit 0 means healthy; any other exit means not yet (or no longer) healthy. It is polled, so it must be cheap and side-effect free.",
@@ -58,9 +72,61 @@
           "default": false
         },
         "port_env": {
-          "description": "Name of the environment variable that carries the per-run allocated port. OPTIONAL, and its absence is the honestly-named shared-resource escape hatch: a service on a fixed external port (an existing shared database) declares no port_env and port allocation is skipped for it. Two services may never name the SAME port_env — one env var, one owner. That uniqueness constraint is not expressible in JSON Schema across sibling properties; it is enforced by _validate_services_config and covered by the shared fixture set.",
+          "description": "Name of the environment variable that carries the per-run allocated port. OPTIONAL, and its absence is the honestly-named shared-resource escape hatch: a service on a fixed external port (an existing shared database) declares no port_env and port allocation is skipped for it. Two services may never name the SAME port_env — one env var, one owner. That uniqueness constraint is not expressible in JSON Schema across sibling properties; it is enforced by _validate_services_config and covered by the shared fixture set. Beyond being a legal env var name, the name is DENIED if it is one the runner's own children depend on: this variable is exported into the environment of every service and gate command, so `port_env: PATH` would set PATH to a port number for the whole run, and `port_env: BASH_ENV` or `LD_PRELOAD` would point a code-loading hook at one. The denylist below is grouped by what the variable controls — command lookup, shell parsing and startup, interpreter/loader hooks, git's own exec hooks, and AID's runtime state (the `AID_` prefix). Matching is EXACT and CASE-SENSITIVE for the enumerated names, and case-sensitive PREFIX for the open-ended loader/function families (`LD_`, `DYLD_`, `BASH_FUNC_`, `AID_`). Case-sensitive because environment variables are: `Path` is not `PATH` and no loader, shell or interpreter honours it, so refusing the case variant would cost a false refusal and buy nothing. Prefix only where the family is genuinely open-ended and libc/shell-version dependent, so an enumeration would silently go stale.",
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "allOf": [
+            {
+              "$comment": "Exact, case-sensitive denials. Kept in the same order as the runtime denylist in _validate_services_config.",
+              "not": {
+                "enum": [
+                  "PATH",
+                  "CDPATH",
+                  "IFS",
+                  "PS4",
+                  "ENV",
+                  "BASH_ENV",
+                  "SHELLOPTS",
+                  "BASHOPTS",
+                  "SHELL",
+                  "HOME",
+                  "PWD",
+                  "OLDPWD",
+                  "TMPDIR",
+                  "TMP",
+                  "TEMP",
+                  "GLIBC_TUNABLES",
+                  "PYTHONPATH",
+                  "PYTHONHOME",
+                  "PYTHONSTARTUP",
+                  "PERL5LIB",
+                  "PERL5OPT",
+                  "NODE_OPTIONS",
+                  "NODE_PATH",
+                  "RUBYOPT",
+                  "RUBYLIB",
+                  "GEM_HOME",
+                  "GEM_PATH",
+                  "CLASSPATH",
+                  "JAVA_TOOL_OPTIONS",
+                  "_JAVA_OPTIONS",
+                  "GIT_DIR",
+                  "GIT_WORK_TREE",
+                  "GIT_INDEX_FILE",
+                  "GIT_SSH",
+                  "GIT_SSH_COMMAND",
+                  "GIT_EXTERNAL_DIFF",
+                  "GIT_PAGER"
+                ]
+              }
+            },
+            {
+              "$comment": "Case-sensitive prefix denials for the open-ended families: the dynamic loaders (LD_*, DYLD_*), bash's exported-function smuggling channel (BASH_FUNC_*) and AID's own runtime namespace (AID_*).",
+              "not": {
+                "pattern": "^(LD_|DYLD_|BASH_FUNC_|AID_)"
+              }
+            }
+          ]
         }
       }
     }

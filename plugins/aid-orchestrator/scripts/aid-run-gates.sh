@@ -287,20 +287,127 @@ _svc_err() {
   echo "ERROR: aid-run-gates.sh: services: service '${1}': ${2}" >&2
 }
 
+# _svc_denied_port_env <name>
+#   True when <name> is a variable the runner's own children depend on.
+#
+#   port_env names the variable carrying the per-run allocated port, and that
+#   variable is exported into the environment of every service and gate command.
+#   So the name is not merely cosmetic: `port_env: PATH` would set PATH to a port
+#   number for the whole run and no command would resolve a binary again;
+#   `BASH_ENV`, `LD_PRELOAD` or `NODE_OPTIONS` would point a code-loading hook at
+#   one. This is refused at declaration time, in the same sweep as every other
+#   shape rule, rather than at export time — the exporting step should inherit a
+#   name it can already trust.
+#
+#   Matching is EXACT and CASE-SENSITIVE for the enumerated names, and
+#   case-sensitive PREFIX for the open-ended families (LD_, DYLD_, BASH_FUNC_,
+#   AID_). Case-sensitive because environment variables are: `Path` is not `PATH`
+#   and nothing on the system honours it, so refusing the case variant would be a
+#   false refusal that buys no safety. Prefix only where the family is genuinely
+#   open-ended and libc/shell-version dependent (LD_PRELOAD, LD_AUDIT,
+#   LD_LIBRARY_PATH, …), so an enumeration would silently go stale.
+#
+#   MIRRORED BY: defaults/schemas/service-declaration.schema.json
+#   (port_env.allOf) — keep the two lists in the same order.
+_svc_denied_port_env() {
+  case "$1" in
+    # Open-ended families: dynamic loaders, bash's exported-function channel,
+    # and AID's own runtime namespace.
+    LD_*|DYLD_*|BASH_FUNC_*|AID_*) return 0 ;;
+    # Command lookup, shell parsing/startup, and the process's idea of where it is.
+    PATH|CDPATH|IFS|PS4|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|SHELL|HOME|PWD|OLDPWD|TMPDIR|TMP|TEMP|GLIBC_TUNABLES) return 0 ;;
+    # Interpreter hooks — each one changes what a child interpreter loads or runs.
+    PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|PERL5LIB|PERL5OPT|NODE_OPTIONS|NODE_PATH|RUBYOPT|RUBYLIB|GEM_HOME|GEM_PATH|CLASSPATH|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS) return 0 ;;
+    # git's own exec hooks and repository resolution — the runner shells out to git.
+    GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_SSH|GIT_SSH_COMMAND|GIT_EXTERNAL_DIFF|GIT_PAGER) return 0 ;;
+  esac
+  return 1
+}
+
+# _svc_backgrounding_form <start_cmd>
+#   Echoes the backgrounding form found in a start_cmd, or nothing.
+#
+#   start_cmd MUST remain the foreground process of its job: the supervisor owns
+#   the process group, and a command that backgrounds itself hands back a pid
+#   owning nothing — the one violation that produces an UNSTOPPABLE orphan.
+#
+#   HONEST LIMIT: this is a SYNTACTIC lint, not a proof. It catches the obvious
+#   forms — a trailing `&` (a trailing `&&` is not one, that is a shell syntax
+#   error to be reported by the shell), and `nohup`, `disown` or `setsid` used as
+#   a command word. It CANNOT see a command that daemonises inside itself (a
+#   wrapper script that forks and exits, a `docker run -d` behind an npm script).
+#   That case is deliberately not chased here: it is caught at runtime instead, by
+#   the rule that a TERMINAL job whose probe still reports healthy is exactly the
+#   daemonised-start_cmd violation. A clean result here means "no obvious
+#   backgrounding syntax", never "proven foreground".
+#
+#   MIRRORED BY: defaults/schemas/service-declaration.schema.json
+#   (start_cmd.allOf).
+_svc_backgrounding_form() {
+  local cmd="$1" trimmed
+  # Regexes held in variables: an unquoted ERE containing ';', '|' and '(' is
+  # fragile inline, and BASH_REMATCH still works through a variable.
+  local re_amp='(^|[^&])&$'
+  local re_word='(^|[[:space:];&|(])(nohup|disown|setsid)[[:space:]]'
+  trimmed="${cmd%"${cmd##*[![:space:]]}"}"
+  if [[ "$trimmed" =~ $re_amp ]]; then
+    echo "a trailing '&'"
+    return 0
+  fi
+  if [[ "$cmd" =~ $re_word ]]; then
+    echo "'${BASH_REMATCH[2]}'"
+    return 0
+  fi
+  return 1
+}
+
 # _validate_services_config <execution_yaml>
 #   Fail-loud sweep over every declared service, run at run_all entry BEFORE any
-#   service or gate action. An ABSENT (or empty) `services:` block returns 0
-#   immediately and touches nothing — that is the byte-identical path every
-#   pre-P076 project stays on.
+#   service or gate action.
+#
+#   Exit contract — three outcomes, not two:
+#     0  nothing to complain about. Either there is no `services:` block (or an
+#        empty one), in which case the function touches nothing and this is the
+#        byte-identical path every pre-P076 project stays on; or every declared
+#        service was inspected and is well-formed.
+#     1  a declaration was inspected and REFUSED — the message names the service
+#        and the field.
+#     2  the config could NOT be inspected (file missing, yq missing, yq could
+#        not parse the file). This is the fail-CLOSED outcome and it is
+#        deliberately not 0: "I could not look" must never read as "it is fine".
+#        run_all cannot reach it today — it guards with `[[ -f ]]` and
+#        require_yq_mikefarah before calling — but the function is a
+#        general-purpose primitive now, and a future second caller without those
+#        guards must inherit a refusal, not a silent skip.
+#   Every non-zero outcome is a refusal for callers that use `|| exit 1`.
 _validate_services_config() {
   local file="$1"
   local svc key tag val
   local -a env_names=() env_owners=()
 
-  [[ "$(yq 'has("services")' "$file" 2>/dev/null || echo false)" == "true" ]] || return 0
+  # ── fail-closed preflight: distinguish "nothing to validate" from "could not
+  # look at it". Both used to return 0; only the first one still does.
+  if [[ ! -f "$file" ]]; then
+    echo "ERROR: aid-run-gates.sh: services: cannot validate '${file}': file not found (refusing rather than assuming there are no services)" >&2
+    return 2
+  fi
+  if ! command -v yq >/dev/null 2>&1; then
+    echo "ERROR: aid-run-gates.sh: services: cannot validate '${file}': yq is not available (refusing rather than assuming there are no services)" >&2
+    return 2
+  fi
+
+  local has_services
+  if ! has_services="$(yq 'has("services")' "$file" 2>&1)"; then
+    echo "ERROR: aid-run-gates.sh: services: cannot parse '${file}': ${has_services}" >&2
+    return 2
+  fi
+  [[ "$has_services" == "true" ]] || return 0
 
   local root_tag
-  root_tag="$(yq '.services | tag' "$file" 2>/dev/null || echo '!!null')"
+  if ! root_tag="$(yq '.services | tag' "$file" 2>&1)"; then
+    echo "ERROR: aid-run-gates.sh: services: cannot read the services block of '${file}': ${root_tag}" >&2
+    return 2
+  fi
   case "$root_tag" in
     '!!null') return 0 ;;   # `services:` with no entries is the same as absent
     '!!map') ;;
@@ -309,6 +416,20 @@ _validate_services_config() {
       return 1
       ;;
   esac
+
+  # The sweep below reads service names line by line, so a name containing a
+  # NEWLINE would arrive as two names and be blamed on the wrong field ("api":
+  # declaration must be a map, found null). Catch it here, where the diagnosis is
+  # still true: if the key list produces more lines than there are keys, some name
+  # contains a newline. Fail-closed either way — this only replaces a misleading
+  # refusal with an accurate one.
+  local declared_keys key_lines
+  declared_keys="$(yq '.services | keys | length' "$file")"
+  key_lines="$(yq '.services | keys | .[]' "$file" | wc -l)"
+  if [[ "$key_lines" != "$declared_keys" ]]; then
+    echo "ERROR: aid-run-gates.sh: services: a service name contains a newline (${declared_keys} name(s) declared, ${key_lines} line(s) of text) — service names must match ^[a-z0-9][a-z0-9_-]*\$" >&2
+    return 1
+  fi
 
   while IFS= read -r svc; do
     [[ -z "$svc" ]] && continue
@@ -358,6 +479,14 @@ _validate_services_config() {
       fi
     done
 
+    # start_cmd stays in the FOREGROUND of its job. Syntactic lint only — see
+    # _svc_backgrounding_form for exactly what it does and does not catch.
+    local bgform
+    if bgform="$(_svc_backgrounding_form "$(SVC="$svc" yq '.services[strenv(SVC)].start_cmd' "$file")")"; then
+      _svc_err "$svc" "field 'start_cmd' must stay in the FOREGROUND of its job, but it contains ${bgform}: the supervisor owns the process group, and a command that backgrounds itself returns a pid owning nothing, so the run can no longer stop what it started. (This check is syntactic: it catches a trailing '&', 'nohup', 'disown' and 'setsid'; it cannot catch a command that daemonises internally, which is caught at runtime instead — a TERMINAL job whose probe still reports healthy.)"
+      return 1
+    fi
+
     # Positive integers.
     for key in startup_deadline_seconds max_lifetime_seconds; do
       [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
@@ -387,6 +516,10 @@ _validate_services_config() {
       val="$(SVC="$svc" yq '.services[strenv(SVC)].port_env' "$file")"
       if [[ "$tag" != '!!str' || ! "$val" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
         _svc_err "$svc" "field 'port_env' must be a valid environment variable name (^[A-Za-z_][A-Za-z0-9_]*\$)"
+        return 1
+      fi
+      if _svc_denied_port_env "$val"; then
+        _svc_err "$svc" "field 'port_env' must not name the reserved variable '${val}': it is exported into every service and gate command, and that variable controls how commands are found, parsed or loaded (or is AID's own runtime state) — setting it to a port number would break or hijack the whole run. Pick a service-specific name such as '$(printf '%s' "${svc^^}" | tr -c 'A-Z0-9_' '_')_PORT'."
         return 1
       fi
       local i

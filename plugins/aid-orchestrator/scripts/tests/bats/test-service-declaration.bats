@@ -30,6 +30,16 @@
 #   7. The REAL runner refuses a malformed services block before any gate
 #      command is spawned.
 #   8. The shipped template documents the block with ZERO active services.
+#   9. port_env may not name a variable the runner's own children depend on
+#      (PATH, LD_*, …) — refused by service, field and variable; the case
+#      variant is accepted, on purpose.
+#  10. start_cmd may not carry an obvious backgrounding form, and the refusal
+#      states the limit of that syntactic check.
+#  11. Fail-closed: "I could not look" (missing file, missing yq, unparsable)
+#      is exit 2 and is distinguishable from "there is nothing to validate"
+#      (exit 0, silent).
+#  12. A service name containing a newline is refused for BEING one, not blamed
+#      on some other field.
 
 setup() {
   export TZ=UTC
@@ -173,6 +183,75 @@ YAML
 services: "postgres"
 YAML
       ;;
+    denied_port_env_path) cat <<'YAML'
+services:
+  api:
+    start_cmd: "npm start"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+    port_env: PATH
+YAML
+      ;;
+    denied_port_env_ld) cat <<'YAML'
+services:
+  api:
+    start_cmd: "npm start"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+    port_env: LD_PRELOAD
+YAML
+      ;;
+    # The case variant is ACCEPTED, deliberately: env var names are
+    # case-sensitive, `Path` is not `PATH`, and nothing honours it — refusing it
+    # would be a false refusal. This row is what makes the denylist's
+    # case-sensitivity a tested decision instead of an accident.
+    allowed_port_env_case_variant) cat <<'YAML'
+services:
+  api:
+    start_cmd: "npm start"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+    port_env: Path
+YAML
+      ;;
+    background_start_cmd) cat <<'YAML'
+services:
+  api:
+    start_cmd: "npm start &"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+YAML
+      ;;
+    nohup_start_cmd) cat <<'YAML'
+services:
+  api:
+    start_cmd: "nohup npm start"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+YAML
+      ;;
+    # Over-match guard: `&&` is a chain, not a background.
+    chained_start_cmd) cat <<'YAML'
+services:
+  api:
+    start_cmd: "npm run build && npm start"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+YAML
+      ;;
+    # The row that actually pins the `(^|[^&])` half of the trailing-& rule: a
+    # command ENDING in `&&`. Both authorities accept it, deliberately — it is a
+    # shell syntax error for the shell to report, not a backgrounding form, and
+    # this lint refuses to mis-blame it as one. Without this row, loosening the
+    # rule to a bare `&$` would go unnoticed.
+    trailing_double_amp) cat <<'YAML'
+services:
+  api:
+    start_cmd: "npm start &&"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+YAML
+      ;;
     dup_port_env) cat <<'YAML'
 services:
   api:
@@ -212,6 +291,13 @@ deadline_zero	invalid	invalid	api|startup_deadline_seconds|integer >= 1
 deadline_not_int	invalid	invalid	api|startup_deadline_seconds|integer >= 1
 empty_start_cmd	invalid	invalid	api|start_cmd|non-empty string
 bad_port_env	invalid	invalid	api|port_env|environment variable name
+denied_port_env_path	invalid	invalid	api|port_env|PATH|reserved variable
+denied_port_env_ld	invalid	invalid	api|port_env|LD_PRELOAD|reserved variable
+allowed_port_env_case_variant	valid	valid
+background_start_cmd	invalid	invalid	api|start_cmd|FOREGROUND|trailing '&'
+nohup_start_cmd	invalid	invalid	api|start_cmd|FOREGROUND|nohup
+chained_start_cmd	valid	valid
+trailing_double_amp	valid	valid
 bad_service_name	invalid	invalid	Postgres Main|invalid service name
 not_a_map	invalid	invalid	must be a map
 dup_port_env	invalid	valid	api|worker|APP_PORT|one env var, one owner
@@ -274,7 +360,7 @@ PY
   done < <(svc_cases)
 
   # Vacuity guard: a table this loop never read would otherwise "pass".
-  [ "$n" -eq 14 ]
+  [ "$n" -eq 21 ]
 
   if [[ -n "$failures" ]]; then
     echo "bash validator disagreed with the shared fixture table:"
@@ -300,7 +386,7 @@ PY
       failures+="  ${name}: schema said ${got}, table says ${want} ($(cat "$WORK/schema-out.txt"))"$'\n'
   done < <(svc_cases)
 
-  [ "$n" -eq 14 ]
+  [ "$n" -eq 21 ]
 
   if [[ -n "$failures" ]]; then
     echo "JSON Schema disagreed with the shared fixture table:"
@@ -467,4 +553,135 @@ YAML
   [ "$status" -eq 0 ]
   run yq '.services | keys | length' "$WORK/example.yaml"
   [ "$output" -eq 1 ]
+}
+
+@test "case 9: port_env may not name a runtime-significant variable, and the case variant still may" {
+  # Exact, case-sensitive denial — the refusal names service, field and variable.
+  svc_fixture_yaml denied_port_env_path > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"service 'api'"* ]]
+  [[ "$output" == *"port_env"* ]]
+  [[ "$output" == *"PATH"* ]]
+
+  # Prefix denial — LD_PRELOAD is not enumerated anywhere, LD_ is.
+  svc_fixture_yaml denied_port_env_ld > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LD_PRELOAD"* ]]
+
+  # An unenumerated member of the same family is denied too — that is the whole
+  # reason the family is a prefix and not a list.
+  cat > "$WORK/exec.yaml" <<'YAML'
+services:
+  api:
+    start_cmd: "npm start"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+    port_env: LD_AUDIT
+YAML
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LD_AUDIT"* ]]
+
+  # And the case variant is ACCEPTED: `Path` is not `PATH`, nothing honours it,
+  # so refusing it would cost a false refusal and buy nothing.
+  svc_fixture_yaml allowed_port_env_case_variant > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -eq 0 ]
+
+  _have_jsonschema || skip "python3 + jsonschema unavailable (schema half only)"
+  svc_fixture_yaml denied_port_env_path > "$WORK/exec.yaml"
+  run run_schema_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  svc_fixture_yaml allowed_port_env_case_variant > "$WORK/exec.yaml"
+  run run_schema_validator "$WORK/exec.yaml"
+  [ "$status" -eq 0 ]
+}
+
+@test "case 10: start_cmd backgrounding is refused, and the refusal states what the check cannot see" {
+  svc_fixture_yaml background_start_cmd > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"service 'api'"* ]]
+  [[ "$output" == *"start_cmd"* ]]
+  [[ "$output" == *"FOREGROUND"* ]]
+  # Honesty clause: the message must not imply the check is complete.
+  [[ "$output" == *"syntactic"* ]]
+  [[ "$output" == *"daemonises internally"* ]]
+
+  svc_fixture_yaml nohup_start_cmd > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"nohup"* ]]
+
+  # setsid / disown are caught by the same word check.
+  local form
+  for form in "setsid npm start" "npm start; disown x"; do
+    cat > "$WORK/exec.yaml" <<YAML
+services:
+  api:
+    start_cmd: "$form"
+    probe_cmd: "true"
+    startup_deadline_seconds: 30
+YAML
+    run run_bash_validator "$WORK/exec.yaml"
+    [ "$status" -ne 0 ]
+  done
+
+  # Over-match guard: `&&` is a chain, not a background.
+  svc_fixture_yaml chained_start_cmd > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -eq 0 ]
+
+  # And the documented limit is documented where a reader will meet it: the
+  # schema's own start_cmd description says what the lint cannot see.
+  run jq -r '.["$defs"].service.properties.start_cmd.description' "$SCHEMA"
+  [[ "$output" == *"SYNTACTIC"* ]]
+  [[ "$output" == *"daemonises INSIDE itself"* ]]
+  [[ "$output" == *"TERMINAL job whose probe still reports healthy"* ]]
+}
+
+@test "case 11: fail-closed — 'could not look' is exit 2, 'nothing to validate' is a silent exit 0" {
+  # Nothing to validate: exit 0, no output, no work.
+  printf 'gates: {}\n' > "$WORK/nosvc.yaml"
+  run run_bash_validator "$WORK/nosvc.yaml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # An empty services block is still "nothing to validate".
+  printf 'services:\n' > "$WORK/emptysvc.yaml"
+  run run_bash_validator "$WORK/emptysvc.yaml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # Could not look, three ways — each one is 2, none of them is 0.
+  run run_bash_validator "$WORK/does-not-exist.yaml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"file not found"* ]]
+
+  printf 'services:\n  api:\n   - [unbalanced\n' > "$WORK/broken.yaml"
+  run run_bash_validator "$WORK/broken.yaml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"cannot parse"* ]]
+
+  # yq unavailable: sourced with a normal PATH, then invoked without one.
+  run bash -c '
+    set -euo pipefail
+    source "$1" >/dev/null 2>&1 || true
+    PATH=/nonexistent-aid-path
+    _validate_services_config "$2"
+  ' _ "$RUN_GATES" "$WORK/nosvc.yaml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"yq is not available"* ]]
+}
+
+@test "case 12: a service name containing a newline is refused for being one" {
+  printf 'services:\n  "api\\nevil":\n    start_cmd: "true"\n    probe_cmd: "true"\n    startup_deadline_seconds: 30\n' \
+    > "$WORK/exec.yaml"
+  run run_bash_validator "$WORK/exec.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"service name contains a newline"* ]]
+  # The old, misleading diagnosis must be gone.
+  [[ "$output" != *"declaration must be a map"* ]]
 }
