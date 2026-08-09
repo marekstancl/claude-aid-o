@@ -62,20 +62,26 @@
 #   says. Fails CLOSED, always.
 #
 #   COMMANDS — stop_cmd, probe_cmd. The DECLARATION is authoritative whenever
-#   one can be read: the recorded copy is reconciled against execution.yaml and
-#   the declaration wins, with any divergence logged. The recorded copy is used
-#   ONLY when no declaration is available for that service, and that case is
-#   logged as unreconciled.
+#   one can be read, and "readable" is decided per FILE, not per service:
+#     • the config declares the service → the DECLARED command runs, divergence
+#       from the recorded copy logged;
+#     • the config is READABLE and does not declare the service → the recorded
+#       command is REFUSED and nothing is executed for it. A readable config is
+#       an authority saying this service does not exist, so the registry cannot
+#       introduce one. The entry's JOB is still cancelled by id — that is what
+#       actually kills the process — so the refusal costs the courtesy command
+#       and never leaves a live job running;
+#     • no config readable at all (it moved, or the caller passed none) → the
+#       recorded copy runs, logged as UNRECONCILED.
 #
-#   THE HONEST LIMIT, named rather than implied: in that last case — no config
-#   readable anywhere — the registry is the only surviving record of how to stop
-#   the service, and this file chooses stopping the service over refusing to
-#   act. Anything able to write into a run's evidence directory is already
-#   inside the trust boundary of that run; what this model removes is the ONE
-#   thing that was not, namely reaching OUT of the evidence directory to a
-#   different run's jobs. If a caller wants the strict reading, it passes its
-#   execution.yaml to `aid_service_down_all` — with a declaration present the
-#   registry has no say over what executes at all.
+#   THE HONEST LIMIT, named rather than implied: in that last case the registry
+#   is the only surviving record of how to stop the service, and this file
+#   chooses stopping the service over refusing to act. That is the one branch
+#   in which a file inside the evidence directory still chooses a command, so
+#   EVERY caller in this repo passes its execution.yaml — `aid-run-gates.sh` on
+#   entry sweep and release, and `aid-fsm.sh` on both `resume` and
+#   `done-advance`. What this model removes unconditionally is reaching OUT of
+#   the evidence directory to a different run's jobs.
 #
 # ── RESOURCE EVIDENCE (observe only) ────────────────────────────────────────
 # Reaching `healthy` also appends one line to
@@ -470,6 +476,22 @@ _aid_svc_reconcile_cmd() {
       _aid_svc_log "service ${name}: the registry's ${key} differs from the one declared in ${yaml} — the DECLARATION wins (the registry records what this run allocated, it does not choose what executes)"
     fi
     printf '%s' "$declared"
+    return 0
+  fi
+  # The authority IS readable and does not name this service. Then "no
+  # declaration available" is false: what we have is a declaration that says
+  # this service does not exist, and honouring the registry's recorded command
+  # here would let a file inside the evidence directory introduce a service the
+  # config never had — a name the caller cannot have reviewed, carrying a
+  # command the caller never wrote. REFUSED, and said out loud. The job is still
+  # cancelled by id (that is how the process actually dies; the recorded
+  # `stop_cmd` is a courtesy on top of it), and the entry is still marked
+  # stopped, so the refusal costs a courtesy and never leaves a live job behind.
+  if [[ -n "$yaml" && -r "$yaml" ]] && command -v yq >/dev/null 2>&1; then
+    if [[ -n "$recorded" && -z "$quiet" ]]; then
+      _aid_svc_log "service ${name}: ${yaml} is readable and does NOT declare this service — REFUSING to run the ${key} recorded in the registry (the registry records what a run allocated, it never introduces a service or chooses what executes). If this service is real, declare it; the recorded value is: ${recorded}"
+    fi
+    printf '%s' ""
     return 0
   fi
   if [[ -n "$recorded" && -z "$quiet" ]]; then

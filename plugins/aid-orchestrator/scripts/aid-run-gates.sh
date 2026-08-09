@@ -677,6 +677,129 @@ _svc_stale_state_present() {
   return 1
 }
 
+# ─── WHO OWNS THIS RUN'S SERVICES (P076 Step 10 fix) ────────────────────────
+# `_svc_stale_state_present` answers "is there service state that is not
+# stopped". That is NOT the question the entry sweep needs, and the difference
+# is destructive: a run that is HEALTHY and mid-gates looks exactly like a run
+# that died with its services up. Asking only the first question means a second
+# `run-all` entering the same evidence directory tears a LIVE run's database
+# down under its running gates.
+#
+# So the acquire path proves the previous owner is GONE before it touches
+# anything, and it proves it about a process rather than about a state string.
+# The claim record is written BEFORE the acquire, so any service state that
+# exists was preceded by a live claim — there is no window in which state exists
+# and no owner is recorded.
+#
+# WHAT IS NOT HERE, deliberately: no `flock` held across the run. I measured the
+# reason rather than assuming it — a descriptor opened with `exec {fd}>>lock` is
+# NOT close-on-exec in bash 5.2, so a run-scoped lock is inherited by every
+# service `aid-job.sh` detaches, and the lock then outlives the runner for the
+# whole lifetime of the service (verified: parent locks, spawns a setsid'd
+# child, closes its own fd — the lock is still held). That converts a crash into
+# a permanently unrunnable project, which is worse than what it prevents. The
+# claim-before-acquire ordering gives the same mutual exclusion for the case
+# that matters without putting a descriptor into a detached process.
+#
+# THE ONE CASE THAT DOES NOT FAIL CLOSED, named: service state with NO claim
+# record. It is swept, as before. Every acquire in this file writes a claim
+# first, so an unclaimed registry is either from a build older than this change
+# or hand-written — never a live run of this code. Refusing there would make the
+# crash recovery unreachable for exactly the runs it exists for.
+_SVC_OWNER_CLAIMED=0
+_svc_owner_file() { printf '%s/services.owner.json' "$1"; }
+
+# _svc_boot_id — an identity for THIS boot, so a recorded pid from before a
+# reboot is provably dead rather than ambiguously reused. Empty where the kernel
+# does not publish one; an empty value is simply not compared.
+_svc_boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || true; }
+
+# _svc_proc_starttime <pid> — field 22 of /proc/<pid>/stat (jiffies since boot),
+# the field that distinguishes a live pid from a RECYCLED one. Parsed after the
+# last ')' because a process name may contain spaces and parentheses.
+_svc_proc_starttime() {
+  local pid="$1" line rest
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ -r "/proc/${pid}/stat" ]] || return 1
+  line="$(cat "/proc/${pid}/stat" 2>/dev/null)" || return 1
+  rest="${line##*') '}"
+  local -a f=()
+  read -r -a f <<<"$rest"
+  # After the comm field the remainder starts at field 3, so field 22 is index 19.
+  [[ -n "${f[19]:-}" ]] || return 1
+  printf '%s' "${f[19]}"
+}
+
+# _svc_owner_live <evidence_dir>
+#   rc 0  another gate runner is — or may still be — managing these services
+#   rc 1  no owner, or the recorded owner is PROVABLY gone
+#   Every "cannot tell" answers rc 0: refusing to start is recoverable, tearing
+#   down a live run's infrastructure is not.
+_svc_owner_live() {
+  local ev="$1" f pid rec_start rec_boot rec_host cur_start now_boot now_host
+  f="$(_svc_owner_file "$ev")"
+  [[ -f "$f" ]] || return 1
+  pid="$(jq -r '.pid // empty' "$f" 2>/dev/null || true)"
+  if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    # A claim record we cannot read is not a claim we can dismiss.
+    return 0
+  fi
+  [[ "$pid" == "$$" ]] && return 1   # our own claim from an earlier phase
+  rec_start="$(jq -r '.starttime // empty' "$f" 2>/dev/null || true)"
+  rec_boot="$(jq -r '.boot_id // empty'   "$f" 2>/dev/null || true)"
+  rec_host="$(jq -r '.host // empty'      "$f" 2>/dev/null || true)"
+  now_boot="$(_svc_boot_id)"
+  now_host="$(hostname 2>/dev/null || true)"
+  # A pid from another machine says nothing about any process here.
+  [[ -n "$rec_host" && -n "$now_host" && "$rec_host" != "$now_host" ]] && return 0
+  # Same machine, different boot: whatever held that pid did not survive.
+  [[ -n "$rec_boot" && -n "$now_boot" && "$rec_boot" != "$now_boot" ]] && return 1
+  if cur_start="$(_svc_proc_starttime "$pid")"; then
+    [[ -n "$rec_start" && "$cur_start" != "$rec_start" ]] && return 1  # pid recycled
+    return 0
+  fi
+  # No readable /proc entry. On Linux the absence of /proc/<pid> is proof; a
+  # /proc/<pid> we merely cannot READ (another user, hidepid) is not.
+  if [[ -d /proc ]]; then
+    [[ -e "/proc/${pid}" ]] && return 0
+    return 1
+  fi
+  ps -p "$pid" -o pid= >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# _svc_owner_describe <evidence_dir> — one line for the refusal message.
+_svc_owner_describe() {
+  jq -r '"pid " + (.pid|tostring) + ", claimed at " + (.claimed_at // "?")
+         + ", run " + (.run_id // "?")' "$(_svc_owner_file "$1")" 2>/dev/null \
+    || printf 'an unreadable claim record'
+}
+
+# _svc_owner_claim <evidence_dir> <run_id> — atomic tmp+mv, so a concurrent
+# reader sees the old record or the new one and never half of one.
+_svc_owner_claim() {
+  local ev="$1" run="${2:-}" f tmp
+  f="$(_svc_owner_file "$ev")"
+  tmp="${f}.tmp.$$"
+  jq -n --arg pid "$$" --arg st "$(_svc_proc_starttime "$$" || true)" \
+        --arg boot "$(_svc_boot_id)" --arg host "$(hostname 2>/dev/null || true)" \
+        --arg run "$run" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{schema:"aid.services.owner/1", pid:($pid|tonumber), starttime:$st,
+          boot_id:$boot, host:$host, run_id:$run, claimed_at:$at}' \
+        > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  _SVC_OWNER_CLAIMED=1
+  return 0
+}
+
+# _svc_owner_clear <evidence_dir> — released with the services it covered.
+_svc_owner_clear() {
+  (( _SVC_OWNER_CLAIMED == 1 )) || return 0
+  _SVC_OWNER_CLAIMED=0
+  rm -f "$(_svc_owner_file "$1")" 2>/dev/null || true
+  return 0
+}
+
 # _svc_manual_commands <evidence_dir> <execution_yaml>
 #   The commands a human would run to finish a teardown this run could not. Read
 #   from the registry, which is the only record of what was allocated — printed
@@ -706,6 +829,10 @@ _svc_release_run() {
     echo "WARN: aid-run-gates.sh: service teardown did not fully succeed — at least one declared service still answers its probe. The gate report is already written and is NOT affected. Finish the teardown by hand:" >&2
     _svc_manual_commands "$ev" "$yaml" >&2
   fi
+  # The claim covered the services this invocation owned; they are down, so it
+  # is dropped LAST — a claim removed before the teardown would let a runner
+  # entering in that window sweep a service that is still being stopped.
+  _svc_owner_clear "$ev"
   return 0
 }
 
@@ -1701,28 +1828,60 @@ run_all_gates() {
   # `aid_service_down_all`, any live job the registry does not name), and the
   # idempotent `up_all` then starts cleanly instead of beside an orphan.
   #
-  # ONE OWNER PER RUN. The targeted_tests escalation re-enters this script as a
-  # subprocess against the SAME epic/run — and therefore the same registry — while
-  # this invocation's services are up. It is handed
-  # AID_SERVICE_LIFECYCLE_OWNED=1, which makes it a CONSUMER: it still reads the
-  # registry for its own `needs_services` checks, and it neither sweeps, acquires
-  # nor releases. That is the same parallel-teardown rule as the per-gate one,
-  # applied to the one place where two runners genuinely share a run.
+  # ONE OWNER PER RUN, and it is enforced two different ways for two different
+  # kinds of second runner — say which is which, because a single sentence here
+  # previously implied a guarantee only one half of it delivered:
+  #   • the KNOWN re-entry. The targeted_tests escalation re-enters this script
+  #     as a subprocess against the SAME epic/run — and therefore the same
+  #     registry — while this invocation's services are up. It is handed
+  #     AID_SERVICE_LIFECYCLE_OWNED=1, which makes it a CONSUMER: it still reads
+  #     the registry for its own `needs_services` checks, and it neither sweeps,
+  #     acquires nor releases. An environment variable is enough here and only
+  #     here, because we are the parent that sets it.
+  #   • ANY OTHER second runner — a rerun launched while the first is still mid
+  #     gates, from a script, a second session, or a scheduler. Nothing tells us
+  #     about that one, so we ask the operating system: the claim record left by
+  #     the current owner is checked against a LIVE PROCESS, and a second runner
+  #     REFUSES rather than sweeping a running run's services out from under it.
+  #     Refusing is the fail-closed direction: a run that will not start is an
+  #     error message, a database torn down mid-gates is a corrupted verdict.
   local _svc_count=0 _svc_manage=1
   _svc_count="$(_svc_declared_count "$execution_yaml")"
   [[ "${AID_SERVICE_LIFECYCLE_OWNED:-}" == "1" ]] && _svc_manage=0
   if (( _svc_count > 0 )); then
     _svc_lib_load || exit 1
   fi
+  # A run that declares services and does not manage them is a legitimate but
+  # UNUSUAL shape: every gate that does not name `needs_services` runs against
+  # infrastructure nobody started, and passes. Recorded, so that run's evidence
+  # cannot be mistaken for a run that had its services (finding 3).
+  if (( _svc_count > 0 && _svc_manage == 0 )); then
+    log_event "$timeline_file" "services_lifecycle_delegated" \
+      declared="$_svc_count" reason="AID_SERVICE_LIFECYCLE_OWNED"
+  fi
   if (( _svc_count > 0 && _svc_manage == 1 )); then
     if [[ -z "$_evidence_dir" || ! -d "$_evidence_dir" ]]; then
       echo "ERROR: aid-run-gates.sh: ${_svc_count} service(s) declared in ${execution_yaml} but there is no evidence directory at '${_evidence_dir}' to hold the service registry — refusing to start a service this run could not record, and therefore could not stop" >&2
+      exit 1
+    fi
+    # BEFORE the sweep, because the sweep is the destructive step.
+    if _svc_owner_live "$_evidence_dir"; then
+      log_event "$timeline_file" "service_owner_conflict" evidence_dir="$_evidence_dir"
+      echo "ERROR: aid-run-gates.sh: another gate runner is still managing the services recorded under '${_evidence_dir}' ($(_svc_owner_describe "$_evidence_dir")) — refusing to run. Two runners sharing one run's service registry cannot both own it: this one would sweep the live run's services out from under its gates. Wait for that run, or stop it; if it is gone and this message persists, its claim record is ${_evidence_dir}/services.owner.json." >&2
       exit 1
     fi
     if _svc_stale_state_present "$_evidence_dir"; then
       echo "aid-run-gates.sh: this run's evidence still holds service state from an earlier, unfinished invocation — sweeping it before acquiring (a killed runner reaches no cleanup hook; this rerun is the cleanup)" >&2
       log_event "$timeline_file" "service_stale_sweep" evidence_dir="$_evidence_dir"
       aid_service_down_all "$_evidence_dir" "$execution_yaml" || true
+    fi
+    # The claim goes down BEFORE anything is started, so there is no window in
+    # which this run owns a service that no record names as ours. A claim we
+    # cannot write is a claim the next runner cannot check, so it fails the run
+    # rather than starting services nobody can prove ownership of.
+    if ! _svc_owner_claim "$_evidence_dir" "$run_id"; then
+      echo "ERROR: aid-run-gates.sh: could not record the service ownership claim at '$(_svc_owner_file "$_evidence_dir")' — refusing to start services whose owner a second runner could not check (it would read the absence as 'nobody owns these' and sweep them)" >&2
+      exit 1
     fi
     log_event "$timeline_file" "services_acquire_start" declared="$_svc_count"
     local _svc_up_rc=0

@@ -21,6 +21,14 @@
 #   5. `resume` on a STILL-RUNNING job is read-only for services too — the
 #      service a live background gate may depend on is left alone
 #   6. `resume` on its terminal-collect path sweeps the stale service
+#   7. done-advance sweeps against the PROJECT'S execution.yaml, so a stop_cmd
+#      planted in the run's own registry is never what executes (CP2 finding 1)
+#   8. the same, with a SPACE in the project path — the sweep's yaml argument
+#      must not word-split back onto the unreconciled fallback (CP2 finding 1b)
+#   9. a second run-all entering a run whose owner is STILL ALIVE refuses,
+#      instead of tearing the live run's service down (CP2 finding 2)
+#  10. AID_SERVICE_LIFECYCLE_OWNED=1 is RECORDED — a run with declared services
+#      and none started must not look like a healthy run (CP2 finding 3)
 #
 # python3 is a declared dependency of the services feature (per-run ports need a
 # real bind probe), so it joins jq/yq/flock in the named-skip list.
@@ -603,4 +611,261 @@ YAML
   _all_dead "$pids1"
   ! _probe_port "$port1"
   _assert_no_service_orphans
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CP2 fixes — the sweep's authority, the run's owner, the suppressed lifecycle
+# ═══════════════════════════════════════════════════════════════════════════
+
+# A project done-advance can be driven against: a real git repo with the
+# `.aid-o` skeleton and the supporting files the release edge reads.
+_mk_release_project() {
+  local root="$1"
+  mkdir -p "$root/.aid-o/plans" "$root/.aid-o/tasks" "$root/.aid-o/config" \
+           "$root/.aid-o/work/evidence" "$root/.aid-o/work/runs"
+  printf 'counter: 0\n' > "$root/.aid-o/config/counter.yaml"
+  : > "$root/.aid-o/work/audit-log.jsonl"
+  printf 'plugin_path: "%s"\ndispatch_mode: subagent\n' "$PLUGIN_ROOT" \
+    > "$root/.aid-o/config/plugin.yaml"
+  printf '.aid-o/\n' > "$root/.gitignore"
+  printf 'release fixture\n' > "$root/README.md"
+  (
+    cd "$root"
+    git init -q -b main 2>/dev/null || { git init -q; git checkout -q -b main 2>/dev/null || git branch -m main; }
+    git config user.email svc@example.com
+    git config user.name Svc
+    git add README.md .gitignore
+    git commit -qm "release fixture base"
+  )
+}
+
+# A DONE/review state file for <epic>/<run> under <root>, plus the evidence the
+# release edge expects. Returns nothing; the caller knows the paths.
+_seed_release_run() {
+  local root="$1" epic="$2" run="$3" ev="$1/.aid-o/work/evidence/$2/$3"
+  mkdir -p "$ev/gates"
+  cat > "$ev/fsm-state.yaml" <<YAML
+epic_id: $epic
+run_id: $run
+branch: task/$epic/main
+state: DONE
+done_phase: review
+created_at: 2026-01-01T00:00:00Z
+total_steps: 1
+current_step: 1
+pm_decision: merge
+YAML
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-01-01T00:00:00Z","_command_log":[]}\n' \
+    > "$ev/gates/gates_report.json"
+}
+
+# THE PLANT. A registry entry an implementer or a gate-fixer subagent could
+# write into the run's own evidence directory, carrying a stop_cmd that is not
+# in any declaration. Nothing here is a mock: this is the real registry schema,
+# read by the real library.
+_plant_hostile_registry() {
+  local ev="$1" name="$2" payload="$3"
+  jq -n --arg n "$name" --arg stop "touch '$payload'" \
+    '{schema:"aid-service-registry/1", updated_at:"2026-01-01T00:00:00Z",
+      services: {($n): {service:$n, run_id:"R-1", state:"healthy", job_id:null,
+                        port:null, port_env:null, probe_cmd:"false",
+                        stop_cmd:$stop, jobs_dir:null, attempt:1,
+                        reallocations:0, restarts:0,
+                        started_at:"2026-01-01T00:00:00Z",
+                        updated_at:"2026-01-01T00:00:00Z",
+                        failure_reason:null, violation:null}}}' > "$ev/services.json"
+}
+
+# The project's OWN declaration of the same service: a stop_cmd that is
+# harmless and observable, so "the declaration won" is a file that exists and
+# not merely the absence of one.
+_write_declared_config() {
+  local root="$1" name="$2" safe="$3"
+  cat > "$root/.aid-o/config/execution.yaml" <<YAML
+services:
+  ${name}:
+    start_cmd: sleep 300
+    probe_cmd: "false"
+    stop_cmd: touch '${safe}'
+    startup_deadline_seconds: 10
+    max_lifetime_seconds: 60
+gates:
+  noop:
+    command: "true"
+    required: true
+    timeout_seconds: 10
+YAML
+}
+
+# done-advance, run from a DIFFERENT git checkout with the project named by
+# AID_PROJECT_ROOT — the P074 worktree shape, and the one in which a cwd-relative
+# config path silently misses.
+_done_advance_from_elsewhere() {
+  local root="$1" epic="$2" run="$3" other="$4"
+  ( cd "$other" && AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1 AID_PROJECT_ROOT="$root" \
+      bash "$FSM" done-advance review release \
+        "$root/.aid-o/work/evidence/$epic/$run/fsm-state.yaml" \
+        --force --reason "PM-authorized test override to reach the release-edge service sweep" \
+      >"$WORK/da.out" 2>"$WORK/da.err" ) 3>&-
+}
+
+@test "case 7: done-advance sweeps against the PROJECT'S execution.yaml — a stop_cmd planted in the registry is never what executes" {
+  local root="$WORK/relproj" other="$WORK/other"
+  _mk_release_project "$root"
+  _mk_release_project "$other"
+  _seed_release_run "$root" E-076-9_9 R-1
+  _write_declared_config "$root" api "$WORK/SAFE"
+  _plant_hostile_registry "$root/.aid-o/work/evidence/E-076-9_9/R-1" api "$WORK/PWNED"
+
+  run _done_advance_from_elsewhere "$root" E-076-9_9 R-1 "$other"
+  [ "$status" -eq 0 ]
+
+  # THE PROPERTY, asserted first: the registry's own string did NOT run. Before
+  # this fix the sweep was handed an empty yaml, fell back to the cwd-relative
+  # $AID_SERVICE_CONFIG, found nothing to reconcile against, and ran this.
+  [ ! -f "$WORK/PWNED" ]
+  # ... and the assertion that keeps the one above from being vacuous: the sweep
+  # really did run, and what it ran was the DECLARED command.
+  [ -f "$WORK/SAFE" ]
+  # the entry is accounted for, not merely skipped
+  [ "$(jq -r '.services.api.state' "$root/.aid-o/work/evidence/E-076-9_9/R-1/services.json")" = "stopped" ]
+}
+
+@test "case 7b: a registry entry the readable config does NOT declare has its recorded stop_cmd refused, not run" {
+  local root="$WORK/relproj2" other="$WORK/other2"
+  _mk_release_project "$root"
+  _mk_release_project "$other"
+  _seed_release_run "$root" E-076-9_9 R-1
+  _write_declared_config "$root" api "$WORK/SAFE2"
+  # The plant invents a service the config never had — the case passing the
+  # yaml alone does not close, because there is no declaration to win.
+  _plant_hostile_registry "$root/.aid-o/work/evidence/E-076-9_9/R-1" ghost "$WORK/PWNED2"
+
+  run _done_advance_from_elsewhere "$root" E-076-9_9 R-1 "$other"
+  [ "$status" -eq 0 ]
+
+  [ ! -f "$WORK/PWNED2" ]
+  [[ "$(cat "$WORK/da.err")" == *"does NOT declare this service"* ]]
+  [ "$(jq -r '.services.ghost.state' "$root/.aid-o/work/evidence/E-076-9_9/R-1/services.json")" = "stopped" ]
+}
+
+@test "case 8: the sweep's yaml argument survives a SPACE in the project path — no silent fall back to the registry's command" {
+  local root="$WORK/rel proj spaced" other="$WORK/other3"
+  _mk_release_project "$root"
+  _mk_release_project "$other"
+  _seed_release_run "$root" E-076-9_9 R-1
+  _write_declared_config "$root" api "$WORK/SAFE3"
+  _plant_hostile_registry "$root/.aid-o/work/evidence/E-076-9_9/R-1" api "$WORK/PWNED3"
+
+  run _done_advance_from_elsewhere "$root" E-076-9_9 R-1 "$other"
+  [ "$status" -eq 0 ]
+
+  [ ! -f "$WORK/PWNED3" ]
+  [ -f "$WORK/SAFE3" ]
+  # the diagnostic that means the yaml was lost must not appear
+  [[ "$(cat "$WORK/da.err")" != *"UNRECONCILED"* ]]
+}
+
+@test "case 9: a second run-all against a run whose owner is STILL ALIVE refuses — it does not sweep the live run's service" {
+  {
+    _services_block "bash \"$FIX/listen.sh\" \"\$SVC_PORT\" $TOKEN"
+    cat <<YAML
+gates:
+  slow:
+    command: bash "$FIX/slow-gate.sh" "$WORK/slow.marker" 40 $GTOKEN
+    required: true
+    timeout_seconds: 120
+YAML
+  } > "$PROJ/exec.yaml"
+
+  start_gates_bg
+  _wait_for 60 '[[ "$(jq -r ".services.api.state // \"\"" "$REG" 2>/dev/null)" == "healthy" ]]'
+  _wait_for 60 '[[ -f "$WORK/slow.marker" ]]'
+
+  local port1 pids1
+  port1="$(_reg_field '.services.api.port')"
+  pids1="$(_service_pids)"
+  [ -n "$pids1" ]
+  # The claim record, read tolerantly: at the commit under test it does not
+  # exist at all, and the assertions that matter below are about the LIVE
+  # SERVICE, not about this file.
+  local owner_pid
+  owner_pid="$(jq -r '.pid // empty' "$ABS_EVID/services.owner.json" 2>/dev/null || true)"
+
+  # THE SECOND RUNNER, same epic/run, same registry — a fast gate, so a runner
+  # that wrongly proceeds finishes (and tears the live service down) quickly.
+  {
+    _services_block "bash \"$FIX/listen.sh\" \"\$SVC_PORT\" $TOKEN"
+    cat <<YAML
+gates:
+  fast:
+    command: "true"
+    required: true
+    timeout_seconds: 30
+YAML
+  } > "$PROJ/exec2.yaml"
+
+  run bash -c "cd '$PROJ' && '$RUN_GATES' run-all exec2.yaml '$EPIC' R-1 \
+      --report-file '$EVID/gates/gates_report2.json' >'$WORK/second.out' 2>'$WORK/second.err'"
+
+  # THE PROPERTY FIRST: the live run is untouched — same processes, still
+  # serving, never stopped, and no sweep even attempted against it. At the
+  # commit under test the second runner swept all of this away while the first
+  # run's gate was still going.
+  local p; for p in $pids1; do kill -0 "$p"; done
+  _probe_port "$port1"
+  [ "$(_reg_field '.services.api.state')" = "healthy" ]
+  [ ! -f "$WORK/stop.log" ]
+  [ "$(grep -c '"event":"service_stale_sweep"' "$TIMELINE" || true)" -eq 0 ]
+
+  # ... and it did not happen by luck: the second runner REFUSED, by name.
+  [ "$status" -ne 0 ]
+  [[ "$(cat "$WORK/second.err")" == *"another gate runner is still managing"* ]]
+  [ -n "$owner_pid" ]
+  kill -0 "$owner_pid"
+  [[ "$(cat "$WORK/second.err")" == *"$owner_pid"* ]]
+  [ "$(grep -c '"event":"service_owner_conflict"' "$TIMELINE")" -ge 1 ]
+
+  # And the claim is not a permanent lock: once the owner is gone, the crash
+  # recovery of case 4 still applies — proven here by the state the next runner
+  # would read rather than by re-running a whole gate suite.
+  kill_runner
+  local i; for i in $(seq 1 50); do _runner_alive || break; sleep 0.1; done
+  ! _runner_alive
+  run bash -c "cd '$PROJ' && '$RUN_GATES' run-all exec2.yaml '$EPIC' R-1 \
+      --report-file '$EVID/gates/gates_report3.json' >'$WORK/third.out' 2>'$WORK/third.err'"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '"event":"service_stale_sweep"' "$TIMELINE")" -ge 1 ]
+  _all_dead "$pids1"
+  [ "$(_reg_field '.services.api.state')" = "stopped" ]
+  [ ! -f "$ABS_EVID/services.owner.json" ]
+  _assert_no_service_orphans
+}
+
+@test "case 10: AID_SERVICE_LIFECYCLE_OWNED=1 is recorded — a run with declared services and none started cannot look like a healthy one" {
+  {
+    _services_block "bash \"$FIX/listen.sh\" \"\$SVC_PORT\" $TOKEN"
+    cat <<YAML
+gates:
+  plain:
+    command: touch "$WORK/plain.marker"
+    required: true
+    timeout_seconds: 30
+YAML
+  } > "$PROJ/exec.yaml"
+
+  run bash -c "cd '$PROJ' && AID_SERVICE_LIFECYCLE_OWNED=1 '$RUN_GATES' run-all exec.yaml '$EPIC' R-1 \
+      --report-file '$EVID/gates/gates_report.json' >'$WORK/fg.out' 2>'$WORK/fg.err'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.overall' "$REPORT")" = "pass" ]
+  [ -f "$WORK/plain.marker" ]
+
+  # nothing was started, nothing leaked ...
+  [ ! -f "$REG" ]
+  [ "$(grep -c '"event":"services_acquired"' "$TIMELINE" || true)" -eq 0 ]
+  _assert_no_service_orphans
+  # ... and the run's own evidence SAYS SO. Without this line a gate suite that
+  # ran against no infrastructure at all is indistinguishable from one that had it.
+  [ "$(grep -c '"event":"services_lifecycle_delegated"' "$TIMELINE")" -eq 1 ]
+  [[ "$(grep '"event":"services_lifecycle_delegated"' "$TIMELINE")" == *"AID_SERVICE_LIFECYCLE_OWNED"* ]]
 }

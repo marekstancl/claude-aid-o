@@ -3788,6 +3788,17 @@ _resume_no_artifact_report() {
 #     read-only-vs-claim split;
 #   • it never fails its caller. A teardown that could not finish is a warning
 #     next to a transition or a collection that already happened.
+#
+# EVERY caller passes its execution.yaml, and that is a SECURITY property rather
+# than a nicety: without a declaration to reconcile against, `aid_service_down_all`
+# falls back to the `stop_cmd` RECORDED IN THE REGISTRY and runs it through
+# `bash -c`. The registry lives in the run's evidence directory, which an
+# implementer or a gate-fixer subagent can write — so a sweep with no declaration
+# is a path from "can write a file under .aid-o/work/evidence/" to "executes a
+# command inside the FSM". With the yaml present the library refuses the recorded
+# string outright. An empty second argument is therefore a BUG, not a shorthand:
+# it makes the library fall back to $AID_SERVICE_CONFIG, a path relative to
+# whatever cwd the FSM happens to run in.
 _fsm_service_sweep() {
   local ev="${1:-}" yaml="${2:-}" caller="${3:-fsm}"
   [[ -n "$ev" && -d "$ev" ]] || return 0
@@ -3804,7 +3815,12 @@ _fsm_service_sweep() {
       return 0
     }
   fi
-  if ! aid_service_down_all "$ev" ${yaml:+"$yaml"}; then
+  # ALWAYS quoted, never `${yaml:+"$yaml"}`: that expansion word-splits a path
+  # containing a space, so `.../my run/.aid-o/config/execution.yaml` reached the
+  # library as `.../my` — a path that does not exist, which is exactly the
+  # no-declaration fallback above. An empty "$yaml" is already the library's
+  # documented "use the default" signal, so the conditional bought nothing.
+  if ! aid_service_down_all "$ev" "$yaml"; then
     echo "WARN: aid-fsm.sh ${caller}: at least one service recorded under ${ev} still answers its probe after teardown — see the named line above; this did not affect anything recorded" >&2
   fi
   return 0
@@ -4085,6 +4101,17 @@ cmd_resume() {
   # service, and sweeping it there would kill the very dependency the surviving
   # job needs in order to finish. A status look never claims, and it never stops
   # a service either.
+  #
+  # THE HONEST BOUND on the two branches that also sit below the live-sibling
+  # refusal and still do NOT sweep — `missing|unknown` and `lost`. The plan says
+  # the sweep runs on the terminal-collect path ONLY, and that is what this code
+  # does. But do not read their leak as "until done-advance": a run whose job is
+  # LOST or whose records are MISSING typically never reaches done-advance at
+  # all, and if it is never rerun there is no `run-all` entry sweep either. So a
+  # service left by such a run leaks until somebody reruns the gates or stops it
+  # by hand — INDEFINITELY, not "until the next boundary". Both branches tell the
+  # operator to rerun the gate, and that rerun is the sweep. Widening this is a
+  # PM decision about the plan's letter, not something to infer from here.
   _fsm_service_sweep "$evidence_dir" "$execution_yaml" "resume"
 
   local rowfile=""
@@ -7421,7 +7448,18 @@ EOF
     # This is NOT the crash path. A runner SIGKILLed mid-gates never reaches
     # release at all — that run is recovered by the next `run-all`'s entry sweep,
     # or by `resume`.
-    _fsm_service_sweep "$evidence_dir" "" "done-advance"
+    #
+    # The execution.yaml is passed for the reason named on `_fsm_service_sweep`:
+    # it is the declaration the library reconciles the registry's recorded
+    # `stop_cmd` against, and without it the registry — a file in the run's own
+    # evidence directory — chooses what this edge executes. Resolved through
+    # `aid_state_path` (the same resolver used for `evidence_dir` two lines up),
+    # so it is correct from inside a linked worktree too, where the cwd-relative
+    # default would silently miss.
+    local _svc_execution_yaml
+    _svc_execution_yaml="$(aid_state_path ".aid-o/config/execution.yaml" 2>/dev/null \
+      || printf '%s' "${project_root%/}/.aid-o/config/execution.yaml")"
+    _fsm_service_sweep "$evidence_dir" "$_svc_execution_yaml" "done-advance"
   fi
 
   # Audit trail
