@@ -12,7 +12,50 @@
     "action_vocabulary",
     "stop_classes",
     "terminus_stages",
-    "existing_loops"
+    "existing_loops",
+    "supersedes"
+  ],
+  "allOf": [
+    {
+      "description": "A policy may not declare the ladder wired while declaring the loader unimplemented. The pairing was previously accepted, which let one edited line claim a runtime that does not exist. This binds overrides too, which the test suite does not see.",
+      "if": {
+        "required": ["ladder_runtime"],
+        "properties": {
+          "ladder_runtime": {
+            "required": ["status"],
+            "properties": { "status": { "const": "wired" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "loader_contract": {
+            "properties": { "implemented": { "const": true } }
+          }
+        }
+      }
+    },
+    {
+      "description": "The mirror: while the ladder is not wired, no class may claim its ladder entry is live. Nothing writes a ladder record, so `live` would be a false statement about code.",
+      "if": {
+        "required": ["ladder_runtime"],
+        "properties": {
+          "ladder_runtime": {
+            "required": ["status"],
+            "properties": { "status": { "const": "not_wired" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stop_classes": {
+            "additionalProperties": {
+              "properties": { "ladder_entry_status": { "const": "planned" } }
+            }
+          }
+        }
+      }
+    }
   ],
   "properties": {
     "version": {
@@ -41,6 +84,8 @@
       "additionalProperties": false,
       "required": [
         "implemented",
+        "loader_path",
+        "loader_anchor",
         "project_override_path",
         "malformed_override",
         "missing_class",
@@ -50,6 +95,16 @@
       ],
       "properties": {
         "implemented": { "type": "boolean" },
+        "loader_path": {
+          "description": "Repository-relative path of the file that will define the loader. The test derives whether the ladder is wired from this file rather than from `implemented`, so it must name plugin code and may not name a test.",
+          "type": "string",
+          "pattern": "^plugins/aid-orchestrator/scripts/(?!tests/)[^\\s]+$"
+        },
+        "loader_anchor": {
+          "description": "Name of the shell function the loader defines. The wired/not-wired answer is derived from a function definition with this name existing in `loader_path` in a file that also references this policy — a fact this policy cannot assert into being.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{4,}$"
+        },
         "project_override_path": { "type": "string", "minLength": 1 },
         "malformed_override": { "type": "string", "minLength": 1 },
         "missing_class": { "type": "string", "minLength": 1 },
@@ -118,6 +173,12 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/existing_loop" }
+    },
+    "supersedes": {
+      "description": "The earlier design documents this policy replaces, and exactly which of their sections it replaces. This lives in the SHIPPED policy on purpose: some of those documents are untracked (this repository gitignores `docs/`), so a claim recorded only in the document would be unreviewable and untestable wherever the document is absent. `tracked: false` obliges a `tracked_reason` — an untracked source may be superseded, but never silently.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/supersede_record" }
     }
   },
   "$defs": {
@@ -155,12 +216,9 @@
         },
         "budget": { "$ref": "#/$defs/budget" },
         "terminus": {
-          "description": "The terminus chain. Every class ends the same way: adjudicate, then ESCALATION, then an audited PM force. Shortening it is not a configuration option.",
+          "description": "The terminus chain, in the order it is tried. Every class ends the same way: adjudicate, then ESCALATION, then an audited PM force. Neither shortening it NOR REORDERING it is a configuration option — the order is load-bearing, because `pm_force` is always a human act and a policy that reached it first would invert the whole ladder. The shipped policy's order is pinned by the test suite; this `const` is what pins it for a project override, which the test suite never sees.",
           "type": "array",
-          "items": { "enum": ["adjudicate", "escalation", "pm_force"] },
-          "minItems": 3,
-          "maxItems": 3,
-          "uniqueItems": true
+          "const": ["adjudicate", "escalation", "pm_force"]
         }
       }
     },
@@ -283,6 +341,45 @@
         },
         "note": { "type": "string" }
       }
+    },
+    "supersede_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "tracked", "marker_pattern", "sections"],
+      "properties": {
+        "document": {
+          "description": "Repository-relative path of the superseded document.",
+          "type": "string",
+          "pattern": "^[^/\\s][^\\s]*\\.md$"
+        },
+        "tracked": {
+          "description": "Is the document under version control? `false` means the supersede marker inside it cannot be diff-reviewed, cannot roll back with this commit and is absent from a clone — which is why the section list is duplicated here, where it does ship.",
+          "type": "boolean"
+        },
+        "tracked_reason": { "type": "string", "minLength": 1 },
+        "marker_pattern": {
+          "description": "The literal string the supersede markers in the document carry, so the doc-side check has something to look for rather than a hand-written pattern in the test.",
+          "type": "string",
+          "minLength": 3
+        },
+        "sections": {
+          "description": "The exact `## ` headings this policy replaces — and, by exclusion, the assertion that every OTHER section of that document is untouched.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^## \\S" }
+        }
+      },
+      "allOf": [
+        {
+          "description": "An untracked supersede must say why it is untracked. Silence about a claim that does not ship is the failure mode this record exists to prevent.",
+          "if": {
+            "required": ["tracked"],
+            "properties": { "tracked": { "const": false } }
+          },
+          "then": { "required": ["tracked_reason"] }
+        }
+      ]
     }
   }
 }

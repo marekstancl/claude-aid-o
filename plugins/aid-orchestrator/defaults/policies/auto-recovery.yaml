@@ -22,7 +22,15 @@
 #     • EVERY emitter site named below greps to real code in this repository
 #       (the anti-decoration assertion);
 #     • every budget in `existing_loops` still matches the live value in the
-#       file it cites (the drift assertion).
+#       file it cites (the drift assertion);
+#     • `ladder_runtime.status`, `loader_contract.implemented` and every
+#       `ladder_entry_status: live` are checked against the REPOSITORY, not
+#       against this file's own say-so: the test derives whether the ladder is
+#       wired from the existence of a real loader function
+#       (`loader_contract.loader_path` + `loader_anchor`) that actually reads
+#       this policy, and fails if the declaration disagrees in EITHER direction.
+#       Editing `status: wired` here without writing that function turns the
+#       suite red; so does writing the loader and leaving `not_wired` here.
 #
 # THE TWO AXES — they mean different things, do not collapse them
 #   detector:     does CODE detect this condition today, at this commit, and
@@ -40,7 +48,12 @@
 #                 for all seven classes because no ladder writer exists yet.
 #                 The next step of this EPIC flips the mechanical ones to
 #                 `live`; the instruction ones flip when the AUTO-loop
-#                 instruction lands in commands/aid-run.md.
+#                 instruction lands in commands/aid-run.md. Flipping any of
+#                 them is not an edit to this file: the test refuses `live`
+#                 until the loader named in `loader_contract` really exists in
+#                 code, and the schema refuses it while `ladder_runtime.status`
+#                 is `not_wired`. Write the loader, then flip all three
+#                 together.
 #
 # DIVERGENCE FROM THE P076 PLAN TEXT — stated, not silently applied
 #   The plan describes DISPATCH_ORPHANED as `detector: instruction` "because the
@@ -54,6 +67,31 @@
 #   message is what routes it — is preserved by the second axis.
 
 version: 1
+
+# ── what this policy supersedes ──────────────────────────────────────────────
+# The earlier prose design this file replaces, recorded HERE — in the artefact
+# that actually ships — because the document itself does not ship: `docs/` is
+# gitignored in this repository, so that file is untracked, absent from the
+# commit, absent from a clone and absent from CI. A test that verified the
+# document alone would therefore check nothing wherever the document is missing,
+# and would report that as a pass.
+#
+# So the claim is split. The half below is shipped, diff-reviewable and
+# unconditionally asserted by the test suite. The doc-side half — that the
+# supersede markers sit in these sections and nowhere else — is verified only
+# where the document is reachable, and the test says loudly when it is not.
+supersedes:
+  - document: docs/plans/2026-07-21-IMP-auto-mode-stop-taxonomy-and-recovery-policy.md
+    tracked: false
+    tracked_reason: >-
+      `.gitignore` ignores `docs/`, so this document is untracked: it lives only
+      in the main working tree, cannot be diff-reviewed, does not roll back with
+      the commit, and never reaches a consumer of the plugin.
+    marker_pattern: P076
+    sections:
+      - "## What Codex may decide without PM"
+      - "## Stop classes for the adjudicator"
+      - "## Deferred: heavy mechanical recovery framework"
 
 # ── ladder runtime status ────────────────────────────────────────────────────
 # Wiring truth, kept in the file the wiring is about.
@@ -71,6 +109,14 @@ ladder_runtime:
 # NONE of these behaviours are implemented at this commit.
 loader_contract:
   implemented: false
+  # WHERE THE LOADER WILL LIVE — and the check that keeps `implemented` honest.
+  # The test does not believe `implemented` or `ladder_runtime.status`: it looks
+  # for a shell function named `loader_anchor`, defined in `loader_path`, in a
+  # file that also names this policy file. Nothing in this repository defines
+  # that function today, so the derived answer is "not wired" and both flags
+  # above must say so. Claiming `wired` costs writing the loader.
+  loader_path: plugins/aid-orchestrator/scripts/lib/aid-recovery-ladder.sh
+  loader_anchor: aid_recovery_policy_load
   project_override_path: ".aid-o/config/policies/auto-recovery.yaml"
   malformed_override: >-
     An unreadable or schema-invalid project override is NOT fatal and is NOT

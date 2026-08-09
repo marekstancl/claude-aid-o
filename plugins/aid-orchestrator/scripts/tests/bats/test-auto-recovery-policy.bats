@@ -19,16 +19,27 @@
 #   7.  every allowed action across all classes is one of the six vocabulary
 #       names, and every vocabulary name is reachable by the schema enum
 #   8.  an unknown action name is a SCHEMA ERROR, never a silent no-op
-#   9.  the honesty axes: nothing claims `ladder_entry_status: live` while
-#       `ladder_runtime.status` is `not_wired`
+#   9.  the honesty axes, checked against the REPOSITORY rather than against
+#       the policy's own say-so: whether the ladder is wired is DERIVED from a
+#       real loader function existing in code, and the policy's `status`,
+#       `implemented` and per-class `live` claims must all agree with that
 #  10.  aid-run.md no longer points the tier rule at nonexistent permissions
 #       keys, and the only permissions key it names is one that really exists
-#  11.  the July stop-taxonomy doc carries supersede markers ONLY in the three
-#       replaced sections — every other section is free of them
+#  11.  the supersede claim about the July stop-taxonomy doc is carried by the
+#       SHIPPED policy (always checked — this case cannot skip)
+#  12.  and, where the untracked July doc is reachable, its markers really do
+#       sit in those sections and nowhere else
 #
-# Case 11 resolves the July doc through the git COMMON dir: `docs/` is
-# gitignored in this repo, so that file lives untracked in the main working
-# tree and is not present inside a plan worktree.
+# WHY 11 AND 12 ARE SEPARATE — a skip is green, and green must never mean
+# "checked nothing". `docs/` is gitignored in this repository, so the July doc
+# is untracked: absent from the commit, from a clone, from CI and from a plan
+# worktree. The earlier single case skipped there and still reported success,
+# so AC 3 was unenforced everywhere except the author's own machine. The
+# checkable part therefore MOVED onto an artefact that ships — `supersedes` in
+# auto-recovery.yaml — which case 11 asserts unconditionally and fails closed.
+# Case 12 is the doc-side cross-check; it fails (does not skip) whenever the
+# document COULD be there, and where it genuinely cannot be it says in plain
+# words that it did not run.
 
 setup() {
   export TZ=UTC
@@ -76,17 +87,46 @@ policy_json() {
   echo "$WORK/policy.json"
 }
 
-# The July doc lives in the MAIN working tree (docs/ is gitignored, so a plan
-# worktree does not carry it). Resolve it via the git common dir.
-july_doc() {
-  local name="docs/plans/2026-07-21-IMP-auto-mode-stop-taxonomy-and-recovery-policy.md"
-  if [[ -f "$REPO_ROOT/$name" ]]; then echo "$REPO_ROOT/$name"; return 0; fi
-  local common main
+# main_tree — the working tree that owns the git COMMON dir. A plan worktree
+# does not carry gitignored paths like docs/, the main tree does.
+main_tree() {
+  local common
   common="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   [[ -n "$common" ]] || return 1
-  main="$(dirname "$common")"
+  dirname "$common"
+}
+
+# resolve_doc <repo-relative-path> — absolute path of an untracked document,
+# here or in the main tree. rc 1 when it is nowhere; the CALLER decides whether
+# that is a skip or a failure (case 12 fails whenever it could have been there).
+resolve_doc() {
+  local name="$1" main
+  if [[ -f "$REPO_ROOT/$name" ]]; then echo "$REPO_ROOT/$name"; return 0; fi
+  main="$(main_tree)" || return 1
   [[ -f "$main/$name" ]] || return 1
   echo "$main/$name"
+}
+
+# ladder_wired_from_code — is the ladder wired? Answered from the REPOSITORY,
+# never from the policy. The policy names a loader path and the shell function
+# that loader defines; this returns `yes` only when that function is really
+# defined, in that file, in a file that really reads this policy. A policy edit
+# alone cannot make it true: to claim `wired` you must write the loader. A test
+# file cannot stand in for it either (the schema's loader_path pattern refuses
+# scripts/tests/, and this refuses it a second time).
+ladder_wired_from_code() {
+  local json="$1" path anchor abs
+  path="$(jq -r '.loader_contract.loader_path // ""' "$json")"
+  anchor="$(jq -r '.loader_contract.loader_anchor // ""' "$json")"
+  [[ -n "$path" && -n "$anchor" ]]                || { echo no; return 0; }
+  [[ "$path" == plugins/aid-orchestrator/scripts/* ]] || { echo no; return 0; }
+  [[ "$path" != */tests/* ]]                      || { echo no; return 0; }
+  abs="$REPO_ROOT/$path"
+  [[ -f "$abs" ]]                                 || { echo no; return 0; }
+  grep -qE "^[[:space:]]*(function[[:space:]]+)?${anchor}[[:space:]]*\(\)[[:space:]]*\{?" "$abs" \
+                                                  || { echo no; return 0; }
+  grep -qF 'auto-recovery.yaml' "$abs"            || { echo no; return 0; }
+  echo yes
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -241,9 +281,9 @@ PY
   [[ "$output" == *"force_merge"* ]] || { echo "$output"; false; }
 }
 
-@test "case 9: no class claims a live ladder entry while the ladder is not wired" {
+@test "case 9: the wired/not-wired answer comes from CODE, and every claim must match it" {
   local json; json="$(policy_json)"
-  local wired; wired="$(jq -r '.ladder_runtime.status' "$json")"
+
   # Both axes are present and constrained on every class.
   local missing
   missing="$(jq -r '.stop_classes | to_entries[]
@@ -253,13 +293,37 @@ PY
                     | .key' "$json")"
   [[ -z "$missing" ]] || { echo "classes missing an honesty axis: $missing"; false; }
 
-  if [[ "$wired" == "not_wired" ]]; then
+  # THE DERIVED ANSWER. Read out of the repository, not out of the policy.
+  local derived expect_status expect_impl
+  derived="$(ladder_wired_from_code "$json")"
+  if [[ "$derived" == "yes" ]]; then expect_status="wired"; expect_impl="true"
+  else                               expect_status="not_wired"; expect_impl="false"; fi
+
+  # 1. The declared status must agree with code — in BOTH directions. Claiming
+  #    `wired` without a loader is red; shipping a loader and still saying
+  #    `not_wired` is red too.
+  local declared; declared="$(jq -r '.ladder_runtime.status' "$json")"
+  [[ "$declared" == "$expect_status" ]] || {
+    echo "ladder_runtime.status says '${declared}', the repository says '${expect_status}'"
+    echo "  loader_path:   $(jq -r '.loader_contract.loader_path // "(unset)"' "$json")"
+    echo "  loader_anchor: $(jq -r '.loader_contract.loader_anchor // "(unset)"' "$json")"
+    echo "  (the loader function must be DEFINED in that file, and that file must read auto-recovery.yaml)"
+    false; }
+
+  # 2. Same for the loader contract's own flag.
+  local impl; impl="$(jq -r '.loader_contract.implemented' "$json")"
+  [[ "$impl" == "$expect_impl" ]] || {
+    echo "loader_contract.implemented says '${impl}', the repository says '${expect_impl}'"; false; }
+
+  # 3. UNCONDITIONAL — this no longer hides behind the policy's own status.
+  #    No class may claim a live ladder entry while no ladder writer exists.
+  if [[ "$derived" != "yes" ]]; then
     local lying
     lying="$(jq -r '.stop_classes | to_entries[]
                     | select(.value.ladder_entry_status == "live") | .key' "$json")"
     [[ -z "$lying" ]] || {
-      echo "ladder_runtime.status is not_wired but these classes claim a live entry: $lying"; false; }
-    [ "$(jq -r '.loader_contract.implemented' "$json")" = "false" ]
+      echo "no ladder loader exists in this repository, but these classes claim a live entry: $lying"
+      false; }
   fi
 }
 
@@ -281,32 +345,88 @@ PY
   grep -q "autonomous_mode" "$PLUGIN_ROOT/scripts/aid-release-policy.sh"
 }
 
-@test "case 11: the July doc carries supersede markers ONLY in the replaced sections" {
-  local doc; doc="$(july_doc)" || skip "July stop-taxonomy doc not present in this working tree"
+@test "case 11: the supersede claim ships in the policy — this case cannot skip" {
+  local json; json="$(policy_json)"
 
-  # The three sections P076 replaced or partially delivered.
+  # The record for the July doc exists in the shipped, diff-reviewable artefact.
+  local doc="docs/plans/2026-07-21-IMP-auto-mode-stop-taxonomy-and-recovery-policy.md"
+  local n
+  n="$(jq --arg d "$doc" '[.supersedes[] | select(.document == $d)] | length' "$json")"
+  [ "$n" -eq 1 ] || { echo "expected exactly one supersedes record for ${doc}, found ${n}"; false; }
+
+  # The three sections P076 replaced or partially delivered, pinned HERE so the
+  # doc-side case cannot be satisfied by editing the policy to match a drifted
+  # document.
   local expected="## What Codex may decide without PM
 ## Stop classes for the adjudicator
 ## Deferred: heavy mechanical recovery framework"
+  local declared
+  declared="$(jq -r --arg d "$doc" '.supersedes[] | select(.document == $d) | .sections[]' "$json")"
+  [[ "$(echo "$declared" | sort)" == "$(echo "$expected" | sort)" ]] || {
+    echo "supersedes.sections:"; echo "$declared"; echo "expected:"; echo "$expected"; false; }
 
-  # Walk the doc, attributing every P076 marker line to the ## section it is in.
+  # `tracked` is checked against GIT, not believed. Saying an untracked
+  # document is tracked (or forgetting to update this when it becomes tracked)
+  # is red either way.
+  local git_tracked="false"
+  git -C "$REPO_ROOT" ls-files --error-unmatch -- "$doc" >/dev/null 2>&1 && git_tracked="true"
+  local claimed
+  claimed="$(jq -r --arg d "$doc" '.supersedes[] | select(.document == $d) | .tracked' "$json")"
+  [[ "$claimed" == "$git_tracked" ]] || {
+    echo "supersedes.tracked says '${claimed}', git says '${git_tracked}' for ${doc}"; false; }
+
+  # An untracked supersede must state why — silence about a claim that does not
+  # ship is the exact failure this record exists to prevent.
+  if [[ "$git_tracked" == "false" ]]; then
+    local reason
+    reason="$(jq -r --arg d "$doc" '.supersedes[] | select(.document == $d) | .tracked_reason // ""' "$json")"
+    [[ -n "$reason" ]] || { echo "untracked supersede with no tracked_reason"; false; }
+  fi
+}
+
+@test "case 12: [MAY NOT RUN — untracked doc] markers sit ONLY in the superseded sections" {
+  local json; json="$(policy_json)"
+  local doc="docs/plans/2026-07-21-IMP-auto-mode-stop-taxonomy-and-recovery-policy.md"
+  local marker
+  marker="$(jq -r --arg d "$doc" '.supersedes[] | select(.document == $d) | .marker_pattern' "$json")"
+  local expected
+  expected="$(jq -r --arg d "$doc" '.supersedes[] | select(.document == $d) | .sections[]' "$json")"
+
+  local path
+  if ! path="$(resolve_doc "$doc")"; then
+    # FAIL CLOSED wherever the document could have been here. Only a tree that
+    # cannot host it at all — a clone, CI, a plan worktree — is allowed to not
+    # run this, and it says so in words no summary line can soften.
+    local main hostable=""
+    main="$(main_tree || true)"
+    [[ -d "$REPO_ROOT/$(dirname "$doc")" ]] && hostable="$REPO_ROOT/$(dirname "$doc")"
+    [[ -z "$hostable" && -n "$main" && -d "$main/$(dirname "$doc")" ]] && hostable="$main/$(dirname "$doc")"
+    if [[ -n "$hostable" ]]; then
+      echo "${hostable} exists, so this tree CAN hold the superseded document — but ${doc} is not there."
+      echo "A tree that can host the document must have it: refusing to pass without checking."
+      false
+    fi
+    skip "DID NOT RUN, NOTHING WAS CHECKED HERE: ${doc} is untracked (docs/ is gitignored) and absent from this tree. AC3's doc-side half is unverifiable here; the half that ships is case 11."
+  fi
+
+  # Walk the doc, attributing every marker line to the ## section it is in.
   local marked
-  marked="$(awk '
+  marked="$(awk -v m="$marker" '
     /^## / { section = $0 }
-    /P076/ && /^> \*\*/ { if (section != "" && !(section in seen)) { seen[section]=1; print section } }
-  ' "$doc")"
+    index($0, m) && /^> \*\*/ { if (section != "" && !(section in seen)) { seen[section]=1; print section } }
+  ' "$path")"
 
   [[ "$(echo "$marked" | sort)" == "$(echo "$expected" | sort)" ]] || {
-    echo "sections carrying a P076 supersede marker:"; echo "$marked"
+    echo "sections carrying a ${marker} supersede marker:"; echo "$marked"
     echo "expected:"; echo "$expected"; false; }
 
-  # And the untouched sections really are untouched: no P076 mention anywhere
-  # outside those three sections, marker or not.
+  # And the untouched sections really are untouched: no mention anywhere
+  # outside those sections, marker or not.
   local strays
-  strays="$(awk -v want="$expected" '
+  strays="$(awk -v want="$expected" -v m="$marker" '
     BEGIN { n = split(want, a, "\n"); for (i=1; i<=n; i++) ok[a[i]] = 1 }
     /^## / { section = $0 }
-    /P076/ { if (!(section in ok)) print FNR ": " section " :: " $0 }
-  ' "$doc")"
-  [[ -z "$strays" ]] || { echo "P076 mentions in untouched sections:"; echo "$strays"; false; }
+    index($0, m) { if (!(section in ok)) print FNR ": " section " :: " $0 }
+  ' "$path")"
+  [[ -z "$strays" ]] || { echo "${marker} mentions in untouched sections:"; echo "$strays"; false; }
 }
