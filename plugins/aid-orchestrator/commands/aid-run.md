@@ -137,12 +137,16 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
 - Codex adjudication and PM decisions are append-only audit events. The adjudicator may choose among
   already-authorized technical recovery paths; it cannot grant PM authority or waive security risk.
 
-Until a dedicated adjudicator command is available, use the existing isolated Codex transport. Give
-it only: verified facts, current FSM state, attempted recoveries, an explicit allowlist of reversible
-in-scope actions, and forbidden authority-expanding actions. Require one selected action plus a short
-rationale and risk note. Reject an answer outside the allowlist, append the accepted decision and
-evidence paths to `timeline.jsonl`, and continue. This is a temporary dispatch convention, not a
-substitute for the project-scoped adjudicator configuration planned for INIT/SETUP.
+Do not hand-roll that dispatch. Source `scripts/lib/aid-recovery-adjudicate.sh` and call
+`aid_recovery_adjudicate <run_evidence_dir> <stop_class> <facts_file>`. It builds the prompt pack
+(verified facts, current FSM state, the ladder record so far, the class's `allowed_actions` from
+`defaults/policies/auto-recovery.yaml` as an explicit allowlist, and the forbidden
+authority-expanding actions), dispatches through the same isolated Codex transport the C3 bridge
+uses, accepts only a reply naming exactly one action from that allowlist plus a rationale, retries
+once with the rejection quoted, and records every exchange to `timeline.jsonl`, the ladder record and
+a per-exchange audit artifact. It prints the selected action, or `escalate` — which is not an action
+and must never be executed as one. The full convention, the fail-closed paths and the authority
+ceiling are specified in that file's header.
 
 ## MECHANICAL ENFORCEMENT PROTOCOL
 
