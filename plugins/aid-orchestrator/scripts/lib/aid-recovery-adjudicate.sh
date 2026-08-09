@@ -98,9 +98,11 @@
 # decoration: with python3 absent or broken, an override could previously
 # invent a stop class the schema's `additionalProperties: false` would have
 # refused, and could reorder `terminus` to put `pm_force` first. Neither could
-# widen the ACTIONS this file prints (INVARIANT 1 held), but the ladder lib
-# READS `terminus`, so an unchecked reorder there would have inverted the
-# escalation order for the one consumer that acts on it.
+# widen the ACTIONS this file prints (INVARIANT 1 held). `terminus` is
+# DECLARATIVE today — no runtime code reads it; the escalation order lives in
+# the control flow (`aid_ladder_attempt` → `adjudicate` → `aid_ladder_escalate`)
+# and the only non-comment uses of the key are these two validation loops. It is
+# asserted precisely so it cannot drift ahead of the code that will act on it.
 #
 # ── UNTRUSTED TEXT IN THE PROMPT ────────────────────────────────────────────
 # Three regions of the prompt are attacker-reachable: the facts file, the ladder
@@ -307,10 +309,30 @@ _aid_ra_policy_error() {
     if [[ "$declared_c" != "$expected_c" ]]; then
       reason="policy stop_classes is not the closed set of seven this adjudicator enforces"; break
     fi
-    local t bad_t=0
+    #      The terminus read is type-aware and COUNTED: `join` on a non-array is
+    #      a yq ERROR, not an empty result, so the earlier form emitted no lines
+    #      and passed VACUOUSLY for a `terminus:` written as a plain string. Any
+    #      terminus that is not an array of strings normalises to INVALID, and
+    #      one verdict line per declared class is required — a read that cannot
+    #      be completed refuses instead of passing.
+    local t bad_t=0 class_n t_out t_rc=0 t_n=0
+    class_n="$(printf '%s' "$json" | jq -r '(.stop_classes // {}) | length' 2>/dev/null)" || class_n=""
+    if [[ ! "$class_n" =~ ^[0-9]+$ ]]; then
+      reason="policy stop_classes could not be counted — the terminus check cannot be trusted"; break
+    fi
+    t_out="$(printf '%s' "$json" | jq -r '
+        (.stop_classes // {}) | to_entries[] | .value as $v
+        | if ($v | type) != "object" then "INVALID"
+          elif (($v.terminus // null) | type) != "array" then "INVALID"
+          elif ([$v.terminus[] | type] | unique) != ["string"] then "INVALID"
+          else ($v.terminus | join(">")) end' 2>/dev/null)" || t_rc=1
+    if [[ -n "$t_out" ]]; then t_n="$(printf '%s\n' "$t_out" | wc -l)"; fi
+    if (( t_rc != 0 )) || (( t_n != class_n )); then
+      reason="the terminus of every stop class could not be read — refusing rather than passing it unverified"; break
+    fi
     while IFS= read -r t; do
       [[ "$t" == "adjudicate>escalation>pm_force" ]] || bad_t=1
-    done < <(yq -r '.stop_classes // {} | .[] | (.terminus // []) | join(">")' "$policy" 2>/dev/null)
+    done <<< "$t_out"
     if [[ "$bad_t" -ne 0 ]]; then
       reason="a stop class declares a terminus other than adjudicate>escalation>pm_force (the order is load-bearing: pm_force is always a human act)"; break
     fi

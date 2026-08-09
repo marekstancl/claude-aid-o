@@ -208,10 +208,36 @@ _aid_ladder_policy_usable() {
       printf 'a stop class declares an action outside the vocabulary (schema error, refused at load)\n'; return 0; }
   done < <(yq -r '[.stop_classes // {} | .[] | .allowed_actions // [] | .[]] | .[]' "$policy" 2>/dev/null)
 
+  # The terminus ORDER, type-aware and COUNTED. `join` on a non-array is a yq
+  # ERROR, not an empty result: with stderr suppressed the earlier form emitted
+  # no lines at all and this loop passed VACUOUSLY, so `terminus:` written as a
+  # plain string was accepted. That is the same "unverifiable is not invalid"
+  # trap the check exists to close, one type level down. So: every terminus that
+  # is not an array of strings is normalised to the literal INVALID, and the
+  # number of verdict lines must equal the number of declared classes —
+  # anything else (a yq/jq error, a class that is not a map) refuses.
+  local class_n t_out t_rc=0 t_n=0
+  class_n="$(yq -r '.stop_classes // {} | keys | length' "$policy" 2>/dev/null)" || class_n=""
+  [[ "$class_n" =~ ^[0-9]+$ ]] || {
+    printf 'policy stop_classes could not be counted — the terminus check cannot be trusted\n'; return 0; }
+  t_out="$(yq -o=json '.' "$policy" 2>/dev/null | jq -r '
+      (.stop_classes // {}) | to_entries[] | .value as $v
+      | if ($v | type) != "object" then "INVALID"
+        elif (($v.terminus // null) | type) != "array" then "INVALID"
+        elif ([$v.terminus[] | type] | unique) != ["string"] then "INVALID"
+        else ($v.terminus | join(">")) end' 2>/dev/null)" || t_rc=1
+  # `if`, not `[[ … ]] && …`: an AND-OR list whose test fails would leave a
+  # nonzero status behind, and this function's whole contract is that its
+  # STDOUT is the verdict — a status that aborts under a caller's `set -e`
+  # would read as the empty (= usable) verdict. Fail closed, never by accident.
+  if [[ -n "$t_out" ]]; then t_n="$(printf '%s\n' "$t_out" | wc -l)"; fi
+  if (( t_rc != 0 )) || (( t_n != class_n )); then
+    printf 'the terminus of every stop class could not be read — refusing rather than passing it unverified\n'; return 0
+  fi
   while IFS= read -r t; do
     [[ "$t" == "adjudicate>escalation>pm_force" ]] || {
       printf 'a stop class declares a terminus other than adjudicate>escalation>pm_force\n'; return 0; }
-  done < <(yq -r '.stop_classes // {} | .[] | (.terminus // []) | join(">")' "$policy" 2>/dev/null)
+  done <<< "$t_out"
 
   while IFS= read -r c; do
     [[ "$c" =~ ^[0-9]+\ [0-9]+$ ]] || {

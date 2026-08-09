@@ -644,6 +644,46 @@ YAML
   run bash -c 'set -euo pipefail; source "$LIB"; AID_RECOVERY_POLICY="'"$p2"'" aid_recovery_policy_load'
   [ "$status" -eq 3 ]
   [[ "$output" == *"closed set of seven"* ]] || { echo "$output"; false; }
+
+  # (d) THE SAME TRAP ONE TYPE LEVEL DOWN. `join` on a NON-array is a yq error,
+  #     not an empty result: with stderr suppressed the check emitted no lines
+  #     and passed VACUOUSLY, so `terminus:` written as a plain string was
+  #     accepted by both libs. Every shape that is not an array of strings must
+  #     refuse — under the SAME broken python3, so no schema check can be
+  #     credited for the refusal.
+  local shape p3
+  for shape in \
+    '.stop_classes.GATE_TIMEOUT.terminus = "pm_force>escalation>adjudicate"' \
+    '.stop_classes.GATE_TIMEOUT.terminus = 42' \
+    '.stop_classes.GATE_TIMEOUT.terminus = {"a":"b"}' \
+    'del(.stop_classes.GATE_TIMEOUT.terminus)' \
+    '.stop_classes.GATE_TIMEOUT.terminus = []' \
+    '.stop_classes.GATE_TIMEOUT.terminus = ["adjudicate","escalation",7]' \
+  ; do
+    p3="$WORK/pol-nonarray.yaml"
+    cp "$POLICY" "$p3"
+    yq -i "$shape" "$p3"
+
+    run bash -c 'set -euo pipefail; source "$LIB"; AID_RECOVERY_POLICY="'"$p3"'" aid_recovery_policy_load'
+    [ "$status" -eq 3 ] || { echo "ladder ACCEPTED [$shape]"; echo "$output"; false; }
+    [[ "$output" == *"terminus"* ]] || { echo "$shape"; echo "$output"; false; }
+
+    rm -f "$ev/timeline.jsonl" "$ev/recovery-ladder.jsonl"
+    run _adj "$p3" GATE_TIMEOUT
+    [ "$status" -eq 3 ] || { echo "adjudicator ACCEPTED [$shape]"; echo "$output"; false; }
+    [ "${lines[-1]}" = "escalate" ]
+    run jq -r -s '[.[] | .verdict] | unique | join(",")' "$ev/timeline.jsonl"
+    [ "$output" = "refused_invalid_policy" ] || { echo "$shape"; cat "$ev/timeline.jsonl"; false; }
+  done
+
+  # ...and the shipped policy is still USABLE under the same broken python3 —
+  # the refusals above are about the shape, not a check that refuses everything.
+  rm -f "$ev/timeline.jsonl" "$ev/recovery-ladder.jsonl"
+  run bash -c 'set -euo pipefail; source "$LIB"; AID_RECOVERY_POLICY="$POLICY" aid_recovery_policy_load'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  run _adj "$POLICY" GATE_TIMEOUT
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "${lines[-1]}" = "rerun_targeted" ] || { echo "$output"; false; }
 }
 
 @test "case 14: the DISPATCH_ORPHANED die names the ladder entry command, and the checklist names the instruction classes" {
@@ -671,6 +711,26 @@ YAML
   [[ "$output" == *"DISPATCH_ORPHANED"* ]] || { echo "$output"; false; }
   [[ "$output" == *"aid_ladder_emit"* ]] || { echo "$output"; false; }
   [[ "$output" == *"lib/aid-recovery-ladder.sh"* ]]
+
+  # ...by a path that RESOLVES where the message is pasted. This message is the
+  # entire mechanism for an instruction-routed entry; a repo-relative source is
+  # `No such file or directory` in a consumer project, where the plugin lives
+  # under ~/.claude/plugins/. So: absolute, and it really sources — proven by
+  # running the printed command from a cwd that is NOT the repo root and
+  # checking the record appears.
+  [[ "$output" == *"source \"/"* ]] || { echo "the ladder source path is not absolute"; echo "$output"; false; }
+  [[ "$output" != *"source plugins/aid-orchestrator"* ]] || { echo "$output"; false; }
+  local libline
+  libline="$(printf '%s\n' "$output" | grep -oE 'source "[^"]*aid-recovery-ladder\.sh"' | head -1 | sed -e 's/^source "//' -e 's/"$//')"
+  [ -f "$libline" ] || { echo "printed path does not exist: $libline"; false; }
+  [ "$libline" = "$LIB" ] || { echo "printed path is not the shipped lib: $libline"; false; }
+
+  local elsewhere="$WORK/not-the-repo-root"
+  mkdir -p "$elsewhere"
+  run bash -c 'cd "'"$elsewhere"'"; source "'"$libline"'"; aid_ladder_emit "'"$ev"'" DISPATCH_ORPHANED fsm_check_orphan_dispatches "missing_dispatch_complete"'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  run jq -r -s '[.[] | select(.class=="DISPATCH_ORPHANED")] | length' "$ev/recovery-ladder.jsonl"
+  [ "$output" = "1" ] || { cat "$ev/recovery-ladder.jsonl"; false; }
 
   # and the AUTO-loop checklist really carries every instruction-routed class,
   # which is the only place their entry can come from
