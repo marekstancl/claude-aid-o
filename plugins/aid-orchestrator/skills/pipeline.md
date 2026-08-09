@@ -43,6 +43,28 @@ started-at timestamp, expected p95, and hard deadline. Determine completion from
 exit status. `tail -f` and notification arrival are not completion signals. If there is no live owned
 process and no repository/evidence progress for 5 minutes, resume or diagnose automatically.
 
+"Resume" names one mechanical path, and its last hop is honestly an instruction:
+
+1. **The artifact.** A run that handed a gate to the background supervisor left exactly one
+   continuation pointer at `<evidence_dir>/auto_resume_required.json`, written before the job was
+   spawned and removed only when the run's last background job was collected. "A resume is
+   required" is derived from (that pointer exists) AND (no liveness signal within the stall
+   threshold) — it is never stored, because a dying controller cannot write anything on its way out.
+2. **The command.** `aid-fsm.sh resume <epic_id>` claims the pointer exactly once, collects the
+   referenced job's terminal result, writes it to the durable `gates_rows/<gate>.json` checkpoint
+   that the next `run-all` assembles into the report (it never edits a final report in place),
+   updates the active-runs entry through the single map writer, and prints three lines: what was
+   found, what was recorded, and the next action. A job still in flight is a read-only status
+   report — nothing is claimed, the pointer is untouched, and a later resume still works. A missing
+   job record, a `lost` job, and a `stale` result are each reported verbatim with the rerun
+   instruction; none of them is ever patched into the report as evidence.
+3. **The printed next action.** The controller runs it.
+
+Steps 1 and 2 are mechanical: a command performs them and reports verified facts. Step 3 is an
+instruction and nothing more — `resume` cannot execute the controller's turn, so a printed next
+action is a handoff, not a completion. Treating it as completion is the failure this classification
+exists to prevent.
+
 The concrete helper implementing this contract is `scripts/aid-job.sh` (IMP-262) — a standalone,
 opt-in supervisor used at the controller boundary in place of `tail -f`/notification waiting. It is
 never a hard FSM/gate precondition and never a release-blocking ceremony:
@@ -2815,7 +2837,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-08-09
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

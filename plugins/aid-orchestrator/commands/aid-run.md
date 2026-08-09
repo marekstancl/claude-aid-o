@@ -53,7 +53,21 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
   PID, log path, start HEAD, start tree hash, start time, expected p95, and hard deadline. Poll the
   process itself and collect its exit status; `tail -f` is forbidden as a completion detector.
 - If no owned process is alive and no repository/evidence progress occurred for 5 minutes, resume
-  or diagnose automatically. Do not wait indefinitely for a missing notification.
+  or diagnose automatically. Do not wait indefinitely for a missing notification. "Resume" is a
+  named mechanical path, not a judgement call:
+  1. **The artifact.** A run that handed a gate to the background supervisor left exactly one
+     continuation pointer at `<evidence_dir>/auto_resume_required.json`. Its presence, plus the
+     absence of a liveness signal, is what "a resume is required" means — the state is derived,
+     never stored, because a dying controller cannot write anything on its way out.
+  2. **The command.** Run `scripts/aid-fsm.sh resume <epic_id>`. It claims that pointer exactly
+     once, collects the referenced job's terminal result, records it as a durable gate-row
+     checkpoint the next `run-all` assembles, updates the active-runs entry, and prints what it
+     found, what it recorded, and the next action. A job still in flight is a read-only status
+     report: nothing is claimed and the pointer stays valid for the next resume.
+  3. **The printed next action.** Execute it.
+  Steps 1–2 are mechanical — the command performs them and reports facts. Step 3 is an
+  instruction: `resume` cannot take the controller's turn for it, so a resume that prints a next
+  action and stops has not finished the work. The controller has.
 - The concrete supervisor for this contract is `scripts/aid-job.sh` (IMP-262), opt-in at the
   controller boundary — not a hard precondition and not a release gate. `aid-job.sh run` starts a
   command in its own process group with a durable record; `status`/`collect` read completion from
@@ -550,4 +564,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-09

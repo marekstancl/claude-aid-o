@@ -4,6 +4,7 @@
 #
 # Usage:
 #   aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force]
+#   aid-fsm.sh resume <epic_id> [--resolve-pidless] [--poll-seconds N|--no-poll]
 #   aid-fsm.sh transition <from> <to> <state_file> [--force]
 #   aid-fsm.sh advance-to-gates <state_file>
 #   aid-fsm.sh get-state <state_file>
@@ -3186,6 +3187,588 @@ _fsm_resume_artifact_preflight() {
     mv "$art" "${art}.superseded-$(date -u +%s)" 2>/dev/null || true
     echo "aid-fsm.sh init: archived a stale continuation artifact (${art} — referenced job '${job_id}' is ${st})" >&2
   done
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 5 — `aid-fsm.sh resume <epic_id>`
+#
+# The mechanical half of the continuation. A controller that died mid-EXECUTE
+# left exactly one continuation artifact behind (Step 4); `resume` claims it
+# EXACTLY ONCE, collects the referenced job's terminal result, records that
+# result as a durable gate-row checkpoint (Step 2's mechanism — the NEXT
+# `run-all` assembles it into the report; resume NEVER edits a final report in
+# place), updates the active-runs map through the one shipped writer, and
+# prints the verified state plus the exact next controller action.
+#
+# What it is NOT: it cannot execute that next action. Classifying it honestly
+# is the whole point — the mechanical core ends at a printed instruction, and
+# the final hop is the controller's own turn.
+#
+# THE CLAIM fires on exactly one edge: when a RESULT (or a proven dead end) is
+# CONSUMED. A status look at a job that is still in flight claims nothing and
+# leaves the artifact byte-identical, so the live-job invariant "a live
+# background job always has exactly one artifact" holds through every read.
+#
+# A row is written ONLY when a genuine terminal result exists AND is current.
+# A missing job record, a `lost` job, a job that never recorded a pid, and a
+# `stale` result are each reported verbatim with the rerun instruction — never
+# patched into the report as evidence of anything.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Courtesy poll: `resume` typed just after a suite finished should be ONE
+# command, not two. Bounded, overridable, and 0 disables it entirely.
+AID_RESUME_POLL_SEC="${AID_RESUME_POLL_SEC:-60}"
+AID_RESUME_POLL_INTERVAL_SEC="${AID_RESUME_POLL_INTERVAL_SEC:-2}"
+# Single-writer threshold: a timeline touched more recently than this, with a
+# live owned job, means a RUNNING runner owns the report — resume must not
+# write into it.
+AID_RESUME_STALL_SEC="${AID_RESUME_STALL_SEC:-300}"
+# How long a job may legitimately sit in `started` (wrapper launched, pid not
+# yet recorded) before that reads as a wrapper that never came up.
+AID_RESUME_PIDLESS_GRACE_SEC="${AID_RESUME_PIDLESS_GRACE_SEC:-60}"
+
+_AID_ID_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+
+# _resume_render_command <string> — P076 Step 5 / carried review obligation
+# (AC4). `safe_next_action` is composed by unquoted interpolation upstream and
+# validated only against '<'; `;`, backticks and `$(...)` pass both the writer
+# and the schema. NOTHING here ever executes it — but this command PRINTS it
+# for a human or a controller to paste, and a printed line must not be able to
+# do something other than what it says. A plain, obviously-inert command is
+# echoed verbatim; anything carrying shell metacharacters is rendered in
+# `printf %q` form (inert when pasted) and flagged by the caller.
+# Returns 0 when the string was plain, 1 when it had to be quoted.
+_resume_render_command() {
+  local s="$1"
+  if [[ "$s" =~ ^[A-Za-z0-9@%+=:,./_-][A-Za-z0-9@%+=:,./_[:space:]-]*$ ]]; then
+    printf '%s' "$s"
+    return 0
+  fi
+  printf '%q' "$s"
+  return 1
+}
+
+# _resume_say <epic_id> <label> <text> — one line of the three-line summary.
+# Always printf '%s' — never an interpolated command line.
+_resume_say() {
+  printf 'resume %s: %-8s — %s\n' "$1" "$2" "$3"
+}
+
+# _resume_next_line <epic_id> <prefix> <command> — prints the `next` line with
+# the command rendered shell-safe, warning on stderr when it had to be quoted.
+_resume_next_line() {
+  local epic_id="$1" prefix="$2" cmd="$3" rendered rc=0
+  rendered="$(_resume_render_command "$cmd")" || rc=$?
+  _resume_say "$epic_id" "next" "${prefix}${rendered}"
+  if (( rc != 0 )); then
+    echo "WARNING: aid-fsm.sh resume: the recorded next action contains shell metacharacters and is shown QUOTED above — read it before running it. Nothing here executed it." >&2
+  fi
+  return 0
+}
+
+# _resume_abs <path> — a jobs_dir/artifact path recorded relative to the state
+# root, resolved against it. Absolute paths pass through untouched, so resume
+# works identically from the plan worktree and from the primary checkout
+# (P074 aid-roots).
+_resume_abs() {
+  local p="$1" root
+  [[ -z "$p" ]] && return 0
+  if [[ "$p" == /* ]]; then printf '%s' "$p"; return 0; fi
+  root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  printf '%s/%s' "$root" "$p"
+}
+
+# _resume_locate_artifact <epic_id> — the run's ONE continuation artifact.
+# Preferred source is the active-runs entry's pointer; the fallback is the
+# NEWEST artifact under this EPIC's evidence root (the map is presentation,
+# the artifact is the truth, so a missing/rotten pointer never hides one).
+_resume_locate_artifact() {
+  local epic_id="$1" map ptr abs ev_root art newest="" newest_t=0 t
+  map="$(active_runs_map_path)"
+  if [[ -f "$map" ]]; then
+    ptr="$(jq -r --arg e "$epic_id" '.[$e].resume_artifact // ""' "$map" 2>/dev/null || echo "")"
+    if [[ -n "$ptr" && "$ptr" != "null" ]]; then
+      abs="$(_resume_abs "$ptr")"
+      if [[ -f "$abs" ]]; then printf '%s' "$abs"; return 0; fi
+    fi
+  fi
+  ev_root="$(aid_state_path ".aid-o/work/evidence/${epic_id}" 2>/dev/null)" || return 1
+  [[ -d "$ev_root" ]] || return 1
+  for art in "$ev_root"/*/"${AID_RESUME_ARTIFACT_BASENAME}"; do
+    [[ -f "$art" ]] || continue
+    t="$(stat -c %Y "$art" 2>/dev/null || echo 0)"
+    if (( t >= newest_t )); then newest_t="$t"; newest="$art"; fi
+  done
+  [[ -n "$newest" ]] || return 1
+  printf '%s' "$newest"
+}
+
+# _resume_job_state <jobs_dir_abs> <job_id> — the supervisor's own verdict, or
+# the literal `missing` when there is no job record to ask about.
+_resume_job_state() {
+  local jobs_dir="$1" job_id="$2"
+  [[ -d "${jobs_dir}/${job_id}" && -f "${jobs_dir}/${job_id}/job.json" ]] || { printf 'missing'; return 0; }
+  bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || printf 'unknown'
+}
+
+# _resume_other_jobs_live <jobs_dir_abs> <this_job_id> — rc 0 iff a DIFFERENT
+# supervised job of this run is still started/running. One artifact serves the
+# whole run, so claiming it while a sibling is still in flight would strand
+# that sibling with no pointer.
+_resume_other_jobs_live() {
+  local jobs_dir="$1" me="$2" d id st
+  [[ -d "$jobs_dir" ]] || return 1
+  for d in "$jobs_dir"/*/; do
+    [[ -f "${d}job.json" ]] || continue
+    id="$(basename "$d")"
+    [[ "$id" == "$me" ]] && continue
+    st="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$id" 2>/dev/null || echo unknown)"
+    case "$st" in started|running) return 0 ;; esac
+  done
+  return 1
+}
+
+# _resume_live_runner_owns_report <jobs_dir_abs> <timeline_file> — the
+# single-writer rule, stated mechanically: the gates report has exactly ONE
+# writer. That is the live runner whenever one exists; resume writes only for
+# a DEAD controller. rc 0 (a living runner owns it) iff aid-job.sh watchdog
+# reports a live owned job AND the run's timeline shows a heartbeat within the
+# stall threshold.
+_resume_live_runner_owns_report() {
+  local jobs_dir="$1" timeline="$2" wd st mtime now
+  [[ -d "$jobs_dir" ]] || return 1
+  wd="$(bash "${SCRIPT_DIR}/aid-job.sh" watchdog --jobs-dir "$jobs_dir" \
+         --interval "$AID_RESUME_STALL_SEC" 2>/dev/null || echo '{}')"
+  st="$(jq -r '.state // ""' <<<"$wd" 2>/dev/null || echo "")"
+  [[ "$st" == "busy" ]] || return 1
+  [[ -f "$timeline" ]] || return 1
+  mtime="$(stat -c %Y "$timeline" 2>/dev/null || echo 0)"
+  now="$(date -u +%s)"
+  (( now - mtime < AID_RESUME_STALL_SEC ))
+}
+
+# _resume_claim <artifact> — THE single-use claim. Same primitive the shipped
+# pm-override path uses, not a second one: `mv -n` plus a MANDATORY
+# source-gone post-check, because on the installed coreutils a SKIPPED `mv -n`
+# still exits 0. Winner: prints the claim path, rc 0. Loser: prints the
+# WINNER's claim file (so the race's losing output names who took it), rc 1.
+_resume_claim() {
+  local art="$1" dest existing
+  dest="${art}.claimed-$(date -u +%s)"
+  if mv -n "$art" "$dest" 2>/dev/null && [[ ! -e "$art" ]]; then
+    printf '%s' "$dest"
+    return 0
+  fi
+  existing=""
+  local c
+  for c in "${art}".claimed-*; do
+    [[ -e "$c" ]] || continue
+    existing="$c"
+  done
+  printf '%s' "${existing:-${art}.claimed-<unknown>}"
+  return 1
+}
+
+# _resume_release_pointer <epic_id> — after a claim: the map's pointer names a
+# file that is no longer there, so it is cleared through the ONE map writer.
+# `auto_controller` is re-asserted as `active` only for an AUTO run: stamping
+# it over a manual run would be this map claiming an autonomous controller
+# that does not exist.
+_resume_release_pointer() {
+  local epic_id="$1"
+  update_active_run_field "$epic_id" resume_artifact "" >/dev/null 2>&1 || true
+  if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then
+    update_active_run_field "$epic_id" auto_controller active >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head>
+#   The ONLY thing resume writes into the run's evidence: Step 2's durable
+#   incremental row checkpoint. Byte-shaped exactly like the in-line path's —
+#   the same `gate_row_from_job` mapping, the same `. + {attempts, runtime_
+#   baseline}` merge, the same `_checkpoint {head, written_at}` envelope, the
+#   same atomic tmp+mv. It has to be: the restore pass refuses a row with no
+#   envelope (`row_not_bound_to_a_revision`), so a differently-shaped row
+#   would be silently discarded by the very run-all this exists to feed.
+#   Echoes the row file path. rc 1 if nothing could be written.
+_resume_write_row() {
+  local evidence_dir="$1" gate="$2" job_dir="$3" job_id="$4" state="$5" \
+        attempts="$6" head="$7"
+  # The gate name becomes a filename — never let it become a path.
+  case "$gate" in */*|*..*|"") return 1 ;; esac
+
+  local row
+  row="$(gate_row_from_job "$gate" "$job_dir" "$job_id" "$state")" || true
+  [[ -n "$row" ]] || return 1
+
+  # The baseline sample the dead in-line runner never got to record. Same
+  # library, same call, same ordering (update, then report) — so the
+  # runtime_baseline this row carries is the one the in-line path would have
+  # carried. The command comes from the JOB RECORD's argv, never re-derived.
+  local rcmd exit_code dur_ms timeout_s
+  rcmd="$(jq -r '.command[2] // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
+  exit_code="$(jq -r '.exit_code' <<<"$row" 2>/dev/null || echo 1)"
+  dur_ms="$(jq -r '.duration_ms' <<<"$row" 2>/dev/null || echo 0)"
+  timeout_s="$(jq -r '.deadline_sec // 0' "$job_dir/job.json" 2>/dev/null || echo 0)"
+  if [[ -n "$rcmd" ]] && declare -F gate_baseline_update >/dev/null 2>&1; then
+    gate_baseline_update "$gate" "$rcmd" "$rcmd" "$exit_code" "$dur_ms" "$timeout_s" || true
+  fi
+  local rb='null'
+  if declare -F gate_baseline_report_json >/dev/null 2>&1; then
+    rb="$(gate_baseline_report_json "$gate" 2>/dev/null)"
+    [[ -z "$rb" ]] && rb='null'
+  fi
+
+  local merged
+  merged="$(jq --argjson rb "$rb" ". + {\"attempts\":${attempts}, \"runtime_baseline\": \$rb}" <<<"$row")" || return 1
+
+  local rows_dir="${evidence_dir}/gates_rows"
+  mkdir -p "$rows_dir" 2>/dev/null || return 1
+  local dest="${rows_dir}/${gate}.json" tmp bound
+  tmp="$(mktemp "${dest}.XXXXXX" 2>/dev/null)" || return 1
+  bound="$(jq -c --arg h "$head" --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+             '. + {_checkpoint: {head: $h, written_at: $t}}' <<<"$merged" 2>/dev/null)" || bound=""
+  [[ -n "$bound" ]] || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  if printf '%s\n' "$bound" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$dest" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+  fi
+  printf '%s' "$dest"
+  return 0
+}
+
+# _resume_newest_claim <epic_id> — the most recent `.claimed-<epoch>` sibling
+# under this EPIC's evidence, or empty. A resume that arrives AFTER the winner
+# finished sees no artifact at all; naming the claim file it lost to is what
+# makes "one winner, and every loser says who won" true for EVERY interleaving,
+# not just the tight mv-race one.
+_resume_newest_claim() {
+  local epic_id="$1" ev_root c newest="" newest_t=0 t
+  ev_root="$(aid_state_path ".aid-o/work/evidence/${epic_id}" 2>/dev/null)" || return 0
+  [[ -d "$ev_root" ]] || return 0
+  for c in "$ev_root"/*/"${AID_RESUME_ARTIFACT_BASENAME}".claimed-*; do
+    [[ -e "$c" ]] || continue
+    t="$(stat -c %Y "$c" 2>/dev/null || echo 0)"
+    if (( t >= newest_t )); then newest_t="$t"; newest="$c"; fi
+  done
+  printf '%s' "$newest"
+}
+
+# _resume_no_artifact_report <epic_id> — the idempotent second invocation.
+# Nothing to claim, so nothing IS claimed: the current state is read back from
+# the map and from whatever job records exist, and the command exits 0.
+_resume_no_artifact_report() {
+  local epic_id="$1" map state="unknown" run_id="" ac="" ev_root d jobs summary=""
+  local prior; prior="$(_resume_newest_claim "$epic_id")"
+  map="$(active_runs_map_path)"
+  if [[ -f "$map" ]]; then
+    state="$(jq -r --arg e "$epic_id" '.[$e].state // "unknown"' "$map" 2>/dev/null || echo unknown)"
+    run_id="$(jq -r --arg e "$epic_id" '.[$e].run_id // ""' "$map" 2>/dev/null || echo "")"
+    ac="$(jq -r --arg e "$epic_id" '.[$e].auto_controller // "unset"' "$map" 2>/dev/null || echo unset)"
+  fi
+  ev_root="$(aid_state_path ".aid-o/work/evidence/${epic_id}" 2>/dev/null)" || ev_root=""
+  if [[ -n "$ev_root" && -d "$ev_root" ]]; then
+    for d in "$ev_root"/*/jobs; do
+      [[ -d "$d" ]] || continue
+      local j id st
+      for j in "$d"/*/; do
+        [[ -f "${j}job.json" ]] || continue
+        id="$(basename "$j")"
+        st="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$d" --id "$id" 2>/dev/null || echo unknown)"
+        summary+="${summary:+, }${id}=${st}"
+      done
+    done
+  fi
+  if [[ -n "$prior" ]]; then
+    _resume_say "$epic_id" "found" "no continuation artifact — it was already claimed; the winner's claim file is ${prior}"
+  else
+    _resume_say "$epic_id" "found" "no continuation artifact — nothing is outstanding for this EPIC"
+  fi
+  _resume_say "$epic_id" "recorded" "nothing by this invocation — FSM state ${state}${run_id:+ (run ${run_id})}, auto_controller ${ac:-unset}; jobs: ${summary:-none}"
+  _resume_say "$epic_id" "next" "nothing to resume — continue the pipeline normally"
+  return 0
+}
+
+cmd_resume() {
+  local epic_id="" resolve_pidless=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --resolve-pidless) resolve_pidless=true; shift ;;
+      --poll-seconds) AID_RESUME_POLL_SEC="${2:-0}"; shift 2 ;;
+      --no-poll) AID_RESUME_POLL_SEC=0; shift ;;
+      --*) echo "ERROR: aid-fsm.sh resume: unknown flag '$1'" >&2; return 1 ;;
+      *) [[ -z "$epic_id" ]] || { echo "ERROR: aid-fsm.sh resume: unexpected argument '$1'" >&2; return 1; }
+         epic_id="$1"; shift ;;
+    esac
+  done
+  if [[ -z "$epic_id" ]]; then
+    echo "Usage: aid-fsm.sh resume <epic_id> [--resolve-pidless] [--poll-seconds N|--no-poll]" >&2
+    return 1
+  fi
+  [[ "$epic_id" =~ $_AID_ID_RE ]] || {
+    echo "ERROR: aid-fsm.sh resume: '${epic_id}' is not a valid epic id" >&2; return 1; }
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: aid-fsm.sh resume: jq is required" >&2; return 1; }
+
+  # NO plan-worktree redirect here, deliberately: `resume` reads and writes
+  # only state-root paths (aid_state_path, P074), so it behaves identically
+  # from the plan worktree and from the primary checkout.
+
+  local art
+  art="$(_resume_locate_artifact "$epic_id")" || art=""
+  if [[ -z "$art" || ! -f "$art" ]]; then
+    _resume_no_artifact_report "$epic_id"
+    return 0
+  fi
+
+  local evidence_dir job_id jobs_dir gate fp next_action run_id
+  evidence_dir="$(dirname "$art")"
+  job_id="$(jq -r '.job_id // ""' "$art" 2>/dev/null || echo "")"
+  jobs_dir="$(jq -r '.jobs_dir // ""' "$art" 2>/dev/null || echo "")"
+  gate="$(jq -r '.gate // ""' "$art" 2>/dev/null || echo "")"
+  fp="$(jq -r '.command_fingerprint // ""' "$art" 2>/dev/null || echo "")"
+  run_id="$(jq -r '.run_id // ""' "$art" 2>/dev/null || echo "")"
+  next_action="$(jq -r '.safe_next_action // ""' "$art" 2>/dev/null || echo "")"
+  if [[ -z "$job_id" || -z "$gate" ]]; then
+    _resume_say "$epic_id" "found" "the continuation artifact at ${art} is unreadable (no job_id/gate)"
+    _resume_say "$epic_id" "recorded" "nothing — a malformed pointer is never treated as a result"
+    _resume_say "$epic_id" "next" "inspect ${art} by hand; rerun the gates when it is understood"
+    return 0
+  fi
+  # Every identifier read from the artifact is used to build paths. Validate
+  # before use — a hostile or merely odd value must never become a path.
+  [[ "$gate" =~ $_AID_ID_RE ]] || {
+    echo "ERROR: aid-fsm.sh resume: gate '${gate}' recorded in ${art} is not a plain name — refusing to touch a row file for it" >&2
+    return 1; }
+  [[ "$job_id" =~ $_AID_ID_RE ]] || {
+    echo "ERROR: aid-fsm.sh resume: job id '${job_id}' recorded in ${art} is not a plain id" >&2
+    return 1; }
+
+  local jobs_abs; jobs_abs="$(_resume_abs "$jobs_dir")"
+  local timeline="${evidence_dir}/timeline.jsonl"
+
+  # `pending` — the PRE-SPAWN pointer. Resolve it the way it was designed to be
+  # resolved: by the command fingerprint, never by trusting a job id nobody
+  # wrote. A match means a job WAS started; no match means none ever was.
+  if [[ "$job_id" == "pending" ]]; then
+    local d cand="" rec
+    if [[ -d "$jobs_abs" ]]; then
+      for d in "$jobs_abs"/*/; do
+        [[ -f "${d}job.json" ]] || continue
+        rec="$(jq -r '.command_fingerprint // ""' "${d}job.json" 2>/dev/null || echo "")"
+        [[ -n "$fp" && "$rec" == "$fp" ]] || continue
+        cand="$(basename "$d")"
+      done
+    fi
+    if [[ -n "$cand" ]]; then
+      job_id="$cand"
+    else
+      local claimed
+      if claimed="$(_resume_claim "$art")"; then
+        _resume_release_pointer "$epic_id"
+        _resume_say "$epic_id" "found" "the pointer was still PRE-SPAWN and no job with fingerprint ${fp:0:12} exists in ${jobs_abs} — gate '${gate}' never ran"
+        _resume_say "$epic_id" "recorded" "no gate row (nothing ran, so there is nothing to record); pointer claimed as ${claimed}"
+      else
+        _resume_say "$epic_id" "found" "the pointer was PRE-SPAWN and was claimed concurrently — the winner's claim file is ${claimed}"
+        _resume_say "$epic_id" "recorded" "nothing by this invocation"
+      fi
+      _resume_next_line "$epic_id" "rerun the gates: " "$next_action"
+      return 0
+    fi
+  fi
+
+  local job_dir="${jobs_abs}/${job_id}"
+  local state; state="$(_resume_job_state "$jobs_abs" "$job_id")"
+
+  # ── courtesy poll ────────────────────────────────────────────────────────
+  # `resume` typed just after the suite finished should be ONE command. Bounded
+  # by AID_RESUME_POLL_SEC and never a substitute for the still-running branch.
+  if [[ "$state" == "running" || "$state" == "started" ]] && (( AID_RESUME_POLL_SEC > 0 )); then
+    local waited=0
+    while (( waited < AID_RESUME_POLL_SEC )); do
+      case "$state" in terminal_pass|terminal_fail|timed_out|cancelled|lost|missing) break ;; esac
+      sleep "$AID_RESUME_POLL_INTERVAL_SEC"
+      waited=$(( waited + AID_RESUME_POLL_INTERVAL_SEC ))
+      state="$(_resume_job_state "$jobs_abs" "$job_id")"
+    done
+  fi
+
+  case "$state" in
+    running)
+      # READ-ONLY. No claim, artifact untouched, still claimable later — one
+      # code path, no re-arm dance.
+      local started deadline remaining="unknown"
+      started="$(jq -r '.started_epoch // empty' "$job_dir/job.json" 2>/dev/null || true)"
+      deadline="$(jq -r '.deadline_sec // 0' "$job_dir/job.json" 2>/dev/null || echo 0)"
+      if [[ "$started" =~ ^[0-9]+$ && "$deadline" =~ ^[0-9]+$ ]] && (( deadline > 0 )); then
+        remaining=$(( started + deadline - $(date -u +%s) ))
+        (( remaining < 0 )) && remaining=0
+        remaining="${remaining}s"
+      fi
+      _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is STILL RUNNING (deadline remaining: ${remaining})"
+      _resume_say "$epic_id" "recorded" "nothing — a status look never claims; ${art} is untouched and still resumable"
+      _resume_say "$epic_id" "next" "let it finish, then run: bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic_id}"
+      return 0
+      ;;
+    started)
+      # The wrapper was launched but has NOT recorded a pid. Within the grace
+      # window that is a job coming up; past it, the wrapper never came up —
+      # and because Step 4's init preflight refuses while a referenced job
+      # reads `started`, that EPIC can otherwise never be re-initialized.
+      # `resume` is the defined escape: a reversible, RECORDED cancellation
+      # (the supervisor writes a terminal `cancelled` record — never a
+      # fabricated gate result), offered by default and performed on request.
+      local started age="unknown"
+      started="$(jq -r '.started_epoch // empty' "$job_dir/job.json" 2>/dev/null || true)"
+      [[ "$started" =~ ^[0-9]+$ ]] && age=$(( $(date -u +%s) - started ))
+      if [[ "$age" != "unknown" ]] && (( age >= AID_RESUME_PIDLESS_GRACE_SEC )); then
+        if $resolve_pidless; then
+          bash "${SCRIPT_DIR}/aid-job.sh" cancel --jobs-dir "$jobs_abs" --id "$job_id" >/dev/null 2>&1 || true
+          local after; after="$(_resume_job_state "$jobs_abs" "$job_id")"
+          local claimed2
+          if claimed2="$(_resume_claim "$art")"; then
+            _resume_release_pointer "$epic_id"
+            _resume_say "$epic_id" "found" "job '${job_id}' sat in 'started' for ${age}s with no pid — its wrapper never came up; it is now ${after}"
+            _resume_say "$epic_id" "recorded" "a terminal CANCELLED job record (not a gate result — gate '${gate}' did not run); pointer claimed as ${claimed2}"
+          else
+            _resume_say "$epic_id" "found" "job '${job_id}' was pid-less and was claimed concurrently — the winner's claim file is ${claimed2}"
+            _resume_say "$epic_id" "recorded" "nothing by this invocation"
+          fi
+          _resume_next_line "$epic_id" "the EPIC can be re-initialized now; rerun the gates: " "$next_action"
+        else
+          _resume_say "$epic_id" "found" "job '${job_id}' has sat in 'started' for ${age}s without ever recording a pid — its wrapper never came up, and init refuses this EPIC while it reads 'started'"
+          _resume_say "$epic_id" "recorded" "nothing — resume does not cancel a job behind your back"
+          _resume_say "$epic_id" "next" "resolve it (records a terminal cancellation, never a gate result): bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic_id} --resolve-pidless"
+        fi
+      else
+        _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is starting (no pid recorded yet, age ${age}s)"
+        _resume_say "$epic_id" "recorded" "nothing — a status look never claims; ${art} is untouched"
+        _resume_say "$epic_id" "next" "give it a moment, then run: bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic_id}"
+      fi
+      return 0
+      ;;
+  esac
+
+  # ── from here the job is dead: terminal, lost, or gone ───────────────────
+  # A sibling background job of the same run still in flight means the ONE
+  # artifact is still that sibling's pointer. Report, never claim.
+  if _resume_other_jobs_live "$jobs_abs" "$job_id"; then
+    _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but another background job of run ${run_id} is still live"
+    _resume_say "$epic_id" "recorded" "nothing — one artifact serves the whole run, so claiming it now would strand the live job"
+    _resume_say "$epic_id" "next" "wait for the live job, then run: bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic_id}"
+    return 0
+  fi
+
+  case "$state" in
+    missing|unknown)
+      local claimed3
+      if claimed3="$(_resume_claim "$art")"; then
+        _resume_release_pointer "$epic_id"
+        _resume_say "$epic_id" "found" "job records missing — the run cannot prove the gate result; rerun the gate ('${job_id}' has no record under ${jobs_abs})"
+        _resume_say "$epic_id" "recorded" "no gate row — a missing record is never a result; pointer claimed as ${claimed3}"
+      else
+        _resume_say "$epic_id" "found" "job records missing and the pointer was claimed concurrently — the winner's claim file is ${claimed3}"
+        _resume_say "$epic_id" "recorded" "nothing by this invocation"
+      fi
+      _resume_next_line "$epic_id" "rerun the gates: " "$next_action"
+      return 0
+      ;;
+    lost)
+      local claimed4
+      if claimed4="$(_resume_claim "$art")"; then
+        _resume_release_pointer "$epic_id"
+        _resume_say "$epic_id" "found" "job '${job_id}' is LOST — its owned process vanished without a terminal record, which proves no outcome for gate '${gate}'"
+        _resume_say "$epic_id" "recorded" "no gate row — a lost job is neither a pass nor an ordinary failure; pointer claimed as ${claimed4}"
+      else
+        _resume_say "$epic_id" "found" "job '${job_id}' is LOST and the pointer was claimed concurrently — the winner's claim file is ${claimed4}"
+        _resume_say "$epic_id" "recorded" "nothing by this invocation"
+      fi
+      _resume_next_line "$epic_id" "rerun the gate: " "$next_action"
+      return 0
+      ;;
+  esac
+
+  # ── terminal ─────────────────────────────────────────────────────────────
+  # Single-writer rule: the gates report has exactly ONE writer. If a runner is
+  # still alive and working, it owns the report — resume only prints status.
+  if _resume_live_runner_owns_report "$jobs_abs" "$timeline"; then
+    _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but a LIVE runner still owns this run's report (owned job live + timeline heartbeat within ${AID_RESUME_STALL_SEC}s)"
+    _resume_say "$epic_id" "recorded" "nothing — the report has exactly one writer, and it is not this command"
+    _resume_say "$epic_id" "next" "let the live runner finish; run resume only if it dies"
+    return 0
+  fi
+
+  local claimed
+  if ! claimed="$(_resume_claim "$art")"; then
+    _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the continuation artifact was already claimed — the winner's claim file is ${claimed}"
+    _resume_say "$epic_id" "recorded" "nothing by this invocation (the claim is single-use)"
+    _resume_say "$epic_id" "next" "read the winner's output; this invocation changed nothing"
+    return 0
+  fi
+
+  # The claim is taken, so the result is this invocation's to consume.
+  local repo collect_out collect_rc=0
+  repo="$(jq -r '.repo // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
+  collect_out="$(bash "${SCRIPT_DIR}/aid-job.sh" collect --jobs-dir "$jobs_abs" \
+                   --id "$job_id" ${repo:+--repo "$repo"} --require-current 2>/dev/null)" || collect_rc=$?
+
+  if (( collect_rc == 4 )); then
+    # The tree moved since the result was produced. Reported verbatim; a stale
+    # result NEVER enters the report as current evidence.
+    _resume_release_pointer "$epic_id"
+    _resume_say "$epic_id" "found" "job '${job_id}' is ${state} but its result is STALE: $(jq -r '.note // "tree moved since the result was produced"' <<<"$collect_out" 2>/dev/null || echo 'tree moved since the result was produced')"
+    _resume_say "$epic_id" "recorded" "no gate row — a stale result is not current evidence; pointer claimed as ${claimed}"
+    _resume_next_line "$epic_id" "rerun the gate at the current revision: " "$next_action"
+    return 0
+  fi
+
+  # Load the shared mapping + baseline libraries lazily: they are needed only
+  # on this one path, and a resume must not change what every other aid-fsm.sh
+  # command loads.
+  # shellcheck disable=SC1091
+  [[ -f "${SCRIPT_DIR}/lib/aid-gate-row.sh" ]] && source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
+  # shellcheck disable=SC1091
+  [[ -f "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh" ]] && source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
+  if ! declare -F gate_row_from_job >/dev/null 2>&1; then
+    _resume_release_pointer "$epic_id"
+    _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the shared job-result mapping (lib/aid-gate-row.sh) is unavailable"
+    _resume_say "$epic_id" "recorded" "no gate row — resume never re-implements the mapping; pointer claimed as ${claimed}"
+    _resume_next_line "$epic_id" "rerun the gates: " "$next_action"
+    return 0
+  fi
+  # The baseline library's data file, resolved through the state root so a
+  # resume from the plan worktree writes the same file the in-line runner did.
+  if [[ -z "${AID_GATE_BASELINE_FILE:-}" ]]; then
+    local _st_root; _st_root="$(aid_state_root 2>/dev/null)" || _st_root="$PWD"
+    export AID_GATE_BASELINE_FILE="${_st_root}/.aid-o/metrics/gate-runtime-baselines.yaml"
+    mkdir -p "$(dirname "$AID_GATE_BASELINE_FILE")" 2>/dev/null || true
+  fi
+
+  local attempts=1
+  [[ "$job_id" =~ -attempt-([0-9]+)$ ]] && attempts="${BASH_REMATCH[1]}"
+  local head=""
+  if [[ -n "$repo" && -d "$repo" ]]; then
+    head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
+  fi
+  [[ -z "$head" ]] && head="$(git rev-parse HEAD 2>/dev/null || echo "")"
+
+  local rowfile=""
+  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head")"; then
+    local rres; rres="$(jq -r '.result // "?"' "$rowfile" 2>/dev/null || echo '?')"
+    _resume_release_pointer "$epic_id"
+    _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is ${state} (collected, current at ${head:0:12})"
+    _resume_say "$epic_id" "recorded" "gate row '${gate}' = ${rres} at ${rowfile} (checkpoint only — the next run-all assembles the report); pointer claimed as ${claimed}"
+    _resume_next_line "$epic_id" "run it — this command cannot: " "$next_action"
+  else
+    _resume_release_pointer "$epic_id"
+    _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the row checkpoint could not be written under ${evidence_dir}/gates_rows"
+    _resume_say "$epic_id" "recorded" "no gate row; pointer claimed as ${claimed}"
+    _resume_next_line "$epic_id" "rerun the gates: " "$next_action"
+  fi
   return 0
 }
 
@@ -7562,6 +8145,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   _AID_FSM_ORIG_ARGS=("$@")
   case "${1:-}" in
     init)              shift; cmd_init "$@" ;;
+    resume)            shift; cmd_resume "$@" ;;   # P076 Step 5 — claim the continuation artifact once, collect, report
     transition)        shift; cmd_transition "$@" ;;
     advance-to-gates)  shift; cmd_advance_to_gates "$@" ;;
     get-state)         shift; cmd_get_state "$@" ;;
@@ -7591,7 +8175,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune> [args...]" >&2
       exit 1 ;;
   esac
 fi
