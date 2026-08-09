@@ -3765,6 +3765,51 @@ _resume_no_artifact_report() {
   return 0
 }
 
+# ─── The service safety net (P076 Step 10) ──────────────────────────────────
+# _fsm_service_sweep <evidence_dir> [<execution_yaml>] [<caller>]
+#
+# ONE teardown definition in this system — `aid_service_down_all` — and this is
+# the FSM's single call site for it, shared by both callers here: `resume` on its
+# terminal-collect path and `done-advance` at the release edge. Neither
+# re-implements teardown; both hand it a run's evidence directory and let the
+# library reason about registry entries and unregistered jobs.
+#
+# It is a NET, not a mechanism. The mechanism is `run-all`, which acquires once
+# and releases once; this exists for the run that is being wrapped up without a
+# rerun ever happening — a dead run collected by `resume`, or a run that reached
+# release with services still recorded.
+#
+# Three properties make it safe to call from the FSM:
+#   • it does NOTHING unless this run's evidence actually holds service state, so
+#     every project that declares no services is untouched (and no library is
+#     even sourced);
+#   • it is never called from a path where a supervised job of the run is still
+#     live — that is the caller's guarantee, and for `resume` it is the whole
+#     read-only-vs-claim split;
+#   • it never fails its caller. A teardown that could not finish is a warning
+#     next to a transition or a collection that already happened.
+_fsm_service_sweep() {
+  local ev="${1:-}" yaml="${2:-}" caller="${3:-fsm}"
+  [[ -n "$ev" && -d "$ev" ]] || return 0
+  # Nothing was ever brought up here → nothing to sweep, nothing to load.
+  [[ -f "${ev}/services.json" || -d "${ev}/service-jobs" ]] || return 0
+  if ! declare -F aid_service_down_all >/dev/null 2>&1; then
+    if [[ ! -f "${SCRIPT_DIR}/lib/aid-service.sh" ]]; then
+      echo "WARN: aid-fsm.sh ${caller}: ${ev} holds service state but lib/aid-service.sh is unavailable — sweep skipped; stop the services by hand (see ${ev}/services.json)" >&2
+      return 0
+    fi
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/lib/aid-service.sh" || {
+      echo "WARN: aid-fsm.sh ${caller}: lib/aid-service.sh could not be loaded — service sweep skipped" >&2
+      return 0
+    }
+  fi
+  if ! aid_service_down_all "$ev" ${yaml:+"$yaml"}; then
+    echo "WARN: aid-fsm.sh ${caller}: at least one service recorded under ${ev} still answers its probe after teardown — see the named line above; this did not affect anything recorded" >&2
+  fi
+  return 0
+}
+
 cmd_resume() {
   local epic_id="" resolve_pidless=false
   while [[ $# -gt 0 ]]; do
@@ -4030,6 +4075,17 @@ cmd_resume() {
   # The gate's own configuration, as named by the artifact's resolved
   # instruction — the template argument the baseline sample needs (AC4).
   local execution_yaml; execution_yaml="$(_resume_execution_yaml "$next_action")"
+
+  # ─── the service safety net, on THIS path only (P076 Step 10) ────────────
+  # The claim is taken and the job is dead: this run is being wrapped up, and a
+  # run that is being wrapped up owns no services any more. Everything above this
+  # line — the `running` branch, the `started` branch, and the live-sibling
+  # refusal — returned WITHOUT touching services, deliberately and as a hard
+  # rule: a background gate that is still running may depend on a declared
+  # service, and sweeping it there would kill the very dependency the surviving
+  # job needs in order to finish. A status look never claims, and it never stops
+  # a service either.
+  _fsm_service_sweep "$evidence_dir" "$execution_yaml" "resume"
 
   local rowfile=""
   if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo" "$tree")"; then
@@ -7352,6 +7408,20 @@ EOF
     # Failure logs a warning but never aborts the release path.
     bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
       2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
+
+    # ─── LAST-RESORT service sweep (P076 Step 10) ────────────────────────
+    # The run is complete. If its evidence still records a service that was never
+    # released — a runner killed after its last gate, a teardown that could not
+    # finish — this is the final moment anything in the pipeline looks at that
+    # run at all. Same one teardown definition, and the same P074 teardown
+    # philosophy the rest of this edge follows: a terminal operation SWEEPS, it
+    # never blocks. A sweep that cannot finish warns; the transition has already
+    # happened and is not undone by it.
+    #
+    # This is NOT the crash path. A runner SIGKILLed mid-gates never reaches
+    # release at all — that run is recovered by the next `run-all`'s entry sweep,
+    # or by `resume`.
+    _fsm_service_sweep "$evidence_dir" "" "done-advance"
   fi
 
   # Audit trail

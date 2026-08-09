@@ -77,6 +77,14 @@
 #   execution.yaml to `aid_service_down_all` — with a declaration present the
 #   registry has no say over what executes at all.
 #
+# ── RESOURCE EVIDENCE (observe only) ────────────────────────────────────────
+# Reaching `healthy` also appends one line to
+# `<evidence>/service-resources.jsonl` naming the per-run resource the service
+# occupies ({kind: external_service, namespace: per-run, id: "<name>:<port>"}).
+# Nothing consumes it to make a decision — the resource-map classifier is not
+# touched — so it can never turn a per-run port into a verdict by accident. See
+# `_aid_svc_emit_resource`.
+#
 # ── STATES ──────────────────────────────────────────────────────────────────
 #   absent → starting → healthy | unhealthy | timed_out | lost
 # `absent` is the absence of an entry, not a stored value. One further value,
@@ -613,6 +621,40 @@ _aid_svc_stop_one() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Resource evidence — OBSERVE ONLY (P076 Step 10, PM decision 3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _aid_svc_emit_resource <evidence_dir> <service> <port>
+#   Appends one line to `<evidence>/service-resources.jsonl` when a service
+#   reaches healthy:
+#     {"kind":"external_service","namespace":"per-run","id":"<name>:<port>"}
+#
+#   It is EVIDENCE, not a control signal. Nothing reads it to make a decision:
+#   the resource-map classifier is deliberately NOT touched by this step, so a
+#   per-run service port cannot start failing a parallel-safety verdict on the
+#   strength of a line nobody designed that classifier to receive. It exists so
+#   that a human — or a later step that decides to consume it on purpose — can
+#   see which per-run ports a run actually occupied.
+#
+#   A service with no `port_env` has no allocated port, and the id says exactly
+#   that (`<name>:none`) rather than pretending to a number.
+#
+#   Best-effort by construction: a failure to append is logged and changes
+#   nothing. A service that is healthy is healthy whether or not we could write
+#   a note about it.
+_aid_svc_emit_resource() {
+  local evidence="$1" name="$2" port="${3:-}" line dest
+  dest="${evidence}/service-resources.jsonl"
+  [[ -d "$evidence" ]] || return 0
+  _aid_svc_valid_port "$port" || port="none"
+  line="$(jq -nc --arg id "${name}:${port}" \
+    '{kind:"external_service", namespace:"per-run", id:$id}' 2>/dev/null)" || return 0
+  printf '%s\n' "$line" >> "$dest" 2>/dev/null \
+    || _aid_svc_log "service ${name}: could not append its resource line to ${dest} (observe-only evidence; the service itself is unaffected)"
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # up
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -821,6 +863,7 @@ _aid_svc_up_one() {
         _aid_svc_svc_err "$name" "came up healthy but the registry could not record it; the job has been cancelled rather than left unstoppable"
         return 1
       fi
+      _aid_svc_emit_resource "$evidence" "$name" "$port"
       _aid_svc_log "service ${name}: healthy (job ${spawned}${port:+, port ${port}}, attempt ${attempt})"
       return 0
     fi

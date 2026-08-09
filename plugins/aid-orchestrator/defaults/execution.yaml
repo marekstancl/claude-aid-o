@@ -15,6 +15,19 @@
 #   pass_criteria    — human-readable success definition
 #   when             — human-readable applicability condition
 #   run_mode         — foreground | background (default: foreground)
+#   needs_services   — list of declared service names this gate requires healthy
+#
+# needs_services: [name, ...]
+#   The services (declared in the `services:` block below) that must be HEALTHY
+#   before this gate is allowed to run. Every name is checked against the
+#   declarations at run-all entry — a name no service declares is a hard error
+#   that names the gate, never a silent wait on nothing.
+#   At gate start the runner asks the service registry (and the declared probe)
+#   whether each named service is healthy; if one is not, THIS gate fails fast
+#   with reason `service_unhealthy` and the other gates still run. It is a check,
+#   never a repair: services are acquired ONCE for the whole run before the first
+#   gate and released ONCE after the report is written, so no gate ever starts or
+#   stops one. A gate that omits the key is unaffected in every way.
 #
 # run_mode: foreground|background
 #   foreground (default, and the behaviour of every gate that omits the key)
@@ -215,6 +228,14 @@ gates:
 #     log_hint: "docker compose logs postgres"
 #     restart_authorized: false
 #     port_env: PGPORT_E2E
+#
+# ... and the gate that needs it says so by name (see `needs_services` in the
+# per-gate key list at the top of this file):
+#
+# gates:
+#   e2e:
+#     command: "npm run test:e2e"
+#     needs_services: [postgres]
 
 # ─── Retry & Escalation ─────────────────────────────────────────────────
 # Retry is PER-GATE only: each gate's own `max_retries` (see gate definitions above)

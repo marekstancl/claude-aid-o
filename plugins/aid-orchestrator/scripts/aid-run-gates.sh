@@ -366,9 +366,61 @@ _svc_backgrounding_form() {
   return 1
 }
 
+# _validate_needs_services <execution_yaml> <declared_names_newline_separated>
+#   A gate may declare `needs_services: [names]` — the services that must be
+#   HEALTHY before that gate is allowed to run. The list is validated against the
+#   DECLARED service names here, at the same config check as everything else,
+#   because the failure it prevents is silent: a gate naming a service that no
+#   longer exists (renamed, removed, typo'd) would otherwise either wait on
+#   nothing or fail at gate time with a diagnosis about readiness when the truth
+#   is a stale config line.
+#
+#   Runs even when there is NO `services:` block at all — that is precisely the
+#   case where every name is unknown, and it is the loudest one worth catching.
+#
+#   rc 0 nothing to complain about · rc 1 a refused declaration (named).
+_validate_needs_services() {
+  local file="$1" declared="$2"
+  local gate n tag
+  [[ "$(yq 'has("gates")' "$file" 2>/dev/null || echo false)" == "true" ]] || return 0
+
+  # ONE yq call for the whole check in the overwhelmingly common case: the gates
+  # that carry the key at all. A project using none pays a single query.
+  local carriers
+  # `select(.value | has(...))` and NOT `select(.value | type == "!!map" and
+  # has(...))`: the second form's operator precedence makes yq evaluate the
+  # `and` as the right-hand side of the `==`, so it selects NOTHING and the whole
+  # check silently passes — which is exactly how this was first written, and the
+  # unknown name reached the gate loop instead of the config check. `has` on a
+  # non-map gate value is simply false, so the type test bought nothing anyway.
+  carriers="$(yq '.gates | to_entries[] | select(.value | has("needs_services")) | .key' "$file" 2>/dev/null || true)"
+  [[ -n "$carriers" ]] || return 0
+
+  while IFS= read -r gate; do
+    [[ -z "$gate" ]] && continue
+    tag="$(GATE="$gate" yq '.gates[strenv(GATE)].needs_services | tag' "$file" 2>/dev/null || echo '!!null')"
+    if [[ "$tag" != '!!seq' ]]; then
+      echo "ERROR: aid-run-gates.sh: gate '${gate}': 'needs_services' must be a list of declared service names (found ${tag#\!\!})" >&2
+      return 1
+    fi
+    while IFS= read -r n; do
+      [[ -z "$n" ]] && continue
+      if ! grep -qxF "$n" <<<"$declared"; then
+        echo "ERROR: aid-run-gates.sh: gate '${gate}': 'needs_services' names '${n}', which is not a declared service. Declared services: ${declared//$'\n'/, }" >&2
+        echo "  A gate cannot wait on a service this project does not declare — add it under 'services:' in ${file}, or drop the name." >&2
+        return 1
+      fi
+    done < <(GATE="$gate" yq '.gates[strenv(GATE)].needs_services | .[]' "$file" 2>/dev/null)
+  done <<< "$carriers"
+  return 0
+}
+
 # _validate_services_config <execution_yaml>
 #   Fail-loud sweep over every declared service, run at run_all entry BEFORE any
-#   service or gate action.
+#   service or gate action. Also validates every gate's optional `needs_services`
+#   list against the names this same sweep just accepted (see
+#   _validate_needs_services) — the two belong to one config check, because a
+#   reference is only checkable next to the thing it references.
 #
 #   Exit contract — three outcomes, not two:
 #     0  nothing to complain about. Either there is no `services:` block (or an
@@ -406,7 +458,9 @@ _validate_services_config() {
     echo "ERROR: aid-run-gates.sh: services: cannot parse '${file}': ${has_services}" >&2
     return 2
   fi
-  [[ "$has_services" == "true" ]] || return 0
+  # No services block: there is nothing to validate about services, but a gate
+  # naming one is still a config error — and the most obvious one there is.
+  [[ "$has_services" == "true" ]] || { _validate_needs_services "$file" ""; return $?; }
 
   local root_tag
   if ! root_tag="$(yq '.services | tag' "$file" 2>&1)"; then
@@ -414,7 +468,7 @@ _validate_services_config() {
     return 2
   fi
   case "$root_tag" in
-    '!!null') return 0 ;;   # `services:` with no entries is the same as absent
+    '!!null') _validate_needs_services "$file" ""; return $? ;;   # `services:` with no entries is the same as absent
     '!!map') ;;
     *)
       echo "ERROR: aid-run-gates.sh: services: must be a map of service name -> declaration (found ${root_tag#\!\!})" >&2
@@ -435,6 +489,11 @@ _validate_services_config() {
     echo "ERROR: aid-run-gates.sh: services: a service name contains a newline (${declared_keys} name(s) declared, ${key_lines} line(s) of text) — service names must match ^[a-z0-9][a-z0-9_-]*\$" >&2
     return 1
   fi
+
+  # Every name this sweep ACCEPTS, for the needs_services cross-check below. It
+  # is built from the accepted names rather than from a second yq read, so a gate
+  # can never reference a service the sweep refused.
+  local accepted_names=""
 
   while IFS= read -r svc; do
     [[ -z "$svc" ]] && continue
@@ -537,8 +596,116 @@ _validate_services_config() {
       env_names+=("$val")
       env_owners+=("$svc")
     fi
+    accepted_names+="${svc}"$'\n'
   done < <(yq '.services | keys | .[]' "$file")
 
+  _validate_needs_services "$file" "${accepted_names%$'\n'}" || return 1
+
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 10 — the service LIFECYCLE, wired into a real run.
+#
+# Step 8 gave the declaration a validator; Step 9 gave it a library. This is the
+# step that makes either reachable, and its whole shape is one rule:
+#
+#   ACQUIRE ONCE before the gate loop, RELEASE ONCE after the report is written.
+#
+# Never per gate. Two gates sharing a service must not let the first one tear it
+# down under the second (the Codex round's parallel-teardown finding), and a
+# service is declared for the RUN, not for a gate — so a service no gate names is
+# still brought up and taken down with the run.
+#
+# There is no completion hook anywhere in this file that a SIGKILLed runner can
+# reach, so the crash safety net is not a hook: a RERUN sweeps at ENTRY, before it
+# acquires, and `resume`/`done-advance` sweep for a run that is being wrapped up
+# without a rerun. All of them call `aid_service_down_all` — ONE teardown
+# definition, four callers.
+#
+# A project that declares no services makes ZERO of these calls: every one of
+# them is behind `_svc_declared_count > 0`, and the library is not even sourced.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Set to 1 once this invocation has acquired services, so the release is exactly
+# once and a release without an acquire is a no-op.
+_SVC_ACQUIRED=0
+
+# _svc_declared_count <execution_yaml> — how many services the config declares.
+# ONE yq call; 0 for a config with no block, an empty block, or an unreadable
+# file (the shape is refused upstream by _validate_services_config, which runs
+# first — this function only decides whether the lifecycle applies at all).
+_svc_declared_count() {
+  local n
+  n="$(yq '.services // {} | length' "$1" 2>/dev/null || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
+# _svc_lib_load — source lib/aid-service.sh, fail CLOSED.
+#   Called only when services are declared. A missing library with declared
+#   services is not a run that can proceed: the gates would run against
+#   infrastructure nobody started and report on it as if they had.
+_svc_lib_load() {
+  declare -F aid_service_up_all >/dev/null 2>&1 && return 0
+  if [[ ! -f "${SCRIPT_DIR}/lib/aid-service.sh" ]]; then
+    echo "ERROR: aid-run-gates.sh: services are declared but ${SCRIPT_DIR}/lib/aid-service.sh is missing — refusing to run gates against infrastructure nothing brought up" >&2
+    return 1
+  fi
+  # shellcheck source=lib/aid-service.sh
+  source "${SCRIPT_DIR}/lib/aid-service.sh" || return 1
+  declare -F aid_service_up_all >/dev/null 2>&1
+}
+
+# _svc_stale_state_present <evidence_dir>
+#   True when THIS run's evidence already holds service state that is not
+#   accounted for as stopped — a registry entry in any non-stopped state, or a
+#   job directory under the supervisor's layout. That is the signature of a run
+#   that died before its release, and it is the only thing the entry sweep needs
+#   to decide on: `aid_service_down_all` does the actual reasoning.
+_svc_stale_state_present() {
+  local ev="$1" reg="$1/services.json" jr="$1/service-jobs"
+  if [[ -f "$reg" ]] \
+     && jq -e '[.services[]? | select(.state != "stopped")] | length > 0' "$reg" >/dev/null 2>&1; then
+    return 0
+  fi
+  # if/fi rather than an `&&` chain: this file runs under `set -e`, and a
+  # trailing false `&&` list as a statement is the shape that exits a script.
+  if [[ -d "$jr" ]]; then
+    if compgen -G "${jr}/*/*/job.json" >/dev/null 2>&1; then return 0; fi
+  fi
+  return 1
+}
+
+# _svc_manual_commands <evidence_dir> <execution_yaml>
+#   The commands a human would run to finish a teardown this run could not. Read
+#   from the registry, which is the only record of what was allocated — printed
+#   verbatim so the line can be pasted rather than reconstructed.
+_svc_manual_commands() {
+  local ev="$1" reg="$1/services.json"
+  [[ -f "$reg" ]] || return 0
+  jq -r --arg job "${SCRIPT_DIR}/aid-job.sh" '
+    .services // {} | to_entries[] | select(.value.state != "stopped") |
+    "  service " + .key + ":"
+    + (if (.value.stop_cmd // "") != "" then "\n    " + .value.stop_cmd else "" end)
+    + (if (.value.job_id // "") != "" then
+         "\n    bash " + $job + " cancel --jobs-dir " + (.value.jobs_dir // "?") + " --id " + .value.job_id
+       else "" end)
+  ' "$reg" 2>/dev/null || true
+}
+
+# _svc_release_run <evidence_dir> <execution_yaml>
+#   THE release. Idempotent, called exactly once per invocation that acquired,
+#   and NEVER able to un-write evidence: it runs after the report is written, and
+#   a failure is a warning naming the manual commands — not a failed run.
+_svc_release_run() {
+  local ev="$1" yaml="$2"
+  (( _SVC_ACQUIRED == 1 )) || return 0
+  _SVC_ACQUIRED=0
+  if ! aid_service_down_all "$ev" "$yaml"; then
+    echo "WARN: aid-run-gates.sh: service teardown did not fully succeed — at least one declared service still answers its probe. The gate report is already written and is NOT affected. Finish the teardown by hand:" >&2
+    _svc_manual_commands "$ev" "$yaml" >&2
+  fi
   return 0
 }
 
@@ -1517,6 +1684,62 @@ run_all_gates() {
     fi
   fi
 
+  # ─── Services: entry sweep, then ACQUIRE ONCE (P076 Step 10) ─────────────
+  # HERE, and not earlier or later, for four reasons that each pin one edge:
+  #   • after `_validate_services_config`, so a malformed declaration is refused
+  #     before anything is started;
+  #   • after `_evidence_dir` is resolved, because the service registry lives in
+  #     the run's evidence and nothing here invents an evidence directory;
+  #   • after the ledger is opened, so a run that cannot be accounted refuses
+  #     before it starts a process;
+  #   • BEFORE the gate loop, so a service failure fails the whole run before a
+  #     single gate has run and reported on infrastructure that never came up.
+  #
+  # The sweep runs before the acquire because a SIGKILLed runner reaches no
+  # completion hook, ever: the next `run-all` IS the crash recovery. It tears
+  # down whatever the dead run left non-stopped (registry entries plus, inside
+  # `aid_service_down_all`, any live job the registry does not name), and the
+  # idempotent `up_all` then starts cleanly instead of beside an orphan.
+  #
+  # ONE OWNER PER RUN. The targeted_tests escalation re-enters this script as a
+  # subprocess against the SAME epic/run — and therefore the same registry — while
+  # this invocation's services are up. It is handed
+  # AID_SERVICE_LIFECYCLE_OWNED=1, which makes it a CONSUMER: it still reads the
+  # registry for its own `needs_services` checks, and it neither sweeps, acquires
+  # nor releases. That is the same parallel-teardown rule as the per-gate one,
+  # applied to the one place where two runners genuinely share a run.
+  local _svc_count=0 _svc_manage=1
+  _svc_count="$(_svc_declared_count "$execution_yaml")"
+  [[ "${AID_SERVICE_LIFECYCLE_OWNED:-}" == "1" ]] && _svc_manage=0
+  if (( _svc_count > 0 )); then
+    _svc_lib_load || exit 1
+  fi
+  if (( _svc_count > 0 && _svc_manage == 1 )); then
+    if [[ -z "$_evidence_dir" || ! -d "$_evidence_dir" ]]; then
+      echo "ERROR: aid-run-gates.sh: ${_svc_count} service(s) declared in ${execution_yaml} but there is no evidence directory at '${_evidence_dir}' to hold the service registry — refusing to start a service this run could not record, and therefore could not stop" >&2
+      exit 1
+    fi
+    if _svc_stale_state_present "$_evidence_dir"; then
+      echo "aid-run-gates.sh: this run's evidence still holds service state from an earlier, unfinished invocation — sweeping it before acquiring (a killed runner reaches no cleanup hook; this rerun is the cleanup)" >&2
+      log_event "$timeline_file" "service_stale_sweep" evidence_dir="$_evidence_dir"
+      aid_service_down_all "$_evidence_dir" "$execution_yaml" || true
+    fi
+    log_event "$timeline_file" "services_acquire_start" declared="$_svc_count"
+    local _svc_up_rc=0
+    aid_service_up_all "$_evidence_dir" "$execution_yaml" || _svc_up_rc=$?
+    if (( _svc_up_rc != 0 )); then
+      # Whatever DID come up is recorded and therefore stoppable — release it
+      # through the one teardown definition before failing.
+      _SVC_ACQUIRED=1
+      log_event "$timeline_file" "services_acquire_fail" declared="$_svc_count" exit_code="$_svc_up_rc"
+      _svc_release_run "$_evidence_dir" "$execution_yaml"
+      echo "ERROR: aid-run-gates.sh: the declared services for this run did not come up (aid_service_up_all exit ${_svc_up_rc}) — refusing to run any gate against infrastructure that is not there. The named service failure is above." >&2
+      exit 1
+    fi
+    _SVC_ACQUIRED=1
+    log_event "$timeline_file" "services_acquired" declared="$_svc_count"
+  fi
+
   # Iterate gate names via yq (mikefarah)
   local gate_names
   gate_names=$(yq '.gates | keys | .[]' "$execution_yaml")
@@ -1592,6 +1815,46 @@ run_all_gates() {
       continue
     fi
 
+    # ─── needs_services fail-fast (P076 Step 10) ──────────────────────────
+    # A gate that declares `needs_services` runs ONLY when every named service is
+    # healthy right now. The check is here — before placeholder resolution, before
+    # the ledger append, before any dispatch — so a gate whose dependency is down
+    # fails FAST and by name instead of failing slowly, in its own words, about
+    # something else. The names were validated against the declarations at config
+    # check, so anything unhealthy here is a runtime fact, never a typo.
+    #
+    # This is a READ of the registry plus one probe per service: cheap enough to
+    # sit on the `background` path too, where it happens at gate start, before the
+    # job is spawned. And it never touches the service — checking is not managing;
+    # the run acquired once and will release once.
+    #
+    # Other gates are completely unaffected: one unhealthy dependency fails ONE
+    # gate, and the loop continues.
+    if (( _svc_count > 0 )); then
+      local _needs_json _need _unhealthy=""
+      _needs_json="$(GATE="$gate_name" yq -o=json '.gates[strenv(GATE)].needs_services // []' "$execution_yaml" 2>/dev/null | tr -d '\n ' || echo '[]')"
+      if [[ -n "$_needs_json" && "$_needs_json" != "[]" && "$_needs_json" != "null" ]]; then
+        while IFS= read -r _need; do
+          [[ -z "$_need" ]] && continue
+          if ! aid_service_status "$_need" "$_evidence_dir" "$execution_yaml" >/dev/null 2>&1; then
+            _unhealthy+="${_unhealthy:+, }${_need}"
+          fi
+        done < <(jq -r '.[]' <<<"$_needs_json" 2>/dev/null || true)
+      fi
+      if [[ -n "$_unhealthy" ]]; then
+        echo "ERROR: aid-run-gates.sh: gate '${gate_name}' needs service(s) that are not healthy: ${_unhealthy} — failing this gate fast rather than running it against infrastructure that is not there" >&2
+        log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="service_unhealthy" services="$_unhealthy"
+        $first || gates_json+=","
+        first=false
+        gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_unhealthy" \
+          '{gate:$g, result:"fail", reason:"service_unhealthy", exit_code:1, duration_ms:0,
+            output:("required service(s) not healthy: " + $s), attempts:0, unhealthy_services:($s | split(", "))}')"
+        processed=$((processed+1))
+        if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
+        continue
+      fi
+    fi
+
     # Phase 2 (P037) — resolve {token} placeholders before bash -c execution.
     # Unknown tokens fail-loud — mark gate as fail and continue to next gate.
     local resolved_cmd
@@ -1647,6 +1910,8 @@ run_all_gates() {
              --fingerprint "$(printf '%s' "$resolved_cmd" | sha256sum | cut -c1-16)" \
              --dispatch-point gate_runner_direct >/dev/null 2>&1; then
           echo "ERROR: aid-run-gates.sh: execution-ledger append failed for gate '$gate_name' — refusing to continue with incomplete accounting" >&2
+          # An abandoned run must not abandon its services. Same one teardown.
+          _svc_release_run "$_evidence_dir" "$execution_yaml"
           return 3
         fi
       done < <(grep -oE '[A-Za-z0-9_./-]+\.bats' <<<"$resolved_cmd" 2>/dev/null \
@@ -1965,6 +2230,9 @@ run_all_gates() {
     if [[ "$_ledger_rc" -ne 0 && "$_ledger_rc" -ne 7 ]]; then
       echo "ERROR: aid-run-gates.sh: the execution ledger could not be closed or evaluated (exit ${_ledger_rc}): ${_ledger_out}" >&2
       unset AID_EXECUTION_LEDGER
+      # Same rule as the append path: no return from this function leaves a
+      # service this invocation acquired still running.
+      _svc_release_run "$_evidence_dir" "$execution_yaml"
       return 3
     fi
     if [[ "$_ledger_rc" -eq 7 ]]; then
@@ -2176,7 +2444,12 @@ run_all_gates() {
     # the parent's AID_EXECUTION_LEDGER, so without this marker the escalation
     # re-running the same units under the full profile would be recorded as an
     # accidental double execution and fail a run that behaved correctly.
-    AID_EXECUTION_KIND=escalation bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
+    # The escalation is a CONSUMER of this run's services, never their owner —
+    # see the acquire block. Without this it would sweep the services THIS
+    # invocation is still holding, which is the parallel-teardown race in its
+    # most literal form: one runner tearing a service down under another.
+    AID_EXECUTION_KIND=escalation AID_SERVICE_LIFECYCLE_OWNED=1 \
+      bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
     if [[ -f "$full_escalation_report_path" ]]; then
       local full_report_json; full_report_json="$(cat "$full_escalation_report_path")"
       report="$(merge_escalation_report "$report" "$full_report_json" "$escalation_reason")"
@@ -2204,6 +2477,16 @@ run_all_gates() {
     mkdir -p "$(dirname "$report_file")"
     # Atomic write via tmp + mv (so concurrent FSM read sees full report)
     echo "$report" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file"
+  fi
+
+  # ─── Services: RELEASE ONCE (P076 Step 10) ───────────────────────────────
+  # AFTER the report is written and echoed, on both the pass and the fail path,
+  # and exactly once for the whole run. Cleanup never un-writes evidence: if the
+  # teardown does not fully succeed the run still reports what the gates found,
+  # and the failure is a warning naming the manual commands.
+  if (( _SVC_ACQUIRED == 1 )); then
+    _svc_release_run "$_evidence_dir" "$execution_yaml"
+    log_event "$timeline_file" "services_released" declared="$_svc_count"
   fi
 
   # Existing per-run completion event (kept for backward compat)
