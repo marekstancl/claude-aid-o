@@ -29,7 +29,12 @@ Run the 6-state FSM controller to orchestrate an EPIC through its full lifecycle
 
 Escalation rules for `--auto`:
 - **S-effort fixes** → auto-approve, apply fix, continue
-- **M-effort decisions** → use default decision from `config/permissions.yaml`
+- **M-effort decisions** → take the default the recovery policy already declares for the stop's
+  class, in `config/policies/auto-recovery.yaml` (shipped at
+  `defaults/policies/auto-recovery.yaml`). That file is the defaults authority: it names the stop
+  classes, the reversible actions each one may take, and its budget. An earlier version of this
+  line pointed at `config/permissions.yaml`, which has never held any such key — the tier rule was
+  real, its mechanical backing was not
 - **Recoverable technical decisions** (retry, repair, stale evidence, process failure,
   test selection) → dispatch the configured Codex adjudicator, record its decision in
   `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
@@ -287,7 +292,8 @@ FSM initialized: READY
 
 **Actions:**
 1. Load `execution.yaml` (gate definitions, step config)
-2. Load `config/permissions.yaml` (mode, auto-approve rules)
+2. Load `config/permissions.yaml` (`autonomous_mode` — the one key this file holds for the run;
+   the per-class recovery defaults live in `config/policies/auto-recovery.yaml`)
 3. **AUTO MODE → SKIP TO STEP 5 IMMEDIATELY.** Do NOT display EPIC summary, do NOT present Options, do NOT wait for PM.
 4. **Manual mode only:** Display EPIC summary to PM:
    ```
@@ -523,7 +529,9 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 - `scripts/aid-run-gates.sh` — gate execution
 - `scripts/lib/aid-stage-log.sh` — timeline.jsonl logging
 - `config/execution.yaml` — gate definitions (lazy-created on first run)
-- `config/permissions.yaml` — autonomous mode settings
+- `config/permissions.yaml` — `autonomous_mode` (read by `aid-release-policy.sh`)
+- `config/policies/auto-recovery.yaml` — AUTO-mode recovery policy: stop classes, allowed
+  reversible actions, budgets, and the ownership table of the retry loops it does NOT govern
 
 ## Important
 

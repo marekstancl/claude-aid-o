@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator/schemas/auto-recovery-v1",
+  "title": "aid-auto-recovery-policy/1",
+  "description": "The shape of the AUTO-mode recovery policy — defaults/policies/auto-recovery.yaml, and any project override of it at .aid-o/config/policies/auto-recovery.yaml. It is the single machine-readable authority for how an AUTO run classifies a stop and what reversible actions it may take before a person is involved. Two properties are load-bearing and are expressed here rather than left to prose: (1) `allowed_actions` is enum-constrained to the six defined action names, so an unknown action is a schema ERROR refused at load and never a silent no-op; (2) every stop class must carry both honesty axes — `detector` (does code detect this today?) and `ladder_entry` (who writes the ladder record?) — plus `ladder_entry_status`, which states whether that writer exists yet. A class may not be declared without an emitter unless it is UNCLASSIFIED, which by construction has none. The companion enforcement is scripts/tests/bats/test-auto-recovery-policy.bats, which validates the shipped policy against this schema, greps every named emitter to a real code site, and re-reads every `existing_loops` budget from the file it cites.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "ladder_runtime",
+    "loader_contract",
+    "action_vocabulary",
+    "stop_classes",
+    "terminus_stages",
+    "existing_loops"
+  ],
+  "properties": {
+    "version": {
+      "description": "Policy schema generation. Bumped only on a breaking shape change.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "ladder_runtime": {
+      "description": "Wiring truth, kept in the file the wiring is about: whether anything actually reads this policy yet, and where the code that will lands.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {
+          "description": "`not_wired` = the policy is shipped but no loader reads it and no code writes a ladder record. `wired` = both exist.",
+          "enum": ["not_wired", "wired"]
+        },
+        "reason": { "type": "string", "minLength": 1 },
+        "loader_lands_in": { "type": "string" },
+        "ladder_record_writer_lands_in": { "type": "string" }
+      }
+    },
+    "loader_contract": {
+      "description": "The decided behaviour of the loader for every degenerate input, written down before the loader exists so it is implemented against a decision rather than improvised. `implemented: false` states plainly that none of it runs yet.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implemented",
+        "project_override_path",
+        "malformed_override",
+        "missing_class",
+        "unknown_action",
+        "zero_budget",
+        "per_plan_override"
+      ],
+      "properties": {
+        "implemented": { "type": "boolean" },
+        "project_override_path": { "type": "string", "minLength": 1 },
+        "malformed_override": { "type": "string", "minLength": 1 },
+        "missing_class": { "type": "string", "minLength": 1 },
+        "unknown_action": { "type": "string", "minLength": 1 },
+        "zero_budget": { "type": "string", "minLength": 1 },
+        "per_plan_override": { "type": "string", "minLength": 1 }
+      }
+    },
+    "action_vocabulary": {
+      "description": "The CLOSED set of reversible actions, each with the sentence that says what it does. Exactly the six names — no more, no fewer — because `allowed_actions` is enum-constrained to them and a vocabulary entry with no enum slot would be unreachable.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wait_and_resume",
+        "retry_once",
+        "restart_service_once",
+        "rerun_targeted",
+        "resume_missing_lenses",
+        "collect_and_continue"
+      ],
+      "properties": {
+        "wait_and_resume": { "type": "string", "minLength": 1 },
+        "retry_once": { "type": "string", "minLength": 1 },
+        "restart_service_once": { "type": "string", "minLength": 1 },
+        "rerun_targeted": { "type": "string", "minLength": 1 },
+        "resume_missing_lenses": { "type": "string", "minLength": 1 },
+        "collect_and_continue": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stop_classes": {
+      "description": "The seven classes. UNCLASSIFIED is required because it is the default routing for anything unnamed — a policy without it could leave a stop with no route at all.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "GATE_TIMEOUT",
+        "SERVICE_UNHEALTHY",
+        "JOB_LOST",
+        "TRANSIENT_INFRA",
+        "DISPATCH_ORPHANED",
+        "REVIEW_EXHAUSTED",
+        "UNCLASSIFIED"
+      ],
+      "properties": {
+        "GATE_TIMEOUT": { "$ref": "#/$defs/emitting_class" },
+        "SERVICE_UNHEALTHY": { "$ref": "#/$defs/emitting_class" },
+        "JOB_LOST": { "$ref": "#/$defs/emitting_class" },
+        "TRANSIENT_INFRA": { "$ref": "#/$defs/emitting_class" },
+        "DISPATCH_ORPHANED": { "$ref": "#/$defs/emitting_class" },
+        "REVIEW_EXHAUSTED": { "$ref": "#/$defs/emitting_class" },
+        "UNCLASSIFIED": { "$ref": "#/$defs/unclassified_class" }
+      }
+    },
+    "terminus_stages": {
+      "description": "What each terminus stage means. The order in a class's `terminus` array is the order they are tried; these are the definitions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adjudicate", "escalation", "pm_force"],
+      "properties": {
+        "adjudicate": { "type": "string", "minLength": 1 },
+        "escalation": { "type": "string", "minLength": 1 },
+        "pm_force": { "type": "string", "minLength": 1 }
+      }
+    },
+    "existing_loops": {
+      "description": "The ownership table: every retry loop that ALREADY exists in AID, declared with its own authority and its own budget location. `authority: existing` and `governed_by_ladder: false` are constants here — the whole point of the table is that the ladder declares these rather than rewiring them (P076 PM decision 4). `budget_value` + `budget_file` are what the drift test re-reads and compares.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/existing_loop" }
+    }
+  },
+  "$defs": {
+    "emitter_site": {
+      "description": "One real code site that detects the condition. `anchor` is a literal substring that must be greppable in `file` — line numbers drift, the anchor is what the anti-decoration test actually asserts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "line", "anchor"],
+      "properties": {
+        "file": {
+          "description": "Repository-relative path.",
+          "type": "string",
+          "pattern": "^plugins/aid-orchestrator/[^\\s]+$"
+        },
+        "line": { "type": "integer", "minimum": 1 },
+        "anchor": { "type": "string", "minLength": 3 },
+        "note": { "type": "string" }
+      }
+    },
+    "class_common": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string", "minLength": 1 },
+        "detector": {
+          "description": "Does CODE detect this condition at this commit, leaving a machine-readable trace? `mechanical` = yes, and `emitter` proves it. `instruction` = no; an agent following written instruction decides it.",
+          "enum": ["mechanical", "instruction"]
+        },
+        "ladder_entry": {
+          "description": "Who writes the ladder record — `mechanical` (from the emitting code site) or `instruction` (the AUTO-loop instruction routes the report into the ladder).",
+          "enum": ["mechanical", "instruction"]
+        },
+        "ladder_entry_status": {
+          "description": "Truth about that writer AT THIS COMMIT. `planned` = it does not exist yet. Marking a class `live` while nothing writes its entry is the decoration failure this field exists to prevent.",
+          "enum": ["planned", "live"]
+        },
+        "budget": { "$ref": "#/$defs/budget" },
+        "terminus": {
+          "description": "The terminus chain. Every class ends the same way: adjudicate, then ESCALATION, then an audited PM force. Shortening it is not a configuration option.",
+          "type": "array",
+          "items": { "enum": ["adjudicate", "escalation", "pm_force"] },
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true
+        }
+      }
+    },
+    "emitting_class": {
+      "description": "A class with at least one real emitter site.",
+      "allOf": [{ "$ref": "#/$defs/class_common" }],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "detector",
+        "ladder_entry",
+        "ladder_entry_status",
+        "emitter",
+        "allowed_actions",
+        "budget",
+        "terminus"
+      ],
+      "properties": {
+        "description": true,
+        "detector": true,
+        "ladder_entry": true,
+        "ladder_entry_status": true,
+        "budget": true,
+        "terminus": true,
+        "emitter": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/emitter_site" }
+        },
+        "allowed_actions": { "$ref": "#/$defs/allowed_actions" }
+      }
+    },
+    "unclassified_class": {
+      "description": "UNCLASSIFIED — the default route. It has no emitter (it is defined as what is left over) and no allowed action at all: it goes straight to adjudication.",
+      "allOf": [{ "$ref": "#/$defs/class_common" }],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "detector",
+        "ladder_entry",
+        "ladder_entry_status",
+        "emitter",
+        "allowed_actions",
+        "budget",
+        "terminus"
+      ],
+      "properties": {
+        "description": true,
+        "detector": true,
+        "ladder_entry": true,
+        "ladder_entry_status": true,
+        "budget": true,
+        "terminus": true,
+        "emitter": { "type": "array", "maxItems": 0 },
+        "allowed_actions": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "allowed_actions": {
+      "description": "Reversible actions this class may take before adjudication. ENUM-CONSTRAINED to the six names in `action_vocabulary`: anything else is a schema error refused at load, never a silent no-op. An empty array is legal and means 'no recovery — adjudicate immediately'.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "wait_and_resume",
+          "retry_once",
+          "restart_service_once",
+          "rerun_targeted",
+          "resume_missing_lenses",
+          "collect_and_continue"
+        ]
+      }
+    },
+    "budget": {
+      "description": "How much the class may spend before the terminus. Zero is legal configuration, not an error: a class entered with no budget goes straight to adjudication.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempts", "wall_clock_seconds"],
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 0 },
+        "wall_clock_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "existing_loop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "what",
+        "authority",
+        "governed_by_ladder",
+        "budget_key",
+        "budget_value",
+        "budget_file",
+        "budget_line",
+        "budget_kind"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$" },
+        "what": { "type": "string", "minLength": 1 },
+        "authority": {
+          "description": "Always `existing`. The ladder declares these loops; it does not own them.",
+          "const": "existing"
+        },
+        "governed_by_ladder": {
+          "description": "Always false. If a loop ever does become ladder-governed it stops being an entry in this table.",
+          "const": false
+        },
+        "budget_key": { "type": "string", "minLength": 1 },
+        "budget_value": { "type": "integer", "minimum": 0 },
+        "budget_file": {
+          "type": "string",
+          "pattern": "^plugins/aid-orchestrator/[^\\s]+$"
+        },
+        "budget_line": { "type": "integer", "minimum": 1 },
+        "budget_kind": {
+          "description": "Where the number physically lives, which is what tells the drift test how to re-read it.",
+          "enum": ["policy_key", "shell_constant", "shell_default", "instruction"]
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}
