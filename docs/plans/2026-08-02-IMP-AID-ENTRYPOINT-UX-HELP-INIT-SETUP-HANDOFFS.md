@@ -1202,6 +1202,38 @@ worktree.
 
 ## 16. Validated follow-up — make auto mode own waits instead of pretending
 
+> **Plan written: P076** — D22 (owned jobs: `run_mode: background` gates delegated
+> to `aid-job.sh`, supervised-resumable-synchronous, crash-rerun re-attaches by
+> command fingerprint), D23 (declared services + `lib/aid-service.sh` over
+> aid-job: health probes, per-run ports, acquire-once/release-once lifecycle),
+> D24 (eager `auto_resume_required.json` + single-use-claimed `resume` command +
+> `auto_controller` status states + honest host card), D25 (machine-readable
+> `auto-recovery.yaml` reconciled with the 2026-07-21 stop-taxonomy design,
+> named per-class emitters, formalized Codex adjudication ending in ESCALATION /
+> P073 force) — tracked in `.aid-o/plans/P076-auto-mode-owned-waits.md`
+> (2026-08-08). Two config layers made explicit: the /aid-init template gains
+> the FIELDS only; the bats_all/bats_boundary background flip lands solely in
+> aid-orchestrator's own project config.
+>
+> **STILL OPEN after P076 (each registered as an IMP backlog entry by the plan —
+> numbers allocated 2026-08-09 in `docs/plans/2026-06-29-BACKLOG.md`):**
+> - **IMP-476** — fire-and-return ASYNC gates (the runner returning before job
+>   completion); P076 ships the supervised-synchronous variant only;
+> - **IMP-477** — services↔resource-map integration (`service-resources.jsonl`
+>   emission is observe-only evidence; the shared-port classifier stays
+>   untouched);
+> - **IMP-478** — foreground-gate `timeout -k` hardening (foreground path kept
+>   byte-identical);
+> - **IMP-479** — visual-companion server migration onto `lib/aid-service.sh`;
+> - **IMP-480** — a true host push-continuation adapter (task-notification
+>   behaviour stays instruction-only host guidance; the artifact is the enforced
+>   fallback).
+>
+> Each backlog entry states what shipped instead, why it was deferred, and the
+> `file:line` hook point of the P076 mechanism it would extend. Cross-reference
+> consistency between this block and the backlog is enforced by
+> `plugins/aid-orchestrator/scripts/tests/bats/test-p076-backlog-closure.bats`.
+
 ### Current state and root cause
 
 The desired rule is already written in `aid-run.md` and `pipeline.md`: in auto
