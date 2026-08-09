@@ -89,9 +89,12 @@ gates:
     description: >-
       Despite the name, this is NOT a fast/partial smoke check — it runs the
       FULL aggregate test suite via run-all-tests.sh (timeout_seconds 7200).
-      Treat it as MORE expensive than bats_all, not as a quick sanity check:
-      it runs the same bats work plus 40 standalone shell suites bats_all
-      never touches. Its true cost is not yet known — no run has completed.
+      It OVERLAPS gate:bats_all rather than containing it: this gate adds 47
+      standalone test-*.sh shell suites bats_all never touches, while bats_all
+      runs test-aid-test-isolation-experiment.bats, which this gate delegates
+      away to its own CI job. Neither set contains the other, so neither gate
+      substitutes for the other. Its true cost is not yet known — no run of
+      either gate has completed, so there is no measured cost to compare.
     # Kept the historical key name rather than renaming it (P071 E-071-1_1
     # Step 2, 2026-08-02) — release_quarantine's own reason text (see below)
     # quotes `shell_pipeline_smoke` verbatim, p064-closure's reason text
@@ -116,18 +119,34 @@ gates:
     # measurement.
     #
     # For scale (P076 Step 7, 2026-08-09): an earlier version of this line said
-    # "bats_all measures 1602s". It does not. 1602s has no record anywhere —
-    # grep across .aid-o/ finds the number only in this file, and the runtime
-    # baseline .aid-o/metrics/gate-runtime-baselines.yaml records gate:bats_all
-    # as samples_count 2 / non_censored_samples_count 0, both exit 124 at the
-    # 600s cap, with p50/p90/p95/max all null. bats_all has therefore never
-    # completed a measured run at all; 1602s and the 1556s figure above are
-    # both unbacked estimates (cf. test audit TAUD-20260806-0440,
-    # checks.fabricated_measured).
-    # The comparison the line was reaching for survives without a number: this
-    # gate runs bats_all's bats work PLUS 40 standalone shell suites bats_all
-    # never touches, so it is strictly the larger of the two — which is why the
-    # two are not interchangeable and neither is redundant.
+    # "bats_all measures 1602s". No completed run backs that number. The
+    # runtime baseline .aid-o/metrics/gate-runtime-baselines.yaml records
+    # gate:bats_all as samples_count 2 / non_censored_samples_count 0, both
+    # exit 124 at the 600s cap, with p50/p90/p95/max all null — bats_all has
+    # never completed a measured run at all. The figure is not unique to this
+    # file: .aid-o/work/evidence/P073/cp1-deep/cp1-lens-L3-enforcement.md:12
+    # cites "a 1556-1602s measurement" — but that line sources itself to
+    # `.aid-o/config/execution.yaml:36`, i.e. it is review prose quoting this
+    # config, not an independent measurement record. 1602s and the 1556s
+    # figure above are both unbacked estimates (cf. test audit
+    # TAUD-20260806-0440, checks.fabricated_measured).
+    #
+    # The comparison the line was reaching for survives without a number, but
+    # it rests on OVERLAP, not containment: each of the two gates runs work the
+    # other never touches, so neither set contains the other and neither gate
+    # is redundant or a substitute for the other.
+    #   - This gate runs 47 standalone `test-*.sh` shell suites
+    #     (plugins/aid-orchestrator/scripts/tests/test-*.sh, none excluded by
+    #     the discovery loop). gate:bats_all invokes bats files only and runs
+    #     none of them.
+    #   - gate:bats_all (aid-bats-parallel-lane.sh --pool-only) skips only the
+    #     2 BOUNDARY_RELATIVE_PATHS files, so it RUNS
+    #     test-aid-test-isolation-experiment.bats — which this gate
+    #     deliberately skips via DELEGATED_SUITES (run-all-tests.sh:141-157)
+    #     because that suite owns a dedicated CI job.
+    #   - The 2 boundary files (test-aid-plan-final-boundary.bats,
+    #     test-aid-plan-release-boundary.bats) are skipped by BOTH gates;
+    #     gate:bats_boundary is what runs them.
     timeout_seconds: 7200
     max_retries: 0
   plan_diff:

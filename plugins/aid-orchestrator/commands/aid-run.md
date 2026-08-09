@@ -47,14 +47,16 @@ Read this before starting an AUTO run — it is what you, or the next controller
 an interruption.
 
 Every live EPIC has an entry in `.aid-o/work/active-runs.json`. The entry's `auto_controller` field
-is stamped whenever the entry is (re)written at a lifecycle boundary — `init` first — and
+is stamped at `init`, the only site that writes an entry into the map (`upsert_active_run`). The
+other lifecycle boundaries do not re-stamp it — the done-advance review→release edge, `plan-close`
+and `active-runs prune` all REMOVE the entry instead. After `init`,
 `aid-fsm.sh active-runs set <epic> auto_controller <value>` is the only single-field writer. Three
 values are **storable**, and the fourth state is never stored at all.
 
 | State | Stored? | What it means | Who sets it |
 |-------|---------|---------------|-------------|
-| `active` | yes | An autonomous controller is alive and owns this run. | Any entry (re)write while `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
-| `manual` | yes | No autonomous controller — a human drives this run. The conservative default for any entry write that is not AUTO. | Any entry (re)write without `AID_AUTO_MODE=1` |
+| `active` | yes | An autonomous controller is alive and owns this run. | `init`, when `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
+| `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when `AID_AUTO_MODE=1` is not set |
 | `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | *Nothing writes it yet.* The value is accepted by the writer and reserved for the escalation ladder's terminus, which is a later plan step. Treat it today as vocabulary, not as observed state. |
 | `awaiting_host_resume` | **never** | A background gate was handed off and the controller then died: the run's continuation artifact is still on disk and nothing has signalled liveness. | Nobody. It is **derived** at read time. |
 
@@ -69,8 +71,10 @@ facts the dead controller provably left behind:
 2. no liveness signal is recent enough. `aid-fsm.sh active-runs stalled` is the shipped derivation
    of that half — newest of the entry's `updated_at` and the run timeline's newest event, against
    `AID_ACTIVE_RUN_STALL_SEC` (default 2100 s) — and `/aid-status` renders its verdict as the
-   `STALLED?` marker plus the recovery line. No command prints the string `awaiting_host_resume`;
-   it is the name for the two facts holding together, not a value any surface emits.
+   `STALLED?` marker plus the recovery line. The string `awaiting_host_resume` does appear in
+   output — as the writer's rejection message (`aid-fsm.sh`) and in `/aid-help` prose — but no
+   surface ever reports it as an observed state of a run: it names the two facts holding together,
+   not a value anything stores or emits as a verdict.
 
 **The resume flow.** When both hold, run `bash {plugin_path}/scripts/aid-fsm.sh resume <epic_id>`.
 It claims the artifact exactly once, collects the referenced job's terminal result, records it as a
