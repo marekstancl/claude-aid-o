@@ -1,0 +1,9 @@
+schema_version: aid-lifecycle-1.0
+repo_id: 0663532a-3dd2-40cb-91fc-5dac362bfcc0
+plan_id: P076
+source_plan_sha: sha256:9fbca4e5a884f24c642b12b877998ff0819dfd9c92f094ca1b755a1fbff2bdb8
+declared_epics:
+  - {id: E-076-1_3, scope: required}
+  - {id: E-076-2_3, scope: required}
+  - {id: E-076-3_3, scope: required}
+depends_on_plans: []
