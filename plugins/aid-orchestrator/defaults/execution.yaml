@@ -5,6 +5,36 @@
 #           content quality, discovered issues triage, and acceptable debt.
 
 # ─── Quality Gates ───────────────────────────────────────────────────────
+#
+# Per-gate keys (all optional unless noted):
+#   description      — human-readable purpose of the gate
+#   required         — true blocks GATES→DONE on failure; false is advisory
+#   command          — the shell command the gate runs
+#   timeout_seconds  — wall-clock budget for the command (default 60)
+#   max_retries      — retry attempts after a failure (default from policy)
+#   pass_criteria    — human-readable success definition
+#   when             — human-readable applicability condition
+#   run_mode         — foreground | background (default: foreground)
+#
+# run_mode: foreground|background
+#   foreground (default, and the behaviour of every gate that omits the key)
+#     runs the command inline under a plain timeout, exactly as AID always has.
+#   background runs the command as a supervised job owned by
+#     `aid-job.sh` (process-group ownership, PID-reuse defeat, a durable
+#     HEAD/tree-bound result record). The gate runner still waits for the job
+#     to finish inside the same invocation — this is not fire-and-forget — but
+#     if the run is interrupted (crash, killed session, disconnected host) the
+#     job survives and the next run RE-ATTACHES to it by command fingerprint
+#     instead of starting the expensive suite a second time.
+#   Anything other than these two words is a hard error naming the gate: a
+#   typo like `backgroud` must never fall back silently to foreground.
+#   No gate in this template sets run_mode — nothing changes for a project
+#   until its own PM edits `.aid-o/config/execution.yaml`. A project learns
+#   which of its gates would benefit from the flip from its own telemetry:
+#   the gate runner emits an observe-only `gate_run_mode_advice` timeline
+#   event (with the exact one-line edit) whenever measured runtimes recommend
+#   background for a gate that declares no run_mode. See also
+#   `aid-gate-runtime-report.sh`, which prints the same recommendation.
 gates:
   tests_pass:
     description: "All tests pass via project test runner"

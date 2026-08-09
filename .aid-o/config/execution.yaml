@@ -38,6 +38,15 @@ gates:
                            # censored samples, no percentile, and a real red
                            # case hidden for two commits because a gate that
                            # always times out reports nothing
+    # P076 Step 1 (2026-08-09): supervised background job via aid-job.sh.
+    # Rationale is measured, not guessed — this gate's own uncapped run is
+    # 1556s (2026-08-04), i.e. ~26 minutes in which an interrupted session
+    # previously threw the whole suite away and restarted it from zero.
+    # Backgrounded, the job is owned by its process group and its result is
+    # bound to the start HEAD/tree, so a rerun after a crash re-attaches to
+    # the still-live job instead of paying the 26 minutes twice. Failure
+    # semantics, required-ness, timeout and retry budget are unchanged.
+    run_mode: background
     max_retries: 0
   bats_boundary:
     # P071 E-071-1_1 Step 3 CP2 fix (2026-08-02): the 2 bats files excluded
@@ -52,6 +61,17 @@ gates:
     command: "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --dedicated-only"
     required: false
     timeout_seconds: 7200
+    # P076 Step 1 (2026-08-09): supervised background job via aid-job.sh.
+    # This is the longest gate in the repository — the 2 sequential boundary
+    # files each build a real git repo per test, and
+    # test-aid-plan-final-boundary.bats alone has been observed running past
+    # 3600s without completing, which is why the cap is 7200s. A gate with a
+    # two-hour ceiling is precisely the one an interrupted auto-mode run must
+    # not have to restart: backgrounded, the job survives the interruption
+    # and the next run re-attaches by command fingerprint. required:false
+    # (advisory) is untouched — backgrounding an advisory gate is legal and
+    # changes none of its failure semantics.
+    run_mode: background
     max_retries: 0
   shell_pipeline_smoke:
     description: >-
