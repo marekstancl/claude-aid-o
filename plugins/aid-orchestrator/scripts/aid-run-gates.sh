@@ -260,6 +260,150 @@ validate_all_run_modes() {
   return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 8 — service declarations.
+#
+# execution.yaml may carry an OPTIONAL `services:` map: the per-project
+# declaration of long-lived processes a run needs standing up before its gates
+# mean anything. It lives here, and not in some new file, because execution.yaml
+# is already the per-project gate/runtime contract every project owns.
+#
+# Two authorities, deliberately, and they must agree:
+#   • defaults/schemas/service-declaration.schema.json — the documentation and
+#     test authority for the shape.
+#   • _validate_services_config below — the RUNTIME enforcement, mirroring every
+#     constraint in that schema plus the one JSON Schema cannot express across
+#     sibling properties (duplicate port_env).
+# scripts/tests/bats/test-service-declaration.bats drives BOTH from one shared
+# case table, so the two cannot drift apart silently.
+#
+# Nothing in this step starts, stops or supervises a service. This is validation
+# only: shape refused early, loudly, by service and field.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _svc_err <service> <message>
+#   Every service violation names the service; the message names the field.
+_svc_err() {
+  echo "ERROR: aid-run-gates.sh: services: service '${1}': ${2}" >&2
+}
+
+# _validate_services_config <execution_yaml>
+#   Fail-loud sweep over every declared service, run at run_all entry BEFORE any
+#   service or gate action. An ABSENT (or empty) `services:` block returns 0
+#   immediately and touches nothing — that is the byte-identical path every
+#   pre-P076 project stays on.
+_validate_services_config() {
+  local file="$1"
+  local svc key tag val
+  local -a env_names=() env_owners=()
+
+  [[ "$(yq 'has("services")' "$file" 2>/dev/null || echo false)" == "true" ]] || return 0
+
+  local root_tag
+  root_tag="$(yq '.services | tag' "$file" 2>/dev/null || echo '!!null')"
+  case "$root_tag" in
+    '!!null') return 0 ;;   # `services:` with no entries is the same as absent
+    '!!map') ;;
+    *)
+      echo "ERROR: aid-run-gates.sh: services: must be a map of service name -> declaration (found ${root_tag#\!\!})" >&2
+      return 1
+      ;;
+  esac
+
+  while IFS= read -r svc; do
+    [[ -z "$svc" ]] && continue
+
+    # Service name: it becomes part of log lines, job directory names and error
+    # messages, so it stays filesystem- and shell-safe.
+    if [[ ! "$svc" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+      _svc_err "$svc" "invalid service name (allowed: lowercase letters, digits, '_' and '-', starting with a letter or digit)"
+      return 1
+    fi
+
+    tag="$(SVC="$svc" yq '.services[strenv(SVC)] | tag' "$file" 2>/dev/null || echo '!!null')"
+    if [[ "$tag" != '!!map' ]]; then
+      _svc_err "$svc" "declaration must be a map of fields (found ${tag#\!\!})"
+      return 1
+    fi
+
+    # additionalProperties: false — an unknown key is a typo, and a typo that is
+    # silently ignored is a contract the project believes it declared.
+    while IFS= read -r key; do
+      [[ -z "$key" ]] && continue
+      case "$key" in
+        start_cmd|probe_cmd|stop_cmd|startup_deadline_seconds|max_lifetime_seconds|log_hint|restart_authorized|port_env) ;;
+        *)
+          _svc_err "$svc" "unknown field '${key}' (accepted: start_cmd, probe_cmd, stop_cmd, startup_deadline_seconds, max_lifetime_seconds, log_hint, restart_authorized, port_env)"
+          return 1
+          ;;
+      esac
+    done < <(SVC="$svc" yq '.services[strenv(SVC)] | keys | .[]' "$file")
+
+    # Required fields.
+    for key in start_cmd probe_cmd startup_deadline_seconds; do
+      if [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" != "true" ]]; then
+        _svc_err "$svc" "missing required field '${key}'"
+        return 1
+      fi
+    done
+
+    # Non-empty strings.
+    for key in start_cmd probe_cmd stop_cmd log_hint; do
+      [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
+      tag="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)] | tag' "$file")"
+      val="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)]' "$file")"
+      if [[ "$tag" != '!!str' || -z "$val" ]]; then
+        _svc_err "$svc" "field '${key}' must be a non-empty string"
+        return 1
+      fi
+    done
+
+    # Positive integers.
+    for key in startup_deadline_seconds max_lifetime_seconds; do
+      [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
+      tag="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)] | tag' "$file")"
+      val="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)]' "$file")"
+      if [[ "$tag" != '!!int' || ! "$val" =~ ^[0-9]+$ || "$val" -lt 1 ]]; then
+        _svc_err "$svc" "field '${key}' must be an integer >= 1"
+        return 1
+      fi
+    done
+
+    # Booleans. Absent restart_authorized defaults to false — repairs are opt-in
+    # authority, so the default is the one that grants nothing.
+    if [[ "$(SVC="$svc" yq '.services[strenv(SVC)] | has("restart_authorized")' "$file")" == "true" ]]; then
+      tag="$(SVC="$svc" yq '.services[strenv(SVC)].restart_authorized | tag' "$file")"
+      if [[ "$tag" != '!!bool' ]]; then
+        _svc_err "$svc" "field 'restart_authorized' must be true or false"
+        return 1
+      fi
+    fi
+
+    # port_env: optional (a service on a fixed external port declares none and
+    # allocation is skipped for it), but when present it must be a legal env var
+    # name AND unowned by any other service.
+    if [[ "$(SVC="$svc" yq '.services[strenv(SVC)] | has("port_env")' "$file")" == "true" ]]; then
+      tag="$(SVC="$svc" yq '.services[strenv(SVC)].port_env | tag' "$file")"
+      val="$(SVC="$svc" yq '.services[strenv(SVC)].port_env' "$file")"
+      if [[ "$tag" != '!!str' || ! "$val" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        _svc_err "$svc" "field 'port_env' must be a valid environment variable name (^[A-Za-z_][A-Za-z0-9_]*\$)"
+        return 1
+      fi
+      local i
+      for i in "${!env_names[@]}"; do
+        if [[ "${env_names[$i]}" == "$val" ]]; then
+          _svc_err "$svc" "field 'port_env' duplicates '${val}', already declared by service '${env_owners[$i]}' — one env var, one owner"
+          return 1
+        fi
+      done
+      env_names+=("$val")
+      env_owners+=("$svc")
+    fi
+  done < <(yq '.services | keys | .[]' "$file")
+
+  return 0
+}
+
 # _gate_expect_p95_seconds <gate_name>
 #   The gate's runtime-baseline p95 in SECONDS for aid-job.sh's --expect-p95,
 #   but only once the baseline holds >= 3 non-censored samples (the same
@@ -994,6 +1138,14 @@ run_all_gates() {
   # spawned — a typo on the third gate must not be discovered after the first
   # two have already run.
   validate_all_run_modes "$execution_yaml" || exit 1
+
+  # ─── services validation (P076 Step 8) ─────────────────────────────────
+  # Same entry point, same spirit: the OPTIONAL `services:` block is checked
+  # here, before any service or gate action, so a malformed declaration is
+  # refused by service and field instead of surfacing as a mystery failure in
+  # the middle of a gate. An absent block is a no-op — nothing changes for a
+  # project that declares no services.
+  _validate_services_config "$execution_yaml" || exit 1
 
   # One-time-per-clone lazy bootstrap (P063 Step 2) — see
   # aid_gate_baseline_ensure_gitignored above. Called once per run (not per

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator/schemas/service-declaration-v1",
+  "title": "aid-service-declaration/1",
+  "description": "The shape of the OPTIONAL `services:` map in a project's execution.yaml — the per-project declaration of long-lived processes a run may need standing up (a database, a dev server, a queue). AID starts nothing on its own authority: a project that declares no services keeps byte-identical runner behaviour, and the shipped template ships this block as commentary with zero active services. This file is the DOCUMENTATION + test authority for the shape; the RUNTIME enforcement is `_validate_services_config` in scripts/aid-run-gates.sh, which mirrors every constraint below and runs at `run_all` entry, before any service or gate action. The two are held together by the shared fixture set in scripts/tests/bats/test-service-declaration.bats, which drives BOTH from the same case table — if one drifts, that suite fails.",
+  "type": "object",
+  "propertyNames": {
+    "description": "Service names are lowercase identifiers: they end up in log lines, job directory names and error messages, so they stay filesystem- and shell-safe.",
+    "pattern": "^[a-z0-9][a-z0-9_-]*$"
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/service"
+  },
+  "$defs": {
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_cmd",
+        "probe_cmd",
+        "startup_deadline_seconds"
+      ],
+      "properties": {
+        "start_cmd": {
+          "description": "The command that starts the service. It MUST remain the foreground process of its job — no `&`, no `nohup`, no self-daemonising fork. The supervisor owns the process group; a command that backgrounds itself hands back a pid that owns nothing, and the run loses the ability to stop what it started.",
+          "type": "string",
+          "minLength": 1
+        },
+        "probe_cmd": {
+          "description": "The health probe. Exit 0 means healthy; any other exit means not yet (or no longer) healthy. It is polled, so it must be cheap and side-effect free.",
+          "type": "string",
+          "minLength": 1
+        },
+        "startup_deadline_seconds": {
+          "description": "The HEALTH-PROBE budget only: absent -> starting must reach healthy within this many seconds, or the service is declared failed to start. Deliberately NOT the process lifetime — see max_lifetime_seconds.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_lifetime_seconds": {
+          "description": "The aid-job whole-process deadline — a run-lifetime ceiling, kept SEPARATE from startup_deadline_seconds so one number never has to mean both 'how long may it take to come up' and 'how long may it live'. Default 86400 (24 h).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 86400
+        },
+        "stop_cmd": {
+          "description": "Graceful shutdown command. Optional: when absent, teardown relies on job cancel alone (process-group kill), which is acceptable for a process with no external state to flush.",
+          "type": "string",
+          "minLength": 1
+        },
+        "log_hint": {
+          "description": "Where this service's own logs land (a path, a container name, a docker logs invocation) — surfaced to a human diagnosing a failed startup. Free-form prose, read by nobody but a person.",
+          "type": "string",
+          "minLength": 1
+        },
+        "restart_authorized": {
+          "description": "Whether an automated run may restart this service after it dies. Defaults to FALSE: repairs are opt-in authority, never assumed.",
+          "type": "boolean",
+          "default": false
+        },
+        "port_env": {
+          "description": "Name of the environment variable that carries the per-run allocated port. OPTIONAL, and its absence is the honestly-named shared-resource escape hatch: a service on a fixed external port (an existing shared database) declares no port_env and port allocation is skipped for it. Two services may never name the SAME port_env — one env var, one owner. That uniqueness constraint is not expressible in JSON Schema across sibling properties; it is enforced by _validate_services_config and covered by the shared fixture set.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        }
+      }
+    }
+  }
+}

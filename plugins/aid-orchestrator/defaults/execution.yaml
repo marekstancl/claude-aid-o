@@ -149,6 +149,73 @@ gates:
 #     max_retries: 2
 #     language: python
 
+# ─── Services (optional — commentary only, nothing active) ───────────────
+#
+# A `services:` map declares the long-lived processes a run may need standing
+# up before its gates can mean anything — a database, a dev server, a queue.
+# It exists because AID starts no service anywhere on its own authority: until
+# a project writes this block, "infrastructure startup" is prose in a role card
+# with no mechanism behind it, and an agent left to improvise reaches for the
+# one thing it must not use (a blind `sleep`) because nothing else is offered.
+#
+# THE BLOCK IS OPTIONAL AND THIS TEMPLATE DECLARES NO SERVICES. A project with
+# no `services:` key behaves exactly as it always has — same gates, same report,
+# byte for byte. Nothing auto-starts for a consumer project; a PM opts in by
+# uncommenting and editing `.aid-o/config/execution.yaml`. This repository, for
+# instance, declares nothing: its tests need no running infrastructure.
+#
+# Shape authority: defaults/schemas/service-declaration.schema.json.
+# Runtime enforcement: `_validate_services_config` in aid-run-gates.sh, which
+# mirrors the schema and runs at run-all entry, BEFORE any service or gate
+# action, naming the offending service and field on violation.
+#
+# Per-service keys:
+#   start_cmd                 (required) the command that starts the service.
+#                             It MUST remain the FOREGROUND process of its job
+#                             — no `&`, no `nohup`, no self-daemonising fork.
+#                             The supervisor owns the process group; a command
+#                             that backgrounds itself returns a pid owning
+#                             nothing and the run can no longer stop what it
+#                             started.
+#   probe_cmd                 (required) health probe; exit 0 = healthy. It is
+#                             polled, so keep it cheap and side-effect free.
+#   startup_deadline_seconds  (required) the HEALTH-PROBE budget only: absent →
+#                             starting must reach healthy within this many
+#                             seconds. It is NOT the process lifetime.
+#   max_lifetime_seconds      (default 86400) the aid-job whole-process
+#                             deadline — a run-lifetime ceiling kept
+#                             deliberately SEPARATE from the startup budget, so
+#                             one number never has to mean both "how long may it
+#                             take to come up" and "how long may it live".
+#   stop_cmd                  (optional) graceful shutdown. Absent → teardown
+#                             relies on job cancel alone (process-group kill),
+#                             which is fine for a process with no external state
+#                             to flush.
+#   log_hint                  (optional) where this service's own logs land —
+#                             for the human diagnosing a failed startup.
+#   restart_authorized        (default false) may an automated run restart it
+#                             after it dies? Repairs are opt-in authority.
+#   port_env                  (optional) the env var carrying the per-run
+#                             allocated port. Its absence is the shared-resource
+#                             escape hatch, honestly named: a service on a fixed
+#                             external port (an existing shared database)
+#                             declares no port_env and allocation is skipped for
+#                             it. Two services may never name the same port_env
+#                             — one env var, one owner; the runner refuses.
+#
+# Worked example (a project whose e2e gate needs its own Postgres):
+#
+# services:
+#   postgres:
+#     start_cmd: "docker compose up postgres"
+#     probe_cmd: "pg_isready -h 127.0.0.1 -p \"$PGPORT_E2E\""
+#     stop_cmd: "docker compose stop postgres"
+#     startup_deadline_seconds: 60
+#     max_lifetime_seconds: 3600
+#     log_hint: "docker compose logs postgres"
+#     restart_authorized: false
+#     port_env: PGPORT_E2E
+
 # ─── Retry & Escalation ─────────────────────────────────────────────────
 # Retry is PER-GATE only: each gate's own `max_retries` (see gate definitions above)
 # is the single retry knob, read by aid-run-gates.sh. There is no project-wide retry
