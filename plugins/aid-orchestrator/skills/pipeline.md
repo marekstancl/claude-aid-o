@@ -25,7 +25,8 @@ the appropriate script.
 7. Validate output: files? scope? AC met? memory_writes present?
 8. Write step-{N}-verify.md (AC checklist + Memory Used/Written + Result: PASS)
 9. increment-step (bash validates verify file)
-10. If more steps → goto 2. If last step → CP3 integration review → transition EXECUTE→GATES
+10. Liveness check (mechanical, after every dispatch/gate action) — see "AUTO liveness step" below
+11. If more steps → goto 2. If last step → CP3 integration review → transition EXECUTE→GATES
 ```
 
 For full details on each item, see sections below.
@@ -59,6 +60,40 @@ process and no repository/evidence progress for 5 minutes, resume or diagnose au
    job record, a `lost` job, and a `stale` result are each reported verbatim with the rerun
    instruction; none of them is ever patched into the report as evidence.
 3. **The printed next action.** The controller runs it.
+
+**AUTO liveness step (loop item 10).** After every dispatch or gate action the controller runs one
+query — no daemon, no waiting turn:
+
+```
+bash scripts/aid-job.sh watchdog --jobs-dir <run evidence>/jobs \
+  --last-progress <epoch of the run timeline's last event> --interval 300
+```
+
+`--last-progress` is read from the run's `timeline.jsonl` (its last event's `ts`, or the file's
+mtime) — no new bookkeeping. Two outcomes, both routed mechanically:
+
+- **`busy`** — an owned job is live. Continue polling; this is not a stall and not a reason to end
+  the turn.
+- **`resume_needed`** — no live owned job and no progress within the interval. Enter the recovery
+  ladder, classified by the NEWEST job record's state: a `lost` or `missing` record is **JOB_LOST**;
+  a `timed_out`/`cancelled` record, or a jobs directory that never existed (a pure-foreground run),
+  is **TRANSIENT_INFRA** and goes to diagnosis, never to a job collect. Either way the eager
+  continuation artifact — not this query — is what guarantees the run can be continued.
+
+A watchdog invocation that fails is logged and skipped: this step is belt-and-braces around the
+artifact, and its absence must never block gates.
+
+The same liveness question asked about OTHER runs is `aid-fsm.sh active-runs stalled` — the one
+shared derivation (non-terminal entry AND nothing newer than the stall threshold, default 2100 s
+via `AID_ACTIVE_RUN_STALL_SEC`, in either the map's `updated_at` or the run's timeline). It is
+derived at read time and stored nowhere, so a controller that wakes up clears it by writing
+anything; `/aid-status` renders the same verdict as `STALLED?`. The threshold sits deliberately
+above the 1800 s dispatch-deadline clamp so a stall verdict can never race a dispatch pinned at it.
+
+What `resume` does NOT promise: it cannot see an in-line (foreground) gate runner at all — only
+supervised jobs are visible to `aid-job.sh`. Its write safety comes from the single-use claim on the
+artifact, from refusing while a supervised sibling job of the same run is still in flight, and from
+writing only the `gates_rows/<gate>.json` checkpoint, never a final report.
 
 Steps 1 and 2 are mechanical: a command performs them and reports verified facts. Step 3 is an
 instruction and nothing more — `resume` cannot execute the controller's turn, so a printed next

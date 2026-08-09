@@ -18,6 +18,7 @@
 #   aid-fsm.sh check-promotion-candidates <state_file>
 #   aid-fsm.sh alloc plan-id | alloc epic-id     # locked counter.yaml allocation (P074 Step 3)
 #   aid-fsm.sh active-runs list | active-runs prune   # multi-run map read / stale-entry sweep (P074 Step 4)
+#   aid-fsm.sh active-runs stalled [--now EPOCH] [--epic ID]   # DERIVED stall verdicts, read-only (P076 Step 6)
 
 set -euo pipefail
 
@@ -562,6 +563,142 @@ prune_active_runs() {
   return "$rc"
 }
 
+# ── P076 Step 6: STALLED is DERIVED at read time ────────────────────────
+# A controller that dies mid-EXECUTE leaves its state file exactly where it
+# was, so prune's file-existence criterion keeps that run looking healthy
+# forever. "Stalled" makes it VISIBLE — and, exactly like awaiting_host_resume,
+# it is DERIVED by every consumer at read time and stored NOWHERE: a dying
+# controller cannot write a flag on its way out, and a flag nobody clears is a
+# lie the moment the controller wakes up.
+#
+# THE RULE (one definition, two consumers — `/aid-status`'s overview render and
+# the AUTO controller loop's watchdog step, both through
+# `aid-fsm.sh active-runs stalled`):
+#
+#   stalled  ⇔  the entry is NON-TERMINAL
+#               AND  now − max(entry.updated_at, the run timeline's newest
+#                              signal)  ≥  AID_ACTIVE_RUN_STALL_SEC
+#
+# • The NEWER of the two signals wins, so Step 2's `gate_job_heartbeat`
+#   (emitted every 60 s while a background gate is polled) counts as progress
+#   and a healthy long wait never flags.
+# • The threshold defaults to 2100 s — deliberately ABOVE the shipped 1800 s
+#   dispatch-deadline clamp, so a stall flag can never race a dispatch pinned
+#   exactly at that clamp — and is env-overridable.
+# • An entry whose STATE FILE IS GONE is not stalled: that is prune's own
+#   removal criterion (a phantom entry, not a stuck run) and must not be
+#   dressed up as a run that could be resumed.
+# • Nothing here writes: prune keeps its existing removal criteria untouched,
+#   and no consumer depends on prune having run.
+AID_ACTIVE_RUN_STALL_SEC="${AID_ACTIVE_RUN_STALL_SEC:-2100}"
+
+# _stall_epoch_from_iso <iso8601Z> — epoch seconds, 0 when unparseable.
+_stall_epoch_from_iso() {
+  local s="${1:-}" e=""
+  [[ -n "$s" && "$s" != "null" ]] || { printf '0'; return 0; }
+  e="$(date -u -d "$s" +%s 2>/dev/null || echo "")"
+  [[ "$e" =~ ^[0-9]+$ ]] || e=0
+  printf '%s' "$e"
+}
+
+# _stall_timeline_epoch <timeline_file> — the run timeline's NEWEST signal:
+# the later of its last event's `ts` and the file's own mtime (a partially
+# written last line must never read as "older than the file itself"). 0 when
+# there is no timeline at all.
+_stall_timeline_epoch() {
+  local tl="${1:-}" mt=0 ts=0 line=""
+  [[ -n "$tl" && -f "$tl" ]] || { printf '0'; return 0; }
+  mt="$(stat -c %Y "$tl" 2>/dev/null || echo 0)"
+  [[ "$mt" =~ ^[0-9]+$ ]] || mt=0
+  line="$(tail -n 1 "$tl" 2>/dev/null || echo "")"
+  if [[ -n "$line" ]]; then
+    ts="$(_stall_epoch_from_iso "$(jq -r '.ts // ""' <<<"$line" 2>/dev/null || echo "")")"
+  fi
+  if (( ts > mt )); then printf '%s' "$ts"; else printf '%s' "$mt"; fi
+}
+
+# active_run_stall_verdict <last_progress_epoch> <now_epoch> [threshold]
+#   THE rule, isolated: rc 0 (stalled) iff the newest progress signal is at
+#   least <threshold> seconds old. Everything above only decides which epoch
+#   to feed it.
+active_run_stall_verdict() {
+  local last="${1:-0}" now="${2:-0}" thr="${3:-$AID_ACTIVE_RUN_STALL_SEC}"
+  [[ "$last" =~ ^[0-9]+$ ]] || last=0
+  [[ "$now"  =~ ^[0-9]+$ ]] || now=0
+  [[ "$thr"  =~ ^[0-9]+$ ]] || thr=2100
+  (( now - last >= thr ))
+}
+
+# active_runs_stalled_json [--now EPOCH] [--epic EPIC_ID] — the ONE consumer
+# surface. Prints a JSON object keyed by epic_id; every entry carries the
+# derived verdict and the facts behind it, so a caller never re-derives:
+#   { stalled, reason, idle_sec, last_progress_at, threshold_sec,
+#     state, resume_artifact, resume_command }
+# Read-only by construction: the map is never locked, never rewritten.
+active_runs_stalled_json() {
+  local now="" only=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --now)  now="${2:-}"; shift 2 ;;
+      --epic) only="${2:-}"; shift 2 ;;
+      *) echo "ERROR: active-runs stalled: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: active-runs stalled: jq is required" >&2; return 1; }
+  [[ "$now" =~ ^[0-9]+$ ]] || now="$(date -u +%s)"
+  local map; map="$(active_runs_map_path)"
+  if [[ ! -e "$map" ]]; then printf '{}\n'; return 0; fi
+  local doc; doc="$(_active_runs_read_object "$map")" || return 1
+  local root; root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  local out='{}'
+  local epic sf run_id ent_state upd abs live_state reason stalled last idle art tl
+  while IFS=$'\t' read -r epic sf run_id ent_state upd; do
+    [[ -n "$epic" ]] || continue
+    [[ -z "$only" || "$only" == "$epic" ]] || continue
+    reason=""; stalled=false; art=""
+    abs="$sf"
+    [[ -n "$abs" && "$abs" != /* ]] && abs="${root}/${abs}"
+    live_state="$ent_state"
+    if [[ -z "$sf" || ! -f "$abs" ]]; then
+      reason="no_state_file"
+    else
+      live_state="$(yaml_field "$abs" state)"
+      [[ -n "$live_state" ]] || live_state="$ent_state"
+      case "$live_state" in
+        DONE|ERROR) reason="terminal_state" ;;
+      esac
+    fi
+    tl="${root}/.aid-o/work/evidence/${epic}/${run_id}/timeline.jsonl"
+    last="$(_stall_epoch_from_iso "$upd")"
+    local tle; tle="$(_stall_timeline_epoch "$tl")"
+    (( tle > last )) && last="$tle"
+    idle=$(( now - last ))
+    (( idle < 0 )) && idle=0
+    if [[ -z "$reason" ]]; then
+      if active_run_stall_verdict "$last" "$now" "$AID_ACTIVE_RUN_STALL_SEC"; then
+        stalled=true; reason="no_progress"
+      else
+        reason="live"
+      fi
+    fi
+    art="$(jq -r --arg e "$epic" '.[$e].resume_artifact // ""' <<<"$doc" 2>/dev/null || echo "")"
+    [[ "$art" == "null" ]] && art=""
+    out="$(jq -c --arg e "$epic" --argjson s "$stalled" --arg r "$reason" \
+             --argjson idle "$idle" --argjson last "$last" \
+             --argjson thr "$AID_ACTIVE_RUN_STALL_SEC" \
+             --arg st "$live_state" --arg art "$art" \
+             --arg cmd "bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic}" \
+             '.[$e] = {stalled: $s, reason: $r, idle_sec: $idle,
+                       last_progress_at: $last, threshold_sec: $thr,
+                       state: (if $st == "" then null else $st end),
+                       resume_artifact: (if $art == "" then null else $art end),
+                       resume_command: $cmd}' <<<"$out")" || return 1
+  done < <(jq -r 'to_entries[] | [.key, (.value.state_file // ""), (.value.run_id // ""),
+                                  (.value.state // ""), (.value.updated_at // "")] | @tsv' <<<"$doc")
+  printf '%s\n' "$out" | jq '.'
+}
+
 # cmd_active_runs — `aid-fsm.sh active-runs <list|prune>` (P074 Step 4).
 # `list` prints the map; when the map is ABSENT it presents the legacy
 # single-slot pointer READ-ONLY in map shape (the one-release fallback —
@@ -578,6 +715,12 @@ cmd_active_runs() {
         exit 1
       fi
       update_active_run_field "$1" "$2" "${3:-}" || exit 1
+      ;;
+    stalled)
+      # active-runs stalled [--now EPOCH] [--epic ID]  (P076 Step 6)
+      # READ-ONLY derivation — see active_runs_stalled_json above.
+      shift
+      active_runs_stalled_json "$@" || exit 1
       ;;
     list)
       command -v jq >/dev/null 2>&1 || {
@@ -599,7 +742,7 @@ cmd_active_runs() {
         fi
       fi ;;
     *)
-      echo "Usage: aid-fsm.sh active-runs <list|prune|set <epic_id> <field> <value>>" >&2
+      echo "Usage: aid-fsm.sh active-runs <list|prune|stalled [--now EPOCH] [--epic ID]|set <epic_id> <field> <value>>" >&2
       exit 1 ;;
   esac
 }
@@ -3220,10 +3363,19 @@ _fsm_resume_artifact_preflight() {
 # command, not two. Bounded, overridable, and 0 disables it entirely.
 AID_RESUME_POLL_SEC="${AID_RESUME_POLL_SEC:-60}"
 AID_RESUME_POLL_INTERVAL_SEC="${AID_RESUME_POLL_INTERVAL_SEC:-2}"
-# Single-writer threshold: a timeline touched more recently than this, with a
-# live owned job, means a RUNNING runner owns the report — resume must not
-# write into it.
-AID_RESUME_STALL_SEC="${AID_RESUME_STALL_SEC:-300}"
+# P076 Step 6 / carried review obligation (AC5): there was a THIRD constant
+# here — a "single-writer" stall threshold guarding a refusal that claimed to
+# detect a live runner owning the report. It was removed together with that
+# refusal, because the refusal could not fire and the claim was false:
+# `aid-job.sh watchdog` reports `busy` only for a SUPERVISED job with a live
+# pid and no result, and the only place the refusal was consulted is already
+# past `_resume_other_jobs_live`, which has just proved no such job exists. The
+# threat it named — a live IN-LINE runner holding the report — is invisible to
+# the supervisor by construction, and nothing in this repository records a
+# runner pid to check instead. What actually keeps the writing honest is
+# stated where it is true: the single-use claim on the artifact,
+# `_resume_other_jobs_live` for a supervised sibling, and the fact that resume
+# writes ONLY the `gates_rows/<gate>.json` checkpoint and never a final report.
 # How long a job may legitimately sit in `started` (wrapper launched, pid not
 # yet recorded) before that reads as a wrapper that never came up.
 AID_RESUME_PIDLESS_GRACE_SEC="${AID_RESUME_PIDLESS_GRACE_SEC:-60}"
@@ -3239,9 +3391,14 @@ _AID_ID_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 # echoed verbatim; anything carrying shell metacharacters is rendered in
 # `printf %q` form (inert when pasted) and flagged by the caller.
 # Returns 0 when the string was plain, 1 when it had to be quoted.
+#
+# The allowlist uses `[:blank:]` (space + tab), NEVER `[:space:]`: `[:space:]`
+# includes the NEWLINE, so a multi-line action would have been echoed verbatim
+# with no warning — and a second line pasted into a shell is a second command,
+# which is exactly the thing this function exists to make impossible.
 _resume_render_command() {
   local s="$1"
-  if [[ "$s" =~ ^[A-Za-z0-9@%+=:,./_-][A-Za-z0-9@%+=:,./_[:space:]-]*$ ]]; then
+  if [[ "$s" =~ ^[A-Za-z0-9@%+=:,./_-][A-Za-z0-9@%+=:,./_[:blank:]-]*$ ]]; then
     printf '%s' "$s"
     return 0
   fi
@@ -3329,25 +3486,6 @@ _resume_other_jobs_live() {
   return 1
 }
 
-# _resume_live_runner_owns_report <jobs_dir_abs> <timeline_file> — the
-# single-writer rule, stated mechanically: the gates report has exactly ONE
-# writer. That is the live runner whenever one exists; resume writes only for
-# a DEAD controller. rc 0 (a living runner owns it) iff aid-job.sh watchdog
-# reports a live owned job AND the run's timeline shows a heartbeat within the
-# stall threshold.
-_resume_live_runner_owns_report() {
-  local jobs_dir="$1" timeline="$2" wd st mtime now
-  [[ -d "$jobs_dir" ]] || return 1
-  wd="$(bash "${SCRIPT_DIR}/aid-job.sh" watchdog --jobs-dir "$jobs_dir" \
-         --interval "$AID_RESUME_STALL_SEC" 2>/dev/null || echo '{}')"
-  st="$(jq -r '.state // ""' <<<"$wd" 2>/dev/null || echo "")"
-  [[ "$st" == "busy" ]] || return 1
-  [[ -f "$timeline" ]] || return 1
-  mtime="$(stat -c %Y "$timeline" 2>/dev/null || echo 0)"
-  now="$(date -u +%s)"
-  (( now - mtime < AID_RESUME_STALL_SEC ))
-}
-
 # _resume_claim <artifact> — THE single-use claim. Same primitive the shipped
 # pm-override path uses, not a second one: `mv -n` plus a MANDATORY
 # source-gone post-check, because on the installed coreutils a SKIPPED `mv -n`
@@ -3384,7 +3522,69 @@ _resume_release_pointer() {
   return 0
 }
 
-# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head>
+# ── P076 Step 6 / carried review obligation (AC4): the baseline sample a
+# resumed row records must JOIN the gate's existing series, not reset it ────
+# The baseline entry's identity is sha256("<gate>:<command_template>"), and the
+# in-line runner passes the TEMPLATE (`.gates.<gate>.command`, `{token}`s and
+# all) as that argument plus the RESOLVED string as the second one. A resume
+# that passed the resolved command as BOTH would fingerprint differently for
+# every token-bearing gate — the normal case here — wiping `recent_samples`,
+# stamping `series_reset_at`, and rewriting `command_template` to the resolved
+# string so the next ordinary `run-all` reset it right back. These three
+# helpers recover the same two arguments the in-line path uses.
+
+# _resume_execution_yaml <safe_next_action> — the execution.yaml the dead run
+# was using, taken from the artifact's own fully resolved instruction
+# (`... aid-run-gates.sh run-all <execution_yaml> <epic> <run> ...`). Empty
+# unless the extracted token is a readable file — a guess is worse than none.
+_resume_execution_yaml() {
+  local s="${1:-}" tok=""
+  [[ -n "$s" ]] || return 0
+  # shellcheck disable=SC2086
+  set -- $s
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "run-all" ]]; then tok="${2:-}"; break; fi
+    shift
+  done
+  [[ -n "$tok" && -f "$tok" ]] && printf '%s' "$tok"
+  return 0
+}
+
+# _resume_command_template <gate> <execution_yaml> <resolved_cmd> — the
+# TEMPLATE, in descending order of authority: the gate's configured command
+# (so a genuinely EDITED command still resets the series, exactly as an
+# ordinary run would), then the template already on record for this gate (so a
+# resume with no reachable config still joins the recorded series), and only
+# then the resolved string (no history exists, so nothing can be reset).
+_resume_command_template() {
+  local gate="$1" ey="${2:-}" resolved="${3:-}" tmpl=""
+  if [[ -n "$ey" ]] && command -v yq >/dev/null 2>&1; then
+    tmpl="$(yq -r ".gates.\"${gate}\".command // \"\"" "$ey" 2>/dev/null || echo "")"
+    [[ "$tmpl" == "null" ]] && tmpl=""
+  fi
+  if [[ -z "$tmpl" ]] && declare -F _gbr_get_entry_json >/dev/null 2>&1; then
+    tmpl="$(_gbr_get_entry_json "$gate" 2>/dev/null | jq -r '.command_template // ""' 2>/dev/null || echo "")"
+    [[ "$tmpl" == "null" ]] && tmpl=""
+  fi
+  [[ -n "$tmpl" ]] || tmpl="$resolved"
+  printf '%s' "$tmpl"
+}
+
+# _resume_concurrency_context <gate> <repo> — the SAME derivation the in-line
+# runner performs (aid-run-gates.sh: only `targeted_tests` can be non-
+# sequential, and its context is the scheduler rollout gate's effective mode).
+# Anything unreadable falls back to `sequential`, the runner's own default.
+_resume_concurrency_context() {
+  local gate="$1" repo="${2:-}" rollout="" mode="sequential"
+  [[ "$gate" == "targeted_tests" ]] || { printf 'sequential'; return 0; }
+  [[ -f "${SCRIPT_DIR}/aid-scheduler-rollout-gate.sh" ]] || { printf 'sequential'; return 0; }
+  [[ -n "$repo" && -d "$repo" ]] || repo="$(aid_state_root 2>/dev/null || printf '%s' "$PWD")"
+  rollout="$(bash "${SCRIPT_DIR}/aid-scheduler-rollout-gate.sh" --project-root "$repo" 2>/dev/null)" || rollout=""
+  mode="$(jq -r '.effective_mode // "sequential"' <<<"$rollout" 2>/dev/null || echo sequential)"
+  case "$mode" in observe_parallel|parallel) printf '%s' "$mode" ;; *) printf 'sequential' ;; esac
+}
+
+# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [execution_yaml] [repo]
 #   The ONLY thing resume writes into the run's evidence: Step 2's durable
 #   incremental row checkpoint. Byte-shaped exactly like the in-line path's —
 #   the same `gate_row_from_job` mapping, the same `. + {attempts, runtime_
@@ -3395,7 +3595,7 @@ _resume_release_pointer() {
 #   Echoes the row file path. rc 1 if nothing could be written.
 _resume_write_row() {
   local evidence_dir="$1" gate="$2" job_dir="$3" job_id="$4" state="$5" \
-        attempts="$6" head="$7"
+        attempts="$6" head="$7" execution_yaml="${8:-}" repo="${9:-}"
   # The gate name becomes a filename — never let it become a path.
   case "$gate" in */*|*..*|"") return 1 ;; esac
 
@@ -3404,16 +3604,21 @@ _resume_write_row() {
   [[ -n "$row" ]] || return 1
 
   # The baseline sample the dead in-line runner never got to record. Same
-  # library, same call, same ordering (update, then report) — so the
-  # runtime_baseline this row carries is the one the in-line path would have
-  # carried. The command comes from the JOB RECORD's argv, never re-derived.
-  local rcmd exit_code dur_ms timeout_s
+  # library, same call, same ARGUMENTS and the same ordering (update, then
+  # report) — so the runtime_baseline this row carries is the one the in-line
+  # path would have carried, and the sample lands in the gate's EXISTING
+  # series instead of resetting it. The resolved command comes from the JOB
+  # RECORD's argv, never re-derived; the template and the concurrency context
+  # are recovered exactly as documented above.
+  local rcmd exit_code dur_ms timeout_s tmpl ctx
   rcmd="$(jq -r '.command[2] // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
   exit_code="$(jq -r '.exit_code' <<<"$row" 2>/dev/null || echo 1)"
   dur_ms="$(jq -r '.duration_ms' <<<"$row" 2>/dev/null || echo 0)"
   timeout_s="$(jq -r '.deadline_sec // 0' "$job_dir/job.json" 2>/dev/null || echo 0)"
   if [[ -n "$rcmd" ]] && declare -F gate_baseline_update >/dev/null 2>&1; then
-    gate_baseline_update "$gate" "$rcmd" "$rcmd" "$exit_code" "$dur_ms" "$timeout_s" || true
+    tmpl="$(_resume_command_template "$gate" "$execution_yaml" "$rcmd")"
+    ctx="$(_resume_concurrency_context "$gate" "$repo")"
+    gate_baseline_update "$gate" "$tmpl" "$rcmd" "$exit_code" "$dur_ms" "$timeout_s" "$ctx" || true
   fi
   local rb='null'
   if declare -F gate_baseline_report_json >/dev/null 2>&1; then
@@ -3549,7 +3754,6 @@ cmd_resume() {
     return 1; }
 
   local jobs_abs; jobs_abs="$(_resume_abs "$jobs_dir")"
-  local timeline="${evidence_dir}/timeline.jsonl"
 
   # `pending` — the PRE-SPAWN pointer. Resolve it the way it was designed to be
   # resolved: by the command fingerprint, never by trusting a job id nobody
@@ -3693,15 +3897,13 @@ cmd_resume() {
   esac
 
   # ── terminal ─────────────────────────────────────────────────────────────
-  # Single-writer rule: the gates report has exactly ONE writer. If a runner is
-  # still alive and working, it owns the report — resume only prints status.
-  if _resume_live_runner_owns_report "$jobs_abs" "$timeline"; then
-    _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but a LIVE runner still owns this run's report (owned job live + timeline heartbeat within ${AID_RESUME_STALL_SEC}s)"
-    _resume_say "$epic_id" "recorded" "nothing — the report has exactly one writer, and it is not this command"
-    _resume_say "$epic_id" "next" "let the live runner finish; run resume only if it dies"
-    return 0
-  fi
-
+  # What keeps this write safe is stated where it is TRUE (P076 Step 6 / AC5):
+  # the single-use claim below (one winner per artifact, every loser names the
+  # winner), the sibling check above (a supervised job of this run still in
+  # flight → report, never claim), and the fact that nothing here touches a
+  # final report — only the `gates_rows/<gate>.json` checkpoint the next
+  # `run-all` assembles. A live IN-LINE runner is invisible to the supervisor,
+  # so no guarantee is claimed about one.
   local claimed
   if ! claimed="$(_resume_claim "$art")"; then
     _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the continuation artifact was already claimed — the winner's claim file is ${claimed}"
@@ -3756,8 +3958,12 @@ cmd_resume() {
   fi
   [[ -z "$head" ]] && head="$(git rev-parse HEAD 2>/dev/null || echo "")"
 
+  # The gate's own configuration, as named by the artifact's resolved
+  # instruction — the template argument the baseline sample needs (AC4).
+  local execution_yaml; execution_yaml="$(_resume_execution_yaml "$next_action")"
+
   local rowfile=""
-  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head")"; then
+  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo")"; then
     local rres; rres="$(jq -r '.result // "?"' "$rowfile" 2>/dev/null || echo '?')"
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is ${state} (collected, current at ${head:0:12})"
@@ -8159,7 +8365,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     plan-close)                 shift; cmd_plan_close "$@" ;;
     queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
     alloc)                      shift; cmd_alloc "$@" ;;   # alloc plan-id | alloc epic-id (P074 Step 3)
-    active-runs)                shift; cmd_active_runs "$@" ;;   # active-runs list | active-runs prune (P074 Step 4)
+    active-runs)                shift; cmd_active_runs "$@" ;;   # active-runs list | active-runs prune | active-runs stalled (P074 Step 4 / P076 Step 6)
     # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the
     # init advisory + docs reference actually exists on aid-fsm.sh.
     plan-reconcile)             shift
@@ -8175,7 +8381,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
       exit 1 ;;
   esac
 fi
