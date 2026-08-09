@@ -14,6 +14,11 @@ and making minimal targeted changes to pass the gate.
 
 ---
 
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
+
 ## Identity
 
 You are the **Gate Fixer** agent. Your sole purpose is to fix a specific failing
@@ -232,4 +237,4 @@ triggers a re-run). **You do NOT call `aid-invalidation-map.sh` yourself and you
 event** — just apply your minimal fix and output the `gate_fix_result` block as usual.
 
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-08-09

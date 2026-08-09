@@ -25,7 +25,8 @@ the appropriate script.
 7. Validate output: files? scope? AC met? memory_writes present?
 8. Write step-{N}-verify.md (AC checklist + Memory Used/Written + Result: PASS)
 9. increment-step (bash validates verify file)
-10. If more steps → goto 2. If last step → CP3 integration review → transition EXECUTE→GATES
+10. Liveness check (mechanical, after every dispatch/gate action) — see "AUTO liveness step" below
+11. If more steps → goto 2. If last step → CP3 integration review → transition EXECUTE→GATES
 ```
 
 For full details on each item, see sections below.
@@ -42,6 +43,78 @@ still running. Each asynchronous job must have a recorded PID, log path, start H
 started-at timestamp, expected p95, and hard deadline. Determine completion from the process and its
 exit status. `tail -f` and notification arrival are not completion signals. If there is no live owned
 process and no repository/evidence progress for 5 minutes, resume or diagnose automatically.
+
+"Resume" names one mechanical path, and its last hop is honestly an instruction:
+
+1. **The artifact.** A run that handed a gate to the background supervisor left exactly one
+   continuation pointer at `<evidence_dir>/auto_resume_required.json`, written before the job was
+   spawned and removed only when the run's last background job was collected. "A resume is
+   required" is derived from (that pointer exists) AND (no liveness signal within the stall
+   threshold) — it is never stored, because a dying controller cannot write anything on its way out.
+2. **The command.** `aid-fsm.sh resume <epic_id>` claims the pointer exactly once, collects the
+   referenced job's terminal result, writes it to the durable `gates_rows/<gate>.json` checkpoint
+   (it never edits a final report in place), updates the active-runs entry through the single map
+   writer, and prints three lines: what was
+   found, what was recorded, and the next action. A job still in flight is a read-only status
+   report — nothing is claimed, the pointer is untouched, and a later resume still works. A missing
+   job record, a `lost` job, and a `stale` result are each reported verbatim with the rerun
+   instruction; none of them is ever patched into the report as evidence.
+3. **The printed next action.** The controller runs it.
+
+**What the checkpoint is, precisely.** `gates_rows/<gate>.json` is a durable record of the result
+`resume` collected — not the route by which that result reaches the report. The next `run-all`
+iterates every defined gate, so it produces its own row for that gate: for a background gate it
+re-attaches to the SAME supervised job and *collects* its terminal result rather than re-executing
+the suite (that, not the checkpoint, is what makes a crash cost zero re-execution), and it then
+overwrites the checkpoint with the row it derived. One condition bounds the re-attach, and only the
+re-attach: a result produced by an EARLIER invocation is replayed only while the working tree has
+not moved since — otherwise the job is superseded and the gate genuinely re-runs, which is what lets
+a fix loop converge. A job this invocation supervised to completion is never second-guessed that
+way: what its command returned is what the row says, and a tree that moved underneath it is recorded
+on the row (`tree_moved_during_run`) rather than substituted for the verdict. The two rows are
+byte-identical by construction, so the outcome is the same either way. The runner's restore-from-checkpoint pass is a fail-closed
+safety net for a defined gate that produced no row at all in an invocation; no ordinary path through
+the gate loop leaves a gate rowless, and a row it cannot verify against this run's own keyed binding
+becomes an explicit `gate_row_stale` FAIL, never a pass.
+
+**AUTO liveness step (loop item 10).** After every dispatch or gate action the controller runs one
+query — no daemon, no waiting turn:
+
+```
+bash scripts/aid-job.sh watchdog --jobs-dir <run evidence>/jobs \
+  --last-progress <epoch of the run timeline's last event> --interval 300
+```
+
+`--last-progress` is read from the run's `timeline.jsonl` (its last event's `ts`, or the file's
+mtime) — no new bookkeeping. Two outcomes, both routed mechanically:
+
+- **`busy`** — an owned job is live. Continue polling; this is not a stall and not a reason to end
+  the turn.
+- **`resume_needed`** — no live owned job and no progress within the interval. Enter the recovery
+  ladder, classified by the NEWEST job record's state: a `lost` or `missing` record is **JOB_LOST**;
+  a `timed_out`/`cancelled` record, or a jobs directory that never existed (a pure-foreground run),
+  is **TRANSIENT_INFRA** and goes to diagnosis, never to a job collect. Either way the eager
+  continuation artifact — not this query — is what guarantees the run can be continued.
+
+A watchdog invocation that fails is logged and skipped: this step is belt-and-braces around the
+artifact, and its absence must never block gates.
+
+The same liveness question asked about OTHER runs is `aid-fsm.sh active-runs stalled` — the one
+shared derivation (non-terminal entry AND nothing newer than the stall threshold, default 2100 s
+via `AID_ACTIVE_RUN_STALL_SEC`, in either the map's `updated_at` or the run's timeline). It is
+derived at read time and stored nowhere, so a controller that wakes up clears it by writing
+anything; `/aid-status` renders the same verdict as `STALLED?`. The threshold sits deliberately
+above the 1800 s dispatch-deadline clamp so a stall verdict can never race a dispatch pinned at it.
+
+What `resume` does NOT promise: it cannot see an in-line (foreground) gate runner at all — only
+supervised jobs are visible to `aid-job.sh`. Its write safety comes from the single-use claim on the
+artifact, from refusing while a supervised sibling job of the same run is still in flight, and from
+writing only the `gates_rows/<gate>.json` checkpoint, never a final report.
+
+Steps 1 and 2 are mechanical: a command performs them and reports verified facts. Step 3 is an
+instruction and nothing more — `resume` cannot execute the controller's turn, so a printed next
+action is a handoff, not a completion. Treating it as completion is the failure this classification
+exists to prevent.
 
 The concrete helper implementing this contract is `scripts/aid-job.sh` (IMP-262) — a standalone,
 opt-in supervisor used at the controller boundary in place of `tail -f`/notification waiting. It is
@@ -2815,7 +2888,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-08-09
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

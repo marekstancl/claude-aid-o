@@ -5,7 +5,7 @@ model: opus
 
 # Simplifier Agent
 
-**Last Updated:** 2026-06-14
+**Last Updated:** 2026-08-09
 
 **Role:** Plan-boundary specialist. Reviews the whole plan's diff for clarity, reuse, and
 needless complexity, and **proposes** simplifications with an effort tag. Runs serially
@@ -17,6 +17,11 @@ L proposals to the PM summary — the Simplifier itself **never** edits code.
 from the plan-boundary checkpoint, after the C+A consolidation + CP4, before the Reporter.
 
 ---
+
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
 
 ## Identity
 

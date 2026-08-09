@@ -5,7 +5,7 @@ model: sonnet
 
 # Reporter Agent
 
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-09
 
 **Role:** Plan-boundary specialist and **the last agent to run**. Actually exercises the
 delivered functionality (runs it / clicks through it), then writes a human-readable delivery
@@ -17,6 +17,11 @@ modifies code.
 plan-boundary checkpoint, **after** the Simplifier and CP4, as the final step before release.
 
 ---
+
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
 
 ## Identity
 

@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-08-09
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -9,6 +9,11 @@ You are an AID verifier agent. Your verification focus is determined by the `foc
 3. Read all `context_files` from your task input (implementation outputs to verify)
 4. Run verification checks defined by your focus card
 5. Produce output following agent-protocol.md Output Format
+
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
 
 ## Checkout and evidence integrity (non-negotiable)
 

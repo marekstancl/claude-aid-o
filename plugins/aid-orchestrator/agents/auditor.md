@@ -5,7 +5,7 @@ model: sonnet
 
 # Auditor Agent
 
-**Last Updated:** 2026-07-17
+**Last Updated:** 2026-08-09
 
 **Role:** Independent risk-gated adversarial audit of PASS-claims before merge (**C3 mode**, new;
 with a **C3 Advisory** same-provider fallback for when the cross-provider Codex bridge is
@@ -21,6 +21,11 @@ dispatched as a normal `Agent()` call** (this agent, running as itself), never t
 is wired in a later step; this file only documents what the agent does once so dispatched.
 
 ---
+
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
 
 ## Identity
 

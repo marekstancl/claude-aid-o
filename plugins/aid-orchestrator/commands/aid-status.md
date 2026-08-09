@@ -53,7 +53,8 @@ linked worktree has no `.aid-o` of its own.
    state_file}`. Recipe **`plan-epics`** returns the EPIC rows of one plan;
    recipe **`planless-epics`** returns entries with no `plan_id` (Fast Mode and
    pre-plan runs). Both sort by `epic_id` — a JSON object's key order is not an
-   ordering and must never be rendered as one.
+   ordering and must never be rendered as one. Both annotate a run that recipe
+   **`stalled-runs`** derives as stalled (see "Stalled runs" below).
 3. **Read the queue** — recipe **`queue-rows`** (which defines both
    `queue_rows`, the plan's rows, and `queue_candidate`, its next claimable
    entry) and recipe **`queue-summary`** (the `N queued, N running, N done`
@@ -142,6 +143,30 @@ the state layer is healthy (plan-state is written at `plan-start`, before any of
 that plan's EPICs is initialized). If a project shows plan-less streams and you
 suspect an orphaned entry, the map is stale, not the surface: run
 `aid-fsm.sh active-runs prune`.
+
+**Stalled runs are visible, and the marker is derived — never stored.** A
+controller that dies mid-EXECUTE leaves its state file exactly where it was, so
+nothing about the map looks wrong: that run would stay "active" forever. Recipe
+**`stalled-runs`** closes that hole. An EPIC row renders a trailing `STALLED?`
+plus a recovery line when `aid-fsm.sh active-runs stalled` derives it stalled —
+the entry is non-terminal and nothing newer than the stall threshold (2100 s by
+default, `AID_ACTIVE_RUN_STALL_SEC`) appears in either the map's `updated_at` or
+the run's `timeline.jsonl`. Three consequences worth knowing:
+
+- **Nothing is written and nothing must run first.** The verdict is computed at
+  read time by the same helper the AUTO controller loop calls. A controller that
+  wakes up and writes anything clears the marker by itself, and `active-runs
+  prune` is not involved (its removal criteria are unchanged).
+- **A long FOREGROUND gate can trip it.** Background gates emit a
+  `gate_job_heartbeat` every 60 s, foreground gates emit nothing until they
+  finish, so a foreground gate running past the threshold renders `STALLED?`
+  while perfectly healthy. The recovery line says so; the honest fix is
+  `run_mode: background` for that gate. A visible false marker beats an
+  invisible dead controller.
+- **An entry whose state file is gone is not stalled** — that is `prune`'s
+  removal criterion, and a phantom entry must not be dressed up as a resumable
+  run. This is why the published example renders above carry no marker: their
+  fixture records runs whose state files were never created.
 
 **Worktree column rules.**
 - A relative `worktree_path` is probed against the state root; an absolute one
@@ -241,33 +266,83 @@ plan_rows() {
 ```
 
 ```bash
+# recipe: stalled-runs — defines stalled_epics() and stall_hint <epic_id>: the
+# STALLED? marker's single authority. The rule (non-terminal entry AND nothing
+# newer than the stall threshold in either the map's `updated_at` or the run's
+# timeline) is NOT re-implemented here — it lives in exactly one place,
+# `scripts/aid-fsm.sh active-runs stalled`, which this surface and the AUTO
+# controller loop's watchdog step both call. It is DERIVED at read time and
+# stored nowhere, so a controller that wakes up and writes anything clears the
+# marker by itself; nothing has to run a sweep first. A failed call renders no
+# markers at all — a status view must never fail because a derivation did.
+stalled_epics() {
+  bash "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/aid-fsm.sh" \
+    active-runs stalled 2>/dev/null \
+    | jq -r 'to_entries[] | select(.value.stalled == true) | .key' 2>/dev/null || true
+}
+
+# The honest caveat belongs in the render, not in a footnote: a FOREGROUND gate
+# emits no heartbeat, so a long one can trip this marker. That is the deliberate
+# trade — a visible false STALLED? beats an invisible dead controller.
+stall_hint() {
+  printf '%sSTALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume %s\n' "${2:-      }" "${1:-}"
+}
+```
+
+```bash
 # recipe: plan-epics — defines plan_epics <plan_id>: that plan's EPIC runs,
-# indented for a plan block, sorted by epic_id.
+# indented for a plan block, sorted by epic_id. A run derived STALLED gets the
+# `STALLED?` marker plus the recovery line beneath its row.
 plan_epics() {
-  local _root _map
+  local _root _map _stalled _row _id
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
+  _stalled="$(stalled_epics)"
+  # Sorted FIRST, then annotated: the hint line is attached to its own row, so
+  # it can never be sorted away from it.
   jq -r --arg p "${1:-}" '
     to_entries[] | select((.value.plan_id // "") == $p)
     | "    \(.key)  [\(.value.state // "?")]  run=\(.value.run_id // "?")  branch=\(.value.branch // "?")"
       + (if .value.governs_main then "  governs-main" else "" end)' \
-    "$_map" 2>/dev/null | sort
+    "$_map" 2>/dev/null | sort | while IFS= read -r _row; do
+      _id="${_row#    }"; _id="${_id%% *}"
+      case "
+$_stalled
+" in
+        *"
+$_id
+"*) printf '%s  STALLED?\n' "$_row"; stall_hint "$_id" "      " ;;
+        *) printf '%s\n' "$_row" ;;
+      esac
+    done
 }
 ```
 
 ```bash
 # recipe: planless-epics — defines planless_epics(): EPIC runs with no plan_id
-# (Fast Mode, pre-plan runs), sorted by epic_id.
+# (Fast Mode, pre-plan runs), sorted by epic_id. Same STALLED? rule as
+# plan_epics — one derivation, both lists.
 planless_epics() {
-  local _root _map
+  local _root _map _stalled _row _id
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
+  _stalled="$(stalled_epics)"
   jq -r '
     to_entries[] | select((.value.plan_id // "") == "")
     | "  \(.key)  [\(.value.state // "?")]  run=\(.value.run_id // "?")  branch=\(.value.branch // "?")"' \
-    "$_map" 2>/dev/null | sort
+    "$_map" 2>/dev/null | sort | while IFS= read -r _row; do
+      _id="${_row#  }"; _id="${_id%% *}"
+      case "
+$_stalled
+" in
+        *"
+$_id
+"*) printf '%s  STALLED?\n' "$_row"; stall_hint "$_id" "    " ;;
+        *) printf '%s\n' "$_row" ;;
+      esac
+    done
 }
 ```
 
@@ -582,7 +657,7 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-09
 
 ## Plan mode
 
