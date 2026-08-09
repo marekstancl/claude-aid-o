@@ -13,7 +13,7 @@
 # Provides (sourced, never executed):
 #   aid_service_up_all    <run_evidence_dir> [<execution_yaml>]
 #   aid_service_down_all  <run_evidence_dir> [<execution_yaml>]
-#   aid_service_status    <name> [<run_evidence_dir>]
+#   aid_service_status    <name> [<run_evidence_dir>] [<execution_yaml>]
 #
 # ── THE REGISTRY ────────────────────────────────────────────────────────────
 # `<run_evidence_dir>/services.json` is the run's per-service record and the
@@ -43,6 +43,39 @@
 # this file exists to prevent. Locking is `flock` on a lock file beside the
 # registry plus atomic tmp+mv in the registry's own directory, and a registry
 # that is not a registry is REFUSED, never clobbered.
+#
+# ── WHAT THE REGISTRY IS AUTHORITATIVE FOR (the trust model) ────────────────
+# The registry was made self-sufficient on purpose, so that a teardown in a
+# process which never saw the startup still works even if the config has moved.
+# That property is worth keeping. But "the registry records what this run
+# allocated" and "the registry decides what command runs, and against which
+# directory" are different claims, and only the first one is granted:
+#
+#   ALLOCATED FACTS — port, job_id, jobs_dir, counters. The registry is the SOLE
+#   source, and every one of them is REVALIDATED on read rather than trusted:
+#   a port must be an integer in range, a service name must be the same
+#   `^[a-z0-9][a-z0-9_-]*$` the declaration validator enforces, and — the one
+#   that crosses a trust boundary — a recorded `jobs_dir` MUST resolve inside
+#   the evidence directory it was loaded from. A value that does not is refused
+#   and the canonical `<evidence>/service-jobs/<name>` is used instead, so a
+#   registry can never aim `aid-job.sh cancel` at another run's job whatever it
+#   says. Fails CLOSED, always.
+#
+#   COMMANDS — stop_cmd, probe_cmd. The DECLARATION is authoritative whenever
+#   one can be read: the recorded copy is reconciled against execution.yaml and
+#   the declaration wins, with any divergence logged. The recorded copy is used
+#   ONLY when no declaration is available for that service, and that case is
+#   logged as unreconciled.
+#
+#   THE HONEST LIMIT, named rather than implied: in that last case — no config
+#   readable anywhere — the registry is the only surviving record of how to stop
+#   the service, and this file chooses stopping the service over refusing to
+#   act. Anything able to write into a run's evidence directory is already
+#   inside the trust boundary of that run; what this model removes is the ONE
+#   thing that was not, namely reaching OUT of the evidence directory to a
+#   different run's jobs. If a caller wants the strict reading, it passes its
+#   execution.yaml to `aid_service_down_all` — with a declaration present the
+#   registry has no say over what executes at all.
 #
 # ── STATES ──────────────────────────────────────────────────────────────────
 #   absent → starting → healthy | unhealthy | timed_out | lost
@@ -80,6 +113,19 @@
 # answering the probe is not the process the supervisor owns. That is the
 # violation, and it is refused by name.
 #
+# The window in which that verdict is reachable is the DECLARED STARTUP BUDGET,
+# not a private timer: after the job reaches a terminal state the probe keeps
+# asking until `startup_deadline_seconds` is spent (never less than
+# AID_SERVICE_TERMINAL_GRACE_SEC, so a job that ends at the very edge of its
+# budget still gets a fair window). So the guarantee is stateable: ANY hand-off
+# that answers a probe within the budget the declaration itself asked for is
+# named `daemonized_start_cmd`. What it still cannot see is a child that binds
+# AFTER that budget — an unbounded wait is not available to a run that has to
+# finish. The price of the wider window is that a service which simply crashes
+# is now reported at the end of its startup budget rather than a few seconds in;
+# a declaration that wants fast failure declares a short
+# `startup_deadline_seconds`, which is exactly what that field is for.
+#
 # Requirements: bash 4.1+ (named fd redirection), jq, flock, yq (mikefarah),
 # aid-job.sh; python3 additionally for any service declaring `port_env`.
 # =============================================================================
@@ -93,19 +139,50 @@ AID_SERVICE_REGISTRY_BASENAME="services.json"
 AID_SERVICE_LOCK_BASENAME=".services.lock"
 AID_SERVICE_JOBS_SUBDIR="service-jobs"
 AID_SERVICE_PROBE_INTERVAL_SEC=1
-# How long the probe keeps asking AFTER the job has reached a terminal state.
-# Not an adaptive schedule and not a second startup budget: it is the window in
-# which a start_cmd that handed off to a child can still betray itself by
-# answering a probe nothing owns. See the probe loop for why it exists.
-AID_SERVICE_TERMINAL_GRACE_SEC=5
+# The FLOOR of the window in which the probe keeps asking after the job has
+# reached a terminal state. The window itself runs to the declared
+# `startup_deadline_seconds`; this is only what a job that ends at the very edge
+# of that budget still gets. Overridable so an operator with a genuinely slow
+# hand-off can widen it without editing a declaration's budget.
+AID_SERVICE_TERMINAL_GRACE_SEC="${AID_SERVICE_TERMINAL_GRACE_SEC:-5}"
 AID_SERVICE_DEFAULT_MAX_LIFETIME=86400
 AID_SERVICE_LOCK_WAIT_SEC=30
 
 # aid-job.sh's terminal vocabulary, verbatim. Never abbreviated, never guessed.
 AID_SERVICE_JOB_TERMINAL_RE='^(terminal_pass|terminal_fail|timed_out|cancelled)$'
+# ... plus `lost`, which aid-job.sh defines as "owned process gone AND no
+# terminal record". For the foreground contract the two say the SAME thing —
+# the supervisor no longer owns a running process — so anything that answers a
+# probe afterwards is equally not the supervisor's. `lost` is also the reading
+# aid-job.sh returns in the instant between the wrapper exiting and the
+# collector writing the terminal record, so treating it differently made the
+# daemonize verdict depend on which side of that instant we happened to poll.
+AID_SERVICE_JOB_ENDED_RE='^(terminal_pass|terminal_fail|timed_out|cancelled|lost)$'
 
 _AID_SERVICE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# TEST SEAM ONLY. The environment may point this at a stub supervisor, which is
+# how this lib's bats suite drives it. Env control of a process is already code
+# execution, so this is not a boundary — it is a hook, and it is named as one.
 AID_SERVICE_JOB_SH="${AID_SERVICE_JOB_SH:-${_AID_SERVICE_LIB_DIR}/../aid-job.sh}"
+
+# ── The env-name denylist: ONE definition, two consumers ─────────────────────
+# The list lives in lib/aid-env-name-denylist.sh and is read by BOTH the
+# declaration-time check (`_svc_denied_port_env` in aid-run-gates.sh) and the
+# export-time guard below. A second enumeration is a list that drifts, and it
+# did: this file's copy was missing the interpreter-hook and git families while
+# its own header advertised that it covered them.
+_AID_SERVICE_DENYLIST_AVAILABLE=1
+if [[ -r "${_AID_SERVICE_LIB_DIR}/aid-env-name-denylist.sh" ]]; then
+  # shellcheck source=aid-env-name-denylist.sh
+  source "${_AID_SERVICE_LIB_DIR}/aid-env-name-denylist.sh"
+fi
+if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
+  # FAIL CLOSED: with no denylist available, every name is denied. That refuses
+  # a legitimate declaration rather than exporting an unchecked one, and the
+  # refusal says which of the two happened.
+  _AID_SERVICE_DENYLIST_AVAILABLE=0
+  aid_env_name_denied() { return 0; }
+fi
 
 # The execution.yaml this lib reads when the caller passes no explicit path.
 AID_SERVICE_CONFIG="${AID_SERVICE_CONFIG:-.aid-o/config/execution.yaml}"
@@ -128,18 +205,85 @@ _aid_svc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # ── Environment export guard ─────────────────────────────────────────────────
 # The port variable is exported into the environment of the start, probe and
 # stop commands. execution.yaml's validator already refuses a reserved or
-# malformed name; this is the second, cheap check at the only place that
-# actually performs the export, so a caller that skipped validation cannot get
-# `PATH=41234` past this file.
+# malformed name; this is the second check at the only place that actually
+# performs the export, reading the SAME shared list, so a caller that skipped
+# validation cannot get `PATH=41234` — or `GIT_SSH_COMMAND=…` — past this file.
+#
+# A refusal is never silent. Without a word the service starts with its port
+# variable unset, binds whatever default it has, fails its probe, and is
+# reported as a startup-deadline timeout — a diagnosis that says nothing about
+# the actual cause. (`_aid_svc_up_one` refuses such a declaration outright, so
+# in practice this message is the defence-in-depth path, not the usual one.)
 _aid_svc_export_port() {
   local var="${1:-}" port="${2:-}"
   [[ -n "$var" && -n "$port" && "$port" != "null" ]] || return 0
-  [[ "$var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 0
-  case "$var" in
-    LD_*|DYLD_*|BASH_FUNC_*|AID_*) return 0 ;;
-    PATH|CDPATH|IFS|PS4|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|SHELL|HOME|PWD|OLDPWD|TMPDIR|TMP|TEMP|GLIBC_TUNABLES) return 0 ;;
-  esac
+  if [[ ! "$var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    _aid_svc_export_refused "$var" "it is not a legal environment variable name"
+    return 0
+  fi
+  if aid_env_name_denied "$var"; then
+    _aid_svc_export_refused "$var" "$(_aid_svc_denied_reason)"
+    return 0
+  fi
   export "${var}=${port}"
+}
+
+_aid_svc_denied_reason() {
+  if (( _AID_SERVICE_DENYLIST_AVAILABLE )); then
+    printf 'it is a variable this system'"'"'s own children depend on (command lookup, shell startup, a loader or interpreter hook, or AID'"'"'s own namespace)'
+  else
+    printf 'the shared env-name denylist at %s/aid-env-name-denylist.sh could not be loaded, so EVERY name is refused rather than one being exported unchecked' "$_AID_SERVICE_LIB_DIR"
+  fi
+}
+
+# One message per variable per shell — a probe loop must not turn a single bad
+# declaration into a hundred identical lines.
+_aid_svc_export_refused() {
+  local var="$1" why="$2"
+  case " ${_AID_SVC_EXPORT_WARNED:-} " in *" ${var} "*) return 0 ;; esac
+  _AID_SVC_EXPORT_WARNED="${_AID_SVC_EXPORT_WARNED:-} ${var}"
+  _aid_svc_err "refusing to export the allocated port as '${var}': ${why}. The command will run with '${var}' untouched and no port in hand."
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Revalidation — nothing read back from the registry is trusted on sight
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _aid_svc_valid_name <name>
+#   The SAME charset `_validate_services_config` enforces at declaration time.
+#   Re-checked here because THIS file is the one that turns a service name into
+#   a filesystem path (`<evidence>/service-jobs/<name>`) and into a job id, and
+#   a path builder that relies on a downstream component's validation is a path
+#   builder with no validation. `aid-job.sh` refusing the derived id afterwards
+#   is defence in depth, not the check.
+_aid_svc_valid_name() { [[ "${1-}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; }
+
+# _aid_svc_valid_port <value> — an integer in the range a socket can carry.
+_aid_svc_valid_port() {
+  [[ "${1-}" =~ ^[0-9]{1,5}$ ]] || return 1
+  (( 10#${1} > 0 && 10#${1} < 65536 ))
+}
+
+# _aid_svc_safe_jobs_dir <evidence_dir> <service> [<recorded_jobs_dir>]
+#   Echoes a jobs directory GUARANTEED to resolve inside <evidence_dir>.
+#
+#   The recorded value is used when it does; otherwise it is refused, loudly,
+#   and the canonical path is used instead. This is the single check that stops
+#   a hand-written registry from aiming `aid-job.sh cancel` at a concurrent
+#   run's jobs — with it, the worst a bad `jobs_dir` can do is name a directory
+#   this run already owns.
+_aid_svc_safe_jobs_dir() {
+  local evidence="$1" name="$2" recorded="${3:-}" canon base rp
+  canon="${evidence}/${AID_SERVICE_JOBS_SUBDIR}/${name}"
+  [[ -n "$recorded" ]] || { printf '%s' "$canon"; return 0; }
+  base="$(realpath -m -- "$evidence" 2>/dev/null || printf '%s' "$evidence")"
+  rp="$(realpath -m -- "$recorded" 2>/dev/null || printf '')"
+  if [[ -n "$rp" && ( "$rp" == "$base" || "$rp" == "$base"/* ) ]]; then
+    printf '%s' "$recorded"
+    return 0
+  fi
+  _aid_svc_log "service ${name}: the registry's jobs_dir '${recorded}' does not resolve inside this run's evidence directory (${base}) — refusing it and using ${canon}"
+  printf '%s' "$canon"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -263,10 +407,19 @@ _aid_svc_entry_field() {
 # Declarations (execution.yaml)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# _aid_svc_declared_names <execution_yaml> — declared service names, or nothing
-# when there is no `services:` block, it is null, or it is not a map. Shape
-# violations are NOT diagnosed here: `_validate_services_config` in
-# aid-run-gates.sh is the one authority for that and runs before this file does.
+# _aid_svc_declared_names <execution_yaml>
+#   rc 0 + the declared service names on stdout (possibly none: no `services:`
+#         block at all, or an explicitly empty one — both genuinely mean "there
+#         are nothing to bring up").
+#   rc 3  the block EXISTS but is not a map.
+#
+# The distinction is the point. `_validate_services_config` in aid-run-gates.sh
+# remains the one authority that DIAGNOSES declaration shape, and it refuses
+# this upstream — but a `services:` written as a list is a misunderstanding of
+# the declarations, and this file must not be the place where a
+# misunderstanding reads as "there are no services" while a missing yq, a
+# missing jq and a missing supervisor all refuse. Same doctrine, applied to the
+# one case that had been left out of it.
 _aid_svc_declared_names() {
   local f="$1" has tag
   [[ -f "$f" ]] || return 0
@@ -274,8 +427,47 @@ _aid_svc_declared_names() {
   has="$(yq 'has("services")' "$f" 2>/dev/null || echo false)"
   [[ "$has" == "true" ]] || return 0
   tag="$(yq '.services | tag' "$f" 2>/dev/null || echo '!!null')"
-  [[ "$tag" == '!!map' ]] || return 0
+  [[ "$tag" == '!!null' ]] && return 0
+  [[ "$tag" == '!!map' ]] || return 3
   yq '.services | keys | .[]' "$f" 2>/dev/null || true
+}
+
+# _aid_svc_declares <execution_yaml> <service> — rc 0 iff the file declares it.
+_aid_svc_declares() {
+  local f="$1" n="$2" line
+  [[ -n "$f" && -f "$f" ]] || return 1
+  command -v yq >/dev/null 2>&1 || return 1
+  while IFS= read -r line; do
+    [[ "$line" == "$n" ]] && return 0
+  done < <(_aid_svc_declared_names "$f" 2>/dev/null || true)
+  return 1
+}
+
+# _aid_svc_reconcile_cmd <execution_yaml> <service> <key> <recorded> [quiet]
+#   Echoes the command that will actually run. See the trust model in the
+#   header: the DECLARATION wins whenever one is readable, and the registry's
+#   recorded copy is a fallback for the case the registry exists to serve — a
+#   teardown whose config has moved — never a channel for choosing what runs.
+#
+#   `quiet` suppresses ONLY the unreconciled-fallback notice, and only where a
+#   notice would be worse than useless: `aid_service_status` is a read-only
+#   question a caller may ask in a loop, and one line of prose per call would
+#   drown the answer. A DIVERGENCE is always reported, quiet or not — that is
+#   the line that means something happened.
+_aid_svc_reconcile_cmd() {
+  local yaml="$1" name="$2" key="$3" recorded="$4" quiet="${5:-}" declared
+  if _aid_svc_declares "$yaml" "$name"; then
+    declared="$(_aid_svc_field "$yaml" "$name" "$key")"
+    if [[ "$declared" != "$recorded" ]]; then
+      _aid_svc_log "service ${name}: the registry's ${key} differs from the one declared in ${yaml} — the DECLARATION wins (the registry records what this run allocated, it does not choose what executes)"
+    fi
+    printf '%s' "$declared"
+    return 0
+  fi
+  if [[ -n "$recorded" && -z "$quiet" ]]; then
+    _aid_svc_log "service ${name}: no declaration available to reconcile ${key} against — using the value recorded at start-up, UNRECONCILED (pass the execution.yaml to reconcile it)"
+  fi
+  printf '%s' "$recorded"
 }
 
 # _aid_svc_field <execution_yaml> <service> <key> — the value, or "" when the
@@ -378,15 +570,24 @@ _aid_svc_job_cancel() {
 # Teardown of ONE service, driven ENTIRELY by the registry
 # ═══════════════════════════════════════════════════════════════════════════
 
-# _aid_svc_stop_one <evidence_dir> <service> [<final_state>]
-#   cancel the recorded job, then run the recorded stop_cmd with the RECORDED
+# _aid_svc_stop_one <evidence_dir> <service> [<final_state>] [<execution_yaml>]
+#   cancel the recorded job, then run the reconciled stop_cmd with the RECORDED
 #   port re-exported, then record the final state. The port is read back from
 #   the registry and never re-derived — that is the whole reason the registry
 #   holds it, and it is what makes teardown work in a process that never saw
-#   the allocation.
+#   the allocation. Every value read back is revalidated first; see the trust
+#   model in the header.
+#
+#   rc 0 always: teardown is best-effort by design, and a partial failure must
+#   still attempt everything else. Whether anything SURVIVED is answered by
+#   `aid_service_down_all`, which probes afterwards.
 _aid_svc_stop_one() {
-  local evidence="$1" name="$2" final="${3:-stopped}"
+  local evidence="$1" name="$2" final="${3:-stopped}" yaml="${4:-}"
   local entry job_id jobs_dir port port_env stop_cmd
+  if ! _aid_svc_valid_name "$name"; then
+    _aid_svc_err "refusing to act on the registry entry '${name}': it is not a valid service name (allowed: lowercase letters, digits, '_' and '-', starting with a letter or digit), and a service name becomes a directory name here"
+    return 0
+  fi
   entry="$(_aid_svc_registry_get "$evidence" "$name")"
   [[ -n "$entry" ]] || return 0
   job_id="$(_aid_svc_entry_field "$entry" job_id)"
@@ -394,7 +595,13 @@ _aid_svc_stop_one() {
   port="$(_aid_svc_entry_field "$entry" port)"
   port_env="$(_aid_svc_entry_field "$entry" port_env)"
   stop_cmd="$(_aid_svc_entry_field "$entry" stop_cmd)"
-  [[ -n "$jobs_dir" ]] || jobs_dir="${evidence}/${AID_SERVICE_JOBS_SUBDIR}/${name}"
+
+  jobs_dir="$(_aid_svc_safe_jobs_dir "$evidence" "$name" "$jobs_dir")"
+  if [[ -n "$port" ]] && ! _aid_svc_valid_port "$port"; then
+    _aid_svc_svc_err "$name" "the registry records a port that is not a port number ('${port}') — the stop command will run without one"
+    port=""
+  fi
+  stop_cmd="$(_aid_svc_reconcile_cmd "$yaml" "$name" stop_cmd "$stop_cmd")"
 
   _aid_svc_job_cancel "$jobs_dir" "$job_id"
   _aid_svc_run_stop "$stop_cmd" "$port_env" "$port"
@@ -415,6 +622,16 @@ _aid_svc_up_one() {
   local evidence="$1" yaml="$2" name="$3"
   local start_cmd probe_cmd stop_cmd port_env log_hint
   local startup_deadline max_lifetime restart_auth
+
+  # The name becomes a DIRECTORY and a JOB ID a few lines below, so it is
+  # validated here rather than downstream. `aid-job.sh` refusing the derived id
+  # is real defence in depth, but it does not stop the `mkdir -p` this file does
+  # first — a traversal name created a directory four levels above the evidence
+  # tree before this check existed.
+  if ! _aid_svc_valid_name "$name"; then
+    _aid_svc_svc_err "$name" "invalid service name (allowed: lowercase letters, digits, '_' and '-', starting with a letter or digit) — it becomes a directory name and a job id, so it is refused before either is built"
+    return 1
+  fi
   start_cmd="$(_aid_svc_field "$yaml" "$name" start_cmd)"
   probe_cmd="$(_aid_svc_field "$yaml" "$name" probe_cmd)"
   stop_cmd="$(_aid_svc_field "$yaml" "$name" stop_cmd)"
@@ -426,6 +643,22 @@ _aid_svc_up_one() {
   [[ "$startup_deadline" =~ ^[0-9]+$ ]] || startup_deadline=60
   [[ "$max_lifetime" =~ ^[0-9]+$ ]] || max_lifetime="$AID_SERVICE_DEFAULT_MAX_LIFETIME"
   [[ "$restart_auth" == "true" ]] || restart_auth="false"
+
+  # A port_env this file would refuse to export is refused HERE, before a job
+  # exists, rather than becoming a service that starts without its port and is
+  # then reported as a startup-deadline timeout — a diagnosis about the symptom.
+  if [[ -n "$port_env" ]]; then
+    local pe_why=""
+    if [[ ! "$port_env" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      pe_why="it is not a legal environment variable name"
+    elif aid_env_name_denied "$port_env"; then
+      pe_why="$(_aid_svc_denied_reason)"
+    fi
+    if [[ -n "$pe_why" ]]; then
+      _aid_svc_svc_err "$name" "port_env '${port_env}' will not be exported: ${pe_why}. Refusing to start it with its port variable unset, which would fail its probe and be reported as a startup timeout instead of as this."
+      return 1
+    fi
+  fi
 
   local hint_suffix=""
   [[ -n "$log_hint" ]] && hint_suffix=" (its own logs: ${log_hint})"
@@ -450,13 +683,13 @@ _aid_svc_up_one() {
         return 0
       fi
       _aid_svc_log "service ${name}: the registry says healthy but the probe disagrees — tearing that job down and starting fresh"
-      _aid_svc_stop_one "$evidence" "$name" "unhealthy"
+      _aid_svc_stop_one "$evidence" "$name" "unhealthy" "$yaml"
     elif [[ "$state" == "starting" || "$state" == "unhealthy" || "$state" == "timed_out" || "$state" == "lost" ]]; then
       # A leftover from a run that died mid-startup. Its job may still be live,
       # and starting a second one beside it is exactly the orphan this file
       # exists to prevent.
       _aid_svc_log "service ${name}: found a leftover '${state}' entry from an earlier attempt — tearing it down before starting"
-      _aid_svc_stop_one "$evidence" "$name" "$state"
+      _aid_svc_stop_one "$evidence" "$name" "$state" "$yaml"
     fi
   fi
 
@@ -537,24 +770,30 @@ _aid_svc_up_one() {
       probe_ok=0
       _aid_svc_probe "$probe_cmd" "$port_env" "$port" && probe_ok=1
 
-      if [[ "$job_state" =~ $AID_SERVICE_JOB_TERMINAL_RE ]]; then
+      if [[ "$job_state" =~ $AID_SERVICE_JOB_ENDED_RE ]]; then
         if (( probe_ok )); then outcome="daemonized"; break; fi
         # The job is over and nothing is answering YET. That is not enough to
         # call it a crash: a start_cmd that handed off to a child which is slow
-        # to bind looks exactly like this for the first second or two, and
-        # calling it a plain start failure would report the wrong diagnosis AND
-        # walk away from an orphan nobody owns. So the probe gets a bounded
-        # grace window after the job ends — long enough for a hand-off to show
-        # itself, short enough that a genuine crash still fails promptly.
+        # to bind looks exactly like this until the child binds, and calling it
+        # a plain start failure would report the wrong diagnosis AND walk away
+        # from an orphan nobody owns.
+        #
+        # So the probe keeps asking for the rest of the DECLARED startup budget
+        # (never less than the terminal-grace floor, so a job that ends at the
+        # very edge of its budget still gets a fair window). The window is a
+        # property of the declaration rather than a private timer, which is what
+        # makes the guarantee stateable: a hand-off answering at ANY point
+        # within the budget is named. An earlier version bounded this at a fixed
+        # 5 s and claimed that was "long enough for a hand-off to show itself" —
+        # it was not, and a 9 s hand-off got the plain start-failure diagnosis.
         local g0=$SECONDS
-        while (( SECONDS - g0 < AID_SERVICE_TERMINAL_GRACE_SEC )); do
+        while (( SECONDS - t0 < startup_deadline || SECONDS - g0 < AID_SERVICE_TERMINAL_GRACE_SEC )); do
           sleep "$AID_SERVICE_PROBE_INTERVAL_SEC"
           if _aid_svc_probe "$probe_cmd" "$port_env" "$port"; then probe_ok=1; break; fi
         done
         if (( probe_ok )); then outcome="daemonized"; else outcome="job_${job_state}"; fi
         break
       fi
-      if [[ "$job_state" == "lost" ]]; then outcome="job_lost"; break; fi
       if (( probe_ok )); then
         # The probe answered — but WHO answered it? The state read above was
         # taken BEFORE the probe, so on its own it cannot rule out a start_cmd
@@ -563,7 +802,7 @@ _aid_svc_up_one() {
         # is terminal now cannot be the process that just answered, and calling
         # that "healthy" would hand the run a service it can never stop.
         post_state="$(_aid_svc_job_state "$jobs_dir" "$spawned")"
-        if [[ "$post_state" =~ $AID_SERVICE_JOB_TERMINAL_RE ]]; then
+        if [[ "$post_state" =~ $AID_SERVICE_JOB_ENDED_RE ]]; then
           job_state="$post_state"; outcome="daemonized"; break
         fi
         outcome="healthy"; break
@@ -591,10 +830,10 @@ _aid_svc_up_one() {
       # start_cmd that daemonises just makes a second orphan.
       _aid_svc_registry_put "$evidence" "$name" "$(jq -nc --arg js "$job_state" \
         '{state:"unhealthy", failure_reason:"daemonized_start_cmd",
-          violation:("job reached " + $js + " while the probe still reported healthy")}')" || true
+          violation:("job ended in " + $js + " while the probe still reported healthy")}')" || true
       _aid_svc_job_cancel "$jobs_dir" "$spawned"
       _aid_svc_run_stop "$stop_cmd" "$port_env" "$port"
-      _aid_svc_svc_err "$name" "start_cmd must remain its job's foreground process — its job reached the terminal state '${job_state}' while the probe still reports healthy, so whatever is answering the probe is NOT the process the supervisor owns and this run can no longer stop what it started${hint_suffix}"
+      _aid_svc_svc_err "$name" "start_cmd must remain its job's foreground process — its job ended in the state '${job_state}' while the probe still reports healthy, so whatever is answering the probe is NOT the process the supervisor owns and this run can no longer stop what it started${hint_suffix}"
       return 1
     fi
 
@@ -670,8 +909,28 @@ aid_service_up_all() {
     return 2
   fi
 
+  if [[ ! -d "$evidence" ]]; then
+    _aid_svc_err "the run evidence directory '${evidence}' does not exist — the service registry lives there, and nothing here creates an evidence directory"
+    return 2
+  fi
+
   local -a names=() declared=()
-  mapfile -t declared < <(_aid_svc_declared_names "$yaml")
+  local names_raw="" rc_names=0
+  names_raw="$(_aid_svc_declared_names "$yaml")" || rc_names=$?
+  if (( rc_names == 3 )); then
+    # NOT the same as "there are no services". A `services:` block that is not a
+    # map is a misunderstanding of the declarations, and this file refuses it for
+    # the same reason it refuses a missing yq: "I could not read it" must never
+    # read as "there is nothing to do". (_validate_services_config diagnoses the
+    # shape in detail and runs upstream; this is the fail-closed floor.)
+    _aid_svc_err "the 'services:' block in '${yaml}' is not a map of service name -> declaration — refusing rather than reading it as 'there are no services'"
+    return 2
+  fi
+  if (( rc_names != 0 )); then
+    _aid_svc_err "could not read the service declarations in '${yaml}' (exit ${rc_names}) — refusing rather than assuming there are no services"
+    return 2
+  fi
+  mapfile -t declared <<<"$names_raw"
   local n
   for n in "${declared[@]}"; do [[ -n "$n" ]] && names+=("$n"); done
   # ── no services declared: a cheap no-op, and the byte-identical path every
@@ -688,10 +947,6 @@ aid_service_up_all() {
   fi
   if [[ ! -f "$AID_SERVICE_JOB_SH" ]]; then
     _aid_svc_err "${#names[@]} service(s) declared in '${yaml}' but the job supervisor is unavailable at ${AID_SERVICE_JOB_SH} — refusing to start a process nothing would own"
-    return 2
-  fi
-  if [[ ! -d "$evidence" ]]; then
-    _aid_svc_err "the run evidence directory '${evidence}' does not exist — the service registry lives there, and nothing here creates an evidence directory"
     return 2
   fi
 
@@ -720,15 +975,25 @@ aid_service_up_all() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 # aid_service_down_all <run_evidence_dir> [<execution_yaml>]
-#   Teardown reads the REGISTRY, not the config: everything it needs (job id,
-#   jobs dir, port, stop_cmd) was recorded at up time precisely so a teardown
-#   in a process that never saw the startup still works. The optional
-#   execution_yaml argument is accepted for signature symmetry and is not read.
+#   Teardown reads the REGISTRY for everything it was RECORDED (job id, jobs
+#   dir, port), precisely so a teardown in a process that never saw the startup
+#   still works — and reconciles the COMMANDS against <execution_yaml> when one
+#   is given, because the registry does not choose what executes (see the trust
+#   model in the header). The argument defaults to $AID_SERVICE_CONFIG.
 #
-#   Always best-effort and always rc 0 for the teardown itself: a stop that
-#   partially fails must still attempt everything else. Failures are logged.
+#   Still best-effort in EFFORT: a stop that partially fails must attempt
+#   everything else, and it does. But the exit code now answers the question a
+#   caller actually has:
+#     rc 0  nothing that this run recorded is answering its probe any more
+#     rc 1  at least one service's readiness probe STILL PASSES after teardown —
+#           named in the log. "I tried everything" and "everything is down" are
+#           different answers and the difference is worth being machine-readable.
+#
+#   The instrument is the DECLARED probe, and that is the limit: a probe that
+#   cannot fail (`probe_cmd: /bin/true`) cannot prove a teardown succeeded, so
+#   rc 1 says exactly what it says — the probe still passes — and no more.
 aid_service_down_all() {
-  local evidence="${1:-}"
+  local evidence="${1:-}" yaml="${2:-$AID_SERVICE_CONFIG}"
   [[ -n "$evidence" ]] || { _aid_svc_err "aid_service_down_all requires <run_evidence_dir>"; return 1; }
   [[ -d "$evidence" ]] || return 0
 
@@ -748,9 +1013,11 @@ aid_service_down_all() {
   fi
 
   local n
+  local -a stopped_names=()
   while IFS= read -r n; do
     [[ -n "$n" ]] || continue
-    _aid_svc_stop_one "$evidence" "$n" "stopped"
+    _aid_svc_stop_one "$evidence" "$n" "stopped" "$yaml"
+    stopped_names+=("$n")
   done < <(_aid_svc_registry_names "$evidence")
 
   # ── belt and braces: the supervisor's own layout ───────────────────────
@@ -760,23 +1027,48 @@ aid_service_down_all() {
   # window we have not thought of — and it is cancelled and logged rather than
   # left running.
   local d jd id st svc
-  [[ -d "$jobs_root" ]] || return 0
-  for d in "$jobs_root"/*/; do
-    [[ -d "$d" ]] || continue
-    svc="$(basename "$d")"
-    for jd in "$d"*/; do
-      [[ -f "${jd}job.json" ]] || continue
-      id="$(basename "$jd")"
-      case " ${known} " in *" ${id} "*) continue ;; esac
-      st="$(_aid_svc_job_state "${d%/}" "$id")"
-      case "$st" in
-        started|running)
-          _aid_svc_log "service ${svc}: job '${id}' is ${st} but the registry does not name it — cancelling this orphan"
-          _aid_svc_job_cancel "${d%/}" "$id"
-          ;;
-      esac
+  if [[ -d "$jobs_root" ]]; then
+    for d in "$jobs_root"/*/; do
+      [[ -d "$d" ]] || continue
+      svc="$(basename "$d")"
+      for jd in "$d"*/; do
+        [[ -f "${jd}job.json" ]] || continue
+        id="$(basename "$jd")"
+        case " ${known} " in *" ${id} "*) continue ;; esac
+        st="$(_aid_svc_job_state "${d%/}" "$id")"
+        case "$st" in
+          started|running)
+            _aid_svc_log "service ${svc}: job '${id}' is ${st} but the registry does not name it — cancelling this orphan"
+            _aid_svc_job_cancel "${d%/}" "$id"
+            ;;
+        esac
+      done
     done
+  fi
+
+  # ── did any of it actually stop? ────────────────────────────────────────
+  # One probe per service that had one. A service still answering after its job
+  # was cancelled and its stop_cmd ran is precisely the daemonised-hand-off
+  # orphan this file cannot reap, and saying so in the exit code is cheaper for
+  # a caller than parsing prose.
+  local survivors=0 entry sport sprobe sportenv
+  for n in "${stopped_names[@]:-}"; do
+    [[ -n "$n" ]] || continue
+    _aid_svc_valid_name "$n" || continue
+    entry="$(_aid_svc_registry_get "$evidence" "$n")"
+    [[ -n "$entry" ]] || continue
+    sprobe="$(_aid_svc_entry_field "$entry" probe_cmd)"
+    sprobe="$(_aid_svc_reconcile_cmd "$yaml" "$n" probe_cmd "$sprobe" quiet)"
+    [[ -n "$sprobe" ]] || continue
+    sport="$(_aid_svc_entry_field "$entry" port)"
+    _aid_svc_valid_port "$sport" || sport=""
+    sportenv="$(_aid_svc_entry_field "$entry" port_env)"
+    if _aid_svc_probe "$sprobe" "$sportenv" "$sport"; then
+      survivors=$(( survivors + 1 ))
+      _aid_svc_svc_err "$n" "its readiness probe still passes after teardown${sport:+ on port ${sport}} — its job was cancelled and its stop_cmd was run, so anything genuinely still answering is not a process this run owns (the daemonised-start_cmd case). Teardown did everything it can. (If probe_cmd cannot fail, this line says only that: a probe that cannot fail proves nothing about a teardown.)"
+    fi
   done
+  (( survivors == 0 )) || return 1
   return 0
 }
 
@@ -784,15 +1076,27 @@ aid_service_down_all() {
 # status
 # ═══════════════════════════════════════════════════════════════════════════
 
-# aid_service_status <name> [<run_evidence_dir>]
+# aid_service_status <name> [<run_evidence_dir>] [<execution_yaml>]
 #   One JSON object on stdout; rc 0 iff the service is healthy right now.
 #   The port comes from the REGISTRY and is never re-derived — that is what
 #   makes a status call from a resumed controller mean the same thing as one
-#   from the process that allocated it.
+#   from the process that allocated it. The probe COMMAND is reconciled against
+#   the declaration exactly as teardown reconciles stop_cmd.
+#
+#   Every exit path is a decision, never a fall-through. An earlier version
+#   handed the registry's `port` straight to `jq --argjson`; a non-numeric value
+#   made jq die printing nothing and the function fell through to `return 0` —
+#   "healthy" on the strength of a crash, in a function whose entire job is
+#   answering a readiness question. Nothing below may report success because
+#   something failed.
 aid_service_status() {
-  local name="${1:-}" evidence="${2:-$AID_SERVICE_EVIDENCE_DIR}"
+  local name="${1:-}" evidence="${2:-$AID_SERVICE_EVIDENCE_DIR}" yaml="${3:-$AID_SERVICE_CONFIG}"
   if [[ -z "$name" ]]; then
     _aid_svc_err "aid_service_status requires <name>"
+    return 1
+  fi
+  if ! _aid_svc_valid_name "$name"; then
+    _aid_svc_err "service '${name}': not a valid service name (allowed: lowercase letters, digits, '_' and '-', starting with a letter or digit)"
     return 1
   fi
   if [[ -z "$evidence" ]]; then
@@ -816,7 +1120,21 @@ aid_service_status() {
   port_env="$(_aid_svc_entry_field "$entry" port_env)"
   probe_cmd="$(_aid_svc_entry_field "$entry" probe_cmd)"
   rec_state="$(_aid_svc_entry_field "$entry" state)"
-  [[ -n "$jobs_dir" ]] || jobs_dir="${evidence}/${AID_SERVICE_JOBS_SUBDIR}/${name}"
+  jobs_dir="$(_aid_svc_safe_jobs_dir "$evidence" "$name" "$jobs_dir")"
+
+  # A port that is not a port is registry corruption, and this function will not
+  # guess past it: it is neither a healthy service nor a question we can answer.
+  if [[ -n "$port" ]] && ! _aid_svc_valid_port "$port"; then
+    _aid_svc_svc_err "$name" "the registry entry records a value that is not a port number ('${port}') — refusing to treat this entry as an answer about readiness"
+    jq -nc --arg n "$name" --arg rs "$rec_state" \
+      '{service:$n, state:"invalid_registry_entry", registry_state:$rs,
+        job_state:"unknown", job_id:null, port:null, probe_exit:null,
+        violation:"registry_port_not_a_number"}' 2>/dev/null \
+      || printf '{"service":"%s","state":"invalid_registry_entry"}\n' "$name"
+    return 1
+  fi
+
+  probe_cmd="$(_aid_svc_reconcile_cmd "$yaml" "$name" probe_cmd "$probe_cmd" quiet)"
 
   job_state="$(_aid_svc_job_state "$jobs_dir" "$job_id")"
 
@@ -830,6 +1148,12 @@ aid_service_status() {
     # Edge case, stated in the plan: a service that WAS healthy whose job is
     # later lost reports lost. Deciding what to do about it belongs elsewhere.
     state="lost"
+    # ... but if something is STILL answering, the same reasoning as the ended
+    # states applies: the supervisor owns nothing, so whatever answers is not
+    # its process. Same violation, named the same way.
+    if (( probe_rc == 0 )); then
+      violation='"daemonized_start_cmd"'
+    fi
   elif [[ "$job_state" == "timed_out" ]]; then
     state="timed_out"
   elif [[ "$job_state" =~ $AID_SERVICE_JOB_TERMINAL_RE ]]; then
@@ -845,13 +1169,20 @@ aid_service_status() {
     state="unhealthy"
   fi
 
-  jq -nc --arg n "$name" --arg s "$state" --arg rs "$rec_state" \
+  # Both --argjson values are revalidated above (port) or produced here
+  # (probe_rc, violation), and the call is STILL checked: a jq that cannot
+  # render the answer has not answered, and an unanswered readiness question is
+  # not a healthy service.
+  if ! jq -nc --arg n "$name" --arg s "$state" --arg rs "$rec_state" \
         --arg js "$job_state" --arg jid "$job_id" \
         --argjson port "${port:-null}" --argjson probe "$probe_rc" \
         --argjson violation "$violation" \
     '{service:$n, state:$s, registry_state:$rs, job_state:$js,
       job_id:(if $jid == "" then null else $jid end), port:$port,
-      probe_exit:$probe, violation:$violation}'
+      probe_exit:$probe, violation:$violation}'; then
+    _aid_svc_svc_err "$name" "could not render its status document — reporting NOT healthy, because 'the answer could not be produced' is not 'the service is up'"
+    return 1
+  fi
 
   [[ "$state" == "healthy" ]] && return 0
   return 1

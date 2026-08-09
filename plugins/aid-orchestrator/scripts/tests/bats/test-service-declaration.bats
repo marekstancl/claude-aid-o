@@ -414,6 +414,53 @@ PY
   [[ "$output" == *"_validate_services_config"* ]]
 }
 
+@test "case 3b: the port_env denylist has ONE definition and both consumers read it" {
+  local DENYLIST="$PLUGIN_ROOT/scripts/lib/aid-env-name-denylist.sh"
+  [ -f "$DENYLIST" ]
+
+  # Every exact name the schema enumerates must be denied by the shared list.
+  # This is the drift guard that matters now that the runtime check exists at
+  # two altitudes: declaration time (aid-run-gates.sh) and export time
+  # (lib/aid-service.sh). One list, or it drifts — and it did.
+  cat > "$WORK/deny-probe.sh" <<'EOS'
+#!/usr/bin/env bash
+set -uo pipefail
+source "$1"; shift
+for v in "$@"; do
+  if aid_env_name_denied "$v"; then printf '%s DENIED\n' "$v"; else printf '%s ALLOWED\n' "$v"; fi
+done
+EOS
+  mapfile -t enumerated < <(jq -r '.["$defs"].service.properties.port_env.allOf[]?.not.enum[]?' "$SCHEMA")
+  [ "${#enumerated[@]}" -ge 30 ]
+
+  run bash "$WORK/deny-probe.sh" "$DENYLIST" "${enumerated[@]}" \
+      LD_PRELOAD DYLD_INSERT_LIBRARIES BASH_FUNC_x%% AID_ANYTHING \
+      SVC_PORT APP_PORT Path
+  [ "$status" -eq 0 ]
+  local v
+  for v in "${enumerated[@]}"; do
+    [[ "$output" == *"$v DENIED"* ]] || { echo "not denied: $v"; return 1; }
+  done
+  for v in LD_PRELOAD DYLD_INSERT_LIBRARIES 'BASH_FUNC_x%%' AID_ANYTHING; do
+    [[ "$output" == *"$v DENIED"* ]] || { echo "family not denied: $v"; return 1; }
+  done
+  # ... and the names that must still be usable, including the case variant the
+  # table deliberately accepts.
+  for v in SVC_PORT APP_PORT Path; do
+    [[ "$output" == *"$v ALLOWED"* ]] || { echo "false refusal: $v"; return 1; }
+  done
+
+  # Neither consumer may carry an enumeration of its own.
+  run grep -c 'PYTHONSTARTUP' "$RUN_GATES"
+  [ "$output" = "0" ]
+  run grep -c 'PYTHONSTARTUP' "$PLUGIN_ROOT/scripts/lib/aid-service.sh"
+  [ "$output" = "0" ]
+  run grep -c 'aid_env_name_denied' "$RUN_GATES"
+  [ "$output" -ge 1 ]
+  run grep -c 'aid_env_name_denied' "$PLUGIN_ROOT/scripts/lib/aid-service.sh"
+  [ "$output" -ge 1 ]
+}
+
 @test "case 4: a service missing probe_cmd fails validation naming the field" {
   svc_fixture_yaml missing_probe_cmd > "$WORK/exec.yaml"
 

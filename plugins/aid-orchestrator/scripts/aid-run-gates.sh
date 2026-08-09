@@ -307,21 +307,26 @@ _svc_err() {
 #   open-ended and libc/shell-version dependent (LD_PRELOAD, LD_AUDIT,
 #   LD_LIBRARY_PATH, …), so an enumeration would silently go stale.
 #
+#   THE LIST ITSELF LIVES IN lib/aid-env-name-denylist.sh, because there are two
+#   consumers — this declaration-time check and the export-time guard in
+#   lib/aid-service.sh — and a second enumeration is a list that drifts. It did:
+#   the export-time copy was missing the interpreter-hook and git families while
+#   advertising that it covered them.
+#
 #   MIRRORED BY: defaults/schemas/service-declaration.schema.json
 #   (port_env.allOf) — keep the two lists in the same order.
 _svc_denied_port_env() {
-  case "$1" in
-    # Open-ended families: dynamic loaders, bash's exported-function channel,
-    # and AID's own runtime namespace.
-    LD_*|DYLD_*|BASH_FUNC_*|AID_*) return 0 ;;
-    # Command lookup, shell parsing/startup, and the process's idea of where it is.
-    PATH|CDPATH|IFS|PS4|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|SHELL|HOME|PWD|OLDPWD|TMPDIR|TMP|TEMP|GLIBC_TUNABLES) return 0 ;;
-    # Interpreter hooks — each one changes what a child interpreter loads or runs.
-    PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|PERL5LIB|PERL5OPT|NODE_OPTIONS|NODE_PATH|RUBYOPT|RUBYLIB|GEM_HOME|GEM_PATH|CLASSPATH|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS) return 0 ;;
-    # git's own exec hooks and repository resolution — the runner shells out to git.
-    GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_SSH|GIT_SSH_COMMAND|GIT_EXTERNAL_DIFF|GIT_PAGER) return 0 ;;
-  esac
-  return 1
+  if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
+    # shellcheck source=lib/aid-env-name-denylist.sh
+    source "${SCRIPT_DIR}/lib/aid-env-name-denylist.sh" 2>/dev/null || true
+  fi
+  if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
+    # FAIL CLOSED, and say why: with no denylist available every name is denied,
+    # which refuses a legitimate declaration rather than admitting a hostile one.
+    echo "ERROR: aid-run-gates.sh: the shared env-name denylist (${SCRIPT_DIR}/lib/aid-env-name-denylist.sh) could not be loaded — refusing every port_env name rather than exporting one unchecked" >&2
+    return 0
+  fi
+  aid_env_name_denied "$1"
 }
 
 # _svc_backgrounding_form <start_cmd>

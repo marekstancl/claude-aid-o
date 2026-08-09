@@ -152,12 +152,17 @@ EOS
   #
   # The ordering is DETERMINISTIC, not lucky, and deliberately in the direction
   # that is hardest for the lib: the parent returns 0 immediately, and the child
-  # waits to be REPARENTED (proof the parent is gone) plus half a second (time
-  # for the supervisor to record the terminal result) before it binds. So there
-  # is no instant at which the probe can succeed while the job is still running
-  # — the only way the lib can reach the right verdict is by continuing to probe
-  # AFTER the job has ended.
-  #   $1 port  $2 token
+  # waits to be REPARENTED (proof the parent is gone) plus a settable delay
+  # (time for the supervisor to record the terminal result) before it binds. So
+  # there is no instant at which the probe can succeed while the job is still
+  # running — the only way the lib can reach the right verdict is by continuing
+  # to probe AFTER the job has ended.
+  #
+  # $3 is the POST-REPARENT DELAY, and it is a parameter rather than a constant
+  # because the interesting question is not "does the lib notice a fast hand-off"
+  # but "how late may a hand-off be and still be named". Test 6 uses the fast
+  # form; test 18 uses one that binds long after any fixed grace window.
+  #   $1 port  $2 token  $3 post-reparent delay seconds (default 0.5)
   cat > "$FIX/daemonize.sh" <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -167,12 +172,12 @@ if os.fork() > 0:
 ppid = os.getppid()
 while os.getppid() == ppid:          # ... wait until we are reparented
     time.sleep(0.05)
-time.sleep(0.5)                      # ... and the job record says terminal
+time.sleep(float(sys.argv[3]))       # ... and the job record says terminal
 s = socket.socket()
 s.bind(("127.0.0.1", int(sys.argv[1])))
 s.listen(8)
 while True:
-    c, _ = s.accept(); c.close()' "$1" "$2"
+    c, _ = s.accept(); c.close()' "$1" "$2" "${3:-0.5}"
 EOS
 
   # A process that lives but never becomes healthy.
@@ -332,7 +337,11 @@ services:
   api:
     start_cmd: bash "$FIX/collide.sh" "$TMP/collide.mark" "$TMP/held.port" $TOKEN
     probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
-    startup_deadline_seconds: 20
+    # Short on purpose: a job that has ended is now probed for the REST of its
+    # declared startup budget (that is what makes the daemonize verdict a
+    # property of the declaration rather than of a private 5 s timer), so the
+    # budget is also what a failing attempt costs before the reallocation.
+    startup_deadline_seconds: 8
     max_lifetime_seconds: 120
     port_env: SVC_PORT
 EOF
@@ -372,7 +381,9 @@ services:
     start_cmd: bash "$FIX/listen.sh" "\$SVC_PORT" 300 $TOKEN
     probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
     stop_cmd: bash "$FIX/stop.sh" "$TMP/stop-port.log"
-    startup_deadline_seconds: 40
+    # See test 3: the post-terminal probe window runs to the declared startup
+    # budget, so this is kept just wide enough to outlast max_lifetime.
+    startup_deadline_seconds: 8
     max_lifetime_seconds: 3
     port_env: SVC_PORT
 EOF
@@ -495,33 +506,70 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════
 # 8. the registry survives concurrent writers (flock)
 # ═══════════════════════════════════════════════════════════════════════════
-@test "8: concurrent registry writers never corrupt or lose an entry (flock)" {
+@test "8: a registry write WAITS for the exclusive lock, and concurrent writers lose nothing" {
   cat > "$TMP/hammer.sh" <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
 source "$1"
-ev="$2"; name="$3"; n="$4"
+ev="$2"; name="$3"; n="$4"; barrier="${5:-}"
+# All writers wait on the same barrier file so they contend from the same
+# instant rather than politely queueing behind one another's start-up cost.
+if [[ -n "$barrier" ]]; then
+  while [[ ! -e "$barrier" ]]; do sleep 0.02; done
+fi
 for ((i=1; i<=n; i++)); do
   _aid_svc_registry_put "$ev" "$name" "$(jq -nc --argjson i "$i" '{state:"starting", attempt:$i}')"
 done
 EOS
   chmod +x "$TMP/hammer.sh"
 
-  bash "$TMP/hammer.sh" "$LIB" "$EV" alpha 30 & a=$!
-  bash "$TMP/hammer.sh" "$LIB" "$EV" beta  30 & b=$!
+  # ── half 1: the DETERMINISTIC half ──────────────────────────────────────
+  # The previous version of this test was a pure race: mutation-tested with
+  # `flock` stubbed to a no-op it passed clean about 4 runs in 10, so a
+  # regression that removed the locking would have survived CI. The property
+  # that actually matters is not statistical — it is that a writer BLOCKS while
+  # someone else holds the lock — and that can be asserted head-on by holding
+  # the lock from the test and watching the writer not write.
+  local FLOCK; FLOCK="$(command -v flock)"
+  : >> "$EV/.services.lock"
+  ( exec 9>>"$EV/.services.lock"; "$FLOCK" -x 9; sleep 4 ) & local holder=$!
+  sleep 0.7                                  # the holder certainly has it now
+
+  ( bash "$TMP/hammer.sh" "$LIB" "$EV" gamma 1 && : > "$TMP/gamma.done" ) & local writer=$!
+  sleep 2                                    # ... and the writer certainly wants it
+
+  # Held for 4 s, asked for at 0.7 s, checked at 2.7 s: nothing may have been
+  # written yet. Without the lock this file already exists — every time.
+  [ ! -e "$TMP/gamma.done" ]
+  if [[ -f "$EV/services.json" ]]; then
+    [ "$(jq -r '.services.gamma // "absent"' "$EV/services.json")" = "absent" ]
+  fi
+
+  wait "$holder"
+  wait "$writer"
+  [ -e "$TMP/gamma.done" ]                   # and it completes once released
+  [ "$(_reg '.services.gamma.attempt')" = "1" ]
+
+  # ── half 2: real contention, no lost updates ────────────────────────────
+  local i pids=()
+  for i in 1 2 3 4 5 6; do
+    bash "$TMP/hammer.sh" "$LIB" "$EV" "w$i" 40 "$TMP/go" & pids+=("$!")
+  done
   # a concurrent READER hammering the same file the whole time
-  ( for i in $(seq 1 60); do
+  ( for i in $(seq 1 200); do
       [[ -f "$EV/services.json" ]] && { jq -e . "$EV/services.json" >/dev/null || exit 1; }
       sleep 0.05
-    done ) & c=$!
+    done ) & local reader=$!
+  : > "$TMP/go"
 
-  wait "$a"; wait "$b"
-  wait "$c"                                # a reader that saw torn JSON fails here
+  for i in "${pids[@]}"; do wait "$i"; done
+  wait "$reader"                             # a reader that saw torn JSON fails here
 
-  jq -e . "$EV/services.json" >/dev/null    # still valid JSON
-  [ "$(_reg '.services.alpha.attempt')" = "30" ]
-  [ "$(_reg '.services.beta.attempt')"  = "30" ]
-  [ "$(_reg '.services | length')" = "2" ]  # neither writer clobbered the other
+  jq -e . "$EV/services.json" >/dev/null     # still valid JSON
+  for i in 1 2 3 4 5 6; do
+    [ "$(_reg ".services.w$i.attempt")" = "40" ]
+  done
+  [ "$(_reg '.services | length')" = "7" ]   # six writers plus gamma, none clobbered
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -718,5 +766,275 @@ EOF
   run env PATH="$TMP/bin" bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
   [ "$status" -eq 0 ]
   [ "$(_reg '.services.worker.state')" = "healthy" ]
-  bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+
+  # THE HONEST LIMIT of down_all's new exit code, asserted rather than dodged:
+  # this worker's probe_cmd is `/bin/true`, so it "passes" whether or not
+  # anything is serving. down_all reports rc 1 and says so in as many words —
+  # a probe that cannot fail cannot prove a teardown succeeded, and the exit
+  # code is a statement about the probe, never more than the probe can carry.
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "readiness probe still passes after teardown" ]]
+  [[ "$output" =~ "a probe that cannot fail proves nothing about a teardown" ]]
+  [ "$(_reg '.services.worker.state')" = "stopped" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 15. the registry is not a command channel when a declaration exists
+# ═══════════════════════════════════════════════════════════════════════════
+@test "15: a registry stop_cmd that contradicts the declaration is NOT the one that runs" {
+  _need_python3
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: bash "$FIX/listen.sh" "\$SVC_PORT" 0 $TOKEN
+    probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
+    stop_cmd: bash "$FIX/stop.sh" "$TMP/stop-port.log"
+    startup_deadline_seconds: 25
+    max_lifetime_seconds: 120
+    port_env: SVC_PORT
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  [ "$status" -eq 0 ]
+
+  # Anything that can write one JSON file into the run's evidence directory
+  # rewrites the recorded stop_cmd into its own command. The registry is
+  # authoritative for what this run ALLOCATED; it is not authoritative for what
+  # to execute, and a declaration is available here to say so.
+  jq --arg c "touch $TMP/OWNED" '.services.api.stop_cmd = $c' \
+     "$EV/services.json" > "$TMP/reg.json"
+  mv "$TMP/reg.json" "$EV/services.json"
+
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [ ! -e "$TMP/OWNED" ]                    # the injected command never ran
+  [[ "$output" =~ "the DECLARATION wins" ]]
+  [ -f "$TMP/stop-port.log" ]              # the declared stop_cmd did
+  _assert_no_orphans
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 16. a registry jobs_dir may never leave this run's evidence directory
+# ═══════════════════════════════════════════════════════════════════════════
+@test "16: a registry jobs_dir outside the evidence directory cannot cancel another run's job" {
+  _need_python3
+  local victim="$TMP/victim-run/service-jobs/api"
+  mkdir -p "$victim"
+  bash "$JOB_SH" run --jobs-dir "$victim" --id victim-1 --deadline 300 \
+      -- bash "$FIX/idle.sh" "${TOKEN}-victim" >/dev/null
+  _wait_for 15 '[[ "$(bash "$JOB_SH" status --jobs-dir "'"$victim"'" --id victim-1)" == "running" ]]'
+  run bash "$JOB_SH" status --jobs-dir "$victim" --id victim-1
+  [ "$output" = "running" ]
+
+  # A hand-written registry, with no execution.yaml anywhere near it, naming
+  # ANOTHER run's job directory.
+  jq -nc --arg s aid-service-registry/1 --arg jd "$victim" \
+    '{schema:$s, updated_at:null,
+      services:{api:{service:"api", state:"starting", job_id:"victim-1",
+                     jobs_dir:$jd, port:null, port_env:null,
+                     probe_cmd:"/bin/false", stop_cmd:null}}}' > "$EV/services.json"
+
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  echo "$output"
+  [[ "$output" =~ "does not resolve inside this run's evidence directory" ]]
+
+  # THE assertion: the other run's job is exactly where it was.
+  run bash "$JOB_SH" status --jobs-dir "$victim" --id victim-1
+  [ "$output" = "running" ]
+
+  bash "$JOB_SH" cancel --jobs-dir "$victim" --id victim-1 >/dev/null 2>&1 || true
+  pkill -9 -f "${TOKEN}-victim" 2>/dev/null || true
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 17. status fails CLOSED on a registry value it cannot use
+# ═══════════════════════════════════════════════════════════════════════════
+@test "17: a registry port that is not a number is refused, never reported healthy" {
+  jq -nc --arg s aid-service-registry/1 \
+    '{schema:$s, updated_at:null,
+      services:{api:{service:"api", state:"healthy", job_id:null, jobs_dir:null,
+                     port:"not-a-number", port_env:"SVC_PORT",
+                     probe_cmd:"/bin/true", stop_cmd:null}}}' > "$EV/services.json"
+
+  # A LOOSE caller on purpose. The suite's usual driver runs under
+  # `set -euo pipefail`, and that is precisely what hid this: there a jq crash
+  # aborts, while an ordinary sourced caller fell through to `return 0`.
+  cat > "$TMP/loose.sh" <<'EOS'
+#!/usr/bin/env bash
+source "$1"; shift
+aid_service_status "$@"
+printf 'rc=%s\n' "$?"
+EOS
+  run bash "$TMP/loose.sh" "$LIB" api "$EV"
+  echo "$output"
+  [[ "$output" =~ "rc=1" ]]
+  [[ ! "$output" =~ \"state\":\"healthy\" ]]
+  [[ "$output" =~ "not a port number" ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 18. the daemonize refusal is bounded by the DECLARED budget, not by 5 s
+# ═══════════════════════════════════════════════════════════════════════════
+@test "18: a hand-off that binds long after any fixed grace is still named daemonized" {
+  _need_python3
+  # 9 s after reparenting — far outside the 5 s terminal-grace floor, far
+  # inside the declared 25 s startup budget. Nothing about the declaration
+  # changed; only how late the child is.
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: bash "$FIX/daemonize.sh" "\$SVC_PORT" $TOKEN 9
+    probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
+    startup_deadline_seconds: 25
+    max_lifetime_seconds: 120
+    port_env: SVC_PORT
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "start_cmd must remain its job's foreground process" ]]
+  [ "$(_reg '.services.api.failure_reason')" = "daemonized_start_cmd" ]
+  [ "$(_job_dirs api)" -eq 1 ]             # still never retried
+
+  # Same honest limit as test 6: the orphan is not the supervisor's to reap.
+  run pgrep -f "$TOKEN"
+  [ "$status" -eq 0 ]
+  pkill -9 -f "$TOKEN" || true
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 19. the export guard denies exactly what the declaration validator denies
+# ═══════════════════════════════════════════════════════════════════════════
+@test "19: the port export guard refuses every family the declaration validator refuses" {
+  cat > "$TMP/exports.sh" <<'EOS'
+#!/usr/bin/env bash
+set -uo pipefail
+source "$1"; shift
+for v in "$@"; do
+  ( _aid_svc_export_port "$v" 41234 2>/dev/null
+    printf '%s=%s\n' "$v" "$(printenv "$v" 2>/dev/null || true)" )
+done
+EOS
+  run bash "$TMP/exports.sh" "$LIB" \
+      PATH BASH_ENV LD_PRELOAD AID_FOO \
+      PYTHONPATH PYTHONSTARTUP PERL5OPT NODE_OPTIONS CLASSPATH JAVA_TOOL_OPTIONS \
+      GIT_SSH_COMMAND GIT_EXTERNAL_DIFF GIT_DIR \
+      SVC_PORT
+  echo "$output"
+  # Whole-line matching, deliberately: `PYTHONPATH=41234` CONTAINS the string
+  # `PATH=41234`, and a substring assertion here would have passed for the wrong
+  # reason (it did, on the first run of this test).
+  local v
+  for v in PATH BASH_ENV LD_PRELOAD AID_FOO \
+           PYTHONPATH PYTHONSTARTUP PERL5OPT NODE_OPTIONS CLASSPATH JAVA_TOOL_OPTIONS \
+           GIT_SSH_COMMAND GIT_EXTERNAL_DIFF GIT_DIR; do
+    if printf '%s\n' "$output" | grep -Fxq -- "${v}=41234"; then
+      echo "EXPORTED: $v" >&2; return 1
+    fi
+  done
+  printf '%s\n' "$output" | grep -Fxq -- "SVC_PORT=41234"   # ordinary name still works
+
+  # ONE definition: this file must not carry an enumeration of its own.
+  run grep -c 'PYTHONSTARTUP' "$LIB"
+  [ "$output" = "0" ]
+  run grep -c 'aid_env_name_denied' "$LIB"
+  [ "$output" -ge 1 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 20. a service name is a path component, so it is validated as one
+# ═══════════════════════════════════════════════════════════════════════════
+@test "20: a service name that is a path traversal creates nothing outside the evidence tree" {
+  _yaml <<'EOF'
+services:
+  "../../../../pwned-svc":
+    start_cmd: /bin/true
+    probe_cmd: /bin/true
+    startup_deadline_seconds: 5
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "invalid service name" ]]
+  # `mkdir -p` on the derived jobs_dir would have landed HERE.
+  [ ! -e "$REPO/.aid-o/work/pwned-svc" ]
+  [ ! -e "$EV/service-jobs" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 21. an unparseable services: block is a refusal, not "nothing to do"
+# ═══════════════════════════════════════════════════════════════════════════
+@test "21: a services: block that is not a map refuses with rc 2" {
+  _yaml <<'EOF'
+services:
+  - api
+  - worker
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "is not a map of service name" ]]
+  [ ! -e "$EV/services.json" ]
+
+  # A scalar is the same misunderstanding wearing a different hat.
+  _yaml <<'EOF'
+services: "api"
+EOF
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  [ "$status" -eq 2 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 22. teardown says so when something is still answering
+# ═══════════════════════════════════════════════════════════════════════════
+@test "22: down_all reports a service still answering its probe after teardown" {
+  _need_python3
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: bash "$FIX/daemonize.sh" "\$SVC_PORT" $TOKEN 0.5
+    probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
+    startup_deadline_seconds: 25
+    max_lifetime_seconds: 120
+    port_env: SVC_PORT
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  [ "$status" -eq 1 ]
+  run pgrep -f "$TOKEN"
+  [ "$status" -eq 0 ]                      # the orphan really is still serving
+
+  # Teardown is still best-effort and still attempts everything — but "I tried
+  # everything" and "everything is down" are different answers, and a caller
+  # gating on the exit code is entitled to the difference.
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "readiness probe still passes after teardown" ]]
+  pkill -9 -f "$TOKEN" || true
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 23. a denylisted port_env is a named refusal at up time
+# ═══════════════════════════════════════════════════════════════════════════
+@test "23: a service declaring a denylisted port_env is refused by name, not started silently" {
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: /bin/true
+    probe_cmd: /bin/true
+    startup_deadline_seconds: 5
+    port_env: NODE_OPTIONS
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "NODE_OPTIONS" ]]
+  [[ "$output" =~ "Refusing to start it with its port variable unset" ]]
+  [ ! -e "$EV/service-jobs/api" ] || [ "$(_job_dirs api)" -eq 0 ]
 }
