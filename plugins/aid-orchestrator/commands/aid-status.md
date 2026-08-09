@@ -173,14 +173,35 @@ about the controller that owns that run. Three values are STORED in
   is recent enough (`aid-fsm.sh active-runs stalled`). One fact alone is not
   it — an artifact beside a live controller is simply a background gate in
   flight. Such a row prints the artifact path, the claim command
-  (`aid-fsm.sh resume <epic_id>`), and then the action that artifact recorded,
-  **verbatim**, so what is pasted is what was recorded.
+  (`aid-fsm.sh resume <epic_id>` — when that id may be rendered as a command at
+  all, see below), and then the action that artifact recorded, **verbatim**, so
+  what is pasted is what was recorded.
 
-That last line is printed through the same renderer `aid-fsm.sh resume` uses: a
-plain command is echoed byte-for-byte, and one carrying shell metacharacters is
-shown in `printf %q` form with a warning. The recorded action is composed by
-unquoted interpolation upstream, and a status page is a paste target — a printed
-line must not be able to do something other than what it says.
+**The pointer gives a location; the file is the fact.** `resume_artifact` is a
+map field like any other, and its writer validates it against nothing — so this
+surface believes it only when it actually NAMES the continuation artifact, i.e.
+its basename is the shared `AID_RESUME_ARTIFACT_BASENAME`
+(`scripts/lib/aid-resume-artifact.sh`, read from there rather than spelled again
+here). A pointer at any other path is ignored and the conventional evidence path
+is probed instead: a regular file sitting at an arbitrary recorded path is not
+evidence that a controller left a continuation behind, and this row must never
+assert a state it cannot prove. A render therefore still never depends on a
+pointer — or on `prune` — having been written.
+
+**A printed command is only ever printed for an id that may be one.** Nothing
+constrains the charset of a map key (`aid-fsm.sh init` upserts whatever it is
+given), so both the claim line above and the `STALLED?` recovery line take their
+permission from the shipped derivation: `active-runs stalled` renders
+`resume_command` only for an id that would survive `resume`, and returns null
+otherwise. When it is null this surface names no command either — the line says
+the id is not usable in a command and stops. One validator, and the surface
+never contradicts the derivation it quotes.
+
+The `verbatim` line is printed through the same renderer `aid-fsm.sh resume`
+uses: a plain command is echoed byte-for-byte, and one carrying shell
+metacharacters is shown in `printf %q` form with a warning. The recorded action
+is composed by unquoted interpolation upstream, and a status page is a paste
+target — a printed line must not be able to do something other than what it says.
 
 **Stalled runs are visible, and the marker is derived — never stored.** A
 controller that dies mid-EXECUTE leaves its state file exactly where it was, so
@@ -328,8 +349,25 @@ stalled_json() {
 # The honest caveat belongs in the render, not in a footnote: a FOREGROUND gate
 # emits no heartbeat, so a long one can trip this marker. That is the deliberate
 # trade — a visible false STALLED? beats an invisible dead controller.
+#
+# stall_hint <epic_id> <indent> <id_is_renderable 0|1> — the third argument is
+# the SHIPPED derivation's verdict on whether this epic id may be interpolated
+# into a command at all (`resume_command` non-null in `active-runs stalled`; see
+# controller_facts below). `cmd_init` puts no charset constraint on the map key
+# it upserts, so a key like `E-OK; curl … | sh` interpolated raw here would be a
+# printed, runnable-looking recovery line — the incident that derivation
+# documents and refuses. A status page is a paste target: when the id is not
+# renderable, this line names no command rather than a plausible-looking one,
+# and it DEFAULTS to that (0), so a caller that forgets the argument gets the
+# safe answer.
 stall_hint() {
-  printf '%sSTALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume %s\n' "${2:-      }" "${1:-}"
+  local _epic="${1:-}" _in="${2:-      }" _ok="${3:-0}"
+  local _pre='STALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background.'
+  if [ "$_ok" = "1" ]; then
+    printf '%s%s Recover with: aid-fsm.sh resume %s\n' "$_in" "$_pre" "$_epic"
+  else
+    printf '%s%s This run'"'"'s id is not usable in a command; recover it by hand.\n' "$_in" "$_pre"
+  fi
 }
 ```
 
@@ -362,18 +400,39 @@ _safe_action() {
   ' _ "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/aid-fsm.sh" "${1:-}"
 }
 
+# _resume_basename — THE continuation artifact's filename, read from the shared
+# vocabulary (`lib/aid-resume-artifact.sh`, where it has its single definition)
+# rather than spelled a fourth time here. A private copy fails open in exactly
+# the way that library's own header describes: rename the artifact and this
+# surface would keep probing the old name. Read in a child shell so sourcing the
+# library cannot leak names into the render. Empty = unreadable.
+_resume_basename() {
+  bash -c '
+    source "$1" >/dev/null 2>&1 || exit 1
+    printf "%s" "${AID_RESUME_ARTIFACT_BASENAME:-}"
+  ' _ "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/lib/aid-resume-artifact.sh" 2>/dev/null
+}
+
 # controller_facts — one TSV row per map entry:
-#   epic · ctl · stalled(true|false|unknown) · quoted(0|1|x|-) · artifact · action
+#   epic · ctl · stalled(true|false|unknown) · quoted(0|1|x|-) · idok(0|1) ·
+#   artifact · action
 # `action` is LAST because a rendered command may legitimately contain a tab.
 #
 # THE DERIVATION. `awaiting_host_resume` is never stored — a dying controller
 # cannot write its own epitaph — so it is computed here from the two facts the
 # controller provably LEFT BEHIND, and both must hold:
-#   1. the run's continuation artifact `auto_resume_required.json` is STILL ON
-#      DISK. The map's `resume_artifact` pointer is used only as a path, never
-#      as evidence: the FILE is the fact, and when there is no pointer the
-#      conventional evidence path is probed instead, so a render never depends
-#      on a pointer (or a prune) having been written.
+#   1. the run's continuation artifact is STILL ON DISK. The map's
+#      `resume_artifact` pointer supplies a LOCATION, never the fact itself, and
+#      it is believed only when it actually NAMES that artifact — its basename
+#      must equal the shared `AID_RESUME_ARTIFACT_BASENAME`. A pointer to
+#      anything else (`update_active_run_field` validates `auto_controller`
+#      against a closed vocabulary and `resume_artifact` not at all) is ignored,
+#      because a regular file at an arbitrary path is not evidence that a
+#      controller left a continuation behind, and a row must never assert a
+#      state it cannot prove. With no usable pointer the conventional evidence
+#      path is probed instead, so a render never depends on a pointer (or on a
+#      prune) having been written. When the shared basename cannot be read at
+#      all, fact 1 is simply not established — the surface claims nothing.
 #   2. no liveness signal is recent enough — `stalled == true` from the ONE
 #      shared derivation above.
 # Neither fact alone renders it: an artifact beside a live controller is an
@@ -390,13 +449,21 @@ _safe_action() {
 # claiming a live autonomous controller for a run nothing stamped AUTO is
 # exactly the false claim the field exists to prevent. Nothing is backfilled;
 # the map is written only by its own writers.
+#
+# The `idok` column is the SHIPPED derivation's verdict on the epic id itself:
+# `resume_command` non-null means that derivation was willing to render
+# `resume <id>` for this key, having checked it against the same charset
+# `resume` enforces before it will act. This surface consumes that verdict
+# instead of re-deriving it — one validator, no second allowlist free to drift —
+# and prints no command line at all when it is 0.
 controller_facts() {
-  local _root _map _stall _epic _ac _sf _run _ptr _mode _abs _rel _art _st _ctl _cmd _rc _q
+  local _root _map _stall _bn _epic _ac _sf _run _ptr _mode _abs _rel _art _st _ctl _cmd _rc _q _idok
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
   _stall="$(stalled_json)"
   printf '%s' "$_stall" | jq -e 'type == "object"' >/dev/null 2>&1 || _stall=""
+  _bn="$(_resume_basename)" || _bn=""
   while IFS="$(printf '\t')" read -r _epic _ac _sf _run _ptr; do
     [ -n "$_epic" ] || continue
     # A TAB is an IFS *whitespace* character, so `read` collapses a run of them
@@ -407,15 +474,22 @@ controller_facts() {
     [ "$_run" != "-" ] || _run=""
     [ "$_ptr" != "-" ] || _ptr=""
     _art=""
-    for _rel in "$_ptr" ".aid-o/work/evidence/${_epic}/${_run}/auto_resume_required.json"; do
-      [ -n "$_rel" ] || continue
-      case "$_rel" in /*) _abs="$_rel" ;; *) _abs="$_root/$_rel" ;; esac
-      if [ -f "$_abs" ]; then _art="$_rel"; break; fi
-    done
+    if [ -n "$_bn" ]; then
+      for _rel in "$_ptr" ".aid-o/work/evidence/${_epic}/${_run}/${_bn}"; do
+        [ -n "$_rel" ] || continue
+        # THE SHAPE CHECK: a pointer that does not name the continuation
+        # artifact is not a pointer to one, whatever happens to sit there.
+        [ "${_rel##*/}" = "$_bn" ] || continue
+        case "$_rel" in /*) _abs="$_rel" ;; *) _abs="$_root/$_rel" ;; esac
+        if [ -f "$_abs" ]; then _art="$_rel"; break; fi
+      done
+    fi
     if [ -z "$_stall" ]; then
-      _st="unknown"
+      _st="unknown"; _idok=0
     else
       _st="$(printf '%s' "$_stall" | jq -r --arg e "$_epic" '.[$e].stalled // false' 2>/dev/null || echo false)"
+      _idok="$(printf '%s' "$_stall" | jq -r --arg e "$_epic" \
+        'if (.[$e].resume_command // null) == null then "0" else "1" end' 2>/dev/null || echo 0)"
     fi
     if [ -n "$_art" ] && [ "$_st" = "true" ]; then
       _ctl="awaiting_host_resume"
@@ -437,7 +511,7 @@ controller_facts() {
         *) _q=x; _cmd="(unavailable — the shared renderer could not be loaded; read the artifact itself)" ;;
       esac
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_epic" "$_ctl" "$_st" "$_q" "${_art:--}" "${_cmd:--}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_epic" "$_ctl" "$_st" "$_q" "${_idok:-0}" "${_art:--}" "${_cmd:--}"
   done <<EOF
 $(jq -r 'to_entries[] | [.key, (.value.auto_controller // "-"), (.value.state_file // "-"),
                          (.value.run_id // "-"), (.value.resume_artifact // "-")] | @tsv' \
@@ -450,13 +524,14 @@ EOF
 # listings so the two can never drift apart.
 epic_row() {
   local _in="$1" _epic="$2" _state="$3" _run="$4" _branch="$5" _gm="$6" _facts="$7"
-  local _line _f _ctl _st _q _art _cmd
+  local _line _f _ctl _st _q _idok _art _cmd
   _f="$(printf '%s\n' "$_facts" | awk -F'\t' -v e="$_epic" '$1 == e { print; exit }')"
-  _ctl=""; _st=""; _q=""; _art=""; _cmd=""
-  IFS="$(printf '\t')" read -r _ _ctl _st _q _art _cmd <<EOF
+  _ctl=""; _st=""; _q=""; _idok=""; _art=""; _cmd=""
+  IFS="$(printf '\t')" read -r _ _ctl _st _q _idok _art _cmd <<EOF
 $_f
 EOF
   [ -n "$_ctl" ] || _ctl="manual"
+  [ "$_idok" = "1" ] || _idok=0
   [ "$_art" != "-" ] || _art=""
   [ "$_cmd" != "-" ] || _cmd=""
   _line="${_in}${_epic}  [${_state}]  run=${_run}  branch=${_branch}  ctl=${_ctl}"
@@ -467,11 +542,18 @@ EOF
   esac
   printf '%s\n' "$_line"
   if [ "$_ctl" = "awaiting_host_resume" ]; then
-    printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. Claim it with: aid-fsm.sh resume %s\n' "$_in" "$_art" "$_epic"
+    # The claim command carries the epic id, so it is offered only when the
+    # SHIPPED derivation was willing to render one for that id (`idok`). An
+    # unrenderable id gets the same answer that derivation gives: no command.
+    if [ "$_idok" = "1" ]; then
+      printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. Claim it with: aid-fsm.sh resume %s\n' "$_in" "$_art" "$_epic"
+    else
+      printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. This run'"'"'s id is not usable in a command; claim it by hand.\n' "$_in" "$_art"
+    fi
     printf '%s  then run the action that artifact recorded, verbatim (nothing here runs it): %s\n' "$_in" "$_cmd"
     [ "$_q" = "1" ] && printf '%s  WARNING: that recorded action carries shell metacharacters and is shown QUOTED — read it before running it.\n' "$_in"
   fi
-  [ "$_st" = "true" ] && stall_hint "$_epic" "${_in}  "
+  [ "$_st" = "true" ] && stall_hint "$_epic" "${_in}  " "$_idok"
   return 0
 }
 ```
