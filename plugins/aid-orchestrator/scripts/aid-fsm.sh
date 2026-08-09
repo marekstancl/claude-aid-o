@@ -1527,6 +1527,16 @@ fsm_check_orphan_dispatches() {
   echo "  aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars why this is acceptable>' \\" >&2
   echo "      --blocked-checks 'dispatch_orphan_complete'" >&2
 
+  # P076 Step 13 — DISPATCH_ORPHANED is `ladder_entry: instruction`: no code here
+  # writes the ladder record, the MESSAGE names the command that does — by RESOLVED
+  # path ($PLUGIN_ROOT is $AID_PLUGIN_PATH when set, the source pipeline.md names),
+  # since repo-relative does not resolve where the plugin lives in a consumer
+  # project. Die, exit status and the audit-log record above are unchanged.
+  echo "" >&2
+  echo "Recovery-ladder entry (DISPATCH_ORPHANED — records this stop for the ladder; changes nothing about the refusal above):" >&2
+  echo "  bash -c 'source \"${PLUGIN_ROOT}/scripts/lib/aid-recovery-ladder.sh\"; \\" >&2
+  echo "           aid_ladder_emit \"${evidence_dir}\" DISPATCH_ORPHANED fsm_check_orphan_dispatches \"missing_dispatch_complete\"'" >&2
+
   # Emit audit log
   local focus_csv orphan_count
   focus_csv=$(echo "$orphan_focuses" | paste -sd, -)
@@ -3765,6 +3775,95 @@ _resume_no_artifact_report() {
   return 0
 }
 
+# ─── The service safety net (P076 Step 10) ──────────────────────────────────
+# _fsm_service_sweep <evidence_dir> [<execution_yaml>] [<caller>]
+#
+# ONE teardown definition in this system — `aid_service_down_all` — and this is
+# the FSM's single call site for it, shared by both callers here: `resume` on its
+# terminal-collect path and `done-advance` at the release edge. Neither
+# re-implements teardown; both hand it a run's evidence directory and let the
+# library reason about registry entries and unregistered jobs.
+#
+# It is a NET, not a mechanism. The mechanism is `run-all`, which acquires once
+# and releases once; this exists for the run that is being wrapped up without a
+# rerun ever happening — a dead run collected by `resume`, or a run that reached
+# release with services still recorded.
+#
+# Four properties make it safe to call from the FSM:
+#   • it does NOTHING unless this run's evidence actually holds service state, so
+#     every project that declares no services is untouched (and no library is
+#     even sourced);
+#   • it is never called from a path where a supervised job of the run is still
+#     live — that is the caller's guarantee, and for `resume` it is the whole
+#     read-only-vs-claim split;
+#   • THE RUNNER'S OWN LIVENESS is checked, and this is the CP3 BLOCKING fix.
+#     The bullet above was the whole guarantee, and it is only half of one:
+#     `_resume_other_jobs_live` sees SUPERVISED JOBS, and a live IN-LINE runner
+#     is invisible to the supervisor by construction (its own comment said so).
+#     A run with one finished background gate and one long FOREGROUND gate
+#     therefore looked exactly like a dead run — and that is not an exotic
+#     shape, it is what `watchdog → resume_needed` produces after 300 s of no
+#     progress, on the ordinary AUTO path, in a repository whose gates routinely
+#     exceed 300 s. The sweep took the database out from under the running gate
+#     and two gates that would have passed were reported `service_unhealthy`: a
+#     fabricated verdict.
+#     The evidence that closes it is the ownership claim this same EPIC built,
+#     and it is NOT re-implemented here. `aid_service_down_all` consults it and
+#     REFUSES (rc 2) while a different, provably-live process holds it, so
+#     `resume`, `done-advance` and `run-all`'s entry sweep all inherit one
+#     answer from one authority. All this function adds is saying out loud which
+#     refusal happened;
+#   • it never fails its caller. A teardown that could not finish — or that was
+#     refused — is a warning next to a transition or a collection that already
+#     happened.
+#
+# EVERY caller passes its execution.yaml, and that is a SECURITY property rather
+# than a nicety: without a declaration to reconcile against, `aid_service_down_all`
+# falls back to the `stop_cmd` RECORDED IN THE REGISTRY and runs it through
+# `bash -c`. The registry lives in the run's evidence directory, which an
+# implementer or a gate-fixer subagent can write — so a sweep with no declaration
+# is a path from "can write a file under .aid-o/work/evidence/" to "executes a
+# command inside the FSM". With the yaml present the library refuses the recorded
+# string outright. An empty second argument is therefore a BUG, not a shorthand:
+# it makes the library fall back to $AID_SERVICE_CONFIG, a path relative to
+# whatever cwd the FSM happens to run in.
+_fsm_service_sweep() {
+  local ev="${1:-}" yaml="${2:-}" caller="${3:-fsm}"
+  [[ -n "$ev" && -d "$ev" ]] || return 0
+  # Nothing was ever brought up here → nothing to sweep, nothing to load.
+  [[ -f "${ev}/services.json" || -d "${ev}/service-jobs" ]] || return 0
+  if ! declare -F aid_service_down_all >/dev/null 2>&1; then
+    if [[ ! -f "${SCRIPT_DIR}/lib/aid-service.sh" ]]; then
+      echo "WARN: aid-fsm.sh ${caller}: ${ev} holds service state but lib/aid-service.sh is unavailable — sweep skipped; stop the services by hand (see ${ev}/services.json)" >&2
+      return 0
+    fi
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/lib/aid-service.sh" || {
+      echo "WARN: aid-fsm.sh ${caller}: lib/aid-service.sh could not be loaded — service sweep skipped" >&2
+      return 0
+    }
+  fi
+  # ALWAYS quoted, never `${yaml:+"$yaml"}`: that expansion word-splits a path
+  # containing a space, so `.../my run/.aid-o/config/execution.yaml` reached the
+  # library as `.../my` — a path that does not exist, which is exactly the
+  # no-declaration fallback above. An empty "$yaml" is already the library's
+  # documented "use the default" signal, so the conditional bought nothing.
+  local rc=0
+  aid_service_down_all "$ev" "$yaml" || rc=$?
+  if (( rc == 2 )); then
+    # The one authority refused: a different process still provably owns these
+    # services. Nothing was cancelled, nothing was stopped. Said plainly,
+    # because "the services are still up" is the CORRECT outcome here and must
+    # not read as a failure of this command.
+    echo "aid-fsm.sh ${caller}: the services recorded under ${ev} were NOT swept — another process still holds this run's ownership claim and is alive (named above). That is deliberate: sweeping a live run's services would report gates that are passing as failed. This ${caller} changed nothing about the services." >&2
+    return 0
+  fi
+  if (( rc != 0 )); then
+    echo "WARN: aid-fsm.sh ${caller}: at least one service recorded under ${ev} still answers its probe after teardown — see the named line above; this did not affect anything recorded" >&2
+  fi
+  return 0
+}
+
 cmd_resume() {
   local epic_id="" resolve_pidless=false
   while [[ $# -gt 0 ]]; do
@@ -3964,8 +4063,12 @@ cmd_resume() {
   # winner), the sibling check above (a supervised job of this run still in
   # flight → report, never claim), and the fact that nothing here touches a
   # final report — only the `gates_rows/<gate>.json` checkpoint the next
-  # `run-all` assembles. A live IN-LINE runner is invisible to the supervisor,
-  # so no guarantee is claimed about one.
+  # `run-all` assembles. A live IN-LINE runner is invisible to the SUPERVISOR,
+  # so no guarantee is claimed here about the checkpoint such a runner may also
+  # be writing. It is NOT invisible to the service ownership claim, and that
+  # difference is load-bearing a few lines below: the service sweep leaves a
+  # live runner's services standing. A checkpoint written twice is recoverable;
+  # a database removed from under a running gate is a fabricated verdict.
   local claimed
   if ! claimed="$(_resume_claim "$art")"; then
     _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the continuation artifact was already claimed — the winner's claim file is ${claimed}"
@@ -4030,6 +4133,36 @@ cmd_resume() {
   # The gate's own configuration, as named by the artifact's resolved
   # instruction — the template argument the baseline sample needs (AC4).
   local execution_yaml; execution_yaml="$(_resume_execution_yaml "$next_action")"
+
+  # ─── the service safety net, on THIS path only (P076 Step 10) ────────────
+  # The claim is taken and the job is dead: this run is being wrapped up, and a
+  # run that is being wrapped up owns no services any more. Everything above this
+  # line — the `running` branch, the `started` branch, and the live-sibling
+  # refusal — returned WITHOUT touching services, deliberately and as a hard
+  # rule: a background gate that is still running may depend on a declared
+  # service, and sweeping it there would kill the very dependency the surviving
+  # job needs in order to finish. A status look never claims, and it never stops
+  # a service either.
+  #
+  # AND the run's OWN liveness, which the live-sibling refusal above cannot see:
+  # a job being dead does not make the RUNNER dead. `aid_service_down_all`
+  # refuses while the ownership claim names a live process, so a resume against
+  # a run whose background gate finished while its foreground gate is still
+  # going now leaves that gate's dependency alone and says so. The check is not
+  # here — it is in the one teardown definition, so this call site cannot drift
+  # away from the one `done-advance` and `run-all` use.
+  #
+  # THE HONEST BOUND on the two branches that also sit below the live-sibling
+  # refusal and still do NOT sweep — `missing|unknown` and `lost`. The plan says
+  # the sweep runs on the terminal-collect path ONLY, and that is what this code
+  # does. But do not read their leak as "until done-advance": a run whose job is
+  # LOST or whose records are MISSING typically never reaches done-advance at
+  # all, and if it is never rerun there is no `run-all` entry sweep either. So a
+  # service left by such a run leaks until somebody reruns the gates or stops it
+  # by hand — INDEFINITELY, not "until the next boundary". Both branches tell the
+  # operator to rerun the gate, and that rerun is the sweep. Widening this is a
+  # PM decision about the plan's letter, not something to infer from here.
+  _fsm_service_sweep "$evidence_dir" "$execution_yaml" "resume"
 
   local rowfile=""
   if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo" "$tree")"; then
@@ -7352,6 +7485,31 @@ EOF
     # Failure logs a warning but never aborts the release path.
     bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
       2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
+
+    # ─── LAST-RESORT service sweep (P076 Step 10) ────────────────────────
+    # The run is complete. If its evidence still records a service that was never
+    # released — a runner killed after its last gate, a teardown that could not
+    # finish — this is the final moment anything in the pipeline looks at that
+    # run at all. Same one teardown definition, and the same P074 teardown
+    # philosophy the rest of this edge follows: a terminal operation SWEEPS, it
+    # never blocks. A sweep that cannot finish warns; the transition has already
+    # happened and is not undone by it.
+    #
+    # This is NOT the crash path. A runner SIGKILLed mid-gates never reaches
+    # release at all — that run is recovered by the next `run-all`'s entry sweep,
+    # or by `resume`.
+    #
+    # The execution.yaml is passed for the reason named on `_fsm_service_sweep`:
+    # it is the declaration the library reconciles the registry's recorded
+    # `stop_cmd` against, and without it the registry — a file in the run's own
+    # evidence directory — chooses what this edge executes. Resolved through
+    # `aid_state_path` (the same resolver used for `evidence_dir` two lines up),
+    # so it is correct from inside a linked worktree too, where the cwd-relative
+    # default would silently miss.
+    local _svc_execution_yaml
+    _svc_execution_yaml="$(aid_state_path ".aid-o/config/execution.yaml" 2>/dev/null \
+      || printf '%s' "${project_root%/}/.aid-o/config/execution.yaml")"
+    _fsm_service_sweep "$evidence_dir" "$_svc_execution_yaml" "done-advance"
   fi
 
   # Audit trail

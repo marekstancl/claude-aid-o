@@ -94,7 +94,14 @@ mtime) — no new bookkeeping. Two outcomes, both routed mechanically:
   ladder, classified by the NEWEST job record's state: a `lost` or `missing` record is **JOB_LOST**;
   a `timed_out`/`cancelled` record, or a jobs directory that never existed (a pure-foreground run),
   is **TRANSIENT_INFRA** and goes to diagnosis, never to a job collect. Either way the eager
-  continuation artifact — not this query — is what guarantees the run can be continued.
+  continuation artifact — not this query — is what guarantees the run can be continued. Entering the
+  ladder means asking for the attempt before taking it:
+  ```bash
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-recovery-ladder.sh"
+  aid_ladder_attempt "<run evidence>" JOB_LOST collect_and_continue   # or TRANSIENT_INFRA + retry_once
+  ```
+  `proceed <n>` → take the action, then `aid_ladder_outcome … <n> succeeded|failed`.
+  `adjudicate <reason>` → `aid_recovery_adjudicate`; `escalate` from that → `aid_ladder_escalate`.
 
 A watchdog invocation that fails is logged and skipped: this step is belt-and-braces around the
 artifact, and its absence must never block gates.
@@ -150,7 +157,33 @@ Until the dedicated adjudicator command lands, the controller uses the existing 
 transport with a bounded decision payload: verified facts, current FSM state, attempted recoveries,
 allowed reversible actions, forbidden authority-expanding actions, and evidence paths. Accept only
 one of the supplied actions and record the chosen action, rationale, risks, and evidence paths. An
-answer outside the allowlist is not authorization.
+answer outside the allowlist is not authorization. That convention is now codified in
+`scripts/lib/aid-recovery-adjudicate.sh` — `aid_recovery_adjudicate <run evidence> <class> <facts>`
+prints one allowlisted action or the literal `escalate`, and records every exchange either way.
+
+**AUTO-loop ladder checklist.** `defaults/policies/auto-recovery.yaml` is the one authority for what
+an AUTO run may do about a stop before a person is involved; `scripts/lib/aid-recovery-ladder.sh`
+loads it and writes the per-run record `<run evidence>/recovery-ladder.jsonl`. Three classes enter
+that record from CODE and need nothing from the controller — **GATE_TIMEOUT** and **JOB_LOST** from
+the gate runner, **SERVICE_UNHEALTHY** from aid-service's restart-exhaustion path. The other four are
+the controller's own responsibility, and this is the checklist for them:
+
+| Class | When the AUTO loop routes it | Route |
+|---|---|---|
+| **TRANSIENT_INFRA** | a C0 plan-review or C3 audit dispatch reports `unavailable` / `rate_limited` / `timeout` | `aid_ladder_attempt … TRANSIENT_INFRA wait_and_resume` (or `retry_once` / `resume_missing_lenses`). Still NOT a loop iteration — no review budget is consumed |
+| **JOB_LOST** | `watchdog` returns `resume_needed` with a `lost`/missing newest job record | `aid_ladder_attempt … JOB_LOST collect_and_continue` |
+| **DISPATCH_ORPHANED** | `fsm_check_orphan_dispatches` dies; its message names the exact `aid_ladder_emit` command | run that command, then `aid_ladder_attempt … DISPATCH_ORPHANED collect_and_continue` |
+| **REVIEW_EXHAUSTED** | a bounded review loop (gate fix, CP2/CP3, C3, the CP1 ledger) declares itself terminal | the policy allows it NO action: straight to `aid_recovery_adjudicate`, then `aid_ladder_escalate` on `escalate` |
+| **UNCLASSIFIED** | anything else, and any class a project override removed | same as REVIEW_EXHAUSTED — a stop AID cannot name is a stop AID does not act on |
+
+Those bounded loops keep their own budgets in their own files; the ladder declares them and records
+their exhaustion, and never extends, shortens or replaces one. Its terminus is
+adjudicate → ESCALATION → PM force, in that order: `aid_ladder_escalate` stamps
+`auto_controller: blocked_for_pm` on the active-runs entry, and LEAVING ESCALATION still requires
+`escalation_decision` in `fsm-state.yaml`. Continuing past a refused terminal state is the audited
+`--force` surface below and nothing else — there is no ladder bypass. In a MANUAL run the emitters
+still record (the evidence is worth having) but nothing routes to adjudication: the human is the
+adjudicator.
 
 Test evidence is immutable-revision evidence. It must record the exact command fingerprint,
 start/end HEAD and relevant tree hash, timestamps, exit code, and pass/fail counts. Any relevant

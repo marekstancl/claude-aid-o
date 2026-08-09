@@ -29,7 +29,13 @@ Run the 6-state FSM controller to orchestrate an EPIC through its full lifecycle
 
 Escalation rules for `--auto`:
 - **S-effort fixes** → auto-approve, apply fix, continue
-- **M-effort decisions** → use default decision from `config/permissions.yaml`
+- **M-effort decisions** → take the default the recovery policy already declares for the stop's
+  class, in the plugin's `defaults/policies/auto-recovery.yaml` (a project MAY override it with
+  its own `config/policies/auto-recovery.yaml`, which no `/aid-init` creates and most projects
+  never have). That file is the defaults authority: it names the stop
+  classes, the reversible actions each one may take, and its budget. An earlier version of this
+  line pointed at `config/permissions.yaml`, which has never held any such key — the tier rule was
+  real, its mechanical backing was not
 - **Recoverable technical decisions** (retry, repair, stale evidence, process failure,
   test selection) → dispatch the configured Codex adjudicator, record its decision in
   `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
@@ -132,12 +138,16 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
 - Codex adjudication and PM decisions are append-only audit events. The adjudicator may choose among
   already-authorized technical recovery paths; it cannot grant PM authority or waive security risk.
 
-Until a dedicated adjudicator command is available, use the existing isolated Codex transport. Give
-it only: verified facts, current FSM state, attempted recoveries, an explicit allowlist of reversible
-in-scope actions, and forbidden authority-expanding actions. Require one selected action plus a short
-rationale and risk note. Reject an answer outside the allowlist, append the accepted decision and
-evidence paths to `timeline.jsonl`, and continue. This is a temporary dispatch convention, not a
-substitute for the project-scoped adjudicator configuration planned for INIT/SETUP.
+Do not hand-roll that dispatch. Source `scripts/lib/aid-recovery-adjudicate.sh` and call
+`aid_recovery_adjudicate <run_evidence_dir> <stop_class> <facts_file>`. It builds the prompt pack
+(verified facts, current FSM state, the ladder record so far, the class's `allowed_actions` from
+`defaults/policies/auto-recovery.yaml` as an explicit allowlist, and the forbidden
+authority-expanding actions), dispatches through the same isolated Codex transport the C3 bridge
+uses, accepts only a reply naming exactly one action from that allowlist plus a rationale, retries
+once with the rejection quoted, and records every exchange to `timeline.jsonl`, the ladder record and
+a per-exchange audit artifact. It prints the selected action, or `escalate` — which is not an action
+and must never be executed as one. The full convention, the fail-closed paths and the authority
+ceiling are specified in that file's header.
 
 ## MECHANICAL ENFORCEMENT PROTOCOL
 
@@ -287,7 +297,10 @@ FSM initialized: READY
 
 **Actions:**
 1. Load `execution.yaml` (gate definitions, step config)
-2. Load `config/permissions.yaml` (mode, auto-approve rules)
+2. Load `config/permissions.yaml` (`autonomous_mode` — the one key this file holds for the run;
+   the per-class recovery defaults live in the plugin's `defaults/policies/auto-recovery.yaml`,
+   which a project may override — but need not, and no installer creates — by placing its own
+   `config/policies/auto-recovery.yaml`)
 3. **AUTO MODE → SKIP TO STEP 5 IMMEDIATELY.** Do NOT display EPIC summary, do NOT present Options, do NOT wait for PM.
 4. **Manual mode only:** Display EPIC summary to PM:
    ```
@@ -523,7 +536,12 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 - `scripts/aid-run-gates.sh` — gate execution
 - `scripts/lib/aid-stage-log.sh` — timeline.jsonl logging
 - `config/execution.yaml` — gate definitions (lazy-created on first run)
-- `config/permissions.yaml` — autonomous mode settings
+- `config/permissions.yaml` — `autonomous_mode` (read by `aid-release-policy.sh`)
+- `defaults/policies/auto-recovery.yaml` (plugin) — AUTO-mode recovery policy: stop classes,
+  allowed reversible actions, budgets, and the ownership table of the retry loops it does NOT
+  govern. This is the file that ships and the file that applies; `config/policies/auto-recovery.yaml`
+  in the project is an OPTIONAL override that no `/aid-init` creates, and is used only when it
+  exists and validates
 
 ## Important
 
@@ -620,4 +638,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-10

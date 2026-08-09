@@ -1,0 +1,400 @@
+# AID Auto-Mode Recovery Policy — v1 (P076 EPIC 2, Step 11)
+#
+# WHAT THIS FILE IS
+#   The single machine-readable authority for how an AUTO run classifies a stop
+#   and what it is allowed to do about it before a person is involved. Before
+#   this file, the "escalation ladder" existed only as prose, in three places
+#   that did not agree, and the one place that named a mechanical backing
+#   (`commands/aid-run.md` → "default decision from config/permissions.yaml")
+#   pointed at keys that do not exist. This file replaces that with one table.
+#
+# WHAT IS AND IS NOT WIRED AT THIS COMMIT — read this before trusting it
+#   Step 13 of this EPIC landed the runtime this file used to only promise:
+#   `scripts/lib/aid-recovery-ladder.sh` loads this policy
+#   (`aid_recovery_policy_load`) and writes the per-run ladder record
+#   `<run evidence>/recovery-ladder.jsonl`. Three classes now enter that record
+#   from CODE — GATE_TIMEOUT and JOB_LOST from aid-run-gates.sh, SERVICE_UNHEALTHY
+#   from aid-service.sh — and say so with `ladder_entry_status: live`.
+#
+#   The other four are still `planned`, and that is the honest word for them:
+#   their ladder entry is written by a CONTROLLER following the AUTO-loop
+#   checklist in skills/pipeline.md, not by code, so no test can prove the entry
+#   happened. Flipping them to `live` would be exactly the failure AID's first
+#   principle names — "a detector without enforcement is decoration"
+#   (docs/plans/AID-v3-principles.md §1) — in a new form: a policy overstating
+#   its own wiring. Overstating and understating are both red by design (case 9).
+#
+#   What IS enforced today, by scripts/tests/bats/test-auto-recovery-policy.bats:
+#     • this file validates against defaults/schemas/auto-recovery.schema.json;
+#     • EVERY emitter site named below greps to real code in this repository
+#       (the anti-decoration assertion);
+#     • every budget in `existing_loops` still matches the live value in the
+#       file it cites (the drift assertion);
+#     • `ladder_runtime.status`, `loader_contract.implemented` and every
+#       `ladder_entry_status: live` are checked against the REPOSITORY, not
+#       against this file's own say-so: the test derives whether the ladder is
+#       wired from the existence of a real loader function
+#       (`loader_contract.loader_path` + `loader_anchor`) that actually reads
+#       this policy, and fails if the declaration disagrees in EITHER direction.
+#       Editing `status: wired` here without writing that function turns the
+#       suite red; so does writing the loader and leaving `not_wired` here.
+#
+# THE TWO AXES — they mean different things, do not collapse them
+#   detector:     does CODE detect this condition today, at this commit, and
+#                 leave a machine-readable trace (timeline event, audit-log
+#                 record, registry state, JSON field)? `mechanical` = yes, and
+#                 the `emitter` sites below are the proof. `instruction` = no
+#                 code decides it; an agent following a written instruction
+#                 does.
+#   ladder_entry: who will WRITE the ladder record for this class —
+#                 `mechanical` = the ladder writer will be called from the
+#                 emitting code site itself; `instruction` = the emitting code
+#                 reports, and the AUTO-loop instruction routes the report into
+#                 the ladder.
+#   ladder_entry_status: truth about the WRITE at this commit. `live` for the
+#                 three `ladder_entry: mechanical` classes, whose write is a
+#                 real call to `aid_ladder_emit` at the emitter site named
+#                 below and is pinned by scripts/tests/bats/test-recovery-ladder.bats.
+#                 `planned` for the four `ladder_entry: instruction` classes:
+#                 their entry is a controller act, so nothing in code writes it.
+#                 Flipping any of them is not an edit to this file — the test
+#                 refuses `live` unless the loader named in `loader_contract`
+#                 really exists in code, and the schema refuses it while
+#                 `ladder_runtime.status` is `not_wired`.
+#
+# DIVERGENCE FROM THE P076 PLAN TEXT — stated, not silently applied
+#   The plan describes DISPATCH_ORPHANED as `detector: instruction` "because the
+#   die message names the ladder entry". That is true of the ladder ENTRY, but
+#   it is not true of DETECTION: `fsm_check_orphan_dispatches` is real code that
+#   finds the orphan and writes `fsm_orphan_dispatch_fail` into audit-log.jsonl
+#   before it dies. Labelling its detector `instruction` would be untruthful on
+#   the axis the label names, so it is recorded here as
+#   `detector: mechanical, ladder_entry: instruction`. Everything the plan
+#   wanted from that label — that no code writes the ladder entry, that the die
+#   message is what routes it — is preserved by the second axis.
+
+version: 1
+
+# ── what this policy supersedes ──────────────────────────────────────────────
+# The earlier prose design this file replaces, recorded HERE — in the artefact
+# that actually ships — because the document itself does not ship: `docs/` is
+# gitignored in this repository, so that file is untracked, absent from the
+# commit, absent from a clone and absent from CI. A test that verified the
+# document alone would therefore check nothing wherever the document is missing,
+# and would report that as a pass.
+#
+# So the claim is split. The half below is shipped, diff-reviewable and
+# unconditionally asserted by the test suite. The doc-side half — that the
+# supersede markers sit in these sections and nowhere else — is verified only
+# where the document is reachable, and the test says loudly when it is not.
+supersedes:
+  - document: docs/plans/2026-07-21-IMP-auto-mode-stop-taxonomy-and-recovery-policy.md
+    tracked: false
+    tracked_reason: >-
+      `.gitignore` ignores `docs/`, so this document is untracked: it lives only
+      in the main working tree, cannot be diff-reviewed, does not roll back with
+      the commit, and never reaches a consumer of the plugin.
+    marker_pattern: P076
+    sections:
+      - "## What Codex may decide without PM"
+      - "## Stop classes for the adjudicator"
+      - "## Deferred: heavy mechanical recovery framework"
+
+# ── ladder runtime status ────────────────────────────────────────────────────
+# Wiring truth, kept in the file the wiring is about.
+ladder_runtime:
+  status: wired
+  reason: >-
+    scripts/lib/aid-recovery-ladder.sh reads this file (aid_recovery_policy_load)
+    and writes <run evidence>/recovery-ladder.jsonl. Budget refusals route to
+    adjudication and then to the FSM ESCALATION state; the three mechanical
+    classes below have real ladder writes at their emitter sites.
+  loader_lands_in: "P076 EPIC 2, Step 13 — scripts/lib/aid-recovery-ladder.sh (landed)"
+  ladder_record_writer_lands_in: "P076 EPIC 2, Step 13 — aid_recovery_ladder_append in the same file (landed)"
+
+# ── loader contract ──────────────────────────────────────────────────────────
+# Declared before the loader existed so it had one place to implement against,
+# and so the failure modes were decided rather than improvised at wiring time.
+# Every behaviour below is now implemented in `loader_path`.
+loader_contract:
+  implemented: true
+  # WHERE THE LOADER LIVES — and the check that keeps `implemented` honest.
+  # The test does not believe `implemented` or `ladder_runtime.status`: it looks
+  # for a shell function named `loader_anchor`, defined in `loader_path`, in a
+  # file that also names this policy file. Renaming either without editing this
+  # block turns the suite red in whichever direction the lie points.
+  loader_path: plugins/aid-orchestrator/scripts/lib/aid-recovery-ladder.sh
+  loader_anchor: aid_recovery_policy_load
+  project_override_path: ".aid-o/config/policies/auto-recovery.yaml"
+  malformed_override: >-
+    An unreadable or schema-invalid project override is NOT fatal and is NOT
+    silently accepted. The loader falls back to this shipped policy and emits a
+    named warning identifying the override path and the first validation error
+    (fail-closed to known-good policy).
+  missing_class: >-
+    A project override that omits a class does not thereby get "no recovery"
+    for it. Any stop whose class is absent from the effective policy routes as
+    UNCLASSIFIED — straight to adjudication.
+  unknown_action: >-
+    An action name outside the six defined in `action_vocabulary` is a schema
+    error, refused at load. It is never a silent no-op.
+  zero_budget: >-
+    A class entered with zero remaining budget goes straight to adjudication.
+    `attempts: 0` is legal configuration, not a malformed policy.
+  per_plan_override: >-
+    Refused at load with a named message. The recovery policy is PROJECT-scoped
+    by design: two plans running concurrently in one project (P074 worktrees)
+    share it. One project, one recovery policy.
+
+# ── the six reversible actions ───────────────────────────────────────────────
+# The CLOSED vocabulary. Every `allowed_actions` entry below is one of these,
+# and the schema enforces that. All six are reversible and none of them
+# weakens, waives or bypasses a gate.
+action_vocabulary:
+  wait_and_resume: >-
+    Sleep out a named external condition (quota window, rate-limit reset), then
+    re-enter the same step. Changes nothing about the work.
+  retry_once: >-
+    Re-run the identical failing operation exactly once more, unchanged.
+  restart_service_once: >-
+    Ask aid-service to bring one declared service back up. Bounded by the
+    service's own `restart_authorized` declaration — this action can never
+    exceed it.
+  rerun_targeted: >-
+    Re-run only the specific failed check/gate/test selection, never a broader
+    suite and never a different command.
+  resume_missing_lenses: >-
+    Re-dispatch only the review lenses that did not run, leaving the lenses
+    that did run and their evidence untouched.
+  collect_and_continue: >-
+    Read a terminal result that already exists but was not collected, record
+    it, and proceed. Produces no new execution.
+
+# ── stop classes ─────────────────────────────────────────────────────────────
+stop_classes:
+
+  GATE_TIMEOUT:
+    description: >-
+      A gate did not finish inside its configured budget — either its job blew
+      past its deadline plus grace and the runner cancelled it, or the
+      repeated-timeout policy blocked a further attempt.
+    detector: mechanical
+    ladder_entry: mechanical
+    ladder_entry_status: live
+    emitter:
+      - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
+        line: 1192
+        anchor: gate_job_deadline_exceeded
+        note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
+      - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
+        line: 2143
+        anchor: timeout_policy_block
+        note: "three censored samples at or above the current timeout — no further attempt is spent"
+    allowed_actions: [rerun_targeted, collect_and_continue]
+    budget: {attempts: 1, wall_clock_seconds: 900}
+    terminus: [adjudicate, escalation, pm_force]
+
+  SERVICE_UNHEALTHY:
+    description: >-
+      A declared service never reached healthy, or fell out of healthy, and
+      aid-service has spent everything its declaration authorised (the one port
+      reallocation and, where declared, the one authorised restart).
+    detector: mechanical
+    ladder_entry: mechanical
+    ladder_entry_status: live
+    emitter:
+      - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
+        line: 1286
+        anchor: "its job was cancelled and stop_cmd run"
+        note: "terminal per-service verdict after the retry budget is spent; registry state is timed_out|lost|unhealthy"
+      - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
+        line: 1269
+        anchor: "still unhealthy after the one authorized restart"
+        note: "the restart-exhaustion failure_reason specifically"
+    allowed_actions: [restart_service_once, wait_and_resume]
+    budget: {attempts: 1, wall_clock_seconds: 300}
+    terminus: [adjudicate, escalation, pm_force]
+
+  JOB_LOST:
+    description: >-
+      A supervised job's owned process is gone and no terminal record exists.
+      Nothing about the outcome is proven — this class exists so that the
+      absence of a result is never read as a pass.
+    detector: mechanical
+    ladder_entry: mechanical
+    ladder_entry_status: live
+    emitter:
+      - file: plugins/aid-orchestrator/scripts/aid-job.sh
+        line: 456
+        anchor: "owned process gone AND no terminal record"
+        note: "_derive_state's lost verdict"
+      - file: plugins/aid-orchestrator/scripts/aid-job.sh
+        line: 506
+        anchor: 'reported="lost"'
+        note: "collect reports lost and exits 3 rather than inventing an outcome"
+    allowed_actions: [collect_and_continue, rerun_targeted]
+    budget: {attempts: 1, wall_clock_seconds: 600}
+    terminus: [adjudicate, escalation, pm_force]
+
+  TRANSIENT_INFRA:
+    description: >-
+      A cross-provider dispatch (C0 plan review, C3 audit) did not produce a
+      response for an infrastructure reason — provider unavailable, rate
+      limited, or the call timed out. Per pipeline.md this is NOT a loop
+      iteration and does not consume review budget.
+    detector: mechanical
+    ladder_entry: instruction
+    ladder_entry_status: planned
+    emitter:
+      - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
+        line: 1742
+        anchor: 'rate_limited) uo="rate_limited" ;;'
+        note: "C3 attempt outcome mapping — unavailable / rate_limited / timeout"
+      - file: plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh
+        line: 1152
+        anchor: 'rate_limited) uo="rate_limited" ;;'
+        note: "C0 attempt outcome mapping, same vocabulary"
+    allowed_actions: [wait_and_resume, retry_once, resume_missing_lenses]
+    budget: {attempts: 3, wall_clock_seconds: 3600}
+    terminus: [adjudicate, escalation, pm_force]
+
+  DISPATCH_ORPHANED:
+    description: >-
+      A dispatch was started and never completed, so the step cannot advance.
+      The code detects it and refuses; the recovery is named in the die message
+      (emit the missing `complete`, or take the audited PM override).
+    detector: mechanical
+    ladder_entry: instruction
+    ladder_entry_status: planned
+    emitter:
+      - file: plugins/aid-orchestrator/scripts/aid-fsm.sh
+        line: 1537
+        anchor: missing_dispatch_complete
+        note: >-
+          fsm_check_orphan_dispatches die site; writes fsm_orphan_dispatch_fail
+          to audit-log.jsonl first, then dies naming the fix command
+    allowed_actions: [collect_and_continue]
+    budget: {attempts: 1, wall_clock_seconds: 300}
+    terminus: [adjudicate, escalation, pm_force]
+
+  REVIEW_EXHAUSTED:
+    description: >-
+      A bounded review loop spent its budget and is still blocking. The budget
+      itself belongs to that loop (see `existing_loops`) — this class covers
+      only what the AUTO run does AFTER the loop declares itself terminal.
+    detector: mechanical
+    ladder_entry: instruction
+    ladder_entry_status: planned
+    emitter:
+      - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
+        line: 1998
+        anchor: budget_exhausted
+        note: "C3 fix loop sets top_outcome=escalated with escalation_reason=budget_exhausted"
+      - file: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
+        line: 521
+        anchor: "increment rejected: budget exhausted"
+        note: "CP1/C0 revision ledger refuses to advance past MAX_ATTEMPTS"
+    allowed_actions: []
+    budget: {attempts: 0, wall_clock_seconds: 0}
+    terminus: [adjudicate, escalation, pm_force]
+
+  UNCLASSIFIED:
+    description: >-
+      The default. Any stop that does not match a class above, and any class a
+      project override removed, lands here. It has no emitter by construction —
+      it is what is left over — and no recovery action at all: it goes straight
+      to adjudication. A stop AID cannot name is a stop AID does not act on.
+    detector: instruction
+    ladder_entry: instruction
+    ladder_entry_status: planned
+    emitter: []
+    allowed_actions: []
+    budget: {attempts: 0, wall_clock_seconds: 0}
+    terminus: [adjudicate, escalation, pm_force]
+
+# ── terminus ─────────────────────────────────────────────────────────────────
+terminus_stages:
+  adjudicate: >-
+    Route the stop to the configured Codex adjudicator with its evidence. The
+    adjudicator may pick an action this policy already allows for the class; it
+    may not invent one, and it may not accept PM-owned risk.
+  escalation: >-
+    The FSM ESCALATION state. The run stops advancing and the stop is surfaced
+    with its evidence for a person.
+  pm_force: >-
+    An explicit, audited PM override (`--force --reason … --blocked-checks …`).
+    Always a human act. Never reachable by an agent on its own authority.
+
+# ── ownership table — loops this ladder does NOT govern ──────────────────────
+# PM decision 4 of P076: DECLARE, do not rewire. Every retry loop that already
+# exists keeps its own authority and its own budget in its own file. The ladder
+# governs the stop that happens AFTER such a loop declares itself terminal, and
+# never overrides, extends or shortens one of these.
+#
+# `budget_value` is pinned by the drift test in
+# scripts/tests/bats/test-auto-recovery-policy.bats: it is re-read from
+# `budget_file` at test time and compared, so this table cannot quietly go
+# stale as the budgets evolve.
+existing_loops:
+
+  - id: gate_fix_loop
+    what: "GATES-state fix loop — a failed check is fixed and ONLY that check re-run"
+    authority: existing
+    governed_by_ladder: false
+    budget_key: "max 3 cycles per check"
+    budget_value: 3
+    budget_file: plugins/aid-orchestrator/skills/pipeline.md
+    budget_line: 587
+    budget_kind: instruction
+    note: "LLM-facing instruction budget, not a mechanical constant; role-cards.md states the same 3."
+
+  - id: cp2_cp3_fix_loop
+    what: "CP2/CP3 review checkpoint fix→re-verify loop"
+    authority: existing
+    governed_by_ladder: false
+    budget_key: "review_checkpoints.fix_loop.max_iterations"
+    budget_value: 2
+    budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
+    budget_line: 20
+    budget_kind: policy_key
+
+  - id: c3_fix_loop
+    what: "C3 independent audit fix→reverify loop (initial audit + rechecks)"
+    authority: existing
+    governed_by_ladder: false
+    budget_key: "c3_fix_loop.max_rechecks"
+    budget_value: 4
+    budget_file: plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml
+    budget_line: 67
+    budget_kind: policy_key
+    note: "aid-c3-dispatch.sh reads this key and fails closed to the same 4."
+
+  - id: c0_cp1_revision_ledger
+    what: "C0 cross-provider plan review revision budget (the CP1 ledger)"
+    authority: existing
+    governed_by_ladder: false
+    budget_key: MAX_ATTEMPTS
+    budget_value: 5
+    budget_file: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
+    budget_line: 108
+    budget_kind: shell_constant
+    note: >-
+      The MECHANICAL authority. review-checkpoints.yaml's
+      `cp1_codex_review.max_rechecks: 4` documents the same shipped budget as
+      "initial review + 4 rechecks" and is read by nobody (P073 Step 1) — do
+      not treat it as a second authority.
+
+  - id: gate_retry
+    what: "Per-gate retry inside aid-run-gates.sh"
+    authority: existing
+    governed_by_ladder: false
+    budget_key: "gates.<name>.max_retries"
+    budget_value: 1
+    budget_file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
+    budget_line: 1957
+    budget_kind: shell_default
+    note: >-
+      Per-gate, declared in the project's execution.yaml; 1 is the runner's
+      default when a gate omits the key. The shipped template sets 0 on its own
+      gates. There is no global retry budget — a former `retry.max_attempts`
+      was unread dead config and was removed.

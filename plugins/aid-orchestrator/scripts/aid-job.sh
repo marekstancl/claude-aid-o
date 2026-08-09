@@ -566,8 +566,18 @@ cmd_cancel() {
     starttime="$(jq -r '.proc_starttime // empty' "$job_dir/job.json")"
     # Review MEDIUM (sharpest weapon): reject pgid 0 (kill -0 targets the CALLER's
     # own group) and 1 (broadcast), and require the recorded pgid to still be the
-    # live pid's ACTUAL process group — a corrupted/forged job.json cannot
-    # redirect the signal at another group. setsid guarantees pgid==pid>1.
+    # live pid's ACTUAL process group. setsid guarantees pgid==pid>1.
+    #
+    # WHAT THAT DOES AND DOES NOT BUY, corrected (CP3 security HIGH). It stops a
+    # CORRUPTED record — one whose pgid no longer matches its pid — from
+    # redirecting the signal. It does NOT stop a FORGED one: the check is
+    # self-consistency, and an attacker who copies a victim's real pid and pgid
+    # out of /proc satisfies it exactly. Nothing readable from this directory can
+    # distinguish those two cases, so the defence cannot live here. It lives in
+    # the CALLER: `cancel` is aimed at a specific --id, and the only untargeted
+    # caller in this repo (aid-service's orphan sweep) now signals a job only
+    # when this run's own spawn ledger or registry vouches for it, and reports
+    # rather than signals anything else. See `_aid_svc_vouched_set`.
     _live_pgid=""
     # `|| true` INSIDE the substitution: on a later iteration the pid may already
     # be dead (the signal took effect), so `ps` fails; without this the pipefail
