@@ -23,6 +23,11 @@
 #             argv) this supervisor would record for `-- <cmd...>`. Exposed so a
 #             caller can decide whether an existing job dir belongs to the SAME
 #             command without re-implementing the computation.
+#   revision  Read-only: echo "<head> <tree>" — the SAME revision pair `run`
+#             binds a job record to and `collect --require-current` compares
+#             against. Exposed for the same reason `fingerprint` is: a caller
+#             that needs to bind its own artefact to a revision must ask for the
+#             one definition instead of copying the formula.
 #   __wrap    INTERNAL — the supervised wrapper process. Not a public command.
 #
 # Design invariants:
@@ -747,6 +752,28 @@ cmd_fingerprint() {
   _command_fingerprint "${command[@]}"
 }
 
+# ── revision ─────────────────────────────────────────────────────────────────
+# Read-only. Echoes "<head> <tree>" — the exact pair `run` records as
+# start_head/start_tree and `collect --require-current` compares against. Starts
+# no process and writes nothing. Exists so a caller that must bind its OWN
+# artefact to a revision (the gate-row checkpoint) reads the answer from the one
+# implementation instead of copying `git rev-parse HEAD` and guessing at the
+# tree half — the divergence that let a head-only binding replay a row the
+# working tree had not earned.
+cmd_revision() {
+  local repo=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo) repo="$2"; shift 2;;
+      *) _die "revision: unknown arg '$1' (usage: revision [--repo <path>])" 1;;
+    esac
+  done
+  [[ -n "$repo" ]] || repo="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  _need sha256sum
+  _job_revision "$repo"
+  printf '\n'
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 main() {
   local sub="${1:-}"; shift || true
@@ -758,11 +785,12 @@ main() {
     watchdog) cmd_watchdog "$@";;
     redgreen) cmd_redgreen "$@";;
     fingerprint) cmd_fingerprint "$@";;
+    revision) cmd_revision "$@";;
     __wrap)   cmd_wrap "$@";;
     ""|-h|--help|help)
-      sed -n '3,49p' "$SELF" | sed 's/^# \{0,1\}//'
+      sed -n '3,54p' "$SELF" | sed 's/^# \{0,1\}//'
       exit 0;;
-    *) _die "unknown subcommand: $sub (run|status|collect|cancel|watchdog|redgreen|fingerprint)" 1;;
+    *) _die "unknown subcommand: $sub (run|status|collect|cancel|watchdog|redgreen|fingerprint|revision)" 1;;
   esac
 }
 main "$@"

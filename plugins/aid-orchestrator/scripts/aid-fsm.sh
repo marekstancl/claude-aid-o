@@ -32,6 +32,17 @@ source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancilla
 # tree checks use aid_invoke_root.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# P076 CP3 — THE shared continuation vocabulary (artifact basename, revision
+# pair, pending-pointer resolution, gate-row binding key). Sourced fail-CLOSED:
+# the live-job init precondition and `resume` are only as good as these
+# definitions, and a missing lib silently falling back to a local default is
+# exactly the fail-open the duplicated constant produced.
+if [[ ! -f "${SCRIPT_DIR}/lib/aid-resume-artifact.sh" ]]; then
+  echo "ERROR: aid-fsm.sh: missing ${SCRIPT_DIR}/lib/aid-resume-artifact.sh — refusing to run without the shared continuation definitions" >&2
+  exit 2
+fi
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
@@ -324,7 +335,12 @@ _active_runs_governs_main() {
 # artifact; the artifact is the truth, the map is presentation.
 AID_ACTIVE_RUN_FIELDS="auto_controller resume_artifact"
 AID_AUTO_CONTROLLER_VALUES="active manual blocked_for_pm"
-AID_RESUME_ARTIFACT_BASENAME="auto_resume_required.json"
+# AID_RESUME_ARTIFACT_BASENAME comes from lib/aid-resume-artifact.sh (sourced at
+# the top of this file), NOT from a second literal here. It used to be declared
+# in both this file and aid-run-gates.sh: renaming one made the live-job refusal
+# glob nothing and return 0, and blinded `_resume_locate_artifact` and
+# `_resume_newest_claim` at the same time — a guard whose failure mode is
+# indistinguishable from "nothing to guard".
 
 # _active_runs_auto_controller — the value init may honestly stamp. An AUTO
 # controller announces itself with AID_AUTO_MODE=1; anything else is a manual
@@ -634,6 +650,10 @@ active_run_stall_verdict() {
 # derived verdict and the facts behind it, so a caller never re-derives:
 #   { stalled, reason, idle_sec, last_progress_at, threshold_sec,
 #     state, resume_artifact, resume_command }
+# `resume_command` is NULL when the entry's key is not a valid epic id (the same
+# `_AID_ID_RE` cmd_resume enforces): this field is rendered to an operator as a
+# recovery line and fed to the AUTO controller as stall input, so an id `resume`
+# would itself refuse must never be presented as a runnable one.
 # Read-only by construction: the map is never locked, never rewritten.
 active_runs_stalled_json() {
   local now="" only=""
@@ -684,16 +704,25 @@ active_runs_stalled_json() {
     fi
     art="$(jq -r --arg e "$epic" '.[$e].resume_artifact // ""' <<<"$doc" 2>/dev/null || echo "")"
     [[ "$art" == "null" ]] && art=""
+    # `resume_command` is rendered by /aid-status as a recovery line and fed to
+    # the AUTO controller as its stall input, so the epic id interpolated into it
+    # is validated HERE, at the producer — with the same `_AID_ID_RE` cmd_resume
+    # applies before it will act on an id. `cmd_init` puts no charset constraint
+    # on the map key it upserts, so a key like `E-OK; curl … | sh` used to become
+    # a printed, runnable-looking recovery line. An id that would not survive
+    # `resume` yields NO command at all rather than a plausible-looking one.
+    local cmd_str=""
+    [[ "$epic" =~ $_AID_ID_RE ]] && cmd_str="bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic}"
     out="$(jq -c --arg e "$epic" --argjson s "$stalled" --arg r "$reason" \
              --argjson idle "$idle" --argjson last "$last" \
              --argjson thr "$AID_ACTIVE_RUN_STALL_SEC" \
              --arg st "$live_state" --arg art "$art" \
-             --arg cmd "bash ${SCRIPT_DIR}/aid-fsm.sh resume ${epic}" \
+             --arg cmd "$cmd_str" \
              '.[$e] = {stalled: $s, reason: $r, idle_sec: $idle,
                        last_progress_at: $last, threshold_sec: $thr,
                        state: (if $st == "" then null else $st end),
                        resume_artifact: (if $art == "" then null else $art end),
-                       resume_command: $cmd}' <<<"$out")" || return 1
+                       resume_command: (if $cmd == "" then null else $cmd end)}' <<<"$out")" || return 1
   done < <(jq -r 'to_entries[] | [.key, (.value.state_file // ""), (.value.run_id // ""),
                                   (.value.state // ""), (.value.updated_at // "")] | @tsv' <<<"$doc")
   printf '%s\n' "$out" | jq '.'
@@ -3295,26 +3324,42 @@ cmd_pm_override() {
 #     • the referenced job is STILL LIVE → REFUSE. Two controllers over one job
 #       is the ambiguity this whole mechanism exists to remove, and the honest
 #       instruction is to resume the existing run, not to start a second one.
-#     • the referenced job is dead (or was never started — job_id "pending") →
-#       proceed, ARCHIVING the artifact as `.superseded-<epoch>`. Archived, not
-#       deleted: it is the only record of what the dead controller was waiting
-#       for.
+#     • the referenced job is dead (or was never started) → proceed, ARCHIVING
+#       the artifact as `.superseded-<epoch>`. Archived, not deleted: it is the
+#       only record of what the dead controller was waiting for.
+#
+#   A `pending` pointer is RESOLVED, never waved through. `pending` is the
+#   PRE-SPAWN pointer — the exact crash window the eager write exists to cover —
+#   so "the job id is pending" is not evidence that no job exists. It used to
+#   skip the liveness query entirely and fall straight to archive-and-proceed,
+#   which admitted a second controller over a genuinely `running` job AND
+#   archived the only pointer at it, orphaning it. `cmd_resume` resolves such a
+#   pointer by scanning the jobs dir for the recorded command fingerprint; this
+#   preflight now calls the SAME primitive (aid_resume_resolve_pending) rather
+#   than implementing half of it.
 _fsm_resume_artifact_preflight() {
   local epic_id="$1"
   command -v jq >/dev/null 2>&1 || return 0
   local ev_root; ev_root="$(aid_state_path ".aid-o/work/evidence/${epic_id}" 2>/dev/null)" || return 0
   [[ -d "$ev_root" ]] || return 0
   local job_sh="${SCRIPT_DIR}/aid-job.sh"
-  local art jobs_dir job_id st root abs
+  local art jobs_dir job_id st root abs fp resolved
   root="$(aid_state_root 2>/dev/null)" || root="$PWD"
   for art in "$ev_root"/*/"${AID_RESUME_ARTIFACT_BASENAME}"; do
     [[ -f "$art" ]] || continue
     jobs_dir="$(jq -r '.jobs_dir // ""' "$art" 2>/dev/null || echo "")"
     job_id="$(jq -r '.job_id // ""' "$art" 2>/dev/null || echo "")"
+    fp="$(jq -r '.command_fingerprint // ""' "$art" 2>/dev/null || echo "")"
     st="unknown"
+    abs="$jobs_dir"
+    [[ -n "$abs" && "$abs" != /* ]] && abs="${root}/${jobs_dir}"
+    if [[ "$job_id" == "pending" && -n "$abs" ]]; then
+      # Same resolution `resume` performs: a fingerprint match means a job WAS
+      # started and the pointer simply died before it could be rewritten.
+      resolved="$(aid_resume_resolve_pending "$abs" "$fp")"
+      [[ -n "$resolved" ]] && job_id="$resolved"
+    fi
     if [[ -n "$jobs_dir" && -n "$job_id" && "$job_id" != "pending" && -f "$job_sh" ]]; then
-      abs="$jobs_dir"
-      [[ "$abs" != /* ]] && abs="${root}/${jobs_dir}"
       st="$(bash "$job_sh" status --jobs-dir "$abs" --id "$job_id" 2>/dev/null || echo unknown)"
     fi
     case "$st" in
@@ -3322,7 +3367,17 @@ _fsm_resume_artifact_preflight() {
         echo "ERROR: aid-fsm.sh init: ${epic_id} still has a LIVE background job ('${job_id}', state ${st}) recorded in ${art}." >&2
         echo "  Refusing to start a second controller over the same job." >&2
         echo "  Resume the existing run instead — the safe next action recorded in that artifact is:" >&2
-        echo "    $(jq -r '.safe_next_action // "(none recorded)"' "$art" 2>/dev/null)" >&2
+        # Through the SAME renderer every `cmd_resume` print site uses. This line
+        # sits under an explicit instruction to run what follows, so a stored
+        # multi-line or metacharacter-bearing action printed verbatim here put a
+        # second, unannounced command at column 0.
+        local _sna _rendered _rrc=0
+        _sna="$(jq -r '.safe_next_action // "(none recorded)"' "$art" 2>/dev/null)"
+        _rendered="$(_resume_render_command "$_sna")" || _rrc=$?
+        echo "    ${_rendered}" >&2
+        if (( _rrc != 0 )); then
+          echo "  WARNING: that recorded action contains shell metacharacters and is shown QUOTED above — read it before running it. Nothing here executed it." >&2
+        fi
         echo "  (or cancel the job: bash ${job_sh} cancel --jobs-dir ${jobs_dir} --id ${job_id})" >&2
         exit 2
         ;;
@@ -3584,18 +3639,21 @@ _resume_concurrency_context() {
   case "$mode" in observe_parallel|parallel) printf '%s' "$mode" ;; *) printf 'sequential' ;; esac
 }
 
-# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [execution_yaml] [repo]
+# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [execution_yaml] [repo] [tree]
 #   The ONLY thing resume writes into the run's evidence: Step 2's durable
 #   incremental row checkpoint. Byte-shaped exactly like the in-line path's —
 #   the same `gate_row_from_job` mapping, the same `. + {attempts, runtime_
-#   baseline}` merge, the same `_checkpoint {head, written_at}` envelope, the
-#   same atomic tmp+mv. It has to be: the restore pass refuses a row with no
-#   envelope (`row_not_bound_to_a_revision`), so a differently-shaped row
-#   would be silently discarded by the very run-all this exists to feed.
+#   baseline}` merge, the same `_checkpoint {head, tree, key, written_at}`
+#   envelope from the same shared helper, the same atomic tmp+mv. It has to be:
+#   the restore pass refuses a row with no envelope
+#   (`row_not_bound_to_a_revision`) or an unverifiable key
+#   (`row_not_written_by_this_run`), so a differently-shaped row would be
+#   discarded by the very run-all this exists to feed.
 #   Echoes the row file path. rc 1 if nothing could be written.
 _resume_write_row() {
   local evidence_dir="$1" gate="$2" job_dir="$3" job_id="$4" state="$5" \
-        attempts="$6" head="$7" execution_yaml="${8:-}" repo="${9:-}"
+        attempts="$6" head="$7" execution_yaml="${8:-}" repo="${9:-}" \
+        tree="${10:-}"
   # The gate name becomes a filename — never let it become a path.
   case "$gate" in */*|*..*|"") return 1 ;; esac
 
@@ -3631,10 +3689,18 @@ _resume_write_row() {
 
   local rows_dir="${evidence_dir}/gates_rows"
   mkdir -p "$rows_dir" 2>/dev/null || return 1
-  local dest="${rows_dir}/${gate}.json" tmp bound
+  local dest="${rows_dir}/${gate}.json" tmp bound rkey ckey
   tmp="$(mktemp "${dest}.XXXXXX" 2>/dev/null)" || return 1
-  bound="$(jq -c --arg h "$head" --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-             '. + {_checkpoint: {head: $h, written_at: $t}}' <<<"$merged" 2>/dev/null)" || bound=""
+  # The SAME envelope the in-line writer produces, from the same shared helper:
+  # head + tree + the run's keyed binding. It has to be byte-identical — the
+  # restore pass refuses anything it cannot verify, so a differently-shaped row
+  # would be discarded by the very run-all this exists to feed.
+  rkey="$(aid_gate_row_run_key "$evidence_dir")"
+  ckey="$(aid_gate_row_binding_key "$rkey" "$gate" "$head" "$tree")"
+  bound="$(jq -c --arg h "$head" --arg tr "$tree" --arg k "$ckey" \
+             --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+             '. + {_checkpoint: {head: $h, tree: $tr, key: $k, written_at: $t}}' \
+             <<<"$merged" 2>/dev/null)" || bound=""
   [[ -n "$bound" ]] || { rm -f "$tmp" 2>/dev/null || true; return 1; }
   if printf '%s\n' "$bound" > "$tmp" 2>/dev/null; then
     mv -f "$tmp" "$dest" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
@@ -3759,15 +3825,10 @@ cmd_resume() {
   # resolved: by the command fingerprint, never by trusting a job id nobody
   # wrote. A match means a job WAS started; no match means none ever was.
   if [[ "$job_id" == "pending" ]]; then
-    local d cand="" rec
-    if [[ -d "$jobs_abs" ]]; then
-      for d in "$jobs_abs"/*/; do
-        [[ -f "${d}job.json" ]] || continue
-        rec="$(jq -r '.command_fingerprint // ""' "${d}job.json" 2>/dev/null || echo "")"
-        [[ -n "$fp" && "$rec" == "$fp" ]] || continue
-        cand="$(basename "$d")"
-      done
-    fi
+    # ONE resolution primitive, two callers: this command and `init`'s live-job
+    # preflight (which used to implement none of it and waved `pending` through).
+    local cand
+    cand="$(aid_resume_resolve_pending "$jobs_abs" "$fp")"
     if [[ -n "$cand" ]]; then
       job_id="$cand"
     else
@@ -3952,10 +4013,13 @@ cmd_resume() {
 
   local attempts=1
   [[ "$job_id" =~ -attempt-([0-9]+)$ ]] && attempts="${BASH_REMATCH[1]}"
-  local head=""
-  if [[ -n "$repo" && -d "$repo" ]]; then
-    head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
-  fi
+  # HEAD *and* tree, from the supervisor's own `revision` — the same pair the
+  # in-line checkpoint writer binds to, so the two writers cannot disagree about
+  # what revision a row was produced at.
+  local _rev head="" tree=""
+  _rev="$(aid_repo_revision "${repo:-}")"
+  head="${_rev%% *}"; tree="${_rev##* }"
+  [[ "$head" == "none" || "$head" == "nogit" ]] && head=""
   [[ -z "$head" ]] && head="$(git rev-parse HEAD 2>/dev/null || echo "")"
 
   # The gate's own configuration, as named by the artifact's resolved
@@ -3963,7 +4027,7 @@ cmd_resume() {
   local execution_yaml; execution_yaml="$(_resume_execution_yaml "$next_action")"
 
   local rowfile=""
-  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo")"; then
+  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo" "$tree")"; then
     local rres; rres="$(jq -r '.result // "?"' "$rowfile" 2>/dev/null || echo '?')"
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is ${state} (collected, current at ${head:0:12})"

@@ -78,8 +78,10 @@ facts the dead controller provably left behind:
 
 **The resume flow.** When both hold, run `bash {plugin_path}/scripts/aid-fsm.sh resume <epic_id>`.
 It claims the artifact exactly once, collects the referenced job's terminal result, records it as a
-durable gate-row checkpoint under `<evidence_dir>/gates_rows/<gate>.json` (the next `run-all`
-assembles it — `resume` never edits a final report), updates the active-runs entry, and prints
+durable gate-row checkpoint under `<evidence_dir>/gates_rows/<gate>.json` (`resume` never edits a
+final report; the next `run-all` re-attaches to that same supervised job and *collects* its terminal
+result rather than re-running the suite, deriving an identical row and overwriting the checkpoint —
+the checkpoint is the durable record, not the delivery route), updates the active-runs entry, and prints
 three lines: what it found, what it recorded, and the next action. It never fabricates a result: a
 missing job record, a `lost` job and a `stale` result are each reported verbatim with the rerun
 instruction. A job still in flight is a read-only status report — nothing is claimed, the artifact
@@ -105,7 +107,7 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
      never stored, because a dying controller cannot write anything on its way out.
   2. **The command.** Run `scripts/aid-fsm.sh resume <epic_id>`. It claims that pointer exactly
      once, collects the referenced job's terminal result, records it as a durable gate-row
-     checkpoint the next `run-all` assembles, updates the active-runs entry, and prints what it
+     checkpoint, updates the active-runs entry, and prints what it
      found, what it recorded, and the next action. A job still in flight is a read-only status
      report: nothing is claimed and the pointer stays valid for the next resume.
   3. **The printed next action.** Execute it.

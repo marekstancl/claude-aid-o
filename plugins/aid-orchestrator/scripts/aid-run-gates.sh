@@ -68,6 +68,17 @@ source "${SCRIPT_DIR}/lib/aid-test-scheduler-report.sh"
 source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
 # shellcheck source=lib/aid-gate-row.sh
 source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
+# shellcheck source=lib/aid-resume-artifact.sh
+# THE shared continuation vocabulary (artifact basename, revision pair,
+# pending-pointer resolution, gate-row binding key). Sourced fail-CLOSED: this
+# file's live-job refusal and row-freshness checks are only as good as these
+# definitions, and a missing lib that degraded to a local default is precisely
+# the fail-open the duplicate constant produced.
+if [[ ! -f "${SCRIPT_DIR}/lib/aid-resume-artifact.sh" ]]; then
+  echo "ERROR: aid-run-gates.sh: missing ${SCRIPT_DIR}/lib/aid-resume-artifact.sh — refusing to run gates without the shared continuation definitions" >&2
+  exit 2
+fi
+source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
 
@@ -291,7 +302,11 @@ _bg_fail_row() {
 # signal). These globals are populated once in run_all_gates(); they are read
 # (never written) inside run_background_gate, which runs in a command
 # substitution subshell.
-AID_RESUME_ARTIFACT_BASENAME="auto_resume_required.json"
+# AID_RESUME_ARTIFACT_BASENAME is defined ONCE, in lib/aid-resume-artifact.sh,
+# and sourced above. It used to be declared here AND in aid-fsm.sh: two string
+# literals with no shared source and no test binding them, so renaming one made
+# the FSM's live-job refusal evaluate an empty glob and return 0 — a guard whose
+# failure mode was indistinguishable from "nothing to guard".
 _RESUME_ARTIFACT=""
 _RESUME_PLAN_ID=""
 _RESUME_EPIC_ID=""
@@ -310,6 +325,36 @@ AID_JOB_TERMINAL_STATES='["terminal_pass","terminal_fail","timed_out","cancelled
 _job_head_drifted() {
   local rec="$1" cur="$2"
   [[ -n "$rec" && -n "$cur" && "$rec" != "none" && "$rec" != "$cur" ]]
+}
+
+# _job_result_stale <job_sh> <jobs_dir> <job_id> <repo>
+#   rc 0 iff the job has a TERMINAL result that the CURRENT tree did not earn.
+#
+#   THE freshness judgement for replaying an existing job's result, and it is
+#   deliberately not a third notion of "current": it asks `aid-job.sh collect
+#   --require-current`, the same primitive `aid-fsm.sh resume` asks, which
+#   compares the recorded start HEAD *and* start TREE and answers rc 4 when
+#   either moved.
+#
+#   Why HEAD alone was not enough (CP3 blocking finding, reproduced in both
+#   directions): the ordinary state of a gate re-run is a tree that MOVED without
+#   a commit. Head-only re-attach therefore replayed `terminal_pass` for a
+#   command that now fails (a green report for a broken tree), and replayed
+#   `terminal_fail` after a gate-fixer had already repaired the tree (a fix loop
+#   that burns its iterations on an already-green gate and can never converge).
+#
+#   A job with NO terminal result is never "stale": a still-LIVE job whose tree
+#   has not moved must keep re-attaching — that is the whole crash-resume story —
+#   and drift on a live job is judged by the head/fingerprint check at the call
+#   site, exactly as before.
+_job_result_stale() {
+  local job_sh="$1" jobs_dir="$2" job_id="$3" repo="$4" rc=0
+  [[ -f "${jobs_dir}/${job_id}/result.json" ]] || return 1
+  local -a args=(collect --jobs-dir "$jobs_dir" --id "$job_id")
+  [[ -n "$repo" ]] && args+=(--repo "$repo")   # array, so a path with spaces survives
+  args+=(--require-current)
+  bash "$job_sh" "${args[@]}" >/dev/null 2>&1 || rc=$?
+  (( rc == 4 ))
 }
 
 # _resume_artifact_write <job_id> <gate_name> <fingerprint> <jobs_dir>
@@ -443,10 +488,16 @@ run_background_gate() {
     if [[ "$rec_fp" != "$fp" ]]; then
       drift_reason="command_fingerprint_mismatch"
     elif _job_head_drifted "$rec_head" "$cur_head"; then
-      # Same command, but the tree moved since the job started. Re-attaching
-      # would answer a question about a revision nobody is asking about any
-      # more — the same judgement `collect --require-current` makes.
+      # Same command, but HEAD moved since the job started. Re-attaching would
+      # answer a question about a revision nobody is asking about any more.
       drift_reason="start_head_moved"
+    elif _job_result_stale "$job_sh" "$jobs_dir" "$job_id" "$repo"; then
+      # Same command, same HEAD — but the job's TERMINAL result was produced
+      # against a different working tree. That result is not this run's evidence,
+      # so the job is superseded and the gate genuinely re-runs. Judged by the
+      # supervisor's own `collect --require-current`, so the runner and `resume`
+      # cannot disagree about what "current" means.
+      drift_reason="result_tree_moved"
     fi
     if [[ -n "$drift_reason" ]]; then
       local sup_ts sup_dir sup_log
@@ -590,7 +641,18 @@ run_background_gate() {
   # `collect` is the idempotent terminal read — it NEVER relaunches, which is
   # what makes a crash cost zero re-execution: a job that finished while nobody
   # was watching is simply collected.
-  bash "$job_sh" collect --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || true
+  #
+  # `--require-current` is passed for the same reason `resume` passes it: this
+  # invocation is about to turn a job record into THIS run's gate result, and a
+  # result the current tree did not earn must never become one. rc 4 (stale) is
+  # the only rc that changes the outcome — 0 (pass) and 1 (non-pass terminal)
+  # are ordinary results, and 3 (not terminal, i.e. `lost`) is handled by the
+  # row mapping below exactly as before.
+  local _collect_rc=0
+  local -a _collect_args=(collect --jobs-dir "$jobs_dir" --id "$job_id")
+  [[ -n "$repo" ]] && _collect_args+=(--repo "$repo")
+  _collect_args+=(--require-current)
+  bash "$job_sh" "${_collect_args[@]}" >/dev/null 2>&1 || _collect_rc=$?
 
   # ── P076 Step 4: the pointer's only deletion site ─────────────────────────
   # A SUCCESSFUL collect means the job reached one of the supervisor's terminal
@@ -613,6 +675,22 @@ run_background_gate() {
       ;;
   esac
 
+  # The tree moved WHILE this gate was being supervised (an edit landing mid-run,
+  # or a job re-attached live whose tree drifted before it finished). The
+  # supervisor's result is real, but it is not a result for the tree this report
+  # is about — so it is refused, loudly, instead of replayed. A plain `fail` in
+  # the existing vocabulary: the retry loop's next attempt gets its own job id
+  # and genuinely re-runs the gate at the current tree, which is how the fix loop
+  # converges instead of replaying a verdict nobody can change.
+  if (( _collect_rc == 4 )); then
+    log_event "$timeline_file" "gate_job_result_stale" gate="$gate_name" \
+      job_id="$job_id" state="$state"
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — job '${job_id}' is ${state}, but its result was produced against a different working tree; refusing to report it as this run's result" >&2
+    _bg_fail_row "$gate_name" "job_result_not_current" \
+      "job ${job_id} is ${state} but its result was produced against a different working tree — the gate did not run against the current tree" "$job_id"
+    return 1
+  fi
+
   local row row_rc=0
   row="$(gate_row_from_job "$gate_name" "$job_dir" "$job_id" "$state")" || row_rc=$?
   printf '%s\n' "$row"
@@ -626,23 +704,38 @@ run_background_gate() {
 #   into. Never brings the evidence directory into being (the same discipline
 #   the execution ledger follows): a gate run must not dirty a working tree.
 #
-#   P076 Step 4 (CP2 carry-over): the row is BOUND to the revision it was
-#   produced at, in an additive `_checkpoint` envelope. Without that binding a
-#   row file written before a code change would replay, unchallenged, as a PASS
-#   for a gate that never ran against current HEAD. The restore pass below
-#   refuses any row whose binding is missing or whose HEAD has moved, using the
-#   same `_job_head_drifted` judgement the job re-attach path uses.
+#   The row is BOUND to the revision it was produced at AND to the run that
+#   produced it, in an additive `_checkpoint` envelope carrying
+#   {head, tree, key, written_at}:
+#     • head + tree — the same PAIR aid-job.sh binds a job result to, read from
+#       `aid-job.sh revision`. HEAD alone was tree-blind: an uncommitted edit
+#       never invalidated a row, which is the same one-sided binding that let a
+#       background job replay a result the working tree had not earned.
+#     • key — a keyed digest over the RUN's own secret (lib/aid-resume-artifact.sh),
+#       the gate name and that revision pair. `head` is public and guessable, so
+#       it could never establish that this run's writers produced the row: a
+#       hand-written `gates_rows/<gate>.json` satisfied it and replayed as a
+#       required-gate PASS. The key cannot be produced without reading the run's
+#       own 0600 key file (see the honest limit stated on that helper).
+#   The restore pass below refuses — as an explicit FAIL row, never silence —
+#   any row whose envelope is missing, whose head or tree has moved, or whose
+#   key does not verify. Fail closed in every direction: a run that could not
+#   establish a key writes no binding and accepts none.
 _gate_row_checkpoint() {
-  local rows_dir="$1" gate_name="$2" row_json="$3" head="${4:-}"
+  local rows_dir="$1" gate_name="$2" row_json="$3" head="${4:-}" \
+        tree="${5:-}" run_key="${6:-}"
   [[ -n "$rows_dir" ]] || return 0
   # The gate name becomes a filename — never let it become a path.
   case "$gate_name" in */*|*..*|"") return 0 ;; esac
   mkdir -p "$rows_dir" 2>/dev/null || return 0
   local dest="${rows_dir}/${gate_name}.json" tmp
   tmp="$(mktemp "${dest}.XXXXXX" 2>/dev/null)" || return 0
-  local bound
-  bound="$(jq -c --arg h "$head" --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-             '. + {_checkpoint: {head: $h, written_at: $t}}' <<<"$row_json" 2>/dev/null)" \
+  local bound key
+  key="$(aid_gate_row_binding_key "$run_key" "$gate_name" "$head" "$tree")"
+  bound="$(jq -c --arg h "$head" --arg tr "$tree" --arg k "$key" \
+             --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+             '. + {_checkpoint: {head: $h, tree: $tr, key: $k, written_at: $t}}' \
+             <<<"$row_json" 2>/dev/null)" \
     || bound=""
   [[ -n "$bound" ]] && row_json="$bound"
   if printf '%s\n' "$row_json" > "$tmp" 2>/dev/null; then
@@ -1010,9 +1103,18 @@ run_all_gates() {
   fi
 
   # The revision every row produced by THIS invocation is bound to, and the one
-  # a restored row's binding is compared against (P076 Step 4 / AC4).
-  local _rows_head
-  _rows_head="$(git -C "$_plugin_project_root" rev-parse HEAD 2>/dev/null || echo "")"
+  # a restored row's binding is compared against. HEAD *and* tree, read from the
+  # supervisor's own `revision` so the checkpoint envelope and a job record
+  # cannot mean different things by "the current revision".
+  local _rows_rev _rows_head _rows_tree _rows_key
+  _rows_rev="$(aid_repo_revision "$_plugin_project_root")"
+  _rows_head="${_rows_rev%% *}"; _rows_tree="${_rows_rev##* }"
+  [[ "$_rows_head" == "none" || "$_rows_head" == "nogit" ]] && _rows_head=""
+  # The run's own gate-row secret. Created on first use beside the run's other
+  # evidence, never bringing an evidence directory into being; empty when there
+  # is no evidence directory, which makes every checkpoint unbindable and every
+  # restore a refusal — the fail-closed direction.
+  _rows_key="$(aid_gate_row_run_key "$_evidence_dir")"
 
   # ─── P076 Step 4 — continuation pointer identity, resolved ONCE ──────────
   # `safe_next_action` is stored FULLY RESOLVED: this plugin's real path (never
@@ -1084,12 +1186,21 @@ run_all_gates() {
       continue
     fi
 
-    # Test-only fault injection (never set in production), P076 Step 4: skip a
-    # gate's iteration to simulate a runner that DIED before reaching it.
-    # Unlike AID_TEST_DROP_GATE above, this seam deliberately does NOT suppress
-    # the checkpoint-restore pass — a crashed run's un-iterated gate is exactly
-    # what that pass exists for, and it is unreachable from a normal run
-    # (every ordinary path emits a row), which is why it shipped unexercised.
+    # Test-only fault injection (never set in production): skip a gate's
+    # iteration to simulate a runner that DIED before reaching it. Unlike
+    # AID_TEST_DROP_GATE above, this seam deliberately does NOT suppress the
+    # checkpoint-restore pass — a crashed run's un-iterated gate is exactly what
+    # that pass exists for, and no ordinary path through this loop leaves a gate
+    # rowless, so this is the only way to exercise it.
+    #
+    # Setting it can no longer MANUFACTURE a result. It used to: combined with a
+    # hand-written `gates_rows/<gate>.json` whose only binding was the public
+    # HEAD, a required gate declaring `command: "exit 1"` reported `pass`. The
+    # restore pass now requires a keyed binding only this run's own writers can
+    # produce, so this seam can skip a gate's execution but the outcome is either
+    # a genuine row the run itself checkpointed, or an explicit refusal — and a
+    # gate with no restorable row at all trips the defined==processed integrity
+    # assert and fails the run.
     if [[ -n "${AID_TEST_DROP_GATE_RESTORE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE_RESTORE}" ]]; then
       continue
     fi
@@ -1383,7 +1494,8 @@ run_all_gates() {
     processed=$((processed+1))
 
     # P076 Step 2 — durable incremental checkpoint of the COMPLETED row.
-    _gate_row_checkpoint "$_rows_dir" "$gate_name" "$merged_row" "$_rows_head"
+    _gate_row_checkpoint "$_rows_dir" "$gate_name" "$merged_row" "$_rows_head" \
+      "$_rows_tree" "$_rows_key"
 
     # ─── command_log entry (P032 Step 3 provenance) ──────────────────
     local exit_code dur_ms
@@ -1415,17 +1527,24 @@ run_all_gates() {
   # the defined==processed assert below. The membership test is anchored by the
   # opening quote (`"name":`), so gate `a` never matches inside gate `ba`.
   #
-  # P076 Step 4 (CP2 carry-over, AC4): a row file is authoritative only for the
-  # REVISION it was produced at. Every checkpoint carries a `_checkpoint.head`
-  # binding, and a row whose binding is missing (written by an older runner, or
-  # a jq failure at write time) or whose HEAD has since moved is NEVER restored
-  # as a pass. It is replaced by an explicit `gate_row_stale` FAIL row, which
-  # still counts toward `processed` — so the defined==processed integrity assert
-  # keeps holding — and still forces overall=fail when the gate is required.
-  # Refusal, not silence: "this gate has no current result" must look different
-  # from "this gate passed".
+  # A row file is authoritative only for the REVISION it was produced at AND
+  # only when THIS RUN's own writers produced it. Every checkpoint carries a
+  # `_checkpoint` envelope of {head, tree, key}; a row whose envelope is missing
+  # (an older runner, or a jq failure at write time), whose head or tree has
+  # since moved, or whose keyed binding does not verify against this run's
+  # secret, is NEVER restored as a pass. It is replaced by an explicit
+  # `gate_row_stale` FAIL row, which still counts toward `processed` — so the
+  # defined==processed integrity assert keeps holding — and still forces
+  # overall=fail when the gate is required. Refusal, not silence: "this gate has
+  # no current result" must look different from "this gate passed".
+  #
+  # The key check is what closes the demonstrated forgery: a hand-written row
+  # carrying the current HEAD used to replay as a required-gate PASS, because
+  # HEAD is public and readable by anything that can write the row file. It also
+  # fails closed on its own inputs — no run key (no evidence directory, or an
+  # unwritable/corrupt key file) means EVERY row is refused, never accepted.
   if [[ -n "$_rows_dir" && -d "$_rows_dir" ]]; then
-    local _rf _rg _rrow _rec_head _stale_reason _required_rg
+    local _rf _rg _rrow _rec_head _rec_tree _rec_key _want_key _stale_reason _required_rg
     for _rf in "$_rows_dir"/*.json; do
       [[ -f "$_rf" ]] || continue
       _rg="$(basename "$_rf" .json)"
@@ -1438,11 +1557,20 @@ run_all_gates() {
       [[ -z "$_rrow" || "$_rrow" == "null" ]] && continue
 
       _rec_head="$(jq -r '._checkpoint.head // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _rec_tree="$(jq -r '._checkpoint.tree // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _rec_key="$(jq -r '._checkpoint.key // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _want_key="$(aid_gate_row_binding_key "$_rows_key" "$_rg" "$_rows_head" "$_rows_tree")"
       _stale_reason=""
       if [[ -z "$_rec_head" ]]; then
         _stale_reason="row_not_bound_to_a_revision"
       elif _job_head_drifted "$_rec_head" "$_rows_head"; then
         _stale_reason="start_head_moved"
+      elif [[ -z "$_rec_tree" ]] || { [[ -n "$_rows_tree" ]] && [[ "$_rec_tree" != "$_rows_tree" ]]; }; then
+        _stale_reason="start_tree_moved"
+      elif [[ -z "$_want_key" ]]; then
+        _stale_reason="run_key_unavailable"
+      elif [[ "$_rec_key" != "$_want_key" ]]; then
+        _stale_reason="row_not_written_by_this_run"
       fi
 
       _required_rg="$(yq ".gates.\"${_rg}\".required // false" "$execution_yaml")"

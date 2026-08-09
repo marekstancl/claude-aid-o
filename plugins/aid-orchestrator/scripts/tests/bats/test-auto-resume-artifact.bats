@@ -69,9 +69,35 @@ teardown() {
       [[ "$pgid" =~ ^[1-9][0-9]*$ ]] && kill -KILL -"$pgid" 2>/dev/null || true
     done
   fi
-  [[ -n "${BG_RUNNER_PID:-}" ]] && kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
+  kill_runner
   cd /
   [[ -n "${WORK:-}" && -d "$WORK" ]] && rm -rf "$WORK"
+  return 0
+}
+
+# `$!` is the backgrounded SUBSHELL; aid-run-gates.sh may be that process or a
+# child of it depending on whether bash exec-optimises the subshell, so killing
+# only the pid bash reports leaves the real runner polling — reparented to PID 1,
+# still holding bats' inherited fds until its gate deadline expires. (Observed:
+# runners alive long after this suite reported complete.) The runner is therefore
+# identified by what it provably IS: an aid-run-gates.sh run-all process whose
+# CWD is THIS test's project. Topology-independent, and safe under parallel bats
+# runs because every test has its own project dir.
+_runner_pids() {
+  local p want
+  want="$(readlink -f "${PROJ:-/nonexistent}" 2>/dev/null || echo "${PROJ:-/nonexistent}")"
+  for p in $(pgrep -f "aid-run-gates.sh run-all" 2>/dev/null || true); do
+    [[ "$(readlink -f "/proc/$p/cwd" 2>/dev/null || true)" == "$want" ]] && echo "$p"
+  done
+  return 0
+}
+
+kill_runner() {
+  local p
+  for p in $(_runner_pids); do kill -KILL "$p" 2>/dev/null || true; done
+  [[ -n "${BG_RUNNER_PID:-}" ]] && kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
+  [[ -n "${BG_RUNNER_PID:-}" ]] && wait "$BG_RUNNER_PID" 2>/dev/null || true
+  BG_RUNNER_PID=""
   return 0
 }
 
@@ -241,8 +267,7 @@ YAML
   # The harshest possible death: no trap, no cleanup, nothing written on the
   # way out. Everything a resume can learn, it learns from what was already
   # on disk BEFORE the death.
-  kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
-  wait "$BG_RUNNER_PID" 2>/dev/null || true
+  kill_runner
 
   [ -f "$ARTIFACT" ]
   run _validate "$ARTIFACT"
@@ -442,20 +467,22 @@ gates:
     required: true
     timeout_seconds: 30
   ghost:
-    command: "echo never-runs"
+    command: "echo ghost-failed-earlier >&2; exit 1"
     required: true
     timeout_seconds: 30
 YAML
 
-  # A row checkpointed at the CURRENT revision, for a gate this invocation is
-  # made to skip entirely (the sanctioned lost-gate fault seam is deliberately
-  # NOT used here — it also suppresses restore, by design).
-  mkdir -p "$ROWS"
-  local head; head="$(git -C "$PROJ" rev-parse HEAD)"
-  jq -n --arg h "$head" \
-    '{gate:"ghost", result:"fail", exit_code:1, duration_ms:5, attempts:1,
-      output:"ghost failed earlier",
-      _checkpoint:{head:$h, written_at:"2026-01-01T00:00:00Z"}}' > "$ROWS/ghost.json"
+  # The row under test is written by THE RUNNER ITSELF, in an earlier
+  # invocation — not by hand. That is the whole point of the binding: a row is
+  # restorable only when this run's own writers produced it, so a fixture that
+  # hand-wrote one would be testing the forgery the binding exists to refuse
+  # (and, before CP3, would have passed for exactly that reason).
+  run run_gates
+  [ -f "$ROWS/ghost.json" ]
+  run jq -r '.result' "$ROWS/ghost.json"
+  [ "$output" = "fail" ]
+  run jq -e '._checkpoint.head != null and ._checkpoint.tree != null and ._checkpoint.key != null' "$ROWS/ghost.json"
+  [ "$status" -eq 0 ]
 
   # `ghost` stays DEFINED (only defined gates are restorable) but is not
   # ITERATED — the shape a runner killed mid-loop leaves behind, and the only
@@ -466,7 +493,7 @@ YAML
   run jq -r '.gates.ghost.result' "$REPORT"
   [ "$output" = "fail" ]
   run jq -r '.gates.ghost.output' "$REPORT"
-  [ "$output" = "ghost failed earlier" ]
+  [[ "$output" == *"ghost-failed-earlier"* ]]
   # A restored FAILING required row still drives overall.
   run jq -r '.overall' "$REPORT"
   [ "$output" = "fail" ]

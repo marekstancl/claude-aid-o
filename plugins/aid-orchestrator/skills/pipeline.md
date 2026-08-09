@@ -53,13 +53,24 @@ process and no repository/evidence progress for 5 minutes, resume or diagnose au
    threshold) — it is never stored, because a dying controller cannot write anything on its way out.
 2. **The command.** `aid-fsm.sh resume <epic_id>` claims the pointer exactly once, collects the
    referenced job's terminal result, writes it to the durable `gates_rows/<gate>.json` checkpoint
-   that the next `run-all` assembles into the report (it never edits a final report in place),
-   updates the active-runs entry through the single map writer, and prints three lines: what was
+   (it never edits a final report in place), updates the active-runs entry through the single map
+   writer, and prints three lines: what was
    found, what was recorded, and the next action. A job still in flight is a read-only status
    report — nothing is claimed, the pointer is untouched, and a later resume still works. A missing
    job record, a `lost` job, and a `stale` result are each reported verbatim with the rerun
    instruction; none of them is ever patched into the report as evidence.
 3. **The printed next action.** The controller runs it.
+
+**What the checkpoint is, precisely.** `gates_rows/<gate>.json` is a durable record of the result
+`resume` collected — not the route by which that result reaches the report. The next `run-all`
+iterates every defined gate, so it produces its own row for that gate: for a background gate it
+re-attaches to the SAME supervised job and *collects* its terminal result rather than re-executing
+the suite (that, not the checkpoint, is what makes a crash cost zero re-execution), and it then
+overwrites the checkpoint with the row it derived. The two rows are byte-identical by construction,
+so the outcome is the same either way. The runner's restore-from-checkpoint pass is a fail-closed
+safety net for a defined gate that produced no row at all in an invocation; no ordinary path through
+the gate loop leaves a gate rowless, and a row it cannot verify against this run's own keyed binding
+becomes an explicit `gate_row_stale` FAIL, never a pass.
 
 **AUTO liveness step (loop item 10).** After every dispatch or gate action the controller runs one
 query — no daemon, no waiting turn:

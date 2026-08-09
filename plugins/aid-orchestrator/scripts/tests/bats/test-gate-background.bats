@@ -70,9 +70,36 @@ teardown() {
       [[ "$pgid" =~ ^[1-9][0-9]*$ ]] && kill -KILL -"$pgid" 2>/dev/null || true
     done
   fi
-  [[ -n "${BG_RUNNER_PID:-}" ]] && kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
+  kill_runner
   cd /
   [[ -n "${WORK:-}" && -d "$WORK" ]] && rm -rf "$WORK"
+  return 0
+}
+
+# `$!` is the backgrounded SUBSHELL; aid-run-gates.sh may be that process or a
+# child of it depending on whether bash exec-optimises the subshell, so killing
+# only the pid bash reports leaves the real runner polling — reparented to PID 1,
+# still holding bats' inherited fds until its gate deadline expires. (Observed:
+# a runner alive 74 s after this suite reported complete.) The runner is
+# therefore identified by what it provably IS: an aid-run-gates.sh run-all
+# process whose CWD is THIS test's project. Topology-independent, and safe under
+# parallel bats runs because every test has its own project dir. The supervised
+# job runs `bash -c <gate command>` and does not match.
+_runner_pids() {
+  local p want
+  want="$(readlink -f "${PROJ:-/nonexistent}" 2>/dev/null || echo "${PROJ:-/nonexistent}")"
+  for p in $(pgrep -f "aid-run-gates.sh run-all" 2>/dev/null || true); do
+    [[ "$(readlink -f "/proc/$p/cwd" 2>/dev/null || true)" == "$want" ]] && echo "$p"
+  done
+  return 0
+}
+
+kill_runner() {
+  local p
+  for p in $(_runner_pids); do kill -KILL "$p" 2>/dev/null || true; done
+  [[ -n "${BG_RUNNER_PID:-}" ]] && kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
+  [[ -n "${BG_RUNNER_PID:-}" ]] && wait "$BG_RUNNER_PID" 2>/dev/null || true
+  BG_RUNNER_PID=""
   return 0
 }
 
@@ -244,9 +271,9 @@ YAML
   wait_for_job_pid "$JOBS/bg-attempt-1"
   [ -f "$JOBS/bg-attempt-1/job.json" ]
 
-  # SIGKILL the runner — no trap, no cleanup, the harshest possible death.
-  kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
-  wait "$BG_RUNNER_PID" 2>/dev/null || true
+  # SIGKILL the runner — no trap, no cleanup, the harshest possible death. Every
+  # process that IS the runner, not just the pid bash reported.
+  kill_runner
 
   # The job is setsid-detached and group-owned, so it survives its caller.
   run bash "$JOB_SH" status --jobs-dir "$JOBS" --id bg-attempt-1
