@@ -70,7 +70,10 @@
 #                         one of the refusals: "budget_exhausted",
 #                         "wall_clock_exhausted", "refused_action_not_allowed",
 #                         "refused_policy_unreadable", "refused_unknown_class",
-#                         "refused_unreadable_record".
+#                         "refused_unreadable_record",
+#                         "refused_record_tampered" (the record is short of, or
+#                         does not match, its own high-water mark — see THE
+#                         RECORD'S INTEGRITY below).
 #   recovery_outcome      what the caller's action actually did.
 #                         outcome: "succeeded" | "failed".
 #   recovery_terminus     outcome: "escalated".
@@ -109,7 +112,7 @@
 #   AID_RECOVERY_FSM_BIN  — path to aid-fsm.sh (test seam).
 #   AID_LADDER_LOCK_TIMEOUT_S — flock wait, default 10.
 #
-# **Last Updated:** 2026-08-09
+# **Last Updated:** 2026-08-10
 # =============================================================================
 
 _AID_LADDER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -326,6 +329,265 @@ aid_recovery_policy_load() {
 # _aid_ladder_record_path <run_evidence_dir>
 _aid_ladder_record_path() { printf '%s/%s' "${1%/}" "$AID_LADDER_RECORD_BASENAME"; }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# THE RECORD'S INTEGRITY — a budget that resets when you delete a file is not a
+# budget (CP3 HIGH)
+# ═══════════════════════════════════════════════════════════════════════════
+# `recovery-ladder.jsonl` is the SOLE accounting for both halves of every
+# class's budget — attempts used and the wall clock, which runs from the class's
+# first line. It lives in the subagent-writable evidence directory and had no
+# binding to anything: grant 1, count 1, `: > record`, count 0, grant again,
+# forever. The flock closed the concurrent TOCTOU and closed nothing at all
+# about a writer that empties the file.
+#
+# What this does NOT do, said first: it does not grant PM authority. The FSM's
+# ESCALATION→EXECUTE/GATES precondition still requires `escalation_decision`, so
+# a reset budget cannot walk past a terminus. What it does is worse in a quieter
+# way — it defeats the mechanism that would have ASKED for that authority, by
+# never reaching the terminus at all.
+#
+# THE MECHANISM, and why this one. The precedents available were the gate-row
+# checkpoint's per-run key, the step-transition ledger, and the ownership claim.
+# The step-transition ledger is the closest fit and the one this follows: it is
+# append-only, every row carries the identity of what produced it, and the FSM's
+# self-heal refuses a row whose binding does not verify (`_increment_binding_
+# verified`) rather than trusting the ledger alone. Applied here that becomes
+# two parts:
+#
+#   1. A HASH CHAIN inside the record. Every line carries `seq` (1, 2, 3 …) and
+#      `prev` — the sha256 of the previous line's exact text, or "genesis". A
+#      line removed from the middle, or edited, breaks the chain at that point
+#      and is provable from the file alone.
+#   2. A HIGH-WATER MARK beside it, `recovery-ladder.hwm.json`, holding the last
+#      `seq` and the sha256 of the last line, rewritten under the SAME lock as
+#      the append. Truncation and wholesale replacement do not break the chain —
+#      a one-line file is a perfectly valid chain — so the thing that catches
+#      them is a mark the record cannot lower. A record shorter than the mark,
+#      or whose tail does not hash to it, is TAMPERED.
+#
+#   3. A WALK over the chain, because the mark can only speak about the END of
+#      the record: a line deleted or edited in the MIDDLE — a spent `started`
+#      turned into anything else — changes neither the maximum seq nor the tail
+#      hash. `_aid_ladder_chain_broken` verifies every chained line's `prev`
+#      against the hash of the one before it and its `seq` against its position.
+#
+# A tampered record does not reset the budget: it refuses. `aid_ladder_attempt`
+# returns `adjudicate refused_record_tampered`, which is the same fail-closed
+# exit as an unparseable record and lands at adjudication, not at "proceed".
+#
+# THE RESIDUAL, named rather than implied: an attacker who deletes BOTH the
+# record and its high-water mark still starts from zero, and a directory the
+# writer must be able to write cannot be made proof against its writer. Perfect
+# tamper-proofing is not on offer here; what is, and what was missing, is that
+# the reset can no longer be SILENT — it now takes two coordinated deletions
+# instead of one truncation, and every partial attempt is a loud, recorded
+# refusal rather than a fresh budget.
+_aid_ladder_hwm_path() { printf '%s.hwm.json' "$(_aid_ladder_record_path "$1")"; }
+
+# _aid_ladder_sha <string> — sha256 of the exact bytes (no trailing newline
+# beyond what is passed). Empty when no sha256 tool is available, which the
+# callers treat as "cannot verify" and therefore as "cannot trust".
+_aid_ladder_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum 2>/dev/null | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 2>/dev/null | awk '{print $1}'
+  else
+    printf ''
+  fi
+}
+
+# _aid_ladder_chain_state <record> — echoes "<max_seq> <sha_of_last_chained_line>"
+# describing the record as it stands. An absent or empty record is "0 genesis".
+#
+# "last CHAINED line", not "last line": the adjudication lib falls back to a
+# PLAIN append when this file is not sourced, so an unchained line can
+# legitimately sit at the end. The chain is defined over the chained lines in
+# order and simply steps over the others, which is what lets both writers
+# coexist without either one reading as damage.
+_aid_ladder_chain_state() {
+  local rec="$1" maxseq="" last=""
+  [[ -s "$rec" ]] || { printf '0 genesis'; return 0; }
+  maxseq="$(jq -rn '[inputs | select(type == "object" and has("seq")) | .seq] | (max // 0)' "$rec" 2>/dev/null || echo 0)"
+  [[ "$maxseq" =~ ^[0-9]+$ ]] || maxseq=0
+  if (( maxseq > 0 )); then
+    last="$(_aid_ladder_line_with_seq "$rec" "$maxseq")"
+  fi
+  if [[ -n "$last" ]]; then
+    printf '%s %s' "$maxseq" "$(_aid_ladder_sha "$last")"
+  else
+    printf '%s %s' "$maxseq" ""
+  fi
+}
+
+# _aid_ladder_line_with_seq <record> <seq> — the EXACT bytes of the (last) line
+# whose `seq` is <seq>. Exact bytes matter: the hash is over the line as
+# written, and re-rendering it through jq would produce a different string for
+# the same document.
+#
+# Scanned BACKWARDS with a cheap substring test first, and only the candidate is
+# handed to jq. A `jq` per line here cost 3 s on a 40-line record — this runs on
+# every append, including the emitters whose callers are producing gate
+# verdicts, so it has to be one subprocess and not n.
+_aid_ladder_line_with_seq() {
+  local rec="$1" want="$2" i n
+  local -a lines=()
+  mapfile -t lines < "$rec" 2>/dev/null || return 0
+  n=${#lines[@]}
+  for (( i = n - 1; i >= 0; i-- )); do
+    [[ "${lines[i]}" == *"\"seq\":${want}"* ]] || continue
+    if [[ "$(jq -r 'if type == "object" and has("seq") then (.seq|tostring) else "" end' <<<"${lines[i]}" 2>/dev/null)" == "$want" ]]; then
+      printf '%s' "${lines[i]}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# _aid_ladder_chain_broken <record> — echoes EMPTY when the chain of chained
+# lines is intact, else the reason it is not.
+#
+# THIS is what makes the chain more than decoration. The high-water mark catches
+# the record being SHORTENED or its tail rewritten; without a walk, a line
+# deleted or edited in the MIDDLE changes neither the maximum seq nor the last
+# line — and a `started` line quietly turned into a spent attempt handed back is
+# the same defect the mark exists to stop.
+#
+# The walk costs one jq for the whole file plus one sha per chained line, and it
+# runs ONLY from `aid_ladder_attempt` — a few times per run at most, never from
+# the emitters. `_aid_ladder_append_locked` uses the cheap mark checks instead,
+# which is sufficient there: truncation is what an append could otherwise HEAL,
+# and truncation is exactly what the mark catches. A middle edit is not healed
+# by later appends — the broken link stays broken — so the attempt-time walk
+# still finds it.
+_aid_ladder_chain_broken() {
+  local rec="$1" line expect="genesis" n=0 seq prev meta i
+  [[ -s "$rec" ]] || { printf ''; return 0; }
+  local -a lines=() metas=()
+  mapfile -t lines < "$rec" 2>/dev/null || { printf ''; return 0; }
+  # ONE jq for the whole record: "<seq> <prev>" per JSON value, in order, or "-"
+  # for a line that is not a chained object. JSONL means one value per line, so
+  # the two arrays align by index.
+  mapfile -t metas < <(jq -rn '
+      inputs
+      | if (type == "object" and has("seq"))
+        then ((.seq|tostring) + " " + (.prev // ""))
+        else "-" end' "$rec" 2>/dev/null || true)
+  (( ${#metas[@]} == ${#lines[@]} )) || { printf ''; return 0; }  # not JSONL — the parse check owns that verdict
+  for (( i = 0; i < ${#lines[@]}; i++ )); do
+    meta="${metas[i]}"
+    [[ "$meta" == "-" ]] && continue          # an unchained line is stepped over
+    seq="${meta%% *}"; prev="${meta#* }"
+    n=$(( n + 1 ))
+    if [[ "$seq" != "$n" ]]; then
+      printf 'the ladder record chain jumps from %s to %s — a line was removed from the middle of it\n' "$(( n - 1 ))" "$seq"
+      return 0
+    fi
+    if [[ "$prev" != "$expect" ]]; then
+      printf 'ladder record line %s does not chain onto the one before it — a line was edited or replaced\n' "$seq"
+      return 0
+    fi
+    expect="$(_aid_ladder_sha "${lines[i]}")"
+    [[ -n "$expect" ]] || { printf 'the ladder record could not be hashed (no sha256 tool), so its chain cannot be verified\n'; return 0; }
+  done
+  printf ''
+  return 0
+}
+
+# _aid_ladder_hwm_write <run_evidence_dir> <seq> <sha> — atomic tmp+mv, called
+# only from inside the append's critical section.
+_aid_ladder_hwm_write() {
+  local hwm tmp
+  hwm="$(_aid_ladder_hwm_path "$1")"
+  tmp="${hwm}.tmp.$$"
+  jq -nc --argjson s "$2" --arg h "$3" --arg at "$(_aid_ladder_now)" \
+     '{schema:"aid.recovery.ladder.hwm/1", seq:$s, last_sha256:$h, updated_at:$at}' \
+     > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  mv -f "$tmp" "$hwm" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  return 0
+}
+
+# _aid_ladder_integrity <run_evidence_dir>
+#   Echoes EMPTY when the record may be trusted, else the reason it may not.
+#   Never mutates anything. Must be called with the record lock held by anything
+#   that will then act on the answer.
+# `_aid_ladder_integrity_fast` is the same verdict WITHOUT the walk: sticky flag
+# plus the two mark comparisons. It is what every append uses, because the only
+# thing an append could otherwise do wrong is HEAL a truncation, and truncation
+# is precisely what the mark catches. `_aid_ladder_integrity` adds the walk and
+# is used where the counts are actually trusted — `aid_ladder_attempt`.
+_aid_ladder_integrity_fast() {
+  local dir="$1" rec hwm state cur_seq cur_sha want_seq want_sha
+  rec="$(_aid_ladder_record_path "$dir")"
+  hwm="$(_aid_ladder_hwm_path "$dir")"
+  if [[ ! -f "$hwm" ]]; then
+    # No mark yet. Either nothing has been recorded, or this record predates the
+    # chain (a run started on an older build). Both are legitimate and neither
+    # is evidence of tampering — the mark is established by the next append.
+    printf ''
+    return 0
+  fi
+  # ONE jq for the whole mark: the sticky verdict and both fields. This runs on
+  # every append, and three jq processes where one does is three processes on a
+  # path whose callers are producing gate verdicts.
+  # THREE LINES, read with mapfile — not `@tsv` into `read -r a b c`. With IFS
+  # set to a tab, `read` treats a LEADING tab as skippable whitespace and drops
+  # the empty first field, so an unset `tamper_reason` silently shifted the seq
+  # into it and every record read as tampered. (Caught by this file's own suite;
+  # noted here because the shape is inviting and the failure is silent.) The
+  # reasons this file writes are single-line literals, so a line each is exact.
+  local -a mark=()
+  local sticky
+  mapfile -t mark < <(jq -r '(if (.tampered // false) then (.tamper_reason // "the ladder record was found tampered earlier in this run") else "" end),
+                             ((.seq // "")|tostring), (.last_sha256 // "")' "$hwm" 2>/dev/null || true)
+  sticky="${mark[0]:-}"; want_seq="${mark[1]:-}"; want_sha="${mark[2]:-}"
+  # A tamper verdict already reached is FINAL for this record. See
+  # `_aid_ladder_hwm_mark_tampered`.
+  if [[ -n "$sticky" ]]; then
+    printf '%s\n' "$sticky"
+    return 0
+  fi
+  if [[ ! "$want_seq" =~ ^[0-9]+$ ]]; then
+    printf 'the ladder high-water mark at %s is unreadable, so the spent budget cannot be established\n' "$hwm"
+    return 0
+  fi
+  state="$(_aid_ladder_chain_state "$rec")"
+  cur_seq="${state%% *}"; cur_sha="${state##* }"
+  if (( cur_seq < want_seq )); then
+    printf 'the ladder record holds %s line(s) but its high-water mark records %s — the record was truncated or replaced, and the spent budget is therefore unknown\n' "$cur_seq" "$want_seq"
+    return 0
+  fi
+  # The content half of the check applies only when there is something to
+  # compare on both sides: an unchained trailing line (the adjudication lib's
+  # plain-append fallback) or a host without sha256 leaves `cur_sha` empty, and
+  # neither of those is evidence of tampering. The seq half above stands in both
+  # cases, and the seq half is what catches truncation and replacement.
+  if (( cur_seq == want_seq )) && [[ -n "$cur_sha" && -n "$want_sha" && "$want_sha" != "genesis" ]]; then
+    if [[ "$cur_sha" != "$want_sha" ]]; then
+      printf 'the ladder record last line does not match its high-water mark — the record was rewritten in place\n'
+      return 0
+    fi
+  fi
+  printf ''
+  return 0
+}
+
+# _aid_ladder_integrity <run_evidence_dir> — the FULL verdict: the fast checks
+# plus THE WALK. The walk is last because it is the expensive one and the cheap
+# checks catch the common shapes; it is not optional, though, because the mark
+# can only ever speak about the END of the record. Without it a line deleted or
+# edited in the MIDDLE — turning a spent `started` into anything else — changes
+# neither the maximum seq nor the tail hash, and hands the budget straight back.
+_aid_ladder_integrity() {
+  local dir="$1" fast walk
+  fast="$(_aid_ladder_integrity_fast "$dir")"
+  if [[ -n "$fast" ]]; then printf '%s' "$fast"; return 0; fi
+  walk="$(_aid_ladder_chain_broken "$(_aid_ladder_record_path "$dir")")"
+  if [[ -n "$walk" ]]; then printf '%s' "$walk"; return 0; fi
+  printf ''
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # aid_recovery_ladder_append <run_evidence_dir> <json_line>
 #
@@ -363,10 +625,77 @@ aid_recovery_ladder_append() {
   aid_lock_acquire "${rec}.lock" "${AID_LADDER_LOCK_TIMEOUT_S:-10}" || {
     _aid_ladder_warn "could not lock ${rec}.lock — nothing appended"; return 1; }
   fd="$AID_LOCK_FD"
-  printf '%s\n' "$line" >> "$rec" 2>/dev/null || rc=1
+  _aid_ladder_append_locked "$dir" "$line" || rc=1
   aid_lock_release "$fd"
   (( rc == 0 )) || _aid_ladder_warn "could not append to ${rec}"
   return "$rc"
+}
+
+# _aid_ladder_append_locked <run_evidence_dir> <canonical_json_line>
+#   The ONE physical write, called with the record lock already held. It stamps
+#   the chain fields (`seq`, `prev`) and advances the high-water mark in the
+#   SAME critical section as the append — a mark written outside the lock would
+#   be a second TOCTOU in the place built to close the first one.
+#
+#   The mark is advanced AFTER the line is on disk, so a crash between the two
+#   leaves a record one line AHEAD of its mark. That direction is deliberate and
+#   harmless: `_aid_ladder_integrity` refuses a record SHORTER than its mark and
+#   accepts a longer one, so a crash costs nothing while a truncation still
+#   refuses. The reverse order would have turned every crash into a tamper
+#   report.
+#
+#   THE MARK IS NEVER ADVANCED OVER A TAMPERED RECORD, and this is checked in
+#   EVERY writer rather than only in the budget path. It has to be: the budget
+#   path is not the only thing that appends. An ordinary `aid_ladder_emit` — a
+#   stop being observed, which is exactly what precedes a recovery attempt —
+#   would otherwise write line 1 over a truncated record, re-establish the mark
+#   at seq 1, and hand the next `aid_ladder_attempt` a record that agrees with
+#   its own mark and reports zero attempts used. The truncation would have been
+#   healed by the very next honest write, which is the original defect wearing a
+#   different hat. So the verdict is taken here, made STICKY in the mark, and
+#   the mark is left where it was.
+#
+#   `skip_hwm` (third argument) forces that same behaviour for a caller that
+#   already knows — the budget path passes it after recording its refusal.
+_aid_ladder_append_locked() {
+  local dir="$1" line="$2" skip_hwm="${3:-}" rec state seq sha next tamper=""
+  rec="$(_aid_ladder_record_path "$dir")"
+  tamper="$(_aid_ladder_integrity_fast "$dir")"
+  if [[ -n "$tamper" ]]; then
+    skip_hwm=1
+    _aid_ladder_hwm_mark_tampered "$dir" "$tamper" || true
+  fi
+  state="$(_aid_ladder_chain_state "$rec")"
+  seq="${state%% *}"; sha="${state##* }"
+  [[ "$seq" =~ ^[0-9]+$ ]] || seq=0
+  [[ -n "$sha" ]] || sha="genesis"
+  next=$(( seq + 1 ))
+  line="$(jq -c --argjson n "$next" --arg p "$sha" '. + {seq:$n, prev:$p}' <<<"$line" 2>/dev/null)" || return 1
+  [[ -n "$line" ]] || return 1
+  printf '%s\n' "$line" >> "$rec" 2>/dev/null || return 1
+  [[ -n "$skip_hwm" ]] && return 0
+  _aid_ladder_hwm_write "$dir" "$next" "$(_aid_ladder_sha "$line")" \
+    || _aid_ladder_warn "the ladder line was appended but its high-water mark at $(_aid_ladder_hwm_path "$dir") could not be advanced — a later truncation of ${rec} would go undetected from this point"
+  return 0
+}
+
+# _aid_ladder_hwm_mark_tampered <run_evidence_dir> <reason>
+#   STICKY. Once the record has been found short of its own mark, saying so once
+#   is not enough: the refusal line itself lengthens the record, so a purely
+#   arithmetic check would forgive the tamper after enough refusals. The verdict
+#   is therefore stored in the mark and every later read returns it verbatim.
+#   Best-effort — a mark that cannot be written leaves the arithmetic check,
+#   which is still the check that caught it.
+_aid_ladder_hwm_mark_tampered() {
+  local dir="$1" reason="$2" hwm tmp
+  hwm="$(_aid_ladder_hwm_path "$dir")"
+  [[ -f "$hwm" ]] || return 0
+  tmp="${hwm}.tmp.$$"
+  jq -c --arg r "${reason%$'\n'}" --arg at "$(_aid_ladder_now)" \
+     '. + {tampered:true, tamper_reason:$r, tampered_at:$at}' "$hwm" > "$tmp" 2>/dev/null \
+     || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  mv -f "$tmp" "$hwm" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  return 0
 }
 
 # _aid_ladder_line <class> <event> <outcome> [k=v ...] — one record line, built
@@ -518,6 +847,16 @@ aid_ladder_attempt() {
     return 4; }
   fd="$AID_LOCK_FD"
 
+  # ── INTEGRITY, inside the same critical section as the count ────────────
+  # Asked here and not earlier for the same reason the count is here: an answer
+  # taken outside the lock is an answer about a file that may have changed by
+  # the time it is acted on. A tampered record is treated exactly like an
+  # unparseable one — the spent budget is UNKNOWN, so no further attempt is
+  # granted — because "the accounting was destroyed" must never be the cheapest
+  # way to obtain a fresh budget.
+  local integrity_err=""
+  integrity_err="$(_aid_ladder_integrity "$dir")"
+
   local used=0 first_ts="" parse_ok=1
   if [[ -s "$rec" ]]; then
     used="$(jq -rn --arg c "$class" '[inputs | select(.event == "recovery_attempt" and .class == $c and .outcome == "started")] | length' "$rec" 2>/dev/null)" || parse_ok=0
@@ -525,10 +864,19 @@ aid_ladder_attempt() {
   fi
   [[ "$used" =~ ^[0-9]+$ ]] || parse_ok=0
 
+  # ORDER: unparseable BEFORE tampered, and it is a diagnosis choice rather than
+  # a precedence of severity — both refuse, both land at adjudication, and
+  # neither grants anything. A record that cannot be parsed at all is reported as
+  # exactly that, because that is the more specific and more actionable thing to
+  # say about it; `refused_record_tampered` is reserved for a record that parses
+  # fine and is simply not the record its own mark describes.
   local outcome="" detail="" attempt_n=0
   if (( ! parse_ok )); then
     outcome="refused_unreadable_record"
     detail="the ladder record could not be parsed; the spent budget is unknown, so no further attempt is granted"
+  elif [[ -n "$integrity_err" ]]; then
+    outcome="refused_record_tampered"
+    detail="${integrity_err%$'\n'}; the spent budget is unknown, so no further attempt is granted"
   else
     local now first_epoch elapsed=0
     now="$(date -u +%s)"
@@ -555,7 +903,12 @@ aid_ladder_attempt() {
   if [[ -n "$line" ]]; then
     line="$(jq -c --argjson n "$attempt_n" '.attempt_n = $n' <<<"$line" 2>/dev/null)" || line=""
   fi
-  if [[ -z "$line" ]] || ! printf '%s\n' "$line" >> "$rec" 2>/dev/null; then
+  local _skip_hwm=""
+  if [[ "$outcome" == "refused_record_tampered" ]]; then
+    _skip_hwm=1
+    _aid_ladder_hwm_mark_tampered "$dir" "$integrity_err" || true
+  fi
+  if [[ -z "$line" ]] || ! _aid_ladder_append_locked "$dir" "$line" "$_skip_hwm"; then
     rc_append=1
   fi
   aid_lock_release "$fd"

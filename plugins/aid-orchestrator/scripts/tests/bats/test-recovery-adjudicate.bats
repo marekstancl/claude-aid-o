@@ -656,3 +656,44 @@ RATIONALE: reversible."
   # and the convention text now lives in the lib header
   grep -qF "Until a dedicated adjudicator command is available, use the existing" "$LIB"
 }
+
+@test "case 25: the PROJECT policy override binds the adjudicator, not only the ladder" {
+  # DEMONSTRATED AT 0d6a3e3: an override narrowing GATE_TIMEOUT to
+  # [wait_and_resume] bounded `aid_ladder_attempt` and did nothing here — this
+  # lib read `${AID_RECOVERY_POLICY:-<shipped>}` and returned `rerun_targeted`,
+  # an action the effective policy had removed. Two consumers of one policy must
+  # not disagree about which policy it is.
+  local proj="$WORK/proj"
+  mkdir -p "$proj/.aid-o/config/policies"
+  policy_copy "$proj/.aid-o/config/policies/auto-recovery.yaml"
+  yq -i '.stop_classes.GATE_TIMEOUT.allowed_actions = ["wait_and_resume"]' \
+    "$proj/.aid-o/config/policies/auto-recovery.yaml"
+
+  # The ladder — the consumer that already honoured the override — agrees the
+  # narrowed policy is in force.
+  run bash -c 'set -euo pipefail; cd "$1"; source "$2"
+               aid_ladder_attempt "$3" GATE_TIMEOUT rerun_targeted' \
+    _ "$proj" "$PLUGIN_ROOT/scripts/lib/aid-recovery-ladder.sh" "$EVID"
+  echo "$output"
+  [ "$status" -eq 4 ]
+  [ "${lines[-1]}" = "adjudicate refused_action_not_allowed" ]
+
+  # And now so does the adjudicator: the removed action is not in the allowlist
+  # it dispatches, and a reply naming it cannot be accepted.
+  reply 1 "ACTION: rerun_targeted
+RATIONALE: this action is no longer in the effective policy's allowlist."
+  reply 2 "ACTION: rerun_targeted
+RATIONALE: still not in the allowlist."
+  run bash -c 'cd "$1"; shift; exec bash "$@"' _ "$proj" "$WORK/run.sh" "$EVID" GATE_TIMEOUT "$FACTS"
+  echo "$output"
+  [ "$status" -eq 3 ]
+  [ "${lines[-1]}" = "escalate" ]
+
+  # The prompt it dispatched carried the OVERRIDE's allowlist, not the shipped
+  # one — the ceiling has to be the effective policy's, or it is a ceiling from
+  # a different building.
+  run bash -c 'awk "/^## ALLOWED ACTIONS/{f=1;next} /^## /{f=0} f" "$1"' _ "$STUB_DIR/prompt-1.md"
+  echo "ALLOWED ACTIONS section: $output"
+  [[ "$output" == *"wait_and_resume"* ]]
+  [[ "$output" != *"rerun_targeted"* ]]
+}

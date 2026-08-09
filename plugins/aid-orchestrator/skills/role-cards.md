@@ -224,7 +224,10 @@ the implementation actually functions across every layer it touches.
   - `probe_cmd` is the alternative the no-arbitrary-sleeps rule always implied and never named:
     readiness is a command that exits 0 when the service is genuinely serving (`pg_isready`, a
     `curl` on the health endpoint), polled by the runner until `startup_deadline_seconds` runs
-    out. A `sleep 10` before a check is a guess; `probe_cmd` is an answer.
+    out. A `sleep 10` before a check is a guess; `probe_cmd` is an answer. It must RETURN — each
+    invocation is bounded by what remains of `startup_deadline_seconds`, and `stop_cmd` by
+    `AID_SERVICE_STOP_TIMEOUT_SEC` (30 s), so a probe that blocks is killed and counted as
+    not-ready rather than holding the deadline open.
   - `port_env` gives the service a per-run port instead of a fixed one, so two runs on the same
     machine cannot collide.
   - **Fallback, only when nothing is declared:** run the infrastructure by hand (docker compose up,
@@ -584,7 +587,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-10
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

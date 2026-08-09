@@ -22,7 +22,25 @@
 # because the state root is deliberately shared between concurrent runs: two
 # runs of the same project must not see one another's ports.
 #
-# It is written EAGERLY and in TWO PHASES, and that is the whole point of the
+# ── WHO MAY TEAR IT DOWN (the ownership claim) ──────────────────────────────
+# `<run_evidence_dir>/services.owner.json` names the process that owns these
+# services, proved as a PROCESS (pid + /proc starttime + boot id + host), not as
+# a state string. `aid_service_down_all` REFUSES (rc 2) while a different,
+# provably-live owner holds it. That check lives in this file, in that one
+# function, so that every teardown path in the system — the run-all entry sweep,
+# the release, `aid-fsm.sh resume` and `aid-fsm.sh done-advance` — inherits it
+# from ONE authority instead of each carrying its own copy of the question. See
+# `aid_service_owner_live`.
+#
+# ── WHAT MAY BE SIGNALLED (the spawn ledger) ────────────────────────────────
+# `<run_evidence_dir>/services.spawned.jsonl` records every job id BEFORE this
+# run asks the supervisor to spawn it. The orphan sweep in
+# `aid_service_down_all` cancels only jobs this run can vouch for through that
+# ledger or the registry; a live job dir that merely APPEARED is reported by
+# name and left alone. Validation answers "is this well-formed"; a planted
+# job.json always is. See `_aid_svc_vouched_set`.
+#
+# The registry is written EAGERLY and in TWO PHASES, and that is the whole point of the
 # design rather than an implementation detail:
 #
 #   phase 1  {service, run_id, port, state:"starting", job_id:null}  is written
@@ -151,8 +169,17 @@ _AID_SERVICE_LIB_LOADED=1
 AID_SERVICE_SCHEMA="aid-service-registry/1"
 AID_SERVICE_REGISTRY_BASENAME="services.json"
 AID_SERVICE_LOCK_BASENAME=".services.lock"
+AID_SERVICE_OWNER_BASENAME="services.owner.json"
+AID_SERVICE_SPAWNED_BASENAME="services.spawned.jsonl"
 AID_SERVICE_JOBS_SUBDIR="service-jobs"
 AID_SERVICE_PROBE_INTERVAL_SEC=1
+# The bound on ONE probe_cmd / stop_cmd invocation. Neither command is a job —
+# they are short, synchronous, declared-cheap commands — but "short" was a
+# contract nothing enforced: `probe_cmd: sleep 600` blocked the startup loop
+# straight through a 3 s `startup_deadline_seconds`, because the loop probed and
+# only THEN looked at the clock. See `_aid_svc_probe`.
+AID_SERVICE_PROBE_TIMEOUT_SEC="${AID_SERVICE_PROBE_TIMEOUT_SEC:-60}"
+AID_SERVICE_STOP_TIMEOUT_SEC="${AID_SERVICE_STOP_TIMEOUT_SEC:-30}"
 # The FLOOR of the window in which the probe keeps asking after the job has
 # reached a terminal state. The window itself runs to the declared
 # `startup_deadline_seconds`; this is only what a job that ends at the very edge
@@ -329,6 +356,199 @@ _aid_svc_safe_jobs_dir() {
   fi
   _aid_svc_log "service ${name}: the registry's jobs_dir '${recorded}' does not resolve inside this run's evidence directory (${base}) — refusing it and using ${canon}"
   printf '%s' "$canon"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WHO OWNS THIS RUN'S SERVICES — THE ONE OWNER-LIVENESS AUTHORITY
+# ═══════════════════════════════════════════════════════════════════════════
+# These five functions were born in aid-run-gates.sh, where only the entry sweep
+# could reach them. That placement was the bug: `_fsm_service_sweep` — the FSM's
+# teardown on `resume` and `done-advance` — never read the claim at all, and
+# `cmd_resume`'s own guard (`_resume_other_jobs_live`) can only see SUPERVISED
+# JOBS. A live IN-LINE runner mid-foreground-gate is invisible to the
+# supervisor, so a run with one completed background gate and one long
+# foreground gate looked, to `resume`, exactly like a dead run: it swept the
+# database out from under the running gate and two gates that would have passed
+# were reported `service_unhealthy`. A fabricated verdict, on the ordinary AUTO
+# path (`watchdog → resume_needed` fires on 300 s of no progress, and this
+# repository's own gates routinely exceed that).
+#
+# The evidence that closes it already existed — this EPIC built it — and was
+# simply not read. So it lives HERE, beside the teardown it must gate, and
+# `aid_service_down_all` consults it FIRST. Every teardown path in the system
+# goes through that function, which is what makes this ONE authority rather than
+# a second copy: the entry sweep, the release, `fsm resume` and `fsm
+# done-advance` all inherit the refusal without any of them re-deciding it.
+#
+# The claim proves a PROCESS, not a state string: pid + its /proc starttime
+# (against pid recycling) + boot id (against a reboot) + host (a pid from
+# another machine says nothing about this one). Every "cannot tell" answers
+# LIVE: refusing to tear down is recoverable, tearing down a live run's
+# infrastructure is not.
+#
+# THE ONE CASE THAT DOES NOT FAIL CLOSED, named rather than implied: service
+# state with NO claim record at all is swept. Every acquire writes its claim
+# BEFORE it starts anything, so an unclaimed registry is either from a build
+# older than this change or hand-written — never a live run of this code.
+# Refusing there would make crash recovery unreachable for exactly the runs it
+# exists for.
+aid_service_owner_file() { printf '%s/%s' "${1%/}" "$AID_SERVICE_OWNER_BASENAME"; }
+
+# _aid_svc_boot_id — an identity for THIS boot, so a recorded pid from before a
+# reboot is provably dead rather than ambiguously reused. Empty where the kernel
+# does not publish one; an empty value is simply not compared.
+_aid_svc_boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || true; }
+
+# _aid_svc_proc_starttime <pid> — field 22 of /proc/<pid>/stat (jiffies since
+# boot), the field that distinguishes a live pid from a RECYCLED one. Parsed
+# after the last ')' because a process name may contain spaces and parentheses.
+_aid_svc_proc_starttime() {
+  local pid="$1" line rest
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ -r "/proc/${pid}/stat" ]] || return 1
+  line="$(cat "/proc/${pid}/stat" 2>/dev/null)" || return 1
+  rest="${line##*') '}"
+  local -a f=()
+  read -r -a f <<<"$rest"
+  # After the comm field the remainder starts at field 3, so field 22 is index 19.
+  [[ -n "${f[19]:-}" ]] || return 1
+  printf '%s' "${f[19]}"
+}
+
+# aid_service_owner_live <evidence_dir>
+#   rc 0  a DIFFERENT process is — or may still be — managing these services
+#   rc 1  no owner, the owner is this very process, or the recorded owner is
+#         PROVABLY gone
+aid_service_owner_live() {
+  local ev="$1" f pid rec_start rec_boot rec_host cur_start now_boot now_host
+  f="$(aid_service_owner_file "$ev")"
+  [[ -f "$f" ]] || return 1
+  pid="$(jq -r '.pid // empty' "$f" 2>/dev/null || true)"
+  if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    # A claim record we cannot read is not a claim we can dismiss.
+    return 0
+  fi
+  [[ "$pid" == "$$" ]] && return 1   # our own claim from an earlier phase
+  rec_start="$(jq -r '.starttime // empty' "$f" 2>/dev/null || true)"
+  rec_boot="$(jq -r '.boot_id // empty'   "$f" 2>/dev/null || true)"
+  rec_host="$(jq -r '.host // empty'      "$f" 2>/dev/null || true)"
+  now_boot="$(_aid_svc_boot_id)"
+  now_host="$(hostname 2>/dev/null || true)"
+  # A pid from another machine says nothing about any process here.
+  [[ -n "$rec_host" && -n "$now_host" && "$rec_host" != "$now_host" ]] && return 0
+  # Same machine, different boot: whatever held that pid did not survive.
+  [[ -n "$rec_boot" && -n "$now_boot" && "$rec_boot" != "$now_boot" ]] && return 1
+  if cur_start="$(_aid_svc_proc_starttime "$pid")"; then
+    [[ -n "$rec_start" && "$cur_start" != "$rec_start" ]] && return 1  # pid recycled
+    return 0
+  fi
+  # No readable /proc entry. On Linux the absence of /proc/<pid> is proof; a
+  # /proc/<pid> we merely cannot READ (another user, hidepid) is not.
+  if [[ -d /proc ]]; then
+    [[ -e "/proc/${pid}" ]] && return 0
+    return 1
+  fi
+  ps -p "$pid" -o pid= >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# aid_service_owner_describe <evidence_dir> — one line for a refusal message.
+aid_service_owner_describe() {
+  jq -r '"pid " + (.pid|tostring) + ", claimed at " + (.claimed_at // "?")
+         + ", run " + (.run_id // "?")' "$(aid_service_owner_file "$1")" 2>/dev/null \
+    || printf 'an unreadable claim record'
+}
+
+# aid_service_owner_claim <evidence_dir> <run_id> — atomic tmp+mv, so a
+# concurrent reader sees the old record or the new one and never half of one.
+aid_service_owner_claim() {
+  local ev="$1" run="${2:-}" f tmp
+  f="$(aid_service_owner_file "$ev")"
+  tmp="${f}.tmp.$$"
+  jq -n --arg pid "$$" --arg st "$(_aid_svc_proc_starttime "$$" || true)" \
+        --arg boot "$(_aid_svc_boot_id)" --arg host "$(hostname 2>/dev/null || true)" \
+        --arg run "$run" --arg at "$(_aid_svc_now)" \
+        '{schema:"aid.services.owner/1", pid:($pid|tonumber), starttime:$st,
+          boot_id:$boot, host:$host, run_id:$run, claimed_at:$at}' \
+        > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  return 0
+}
+
+# aid_service_owner_clear <evidence_dir> — released with the services it covered.
+aid_service_owner_clear() {
+  rm -f "$(aid_service_owner_file "$1")" 2>/dev/null || true
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WHAT VOUCHES FOR A JOB — the spawn ledger
+# ═══════════════════════════════════════════════════════════════════════════
+# `aid_service_down_all`'s orphan sweep used to cancel ANY `started|running` job
+# it found under `<evidence>/service-jobs/*/*/`, taking both the liveness
+# verdict and the signal target from that `job.json` alone. `aid-job.sh`'s
+# forged-pgid guard only proves the record SELF-CONSISTENT (`pgid` equals the
+# live `ps -o pgid=` of `pid`), which anybody can satisfy by copying a victim's
+# real values out of `/proc`. Plant one file, and a plain teardown TERMs an
+# unrelated process group — reachable from four edges: the run-all entry sweep,
+# the release, `fsm resume` and `fsm done-advance`.
+#
+# Validation could never have closed that: a planted job.json is perfectly
+# well-formed. The missing question is not "is this well-formed" but "did WE
+# write it", and the answer has to come from something this run produced. So
+# every job id is recorded HERE, in this run's own append-only ledger, BEFORE
+# the supervisor is asked to spawn it — the same eager discipline the registry's
+# phase 1 uses, and for the same reason: there is no window in which a job this
+# run could have created is not vouched for.
+#
+# A job the ledger does not name, and the registry does not name, is a job dir
+# that APPEARED rather than one this run CREATED. It is reported, by name and
+# loudly, and NOT signalled. That is the fail-closed direction here: not
+# signalling an unknown target costs a diagnostic, signalling one is the
+# vulnerability.
+#
+# THE HONEST LIMIT, named rather than implied: the ledger lives in the same
+# writable evidence directory as the job records, so an attacker who plants a
+# job.json AND appends a matching ledger line is vouched for. This does not make
+# forgery impossible; it makes an untargeted sweep stop being a kill primitive
+# that needs no forgery at all. A pre-upgrade run's orphans are equally
+# unvouched and equally reported rather than cancelled — the operator gets the
+# `aid-job.sh cancel` line instead of a silent signal.
+_aid_svc_spawned_path() { printf '%s/%s' "${1%/}" "$AID_SERVICE_SPAWNED_BASENAME"; }
+
+# _aid_svc_record_spawn <evidence_dir> <service> <job_id>
+#   rc 0 recorded · rc 1 not recorded (and the caller MUST refuse to spawn: a
+#   job nothing vouches for is a job no later sweep may cancel).
+_aid_svc_record_spawn() {
+  local ev="$1" name="$2" id="$3" line dest
+  dest="$(_aid_svc_spawned_path "$ev")"
+  line="$(jq -nc --arg s "$name" --arg j "$id" --arg r "${AID_SERVICE_RUN_ID:-}" \
+            --arg at "$(_aid_svc_now)" \
+            '{service:$s, job_id:$j, run_id:(if $r == "" then null else $r end), at:$at}' \
+          2>/dev/null)" || return 1
+  printf '%s\n' "$line" >> "$dest" 2>/dev/null || return 1
+  return 0
+}
+
+# _aid_svc_vouched_set <evidence_dir> — the `<service>/<job_id>` pairs this run
+# can vouch for, space-delimited and space-padded for a `case` membership test.
+# Two sources, both produced by this run: the spawn ledger (every id this run
+# asked the supervisor for) and the registry (every id it recorded).
+_aid_svc_vouched_set() {
+  local ev="$1" reg led out=""
+  reg="$(_aid_svc_registry_path "$ev")"
+  led="$(_aid_svc_spawned_path "$ev")"
+  if [[ -s "$led" ]]; then
+    out="$(jq -rn '[inputs | select(type == "object")
+                   | select((.service // "") != "" and (.job_id // "") != "")
+                   | (.service + "/" + .job_id)] | join(" ")' "$led" 2>/dev/null || true)"
+  fi
+  if [[ -f "$reg" ]]; then
+    out="${out} $(jq -r '[.services // {} | to_entries[]
+                          | select((.value.job_id // "") != "")
+                          | (.key + "/" + .value.job_id)] | join(" ")' "$reg" 2>/dev/null || true)"
+  fi
+  printf ' %s ' "$out"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -582,26 +802,75 @@ _aid_svc_bind_failure() {
 # Probe
 # ═══════════════════════════════════════════════════════════════════════════
 
-# _aid_svc_probe <probe_cmd> <port_env> <port> — rc 0 iff healthy. Runs in a
-# command-substitution-free SUBSHELL so the exported port never leaks into the
-# caller's environment (a run with two port_env services must not hand service
-# B the environment of service A).
+# ── BOUNDING THE TWO COMMANDS THAT ARE NOT JOBS ──────────────────────────────
+# `start_cmd` is long-lived and therefore a JOB: aid-job.sh owns it, deadlines
+# it and kills it. `probe_cmd` and `stop_cmd` are neither long-lived nor jobs by
+# design — they are short, synchronous, declared cheap and side-effect free —
+# and until now "short" was a promise nothing checked. It failed exactly where
+# it mattered: the startup loop probes and THEN looks at the clock, so
+# `probe_cmd: sleep 600` under `startup_deadline_seconds: 3` was never
+# interrupted at all, and `stop_cmd` — which runs on `done-advance` — could hang
+# the FSM's release edge outright.
+#
+# Bounded with `timeout(1)`, and that choice is the point: it is NOT a second
+# supervisor. It owns nothing past the one foreground command, records no state,
+# has no job directory, no id and no result, and it is spelled here rather than
+# with any `setsid`/pgid arithmetic of our own — this file still contains none,
+# and aid-job.sh is still the only process owner in the system. What `timeout`
+# adds is exactly one thing: a command that does not return cannot stop a
+# deadline from being enforced.
+#
+# WHERE IT CANNOT FAIL CLOSED, named: with `timeout` absent from PATH the
+# command runs UNBOUNDED, once per shell behind a loud warning. `aid_service_up_all`
+# refuses BY NAME up front when services are declared and `timeout` is missing
+# (same treatment as jq/flock/yq/python3), so that fallback is reachable only by
+# a caller that entered this library some other way — `aid_service_status`, or a
+# teardown of a registry written before this change.
+_AID_SVC_TIMEOUT_BIN="$(command -v timeout 2>/dev/null || true)"
+_aid_svc_unbounded_warned=""
+_aid_svc_run_bounded() {
+  local secs="$1" cmd="$2"
+  [[ "$secs" =~ ^[0-9]+$ ]] && (( secs > 0 )) || secs=1
+  if [[ -n "$_AID_SVC_TIMEOUT_BIN" ]]; then
+    "$_AID_SVC_TIMEOUT_BIN" -k 1 "$secs" bash -c "$cmd"
+    return $?
+  fi
+  if [[ -z "$_aid_svc_unbounded_warned" ]]; then
+    _aid_svc_unbounded_warned=1
+    _aid_svc_err "timeout(1) is not on PATH — a probe_cmd or stop_cmd that never returns cannot be interrupted, so the declared startup_deadline_seconds is not enforceable in this shell. Install coreutils' timeout."
+  fi
+  bash -c "$cmd"
+}
+
+# _aid_svc_probe <probe_cmd> <port_env> <port> [<bound_seconds>] — rc 0 iff
+# healthy. Runs in a command-substitution-free SUBSHELL so the exported port
+# never leaks into the caller's environment (a run with two port_env services
+# must not hand service B the environment of service A).
+#
+# The bound defaults to AID_SERVICE_PROBE_TIMEOUT_SEC; the startup loop passes
+# the REMAINING startup budget instead, which is what makes
+# `startup_deadline_seconds` a bound on the loop rather than on the clock check
+# at the bottom of it.
 _aid_svc_probe() {
-  local probe_cmd="${1:-}" port_env="${2:-}" port="${3:-}"
+  local probe_cmd="${1:-}" port_env="${2:-}" port="${3:-}" bound="${4:-}"
   [[ -n "$probe_cmd" ]] || return 1
+  [[ "$bound" =~ ^[0-9]+$ ]] && (( bound > 0 )) || bound="$AID_SERVICE_PROBE_TIMEOUT_SEC"
   (
     _aid_svc_export_port "$port_env" "$port"
-    bash -c "$probe_cmd"
+    _aid_svc_run_bounded "$bound" "$probe_cmd"
   ) >/dev/null 2>&1
 }
 
-# _aid_svc_run_stop <stop_cmd> <port_env> <port> — best effort, same isolation.
+# _aid_svc_run_stop <stop_cmd> <port_env> <port> — best effort, same isolation,
+# bounded by AID_SERVICE_STOP_TIMEOUT_SEC. Best-effort has always meant "its
+# failure does not fail the teardown"; it never meant "it may run forever", and
+# on the `done-advance` release edge that difference is the FSM hanging.
 _aid_svc_run_stop() {
   local stop_cmd="${1:-}" port_env="${2:-}" port="${3:-}"
   [[ -n "$stop_cmd" ]] || return 0
   (
     _aid_svc_export_port "$port_env" "$port"
-    bash -c "$stop_cmd"
+    _aid_svc_run_bounded "$AID_SERVICE_STOP_TIMEOUT_SEC" "$stop_cmd"
   ) >/dev/null 2>&1 || true
   return 0
 }
@@ -773,7 +1042,7 @@ _aid_svc_up_one() {
       local rport rjob
       rport="$(_aid_svc_entry_field "$entry" port)"
       rjob="$(_aid_svc_entry_field "$entry" job_id)"
-      if _aid_svc_probe "$probe_cmd" "$port_env" "$rport"; then
+      if _aid_svc_probe "$probe_cmd" "$port_env" "$rport" "$startup_deadline"; then
         _aid_svc_log "service ${name}: already healthy (job ${rjob:-none}${rport:+, port ${rport}}) — reused, not restarted"
         return 0
       fi
@@ -824,6 +1093,18 @@ _aid_svc_up_one() {
 
     # ── spawn, through the ONE process owner ───────────────────────────────
     local job_id="${name}-$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+    # VOUCH BEFORE SPAWNING. The id is known before the supervisor is asked for
+    # it, so the ledger entry goes down first — exactly like the registry's
+    # eager phase 1, and for the same reason: there must be no window in which a
+    # job this run created is a job no later sweep may cancel. A ledger this run
+    # cannot write is refused for the mirror of the registry's reason: an
+    # unvouchable job is one the sweep would have to leave running.
+    if ! _aid_svc_record_spawn "$evidence" "$name" "$job_id"; then
+      _aid_svc_registry_put "$evidence" "$name" \
+        "$(jq -nc '{state:"unhealthy", failure_reason:"spawn_ledger_write_failed"}')" || true
+      _aid_svc_svc_err "$name" "could not record job '${job_id}' in the spawn ledger at $(_aid_svc_spawned_path "$evidence") — refusing to start a job no teardown would be allowed to cancel (an unvouched job is reported, never signalled)"
+      return 1
+    fi
     local errfile spawned="" start_rc=0 start_err=""
     errfile="$(mktemp)"
     spawned="$(
@@ -843,6 +1124,14 @@ _aid_svc_up_one() {
       return 1
     fi
 
+    # The supervisor echoes back the id it was given; if a future version ever
+    # returns a different one, vouch for THAT too rather than for a name the
+    # sweep will not find.
+    if [[ "$spawned" != "$job_id" ]]; then
+      _aid_svc_record_spawn "$evidence" "$name" "$spawned" || \
+        _aid_svc_log "service ${name}: the supervisor returned job id '${spawned}' rather than '${job_id}' and the spawn ledger could not record it — that job will be REPORTED rather than cancelled by a later sweep"
+    fi
+
     # ── EAGER PHASE 2 — the real job id, immediately ───────────────────────
     if ! _aid_svc_registry_put "$evidence" "$name" \
           "$(jq -nc --arg j "$spawned" '{job_id:$j}')"; then
@@ -859,11 +1148,19 @@ _aid_svc_up_one() {
     # iteration, and that order is load-bearing: a job already TERMINAL when a
     # subsequent probe answers healthy proves the answering process is not the
     # one the supervisor owned.
-    local t0=$SECONDS outcome="" job_state="" post_state="" probe_ok=0
+    #
+    # EVERY probe below is bounded by what is LEFT of that budget (floor 1 s),
+    # so the loop cannot be held open past its own deadline by a probe that
+    # never returns — the clock check at the bottom is unreachable while a probe
+    # blocks, which is precisely how `probe_cmd: sleep 600` survived
+    # `startup_deadline_seconds: 3`.
+    local t0=$SECONDS outcome="" job_state="" post_state="" probe_ok=0 probe_bound
     while : ; do
       job_state="$(_aid_svc_job_state "$jobs_dir" "$spawned")"
       probe_ok=0
-      _aid_svc_probe "$probe_cmd" "$port_env" "$port" && probe_ok=1
+      probe_bound=$(( startup_deadline - (SECONDS - t0) ))
+      (( probe_bound > 0 )) || probe_bound=1
+      _aid_svc_probe "$probe_cmd" "$port_env" "$port" "$probe_bound" && probe_ok=1
 
       if [[ "$job_state" =~ $AID_SERVICE_JOB_ENDED_RE ]]; then
         if (( probe_ok )); then outcome="daemonized"; break; fi
@@ -884,7 +1181,9 @@ _aid_svc_up_one() {
         local g0=$SECONDS
         while (( SECONDS - t0 < startup_deadline || SECONDS - g0 < AID_SERVICE_TERMINAL_GRACE_SEC )); do
           sleep "$AID_SERVICE_PROBE_INTERVAL_SEC"
-          if _aid_svc_probe "$probe_cmd" "$port_env" "$port"; then probe_ok=1; break; fi
+          probe_bound=$(( startup_deadline - (SECONDS - t0) ))
+          (( probe_bound > 0 )) || probe_bound="$AID_SERVICE_TERMINAL_GRACE_SEC"
+          if _aid_svc_probe "$probe_cmd" "$port_env" "$port" "$probe_bound"; then probe_ok=1; break; fi
         done
         if (( probe_ok )); then outcome="daemonized"; else outcome="job_${job_state}"; fi
         break
@@ -1050,6 +1349,14 @@ aid_service_up_all() {
     _aid_svc_err "${#names[@]} service(s) declared in '${yaml}' but the job supervisor is unavailable at ${AID_SERVICE_JOB_SH} — refusing to start a process nothing would own"
     return 2
   fi
+  # `timeout` is what bounds probe_cmd and stop_cmd (see `_aid_svc_run_bounded`).
+  # Without it `startup_deadline_seconds` is not enforceable — a probe that never
+  # returns holds the startup loop open forever — so it is refused BY NAME here
+  # rather than becoming a run that hangs with no diagnosis.
+  if [[ -z "$_AID_SVC_TIMEOUT_BIN" ]]; then
+    _aid_svc_err "${#names[@]} service(s) declared in '${yaml}' but timeout(1) is not available — probe_cmd and stop_cmd would run unbounded and startup_deadline_seconds could not be enforced. Install coreutils' timeout."
+    return 2
+  fi
 
   # python3 is a DECLARED DEPENDENCY of the port-allocating half of this
   # feature, refused by name and up front rather than as a mystery failure on
@@ -1093,6 +1400,15 @@ aid_service_up_all() {
 #   The instrument is the DECLARED probe, and that is the limit: a probe that
 #   cannot fail (`probe_cmd: /bin/true`) cannot prove a teardown succeeded, so
 #   rc 1 says exactly what it says — the probe still passes — and no more.
+#
+#     rc 2  REFUSED — a DIFFERENT, provably live process holds the ownership
+#           claim for this evidence directory. Nothing was cancelled, nothing
+#           was stopped, no state was written. This is the one gate that makes
+#           the claim record an enforcement rather than a note, and it is here —
+#           inside the single teardown definition — precisely so that every
+#           teardown path in the system inherits it: the run-all entry sweep,
+#           the release, `fsm resume` and `fsm done-advance` all consult one
+#           authority instead of each carrying a copy of the question.
 aid_service_down_all() {
   local evidence="${1:-}" yaml="${2:-$AID_SERVICE_CONFIG}"
   [[ -n "$evidence" ]] || { _aid_svc_err "aid_service_down_all requires <run_evidence_dir>"; return 1; }
@@ -1104,10 +1420,44 @@ aid_service_down_all() {
   # Cheap no-op: nothing was ever brought up here.
   [[ -f "$reg" || -d "$jobs_root" ]] || return 0
 
+  # ── THE OWNER GATE — before anything destructive ────────────────────────
+  # A teardown while the recorded owner is alive is not a teardown, it is a
+  # corrupted verdict: gates that would have passed are reported failed against
+  # infrastructure this call removed. Refusing costs a diagnostic; sweeping
+  # costs the run's answer. Every "cannot tell" reads as LIVE.
+  if [[ -f "$(aid_service_owner_file "$evidence")" ]]; then
+    if ! command -v jq >/dev/null 2>&1; then
+      # A claim exists and we have no way to read it. "I could not check" must
+      # never read as "nobody owns these" — that is the exact substitution this
+      # gate exists to prevent, one dependency down.
+      _aid_svc_err "REFUSING to tear down the services recorded under '${evidence}': an ownership claim exists at $(aid_service_owner_file "$evidence") and jq is not available to check whether its owner is alive."
+      return 2
+    fi
+    if aid_service_owner_live "$evidence"; then
+      _aid_svc_err "REFUSING to tear down the services recorded under '${evidence}': another process still holds this run's ownership claim ($(aid_service_owner_describe "$evidence")) and is provably alive. Nothing was cancelled and nothing was stopped. If that process is genuinely gone and this message persists, its claim record is $(aid_service_owner_file "$evidence")."
+      return 2
+    fi
+  fi
+
+  # yq preflight, matching `aid_service_up_all`'s. Without it
+  # `_aid_svc_declares` cannot answer, every service falls onto the
+  # UNRECONCILED branch, and the registry's RECORDED `stop_cmd` — a string from
+  # a file inside the subagent-writable evidence directory — is what runs. The
+  # up path has refused that for a missing yq since it shipped; the down path
+  # simply had not been given the same floor.
+  if [[ -f "$reg" ]] && ! command -v yq >/dev/null 2>&1; then
+    _aid_svc_err "REFUSING to tear down the services recorded under '${evidence}': yq is not available, so the declarations in '${yaml}' cannot be read and every recorded stop_cmd would run UNRECONCILED — a command chosen by a file in the evidence directory rather than by the project's config. Recorded jobs can still be cancelled by hand with aid-job.sh."
+    return 2
+  fi
+
   AID_SERVICE_EVIDENCE_DIR="$evidence"
 
-  # The set of job ids the registry KNOWS about, captured before teardown so
-  # the sweep below can tell a recorded job from an unrecorded one.
+  # The set of `<service>/<job_id>` pairs this run can VOUCH for — the spawn
+  # ledger it wrote before each spawn, plus the registry it recorded. Captured
+  # before teardown, because teardown rewrites the registry.
+  local vouched=""
+  vouched="$(_aid_svc_vouched_set "$evidence")"
+  # The registry's own ids, for telling a recorded job from an unrecorded one.
   local known=""
   if [[ -f "$reg" ]]; then
     known="$(jq -r '[.services[]?.job_id // empty] | join(" ")' "$reg" 2>/dev/null || true)"
@@ -1127,7 +1477,16 @@ aid_service_down_all() {
   # superseded retry whose teardown did not complete, or from a crash in a
   # window we have not thought of — and it is cancelled and logged rather than
   # left running.
-  local d jd id st svc
+  #
+  # ONLY IF THIS RUN CAN VOUCH FOR IT. The signal target and the liveness
+  # verdict both come from a `job.json` in a directory a subagent can write, and
+  # a planted one that copies a victim's real pid/pgid out of /proc satisfies
+  # every self-consistency check aid-job.sh can make. So the question asked here
+  # is not "is this record well-formed" — it always is — but "did this run
+  # create this job", answered from the spawn ledger and the registry, both
+  # written by us. A job dir that merely APPEARED is named and left alone, with
+  # the exact command an operator would use if it is genuinely theirs.
+  local d jd id st svc unvouched=0
   if [[ -d "$jobs_root" ]]; then
     for d in "$jobs_root"/*/; do
       [[ -d "$d" ]] || continue
@@ -1138,14 +1497,23 @@ aid_service_down_all() {
         case " ${known} " in *" ${id} "*) continue ;; esac
         st="$(_aid_svc_job_state "${d%/}" "$id")"
         case "$st" in
-          started|running)
-            _aid_svc_log "service ${svc}: job '${id}' is ${st} but the registry does not name it — cancelling this orphan"
+          started|running) ;;
+          *) continue ;;
+        esac
+        case "$vouched" in
+          *" ${svc}/${id} "*)
+            _aid_svc_log "service ${svc}: job '${id}' is ${st} but the registry does not name it — this run vouches for it (spawn ledger), so it is cancelled as an orphan of ours"
             _aid_svc_job_cancel "${d%/}" "$id"
+            ;;
+          *)
+            unvouched=$(( unvouched + 1 ))
+            _aid_svc_svc_err "$svc" "job '${id}' under ${d%/} is ${st}, and NOTHING this run wrote vouches for it — neither the registry nor the spawn ledger names it. It is REPORTED, not signalled: the liveness verdict and the signal target would both come from that job.json, and a record this run did not write cannot authorise a kill. If it is genuinely yours: bash ${AID_SERVICE_JOB_SH} cancel --jobs-dir '${d%/}' --id '${id}'"
             ;;
         esac
       done
     done
   fi
+  (( unvouched == 0 )) || _aid_svc_err "${unvouched} live service job(s) under ${jobs_root} could not be vouched for by this run and were left alone (each named above)."
 
   # ── did any of it actually stop? ────────────────────────────────────────
   # One probe per service that had one. A service still answering after its job

@@ -183,11 +183,11 @@ stop_classes:
     ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 1245
+        line: 1192
         anchor: gate_job_deadline_exceeded
         note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 2196
+        line: 2143
         anchor: timeout_policy_block
         note: "three censored samples at or above the current timeout — no further attempt is spent"
     allowed_actions: [rerun_targeted, collect_and_continue]
@@ -204,11 +204,11 @@ stop_classes:
     ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        line: 987
+        line: 1286
         anchor: "its job was cancelled and stop_cmd run"
         note: "terminal per-service verdict after the retry budget is spent; registry state is timed_out|lost|unhealthy"
       - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        line: 970
+        line: 1269
         anchor: "still unhealthy after the one authorized restart"
         note: "the restart-exhaustion failure_reason specifically"
     allowed_actions: [restart_service_once, wait_and_resume]

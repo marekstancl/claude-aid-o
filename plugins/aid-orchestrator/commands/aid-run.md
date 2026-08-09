@@ -30,8 +30,9 @@ Run the 6-state FSM controller to orchestrate an EPIC through its full lifecycle
 Escalation rules for `--auto`:
 - **S-effort fixes** → auto-approve, apply fix, continue
 - **M-effort decisions** → take the default the recovery policy already declares for the stop's
-  class, in `config/policies/auto-recovery.yaml` (shipped at
-  `defaults/policies/auto-recovery.yaml`). That file is the defaults authority: it names the stop
+  class, in the plugin's `defaults/policies/auto-recovery.yaml` (a project MAY override it with
+  its own `config/policies/auto-recovery.yaml`, which no `/aid-init` creates and most projects
+  never have). That file is the defaults authority: it names the stop
   classes, the reversible actions each one may take, and its budget. An earlier version of this
   line pointed at `config/permissions.yaml`, which has never held any such key — the tier rule was
   real, its mechanical backing was not
@@ -297,7 +298,9 @@ FSM initialized: READY
 **Actions:**
 1. Load `execution.yaml` (gate definitions, step config)
 2. Load `config/permissions.yaml` (`autonomous_mode` — the one key this file holds for the run;
-   the per-class recovery defaults live in `config/policies/auto-recovery.yaml`)
+   the per-class recovery defaults live in the plugin's `defaults/policies/auto-recovery.yaml`,
+   which a project may override — but need not, and no installer creates — by placing its own
+   `config/policies/auto-recovery.yaml`)
 3. **AUTO MODE → SKIP TO STEP 5 IMMEDIATELY.** Do NOT display EPIC summary, do NOT present Options, do NOT wait for PM.
 4. **Manual mode only:** Display EPIC summary to PM:
    ```
@@ -534,8 +537,11 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 - `scripts/lib/aid-stage-log.sh` — timeline.jsonl logging
 - `config/execution.yaml` — gate definitions (lazy-created on first run)
 - `config/permissions.yaml` — `autonomous_mode` (read by `aid-release-policy.sh`)
-- `config/policies/auto-recovery.yaml` — AUTO-mode recovery policy: stop classes, allowed
-  reversible actions, budgets, and the ownership table of the retry loops it does NOT govern
+- `defaults/policies/auto-recovery.yaml` (plugin) — AUTO-mode recovery policy: stop classes,
+  allowed reversible actions, budgets, and the ownership table of the retry loops it does NOT
+  govern. This is the file that ships and the file that applies; `config/policies/auto-recovery.yaml`
+  in the project is an OPTIONAL override that no `/aid-init` creates, and is used only when it
+  exists and validates
 
 ## Important
 
@@ -632,4 +638,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-10

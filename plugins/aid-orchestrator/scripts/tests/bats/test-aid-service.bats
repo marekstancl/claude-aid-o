@@ -660,6 +660,17 @@ EOF
 
   # An UNRECORDED job in the supervisor's own one-job-one-dir layout — the
   # shape a retry whose teardown never completed would leave behind.
+  #
+  # CP3: created the way the RUN creates one — spawn ledger first, then the
+  # supervisor — because that ordering is now what separates an orphan of ours
+  # from a job dir that merely appeared. `_aid_svc_up_one` writes the ledger line
+  # before it asks aid-job.sh for anything, so every real retry orphan is
+  # vouched for and still reaped here; a fixture that skipped the ledger was
+  # indistinguishable from the planted job.json of case 25, and would now be
+  # reported rather than signalled. The behaviour under test is unchanged; the
+  # fixture is what had stopped being faithful.
+  jq -nc --arg s api --arg j ghost-1 --arg at "2026-01-01T00:00:00Z" \
+    '{service:$s, job_id:$j, run_id:null, at:$at}' >> "$EV/services.spawned.jsonl"
   orphan_id="$(bash "$JOB_SH" run --jobs-dir "$EV/service-jobs/api" \
       --id "ghost-1" --deadline 300 -- bash "$FIX/idle.sh" "${TOKEN}-ghost")"
   _wait_for 15 '[[ "$(bash "$JOB_SH" status --jobs-dir "$EV/service-jobs/api" --id ghost-1)" == "running" ]]'
@@ -1037,4 +1048,223 @@ EOF
   [[ "$output" =~ "NODE_OPTIONS" ]]
   [[ "$output" =~ "Refusing to start it with its port variable unset" ]]
   [ ! -e "$EV/service-jobs/api" ] || [ "$(_job_dirs api)" -eq 0 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CP3 fixes — the owner gate, the vouched sweep, the bounded commands
+# ═══════════════════════════════════════════════════════════════════════════
+
+# A process that is provably alive and provably NOT ours to kill: its own
+# session and process group (setsid), so a group signal aimed at it cannot also
+# hit this test. It is the victim of the planted-job.json repro below.
+_start_victim() {
+  setsid bash -c 'exec sleep 300' "$1" >/dev/null 2>&1 &
+  VICTIM_PID=$!
+  local i
+  for ((i=0; i<50; i++)); do
+    [[ "$(ps -o pgid= -p "$VICTIM_PID" 2>/dev/null | tr -d ' ')" == "$VICTIM_PID" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+# A claim record naming a live process. `sleep` is a real, live, unrelated pid —
+# the point of the gate is that it asks the OPERATING SYSTEM, not a state string.
+_plant_owner() {
+  local pid="$1" st boot host
+  st="$(awk '{ n=split($0, a, ") "); print a[n] }' "/proc/${pid}/stat" 2>/dev/null | awk '{print $20}')"
+  boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+  host="$(hostname 2>/dev/null || true)"
+  jq -n --argjson pid "$pid" --arg st "$st" --arg b "$boot" --arg h "$host" \
+    '{schema:"aid.services.owner/1", pid:$pid, starttime:$st, boot_id:$b,
+      host:$h, run_id:"R-OTHER", claimed_at:"2026-01-01T00:00:00Z"}' \
+    > "$EV/services.owner.json"
+}
+
+@test "24: down_all REFUSES while a different, provably live process holds the ownership claim" {
+  _need_python3
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: bash "$FIX/listen.sh" "\$SVC_PORT" 0 $TOKEN
+    probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
+    stop_cmd: bash "$FIX/stop.sh" "$TMP/stop.log"
+    startup_deadline_seconds: 25
+    max_lifetime_seconds: 120
+    port_env: SVC_PORT
+EOF
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  [ "$status" -eq 0 ]
+  local port; port="$(_reg '.services.api.port')"
+
+  # A live claim held by somebody else. This is the evidence the FSM's sweep
+  # never read: a live runner mid-foreground-gate leaves exactly this behind.
+  sleep 300 & OWNERPID=$!
+  _plant_owner "$OWNERPID"
+
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "REFUSING to tear down" ]]
+  [[ "$output" =~ "R-OTHER" ]]
+
+  # NOTHING happened: the service still serves, its state is untouched, and the
+  # stop_cmd never ran. That is the whole point — two gates that would have
+  # passed were being reported failed against infrastructure the sweep removed.
+  [ "$(_reg '.services.api.state')" = "healthy" ]
+  bash "$FIX/probe.sh" "$port"
+  [ ! -f "$TMP/stop.log" ]
+
+  # The owner dies → the claim is provably stale → the same call now sweeps.
+  kill -9 "$OWNERPID" 2>/dev/null || true
+  wait "$OWNERPID" 2>/dev/null || true
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(_reg '.services.api.state')" = "stopped" ]
+  _assert_no_orphans
+}
+
+@test "25: the orphan sweep will not signal a job this run cannot vouch for" {
+  _start_victim "$TOKEN-victim"
+
+  # A perfectly well-formed job.json carrying the victim's REAL pid and pgid —
+  # copied out of /proc, so every self-consistency check aid-job.sh can make
+  # passes. Validation answers "is this well-formed"; it cannot answer "did we
+  # write it".
+  mkdir -p "$EV/service-jobs/api/planted"
+  jq -n --argjson pid "$VICTIM_PID" --argjson pgid "$VICTIM_PID" \
+     --arg st "$(awk '{ n=split($0, a, ") "); print a[n] }' "/proc/${VICTIM_PID}/stat" | awk '{print $20}')" \
+    '{schema:"aid-job/1", id:"planted", state:"running", pid:$pid, pgid:$pgid,
+      proc_starttime:$st, cookie:"x", started_at:"2026-01-01T00:00:00Z",
+      started_epoch:1767225600, deadline_seconds:0, label:"service:api",
+      command_fingerprint:"x", start_head:"none", start_tree:"none", repo:null}' \
+    > "$EV/service-jobs/api/planted/job.json"
+
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: /bin/true
+    probe_cmd: /bin/false
+EOF
+
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "NOTHING this run wrote vouches for it" ]]
+  [[ "$output" =~ "REPORTED, not signalled" ]]
+  # The operator gets the exact command, because "we will not do this for you"
+  # is only useful with "here is how, if it is yours".
+  [[ "$output" =~ "cancel --jobs-dir" ]]
+
+  # THE assertion: an unrelated process group was not TERMed by a plain teardown.
+  kill -0 "$VICTIM_PID"
+  kill -9 -"$VICTIM_PID" 2>/dev/null || true
+}
+
+@test "26: a job this run DID spawn is still swept, on the strength of the spawn ledger" {
+  _need_python3
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: bash "$FIX/listen.sh" "\$SVC_PORT" 0 $TOKEN
+    probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
+    startup_deadline_seconds: 25
+    max_lifetime_seconds: 120
+    port_env: SVC_PORT
+EOF
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  [ "$status" -eq 0 ]
+
+  # The ledger vouches for the id BEFORE the spawn — eagerly, like the registry's
+  # phase 1 — so there is no window in which a job we created is unvouchable.
+  local jid; jid="$(_reg '.services.api.job_id')"
+  run jq -r --arg j "$jid" 'select(.job_id == $j) | .service' "$EV/services.spawned.jsonl"
+  [ "$output" = "api" ]
+
+  # Erase the registry's memory of the job id — the ledger alone must still
+  # authorise the cancel, which is the superseded-retry orphan case.
+  jq '.services.api.job_id = null' "$EV/services.json" > "$EV/services.json.t"
+  mv "$EV/services.json.t" "$EV/services.json"
+
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [[ "$output" =~ "this run vouches for it" ]]
+  _assert_no_orphans
+}
+
+@test "27: startup_deadline_seconds bounds a probe_cmd that never returns" {
+  # THE repro: the loop probed and only THEN looked at the clock, so a blocking
+  # probe was never interrupted — deadline 3 s, probe `sleep 600`, still running
+  # at 25 s. A deadline a command can hold open is not a deadline.
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: sleep 120
+    probe_cmd: sleep 600
+    startup_deadline_seconds: 3
+EOF
+  local t0 t1
+  t0="$(date +%s)"
+  run timeout 60 bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  t1="$(date +%s)"
+  echo "$output"
+  echo "elapsed=$(( t1 - t0 ))s"
+  [ "$status" -eq 1 ]                       # a named failure, not a hang
+  [ "$(( t1 - t0 ))" -lt 30 ]               # bounded — it used to run past this
+  [[ "$output" =~ "startup_deadline_seconds=3" ]]
+  [ "$(_reg '.services.api.state')" = "timed_out" ]
+}
+
+@test "28: a stop_cmd that never returns cannot hang the teardown" {
+  _yaml <<EOF
+services:
+  api:
+    start_cmd: sleep 120
+    probe_cmd: /bin/true
+    stop_cmd: sleep 600
+    startup_deadline_seconds: 5
+EOF
+  run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
+  [ "$status" -eq 0 ]
+
+  local t0 t1
+  t0="$(date +%s)"
+  AID_SERVICE_STOP_TIMEOUT_SEC=3 run timeout 60 bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  t1="$(date +%s)"
+  echo "elapsed=$(( t1 - t0 ))s"
+  [ "$(( t1 - t0 ))" -lt 45 ]
+}
+
+@test "29: down_all refuses rather than running a registry-recorded stop_cmd with no yq" {
+  # `up_all` has refused a missing yq since it shipped. `down_all` had not, so a
+  # host without yq dropped it onto the UNRECONCILED branch — where the command
+  # that runs is a string read out of the subagent-writable evidence directory.
+  mkdir -p "$EV"
+  jq -n '{schema:"aid-service-registry/1", updated_at:null,
+          services:{api:{service:"api", state:"healthy", job_id:null,
+                         stop_cmd:"touch /tmp/aid-should-never-run", port:null}}}' \
+    > "$EV/services.json"
+  _yaml <<EOF
+services: {}
+EOF
+  local stub="$TMP/nobin"; mkdir -p "$stub"
+  run env PATH="$stub:/usr/bin:/bin" bash -c '
+    command -v yq >/dev/null 2>&1 && exit 99
+    source "$1"; aid_service_down_all "$2" "$3"' _ "$LIB" "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "yq is not available" ]]
+  [[ "$output" =~ "UNRECONCILED" ]]
+}
+
+# The constraint this EPIC works under, made grep-guarded rather than promised:
+# aid-job.sh is the ONE process owner, and no session/process-group arithmetic
+# may appear anywhere else. `timeout` bounds a foreground command; it owns
+# nothing, records nothing and is not a supervisor.
+@test "30: aid-service.sh still contains no process-group management of its own" {
+  # CODE only — this file discusses setsid at length in its header, and a guard
+  # that a comment can turn red is a guard nobody keeps.
+  run bash -c 'grep -vE "^[[:space:]]*#" "$1" | grep -nE "\b(setsid|pkill|nohup|disown|setpgid)\b|kill[[:space:]]+-[A-Za-z0-9]+[[:space:]]+-"' _ "$LIB"
+  [ "$status" -ne 0 ] || { echo "$output"; false; }
 }

@@ -170,13 +170,15 @@
 #          still cannot act on `escalate`: it is not an executable action name.
 #
 # Environment (optional):
-#   AID_RECOVERY_POLICY  — path to the effective recovery policy (test seam;
-#                          default: the shipped defaults/policies/auto-recovery.yaml).
-#                          The project-override resolution declared in that
-#                          file's `loader_contract` belongs to the ladder lib.
+#   AID_RECOVERY_POLICY  — explicit recovery policy path (test seam). With it
+#                          unset the effective policy is resolved by the ladder
+#                          lib's `aid_recovery_policy_load`, which honours the
+#                          project override declared in the policy's own
+#                          `loader_contract` — the same file the ladder bounds
+#                          itself by. See `_aid_ra_effective_policy`.
 #   AID_RECOVERY_FSM_BIN — path to aid-fsm.sh (test seam).
 #
-# **Last Updated:** 2026-08-09
+# **Last Updated:** 2026-08-10
 # =============================================================================
 
 # shellcheck source=aid-c3-dispatch.sh
@@ -515,6 +517,48 @@ _aid_ra_artifact() {
 }
 
 # ---------------------------------------------------------------------------
+# _aid_ra_effective_policy — THE policy this adjudication is bound by.
+#
+# It used to be `${AID_RECOVERY_POLICY:-$_AID_RA_POLICY_DEFAULT}`, which reads
+# the SHIPPED file and nothing else — while the ladder lib, following the
+# policy's own `loader_contract`, honours the project override at
+# `.aid-o/config/policies/auto-recovery.yaml`. Two consumers of one policy
+# disagreeing about which policy it is, demonstrated: an override narrowing
+# GATE_TIMEOUT to `[wait_and_resume]` bounded the ladder and did nothing here —
+# this function still returned `rerun_targeted`, an action the effective policy
+# had removed. The ceiling was real; it was just a ceiling from a different
+# building.
+#
+# The resolution ORDER is not re-implemented — that would be the same mistake
+# one layer down. `aid_recovery_policy_load` owns it (explicit/env first, then
+# the project override, then the shipped default, each structurally validated),
+# and this delegates to it whenever the ladder lib is loadable. The old
+# expression survives only as the fallback for a caller that has neither.
+_aid_ra_effective_policy() {
+  if ! declare -F aid_recovery_policy_load >/dev/null 2>&1; then
+    if [[ -f "$_AID_RA_DIR/aid-recovery-ladder.sh" ]]; then
+      # shellcheck source=aid-recovery-ladder.sh
+      source "$_AID_RA_DIR/aid-recovery-ladder.sh" >/dev/null 2>&1 || true
+    fi
+  fi
+  local p=""
+  if declare -F aid_recovery_policy_load >/dev/null 2>&1; then
+    p="$(aid_recovery_policy_load 2>/dev/null || true)"
+  fi
+  # THE FALLBACK, and why it is not a hole. It is reached when the ladder lib is
+  # absent, and when it is present but resolved nothing usable. In both cases the
+  # CANDIDATE path is returned rather than nothing, because `_aid_ra_policy_error`
+  # re-derives its own verdict on whatever it is handed — so a policy the loader
+  # rejected is rejected again here, with the specific reason attached to the
+  # artifact instead of a bare "missing". The ceiling therefore never rests on
+  # the loader's exit code; it rests on this file's own validation, exactly as it
+  # did before the loader existed. Delegation changes WHICH file gets validated,
+  # never WHETHER it is.
+  if [[ -n "$p" ]]; then printf '%s' "$p"; return 0; fi
+  printf '%s' "${AID_RECOVERY_POLICY:-$_AID_RA_POLICY_DEFAULT}"
+}
+
+# ---------------------------------------------------------------------------
 # aid_recovery_adjudicate <run_evidence_dir> <stop_class> <facts_file>
 # ---------------------------------------------------------------------------
 aid_recovery_adjudicate() {
@@ -536,7 +580,7 @@ aid_recovery_adjudicate() {
     return 3
   fi
 
-  local policy="${AID_RECOVERY_POLICY:-$_AID_RA_POLICY_DEFAULT}"
+  local policy; policy="$(_aid_ra_effective_policy)"
   local fsm_bin="${AID_RECOVERY_FSM_BIN:-$_AID_RA_FSM_DEFAULT}"
   local ts; ts="$(date -u +%Y%m%dT%H%M%SZ)"
   local art="$dir/recovery-adjudication-${ts}-1.json"

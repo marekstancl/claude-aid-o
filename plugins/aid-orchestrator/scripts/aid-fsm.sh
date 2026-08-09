@@ -3789,15 +3789,33 @@ _resume_no_artifact_report() {
 # rerun ever happening — a dead run collected by `resume`, or a run that reached
 # release with services still recorded.
 #
-# Three properties make it safe to call from the FSM:
+# Four properties make it safe to call from the FSM:
 #   • it does NOTHING unless this run's evidence actually holds service state, so
 #     every project that declares no services is untouched (and no library is
 #     even sourced);
 #   • it is never called from a path where a supervised job of the run is still
 #     live — that is the caller's guarantee, and for `resume` it is the whole
 #     read-only-vs-claim split;
-#   • it never fails its caller. A teardown that could not finish is a warning
-#     next to a transition or a collection that already happened.
+#   • THE RUNNER'S OWN LIVENESS is checked, and this is the CP3 BLOCKING fix.
+#     The bullet above was the whole guarantee, and it is only half of one:
+#     `_resume_other_jobs_live` sees SUPERVISED JOBS, and a live IN-LINE runner
+#     is invisible to the supervisor by construction (its own comment said so).
+#     A run with one finished background gate and one long FOREGROUND gate
+#     therefore looked exactly like a dead run — and that is not an exotic
+#     shape, it is what `watchdog → resume_needed` produces after 300 s of no
+#     progress, on the ordinary AUTO path, in a repository whose gates routinely
+#     exceed 300 s. The sweep took the database out from under the running gate
+#     and two gates that would have passed were reported `service_unhealthy`: a
+#     fabricated verdict.
+#     The evidence that closes it is the ownership claim this same EPIC built,
+#     and it is NOT re-implemented here. `aid_service_down_all` consults it and
+#     REFUSES (rc 2) while a different, provably-live process holds it, so
+#     `resume`, `done-advance` and `run-all`'s entry sweep all inherit one
+#     answer from one authority. All this function adds is saying out loud which
+#     refusal happened;
+#   • it never fails its caller. A teardown that could not finish — or that was
+#     refused — is a warning next to a transition or a collection that already
+#     happened.
 #
 # EVERY caller passes its execution.yaml, and that is a SECURITY property rather
 # than a nicety: without a declaration to reconcile against, `aid_service_down_all`
@@ -3830,7 +3848,17 @@ _fsm_service_sweep() {
   # library as `.../my` — a path that does not exist, which is exactly the
   # no-declaration fallback above. An empty "$yaml" is already the library's
   # documented "use the default" signal, so the conditional bought nothing.
-  if ! aid_service_down_all "$ev" "$yaml"; then
+  local rc=0
+  aid_service_down_all "$ev" "$yaml" || rc=$?
+  if (( rc == 2 )); then
+    # The one authority refused: a different process still provably owns these
+    # services. Nothing was cancelled, nothing was stopped. Said plainly,
+    # because "the services are still up" is the CORRECT outcome here and must
+    # not read as a failure of this command.
+    echo "aid-fsm.sh ${caller}: the services recorded under ${ev} were NOT swept — another process still holds this run's ownership claim and is alive (named above). That is deliberate: sweeping a live run's services would report gates that are passing as failed. This ${caller} changed nothing about the services." >&2
+    return 0
+  fi
+  if (( rc != 0 )); then
     echo "WARN: aid-fsm.sh ${caller}: at least one service recorded under ${ev} still answers its probe after teardown — see the named line above; this did not affect anything recorded" >&2
   fi
   return 0
@@ -4035,8 +4063,12 @@ cmd_resume() {
   # winner), the sibling check above (a supervised job of this run still in
   # flight → report, never claim), and the fact that nothing here touches a
   # final report — only the `gates_rows/<gate>.json` checkpoint the next
-  # `run-all` assembles. A live IN-LINE runner is invisible to the supervisor,
-  # so no guarantee is claimed about one.
+  # `run-all` assembles. A live IN-LINE runner is invisible to the SUPERVISOR,
+  # so no guarantee is claimed here about the checkpoint such a runner may also
+  # be writing. It is NOT invisible to the service ownership claim, and that
+  # difference is load-bearing a few lines below: the service sweep leaves a
+  # live runner's services standing. A checkpoint written twice is recoverable;
+  # a database removed from under a running gate is a fabricated verdict.
   local claimed
   if ! claimed="$(_resume_claim "$art")"; then
     _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the continuation artifact was already claimed — the winner's claim file is ${claimed}"
@@ -4111,6 +4143,14 @@ cmd_resume() {
   # service, and sweeping it there would kill the very dependency the surviving
   # job needs in order to finish. A status look never claims, and it never stops
   # a service either.
+  #
+  # AND the run's OWN liveness, which the live-sibling refusal above cannot see:
+  # a job being dead does not make the RUNNER dead. `aid_service_down_all`
+  # refuses while the ownership claim names a live process, so a resume against
+  # a run whose background gate finished while its foreground gate is still
+  # going now leaves that gate's dependency alone and says so. The check is not
+  # here — it is in the one teardown definition, so this call site cannot drift
+  # away from the one `done-advance` and `run-all` use.
   #
   # THE HONEST BOUND on the two branches that also sit below the live-sibling
   # refusal and still do NOT sweep — `missing|unknown` and `lost`. The plan says

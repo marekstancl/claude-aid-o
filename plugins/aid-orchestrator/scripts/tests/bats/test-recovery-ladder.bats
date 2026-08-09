@@ -93,6 +93,13 @@ seed_record() {
   for l in "$@"; do printf '%s\n' "$l" >> "$REC"; done
 }
 
+# reset_record — a case constructing a fresh history from scratch. The record is
+# now paired with a high-water mark (`<record>.hwm.json`) that exists precisely
+# so that a record which SHRINKS is refused instead of silently granting a fresh
+# budget, so deleting the record alone is — correctly — indistinguishable from
+# the truncation attack. A test resetting its fixture must reset both.
+reset_record() { rm -f "$REC" "${REC}.hwm.json"; }
+
 attempt_line() { # attempt_line <class> <action> <outcome> <n> [ts]
   jq -nc --arg c "$1" --arg a "$2" --arg o "$3" --argjson n "$4" \
          --arg ts "${5:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" \
@@ -239,7 +246,7 @@ normalize_report() {
 
   # The clock runs from the class's FIRST line — which an EMITTER line can be,
   # not only an attempt: the budget starts when the stop was first seen.
-  rm -f "$REC"
+  reset_record          # the record has a companion mark now: reset BOTH
   seed_record "$(jq -nc --arg ts "$old" '{ts:$ts, event:"recovery_stop", class:"JOB_LOST", outcome:"detected", auto:true}')"
   run ladder aid_ladder_attempt "$EVID" JOB_LOST collect_and_continue
   [ "$status" -eq 4 ]
@@ -547,7 +554,7 @@ YAML
   local p="$WORK/bad-vocab.yaml"
   cp "$POLICY" "$p"
   yq -i '.stop_classes.GATE_TIMEOUT.allowed_actions = ["waive_gate"]' "$p"
-  rm -f "$REC"
+  reset_record          # the record has a companion mark now: reset BOTH
   run bash -c 'set -euo pipefail; source "$LIB"; AID_RECOVERY_POLICY="'"$p"'" aid_ladder_attempt "$EVID" GATE_TIMEOUT waive_gate'
   [ "$status" -eq 4 ]
   [ "${lines[-1]}" = "adjudicate refused_policy_unreadable" ]
@@ -750,4 +757,140 @@ YAML
   [[ "$block" == *"aid_ladder_attempt"* ]]
   [[ "$block" == *"aid_recovery_adjudicate"* ]]
   [[ "$block" == *"aid_ladder_escalate"* ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CP3 HIGH — a budget that resets when you delete a file is not a budget
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "case 15: truncating the record does NOT hand back a fresh budget" {
+  # THE repro, verbatim: 1 grant -> count 1 -> truncate -> count 0 -> grant
+  # again, forever. The flock closed the concurrent TOCTOU and closed nothing
+  # about a writer that empties the file. TRANSIENT_INFRA's budget is 3; the
+  # ladder record was the only thing that remembered how much of it was spent.
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 0 ]
+  [ "$output" = "proceed 1" ]
+
+  # The mark is established by the append itself, in the same critical section.
+  [ -f "${REC}.hwm.json" ]
+  [ "$(jq -r '.seq' "${REC}.hwm.json")" = "1" ]
+
+  : > "$REC"                                   # the attack: one truncation
+
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  echo "$output"
+  [ "$status" -eq 4 ]
+  [ "${lines[-1]}" = "adjudicate refused_record_tampered" ]
+
+  # And it STAYS refused. The refusal line itself lengthens the record, so a
+  # purely arithmetic check would forgive the tamper after enough refusals; the
+  # verdict is sticky in the mark instead.
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 4 ]
+  [ "${lines[-1]}" = "adjudicate refused_record_tampered" ]
+  [ "$(jq -r '.tampered' "${REC}.hwm.json")" = "true" ]
+
+  # The refusal is on the audit surface, not only on stderr.
+  run jq -rs '[.[] | select(.outcome == "refused_record_tampered")] | length' "$REC"
+  [ "$output" -ge 1 ]
+}
+
+@test "case 16: rewriting a line in place is detected; an honest history still works" {
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 0 ]
+  run ladder aid_ladder_outcome "$EVID" TRANSIENT_INFRA wait_and_resume 1 failed
+  [ "$status" -eq 0 ]
+
+  # An honest history keeps working — the chain is a detector, never a second
+  # budget.
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA retry_once
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "proceed 2" ]
+
+  # Now edit the tail IN PLACE: same line count, different content. Truncation
+  # is caught by the seq; this is what the content half of the mark is for.
+  local n; n="$(wc -l < "$REC")"
+  head -n -1 "$REC" > "${REC}.new"
+  tail -n 1 "$REC" | jq -c '.outcome = "started_but_edited"' >> "${REC}.new"
+  mv "${REC}.new" "$REC"
+  [ "$(wc -l < "$REC")" -eq "$n" ]
+
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  echo "$output"
+  [ "$status" -eq 4 ]
+  [ "${lines[-1]}" = "adjudicate refused_record_tampered" ]
+}
+
+@test "case 17: every line the writer emits is chained, and a crash between line and mark is forgiven" {
+  run ladder aid_ladder_emit "$EVID" TRANSIENT_INFRA unit_test "chain check"
+  [ "$status" -eq 0 ]
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 0 ]
+
+  run jq -rs '[.[] | select(has("seq") and has("prev"))] | length' "$REC"
+  [ "$output" = "2" ]
+  run jq -rsc '[.[].seq]' "$REC"
+  [ "$output" = "[1,2]" ]
+  run jq -rs '.[0].prev' "$REC"
+  [ "$output" = "genesis" ]
+
+  # A crash between the append and the mark leaves the record one line AHEAD of
+  # its mark. That direction must be forgiven, or every crash would read as an
+  # attack — the check refuses SHORT, never long.
+  jq -c '.seq = 1' "${REC}.hwm.json" > "${REC}.hwm.json.t"
+  mv "${REC}.hwm.json.t" "${REC}.hwm.json"
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA retry_once
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "case 18: an ordinary emitter cannot HEAL a truncated record back into a fresh budget" {
+  # The budget path is not the only writer. `aid_ladder_emit` — a stop being
+  # observed, which is precisely what precedes a recovery attempt — would
+  # otherwise append line 1 over a truncated record, re-establish the mark at
+  # seq 1, and hand the next attempt a record that agrees with its own mark and
+  # reports zero attempts used. The detection has to live in EVERY writer.
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 0 ]
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA retry_once
+  [ "$status" -eq 0 ]
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 0 ]
+  [ "$output" = "proceed 3" ]                 # the 3-attempt budget is now spent
+
+  : > "$REC"
+  run ladder aid_ladder_emit "$EVID" TRANSIENT_INFRA unit_test "an honest emitter, after the truncation"
+  [ "$status" -eq 0 ]                          # evidence is still recorded...
+  [ "$(jq -r '.tampered' "${REC}.hwm.json")" = "true" ]   # ...but it does not heal
+
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  echo "$output"
+  [ "$status" -eq 4 ]
+  [ "${lines[-1]}" = "adjudicate refused_record_tampered" ]
+}
+
+@test "case 19: a line deleted or edited in the MIDDLE of the record is detected too" {
+  # The mark can only ever speak about the END of the record. Without the walk,
+  # removing a spent `started` line from the middle changes neither the maximum
+  # seq nor the tail hash — and hands the budget straight back. Same for editing
+  # one in place.
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  [ "$status" -eq 0 ]
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA retry_once
+  [ "$status" -eq 0 ]
+  run ladder aid_ladder_outcome "$EVID" TRANSIENT_INFRA retry_once 2 failed
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$REC")" -eq 3 ]
+
+  # delete the FIRST spent attempt — the tail and the maximum seq are untouched
+  local before_tail; before_tail="$(tail -n 1 "$REC")"
+  sed -i '1d' "$REC"
+  [ "$(tail -n 1 "$REC")" = "$before_tail" ]
+
+  run ladder aid_ladder_attempt "$EVID" TRANSIENT_INFRA wait_and_resume
+  echo "$output"
+  [ "$status" -eq 4 ]
+  [ "${lines[-1]}" = "adjudicate refused_record_tampered" ]
 }

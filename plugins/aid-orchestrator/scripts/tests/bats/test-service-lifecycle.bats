@@ -869,3 +869,77 @@ YAML
   [ "$(grep -c '"event":"services_lifecycle_delegated"' "$TIMELINE")" -eq 1 ]
   [[ "$(grep '"event":"services_lifecycle_delegated"' "$TIMELINE")" == *"AID_SERVICE_LIFECYCLE_OWNED"* ]]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CP3 BLOCKING — the shape cases 5 and 6 between them never form
+# ═══════════════════════════════════════════════════════════════════════════
+# Case 5 proves resume leaves services alone while a supervised job is LIVE.
+# Case 6 proves it sweeps them when the job is TERMINAL. Both call `kill_runner`
+# BEFORE `resume`, so the combination they never form is the one that matters:
+# a terminal background job while the RUNNER IS STILL ALIVE, in a foreground
+# gate. `_resume_other_jobs_live` cannot see that runner — the supervisor never
+# owned it — so the run looked dead and its services were swept out from under a
+# gate that was still running. That is not an exotic shape: `watchdog →
+# resume_needed` produces it whenever a background gate finishes and a long
+# foreground gate keeps the run past 300 s of "no progress".
+
+@test "case 11: resume does NOT sweep the services of a run whose RUNNER is still alive" {
+  # The runner polls its background job on a 30 s tick here, which is what makes
+  # the window deterministic instead of a race: the job is cancelled from
+  # outside, so it is TERMINAL while the runner is still alive, still holding
+  # the ownership claim, and still going to run the FOREGROUND gate that needs
+  # the same service. `_resume_other_jobs_live` sees no live supervised job —
+  # correctly, there is none — and an in-line runner is invisible to the
+  # supervisor by construction. That is the whole gap.
+  export AID_GATE_POLL_INTERVAL_SEC=30
+  _seed_map
+  {
+    _services_block "bash \"$FIX/listen.sh\" \"\$SVC_PORT\" $TOKEN"
+    cat <<YAML
+gates:
+  bg:
+    command: bash "$FIX/slow-gate.sh" "$WORK/bg.marker" 120 $GTOKEN
+    required: true
+    timeout_seconds: 300
+    run_mode: background
+    needs_services: [api]
+  slow:
+    command: bash "$FIX/slow-gate.sh" "$WORK/slow.marker" 60 $GTOKEN
+    required: true
+    timeout_seconds: 180
+    needs_services: [api]
+YAML
+  } > "$PROJ/exec.yaml"
+
+  start_gates_bg
+  _wait_for 60 '[[ "$(jq -r ".services.api.state // \"\"" "$REG" 2>/dev/null)" == "healthy" ]]'
+  _wait_for 60 '[[ -f "$JOBS/bg-attempt-1/job.json" ]] && jq -e ".pid != null" "$JOBS/bg-attempt-1/job.json" >/dev/null 2>&1'
+  _wait_for 60 '[[ "$(jq -r ".job_id // \"\"" "$ARTIFACT" 2>/dev/null)" == "bg-attempt-1" ]]'
+
+  local port1 pids1
+  port1="$(_reg_field '.services.api.port')"
+  pids1="$(_service_pids)"
+
+  # The background job goes terminal WITHOUT the runner dying — it is mid-poll,
+  # 30 s from noticing, and it still owns the services.
+  bash "$JOB_SH" cancel --jobs-dir "$JOBS" --id bg-attempt-1 >/dev/null 2>&1 || true
+  _wait_for 30 '[[ "$(bash "$JOB_SH" status --jobs-dir "$JOBS" --id bg-attempt-1)" == "cancelled" ]]'
+  _runner_alive || { echo "the runner exited before the window opened"; false; }
+  _probe_port "$port1"
+
+  run bash -c "cd '$PROJ' && bash '$FSM' resume '$EPIC' 2>&1"
+  echo "$output"
+  [ "$status" -eq 0 ]
+
+  # THE assertion. The live runner is invisible to the SUPERVISOR but not to the
+  # ownership claim, and the one teardown definition reads that claim. Before
+  # this fix the service was stopped here and the run's remaining gates were
+  # reported `service_unhealthy` — a fabricated verdict.
+  [[ "$output" =~ "were NOT swept" ]]
+  [ "$(_reg_field '.services.api.state')" = "healthy" ]
+  [ "$(_reg_field '.services.api.port')" = "$port1" ]
+  _probe_port "$port1"
+  local p; for p in $pids1; do kill -0 "$p"; done
+  [ ! -f "$WORK/stop.log" ]
+  _runner_alive
+}

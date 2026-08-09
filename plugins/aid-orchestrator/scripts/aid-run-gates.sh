@@ -721,6 +721,18 @@ _svc_stale_state_present() {
 # exists was preceded by a live claim — there is no window in which state exists
 # and no owner is recorded.
 #
+# THE CLAIM IS NOT DEFINED HERE ANY MORE, and that is the CP3 BLOCKING fix. It
+# used to be, and the consequence was that only this file could read it: the
+# FSM's `_fsm_service_sweep` — the teardown on `resume` and `done-advance` —
+# never consulted it, so a `resume` against a run whose background gate had
+# finished while its FOREGROUND gate was still running swept that live run's
+# services away and reported two passing gates as `service_unhealthy`. The
+# definitions now live in `lib/aid-service.sh`, beside `aid_service_down_all`,
+# which refuses while a live owner holds the claim — so every teardown path in
+# the system reads ONE authority. These four wrappers keep this file's local
+# vocabulary and add only the `_SVC_OWNER_CLAIMED` bookkeeping, which is this
+# invocation's own business.
+#
 # WHAT IS NOT HERE, deliberately: no `flock` held across the run. I measured the
 # reason rather than assuming it — a descriptor opened with `exec {fd}>>lock` is
 # NOT close-on-exec in bash 5.2, so a run-scoped lock is inherited by every
@@ -737,96 +749,20 @@ _svc_stale_state_present() {
 # or hand-written — never a live run of this code. Refusing there would make the
 # crash recovery unreachable for exactly the runs it exists for.
 _SVC_OWNER_CLAIMED=0
-_svc_owner_file() { printf '%s/services.owner.json' "$1"; }
+_svc_owner_file()     { aid_service_owner_file "$1"; }
+_svc_owner_live()     { aid_service_owner_live "$1"; }
+_svc_owner_describe() { aid_service_owner_describe "$1"; }
 
-# _svc_boot_id — an identity for THIS boot, so a recorded pid from before a
-# reboot is provably dead rather than ambiguously reused. Empty where the kernel
-# does not publish one; an empty value is simply not compared.
-_svc_boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || true; }
-
-# _svc_proc_starttime <pid> — field 22 of /proc/<pid>/stat (jiffies since boot),
-# the field that distinguishes a live pid from a RECYCLED one. Parsed after the
-# last ')' because a process name may contain spaces and parentheses.
-_svc_proc_starttime() {
-  local pid="$1" line rest
-  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  [[ -r "/proc/${pid}/stat" ]] || return 1
-  line="$(cat "/proc/${pid}/stat" 2>/dev/null)" || return 1
-  rest="${line##*') '}"
-  local -a f=()
-  read -r -a f <<<"$rest"
-  # After the comm field the remainder starts at field 3, so field 22 is index 19.
-  [[ -n "${f[19]:-}" ]] || return 1
-  printf '%s' "${f[19]}"
-}
-
-# _svc_owner_live <evidence_dir>
-#   rc 0  another gate runner is — or may still be — managing these services
-#   rc 1  no owner, or the recorded owner is PROVABLY gone
-#   Every "cannot tell" answers rc 0: refusing to start is recoverable, tearing
-#   down a live run's infrastructure is not.
-_svc_owner_live() {
-  local ev="$1" f pid rec_start rec_boot rec_host cur_start now_boot now_host
-  f="$(_svc_owner_file "$ev")"
-  [[ -f "$f" ]] || return 1
-  pid="$(jq -r '.pid // empty' "$f" 2>/dev/null || true)"
-  if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
-    # A claim record we cannot read is not a claim we can dismiss.
-    return 0
-  fi
-  [[ "$pid" == "$$" ]] && return 1   # our own claim from an earlier phase
-  rec_start="$(jq -r '.starttime // empty' "$f" 2>/dev/null || true)"
-  rec_boot="$(jq -r '.boot_id // empty'   "$f" 2>/dev/null || true)"
-  rec_host="$(jq -r '.host // empty'      "$f" 2>/dev/null || true)"
-  now_boot="$(_svc_boot_id)"
-  now_host="$(hostname 2>/dev/null || true)"
-  # A pid from another machine says nothing about any process here.
-  [[ -n "$rec_host" && -n "$now_host" && "$rec_host" != "$now_host" ]] && return 0
-  # Same machine, different boot: whatever held that pid did not survive.
-  [[ -n "$rec_boot" && -n "$now_boot" && "$rec_boot" != "$now_boot" ]] && return 1
-  if cur_start="$(_svc_proc_starttime "$pid")"; then
-    [[ -n "$rec_start" && "$cur_start" != "$rec_start" ]] && return 1  # pid recycled
-    return 0
-  fi
-  # No readable /proc entry. On Linux the absence of /proc/<pid> is proof; a
-  # /proc/<pid> we merely cannot READ (another user, hidepid) is not.
-  if [[ -d /proc ]]; then
-    [[ -e "/proc/${pid}" ]] && return 0
-    return 1
-  fi
-  ps -p "$pid" -o pid= >/dev/null 2>&1 && return 0
-  return 1
-}
-
-# _svc_owner_describe <evidence_dir> — one line for the refusal message.
-_svc_owner_describe() {
-  jq -r '"pid " + (.pid|tostring) + ", claimed at " + (.claimed_at // "?")
-         + ", run " + (.run_id // "?")' "$(_svc_owner_file "$1")" 2>/dev/null \
-    || printf 'an unreadable claim record'
-}
-
-# _svc_owner_claim <evidence_dir> <run_id> — atomic tmp+mv, so a concurrent
-# reader sees the old record or the new one and never half of one.
 _svc_owner_claim() {
-  local ev="$1" run="${2:-}" f tmp
-  f="$(_svc_owner_file "$ev")"
-  tmp="${f}.tmp.$$"
-  jq -n --arg pid "$$" --arg st "$(_svc_proc_starttime "$$" || true)" \
-        --arg boot "$(_svc_boot_id)" --arg host "$(hostname 2>/dev/null || true)" \
-        --arg run "$run" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{schema:"aid.services.owner/1", pid:($pid|tonumber), starttime:$st,
-          boot_id:$boot, host:$host, run_id:$run, claimed_at:$at}' \
-        > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
-  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  aid_service_owner_claim "$1" "${2:-}" || return 1
   _SVC_OWNER_CLAIMED=1
   return 0
 }
 
-# _svc_owner_clear <evidence_dir> — released with the services it covered.
 _svc_owner_clear() {
   (( _SVC_OWNER_CLAIMED == 1 )) || return 0
   _SVC_OWNER_CLAIMED=0
-  rm -f "$(_svc_owner_file "$1")" 2>/dev/null || true
+  aid_service_owner_clear "$1"
   return 0
 }
 
@@ -855,7 +791,18 @@ _svc_release_run() {
   local ev="$1" yaml="$2"
   (( _SVC_ACQUIRED == 1 )) || return 0
   _SVC_ACQUIRED=0
-  if ! aid_service_down_all "$ev" "$yaml"; then
+  local _down_rc=0
+  aid_service_down_all "$ev" "$yaml" || _down_rc=$?
+  if (( _down_rc == 2 )); then
+    # Cannot happen on this path — the claim being released is THIS process's,
+    # and the owner gate never counts our own claim as a live foreign owner — so
+    # if it ever does happen, say so as the anomaly it is rather than as a
+    # generic teardown warning.
+    echo "WARN: aid-run-gates.sh: the service teardown REFUSED because the ownership claim under '${ev}' names a live process other than this runner. That should be impossible while releasing our own claim; the claim record has NOT been cleared and no service was stopped. Investigate before rerunning:" >&2
+    _svc_manual_commands "$ev" "$yaml" >&2
+    return 0
+  fi
+  if (( _down_rc != 0 )); then
     echo "WARN: aid-run-gates.sh: service teardown did not fully succeed — at least one declared service still answers its probe. The gate report is already written and is NOT affected. Finish the teardown by hand:" >&2
     _svc_manual_commands "$ev" "$yaml" >&2
   fi
