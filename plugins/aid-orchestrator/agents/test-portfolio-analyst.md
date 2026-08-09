@@ -99,4 +99,4 @@ Emit exactly one JSON document matching `defaults/schemas/test-audit-wave-artifa
 optional bookkeeping. No prose outside this document — the controller writes your raw output
 verbatim to `.aid-o/work/test-audits/<audit-id>/agents/<wave>-<focus>[-<shard_id>].json`.
 
-**Last Updated:** 2026-08-03
+**Last Updated:** 2026-08-09

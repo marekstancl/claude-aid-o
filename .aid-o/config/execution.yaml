@@ -93,8 +93,12 @@ gates:
       standalone test-*.sh shell suites bats_all never touches, while bats_all
       runs test-aid-test-isolation-experiment.bats, which this gate delegates
       away to its own CI job. Neither set contains the other, so neither gate
-      substitutes for the other. Its true cost is not yet known — no run of
-      either gate has completed, so there is no measured cost to compare.
+      substitutes for the other. Its cost under the CURRENT cap is unmeasured:
+      gate-runtime-baselines.yaml records 5 non-censored runs (p50 1393316 ms,
+      p90/p95/max 1869545 ms), the newest dated 2026-07-15, and every one of
+      the 8 samples since is exit 124, censored at the then-1900s cap. bats_all
+      has never completed at all (percentiles null), so the two gates have no
+      comparable current measurement.
     # Kept the historical key name rather than renaming it (P071 E-071-1_1
     # Step 2, 2026-08-02) — release_quarantine's own reason text (see below)
     # quotes `shell_pipeline_smoke` verbatim, p064-closure's reason text
@@ -113,9 +117,16 @@ gates:
     # exactly as bats_all's own 600s cap did.
     #
     # 7200 is a CEILING chosen to let the gate finish and finally produce a real
-    # number, NOT a prediction of how long it takes. Nobody knows that yet:
-    # 2001s/73-suites is a lower bound, and scaling it to 151 would be the
-    # arithmetic this plan forbids. Once one run completes, set this from the
+    # number, NOT a prediction of how long it takes. No run under the CURRENT cap
+    # has completed: the 5 non-censored samples in
+    # .aid-o/metrics/gate-runtime-baselines.yaml (p50 1393316 ms, p90/p95/max
+    # 1869545 ms) all predate 2026-07-15 and were taken at the then-1900s cap, and
+    # every sample since is exit 124. 2001s/73-suites is a lower bound, and
+    # scaling it to 151 would be the arithmetic this plan forbids. Note the
+    # baseline machinery already derives timeout_recommended_seconds: 2805 and
+    # run_mode_recommended: background for this gate from those stale samples —
+    # 7200 is ~2.6x that, deliberately, because it is a ceiling and not an
+    # estimate. Once one run completes under this cap, set both from the
     # measurement.
     #
     # For scale (P076 Step 7, 2026-08-09): an earlier version of this line said
