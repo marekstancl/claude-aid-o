@@ -120,7 +120,8 @@ gates:
     # number, NOT a prediction of how long it takes. No run under the CURRENT cap
     # has completed: the 5 non-censored samples in
     # .aid-o/metrics/gate-runtime-baselines.yaml (p50 1393316 ms, p90/p95/max
-    # 1869545 ms) all predate 2026-07-15 and were taken at the then-1900s cap, and
+    # 1869545 ms) all date from 2026-07-12 to 2026-07-15 and were taken at the
+    # then-1900s cap, and
     # every sample since is exit 124. 2001s/73-suites is a lower bound, and
     # scaling it to 151 would be the arithmetic this plan forbids. Note the
     # baseline machinery already derives timeout_recommended_seconds: 2805 and
