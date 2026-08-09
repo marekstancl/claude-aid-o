@@ -84,12 +84,23 @@
 # bearing reply. Silence, emptiness and ambiguity are never consent.
 #
 # ONE residual that cannot fail closed, named rather than hidden: JSON Schema
-# validation of the policy needs python3 + jsonschema. Where they are absent the
-# schema check is skipped (`policy_schema_check: "unavailable"` in the artifact)
-# and only the structural checks above run. Those structural checks — vocabulary
-# identity, per-class action membership, class-name membership — are pure
+# validation of the policy needs python3 + jsonschema. Where they are absent —
+# OR BROKEN, which is the same thing from here: an interpreter that errors out
+# produces no output, and "unverifiable" is not "invalid" — the schema check is
+# skipped (`policy_schema_check: "unavailable"` in the artifact) and only the
+# structural checks run. Those structural checks are therefore written to stand
+# ALONE: vocabulary identity, per-class action membership, class-name
+# membership, the closed CLASS set, and the terminus ORDER. They are pure
 # bash+yq+jq and are what INVARIANT 1 and 2 actually rest on, so the ceiling
 # does not depend on the optional validator.
+#
+# The last two were added by the final Step-12 security review and are not
+# decoration: with python3 absent or broken, an override could previously
+# invent a stop class the schema's `additionalProperties: false` would have
+# refused, and could reorder `terminus` to put `pm_force` first. Neither could
+# widen the ACTIONS this file prints (INVARIANT 1 held), but the ladder lib
+# READS `terminus`, so an unchecked reorder there would have inverted the
+# escalation order for the one consumer that acts on it.
 #
 # ── UNTRUSTED TEXT IN THE PROMPT ────────────────────────────────────────────
 # Three regions of the prompt are attacker-reachable: the facts file, the ladder
@@ -124,9 +135,19 @@
 # this function proved appendable at entry) — and only appends the timeline line
 # after the ladder accepted it. A rejected record therefore leaves no trace at
 # all, instead of leaving `verdict: accepted` on the audit surface while the
-# function returns `escalate`. If the timeline nevertheless fails after the
-# ladder accepted, a compensating `revoked_unrecorded` line is appended to the
-# ladder before returning.
+# function returns `escalate`.
+#
+# THE RESIDUAL, stated rather than implied: if the timeline append fails AFTER
+# the ladder accepted, a compensating `verdict: "revoked_unrecorded"` line is
+# ATTEMPTED — and that attempt is itself best-effort (`|| true`), because there
+# is nothing left to fail closed TO once both writers are broken. So in the
+# double-failure case the ladder keeps a bare `accepted` line for an outcome
+# this function did NOT return. Consequently `revoked_unrecorded` is
+# authoritative for readers, and an `accepted` ladder line is not by itself
+# proof that an action was taken: every reader must drop an accepted line whose
+# (class, attempt) a later `revoked_unrecorded` names.
+# `aid_ladder_last_accepted_action` in lib/aid-recovery-ladder.sh is that
+# reader, and it is bats-pinned against exactly this sequence.
 #
 # DIVERGENCE FROM THE PLAN TEXT — stated, not silently applied: the plan names
 # the artifact `recovery-adjudication-<ts>.json`. A retry is a SECOND exchange
@@ -136,9 +157,9 @@
 #
 # The accepted decision (and the refusals) are appended to
 # `<run_evidence_dir>/timeline.jsonl` and to the ladder record
-# `<run_evidence_dir>/recovery-ladder.jsonl`. The ladder lib (next step of this
-# EPIC) owns that file's writer; if it is already sourced, its
-# `aid_recovery_ladder_append` is used instead of the local append.
+# `<run_evidence_dir>/recovery-ladder.jsonl`. `lib/aid-recovery-ladder.sh` owns
+# that file's writer; when it is sourced, its `aid_recovery_ladder_append` — the
+# validating writer that can REFUSE — is used instead of the local plain append.
 #
 # Output:  the selected action on stdout (one of the class's allowed actions),
 #          or the literal `escalate`.
@@ -180,6 +201,17 @@ _AID_RA_SCHEMA_CHECK="unavailable"
 # the policy is the thing being bounded. `test-recovery-adjudicate.bats` case 22
 # pins them equal to the policy's `action_vocabulary` keys and to the schema's
 # `allowed_actions` enum, so drift is loud rather than silent.
+_aid_ra_class_constants() {
+  printf '%s\n' \
+    GATE_TIMEOUT \
+    SERVICE_UNHEALTHY \
+    JOB_LOST \
+    TRANSIENT_INFRA \
+    DISPATCH_ORPHANED \
+    REVIEW_EXHAUSTED \
+    UNCLASSIFIED
+}
+
 _aid_ra_action_constants() {
   printf '%s\n' \
     wait_and_resume \
@@ -261,6 +293,26 @@ _aid_ra_policy_error() {
     done < <(yq -r '[.stop_classes // {} | .[] | .allowed_actions // [] | .[]] | .[]' "$policy" 2>/dev/null)
     if [[ "$bad" -ne 0 ]]; then
       reason="a stop class declares an action outside action_vocabulary (schema error, refused at load)"; break
+    fi
+
+    # (b2) the CLASS set is closed too, and the terminus ORDER is fixed. The
+    #      schema says both (`stop_classes.additionalProperties: false`,
+    #      `terminus.const`), but the schema check below is optional equipment:
+    #      absent OR broken python3 skipped it, and an invented class plus a
+    #      `pm_force`-first terminus were both accepted. These two loops are the
+    #      same refusals in bash, so they cannot be skipped by anything.
+    local declared_c expected_c
+    declared_c="$(yq -r '.stop_classes // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')" || declared_c=""
+    expected_c="$(_aid_ra_class_constants | LC_ALL=C sort | tr '\n' ',')"
+    if [[ "$declared_c" != "$expected_c" ]]; then
+      reason="policy stop_classes is not the closed set of seven this adjudicator enforces"; break
+    fi
+    local t bad_t=0
+    while IFS= read -r t; do
+      [[ "$t" == "adjudicate>escalation>pm_force" ]] || bad_t=1
+    done < <(yq -r '.stop_classes // {} | .[] | (.terminus // []) | join(">")' "$policy" 2>/dev/null)
+    if [[ "$bad_t" -ne 0 ]]; then
+      reason="a stop class declares a terminus other than adjudicate>escalation>pm_force (the order is load-bearing: pm_force is always a human act)"; break
     fi
 
     # (c) full JSON Schema validation where the validator exists. Absent it, the
@@ -623,10 +675,16 @@ aid_recovery_adjudicate() {
     local raw; raw="$(cat "$reply_file" 2>/dev/null || true)"
 
     # -- validation: the ACTION FIELD is the decision (INVARIANT 3) ----------
-    # Nothing derived from the reply's free text is ever written into the
-    # timeline: the recorded rejection reason is built from constants and, at
-    # most, from a name that already matched the closed set. The verbatim reply
-    # lives in the artifact (and, fenced, in the retry prompt).
+    # The property that actually holds — stated precisely, because the earlier
+    # wording ("no reply-derived free text reaches timeline.jsonl") was wider
+    # than the code: an ACCEPTED decision's RATIONALE *is* reply text, kept
+    # deliberately (a decision with no reason is not auditable), capped at 500
+    # bytes and jq-escaped as a value.
+    # What holds without exception is about the REJECTIONS: a rejection reason
+    # is built from constants and, at most, from a name that already matched the
+    # closed set — so a rejected reply can never write its own words onto the
+    # audit surface. The verbatim reply lives in the artifact (and, fenced, in
+    # the retry prompt).
     local verdict="" action="" rationale="" action_content=""
     local n_action_lines
     n_action_lines="$(grep -acE '^[[:space:]]*[Aa][Cc][Tt][Ii][Oo][Nn]:' "$reply_file" 2>/dev/null || true)"

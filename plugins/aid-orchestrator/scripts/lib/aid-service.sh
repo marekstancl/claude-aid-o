@@ -210,6 +210,37 @@ AID_SERVICE_EVIDENCE_DIR="${AID_SERVICE_EVIDENCE_DIR:-}"
 # Every service failure names the service. `aid-job.sh`'s own stderr is
 # propagated VERBATIM behind that prefix — this file never paraphrases the
 # supervisor.
+# ── Recovery-ladder emitter (P076 Step 13) ───────────────────────────────────
+# SERVICE_UNHEALTHY is a `ladder_entry: mechanical` class, so the ladder record
+# is written from the emitting code site itself — the restart-exhaustion path
+# below. It is EVIDENCE ONLY: the per-service verdict, the registry state, the
+# stderr and the rc 1 are all unchanged, and a ladder that cannot be loaded or
+# written changes nothing. Loaded lazily and best-effort for that reason.
+#
+# It also cannot smuggle authority. Nothing here executes a restart; the ladder
+# lib executes nothing at all. `restart_service_once` — the action the policy
+# allows this class — is performed by the ONE authorized-restart branch in
+# `_aid_svc_up_one` (`[[ "$restart_auth" == "true" ]] && (( restart_used == 0 ))`),
+# so a ladder-selected restart still has to pass the service's own declaration
+# and its one-cycle limit.
+_AID_SVC_LADDER_STATE=""
+_aid_svc_ladder_emit() {
+  local dir="${1:-}" class="$2" emitter="$3" detail="${4:-}"
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  if [[ -z "$_AID_SVC_LADDER_STATE" ]]; then
+    _AID_SVC_LADDER_STATE="no"
+    if [[ -f "${_AID_SERVICE_LIB_DIR}/aid-recovery-ladder.sh" ]]; then
+      # shellcheck source=aid-recovery-ladder.sh
+      source "${_AID_SERVICE_LIB_DIR}/aid-recovery-ladder.sh" >/dev/null 2>&1 \
+        && declare -F aid_ladder_emit >/dev/null 2>&1 \
+        && _AID_SVC_LADDER_STATE="ok"
+    fi
+  fi
+  [[ "$_AID_SVC_LADDER_STATE" == "ok" ]] || return 0
+  aid_ladder_emit "$dir" "$class" "$emitter" "$detail" >/dev/null 2>&1 || true
+  return 0
+}
+
 _aid_svc_err()      { printf 'ERROR: aid-service: %s\n' "$1" >&2; }
 _aid_svc_svc_err()  { printf 'ERROR: aid-service: service %s: %s\n' "$1" "$2" >&2; }
 _aid_svc_log()      { printf 'aid-service: %s\n' "$1" >&2; }
@@ -948,6 +979,11 @@ _aid_svc_up_one() {
       --arg s "$final_state" --arg f "$failure" \
       --argjson realloc "$realloc_used" --argjson restarts "$restart_used" \
       '{state:$s, failure_reason:$f, reallocations:$realloc, restarts:$restarts}')" || true
+    # P076 Step 13 — SERVICE_UNHEALTHY, mechanical ladder entry: this service has
+    # spent everything its declaration authorised. Recorded AFTER the registry
+    # write, so the ladder line can only describe a verdict already committed.
+    _aid_svc_ladder_emit "$evidence" SERVICE_UNHEALTHY service_restart_exhausted \
+      "service ${name}: ${failure} (state ${final_state}, reallocations ${realloc_used}, restarts ${restart_used})"
     _aid_svc_svc_err "$name" "${failure}; its job was cancelled and stop_cmd run${hint_suffix}"
     return 1
   done

@@ -1527,6 +1527,15 @@ fsm_check_orphan_dispatches() {
   echo "  aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars why this is acceptable>' \\" >&2
   echo "      --blocked-checks 'dispatch_orphan_complete'" >&2
 
+  # P076 Step 13 — DISPATCH_ORPHANED is `ladder_entry: instruction`: no code
+  # here writes the ladder record, the MESSAGE names the command that does. The
+  # die below, its exit status and the audit-log record above are unchanged —
+  # this adds two lines of stderr and nothing else.
+  echo "" >&2
+  echo "Recovery-ladder entry (DISPATCH_ORPHANED — records this stop for the ladder; changes nothing about the refusal above):" >&2
+  echo "  bash -c 'source plugins/aid-orchestrator/scripts/lib/aid-recovery-ladder.sh; \\" >&2
+  echo "           aid_ladder_emit \"${evidence_dir}\" DISPATCH_ORPHANED fsm_check_orphan_dispatches \"missing_dispatch_complete\"'" >&2
+
   # Emit audit log
   local focus_csv orphan_count
   focus_csv=$(echo "$orphan_focuses" | paste -sd, -)

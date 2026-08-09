@@ -80,6 +80,36 @@ if [[ ! -f "${SCRIPT_DIR}/lib/aid-resume-artifact.sh" ]]; then
 fi
 source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 
+# ─── Recovery-ladder emitters (P076 Step 13) ────────────────────────────────
+# The ladder RECORDS and ROUTES; it never replaces a verdict. Every call below
+# is additive: the gate's fail, its 124 streak accounting, the repeated-timeout
+# policy block and the job_lost row all behave exactly as they did before, and
+# a ladder that cannot be loaded or cannot be written changes nothing at all.
+#
+# Sourced LAZILY and BEST-EFFORT (the opposite discipline from
+# aid-resume-artifact.sh above, on purpose): those definitions are load-bearing
+# for a gate's correctness, this one is evidence. Failing a gate run because a
+# recovery record could not be written would be the ladder replacing a verdict.
+_AID_GATE_LADDER_STATE=""   # "" untried | "ok" | "no"
+_gate_ladder_emit() {
+  local class="$1" emitter="$2" detail="${3:-}" dir="${_evidence_dir:-}"
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  if [[ -z "$_AID_GATE_LADDER_STATE" ]]; then
+    _AID_GATE_LADDER_STATE="no"
+    if [[ -f "${SCRIPT_DIR}/lib/aid-recovery-ladder.sh" ]]; then
+      # shellcheck source=lib/aid-recovery-ladder.sh
+      source "${SCRIPT_DIR}/lib/aid-recovery-ladder.sh" >/dev/null 2>&1 \
+        && declare -F aid_ladder_emit >/dev/null 2>&1 \
+        && _AID_GATE_LADDER_STATE="ok"
+    fi
+  fi
+  [[ "$_AID_GATE_LADDER_STATE" == "ok" ]] || return 0
+  # stdout is muted deliberately: several callers of this helper have a GATE ROW
+  # on their own stdout, and one stray line there would corrupt the report.
+  aid_ladder_emit "$dir" "$class" "$emitter" "$detail" >/dev/null 2>&1 || true
+  return 0
+}
+
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
 
 # ─── Gate runtime baseline gitignore bootstrap (P063 Step 2) ────────────────
@@ -1215,6 +1245,11 @@ run_background_gate() {
       log_event "$timeline_file" "gate_job_deadline_exceeded" gate="$gate_name" \
         job_id="$job_id" elapsed_sec="$job_elapsed" poll_elapsed_sec="$elapsed" \
         deadline_sec="$timeout_s" grace_sec="$AID_GATE_DEADLINE_GRACE_SEC"
+      # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. Recorded here and
+      # nothing else: the cancel below, the state re-read and the row mapping
+      # are untouched.
+      _gate_ladder_emit GATE_TIMEOUT gate_job_deadline_exceeded \
+        "gate ${gate_name} job ${job_id} ran ${job_elapsed}s past a ${timeout_s}s deadline plus ${AID_GATE_DEADLINE_GRACE_SEC}s grace; the runner is cancelling it"
       bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || true
       state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo lost)"
       break
@@ -1314,6 +1349,17 @@ run_background_gate() {
 
   local row row_rc=0
   row="$(gate_row_from_job "$gate_name" "$job_dir" "$job_id" "$state")" || row_rc=$?
+
+  # P076 Step 13 — JOB_LOST, mechanical ladder entry. The MAPPING is what is
+  # observed (`reason:"job_lost"` — no terminal record exists, so nothing about
+  # the outcome is proven), read back off the row rather than re-derived, so the
+  # ladder can never disagree with the row it is recording. The row itself, its
+  # fail result and `row_rc` are untouched.
+  if [[ "$(jq -r '.reason // ""' <<<"$row" 2>/dev/null || true)" == "job_lost" ]]; then
+    _gate_ladder_emit JOB_LOST gate_job_lost \
+      "gate ${gate_name} job ${job_id} is '${state}' with no terminal record — the absence of a result is not a pass"
+  fi
+
   if (( _tree_moved )); then
     # A jq failure must never blank a row that already exists — keep the row.
     local _annotated=""
@@ -2148,6 +2194,11 @@ run_all_gates() {
         # reason/recommendation are purely additive fields describing WHY no
         # further attempt was made.
         gate_result=$(echo "$gate_result" | jq '.result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
+        # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. AFTER the row is
+        # final, so the recorded stop is the verdict that was actually reached;
+        # `gate_result` is never touched from here, and `break` still happens.
+        _gate_ladder_emit GATE_TIMEOUT timeout_policy_block \
+          "gate ${gate_name}: three censored samples at or above the configured ${timeout_s}s timeout — no further attempt is spent"
         break
       fi
 

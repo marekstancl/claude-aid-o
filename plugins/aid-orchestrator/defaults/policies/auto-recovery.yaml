@@ -8,14 +8,21 @@
 #   (`commands/aid-run.md` → "default decision from config/permissions.yaml")
 #   pointed at keys that do not exist. This file replaces that with one table.
 #
-# WHAT THIS FILE IS NOT — read this before trusting it
-#   At THIS commit the ladder has NO runtime. Nothing reads this file yet; the
-#   loader and the ladder-record writer are a LATER step of this EPIC (see
-#   `ladder_runtime` below). This file is therefore a POLICY and a CONTRACT,
-#   and it is deliberately labelled as such per class, because AID treats
-#   "a detector without enforcement is decoration"
-#   (docs/plans/AID-v3-principles.md §1) as binding — and a policy that
-#   overstated its own wiring would be exactly that failure in a new form.
+# WHAT IS AND IS NOT WIRED AT THIS COMMIT — read this before trusting it
+#   Step 13 of this EPIC landed the runtime this file used to only promise:
+#   `scripts/lib/aid-recovery-ladder.sh` loads this policy
+#   (`aid_recovery_policy_load`) and writes the per-run ladder record
+#   `<run evidence>/recovery-ladder.jsonl`. Three classes now enter that record
+#   from CODE — GATE_TIMEOUT and JOB_LOST from aid-run-gates.sh, SERVICE_UNHEALTHY
+#   from aid-service.sh — and say so with `ladder_entry_status: live`.
+#
+#   The other four are still `planned`, and that is the honest word for them:
+#   their ladder entry is written by a CONTROLLER following the AUTO-loop
+#   checklist in skills/pipeline.md, not by code, so no test can prove the entry
+#   happened. Flipping them to `live` would be exactly the failure AID's first
+#   principle names — "a detector without enforcement is decoration"
+#   (docs/plans/AID-v3-principles.md §1) — in a new form: a policy overstating
+#   its own wiring. Overstating and understating are both red by design (case 9).
 #
 #   What IS enforced today, by scripts/tests/bats/test-auto-recovery-policy.bats:
 #     • this file validates against defaults/schemas/auto-recovery.schema.json;
@@ -44,16 +51,16 @@
 #                 emitting code site itself; `instruction` = the emitting code
 #                 reports, and the AUTO-loop instruction routes the report into
 #                 the ladder.
-#   ladder_entry_status: truth about the WRITE at this commit. It is `planned`
-#                 for all seven classes because no ladder writer exists yet.
-#                 The next step of this EPIC flips the mechanical ones to
-#                 `live`; the instruction ones flip when the AUTO-loop
-#                 instruction lands in commands/aid-run.md. Flipping any of
-#                 them is not an edit to this file: the test refuses `live`
-#                 until the loader named in `loader_contract` really exists in
-#                 code, and the schema refuses it while `ladder_runtime.status`
-#                 is `not_wired`. Write the loader, then flip all three
-#                 together.
+#   ladder_entry_status: truth about the WRITE at this commit. `live` for the
+#                 three `ladder_entry: mechanical` classes, whose write is a
+#                 real call to `aid_ladder_emit` at the emitter site named
+#                 below and is pinned by scripts/tests/bats/test-recovery-ladder.bats.
+#                 `planned` for the four `ladder_entry: instruction` classes:
+#                 their entry is a controller act, so nothing in code writes it.
+#                 Flipping any of them is not an edit to this file — the test
+#                 refuses `live` unless the loader named in `loader_contract`
+#                 really exists in code, and the schema refuses it while
+#                 `ladder_runtime.status` is `not_wired`.
 #
 # DIVERGENCE FROM THE P076 PLAN TEXT — stated, not silently applied
 #   The plan describes DISPATCH_ORPHANED as `detector: instruction` "because the
@@ -96,25 +103,26 @@ supersedes:
 # ── ladder runtime status ────────────────────────────────────────────────────
 # Wiring truth, kept in the file the wiring is about.
 ladder_runtime:
-  status: not_wired
+  status: wired
   reason: >-
-    This step ships the policy, its schema and its tests only. No loader reads
-    this file and no code writes a ladder record at this commit.
-  loader_lands_in: "P076 EPIC 2, the step after this one (the ladder lib)"
-  ladder_record_writer_lands_in: "P076 EPIC 2, the step after this one"
+    scripts/lib/aid-recovery-ladder.sh reads this file (aid_recovery_policy_load)
+    and writes <run evidence>/recovery-ladder.jsonl. Budget refusals route to
+    adjudication and then to the FSM ESCALATION state; the three mechanical
+    classes below have real ladder writes at their emitter sites.
+  loader_lands_in: "P076 EPIC 2, Step 13 — scripts/lib/aid-recovery-ladder.sh (landed)"
+  ladder_record_writer_lands_in: "P076 EPIC 2, Step 13 — aid_recovery_ladder_append in the same file (landed)"
 
 # ── loader contract ──────────────────────────────────────────────────────────
-# Declared here so the later loader has one place to implement against, and so
-# the failure modes are decided now rather than improvised at wiring time.
-# NONE of these behaviours are implemented at this commit.
+# Declared before the loader existed so it had one place to implement against,
+# and so the failure modes were decided rather than improvised at wiring time.
+# Every behaviour below is now implemented in `loader_path`.
 loader_contract:
-  implemented: false
-  # WHERE THE LOADER WILL LIVE — and the check that keeps `implemented` honest.
+  implemented: true
+  # WHERE THE LOADER LIVES — and the check that keeps `implemented` honest.
   # The test does not believe `implemented` or `ladder_runtime.status`: it looks
   # for a shell function named `loader_anchor`, defined in `loader_path`, in a
-  # file that also names this policy file. Nothing in this repository defines
-  # that function today, so the derived answer is "not wired" and both flags
-  # above must say so. Claiming `wired` costs writing the loader.
+  # file that also names this policy file. Renaming either without editing this
+  # block turns the suite red in whichever direction the lie points.
   loader_path: plugins/aid-orchestrator/scripts/lib/aid-recovery-ladder.sh
   loader_anchor: aid_recovery_policy_load
   project_override_path: ".aid-o/config/policies/auto-recovery.yaml"
@@ -172,14 +180,14 @@ stop_classes:
       repeated-timeout policy blocked a further attempt.
     detector: mechanical
     ladder_entry: mechanical
-    ladder_entry_status: planned
+    ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 1215
+        line: 1245
         anchor: gate_job_deadline_exceeded
         note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 2150
+        line: 2196
         anchor: timeout_policy_block
         note: "three censored samples at or above the current timeout — no further attempt is spent"
     allowed_actions: [rerun_targeted, collect_and_continue]
@@ -193,14 +201,14 @@ stop_classes:
       reallocation and, where declared, the one authorised restart).
     detector: mechanical
     ladder_entry: mechanical
-    ladder_entry_status: planned
+    ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        line: 951
+        line: 987
         anchor: "its job was cancelled and stop_cmd run"
         note: "terminal per-service verdict after the retry budget is spent; registry state is timed_out|lost|unhealthy"
       - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        line: 939
+        line: 970
         anchor: "still unhealthy after the one authorized restart"
         note: "the restart-exhaustion failure_reason specifically"
     allowed_actions: [restart_service_once, wait_and_resume]
@@ -214,7 +222,7 @@ stop_classes:
       absence of a result is never read as a pass.
     detector: mechanical
     ladder_entry: mechanical
-    ladder_entry_status: planned
+    ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-job.sh
         line: 456
@@ -260,7 +268,7 @@ stop_classes:
     ladder_entry_status: planned
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-fsm.sh
-        line: 1539
+        line: 1537
         anchor: missing_dispatch_complete
         note: >-
           fsm_check_orphan_dispatches die site; writes fsm_orphan_dispatch_fail
@@ -336,7 +344,7 @@ existing_loops:
     budget_key: "max 3 cycles per check"
     budget_value: 3
     budget_file: plugins/aid-orchestrator/skills/pipeline.md
-    budget_line: 554
+    budget_line: 587
     budget_kind: instruction
     note: "LLM-facing instruction budget, not a mechanical constant; role-cards.md states the same 3."
 
