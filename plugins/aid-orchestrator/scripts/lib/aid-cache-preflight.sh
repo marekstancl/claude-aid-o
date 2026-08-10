@@ -58,6 +58,14 @@
 # Resolve the RUNNING plugin from THIS lib's own location (correct whether
 # sourced by aid-fsm.sh or executed standalone). lib lives at scripts/lib/.
 _AID_CP_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# P079 Step 8: the shared root resolver, for the WIP detection below. Sourced
+# guarded — this library's PRIMARY job (comparing two plugin trees) must keep
+# working even where aid-roots.sh is absent, and the WIP downgrade simply does
+# not fire there.
+if [[ -f "${_AID_CP_LIB_DIR}/aid-roots.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${_AID_CP_LIB_DIR}/aid-roots.sh" || true
+fi
 _AID_CP_RUNNING_SCRIPTS_DIR="$(cd "${_AID_CP_LIB_DIR}/.." && pwd)"
 _AID_CP_RUNNING_PLUGIN_JSON="${_AID_CP_RUNNING_SCRIPTS_DIR}/../.claude-plugin/plugin.json"
 
@@ -147,10 +155,17 @@ _aid_cp_wip_parent() {
   fi
 }
 
+# Sets _AID_CP_WIP_COUNT. `grep -c` PRINTS 0 and then exits 1 on no match, so
+# a `|| printf 0` fallback would emit two zeros and every numeric test on the
+# result would be comparing "0\n0" — counted in bash instead.
 _aid_cp_wip_count() {
-  local top="$1" base
-  base="$(_aid_cp_wip_base "$top")" || { printf '0'; return 0; }
-  git -C "$top" diff --name-only "${base}..HEAD" -- plugins/ 2>/dev/null | grep -c . || printf '0'
+  local top="$1" base out
+  _AID_CP_WIP_COUNT=0
+  base="$(_aid_cp_wip_base "$top")" || return 0
+  out="$(git -C "$top" diff --name-only "${base}..HEAD" -- plugins/ 2>/dev/null)" || return 0
+  [[ -n "$out" ]] || return 0
+  _AID_CP_WIP_COUNT="$(printf '%s\n' "$out" | wc -l)"
+  return 0
 }
 
 _aid_cp_is_plugin_wip() {
@@ -174,9 +189,11 @@ _aid_cp_is_plugin_wip() {
   phys="$(cd "$top" 2>/dev/null && pwd -P)" || return 1
   plan_id="$(basename "$phys")"; plan_id="${plan_id#plan-}"
   if [[ -f "${_AID_CP_LIB_DIR}/aid-plan-state.sh" && "$plan_id" =~ ^P[0-9]{3}$ ]]; then
-    # The state root is the parent of the shared git dir — the primary
-    # checkout, which is where `.aid-o` lives.
-    local state_root="${cd_%/.git}"
+    # The primary checkout, from the shared resolver rather than by trimming
+    # the common dir by hand — it also refuses the bare-repo and detached
+    # common-dir layouts that a `${cd_%/.git}` would turn into a nonsense root.
+    local state_root
+    state_root="$(cd "$top" 2>/dev/null && aid_state_root 2>/dev/null)" || return 1
     recorded="$(AID_PLAN_STATE_PROJECT_ROOT="$state_root" \
       bash "${_AID_CP_LIB_DIR}/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
     # rc > 1 is an UNREADABLE registry (missing yq, corrupt state, lock
@@ -195,8 +212,10 @@ _aid_cp_is_plugin_wip() {
     [[ "$phys" == */.aid-worktrees/plan-* ]] || return 1
   fi
 
-  # 3. the diff actually touches plugins/
-  [[ "$(_aid_cp_wip_count "$top")" -gt 0 ]]
+  # 3. the diff actually touches plugins/. The count is left in
+  # _AID_CP_WIP_COUNT for the warning text, so the git pipeline runs once.
+  _aid_cp_wip_count "$top"
+  [[ "$_AID_CP_WIP_COUNT" -gt 0 ]]
 }
 
 run_cache_preflight() {
@@ -262,7 +281,7 @@ run_cache_preflight() {
       _aid_cp_log "$timeline" "cache_preflight_skew_wip" \
         running_version="$running_version" cache_version="$dogfood_version" \
         running_hash="$running_hash" cache_hash="$dogfood_hash"
-      _aid_cp_warn "cache-preflight downgraded: $(_aid_cp_wip_count "$toplevel") file(s) under plugins/ differ from the plan branch — this is the EPIC's own work, not a stale cache. Controller tooling staleness is NOT verified for this run."
+      _aid_cp_warn "cache-preflight downgraded: ${_AID_CP_WIP_COUNT} file(s) under plugins/ differ from the plan branch — this is the EPIC's own work, not a stale cache. Controller tooling staleness is NOT verified for this run."
       return 0
     fi
 

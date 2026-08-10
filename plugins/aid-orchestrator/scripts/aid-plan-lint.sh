@@ -79,8 +79,12 @@ advisories=0
 # em dash that are not among the bullet's declared paths.
 _prose_paths() {
   local bullet="${1#- }" body prose declared rest tok
-  body="$(_aid_files_bullet_body "$bullet")"
-  # Nothing after the em dash (or "--") means no description to mine.
+  body="$(_aid_files_bullet_body "$bullet")" || true
+  # Nothing after the em dash (or "--") means no description to mine — that
+  # early return, and the backtick-pair loop condition below, are the whole
+  # precondition. A separate backtick-count precheck was tried and removed: it
+  # skipped a bullet whose declared path was unbackticked and whose prose
+  # carried the only pair.
   case "$body" in
     *$'\xe2\x80\x94'*) prose="${body#*$'\xe2\x80\x94'}" ;;
     *--*)              prose="${body#*--}" ;;
@@ -123,10 +127,7 @@ _reason_msg() {
 
 while IFS=$'\t' read -r lineno bullet; do
   [[ -z "${bullet:-}" ]] && continue
-  # A bullet whose only backtick span is its declared path (exactly two
-  # backticks) can have nothing to report — skip the call entirely.
-  _bt="${bullet//[^\`]/}"
-  [[ "${#_bt}" -ge 4 ]] && while IFS= read -r prose_path; do
+  while IFS= read -r prose_path; do
     [[ -n "$prose_path" ]] || continue
     advisories=$((advisories+1))
     [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: [ADVISORY] \`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}" >&2

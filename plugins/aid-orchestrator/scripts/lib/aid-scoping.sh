@@ -167,25 +167,18 @@ _aid_extract_files_bullets_numbered() { awk -v emit_lineno=1 "$_AID_FILES_BULLET
 # against this one pattern, so adding a verb is one edit, not four.
 _AID_FILES_VERB_RE='^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$'
 
-# _aid_files_bullet_verb_split <bullet> — echoes "<verb>\t<rest>" and returns 0
-# when the bullet carries a verb label; returns 1 (echoing nothing) when it does
-# not. The generator and the classifier both key off this, so "which bullets are
-# parseable" cannot mean two different things in the lint and in generation.
-_aid_files_bullet_verb_split() {
-  local b="${1#- }"
-  [[ "$b" =~ $_AID_FILES_VERB_RE ]] || return 1
-  printf '%s\t%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-}
-
 # _aid_files_bullet_body <bullet> — the bullet with its leading "- " and verb
-# label stripped (the whole bullet when it carries no verb).
+# label stripped. Returns 1 (and echoes the bullet unchanged) when there is NO
+# verb label, so callers can branch on "is this labelled at all" without a
+# second function or a second copy of the vocabulary.
 _aid_files_bullet_body() {
-  local split
-  if split="$(_aid_files_bullet_verb_split "$1")"; then
-    printf '%s' "${split#*$'\t'}"
-  else
-    printf '%s' "${1#- }"
+  local b="${1#- }"
+  if [[ "$b" =~ $_AID_FILES_VERB_RE ]]; then
+    printf '%s' "${BASH_REMATCH[2]}"
+    return 0
   fi
+  printf '%s' "$b"
+  return 1
 }
 
 _aid_classify_files_bullet() {
@@ -194,12 +187,11 @@ _aid_classify_files_bullet() {
   # — an unlabelled bullet, and a verb with no path) are ERROR tier here, or
   # this lint would green-light a plan the generator then rejects, which is the
   # one promise this file's header makes.
-  local split body
-  if ! split="$(_aid_files_bullet_verb_split "$bullet")"; then
+  local body
+  if ! body="$(_aid_files_bullet_body "$bullet")"; then
     echo "error:no-verb-label"
     return
   fi
-  body="${split#*$'\t'}"
   if [[ -z "${body//[[:space:]]/}" ]]; then
     echo "error:verb-no-path"
     return

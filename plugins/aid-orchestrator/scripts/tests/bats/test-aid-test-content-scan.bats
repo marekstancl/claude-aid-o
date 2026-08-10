@@ -63,3 +63,72 @@ YAML
   [ "$(jq -r '.counts.unreferenced' "$OUT")" = "1" ]
   [[ "$(jq -r '.checks.unreferenced_tests[0].file' "$OUT")" == *"test-orphan"* ]]
 }
+
+# ─── P079 Step 11 (IMP-481): the mechanical half of "green but checks nothing" ─
+
+@test "P079 Step 11: an unguarded 'grep -c' under set -e is flagged; a guarded one and a continued one are not" {
+  cat > "$PROJ/tests/test-unguarded.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+COUNT=$(grep -c 'thing' somefile)
+echo "$COUNT"
+EOF
+  cat > "$PROJ/tests/test-guarded.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+COUNT=$(grep -c 'thing' somefile || true)
+echo "$COUNT"
+EOF
+  # The live shape that made the first grounding wrong: the guard is on the
+  # CONTINUATION line, so a line-at-a-time scan would call this a finding.
+  cat > "$PROJ/tests/test-continued.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+COUNT=$(grep -cE 'a|b' \
+        somefile || true)
+echo "$COUNT"
+EOF
+  # No `set -e`: the exit-1 does not kill anything.
+  cat > "$PROJ/tests/test-no-set-e.sh" <<'EOF'
+#!/usr/bin/env bash
+COUNT=$(grep -c 'thing' somefile)
+echo "$COUNT"
+EOF
+
+  run bash "$SCAN" --project-root "$PROJ" --output "$OUT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.set_e_grep_count' "$OUT")" = "1" ]
+  [ "$(jq -r '.checks.set_e_grep_count[0].file' "$OUT")" = "tests/test-unguarded.sh" ]
+}
+
+@test "P079 Step 11: a skip keyed on the SUBJECT's existence is flagged; platform and allowlisted skips are not" {
+  cat > "$PROJ/tests/test-subject-skip.bats" <<'EOF'
+@test "the thing works" {
+  [ -f "$LIB" ] || skip "lib not found"
+  true
+}
+EOF
+  cat > "$PROJ/tests/test-platform-skip.bats" <<'EOF'
+@test "reads real process facts" {
+  [ -d /proc ] || skip "/proc is not available"
+  true
+}
+EOF
+  cat > "$PROJ/tests/test-allowed-skip.bats" <<'EOF'
+@test "self-host config" {
+  # content-scan: allow existence-skip — the workspace config is gitignored
+  [[ -f "$cfg" ]] || skip "no local .aid-o config in this checkout"
+  true
+}
+EOF
+
+  run bash "$SCAN" --project-root "$PROJ" --output "$OUT"
+  [ "$status" -eq 0 ]
+  # The count reports only the UNSUPPRESSED ones.
+  [ "$(jq -r '.counts.existence_keyed_skip' "$OUT")" = "1" ]
+  [ "$(jq -r '[.checks.existence_keyed_skip[] | select(.suppressed | not) | .file] | join(",")' "$OUT")" = "tests/test-subject-skip.bats" ]
+  # The allowlisted one is still REPORTED, with its suppression visible.
+  [ "$(jq -r '[.checks.existence_keyed_skip[] | select(.suppressed)] | length' "$OUT")" = "1" ]
+  # The platform skip does not appear at all.
+  [ "$(jq -r '[.checks.existence_keyed_skip[] | select(.file | endswith("platform-skip.bats"))] | length' "$OUT")" = "0" ]
+}

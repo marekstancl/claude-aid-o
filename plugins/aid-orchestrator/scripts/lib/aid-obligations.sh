@@ -64,7 +64,16 @@ _aid_obligation_file() {
     echo "ERROR: aid-obligations: a plan id is required" >&2
     return 2
   fi
-  if ! root="$(aid_state_root 2>/dev/null)"; then
+    # The plan id becomes a DIRECTORY name, so it takes the same traversal guard
+  # lib/aid-plan-state.sh applies to the same id (`../..` would place the
+  # journal outside the state root entirely). And the state root is resolved
+  # the way plan-state resolves it, honouring AID_PLAN_STATE_PROJECT_ROOT —
+  # otherwise a plan's state dir and its journal could land in two roots.
+  if ! [[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "ERROR: aid-obligations: plan id '${plan_id}' contains invalid characters (path traversal guard)" >&2
+    return 2
+  fi
+if ! root="$(aid_state_root "${AID_PLAN_STATE_PROJECT_ROOT:-}" 2>/dev/null)"; then
     echo "ERROR: aid-obligations: cannot resolve the state root, so there is no durable place for ${plan_id}'s obligations — refusing to write one into a worktree that will be torn down" >&2
     return 2
   fi
@@ -143,13 +152,10 @@ aid_obligation_open() {
   # `jq -e .` has no result on empty input and would otherwise block a close
   # over a file that says nothing is owed.
   [[ -s "$file" ]] || return 0
-  local bad
-  bad="$(grep -cvE '^[[:space:]]*\{.*\}[[:space:]]*$' "$file" 2>/dev/null || true)"
-  if ! jq -e . "$file" >/dev/null 2>&1; then
-    echo "ERROR: aid-obligations: ${file} has ${bad:-one or more} unreadable line(s) — refusing to report 'no open obligations' from a journal that cannot be parsed" >&2
-    return 2
-  fi
-  jq -rs --arg want "$want" '
+  # ONE parse: `jq -rs` already fails on a malformed line, so a separate
+  # validation pass would read the file twice to learn the same thing.
+  local out
+  if ! out="$(jq -rs --arg want "$want" '
     ( [ .[] | select(.op == "resolve") | .index ] | map({(tostring): true}) | add // {} ) as $done
     | [ .[] | select(.op == "add") ]
     | to_entries
@@ -157,5 +163,12 @@ aid_obligation_open() {
     | map(select($want == "" or .value.severity == $want))
     | .[]
     | "\(.key + 1)\t\(.value.severity)\t\(.value.text)\t\(.value.source_ref // "")"
-  ' "$file"
+  ' "$file" 2>/dev/null)"; then
+    local bad
+    bad="$(grep -cvE '^[[:space:]]*\{.*\}[[:space:]]*$' "$file" 2>/dev/null || true)"
+    echo "ERROR: aid-obligations: ${file} has ${bad:-one or more} unreadable line(s) — refusing to report 'no open obligations' from a journal that cannot be parsed" >&2
+    return 2
+  fi
+  [[ -n "$out" ]] && printf '%s\n' "$out"
+  return 0
 }

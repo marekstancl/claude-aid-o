@@ -1290,6 +1290,15 @@ fsm_check_verifier_output() {
   return 0
 }
 
+# _fsm_routed_recorded_set <plan_id> — every fingerprint the routed-findings
+# journal knows about, one per line. Empty when there is no journal.
+_fsm_routed_recorded_set() {
+  declare -F _aid_rf_file >/dev/null 2>&1 || return 0
+  local f; f="$(_aid_rf_file "$1" 2>/dev/null)" || return 0
+  [[ -s "$f" ]] || return 0
+  jq -rs '[ .[].fingerprint ] | unique | .[]' "$f" 2>/dev/null || return 0
+}
+
 # ---------------------------------------------------------------------------
 # _fsm_routed_findings_check <epic_id> <evidence_dir>  (P079 Step 7, IMP-473)
 #
@@ -1360,24 +1369,27 @@ _fsm_routed_findings_check() {
     return 1
   fi
 
+  # The journal is read ONCE into a newline blob; `aid_finding_recorded` would
+  # otherwise re-parse the whole file for every out-of-scope finding.
+  local recorded_fps=""
+  recorded_fps="$(_fsm_routed_recorded_set "$plan_id")" || recorded_fps=""
+
   local fp tp in_scope pat
   while IFS=$'\t' read -r fp tp; do
     [[ -n "$fp" && -n "$tp" ]] || continue
     in_scope=0
     while IFS= read -r pat; do
       [[ -n "$pat" ]] || continue
-      # Same two-part rule the shipped scope gate uses: a bash GLOB match
-      # (`scripts/**`, `src/*.ts`) or a plain directory prefix (`src` covering
-      # `src/nested/thing.ts`). Matching only the prefix would have called a
-      # legitimately in-scope glob path out-of-scope and demanded a route.
-      # shellcheck disable=SC2254
-      case "$tp" in
-        $pat) in_scope=1; break ;;
-      esac
-      if [[ "$tp" == "$pat" || "$tp" == "$pat"/* ]]; then in_scope=1; break; fi
+      # `_aid_ancillary_glob_match` (lib/aid-ancillary.sh) is the shipped
+      # path-vs-pattern predicate, permissive mode: a bash GLOB (`scripts/**`,
+      # `src/*.ts`) or a plain directory prefix (`src` covering
+      # `src/nested/thing.ts`). Reused rather than restated — a private copy
+      # here would make "in scope" mean one thing to this check and another to
+      # every other consumer of the same allowed_paths.
+      if _aid_ancillary_glob_match "$tp" "$pat"; then in_scope=1; break; fi
     done <<< "$scope_list"
     [[ "$in_scope" -eq 1 ]] && continue
-    if ! aid_finding_recorded "$plan_id" "$fp"; then
+    if [[ $'\n'"$recorded_fps"$'\n' != *$'\n'"$fp"$'\n'* ]]; then
       echo "PRECONDITION FAIL: CP3 finding ${fp} targets ${tp}, which no step of ${epic_id} was allowed to touch, and nothing recorded what happens to it. Route it before completing: aid_finding_route ${plan_id} ${fp} cp3 <step:<n>|epic:<id>|backlog:IMP-<n>> ${epic_id}" >&2
       failed=1
     fi

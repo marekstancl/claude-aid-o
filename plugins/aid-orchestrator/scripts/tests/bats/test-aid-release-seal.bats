@@ -59,15 +59,8 @@ _mk_repo() {
   local ver="$1" tagged="${2:-}"
   mkdir -p "$REPO"
   _changelog "$REPO/CHANGELOG.md" "$ver"
-  (
-    cd "$REPO"
-    git init -q -b main 2>/dev/null || { git init -q; git branch -m main; }
-    git config user.email aid-test@example.com
-    git config user.name "AID Test"
-    git add -A
-    git commit -q -m "release ${ver}"
-    if [[ "$tagged" == "--tagged" ]]; then git tag "v${ver}"; fi
-  )
+  aid_test_mk_repo "$REPO"
+  if [[ "$tagged" == "--tagged" ]]; then git -C "$REPO" tag "v${ver}"; fi
   return 0
 }
 

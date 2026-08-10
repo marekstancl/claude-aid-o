@@ -48,7 +48,16 @@
 _aid_rf_file() {
   local plan_id="${1:-}" root=""
   [[ -n "$plan_id" ]] || { echo "ERROR: aid-routed-findings: a plan id is required" >&2; return 2; }
-  if ! root="$(aid_state_root 2>/dev/null)"; then
+    # The plan id becomes a DIRECTORY name, so it takes the same traversal guard
+  # lib/aid-plan-state.sh applies to the same id (`../..` would place the
+  # journal outside the state root entirely). And the state root is resolved
+  # the way plan-state resolves it, honouring AID_PLAN_STATE_PROJECT_ROOT —
+  # otherwise a plan's state dir and its journal could land in two roots.
+  if ! [[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "ERROR: aid-routed-findings: plan id '${plan_id}' contains invalid characters (path traversal guard)" >&2
+    return 2
+  fi
+if ! root="$(aid_state_root "${AID_PLAN_STATE_PROJECT_ROOT:-}" 2>/dev/null)"; then
     echo "ERROR: aid-routed-findings: cannot resolve the state root — refusing to record a route where a worktree teardown would erase it" >&2
     return 2
   fi

@@ -139,6 +139,7 @@ _lib() {
 }
 
 @test "P079 Step 6: an EMPTY journal file reads as 'nothing owed', not as 'unreadable'" {
+  mkdir -p "$(dirname "$(_journal P900)")"
   : > "$(_journal P900)"
 
   run _lib "$ROOT" "aid_obligation_open P900"

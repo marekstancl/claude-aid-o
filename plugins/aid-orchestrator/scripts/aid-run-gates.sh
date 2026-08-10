@@ -1777,9 +1777,10 @@ run_all_gates() {
   local escalation_reason=""
 
   # ─── Background job + row-checkpoint locations (P076 Step 2) ─────────────
-  # Both live under THIS run's evidence directory. Resolved once, and only when
-  # that directory already exists — the gate runner writes into evidence, it
-  # never invents evidence directories (same rule the execution ledger follows).
+  # Both live under `$_evidence_dir` (resolved once at the top of this
+  # function) and are set only when that directory already exists — the gate
+  # runner writes into evidence, it never invents evidence directories (the
+  # same rule the execution ledger follows).
   local _jobs_dir="" _rows_dir=""
   if [[ -d "$_evidence_dir" ]]; then
     _jobs_dir="${_evidence_dir}/jobs"

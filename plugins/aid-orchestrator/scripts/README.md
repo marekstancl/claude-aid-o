@@ -668,6 +668,30 @@ After running the full pipeline, the workspace looks like:
 All pipeline scripts have comprehensive test suites located in `tests/`. A
 master test runner executes all suites and reports unified results.
 
+### Writing a test that can fail
+
+A green test that could never have gone red is worse than no test: it spends
+the time and buys the confidence without doing the work. Four rules, each of
+them a live incident:
+
+1. **A test must FAIL when its subject is absent.** Delete the function under
+   test and the case must go red — not skip, not pass.
+2. **`skip` is legal only when it is counted and rendered as skipped**, never
+   as passed, and never keyed on whether the subject exists. Key it on a
+   platform or environment fact instead (`[ -d /proc ]`, a missing binary). A
+   deliberate exception is recorded in place:
+   `# content-scan: allow existence-skip — <reason>`.
+3. **An assertion must read a DIFFERENT surface than the one that wrote the
+   claim.** Asserting that a report says "pass" because the same run wrote
+   "pass" into it proves only that a string round-tripped.
+4. **`grep -c` under `set -e` needs a guard** (`|| true`): it exits 1 when it
+   counts zero, so the assignment kills the suite before it prints anything —
+   and a suite that dies early still reports the cases it already ran as green.
+
+`aid-test-content-scan.sh` checks rules 2 and 4 mechanically
+(`existence_keyed_skip`, `set_e_grep_count`); rules 1 and 3 need a reader and
+are the reason this section exists.
+
 ### Running All Tests
 
 ```bash

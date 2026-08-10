@@ -44,8 +44,6 @@ teardown() {
   return 0
 }
 
-_phys() { (cd "$1" && pwd -P); }
-
 # _mk_primary — committed checkout with the .aid-o skeleton, .aid-o gitignored
 # exactly as a real AID project has it.
 _mk_primary() {
@@ -118,7 +116,7 @@ _run_gates() {
   [ ! -e "$WT/.aid-o" ]
 
   # The command, by contrast, ran in the WORKTREE.
-  [ "$(cat "$PRIMARY/gate-cwd.txt")" = "$(_phys "$WT")" ]
+  [ "$(cat "$PRIMARY/gate-cwd.txt")" = "$(aid_test_phys "$WT")" ]
 }
 
 @test "P079 Step 2: the report's head_sha describes the WORKTREE HEAD (the candidate), not the state root's" {
