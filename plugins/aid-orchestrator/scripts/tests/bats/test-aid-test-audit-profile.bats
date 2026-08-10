@@ -13,7 +13,18 @@ setup() {
   PLUGIN_DIR="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   REPO="$(cd "$PLUGIN_DIR/../.." && pwd)"
   PROFILE="$PLUGIN_DIR/scripts/aid-test-audit-profile.sh"
-  CATALOG="$REPO/.aid-o/config/test-catalog.yaml"
+  # The catalog used by every case is an APPROVED COPY of the checkout's, kept
+  # in the test's own tmpdir. The subject of this suite is the profiler, not the
+  # PM's workspace: the command allowlist
+  # (lib/aid-test-audit-command-allowlist.sh:117-119) refuses every command
+  # unless the catalog's root status is "approved", so reading the checkout's
+  # catalog directly made 15 cases pass or fail on workspace state — they were
+  # red on main for exactly that reason. The refusal paths that matter are
+  # pinned by their own cases (unknown unit, catalog/execution.yaml
+  # disagreement, schema rejection), never by an un-approved fixture.
+  CATALOG="$TEST_TMPDIR/approved-test-catalog.yaml"
+  sed 's/^status: proposed$/status: approved/' \
+    "$REPO/.aid-o/config/test-catalog.yaml" > "$CATALOG" 2>/dev/null || true
   EXEC_YAML="$REPO/.aid-o/config/execution.yaml"
   OUT="$TEST_TMPDIR/out"
 }
