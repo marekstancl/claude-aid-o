@@ -601,6 +601,15 @@ else
   # Additional CHANGELOGs
   for cl in $(find "$REPO_ROOT" -maxdepth 4 -name "CHANGELOG.md" ! -path "*/node_modules/*" 2>/dev/null); do
     [[ "$cl" == "$REPO_ROOT/CHANGELOG.md" ]] && continue
+    # A file whose TOP heading is already the new version is a pre-written
+    # entry — exactly the `header == NEW_VERSION` no-op `update_changelog` has
+    # for the primary CHANGELOG. Without it this loop finds $CURRENT further
+    # down the file and prepends a placeholder ABOVE a finished entry, which is
+    # how a release ends up with two headings for one version.
+    if grep -m1 -qE "^## \[${NEW_VERSION//./\\.}\]" "$cl" 2>/dev/null; then
+      echo "Skipped: $cl (header already $NEW_VERSION — pre-written entry)"
+      continue
+    fi
     if grep -q "## \[$CURRENT\]" "$cl" 2>/dev/null; then
       # P079 Step 10: the same seal as update_changelog above — this fallback
       # applies the identical blind sed, so it takes the identical branch:
