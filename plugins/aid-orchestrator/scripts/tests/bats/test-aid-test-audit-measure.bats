@@ -33,7 +33,6 @@ _approve() {
       run_unit_id: .run_unit_id, runner: "bats", source_paths: [], production_surfaces: [],
       test_level: "suite", risk_tags: [], profiles: ["default"], behavior_claims: [],
       confidence: "low", command: .command, runtime: {fingerprint: "sha256:000000000000"},
-      parallel: {status: "unknown", exclusive_resources: [], max_workers: null, internal_parallelism: false},
       isolation: {temp_workspace: "unknown", fixed_ports: [], shared_paths: [], lock_usage: [], adapter_confidence: "static_parse"},
       recommendation: "keep", test_cases: []
     }],

@@ -118,13 +118,6 @@ _unit_yaml() {   # <id> <status>
     {run_unit_id:$id, runner:"bats", source_paths:["a.bats"], production_surfaces:["a.bats"],
      test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
      command:{type:"argv",argv:["bash","-c","true"]}, runtime:{fingerprint:"sha256:aaaaaaaaaaaa"},
-     parallel:({status:$st, exclusive_resources:[], max_workers:null, internal_parallelism:false}
-               + (if $st == "unknown" then {}
-                  else {provenance:{evidence_ref:"fixture", verified_at:"2026-08-01T00:00:00Z",
-                                    method:"resource_map_plus_pilot",
-                                    source_sha256:"aa11bb22cc33dd44ee55ff6677889900aa11bb22cc33dd44ee55ff6677889900",
-                                    resource_digest:"bb22cc33dd44ee55ff6677889900aa11bb22cc33dd44ee55ff6677889900aa11"}}
-                  end)),
      isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
      recommendation:"keep", test_cases:[]}'
 }

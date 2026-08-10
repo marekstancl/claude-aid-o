@@ -77,7 +77,6 @@ _catalog() {
     confidence: low
     command: {type: argv, argv: ["bats", "x.bats"]}
     runtime: {fingerprint: "sha256:000000000000"}
-    parallel: {status: unknown, exclusive_resources: [], max_workers: null, internal_parallelism: false}
     isolation: {temp_workspace: unknown, fixed_ports: [], shared_paths: [], lock_usage: [], adapter_confidence: static_parse}
     recommendation: keep
     test_cases: []
