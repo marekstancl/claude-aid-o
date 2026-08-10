@@ -1874,4 +1874,111 @@ dying controller would have to write about itself is DERIVED by its readers
 instead — the epitaph rule: the one party that cannot write is the one the flag
 would be about.
 
+## The aftermath layer (P079)
+
+P076 was the first plan to run the whole machine at once, and running it is what
+found these. Every mechanism below exists because a live run did something
+untrue and nothing stopped it. If you touch the worktree seam, a review
+checkpoint, or the release script, read the part that covers it.
+
+### The worktree seam: which tree, and where the evidence goes
+
+Two different roots meet in every gate run, and they are not the same root:
+
+- The **tree under test** is the caller's working directory. Gate COMMANDS run
+  there, and the report's `head_sha` describes it. This is the candidate code.
+- The **state root** is where `.aid-o` lives. It is the primary checkout and
+  never moves into a worktree, so every state artifact — timeline, gate report,
+  execution ledger, gate-scoped waivers, row checkpoints, project config —
+  belongs there.
+
+Before P079 both were "whatever cwd happened to be". `advance-to-gates` was the
+one plan-linked tree command with no worktree redirect, so a run driven from the
+primary checkout executed every gate against `main` and reported a confident
+green about code the commands never saw — and the risk resolver, reading that
+empty diff, picked the cheapest profile. Meanwhile the runner's state writes
+went looking for evidence directories that were not there; because the ledger,
+the rows and the recovery ladder are all `[[ -d ]]`-guarded, they did not fail,
+they went quiet.
+
+**Adding to this area.** A command that reads or writes a TREE gets
+`_fsm_require_plan_worktree` (aid-fsm.sh) or its plan-FSM twin — there are now
+three call sites and they all look identical on purpose. A path that names
+`.aid-o` goes through `aid_state_path` / `aid_state_root` (lib/aid-roots.sh),
+never through cwd and never through `git rev-parse --show-toplevel`. If you find
+yourself writing `${toplevel}/.aid-o/...`, you have written the bug this section
+is about.
+
+### Chained EPICs and the two base records
+
+Chain generation registers every EPIC of a plan at once, and `epic-start` cuts
+`task/<epic>/main` from the plan head at REGISTRATION time. That cut is correct
+when it happens and stale by the time a later chain member executes — its
+predecessors have merged since. The shipped lineage check cannot see it, because
+merge-base equality is *precisely* what "merely behind" means.
+
+`_pfsm_reconcile_task_branch` runs BEFORE that precondition (a crash mid-repair
+breaks the invariant the precondition asserts, so an untouched lineage check
+would refuse before any repair code could run), under the plan lock that also
+covers the plan-head read. Strictly behind is fast-forwarded; DIVERGED is
+refused by name with both heads and never merged automatically.
+
+Note the number of places that record the same fact: the manifest's
+`epic_base_commit`, the fsm-state's `base_commit`, and the branch itself. They
+move together — the manifest under a CAS, the fsm-state under an ancestor guard
+— and every crash window between the writes re-runs clean. **If you add a fourth
+record of that fact, you are adding a fourth thing that can disagree.**
+
+### Journals: obligations and routed findings
+
+Two append-only JSONL journals live in the state root's plan-state directory,
+which is the one place that outlives every worktree:
+
+- `carried-obligations.jsonl` (lib/aid-obligations.sh) — a deferral the run
+  decided to make. `aid-plan-close-check.sh` refuses to close a plan while a
+  `release_blocker` is open.
+- `routed-findings.jsonl` (lib/aid-routed-findings.sh) — a review finding no
+  remaining step may fix. `done-advance` refuses over an open one AND
+  reconciles the canonical `semantic-review-final.json` against the journal, so
+  an out-of-scope finding nobody recorded fails by fingerprint.
+
+Both exist because the first P076 run improvised a `carried-obligations.md`
+inside the plan worktree's gitignored `.aid-o`; the worktree was torn down and
+the obligation went with it — and nothing would have read it anyway, because
+that file had no writer and no reader anywhere in the codebase.
+
+**Adding to this area.** Indices and identities are assigned at FOLD time, never
+embedded at write time — two concurrent appends could otherwise embed the same
+index and a later resolve would close an unrelated blocker. An unreadable
+journal FAILS CLOSED: "cannot be parsed" and "nothing is owed" must never look
+alike. And note the honest split recorded in the registry — recording an
+obligation is *instruction* (a deferral is born in a controller decision, with
+no artifact to reconcile against), while consuming one is *blocking*. Routed
+findings have both halves because they DO have a canonical artifact.
+
+### The release seal
+
+A tagged version's CHANGELOG heading is immutable. Both retitle sites in
+`aid-release.sh` were a blind `sed 's/## [$CURRENT]/## [$NEW_VERSION]/'`: on a
+version that never shipped that is a correction, on one that did it renames the
+entry, and the new release inherits the old one's content while the old release
+disappears under a number that does not describe it. `_release_version_sealed`
+keys on the git tag and both sites take the same branch — preserve the heading,
+prepend a fresh entry — and it FAILS CLOSED when the tag lookup itself cannot
+run.
+
+### Tests that cannot fail
+
+`aid-test-content-scan.sh` gained the two MECHANICAL shapes of "green but checks
+nothing": an unguarded `grep -c` under `set -e` (it exits 1 on zero matches and
+kills the suite before it prints, while the cases already run still read as
+green) and a `skip` keyed on whether the SUBJECT exists (a deleted subject
+should go red, not skipped). The judgment shapes need a reader and ship as the
+authoring rule in `scripts/README.md` instead — named honestly rather than
+pretended to be mechanical.
+
+**Adding to this area.** A new check goes in the scanner only if it is
+deterministic and its false-positive shape is pinned by a test. If it needs
+judgment, write it as a rule where test authors read and say so.
+
 **Last Updated:** 2026-08-10
