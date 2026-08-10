@@ -1247,7 +1247,7 @@ fsm_check_verifier_output() {
   # unknown values (`banana`, `PASSED`) still fail loudly. Only the extracted
   # TOKEN is lowercased — the evidence file's bytes are never touched.
   classification=$(yaml_field "$file" classification)
-  case "$(printf '%s' "$classification" | tr '[:upper:]' '[:lower:]')" in
+  case "${classification,,}" in
     skip)
       grep -q '^reason:' "$file" || return 1
       ;;
@@ -1255,7 +1255,7 @@ fsm_check_verifier_output() {
       grep -q '^verdict:' "$file" || return 1
       local verdict
       verdict=$(yaml_field "$file" verdict)
-      case "$(printf '%s' "$verdict" | tr '[:upper:]' '[:lower:]')" in
+      case "${verdict,,}" in
         pass|fail) ;;          # only valid completed verdicts
         pending)   return 1 ;; # pre-filter placeholder: verifier not dispatched
         *)         return 1 ;; # unknown/garbage verdict (e.g. banana, empty, typo)
@@ -5102,10 +5102,9 @@ cmd_advance_to_gates() {
   # after the state file exists (the EPIC id is read FROM it) and before every
   # pre-flight guard, so the re-executed process is the only one with side
   # effects. The redirect absolutizes the state-file argument on re-exec.
-  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
-
   local epic_id run_id current_state current_step total_steps evidence_dir timeline
   epic_id=$(yaml_field "$state_file" epic_id)
+  _fsm_require_plan_worktree "$epic_id"
   run_id=$(yaml_field "$state_file" run_id)
   current_state=$(yaml_field "$state_file" state)
   current_step=$(yaml_field "$state_file" current_step)
@@ -5507,8 +5506,7 @@ cmd_increment_step() {
     # P079 Step 4 (IMP-472): case-tolerant, same rule as the verdict field.
     # The canonical form in every template stays uppercase; a verifier writing
     # `## Result: pass` means the same thing and is no longer rejected for it.
-    local _verify_content_lc="${_verify_content,,}"
-    [[ "$_verify_content_lc" == *"## result: pass"* ]] || _increment_fail step_verify_not_pass \
+    [[ "${_verify_content,,}" == *"## result: pass"* ]] || _increment_fail step_verify_not_pass \
       "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." \
       "File: ${verify_file}" \
       "Fix failing AC or mark '## Result: PASS' when all criteria met."

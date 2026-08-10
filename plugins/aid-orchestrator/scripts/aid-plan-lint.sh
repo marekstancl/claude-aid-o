@@ -78,8 +78,8 @@ advisories=0
 # Echoes one path per line: backticked, path-shaped tokens found AFTER the
 # em dash that are not among the bullet's declared paths.
 _prose_paths() {
-  local bullet="${1#- }" body prose declared tok
-  body="$(printf '%s' "$bullet" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
+  local bullet="${1#- }" body prose declared rest tok
+  body="$(_aid_files_bullet_body "$bullet")"
   # Nothing after the em dash (or "--") means no description to mine.
   case "$body" in
     *$'\xe2\x80\x94'*) prose="${body#*$'\xe2\x80\x94'}" ;;
@@ -87,17 +87,24 @@ _prose_paths() {
     *)                 return 0 ;;
   esac
   declared="$(_aid_split_path_entry "$body" 2>/dev/null)" || declared=""
-  while IFS= read -r tok; do
-    [[ -n "$tok" ]] || continue
+  # Backtick spans, read the way the shared cleaner reads them: pure bash, so
+  # the advisory does not quietly disappear on a grep without PCRE support.
+  rest="$prose"
+  while [[ "$rest" == *'`'*'`'* ]]; do
+    rest="${rest#*\`}"
+    tok="${rest%%\`*}"
+    rest="${rest#*\`}"
     # A real repo file, deliberately narrow: at least one directory segment and
     # a file extension, no placeholder brackets, no trailing slash. Directories
-    # (`<evidence_dir>/jobs/`),command fragments and prose punctuation are not
+    # (`<evidence_dir>/jobs/`), command fragments and prose punctuation are not
     # scope declarations and must not generate noise.
     [[ "$tok" =~ ^[A-Za-z0-9._/-]+/[A-Za-z0-9._-]+\.[A-Za-z0-9]+$ ]] || continue
     _aid_path_shape_ok "$tok" || continue
-    grep -qxF "$tok" <<<"$declared" && continue        # already in scope
+    # Already declared? Pure-bash membership — one fork per token adds up on a
+    # sixty-bullet plan that prints nothing.
+    [[ $'\n'"$declared"$'\n' == *$'\n'"$tok"$'\n'* ]] && continue
     printf '%s\n' "$tok"
-  done < <(printf '%s\n' "$prose" | grep -oP '(?<=`)[^`]+(?=`)' 2>/dev/null || true)
+  done
 }
 
 # Reason -> human message.
@@ -108,13 +115,18 @@ _reason_msg() {
     no-backtick-path)   echo "path is not \`backtick\`-wrapped";;
     non-line-paren)     echo "a parenthetical before '—' is not a (lines ~N-M) range — move the note after '—'";;
     ambiguous-entry)    echo "unparsed text after a path — use \`a\` + \`b\` for multiple paths and put prose after '—'";;
+    no-verb-label)      echo "no Create:/Modify:/Test:/Rewrite: label — generation cannot tell what this bullet declares, and the path never reaches allowed_paths";;
+    verb-no-path)       echo "a verb label with no path after it";;
     *)                  echo "$1";;
   esac
 }
 
 while IFS=$'\t' read -r lineno bullet; do
   [[ -z "${bullet:-}" ]] && continue
-  while IFS= read -r prose_path; do
+  # A bullet whose only backtick span is its declared path (exactly two
+  # backticks) can have nothing to report — skip the call entirely.
+  _bt="${bullet//[^\`]/}"
+  [[ "${#_bt}" -ge 4 ]] && while IFS= read -r prose_path; do
     [[ -n "$prose_path" ]] || continue
     advisories=$((advisories+1))
     [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: [ADVISORY] \`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}" >&2

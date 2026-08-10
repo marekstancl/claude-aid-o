@@ -992,7 +992,9 @@ for sn in "${phase_steps[@]}"; do
   while IFS= read -r _raw_file; do
     [[ -n "${_raw_file// /}" ]] || continue          # blank line, not a bullet
     _raw_file="${_raw_file#- }"
-    if [[ ! "$_raw_file" =~ ^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$ ]]; then
+    # The verb vocabulary is the shared one (lib/aid-scoping.sh), so the
+    # plan lint's ERROR tier and this refusal are provably the same rule.
+    if [[ ! "$_raw_file" =~ $_AID_FILES_VERB_RE ]]; then
       _dropped_bullets+="  step ${sn}: unparseable Files bullet dropped: \"${_raw_file}\""$'\n'
       continue
     fi

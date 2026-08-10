@@ -15,7 +15,7 @@
 # file afterwards would hide the second half of the defect.
 #
 # FD-3 HYGIENE: every plan-FSM invocation runs with `3>&-`. After any edit:
-#   bats --tap test-epic-chain-freshness.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-epic-chain-freshness.bats | grep -cE '^(ok|not ok)'   # == 9
 
 load test-helpers.bash
 
@@ -196,6 +196,29 @@ _state_base() {
   run _pf epic-start P900 E-900-2_2 --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [ "$(_state_base E-900-2_2)" = "$plan_head" ]
+}
+
+@test "P079 Step 3: an fsm-state base_commit that is NOT an ancestor of the new base is refused, not overwritten" {
+  _mk_project
+  _seed_chain
+  local plan_head foreign
+  plan_head="$(_merge_epic1)"
+  # Somebody else moved EPIC 2's recorded base to a commit that the
+  # fast-forward does not supersede (a sibling line of history).
+  foreign="$(_in_root "set -e
+    git -C '$ROOT' checkout -q -b p079/foreign main
+    printf 'foreign\n' > '$ROOT/foreign.txt'
+    git -C '$ROOT' add foreign.txt
+    git -C '$ROOT' -c user.email=t@e -c user.name=t commit -q -m foreign
+    git -C '$ROOT' checkout -q main
+    git -C '$ROOT' rev-parse p079/foreign")"
+  sed -i "s|^base_commit:.*|base_commit: ${foreign}|" \
+    "$ROOT/$(_evidence E-900-2_2)/fsm-state.yaml"
+
+  run _pf epic-start P900 E-900-2_2 --project-root "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not an ancestor"* ]]
+  [ "$(_state_base E-900-2_2)" = "$foreign" ]           # untouched
 }
 
 # ─── refusals and no-ops ───────────────────────────────────────────────────

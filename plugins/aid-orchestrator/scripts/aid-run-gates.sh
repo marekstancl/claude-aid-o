@@ -180,7 +180,7 @@ aid_gate_baseline_ensure_gitignored() {
   # there and applies to all of them, which is what "LOCAL-ONLY to this clone"
   # meant all along.
   local _common_dir
-  _common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  _common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
   [[ -n "$_common_dir" ]] || return 0
   gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/"
   gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/*.lock"
@@ -1551,14 +1551,22 @@ run_all_gates() {
   local run_id="$3"
   shift 3
 
+  # THE run's evidence directory, resolved ONCE (P079 Step 2). Every state
+  # artifact below — timeline, default report path, execution ledger, waivers,
+  # job records, row checkpoints, the service registry — hangs off this one
+  # value, and the recovery ladder reads it by name from this scope.
+  local _evidence_dir; _evidence_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
+
   # Determine timeline_file: use positional $4 ONLY if it's not a flag.
   # Bug fix (PM-reported): the previous `${4:-default}` + unconditional
   # `shift` swallowed `--state-file` when caller skipped the positional
   # arg, causing log_event to write to a literal file named "--state-file".
-  local timeline_file="$(_gates_evidence_dir "$epic_id" "$run_id")/timeline.jsonl"
+  local timeline_file
   if [[ -n "${1:-}" && "${1}" != --* ]]; then
     timeline_file="$1"
     shift
+  else
+    timeline_file="${_evidence_dir}/timeline.jsonl"
   fi
 
   # Parse optional flags: --state-file, --report-file, --plan-json, --profile,
@@ -1677,7 +1685,7 @@ run_all_gates() {
 
   # Resolve report path early so we can put it in the gate_runner_start event.
   local report_path="${report_file:-}"
-  [[ -z "$report_path" ]] && report_path="$(_gates_evidence_dir "$epic_id" "$run_id")/gates/gates_report.json"
+  [[ -z "$report_path" ]] && report_path="${_evidence_dir}/gates/gates_report.json"
 
   # Phase 2 (P037) — pull base_commit and plan_path from fsm-state.yaml for placeholder resolution.
   # Falls back to empty/null when fsm-state.yaml is absent (e.g., legacy/source-mode invocations).
@@ -1772,7 +1780,6 @@ run_all_gates() {
   # Both live under THIS run's evidence directory. Resolved once, and only when
   # that directory already exists — the gate runner writes into evidence, it
   # never invents evidence directories (same rule the execution ledger follows).
-  local _evidence_dir; _evidence_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
   local _jobs_dir="" _rows_dir=""
   if [[ -d "$_evidence_dir" ]]; then
     _jobs_dir="${_evidence_dir}/jobs"
@@ -1825,9 +1832,8 @@ run_all_gates() {
     # `.aid-o/work/evidence/execution-ledger/` is an untracked path, and a gate
     # run that dirties `git status` is one that cannot be run safely from a
     # checkout somebody is working in.
-    local _ledger_dir; _ledger_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
-    if [[ -d "$_ledger_dir" ]]; then
-      _ledger_path="${_ledger_dir}/execution-ledger.json"
+    if [[ -d "$_evidence_dir" ]]; then
+      _ledger_path="${_evidence_dir}/execution-ledger.json"
       # A failed open is NOT a reason to run unaccounted. Swallowing it produced
       # exactly the outcome the ledger exists to prevent: a green gate run whose
       # test accounting silently did not happen.
@@ -1849,7 +1855,7 @@ run_all_gates() {
       # line turned four passing gate-runner tests red by making the report
       # unparseable. The fact still has to be durable, so it goes where the rest
       # of the run's findings go.
-      _ledger_unaccounted_reason="no evidence directory at '${_ledger_dir}' — this gate run is NOT accounted by an execution ledger and cannot support a no-double-execution claim"
+      _ledger_unaccounted_reason="no evidence directory at '${_evidence_dir}' — this gate run is NOT accounted by an execution ledger and cannot support a no-double-execution claim"
     fi
   fi
 
@@ -2216,15 +2222,14 @@ run_all_gates() {
     # evidence. A waiver present but failing check for ANY reason leaves the
     # result "fail" and records waiver_rejected:<verdict> on the row.
     if [[ "$final_result" == "fail" ]]; then
-      local _wv_ev_dir; _wv_ev_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
-      local _wv_file="${_wv_ev_dir}/waivers/gate-waiver-${gate_name}.json"
+      local _wv_file="${_evidence_dir}/waivers/gate-waiver-${gate_name}.json"
       if [[ -f "$_wv_file" ]]; then
         local _wv_head _wv_cmd_sha _wv_verdict _wv_rc
         _wv_head=$(git rev-parse HEAD 2>/dev/null || echo "")
         _wv_cmd_sha=$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)
         _wv_rc=0
         _wv_verdict=$("${SCRIPT_DIR}/aid-gate-waiver.sh" check "$gate_name" \
-          --evidence-dir "$_wv_ev_dir" --head "$_wv_head" \
+          --evidence-dir "$_evidence_dir" --head "$_wv_head" \
           --command-sha "$_wv_cmd_sha" --epic "$epic_id" --run "$run_id" 2>/dev/null) || _wv_rc=$?
         if [[ "$_wv_rc" -eq 0 && "$_wv_verdict" == "valid" ]]; then
           # IMP-270 review F1: consumption must be DURABLE before we waive. If
@@ -2234,7 +2239,7 @@ run_all_gates() {
           # than stamping a waived result on an unconsumed waiver.
           local _wv_consume_rc=0
           "${SCRIPT_DIR}/aid-gate-waiver.sh" consume "$gate_name" \
-            --evidence-dir "$_wv_ev_dir" --by-run "$run_id" >/dev/null 2>&1 || _wv_consume_rc=$?
+            --evidence-dir "$_evidence_dir" --by-run "$run_id" >/dev/null 2>&1 || _wv_consume_rc=$?
           if [[ "$_wv_consume_rc" -ne 0 ]]; then
             gate_result=$(echo "$gate_result" | jq '.waiver_rejected = "consume_failed"')
           else

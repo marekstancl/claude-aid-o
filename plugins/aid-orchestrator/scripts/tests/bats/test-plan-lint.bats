@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
-# test-plan-lint.bats — plan-time Files-shape lint (v2.58.3).
-# Unit: every violation class + two-tier severity + legacy tolerance.
+# test-plan-lint.bats — plan-time Files-shape lint (v2.58.3; P079 Step 5).
+# Unit: every violation class, the two blocking tiers + legacy tolerance, and
+# the non-blocking description-path advisory.
 # Integration: lint-clean plan flows through aid-plan-to-epic -> aid-epic-to-json
 # -> contract gate with all three agreeing (proves the lint and the generator do
 # not have a different reality), and the preflight fail-fasts BEFORE any write.
@@ -75,11 +76,16 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   _plan pl.md legacy '- Modify: src/nobacktick.ts — no backticks'
   run "$LINT" pl.md; [ "$status" -eq 0 ]
 }
-@test "lint STRICT: verb+path split across two lines (dropped path) blocks strict, passes legacy" {
+@test "lint ERROR (P079 Step 5, was STRICT): verb+path split across two lines blocks BOTH modes" {
+  # Tier raised deliberately. This shape is `- Create:` with an empty body, and
+  # since P079 Step 5 generation REFUSES it by name instead of dropping the path
+  # in silence — so tolerating it for legacy plans would break the promise in
+  # this lint's header: a plan that passes the lint passes generation.
   _plan ps.md strict '- Create:' '  `src/split.ts` — path on the next line'
   run "$LINT" ps.md; [ "$status" -ne 0 ]
   _plan pl.md legacy '- Create:' '  `src/split.ts` — path on the next line'
-  run "$LINT" pl.md; [ "$status" -eq 0 ]
+  run "$LINT" pl.md; [ "$status" -ne 0 ]
+  [[ "$output" == *"verb label with no path"* ]]
 }
 
 # ── indented sub-bullets are prose continuation, NOT separate entries ────────
@@ -88,7 +94,6 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   run "$LINT" p.md; [ "$status" -eq 0 ]
 }
 
-# ── usage / IO ───────────────────────────────────────────────────────────────
 # ── P079 Step 5 (IMP-480): the drop shape the live P076 run actually hit ─────
 #
 # Its Files bullet was CANONICAL and parsed cleanly; the second path lived in
@@ -115,6 +120,7 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   [[ "$output" != *"ADVISORY"* ]]
 }
 
+# ── usage / IO ───────────────────────────────────────────────────────────────
 @test "lint: missing file -> usage exit 2" {
   run "$LINT" /nonexistent/plan.md; [ "$status" -eq 2 ]
 }
@@ -164,29 +170,23 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
 # outright rather than silently narrowing allowed_paths to the first path
 # (the historical bug this test guards against). Legacy plan, so this proves
 # the fail-closed behavior is NOT gated behind lifecycle_strict.
-@test "P079 Step 5: an UNLABELLED Files bullet fails generation by name instead of vanishing" {
-  # The lint calls this bad-shape and blocks it too; generation is the
-  # defense-in-depth half, because a plan can reach the generator without the
-  # preflight (direct invocation, an older plan, a --force path).
-  _plan dirty.md legacy '- Create: `src/a.ts` — fine' '- `src/forgotten.ts` — no verb label'
-  mkdir -p out
-  run "$P2E" --plan dirty.md --phase 1 --total 1 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir out --counter-yaml counter.yaml
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"src/forgotten.ts"* ]]                     # named, not counted
-  [ -z "$(ls out/ 2>/dev/null)" ]
-}
-
-@test "P079 Step 5: a Files bullet with a verb but no path fails generation instead of producing an empty entry" {
-  _plan dirty.md legacy '- Create: `src/a.ts` — fine' '- Modify:'
-  mkdir -p out
-  run "$P2E" --plan dirty.md --phase 1 --total 1 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir out --counter-yaml counter.yaml
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"verb but no path"* ]]
-  [ -z "$(ls out/ 2>/dev/null)" ]
+@test "P079 Step 5: the lint and generation agree on both new refusals (the seam's whole promise)" {
+  # aid-plan-lint.sh's header promises "a plan that passes this lint provably
+  # passes the gate". Making generation refuse a shape the lint called clean
+  # would have broken exactly that, so both shapes are ERROR tier in the shared
+  # classifier — asserted here as one fact, in both directions.
+  local shape
+  for shape in '- `src/forgotten.ts` — no verb label' '- Modify:'; do
+    _plan p.md legacy '- Create: `src/a.ts` — fine' "$shape"
+    run "$LINT" p.md
+    [ "$status" -ne 0 ]                                       # lint refuses
+    mkdir -p out && rm -rf out && mkdir -p out
+    run "$P2E" --plan p.md --phase 1 --total 1 \
+      --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
+      --output-dir out --counter-yaml counter.yaml
+    [ "$status" -ne 0 ]                                       # generation too
+    [ -z "$(ls out/ 2>/dev/null)" ]
+  done
 }
 
 @test "integration: comma-separated Files entry fails aid-plan-to-epic generation (legacy plan), never silently narrows" {

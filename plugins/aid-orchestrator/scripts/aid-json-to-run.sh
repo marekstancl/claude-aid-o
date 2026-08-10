@@ -658,17 +658,25 @@ fsm_state_file="${fsm_evidence_dir}/fsm-state.yaml"
 fsm_mode="full"
 fsm_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 fsm_base_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+# The plan id this EPIC belongs to. Derived HERE (it was derived further down,
+# in the epic-start registration block) because the base_commit choice below
+# needs it too — same derivation, one place, and the block below stays a no-op
+# when a caller passed --plan-id explicitly.
+if [[ -z "$plan_id" ]]; then
+  _jr_nnn="${epic_id%%_*}"
+  [[ "$_jr_nnn" =~ ^E-([0-9]+) ]] && plan_id="P${BASH_REMATCH[1]}"
+fi
+
 # P079 Step 3 (IMP-478): for a plan that owns an execution worktree, the EPIC
 # will execute on `task/<epic_id>/main`, not on whatever generation happened to
 # have checked out — and generation runs for EVERY chain member at once, long
 # before the later ones' branches exist in their final shape. Record the task
 # branch head when it is already there; epic-start's reconciliation moves this
-# field again if the branch is later fast-forwarded.
-_p079_plan_nnn="${epic_id%%_*}"
-if [[ "$_p079_plan_nnn" =~ ^E-([0-9]+) ]] \
-   && [[ -n "$(AID_PLAN_STATE_PROJECT_ROOT="$(aid_state_root 2>/dev/null || pwd)" \
-        bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "P${BASH_REMATCH[1]}" worktree_path 2>/dev/null \
-        | grep -v '^not_found$\|^null$')" ]]; then
+# field again if the branch is later fast-forwarded. The worktree test is this
+# file's own (`_jr_wt` below), deliberately: asking plan-state instead would
+# have to distinguish "no worktree" from "state unreadable", and collapsing
+# those two is the failure class this step exists to close.
+if [[ -n "$plan_id" && -d "$(aid_state_path ".aid-worktrees/plan-${plan_id}")" ]]; then
   _p079_task_head="$(git rev-parse --verify --quiet "refs/heads/task/${epic_id}/main" 2>/dev/null || true)"
   [[ -n "$_p079_task_head" ]] && fsm_base_commit="$_p079_task_head"
 fi
@@ -750,10 +758,8 @@ elif [[ ! -f "$fsm_state_file" ]]; then
   # init derives the same plan id from the same epic id and consults the same
   # committed manifest, so a standalone init of a plan_branch EPIC would
   # otherwise refuse on lineage nobody registered.
-  if [[ -z "$plan_id" ]]; then
-    _jr_nnn="${epic_id%%_*}"
-    [[ "$_jr_nnn" =~ ^E-([0-9]+) ]] && plan_id="P${BASH_REMATCH[1]}"
-  fi
+  # plan_id is already derived above (Step 18's base_commit choice needs it);
+  # this stays as the guard for a caller that passed it explicitly.
   if [[ -z "$plan_mode" && -n "$plan_id" ]]; then
     plan_mode="$(git show "$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo main):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null \
                  | yq -r '.mode // ""' 2>/dev/null || true)"
