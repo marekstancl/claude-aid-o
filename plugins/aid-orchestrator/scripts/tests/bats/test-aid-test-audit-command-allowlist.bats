@@ -37,11 +37,6 @@ run_units:
       argv: ["bats", "tests/suite.bats"]
     runtime:
       fingerprint: "sha256:0123456789ab"
-    parallel:
-      status: unknown
-      exclusive_resources: []
-      max_workers: null
-      internal_parallelism: false
     isolation:
       temp_workspace: unknown
       fixed_ports: []
@@ -75,11 +70,6 @@ run_units:
       argv: ["bats", "tests/other.bats"]
     runtime:
       fingerprint: "sha256:abcdef012345"
-    parallel:
-      status: unknown
-      exclusive_resources: []
-      max_workers: null
-      internal_parallelism: false
     isolation:
       temp_workspace: unknown
       fixed_ports: []

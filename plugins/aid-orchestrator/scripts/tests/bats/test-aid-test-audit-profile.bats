@@ -366,8 +366,7 @@ YAML
   jq -n '{schema_version:"1.0.0", generated_at:"2026-08-04T00:00:00Z", status:"approved",
           run_units:[{run_unit_id:"gate:demo", runner:"declared-command",
                       source_paths:["x"],
-                      command:{type:"shell", shell:"echo QUARANTINED; exit 86"},
-                      parallel:{status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false}}],
+                      command:{type:"shell", shell:"echo QUARANTINED; exit 86"}}],
           source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' \
     | yq -P '.' > "$cat2"
 
@@ -400,8 +399,7 @@ YAML
   jq -n --arg cmd "rm -f $OUT/inventory.json" '
     {schema_version:"1.0.0", generated_at:"2026-08-04T00:00:00Z", status:"approved",
      run_units:[{run_unit_id:"gate:wrecker", runner:"declared-command", source_paths:["x"],
-                 command:{type:"shell", shell:$cmd},
-                 parallel:{status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false}}],
+                 command:{type:"shell", shell:$cmd}}],
      source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' | yq -P '.' > "$cat2"
 
   run bash "$PROFILE" --run-unit-id "gate:wrecker" \

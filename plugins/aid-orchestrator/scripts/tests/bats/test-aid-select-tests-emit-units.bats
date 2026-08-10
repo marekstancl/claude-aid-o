@@ -65,7 +65,6 @@ _write_catalog() {
        test_level:"suite", risk_tags:[], profiles:["default"], behavior_claims:[], confidence:"medium",
        command:{type:"argv", argv:["bats","plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats"]},
        runtime:{fingerprint:"sha256:aaaaaaaaaaaa"},
-       parallel:{status:$s, exclusive_resources:[], max_workers:null, internal_parallelism:false},
        isolation:{temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
        recommendation:"keep", test_cases:[]}
     ],
