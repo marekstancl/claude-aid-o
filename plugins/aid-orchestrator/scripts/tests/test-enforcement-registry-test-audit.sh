@@ -144,7 +144,13 @@ else
     while IFS= read -r bad_id; do
       [[ -z "$bad_id" ]] && continue
       if [[ -n "${DECLARED_AMENDMENTS[$bad_id]:-}" ]]; then
-        pass_msg "pre-existing row '$bad_id' was amended, and the amendment is declared: ${DECLARED_AMENDMENTS[$bad_id]}"
+        # Declared means "this row's CONTENT was allowed to move", never "this
+        # row may vanish" — a deletion is not an amendment.
+        if jq -e --arg id "$bad_id" 'any(.[]; .id == $id)' <<<"$(jq -c '[.enforcements[] | {id}]' <<<"$registry_json")" >/dev/null; then
+          pass_msg "pre-existing row '$bad_id' was amended, and the amendment is declared: ${DECLARED_AMENDMENTS[$bad_id]}"
+        else
+          fail_msg "row '$bad_id' has a declared amendment but is GONE from the registry — an amendment is not a licence to delete"
+        fi
         continue
       fi
       fail_msg "pre-existing row '$bad_id' is missing or was modified relative to the pre-Step-19 baseline"

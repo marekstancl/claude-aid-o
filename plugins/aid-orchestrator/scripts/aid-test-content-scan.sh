@@ -463,6 +463,11 @@ except Exception:
 #     `# content-scan: allow existence-skip — <reason>` on the preceding line
 #     to record a deliberate one; it is reported with suppressed: true.
 #
+# Both checks read test files as TEXT, so a suite that carries an example of
+# either shape inside a heredoc (this scanner's own bats suite does) is
+# reported for the line it really contains. That is a true statement about the
+# file, not a false positive to suppress.
+#
 # Plain `.sh` suites are enumerated HERE and nowhere else: the scanner's other
 # checks are calibrated against the bats/py/ts universe, and widening that
 # universe globally would silently change their counts. Named work, not free.
@@ -479,16 +484,21 @@ def _join_continuations(lines):
             continue
         out.append((start, buf + ln))
         buf, start = "", None
-    if start is not None:
-        out.append((start, buf))
+    # A file ending mid-continuation has an UNFINISHED command; reporting it
+    # would be reporting a syntax error as a vacuous-green pattern.
     return out
 
-_grep_count_re = re.compile(r"=\s*[\$`]\(?\s*grep\s+-[a-zA-Z]*c\b")
+# `grep -c`, `grep -cE`, `grep -E -c`, `grep --count` — the option may carry
+# other letters and may be a separate word, so match ANY grep invocation that
+# takes a count flag before its pattern.
+_grep_count_re = re.compile(
+    r"=\s*[\$`]\(?\s*grep\b(?:\s+-[a-zA-Z]*\b|\s+--[a-z-]+)*"
+    r"(?:\s+-[a-zA-Z]*c[a-zA-Z]*\b|\s+--count\b)")
 set_e_grep_count = []
 for f in sh_tests:
     try: lines = open(f, errors="ignore").read().splitlines()
     except Exception: continue
-    if not any(re.search(r"^\s*set\s+-[a-zA-Z]*e", ln) for ln in lines[:25]):
+    if not any(re.search(r"^\s*set\s+(-[a-zA-Z]*e|-o\s+errexit)", ln) for ln in lines[:25]):
         continue
     for lineno, text in _join_continuations(lines):
         if text.lstrip().startswith("#"): continue
@@ -498,17 +508,30 @@ for f in sh_tests:
         set_e_grep_count.append({"file": rel(f), "line": lineno,
                                  "text": text.strip()[:160]})
 
-# A skip keyed on an ABSOLUTE path outside the project (`[ -d /proc ]`) is a
-# PLATFORM capability check, not a claim about the subject under test — those
-# are legitimate and are not flagged.
-_skip_re = re.compile(r"\[\[?\s+-[fdesx]\s+(?!/)[^]]*\]\]?\s*\|\|\s*skip\b")
+# Three shapes of the same thing: `[ -f X ] || skip`, `[[ ! -f X ]] && skip`,
+# and `if [[ ! -f X ]]; then skip`. A skip keyed on an ABSOLUTE path (`/proc`,
+# quoted or not) is a PLATFORM capability check rather than a claim about the
+# subject under test, and is not flagged.
+_skip_res = [
+    re.compile(r"\[\[?\s+-[fdesx]\s+(?P<t>[^]]*?)\s*\]\]?\s*\|\|\s*skip\b"),
+    re.compile(r"\[\[?\s+!\s*-[fdesx]\s+(?P<t>[^]]*?)\s*\]\]?\s*(?:&&\s*|;\s*then\s*)skip\b"),
+]
+def _skip_target(ln):
+    for rx in _skip_res:
+        m = rx.search(ln)
+        if m:
+            return m.group("t").strip()
+    return None
+def _is_platform_path(tok):
+    return tok.strip("\"'").startswith("/")
 _allow_re = re.compile(r"#\s*content-scan:\s*allow existence-skip")
 existence_keyed_skip = []
 for f in all_tests + sh_tests:
     try: lines = open(f, errors="ignore").read().splitlines()
     except Exception: continue
     for i, ln in enumerate(lines, 1):
-        if not _skip_re.search(ln): continue
+        target = _skip_target(ln)
+        if target is None or _is_platform_path(target): continue
         prev = lines[i - 2] if i >= 2 else ""
         existence_keyed_skip.append({"file": rel(f), "line": i,
                                      "text": ln.strip()[:160],

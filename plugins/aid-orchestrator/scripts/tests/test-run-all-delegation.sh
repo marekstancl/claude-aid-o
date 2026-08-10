@@ -31,11 +31,21 @@ _fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL+1)); }
 
 # The map, read from the runner itself rather than restated here — a copy would
 # pass while the two drifted.
+# Comment lines inside the block are NOT entries — a commented-out delegation
+# means the suite runs inline, and treating it as live would demand a CI job
+# for a suite nothing delegates.
 mapfile -t MAP_LINES < <(
   awk '/^declare -A DELEGATED_SUITES=\(/ { inside = 1; next }
        inside && /^\)/                    { exit }
+       inside && /^[[:space:]]*#/          { next }
        inside && /\["/                    { print }' "$RUNNER"
 )
+# One declaration, or the map this test read is not the map the runner uses.
+decl_blocks=$(grep -c '^declare -A DELEGATED_SUITES=(' "$RUNNER")
+if [[ "$decl_blocks" -ne 1 ]]; then
+  echo "FAIL: run-all-tests.sh declares DELEGATED_SUITES ${decl_blocks} times — this test reads the first block only, so it can no longer speak for the runner's effective map" >&2
+  exit 1
+fi
 if [[ "${#MAP_LINES[@]}" -eq 0 ]]; then
   echo "FAIL: could not read DELEGATED_SUITES out of $RUNNER" >&2
   exit 1
@@ -59,11 +69,19 @@ for suite in "${!OWNER[@]}"; do
     0) _fail "$suite is delegated to job '$job', but NO workflow defines that job — the suite is now run by nothing" ;;
     *) _fail "$suite is delegated to job '$job', which $hits workflow files define — one owner or none is a fact, two is a guess" ;;
   esac
-  # And the job actually runs THAT suite.
-  if grep -rqF "tests/bats/${suite}" "$WORKFLOW_DIR" 2>/dev/null; then
-    _pass "$suite is named in a workflow run line"
+  # And the job actually RUNS that suite — on a live line. A commented-out
+  # `# run: bats …` mentions the suite and runs nothing, which is precisely the
+  # silent-disappearance this test exists to prevent.
+  live_hits=$(grep -rhF "tests/bats/${suite}" "$WORKFLOW_DIR" 2>/dev/null \
+              | grep -vE '^\s*#' | grep -cE '(^|\s)run:' || true)
+  if [[ "${live_hits:-0}" -ge 1 ]]; then
+    _pass "$suite is named on a live (uncommented) workflow run line"
   else
-    _fail "$suite is delegated but no workflow run line mentions it"
+    _fail "$suite is delegated but no UNCOMMENTED workflow run line runs it — it is now run by nothing"
+  fi
+  # A job disabled by `if: false` owns nothing either.
+  if grep -rhA 3 "^  ${job}:\s*\$" "$WORKFLOW_DIR" 2>/dev/null | grep -qE '^\s*if:\s*(false|\$\{\{\s*false)'; then
+    _fail "$suite is delegated to job '$job', which is disabled with 'if: false'"
   fi
 done
 
