@@ -104,18 +104,27 @@ UNPARSED_SUITES=()
 INCONSISTENT_SUITES=()
 # Suites whose TAP plan promised more results than arrived (P074 EPIC 1).
 TRUNCATED_SUITES=()
+LIST_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --verbose|-v)
       VERBOSE=1
       ;;
+    --list)
+      # P079 Step 12: enumerate WITHOUT running anything. The delegation test
+      # needs to see which suites are inline and which are delegated, and
+      # running the whole aggregate suite to find out would cost half an hour
+      # to answer a question about a directory listing.
+      LIST_ONLY=1
+      ;;
     --help|-h)
-      echo "Usage: $(basename "$0") [--verbose]"
+      echo "Usage: $(basename "$0") [--verbose] [--list]"
       echo ""
       echo "Runs all test-*.sh scripts in the tests directory."
       echo ""
       echo "Options:"
       echo "  --verbose, -v   Show full output from each test suite"
+      echo "  --list          List discovered and DELEGATED suites, run nothing"
       echo "  --help, -h      Show this help message"
       exit 0
       ;;
@@ -154,6 +163,14 @@ declare -A DELEGATED_SUITES=(
   # not a flake. Delegated to its own job with its own budget instead of
   # eating this job's headroom, exactly like the two entries above.
   ["test-aid-test-isolation-experiment.bats"]="isolation-experiment-tests"
+  # P079 Step 12 (IMP-483) — the three heaviest P076 suites, same reasoning as
+  # every entry above: each drives real processes (a bash fixture service under
+  # a supervisor, port allocation, /proc identity checks) rather than mocks, so
+  # each gets its own job with its own budget instead of eating this one's.
+  # Together they are the bulk of what the plan-final broad gate spends inline.
+  ["test-aid-service.bats"]="service-lib-tests"
+  ["test-service-lifecycle.bats"]="service-lifecycle-tests"
+  ["test-p076-integration.bats"]="p076-integration-tests"
 )
 
 # ---------------------------------------------------------------------------
@@ -179,6 +196,13 @@ done
 if [[ ${#SUITES[@]} -eq 0 && ${#DELEGATED_LOG[@]} -eq 0 ]]; then
   echo "ERROR: No test-*.sh or bats/test-*.bats suites found in $SCRIPT_DIR" >&2
   exit 1
+fi
+
+if [[ "$LIST_ONLY" -eq 1 ]]; then
+  echo "Discovered ${#SUITES[@]} test suite(s)"
+  for suite in "${SUITES[@]}"; do echo "INLINE: $(basename "$suite")"; done
+  for entry in "${DELEGATED_LOG[@]+"${DELEGATED_LOG[@]}"}"; do echo "DELEGATED: $entry"; done
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------

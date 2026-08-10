@@ -58,6 +58,14 @@
 # Resolve the RUNNING plugin from THIS lib's own location (correct whether
 # sourced by aid-fsm.sh or executed standalone). lib lives at scripts/lib/.
 _AID_CP_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# P079 Step 8: the shared root resolver, for the WIP detection below. Sourced
+# guarded — this library's PRIMARY job (comparing two plugin trees) must keep
+# working even where aid-roots.sh is absent, and the WIP downgrade simply does
+# not fire there.
+if [[ -f "${_AID_CP_LIB_DIR}/aid-roots.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${_AID_CP_LIB_DIR}/aid-roots.sh" || true
+fi
 _AID_CP_RUNNING_SCRIPTS_DIR="$(cd "${_AID_CP_LIB_DIR}/.." && pwd)"
 _AID_CP_RUNNING_PLUGIN_JSON="${_AID_CP_RUNNING_SCRIPTS_DIR}/../.claude-plugin/plugin.json"
 
@@ -110,6 +118,106 @@ _aid_cp_yaml() {
 
 # run_cache_preflight <state_file> [timeline_file]
 #   Returns 0 on ok / skew_consumer / override; returns 1 on skew_dogfood.
+# ─── Is this the plugin's own work in progress? (P079 Step 8, IMP-477) ──────
+#
+# Three conditions, all cheap, deliberately conjunctive, and FAIL CLOSED: any
+# one of them failing to answer leaves the hard stop in place. Uncertainty is
+# never a reason to downgrade a staleness check.
+#
+#   1. the invocation is in a LINKED worktree (its git dir is not the common one)
+#   2. that worktree is the plan's registered execution worktree — the recorded
+#      path when plan-state can be read, the `.aid-worktrees/plan-*` convention
+#      otherwise
+#   3. its diff against the plan branch actually touches `plugins/`
+#
+# _aid_cp_wip_base <toplevel> — the commit to diff against: the merge-base with
+# the worktree's own branch point. Falls back to a bounded HEAD~20 so a shallow
+# or freshly-cut branch still answers.
+_aid_cp_wip_base() {
+  local top="$1" branch base
+  branch="$(git -C "$top" rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 1
+  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 1
+  base="$(git -C "$top" merge-base "$branch" "$(_aid_cp_wip_parent "$top" "$branch")" 2>/dev/null)" || base=""
+  [[ -n "$base" ]] || base="$(git -C "$top" rev-parse --verify --quiet 'HEAD~20' 2>/dev/null)" || base=""
+  [[ -n "$base" ]] || return 1
+  printf '%s' "$base"
+}
+
+# _aid_cp_wip_parent <toplevel> <branch> — what a plan worktree's branch was cut
+# from: `main` when it exists, else the branch itself (making the diff empty and
+# the downgrade not fire, which is the fail-closed direction).
+_aid_cp_wip_parent() {
+  local top="$1" branch="$2"
+  if git -C "$top" rev-parse --verify --quiet refs/heads/main >/dev/null 2>&1; then
+    printf 'main'
+  else
+    printf '%s' "$branch"
+  fi
+}
+
+# Sets _AID_CP_WIP_COUNT. `grep -c` PRINTS 0 and then exits 1 on no match, so
+# a `|| printf 0` fallback would emit two zeros and every numeric test on the
+# result would be comparing "0\n0" — counted in bash instead.
+_aid_cp_wip_count() {
+  local top="$1" base out
+  _AID_CP_WIP_COUNT=0
+  base="$(_aid_cp_wip_base "$top")" || return 0
+  out="$(git -C "$top" diff --name-only "${base}..HEAD" -- plugins/ 2>/dev/null)" || return 0
+  [[ -n "$out" ]] || return 0
+  _AID_CP_WIP_COUNT="$(printf '%s\n' "$out" | wc -l)"
+  return 0
+}
+
+_aid_cp_is_plugin_wip() {
+  local top="${1:-}"
+  [[ -n "$top" ]] || return 1
+
+  # 1. a linked worktree
+  local gd cd_
+  gd="$(git -C "$top" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  cd_="$(git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$gd" && -n "$cd_" && "$gd" != "$cd_" ]] || return 1
+
+  # 2. THE plan's registered execution worktree.
+  #
+  # The path convention is only the FALLBACK for when there is no registry to
+  # ask (no plan-state library, or a directory name that is not a plan id). When
+  # a registry CAN be asked, its answer is authoritative and a failed lookup is
+  # a refusal — otherwise a hand-made worktree at the conventional path, or a
+  # transient read error, would downgrade a genuinely stale cache.
+  local phys recorded="" plan_id="" rc=0
+  phys="$(cd "$top" 2>/dev/null && pwd -P)" || return 1
+  plan_id="$(basename "$phys")"; plan_id="${plan_id#plan-}"
+  if [[ -f "${_AID_CP_LIB_DIR}/aid-plan-state.sh" && "$plan_id" =~ ^P[0-9]{3}$ ]]; then
+    # The primary checkout, from the shared resolver rather than by trimming
+    # the common dir by hand — it also refuses the bare-repo and detached
+    # common-dir layouts that a `${cd_%/.git}` would turn into a nonsense root.
+    local state_root
+    state_root="$(cd "$top" 2>/dev/null && aid_state_root 2>/dev/null)" || return 1
+    recorded="$(AID_PLAN_STATE_PROJECT_ROOT="$state_root" \
+      bash "${_AID_CP_LIB_DIR}/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
+    # rc > 1 is an UNREADABLE registry (missing yq, corrupt state, lock
+    # timeout) — the one case that must never be read as permission.
+    [[ "$rc" -le 1 ]] || return 1
+    [[ "$recorded" == "not_found" || "$recorded" == "null" ]] && recorded=""
+  fi
+  if [[ -n "$recorded" ]]; then
+    # A recorded worktree is authoritative: this must BE it, not merely sit at
+    # a path that looks like it.
+    [[ "$(cd "$recorded" 2>/dev/null && pwd -P)" == "$phys" ]] || return 1
+  else
+    # No record to consult (a plan-state-less project, or a worktree made by
+    # hand for plugin work — how this repository's own EPICs run). The path
+    # convention is the fallback, and it is still one of three conditions.
+    [[ "$phys" == */.aid-worktrees/plan-* ]] || return 1
+  fi
+
+  # 3. the diff actually touches plugins/. The count is left in
+  # _AID_CP_WIP_COUNT for the warning text, so the git pipeline runs once.
+  _aid_cp_wip_count "$top"
+  [[ "$_AID_CP_WIP_COUNT" -gt 0 ]]
+}
+
 run_cache_preflight() {
   local state_file="${1:-}"
   local timeline="${2:-}"
@@ -152,6 +260,28 @@ run_cache_preflight() {
     if [[ "$running_version" == "$dogfood_version" && "$running_hash" == "$dogfood_hash" ]]; then
       _aid_cp_log "$timeline" "cache_preflight_ok" mode="dogfood" \
         running_version="$running_version"
+      return 0
+    fi
+
+    # ── The EPIC's own work is not staleness (P079 Step 8, IMP-477) ────────
+    # The dogfood reference resolves to the INVOKING tree's plugins/ copy, so
+    # an EPIC that modifies the plugin always "skews" against itself: the
+    # difference the check reports IS the work in progress. That is a false
+    # positive by construction, and it hard-stopped the plugin's own runs.
+    #
+    # Downgraded to a warning ONLY when all three hold — a linked worktree, at
+    # the registered plan-worktree path, whose diff against the plan branch
+    # actually touches plugins/. The primary-checkout hard stop is untouched,
+    # and a worktree with NO plugin changes still hard-stops, so real staleness
+    # is still caught in both places. What the downgrade costs is stated
+    # plainly: for this one run, controller tooling from a genuinely stale
+    # cache would go unreported. The gates themselves execute the tree's own
+    # scripts, so the risk window is the controller layer only.
+    if _aid_cp_is_plugin_wip "$toplevel"; then
+      _aid_cp_log "$timeline" "cache_preflight_skew_wip" \
+        running_version="$running_version" cache_version="$dogfood_version" \
+        running_hash="$running_hash" cache_hash="$dogfood_hash"
+      _aid_cp_warn "cache-preflight downgraded: ${_AID_CP_WIP_COUNT} file(s) under plugins/ differ from the plan branch — this is the EPIC's own work, not a stale cache. Controller tooling staleness is NOT verified for this run."
       return 0
     fi
 

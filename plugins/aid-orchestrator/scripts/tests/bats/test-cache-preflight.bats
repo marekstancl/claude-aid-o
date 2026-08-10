@@ -173,3 +173,100 @@ EOF
   [[ "$output" == *'"state":"READY"'* ]]     # JSON stdout intact (preflight is stderr/timeline only)
   grep -q "^controller_version: ${RUNNING_VERSION}$" "$state"
 }
+
+# ─── P079 Step 8 (IMP-477): the EPIC's own work is not a stale cache ─────────
+#
+# THE LIVE FAILURE: the dogfood reference resolves to the INVOKING tree's
+# plugins/ copy, so an EPIC that modifies the plugin always "skews" against
+# itself. The check hard-stopped the plugin's own runs on the difference that
+# WAS the work. The downgrade is narrow on purpose — the three cases below pin
+# both what it now tolerates and everything it still stops.
+
+# make_plan_worktree <primary> <plan_id> — a linked worktree at the registered
+# plan-worktree path, carrying a skewed dogfood plugin copy.
+make_plan_worktree() {
+  local primary="$1" plan_id="$2" wt="$1/.aid-worktrees/plan-$2"
+  git -C "$primary" worktree add -q "$wt" -b "plan/${plan_id}"
+  make_dogfood_fixture "$wt" skew
+  git -C "$wt" add -A
+  git -C "$wt" -c user.email=t@e -c user.name=t commit -q -m "the EPIC's own plugin work"
+  printf '%s' "$wt"
+}
+
+@test "P079 Step 8: a plan worktree whose diff touches plugins/ WARNS and continues (skew_wip event)" {
+  local primary="$WORK/primary" wt
+  make_dogfood_fixture "$primary" match
+  init_git_repo "$primary"
+  wt="$(make_plan_worktree "$primary" P900)"
+
+  run bash -c "cd '$wt' && exec bash '$LIB' '$wt/nonexistent-state.yaml' '$WORK/tl.jsonl'" 3>&-
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"the EPIC's own work"* ]]
+  [[ "$output" != *"HARD STOP"* ]]
+  jq -se 'any(.[]; .event == "cache_preflight_skew_wip")' "$WORK/tl.jsonl" | grep -q '^true$'
+}
+
+@test "P079 Step 8: a plan worktree with NO plugins/ diff still HARD STOPS (real staleness is still caught)" {
+  local primary="$WORK/primary" wt="$WORK/primary/.aid-worktrees/plan-P900"
+  make_dogfood_fixture "$primary" skew
+  init_git_repo "$primary"
+  git -C "$primary" worktree add -q "$wt" -b plan/P900
+  # A worktree that changed nothing under plugins/ — the skew is genuinely the
+  # cache, not the work.
+  printf 'notes\n' > "$wt/NOTES.md"
+  git -C "$wt" add -A
+  git -C "$wt" -c user.email=t@e -c user.name=t commit -q -m "docs only"
+
+  run bash -c "cd '$wt' && exec bash '$LIB' '$wt/nonexistent-state.yaml' '$WORK/tl.jsonl'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"HARD STOP"* ]]
+  jq -se 'any(.[]; .event == "cache_preflight_skew_dogfood")' "$WORK/tl.jsonl" | grep -q '^true$'
+}
+
+@test "P079 Step 8: the PRIMARY checkout hard stop is untouched, even with plugins/ changes" {
+  local repo="$WORK/primaryskew"
+  make_dogfood_fixture "$repo" skew
+  init_git_repo "$repo"
+  printf 'x\n' > "$repo/plugins/aid-orchestrator/newfile.txt"
+  ( cd "$repo" && git add -A && git commit -q -m "plugin change on the primary checkout" )
+
+  run bash -c "cd '$repo' && exec bash '$LIB' '$repo/nonexistent-state.yaml' '$WORK/tl.jsonl'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"HARD STOP"* ]]
+}
+
+@test "P079 Step 8: a linked worktree OUTSIDE the plan-worktree convention hard stops (the downgrade is not a blanket worktree escape)" {
+  local primary="$WORK/primary" wt="$WORK/elsewhere"
+  make_dogfood_fixture "$primary" match
+  init_git_repo "$primary"
+  git -C "$primary" worktree add -q "$wt" -b feature/whatever
+  make_dogfood_fixture "$wt" skew
+  git -C "$wt" add -A
+  git -C "$wt" -c user.email=t@e -c user.name=t commit -q -m "plugin work outside a plan worktree"
+
+  run bash -c "cd '$wt' && exec bash '$LIB' '$wt/nonexistent-state.yaml' '$WORK/tl.jsonl'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"HARD STOP"* ]]
+}
+
+@test "P079 Step 8: a worktree the registry records ELSEWHERE does not downgrade (the record wins over the path)" {
+  # The path convention is only the fallback for when there is no record to
+  # consult. A record that names a DIFFERENT directory is an authoritative no.
+  local primary="$WORK/primary" wt="$WORK/primary/.aid-worktrees/plan-P900"
+  make_dogfood_fixture "$primary" match
+  init_git_repo "$primary"
+  mkdir -p "$primary/.aid-o/work/plan-state/P900"
+  cat > "$primary/.aid-o/work/plan-state/P900/plan-state.yaml" <<EOF
+plan_id: P900
+plan_state: OPEN
+worktree_path: ${primary}/.aid-worktrees/plan-P901
+EOF
+  git -C "$primary" worktree add -q "$wt" -b plan/P900
+  make_dogfood_fixture "$wt" skew
+  git -C "$wt" add -A
+  git -C "$wt" -c user.email=t@e -c user.name=t commit -q -m "plugin work in a worktree the plan does not claim"
+
+  run bash -c "cd '$wt' && exec bash '$LIB' '$wt/nonexistent-state.yaml' '$WORK/tl.jsonl'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"HARD STOP"* ]]
+}

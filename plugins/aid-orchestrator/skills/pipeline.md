@@ -774,6 +774,13 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    ```
    bash $AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify <N> <evidence_dir>
    ```
+
+   **Run this for EVERY step. There is no step-0 special case** (P079 Step 9,
+   IMP-474 — a live run seeded step 0 by hand and left every other step to
+   classify, which looked like two different rules and was neither). The seed
+   file `verifier-output-step-<N>.md` is always classify's product: a verifier
+   that finds no seed means classify was SKIPPED for that step. Recovery: run
+   classify, then dispatch the verifier — never hand-write the seed.
    Exit code:
    - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
    - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
@@ -858,6 +865,10 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    Prompt explicitly says "you do NOT see why, only what changed."
 
 Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verifier. Max 2 iterations. E7 on exhaustion.
+
+A CP2 finding whose file no remaining step may touch is ROUTED before the
+checkpoint closes (§13 *Routing a finding no remaining step may fix*);
+done-advance refuses over one that was never recorded.
 **Invalidation-Map call site 1/5:** after each applied CP2 fix, run the **Invalidation-Map Post-Fix Hook** (§13, observe-only) with `fix_ref=cp2-step-<N>-iter<K>` (capture `pre_fix_ref` before dispatching the fixer).
 
 **Retry telemetry:** Every re-dispatch in the CP2 fix loop re-emits the same
@@ -1004,6 +1015,13 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    documented above (focus=`cp3-code-review` and `cp3-security`,
    step_n=`null`). Iteration 2 appends 4 additional events to
    `timeline.jsonl`; provenance binding uses the last pair per focus.
+
+   **Deferring instead of fixing?** A finding you decide NOT to fix here, and
+   which must not be lost at release, is recorded with `aid_obligation_add`
+   (§13 *Carried obligations*) — plan-close refuses while one is open. A finding
+   whose FILE no remaining step may touch is routed instead (§13 *Routing a
+   finding no remaining step may fix*) — done-advance refuses over an
+   unrecorded one.
 
 #### C2 Dual-Emit in CP3
 
@@ -1379,6 +1397,10 @@ plan-final equivalent is *Plan-final review boundary* further down this section.
 | 9 | `plan-close` marker | `ca-review-complete` — `plan-close` enforces all of 3-8 |
 | 10 | PM decision | MERGE / FIX / ABORT |
 | 11 | `done-advance review release` | `pm_decision=merge` + reports present |
+
+Anything this review DEFERS rather than fixes is recorded with
+`aid_obligation_add` (§13 *Carried obligations*) before you move on — plan-close
+refuses to close over an open `release_blocker`.
 
 ### Telemetry Overview
 
@@ -2829,6 +2851,52 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 > how *every* fix loop is shaped. It is **NOT a gate-fixer dispatch call site** and MUST NOT
 > carry an Invalidation-Map Post-Fix Hook invocation. The 5 real call sites are enumerated in
 > the hook section immediately below.
+
+### Routing a finding no remaining step may fix (P079 Step 7, IMP-473)
+
+A CP2/CP3 finding whose target file is outside every remaining step's
+`allowed_paths` has nowhere legitimate to be fixed. Before you close the
+checkpoint, give it a route:
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh"
+aid_finding_route <plan_id> <fingerprint> <cp2|cp3-code-review|cp3-security> \
+                  <step:<n> | epic:<epic_id> | backlog:IMP-<n>> <epic_id> <total_steps>
+```
+
+Copy the fingerprint VERBATIM from the review artifact — two fingerprint
+formulas ship and the library deliberately recomputes neither.
+
+`done-advance` is the mechanical backstop, in both directions: it refuses while
+a finding routed to this EPIC is unresolved, AND it reconciles the canonical
+`semantic-review-final.json` against the journal — an out-of-scope finding with
+no route recorded is refused BY FINGERPRINT. Skipping the routing is caught at
+the boundary, not lost.
+
+### Carried obligations — a deferral that survives the run (P079 Step 6, IMP-476)
+
+Whenever a checkpoint verdict, a C3 loop outcome or the DONE review leads you to
+DEFER something that must happen before the plan ships, record it:
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-obligations.sh"
+aid_obligation_add <plan_id> release_blocker "<what is owed, in one sentence>" "<CP3|C3|done-review|…>"
+```
+
+Use `followup` instead of `release_blocker` when it genuinely does not block the
+release; a `followup` is recorded and never blocks anything.
+
+Two rules, both learned the expensive way:
+
+- **Never write a deferral into a file you invent.** The first P076 run put one
+  in a `carried-obligations.md` inside the plan worktree; the worktree was torn
+  down at close and the obligation went with it. This library writes to the
+  STATE root, which outlives every worktree, and refuses to write at all when it
+  cannot resolve one.
+- **Discharge it or register it.** `aid-plan-close-check.sh` refuses to close the
+  plan while a `release_blocker` is open. The two exits are: fix it, or register
+  it as a backlog IMP and record that —
+  `aid_obligation_resolve <plan_id> <index> "registered as IMP-<n>"`.
 
 ### Invalidation-Map Post-Fix Hook (C3 activation — E-059-1_2 Step 2, IMP-177)
 

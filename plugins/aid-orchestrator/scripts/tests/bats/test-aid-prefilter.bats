@@ -314,3 +314,40 @@ EOF
   run jq -r '.review_profile.matched_surfaces[]' "$TEST_EVIDENCE_DIR/review-profile.json"
   [[ "$output" == *"fixtures"* ]]
 }
+
+# ─── P079 Step 9 (IMP-474): one seeding rule, pinned by shape ────────────────
+#
+# A live run seeded step 0 by hand and let classify seed every other step. No
+# code path ever made step 0 special — the inconsistency was controller
+# behaviour — so the fix is the instruction (pipeline.md) plus this pin: any
+# future change that made classify's product differ by step number, or stopped
+# it being idempotent, fails here.
+
+@test "P079 Step 9: classify produces the SAME seed shape for step 0 and step 3 (no step-0 special case)" {
+  make_commit "add helper script" "lib/helper.sh" "#!/bin/bash"$'\n'"echo hello"
+  seed_base_commit
+  run "$PREFILTER" classify 0 "$TEST_EVIDENCE_DIR"; [ "$status" -eq 10 ]
+  run "$PREFILTER" classify 3 "$TEST_EVIDENCE_DIR"; [ "$status" -eq 10 ]
+
+  local f0="$TEST_EVIDENCE_DIR/verifier-output-step-0.md"
+  local f3="$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+  [ -f "$f0" ] && [ -f "$f3" ]
+  # Field SETS, not bytes — timestamps and the step number legitimately differ.
+  local keys0 keys3
+  keys0="$(grep -oE '^[a-z_]+:' "$f0" | sort -u)"
+  keys3="$(grep -oE '^[a-z_]+:' "$f3" | sort -u)"
+  [ "$keys0" = "$keys3" ]
+  [ -n "$keys0" ]
+  grep -q '^_generated_by:' "$f0"
+  grep -q '^_generated_by:' "$f3"
+}
+
+@test "P079 Step 9: re-running classify for the same step is idempotent in shape" {
+  make_commit "add helper script" "lib/helper.sh" "#!/bin/bash"$'\n'"echo hello"
+  seed_base_commit
+  run "$PREFILTER" classify 2 "$TEST_EVIDENCE_DIR"; [ "$status" -eq 10 ]
+  local first; first="$(grep -oE '^[a-z_]+:' "$TEST_EVIDENCE_DIR/verifier-output-step-2.md" | sort -u)"
+  run "$PREFILTER" classify 2 "$TEST_EVIDENCE_DIR"; [ "$status" -eq 10 ]
+  local second; second="$(grep -oE '^[a-z_]+:' "$TEST_EVIDENCE_DIR/verifier-output-step-2.md" | sort -u)"
+  [ "$first" = "$second" ]
+}

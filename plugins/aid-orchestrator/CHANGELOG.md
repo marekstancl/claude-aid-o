@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.81.0] — 2026-08-10
+
+### Added
+- **Durable carried obligations** — a deferral a run decides to make is recorded in an append-only journal in the state root's plan-state directory, which outlives every worktree, and `aid-plan-close-check.sh` refuses to close a plan while a `release_blocker` is open; the previous improvised file lived inside the plan worktree, was erased with it, and had no reader anywhere in the codebase.
+- **Routed review findings** — a finding no remaining step may fix gets a recorded route (a later step, a later EPIC, or a backlog IMP), and `done-advance` both refuses over an open one and reconciles the canonical CP3 review artifact against the journal, so an out-of-scope finding nobody recorded fails by fingerprint instead of living in prose.
+- **Chained task branch reconciliation** — an EPIC whose branch was cut before its predecessors merged is fast-forwarded to the live plan head under the plan lock, with the manifest's `epic_base_commit` and the fsm-state's `base_commit` moving with it, and a genuinely diverged branch is refused by name with both heads.
+- **Vacuous-green test checks** — the content scanner reports an unguarded `grep -c` under `set -e` (it exits 1 on zero matches and kills the suite while the cases already run still read as green) and a `skip` keyed on whether the subject under test exists, with an authoring rule for the shapes that need a reader.
+- **Delegated-suite ownership test** — every suite the aggregate runner delegates must have exactly one CI job that runs it on an uncommented line, because a delegated suite whose job disappears stops being run by anything while the inline run gets faster.
+
+### Fixed
+- **Gates run in the plan's own tree** — `advance-to-gates` redirects into the plan's execution worktree like every other plan-linked tree command, so gate commands stop running against `main` and reporting a confident green about code they never saw.
+- **Gate evidence lands where the run can find it** — the runner's timeline, report path, execution ledger, waivers, row checkpoints and project config resolve through the state root while the gate commands keep running in the candidate tree; previously those writes were guarded by directory checks that turned a worktree run's evidence into silence.
+- **A verdict is not rejected for its casing** — `verdict: PASS` and `## Result: pass` mean what they say; genuinely unknown values still fail loudly.
+- **A dropped Files bullet is named** — a bullet the generator cannot parse stops generation instead of silently narrowing the step's scope, the plan lint blocks the same two shapes so it still predicts generation, and a path named only in a bullet's description is reported as an advisory.
+- **The plugin's own work is not a stale cache** — the cache preflight downgrades to a warning inside a registered plan worktree whose diff touches `plugins/`, and keeps the hard stop everywhere else, including a worktree the plan's record does not claim.
+- **A released version's CHANGELOG heading is immutable** — `aid-release.sh` refuses to retitle an entry whose version is already tagged and prepends a new one instead, at both update sites, and fails closed when it cannot tell.
+
+### Changed
+- **`shell_pipeline_smoke` delegation** — the three heaviest P076 suites (service library, service lifecycle, P076 integration) move to their own CI jobs, and `run-all-tests.sh` gains a `--list` mode that enumerates without running anything.
+- **CHANGELOG identity is tested** — `verify-version-files.sh` compares the two CHANGELOGs' sections for the version being released byte for byte; the repository rule that they are always identical had never had a test.
+- **One prefilter seeding rule** — `aid-prefilter.sh classify` runs for every step with no step-0 special case, stated in the pipeline instruction and pinned by a shape test.
+
 ## [2.80.0] — 2026-08-10
 
 > **Version set by hand, deliberately (PM decision 2026-08-10).** `aid-release.sh` must not

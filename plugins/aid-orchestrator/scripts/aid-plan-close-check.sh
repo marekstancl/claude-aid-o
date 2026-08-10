@@ -38,6 +38,8 @@ AID_FSM="${SCRIPT_DIR}/aid-fsm.sh"
 # P074 Step 1 — shared state-root resolution (PROJECT_ROOT default below).
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# shellcheck source=lib/aid-obligations.sh
+source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 
 # ─────────────────────────────────────────────────────────────────────────
 # Check 2 classification regex — anything NOT matching this allow-list is
@@ -625,6 +627,46 @@ check4_queue_revalidate() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════
+# Check 6 — carried obligations (P079 Step 6, IMP-476)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# A deferral recorded during the run is only durable if something refuses to
+# close over it. The first P076 run deferred a release-blocking item into a
+# file it invented inside the plan worktree; the worktree was torn down and the
+# release shipped without it. `lib/aid-obligations.sh` gives that record a home
+# in the state root — this check is the reader that makes it mean something.
+#
+# `followup` obligations are reported and never block; only `release_blocker`
+# does. An UNREADABLE journal blocks too: "cannot be parsed" and "nothing is
+# owed" must never look alike.
+# ═══════════════════════════════════════════════════════════════════════
+
+check6_carried_obligations() {
+  local open_rc=0 open_out
+  open_out="$(aid_obligation_open "$PLAN_ID" 2>&1)" || open_rc=$?
+  if [[ "$open_rc" -ne 0 ]]; then
+    _fail "obligations" "cannot read ${PLAN_ID}'s carried-obligations journal — ${open_out}"
+    return 0
+  fi
+  if [[ -z "$open_out" ]]; then
+    _pass "obligations" "no open carried obligations"
+    return 0
+  fi
+  local idx sev text ref blockers=0
+  while IFS=$'\t' read -r idx sev text ref; do
+    [[ -n "$sev" ]] || continue
+    if [[ "$sev" == "release_blocker" ]]; then
+      blockers=$((blockers + 1))
+      _fail "obligations" "open release-blocking obligation #${idx}: ${text}${ref:+ (from ${ref})} — discharge it, or register it as a backlog IMP and record that: aid_obligation_resolve ${PLAN_ID} ${idx} \"registered as IMP-<n>\""
+    else
+      _info "obligations" "open ${sev} #${idx}: ${text}${ref:+ (from ${ref})} — recorded, not blocking"
+    fi
+  done <<< "$open_out"
+  [[ "$blockers" -eq 0 ]] && _pass "obligations" "no open release-blocking obligations"
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════
 # Check 5 — the plan-branch close boundary (P068 E-068-1_2 Step 6)
 # ═══════════════════════════════════════════════════════════════════════
 #
@@ -1100,6 +1142,7 @@ main() {
   check2_head_freshness
   check3_fsm_done_pending
   check4_queue_revalidate
+  check6_carried_obligations
   if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
     check5_plan_branch_boundary
   fi

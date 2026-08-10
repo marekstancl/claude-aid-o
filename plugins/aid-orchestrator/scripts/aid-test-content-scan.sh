@@ -442,6 +442,101 @@ try:
 except Exception:
     pass
 
+# ── 10b. vacuous green: tests that cannot fail (P079 Step 11, IMP-481) ─────
+# Two MECHANICAL shapes of "a green test that checks nothing". The judgment
+# shapes (an assertion that reads back the same surface that wrote the claim, a
+# test whose subject could vanish and it would still pass) are NOT here — they
+# need a reader, and scripts/README.md's authoring rule covers them as
+# instruction.
+#
+# (a) set_e_grep_count — `x=$(grep -c ...)` in a `set -e` shell suite with no
+#     `|| true` guard. `grep -c` exits 1 when it counts zero, so the assignment
+#     kills the script BEFORE it prints anything, and a suite that dies early
+#     reports the cases it did run as green. Line CONTINUATIONS are joined
+#     first: the one live candidate in this repo carries its `|| true` on the
+#     next line, and flagging it would be a false positive.
+#
+# (b) existence_keyed_skip — a `skip` guarded by whether the file under test
+#     exists. If the subject disappears, the test reports SKIPPED instead of
+#     failing, and a skip that is counted and rendered as skipped is legal —
+#     but keyed on the SUBJECT's existence it is the test's own oracle. Add
+#     `# content-scan: allow existence-skip — <reason>` on the preceding line
+#     to record a deliberate one; it is reported with suppressed: true.
+#
+# Both checks read test files as TEXT, so a suite that carries an example of
+# either shape inside a heredoc (this scanner's own bats suite does) is
+# reported for the line it really contains. That is a true statement about the
+# file, not a false positive to suppress.
+#
+# Plain `.sh` suites are enumerated HERE and nowhere else: the scanner's other
+# checks are calibrated against the bats/py/ts universe, and widening that
+# universe globally would silently change their counts. Named work, not free.
+sh_tests = _clean(sorted(glob.glob(f"{ROOT}/**/tests/test-*.sh", recursive=True)))
+
+def _join_continuations(lines):
+    """[(lineno, joined_text)] — a backslash-continued command as one line."""
+    out, buf, start = [], "", None
+    for i, ln in enumerate(lines, 1):
+        if start is None:
+            start = i
+        if ln.rstrip().endswith("\\"):
+            buf += ln.rstrip()[:-1] + " "
+            continue
+        out.append((start, buf + ln))
+        buf, start = "", None
+    # A file ending mid-continuation has an UNFINISHED command; reporting it
+    # would be reporting a syntax error as a vacuous-green pattern.
+    return out
+
+# `grep -c`, `grep -cE`, `grep -E -c`, `grep --count` — the option may carry
+# other letters and may be a separate word, so match ANY grep invocation that
+# takes a count flag before its pattern.
+_grep_count_re = re.compile(
+    r"=\s*[\$`]\(?\s*grep\b(?:\s+-[a-zA-Z]*\b|\s+--[a-z-]+)*"
+    r"(?:\s+-[a-zA-Z]*c[a-zA-Z]*\b|\s+--count\b)")
+set_e_grep_count = []
+for f in sh_tests:
+    try: lines = open(f, errors="ignore").read().splitlines()
+    except Exception: continue
+    if not any(re.search(r"^\s*set\s+(-[a-zA-Z]*e|-o\s+errexit)", ln) for ln in lines[:25]):
+        continue
+    for lineno, text in _join_continuations(lines):
+        if text.lstrip().startswith("#"): continue
+        if not _grep_count_re.search(text): continue
+        if "||" in text: continue          # guarded
+        if re.search(r"\brun\s+grep\b", text): continue   # bats `run` wrapper
+        set_e_grep_count.append({"file": rel(f), "line": lineno,
+                                 "text": text.strip()[:160]})
+
+# Three shapes of the same thing: `[ -f X ] || skip`, `[[ ! -f X ]] && skip`,
+# and `if [[ ! -f X ]]; then skip`. A skip keyed on an ABSOLUTE path (`/proc`,
+# quoted or not) is a PLATFORM capability check rather than a claim about the
+# subject under test, and is not flagged.
+_skip_res = [
+    re.compile(r"\[\[?\s+-[fdesx]\s+(?P<t>[^]]*?)\s*\]\]?\s*\|\|\s*skip\b"),
+    re.compile(r"\[\[?\s+!\s*-[fdesx]\s+(?P<t>[^]]*?)\s*\]\]?\s*(?:&&\s*|;\s*then\s*)skip\b"),
+]
+def _skip_target(ln):
+    for rx in _skip_res:
+        m = rx.search(ln)
+        if m:
+            return m.group("t").strip()
+    return None
+def _is_platform_path(tok):
+    return tok.strip("\"'").startswith("/")
+_allow_re = re.compile(r"#\s*content-scan:\s*allow existence-skip")
+existence_keyed_skip = []
+for f in all_tests + sh_tests:
+    try: lines = open(f, errors="ignore").read().splitlines()
+    except Exception: continue
+    for i, ln in enumerate(lines, 1):
+        target = _skip_target(ln)
+        if target is None or _is_platform_path(target): continue
+        prev = lines[i - 2] if i >= 2 else ""
+        existence_keyed_skip.append({"file": rel(f), "line": i,
+                                     "text": ln.strip()[:160],
+                                     "suppressed": bool(_allow_re.search(prev))})
+
 # ── 11. does CI run any tests at all? ─────────────────────────────────────
 # A verification agent found the project's single most serious hole in a place
 # this audit never looked: the CI workflow's test step was commented out, so a
@@ -480,6 +575,8 @@ doc = {
                         "files": case_counts},
         "naming": naming,
         "fabricated_measured": fabricated,
+        "set_e_grep_count": set_e_grep_count,
+        "existence_keyed_skip": existence_keyed_skip,
         "ci": ci,
         "gate_overview": gate_overview,
         "scope": {"bats_files": len(bats), "py_test_files": len(py_tests),
@@ -497,6 +594,9 @@ doc = {
         "total_cases_countable": total_cases,
         "naming_outliers": len(outliers),
         "fabricated_measured": len(fabricated),
+        "set_e_grep_count": len(set_e_grep_count),
+        "existence_keyed_skip": len([e for e in existence_keyed_skip if not e["suppressed"]]),
+        "sh_test_files_scanned": len(sh_tests),
         "test_files_all_runners": len(all_tests),
     },
 }

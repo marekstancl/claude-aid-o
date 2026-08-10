@@ -78,6 +78,14 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-active-index.sh" ]]; then
   # shellcheck disable=SC1091
   source "${SCRIPT_DIR}/lib/aid-active-index.sh" || true
 fi
+# P079 Step 7 — the routed-findings journal (aid_finding_open_for_epic,
+# aid_finding_recorded), read by done-advance. Guarded exactly like the two
+# libs above: a missing lib must not abort the CLI, and the check that uses it
+# fails closed on its own when the functions are not there.
+if [[ -f "${SCRIPT_DIR}/lib/aid-routed-findings.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-routed-findings.sh" || true
+fi
 
 # P074 Step 8 — the verbatim argv of this process, captured by the dispatcher
 # at the bottom of this file before any parsing, so the plan-worktree redirect
@@ -1239,16 +1247,23 @@ fsm_check_verifier_output() {
   generated_at=$(yaml_field "$file" _generated_at)
   [[ -z "$generated_at" ]] && return 1  # non-empty: ensures verifier wrote a real timestamp
 
+  # P079 Step 4 (IMP-472): these two fields are the only ones a HUMAN-facing
+  # agent writes by hand, and they carry OPPOSITE casing conventions —
+  # classification uppercase, verdict lowercase — so a verifier that followed
+  # the template's `## Result: PASS` into the verdict field had its whole
+  # review rejected for the casing. Equivalent forms are normalized; genuinely
+  # unknown values (`banana`, `PASSED`) still fail loudly. Only the extracted
+  # TOKEN is lowercased — the evidence file's bytes are never touched.
   classification=$(yaml_field "$file" classification)
-  case "$classification" in
-    SKIP)
+  case "${classification,,}" in
+    skip)
       grep -q '^reason:' "$file" || return 1
       ;;
-    RUN|FAIL|FULL_REVIEW)
+    run|fail|full_review)
       grep -q '^verdict:' "$file" || return 1
       local verdict
       verdict=$(yaml_field "$file" verdict)
-      case "$verdict" in
+      case "${verdict,,}" in
         pass|fail) ;;          # only valid completed verdicts
         pending)   return 1 ;; # pre-filter placeholder: verifier not dispatched
         *)         return 1 ;; # unknown/garbage verdict (e.g. banana, empty, typo)
@@ -1272,6 +1287,115 @@ fsm_check_verifier_output() {
     fi
   fi
 
+  return 0
+}
+
+# _fsm_routed_recorded_set <plan_id> — every fingerprint the routed-findings
+# journal knows about, one per line. Empty when there is no journal.
+_fsm_routed_recorded_set() {
+  declare -F _aid_rf_file >/dev/null 2>&1 || return 0
+  local f; f="$(_aid_rf_file "$1" 2>/dev/null)" || return 0
+  [[ -s "$f" ]] || return 0
+  jq -rs '[ .[].fingerprint ] | unique | .[]' "$f" 2>/dev/null || return 0
+}
+
+# ---------------------------------------------------------------------------
+# _fsm_routed_findings_check <epic_id> <evidence_dir>  (P079 Step 7, IMP-473)
+#
+# TWO halves, because either alone is a half-truth:
+#
+#   CONSUMER — a finding routed to THIS epic (or one of its steps) that is not
+#   yet resolved blocks completion. This is the ordinary carrier check.
+#
+#   PRODUCER RECONCILIATION — every finding in the run's canonical CP3
+#   artifact whose target file lies OUTSIDE the union of all steps'
+#   allowed_paths must have a journal entry, open or resolved. Without this the
+#   carrier only remembers what the controller chose to write down, and the
+#   live failure was precisely a controller that wrote nothing.
+#
+# ZERO-COST when the run never routed anything and its CP3 findings are all
+# in scope: no journal and no out-of-scope findings means no work and no
+# behaviour change, which is what every legacy run looks like.
+#
+# Returns 0 when the EPIC may complete, 1 when it may not (message on stderr).
+# ---------------------------------------------------------------------------
+_fsm_routed_findings_check() {
+  local epic_id="$1" evidence_dir="$2"
+  local plan_nnn plan_id
+  plan_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  # An ad-hoc EPIC belongs to no plan, so there is no plan-scoped journal to
+  # consult. The instruction still applies (route to backlog), but there is
+  # nothing mechanical to check here.
+  [[ -n "$plan_nnn" ]] || return 0
+  plan_id="P${plan_nnn}"
+  declare -F aid_finding_open_for_epic >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: lib/aid-routed-findings.sh is missing, so ${epic_id}'s routed review findings cannot be checked — refusing to complete an EPIC whose out-of-scope findings cannot be accounted for." >&2
+    return 1
+  }
+
+  local rc=0 open_out
+  open_out="$(aid_finding_open_for_epic "$plan_id" "$epic_id" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: ${open_out}" >&2
+    return 1
+  fi
+  local failed=0
+  if [[ -n "$open_out" ]]; then
+    local fp src target
+    while IFS=$'\t' read -r fp src target; do
+      [[ -n "$fp" ]] || continue
+      echo "PRECONDITION FAIL: review finding ${fp} (from ${src}, routed ${target}) is still open — fix it in an authorized step and record that, or route it to the backlog: aid_finding_resolve ${plan_id} ${fp} \"<where it was fixed>\" | aid_finding_route ${plan_id} ${fp} ${src} backlog:IMP-<n> ${epic_id}" >&2
+      failed=1
+    done <<< "$open_out"
+  fi
+
+  # ── Producer reconciliation against the canonical CP3 artifact ────────────
+  local review_json="${evidence_dir}/semantic-review-final.json"
+  local plan_json="${evidence_dir}/plan.json"
+  [[ -f "$review_json" && -f "$plan_json" ]] || { [[ "$failed" -eq 1 ]] && return 1; return 0; }
+
+  # The scope union is the same one the pre-commit hook computes for GATES and
+  # DONE: every step's allowed_paths, flattened. A finding inside it had an
+  # authorized place to be fixed and needs no route.
+  local scope_list findings
+  if ! scope_list="$(jq -r '[ .steps[]?.allowed_paths[]? ] | unique | .[]' "$plan_json" 2>&1)"; then
+    echo "PRECONDITION FAIL: cannot read allowed_paths from ${plan_json} (${scope_list}) — refusing to decide which review findings were in scope from a file that will not parse." >&2
+    return 1
+  fi
+  # A jq failure here must NOT read as "no findings": an unreadable review is
+  # the one input whose silence would pass this whole check open.
+  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
+    echo "PRECONDITION FAIL: cannot read findings from ${review_json} (${findings}) — refusing to complete ${epic_id} on a review artifact that will not parse." >&2
+    return 1
+  fi
+
+  # The journal is read ONCE into a newline blob; `aid_finding_recorded` would
+  # otherwise re-parse the whole file for every out-of-scope finding.
+  local recorded_fps=""
+  recorded_fps="$(_fsm_routed_recorded_set "$plan_id")" || recorded_fps=""
+
+  local fp tp in_scope pat
+  while IFS=$'\t' read -r fp tp; do
+    [[ -n "$fp" && -n "$tp" ]] || continue
+    in_scope=0
+    while IFS= read -r pat; do
+      [[ -n "$pat" ]] || continue
+      # `_aid_ancillary_glob_match` (lib/aid-ancillary.sh) is the shipped
+      # path-vs-pattern predicate, permissive mode: a bash GLOB (`scripts/**`,
+      # `src/*.ts`) or a plain directory prefix (`src` covering
+      # `src/nested/thing.ts`). Reused rather than restated — a private copy
+      # here would make "in scope" mean one thing to this check and another to
+      # every other consumer of the same allowed_paths.
+      if _aid_ancillary_glob_match "$tp" "$pat"; then in_scope=1; break; fi
+    done <<< "$scope_list"
+    [[ "$in_scope" -eq 1 ]] && continue
+    if [[ $'\n'"$recorded_fps"$'\n' != *$'\n'"$fp"$'\n'* ]]; then
+      echo "PRECONDITION FAIL: CP3 finding ${fp} targets ${tp}, which no step of ${epic_id} was allowed to touch, and nothing recorded what happens to it. Route it before completing: aid_finding_route ${plan_id} ${fp} cp3 <step:<n>|epic:<id>|backlog:IMP-<n>> ${epic_id}" >&2
+      failed=1
+    fi
+  done <<< "$findings"
+
+  [[ "$failed" -eq 1 ]] && return 1
   return 0
 }
 
@@ -5078,10 +5202,26 @@ cmd_advance_to_gates() {
       *) shift ;;
     esac
   done
+  # P079 Step 1: same re-anchor as done-advance — `.aid-o` lives only in the
+  # primary checkout, so an in-worktree invocation passing the historic
+  # relative state-file path would die "not found" before the redirect below
+  # could run. A primary-checkout invocation resolves to the same absolute
+  # path, so behaviour there is unchanged.
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+
   [[ ! -f "$state_file" ]] && { echo "ERROR: state file not found: $state_file" >&2; exit 1; }
 
+  # ── P079 Step 1 (IMP-475): run where the plan's tree is ──────────────────
+  # The gate COMMANDS execute in the caller's cwd. Invoked from the primary
+  # checkout for a worktree-recorded plan, they therefore ran against main and
+  # the report claimed a confident green about code they never saw — while the
+  # risk resolver read the empty diff and picked the cheapest profile. Placed
+  # after the state file exists (the EPIC id is read FROM it) and before every
+  # pre-flight guard, so the re-executed process is the only one with side
+  # effects. The redirect absolutizes the state-file argument on re-exec.
   local epic_id run_id current_state current_step total_steps evidence_dir timeline
   epic_id=$(yaml_field "$state_file" epic_id)
+  _fsm_require_plan_worktree "$epic_id"
   run_id=$(yaml_field "$state_file" run_id)
   current_state=$(yaml_field "$state_file" state)
   current_step=$(yaml_field "$state_file" current_step)
@@ -5195,9 +5335,17 @@ cmd_advance_to_gates() {
 
   # Invoke runner with explicit FSM signal — Step 2 makes runner accept this.
   local rc=0
+  # P079 Step 2: pass the ALREADY-RESOLVED timeline in the runner's positional
+  # slot instead of leaving it to the runner's default — the FSM path then
+  # never depends on where the runner was invoked from. The slot is skipped
+  # when the timeline could not be derived (the runner's own default and its
+  # fixture fallback still apply).
+  local -a timeline_arg=()
+  [[ -n "$timeline" ]] && timeline_arg=("$timeline")
   AID_GATES_TRIGGERED_BY_FSM=1 \
     "${SCRIPT_DIR}/aid-run-gates.sh" run-all \
       "$execution_yaml" "$epic_id" "$run_id" \
+      "${timeline_arg[@]}" \
       --state-file "$state_file" \
       --report-file "$report_file" \
       "${plan_json_arg[@]}" \
@@ -5472,7 +5620,10 @@ cmd_increment_step() {
     local _verify_content
     _verify_content=$(<"$verify_file")
 
-    [[ "$_verify_content" == *"## Result: PASS"* ]] || _increment_fail step_verify_not_pass \
+    # P079 Step 4 (IMP-472): case-tolerant, same rule as the verdict field.
+    # The canonical form in every template stays uppercase; a verifier writing
+    # `## Result: pass` means the same thing and is no longer rejected for it.
+    [[ "${_verify_content,,}" == *"## result: pass"* ]] || _increment_fail step_verify_not_pass \
       "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." \
       "File: ${verify_file}" \
       "Fix failing AC or mark '## Result: PASS' when all criteria met."
@@ -6758,6 +6909,16 @@ EOF
         echo "Move to tasks/archive/ before advancing: mv $task_file ${_tasks_dir}/archive/" >&2
         errors=$((errors + 1))
       fi
+
+      # ── Routed review findings (EPIC-LOCAL, BOTH modes) — P079 Step 7 ───────
+      #
+      # Three times in one P076 run a review produced a finding whose file lay
+      # outside every remaining step's allowed_paths. No authorized step could
+      # fix it, so it lived in the controller's prose — and one of them crossed
+      # an EPIC boundary and was never seen again. Two halves are checked here,
+      # and BOTH are needed: the first only catches findings somebody already
+      # decided about, the second catches the ones nobody did.
+      _fsm_routed_findings_check "$epic_id" "$evidence_dir" || errors=$((errors + 1))
 
       # ── The auditor's `blocking_findings` verdict (EPIC-LOCAL, BOTH modes) ───
       # HOISTED out of the release stack by the Step 4 CP2 review (finding 1). It

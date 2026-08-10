@@ -163,9 +163,39 @@ _aid_extract_files_bullets_numbered() { awk -v emit_lineno=1 "$_AID_FILES_BULLET
 #   clean                    canonical: `path`[ + `path`]* [(lines …)] [— prose]
 # Uses ONLY the shared cleaner + shape predicate, so its ERROR verdicts are exactly
 # the entries the generation-time gate would reject.
+# THE Files-bullet verb vocabulary. Every reader and the generator match
+# against this one pattern, so adding a verb is one edit, not four.
+_AID_FILES_VERB_RE='^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$'
+
+# _aid_files_bullet_body <bullet> — the bullet with its leading "- " and verb
+# label stripped. Returns 1 (and echoes the bullet unchanged) when there is NO
+# verb label, so callers can branch on "is this labelled at all" without a
+# second function or a second copy of the vocabulary.
+_aid_files_bullet_body() {
+  local b="${1#- }"
+  if [[ "$b" =~ $_AID_FILES_VERB_RE ]]; then
+    printf '%s' "${BASH_REMATCH[2]}"
+    return 0
+  fi
+  printf '%s' "$b"
+  return 1
+}
+
 _aid_classify_files_bullet() {
   local bullet="${1#- }"
-  local body; body="$(printf '%s' "$bullet" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
+  # P079 Step 5: the two shapes GENERATION refuses outright (aid-plan-to-epic.sh
+  # — an unlabelled bullet, and a verb with no path) are ERROR tier here, or
+  # this lint would green-light a plan the generator then rejects, which is the
+  # one promise this file's header makes.
+  local body
+  if ! body="$(_aid_files_bullet_body "$bullet")"; then
+    echo "error:no-verb-label"
+    return
+  fi
+  if [[ -z "${body//[[:space:]]/}" ]]; then
+    echo "error:verb-no-path"
+    return
+  fi
   local p count=0 bad_shape=0 parsed
   if ! parsed="$(_aid_split_path_entry "$body" 2>/dev/null)"; then
     echo "error:ambiguous-entry"

@@ -150,6 +150,66 @@ jobs:
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment.bats
         timeout-minutes: 30
 
+  # ── P079 Step 12 (IMP-483): the three heaviest P076 suites ───────────────
+  # Same shape and same reason as plan-boundary-tests / plan-final-tests /
+  # isolation-experiment-tests above. Each of these drives REAL processes — a
+  # bash fixture service under aid-job.sh's supervisor, real port allocation,
+  # /proc identity checks — so each gets its own job and its own budget rather
+  # than eating the bash-tests job's headroom. run-all-tests.sh skips them
+  # inline and names the owning job in its DELEGATED report lines; the
+  # delegation test asserts every mapped suite has exactly one job here.
+
+  service-lib-tests:
+    runs-on: [self-hosted, eco-dev]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        run: |
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
+      - name: Run service library suite
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-service.bats
+        timeout-minutes: 20
+
+  service-lifecycle-tests:
+    runs-on: [self-hosted, eco-dev]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        run: |
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
+      - name: Run service lifecycle suite
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-service-lifecycle.bats
+        timeout-minutes: 20
+
+  p076-integration-tests:
+    runs-on: [self-hosted, eco-dev]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        run: |
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
+      - name: Run P076 integration suite
+        # The four-phase integration fixture: it starts real services, kills a
+        # runner mid-gate and re-attaches. Budget matched to the other
+        # real-process suites above.
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-p076-integration.bats
+        timeout-minutes: 30
+
   vitest:
     runs-on: [self-hosted, eco-dev]
     steps:

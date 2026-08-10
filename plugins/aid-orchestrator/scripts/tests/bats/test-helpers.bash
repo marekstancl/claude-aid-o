@@ -177,3 +177,30 @@ verdict: pass
 Test verifier output (synthetic for bats fixture).
 EOF
 }
+
+# ─── worktree fixtures (P079) ────────────────────────────────────────────────
+# Four suites had grown their own near-identical copies of these, with two
+# different `_phys` bodies. New suites use these; the older copies migrate when
+# those files are next touched.
+
+# aid_test_phys <dir> — physical path, matching what git and `pwd -P` report.
+aid_test_phys() { (cd "$1" && pwd -P); }
+
+# aid_test_mk_repo <dir> [extra .aid-o subdir …] — a committed checkout with the
+# .aid-o skeleton, with `.aid-o/` and `.aid-worktrees/` gitignored exactly as a
+# real AID project has them (the gitignore is what makes a fresh linked worktree
+# have no .aid-o of its own — the condition every worktree fixture is about).
+aid_test_mk_repo() {
+  local d="$1"; shift
+  mkdir -p "$d/.aid-o/config" "$d/.aid-o/work/evidence" "$@"
+  printf '.aid-o/\n.aid-worktrees/\n' > "$d/.gitignore"
+  printf 'seed\n' > "$d/README.md"
+  (
+    cd "$d"
+    git init -q -b main 2>/dev/null || { git init -q; git branch -m main; }
+    git config user.email aid-test@example.com
+    git config user.name "AID Test"
+    git add -A
+    git commit -q -m "seed repo"
+  )
+}

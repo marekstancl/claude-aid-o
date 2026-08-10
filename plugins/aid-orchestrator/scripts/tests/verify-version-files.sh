@@ -99,6 +99,40 @@ else
   _check_fail "$PLUGIN_CHANGELOG does not exist"
 fi
 
+# 2b. The two CHANGELOGs' entries for THIS version must be byte-identical
+#
+# P079 Step 10 (IMP-482): CLAUDE.md has always said "root and plugin CHANGELOGs
+# are always identical", and the P076 retrospective assumed a test enforced it.
+# None did — only the two header checks above, which agree on the version
+# number and say nothing about the content underneath. Two CHANGELOGs that
+# describe the same release differently is exactly the drift a consumer reads.
+#
+# Compared: the section from `## [NEW_VERSION]` up to (not including) the next
+# `## [` heading, in both files.
+_changelog_section() {
+  awk -v ver="$NEW_VERSION" '
+    $0 ~ "^## \\[" ver "\\]" { inside = 1; next }
+    inside && /^## \[/          { exit }
+    inside                       { print }
+  ' "$1"
+}
+if [[ -f "CHANGELOG.md" && -f "$PLUGIN_CHANGELOG" ]]; then
+  # Written to files and compared with cmp: command substitution strips
+  # trailing newlines, so a shell-string comparison would call two sections
+  # "byte-identical" while their bytes differ.
+  root_section="$(mktemp)"; plugin_section="$(mktemp)"
+  _changelog_section "CHANGELOG.md"    > "$root_section"
+  _changelog_section "$PLUGIN_CHANGELOG" > "$plugin_section"
+  if [[ ! -s "$root_section" ]]; then
+    _check_fail "CHANGELOG.md has no content under its [$NEW_VERSION] heading"
+  elif cmp -s "$root_section" "$plugin_section"; then
+    _check_pass "both CHANGELOGs' [$NEW_VERSION] sections are byte-identical"
+  else
+    _check_fail "the [$NEW_VERSION] sections of CHANGELOG.md and $PLUGIN_CHANGELOG differ — they must be identical (diff them and copy one over the other)"
+  fi
+  rm -f "$root_section" "$plugin_section"
+fi
+
 # 3 & 4. marketplace.json metadata.version + plugins[0].version
 MARKETPLACE_JSON=".claude-plugin/marketplace.json"
 if [[ -f "$MARKETPLACE_JSON" ]]; then

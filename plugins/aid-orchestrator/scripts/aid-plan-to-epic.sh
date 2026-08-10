@@ -982,10 +982,26 @@ for sn in "${phase_steps[@]}"; do
   # exact algorithm directly inside aid-epic-to-json.sh when it derives
   # per-step allowed_paths from the block's RAW files[] values, using
   # _aid_split_path_entry below as the reference spec, not as callable code.
+  # P079 Step 5 (IMP-480): a top-level Files bullet that does not match the
+  # verb grammar used to be dropped by a bare `continue`. Generation then
+  # succeeded with a narrower scope than the plan declared — and the EPIC ran
+  # with a file its own plan named missing from allowed_paths, which nothing
+  # downstream could notice. A parser may refuse, it may not narrow silently.
   step_files=""
+  _dropped_bullets=""
   while IFS= read -r _raw_file; do
+    [[ -n "${_raw_file// /}" ]] || continue          # blank line, not a bullet
     _raw_file="${_raw_file#- }"
-    [[ "$_raw_file" =~ ^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$ ]] || continue
+    # The verb vocabulary is the shared one (lib/aid-scoping.sh), so the
+    # plan lint's ERROR tier and this refusal are provably the same rule.
+    if [[ ! "$_raw_file" =~ $_AID_FILES_VERB_RE ]]; then
+      _dropped_bullets+="  step ${sn}: unparseable Files bullet dropped: \"${_raw_file}\""$'\n'
+      continue
+    fi
+    if [[ -z "${BASH_REMATCH[2]//[[:space:]]/}" ]]; then
+      _dropped_bullets+="  step ${sn}: Files bullet has a verb but no path: \"${_raw_file}\""$'\n'
+      continue
+    fi
     if ! _split_paths="$(_aid_split_path_entry "${BASH_REMATCH[2]}")"; then
       error_exit "Invalid Files entry in step ${sn}: ${_raw_file}. Canonical multi-path form: \`a\` + \`b\` — description." 1
     fi
@@ -993,6 +1009,10 @@ for sn in "${phase_steps[@]}"; do
       [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
     done <<< "$_split_paths"
   done <<< "$step_artifacts_top_level"
+  if [[ -n "$_dropped_bullets" ]]; then
+    error_exit "Files block in ${plan} has bullets this generator cannot parse:
+${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite>: <path> — <why>\`. See skills/plan-writing.md (Files block grammar). Fix the plan and re-run generation." 1
+  fi
   if [[ -n "$step_files" ]]; then
     all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
   fi

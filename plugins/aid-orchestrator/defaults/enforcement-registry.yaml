@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 413          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 423          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -103,9 +103,14 @@ totals:
 #   run. The {ready:true} -> real plan-file path was separately proven, with
 #   different, genuinely actionable findings, by Step 22's own real run and
 #   by test-integration-e2e-audit-pipeline.sh (Step 24 Part A).
-  mapped_with_verdict: 159   # recomputed via `yq -o=json .enforcements | jq '[.[]|select(.verdict != null and .verdict != "unmapped")]|length'` (ALIGNED 142 + GAP 13 + UNREACHABLE 3 + CONTRADICTORY 1)
+  mapped_with_verdict: 257   # recomputed via `yq -o=json .enforcements | jq '[.[]|select(.verdict != null and .verdict != "unmapped")]|length'` (ALIGNED 240 + GAP 13 + UNREACHABLE 3 + CONTRADICTORY 1)
   mapping_pending: 123       # recomputed via `... select(.verdict == "unmapped") ...`; includes the two planned/unmapped writer-only P064 rows (plan_queue_scripted_transitions, plan_final_required_gates_record) until their callers/readers land
-  verdict_distribution: {ALIGNED: 142, GAP: 13, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 123}
+  # P079 Step 13: these three were recomputed from the file's own commands and
+  # corrected a PRE-EXISTING drift, not just P079's own additions — the recorded
+  # ALIGNED count had been 142 against 229 actual rows before this plan added
+  # eleven. 43 rows carry no `verdict` key at all, which is why the two counts
+  # below do not sum to `enforcements`.
+  verdict_distribution: {ALIGNED: 240, GAP: 13, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 123}
 
 enforcements:
   - {id: plan_final_gate_required, type: 1, source: "scripts/aid-plan-fsm.sh:cmd_plan_finalize --stage gates", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 E-068-1_2 Step 2: the plan-final gate profile runs EXACTLY once, against the frozen candidate, and its report is recorded in the RUNTIME plan-boundary manifest bound to candidate_sha. A quarantined gate is never reported as pass; an excluded gate is recorded profile_excluded, never silently dropped. plan-close (Check 5.3) refuses to close without that report, so the gate is a precondition rather than a recommendation.", test: "scripts/tests/bats/test-aid-plan-final-boundary.bats"}
@@ -154,7 +159,7 @@ enforcements:
   - {id: memory_writes_validation,     type: 2, source: "skills/memory-mcp.md:240", instruction: "skills/memory-mcp.md:96", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "controller validates memory_writes block, rejects + re-dispatches"}
   - {id: memory_writes_na_reject,      type: 2, source: "skills/memory-mcp.md:264", instruction: "skills/memory-mcp.md:229", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "memory_writes N/A rejected when code files changed"}
   - {id: increment_verify_exists,      type: 2, source: "scripts/aid-fsm.sh:1727", instruction: "skills/memory.md:53", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "increment-step: step-N-verify.md must exist"}
-  - {id: increment_result_pass,        type: 2, source: "scripts/aid-fsm.sh:1739", instruction: "defaults/templates/step-verify-template.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "increment-step: verify file must contain ## Result: PASS"}
+  - {id: increment_result_pass,        type: 2, source: "scripts/aid-fsm.sh cmd_increment_step (search: 'step_verify_not_pass')", instruction: "defaults/templates/step-verify-template.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "increment-step: verify file must contain ## Result: PASS. P079 Step 4 (IMP-472): the substring match is CASE-INSENSITIVE — the canonical heading stays uppercase, but `## Result: pass` is the same claim and is no longer rejected for its casing. The stale cite this row carried (aid-fsm.sh:1739) named neither the check nor a `grep -q`, which is what the template also wrongly claimed.", test: "scripts/tests/bats/test-aid-fsm.bats"}
   - {id: increment_step_binding,       type: 2, source: "scripts/aid-fsm.sh cmd_increment_step (search: 'IMP-263: step-bound evidence binding')", instruction: "skills/pipeline.md (grep: 'Step-binding block (IMP-263')", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "IMP-263: step-verify evidence carrying a binding block is validated against the LIVE plan.json + fsm-state before increment mutates — step_index==current_step, step_id/plan_step_hash==plan steps[N], reviewed_commit==HEAD; a copied/renamed prior verify file is rejected (binding_step_index_mismatch/binding_step_id_mismatch/binding_plan_step_hash_mismatch/binding_wrong_commit/binding_missing_token). Advancement is idempotent + crash-safe via step-transition-ledger.jsonl: the idempotency_token and the current_step bump commit together (ledger append then state write), a replayed token returns status=already_applied without re-advancing, and a crash between the two self-heals on re-invocation (step_transition_recovered) — never a double advance. Stdout is machine-readable (status=advanced|already_applied), never a bare integer. Fail-closed hardening (PM review 2026-07-24): STRICT IS THE DEFAULT — a non-grandfathered run with no binding is rejected without any env; only a genuinely grandfathered created_at (before the deploy threshold) or explicit AID_STEP_BINDING=observe downgrades. A PARTIAL binding (1..4 of the 5 fields) is rejected unconditionally (incomplete_step_binding) — the id/hash/commit checks can no longer be skipped by omitting fields. The crash-recovery self-heal is EVIDENCE-gated: a hand-inserted ledger row {token,from,to} can no longer masquerade as recovery — self-heal runs only when step-<n>-verify.md carries a COMPLETE, live-verified binding matching the ledger token/step/plan/HEAD (predicate _increment_binding_verified); a ledger hit with no valid basis falls through to the fail-closed preconditions, and pure replay (state already at target) stays a safe no-op. Every ledger row written is validated and is a precondition of the current_step bump", test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'IMP-263')"}
   - {id: increment_ac_checklist,       type: 2, source: "scripts/aid-fsm.sh:1750", instruction: "defaults/templates/step-verify-template.md:44", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "increment-step: AC checklist - [x] >=1 required"}
   - {id: increment_commit_ref,         type: 2, source: "scripts/aid-fsm.sh:1764", instruction: "defaults/templates/step-verify-template.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "increment-step: commit reference [a-f0-9]{7,} required"}
@@ -2552,3 +2557,128 @@ enforcements:
     description: "P076 Step 13 — the ladder's terminus stops the run at a person and cannot walk past one. It writes the terminus line, then sets `auto_controller: blocked_for_pm` on the active-runs entry through the FSM's single writer (which validates the value against the closed vocabulary and refuses the derived `awaiting_host_resume`), so the map stops claiming a live autonomous controller. The load-bearing property is what it did NOT do: reaching ESCALATION automatically did not make ESCALATION leavable — the transition still refuses without `escalation_decision`, and the ladder ships no function that continues past a refused terminal state. Continuation remains the audited PM `--force` surface and nothing else, grep-guarded in the ladder's own regression suite."
     recovery: "The refusing transition names `escalation_decision`; a PM records the decision and the transition proceeds."
     test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  # ── P079 (IMP-472..483): the aftermath layer ──────────────────────────────
+  # Every mechanical refusal the first live P076 run made necessary. Each row's
+  # `source` names the function, not a line number — the P076 rows above showed
+  # how fast line cites rot.
+
+  - id: advance_to_gates_worktree_redirect
+    type: 1
+    source: "scripts/aid-fsm.sh:cmd_advance_to_gates (search: 'P079 Step 1 (IMP-475)') calling _fsm_require_plan_worktree"
+    instruction: "skills/pipeline.md (§5 GATES State)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 1 — gates execute in the plan's own execution worktree. advance-to-gates was the one plan-linked tree command without the P074 redirect, so a run driven from the primary checkout ran every gate COMMAND against main and reported a confident green about code the commands never saw — while the risk resolver read that empty diff and picked the cheapest profile. The enforcer's four outcomes are unchanged (legacy no-op / refuse unrecorded / refuse missing / re-exec); this row records the third call site."
+    recovery: "The refusal names `aid-plan-fsm.sh plan-state <id> --recreate-worktree` when the recorded worktree is missing; otherwise the command re-executes itself in the right tree and says so."
+    test: "scripts/tests/bats/test-roots-worktree.bats (grep: 'P079 Step 1')"
+
+  - id: gate_runner_state_root_paths
+    type: 1
+    source: "scripts/aid-run-gates.sh:_gates_evidence_dir + _gates_state_path (search: 'P079 Step 2, IMP-479')"
+    instruction: "scripts/README.md (Testing) + skills/pipeline.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 2 — the runner's own STATE writes (timeline, default report path, execution ledger, gate-scoped waivers, row checkpoints, project config) resolve through the state root; the gate COMMANDS keep running in the invoking tree, which is the whole point of Step 1. `.aid-o` exists only in the primary checkout, so before this every one of those paths was built against a worktree that has none — and because the ledger, the rows and the ladder are all `[[ -d ]]`-guarded, they did not fail, they went quiet. Honest classification: this is a path-resolution fix, so its enforcement is that the guarded writers now have somewhere to write; the refusals they already carried (the ledger's `return 3`) are what blocks."
+    recovery: "A state root that resolves but cannot be written surfaces as the existing per-write error, now with an absolute path in the message."
+    test: "scripts/tests/bats/test-run-gates-worktree-paths.bats"
+
+  - id: task_branch_freshness
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:_pfsm_reconcile_task_branch (+ _pfsm_reconcile_task_branch_locked, _pfsm_update_fsm_state_base) and lib/aid-plan-manifest.sh:plan_manifest_update_epic_base"
+    instruction: "skills/pipeline.md (§4 EXECUTE / plan-branch chain)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 3 (IMP-478) — a chained EPIC executes on its predecessors' work or it does not execute. Chain generation registers every EPIC at once and cuts `task/<epic>/main` from the plan head at REGISTRATION time; by execution that branch can predate everything its predecessors merged. The shipped lineage check cannot see it — merge-base equality is exactly what 'merely behind' means — so the reconciliation runs BEFORE that precondition, under the plan lock that also covers the plan-head read: strictly behind is fast-forwarded, DIVERGED is refused by name with both heads, and both persisted base records (the manifest's epic_base_commit under a CAS, and the pre-existing fsm-state base_commit under an ancestor guard) move with the branch. Every crash window between the three writes re-runs clean."
+    recovery: "A divergence refusal names both heads and the two manual repairs (merge the plan branch into the task branch, or re-cut after saving its work); a CAS mismatch names both values and writes nothing."
+    test: "scripts/tests/bats/test-epic-chain-freshness.bats"
+
+  - id: files_bullet_silent_drop
+    type: 6
+    source: "scripts/aid-plan-to-epic.sh (search: 'P079 Step 5 (IMP-480)') + lib/aid-scoping.sh:_AID_FILES_VERB_RE / _aid_classify_files_bullet"
+    instruction: "skills/plan-writing.md (Files block grammar)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 5 — a parser may refuse, it may not narrow in silence. A top-level Files bullet that failed the verb grammar was `continue`d without a word, so generation succeeded with a smaller scope than the plan declared and the EPIC ran with a file its own plan named missing from allowed_paths. Generation now fails naming every unparseable bullet, and the two shapes it refuses (no verb label, a verb with no path) became ERROR tier in the SHARED classifier — otherwise the plan lint would have gone on green-lighting plans the generator rejects, which is the one promise that file makes. A path named only in a bullet's DESCRIPTION (the live P076 shape) is a non-blocking lint advisory: it is as often a reference as a forgotten scope entry, and only the author can tell them apart."
+    recovery: "The generation failure quotes each bullet with its step number and points at the grammar; the advisory names the path and what to do if the step really edits it."
+    test: "scripts/tests/bats/test-plan-lint.bats (grep: 'P079 Step 5')"
+
+  - id: carried_obligations_block_close
+    type: 1
+    source: "scripts/aid-plan-close-check.sh:check6_carried_obligations reading lib/aid-obligations.sh:aid_obligation_open"
+    instruction: "skills/pipeline.md (§13 'Carried obligations')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 6 (IMP-476) — a deferral that survives the run. The first P076 run recorded a release-blocking deferral in a file it invented inside the plan WORKTREE's gitignored `.aid-o`; the worktree was torn down at close and the obligation went with it, and nothing would have read it anyway — that file had no writer and no reader in the codebase. The journal now lives in the state root's plan-state directory, which outlives every worktree, and plan-close REFUSES while a `release_blocker` is open. HONEST SPLIT: the PRODUCE side is instruction (an obligation is born in a controller decision and has no authoritative artifact to reconcile against); the CONSUME side is blocking. An unreadable journal blocks too — 'cannot be parsed' and 'nothing is owed' must never look alike."
+    recovery: "The refusal names each open obligation and its two exits: discharge it, or register it as a backlog IMP and record that with aid_obligation_resolve."
+    test: "scripts/tests/bats/test-aid-obligations.bats"
+
+  - id: routed_findings_block_done
+    type: 1
+    source: "scripts/aid-fsm.sh:_fsm_routed_findings_check (called from cmd_done_advance's EPIC-local both-modes block) reading lib/aid-routed-findings.sh"
+    instruction: "skills/pipeline.md (§13 'Routing a finding no remaining step may fix')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 7 (IMP-473) — a review finding no authorized step may fix gets a recorded route, and an EPIC cannot complete over an open one. TWO halves, because either alone is a half-truth: the consumer blocks on findings routed to this EPIC, and the PRODUCER RECONCILIATION reads the run's canonical semantic-review-final.json and refuses BY FINGERPRINT any finding whose target lies outside the union of every step's allowed_paths and which has no journal entry at all. Without the second half the carrier would only remember what the controller chose to write down — and in the live incident the controller wrote nothing, three times, once across an EPIC boundary. Fingerprints are carried opaquely (two formulas ship; neither is recomputed here). Zero-cost for runs that route nothing and whose findings are all in scope."
+    recovery: "The refusal names the fingerprint, its source checkpoint and both exits (fix in an authorized step and resolve, or route to backlog:IMP-<n>); an unreadable review artifact or plan.json fails closed by name."
+    test: "scripts/tests/bats/test-routed-findings.bats"
+
+  - id: cache_preflight_wip_downgrade
+    type: 5
+    source: "scripts/lib/aid-cache-preflight.sh:_aid_cp_is_plugin_wip (search: 'P079 Step 8, IMP-477')"
+    instruction: "commands/aid-run.md (cache preflight)"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 8 — the EPIC's own work is not a stale cache. The dogfood reference resolves to the INVOKING tree's plugins/ copy, so an EPIC that modifies the plugin always skewed against itself and hard-stopped on the difference that WAS the work. Downgraded to a loud warning only when all three hold: a linked worktree, at the plan's registered execution worktree (the record is authoritative when there is one; an UNREADABLE registry refuses), and a diff that actually touches plugins/. Every other path keeps the hard stop — the primary checkout, a worktree with no plugin changes, a worktree the record does not claim. What the downgrade costs is stated in the warning: controller-tooling staleness is not verified for that run."
+    recovery: "The warning names the file count and says plainly what was not verified; AID_CACHE_PREFLIGHT_OVERRIDE=1 remains the explicit escape for everything else."
+    test: "scripts/tests/bats/test-cache-preflight.bats (grep: 'P079 Step 8')"
+
+  - id: release_version_sealed
+    type: 6
+    source: "scripts/aid-release.sh:_release_version_sealed (guarding update_changelog's retitle AND the no-config fallback loop)"
+    instruction: "CLAUDE.md (Release Workflow) + defaults/policies/release-policy.yaml"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 10 (IMP-482) — a tagged version is history; tools append above it, never rewrite it. Both CHANGELOG update sites were a blind `sed 's/## [$CURRENT]/## [$NEW_VERSION]/'`: on an unreleased version that is a correction, on a released one it renames the entry and the new release inherits the old one's content while the old release vanishes under a number that does not describe it. The seal keys on the git tag — the repository's own record that a version shipped — and both sites take the same branch: preserve the heading, prepend a fresh entry. FAILS CLOSED: if the tag lookup cannot run at all, the release stops rather than guessing. It composes with the P073 completeness gate, which then refuses to ship the placeholder."
+    recovery: "The seal prints which version it preserved and that a new entry was prepended; the completeness gate names the placeholder that still needs writing."
+    test: "scripts/tests/bats/test-aid-release-seal.bats"
+
+  - id: content_scan_vacuous_green
+    type: 6
+    source: "scripts/aid-test-content-scan.sh (checks `set_e_grep_count` + `existence_keyed_skip`)"
+    instruction: "scripts/README.md ('Writing a test that can fail')"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 11 (IMP-481) — the mechanical half of 'a green test that checks nothing'. `set_e_grep_count`: `x=$(grep -c …)` in a `set -e` shell suite with no guard, which kills the suite before it prints anything while the cases it already ran still read as green (line continuations are joined first, so the one live candidate — whose guard sits on the next line — is correctly NOT flagged). `existence_keyed_skip`: a `skip` keyed on whether the SUBJECT exists, which turns a deleted subject into a skip instead of a failure; platform paths and an explicit `# content-scan: allow existence-skip` comment are excluded and suppressed-but-reported respectively. The judgment shapes (an assertion reading back the surface that wrote the claim) need a reader and ship as the authoring rule instead — named honestly rather than pretended to be mechanical."
+    recovery: "Findings carry file:line and the scan exits 0 — they are the product, not a failure, and flow through the existing audit rendering."
+    test: "scripts/tests/bats/test-aid-test-content-scan.bats (grep: 'P079 Step 11')"
+
+  - id: delegated_suite_ownership
+    type: 6
+    source: "scripts/tests/test-run-all-delegation.sh (reads DELEGATED_SUITES out of run-all-tests.sh and cross-checks .github/workflows)"
+    instruction: "scripts/tests/run-all-tests.sh (DELEGATED_SUITES comment block)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P079 Step 12 (IMP-483) — delegation moves a suite OUT of the inline run, so a missing, renamed or duplicated CI job stops that suite being run by anything, and the inline run gets FASTER, which reads as success. The test asserts every mapped suite has exactly one owning job that names it, and that the inline runner really skips it and says who owns it. The map is READ from the runner rather than restated, so the two cannot drift. Explicitly not parallelism: this is placement and ownership only."
+    recovery: "Each failure names the suite and whether its job is missing or duplicated."
+    test: "scripts/tests/test-run-all-delegation.sh"

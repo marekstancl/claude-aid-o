@@ -107,6 +107,22 @@ for id in "${REQUIRED_IDS[@]}"; do
 done
 
 echo "TEST: no pre-existing row (per the checked-in pre-Step-19 baseline) was modified or removed"
+# DECLARED AMENDMENTS (P079 Step 13). The point of this check is that a
+# pre-existing row cannot be changed SILENTLY — not that a row is frozen
+# forever. A row whose description or cite genuinely has to move says so here,
+# with the plan that moved it and why; anything not on this list still fails.
+# The list is deliberately id-only and short: it is a record, not an allowlist
+# to grow.
+declare -A DECLARED_AMENDMENTS=(
+  # P076 Step 1/3 gave the run-mode recommendation a real landing field and a
+  # first (observe-only) consumer, so the row's "changes nothing by itself"
+  # sentence had become false. Amended with P076, not by this plan.
+  ["gate_runtime_baseline_advisory"]="P076 Steps 1+3 — run_mode landing field + observe-only advice event"
+  # P079 Step 4 repointed a cite that named nothing (`aid-fsm.sh:1739` was
+  # neither the check nor the `grep -q` the row and the template both claimed)
+  # and recorded that the anchor is now case-insensitive.
+  ["increment_result_pass"]="P079 Step 4 (IMP-472) — stale cite repointed, case-tolerance recorded"
+)
 # Codex review: counting `- id:` lines only proved the registry didn't
 # SHRINK below a floor — it never proved that any SPECIFIC prior row
 # survived unchanged (a delete-one/add-two edit would still pass). Compare
@@ -127,6 +143,16 @@ else
   if [[ -n "$mismatch_ids" ]]; then
     while IFS= read -r bad_id; do
       [[ -z "$bad_id" ]] && continue
+      if [[ -n "${DECLARED_AMENDMENTS[$bad_id]:-}" ]]; then
+        # Declared means "this row's CONTENT was allowed to move", never "this
+        # row may vanish" — a deletion is not an amendment.
+        if jq -e --arg id "$bad_id" 'any(.[]; .id == $id)' <<<"$(jq -c '[.enforcements[] | {id}]' <<<"$registry_json")" >/dev/null; then
+          pass_msg "pre-existing row '$bad_id' was amended, and the amendment is declared: ${DECLARED_AMENDMENTS[$bad_id]}"
+        else
+          fail_msg "row '$bad_id' has a declared amendment but is GONE from the registry — an amendment is not a licence to delete"
+        fi
+        continue
+      fi
       fail_msg "pre-existing row '$bad_id' is missing or was modified relative to the pre-Step-19 baseline"
     done <<<"$mismatch_ids"
   else
