@@ -24,7 +24,7 @@
 # plan-close-check, golden sequence) therefore runs with `3>&-` so no child
 # of the AID script chain can ever hold bats' report fd. After any edit to
 # this file, verify the full result count:
-#   bats --tap test-roots-worktree.bats | grep -cE '^(ok|not ok)'   # == plan count (currently 28)
+#   bats --tap test-roots-worktree.bats | grep -cE '^(ok|not ok)'   # == plan count (currently 32)
 
 load test-helpers.bash
 
@@ -608,6 +608,117 @@ EOF
   grep -q 'fsm_force_override' "$primary/.aid-o/work/audit-log.jsonl"
   [ -f "$TEST_TMPDIR/wt/.aid-o" ]
   [ ! -d "$TEST_TMPDIR/wt/.aid-o" ]
+}
+
+# ─── P079 Step 1 (IMP-475): advance-to-gates redirects into the plan tree ──
+#
+# THE LIVE FAILURE: the first P076 run drove advance-to-gates from the PRIMARY
+# checkout while the plan's work lived in a linked worktree. The gate COMMANDS
+# therefore ran against main — a confident green about code they never saw.
+# The fixture proves the redirect by making the gate command record its own
+# `pwd`: a green run whose recorded pwd is the worktree is the only evidence
+# that the commands saw the candidate tree.
+
+# _seed_worktree_plan <primary> <plan_id> — a plan with a real branch, a real
+# registered worktree and the plan-state record the enforcer reads.
+_seed_worktree_plan() {
+  local primary="$1" plan_id="$2" wt="$1/.aid-worktrees/plan-$2"
+  bash -c "cd '$primary' && set -e
+    export AID_PLAN_STATE_PROJECT_ROOT='$primary' AID_PLAN_MANIFEST_PROJECT_ROOT='$primary'
+    source '$SCRIPTS/lib/aid-plan-state.sh'
+    base=\$(git -C '$primary' rev-parse HEAD)
+    git -C '$primary' branch plan/${plan_id} \"\$base\"
+    plan_state_init ${plan_id} plan_branch plan/${plan_id} main >/dev/null
+    git -C '$primary' worktree add -q '$wt' plan/${plan_id}
+    plan_state_set_worktree_path ${plan_id} '$wt'" 3>&-
+}
+
+# _seed_gates_run <primary> <epic_id> — an EXECUTE run ready for
+# advance-to-gates, with a gate command that records its working directory.
+_seed_gates_run() {
+  local primary="$1" epic_id="$2" ev="$1/.aid-o/work/evidence/$2/R-1"
+  mkdir -p "$ev/gates"
+  cat > "$ev/fsm-state.yaml" <<EOF
+epic_id: ${epic_id}
+run_id: R-1
+state: EXECUTE
+current_step: 1
+total_steps: 1
+base_commit: HEAD
+branch: plan/P900
+streamlined_mode: false
+EOF
+  printf '{"ts":"2026-08-10T00:00:00Z","event":"run_started"}\n' > "$ev/timeline.jsonl"
+  cat > "$primary/.aid-o/config/execution.yaml" <<EOF
+version: '1.0'
+gates:
+  where:
+    command: "pwd -P > '${primary}/gate-cwd.txt'"
+    required: true
+    timeout_seconds: 30
+    max_retries: 0
+EOF
+  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-code-review.md"
+  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-security.md"
+  printf '%s' "$ev"
+}
+
+@test "P079 Step 1: advance-to-gates from the PRIMARY checkout re-executes inside the plan worktree (gate commands see the candidate tree)" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  local primary ev
+  primary="$(_phys "$TEST_TMPDIR/primary")"
+  _seed_worktree_plan "$primary" P900
+  ev="$(_seed_gates_run "$primary" E-900-1_1)"
+
+  run bash -c "cd '$primary' && AID_DEPLOY_DATE='2026-04-01T00:00:00Z' '$FSM' advance-to-gates '$ev/fsm-state.yaml'" 3>&-
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"executes in its own worktree"* ]]
+  [ -f "$primary/gate-cwd.txt" ]
+  [ "$(cat "$primary/gate-cwd.txt")" = "$(_phys "$primary/.aid-worktrees/plan-P900")" ]
+  [ -f "$ev/gates/gates_report.json" ]                  # evidence on the PRIMARY root
+  grep -q '^state: GATES' "$ev/fsm-state.yaml"
+}
+
+@test "P079 Step 1: a RELATIVE state-file argument survives the redirect (re-anchored, then absolutized)" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  local primary
+  primary="$(_phys "$TEST_TMPDIR/primary")"
+  _seed_worktree_plan "$primary" P900
+  _seed_gates_run "$primary" E-900-1_1 >/dev/null
+  local rel=".aid-o/work/evidence/E-900-1_1/R-1/fsm-state.yaml"
+
+  run bash -c "cd '$primary' && AID_DEPLOY_DATE='2026-04-01T00:00:00Z' '$FSM' advance-to-gates '$rel'" 3>&-
+  [ "$status" -eq 0 ]
+  [ "$(cat "$primary/gate-cwd.txt")" = "$(_phys "$primary/.aid-worktrees/plan-P900")" ]
+  grep -q '^state: GATES' "$primary/$rel"
+}
+
+@test "P079 Step 1: a RECORDED but missing worktree refuses naming --recreate-worktree instead of running on the wrong tree" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  local primary ev
+  primary="$(_phys "$TEST_TMPDIR/primary")"
+  _seed_worktree_plan "$primary" P900
+  ev="$(_seed_gates_run "$primary" E-900-1_1)"
+  rm -rf "$primary/.aid-worktrees/plan-P900"
+
+  run bash -c "cd '$primary' && '$FSM' advance-to-gates '$ev/fsm-state.yaml'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--recreate-worktree"* ]]
+  [ ! -f "$primary/gate-cwd.txt" ]                      # no gate ran anywhere
+  grep -q '^state: EXECUTE' "$ev/fsm-state.yaml"        # nothing advanced
+}
+
+@test "P079 Step 1: a legacy plan with NO recorded worktree is byte-identical to pre-P079 (gates run in the invoking tree)" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  local primary ev
+  primary="$(_phys "$TEST_TMPDIR/primary")"
+  ev="$(_seed_gates_run "$primary" E-901-1_1)"
+
+  run bash -c "cd '$primary' && AID_DEPLOY_DATE='2026-04-01T00:00:00Z' '$FSM' advance-to-gates '$ev/fsm-state.yaml'" 3>&-
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"executes in its own worktree"* ]]
+  [ "$(cat "$primary/gate-cwd.txt")" = "$primary" ]
+  grep -q '^state: GATES' "$ev/fsm-state.yaml"
 }
 
 # ─── guard grep: no unresolved literals sneak back in ────────────────────

@@ -5078,7 +5078,24 @@ cmd_advance_to_gates() {
       *) shift ;;
     esac
   done
+  # P079 Step 1: same re-anchor as done-advance — `.aid-o` lives only in the
+  # primary checkout, so an in-worktree invocation passing the historic
+  # relative state-file path would die "not found" before the redirect below
+  # could run. A primary-checkout invocation resolves to the same absolute
+  # path, so behaviour there is unchanged.
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+
   [[ ! -f "$state_file" ]] && { echo "ERROR: state file not found: $state_file" >&2; exit 1; }
+
+  # ── P079 Step 1 (IMP-475): run where the plan's tree is ──────────────────
+  # The gate COMMANDS execute in the caller's cwd. Invoked from the primary
+  # checkout for a worktree-recorded plan, they therefore ran against main and
+  # the report claimed a confident green about code they never saw — while the
+  # risk resolver read the empty diff and picked the cheapest profile. Placed
+  # after the state file exists (the EPIC id is read FROM it) and before every
+  # pre-flight guard, so the re-executed process is the only one with side
+  # effects. The redirect absolutizes the state-file argument on re-exec.
+  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
 
   local epic_id run_id current_state current_step total_steps evidence_dir timeline
   epic_id=$(yaml_field "$state_file" epic_id)
