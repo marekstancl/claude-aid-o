@@ -271,7 +271,7 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e --argjson p "$starting_port" '.state == "healthy" and .port == $p'
 
-  bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   _assert_no_orphans
 }
 
@@ -312,7 +312,7 @@ EOF
 
   # down_all, in a fresh process that never saw the startup, reads the registry
   # and cancels it.
-  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   [ "$status" -eq 0 ]
   [ "$(_reg '.services.api.state')" = "stopped" ]
   run bash "$JOB_SH" status --jobs-dir "$EV/service-jobs/api" --id "$job_id"
@@ -365,7 +365,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | wc -l)" -eq 1 ]    # exactly one collided, not both
 
-  bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   kill -9 "$HOLDPID" 2>/dev/null || true; HOLDPID=""
   _assert_no_orphans
 }
@@ -492,7 +492,7 @@ EOF
   # The allocating process is GONE. This one never saw the port, and SVC_PORT
   # is explicitly removed from its environment — the registry is the only way
   # the stop command can learn the number.
-  run env -u SVC_PORT bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  run env -u SVC_PORT bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   [ "$status" -eq 0 ]
   [ "$(head -1 "$TMP/stop-port.log")" = "$port" ]
   [ "$(_reg '.services.api.state')" = "stopped" ]
@@ -584,7 +584,7 @@ EOF
   run bash "$DRIVE" "$LIB" aid_service_up_all "$EV" "$YAML"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   [ "$status" -eq 0 ]
   # nothing created: no registry, no lock, no job root
   [ ! -e "$EV/services.json" ]
@@ -637,7 +637,7 @@ EOF
   [ "$(_reg '.services.api.port')" = "$first_port" ]
   [ "$(_job_dirs api)" -eq 1 ]             # NO second job dir — the AC
 
-  bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   _assert_no_orphans
 }
 
@@ -675,7 +675,7 @@ EOF
       --id "ghost-1" --deadline 300 -- bash "$FIX/idle.sh" "${TOKEN}-ghost")"
   _wait_for 15 '[[ "$(bash "$JOB_SH" status --jobs-dir "$EV/service-jobs/api" --id ghost-1)" == "running" ]]'
 
-  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   [ "$status" -eq 0 ]
   [[ "$output" =~ "the registry does not name it" ]]
   run bash "$JOB_SH" status --jobs-dir "$EV/service-jobs/api" --id "$orphan_id"
@@ -783,7 +783,7 @@ EOF
   # anything is serving. down_all reports rc 1 and says so in as many words —
   # a probe that cannot fail cannot prove a teardown succeeded, and the exit
   # code is a statement about the probe, never more than the probe can carry.
-  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   [ "$status" -eq 1 ]
   [[ "$output" =~ "readiness probe still passes after teardown" ]]
   [[ "$output" =~ "a probe that cannot fail proves nothing about a teardown" ]]
@@ -838,15 +838,25 @@ EOF
   run bash "$JOB_SH" status --jobs-dir "$victim" --id victim-1
   [ "$output" = "running" ]
 
-  # A hand-written registry, with no execution.yaml anywhere near it, naming
-  # ANOTHER run's job directory.
+  # A hand-written registry naming ANOTHER run's job directory. The service IS
+  # declared: `aid_service_down_all` refuses outright when the declarations
+  # cannot be read at all (P076 Step 16 — see case 31), so reaching the jobs_dir
+  # guard requires getting PAST that floor. The declaration is deliberately
+  # minimal and names no jobs_dir: the registry is the only place this teardown
+  # can learn one, which is exactly the channel under test.
+  _yaml <<'EOF'
+services:
+  api:
+    start_cmd: /bin/true
+    probe_cmd: /bin/false
+EOF
   jq -nc --arg s aid-service-registry/1 --arg jd "$victim" \
     '{schema:$s, updated_at:null,
       services:{api:{service:"api", state:"starting", job_id:"victim-1",
                      jobs_dir:$jd, port:null, port_env:null,
                      probe_cmd:"/bin/false", stop_cmd:null}}}' > "$EV/services.json"
 
-  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV"
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
   echo "$output"
   [[ "$output" =~ "does not resolve inside this run's evidence directory" ]]
 
@@ -1267,4 +1277,69 @@ EOF
   # that a comment can turn red is a guard nobody keeps.
   run bash -c 'grep -vE "^[[:space:]]*#" "$1" | grep -nE "\b(setsid|pkill|nohup|disown|setpgid)\b|kill[[:space:]]+-[A-Za-z0-9]+[[:space:]]+-"' _ "$LIB"
   [ "$status" -ne 0 ] || { echo "$output"; false; }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 31. the OTHER door into the unreconciled branch (P076 Step 16, CP3 MEDIUM)
+# ═══════════════════════════════════════════════════════════════════════════
+@test "31: down_all refuses rather than running a registry-recorded stop_cmd with the execution.yaml absent" {
+  # Case 29 closed one door: no yq means `_aid_svc_declares` cannot answer, so
+  # every service fell onto the UNRECONCILED branch and the registry's RECORDED
+  # stop_cmd — a string from a file inside the subagent-writable evidence
+  # directory — is what ran. The preflight was the right shape guarding ONE of
+  # the two doors into that branch. `_aid_svc_declares` also cannot answer when
+  # the declarations themselves are unreadable, and that door was open: with yq
+  # present and execution.yaml simply ABSENT, the recorded command executed.
+  #
+  # The proof is a side effect, not a message: the recorded stop_cmd creates a
+  # file, and the assertion is that the file does not exist.
+  mkdir -p "$EV"
+  local canary="$TMP/RECORDED_STOP_CMD_RAN"
+  jq -n --arg c "touch '$canary'" \
+     '{schema:"aid-service-registry/1", updated_at:null,
+       services:{api:{service:"api", state:"healthy", job_id:null,
+                      stop_cmd:$c, port:null}}}' > "$EV/services.json"
+
+  local missing="$TMP/does-not-exist/execution.yaml"
+  [ ! -f "$missing" ]
+
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$missing"
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "cannot be read" ]]
+  [[ "$output" =~ "UNRECONCILED" ]]
+
+  # NOTHING EXECUTED, and nothing was written: the registry entry is untouched,
+  # exactly as it is on the no-yq path.
+  [ ! -e "$canary" ]
+  [ "$(_reg '.services.api.state')" = "healthy" ]
+
+  # Same door, second latch: a yaml that EXISTS but cannot be read is equally
+  # unable to answer, and is refused the same way. (Skipped for a caller that
+  # can read anything — root's `test -r` is always true.)
+  _yaml <<'EOF'
+services: {}
+EOF
+  chmod 000 "$YAML"
+  if [ -r "$YAML" ]; then
+    chmod 644 "$YAML"
+    skip "this user can read a mode-000 file (running as root), so 'unreadable' cannot be constructed here"
+  fi
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  chmod 644 "$YAML"
+  echo "$output"
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "cannot be read" ]]
+  [ ! -e "$canary" ]
+
+  # AND THE FLOOR IS NOT A WALL: with the declarations readable the teardown
+  # proceeds — and, because the declaration does not name `api`, it still
+  # refuses the RECORDED stop_cmd rather than running it. The canary never runs
+  # on any path.
+  run bash "$DRIVE" "$LIB" aid_service_down_all "$EV" "$YAML"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "does NOT declare this service" ]]
+  [ ! -e "$canary" ]
+  [ "$(_reg '.services.api.state')" = "stopped" ]
 }

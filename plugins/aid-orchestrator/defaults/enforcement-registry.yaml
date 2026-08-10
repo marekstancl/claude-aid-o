@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 399          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 413          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2357,3 +2357,180 @@ enforcements:
     description: "P075 — the branch restore after FSM init only ever ran when init SUCCEEDED. `aid-json-to-run.sh` runs under `set -euo pipefail`, so a refusing init aborted the script at the call site, before the restore, and left the operator's own checkout parked on the `task/<epic>/main` that init had auto-created on its way to refusing — the 'borrowed the PM's tree' outcome the plan-branch topology exists to remove, produced by the very check that was protecting it. Init's exit status is now captured, the existing restore block runs whether init succeeded or refused, and only then is init's own failure re-raised with a line stating the checkout was restored first. The restore's OWN failure keeps its distinct exit 4 and its git-checkout recovery instruction; it is not swallowed by the new path."
     recovery: "The failure line names the branch the checkout was restored to. A restore that itself fails still exits 4 with the exact `git checkout` command."
     test: "scripts/tests/bats/test-p074-integration.bats"
+
+  # ══ P076: crash survival, declared services, and the recovery ladder ═══════
+  # Fourteen rows for one plan, and the mechanical/instruction label on each is
+  # the point of the pass rather than paperwork: this plan repeatedly found
+  # documentation asserting a mechanism that did not exist, and the registry is
+  # the single place where such a claim does the most damage. Two rows below are
+  # honestly labelled as carrying no shipped enforcement of their own
+  # (`surface: internal-guard`, enforcement = the named regression suite), and
+  # they say so instead of borrowing credit from the code they describe.
+
+  - id: gate_run_mode_contract
+    type: 2
+    source: "scripts/aid-run-gates.sh:validate_all_run_modes (called from run_all_gates BEFORE any gate command is spawned) + run_background_gate's two no-fallback refusals (supervisor unavailable; no evidence directory)"
+    instruction: "defaults/execution.yaml (the `run_mode:` key and its comment) + commands/aid-run.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 1-2 — `run_mode: foreground|background` is a per-gate key in execution.yaml, defaulting to foreground. The load-bearing property is that it is a CONTRACT, not a hint: every gate's value is validated UP FRONT, so a typo on the last gate refuses the run before the first gate's command is spawned, and a `background` declaration never silently degrades to the foreground path — a missing aid-job.sh supervisor or a missing evidence directory refuses the gate by name rather than running it unowned. Both refusals name the gate, the offending value and both accepted forms."
+    recovery: "The error names the gate and prints the two accepted values; fix the key in execution.yaml."
+    test: "scripts/tests/bats/test-gate-background.bats + scripts/tests/bats/test-run-mode-field.bats"
+
+  - id: gate_background_eager_artifact
+    type: 4
+    source: "scripts/aid-run-gates.sh:_resume_artifact_write + its two call sites in run_background_gate (the PRE-SPAWN `pending` write that refuses the gate, and the POST-SPAWN rewrite whose failure CANCELS the just-started job)"
+    instruction: "commands/aid-run.md (the `awaiting_host_resume` row of the controller-state table)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 4 — a controller that dies mid-EXECUTE cannot write anything on its way out, so 'a resume is required' must be derivable from what it provably LEFT BEHIND: one continuation pointer per run, written BEFORE the background job is handed to the supervisor and deleted only once the run's last outstanding job is collected. It is fail-closed in both directions. An unwritable evidence directory refuses the gate BEFORE the spawn, because an unresumable background job must never come into existence. A failure of the POST-SPAWN rewrite is not merely refused — the job is already running, so it is CANCELLED as compensation, and a cancel that also fails prints the exact manual command. The crash window between the two writes leaves the `pending` pointer, which resume resolves by scanning the jobs dir for the recorded fingerprint: no window produces a job without a pointer, only a pointer one field less precise."
+    recovery: "Both refusals name the pointer path and the gate; the compensating-cancel failure prints the `aid-job.sh cancel` command verbatim."
+    test: "scripts/tests/bats/test-auto-resume-artifact.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  - id: resume_single_use_claim
+    type: 4
+    source: "scripts/aid-fsm.sh:_resume_claim (`mv -n` plus a MANDATORY source-gone post-check) + cmd_resume's claim-before-consume ordering"
+    instruction: "commands/aid-run.md (the resume card) + commands/aid-status.md (recipe: controller-state)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 5 — `aid-fsm.sh resume <epic>` claims the continuation artifact EXACTLY ONCE and only then consumes the job's terminal result, so two racing resumes cannot both record a row for the same job. The primitive is the one the shipped pm-override path already uses, not a second implementation: `mv -n` with a mandatory source-gone post-check, because on the installed coreutils a SKIPPED `mv -n` still exits 0 — the check is the enforcement, not the mv. Every loser prints the WINNER's claim file, so a race names who took it instead of failing anonymously. SINGLE-WRITER: a status look at a still-live job claims nothing and leaves the artifact byte-identical; only the terminal-collect path claims."
+    recovery: "A losing resume exits 0 and names the winner's `.claimed-<epoch>` file; nothing is left half-consumed."
+    test: "scripts/tests/bats/test-resume-command.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  - id: active_run_stall_derivation
+    type: 9
+    source: "scripts/aid-fsm.sh:active_runs_stalled_json + active_run_stall_verdict (`aid-fsm.sh active-runs stalled`, read-only) + the refusal in update_active_run_field that rejects `awaiting_host_resume` as a stored value"
+    instruction: "commands/aid-status.md (recipe: stalled-runs and recipe: controller-state) + commands/aid-run.md"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 6 + Step 15 — a controller that dies mid-EXECUTE leaves its state file exactly where it was, so prune's file-existence criterion keeps the run looking healthy forever. `stalled` makes it visible, and like `awaiting_host_resume` it is DERIVED at read time and stored NOWHERE: a dying controller cannot write a flag on its way out, and a flag nobody clears is a lie the moment the controller wakes. One definition (non-terminal entry AND nothing newer than the threshold in either the map's `updated_at` or the run's timeline), two consumers — the `/aid-status` render and the AUTO watchdog — both through the same command. The MECHANICAL half of this row is the writer's refusal: passing `awaiting_host_resume` to `active-runs set` is rejected with a message saying it is derived. The rendering itself is advisory: a false STALLED? on a long foreground gate is the deliberate trade against an invisible dead controller."
+    recovery: "The rendered row names the artifact and prints `aid-fsm.sh resume <epic>` — or, for an id that would not survive `resume`'s own charset check, no command at all."
+    test: "scripts/tests/bats/test-status-two-streams.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  - id: instruction_closure_structural_check
+    type: 9
+    source: "scripts/tests/bats/test-instruction-closure.bats (the enforcement IS this suite: it enumerates agents/ dynamically, requires the reference marker in every card, forbids a divergent restatement of the contract, and asserts the referenced section exists)"
+    instruction: "skills/agent-protocol.md → **Controller boundary (non-negotiable)**"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 7 — the Controller-boundary contract used to live in exactly ONE agent card, so it bound one agent out of nine by accident of where it was written. The contract is now stated once in skills/agent-protocol.md and every card carries a reference marker. HONEST LABEL: there is no shipped script enforcing this at runtime — the enforcement mechanism is the named regression suite, and it is structural (a grep over the agents/ directory enumerated at test time), so a card added tomorrow without the marker fails there rather than silently escaping the contract. Both content checks run over the card with fenced blocks blanked, so a card quoting the contract in an example neither satisfies closure nor trips the divergent-copy check."
+    recovery: "The failure names the card missing the marker, or the card carrying a divergent copy, by path."
+    test: "scripts/tests/bats/test-instruction-closure.bats"
+
+  - id: service_declaration_schema
+    type: 2
+    source: "scripts/aid-run-gates.sh:_validate_services_config (called from run_all_gates before any service is started or any gate is run)"
+    instruction: "defaults/execution.yaml (the `services:` block and its comments)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 8 — a `services:` block is validated as a whole before any service or gate action, and every refusal is fail-closed. The block must be a map and every declaration must be a map; the required fields must be present and the numeric budgets numeric; `additionalProperties: false` is enforced, because an unknown key is a typo and a silently ignored typo is a contract the project believes it declared. Service names are constrained to `^[a-z0-9][a-z0-9_-]*$` — they become job directory names, log lines and error messages, so the charset is what keeps a path traversal or a shell metacharacter out of them, and a name containing a NEWLINE is caught separately so the diagnosis names the real problem instead of blaming the next field. `port_env` is checked against the SHARED env-name denylist, and a denylist that cannot be loaded denies every name rather than exporting one unchecked. A `services:` key present but empty is treated exactly as absent — a cheap no-op — rather than as a malformed block."
+    recovery: "Each refusal names the service, the offending key and the accepted shape."
+    test: "scripts/tests/bats/test-service-declaration.bats"
+
+  - id: gate_needs_services_fail_fast
+    type: 2
+    source: "scripts/aid-run-gates.sh:_validate_needs_services (config time — an unknown name refuses the whole run) + the pre-dispatch health check in run_all_gates that fails a dependent gate with reason `service_unhealthy` before its job is spawned"
+    instruction: "defaults/execution.yaml (the per-gate `needs_services:` key)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 8 + Step 10 — `needs_services: [names]` is checked twice, and the two checks answer different questions. At CONFIG time a name that is not a declared service refuses the run outright, listing the declared names: a dependency on a service that does not exist is a typo, not a runtime condition. At RUN time a gate whose dependency is not healthy fails FAST and BY NAME (`reason: service_unhealthy`, `unhealthy_services: [...]`, `duration_ms: 0`) before its job is ever spawned, while every other gate still runs — a gate that cannot reach its dependency produces no evidence, and running it would produce a failure that says nothing about the code."
+    recovery: "The config refusal lists the declared service names; the runtime row names the unhealthy services."
+    test: "scripts/tests/bats/test-service-lifecycle.bats"
+
+  - id: service_registry_eager_write
+    type: 4
+    source: "scripts/lib/aid-service.sh:_aid_svc_up_one (eager phase 1: the registry entry and the spawn-ledger entry are both written BEFORE the supervised spawn; eager phase 2: the real job id immediately after it, with a compensating cancel when that write fails; healthy only after the probe passes; `start_cmd` runs as a FOREGROUND aid-job.sh job with `--deadline <max_lifetime_seconds>`) + the `daemonized_start_cmd` refusal"
+    instruction: "defaults/execution.yaml (the `services:` block: start_cmd, probe_cmd, startup_deadline_seconds, max_lifetime_seconds)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 9 — the registry entry is written EAGERLY, before the process exists, so a SIGKILL in any window leaves a record every teardown path can see rather than an untracked process. `start_cmd` must be a FOREGROUND command: it is supervised by aid-job.sh (the one process owner) and deadlined by `max_lifetime_seconds`, so a command that daemonises internally and returns is refused by name instead of being reported healthy — the supervisor cannot own a process it never had. The startup loop is bounded by `startup_deadline_seconds` through `timeout(1)`, which is refused up front when absent because without it the deadline is not enforceable. The deadline CANCELS: expiry kills the job's whole process group and runs the declared stop_cmd, leaving no orphan."
+    recovery: "The daemonize refusal names the service and says what it observed; a deadline expiry is recorded in the registry with its failure_reason."
+    test: "scripts/tests/bats/test-aid-service.bats"
+
+  - id: service_lifecycle_acquire_release
+    type: 4
+    source: "scripts/aid-run-gates.sh:_svc_owner_claim + _svc_release_run (acquire once at run entry, release on every exit path) + scripts/lib/aid-service.sh:aid_service_down_all's owner gate (rc 2 while a different, provably live process holds the claim)"
+    instruction: "commands/aid-run.md + skills/pipeline.md (the gate-run section)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 10 — declared services are acquired exactly once per run and released exactly once, on every exit path the runner has, with `services_acquired`/`services_released` framing the run on the timeline. The ownership CLAIM is what makes this safe under a crash: a second runner entering a run whose owner is still alive refuses instead of tearing the live run's services down, and a run whose owner is provably dead has its stale services swept at entry before re-acquiring. There is ONE teardown definition, so `run-all`'s entry sweep, its release, `fsm resume` and `fsm done-advance` all inherit the same refusal from the same authority rather than each carrying a copy of the question."
+    recovery: "The refusal names the live owner and its claim record; nothing is cancelled or stopped."
+    test: "scripts/tests/bats/test-service-lifecycle.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  - id: service_teardown_declaration_preflight
+    type: 4
+    source: "scripts/lib/aid-service.sh:aid_service_down_all (the declaration preflight: rc 2 when yq is unavailable OR the execution.yaml is missing/unreadable, scoped to a run that has a registry)"
+    instruction: "skills/pipeline.md (the gate-run section) + commands/aid-run.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 9 + Step 16 — `_aid_svc_declares` is what stands between the run's registry and execution: when it can answer, the DECLARED stop_cmd runs (and a service the config does not name is refused outright); when it cannot, every service falls onto the UNRECONCILED branch and the registry's RECORDED stop_cmd runs — a string from a file inside the subagent-writable evidence directory, i.e. a path from 'can write under .aid-o/work/evidence/' to 'executes a command'. It has exactly TWO ways to be unable to answer and they are the same door: no yq, or no readable execution.yaml. Step 9 closed the first. The CP3 security review of EPIC 2 found the second still open — with yq present and execution.yaml simply absent the recorded command executed — and Step 16 closed it symmetrically: rc 2, nothing cancelled, nothing stopped, no state written. Scoped to a run that actually has a registry, because with no registry there is no recorded command to run and the orphan sweep cancels by job id, which the evidence directory does not choose."
+    recovery: "The refusal names the unreadable declarations path and says recorded jobs can still be cancelled by hand with aid-job.sh."
+    test: "scripts/tests/bats/test-aid-service.bats (cases 29 and 31)"
+
+  - id: auto_recovery_policy_contract
+    type: 9
+    source: "defaults/policies/auto-recovery.yaml + defaults/schemas/auto-recovery.schema.json (the declared artefacts) — the enforcement is scripts/tests/bats/test-auto-recovery-policy.bats, which validates the policy against its schema and greps every declared `emitter` anchor to a real code site"
+    instruction: "commands/aid-run.md (the AUTO-mode recovery section)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 11 — the stop taxonomy, its per-class budgets and its action vocabulary ship as a POLICY file with a schema. HONEST LABEL: the policy is data, not code; its enforcement is the named regression suite, and that suite exists precisely because AID's first principle warns that a detector without enforcement is decoration. It is an ANTI-DECORATION test rather than a schema test: every `emitter` anchor the policy names is grepped to a real code site in the file it claims, every budget it cites from another file is RE-READ from that file and compared, and the policy's own `status`/`implemented`/`live` claims are checked against whether a real loader function exists in code — so the policy cannot claim to be wired when it is not. An action name outside the vocabulary is a schema error, never a silent no-op."
+    recovery: "The suite names the drifted anchor, the file it claims and what was found there."
+    test: "scripts/tests/bats/test-auto-recovery-policy.bats"
+
+  - id: recovery_adjudication_allowlist
+    type: 2
+    source: "scripts/lib/aid-recovery-adjudicate.sh:aid_recovery_adjudicate (policy trust check, class-declared check, per-class allowlist from _aid_ra_allowlist, closed-set membership via _aid_ra_is_action) + _aid_ra_forbidden_block"
+    instruction: "commands/aid-run.md (the AUTO-mode recovery section) + defaults/policies/auto-recovery.yaml (`allowed_actions` per stop class)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 12 — the adjudication dispatch codifies what commands/aid-run.md used to carry as prose, and the property that matters is that the adjudicator CANNOT widen its own remit whatever it replies. The ceiling is mechanical, not persuasive: the reply's ACTION line is the decision (never the prose around it), it must be a member of the CLASS's allowlist, and the six-name action vocabulary is compiled into the lib and drift-tested equal to the policy and the schema. `escalate` is deliberately NOT in the vocabulary — no caller can execute it — so every refusal path ends there: an unreadable or schema-invalid policy, an undeclared class, an empty allowlist (no dispatch at all), an empty or ambiguous or out-of-allowlist reply, a reply demanding PM authority or a gate waiver, and an unavailable transport. Every exchange, including the refusals that never dispatch, leaves an audit artifact."
+    recovery: "The returned decision is `escalate` with a `rejected_*`/`refused_*` verdict recorded in the timeline and the ladder record, plus a per-exchange artifact."
+    test: "scripts/tests/bats/test-recovery-adjudicate.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  - id: recovery_ladder_budget_refusal
+    type: 4
+    source: "scripts/lib/aid-recovery-ladder.sh:aid_ladder_attempt (the count and the append are ONE critical section under lib/aid-lock.sh's flock on `<record>.lock`, via _aid_ladder_append_locked)"
+    instruction: "defaults/policies/auto-recovery.yaml (`budget: {attempts, wall_clock_seconds}` per stop class) + commands/aid-run.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 13 — the recovery budget is spent under a lock, and that is the whole enforcement: counting outside the lock let two concurrent attempts of a one-attempt class both see zero spent and both proceed, so the count and the append are now one critical section. Budgets are strictly per class and the wall clock runs from the class's FIRST line in the record — an emitter line counts, so the clock starts when the stop was first SEEN, not when recovery was first attempted. Every refusal routes to adjudication and none of them grants anything: over attempts, past the wall clock, an action the class does not allow (named), an undeclared class, an unreadable policy, an unparseable record, a record that shrank against its own high-water mark, and a lock timeout. A refusal is itself recorded and never spends an attempt of its own."
+    recovery: "stdout is `adjudicate <reason>` with rc 4; the reason and its detail are appended to the run's recovery-ladder.jsonl."
+    test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-p076-integration.bats"
+
+  - id: recovery_escalation_terminus
+    type: 4
+    source: "scripts/lib/aid-recovery-ladder.sh:aid_ladder_escalate (records the terminus, then sets `auto_controller: blocked_for_pm` through aid-fsm.sh's ONE map writer) + scripts/aid-fsm.sh's existing ESCALATION precondition requiring `escalation_decision`"
+    instruction: "skills/pipeline.md (grep: 'blocked_for_pm') + commands/aid-run.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P076 Step 13 — the ladder's terminus stops the run at a person and cannot walk past one. It writes the terminus line, then sets `auto_controller: blocked_for_pm` on the active-runs entry through the FSM's single writer (which validates the value against the closed vocabulary and refuses the derived `awaiting_host_resume`), so the map stops claiming a live autonomous controller. The load-bearing property is what it did NOT do: reaching ESCALATION automatically did not make ESCALATION leavable — the transition still refuses without `escalation_decision`, and the ladder ships no function that continues past a refused terminal state. Continuation remains the audited PM `--force` surface and nothing else, grep-guarded in the ladder's own regression suite."
+    recovery: "The refusing transition names `escalation_decision`; a PM records the decision and the transition proceeds."
+    test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-p076-integration.bats"
