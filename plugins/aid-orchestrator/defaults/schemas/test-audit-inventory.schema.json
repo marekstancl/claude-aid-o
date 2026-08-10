@@ -168,7 +168,7 @@
               "kind": {
                 "enum": [
                   "aggregate_runner",
-                  "catalog_pool_runner",
+                  "bats_tree_runner",
                   "direct_invocation",
                   "context_required"
                 ]
@@ -185,7 +185,7 @@
                   "dedicated",
                   "all"
                 ],
-                "description": "Which slice of its candidate set the gate dispatches. `--pool-only` and `--dedicated-only` are complementary, so the two lane gates do not overlap despite sharing a candidate set."
+                "description": "Which slice of its candidate set the gate dispatches. gate:bats_all globs the suite tree minus the boundary files that gate:bats_boundary owns, so the two do not overlap despite sharing a candidate set."
               },
               "membership": {
                 "enum": [

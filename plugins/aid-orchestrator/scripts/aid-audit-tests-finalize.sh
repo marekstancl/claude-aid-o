@@ -49,7 +49,6 @@ audit_id="" wave_artifacts_dir="" dispatch_manifest="" output_dir="" catalog_pat
 # gate can apply to `full` only. REQUIRED whenever --write-plan is used: the
 # bridge refuses to guess a mode, and so does this script.
 audit_mode="" inventory_path="" project_root="" profiles_dir="" profile_selection=""
-resource_maps_dir="" pilots_dir=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
@@ -68,8 +67,7 @@ while [[ $# -gt 0 ]]; do
     --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
     --profiles-dir) [[ $# -ge 2 ]] || _die 2 "--profiles-dir requires a value"; profiles_dir="$2"; shift 2 ;;
     --profile-selection) [[ $# -ge 2 ]] || _die 2 "--profile-selection requires a value"; profile_selection="$2"; shift 2 ;;
-    --resource-maps-dir) [[ $# -ge 2 ]] || _die 2 "--resource-maps-dir requires a value"; resource_maps_dir="$2"; shift 2 ;;
-    --pilots-dir) [[ $# -ge 2 ]] || _die 2 "--pilots-dir requires a value"; pilots_dir="$2"; shift 2 ;;
+    --resource-maps-dir|--pilots-dir) _die 2 "$1 was removed in P078 with the parallelism machinery" ;;
     --write-plan) write_plan="true"; shift ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
@@ -176,18 +174,6 @@ if [[ -n "$profiles_dir" ]]; then
     || _die 2 "--mode static cannot carry profiles: a static audit runs nothing, so a profiling receipt under it did not come from this audit"
 fi
 
-# Resource maps and pilot receipts, from their conventional locations. Both are
-# optional: an audit that mapped nothing proposes no lanes, which is a real and
-# reportable state rather than an error.
-if [[ -z "$resource_maps_dir" ]]; then
-  _conv_maps="${output_dir%/}/resource-maps"
-  [[ -d "$_conv_maps" ]] && resource_maps_dir="$_conv_maps"
-fi
-if [[ -z "$pilots_dir" ]]; then
-  _conv_pilots="${output_dir%/}/pilots"
-  [[ -d "$_conv_pilots" ]] && pilots_dir="$_conv_pilots"
-fi
-
 # ─── Stage 1: consolidate (Step 14) — fails closed on any incomplete/
 #     mismatched/undeclared wave artifact; produces NO output on failure.
 consolidate_args=(
@@ -205,8 +191,6 @@ consolidate_args=(
 # inside the consolidator rather than assumed from the path.
 [[ -n "$profiles_dir" ]] && consolidate_args+=(--profiles-dir "$profiles_dir")
 [[ -n "$profile_selection" ]] && consolidate_args+=(--profile-selection "$profile_selection")
-[[ -n "$resource_maps_dir" ]] && consolidate_args+=(--resource-maps-dir "$resource_maps_dir")
-[[ -n "$pilots_dir" ]] && consolidate_args+=(--pilots-dir "$pilots_dir")
 
 if ! bash "${SCRIPT_DIR}/aid-test-audit-consolidate.sh" "${consolidate_args[@]}" >/dev/null; then
   _die 1 "consolidation failed — refusing to render a chat turn or persist a durable record over an incomplete/invalid audit (no consolidated-findings.json was produced)"
@@ -271,19 +255,6 @@ fi
   if ! bash "${SCRIPT_DIR}/aid-test-audit-report.sh" \
        --audit-dir "$output_dir" --project-root "${project_root:-.}" >/dev/null 2>&2; then
     echo "WARN: aid-audit-tests-finalize.sh: report.html could not be generated — the audit stands, but the fixed-form page is missing; run aid-test-audit-report.sh by hand and report the error" >&2
-  fi
-
-  _proposed_catalog="${output_dir%/}/test-catalog.proposed.yaml"
-  if [[ -f "$_proposed_catalog" && -n "$project_root" ]]; then
-    _apply_args=(--catalog "$_proposed_catalog" --decision "$decision_path" --project-root "$project_root")
-    # The currently approved catalog is where previously-proven evidence lives.
-    # Carrying it forward is safe because every entry is bound to a content
-    # hash: anything whose source moved fails its own binding and reverts.
-    _approved_catalog="${project_root%/}/.aid-o/config/test-catalog.yaml"
-    [[ -f "$_approved_catalog" ]] && _apply_args+=(--previous "$_approved_catalog")
-    if ! bash "${SCRIPT_DIR}/aid-test-catalog-apply-evidence.sh" "${_apply_args[@]}" >&2; then
-      echo "WARN: aid-audit-tests-finalize.sh: could not apply this audit's parallel-safety evidence to ${_proposed_catalog} — the proposed catalog is complete but its parallel column is not filled in" >&2
-    fi
   fi
 
 # ─── Stage 2: render the mandatory chat summary (Step 15) — persists the

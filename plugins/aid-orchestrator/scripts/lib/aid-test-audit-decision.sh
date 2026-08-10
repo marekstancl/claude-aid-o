@@ -14,12 +14,13 @@
 #   0  ok
 #   2  schema file missing / validator unavailable
 #   3  instance failed schema validation
-#   4  cross-lane invariant violated (a run_unit_id in two lanes)
+#   4  (retired with the parallelism machinery in P078 — was: a run_unit_id
+#      in two lanes; never reused, so a consumer branching on it still reads
+#      correctly)
 #   5  evidence_ref escapes the audit directory
 #
-# Why 4 and 5 are enforced here rather than in the schema: JSON Schema cannot
-# express disjointness ACROSS array items, and it cannot resolve a path
-# against a root it does not know. Both are real fail-closed rules, so they
+# Why 5 is enforced here rather than in the schema: JSON Schema cannot resolve
+# a path against a root it does not know. It is a real fail-closed rule, so it
 # live in the one function every consumer already calls.
 
 _TAD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,33 +71,13 @@ PY
   return 3
 }
 
-# _tad_check_lane_disjointness <instance_file> — 0 ok, 4 on overlap.
-# Reports the FIRST offending unit with BOTH lane ids, because naming only
-# one lane leaves the reader to find the other by hand.
-_tad_check_lane_disjointness() {
-  local instance_file="$1" dup
-  dup="$(jq -r '
-    [ .parallelization.lanes[]? as $lane
-      | $lane.run_unit_ids[]? | { unit: ., lane: $lane.lane_id } ]
-    | group_by(.unit)
-    | map(select(length > 1))
-    | .[0] // empty
-    | "\(.[0].unit)\t\(map(.lane) | join(", "))"
-  ' "$instance_file" 2>/dev/null)"
-
-  [[ -z "$dup" ]] && return 0
-  echo "aid-test-audit-decision: run_unit '${dup%%$'\t'*}' appears in more than one lane (${dup#*$'\t'}) — lanes must be disjoint" >&2
-  return 4
-}
-
 # _tad_check_evidence_refs <instance_file> — 0 ok, 5 on escape.
 # The schema already anchors a ref to a non-'/' first character; this closes
 # the remaining hole, a relative ref that climbs out via '..'.
 _tad_check_evidence_refs() {
   local instance_file="$1" bad
   bad="$(jq -r '
-    [ (.actions[]?.evidence_refs[]?),
-      (.parallelization.lanes[]?.evidence_refs[]?) ]
+    [ .actions[]?.evidence_refs[]? ]
     | map(select(test("(^|/)\\.\\.(/|$)")))
     | .[0] // empty
   ' "$instance_file" 2>/dev/null)"
@@ -106,13 +87,12 @@ _tad_check_evidence_refs() {
   return 5
 }
 
-# _tad_validate_all <instance_file> — schema, then the two invariants the
-# schema cannot express. Order matters: a structurally invalid artifact is
-# reported as such rather than as a lane violation found in garbage.
+# _tad_validate_all <instance_file> — schema, then the invariant the schema
+# cannot express. Order matters: a structurally invalid artifact is reported
+# as such rather than as a path violation found in garbage.
 _tad_validate_all() {
   local instance_file="$1" rc
   _tad_schema_validate "$instance_file" || return $?
-  _tad_check_lane_disjointness "$instance_file" || { rc=$?; return $rc; }
   _tad_check_evidence_refs "$instance_file" || { rc=$?; return $rc; }
   return 0
 }
@@ -189,15 +169,4 @@ aid_test_audit_decision_status() {
   local body
   body="$(aid_test_audit_decision_read "$path")" || { rc=$?; return $rc; }
   jq -r '.audit_status' <<<"$body"
-}
-
-# aid_test_audit_decision_lane_units <path>
-#
-# Echoes the union of every lane's run_unit_ids, one per line, sorted. Used
-# by the consolidator's own cross-checks.
-aid_test_audit_decision_lane_units() {
-  local path="$1" rc
-  local body
-  body="$(aid_test_audit_decision_read "$path")" || { rc=$?; return $rc; }
-  jq -r '[.parallelization.lanes[]?.run_unit_ids[]?] | unique | .[]' <<<"$body"
 }

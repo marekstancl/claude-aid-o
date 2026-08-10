@@ -38,10 +38,9 @@ or absent `focus` halts immediately** with a named error — there is no default
 
 | `focus` | Wave | What it does |
 |---|---|---|
-| `shard_portfolio` | 1 | Analyzes one assigned shard of `run_units[]` (by runner + module/package + shared-fixture boundary) for cost/reliability/parallel-safety/quality findings, AND emits exactly one terminal disposition per assigned `run_unit_id` (see Constraints). |
+| `shard_portfolio` | 1 | Analyzes one assigned shard of `run_units[]` (by runner + module/package + shared-fixture boundary) for cost/reliability/quality findings, AND emits exactly one terminal disposition per assigned `run_unit_id` (see Constraints). |
 | `performance_cost` | 2 | Cross-cutting: analyzes `measure`/`full`-mode timing receipts across ALL shards for cost outliers — requires real measured data; this focus is never dispatched in `static` mode (that wave is skipped entirely, not merely empty). |
 | `flake_isolation` | 2 | Cross-cutting: analyzes repeated-run/isolation evidence for flake/order-dependency signals — same `static`-mode skip as `performance_cost`. |
-| `parallel_safety` | 2 | Cross-cutting: classifies `parallel.status` (`safe\|constrained\|exclusive\|unknown`) from direct, cited adapter/measurement evidence only, and records each resource WITH its namespace. **This output is consumed for real** — the catalog's provenance-bound effective status is what `aid-bats-parallel-lane.sh` and the P069 scheduler read to decide what may run concurrently. |
 | `adversarial_review` | 3 | Reads ALL prior wave artifacts read-only and adversarially checks each finding's evidence — flags unsupported claims, especially any `remove`/`quarantine` recommendation lacking a `falsification_check`. |
 | `consolidator` | 4 | Requires prior wave artifacts to exist (halts if none are present) — merges them by stable ID into the audit's final consolidated findings; this focus never dispatches its own wave artifact through the same manifest as the others (Step 14 owns the actual consolidation script this focus's findings feed). |
 
@@ -60,14 +59,6 @@ the prompt fills, not a duplicate of its content.
 - A `remove` or `quarantine` recommendation MUST include a `falsification_check` describing what
   would have to be true for the recommendation to be wrong — the consolidator (Step 14) rejects a
   finding at this severity lacking one.
-- `parallel.status` findings default to `unknown` absent direct, cited evidence — never optimistic.
-- Promotion out of `unknown` needs TWO kinds of evidence, never one: a resource map read from
-  source, and a pilot that ran that exact membership serially and concurrently in a disposable
-  clone. A classification alone proposes nothing.
-- A promoted status is bound to the content it was verified against — the unit's whole dependency
-  closure, helpers included — and reverts to `unknown` on its own when those resources change.
-  A grep hit alone can never label a resource shared: follow the helper to its definition and read
-  its callers, including the files that deviate from the common pattern.
 
 ### Terminal dispositions — `shard_portfolio`, full mode (mandatory)
 

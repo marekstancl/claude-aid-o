@@ -11,10 +11,11 @@ gates:
     # quarantine (below, kept for history) blocked the monolithic aggregate
     # after two overlapping E-064-2_2 runs shared the live repository and
     # cost 50-95 minutes of untrustworthy evidence. P071 replaced the blanket
-    # `bats plugins/aid-orchestrator/scripts/tests/bats/` invocation with
-    # aid-bats-parallel-lane.sh --pool-only, which partitions the approved
-    # catalog (.aid-o/config/test-catalog.yaml) and runs only the `bats -j N`
-    # safe pool (everything except the 2 known-slow boundary files below).
+    # `bats plugins/aid-orchestrator/scripts/tests/bats/` invocation with a
+    # partitioned run (everything except the 2 known-slow boundary files
+    # below). P078 removed the parallel lane wrapper that once performed that
+    # partition; the partition stays, now as the plain globbed-and-filtered
+    # bats invocation in `command:` above.
     #
     # CP2 fix (2026-08-02): this gate ONLY runs the pool phase now, split out
     # from the 2 boundary files (see gate:bats_boundary below) — an earlier
@@ -31,7 +32,11 @@ gates:
     #   authorized_by: "PM 2026-07-23"
     #   tracked_by: "P066"
     #   original_command: "bats plugins/aid-orchestrator/scripts/tests/bats/"
-    command: "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --pool-only"
+    # P078 (2026-08-10): parallelism removed — plain sequential bats over the
+    # suite directory, still excluding the 2 slow boundary files (they keep
+    # their own gate:bats_boundary below; the exclusion predates parallelism
+    # and survives it — it is about budget isolation, not pooling).
+    command: "bash -c 'bats $(ls plugins/aid-orchestrator/scripts/tests/bats/*.bats | grep -v -e test-aid-plan-final-boundary -e test-aid-plan-release-boundary)'"
     required: true
     timeout_seconds: 2400  # headroom over an UNBACKED 1556s estimate — see the
                            # P076 Step 1 note below for why that figure is not a
@@ -62,7 +67,7 @@ gates:
     max_retries: 0
   bats_boundary:
     # P071 E-071-1_1 Step 3 CP2 fix (2026-08-02): the 2 bats files excluded
-    # from gate:bats_all's parallel pool (test-aid-plan-final-boundary.bats,
+    # from gate:bats_all's run (test-aid-plan-final-boundary.bats,
     # test-aid-plan-release-boundary.bats) — both create a real git repo per
     # test and run sequentially, never pooled. required:false + a generous
     # timeout because test-aid-plan-final-boundary.bats's own root-cause fix
@@ -70,7 +75,9 @@ gates:
     # gate is advisory (informational signal only, never blocks GATES→DONE).
     # Re-evaluate required:true once Step 4 brings this file's cost down to
     # something a real timeout budget can bound.
-    command: "bash plugins/aid-orchestrator/scripts/aid-bats-parallel-lane.sh --dedicated-only"
+    # P078 (2026-08-10): plain sequential bats, same 2 files the lane
+    # wrapper used to resolve before P078 deleted it.
+    command: "bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
     required: false
     timeout_seconds: 7200
     # P076 Step 1 (2026-08-09): supervised background job via aid-job.sh.
@@ -91,9 +98,10 @@ gates:
       FULL aggregate test suite via run-all-tests.sh (timeout_seconds 7200).
       It OVERLAPS gate:bats_all rather than containing it: this gate adds 47
       standalone test-*.sh shell suites bats_all never touches, while bats_all
-      runs test-aid-test-isolation-experiment.bats, which this gate delegates
-      away to its own CI job. Neither set contains the other, so neither gate
-      substitutes for the other. Its cost under the CURRENT cap is unmeasured:
+      covers the bats aggregate this gate partly delegates to CI jobs.
+      Neither set contains the other, so neither gate substitutes for the
+      other. (P078: the isolation-experiment suite both once referenced was
+      deleted with the parallelism machinery.) Its cost under the CURRENT cap is unmeasured:
       gate-runtime-baselines.yaml records 5 non-censored runs (p50 1393316 ms,
       p90/p95/max 1869545 ms), the newest dated 2026-07-15, and every one of
       the 8 samples since is exit 124, censored at the then-1900s cap. bats_all
@@ -151,11 +159,10 @@ gates:
     #     (plugins/aid-orchestrator/scripts/tests/test-*.sh, none excluded by
     #     the discovery loop). gate:bats_all invokes bats files only and runs
     #     none of them.
-    #   - gate:bats_all (aid-bats-parallel-lane.sh --pool-only) skips only the
-    #     2 BOUNDARY_RELATIVE_PATHS files, so it RUNS
-    #     test-aid-test-isolation-experiment.bats — which this gate
-    #     deliberately skips via DELEGATED_SUITES (run-all-tests.sh:141-157)
-    #     because that suite owns a dedicated CI job.
+    #   - gate:bats_all globs the bats tree and skips only the 2 boundary
+    #     files, so it runs every other bats suite inline; this gate skips
+    #     whatever DELEGATED_SUITES (run-all-tests.sh) hands to a dedicated
+    #     CI job.
     #   - The 2 boundary files (test-aid-plan-final-boundary.bats,
     #     test-aid-plan-release-boundary.bats) are skipped by BOTH gates;
     #     gate:bats_boundary is what runs them.
@@ -384,13 +391,3 @@ gate_profiles:
       - bats_all
       - targeted_tests
       - docs_updated
-
-# P069 scheduler rollout (PM approval 2026-08-08, delegated in chat: "co se
-# aidu týká udělej vše ty"): catalog TAUD-20260806-0440 approved (181 units,
-# 54 parallel-safe with resource_map_plus_pilot evidence). observe_parallel
-# stays gated by aid-scheduler-rollout-gate.sh — it activates only with 3
-# qualifying divergence artifacts at the current commit, else fails closed
-# to sequential.
-test_audit:
-  scheduler:
-    mode: observe_parallel

@@ -135,38 +135,6 @@ _catalog_yaml() {   # <out> <status-doc> <unit-status>
     | yq -P '.' > "$1"
 }
 
-@test "approving a freshly-scanned proposal over provenance-bound evidence is REFUSED, and names what it would revoke" {
-  # A scan classifies every unit `unknown`. Approving one over a catalog that
-  # carries real pilot/migration evidence silently revokes all of it — in this
-  # repository, 65 units leaving the safe pool and a 24-minute concurrent run
-  # becoming a serial one. Nothing about the operation announced that.
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  _catalog_yaml "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" approved safe
-  _catalog_yaml "$TEST_TMPDIR/scan.yaml" proposed unknown
-
-  run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/scan.yaml" --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"would revoke the parallel-safety evidence"* ]]
-  [[ "$output" == *"bats:a"* ]]
-  # And it did not publish: the evidence is still there.
-  [ "$(yq -r '.run_units[0].parallel.status' "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml")" = "safe" ]
-}
-
-@test "the revocation is allowed when the operator says they meant it" {
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  _catalog_yaml "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" approved safe
-  _catalog_yaml "$TEST_TMPDIR/scan.yaml" proposed unknown
-
-  AID_CATALOG_ACCEPT_REVOCATION=1 run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/scan.yaml" --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-  [ "$(yq -r '.run_units[0].parallel.status' "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml")" = "unknown" ]
-}
-
-@test "a proposal that PRESERVES the evidence approves without any override" {
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  _catalog_yaml "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" approved safe
-  _catalog_yaml "$TEST_TMPDIR/keeps.yaml" proposed safe
-
-  run "$APPROVE_SCRIPT" --proposed "$TEST_TMPDIR/keeps.yaml" --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-}
+# (P078: the three provenance-revocation-guard tests were removed with the
+# guard itself — a catalog no longer carries parallel-safety evidence that an
+# approval could silently discard.)

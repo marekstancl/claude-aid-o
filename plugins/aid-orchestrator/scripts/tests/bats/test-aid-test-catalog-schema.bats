@@ -55,7 +55,6 @@ _minimal_run_unit() {
   "confidence": "medium",
   "command": {"type": "argv", "argv": ["bats", "scripts/tests/bats/test-example.bats"]},
   "runtime": {"fingerprint": "sha256:0123456789ab"},
-  "parallel": {"status": "unknown", "exclusive_resources": [], "max_workers": null, "internal_parallelism": false},
   "isolation": {"temp_workspace": "unknown", "fixed_ports": [], "shared_paths": [], "lock_usage": [], "adapter_confidence": "static_parse"},
   "recommendation": "keep",
   "test_cases": [{"test_case_id": "t1", "name": "example works", "filter_expression": "example works"}]
@@ -87,25 +86,6 @@ JSON
   local fixture="$TEST_TMPDIR/catalog-bare-command.json"
   local unit
   unit="$(_minimal_run_unit | python3 -c 'import json,sys; d=json.load(sys.stdin); d["command"]="bats file.bats"; print(json.dumps(d))')"
-  cat > "$fixture" <<JSON
-{
-  "schema_version": "1.0.0",
-  "generated_at": "2026-07-29T00:00:00Z",
-  "status": "proposed",
-  "run_units": [$unit],
-  "source_pattern_mappings": [],
-  "mapping_approval": {"status": "proposed"}
-}
-JSON
-  run _schema_validate "$CATALOG_SCHEMA" "$fixture"
-  [ "$status" -eq 1 ]
-}
-
-@test "test-catalog.schema.json: parallel.status unknown with non-empty exclusive_resources fails" {
-  _have_jsonschema || skip "python3 + jsonschema unavailable"
-  local fixture="$TEST_TMPDIR/catalog-bad-parallel.json"
-  local unit
-  unit="$(_minimal_run_unit | python3 -c 'import json,sys; d=json.load(sys.stdin); d["parallel"]["exclusive_resources"]=["port:8080"]; print(json.dumps(d))')"
   cat > "$fixture" <<JSON
 {
   "schema_version": "1.0.0",

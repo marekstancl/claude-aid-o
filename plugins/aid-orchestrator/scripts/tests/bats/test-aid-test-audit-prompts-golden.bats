@@ -33,9 +33,6 @@ _vars_json_for() {
     test-audit-flake-isolation-prompt-v1.md)
       jq -n '{audit_id:"a1", wave:"2", measurements_path:"/tmp/measurements.jsonl", repeat_runs_path:"/tmp/repeat.jsonl", catalog_path:"/tmp/catalog.yaml", output_schema_path:"/tmp/schema.json", producer_agent_dispatch_id:"dispatch-1"}'
       ;;
-    test-audit-parallel-safety-prompt-v1.md)
-      jq -n '{audit_id:"a1", wave:"2", catalog_path:"/tmp/catalog.yaml", measurements_path:"/tmp/measurements.jsonl", output_schema_path:"/tmp/schema.json", producer_agent_dispatch_id:"dispatch-1"}'
-      ;;
     test-audit-adversarial-review-prompt-v1.md)
       jq -n '{audit_id:"a1", wave:"3", prior_wave_artifact_paths:"/tmp/1-shard.json,/tmp/2-cost.json", output_schema_path:"/tmp/schema.json", producer_agent_dispatch_id:"dispatch-1"}'
       ;;
@@ -53,7 +50,6 @@ _all_templates() {
   echo "test-audit-shard-auditor-prompt-v1.md"
   echo "test-audit-performance-cost-prompt-v1.md"
   echo "test-audit-flake-isolation-prompt-v1.md"
-  echo "test-audit-parallel-safety-prompt-v1.md"
   echo "test-audit-adversarial-review-prompt-v1.md"
   echo "test-audit-consolidator-prompt-v1.md"
 }
@@ -110,22 +106,10 @@ _all_templates() {
   done < <(_all_templates)
 }
 
-@test "the parallel_safety template states its output IS consumed, and forbids grep-alone reasoning" {
-  # P072 Step 6: the old assertion pinned the sentence "no scheduler in this
-  # plan consumes it", which stopped being true when P069 shipped a scheduler
-  # that reads this field and P072 wired the parallel lane to it. Pinning a
-  # false sentence is worse than pinning none, so this asserts the corrected
-  # boundary instead of deleting the check.
-  grep -q "Your classification is evidence, not a verdict" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
-  grep -q "aid-bats-parallel-lane.sh" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
-  grep -q "A grep hit alone can never label a resource shared" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
-}
-
-@test "each of the 6 templates matches its focus's exact enum value in its output contract" {
+@test "each of the 5 templates matches its focus's exact enum value in its output contract" {
   grep -q '"shard_portfolio"' "$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
   grep -q '"performance_cost"' "$PROMPTS_DIR/test-audit-performance-cost-prompt-v1.md"
   grep -q '"flake_isolation"' "$PROMPTS_DIR/test-audit-flake-isolation-prompt-v1.md"
-  grep -q '"parallel_safety"' "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
   grep -q '"adversarial_review"' "$PROMPTS_DIR/test-audit-adversarial-review-prompt-v1.md"
   grep -q '"consolidator"' "$PROMPTS_DIR/test-audit-consolidator-prompt-v1.md"
 }
@@ -165,7 +149,7 @@ _all_templates() {
 @test "the shard template states the exact disposition enum, not a few examples" {
   local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
   grep -q "must be exactly one of this enum" "$t"
-  for v in keep fix rewrite_unit merge split remove quarantine keep_serial parallelize measure; do
+  for v in keep fix rewrite_unit merge split remove quarantine measure; do
     grep -q "\`$v\`" "$t" || { echo "enum value missing from prompt: $v"; return 1; }
   done
 }
@@ -184,17 +168,6 @@ _all_templates() {
   local t="$PROMPTS_DIR/test-audit-shard-auditor-prompt-v1.md"
   grep -q "enforces presence for \`full\` only" "$card"
   grep -q "enforces presence only for \`full\`" "$t"
-}
-
-@test "the parallel_safety template requires a resource AND its namespace, not a bare label" {
-  local t="$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
-  grep -q "the pair is one" "$t"
-  grep -q "per-test" "$t" && grep -q "shared" "$t"
-  grep -q "fixed_path/shared" "$t"
-}
-
-@test "the parallel_safety template demands a proposed lane or a named bounded proof" {
-  grep -q "End with a proposal or a named proof" "$PROMPTS_DIR/test-audit-parallel-safety-prompt-v1.md"
 }
 
 @test "the adversarial template names all five challenge classes" {
@@ -229,10 +202,9 @@ _all_templates() {
   grep -q "outside your assignment" "$card"
 }
 
-@test "the agent card no longer claims the parallel classification has no consumer" {
+@test "the agent card makes no parallel-consumer claim at all (P078: machinery removed)" {
   local card="$AID_PLUGIN_PATH/agents/test-portfolio-analyst.md"
-  ! grep -q "no scheduler in this plan consumes it" "$card"
-  grep -q "consumed for real" "$card"
+  ! grep -qi "parallel" "$card"
 }
 
 @test "the shard template's worked examples are themselves valid against the real disposition schema" {

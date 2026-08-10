@@ -117,7 +117,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.81.0** (current) — the run can trust its own tree: gates execute in the plan's worktree and write evidence where the run can find it, a chained EPIC starts on its predecessors' work, and a deferral or an out-of-scope review finding cannot be lost in prose
+- **v2.82.0** (current) — the test-parallelism line is removed: scheduler, rollout gate, divergence campaign, parallel lane and the catalog's parallel evidence are gone; tests run sequentially by design
+- **v2.81.0** — the run can trust its own tree: gates execute in the plan's worktree and write evidence where the run can find it, a chained EPIC starts on its predecessors' work, and a deferral or an out-of-scope review finding cannot be lost in prose
 - **v2.80.0** — auto mode owns its waits: background gates survive a killed session and re-attach, declared services live and die with the run, and a recovery ladder with budgets it cannot silently reset
 - **v2.79.3** — scheduler dispatch survives a real-size catalog (argv overflow fixed). Previously v2.79.2 — C4 plan-diff verdict vocabulary fixed (blocked every real plan). Previously v2.79.1 — audit-scoped findings no longer block the write-plan handoff. Previously v2.79.0 — the report answers "what is each suite for": per-gate purpose, counts, profiles, rename proposals for EPIC codenames
 - **v2.78.0** — the audit asks "what exists", not "what do gates run": CI test-execution check, wrapper-aware marker-exact reachability, per-test cost

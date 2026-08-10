@@ -128,37 +128,10 @@ fi
 # Flip ONLY the document-root status. mapping_approval and every
 # source_pattern_mappings[] row's own status are copied through unchanged —
 # this action alone never approves the routing map.
-# ─── Provenance-revocation guard ────────────────────────────────────────────
-# Approval REPLACES the catalog wholesale, and a freshly-scanned proposal knows
-# nothing about parallel safety — every unit in it is `unknown`. So approving a
-# scan output over a catalog that carries provenance-bound `safe` entries
-# silently revokes all of them: in this repository that is 65 units leaving the
-# pool, turning a 24-minute concurrent run back into a serial one. Nothing about
-# the operation announces that; it looks like an ordinary approval.
-#
-# Real evidence being thrown away is a decision, not a side effect. It is named,
-# counted, and requires the operator to say they meant it.
-if [[ -f "$approved_path" ]]; then
-  _current_json="$(yq -o=json '.' "$approved_path" 2>/dev/null)" || _current_json=""
-  if [[ -n "$_current_json" && "$_current_json" != "null" ]]; then
-    _revoked="$(jq -r --argjson prop "$proposed_json" '
-      [ .run_units[]?
-        | select((.parallel.status // "unknown") != "unknown")
-        | .run_unit_id as $id
-        | select( [ $prop.run_units[]? | select(.run_unit_id == $id)
-                    | select((.parallel.status // "unknown") != "unknown") ] | length == 0 )
-        | $id ]' <<<"$_current_json" 2>/dev/null)" || _revoked="[]"
-    _n_revoked="$(jq -r 'length' <<<"$_revoked" 2>/dev/null || echo 0)"
-    if [[ "${_n_revoked:-0}" -gt 0 && "${AID_CATALOG_ACCEPT_REVOCATION:-0}" != "1" ]]; then
-      echo "aid-test-catalog-approve.sh: refusing to approve — this proposal would revoke the parallel-safety evidence of ${_n_revoked} unit(s) that the current approved catalog records as non-unknown:" >&2
-      jq -r '.[] | "    " + .' <<<"$_revoked" >&2
-      echo "  A freshly-scanned proposal classifies every unit as 'unknown', so approving one over a catalog" >&2
-      echo "  carrying real pilot/migration evidence discards that evidence and serialises those units." >&2
-      echo "  If that is intended, re-run with AID_CATALOG_ACCEPT_REVOCATION=1." >&2
-      exit 1
-    fi
-  fi
-fi
+# (P078 removed the provenance-revocation guard with the parallelism
+# machinery: it existed because approving a fresh scan silently revoked
+# provenance-bound `safe` statuses. A catalog no longer carries parallel
+# status, so an approval can no longer discard that evidence.)
 
 approved_json="$(jq -c '.status = "approved"' <<<"$proposed_json")"
 

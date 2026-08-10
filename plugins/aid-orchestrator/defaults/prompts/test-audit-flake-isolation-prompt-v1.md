@@ -73,7 +73,7 @@ later audit propose it properly.
 ### What this wave may propose, and its guards
 
 - **`fix` (flake with a named cause)** — GUARD: a cause may be stated only when
-  evidence links it (fails only in the parallel lane; correlates with load);
+  evidence links it (correlates with load or a co-resident process);
   otherwise it is a hypothesis and must be labelled one. With fewer than N
   observed failures you have an anecdote, not a finding.
 - **`quarantine`** — always with an expiry and an owner, and the expiry must
@@ -83,8 +83,8 @@ later audit propose it properly.
   invisible and under-reports this whole wave; surfacing it precedes every
   other flake finding.
 - **Non-hermetic dependency** — real network/clock/env: the fix is hermetic
-  setup, and it usually also unblocks parallelism — fill `conflicts_with` when
-  your fix and a parallel-safety fix touch the same lines.
+  setup — fill `conflicts_with` when your fix and another finding's fix
+  touch the same lines.
 
 ## Output contract
 

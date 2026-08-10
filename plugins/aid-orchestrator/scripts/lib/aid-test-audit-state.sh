@@ -116,7 +116,7 @@ audit_state_init() {
 _tas_expected_focuses_for_status() {
   case "$1" in
     sharding) echo "shard_portfolio" ;;
-    dispatching) echo "performance_cost flake_isolation parallel_safety" ;;
+    dispatching) echo "performance_cost flake_isolation" ;;
     consolidating) echo "adversarial_review" ;;
     *) echo "" ;;
   esac

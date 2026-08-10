@@ -1,5 +1,11 @@
 # P072 — The parallel-safety authority, after this plan
 
+> **ARCHIVED (P078, 2026-08-10).** The subsystem this page describes — the
+> catalog `parallel` block, the lane runner, the scheduler and their shared
+> resolver — was removed outright when the PM cancelled the test-parallelism
+> line (2026-08-09). Kept as a historical record of the boundary as it stood;
+> nothing here describes current behaviour.
+
 One page, because the question "what decides whether these tests may run at the
 same time?" had three answers before this plan and now has one.
 

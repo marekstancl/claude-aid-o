@@ -21,7 +21,7 @@ teardown() { teardown_test_evidence_dir; }
 _open() { bash "$LEDGER" open --path "$L" --run-id "${1:-r1}" --candidate-sha "${2:-sha1}" >/dev/null; }
 _append() {  # <unit> <gate> [point] [fingerprint]
   bash "$LEDGER" append --path "$L" --run-unit-id "$1" --gate-id "$2" \
-    --dispatch-point "${3:-bats_lane}" --fingerprint "${4:-fp}"
+    --dispatch-point "${3:-aggregate_runner}" --fingerprint "${4:-fp}"
 }
 _close() { bash "$LEDGER" close --path "$L" "$@"; }
 
@@ -43,7 +43,7 @@ PY
   # gate:bats_all runs it in the pool, and the full profile includes both.
   _open
   _append "bats:test-aid-fsm" "gate:bats_fsm" gate_runner_direct
-  _append "bats:test-aid-fsm" "gate:bats_all" bats_lane
+  _append "bats:test-aid-fsm" "gate:bats_all" aggregate_runner
   run _close
   [ "$status" -eq 7 ]
   [[ "$output" == *"DOUBLE EXECUTION"* ]]
@@ -57,12 +57,12 @@ PY
   # what stops it coming back.
   local c="$TEST_TMPDIR/contains.json"
   cat > "$c" <<'JSON'
-[{"gate":"gate:bats_all","kind":"catalog_pool_runner","partition":"pool",
+[{"gate":"gate:bats_all","kind":"bats_tree_runner","partition":"pool",
   "membership":"runtime_partitioned","run_unit_ids":["bats:test-aid-fsm"]}]
 JSON
   _open
   _append "bats:test-aid-fsm" "gate:bats_fsm" gate_runner_direct
-  _append "bats:test-aid-fsm" "gate:bats_all" bats_lane
+  _append "bats:test-aid-fsm" "gate:bats_all" aggregate_runner
   run _close --contains "$c"
   [ "$status" -eq 7 ]
   [[ "$output" == *"DOUBLE EXECUTION"* ]]
@@ -105,7 +105,7 @@ JSON
 @test "a dispatch point OUTSIDE a gate run appends nothing, and that is not an error" {
   # A developer running a suite by hand has no run to account for. Failing
   # here would make the instrumentation something people remove.
-  run bash "$LEDGER" append --run-unit-id "bats:a" --gate-id "gate:x" --dispatch-point bats_lane
+  run bash "$LEDGER" append --run-unit-id "bats:a" --gate-id "gate:x" --dispatch-point aggregate_runner
   [ "$status" -eq 0 ]
 }
 
@@ -115,7 +115,7 @@ JSON
   # supplied, so a run IS being accounted for; the file's absence is the
   # accounting failing, not an absence of accounting.
   run bash "$LEDGER" append --path "$TEST_TMPDIR/never-opened.json" \
-    --run-unit-id "bats:a" --gate-id "gate:x" --dispatch-point bats_lane
+    --run-unit-id "bats:a" --gate-id "gate:x" --dispatch-point aggregate_runner
   [ "$status" -eq 3 ]
   [[ "$output" == *"does not exist"* ]]
 }
@@ -139,15 +139,15 @@ JSON
   _open
   run _validate
   [ "$status" -eq 0 ]
-  _append "bats:a" "gate:one" scheduler
+  _append "bats:a" "gate:one" aggregate_runner
   _close
   run _validate
   [ "$status" -eq 0 ]
 }
 
 @test "every entry records WHICH dispatch point appended it" {
-  # The four paths are not interchangeable: `gate_runner_direct` is the one
-  # that makes a directly-invoked gate visible at all.
+  # The paths are not interchangeable: `gate_runner_direct` is the one
+  # that makes a directly-invoked gate visible at all (P078: two live paths).
   _open
   _append "bats:a" "gate:one" gate_runner_direct
   _append "bats:b" "gate:two" aggregate_runner
@@ -157,7 +157,7 @@ JSON
 
 @test "an unrecognised dispatch point is rejected by the schema" {
   _open
-  _append "bats:a" "gate:one" bats_lane
+  _append "bats:a" "gate:one" aggregate_runner
   jq '.entries[0].dispatch_point = "somewhere_else"' "$L" > "$L.tmp" && mv "$L.tmp" "$L"
   run _validate
   [ "$status" -ne 0 ]
@@ -185,12 +185,12 @@ JSON
 # ─── Concurrency ───────────────────────────────────────────────────────────
 
 @test "concurrent appends do not lose entries" {
-  # The scheduler dispatches in parallel; a lost append is a gap, and a gap
-  # reads as an absence of duplication.
+  # Appends can race (backgrounded gates, concurrent shells); a lost append
+  # is a gap, and a gap reads as an absence of duplication.
   _open
   local i
   for i in $(seq 1 12); do
-    ( _append "bats:u$i" "gate:parallel" scheduler ) &
+    ( _append "bats:u$i" "gate:many" aggregate_runner ) &
   done
   wait
   _close
@@ -204,7 +204,7 @@ JSON
   # parent's ledger inherited. Without a way to say so, correct behaviour
   # would fail the run.
   _open
-  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point aggregate_runner
   bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:two" \
     --dispatch-point gate_runner_direct --execution-kind escalation
   run bash "$LEDGER" close --path "$L"
@@ -215,7 +215,7 @@ JSON
 
 @test "a deliberate repeat is REPORTED, never silent — it still costs wall clock" {
   _open
-  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point aggregate_runner
   bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:two" \
     --dispatch-point gate_runner_direct --execution-kind escalation
   run bash "$LEDGER" close --path "$L"
@@ -225,9 +225,9 @@ JSON
 
 @test "AID_EXECUTION_KIND declares a whole subprocess — that is how escalation marks itself" {
   _open
-  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point aggregate_runner
   AID_EXECUTION_KIND=escalation bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" \
-    --gate-id "gate:two" --dispatch-point bats_lane
+    --gate-id "gate:two" --dispatch-point aggregate_runner
   run bash "$LEDGER" close --path "$L"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.summary.deliberate_repeats | length' "$L")" = "1" ]
@@ -237,7 +237,7 @@ JSON
   # The whole exemption is worth nothing if forgetting to mark something is
   # the same as marking it.
   _open
-  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point aggregate_runner
   bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:two" --dispatch-point gate_runner_direct
   run bash "$LEDGER" close --path "$L"
   [ "$status" -eq 7 ]
@@ -247,12 +247,12 @@ JSON
 @test "an unrecognised --execution-kind is rejected — a typo must not become a free pass" {
   _open
   run bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" \
-    --dispatch-point bats_lane --execution-kind "escalation!"
+    --dispatch-point aggregate_runner --execution-kind "escalation!"
   [ "$status" -eq 2 ]
 }
 
 @test "every entry records its execution kind, and the default is normal" {
   _open
-  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point bats_lane
+  bash "$LEDGER" append --path "$L" --run-unit-id "bats:a" --gate-id "gate:one" --dispatch-point aggregate_runner
   [ "$(jq -r '.entries[0].execution_kind' "$L")" = "normal" ]
 }

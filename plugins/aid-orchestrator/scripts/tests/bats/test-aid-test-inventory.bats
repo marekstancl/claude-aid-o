@@ -230,23 +230,26 @@ _inv_out() {
   [ "$output" = "direct_invocation/exact/1" ]
 }
 
-@test "P072 Step 10: the two lane gates are complementary partitions, not overlapping sets" {
-  # `--pool-only` and `--dedicated-only` split the bats units between them.
-  # Recording both as containing every bats unit produced 105 false
-  # double-execution reports.
+@test "P072 Step 10: the two bats gates are complementary partitions, not overlapping sets" {
+  # gate:bats_all globs the suite tree minus the 2 boundary files;
+  # gate:bats_boundary names those 2 literally. Recording both as containing
+  # every bats unit produced 105 false double-execution reports.
+  # P078: the split survived the parallel lane it was once implemented with —
+  # bats_all is now a tree runner (runtime-expanded glob), bats_boundary a
+  # direct invocation whose membership is EXACT because it names its files.
   local repo out
   repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
   out="$(_inv_out "$repo")"
-  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_all") | .partition' "$out/inventory.json"
-  [ "$output" = "pool" ]
-  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_boundary") | .partition' "$out/inventory.json"
-  [ "$output" = "dedicated" ]
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_all") | "\(.kind)/\(.partition)"' "$out/inventory.json"
+  [ "$output" = "bats_tree_runner/pool" ]
+  run jq -r '.reconciliation.contains[] | select(.gate=="gate:bats_boundary") | .kind' "$out/inventory.json"
+  [ "$output" = "direct_invocation" ]
 }
 
 @test "P075 Step 3: gate:bats_boundary contains exactly the 2 boundary files, and gate:bats_all excludes them" {
   # Before this fix, both gates shared the identical 132-member bats set,
   # differing only in `partition` — a reader of inventory.json would wrongly
-  # conclude gate:bats_boundary re-runs the whole pool (P075 Step 3).
+  # conclude gate:bats_boundary re-runs the whole tree (P075 Step 3).
   local repo out boundary_a boundary_b
   repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
   out="$(_inv_out "$repo")"
@@ -277,7 +280,7 @@ _inv_out() {
   local repo out
   repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
   out="$(_inv_out "$repo")"
-  run jq -r '.reconciliation.contains[] | select(.kind=="catalog_pool_runner" or .kind=="aggregate_runner")
+  run jq -r '.reconciliation.contains[] | select(.kind=="bats_tree_runner" or .kind=="aggregate_runner")
              | .membership' "$out/inventory.json"
   [[ "$output" != *"exact"* ]]
 }
@@ -293,7 +296,7 @@ _inv_out() {
 
 @test "P072 Step 10: no EXACT-membership unit is reached by two gates in this repository" {
   # The honest double-execution surface. A runtime-partitioned candidate set
-  # must not be counted here, or every pooled bats file looks duplicated.
+  # must not be counted here, or every bats file in the tree looks duplicated.
   local repo out dupes
   repo="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
   out="$(_inv_out "$repo")"

@@ -154,15 +154,6 @@ declare -A DELEGATED_SUITES=(
   # bumps and freeze/invalidation cycles through the CLI, so it gets its own
   # job with its own budget instead of eating this job's headroom.
   ["test-aid-plan-final-boundary.bats"]="plan-final-tests"
-  # P069 EPIC 5 CI fix — same reasoning as the two lines above: this suite
-  # (Step 6's isolation-experiment protocol) creates a REAL disposable git
-  # worktree per test (git worktree add/remove), which measured 5m58s total
-  # locally for just its own 11 tests — bash-tests' own real CI run reached
-  # this suite at ~18m32s already elapsed (suite 89/132) and the job's
-  # 20-minute budget was hit mid-suite as a direct, deterministic result,
-  # not a flake. Delegated to its own job with its own budget instead of
-  # eating this job's headroom, exactly like the two entries above.
-  ["test-aid-test-isolation-experiment.bats"]="isolation-experiment-tests"
   # P079 Step 12 (IMP-483) — the three heaviest P076 suites, same reasoning as
   # every entry above: each drives real processes (a bash fixture service under
   # a supervisor, port allocation, /proc identity checks) rather than mocks, so

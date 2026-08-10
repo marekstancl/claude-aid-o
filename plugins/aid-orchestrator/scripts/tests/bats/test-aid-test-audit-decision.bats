@@ -40,23 +40,6 @@ valid_decision() {
       "impact": { "kind": "measured", "before_ms": 147000, "after_ms": 44790, "assumptions": [] }
     }
   ],
-  "parallelization": {
-    "lanes": [
-      {
-        "lane_id": "lane-isolated-1",
-        "disposition": "proposed_parallel",
-        "run_unit_ids": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
-        "resource_basis": ["temp_path/per-test"],
-        "evidence_refs": ["pilots/lane-isolated-1.json"]
-      }
-    ],
-    "smallest_safe_pilot": {
-      "run_unit_ids": ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
-      "workers": 4,
-      "repeat": 2,
-      "pass_criteria": ["same membership", "same aggregate verdict", "clean git status"]
-    }
-  },
   "unresolved": [],
   "portfolio_coverage": {
     "inventory_count": 1,
@@ -182,47 +165,6 @@ mutate() { valid_decision | jq -c "$1"; }
   [ "$output" = "complete" ]
 }
 
-@test "a proposed_parallel lane with no evidence is rejected" {
-  run aid_test_audit_decision_write \
-    "$(mutate '.parallelization.lanes[0].evidence_refs = []')" "$TMP/d.json"
-  [ "$status" -eq 3 ]
-}
-
-@test "a keep_serial lane with no evidence is accepted" {
-  run aid_test_audit_decision_write \
-    "$(mutate '.parallelization.lanes[0].disposition = "keep_serial" | .parallelization.lanes[0].evidence_refs = []')" \
-    "$TMP/d.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "an invalid resource_basis pair is rejected" {
-  run aid_test_audit_decision_write \
-    "$(mutate '.parallelization.lanes[0].resource_basis = ["database/sometimes"]')" "$TMP/d.json"
-  [ "$status" -eq 3 ]
-}
-
-@test "two lanes sharing a run unit exit 4 naming BOTH lane ids" {
-  local two_lanes
-  two_lanes="$(mutate '
-    .parallelization.lanes += [{
-      lane_id: "lane-isolated-2",
-      disposition: "proposed_parallel",
-      run_unit_ids: ["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm"],
-      resource_basis: ["temp_path/per-test"],
-      evidence_refs: ["pilots/lane-isolated-2.json"]
-    }]')"
-  run aid_test_audit_decision_write "$two_lanes" "$TMP/d.json"
-  [ "$status" -eq 4 ]
-  [[ "$output" == *"lane-isolated-1"* ]]
-  [[ "$output" == *"lane-isolated-2"* ]]
-  [ ! -f "$TMP/d.json" ]
-}
-
-# The schema's own pattern anchors a ref to an alphanumeric first character,
-# so a LEADING `../` never reaches the bash check. The escape the schema
-# cannot see is an EMBEDDED `..`, which is what exit 5 exists for — these two
-# cases pin which layer catches which vector, so neither can be removed on
-# the assumption the other covers it.
 @test "an evidence_ref escaping via an embedded .. exits 5" {
   run aid_test_audit_decision_write \
     "$(mutate '.actions[0].evidence_refs = ["profiles/../../../etc/passwd"]')" "$TMP/d.json"
@@ -277,22 +219,6 @@ mutate() { valid_decision | jq -c "$1"; }
   run aid_test_audit_decision_write \
     "$(mutate '.schema_version = "aid-test-audit-decision-v2"')" "$TMP/d.json"
   [ "$status" -eq 3 ]
-}
-
-@test "lane_units returns the sorted union across lanes" {
-  local two_lanes
-  two_lanes="$(mutate '
-    .parallelization.lanes += [{
-      lane_id: "lane-b",
-      disposition: "keep_serial",
-      run_unit_ids: ["sh:plugins/aid-orchestrator/scripts/tests/test-semantic-review"],
-      resource_basis: ["fixed_path/shared"],
-      evidence_refs: []
-    }]')"
-  aid_test_audit_decision_write "$two_lanes" "$TMP/d.json"
-  run aid_test_audit_decision_lane_units "$TMP/d.json"
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 2 ]
 }
 
 @test "a decision artifact without an audit_id is rejected (it could not be bound to its audit)" {

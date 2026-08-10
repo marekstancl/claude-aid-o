@@ -88,7 +88,7 @@ _sections_present() {   # <file>
 
 @test "the second round shows a trend against the first" {
   mkdir -p "$TEST_TMPDIR/rounds/r1" "$TEST_TMPDIR/rounds/r2"
-  printf '{"audit_id":"R1","units":10,"examined":2,"unexamined":8,"measured_min":5.0,"censored":3,"parallel_safe":1,"actions":4}'     > "$TEST_TMPDIR/rounds/r1/round-summary.json"
+  printf '{"audit_id":"R1","units":10,"examined":2,"unexamined":8,"measured_min":5.0,"censored":3,"actions":4}'     > "$TEST_TMPDIR/rounds/r1/round-summary.json"
   printf '{"schema_version":"1.0.0","generated_at":"t","runner_families":["bats"],"entries":[]}' > "$TEST_TMPDIR/rounds/r2/inventory.json"
   run bash "$REPORT" --audit-dir "$TEST_TMPDIR/rounds/r2" --project-root "$PROJ"
   [ "$status" -eq 0 ]

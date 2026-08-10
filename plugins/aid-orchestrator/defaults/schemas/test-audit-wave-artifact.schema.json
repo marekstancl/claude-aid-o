@@ -24,7 +24,6 @@
         "shard_portfolio",
         "performance_cost",
         "flake_isolation",
-        "parallel_safety",
         "adversarial_review",
         "consolidator"
       ]
@@ -252,8 +251,6 @@
               "split",
               "remove",
               "quarantine",
-              "keep_serial",
-              "parallelize",
               "measure"
             ]
           },

@@ -79,7 +79,7 @@ _minimal_receipt() {
   _have_jsonschema || skip "python3+jsonschema unavailable"
   jq -nc '{
     unit_id:"bats:running", job_id:"job-1", state:"running", duration_ms:null,
-    concurrency_context:"parallel", co_scheduled_with:["bats:other"],
+    concurrency_context:"sequential", co_scheduled_with:[],
     stdout_path:"/tmp/x/stdout.log", exit_code:null
   }' > "$WORK/receipt.json"
   jq -n --argjson r "$(cat "$WORK/receipt.json")" \

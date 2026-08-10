@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-decision.schema.json",
-  "title": "AID Test Portfolio Audit \u2014 Consolidated Decision Artifact",
-  "$comment": "producer: aid-test-audit-consolidate.sh (via lib/aid-test-audit-decision.sh aid_test_audit_decision_write), consumers: [lib/aid-test-audit-chat-summary.sh, lib/aid-test-audit-write-plan-bridge.sh]. P072 Step 2. This is the CONSOLIDATED decision \u2014 a single global conclusion per audit. Per-unit terminal dispositions live in the wave artifacts (test-audit-wave-artifact.schema.json), not here.",
-  "description": "Strict, public-safe decision artifact written once per full-mode audit. Human prose belongs in the rendered report and the evidence files, never in a durable protocol field here \u2014 every free-text field is length-bounded and rejects absolute paths.",
+  "title": "AID Test Portfolio Audit — Consolidated Decision Artifact",
+  "$comment": "producer: aid-test-audit-consolidate.sh (via lib/aid-test-audit-decision.sh aid_test_audit_decision_write), consumers: [lib/aid-test-audit-chat-summary.sh, lib/aid-test-audit-write-plan-bridge.sh]. P072 Step 2. This is the CONSOLIDATED decision — a single global conclusion per audit. Per-unit terminal dispositions live in the wave artifacts (test-audit-wave-artifact.schema.json), not here.",
+  "description": "Strict, public-safe decision artifact written once per full-mode audit. Human prose belongs in the rendered report and the evidence files, never in a durable protocol field here — every free-text field is length-bounded and rejects absolute paths.",
   "type": "object",
   "required": [
     "schema_version",
@@ -11,7 +11,6 @@
     "audit_status",
     "current_runtime",
     "actions",
-    "parallelization",
     "unresolved",
     "portfolio_coverage",
     "portfolio_change"
@@ -30,7 +29,7 @@
         "complete",
         "incomplete"
       ],
-      "description": "`incomplete` blocks the --write-plan handoff (lib/aid-test-audit-write-plan-bridge.sh). It is NOT a failure \u2014 it is an honest refusal to be treated as remediation-ready."
+      "description": "`incomplete` blocks the --write-plan handoff (lib/aid-test-audit-write-plan-bridge.sh). It is NOT a failure — it is an honest refusal to be treated as remediation-ready."
     },
     "incomplete_reason": {
       "$ref": "#/$defs/controlled_reason",
@@ -114,7 +113,7 @@
     },
     "actions": {
       "type": "array",
-      "description": "May be empty \u2014 a genuinely healthy portfolio proposes nothing. An empty actions[] must never be conflated with audit_status: incomplete.",
+      "description": "May be empty — a genuinely healthy portfolio proposes nothing. An empty actions[] must never be conflated with audit_status: incomplete.",
       "items": {
         "type": "object",
         "required": [
@@ -133,8 +132,6 @@
               "merge",
               "remove",
               "split",
-              "parallelize",
-              "keep_serial",
               "measure",
               "add",
               "strengthen",
@@ -209,7 +206,7 @@
                       "L",
                       "decision-required"
                     ],
-                    "description": "Effort to VERIFY the change did not lose anything \u2014 split from the edit itself, because most delete proposals are S to perform and L to verify, and the verification cost is what decides whether it is worth doing."
+                    "description": "Effort to VERIFY the change did not lose anything — split from the edit itself, because most delete proposals are S to perform and L to verify, and the verification cost is what decides whether it is worth doing."
                   },
                   "repeat_count": {
                     "type": "integer",
@@ -254,124 +251,7 @@
                 "type": "null"
               }
             ],
-            "description": "What newly goes undetected (remove/merge) or newly becomes detected (add/strengthen). Its own field because smuggling it into impact.assumptions violated the impact contract: an unknown impact with no number carries no prose, and that rule is right \u2014 risk is not an assumption about a number, it is a consequence of the change."
-          }
-        }
-      }
-    },
-    "parallelization": {
-      "type": "object",
-      "required": [
-        "lanes",
-        "smallest_safe_pilot"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "lanes": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "lane_id",
-              "disposition",
-              "run_unit_ids",
-              "resource_basis",
-              "evidence_refs"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "lane_id": {
-                "$ref": "#/$defs/stable_id"
-              },
-              "disposition": {
-                "enum": [
-                  "proposed_parallel",
-                  "keep_serial",
-                  "blocked_pending_fix",
-                  "context_required"
-                ]
-              },
-              "run_unit_ids": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                  "$ref": "#/$defs/stable_id"
-                },
-                "description": "Disjointness ACROSS lanes is not expressible in JSON Schema; lib/aid-test-audit-decision.sh enforces it in bash and returns exit code 4 naming both lane ids."
-              },
-              "resource_basis": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/resource_pair"
-                }
-              },
-              "evidence_refs": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/evidence_ref"
-                }
-              }
-            },
-            "allOf": [
-              {
-                "$comment": "A lane may only be proposed for parallel execution with at least one citable piece of evidence. keep_serial/context_required may legitimately carry none.",
-                "if": {
-                  "properties": {
-                    "disposition": {
-                      "const": "proposed_parallel"
-                    }
-                  },
-                  "required": [
-                    "disposition"
-                  ]
-                },
-                "then": {
-                  "properties": {
-                    "evidence_refs": {
-                      "minItems": 1
-                    }
-                  }
-                }
-              }
-            ]
-          }
-        },
-        "smallest_safe_pilot": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "required": [
-            "run_unit_ids",
-            "workers",
-            "repeat",
-            "pass_criteria"
-          ],
-          "additionalProperties": false,
-          "description": "The smallest bounded pilot that would settle the most currently-unresolved units. Null only when nothing is unresolved.",
-          "properties": {
-            "run_unit_ids": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/stable_id"
-              }
-            },
-            "workers": {
-              "type": "integer",
-              "minimum": 2
-            },
-            "repeat": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "pass_criteria": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/bounded_text"
-              }
-            }
+            "description": "What newly goes undetected (remove/merge) or newly becomes detected (add/strengthen). Its own field because smuggling it into impact.assumptions violated the impact contract: an unknown impact with no number carries no prose, and that rule is right — risk is not an assumption about a number, it is a consequence of the change."
           }
         }
       }
@@ -395,7 +275,7 @@
           },
           "next_measurement": {
             "$ref": "#/$defs/bounded_text",
-            "description": "Must name a bounded operation this plugin can actually run \u2014 not an aspiration."
+            "description": "Must name a bounded operation this plugin can actually run — not an aspiration."
           }
         }
       }
@@ -410,7 +290,7 @@
         "duplicate_run_unit_ids"
       ],
       "additionalProperties": false,
-      "description": "Computed by the consolidator from the inventory, the dispatch manifest and the wave artifacts \u2014 never from a shard's self-reported count.",
+      "description": "Computed by the consolidator from the inventory, the dispatch manifest and the wave artifacts — never from a shard's self-reported count.",
       "properties": {
         "inventory_count": {
           "type": "integer",
@@ -617,13 +497,13 @@
       "minLength": 1,
       "maxLength": 200,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
-      "$comment": "Matches the run_unit_id grammar (bats:path, sh:path, gate:name, npm:script) plus lane ids. Leading '/' is impossible, which is what keeps an absolute path out of an id field."
+      "$comment": "Matches the run_unit_id grammar (bats:path, sh:path, gate:name, npm:script). Leading '/' is impossible, which is what keeps an absolute path out of an id field."
     },
     "bounded_text": {
       "type": "string",
       "minLength": 1,
       "maxLength": 500,
-      "$comment": "Bounded, public-safe reason text. What is ACTUALLY enforced: length 1-500, no embedded absolute path, and a NAMED set of credential shapes (AWS key id, GitHub/Slack tokens, PEM private-key header, an inline credential assignment with a 12+ character value). This is a deliberately narrow list, not general secret detection \u2014 claiming the latter would promise a guarantee no regex can keep. Human prose belongs in the rendered report and evidence files.",
+      "$comment": "Bounded, public-safe reason text. What is ACTUALLY enforced: length 1-500, no embedded absolute path, and a NAMED set of credential shapes (AWS key id, GitHub/Slack tokens, PEM private-key header, an inline credential assignment with a 12+ character value). This is a deliberately narrow list, not general secret detection — claiming the latter would promise a guarantee no regex can keep. Human prose belongs in the rendered report and evidence files.",
       "allOf": [
         {
           "$comment": "Rejects an embedded absolute path. Human prose belongs in the rendered report and evidence files; this field carries a bounded, public-safe reason only.",
@@ -656,7 +536,7 @@
           }
         },
         {
-          "$comment": "An inline credential assignment with a substantial value: `api_key=\u2026`, `secret: \u2026`, `password=\u2026`, `token=\u2026`. Deliberately requires 12+ characters so a sentence like `the api_key is unset` is not rejected.",
+          "$comment": "An inline credential assignment with a substantial value: `api_key=…`, `secret: …`, `password=…`, `token=…`. Deliberately requires 12+ characters so a sentence like `the api_key is unset` is not rejected.",
           "not": {
             "pattern": "(?i)(api[_-]?key|secret|passwd|password|token)\\s*[:=]\\s*\\S{12,}"
           }
@@ -689,7 +569,7 @@
         "template_context_required",
         "source_unreadable"
       ],
-      "$comment": "Controlled, not free text \u2014 a reason a consumer can branch on. Extending this list is a schema change, which is the point: a new reason must be a deliberate contract decision."
+      "$comment": "Controlled, not free text — a reason a consumer can branch on. Extending this list is a schema change, which is the point: a new reason must be a deliberate contract decision."
     },
     "impact": {
       "type": "object",
@@ -731,7 +611,7 @@
       },
       "allOf": [
         {
-          "$comment": "measured means two comparable runs happened \u2014 both endpoints must be real numbers, and there is nothing left to assume.",
+          "$comment": "measured means two comparable runs happened — both endpoints must be real numbers, and there is nothing left to assume.",
           "if": {
             "properties": {
               "kind": {
@@ -777,7 +657,7 @@
           }
         },
         {
-          "$comment": "`unknown` claims no BENEFIT \u2014 which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced. The assumptions rule follows from that same relaxation: when a number IS recorded it must be qualified, because a bare `before_ms` on an unfinished run reads as a measured total; when no number is recorded there is nothing to qualify and assumptions would be clutter.",
+          "$comment": "`unknown` claims no BENEFIT — which is what an absent `after_ms` says. A `before_ms` may still be recorded, because a current cost is not a claimed saving: with no after value there is no delta to imply. This is what lets an honest LOWER BOUND from an unfinished profile be reported at all; forbidding both numbers forced the alternative of dropping the only measurement the run actually produced. The assumptions rule follows from that same relaxation: when a number IS recorded it must be qualified, because a bare `before_ms` on an unfinished run reads as a measured total; when no number is recorded there is nothing to qualify and assumptions would be clutter.",
           "if": {
             "properties": {
               "kind": {

@@ -52,8 +52,8 @@ In `static` and `measure` mode a disposition is welcome but not required — tho
 measurement data to decide most units on, and the consolidator enforces presence only for `full`.
 
 **`disposition` must be exactly one of this enum** — no synonym, no omission, no free text:
-`keep`, `fix`, `rewrite_unit`, `merge`, `split`, `remove`, `quarantine`, `keep_serial`,
-`parallelize`, `measure`. A record without `run_unit_id` and `disposition` is rejected outright.
+`keep`, `fix`, `rewrite_unit`, `merge`, `split`, `remove`, `quarantine`,
+`measure`. A record without `run_unit_id` and `disposition` is rejected outright.
 
 Each record carries, all required: `run_unit_id`, `disposition`, `behavior_claim` (the invariant or
 historical regression this unit protects, 1–300 chars), `failure_signal` (what the test emits when

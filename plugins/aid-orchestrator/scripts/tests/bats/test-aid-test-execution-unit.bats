@@ -61,7 +61,7 @@ _await_terminal_receipt() {
 
 # -- 2. argv-type command dispatch, happy path ------------------------------
 @test "execution_unit_run dispatches an argv command and reaches terminal_pass" {
-  unit_json='{"unit_id":"bats:foo/bar.bats","command":{"type":"argv","argv":["bash","-c","echo hi; exit 0"]},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"bats:foo/bar.bats","command":{"type":"argv","argv":["bash","-c","echo hi; exit 0"]},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   job_id="$(execution_unit_run "$unit_json" "$JOBS")"
   [ -n "$job_id" ]
   _await_terminal_receipt "$job_id"
@@ -72,7 +72,7 @@ _await_terminal_receipt() {
 
 # -- 3. shell-type command dispatch -----------------------------------------
 @test "execution_unit_run dispatches a shell command" {
-  unit_json='{"unit_id":"bats:shell-unit","command":{"type":"shell","shell":"echo shelled; exit 3"},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"bats:shell-unit","command":{"type":"shell","shell":"echo shelled; exit 3"},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   job_id="$(execution_unit_run "$unit_json" "$JOBS")"
   _await_terminal_receipt "$job_id"
   run execution_unit_receipt "$JOBS" "$job_id" "bats:shell-unit"
@@ -83,7 +83,7 @@ _await_terminal_receipt() {
 
 # -- 4. unsupported command.type is rejected --------------------------------
 @test "execution_unit_run rejects a third command.type" {
-  unit_json='{"unit_id":"bad-unit","command":{"type":"weird","foo":"bar"},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"bad-unit","command":{"type":"weird","foo":"bar"},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   run execution_unit_run "$unit_json" "$JOBS"
   [ "$status" -ne 0 ]
   [[ "$output" == *"unsupported command.type"* ]]
@@ -91,7 +91,7 @@ _await_terminal_receipt() {
 
 # -- 5. unit_id is sanitized deterministically into a valid job_id ----------
 @test "unit_id with ':' and '/' is sanitized into a valid, deterministic job_id" {
-  unit_json='{"unit_id":"bats:scripts/tests/bats/foo.bats","command":{"type":"argv","argv":["bash","-c","exit 0"]},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"bats:scripts/tests/bats/foo.bats","command":{"type":"argv","argv":["bash","-c","exit 0"]},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   job_id1="$(execution_unit_run "$unit_json" "$JOBS")"
   _await_terminal_receipt "$job_id1"
   [[ "$job_id1" != *:* && "$job_id1" != */* ]]
@@ -100,7 +100,7 @@ _await_terminal_receipt() {
 
 # -- 6. hung fixture reaches state:timed_out with zero orphaned descendants -
 @test "a hung unit past its deadline reaches timed_out with no orphaned descendants" {
-  unit_json='{"unit_id":"hung-unit","command":{"type":"shell","shell":"sleep 60 & echo $! > '"$TMP"'/child.pid; wait"},"deadline_seconds":1,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"hung-unit","command":{"type":"shell","shell":"sleep 60 & echo $! > '"$TMP"'/child.pid; wait"},"deadline_seconds":1,"membership_verified":false,"dedup":false}'
   job_id="$(execution_unit_run "$unit_json" "$JOBS")"
   _await_terminal_receipt "$job_id" 100
   run execution_unit_receipt "$JOBS" "$job_id" "hung-unit"
@@ -115,7 +115,7 @@ _await_terminal_receipt() {
 
 # -- 7b. argv element with an embedded newline is preserved as ONE argument -
 @test "an argv element containing an embedded newline is passed through as a single argument (Codex regression)" {
-  unit_json='{"unit_id":"newline-arg-unit","command":{"type":"argv","argv":["bash","-c","printf %s\\\\n \"$1\" > out.txt","_","line-one\nline-two"]},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"newline-arg-unit","command":{"type":"argv","argv":["bash","-c","printf %s\\\\n \"$1\" > out.txt","_","line-one\nline-two"]},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   job_id="$(execution_unit_run "$unit_json" "$JOBS")"
   _await_terminal_receipt "$job_id"
   # job.json's persisted command array must still have exactly 5 elements —
@@ -167,7 +167,7 @@ _await_terminal_receipt() {
 # per-unit shape).
 @test "a standalone receipt (default args) validates against execution-unit-receipt.schema.json" {
   command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1 || skip "python3+jsonschema unavailable"
-  unit_json='{"unit_id":"bats:schema-check","command":{"type":"argv","argv":["bash","-c","exit 0"]},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"bats:schema-check","command":{"type":"argv","argv":["bash","-c","exit 0"]},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   job_id="$(execution_unit_run "$unit_json" "$JOBS")"
   _await_terminal_receipt "$job_id"
   receipt="$(execution_unit_receipt "$JOBS" "$job_id" "bats:schema-check")"
@@ -187,7 +187,7 @@ sys.exit(1 if list(Draft202012Validator(schema).iter_errors(inst)) else 0)
 
 # -- 7. streamed log is readable WHILE the unit is still running ------------
 @test "stdout is readable via stdout_path while the unit is still in-flight" {
-  unit_json='{"unit_id":"streaming-unit","command":{"type":"shell","shell":"echo first; sleep 3; echo second"},"deadline_seconds":10,"resource_locks":[],"parallel_eligible":false,"membership_verified":false,"dedup":false}'
+  unit_json='{"unit_id":"streaming-unit","command":{"type":"shell","shell":"echo first; sleep 3; echo second"},"deadline_seconds":10,"membership_verified":false,"dedup":false}'
   job_id="$(execution_unit_run "$unit_json" "$JOBS")"
   # Poll briefly for the first line to appear while the unit is still running.
   for ((i = 0; i < 50; i++)); do

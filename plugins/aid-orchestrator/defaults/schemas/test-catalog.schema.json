@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-catalog.schema.json",
   "title": "AID Test Portfolio — Catalog",
-  "$comment": "producer: aid-test-inventory.sh (proposed) / aid-test-catalog-approve.sh (approved copy), consumers: [aid-audit-tests dispatch/allowlist/measure, P069 scheduler (shipped v2.67.0, approved-mapping-only)]",
+  "$comment": "producer: aid-test-inventory.sh (proposed) / aid-test-catalog-approve.sh (approved copy), consumers: [aid-audit-tests dispatch/allowlist/measure, aid-select-tests (approved-mapping-only)]. P078 removed the scheduler consumer and the parallel block with the parallelism machinery.",
   "description": "Canonical test-portfolio catalog. run_units[] is the ONLY array any selection, scheduling, or fingerprinting logic reads — one entry per real, schedulable command (whole .bats/.sh file, or one declared gate). test_cases[] nested under a run_unit is a diagnostic-only sub-count (e.g. individual Bats @test entries) and is never used for identity, selection, or fingerprinting. source_pattern_mappings[] proposes which run_unit_ids a changed source path should trigger; mapping_approval gates whether that proposal may be treated as authoritative — approving the catalog file as a whole does NOT imply mapping_approval.",
   "type": "object",
   "required": [
@@ -200,161 +200,6 @@
       },
       "additionalProperties": false
     },
-    "parallel": {
-      "type": "object",
-      "required": [
-        "status",
-        "exclusive_resources",
-        "max_workers",
-        "internal_parallelism"
-      ],
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": [
-            "safe",
-            "constrained",
-            "exclusive",
-            "unknown"
-          ]
-        },
-        "exclusive_resources": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "max_workers": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "internal_parallelism": {
-          "type": "boolean"
-        },
-        "provenance": {
-          "description": "Where a non-`unknown` status came from, when, by what method, and against which source content. Nullable throughout so a catalog written before this field existed still loads — as all-null, and therefore effectively `unknown`.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "evidence_ref",
-            "verified_at",
-            "method",
-            "source_sha256",
-            "resource_digest"
-          ],
-          "properties": {
-            "evidence_ref": {
-              "description": "The audit or pilot receipt this rests on. A status with no citable evidence is an opinion.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "verified_at": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time"
-            },
-            "method": {
-              "description": "How it was established. A migrated entry must never be indistinguishable from a freshly piloted one.",
-              "type": [
-                "string",
-                "null"
-              ],
-              "enum": [
-                "resource_map_plus_pilot",
-                "migrated_p071_step3",
-                "manual_pm",
-                null
-              ]
-            },
-            "source_sha256": {
-              "description": "Digest over the unit's source_paths in catalog order. When it no longer matches, the recorded status describes content that is gone.",
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[0-9a-f]{64}$"
-            },
-            "resource_digest": {
-              "description": "Digest over the unit's sorted resource kind/namespace pairs from the Step 14 map. This is the second tier: when the source hash changes but the resources did not, the status survives and the hash is refreshed. A blanket revert would cost a pilot for a comment.",
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[0-9a-f]{64}$"
-            }
-          }
-        }
-      },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "unknown"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "exclusive_resources": {
-                "maxItems": 0
-              }
-            }
-          }
-        },
-        {
-          "$comment": "A non-`unknown` status must carry its full provenance. Anything less is a claim with no way to check it, and this field decides whether a test file runs concurrently with others.",
-          "if": {
-            "properties": {
-              "status": {
-                "not": {
-                  "const": "unknown"
-                }
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          "then": {
-            "properties": {
-              "provenance": {
-                "properties": {
-                  "evidence_ref": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "verified_at": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "method": {
-                    "type": "string"
-                  },
-                  "source_sha256": {
-                    "type": "string"
-                  },
-                  "resource_digest": {
-                    "type": "string"
-                  }
-                }
-              }
-            },
-            "required": [
-              "provenance"
-            ]
-          }
-        }
-      ],
-      "description": "Whether this unit may share a parallel pool. `status` means nothing a reader can check unless it carries WHERE the answer came from — which is what `provenance` adds. Every consumer must go through aid_test_catalog_provenance_effective_status rather than reading `status` directly, because the reversion rule below is not something a caller can be trusted to remember."
-    },
     "run_unit": {
       "type": "object",
       "required": [
@@ -369,7 +214,6 @@
         "confidence",
         "command",
         "runtime",
-        "parallel",
         "isolation",
         "recommendation",
         "test_cases"
@@ -447,9 +291,6 @@
             }
           },
           "additionalProperties": true
-        },
-        "parallel": {
-          "$ref": "#/$defs/parallel"
         },
         "isolation": {
           "$ref": "#/$defs/isolation"

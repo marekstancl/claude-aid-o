@@ -3760,17 +3760,13 @@ _resume_command_template() {
 }
 
 # _resume_concurrency_context <gate> <repo> — the SAME derivation the in-line
-# runner performs (aid-run-gates.sh: only `targeted_tests` can be non-
-# sequential, and its context is the scheduler rollout gate's effective mode).
-# Anything unreadable falls back to `sequential`, the runner's own default.
+# runner performs. P078 removed the scheduler, so every gate — targeted_tests
+# included — executes sequentially and the baseline series is single-valued.
+# Kept as a function (rather than inlining the literal) because the resume path
+# and the in-line runner must never drift on this value, and a named seam is
+# where a future change would land.
 _resume_concurrency_context() {
-  local gate="$1" repo="${2:-}" rollout="" mode="sequential"
-  [[ "$gate" == "targeted_tests" ]] || { printf 'sequential'; return 0; }
-  [[ -f "${SCRIPT_DIR}/aid-scheduler-rollout-gate.sh" ]] || { printf 'sequential'; return 0; }
-  [[ -n "$repo" && -d "$repo" ]] || repo="$(aid_state_root 2>/dev/null || printf '%s' "$PWD")"
-  rollout="$(bash "${SCRIPT_DIR}/aid-scheduler-rollout-gate.sh" --project-root "$repo" 2>/dev/null)" || rollout=""
-  mode="$(jq -r '.effective_mode // "sequential"' <<<"$rollout" 2>/dev/null || echo sequential)"
-  case "$mode" in observe_parallel|parallel) printf '%s' "$mode" ;; *) printf 'sequential' ;; esac
+  printf 'sequential'
 }
 
 # _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [execution_yaml] [repo] [tree]

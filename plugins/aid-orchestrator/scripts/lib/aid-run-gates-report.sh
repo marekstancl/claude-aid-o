@@ -28,8 +28,7 @@
 # Emits the merged report JSON to stdout.
 #
 # NO top-level `set -e`/`set -euo pipefail` — sourced under the caller's own
-# strict shell (same idiom as aid-test-adapter-bats.sh /
-# aid-test-scheduler-report.sh).
+# strict shell (same idiom as aid-test-adapter-bats.sh).
 
 merge_escalation_report() {
   local targeted_report_json="$1" full_report_json="$2" reason="$3"

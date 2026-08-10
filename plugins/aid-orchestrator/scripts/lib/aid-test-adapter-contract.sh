@@ -87,10 +87,10 @@ adapter_slug() {
 #   [source_paths_json] [confidence]
 #   Emits one schema-valid run_units[] entry (test-catalog.schema.json) to
 #   stdout, with safe closed-enum defaults for every field a Wave-0 scanner
-#   cannot yet know (parallel.status: unknown, recommendation: keep,
-#   isolation left at "unknown"/empty). Later steps (Step 4's lock-usage
-#   grep, Step 11's specialist findings) refine these fields — this helper
-#   never invents a non-default value on their behalf.
+#   cannot yet know (recommendation: keep, isolation left at
+#   "unknown"/empty). Later steps (Step 11's specialist findings) refine
+#   these fields — this helper never invents a non-default value on their
+#   behalf.
 #
 #   <command_json> and <test_cases_json> must be valid JSON (object / array
 #   literals respectively) — callers build these with jq themselves.
@@ -122,7 +122,6 @@ adapter_run_unit_json() {
       confidence: $confidence,
       command: $command,
       runtime: { fingerprint: $fingerprint },
-      parallel: { status: "unknown", exclusive_resources: [], max_workers: null, internal_parallelism: false },
       isolation: { temp_workspace: "unknown", fixed_ports: [], shared_paths: [], lock_usage: [], adapter_confidence: "static_parse" },
       recommendation: "keep",
       test_cases: $test_cases

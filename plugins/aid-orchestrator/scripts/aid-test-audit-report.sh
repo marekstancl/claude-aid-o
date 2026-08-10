@@ -3,7 +3,7 @@
 #
 # WHY A FIXED FORM
 #   Four days of audits produced fragments: a count here, a cost there, a
-#   parallel number somewhere else — each shown only when the owner complained
+#   a number somewhere else — each shown only when the owner complained
 #   about its absence. The owner's requirement is the opposite: one page, all
 #   sections, every time, whether or not the data behind a section is complete.
 #   A section with no data still renders, saying what is missing and why —
@@ -11,7 +11,7 @@
 #   "nothing to see here".
 #
 # THE CANONICAL SECTIONS (never omit one):
-#   1. Hlavní čísla        — totals: units, examined vs not, measured cost, parallel
+#   1. Hlavní čísla        — totals: units, examined vs not, measured cost
 #   2. Prověřenost         — how many units anyone actually examined
 #   3. Skupiny             — the portfolio grouped so a human can hold it
 #   4. Co žere čas         — top costs and every timeout-censored unit
@@ -86,13 +86,11 @@ try:
     if sibs: prev = jload(sibs[-1], {})
 except Exception: pass
 
-cat_units, cat_safe = [], set()
+cat_units = []
 try:
     import yaml
     c = yaml.safe_load(open(CAT))
     cat_units = c.get("run_units", [])
-    cat_safe = {u["run_unit_id"] for u in cat_units
-                if (u.get("parallel") or {}).get("status") == "safe"}
 except Exception:
     pass
 
@@ -124,12 +122,11 @@ def gkey(uid):
     return (kind, "/".join(parts[:-1]) if len(parts) > 1 else "(kořen)")
 _cc = sc.get("case_counts") or {}
 _all_cases = {c["file"]: c["cases"] for c in (_cc.get("files") or _cc.get("top") or [])}
-groups = collections.defaultdict(lambda: {"n": 0, "cost": 0.0, "par": 0, "to": 0, "cases": 0})
+groups = collections.defaultdict(lambda: {"n": 0, "cost": 0.0, "to": 0, "cases": 0})
 for e in inv:
     uid = e["run_unit_id"]
     g = groups[gkey(uid)]
     g["n"] += 1
-    if uid in cat_safe: g["par"] += 1
     m = by_unit_meas.get(uid)
     if m and m.get("duration_ms"):
         g["cost"] += m["duration_ms"] / 1000
@@ -157,10 +154,6 @@ def nm(uid):
 qual = collections.defaultdict(list)
 for f in findings:
     qual[f.get("category", "ostatní")].append(f)
-
-safe_cost = sum((by_unit_meas.get(u["run_unit_id"], {}).get("duration_ms") or 0)
-                for u in cat_units
-                if u["run_unit_id"] in cat_safe) / 1000
 
 # ── html ────────────────────────────────────────────────────────────────────
 CSS = """
@@ -232,7 +225,6 @@ if cases_total:
     H.append(f'<div class="stat"><b>{cases_total}</b><span>testovacích případů ({detail})</span></div>')
 H.append(f'<div class="stat bad"><b>{n_unexamined}</b><span>zatím neprověřeno do hloubky</span></div>')
 H.append(f'<div class="stat"><b>{total_s/60:.0f}&nbsp;min</b><span>změřená cena ({len(measured)} sad)</span></div>')
-H.append(f'<div class="stat good"><b>{len(cat_safe)}</b><span>smí běžet paralelně</span></div>')
 _unref_n = len(sc.get("unreferenced_tests") or [])
 _files_n = sum((sc.get("scope") or {}).get(k) or 0
                for k in ("bats_files", "py_test_files", "ts_test_files"))
@@ -269,7 +261,7 @@ else:
 H.append(sec("3 · Skupiny", "Z čeho se portfolio skládá"))
 if groups:
     H.append('<div class="tablewrap"><table><tr><th>Skupina (typ · umístění)</th>'
-             '<th class="num">Sad</th><th class="num">Případů</th><th class="num">Cena</th><th class="num">s/případ</th><th class="num">Paralelně</th>'
+             '<th class="num">Sad</th><th class="num">Případů</th><th class="num">Cena</th><th class="num">s/případ</th>'
              '<th class="num">Utnuto</th></tr>')
     for (kind, d), g in sorted(groups.items(), key=lambda x: -x[1]["cost"]):
         _per = f'{g["cost"]/g["cases"]:.2f}' if g["cases"] and g["cost"] else "—"
@@ -278,7 +270,6 @@ if groups:
                  f'<td class="num">{g["cases"] or "—"}</td>'
                  f'<td class="num">{g["cost"]/60:.1f}&nbsp;min</td>'
                  f'<td class="num">{_per}</td>'
-                 f'<td class="num">{g["par"]}</td>'
                  f'<td class="num">{g["to"] or "—"}</td></tr>')
     H.append('</table></div>')
     _unmapped = cases_total and all(g["cases"] == 0 for g in groups.values())
@@ -335,30 +326,6 @@ else:
 # 5 — páky
 H.append(sec("5 · Kolik ušetříme čím", "Páky podle výnosu"))
 H.append('<div class="tablewrap"><table><tr><th>Páka</th><th>Stav</th><th class="num">Úspora</th><th>Jistota</th></tr>')
-if cat_safe and safe_cost > 0:
-    est = safe_cost * (1 - 1/4)
-    H.append(f'<tr><td><b>Paralelismus</b></td><td>{len(cat_safe)} sad v poolu; '
-             f'sériově stojí {safe_cost/60:.0f} min</td>'
-             f'<td class="num">~{est/60:.0f} min/běh</td><td>odhad při 4 bězích vedle sebe</td></tr>')
-else:
-    blockers = collections.Counter()
-    for l in (dec.get("parallelization", {}).get("lanes") or []):
-        if l.get("disposition") in ("blocked_pending_fix", "keep_serial"):
-            for rb in (l.get("resource_basis") or []):
-                blockers[rb] += len(l.get("run_unit_ids") or [])
-    for u in unresolved:
-        t = (u.get("next_measurement") or "") + (u.get("missing_proof") or "")
-        if "parallel" in t.lower() or "sweep" in t.lower() or "leak" in t.lower():
-            blockers["(detail v Nedokázáno)"] += 1
-    if blockers:
-        tb = blockers.most_common(1)[0]
-        H.append(f'<tr><td><b>Paralelismus</b></td>'
-                 f'<td>zatím 0 s důkazem — největší blokátor <code>{esc(tb[0])}</code> '
-                 f'drží {tb[1]} jednotek; JEHO oprava otevře pool (viz Akce a Nedokázáno)</td>'
-                 f'<td class="num">odemkne se opravou</td><td>z lanes a nedokázaného</td></tr>')
-    else:
-        H.append('<tr><td><b>Paralelismus</b></td><td class="empty">0 s důkazem a žádný pojmenovaný '
-                 'blokátor — to je mezera auditu, ne stav portfolia</td><td class="num">—</td><td>—</td></tr>')
 if censored:
     H.append(f'<tr><td><b>Obří sady</b></td><td>{len(censored)}× utnuto — nejdřív doměřit, pak dělit</td>'
              f'<td class="num">neznámo</td><td>nutné doměřit</td></tr>')
@@ -557,12 +524,12 @@ else:
 # 11 — zdroje
 H.append(sec("11 · Zdroje", "Odkud každé číslo je"))
 cat_note = ("schválený katalog <code>.aid-o/config/test-catalog.yaml</code>" if cat_units
-            else "SCHVÁLENÝ KATALOG NEEXISTUJE — paralelismus je z návrhu/ničeho a sloupec Paralelně je nula právem")
+            else "SCHVÁLENÝ KATALOG NEEXISTUJE — skupiny a počty jsou z návrhu, ne ze schváleného stavu")
 H.append('<p class="legend">inventura: <code>inventory.json</code> · měření: '
          '<code>measurements.jsonl</code> · verdikty analytiků: <code>agents/*.json</code> · '
          'nálezy: <code>consolidated-findings.json</code> · akce a nedokázané: '
          '<code>decision.json</code> · mechanický sken (duplicity, rizika, stabilita): '
-         '<code>content-scan.json</code> · paralelismus: ' + cat_note + '. Vše v adresáři auditu; '
+         '<code>content-scan.json</code> · katalog: ' + cat_note + '. Vše v adresáři auditu; '
          'nic v tomto reportu nevzniklo mimo tyto soubory.</p>')
 
 with open(OUT, "w") as f:
@@ -571,7 +538,7 @@ with open(OUT, "w") as f:
 with open(f"{D}/round-summary.json", "w") as f:
     json.dump({"audit_id": audit_id, "units": n_units, "examined": n_examined,
                "unexamined": n_unexamined, "measured_min": round(total_s/60, 1),
-               "censored": len(censored), "parallel_safe": len(cat_safe),
+               "censored": len(censored),
                "actions": len(actions)}, f, indent=1)
 print(OUT)
 PY
