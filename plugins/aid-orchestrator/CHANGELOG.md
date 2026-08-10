@@ -3,36 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — versioned at the plan-final release boundary (P076)
+## [2.80.0] — 2026-08-10
 
-> **DO NOT run `aid-release.sh` against this heading — set the version by hand first.**
-> `_release_probe_first` matches only numeric `## [X.Y.Z]` headings, so it skips
-> `## [Unreleased]` entirely and returns `2.79.3` — which equals `RELEASED_VERSION`
-> from `plugin.json`, so `update_changelog` takes its `header == CURRENT` branch and
-> `sed`-renames the SHIPPED `## [2.79.3]` heading into the new version. The result:
-> 2.79.3's released history is absorbed into the new release and THIS entry stays
-> `[Unreleased]`. The IMP-093 two-source guard cannot see a heading the probe skipped.
-> Replace `[Unreleased]` with the intended `[X.Y.Z] — YYYY-MM-DD` (in BOTH CHANGELOGs,
-> which must stay byte-identical) before any release automation runs. Tracked as IMP-489.
->
-> **And the byte-identity check will not catch it.** Driven live against a throwaway
-> repository shaped exactly like this plan worktree (no `.aid-o/config/project.yaml`,
-> so the `versioning.files[]` loop never runs): `aid-release.sh patch` renamed
-> `## [2.79.3]` to `## [2.79.4] — <today>` in the root CHANGELOG *and* — through the
-> no-config fallback that finds every other `CHANGELOG.md` — in the plugin CHANGELOG,
-> with the same `sed`. The two files therefore stay byte-identical while both lose the
-> shipped 2.79.3 entry, and `## [Unreleased]` survives untouched above them. Case 2 of
-> `test-p076-docs-closure.bats` compares the two files to each other, so it is silent
-> by construction; only case 4 (P076's entry still names what it shipped) would go red,
-> and only after the release commit already exists.
-
-> AUTO mode used to pretend it could wait. A long gate ran inline, so a killed
-> session took the suite down with it; a controller that died left a run that
-> looked exactly like one making progress; and the infrastructure a test needed
-> was a sleep and a hope. This plan gives every long operation an owner: gates
-> that survive their session, services that are declared and probed, a
-> continuation artifact a dying controller always leaves behind, and a recovery
-> ladder with budgets it cannot quietly reset.
+> **Version set by hand, deliberately (PM decision 2026-08-10).** `aid-release.sh` must not
+> be allowed to derive this heading: `_release_probe_first` matches only numeric
+> `## [X.Y.Z]` headings, so an unversioned pending section makes it return the LAST SHIPPED
+> version, judge it current, and `sed`-rename that released heading into the new one —
+> absorbing its history while leaving this entry unversioned. A no-config fallback applies
+> the same blind `sed` to the plugin CHANGELOG, so byte-identity holds and both files are
+> corrupted identically, which is why the byte-identity test cannot catch it. Writing
+> `2.80.0` here first removes the trigger: the probe now finds a numeric heading that is
+> NOT the current version. Tracked as IMP-482 (canonical; this branch's duplicate is 489).
 
 ### Added
 - **Background gates over an owned job supervisor** — a gate declaring `run_mode: background` runs through `aid-job.sh` (process-group ownership, PID-reuse defeat, a durable HEAD/tree-bound receipt) while the runner still polls it to completion inside the same invocation, so an interrupted session's rerun RE-ATTACHES to the surviving job — found by deterministic id, validated against the command fingerprint and start HEAD — instead of re-running a thirty-minute suite, while command drift cancels, archives and starts fresh.
