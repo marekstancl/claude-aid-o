@@ -159,7 +159,7 @@ jobs:
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-service-lifecycle.bats
         timeout-minutes: 20
 
-  p076-integration-tests:
+  owned-jobs-integration-tests:
     runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
@@ -175,7 +175,7 @@ jobs:
         # The four-phase integration fixture: it starts real services, kills a
         # runner mid-gate and re-attaches. Budget matched to the other
         # real-process suites above.
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-p076-integration.bats
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-owned-jobs-integration.bats
         timeout-minutes: 30
 
   vitest:

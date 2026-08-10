@@ -260,20 +260,28 @@ The `## Implementation Steps` section replaces the old `## High-Level Steps` tab
 **Files:**
 - Create: `exact/path/to/new-file.ts` — {what this file contains and why}
 - Modify: `exact/path/to/existing-file.ts` (lines ~{start}-{end}) — {what changes and why}
-- Test: `tests/exact/path/to/test-file.spec.ts` — {what behavior this tests}
+- Test: `tests/exact/path/to/test-file.spec.ts` (tier: t1) — {what behavior this tests}
 
 **Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
 hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
 line).** Each Files bullet MUST be exactly:
 
 ```
-- <Create|Modify|Test|Rewrite>: `path` [ + `path`]* [(lines ~N-M)] [— prose]
+- <Create|Modify|Test|Rewrite>: `path` [ + `path`]* [(lines ~N-M)] [(tier: t0|t1|t2)] [— prose]
 ```
 
 - The path(s) come FIRST, each in backticks, immediately after the `Verb:` label.
 - Multiple files in one bullet ONLY via an explicit `` + `` between backtick paths.
-- The only parenthetical allowed before the `—` is a `(lines ~N-M)` range; put every
-  other note AFTER the `—`.
+- The only parentheticals allowed before the `—` are a `(lines ~N-M)` range and a
+  `(tier: t0|t1|t2)` declaration; put every other note AFTER the `—`.
+- A `Test:` bullet naming a suite that **does not exist yet** MUST declare its tier.
+  Generation refuses without it (`aid-plan-to-epic.sh`), because a portfolio that can
+  grow untiered is a portfolio that grows back onto the merge path. A bullet pointing
+  at an EXISTING suite needs no declaration — it inherits that file's own
+  `# aid-tier:` tag, which `aid-test-tier-lint.sh` guards. Adding a case to a suite
+  that already exists is the cheapest and most encouraged move, and it stays free.
+  Projects that have adopted no tiers at all are unaffected: the requirement
+  activates only once some suite in the tree carries a tag.
 
 NEVER (these are why plans used to blow up mid-generation):
 - ❌ bold-wrap the bullet: `- **Modify: \`x\` …**` (the `**` breaks label parsing)
@@ -458,6 +466,7 @@ Every step MUST have ALL of these fields populated:
 |-------|-------------------|
 | **Objective** | One clear sentence, no ambiguity |
 | **Files** | At least 1 concrete file path (no placeholders like `src/...`) |
+| **Tier** (`Test:` bullets naming a NEW suite) | `(tier: t0\|t1\|t2)` — chosen from cost and scope, never from importance: **t0** under 2 s per case (the whole tier under 2 min), **t1** under 30 s per case (the whole tier under 10 min, and this is what blocks a merge), **t2** everything else AND anything cross-component. Into **t2 only with a stated reason** in the prose — t2 runs nightly, so a suite parked there is one nobody is waiting on. |
 | **Architecture Context** | At least 2 sentences referencing the Architecture section |
 | **Implementation Detail** | At least 1 paragraph with concrete logic OR 1 code snippet |
 | **Error Handling** | At least 1 failure mode with recovery strategy |

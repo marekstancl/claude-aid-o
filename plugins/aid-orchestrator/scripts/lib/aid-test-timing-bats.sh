@@ -54,6 +54,20 @@ bats_timing_supported() {
   (( major == 1 && minor >= 2 ))
 }
 
+# bats_timing_can_time_argv <argv0> — 0 when `--timing` may be inserted after
+# argv0, i.e. argv0 IS the Bats runner.
+#
+# The scar this closes (P081 Step 1): `--timing` is a flag of the RUNNER. For a
+# shell-form command what actually runs is `bash -c '<string>'`, whose argv[0]
+# is `bash`, and inserting the flag there produced `bash --timing -c …` — a
+# per-case breakdown request that could only ever fail. Every caller that
+# inserts the flag asks here first, so a second caller cannot re-derive it.
+bats_timing_can_time_argv() {
+  local argv0="${1:-}"
+  [[ -n "$argv0" ]] || return 1
+  [[ "${argv0##*/}" == "bats" ]]
+}
+
 # bats_timing_parse <tap_output> <run_unit_id>
 #   Emits ONE JSON object describing the run:
 #     {run_unit_id, bats_version, planned, cases:[…], truncated, parsed_lines}

@@ -692,6 +692,33 @@ them a live incident:
 (`existence_keyed_skip`, `set_e_grep_count`); rules 1 and 3 need a reader and
 are the reason this section exists.
 
+### Test tiers — where a new suite goes (P081)
+
+**Every suite declares its tier in its leading comment block**, once:
+
+```bash
+#!/usr/bin/env bats
+# aid-tier: t1
+```
+
+| Tier | Cost per case | Whole-tier budget | Runs |
+|------|---------------|-------------------|------|
+| `t0` | under 2 s | under 2 min | merge path |
+| `t1` | under 30 s | under 10 min | merge path — this is what blocks a merge |
+| `t2` | more, **or cross-component at any cost** | none | nightly only |
+
+Tier follows measured cost and scope, never importance. A suite with no
+resolvable subject file is cross-component and therefore `t2` however cheap it
+is. `aid-test-tier-assign.sh` proposes tiers from the durations journal and
+enforces the aggregate budgets; `aid-test-tier-lint.sh` fails a suite with no
+tag, with two tags, with a plan number in its filename, or with a tier cheaper
+than its newest measurement supports. Inside a tiered tree the RUNNER refuses to
+run at all while any suite is untagged — an untagged suite under `--tier` is a
+suite that silently never runs.
+
+Placement is unchanged: `tests/test-*.sh` and `tests/bats/test-*.bats`, both
+discovered by the globs below. The tier is a tag precisely so nothing moves.
+
 ### Running All Tests
 
 ```bash
@@ -700,6 +727,12 @@ are the reason this section exists.
 
 # From the repository root
 bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+
+# What the merge path actually runs
+./tests/run-all-tests.sh --tier t0 && ./tests/run-all-tests.sh --tier t1
+
+# What the nightly runs, refreshing every suite's measured duration
+./tests/run-all-tests.sh --tier t2 --timing --include-delegated
 
 # With full output from each suite
 ./tests/run-all-tests.sh --verbose
@@ -710,6 +743,10 @@ bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
 | Flag | Description |
 |------|-------------|
 | `--verbose`, `-v` | Show full output from each test suite (individual PASS/FAIL lines) |
+| `--list` | Enumerate discovered and DELEGATED suites with their tier, run nothing |
+| `--tier <t0\|t1\|t2>` | Run only suites declaring that tier; skipped-by-tier counts are printed, never silent |
+| `--timing` | Record one duration per suite into `.aid-o/work/test-durations.jsonl` (opt-in; without it the run is byte-identical to before) |
+| `--include-delegated` | Also run suites owned by a dedicated CI job — measurement runs only, so every suite has a duration |
 | `--help`, `-h` | Show usage information |
 
 ### Test Runner Output

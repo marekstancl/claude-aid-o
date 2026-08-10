@@ -36,15 +36,25 @@ gates:
     # suite directory, still excluding the 2 slow boundary files (they keep
     # their own gate:bats_boundary below; the exclusion predates parallelism
     # and survives it — it is about budget isolation, not pooling).
-    command: "bash -c 'bats $(ls plugins/aid-orchestrator/scripts/tests/bats/*.bats | grep -v -e test-aid-plan-final-boundary -e test-aid-plan-release-boundary)'"
+    #
+    # P081 Step 6 (2026-08-10): THIS GATE IS NOW T0+T1, NOT THE PORTFOLIO.
+    # The old command was a glob with a hand-maintained negative filter naming
+    # the two boundary suites. Tier filtering plus the delegation map express
+    # the same partition declaratively, so the filter is REMOVED rather than
+    # translated — and the partition is now derived from measured cost instead
+    # of from whichever files somebody remembered to exclude. The gate keeps
+    # its NAME so every profile, registry row and historical baseline that
+    # references it stays valid. What used to run here now runs nightly
+    # (gate:shell_pipeline_smoke below, .github/workflows/nightly-tests.yml).
+    command: "bash -c 'plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 && plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1'"
     required: true
-    timeout_seconds: 2400  # headroom over an UNBACKED 1556s estimate — see the
-                           # P076 Step 1 note below for why that figure is not a
-                           # measurement. What IS recorded: 600s had NEVER
-                           # completed since the P071 quarantine lift — two
-                           # censored samples, no percentile, and a real red
-                           # case hidden for two commits because a gate that
-                           # always times out reports nothing
+    timeout_seconds: 900   # the standard's own budgets — T0 ≤ 2 min, T1 ≤ 10 min
+                           # — plus headroom. aid-test-tier-assign.sh ENFORCES
+                           # those budgets by demoting the most expensive member
+                           # while a tier overflows, so this cap is bounded by
+                           # construction rather than by hope. The previous
+                           # 2400s stood over an UNBACKED 1556s estimate for a
+                           # whole-portfolio run this gate no longer performs.
     # P076 Step 1 (2026-08-09): supervised background job via aid-job.sh.
     # Rationale, stated honestly. An earlier version of this comment called
     # the 1556s figure above "measured, not guessed". It is not: the repo's
@@ -77,6 +87,13 @@ gates:
     # something a real timeout budget can bound.
     # P078 (2026-08-10): plain sequential bats, same 2 files the lane
     # wrapper used to resolve before P078 deleted it.
+    #
+    # P081 Step 6 (2026-08-10): OFF THE MERGE PATH. Both suites are T2 by any
+    # measurement — each builds a real git repository per test — and a gate
+    # with a two-hour ceiling in front of every merge is precisely what this
+    # plan exists to remove. The gate definition stays (its two suites still
+    # run, in the nightly's T2 selection); it is simply no longer in any
+    # merge-path profile.
     command: "bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
     required: false
     timeout_seconds: 7200
@@ -116,7 +133,16 @@ gates:
     # confirm every reference was caught, for a gate that has no other active
     # collision. The name's "smoke" implication is corrected via description
     # above instead.
-    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+    # P081 Step 6 (2026-08-10): THIS IS THE NIGHTLY'S COMMAND NOW, and it is in
+    # NO merge-path profile. The tier work did not make this run cheaper — it
+    # moved it to where its cost is free. `--tier t2` is the portfolio minus
+    # what the merge path already ran; `--include-delegated` because the
+    # nightly is the one run that owes every suite a measurement; `--timing`
+    # because that measurement is what keeps every tier assignment honest
+    # without ever needing another special campaign.
+    # .github/workflows/nightly-tests.yml runs the same selection, and
+    # test-tier-gate-routing.bats asserts the two do not drift apart.
+    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t2 --timing --include-delegated
     required: false
     # 1900s -> 7200s (2026-08-04). A real audit cut this gate off at 2001s with
     # 73 of 151 suites done, so it had NEVER completed inside its cap — and a
@@ -323,17 +349,23 @@ gate_profiles:
   # lives in a fixture (test-aid-test-execution-ledger.bats case 1), not in
   # this configuration, so removing the duplication does not blind the check.
   # The narrower profiles keep bats_fsm because they do not run bats_all.
+  # P081 Step 6 (2026-08-10) — THE MERGE PATH IS T0 + T1.
+  # `bats_all` now resolves to the tier-filtered runner, and the two gates that
+  # carried the rest of the portfolio left these profiles entirely:
+  #   - shell_pipeline_smoke (the whole portfolio, 3 h 23 min measured) is the
+  #     nightly's command;
+  #   - bats_boundary (two suites, 7200 s ceiling) is T2 and rides the nightly
+  #     with everything else.
+  # Neither gate was deleted, and neither stops running: they run at 02:40 UTC
+  # instead of in front of a merge.
   full:
     include:
       - bats_all
-      - bats_boundary
       - plan_diff
       - docs_updated
   release:
     include:
       - bats_all
-      - bats_boundary
-      - shell_pipeline_smoke
       - plan_diff
       - docs_updated
   bats_all_quarantine:
@@ -350,23 +382,25 @@ gate_profiles:
   release_quarantine:
     reason: >-
       P068 Step 2 — THE plan-final substitute for `release` while a release
-      gate carries a declared `quarantine:` block (at v2.62.1 that is
-      `bats_all`, PM 2026-07-23, tracked by P066). It is `release` MINUS the
-      quarantined gate and NOTHING else: every other release gate — including
-      `shell_pipeline_smoke` — still runs for real.
-      This is deliberately NOT `bats_all_quarantine`: that profile is
-      EPIC-boundary-scoped and omits `shell_pipeline_smoke`, so using it for a
-      plan-final run would silently drop a non-quarantined release gate. The
-      plan-final stage (`aid-plan-fsm.sh plan-finalize --stage gates`) asserts
-      this set equality against `release` and refuses to run otherwise, so a
-      future edit that drops another gate from here fails loudly instead of
-      quietly shrinking the plan-final evidence.
-      The quarantined gate is never green: it is reported
-      profile_excluded/waived and must carry its own marked targeted-substitute
-      receipt in the report's `quarantine_substitutes[]`.
+      gate carries a declared `quarantine:` block (at v2.62.1 that was
+      `bats_all`, PM 2026-07-23, tracked by P066; no gate carries an active
+      block today). It is `release` MINUS the quarantined gate and NOTHING
+      else, and `aid-plan-fsm.sh plan-finalize --stage gates` asserts exactly
+      that SET EQUALITY before it will run.
+      P081 Step 6 (2026-08-10) — re-pointed with `release`, and the latent
+      inconsistency it had carried is closed at the same time. `release` is now
+      {bats_all, plan_diff, docs_updated}, so this profile is {plan_diff,
+      docs_updated}: `bats_all` is the ONLY test gate `release` has left, which
+      means a quarantined `bats_all` leaves this substitute with no test gate
+      by construction. That is not an oversight to paper over with `bats_fsm`
+      — adding it is what made the old set-equality assertion unsatisfiable,
+      and `bats_fsm` would in any case re-run a suite `bats_all`'s own T0
+      selection already dispatches (the double-dispatch the execution ledger
+      exists to catch). The compensation is the one this profile already
+      names: the quarantined gate is never green, it is reported
+      profile_excluded/waived, and it must carry its own marked
+      targeted-substitute receipt in the report's `quarantine_substitutes[]`.
     include:
-      - bats_fsm
-      - shell_pipeline_smoke
       - plan_diff
       - docs_updated
   p064-closure:

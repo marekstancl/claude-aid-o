@@ -57,16 +57,23 @@ its own git worktree under `.aid-worktrees/plan-<id>`, so an active plan does
 not hold the PM's checkout, and the PM's own uncommitted work does not block
 plan creation. Say so plainly rather than asking the PM to stash or wait.
 
-**Orient before Step 1.** Three reads, all cheap:
+**Orient before Step 1.** Four reads, all cheap:
 
 ```bash
 git worktree list                       # every tree: the PM's, and one per active plan
 ls .aid-o/work/plan-state/*/plan-state.yaml 2>/dev/null   # which plans exist and their phase
 cat .aid-o/work/active-runs.json 2>/dev/null              # which EPICs are actually running
+cat "${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}/latest.json" 2>/dev/null  # last nightly result
 ```
 
-`/aid-status`'s `plan-rows` and `next-epic` recipes render exactly this; reuse
-them rather than writing a second reader.
+`/aid-status`'s `plan-rows`, `next-epic` and `nightly-line` recipes render
+exactly this; reuse them rather than writing a second reader.
+
+**The nightly read NEVER blocks planning.** The merge path runs T0+T1 only, so
+the full portfolio's verdict arrives that night rather than at the gate — which
+means a red night is something a PM should hear once, at the start, not
+something that stops a plan being written. Report it in one line (the same
+shape `/aid-status` renders) and carry on. No artifact at all: say nothing.
 
 **What to tell the PM, by what you find:**
 
@@ -79,6 +86,7 @@ them rather than writing a second reader.
 | A worktree directory exists that `git worktree list` does not know | Leftover from a crash plus a manual prune. Name it and `git worktree prune`; do not delete a directory you did not create. |
 | `git worktree list` shows trees OUTSIDE `.aid-worktrees/` | Not AID's. Someone else's branch checkout, another session, a sibling clone. AID neither manages nor tears these down. Name them once so the PM knows what else is checked out, note which branch each is on, and leave them alone — in particular, a branch checked out there cannot be checked out again, which is the one way they can make a later `plan-start` or `--recreate-worktree` fail. |
 | Three or more streams already active | Say how many and which, and ask whether to add another — this is a PM capacity question, not a technical limit. |
+| The nightly artifact is red, stale or unreadable | One line, then continue. Naming it is the whole obligation: planning is never blocked by a test result, and a red night the PM never hears about is the failure this read exists to prevent. |
 
 **Generating AND starting both work.** A newly generated plan's EPICs are
 registered (`epic-start`) and initialised inside that plan's own worktree, so a

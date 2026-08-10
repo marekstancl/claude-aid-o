@@ -21,6 +21,10 @@ REQUIRED_IDS=(
   test_audit_static_command_allowlist
   test_audit_catalog_approval_boundary
   test_audit_never_auto_invoked
+  test_tier_declared
+  test_tier_runner_refusal
+  test_tier_declared_at_plan_time
+  selector_honesty_check
 )
 REQUIRED_FIELDS=(id type source description instruction severity surface status verdict test)
 

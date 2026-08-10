@@ -215,10 +215,35 @@ _aid_classify_files_bullet() {
   local pre="${body%%--*}"
   pre="$(printf '%s' "$pre" | sed 's/\xe2\x80\x94.*//; s/`[^`]*`//g')"
   if [[ "$pre" == *"("* ]]; then
-    local pre_nolines; pre_nolines="$(printf '%s' "$pre" | sed -E 's/\((lines?|řádk[^)]*)[^)]*\)//g')"
+    # `(tier: tN)` joins `(lines …)` in the parenthetical vocabulary (P081
+    # Step 10). It goes HERE rather than in the prose after the em-dash for the
+    # same reason the line range does: generation has to read it mechanically,
+    # and prose is not a place a generator can read anything from.
+    local pre_nolines; pre_nolines="$(printf '%s' "$pre" \
+      | sed -E 's/\((lines?|řádk[^)]*)[^)]*\)//g; s/\([[:space:]]*tier:[[:space:]]*t[0-2][[:space:]]*\)//g')"
     [[ "$pre_nolines" == *"("* ]] && { echo "strict:non-line-paren"; return; }
   fi
   echo "clean"
+}
+
+# _aid_files_bullet_tier <bullet> — the tier a `Test:` bullet declares, or
+# nothing plus return 1 when it declares none (P081 Step 10).
+#
+# ONE authority: generation, the plan lint and any later reader all ask here,
+# so the accepted spelling is defined in exactly one place. An unknown value is
+# NOT silently ignored — it returns 2, because `(tier: t9)` is a declaration
+# somebody meant and the caller must say so rather than treat it as absent.
+_aid_files_bullet_tier() {
+  local bullet="${1#- }" body decl
+  body="$(_aid_files_bullet_body "$bullet")" || body="$bullet"
+  if [[ ! "$body" =~ \([[:space:]]*tier:[[:space:]]*([A-Za-z0-9]+)[[:space:]]*\) ]]; then
+    return 1
+  fi
+  decl="${BASH_REMATCH[1]}"
+  case "$decl" in
+    t0|t1|t2) printf '%s' "$decl"; return 0 ;;
+    *) printf '%s' "$decl"; return 2 ;;
+  esac
 }
 
 # _aid_allowed_paths_from_files_json — derive a step's cleaned allowed_paths

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# test-p076-integration.bats — P076 Step 16: the plan's acceptance instrument.
+# test-owned-jobs-integration.bats — P076 Step 16: the plan's acceptance instrument.
 #
 # Every other suite in this plan proves one mechanism. This one proves the
 # CHAIN: that the pieces built across three EPICs hold together end to end,
@@ -57,7 +57,7 @@
 #
 # HYGIENE: the status render runs in a child shell — invoked with `3>&-`.
 # After any edit verify:
-#   bats --tap test-p076-integration.bats </dev/null | grep -cE '^(ok|not ok)'  # == 4
+#   bats --tap test-owned-jobs-integration.bats </dev/null | grep -cE '^(ok|not ok)'  # == 4
 
 setup() {
   export TZ=UTC

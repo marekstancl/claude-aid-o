@@ -987,6 +987,23 @@ for sn in "${phase_steps[@]}"; do
   # succeeded with a narrower scope than the plan declared — and the EPIC ran
   # with a file its own plan named missing from allowed_paths, which nothing
   # downstream could notice. A parser may refuse, it may not narrow silently.
+  # P081 Step 10 — has THIS project adopted tiers? The same rule the runner
+  # uses, for the same reason: a project that has never tagged a suite must
+  # generate exactly as it does today, so taking a plugin upgrade never
+  # invalidates a plan that was correct when it was written. Answered once per
+  # generation, from the tree being generated, not from the installed plugin.
+  _p081_tiers_adopted() {
+    if [[ -z "${_P081_TIERS_ADOPTED:-}" ]]; then
+      if grep -rlq --include='test-*.bats' --include='test-*.sh' \
+           '^[[:space:]]*#[[:space:]]*aid-tier:' . 2>/dev/null; then
+        _P081_TIERS_ADOPTED=yes
+      else
+        _P081_TIERS_ADOPTED=no
+      fi
+    fi
+    [[ "$_P081_TIERS_ADOPTED" == "yes" ]]
+  }
+
   step_files=""
   _dropped_bullets=""
   while IFS= read -r _raw_file; do
@@ -1005,13 +1022,43 @@ for sn in "${phase_steps[@]}"; do
     if ! _split_paths="$(_aid_split_path_entry "${BASH_REMATCH[2]}")"; then
       error_exit "Invalid Files entry in step ${sn}: ${_raw_file}. Canonical multi-path form: \`a\` + \`b\` — description." 1
     fi
+    # P081 Step 10 — the budget on the way IN. A `Test:` bullet naming a suite
+    # that does not exist yet is a NEW suite, and a new suite with no declared
+    # tier is how a portfolio grows untiered. Only new ones need the
+    # declaration: a bullet pointing at an existing file inherits that file's
+    # tag, which aid-test-tier-lint.sh already guards, so adding a case to an
+    # existing suite — the common and encouraged move — stays free.
+    if [[ "$_raw_file" == Test:* ]] && _p081_tiers_adopted; then
+      # `x="$(f)"` under `set -e` EXITS when f returns non-zero, and "no tier
+      # declared" is exactly a non-zero return — so the rc is captured on the
+      # `||` side or this refusal would kill generation silently instead of
+      # reporting anything.
+      _tier_rc=0
+      _declared_tier="$(_aid_files_bullet_tier "$_raw_file")" || _tier_rc=$?
+      if [[ "$_tier_rc" -eq 2 ]]; then
+        _dropped_bullets+="  step ${sn}: Test bullet declares tier '${_declared_tier}', which is not one of t0/t1/t2: \"${_raw_file}\""$'\n'
+      elif [[ "$_tier_rc" -ne 0 ]]; then
+        while IFS= read -r _tpath; do
+          [[ -n "$_tpath" ]] || continue
+          # A fixture is not a suite: only the runner's own discovery shapes
+          # (`tests/test-*.sh`, `tests/bats/test-*.bats`) carry a tier.
+          case "$_tpath" in
+            */tests/test-*.sh|*/tests/bats/test-*.bats) ;;
+            *) continue ;;
+          esac
+          if [[ ! -e "$_tpath" ]]; then
+            _dropped_bullets+="  step ${sn}: Test bullet names a NEW suite with no tier: \"${_raw_file}\" — add (tier: t0|t1|t2)"$'\n'
+          fi
+        done <<< "$_split_paths"
+      fi
+    fi
     while IFS= read -r _path; do
       [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
     done <<< "$_split_paths"
   done <<< "$step_artifacts_top_level"
   if [[ -n "$_dropped_bullets" ]]; then
     error_exit "Files block in ${plan} has bullets this generator cannot parse:
-${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite>: <path> — <why>\`. See skills/plan-writing.md (Files block grammar). Fix the plan and re-run generation." 1
+${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite>: <path> — <why>\`, and a \`Test:\` bullet naming a suite that does not exist yet must state its tier: \`- Test: \\\`path\\\` (tier: t1) — <what it proves>\`. See skills/plan-writing.md (Files block grammar). Fix the plan and re-run generation." 1
   fi
   if [[ -n "$step_files" ]]; then
     all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'

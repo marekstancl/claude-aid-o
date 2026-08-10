@@ -1,0 +1,88 @@
+name: Nightly tests
+# P081 Step 7 — the full portfolio, off the merge path.
+#
+# THE POINT OF THIS FILE: `ci.yml` used to be where the whole 3 h 23 min
+# portfolio sat, in front of every merge. It now runs T0+T1 there and the rest
+# runs HERE, once a night, where it delays nobody. Before this file the repo
+# had no `schedule:` trigger at all.
+#
+# 02:40 UTC is AID's own slot. The self-hosted runner is shared across the
+# ecosystem and cannot carry six portfolios at once, so each adopting project
+# gets a different hour — this one is AID's, and a project adopting the
+# standard later picks another.
+#
+# `workflow_dispatch` is not decoration: the pilot's own acceptance depends on
+# running this configuration on demand and reading the artifact it produced
+# from a developer's checkout.
+on:
+  schedule:
+    - cron: '40 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  nightly-portfolio:
+    runs-on: [self-hosted, eco-dev]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The selector honesty check replays the last merge's changed paths,
+          # so it needs more than the single commit a default checkout fetches.
+          fetch-depth: 50
+
+      - name: Install jq + bats + yq
+        run: |
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
+          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
+
+      - name: Run the T2 portfolio with timing
+        id: portfolio
+        # Generous, because this job blocks nobody. `--timing` refreshes the
+        # durations journal every night, which is what keeps tier assignments
+        # honest without ever needing a special measurement campaign again.
+        # `continue-on-error`: a red portfolio is the REPORT's subject, not a
+        # reason to skip writing the report.
+        continue-on-error: true
+        run: |
+          chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+          set +e
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh \
+            --tier t2 --timing --include-delegated --verbose > nightly-run.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+        timeout-minutes: 300
+
+      - name: Write the result and report it
+        # The artifact lands on a shared HOST path, never under `.aid-o/` —
+        # that directory is gitignored, so a file written there in this
+        # checkout could never be read from anyone else's.
+        run: |
+          bash plugins/aid-orchestrator/scripts/aid-nightly-report.sh \
+            --runner-log nightly-run.log \
+            --exit-code "${{ steps.portfolio.outputs.exit_code }}" \
+            --log-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Check the selector's honesty
+        # A gap is REPORTED, never a job failure: the finding is about the
+        # merge-path selector, and failing this job would only teach people to
+        # ignore it.
+        continue-on-error: true
+        run: bash plugins/aid-orchestrator/scripts/aid-selector-honesty-check.sh --repo .
+
+      - name: Propose deletions (first run of the month)
+        continue-on-error: true
+        run: |
+          [ "$(date -u +%d)" = "01" ] || exit 0
+          bash plugins/aid-orchestrator/scripts/aid-test-reaper.sh --repo .
+
+      - name: Attach the night's artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-result
+          path: |
+            nightly-run.log
+            /opt/eco/data/aid-nightly/aid-orchestrator/*.json
+          if-no-files-found: warn

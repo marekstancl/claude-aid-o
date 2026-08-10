@@ -97,6 +97,20 @@ for suite in "${!OWNER[@]}"; do
   else
     _fail "$suite is listed by the inline runner without a DELEGATED marker"
   fi
+  # P081 Step 5: tier filtering and delegation must COMPOSE. A delegated suite
+  # keeps exactly one line in the listing — delegation wins, it runs in its own
+  # job — and that line carries the tier column like every other.
+  n="$(grep -cE "^(INLINE|DELEGATED): .*${suite}" <<<"$listing")"
+  if [[ "$n" -eq 1 ]]; then
+    _pass "$suite is listed exactly once (tier filtering did not duplicate it)"
+  else
+    _fail "$suite appears on $n listing lines — tier filtering and delegation disagree about who owns it"
+  fi
+  if grep -qE "DELEGATED: .*${suite}.* \[(t0|t1|t2|untagged)\]" <<<"$listing"; then
+    _pass "$suite carries a tier column in the listing"
+  else
+    _fail "$suite is listed without a tier column"
+  fi
 done
 
 echo "---"

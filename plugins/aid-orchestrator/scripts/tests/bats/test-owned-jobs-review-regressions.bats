@@ -1,6 +1,11 @@
 #!/usr/bin/env bats
-# test-p076-cp3-regressions.bats — the CP3 integration-review findings, each
-# reproduced as a test that FAILS against the pre-fix runner and passes after.
+# test-owned-jobs-review-regressions.bats — P076 CP3: the integration-review
+# findings, each reproduced as a test that FAILS against the pre-fix runner and
+# passes after.
+#
+# Renamed from test-p076-cp3-regressions.bats by P081 Step 4; the plan that
+# produced it is recorded here rather than in the filename, which now says what
+# the suite proves.
 #
 # Every case drives the REAL aid-run-gates.sh, the REAL aid-job.sh supervisor and
 # the REAL aid-fsm.sh against a real git fixture. Nothing is stubbed: each of

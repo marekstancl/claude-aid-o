@@ -1,0 +1,14 @@
+# tier-lint-allowlist.txt — sanctioned exceptions to the naming rule
+# (P081 Step 3).
+#
+# A suite listed here may keep a plan/EPIC/task number in its filename.
+# One basename per line; `#` starts a comment.
+#
+# This file is a MIGRATION WINDOW, not a permanent exemption list. It was
+# seeded with the six suites that carried a plan number when the lint landed,
+# so the tree was lint-clean the moment the rule existed; P081 Step 4 renames
+# all six and empties this file. A missing file means NO exceptions — never
+# "allow everything".
+#
+# EMPTY as of P081 Step 4: all six were renamed after what they prove, so the
+# migration window is CLOSED, not merely tolerated.
