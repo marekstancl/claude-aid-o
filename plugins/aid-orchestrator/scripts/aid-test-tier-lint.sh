@@ -44,8 +44,10 @@ ALLOWLIST=""
 QUIET=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tests-dir) TESTS_DIR="${2:-}"; shift 2 ;;
-    --allowlist) ALLOWLIST="${2:-}"; shift 2 ;;
+    --tests-dir) [[ $# -ge 2 ]] || { echo "aid-test-tier-lint: --tests-dir needs a value" >&2; exit 2; }
+                 TESTS_DIR="$2"; shift 2 ;;
+    --allowlist) [[ $# -ge 2 ]] || { echo "aid-test-tier-lint: --allowlist needs a value" >&2; exit 2; }
+                 ALLOWLIST="$2"; shift 2 ;;
     --quiet)     QUIET=1; shift ;;
     --help|-h)
       sed -n '/^# Usage:/,/^# Exit codes:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -55,6 +57,14 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$TESTS_DIR" ]] || TESTS_DIR="$(aid_test_default_tests_dir)"
 [[ -n "$ALLOWLIST" ]] || ALLOWLIST="$TESTS_DIR/tier-lint-allowlist.txt"
+
+# The journal is probed ONCE, loudly. A per-suite read that returns "cannot
+# read this" would otherwise be indistinguishable from "never measured", and the
+# lint would report a corrupt journal as a clean, merely unverified tree.
+if ! aid_durations_readable; then
+  echo "aid-test-tier-lint: the durations journal cannot be read — refusing to report tiers as unverified when the real state is unknown" >&2
+  exit 2
+fi
 
 VIOLATIONS=()
 UNVERIFIED=()

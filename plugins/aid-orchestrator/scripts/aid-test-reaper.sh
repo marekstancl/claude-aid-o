@@ -19,7 +19,9 @@
 #   duplication    — the content scanner's duplicate-test-case pairs.
 #   cost           — the durations journal: a suite carrying a large share of
 #                    the whole portfolio's cost.
-#   failure age    — how long since the suite last caught a REAL regression.
+#   failure age    — how long since the suite last caught a REAL regression,
+#                    within a window (AID_REAPER_FAILURE_WINDOW_DAYS, 180 by
+#                    default) — a failure from years ago is not a defence.
 #                    This has no source in the tree: `git log` gives CHANGE
 #                    age, not failure age, and no per-suite failure history
 #                    existed before the nightly journal started. It fills in
@@ -51,6 +53,10 @@ NIGHTLY_DIR="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
 CONTENT_SCAN=""; TESTS_DIR=""; REPO="$PWD"; AS_JSON=0
 COST_SHARE="${AID_REAPER_COST_SHARE:-5}"      # percent of the portfolio's cost
 GRACE_DAYS="${AID_REAPER_GRACE_DAYS:-30}"     # too young to judge
+# "Failed RECENTLY" needs a window, or the veto is permanent: a suite that
+# caught something once in 2020 would be shielded forever, which is exactly the
+# suite the reaper exists to find.
+FAILURE_WINDOW_DAYS="${AID_REAPER_FAILURE_WINDOW_DAYS:-180}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --content-scan) CONTENT_SCAN="${2:-}"; shift 2 ;;
@@ -74,10 +80,18 @@ if [[ -n "$CONTENT_SCAN" && -f "$CONTENT_SCAN" ]]; then
   # Keyed by BASENAME: the scanner reports repo-relative paths and this tool
   # walks absolute ones, and a suite basename is unique across the two
   # discovery globs by construction (`test-*.sh` vs `bats/test-*.bats`).
-  vacuous="$(jq -c '[.checks.weak_oracle[]? | select(.likely_legitimate | not)
-                     | .file | split("/") | last]' "$CONTENT_SCAN")"
-  duplicates="$(jq -c '[.checks.duplicate_test_cases[]? | select(.shared_cases > 0)
-                        | .file_a, .file_b | split("/") | last] | unique' "$CONTENT_SCAN")"
+  #
+  # Both reads are CHECKED. A malformed scan file read as an empty scan would
+  # hide every candidate only that input can see, while the report still
+  # claimed the input was available — proposing from fewer signals than it
+  # says is the one thing this tool must never do.
+  if ! vacuous="$(jq -c '[.checks.weak_oracle[]? | select(.likely_legitimate | not)
+                          | .file | split("/") | last]' "$CONTENT_SCAN" 2>/dev/null)" \
+     || ! duplicates="$(jq -c '[.checks.duplicate_test_cases[]? | select(.shared_cases > 0)
+                                | .file_a, .file_b | split("/") | last] | unique' "$CONTENT_SCAN" 2>/dev/null)"; then
+    vacuous='[]'; duplicates='[]'
+    MISSING_INPUTS+=("content scan at '$CONTENT_SCAN' could not be read — its findings are NOT in this list")
+  fi
 else
   MISSING_INPUTS+=("content scan (vacuous-green and duplicate findings) — pass --content-scan")
 fi
@@ -110,6 +124,13 @@ if [[ "$history" -eq 0 ]]; then
   MISSING_INPUTS+=("failure age — no nightly history yet; this input fills in as nightlies accumulate")
 fi
 
+# _days_since <YYYY-MM-DD> — whole days from that date to today.
+_days_since() {
+  local then_s
+  then_s="$(date -u -d "$1" +%s 2>/dev/null)" || { echo 99999; return 0; }
+  echo $(( ( $(date -u +%s) - then_s ) / 86400 ))
+}
+
 # ─── first_seen_days <path> — age of the file's oldest commit ───────────────
 #
 # `--follow`, so a RENAMED suite keeps its history. Without it, renaming a
@@ -120,8 +141,14 @@ fi
 # than as new: "new" here means "recently committed", and an untracked file
 # is not part of the portfolio the reaper is judging in the first place.
 first_seen_days() {
-  local ts
-  ts="$(git -C "$REPO" log --follow --format=%at -- "$1" 2>/dev/null | tail -1)"
+  local ts path="$1"
+  # Git pathspecs are REPOSITORY-relative. Discovery yields absolute paths, and
+  # an absolute pathspec matches nothing, so every suite looked ancient and the
+  # grace-period veto never fired at all.
+  case "$path" in
+    "$REPO"/*) path="${path#"$REPO"/}" ;;
+  esac
+  ts="$(git -C "$REPO" log --follow --format=%at -- "$path" 2>/dev/null | tail -1)"
   [[ "$ts" =~ ^[0-9]+$ ]] || { echo 99999; return 0; }
   echo $(( ( $(date -u +%s) - ts ) / 86400 ))
 }
@@ -149,7 +176,8 @@ while IFS= read -r suite; do
 
   # Two vetoes, in order of how loudly they say "not this one".
   name_no_ext="${base%.bats}"; name_no_ext="${name_no_ext%.sh}"
-  if [[ -n "${LAST_FAILED[$name_no_ext]:-}" ]]; then
+  if [[ -n "${LAST_FAILED[$name_no_ext]:-}" ]] \
+     && [[ "$(_days_since "${LAST_FAILED[$name_no_ext]}")" -lt "$FAILURE_WINDOW_DAYS" ]]; then
     continue
   fi
   [[ "$(first_seen_days "$suite")" -lt "$GRACE_DAYS" ]] && continue

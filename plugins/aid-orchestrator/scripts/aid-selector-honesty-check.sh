@@ -74,7 +74,12 @@ write_report() {
   jq -n --arg date "$DATE" --argjson merges "$1" --argjson gaps "$2" \
         --argjson unmappable "$3" --arg note "$4" \
     '{date:$date, evaluated_merges:$merges, gaps:$gaps,
-      unmappable:$unmappable, note:$note}' > "$OUT"
+      unmappable:$unmappable, note:$note}' > "$OUT" || {
+    # Printing a path for a file that was never written is worse than printing
+    # nothing: the next reader takes the absence for "no gaps".
+    echo "aid-selector-honesty-check: could not write '$OUT' — no gap report exists for $DATE" >&2
+    return 1
+  }
   echo "aid-selector-honesty-check: $OUT ($(jq 'length' <<<"$2") gap(s))"
 }
 

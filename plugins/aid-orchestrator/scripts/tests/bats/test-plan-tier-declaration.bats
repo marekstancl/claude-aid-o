@@ -92,6 +92,20 @@ _generate() {
   [ "$status" -eq 0 ]
 }
 
+@test "5b: a fixture with a tier-shaped parenthetical is still not a suite" {
+  _generate "$(_plan 'Test: `scripts/tests/fixtures/sample-input.json` (tier: t9) — the input')"
+  [ "$status" -eq 0 ]
+}
+
+@test "5c: a ROOT-relative suite path is a suite too" {
+  # `tests/test-new.sh` — the ordinary shape in a consumer project. A pattern
+  # anchored on `*/tests/` requires a directory before it and would never fire.
+  mkdir -p "$ROOT/tests"
+  _generate "$(_plan 'Test: `tests/test-brand-new.sh` — what it proves')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no tier"* ]]
+}
+
 @test "6: a project that has adopted no tiers generates exactly as before" {
   rm -f "$ROOT/scripts/tests/bats/test-existing.bats"
   _generate "$(_plan 'Test: `scripts/tests/bats/test-brand-new.bats` — what it proves')"

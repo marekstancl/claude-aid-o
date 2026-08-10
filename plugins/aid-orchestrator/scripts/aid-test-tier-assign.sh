@@ -50,8 +50,10 @@ TESTS_DIR=""
 FORMAT="tsv"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tests-dir) TESTS_DIR="${2:-}"; shift 2 ;;
-    --format)    FORMAT="${2:-}"; shift 2 ;;
+    --tests-dir) [[ $# -ge 2 ]] || { echo "aid-test-tier-assign: --tests-dir needs a value" >&2; exit 2; }
+                 TESTS_DIR="$2"; shift 2 ;;
+    --format)    [[ $# -ge 2 ]] || { echo "aid-test-tier-assign: --format needs a value" >&2; exit 2; }
+                 FORMAT="$2"; shift 2 ;;
     --help|-h)
       sed -n '/^# Usage:/,/^# Exit codes:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -62,6 +64,14 @@ case "$FORMAT" in
   tsv|md) ;;
   *) echo "aid-test-tier-assign: --format must be tsv or md" >&2; exit 2 ;;
 esac
+
+# Probed ONCE, loudly: a journal this cannot read must not be reported as a
+# portfolio nobody has measured — that reads as a table with every row missing
+# rather than as the corruption it is.
+if ! aid_durations_readable; then
+  echo "aid-test-tier-assign: the durations journal cannot be read — refusing to publish an assignment built on it" >&2
+  exit 2
+fi
 
 # ─── Subject resolution ─────────────────────────────────────────────────────
 #

@@ -135,14 +135,20 @@ gates:
     # above instead.
     # P081 Step 6 (2026-08-10): THIS IS THE NIGHTLY'S COMMAND NOW, and it is in
     # NO merge-path profile. The tier work did not make this run cheaper — it
-    # moved it to where its cost is free. `--tier t2` is the portfolio minus
-    # what the merge path already ran; `--include-delegated` because the
-    # nightly is the one run that owes every suite a measurement; `--timing`
-    # because that measurement is what keeps every tier assignment honest
-    # without ever needing another special campaign.
+    # moved it to where its cost is free.
+    #
+    # NO `--tier` HERE, deliberately. An earlier cut ran `--tier t2` — the
+    # portfolio minus what the merge path already covered — which sounds
+    # efficient and quietly breaks two of this plan's own claims: the full
+    # portfolio would never run green in one place, and `--timing` would only
+    # ever refresh T2 durations, so a T0 suite that grew into T1 territory
+    # could never be caught by the lint that compares a tag against its newest
+    # measurement. Re-running 12 minutes of T0+T1 at 02:40 costs nothing.
+    # `--include-delegated` because the nightly is the one run that owes every
+    # suite a measurement.
     # .github/workflows/nightly-tests.yml runs the same selection, and
     # test-tier-gate-routing.bats asserts the two do not drift apart.
-    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t2 --timing --include-delegated
+    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing --include-delegated
     required: false
     # 1900s -> 7200s (2026-08-04). A real audit cut this gate off at 2001s with
     # 73 of 151 suites done, so it had NEVER completed inside its cap — and a

@@ -19,7 +19,7 @@
 # Fixture suites are written with printf, never a heredoc (IMP-494).
 #
 # Result count after any edit:
-#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 11
 
 load test-helpers.bash
 
@@ -71,6 +71,13 @@ _mk_bats() {
   local path="$1" body="$2"
   printf '#!/usr/bin/env bats\n' > "$path"
   printf '@test "case" { %s; }\n' "$body" >> "$path"
+}
+
+# _quarantine <suite> <days ago> — an ownerless open entry of that exact age.
+_quarantine() {
+  jq -nc --arg s "$1" --arg d "$(date -u -d "$2 days ago" +%Y-%m-%d)" \
+    '{action:"add", suite:$s, owner:"", opened:$d, at:($d + "T00:00:00Z")}' \
+    > "$NIGHTLY_DIR/quarantine.jsonl"
 }
 
 _report() {
@@ -128,14 +135,32 @@ _report() {
   [ ! -e "$SENT" ]
 }
 
-@test "6: an ownerless quarantine past its deadline escalates on a quiet night" {
-  jq -nc '{action:"add", suite:"test-old.bats", owner:"", opened:"2020-01-01",
-           at:"2020-01-01T00:00:00Z"}' > "$NIGHTLY_DIR/quarantine.jsonl"
+@test "6: an ownerless quarantine escalates the night it crosses its deadline" {
+  _quarantine test-old.bats 14
   run _report "$(_log 3 3)" --exit-code 0
   [ "$status" -eq 0 ]
   [ -e "$SENT" ]
   [[ "$(cat "$SENT")" == *"no owner"* ]]
   [[ "$(cat "$SENT")" == *"test-old.bats"* ]]
+}
+
+@test "6b: and then weekly, not every night — a daily repeat mutes the channel" {
+  _quarantine test-old.bats 15          # one night past the crossing
+  run _report "$(_log 3 3)" --exit-code 0
+  [ "$status" -eq 0 ]
+  [ ! -e "$SENT" ]
+
+  _quarantine test-old.bats 21          # a week after the crossing
+  run _report "$(_log 3 3)" --exit-code 0
+  [ "$status" -eq 0 ]
+  [ -e "$SENT" ]
+}
+
+@test "6c: a suite that keeps flaking does NOT reset its own age" {
+  _quarantine test-old.bats 14
+  bash "$QUARANTINE" add test-old.bats ""      # tonight it flaked again
+  [ "$(bash "$QUARANTINE" list --json | jq -r '.[0].age_days')" -eq 14 ]
+  [ "$(bash "$QUARANTINE" list --json | jq 'length')" -eq 1 ]
 }
 
 @test "7: a missing Telegram helper is a warning, not a failed job" {
@@ -145,6 +170,22 @@ _report() {
   [ "$status" -eq 0 ]
   [ -f "$NIGHTLY_DIR/latest.json" ]
   [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "false" ]
+}
+
+@test "7b: a failure whose message never got out is re-sent, not counted silent" {
+  _mk_bats "$FIXTURE_TESTS/bats/test-red.bats" false
+  # Night one: the helper is missing, so nothing is delivered.
+  AID_TELEGRAM_LIB="$TEST_TMPDIR/does-not-exist.sh" \
+    run _report "$(_log 2 3 test-red)" --exit-code 1
+  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "false" ]
+  [ ! -e "$SENT" ]
+
+  # Night two: the helper is back. The failure is "known", but it was never
+  # actually reported — silence here would make the outage permanent.
+  run _report "$(_log 2 3 test-red)" --exit-code 1
+  [ "$status" -eq 0 ]
+  [ -e "$SENT" ]
+  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "true" ]
 }
 
 @test "8: a run cut short is recorded censored, never as a green night" {

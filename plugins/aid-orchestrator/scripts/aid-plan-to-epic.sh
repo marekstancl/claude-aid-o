@@ -1029,27 +1029,39 @@ for sn in "${phase_steps[@]}"; do
     # tag, which aid-test-tier-lint.sh already guards, so adding a case to an
     # existing suite — the common and encouraged move — stays free.
     if [[ "$_raw_file" == Test:* ]] && _p081_tiers_adopted; then
-      # `x="$(f)"` under `set -e` EXITS when f returns non-zero, and "no tier
-      # declared" is exactly a non-zero return — so the rc is captured on the
-      # `||` side or this refusal would kill generation silently instead of
-      # reporting anything.
-      _tier_rc=0
-      _declared_tier="$(_aid_files_bullet_tier "$_raw_file")" || _tier_rc=$?
-      if [[ "$_tier_rc" -eq 2 ]]; then
-        _dropped_bullets+="  step ${sn}: Test bullet declares tier '${_declared_tier}', which is not one of t0/t1/t2: \"${_raw_file}\""$'\n'
-      elif [[ "$_tier_rc" -ne 0 ]]; then
-        while IFS= read -r _tpath; do
-          [[ -n "$_tpath" ]] || continue
-          # A fixture is not a suite: only the runner's own discovery shapes
-          # (`tests/test-*.sh`, `tests/bats/test-*.bats`) carry a tier.
-          case "$_tpath" in
-            */tests/test-*.sh|*/tests/bats/test-*.bats) ;;
-            *) continue ;;
-          esac
-          if [[ ! -e "$_tpath" ]]; then
-            _dropped_bullets+="  step ${sn}: Test bullet names a NEW suite with no tier: \"${_raw_file}\" — add (tier: t0|t1|t2)"$'\n'
-          fi
-        done <<< "$_split_paths"
+      # WHICH PATHS ARE SUITES comes first, and the tier is only judged for a
+      # bullet that names one. Judging the declaration first refused a
+      # fixture-only bullet that happened to carry a tier-shaped parenthetical
+      # — a rule firing on something it explicitly exempts.
+      #
+      # The pattern is anchored on `tests/`, not on `*/tests/`: a root-relative
+      # `tests/test-new.sh` is the ordinary shape in a consumer project, and
+      # `*/tests/` requires a directory component before it, so the refusal
+      # would never have fired there at all.
+      _names_new_suite=false
+      _names_suite=false
+      while IFS= read -r _tpath; do
+        [[ -n "$_tpath" ]] || continue
+        case "$_tpath" in
+          tests/test-*.sh|*/tests/test-*.sh|tests/bats/test-*.bats|*/tests/bats/test-*.bats) ;;
+          *) continue ;;
+        esac
+        _names_suite=true
+        [[ -e "$_tpath" ]] || _names_new_suite=true
+      done <<< "$_split_paths"
+
+      if [[ "$_names_suite" == "true" ]]; then
+        # `x="$(f)"` under `set -e` EXITS when f returns non-zero, and "no tier
+        # declared" is exactly a non-zero return — so the rc is captured on the
+        # `||` side or this refusal would kill generation silently instead of
+        # reporting anything.
+        _tier_rc=0
+        _declared_tier="$(_aid_files_bullet_tier "$_raw_file")" || _tier_rc=$?
+        if [[ "$_tier_rc" -eq 2 ]]; then
+          _dropped_bullets+="  step ${sn}: Test bullet declares tier '${_declared_tier}', which is not one of t0/t1/t2: \"${_raw_file}\""$'\n'
+        elif [[ "$_tier_rc" -ne 0 && "$_names_new_suite" == "true" ]]; then
+          _dropped_bullets+="  step ${sn}: Test bullet names a NEW suite with no tier: \"${_raw_file}\" — add (tier: t0|t1|t2)"$'\n'
+        fi
       fi
     fi
     while IFS= read -r _path; do

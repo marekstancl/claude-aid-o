@@ -118,6 +118,25 @@ _reasons() { jq -r --arg s "$1" '.candidates[] | select(.suite == $s) | .reasons
   [ "$(jq '.candidates | length' <<<"$output")" -eq 0 ]
 }
 
+@test "5b: a failure from years ago is not a permanent shield" {
+  _suite test-heavy.bats
+  _measure test-heavy.bats 90000
+  jq -n '{date:"2020-01-01", failed:[{suite:"test-heavy", streak:1}]}' \
+    > "$NIGHTLY_DIR/2020-01-01.json"
+  run _reap
+  [ "$status" -eq 0 ]
+  [[ "$(_reasons test-heavy.bats <<<"$output")" == *"% of the whole portfolio"* ]]
+}
+
+@test "6b: a content scan that cannot be parsed is named, not read as empty" {
+  _suite test-vacuous.bats
+  printf '{ broken\n' > "$SCAN"
+  run _reap
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not be read"* ]]
+  [ "$(jq '.candidates | length' <<<"$output")" -eq 0 ]
+}
+
 @test "8: the reaper proposes only — it contains no removal operation" {
   run grep -nE '(^|[^[:alnum:]_])(rm|git rm|unlink|shred|truncate)[[:space:]]' "$REAPER"
   [ "$status" -ne 0 ]

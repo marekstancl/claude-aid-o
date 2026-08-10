@@ -73,6 +73,14 @@ cmd_add() {
   local suite="${1:-}" owner="${2:-}"
   [[ -n "$suite" ]] || { echo "aid-test-quarantine: add needs a suite" >&2; return 2; }
   _ensure_dir || return $?
+  # ALREADY OPEN IS A NO-OP, and that is the whole deadline. A second `add`
+  # would stamp a fresh `opened` date, so a suite that flakes every week would
+  # reset its own age every week and never reach the 14-day escalation — the
+  # record would be a permanent record of nothing. The nightly calls `add`
+  # every time a suite flakes, so this path is the common one, not the corner.
+  if [[ "$(_open_entries | jq --arg s "$suite" '[.[] | select(.suite == $s)] | length')" -gt 0 ]]; then
+    return 0
+  fi
   jq -nc --arg suite "$suite" --arg owner "$owner" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
          --arg opened "$(_today)" \
     '{action:"add", suite:$suite, owner:$owner, opened:$opened, at:$at}' \

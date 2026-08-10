@@ -79,10 +79,13 @@ _command() { yq -r ".gates.\"$1\".command // \"\"" "$EXEC_YAML"; }
   [ "$(yq -r '.gates.bats_all.required' "$EXEC_YAML")" = "true" ]
 }
 
-@test "4: the nightly gate is the T2 selection, and it measures while it runs" {
+@test "4: the nightly gate runs the WHOLE portfolio and measures while it runs" {
   _need_project_config
   cmd="$(_command shell_pipeline_smoke)"
-  [[ "$cmd" == *"--tier t2"* ]]
+  # No tier filter: a T2-only nightly would never prove the whole portfolio
+  # green in one place, and its --timing pass would refresh only T2 durations —
+  # leaving the lint unable to catch a T0 suite that grew.
+  [[ "$cmd" != *"--tier"* ]]
   [[ "$cmd" == *"--timing"* ]]
   [[ "$cmd" == *"--include-delegated"* ]]
 }
@@ -92,9 +95,10 @@ _command() { yq -r ".gates.\"$1\".command // \"\"" "$EXEC_YAML"; }
   run grep -E 'schedule:|workflow_dispatch:' "$WORKFLOW"
   [ "$status" -eq 0 ]
   wf="$(grep -A 3 'run-all-tests.sh' "$WORKFLOW" | tr '\n' ' ')"
-  for flag in "--tier t2" "--timing" "--include-delegated"; do
+  for flag in "--timing" "--include-delegated"; do
     [[ "$wf" == *"$flag"* ]] || fail "the nightly workflow does not pass $flag"
   done
+  [[ "$wf" != *"--tier"* ]] || fail "the nightly workflow filters by tier; it must run the whole portfolio"
 }
 
 @test "6: release_quarantine is still exactly release minus bats_all" {

@@ -17,6 +17,15 @@
 #   ${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}/<date>.json
 # plus a `latest.json` pointer.
 #
+# THE ASSUMPTION THIS MAKES, stated rather than hidden: the self-hosted runner
+# and the checkout that reads the result are the SAME HOST (both `eco-dev`
+# here — `.github/workflows/*.yml` pin `runs-on: [self-hosted, eco-dev]` and
+# the repository lives there). A host path is not magic: uploading the file as
+# a GitHub artifact does NOT materialise it on anyone's machine. A project
+# whose runner is elsewhere must point `AID_NIGHTLY_DIR` at something both
+# sides can genuinely see — a shared mount, or a fetch step — before the
+# second surface means anything.
+#
 # FLAKY IS ITS OWN STATE. Every failing suite is retried EXACTLY ONCE. Pass on
 # the retry ⇒ recorded `flaky` and quarantined (see aid-test-quarantine.sh),
 # not counted as a failure. Fail again ⇒ a real failure.
@@ -110,7 +119,7 @@ suite_path() {
 }
 
 # ─── Retry once: flaky and failed are different states ──────────────────────
-failed=(); flaky=()
+failed=(); flaky=(); quarantine_write_failed=false
 for name in ${reported_failures[@]+"${reported_failures[@]}"}; do
   path="$(suite_path "$name")" || { failed+=("$name"); continue; }
   if [[ "$path" == *.bats ]]; then
@@ -120,7 +129,13 @@ for name in ${reported_failures[@]+"${reported_failures[@]}"}; do
   fi
   if [[ "$retry_ok" -eq 1 ]]; then
     flaky+=("$name")
-    bash "$QUARANTINE_SH" add "$name" "" >/dev/null 2>&1 || true
+    # A quarantine that was not written is a suite that will never age and
+    # never escalate — the artifact would show it flaky tonight and forget it
+    # tomorrow. Say so rather than swallowing the write.
+    if ! bash "$QUARANTINE_SH" add "$name" "" >/dev/null 2>&1; then
+      echo "aid-nightly-report: '$name' is flaky but could NOT be quarantined — it will not age or escalate until this is fixed" >&2
+      quarantine_write_failed=true
+    fi
   else
     failed+=("$name")
   fi
@@ -142,7 +157,14 @@ failed_json="$(printf '%s\n' ${failed[@]+"${failed[@]}"} \
            known: ($before != null)})')"
 
 flaky_json="$(printf '%s\n' ${flaky[@]+"${flaky[@]}"} | jq -Rc 'select(length > 0)' | jq -sc '.')"
-quarantined_json="$(bash "$QUARANTINE_SH" list --json 2>/dev/null || echo '[]')"
+# An unreadable quarantine record is NOT an empty one. Defaulting to `[]` would
+# hide every overdue entry and report a clean night.
+quarantine_unreadable=false
+if ! quarantined_json="$(bash "$QUARANTINE_SH" list --json 2>/dev/null)"; then
+  quarantine_unreadable=true
+  quarantined_json='[]'
+  echo "aid-nightly-report: the quarantine record could not be read — overdue entries cannot be reported tonight" >&2
+fi
 
 # The night's portfolio cost, summed from the durations the run itself just
 # refreshed — never a figure carried over from another machine or another day.
@@ -153,9 +175,24 @@ while IFS= read -r suite; do
   duration_ms=$(( duration_ms + d ))
 done < <(aid_test_discover_suites "$TESTS_DIR")
 
+# An ownerless overdue entry escalates the night it crosses the deadline and
+# then once a week — not every single night. A daily repeat of the same
+# sentence is how a channel gets muted, which costs the streak counting its
+# whole point.
 escalating="$(jq --argjson limit "${AID_QUARANTINE_ESCALATE_DAYS:-14}" \
-  '[.[] | select(.owner == "" and .age_days >= $limit)] | length' <<<"$quarantined_json")"
+  '[.[] | select(.owner == "" and .age_days >= $limit
+                 and ((.age_days - $limit) % 7 == 0))] | length' <<<"$quarantined_json")"
 new_failures="$(jq '[.[] | select(.known | not)] | length' <<<"$failed_json")"
+
+# A message that was never delivered leaves the failure "known" but UNREPORTED.
+# Without this, a red night that coincided with a broken Telegram token stays
+# silent forever afterwards, because every later night sees a known failure.
+prev_undelivered=false
+if [[ -f "$LATEST" ]] \
+   && [[ "$(jq -r '.notified' "$LATEST" 2>/dev/null)" == "false" ]] \
+   && [[ "$(jq -r '.failed | length' "$LATEST" 2>/dev/null)" != "0" ]]; then
+  prev_undelivered=true
+fi
 
 # ─── The artifact, written BEFORE anything is sent ──────────────────────────
 write_artifact() {
@@ -164,27 +201,33 @@ write_artifact() {
         --argjson flaky "$flaky_json" --argjson quarantined "$quarantined_json" \
         --argjson duration_ms "$duration_ms" --arg log_url "$LOG_URL" \
         --argjson exit_code "$EXIT_CODE" --argjson censored "$censored" \
-        --argjson notified "$1" \
+        --argjson notified "$1" --argjson quarantine_unreadable "$quarantine_unreadable" \
+        --argjson quarantine_write_failed "$quarantine_write_failed" \
     '{date:$date, suites_run:$suites_run, passed:$passed, failed:$failed,
       flaky:$flaky, quarantined:$quarantined, duration_ms:$duration_ms,
       exit_code:$exit_code, censored:$censored, log_url:$log_url,
+      quarantine_unreadable:$quarantine_unreadable,
+      quarantine_write_failed:$quarantine_write_failed,
       notified:$notified}' > "$ARTIFACT" || return 1
-  cp "$ARTIFACT" "$LATEST"
+  cp "$ARTIFACT" "$LATEST" || return 1
 }
 write_artifact false || { echo "aid-nightly-report: could not write '$ARTIFACT'" >&2; exit 2; }
 
 # ─── One message, only when there is something new to say ───────────────────
 notified=false
-if [[ "$NOTIFY" -eq 1 ]] && { [[ "$new_failures" -gt 0 ]] || [[ "$escalating" -gt 0 ]]; }; then
+if [[ "$NOTIFY" -eq 1 ]] \
+   && { [[ "$new_failures" -gt 0 ]] || [[ "$escalating" -gt 0 ]] || [[ "$prev_undelivered" == "true" ]]; }; then
   msg="$(printf 'AID nightly %s: %s failed, %s flaky, %s quarantined\n' \
     "$TODAY" "$(jq 'length' <<<"$failed_json")" "$(jq 'length' <<<"$flaky_json")" \
     "$(jq 'length' <<<"$quarantined_json")")"
   msg+="$(jq -r '.[] | "  - \(.suite)\(if .streak > 1 then " — \(.streak). night in a row" else "" end)"' <<<"$failed_json")"
   if [[ "$escalating" -gt 0 ]]; then
     msg+=$'\n'"$(jq -r --argjson limit "${AID_QUARANTINE_ESCALATE_DAYS:-14}" \
-      '.[] | select(.owner == "" and .age_days >= $limit) | "  ! quarantined \(.age_days)d with no owner: \(.suite)"' \
+      '.[] | select(.owner == "" and .age_days >= $limit and ((.age_days - $limit) % 7 == 0))
+       | "  ! quarantined \(.age_days)d with no owner: \(.suite)"' \
       <<<"$quarantined_json")"
   fi
+  [[ "$quarantine_unreadable" == "true" ]] && msg+=$'\n'"  ! the quarantine record is unreadable"
   [[ -n "$LOG_URL" ]] && msg+=$'\n'"$LOG_URL"
 
   if [[ -f "$TELEGRAM_LIB" ]]; then

@@ -2,9 +2,15 @@ name: Nightly tests
 # P081 Step 7 — the full portfolio, off the merge path.
 #
 # THE POINT OF THIS FILE: `ci.yml` used to be where the whole 3 h 23 min
-# portfolio sat, in front of every merge. It now runs T0+T1 there and the rest
-# runs HERE, once a night, where it delays nobody. Before this file the repo
-# had no `schedule:` trigger at all.
+# portfolio sat, in front of every merge. It now runs T0+T1 there and the WHOLE
+# portfolio runs HERE, once a night, where it delays nobody. Before this file
+# the repo had no `schedule:` trigger at all.
+#
+# The whole portfolio and not just T2: re-running T0+T1 costs ~12 minutes at
+# 02:40 and buys two things a T2-only run cannot — one place where the entire
+# suite is proved green together, and a `--timing` pass that refreshes EVERY
+# tier's durations, which is what lets the lint catch a T0 suite that has grown
+# into T1 territory.
 #
 # 02:40 UTC is AID's own slot. The self-hosted runner is shared across the
 # ecosystem and cannot carry six portfolios at once, so each adopting project
@@ -38,7 +44,7 @@ jobs:
           }
           python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
 
-      - name: Run the T2 portfolio with timing
+      - name: Run the whole portfolio with timing
         id: portfolio
         # Generous, because this job blocks nobody. `--timing` refreshes the
         # durations journal every night, which is what keeps tier assignments
@@ -50,7 +56,7 @@ jobs:
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
           set +e
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh \
-            --tier t2 --timing --include-delegated --verbose > nightly-run.log 2>&1
+            --timing --include-delegated --verbose > nightly-run.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
         timeout-minutes: 300
 

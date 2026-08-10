@@ -133,6 +133,17 @@ _aid_durations_assert_readable() {
   fi
 }
 
+# aid_durations_readable — 0 when the journal can be read (or does not exist
+# yet), 3 when it exists and cannot be. Callers probe ONCE at startup: without
+# it, every per-suite read that returns 3 is indistinguishable from "this suite
+# was never measured", and a corrupt journal reads as a portfolio nobody has
+# ever measured — the fail-closed rule undone one caller at a time.
+aid_durations_readable() {
+  local file; file="$(aid_durations_file)" || return $?
+  [[ -f "$file" ]] || return 0
+  _aid_durations_assert_readable "$file"
+}
+
 aid_durations_latest_json() {
   local suite="${1:?aid_durations_latest_json: suite required}"
   local file; file="$(aid_durations_file)" || return $?
