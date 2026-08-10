@@ -3,6 +3,37 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.82.0] — 2026-08-10
+
+> The test-parallelism line is over. Measured on this repository's own
+> portfolio: 3-6 % saved on a full run, ~15 h of compute to qualify the
+> evidence, and that evidence invalidated by every commit — while the
+> machinery's own test suites were among the most expensive units the audit
+> had ever measured. A feature that costs more test time than it saves is
+> not a feature. Removal only: nothing about how tests run changed except
+> that they now only run one way.
+
+### Removed
+- **The Test Scheduler And Its Rollout** — `aid-test-scheduler.sh`, `aid-scheduler-rollout-gate.sh`, `aid-test-schedule-divergence-check.sh`, `aid-test-divergence-campaign.sh`, `aid-scheduler-overlay-approve.sh`, `aid-test-isolation-experiment.sh` and the scheduler dispatch path inside `aid-run-gates.sh`; `targeted_tests` runs through the ordinary gate path like every other gate, and the gate-runtime baseline records `sequential` because that is now the only truth it can record.
+- **The Parallel Lane And Its Evidence Chain** — `aid-bats-parallel-lane.sh`, `aid-test-parallel-pilot.sh`, `aid-test-resource-map.sh`, `lib/aid-test-catalog-provenance.sh`, `aid-test-catalog-apply-evidence.sh`, the two P071 migrations, and the `parallel` block itself — gone from the catalog schema, from this repository's catalog (181 units) and from every scanner that emitted it.
+- **Parallel Surfaces In The Audit** — the `parallel_safety` analyst wave and its prompt, the decision artifact's `parallelization` object (lanes, `smallest_safe_pilot`) and the lane-disjointness invariant behind it, the chat summary's two lane sections (six parts become four), and the report's parallel-safe headline stat, per-group column and "parallelism" savings lever. An audit no longer classifies, proposes or advertises concurrency.
+- **Consumer-Facing Scheduler Config** — `/aid-init` and `aid-init-upgrade-test-audit.sh` stop writing a `test_audit.scheduler` block into generated projects; `defaults/config/test-audit.yaml` loses its lane-scoped keys. Projects keep the change-based `targeted_tests` selector, which was never about parallel execution.
+- **The Quarantine Remediation Cluster** — `aid-quarantine-decision-record.sh`, its evidence collector and both schemas: the bundle's whole content was divergence evidence produced by the deleted check.
+- **Five Enforcement Rows** — `test_audit_resource_map_shared_evidence`, `test_audit_pilot_evidence_bound`, `test_catalog_parallel_provenance_binding`, `test_lane_single_parallel_authority`, `test_audit_lane_membership_exact` plus the two scheduler rows, retired as `removed_scoped` records rather than deleted, and the catalog-approve revocation guard whose subject no longer exists.
+
+### Changed
+- **`gate:bats_all` And `gate:bats_boundary` Run Plain `bats`** — the same partition the lane used to resolve (the two boundary suites keep their own gate and their own budget), now as a direct invocation. Gate profiles are untouched; a separate tiering plan will reorganize those.
+- **Instruction Surfaces Tell The Truth** — the plugin README's scheduler section is one paragraph saying tests run sequentially and why; `commands/aid-audit-tests.md`, the analyst card and `docs/extending-aid.md` lose their parallel-safety contracts; `docs/plans/P072-authority-boundary.md` is archived with a header saying what it now is. The instruction-consistency guard that once banned "no scheduler consumes this" is inverted to ban the opposite claim, so the truthful sentence is the one that passes.
+
+### Fixed
+- **`gate:bats_all` Vanished From Double-Execution Accounting** — with the lane deleted, its replacement command names no literal `.bats` path (the shell expands the glob at dispatch), so the execution ledger recorded nothing for 159 files and would have reported zero duplicates for a portfolio it never accounted. `_gate_bats_units()` now expands globs and honours the command's own exclusion filter, and `aid-test-inventory.sh` recognises the same shape for `reconciliation.contains[]` — the two derivations agree by construction. Found by Codex review of the removal diff.
+- **The Adapter Emitted A Field Its Schema Rejects** — `lib/aid-test-adapter-contract.sh` still wrote a `parallel` block into every scanned run unit after the schema dropped it, which would have failed every fresh inventory.
+- **A Sequential Receipt Could Claim Concurrent Peers** — `co_scheduled_with` is constrained to empty now that `concurrency_context` has one legal value.
+- **The Catalog Still Listed 24 Deleted Suites** — stripping the `parallel` block left the approved catalog structurally valid but factually stale: 24 run units whose files Ring 1 deleted, 18 exact mappings to those files, and `gate:bats_all`/`gate:bats_boundary` still declaring the deleted lane command. Any audit, profile or selection touching them would have resolved a nonexistent path. Found by Codex review of the removal diff.
+- **The Receipt Producer Could Emit What Its Schema Rejects** — `execution_unit_receipt` still took a caller-supplied `concurrency_context` and `co_scheduled_with`; both are now fixed at `sequential`/empty, matching the narrowed schema instead of drifting from it.
+- **The Audit State Guard Still Expected A Deleted Wave** — `_tas_expected_focuses_for_status` listed `parallel_safety` among the dispatching-phase focuses that dispatch no longer produces.
+- **`test-run-all-delegation.sh` Was Committed Non-Executable** — a P079 file-mode slip its own adapter guard was already failing on `main`; unrelated to this plan, fixed in passing.
+
 ## [2.81.0] — 2026-08-10
 
 ### Added

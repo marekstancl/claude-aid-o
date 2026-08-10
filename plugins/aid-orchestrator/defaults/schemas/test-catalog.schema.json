@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-catalog.schema.json",
   "title": "AID Test Portfolio — Catalog",
-  "$comment": "producer: aid-test-inventory.sh (proposed) / aid-test-catalog-approve.sh (approved copy), consumers: [aid-audit-tests dispatch/allowlist/measure, P069 scheduler (shipped v2.67.0, approved-mapping-only)]",
+  "$comment": "producer: aid-test-inventory.sh (proposed) / aid-test-catalog-approve.sh (approved copy), consumers: [aid-audit-tests dispatch/allowlist/measure, aid-select-tests (approved-mapping-only)]. P078 removed the scheduler consumer and the parallel block with the parallelism machinery.",
   "description": "Canonical test-portfolio catalog. run_units[] is the ONLY array any selection, scheduling, or fingerprinting logic reads — one entry per real, schedulable command (whole .bats/.sh file, or one declared gate). test_cases[] nested under a run_unit is a diagnostic-only sub-count (e.g. individual Bats @test entries) and is never used for identity, selection, or fingerprinting. source_pattern_mappings[] proposes which run_unit_ids a changed source path should trigger; mapping_approval gates whether that proposal may be treated as authoritative — approving the catalog file as a whole does NOT imply mapping_approval.",
   "type": "object",
   "required": [

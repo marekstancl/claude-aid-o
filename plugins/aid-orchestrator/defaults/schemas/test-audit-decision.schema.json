@@ -497,7 +497,7 @@
       "minLength": 1,
       "maxLength": 200,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
-      "$comment": "Matches the run_unit_id grammar (bats:path, sh:path, gate:name, npm:script) plus lane ids. Leading '/' is impossible, which is what keeps an absolute path out of an id field."
+      "$comment": "Matches the run_unit_id grammar (bats:path, sh:path, gate:name, npm:script). Leading '/' is impossible, which is what keeps an absolute path out of an id field."
     },
     "bounded_text": {
       "type": "string",

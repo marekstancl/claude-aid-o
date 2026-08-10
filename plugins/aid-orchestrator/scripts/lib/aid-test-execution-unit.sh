@@ -130,7 +130,13 @@ execution_unit_cancel() {
 #   aid-job.sh) never ran the command and carries no ended_epoch at all —
 #   so duration_ms is null for those, never a failed arithmetic subtraction.
 execution_unit_receipt() {
-  local jobs_dir="$1" job_id="$2" unit_id="$3" concurrency_context="${4:-sequential}" co_scheduled_with_json="${5:-[]}"
+  # P078: parallel execution is gone, so the last two positional arguments are
+  # accepted (every historical call site passes them) and IGNORED — the
+  # receipt schema now admits concurrency_context "sequential" and an EMPTY
+  # co_scheduled_with only, and a producer that can emit something its own
+  # schema rejects is drift waiting to be discovered by a consumer.
+  local jobs_dir="$1" job_id="$2" unit_id="$3"
+  local concurrency_context="sequential" co_scheduled_with_json="[]"
   local job_dir="$jobs_dir/$job_id"
   [[ -d "$job_dir" && -f "$job_dir/job.json" ]] || {
     echo "execution_unit_receipt: no such job: $job_id (under $jobs_dir)" >&2
