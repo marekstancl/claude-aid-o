@@ -450,6 +450,30 @@ fi
 # for the upcoming release (header == NEW_VERSION) or stale at the previously
 # released version (header == CURRENT). Skip rename in either case.
 
+# _release_version_sealed <version> — 0 when <version> is already TAGGED in this
+# repository, i.e. it is history.
+#
+# P079 Step 10 (IMP-482): both CHANGELOG retitle sites are a blind
+# `sed 's/## \[$CURRENT\].*/## [$NEW_VERSION]/'`. Applied to a version that
+# already shipped, that does not "update a stale header" — it RENAMES a
+# released entry, and the new release silently absorbs the old one's history.
+# A tag is the repository's own record that a version was published, so a
+# tagged version's heading is immutable: tools append above it, never rewrite
+# it.
+#
+# FAILS CLOSED. If the tag lookup itself cannot run (not a git repo, no git),
+# the answer is unknown, and rewriting history on a guess is the one outcome
+# worth preventing — the caller stops and names the manual step.
+_release_version_sealed() {
+  local ver="${1:-}" out=""
+  [[ -n "$ver" ]] || return 1
+  if ! out="$(git -C "$REPO_ROOT" tag -l "v${ver}" 2>/dev/null)"; then
+    echo "ERROR: aid-release.sh: cannot list tags in ${REPO_ROOT}, so whether v${ver} is already released is unknown — refusing to rewrite a CHANGELOG heading on a guess. Set the new heading by hand, or run from the repository." >&2
+    exit 1
+  fi
+  [[ -n "$out" ]]
+}
+
 update_changelog() {
   local file="$1"
   [[ -f "$file" ]] || return 0
@@ -463,14 +487,18 @@ update_changelog() {
   if [[ "$header" == "$NEW_VERSION" ]]; then
     # Pre-written entry for upcoming release — header already correct, no-op.
     echo "Skipped: $file (header already $NEW_VERSION — pre-written entry)"
-  elif [[ "$header" == "$CURRENT" ]]; then
-    # Stale header at released version — bump to new (existing behavior).
+  elif [[ "$header" == "$CURRENT" ]] && ! _release_version_sealed "$CURRENT"; then
+    # Stale header at an UNRELEASED current version — bump to new (existing
+    # behaviour, and the only case where a retitle is a correction).
     sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$file"
     echo "Updated: $file (header $CURRENT → $NEW_VERSION)"
   else
     # Different state: prepend a new entry above the current top entry.
     # This handles the case where CHANGELOG has been edited but doesn't match
     # current OR new version (e.g., pre-written for an even newer version).
+    if [[ "$header" == "$CURRENT" ]]; then
+      echo "Sealed: v$CURRENT is tagged — its heading is preserved; prepending a new $NEW_VERSION entry instead"
+    fi
     local tmp; tmp=$(mktemp)
     {
       head -4 "$file"   # # Changelog header + intro lines
@@ -574,6 +602,12 @@ else
   for cl in $(find "$REPO_ROOT" -maxdepth 4 -name "CHANGELOG.md" ! -path "*/node_modules/*" 2>/dev/null); do
     [[ "$cl" == "$REPO_ROOT/CHANGELOG.md" ]] && continue
     if grep -q "## \[$CURRENT\]" "$cl" 2>/dev/null; then
+      # P079 Step 10: the same seal as update_changelog above — this fallback
+      # applies the identical blind sed, so it needs the identical guard.
+      if _release_version_sealed "$CURRENT"; then
+        echo "Sealed: $cl left untouched — v$CURRENT is tagged (write the new entry by hand)"
+        continue
+      fi
       sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$cl"
       UPDATED+=("$cl")
       echo "Updated: $cl (changelog)"

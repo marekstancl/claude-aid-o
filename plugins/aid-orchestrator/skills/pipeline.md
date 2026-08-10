@@ -774,6 +774,13 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    ```
    bash $AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify <N> <evidence_dir>
    ```
+
+   **Run this for EVERY step. There is no step-0 special case** (P079 Step 9,
+   IMP-474 — a live run seeded step 0 by hand and left every other step to
+   classify, which looked like two different rules and was neither). The seed
+   file `verifier-output-step-<N>.md` is always classify's product: a verifier
+   that finds no seed means classify was SKIPPED for that step. Recovery: run
+   classify, then dispatch the verifier — never hand-write the seed.
    Exit code:
    - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
    - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
