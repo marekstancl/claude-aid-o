@@ -54,7 +54,6 @@ _write_complete_decision() {
     audit_status: "complete",
     current_runtime: {kind: "unknown", duration_ms: null, scope: ["bats:a"]},
     actions: [],
-    parallelization: {lanes: [], smallest_safe_pilot: null},
     unresolved: [],
     portfolio_coverage: {inventory_count: 1, assigned_count: 1, disposition_count: 1,
                          missing_run_unit_ids: [], duplicate_run_unit_ids: []},

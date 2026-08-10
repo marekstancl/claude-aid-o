@@ -70,8 +70,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-execution-unit-membership.sh
 source "${SCRIPT_DIR}/lib/aid-execution-unit-membership.sh"
-# shellcheck source=lib/aid-test-catalog-provenance.sh
-source "${SCRIPT_DIR}/lib/aid-test-catalog-provenance.sh"
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.56.0}"
 
 # Repo-root-relative prefix all Initial-mapping entries live under. Changed

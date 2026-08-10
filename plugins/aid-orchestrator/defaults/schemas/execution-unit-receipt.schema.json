@@ -7,7 +7,16 @@
   "$defs": {
     "receipt": {
       "type": "object",
-      "required": ["unit_id", "job_id", "state", "duration_ms", "concurrency_context", "co_scheduled_with", "stdout_path", "exit_code"],
+      "required": [
+        "unit_id",
+        "job_id",
+        "state",
+        "duration_ms",
+        "concurrency_context",
+        "co_scheduled_with",
+        "stdout_path",
+        "exit_code"
+      ],
       "properties": {
         "unit_id": {
           "type": "string",
@@ -21,64 +30,153 @@
         },
         "state": {
           "type": "string",
-          "enum": ["started", "running", "lost", "terminal_pass", "terminal_fail", "timed_out", "cancelled"],
+          "enum": [
+            "started",
+            "running",
+            "lost",
+            "terminal_pass",
+            "terminal_fail",
+            "timed_out",
+            "cancelled"
+          ],
           "description": "aid-job.sh's own state vocabulary (via aid-test-execution-unit.sh's status/receipt normalization, Step 1) — never a second, competing vocabulary. started/running/lost are non-terminal; the rest are terminal."
         },
         "duration_ms": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "description": "null while non-terminal — never fabricated from a partial run. Whole-second-quantized (see aid-test-execution-unit.sh's own documented limitation)."
         },
         "concurrency_context": {
           "type": "string",
-          "enum": ["sequential"],
+          "enum": [
+            "sequential"
+          ],
           "description": "Always \"sequential\" since P078 removed parallel execution; kept so historical receipts and the baseline series keep a stable field."
         },
         "co_scheduled_with": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "description": "Diagnostic-only: unit_ids of other units the scheduler ran concurrently with this one in the same batch. Empty for a sequential (size-1) batch. Never used to compute unit_id, job_id, or any selection/scheduling decision."
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Always empty since P078 removed parallel execution: nothing is ever co-scheduled. Kept (rather than dropped) so historical receipts stay readable; constrained to empty so a receipt can never claim concurrent peers while declaring concurrency_context: sequential.",
+          "maxItems": 0
         },
         "stdout_path": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Path to the unit's streamed stdout log (aid-job.sh's own stdout_path)."
         },
         "exit_code": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "description": "null while non-terminal."
         }
       },
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "state": { "enum": ["started", "running", "lost"] } } },
-          "then": { "properties": { "duration_ms": { "const": null }, "exit_code": { "const": null } } },
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "started",
+                  "running",
+                  "lost"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "duration_ms": {
+                "const": null
+              },
+              "exit_code": {
+                "const": null
+              }
+            }
+          },
           "$comment": "Non-terminal states never carry a fabricated duration/exit_code — matches aid-test-execution-unit.sh's execution_unit_receipt, which emits both as null for every non-terminal state."
         },
         {
-          "if": { "properties": { "state": { "enum": ["terminal_pass", "terminal_fail", "timed_out"] } } },
-          "then": { "properties": { "duration_ms": { "type": "integer" }, "exit_code": { "type": "integer" } } },
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "terminal_pass",
+                  "terminal_fail",
+                  "timed_out"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "duration_ms": {
+                "type": "integer"
+              },
+              "exit_code": {
+                "type": "integer"
+              }
+            }
+          },
           "$comment": "aid-job.sh's normal cmd_wrap completion path always records ended_epoch for these three states, so duration_ms/exit_code are always present — the null exception below is cancelled-only."
         },
         {
-          "if": { "properties": { "state": { "const": "cancelled" } } },
-          "then": { "properties": { "exit_code": { "type": "integer" } } },
+          "if": {
+            "properties": {
+              "state": {
+                "const": "cancelled"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "type": "integer"
+              }
+            }
+          },
           "$comment": "aid-job.sh's cancel path always sets exit_code:143 (even the pre-exec-handshake _wrap_write_cancelled_result), but duration_ms may legitimately be null — that handshake result carries no ended_epoch at all since the command never ran."
         }
       ]
     }
   },
   "type": "object",
-  "required": ["batch_id", "units", "started_at", "ended_at"],
+  "required": [
+    "batch_id",
+    "units",
+    "started_at",
+    "ended_at"
+  ],
   "properties": {
-    "batch_id": { "type": "string", "minLength": 1 },
+    "batch_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "units": {
       "type": "array",
-      "items": { "$ref": "#/$defs/receipt" },
+      "items": {
+        "$ref": "#/$defs/receipt"
+      },
       "description": "Sorted by unit_id (ascending, byte/codepoint order) at serialization time — the canonical, deterministic ordering every producer/consumer of this shape agrees on."
     },
-    "started_at": { "type": "string", "format": "date-time" },
-    "ended_at": { "type": "string", "format": "date-time" }
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time"
+    }
   },
   "additionalProperties": false
 }

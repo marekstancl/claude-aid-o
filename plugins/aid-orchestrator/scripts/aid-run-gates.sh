@@ -1440,6 +1440,52 @@ _gate_output_escape() {
   printf '%s' "$s"
 }
 
+# _gate_bats_units <resolved_command>
+#   The .bats files a gate command actually dispatches, one per line, relative
+#   to the project root. Three shapes, because the ledger has to see all of
+#   them or its double-execution accounting silently under-reports:
+#     * literal paths          — `bats a.bats b.bats`
+#     * a directory glob       — `bats path/*.bats` (expanded here, because the
+#                                shell expands it at dispatch time and the
+#                                command string never contains the file names)
+#     * a glob minus a filter  — `ls path/*.bats | grep -v -e X -e Y`, which is
+#                                how gate:bats_all excludes the boundary files
+#                                that gate:bats_boundary owns
+#   Getting the third one wrong is not cosmetic: counting the excluded files
+#   here would report every boundary file as double-dispatched, and skipping
+#   glob expansion entirely (the state P078 left behind for one commit) drops
+#   159 files out of the accounting and certifies the portfolio clean.
+#   aid-test-inventory.sh derives the same partition for reconciliation.contains[];
+#   the two must agree.
+_gate_bats_units() {
+  local cmd="$1" tok f
+  local -a excludes=()
+  # `grep -v -e A -e B` / `grep -v A` inside the command declares exclusions.
+  if [[ "$cmd" == *"grep -v"* ]]; then
+    while read -r tok; do
+      [[ -n "$tok" ]] && excludes+=("$tok")
+    done < <(grep -oE '\-v( +\-e +[A-Za-z0-9_./-]+)+|\-v +[A-Za-z0-9_./-]+' <<<"$cmd" \
+               | grep -oE '[A-Za-z0-9_./-]+' | grep -vx -e v -e e || true)
+  fi
+  {
+    # literal paths
+    grep -oE '[A-Za-z0-9_./-]+\.bats' <<<"$cmd" 2>/dev/null || true
+    # globs — expanded against the CURRENT directory, which run_all_gates has
+    # already set to the project root for command execution
+    while read -r tok; do
+      [[ -n "$tok" ]] || continue
+      compgen -G "$tok" 2>/dev/null || true
+    done < <(grep -oE '[A-Za-z0-9_./-]*\*[A-Za-z0-9_./-]*\.bats' <<<"$cmd" 2>/dev/null || true)
+  } | sort -u | while read -r f; do
+    [[ -n "$f" ]] || continue
+    local skip=0 ex
+    for ex in "${excludes[@]:-}"; do
+      [[ -n "$ex" && "$f" == *"$ex"* ]] && skip=1
+    done
+    (( skip )) || printf '%s\n' "$f"
+  done
+}
+
 run_all_gates() {
   local execution_yaml="$1"
   local epic_id="$2"
@@ -2004,7 +2050,7 @@ run_all_gates() {
           _svc_release_run "$_evidence_dir" "$execution_yaml"
           return 3
         fi
-      done < <(grep -oE '[A-Za-z0-9_./-]+\.bats' <<<"$resolved_cmd" 2>/dev/null || true)
+      done < <(_gate_bats_units "$resolved_cmd")
     fi
 
     local gate_result="" attempt=0 gate_exit=0

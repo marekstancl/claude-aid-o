@@ -208,7 +208,7 @@ _decision() {
   jq -n --argjson pc "$2" --arg st "${3:-complete}" \
     '{schema_version:"aid-test-audit-decision-v1", audit_id:"a1", audit_status:$st,
       current_runtime:{kind:"unknown", duration_ms:null, scope:["bats:a"]},
-      actions:[], parallelization:{lanes:[], smallest_safe_pilot:null}, unresolved:[],
+      actions:[], unresolved:[],
       portfolio_coverage:{inventory_count:1, assigned_count:1, disposition_count:1,
                           missing_run_unit_ids:[], duplicate_run_unit_ids:[]},
       portfolio_change:$pc}
@@ -331,7 +331,6 @@ _valid_decision_base() {
   "audit_status": "complete",
   "current_runtime": {"kind": "unknown", "duration_ms": null, "scope": ["bats:x"]},
   "actions": [],
-  "parallelization": {"lanes": [], "smallest_safe_pilot": null},
   "unresolved": [],
   "portfolio_coverage": {"inventory_count": 1, "assigned_count": 1, "disposition_count": 1,
                          "missing_run_unit_ids": [], "duplicate_run_unit_ids": []},

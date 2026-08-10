@@ -257,19 +257,6 @@ fi
     echo "WARN: aid-audit-tests-finalize.sh: report.html could not be generated — the audit stands, but the fixed-form page is missing; run aid-test-audit-report.sh by hand and report the error" >&2
   fi
 
-  _proposed_catalog="${output_dir%/}/test-catalog.proposed.yaml"
-  if [[ -f "$_proposed_catalog" && -n "$project_root" ]]; then
-    _apply_args=(--catalog "$_proposed_catalog" --decision "$decision_path" --project-root "$project_root")
-    # The currently approved catalog is where previously-proven evidence lives.
-    # Carrying it forward is safe because every entry is bound to a content
-    # hash: anything whose source moved fails its own binding and reverts.
-    _approved_catalog="${project_root%/}/.aid-o/config/test-catalog.yaml"
-    [[ -f "$_approved_catalog" ]] && _apply_args+=(--previous "$_approved_catalog")
-    if ! bash "${SCRIPT_DIR}/aid-test-catalog-apply-evidence.sh" "${_apply_args[@]}" >&2; then
-      echo "WARN: aid-audit-tests-finalize.sh: could not apply this audit's parallel-safety evidence to ${_proposed_catalog} — the proposed catalog is complete but its parallel column is not filled in" >&2
-    fi
-  fi
-
 # ─── Stage 2: render the mandatory chat summary (Step 15) — persists the
 #     durable record as a side effect; fails closed if that persist fails.
 # "" for $2 keeps the renderer's own default changed_text (it uses :- so an

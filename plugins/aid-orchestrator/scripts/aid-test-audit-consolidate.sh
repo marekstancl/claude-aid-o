@@ -106,7 +106,7 @@ trap 'rm -rf "$_tmpdir"' EXIT
 # too long" — and because this script is the only mandatory closing step, and it
 # fails closed, the whole audit produced no decision artifact at all.
 #
-# The same defect was fixed once in aid-test-resource-map.sh (2.70.2) and not
+# The same defect was fixed once in the resource map (2.70.2, since removed) and not
 # swept for elsewhere. `_bigjson` is that sweep: it writes a value to a temp
 # file and prints the path, for use with `--slurpfile NAME` + `$NAME[0]`.
 _TAC_BIGJSON_FILES=()
@@ -295,7 +295,7 @@ if [[ "$audit_mode" == "full" ]]; then
       schema_version:"aid-test-audit-decision-v1", audit_id:$id,
       audit_status:"incomplete", incomplete_reason:"empty_inventory",
       current_runtime:{kind:"unknown",duration_ms:null,scope:["none"]},
-      actions:[], parallelization:{lanes:[],smallest_safe_pilot:null}, unresolved:[],
+      actions:[], unresolved:[],
       portfolio_coverage:{inventory_count:0,assigned_count:0,disposition_count:0,
                           missing_run_unit_ids:[],duplicate_run_unit_ids:[]},
       portfolio_change:{current_run_units:0,proposed_run_units:0,keep:[],rewrite_unit:[],
@@ -578,12 +578,9 @@ if [[ "$audit_mode" == "full" ]]; then
     fi
 
 
-    # ─── P078: the P072 Step 18 lane-promotion block was removed with the
-    # parallelism machinery (PM decision 2026-08-09). The decision artifact
-    # keeps an empty parallelization object for schema stability; Ring 2
-    # removes the field from the schema itself.
-    lanes_json='[]'
-    smallest_pilot='null'
+    # (P078: the P072 Step 18 lane-promotion block was removed with the
+    # parallelism machinery — PM decision 2026-08-09. The decision artifact
+    # no longer carries a parallelization object at all.)
 
     # ─── P072 Step 5: content checks on the dispositions themselves ─────────
     #
@@ -742,16 +739,15 @@ if [[ "$audit_mode" == "full" ]]; then
       --slurpfile merge_groups_w "$(_bigjson "$merge_groups_json")" --arg impact_kind "$impact_kind" \
       --argjson merged_surplus "$merged_surplus" \
       --slurpfile profile_actions_w "$(_bigjson "$profile_actions_json")" \
-      --slurpfile lanes_w "$(_bigjson "$lanes_json")" --argjson smallest_pilot "$smallest_pilot" \
       --argjson rt_before "$runtime_before" --argjson rt_after "$runtime_after" '
       ($inv_w[0]) as $inv | ($missing_w[0]) as $missing | ($dupes_w[0]) as $dupes
       | ($unresolved_w[0]) as $unresolved | ($keep_w[0]) as $keep
       | ($rewrite_w[0]) as $rewrite | ($remove_w[0]) as $remove
       | ($merge_groups_w[0]) as $merge_groups | ($profile_actions_w[0]) as $profile_actions
-      | ($lanes_w[0]) as $lanes |
+      |
       {schema_version:"aid-test-audit-decision-v1", audit_id:$id, audit_status:$status,
        current_runtime:{kind:"unknown", duration_ms:null, scope:$inv},
-       actions:$profile_actions, parallelization:{lanes:$lanes, smallest_safe_pilot:$smallest_pilot},
+       actions:$profile_actions,
        unresolved:$unresolved,
        portfolio_coverage:{inventory_count:$ic, assigned_count:$ac, disposition_count:$dc,
                            missing_run_unit_ids:$missing, duplicate_run_unit_ids:$dupes},
@@ -798,10 +794,6 @@ if [[ "$audit_mode" == "full" ]]; then
                  | .impact.assumptions = ((.impact.assumptions + ["a single measured run, not a before/after comparison"]) | map(bounded)))
            else . end))
       | .unresolved |= map(if .next_measurement then .next_measurement |= bounded else . end)
-      | .parallelization.lanes |= map(.evidence_refs |= bound_refs)
-      | (if .parallelization.smallest_safe_pilot != null
-         then .parallelization.smallest_safe_pilot.pass_criteria |= map(bounded)
-         else . end)
     ' <<<"$decision_json")"
 
     aid_test_audit_decision_write "$decision_json" "${output_dir%/}/decision.json" \

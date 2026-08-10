@@ -981,7 +981,7 @@ _run_full_profiled() {
   # "Argument list too long". Because this script is the only mandatory closing
   # step and it fails closed, the audit produced no decision artifact at all.
   #
-  # The same defect was fixed in aid-test-resource-map.sh in 2.70.2 and never
+  # The same defect was fixed in the resource map in 2.70.2 (since removed) and never
   # swept for here. Every fixture in this file is small, which is exactly why
   # nothing caught it — so this one is deliberately not small.
   local n=400 i
