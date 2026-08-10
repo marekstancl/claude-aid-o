@@ -1217,7 +1217,13 @@ worktree.
 > reader can follow. The supersede record is likewise split: the shipped half
 > lives in `auto-recovery.yaml`'s own `supersedes:` block, because the
 > 2026-07-21 document is untracked too and its section markers are not on the
-> branch. Two config layers made explicit: `/aid-init`'s `execution.yaml`
+> branch. (Plan-vs-shipped divergence, recorded rather than absorbed: this
+> paragraph originally read *"reconciled with the 2026-07-21 stop-taxonomy
+> design"*. Step 17 changed it to *"superseding"* because that is what shipped —
+> `auto-recovery.yaml` carries a `supersedes:` block, not a reconciliation. The
+> word was wrong, not the intent; the original wording is kept here so the
+> correction is visible instead of silently overwritten.) Two config layers made
+> explicit: `/aid-init`'s `execution.yaml`
 > template gains the FIELDS only (`run_mode`, `needs_services` and a `services:`
 > block that ships as commentary with zero active services), while
 > `auto-recovery.yaml` and three JSON schemas ship as new template files with

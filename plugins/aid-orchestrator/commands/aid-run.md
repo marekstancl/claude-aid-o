@@ -63,7 +63,7 @@ values are **storable**, and the fourth state is never stored at all.
 |-------|---------|---------------|-------------|
 | `active` | yes | An autonomous controller is alive and owns this run. | `init`, when `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
 | `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when `AID_AUTO_MODE=1` is not set |
-| `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | *Nothing writes it yet.* The value is accepted by the writer and reserved for the escalation ladder's terminus, which is a later plan step. Treat it today as vocabulary, not as observed state. |
+| `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | `aid_ladder_escalate` (`lib/aid-recovery-ladder.sh`), through the single map writer, when a class's terminus reaches escalation. |
 | `awaiting_host_resume` | **never** | A background gate was handed off and the controller then died: the run's continuation artifact is still on disk and nothing has signalled liveness. | Nobody. It is **derived** at read time. |
 
 `awaiting_host_resume` is derived rather than stored for one reason: a controller that has died

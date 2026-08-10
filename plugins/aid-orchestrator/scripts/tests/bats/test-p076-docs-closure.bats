@@ -14,6 +14,9 @@
 #      cannot quietly drop the cross-reference.
 #   5. Every skill, command and agent card this plan touched carries a
 #      `**Last Updated:**` stamp.
+#   6. `aid-run.md`'s `blocked_for_pm` row names a writer that really writes the
+#      value — pinned from both sides, because that row's earlier "nothing
+#      writes it yet" survived the arrival of its writer unnoticed.
 #
 # WHY THERE IS NO `skip` ANYWHERE IN THIS FILE. The step's Edge Cases allowed a
 # named skip for a checkout with no `docs/`. That premise does not hold and was
@@ -212,4 +215,33 @@ expected exactly:
 ${expected}
 found:
 ${stale:-<none>}"
+}
+
+@test "9: aid-run.md's blocked_for_pm row names a writer that really writes it" {
+  # The row said "Nothing writes it yet" while lib/aid-recovery-ladder.sh had
+  # already shipped the writer. Neither half was pinned, so the claim went
+  # stale silently. This case pins BOTH directions: the doc may not re-assert
+  # that nothing writes the value, and the writer it names must still exist.
+  local runmd="$REPO_ROOT/plugins/aid-orchestrator/commands/aid-run.md"
+  local ladder="$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-recovery-ladder.sh"
+  [ -f "$runmd" ] || _fail "missing $runmd"
+  [ -f "$ladder" ] || _fail "missing $ladder"
+
+  local row
+  row="$(grep -F '| `blocked_for_pm` |' "$runmd" || true)"
+  [ -n "$row" ] || _fail "aid-run.md no longer has a 'blocked_for_pm' row in the run-states table"
+
+  if grep -qiF 'nothing writes it' <<<"$row"; then
+    _fail "aid-run.md's blocked_for_pm row claims nothing writes the value, but lib/aid-recovery-ladder.sh does:
+$row"
+  fi
+
+  grep -qF 'aid_ladder_escalate' <<<"$row" \
+    || _fail "aid-run.md's blocked_for_pm row does not name its writer (aid_ladder_escalate):
+$row"
+
+  grep -qE '^aid_ladder_escalate\(\)' "$ladder" \
+    || _fail "aid-run.md names aid_ladder_escalate as the writer, but no such function is defined in lib/aid-recovery-ladder.sh"
+  grep -qF 'auto_controller blocked_for_pm' "$ladder" \
+    || _fail "lib/aid-recovery-ladder.sh no longer writes 'auto_controller blocked_for_pm' — aid-run.md's row is stale again"
 }

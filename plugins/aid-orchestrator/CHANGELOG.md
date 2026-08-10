@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased] — versioned at the plan-final release boundary (P076)
 
+> **DO NOT run `aid-release.sh` against this heading — set the version by hand first.**
+> `_release_probe_first` matches only numeric `## [X.Y.Z]` headings, so it skips
+> `## [Unreleased]` entirely and returns `2.79.3` — which equals `RELEASED_VERSION`
+> from `plugin.json`, so `update_changelog` takes its `header == CURRENT` branch and
+> `sed`-renames the SHIPPED `## [2.79.3]` heading into the new version. The result:
+> 2.79.3's released history is absorbed into the new release and THIS entry stays
+> `[Unreleased]`. The IMP-093 two-source guard cannot see a heading the probe skipped.
+> Replace `[Unreleased]` with the intended `[X.Y.Z] — YYYY-MM-DD` (in BOTH CHANGELOGs,
+> which must stay byte-identical) before any release automation runs. Tracked as IMP-481.
+
 > AUTO mode used to pretend it could wait. A long gate ran inline, so a killed
 > session took the suite down with it; a controller that died left a run that
 > looked exactly like one making progress; and the infrastructure a test needed
@@ -30,7 +40,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **`run_mode` is a documented per-gate key** — every gate's value is validated before any command is spawned, so a typo fails loudly naming the gate; the shipped template documents the field and no template gate sets it, and this repository's own two long suites are the only gates anywhere that declare `background`.
-- **The runtime-baseline recommendation gained its first consumer, deliberately observe-only** — one `gate_run_mode_advice` timeline event per over-threshold gate that declares no `run_mode`, carrying the measured p95 and the exact one-line edit; flipping stays the PM's decision, and the gate report is provably byte-identical with and without the event.
+- **The runtime-baseline recommendation gained its first consumer, deliberately observe-only** — one `gate_run_mode_advice` timeline event per over-threshold gate that declares no `run_mode`, carrying the measured p95 and the exact one-line edit; flipping stays the PM's decision, and the advice exists only as that timeline event — it writes no gate row, changes no gate verdict and no exit code, and an unreadable baseline yields no advice and no failure (`test-run-mode-advice.bats`, four cases over the real gate runner).
 - **A background gate's result answers for the tree it came from** — a REPLAYED result (a job already terminal when this invocation re-attached) must still be current or the gate genuinely re-runs, while a job this invocation spawned or watched to completion keeps the command's exit code as the verdict and merely records `tree_moved_during_run`.
 - **`/aid-status`, `/aid-run`, `/aid-help` and the e2e role card** — status renders the controller state, the stall marker and the resume line, byte-locked against the published example render; `aid-run.md` documents the four controller states, why one of them can never be stored, and the resume flow as the AUTO contract's single carve-out from do-not-pause; the e2e card's infrastructure prose becomes "declare it", and the no-arbitrary-sleeps rule finally names its alternative — `probe_cmd`.
 - **The AUTO controller loop has a mechanical liveness step** — `pipeline.md` now specifies `aid-job.sh watchdog` after each dispatch or gate action, `busy` meaning keep polling, and `resume_needed` routing into the recovery ladder, with a failed watchdog invocation logged and skipped rather than blocking gates.
