@@ -614,15 +614,25 @@ JSON
   [[ "$output" == *"E-901-5_5"*"ctl=active"* ]]
 }
 
-@test "the pointer is proof only when it NAMES the continuation artifact — an arbitrary path is not fact 1" {
+@test "the pointer is proof only when it NAMES the continuation artifact AND resolves inside this run's evidence directory" {
   # THE REGRESSION THIS CLOSES: fact 1 is "the run's continuation artifact is
   # still on disk". Probing `resume_artifact` as an arbitrary path and taking
   # any regular file found there as that artifact makes the row assert a state
   # it cannot prove — the exact failure the two-fact rule exists to prevent.
   # `update_active_run_field` validates `auto_controller` against a closed
-  # vocabulary and `resume_artifact` not at all, so this surface validates the
-  # SHAPE it is willing to treat as evidence: the basename must be the shared
-  # AID_RESUME_ARTIFACT_BASENAME, read from lib/aid-resume-artifact.sh.
+  # vocabulary and `resume_artifact` not at all, so this surface validates BOTH
+  # the SHAPE it is willing to treat as evidence (the basename must be the
+  # shared AID_RESUME_ARTIFACT_BASENAME, read from lib/aid-resume-artifact.sh)
+  # and the LOCATION (it must resolve inside `.aid-o/work/evidence/<epic>/<run>`,
+  # the same rule lib/aid-service.sh:_aid_svc_safe_jobs_dir applies to a
+  # registry-recorded jobs_dir).
+  #
+  # THE SECOND HALF IS THE CP3 SECURITY FINDING, DEMONSTRATED: shape alone was
+  # not containment. A correctly-named file OUTSIDE the evidence directory,
+  # outside the repository and outside `.aid-o` entirely made this row assert
+  # `awaiting_host_resume` and print that file's `safe_next_action` as a
+  # pasteable command. This case now pins the containment, so the escape cannot
+  # come back as "the location is not validated".
   local d="$TEST_TMPDIR/ptr"
   _repo "$d"
   mkdir -p "$d/.aid-o/work"
@@ -647,21 +657,54 @@ JSON
   [[ "$output" != *"README.md"* ]]
   # it is still an honest stall, with the RECORDED controller value
   [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
-  # and a pointer that DOES name the artifact is still honoured, off the
-  # conventional path — the shape is validated, the location is not
+  # (b) CORRECT BASENAME, WRONG PLACE — the demonstrated escape. Two locations:
+  # one still inside `.aid-o` but not this run's evidence directory, one
+  # entirely outside the project tree. Both carry a real, readable artifact
+  # with a real `safe_next_action`, and neither may become fact 1.
+  local tmp elsewhere
   mkdir -p "$d/.aid-o/work/handoff"
   printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
     > "$d/.aid-o/work/handoff/auto_resume_required.json"
-  local tmp; tmp="$(mktemp)"
-  jq '."E-901-1_1".resume_artifact = ".aid-o/work/handoff/auto_resume_required.json"' \
+  elsewhere="$TEST_TMPDIR/outside/EVIL"
+  mkdir -p "$elsewhere"
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned"}\n' \
+    > "$elsewhere/auto_resume_required.json"
+  local ptr
+  for ptr in ".aid-o/work/handoff/auto_resume_required.json" \
+             "$elsewhere/auto_resume_required.json"; do
+    tmp="$(mktemp)"
+    jq --arg p "$ptr" '."E-901-1_1".resume_artifact = $p' \
+      "$d/.aid-o/work/active-runs.json" > "$tmp" && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+    before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+    _call "$d" 'plan_epics P901'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"awaiting_host_resume"* ]] || {
+      echo "FAIL: a pointer outside this run's evidence directory ('$ptr') was accepted as fact 1:
+$output" >&2; false; }
+    [[ "$output" != *"$ptr"* ]]
+    [[ "$output" != *"bash /tmp/pwn.sh --owned"* ]]
+    [[ "$output" != *"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"* ]]
+    # the row degrades honestly to the RECORDED value, it does not blank
+    [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+    [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+  done
+
+  # (c) CORRECT BASENAME, INSIDE this run's evidence directory but NOT on the
+  # conventional path — still honoured, so the containment check narrows the
+  # pointer rather than making it decorative.
+  mkdir -p "$d/.aid-o/work/evidence/E-901-1_1/R-1/handoff"
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/R-1/handoff/auto_resume_required.json"
+  tmp="$(mktemp)"
+  jq '."E-901-1_1".resume_artifact = ".aid-o/work/evidence/E-901-1_1/R-1/handoff/auto_resume_required.json"' \
     "$d/.aid-o/work/active-runs.json" > "$tmp" && mv "$tmp" "$d/.aid-o/work/active-runs.json"
   before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
   _call "$d" 'plan_epics P901'
   [ "$status" -eq 0 ]
   [[ "$output" == *"E-901-1_1"*"ctl=awaiting_host_resume"* ]]
-  [[ "$output" == *".aid-o/work/handoff/auto_resume_required.json is still on disk"* ]]
+  [[ "$output" == *"evidence/E-901-1_1/R-1/handoff/auto_resume_required.json is still on disk"* ]]
   [[ "$output" == *"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"* ]]
-  # neither render wrote anything
+  # no render wrote anything
   [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
 }
 

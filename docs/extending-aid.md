@@ -1665,7 +1665,9 @@ mechanical signal is already collected for you: when a gate's runtime baseline
 recommends `background` and the gate declares no `run_mode`, the runner emits a
 `gate_run_mode_advice` timeline event carrying the measured p95 and the exact
 one-line edit. That event is deliberately observe-only — it never flips
-anything, and the gate report is byte-identical with and without it. The flip is
+anything: it writes no gate row, changes no gate verdict and no exit code, and
+an unreadable baseline yields no advice and no failure
+(`test-run-mode-advice.bats`, four cases over the real gate runner). The flip is
 a PM's one-line decision, and in this repository only `bats_all` and
 `bats_boundary` have earned it. The shipped `/aid-init` template documents the
 key and declares it nowhere, so a consumer project's gates keep the foreground

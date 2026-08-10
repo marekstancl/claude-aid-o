@@ -30,6 +30,18 @@
 #                           volatile fields, to the COMMITTED pre-P076 reference.
 #   REGISTRY              — every mechanism this plan shipped has a row in
 #                           defaults/enforcement-registry.yaml (grep-asserted).
+#                           UN-SKIPPABLE: it is pure grep and `yq` over a file in
+#                           this repository, so no environment can excuse it.
+#
+# SKIPS, AND WHERE THEY MAY LIVE. `jq` and `yq` are hard dependencies of the
+# shipped runner and their absence FAILS setup(); the process facilities
+# (`setsid`, `flock`, `timeout`, `python3`, `/proc`) skip only the three phases
+# that genuinely drive processes, through `_require_process_facilities`. They
+# used to sit in setup(), where one absent binary skipped all four tests —
+# including the registry check, which needs none of them — and bats reports a
+# skip as `ok`. The two closure suites of this EPIC were built un-skippable after
+# that failure mode bit once; this suite is now as un-skippable as its
+# dependencies allow.
 #
 # Codex is never reached: phase 3 redefines `_run_codex_isolated` after sourcing
 # the adjudication lib, exactly as test-recovery-adjudicate.bats does.
@@ -67,17 +79,19 @@ setup() {
   GOLDEN="$PLUGIN_ROOT/scripts/tests/fixtures/p076/golden-gates-report.json"
   export RUN_GATES JOB_SH FSM LADDER_LIB ADJ_LIB STATUS_DOC REGISTRY GOLDEN
 
-  # NAMED SKIPS. Every one of these is a declared dependency of the machinery
-  # under test, not a convenience: `setsid` is how a supervised job outlives its
-  # caller, `/proc` is how this suite identifies a runner by its CWD rather than
-  # by a pattern, and python3 is how the services half allocates a real port.
-  command -v jq      >/dev/null 2>&1 || skip "jq is not available"
-  command -v yq      >/dev/null 2>&1 || skip "yq is not available (the service declarations and the status render both read it)"
-  command -v flock   >/dev/null 2>&1 || skip "flock is not available"
-  command -v setsid  >/dev/null 2>&1 || skip "setsid is not available — a supervised job cannot be detached into its own session, so the crash-survival phases cannot be run"
-  command -v python3 >/dev/null 2>&1 || skip "python3 is not available (a declared dependency of the services feature)"
-  command -v timeout >/dev/null 2>&1 || skip "timeout(1) is not available"
-  [ -d /proc ] || skip "/proc is not available — this suite identifies runners and services by real process facts, never by a pattern match"
+  # HARD DEPENDENCIES — a FAILURE, never a skip. `jq` and `yq` are hard deps of
+  # the shipped runner itself, not environment quirks: a checkout that cannot
+  # run them cannot run AID, so reporting green here would be a lie about the
+  # whole plan. Seven skips used to sit in this function, which meant ONE absent
+  # binary skipped all four tests — bats prints a skip as `ok`, the file exits 0,
+  # and the plan's own acceptance instrument reported success while checking
+  # nothing. That is the exact silent-skip failure mode this plan was written to
+  # eliminate, and the two closure suites were deliberately built un-skippable
+  # after it bit once already. This suite now inherits that property.
+  command -v jq >/dev/null 2>&1 \
+    || { echo "FATAL: jq is not available — it is a hard dependency of the shipped gate runner, not an environment quirk; a skip here would report this plan's acceptance instrument as green while checking nothing" >&2; return 1; }
+  command -v yq >/dev/null 2>&1 \
+    || { echo "FATAL: yq is not available — the service declarations and the status render both read it; see the note on jq above" >&2; return 1; }
 
   WORK="$(mktemp -d)"; export WORK
   PROJ="$WORK/project"; export PROJ
@@ -111,6 +125,26 @@ setup() {
   TOKEN="aidp076int-$$-${RANDOM}-${BATS_TEST_NUMBER}"; export TOKEN
 
   _write_fixtures
+}
+
+# _require_process_facilities — the PROCESS dependencies, named and skipped in
+# the phases that actually use them, never in setup().
+#
+# These five are genuine environment facilities rather than AID dependencies:
+# `setsid` is how a supervised job outlives its caller, `/proc` is how this
+# suite identifies a runner by its CWD rather than by a pattern match, `python3`
+# is how the services half allocates a real port by BIND probe, and `flock` and
+# `timeout(1)` bound the ladder's critical section and every probe. A machine
+# without them cannot run the crash-survival phases at all — but it can still
+# run the registry assertion, which is pure grep and `yq` over a YAML file in
+# this repository and needs no process facility whatsoever. Keeping these skips
+# in setup() meant a missing `setsid` silently skipped that check too.
+_require_process_facilities() {
+  command -v flock   >/dev/null 2>&1 || skip "flock is not available"
+  command -v setsid  >/dev/null 2>&1 || skip "setsid is not available — a supervised job cannot be detached into its own session, so the crash-survival phases cannot be run"
+  command -v python3 >/dev/null 2>&1 || skip "python3 is not available (a declared dependency of the services feature)"
+  command -v timeout >/dev/null 2>&1 || skip "timeout(1) is not available"
+  [ -d /proc ] || skip "/proc is not available — this suite identifies runners and services by real process facts, never by a pattern match"
 }
 
 # teardown — nothing this suite starts may outlive it, and everything is killed
@@ -439,6 +473,7 @@ golden_normalize() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 @test "phases 1-2: a SIGKILLed controller derives awaiting_host_resume, resume claims it once, and the rerun finishes the run without re-executing anything" {
+  _require_process_facilities
   init_project
   _seed_map
   _write_exec_yaml
@@ -623,6 +658,7 @@ golden_normalize() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 @test "phase 3: a forced GATE_TIMEOUT exhausts the ladder budget, the stubbed adjudication escalates, and the run is blocked for a person" {
+  _require_process_facilities
   local P3EPIC="E-076-8_8"
   local P3EVID_REL=".aid-o/work/evidence/${P3EPIC}/R-1"
   local P3PROJ="$WORK/p3" P3EVID
@@ -769,6 +805,7 @@ SH
 # ═══════════════════════════════════════════════════════════════════════════
 
 @test "phase 4: GOLDEN — a foreground-only config with no services is byte-identical to the committed pre-P076 reference" {
+  _require_process_facilities
   [ -f "$GOLDEN" ] \
     || _fail 4 "$GOLDEN" "the committed pre-P076 reference is missing — phase 4 has nothing to compare against and must never regenerate it"
 
@@ -845,6 +882,108 @@ $output"
   [ "$status" -ne 0 ] \
     || _fail 4 "$REGISTRY" "a P076 instruction: field cites a gitignored plan/design file, which resolves to nothing for any other reader:
 $output"
+
+  # EVERY FILE A P076 `instruction:` CITES MUST EXIST, AND EVERY `grep:` TOKEN
+  # IT PROMISES MUST BE FINDABLE THERE.
+  #
+  # THE REGRESSION THIS CLOSES. Two rows anchored the declared-services lifecycle
+  # to "commands/aid-run.md + skills/pipeline.md (the gate-run section)". Neither
+  # half existed: `grep -ci service commands/aid-run.md` was 0, and pipeline.md's
+  # only hits were the SERVICE_UNHEALTHY stop-class name and a docker-compose
+  # scan. The registry asserted DOCUMENTATION that did not exist — the exact
+  # defect, inverted, that the banner three lines above these rows says the
+  # registry is the single most damaging place for. The gitignore check above
+  # cannot see it: a citation into a TRACKED file that says nothing about the
+  # mechanism passes it. Existence plus the promised token is what closes it.
+  local ins path tok plugin_rel found
+  while IFS= read -r ins; do
+    for path in $(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u); do
+      case "$path" in
+        docs/*) plugin_rel="$REPO_ROOT/$path" ;;
+        *)      plugin_rel="$PLUGIN_ROOT/$path" ;;
+      esac
+      [ -f "$plugin_rel" ] \
+        || _fail 4 "$REGISTRY" "a P076 instruction: cites '$path', which does not exist — a reader following this anchor finds nothing:
+$ins"
+    done
+    # `grep: 'token'` inside an anchor is a PROMISE about the file beside it.
+    tok="$(sed -n "s/.*grep: '\([^']*\)'.*/\1/p" <<<"$ins")"
+    if [ -n "$tok" ]; then
+      local found=0
+      for path in $(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u); do
+        case "$path" in
+          docs/*) plugin_rel="$REPO_ROOT/$path" ;;
+          *)      plugin_rel="$PLUGIN_ROOT/$path" ;;
+        esac
+        grep -qF -- "$tok" "$plugin_rel" && { found=1; break; }
+      done
+      [ "$found" = 1 ] \
+        || _fail 4 "$REGISTRY" "a P076 instruction: promises grep: '$tok' but no file it cites contains that string:
+$ins"
+    fi
+  done < <(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" | grep -E '^    instruction: ')
+
+  # EXISTENCE IS NOT SUBSTANCE — the anchor must land where the mechanism is
+  # actually described. Both files the two broken rows cited EXIST, so an
+  # existence check alone passes on the very defect this closes (verified: the
+  # check above stays green when the broken anchor is restored). Each row
+  # therefore declares ONE distinctive token of its own mechanism, and at least
+  # one file the row cites must contain it. Tokens are chosen to be the word a
+  # reader would search for, not a sentence that rewording would break.
+  local pair rid want ok_row cited
+  for pair in \
+    "gate_run_mode_contract|run_mode" \
+    "gate_background_eager_artifact|awaiting_host_resume" \
+    "resume_single_use_claim|resume" \
+    "active_run_stall_derivation|stalled" \
+    "instruction_closure_structural_check|Controller boundary" \
+    "service_declaration_schema|start_cmd" \
+    "gate_needs_services_fail_fast|needs_services" \
+    "service_registry_eager_write|start_cmd" \
+    "service_lifecycle_acquire_release|needs_services" \
+    "service_teardown_declaration_preflight|stop_cmd" \
+    "auto_recovery_policy_contract|auto-recovery.yaml" \
+    "recovery_adjudication_allowlist|auto-recovery.yaml" \
+    "recovery_ladder_budget_refusal|budget" \
+    "recovery_escalation_terminus|blocked_for_pm"
+  do
+    rid="${pair%%|*}"; want="${pair#*|}"
+    ins="$(awk -v id="  - id: ${rid}" '$0 == id {f=1; next} f && /^    instruction: /{print; exit}' "$REGISTRY")"
+    [ -n "$ins" ] || _fail 4 "$REGISTRY" "row '${rid}' has no instruction: field"
+    ok_row=0; cited=""
+    for path in $(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u); do
+      case "$path" in
+        docs/*) plugin_rel="$REPO_ROOT/$path" ;;
+        *)      plugin_rel="$PLUGIN_ROOT/$path" ;;
+      esac
+      cited="${cited}${path} "
+      grep -qF -- "$want" "$plugin_rel" 2>/dev/null && { ok_row=1; break; }
+    done
+    [ "$ok_row" = 1 ] \
+      || _fail 4 "$REGISTRY" "row '${rid}' anchors its instruction to [${cited% }], but NONE of those files mentions '${want}' — the anchor names a document that does not describe the mechanism, which is the defect the banner above these rows says the registry is the worst place for:
+$ins"
+  done
+
+  # THE BANNER'S OWN CLAIM ABOUT ITSELF MUST BE TRUE.
+  #
+  # THE REGRESSION THIS CLOSES. The banner said "Two rows below are honestly
+  # labelled as carrying no shipped enforcement of their own (`surface:
+  # internal-guard`)". FIVE rows carried that surface, and three of the five had
+  # real shipped runtime enforcement — the sentence asserting the pass's honesty
+  # was itself wrong in both directions, and it redefined a field 100+ other rows
+  # already use with a different meaning. `surface:` now means what the schema
+  # header says (WHERE the rule is stated, not how strong the enforcement is),
+  # and the banner's count is asserted against the rows rather than trusted.
+  local ig_count ig_ids
+  ig_count="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" | grep -c '^    surface: internal-guard')"
+  ig_ids="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" \
+            | awk '/^  - id: /{id=$3} /^    surface: internal-guard$/{print id}')"
+  [ "$ig_count" = "1" ] \
+    || _fail 4 "$REGISTRY" "the P076 banner states that exactly ONE row carries surface: internal-guard, but ${ig_count} do (${ig_ids//$'\n'/, }) — the banner is describing itself falsely, which is the one thing this registry pass exists to prevent"
+  [ "$ig_ids" = "service_teardown_declaration_preflight" ] \
+    || _fail 4 "$REGISTRY" "the P076 banner names service_teardown_declaration_preflight as the one internal-guard row; the file says: ${ig_ids//$'\n'/, }"
+  grep -q 'Exactly ONE row below is `internal-guard`' "$REGISTRY" \
+    || _fail 4 "$REGISTRY" "the P076 banner no longer states how many internal-guard rows it has, so nothing holds its self-description to the rows"
 
   # And every P076 row carries the five fields the schema requires.
   local missing

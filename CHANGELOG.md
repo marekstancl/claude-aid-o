@@ -14,6 +14,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 > `[Unreleased]`. The IMP-093 two-source guard cannot see a heading the probe skipped.
 > Replace `[Unreleased]` with the intended `[X.Y.Z] — YYYY-MM-DD` (in BOTH CHANGELOGs,
 > which must stay byte-identical) before any release automation runs. Tracked as IMP-481.
+>
+> **And the byte-identity check will not catch it.** Driven live against a throwaway
+> repository shaped exactly like this plan worktree (no `.aid-o/config/project.yaml`,
+> so the `versioning.files[]` loop never runs): `aid-release.sh patch` renamed
+> `## [2.79.3]` to `## [2.79.4] — <today>` in the root CHANGELOG *and* — through the
+> no-config fallback that finds every other `CHANGELOG.md` — in the plugin CHANGELOG,
+> with the same `sed`. The two files therefore stay byte-identical while both lose the
+> shipped 2.79.3 entry, and `## [Unreleased]` survives untouched above them. Case 2 of
+> `test-p076-docs-closure.bats` compares the two files to each other, so it is silent
+> by construction; only case 4 (P076's entry still names what it shipped) would go red,
+> and only after the release commit already exists.
 
 > AUTO mode used to pretend it could wait. A long gate ran inline, so a killed
 > session took the suite down with it; a controller that died left a run that

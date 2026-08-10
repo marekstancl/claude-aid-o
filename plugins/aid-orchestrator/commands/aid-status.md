@@ -179,14 +179,25 @@ about the controller that owns that run. Three values are STORED in
 
 **The pointer gives a location; the file is the fact.** `resume_artifact` is a
 map field like any other, and its writer validates it against nothing — so this
-surface believes it only when it actually NAMES the continuation artifact, i.e.
-its basename is the shared `AID_RESUME_ARTIFACT_BASENAME`
-(`scripts/lib/aid-resume-artifact.sh`, read from there rather than spelled again
-here). A pointer at any other path is ignored and the conventional evidence path
-is probed instead: a regular file sitting at an arbitrary recorded path is not
-evidence that a controller left a continuation behind, and this row must never
-assert a state it cannot prove. A render therefore still never depends on a
-pointer — or on `prune` — having been written.
+surface believes it only when it passes BOTH checks, and a pointer failing
+either is ignored while the conventional evidence path is probed instead:
+
+1. **Shape.** Its basename is the shared `AID_RESUME_ARTIFACT_BASENAME`
+   (`scripts/lib/aid-resume-artifact.sh`, read from there rather than spelled
+   again here). A file with any other name is not the continuation artifact.
+2. **Containment.** It resolves (`realpath -m`) INSIDE this run's own evidence
+   directory, `.aid-o/work/evidence/<epic_id>/<run_id>` — the same rule
+   `lib/aid-service.sh:_aid_svc_safe_jobs_dir` applies to a registry-recorded
+   `jobs_dir`. Shape alone was not containment: a correctly-named regular file
+   anywhere the process could `stat` it — another run's leftovers, `/tmp`,
+   outside the repository entirely — was accepted as proof, and this row then
+   asserted `awaiting_host_resume` and printed that file's recorded action as a
+   pasteable command.
+
+A regular file sitting at an arbitrary recorded path is not evidence that a
+controller left a continuation behind, and this row must never assert a state it
+cannot prove. A render therefore still never depends on a pointer — or on
+`prune` — having been written.
 
 **A printed command is only ever printed for an id that may be one.** Nothing
 constrains the charset of a map key (`aid-fsm.sh init` upserts whatever it is
@@ -458,6 +469,7 @@ _resume_basename() {
 # and prints no command line at all when it is 0.
 controller_facts() {
   local _root _map _stall _bn _epic _ac _sf _run _ptr _mode _abs _rel _art _st _ctl _cmd _rc _q _idok
+  local _evd _evrp _rp
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
@@ -475,12 +487,25 @@ controller_facts() {
     [ "$_ptr" != "-" ] || _ptr=""
     _art=""
     if [ -n "$_bn" ]; then
+      # THE CONTAINMENT ROOT: this run's own evidence directory. A pointer is a
+      # claim about THIS run, so a path that does not live under it cannot
+      # substantiate one. Canonicalized once per row, and `-m` so a directory
+      # that does not exist yet still yields a comparable answer.
+      _evd="$_root/.aid-o/work/evidence/${_epic}${_run:+/$_run}"
+      _evrp="$(realpath -m -- "$_evd" 2>/dev/null || printf '%s' "$_evd")"
       for _rel in "$_ptr" ".aid-o/work/evidence/${_epic}/${_run}/${_bn}"; do
         [ -n "$_rel" ] || continue
         # THE SHAPE CHECK: a pointer that does not name the continuation
         # artifact is not a pointer to one, whatever happens to sit there.
         [ "${_rel##*/}" = "$_bn" ] || continue
         case "$_rel" in /*) _abs="$_rel" ;; *) _abs="$_root/$_rel" ;; esac
+        # THE CONTAINMENT CHECK: shape alone let a correctly-named file at ANY
+        # location — another run's evidence, /tmp, outside the repository — be
+        # accepted as proof that this run's controller left a continuation
+        # behind, and its recorded action was then printed as a pasteable
+        # command. Same rule as lib/aid-service.sh:_aid_svc_safe_jobs_dir.
+        _rp="$(realpath -m -- "$_abs" 2>/dev/null || printf '%s' "$_abs")"
+        case "$_rp" in "$_evrp"/*) ;; *) continue ;; esac
         if [ -f "$_abs" ]; then _art="$_rel"; break; fi
       done
     fi
@@ -511,6 +536,13 @@ controller_facts() {
         *) _q=x; _cmd="(unavailable — the shared renderer could not be loaded; read the artifact itself)" ;;
       esac
     fi
+    # DISPLAY-ONLY HYGIENE, applied after the artifact has been read and never
+    # before: the path is echoed into a terminal, so its control bytes go here.
+    # TSV framing already neutralizes TAB/CR/LF (jq's `@tsv` escapes them, and a
+    # key carrying either fails the lookup and degrades to `manual`); this
+    # removes the rest, ESC included, so a crafted directory name cannot
+    # recolour or overpaint the rendered line.
+    [ -z "$_art" ] || _art="$(printf '%s' "$_art" | tr -d '[:cntrl:]')"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_epic" "$_ctl" "$_st" "$_q" "${_idok:-0}" "${_art:--}" "${_cmd:--}"
   done <<EOF
 $(jq -r 'to_entries[] | [.key, (.value.auto_controller // "-"), (.value.state_file // "-"),

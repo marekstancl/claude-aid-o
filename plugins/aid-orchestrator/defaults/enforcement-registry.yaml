@@ -2359,18 +2359,36 @@ enforcements:
     test: "scripts/tests/bats/test-p074-integration.bats"
 
   # ══ P076: crash survival, declared services, and the recovery ladder ═══════
-  # Fourteen rows for one plan, and the mechanical/instruction label on each is
-  # the point of the pass rather than paperwork: this plan repeatedly found
+  # Fourteen rows for one plan, and the `instruction:` anchor on each is the
+  # point of the pass rather than paperwork: this plan repeatedly found
   # documentation asserting a mechanism that did not exist, and the registry is
-  # the single place where such a claim does the most damage. Two rows below are
-  # honestly labelled as carrying no shipped enforcement of their own
-  # (`surface: internal-guard`, enforcement = the named regression suite), and
-  # they say so instead of borrowing credit from the code they describe.
+  # the single place where such a claim does the most damage. Every anchor below
+  # was resolved by grep against the file it names before it was written here.
+  #
+  # `surface:` is used here with the meaning the schema header at the top of
+  # this file already gives it, and with no meaning of its own: it names WHERE
+  # the rule is stated to the party doing the work — never how strong the
+  # enforcement is.
+  #   `llm-facing`     the `instruction:` anchor resolves to a surface an agent
+  #                    or a PM reads while working: a command card, a skill, or
+  #                    a key in the execution.yaml a project edits.
+  #   `internal-guard` there is no such surface. The mechanism guards the
+  #                    orchestrator internally and its only documentation is for
+  #                    contributors (docs/extending-aid.md).
+  # Exactly ONE row below is `internal-guard`
+  # (`service_teardown_declaration_preflight`), which is the same use the
+  # pre-existing `pm_override_single_use_claim` row makes of the label.
+  #
+  # Separately, and NOT a property of `surface:`: two rows
+  # (`instruction_closure_structural_check`, `auto_recovery_policy_contract`)
+  # ship no runtime code of their own — their `source:` IS the named regression
+  # suite — and each says so in its own description instead of borrowing credit
+  # from the code it describes.
 
   - id: gate_run_mode_contract
     type: 2
     source: "scripts/aid-run-gates.sh:validate_all_run_modes (called from run_all_gates BEFORE any gate command is spawned) + run_background_gate's two no-fallback refusals (supervisor unavailable; no evidence directory)"
-    instruction: "defaults/execution.yaml (the `run_mode:` key and its comment) + commands/aid-run.md"
+    instruction: "defaults/execution.yaml (the `run_mode:` key and its comment) + docs/extending-aid.md (### The owned-job contract, grep: 'run_mode')"
     severity: blocking
     surface: llm-facing
     status: active
@@ -2382,9 +2400,9 @@ enforcements:
   - id: gate_background_eager_artifact
     type: 4
     source: "scripts/aid-run-gates.sh:_resume_artifact_write + its two call sites in run_background_gate (the PRE-SPAWN `pending` write that refuses the gate, and the POST-SPAWN rewrite whose failure CANCELS the just-started job)"
-    instruction: "commands/aid-run.md (the `awaiting_host_resume` row of the controller-state table)"
+    instruction: "commands/aid-run.md (the `awaiting_host_resume` row of the controller-state table) + commands/aid-status.md (recipe: controller-state)"
     severity: blocking
-    surface: internal-guard
+    surface: llm-facing
     status: active
     verdict: ALIGNED
     description: "P076 Step 4 — a controller that dies mid-EXECUTE cannot write anything on its way out, so 'a resume is required' must be derivable from what it provably LEFT BEHIND: one continuation pointer per run, written BEFORE the background job is handed to the supervisor and deleted only once the run's last outstanding job is collected. It is fail-closed in both directions. An unwritable evidence directory refuses the gate BEFORE the spawn, because an unresumable background job must never come into existence. A failure of the POST-SPAWN rewrite is not merely refused — the job is already running, so it is CANCELLED as compensation, and a cancel that also fails prints the exact manual command. The crash window between the two writes leaves the `pending` pointer, which resume resolves by scanning the jobs dir for the recorded fingerprint: no window produces a job without a pointer, only a pointer one field less precise."
@@ -2420,10 +2438,10 @@ enforcements:
     source: "scripts/tests/bats/test-instruction-closure.bats (the enforcement IS this suite: it enumerates agents/ dynamically, requires the reference marker in every card, forbids a divergent restatement of the contract, and asserts the referenced section exists)"
     instruction: "skills/agent-protocol.md → **Controller boundary (non-negotiable)**"
     severity: blocking
-    surface: internal-guard
+    surface: llm-facing
     status: active
     verdict: ALIGNED
-    description: "P076 Step 7 — the Controller-boundary contract used to live in exactly ONE agent card, so it bound one agent out of nine by accident of where it was written. The contract is now stated once in skills/agent-protocol.md and every card carries a reference marker. HONEST LABEL: there is no shipped script enforcing this at runtime — the enforcement mechanism is the named regression suite, and it is structural (a grep over the agents/ directory enumerated at test time), so a card added tomorrow without the marker fails there rather than silently escaping the contract. Both content checks run over the card with fenced blocks blanked, so a card quoting the contract in an example neither satisfies closure nor trips the divergent-copy check."
+    description: "P076 Step 7 — the Controller-boundary contract used to live in exactly ONE agent card, so it bound one agent out of nine by accident of where it was written. The contract is now stated once in skills/agent-protocol.md and every card carries a reference marker. NO RUNTIME CODE OF ITS OWN: there is no shipped script enforcing this at runtime — the enforcement mechanism is the named regression suite, and it is structural (a grep over the agents/ directory enumerated at test time), so a card added tomorrow without the marker fails there rather than silently escaping the contract. Both content checks run over the card with fenced blocks blanked, so a card quoting the contract in an example neither satisfies closure nor trips the divergent-copy check."
     recovery: "The failure names the card missing the marker, or the card carrying a divergent copy, by path."
     test: "scripts/tests/bats/test-instruction-closure.bats"
 
@@ -2466,7 +2484,7 @@ enforcements:
   - id: service_lifecycle_acquire_release
     type: 4
     source: "scripts/aid-run-gates.sh:_svc_owner_claim + _svc_release_run (acquire once at run entry, release on every exit path) + scripts/lib/aid-service.sh:aid_service_down_all's owner gate (rc 2 while a different, provably live process holds the claim)"
-    instruction: "commands/aid-run.md + skills/pipeline.md (the gate-run section)"
+    instruction: "skills/role-cards.md (the e2e role card, grep: 'declare it, never improvise it' — acquire ONCE before the first gate, release ONCE after the report, never inside a gate) + defaults/execution.yaml (the `services:` block and the per-gate `needs_services:` key)"
     severity: blocking
     surface: llm-facing
     status: active
@@ -2478,7 +2496,7 @@ enforcements:
   - id: service_teardown_declaration_preflight
     type: 4
     source: "scripts/lib/aid-service.sh:aid_service_down_all (the declaration preflight: rc 2 when yq is unavailable OR the execution.yaml is missing/unreadable, scoped to a run that has a registry)"
-    instruction: "skills/pipeline.md (the gate-run section) + commands/aid-run.md"
+    instruction: "docs/extending-aid.md (### Declaring services, grep: 'Teardown reconciles commands against the declaration' — and the rule that a caller must relay aid_service_down_all's own named rc-2 line rather than assert a cause)"
     severity: blocking
     surface: internal-guard
     status: active
@@ -2492,10 +2510,10 @@ enforcements:
     source: "defaults/policies/auto-recovery.yaml + defaults/schemas/auto-recovery.schema.json (the declared artefacts) — the enforcement is scripts/tests/bats/test-auto-recovery-policy.bats, which validates the policy against its schema and greps every declared `emitter` anchor to a real code site"
     instruction: "commands/aid-run.md (the AUTO-mode recovery section)"
     severity: blocking
-    surface: internal-guard
+    surface: llm-facing
     status: active
     verdict: ALIGNED
-    description: "P076 Step 11 — the stop taxonomy, its per-class budgets and its action vocabulary ship as a POLICY file with a schema. HONEST LABEL: the policy is data, not code; its enforcement is the named regression suite, and that suite exists precisely because AID's first principle warns that a detector without enforcement is decoration. It is an ANTI-DECORATION test rather than a schema test: every `emitter` anchor the policy names is grepped to a real code site in the file it claims, every budget it cites from another file is RE-READ from that file and compared, and the policy's own `status`/`implemented`/`live` claims are checked against whether a real loader function exists in code — so the policy cannot claim to be wired when it is not. An action name outside the vocabulary is a schema error, never a silent no-op."
+    description: "P076 Step 11 — the stop taxonomy, its per-class budgets and its action vocabulary ship as a POLICY file with a schema. NO RUNTIME CODE OF ITS OWN: the policy is data, not code; its enforcement is the named regression suite, and that suite exists precisely because AID's first principle warns that a detector without enforcement is decoration. It is an ANTI-DECORATION test rather than a schema test: every `emitter` anchor the policy names is grepped to a real code site in the file it claims, every budget it cites from another file is RE-READ from that file and compared, and the policy's own `status`/`implemented`/`live` claims are checked against whether a real loader function exists in code — so the policy cannot claim to be wired when it is not. An action name outside the vocabulary is a schema error, never a silent no-op."
     recovery: "The suite names the drifted anchor, the file it claims and what was found there."
     test: "scripts/tests/bats/test-auto-recovery-policy.bats"
 
@@ -2516,7 +2534,7 @@ enforcements:
     source: "scripts/lib/aid-recovery-ladder.sh:aid_ladder_attempt (the count and the append are ONE critical section under lib/aid-lock.sh's flock on `<record>.lock`, via _aid_ladder_append_locked)"
     instruction: "defaults/policies/auto-recovery.yaml (`budget: {attempts, wall_clock_seconds}` per stop class) + commands/aid-run.md"
     severity: blocking
-    surface: internal-guard
+    surface: llm-facing
     status: active
     verdict: ALIGNED
     description: "P076 Step 13 — the recovery budget is spent under a lock, and that is the whole enforcement: counting outside the lock let two concurrent attempts of a one-attempt class both see zero spent and both proceed, so the count and the append are now one critical section. Budgets are strictly per class and the wall clock runs from the class's FIRST line in the record — an emitter line counts, so the clock starts when the stop was first SEEN, not when recovery was first attempted. Every refusal routes to adjudication and none of them grants anything: over attempts, past the wall clock, an action the class does not allow (named), an undeclared class, an unreadable policy, an unparseable record, a record that shrank against its own high-water mark, and a lock timeout. A refusal is itself recorded and never spends an attempt of its own."

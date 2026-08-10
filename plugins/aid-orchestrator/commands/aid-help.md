@@ -177,7 +177,10 @@ the rerun instruction.
 Run state lives in .aid-o/work/active-runs.json as auto_controller:
   active           an autonomous controller is alive and owns the run
   manual           a human drives it (the default for a non-AUTO run)
-  blocked_for_pm   reserved for the PM-authority stop; nothing writes it yet
+  blocked_for_pm   the run stopped at a PM-authority decision and waits for a
+                   person; written by aid_ladder_escalate
+                   (lib/aid-recovery-ladder.sh) when a class's recovery
+                   terminus reaches escalation
   awaiting_host_resume
                    DERIVED, never stored — the pointer is still on disk and
                    nothing has signalled liveness. A dead controller cannot
@@ -311,4 +314,4 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-08-10
