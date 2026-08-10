@@ -1626,4 +1626,250 @@ from the transaction, not from the epic id. And every refusal you add gets a row
 in `defaults/enforcement-registry.yaml` with its enforcement mechanism named at
 design time — a detector without enforcement is decoration.
 
-**Last Updated:** 2026-08-06
+---
+
+## Owned waits: background gates, declared services, bounded recovery (P076)
+
+Before P076, every long operation in AUTO mode was a wait nobody owned. A
+thirty-minute suite ran inline, so a killed session took it with it; the
+infrastructure a test needed was started by hand and slept on; and a controller
+that died left a run indistinguishable from one making progress. P076 gives each
+of those an owner. Three contracts came out of it, and anything you add that
+runs long, needs infrastructure, or retries after a failure has to respect the
+matching one.
+
+### The owned-job contract
+
+A gate declares how it runs:
+
+```yaml
+gates:
+  bats_all:
+    command: "bash scripts/tests/run-all.sh"
+    timeout_seconds: 3600
+    run_mode: background        # foreground | background (default: foreground)
+```
+
+**Background is not fire-and-return.** The runner still polls the job to
+completion inside the same invocation and returns the gate row itself
+(`aid-run-gates.sh`, the poll loop under `# ── poll to completion, inside THIS
+invocation ──`). What `background` buys is *survivability*: the command runs as
+an `aid-job.sh` job — its own process group, PID-reuse defeat, a durable
+HEAD/tree-bound terminal receipt — so the work outlives the session that started
+it. A runner that returns before the job does is IMP-476 and does not exist;
+building one needs a registered collector first, and the runner is written to
+refuse an unknown mode rather than to document the requirement.
+
+**Background it when losing the session would cost more than the gate.** The
+mechanical signal is already collected for you: when a gate's runtime baseline
+recommends `background` and the gate declares no `run_mode`, the runner emits a
+`gate_run_mode_advice` timeline event carrying the measured p95 and the exact
+one-line edit. That event is deliberately observe-only — it never flips
+anything, and the gate report is byte-identical with and without it. The flip is
+a PM's one-line decision, and in this repository only `bats_all` and
+`bats_boundary` have earned it. The shipped `/aid-init` template documents the
+key and declares it nowhere, so a consumer project's gates keep the foreground
+path, which is byte-for-byte the code AID always ran.
+
+**Re-attach, precisely.** The job id is deterministic —
+`<gate>-attempt-<N>` — so a rerun looks in exactly the directory this attempt
+would use. Finding a job there is not sufficient to trust it:
+
+| Found | What happens |
+|-------|--------------|
+| fingerprint + start HEAD match, job live | re-attach and keep polling (`gate_job_reattached`); the suite is not re-run |
+| fingerprint + start HEAD match, job terminal | collect the receipt — but see currency below |
+| command fingerprint drifted | cancel, archive to `.superseded-<epoch>`, start fresh |
+| no job, or no result record | start fresh; a missing result maps to an explicit `job_lost` fail row |
+
+The fingerprint is a *validation guard* on the job the id found, never a
+discovery mechanism — two gates running an identical command never
+cross-attach.
+
+**Currency splits on provenance, not on timing.** A REPLAYED result — a job this
+invocation found already terminal — is a result produced before this invocation
+existed, so the working tree gets to veto it: `aid-job.sh collect
+--require-current` supersedes a stale receipt and the gate genuinely re-runs.
+A job this invocation spawned, or re-attached to while still live and polled to
+completion, is *watched* work: the command's exit code is the gate's answer, and
+tree movement during the run is recorded (`gate_job_tree_moved`,
+`tree_moved_during_run` on the row) rather than promoted to a verdict. Getting
+this backwards is what made a self-writing gate fail while its identical
+foreground twin passed.
+
+**The row is checkpointed, and the checkpoint is bound.** A completed gate's row
+lands atomically in `<evidence>/gates_rows/<gate>.json`, restored by a resumed
+invocation. It is not what avoids re-execution after a crash — re-attaching to
+the still-supervised job is — it is a fail-closed safety net for a gate that
+produced no row at all. The envelope carries the head, the tree, the
+checkpoint's canonical home directory and a key derived from a per-run 0600
+secret, and the restore pass refuses on any mismatch, so a hand-written row or a
+copied evidence directory carries no authority.
+
+**The continuation artifact is the contract with a controller that dies.** A
+single `auto_resume_required.json` per run is written *before* the job spawns
+(`job_id: pending`) and rewritten atomically with the real id immediately after,
+so there is no crash window that leaves no pointer; it is deleted only on a
+terminal collect with no other background job still live. `aid-fsm.sh resume
+<epic_id>` claims it exactly once (`mv -n` plus a source-gone post-check),
+collects, writes the durable row and prints three lines — what it found, what it
+recorded, what to do next. Executing that next action is the controller's turn,
+not the command's.
+
+If you add a code path that starts or collects one of these jobs, use the shared
+pieces rather than a second copy: `lib/aid-gate-row.sh` is the ONLY job-result
+to gate-row mapping, and `lib/aid-resume-artifact.sh` is the only definition of
+the artifact's name (a test fails if a second one appears — they had already
+diverged once, fail-open).
+
+### Declaring services
+
+Infrastructure a gate needs is declared in `execution.yaml` next to the gates,
+and the runner owns its lifecycle:
+
+```yaml
+services:
+  postgres:
+    start_cmd: "docker compose up postgres"     # MUST stay in the foreground
+    probe_cmd: "pg_isready -h 127.0.0.1 -p \"$PGPORT_E2E\""
+    stop_cmd: "docker compose stop postgres"
+    startup_deadline_seconds: 60                # health-probe budget
+    max_lifetime_seconds: 3600                  # the job's whole-process deadline
+    restart_authorized: false                   # repairs are opt-in authority
+    port_env: PGPORT_E2E                        # per-run allocated port
+
+gates:
+  e2e:
+    command: "npm run test:e2e"
+    needs_services: [postgres]
+```
+
+Four rules a contributor has to respect:
+
+1. **`start_cmd` must remain the foreground process of its job.** The service
+   job IS the ownership record — `lib/aid-service.sh` contains no `setsid`, no
+   pgid arithmetic and no direct `kill`; its entire process surface is four
+   `aid-job.sh` invocations. A trailing `&`, `nohup`, `disown` or `setsid` is
+   refused by a lint at declaration time, and a command that daemonizes
+   internally is caught at runtime (a terminal job whose probe still answers is
+   refused by name) — the honest limit being that after that refusal the orphan
+   really does survive, because there is nothing left to signal.
+2. **Readiness is `probe_cmd`, never a sleep.** The probe is polled to healthy
+   or to `startup_deadline_seconds`, bounded by `timeout(1)` so a blocking probe
+   cannot outlive the declared budget. The e2e role card names `probe_cmd` as
+   the alternative to an arbitrary sleep; manual `docker` is a fallback that
+   must be declared in the report.
+3. **Ports come from the registry, not from the config.** With `port_env` set,
+   the runner allocates a per-run port by BIND probe (a connect scan cannot
+   prove bindability, which is why `python3` is a named dependency with a named
+   refusal), exports it into every command for that service, and records it in
+   `<evidence>/services.json` — written *before* the spawn, so no started job is
+   ever unrecorded. Omitting `port_env` is the honestly-named escape hatch for a
+   service on a fixed external port. `port_env` names are checked against one
+   shared denylist (`lib/aid-env-name-denylist.sh`) — `PATH`, `BASH_ENV`, the
+   `LD_`/`DYLD_`/`BASH_FUNC_`/`AID_` families and friends — because a project's
+   own config must not be able to aim it at the loader or the runner's state.
+4. **Acquire once, release once, and never inside a gate.** Services come up
+   after the declaration validator and before the gate loop, and go down after
+   the report is written; `needs_services` is a *check* at gate start
+   (unhealthy → that gate fails fast with `service_unhealthy`, the rest still
+   run), never a repair. A nested runner invocation — the targeted-tests
+   escalation re-enters the same script — runs with
+   `AID_SERVICE_LIFECYCLE_OWNED=1` and neither sweeps, acquires nor releases.
+   That rule exists because the parallel-teardown race is real: two gates
+   sharing a service, one tearing it down under the other.
+
+**Crash recovery is the NEXT run's entry sweep**, because a SIGKILLed runner
+reaches no cleanup hook. The sweep runs before the acquire, and it is
+authenticated: an ownership claim (pid, `/proc` start time, boot id, host) is
+written before the acquire and dropped after teardown, every "cannot tell"
+answers *alive*, and a second runner meeting a live claim REFUSES rather than
+skipping the sweep and inheriting the services. A job under `service-jobs/` that
+neither this run's spawn ledger nor its registry vouches for is REPORTED with the
+exact cancel command, never signalled.
+
+**Teardown reconciles commands against the declaration.** The registry records
+`stop_cmd` and `probe_cmd` so a teardown still works after the config moved, but
+whenever a declaration can be read it WINS, and a recorded entry naming a
+service the config does not declare is refused rather than executed. Read
+`aid_service_down_all`'s header before you call it: **its rc 2 has several
+distinct causes** — a live foreign owner, a missing `jq`, a missing `yq`, an
+unreadable declaration — and it prints its own named line for each. A caller
+must relay that line, not assert a cause of its own.
+
+### The recovery policy, and how a consumer changes it
+
+`defaults/policies/auto-recovery.yaml` is the one machine-readable answer to
+"what may an autonomous run do about a stop, and how often". It defines seven
+stop classes (`GATE_TIMEOUT`, `SERVICE_UNHEALTHY`, `JOB_LOST`,
+`TRANSIENT_INFRA`, `DISPATCH_ORPHANED`, `REVIEW_EXHAUSTED`, `UNCLASSIFIED`),
+each carrying:
+
+- `allowed_actions` — drawn from a CLOSED vocabulary of six reversible actions
+  (`wait_and_resume`, `retry_once`, `restart_service_once`, `rerun_targeted`,
+  `resume_missing_lenses`, `collect_and_continue`). None of them weakens, waives
+  or bypasses a gate. An action name outside the six is a schema error at load,
+  never a silent no-op.
+- `budget: {attempts, wall_clock_seconds}` — spent per run per class.
+- `emitter` — the real `file:line` that classifies this stop, grepped against
+  the source by a test that turns red when the anchor moves.
+- `terminus: [adjudicate, escalation, pm_force]` — where the class goes when its
+  budget is gone. The schema pins the ORDER, not merely the set, so an override
+  cannot put the human-only act first.
+
+Three consumers sit on it. `lib/aid-recovery-ladder.sh` loads it
+(`aid_recovery_policy_load`), records every attempt in
+`<evidence>/recovery-ladder.jsonl` and returns PERMISSION — it never performs an
+action. `lib/aid-recovery-adjudicate.sh` takes the exhausted case to the isolated Codex
+transport (`_run_codex_isolated`, shared with the C3 dispatch bridge) with a
+fact pack, and returns exactly one allowlisted action or the literal `escalate`. And the terminus stamps `auto_controller:
+blocked_for_pm` on the run, which `/aid-status` renders.
+
+**Two properties you must not break when you extend this area.** First, the
+returnable set is computed from constants IN THE LIBRARY, before any reply
+exists — the policy's own `action_vocabulary` is checked against those
+constants, never trusted as the authority, and `escalate` is deliberately absent
+from the vocabulary so no caller can execute it. Second, the budget is not a
+plain counter: the record is hash-chained with a high-water mark written under
+the same lock, so truncating the file to buy more attempts is a sticky refusal
+rather than a silent reset (deleting BOTH files still resets it — a directory
+the writer must write cannot be proof against its writer; what ended is the
+*silent* reset).
+
+**A consumer project overrides by file, never per plan.** Write
+`.aid-o/config/policies/auto-recovery.yaml`; the loader resolves it after any
+explicit path and before the shipped default. The contract for what happens next
+is declared in the policy's own `loader_contract` and implemented in the loader:
+
+| Situation | Result |
+|-----------|--------|
+| override unreadable or schema-invalid | named warning identifying the path and the first error; falls back to the shipped policy |
+| override omits a class | that stop routes as `UNCLASSIFIED` — straight to adjudication, never "no recovery" |
+| unknown action name | refused at load |
+| `attempts: 0` | legal configuration; the class goes straight to adjudication |
+| a per-plan override (`AID_RECOVERY_POLICY_PER_PLAN`) | refused by name — the policy is PROJECT-scoped, because two plans running concurrently in one project share it |
+
+To **add a class**, give it all of the above *including a real emitter that
+already exists*, and label it honestly on both axes: `detector` (does code find
+the condition?) and `ladder_entry` (does code write the record, or does the
+AUTO-loop instruction route it?). A class whose ladder entry is an instruction
+says `ladder_entry: instruction` and `ladder_entry_status: planned` — the
+anti-decoration test derives the wired answer from the repository rather than
+from the file's own claim, so a status you assert without a write turns it red.
+To **change a budget**, edit the class's `budget` in your override — but check
+`existing_loops` first: the gate fix loop, CP2/CP3, C3 rechecks, the CP1 ledger
+and per-gate `max_retries` are declared there with `authority: existing` and the
+file each budget really lives in. Those are NOT governed by the ladder, and
+changing the ladder's numbers will not move them.
+
+### Adding to this area
+
+Anything that runs long enough to outlive a session becomes an `aid-job.sh` job,
+not a detached process. Anything a gate depends on gets DECLARED, so the runner
+can probe it instead of a human sleeping on it. Anything that retries goes
+through the ladder's budget rather than counting for itself. And any state a
+dying controller would have to write about itself is DERIVED by its readers
+instead — the epitaph rule: the one party that cannot write is the one the flag
+would be about.
+
+**Last Updated:** 2026-08-10

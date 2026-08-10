@@ -818,6 +818,7 @@ $output"
     service_declaration_schema \
     service_registry_eager_write \
     service_lifecycle_acquire_release \
+    service_teardown_declaration_preflight \
     gate_needs_services_fail_fast \
     auto_recovery_policy_contract \
     recovery_adjudication_allowlist \

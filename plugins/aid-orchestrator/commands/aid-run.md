@@ -77,10 +77,12 @@ facts the dead controller provably left behind:
 2. no liveness signal is recent enough. `aid-fsm.sh active-runs stalled` is the shipped derivation
    of that half — newest of the entry's `updated_at` and the run timeline's newest event, against
    `AID_ACTIVE_RUN_STALL_SEC` (default 2100 s) — and `/aid-status` renders its verdict as the
-   `STALLED?` marker plus the recovery line. The string `awaiting_host_resume` does appear in
-   output — as the writer's rejection message (`aid-fsm.sh`) and in `/aid-help` prose — but no
-   surface ever reports it as an observed state of a run: it names the two facts holding together,
-   not a value anything stores or emits as a verdict.
+   `STALLED?` marker plus the recovery line. `/aid-status` does report
+   `ctl=awaiting_host_resume` for a run — but it COMPUTES that word from both facts at render time
+   and writes nothing back: the map's sha256 is unchanged across a render, and with either fact
+   missing the row falls back to the RECORDED value (or to `liveness?` when the derivation cannot
+   run at all). So the word names two facts holding together, never a value anything stored or
+   emitted as a verdict.
 
 **The resume flow.** When both hold, run `bash {plugin_path}/scripts/aid-fsm.sh resume <epic_id>`.
 It claims the artifact exactly once, collects the referenced job's terminal result, records it as a

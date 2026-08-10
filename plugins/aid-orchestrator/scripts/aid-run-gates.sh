@@ -794,11 +794,13 @@ _svc_release_run() {
   local _down_rc=0
   aid_service_down_all "$ev" "$yaml" || _down_rc=$?
   if (( _down_rc == 2 )); then
-    # Cannot happen on this path — the claim being released is THIS process's,
-    # and the owner gate never counts our own claim as a live foreign owner — so
-    # if it ever does happen, say so as the anomaly it is rather than as a
-    # generic teardown warning.
-    echo "WARN: aid-run-gates.sh: the service teardown REFUSED because the ownership claim under '${ev}' names a live process other than this runner. That should be impossible while releasing our own claim; the claim record has NOT been cleared and no service was stopped. Investigate before rerunning:" >&2
+    # rc 2 is a REFUSAL, and it has several causes: a live foreign owner (which
+    # should indeed be impossible while releasing our own claim), but also jq
+    # missing so the claim cannot be read, or yq missing / the declaration
+    # unreadable so a recorded stop_cmd would run unreconciled. The library
+    # prints its named line immediately above, and its header tells callers not
+    # to assume a cause — so this message reports the outcome and defers.
+    echo "WARN: aid-run-gates.sh: the service teardown REFUSED for the reason named in the line above (a live owner's claim, or a dependency/declaration it could not read). The claim record under '${ev}' has NOT been cleared and no service was stopped. If that line names a live foreign owner, that should be impossible while releasing our own claim — investigate before rerunning:" >&2
     _svc_manual_commands "$ev" "$yaml" >&2
     return 0
   fi
