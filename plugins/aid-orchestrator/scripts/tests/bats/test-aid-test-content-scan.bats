@@ -102,25 +102,16 @@ EOF
 }
 
 @test "P079 Step 11: a skip keyed on the SUBJECT's existence is flagged; platform and allowlisted skips are not" {
-  cat > "$PROJ/tests/test-subject-skip.bats" <<'EOF'
-@test "the thing works" {
-  [ -f "$LIB" ] || skip "lib not found"
-  true
-}
-EOF
-  cat > "$PROJ/tests/test-platform-skip.bats" <<'EOF'
-@test "reads real process facts" {
-  [ -d /proc ] || skip "/proc is not available"
-  true
-}
-EOF
-  cat > "$PROJ/tests/test-allowed-skip.bats" <<'EOF'
-@test "self-host config" {
-  # content-scan: allow existence-skip — the workspace config is gitignored
-  [[ -f "$cfg" ]] || skip "no local .aid-o config in this checkout"
-  true
-}
-EOF
+  # NOTE: fixture bodies are written with printf, never a heredoc. bats parses
+  # `@test` at column 0 line-by-line and does not know about heredocs, so a
+  # heredoc'd fixture registers phantom tests in THIS file ("unknown test name",
+  # "Executed 6 instead of expected 9"). Keep `@test` off column 0 in the source.
+  printf '@test "the thing works" {\n  [ -f "$LIB" ] || skip "lib not found"\n  true\n}\n' \
+    > "$PROJ/tests/test-subject-skip.bats"
+  printf '@test "reads real process facts" {\n  [ -d /proc ] || skip "/proc is not available"\n  true\n}\n' \
+    > "$PROJ/tests/test-platform-skip.bats"
+  printf '@test "self-host config" {\n  # content-scan: allow existence-skip — the workspace config is gitignored\n  [[ -f "$cfg" ]] || skip "no local .aid-o config in this checkout"\n  true\n}\n' \
+    > "$PROJ/tests/test-allowed-skip.bats"
 
   run bash "$SCAN" --project-root "$PROJ" --output "$OUT"
   [ "$status" -eq 0 ]
