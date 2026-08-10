@@ -194,6 +194,39 @@ either is ignored while the conventional evidence path is probed instead:
    asserted `awaiting_host_resume` and printed that file's recorded action as a
    pasteable command.
 
+   **And the root that containment is measured against is not the map's to
+   choose.** `_aid_svc_safe_jobs_dir` is handed its evidence directory by its
+   CALLER — exactly one of the two sides is untrusted, which is the whole
+   reason the comparison means anything. A first attempt here assembled the
+   root from `<epic_id>/<run_id>` read out of the very entry supplying the
+   pointer, so both sides were attacker-chosen and a `run_id` of `../../…`
+   (nothing validates that field on the write path either) simply moved the
+   root onto the planted file. The root is therefore built from
+   `<state_root>/.aid-o/work/evidence` — which the map cannot influence — and
+   the two recorded components are admitted only after each is proved to be a
+   single path segment (not empty, not `.`, not `..`, no `/`) AND the assembled
+   root still canonicalizes inside that base, which also refuses a root reached
+   through a symlink that leaves the tree. A component failing either test
+   establishes no fact at all: the row falls back to its recorded controller
+   value and claims nothing.
+
+   **An entry with no `run_id` is one of those failures.** A single path segment
+   is what each component must be, and the empty string is not one: with no
+   `run_id` there is no run directory to name, and admitting the entry would
+   measure containment against the whole `<epic_id>` directory instead — under
+   which another run's leftovers under the same epic, the first case this
+   section says is refused, would pass. Such a row claims nothing.
+
+3. **And containment is refused outright when it cannot be computed.** `-m` is a
+   GNU coreutils extension and BSD/macOS `realpath(1)` lacks it, so every
+   canonicalization here yields the empty string on failure and an empty result
+   is refused — the row degrades to its recorded controller value exactly as an
+   unreadable basename does. It is never replaced by the un-normalized string: a
+   plain prefix comparison of raw strings reproduces the escape this check
+   exists to close, because the kernel resolves `..` in a path the comparison
+   accepted whole. This is the refusal `_aid_svc_safe_jobs_dir` also makes when
+   its own canonicalization comes back empty.
+
 A regular file sitting at an arbitrary recorded path is not evidence that a
 controller left a continuation behind, and this row must never assert a state it
 cannot prove. A render therefore still never depends on a pointer — or on
@@ -205,8 +238,11 @@ given), so both the claim line above and the `STALLED?` recovery line take their
 permission from the shipped derivation: `active-runs stalled` renders
 `resume_command` only for an id that would survive `resume`, and returns null
 otherwise. When it is null this surface names no command either — the line says
-the id is not usable in a command and stops. One validator, and the surface
-never contradicts the derivation it quotes.
+the id is not usable in a command and stops. That gate covers the `verbatim`
+action line too: it is the line that actually hands over something to paste, and
+it is withheld with the others rather than printed beside a refusal. The
+artifact's own path is still named, so the action remains one `cat` away. One
+validator, and the surface never contradicts the derivation it quotes.
 
 The `verbatim` line is printed through the same renderer `aid-fsm.sh resume`
 uses: a plain command is echoed byte-for-byte, and one carrying shell
@@ -424,6 +460,17 @@ _resume_basename() {
   ' _ "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/lib/aid-resume-artifact.sh" 2>/dev/null
 }
 
+# _path_segment <s> — true when <s> is ONE path segment that cannot ascend:
+# non-empty, not `.`, not `..`, and containing no `/`. Deliberately a structural
+# test and not a charset allowlist — this surface already consumes the SHIPPED
+# id verdict (`idok`) for anything that renders a command, and a second private
+# allowlist would be free to drift from it. What this rules out is narrower and
+# absolute: a map-supplied value that changes which DIRECTORY a path names.
+_path_segment() {
+  case "${1:-}" in ""|.|..|*/*) return 1 ;; esac
+  return 0
+}
+
 # controller_facts — one TSV row per map entry:
 #   epic · ctl · stalled(true|false|unknown) · quoted(0|1|x|-) · idok(0|1) ·
 #   artifact · action
@@ -469,13 +516,44 @@ _resume_basename() {
 # and prints no command line at all when it is 0.
 controller_facts() {
   local _root _map _stall _bn _epic _ac _sf _run _ptr _mode _abs _rel _art _st _ctl _cmd _rc _q _idok
-  local _evd _evrp _rp
+  local _evbase _evbrp _evd _evrp _rp
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
   _stall="$(stalled_json)"
   printf '%s' "$_stall" | jq -e 'type == "object"' >/dev/null 2>&1 || _stall=""
   _bn="$(_resume_basename)" || _bn=""
+  # THE CONTAINMENT BASE, DERIVED FROM THE STATE ROOT ALONE — nothing the map
+  # supplies contributes to it. This is the half of the containment rule that a
+  # first attempt lost: the per-run root was assembled as
+  # `evidence/${_epic}/${_run}` from the SAME attacker-writable map that
+  # supplies the pointer being checked, so the check compared untrusted input
+  # against a root the same input had chosen. A valid epic id with
+  # `run_id: ../../../../../OUT2` — or a map key spelled the same way — walked
+  # the root out to the planted file and the escape reopened one field over.
+  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir`, the rule this borrows, takes
+  # its evidence dir as a CALLER-supplied argument: exactly one side is
+  # untrusted, and that asymmetry is what makes the comparison mean anything.
+  #
+  # AND IT FAILS CLOSED WHEN IT CANNOT CANONICALIZE. `-m` is a GNU coreutils
+  # extension; BSD/macOS `realpath(1)` does not have it, so "no `-m`" is a
+  # DEFAULT platform, not an exotic edge. A first fix fell back to the raw
+  # string (`|| printf '%s' "$_evbase"`) on both sides, which degraded the whole
+  # rule to a string-prefix test and reproduced the very escape it closes: with
+  # `_abs` = `<root>/.aid-o/work/evidence/E/R/../../../../../tmp/<basename>` and
+  # `_evrp` = `<root>/.aid-o/work/evidence/E/R`, the prefix matched, the check
+  # PASSED, and `[ -f ]` then succeeded because the KERNEL resolves `..` even
+  # though the comparison did not. Every canonicalization below therefore yields
+  # the empty string on failure and an empty result is REFUSED, never used:
+  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir` does the same (`rp` is required
+  # non-empty before the recorded value is honoured), and refusing to claim
+  # containment you cannot compute is the only honest answer. The consequence is
+  # stated rather than hidden: on a host whose `realpath` lacks `-m`, fact 1 is
+  # never established and every row degrades to its recorded controller value —
+  # exactly as an unreadable basename does. A surface that cannot prove a state
+  # says nothing; it does not lower the bar until it can.
+  _evbase="$_root/.aid-o/work/evidence"
+  _evbrp="$(realpath -m -- "$_evbase" 2>/dev/null || printf '')"
   while IFS="$(printf '\t')" read -r _epic _ac _sf _run _ptr; do
     [ -n "$_epic" ] || continue
     # A TAB is an IFS *whitespace* character, so `read` collapses a run of them
@@ -486,13 +564,41 @@ controller_facts() {
     [ "$_run" != "-" ] || _run=""
     [ "$_ptr" != "-" ] || _ptr=""
     _art=""
-    if [ -n "$_bn" ]; then
-      # THE CONTAINMENT ROOT: this run's own evidence directory. A pointer is a
-      # claim about THIS run, so a path that does not live under it cannot
-      # substantiate one. Canonicalized once per row, and `-m` so a directory
-      # that does not exist yet still yields a comparable answer.
-      _evd="$_root/.aid-o/work/evidence/${_epic}${_run:+/$_run}"
-      _evrp="$(realpath -m -- "$_evd" 2>/dev/null || printf '%s' "$_evd")"
+    # THE CONTAINMENT ROOT: this run's own evidence directory, assembled from
+    # the trusted base above and the two map-supplied components — but only
+    # after each of those has been proved incapable of choosing a different
+    # directory. Two steps, both required:
+    #   1. `_epic` and `_run` must each be a SINGLE path segment (`_path_segment`),
+    #      so neither can ascend out of the base or reach sideways into another
+    #      run's directory. `run_id` is validated NOWHERE on the write path, and
+    #      the map key carries no charset constraint either, so this surface
+    #      cannot assume either is a name. `_path_segment` rejects the EMPTY
+    #      string too, and that is deliberate: an entry with no `run_id` names no
+    #      run directory, and treating it as "the epic directory will do" widened
+    #      the root by one level — under which ANOTHER run's artifact under the
+    #      same epic satisfied containment, the first case §2 above says is
+    #      refused, while the conventional candidate two lines below still hard-
+    #      codes `/${_run}/`. The two would then disagree. A missing `run_id`
+    #      therefore establishes no fact 1, the same as any other component this
+    #      surface cannot pin to one directory.
+    #   2. the assembled root must still canonicalize INSIDE the canonicalized
+    #      base — which additionally refuses a root reached through a symlink
+    #      that leaves the tree, the one ascent step 1 cannot see. The base must
+    #      itself have canonicalized (`_evbrp` non-empty): with an empty base the
+    #      containment pattern would degenerate to `/*` and match every absolute
+    #      path there is.
+    # A row that fails any step establishes no fact 1 at all: it degrades to
+    # its recorded controller value, exactly as an unreadable basename does.
+    # Canonicalized once per row, `-m` so a directory that does not exist yet
+    # still yields a comparable answer, and — per the base above — an empty
+    # result is refused rather than replaced by the raw string.
+    _evrp=""
+    if [ -n "$_bn" ] && [ -n "$_evbrp" ] && _path_segment "$_epic" && _path_segment "$_run"; then
+      _evd="$_evbase/$_epic/$_run"
+      _evrp="$(realpath -m -- "$_evd" 2>/dev/null || printf '')"
+      case "$_evrp" in "$_evbrp"/*) ;; *) _evrp="" ;; esac
+    fi
+    if [ -n "$_evrp" ]; then
       for _rel in "$_ptr" ".aid-o/work/evidence/${_epic}/${_run}/${_bn}"; do
         [ -n "$_rel" ] || continue
         # THE SHAPE CHECK: a pointer that does not name the continuation
@@ -503,8 +609,13 @@ controller_facts() {
         # location — another run's evidence, /tmp, outside the repository — be
         # accepted as proof that this run's controller left a continuation
         # behind, and its recorded action was then printed as a pasteable
-        # command. Same rule as lib/aid-service.sh:_aid_svc_safe_jobs_dir.
-        _rp="$(realpath -m -- "$_abs" 2>/dev/null || printf '%s' "$_abs")"
+        # command. Same rule as lib/aid-service.sh:_aid_svc_safe_jobs_dir,
+        # INCLUDING its refusal: a canonicalization that did not happen is not a
+        # containment result, so an empty `_rp` skips the candidate instead of
+        # falling back to the un-normalized string (see the base above for what
+        # that fallback actually let through).
+        _rp="$(realpath -m -- "$_abs" 2>/dev/null || printf '')"
+        [ -n "$_rp" ] || continue
         case "$_rp" in "$_evrp"/*) ;; *) continue ;; esac
         if [ -f "$_abs" ]; then _art="$_rel"; break; fi
       done
@@ -577,13 +688,22 @@ EOF
     # The claim command carries the epic id, so it is offered only when the
     # SHIPPED derivation was willing to render one for that id (`idok`). An
     # unrenderable id gets the same answer that derivation gives: no command.
+    #
+    # THE ACTION LINE IS GATED THE SAME WAY, and this is the CP3 correction: it
+    # was printed unconditionally, so the id-renderability guard did not gate
+    # the one line that hands over a PASTEABLE COMMAND. An id the shipped
+    # derivation refuses is an id this surface will not build a recovery flow
+    # around — step 2 without step 1 is not advice, and the artifact that
+    # supplied the action was located through a path component named by the
+    # very id just declared unusable. The artifact's own path is still printed
+    # on the line above, so nothing is hidden: read it there.
     if [ "$_idok" = "1" ]; then
       printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. Claim it with: aid-fsm.sh resume %s\n' "$_in" "$_art" "$_epic"
+      printf '%s  then run the action that artifact recorded, verbatim (nothing here runs it): %s\n' "$_in" "$_cmd"
+      [ "$_q" = "1" ] && printf '%s  WARNING: that recorded action carries shell metacharacters and is shown QUOTED — read it before running it.\n' "$_in"
     else
       printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. This run'"'"'s id is not usable in a command; claim it by hand.\n' "$_in" "$_art"
     fi
-    printf '%s  then run the action that artifact recorded, verbatim (nothing here runs it): %s\n' "$_in" "$_cmd"
-    [ "$_q" = "1" ] && printf '%s  WARNING: that recorded action carries shell metacharacters and is shown QUOTED — read it before running it.\n' "$_in"
   fi
   [ "$_st" = "true" ] && stall_hint "$_epic" "${_in}  " "$_idok"
   return 0

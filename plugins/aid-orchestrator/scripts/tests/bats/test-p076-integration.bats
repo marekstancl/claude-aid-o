@@ -161,10 +161,16 @@ teardown() {
   done
   # 2. any runner still polling in this test's project
   kill_runner
-  # 3. anything still carrying this test's argv token, by exact pid
-  for p in $(pgrep -f "$TOKEN" 2>/dev/null || true); do
-    kill -KILL "$p" 2>/dev/null || true
-  done
+  # 3. anything still carrying this test's argv token, by exact pid.
+  # THE GUARD IS LOAD-BEARING: bats runs teardown() even when setup() died
+  # BEFORE line ~125 set TOKEN, and `pgrep -f ""` matches every process on the
+  # box (measured: 671) — which this loop would then feed to `kill -KILL` one
+  # exact pid at a time. A missing `jq` in setup() is enough to reach it.
+  if [[ -n "${TOKEN:-}" ]]; then
+    for p in $(pgrep -f "$TOKEN" 2>/dev/null || true); do
+      kill -KILL "$p" 2>/dev/null || true
+    done
+  fi
   cd /
   [[ -n "${WORK:-}" && -d "$WORK" ]] && rm -rf "$WORK"
   return 0
@@ -896,6 +902,7 @@ $output"
   # cannot see it: a citation into a TRACKED file that says nothing about the
   # mechanism passes it. Existence plus the promised token is what closes it.
   local ins path tok plugin_rel found
+  local -a toks
   while IFS= read -r ins; do
     for path in $(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u); do
       case "$path" in
@@ -907,9 +914,16 @@ $output"
 $ins"
     done
     # `grep: 'token'` inside an anchor is a PROMISE about the file beside it.
-    tok="$(sed -n "s/.*grep: '\([^']*\)'.*/\1/p" <<<"$ins")"
-    if [ -n "$tok" ]; then
-      local found=0
+    #
+    # EVERY promise, not just the last one. The extraction was
+    # `sed -n "s/.*grep: '\(...\)'.*/\1/p"`, whose leading `.*` is GREEDY: on an
+    # instruction promising two tokens it returned only the SECOND, and the
+    # first went unverified. No P076 row promises two today, so this was latent —
+    # which is exactly when it is cheap to fix.
+    mapfile -t toks < <(grep -oE "grep: '[^']*'" <<<"$ins" | sed "s/^grep: '//; s/'\$//")
+    for tok in ${toks+"${toks[@]}"}; do
+      [ -n "$tok" ] || continue
+      found=0
       for path in $(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u); do
         case "$path" in
           docs/*) plugin_rel="$REPO_ROOT/$path" ;;
@@ -920,47 +934,71 @@ $ins"
       [ "$found" = 1 ] \
         || _fail 4 "$REGISTRY" "a P076 instruction: promises grep: '$tok' but no file it cites contains that string:
 $ins"
-    fi
+    done
   done < <(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" | grep -E '^    instruction: ')
 
   # EXISTENCE IS NOT SUBSTANCE — the anchor must land where the mechanism is
   # actually described. Both files the two broken rows cited EXIST, so an
   # existence check alone passes on the very defect this closes (verified: the
   # check above stays green when the broken anchor is restored). Each row
-  # therefore declares ONE distinctive token of its own mechanism, and at least
-  # one file the row cites must contain it. Tokens are chosen to be the word a
-  # reader would search for, not a sentence that rewording would break.
-  local pair rid want ok_row cited
-  for pair in \
-    "gate_run_mode_contract|run_mode" \
-    "gate_background_eager_artifact|awaiting_host_resume" \
-    "resume_single_use_claim|resume" \
-    "active_run_stall_derivation|stalled" \
-    "instruction_closure_structural_check|Controller boundary" \
-    "service_declaration_schema|start_cmd" \
-    "gate_needs_services_fail_fast|needs_services" \
-    "service_registry_eager_write|start_cmd" \
-    "service_lifecycle_acquire_release|needs_services" \
-    "service_teardown_declaration_preflight|stop_cmd" \
-    "auto_recovery_policy_contract|auto-recovery.yaml" \
-    "recovery_adjudication_allowlist|auto-recovery.yaml" \
-    "recovery_ladder_budget_refusal|budget" \
-    "recovery_escalation_terminus|blocked_for_pm"
+  # therefore declares ONE distinctive token of its own mechanism, IN THE ONE
+  # FILE that token is supposed to be found in.
+  #
+  # TWO WEAKNESSES THIS TABLE PREVIOUSLY HAD, both found by a redundancy sweep
+  # while every row was green:
+  #
+  #   1. THE ANCHOR WAS NOT THE ANCHOR. The old loop walked every file the row
+  #      cites and `break`ed on the first hit, and `sort -u` puts `defaults/…`
+  #      ahead of `skills/…` — so `service_lifecycle_acquire_release` was
+  #      satisfied by `defaults/execution.yaml` and `skills/role-cards.md`, the
+  #      document that row is actually ABOUT, was never opened. A check that can
+  #      be satisfied by a file other than the one under discussion does not pin
+  #      the anchor. Each row now names its file, and the token must be there.
+  #
+  #   2. THE TOKENS WERE WEAK TO VACUOUS. `resume_single_use_claim` asked for
+  #      `resume` (23 hits in aid-run.md — no plausible edit removes it);
+  #      `recovery_ladder_budget_refusal` asked for `budget` against a policy
+  #      whose own key IS `budget:`, so it self-satisfied; `service_registry_
+  #      eager_write` reused `start_cmd` verbatim from the row above it, proving
+  #      the services block exists and saying nothing about eager writing;
+  #      `recovery_adjudication_allowlist` asked for the FILENAME
+  #      `auto-recovery.yaml` rather than `allowed_actions`, the mechanism-
+  #      distinctive key. A token is only worth asserting if deleting the
+  #      mechanism's description would delete the token — that is the bar every
+  #      entry below is chosen against, and the third column records it.
+  local triple rid tfile want cited
+  for triple in \
+    "gate_run_mode_contract|docs/extending-aid.md|### The owned-job contract" \
+    "gate_background_eager_artifact|commands/aid-run.md|awaiting_host_resume" \
+    "resume_single_use_claim|commands/aid-run.md|exactly once" \
+    "active_run_stall_derivation|commands/aid-status.md|recipe: stalled-runs" \
+    "instruction_closure_structural_check|skills/agent-protocol.md|Controller boundary" \
+    "service_declaration_schema|defaults/execution.yaml|service-declaration.schema.json" \
+    "gate_needs_services_fail_fast|defaults/execution.yaml|needs_services" \
+    "service_registry_eager_write|defaults/execution.yaml|no self-daemonising fork" \
+    "service_lifecycle_acquire_release|skills/role-cards.md|declare it, never improvise it" \
+    "service_teardown_declaration_preflight|docs/extending-aid.md|Teardown reconciles commands against the declaration" \
+    "auto_recovery_policy_contract|commands/aid-run.md|auto-recovery.yaml" \
+    "recovery_adjudication_allowlist|defaults/policies/auto-recovery.yaml|allowed_actions" \
+    "recovery_ladder_budget_refusal|defaults/policies/auto-recovery.yaml|wall_clock_seconds" \
+    "recovery_escalation_terminus|skills/pipeline.md|blocked_for_pm"
   do
-    rid="${pair%%|*}"; want="${pair#*|}"
+    rid="${triple%%|*}"; want="${triple##*|}"; tfile="${triple#*|}"; tfile="${tfile%%|*}"
     ins="$(awk -v id="  - id: ${rid}" '$0 == id {f=1; next} f && /^    instruction: /{print; exit}' "$REGISTRY")"
     [ -n "$ins" ] || _fail 4 "$REGISTRY" "row '${rid}' has no instruction: field"
-    ok_row=0; cited=""
-    for path in $(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u); do
-      case "$path" in
-        docs/*) plugin_rel="$REPO_ROOT/$path" ;;
-        *)      plugin_rel="$PLUGIN_ROOT/$path" ;;
-      esac
-      cited="${cited}${path} "
-      grep -qF -- "$want" "$plugin_rel" 2>/dev/null && { ok_row=1; break; }
-    done
-    [ "$ok_row" = 1 ] \
-      || _fail 4 "$REGISTRY" "row '${rid}' anchors its instruction to [${cited% }], but NONE of those files mentions '${want}' — the anchor names a document that does not describe the mechanism, which is the defect the banner above these rows says the registry is the worst place for:
+    # THE ROW MUST STILL CITE THE FILE ITS TOKEN IS PINNED IN — otherwise this
+    # table could drift into asserting things about documents the registry no
+    # longer sends anyone to.
+    cited="$(grep -oE '(commands|skills|agents|defaults|scripts)/[A-Za-z0-9._/-]+\.(md|ya?ml|json|sh)|docs/[A-Za-z0-9._/-]+\.md' <<<"$ins" | sort -u | tr '\n' ' ')"
+    [[ " $cited" == *" $tfile "* ]] \
+      || _fail 4 "$REGISTRY" "row '${rid}' no longer cites '${tfile}', the file this suite pins its mechanism token in — it cites [${cited% }]:
+$ins"
+    case "$tfile" in
+      docs/*) plugin_rel="$REPO_ROOT/$tfile" ;;
+      *)      plugin_rel="$PLUGIN_ROOT/$tfile" ;;
+    esac
+    grep -qF -- "$want" "$plugin_rel" \
+      || _fail 4 "$REGISTRY" "row '${rid}' anchors its instruction to '${tfile}', but that file does not mention '${want}' — the anchor names a document that does not describe the mechanism, which is the defect the banner above these rows says the registry is the worst place for:
 $ins"
   done
 
@@ -974,8 +1012,13 @@ $ins"
   # already use with a different meaning. `surface:` now means what the schema
   # header says (WHERE the rule is stated, not how strong the enforcement is),
   # and the banner's count is asserted against the rows rather than trusted.
+  #
+  # `|| true` IS LOAD-BEARING: `grep -c` prints `0` and EXITS 1 on no match, so
+  # under bats' `set -e` the assignment aborted the test before the message
+  # below could print — in exactly the case it exists to report. The check could
+  # only ever say "too many", never "none".
   local ig_count ig_ids
-  ig_count="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" | grep -c '^    surface: internal-guard')"
+  ig_count="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" | grep -c '^    surface: internal-guard' || true)"
   ig_ids="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" \
             | awk '/^  - id: /{id=$3} /^    surface: internal-guard$/{print id}')"
   [ "$ig_count" = "1" ] \

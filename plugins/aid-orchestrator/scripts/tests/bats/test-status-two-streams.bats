@@ -21,7 +21,14 @@
 # adds the controller column: the five pinned row shapes (active, a legacy
 # entry defaulting to manual, blocked_for_pm, the DERIVED awaiting_host_resume,
 # and a stalled run), the verbatim `safe_next_action` line and its inert
-# rendering, and the honest `liveness?` third answer.
+# rendering, and the honest `liveness?` third answer. The FOUR containment cases
+# are the CP3 security set, and each one closes an escape the case before it
+# stayed green through: the first varies the POINTER; the second varies the two
+# map fields the containment ROOT is built from (`epic_id`, `run_id`); the third
+# removes `realpath -m` (a GNU extension BSD/macOS lacks), under which both
+# canonicalizations used to fall back to the raw string and the rule degraded to
+# a prefix test that passes on the escape; the fourth omits `run_id` entirely,
+# under which the root used to widen to the whole epic directory.
 #
 # Every fixture is a real git repository (with a real linked worktree in the
 # two-stream case): the recipes resolve `.aid-o` through lib/aid-roots.sh, and
@@ -30,7 +37,7 @@
 #
 # FD-3 HYGIENE: every recipe runs in a child shell — run them with `3>&-`.
 # After any edit verify:
-#   bats --tap test-status-two-streams.bats | grep -cE '^(ok|not ok)'   # == 25
+#   bats --tap test-status-two-streams.bats | grep -cE '^(ok|not ok)'   # == 28
 
 load test-helpers.bash
 
@@ -708,6 +715,301 @@ $output" >&2; false; }
   [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
 }
 
+@test "the containment ROOT is built from the state root, never from the map fields it is judging" {
+  # THE REGRESSION THIS CLOSES — and it is the regression the FIRST containment
+  # fix shipped. That fix validated the pointer against
+  # `evidence/${epic_id}/${run_id}`, both read out of the SAME attacker-writable
+  # `active-runs.json` entry that supplies the pointer: the check compared
+  # untrusted input against a root the same input had chosen, so the escape
+  # closed on one field and reopened on the next one over. `run_id` is validated
+  # NOWHERE on the write path, and the map key carries no charset constraint
+  # either (`cmd_init` upserts whatever it is handed).
+  #
+  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir` — the rule this surface borrows —
+  # takes its evidence directory as a CALLER-supplied argument. Exactly ONE of
+  # the two sides is untrusted, and that asymmetry is the whole reason the
+  # comparison means anything. This case pins that asymmetry here: the base is
+  # `<state_root>/.aid-o/work/evidence` and the two recorded components are
+  # admitted only as single, non-ascending path segments.
+  #
+  # WHY THE EARLIER SUITE STAYED GREEN THROUGH THIS: every case above varies
+  # only `resume_artifact`. This one varies `epic_id` and `run_id` — the fields
+  # the root itself is made of — and holds the pointer to the same two values
+  # (null, i.e. the CONVENTIONAL path, which is assembled from those very
+  # fields; and the planted file named outright).
+  local d="$TEST_TMPDIR/rootesc" out2 out3 tmp ptr before
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  _run_state "$d" E-901-1_1 R-1 EXECUTE
+
+  # (a) A PERFECTLY VALID EPIC ID, AND AN ESCAPING `run_id`. Five levels up from
+  # `evidence/E-901-1_1` is $TEST_TMPDIR — outside the project tree entirely.
+  out2="$TEST_TMPDIR/OUT2"
+  mkdir -p "$out2"
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned-via-run-id"}\n' \
+    > "$out2/auto_resume_required.json"
+  [ "$(realpath -m "$d/.aid-o/work/evidence/E-901-1_1/../../../../../OUT2")" = "$(realpath -m "$out2")" ]
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{
+  "E-901-1_1": {"state_file": ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                "run_id": "../../../../../OUT2", "state": "EXECUTE", "branch": "b",
+                "plan_id": "P901", "updated_at": "2026-01-01T00:00:00Z",
+                "auto_controller": "active", "resume_artifact": null}
+}
+JSON
+  # the id itself is renderable, so this row WOULD carry a `Claim it with:` line
+  run bash -c "cd '$d' && bash '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' active-runs stalled"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '."E-901-1_1".stalled' <<<"$output")" = "true" ]
+  [ "$(jq -r '."E-901-1_1".resume_command' <<<"$output")" != "null" ]
+  # both pointer values: null (the conventional path, itself built from run_id)
+  # and the planted file named outright.
+  for ptr in null "\"$out2/auto_resume_required.json\""; do
+    tmp="$(mktemp)"
+    jq --argjson p "$ptr" '."E-901-1_1".resume_artifact = $p' \
+      "$d/.aid-o/work/active-runs.json" > "$tmp" && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+    before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+    _call "$d" 'plan_epics P901'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"awaiting_host_resume"* ]] || {
+      echo "FAIL: an escaping run_id moved the containment root onto the planted file (pointer=$ptr):
+$output" >&2; false; }
+    [[ "$output" != *"awaiting host resume"* ]]
+    [[ "$output" != *"pwn.sh --owned-via-run-id"* ]]
+    [[ "$output" != *"auto_resume_required.json"* ]]
+    # the row degrades honestly to its RECORDED value — it does not blank
+    [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+    [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+  done
+
+  # (b) THE SAME ESCAPE THROUGH THE MAP KEY. Four levels up from `evidence/`
+  # again leaves the tree; the key is also unrenderable as a command, so this
+  # row additionally pins that NO pasteable line survives an unusable id.
+  out3="$TEST_TMPDIR/OUT3/R-1"
+  mkdir -p "$out3"
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned-via-epic-key"}\n' \
+    > "$out3/auto_resume_required.json"
+  [ "$(realpath -m "$d/.aid-o/work/evidence/../../../../OUT3/R-1")" = "$(realpath -m "$out3")" ]
+  _run_state "$d" ESCKEY R-1 EXECUTE
+  jq -n --arg k '../../../../OUT3' \
+    '{($k): {state_file: ".aid-o/work/evidence/ESCKEY/R-1/fsm-state.yaml",
+             run_id: "R-1", state: "EXECUTE", branch: "b", plan_id: "P901",
+             updated_at: "2026-01-01T00:00:00Z", auto_controller: "active",
+             resume_artifact: null}}' > "$d/.aid-o/work/active-runs.json"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]] || {
+    echo "FAIL: an escaping map KEY moved the containment root onto the planted file:
+$output" >&2; false; }
+  [[ "$output" != *"pwn.sh --owned-via-epic-key"* ]]
+  [[ "$output" != *"auto_resume_required.json"* ]]
+  [[ "$output" != *"verbatim (nothing here runs it)"* ]]
+
+  # (c) SIDEWAYS, AND STILL INSIDE THE EVIDENCE BASE. `../E-OTHER/R-9` never
+  # leaves `.aid-o/work/evidence`, so a base-containment check ALONE would let
+  # this through and one run would substantiate its state with another's
+  # artifact. The single-path-segment rule is what refuses it.
+  mkdir -p "$d/.aid-o/work/evidence/E-OTHER/R-9"
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned-sideways"}\n' \
+    > "$d/.aid-o/work/evidence/E-OTHER/R-9/auto_resume_required.json"
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{
+  "E-901-1_1": {"state_file": ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                "run_id": "../E-OTHER/R-9", "state": "EXECUTE", "branch": "b",
+                "plan_id": "P901", "updated_at": "2026-01-01T00:00:00Z",
+                "auto_controller": "active", "resume_artifact": null}
+}
+JSON
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]] || {
+    echo "FAIL: a run_id reaching sideways into another run's evidence was accepted:
+$output" >&2; false; }
+  [[ "$output" != *"pwn.sh --owned-sideways"* ]]
+  [[ "$output" != *"auto_resume_required.json"* ]]
+  [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+
+  # (d) THE POSITIVE CONTROL, on the same fixture: ordinary components, nothing
+  # exotic — still honoured, so the root rule narrows the surface rather than
+  # disabling it.
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/R-1/auto_resume_required.json"
+  tmp="$(mktemp)"
+  jq '."E-901-1_1".run_id = "R-1"' "$d/.aid-o/work/active-runs.json" > "$tmp" \
+    && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-901-1_1"*"ctl=awaiting_host_resume"* ]]
+  [[ "$output" == *"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"* ]]
+}
+
+@test "containment that cannot be canonicalized is REFUSED, never degraded to a raw string comparison" {
+  # THE REGRESSION THIS CLOSES — the third form of the same escape, and the one
+  # that shipped INSIDE the fix for the second. Both canonicalizations read
+  # `realpath -m -- … 2>/dev/null || printf '%s' "$_abs"`: when `realpath -m`
+  # is unavailable the RAW, un-normalized strings were compared, so the whole
+  # containment rule degraded to a plain string-prefix test. That test passes on
+  # the very path it exists to refuse —
+  #   _abs  = <root>/.aid-o/work/evidence/E/R/../../../../../../OUT/<basename>
+  #   _evrp = <root>/.aid-o/work/evidence/E/R                → prefix MATCHES
+  # — and `[ -f "$_abs" ]` then succeeds, because the KERNEL resolves `..` even
+  # though the comparison never did.
+  #
+  # AND THIS IS NOT AN EXOTIC PLATFORM. `-m` is a GNU coreutils extension;
+  # BSD/macOS `realpath(1)` has no `-m`, so the fallback was the DEFAULT path
+  # there. The fake below is exactly that shape: a real `realpath` that rejects
+  # `-m` and nothing else.
+  #
+  # The rule is now: an empty canonicalization is refused. The row claims
+  # nothing — the same degradation an unreadable basename produces — rather than
+  # lowering the bar to something it can compute.
+  local d="$TEST_TMPDIR/nocanon" fakebin real out tmp
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  _run_state "$d" E-901-1_1 R-1 EXECUTE
+
+  real="$(command -v realpath)"
+  [ -n "$real" ]
+  fakebin="$TEST_TMPDIR/nocanon-bin"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/realpath" <<SH
+#!/usr/bin/env bash
+# BSD/macOS realpath(1): there is no -m.
+for _a in "\$@"; do
+  case "\$_a" in -m) printf 'realpath: illegal option -- m\n' >&2; exit 1 ;; esac
+done
+exec '$real' "\$@"
+SH
+  chmod +x "$fakebin/realpath"
+  # the fake really does refuse -m, and really does work without it
+  run env PATH="$fakebin:$PATH" realpath -m -- "$d/nope"
+  [ "$status" -ne 0 ]
+  run env PATH="$fakebin:$PATH" realpath -- "$d"
+  [ "$status" -eq 0 ]
+
+  # (a) THE ESCAPE THE PREFIX TEST LET THROUGH. Six levels up from this run's
+  # evidence directory is $TEST_TMPDIR — outside the project tree entirely — and
+  # the pointer keeps the un-normalized prefix that made the string compare pass.
+  out="$TEST_TMPDIR/OUTM"
+  mkdir -p "$out"
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned-via-no-realpath-m"}\n' \
+    > "$out/auto_resume_required.json"
+  local escape=".aid-o/work/evidence/E-901-1_1/R-1/../../../../../../OUTM/auto_resume_required.json"
+  # the planted file is genuinely reachable through that string — the kernel
+  # resolves the `..` the string comparison did not
+  [ -f "$d/$escape" ]
+  [ "$(realpath -m "$d/$escape")" = "$(realpath -m "$out/auto_resume_required.json")" ]
+  jq --arg p "$escape" -n \
+    '{"E-901-1_1": {state_file: ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                    run_id: "R-1", state: "EXECUTE", branch: "b", plan_id: "P901",
+                    updated_at: "2026-01-01T00:00:00Z", auto_controller: "active",
+                    resume_artifact: $p}}' > "$d/.aid-o/work/active-runs.json"
+  local before; before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+  PATH="$fakebin:$PATH" _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]] || {
+    echo "FAIL: with no 'realpath -m' the containment check degraded to a string-prefix test and accepted a path that leaves the tree:
+$output" >&2; false; }
+  [[ "$output" != *"pwn.sh --owned-via-no-realpath-m"* ]]
+  [[ "$output" != *"auto_resume_required.json"* ]]
+  # the row degrades honestly to its RECORDED value — it does not blank
+  [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+  [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+
+  # (b) THE PRICE, STATED RATHER THAN HIDDEN. A perfectly legitimate artifact on
+  # the conventional path is ALSO refused while canonicalization is unavailable:
+  # the surface claims nothing it cannot prove, and this is what the doc says.
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/R-1/auto_resume_required.json"
+  tmp="$(mktemp)"
+  jq '."E-901-1_1".resume_artifact = null' "$d/.aid-o/work/active-runs.json" > "$tmp" \
+    && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+  PATH="$fakebin:$PATH" _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]]
+  [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+
+  # (c) THE POSITIVE CONTROL, same fixture, real `realpath`: the refusal in (b)
+  # is caused by the missing `-m` and by nothing else about this fixture.
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-901-1_1"*"ctl=awaiting_host_resume"* ]]
+  [[ "$output" == *"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"* ]]
+}
+
+@test "an entry with no run_id names no run directory, so it establishes no containment root at all" {
+  # THE REGRESSION THIS CLOSES: the root was assembled as
+  # `evidence/${_epic}${_run:+/$_run}`, which silently DROPS the run segment for
+  # any entry whose `run_id` is absent — and `run_id` is optional in practice
+  # (the TSV producer emits `-` for it, decoded back to the empty string). The
+  # root then widened to the whole `<epic_id>` directory, so ANOTHER run's
+  # artifact under the same epic satisfied containment: precisely the "another
+  # run's leftovers" case the doc says is refused. The conventional candidate
+  # one line below still hard-coded `/${_run}/`, so the two halves of the same
+  # check disagreed about what this run's directory even is.
+  #
+  # A missing `run_id` is now a component that cannot be pinned to one
+  # directory, exactly like `..` — the row claims nothing.
+  local d="$TEST_TMPDIR/norun" tmp before
+  _repo "$d"
+  mkdir -p "$d/.aid-o/work"
+  _plan "$d" P901 EPIC_INTEGRATION
+  _run_state "$d" E-901-1_1 R-1 EXECUTE
+
+  # (a) ANOTHER RUN'S ARTIFACT, SAME EPIC, and no `run_id` on the entry.
+  mkdir -p "$d/.aid-o/work/evidence/E-901-1_1/R-OTHER"
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned-via-absent-run-id"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/R-OTHER/auto_resume_required.json"
+  jq -n '{"E-901-1_1": {state_file: ".aid-o/work/evidence/E-901-1_1/R-1/fsm-state.yaml",
+                        state: "EXECUTE", branch: "b", plan_id: "P901",
+                        updated_at: "2026-01-01T00:00:00Z", auto_controller: "active",
+                        resume_artifact: ".aid-o/work/evidence/E-901-1_1/R-OTHER/auto_resume_required.json"}}' \
+    > "$d/.aid-o/work/active-runs.json"
+  [ "$(jq -r '."E-901-1_1" | has("run_id")' "$d/.aid-o/work/active-runs.json")" = "false" ]
+  before="$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]] || {
+    echo "FAIL: an entry with no run_id widened the containment root to the whole epic directory and accepted another run's artifact:
+$output" >&2; false; }
+  [[ "$output" != *"pwn.sh --owned-via-absent-run-id"* ]]
+  [[ "$output" != *"auto_resume_required.json"* ]]
+  [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+  [ "$(sha256sum "$d/.aid-o/work/active-runs.json" | cut -d' ' -f1)" = "$before" ]
+
+  # (b) AND NOT VIA THE EPIC DIRECTORY EITHER. An artifact sitting directly in
+  # `evidence/<epic>` is inside the widened root and inside the collapsed
+  # conventional path (`evidence/<epic>//<basename>`) — both halves of the old
+  # check would have taken it.
+  printf '{"safe_next_action":"bash /tmp/pwn.sh --owned-via-epic-dir"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/auto_resume_required.json"
+  tmp="$(mktemp)"
+  jq '."E-901-1_1".resume_artifact = null' "$d/.aid-o/work/active-runs.json" > "$tmp" \
+    && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"awaiting_host_resume"* ]] || {
+    echo "FAIL: with no run_id the conventional candidate collapsed onto the epic directory and was accepted:
+$output" >&2; false; }
+  [[ "$output" != *"pwn.sh --owned-via-epic-dir"* ]]
+  [[ "$output" == *"E-901-1_1"*"ctl=active"*"STALLED?"* ]]
+
+  # (c) THE POSITIVE CONTROL: give the SAME entry its `run_id` back and put the
+  # artifact where that run really lives — still honoured, so the rule narrows
+  # the surface rather than disabling it.
+  printf '{"safe_next_action":"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"}\n' \
+    > "$d/.aid-o/work/evidence/E-901-1_1/R-1/auto_resume_required.json"
+  tmp="$(mktemp)"
+  jq '."E-901-1_1".run_id = "R-1"' "$d/.aid-o/work/active-runs.json" > "$tmp" \
+    && mv "$tmp" "$d/.aid-o/work/active-runs.json"
+  _call "$d" 'plan_epics P901'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-901-1_1"*"ctl=awaiting_host_resume"* ]]
+  [[ "$output" == *"bash /x/g.sh run-all e.yaml E-901-1_1 R-1"* ]]
+}
+
 @test "an epic id the shipped derivation refuses to render as a command yields NO pasteable command line" {
   # THE REGRESSION THIS CLOSES: `cmd_init` puts no charset constraint on the map
   # key it upserts, so a key like `E-OK; curl … | sh` interpolated raw into
@@ -749,9 +1051,15 @@ $output" >&2; false; }
   # …and it says so, rather than silently dropping the recovery advice
   [[ "$got" == *"This run's id is not usable in a command; claim it by hand."* ]]
   [[ "$got" == *"This run's id is not usable in a command; recover it by hand."* ]]
-  # the artifact's own recorded action is still rendered — that promise is
-  # unaffected by the id being unusable
-  [[ "$got" == *"verbatim (nothing here runs it): bash /x/g.sh run-all e.yaml Q R-1"* ]]
+  # THE `verbatim` LINE IS GATED THE SAME WAY (CP3 security correction). It used
+  # to print unconditionally, on the reasoning that the artifact's action is a
+  # separate promise from the id — but it is the line that actually hands over
+  # something to PASTE, so the id-renderability guard was gating everything
+  # except the one line that mattered. It is now withheld with the others: the
+  # artifact's path is still named on the line above, so the action is one `cat`
+  # away and nothing is hidden.
+  [[ "$got" != *"verbatim (nothing here runs it)"* ]]
+  [[ "$got" != *"bash /x/g.sh run-all e.yaml Q R-1"* ]]
   # a renderable id on the same two lines still gets its command
   _fixture "$TEST_TMPDIR/ok" full
   _call "$TEST_TMPDIR/ok" 'plan_epics P901'

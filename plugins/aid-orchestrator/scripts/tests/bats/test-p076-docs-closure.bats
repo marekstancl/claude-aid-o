@@ -276,7 +276,10 @@ $offender"
   # so the weaker claim is anchored rather than merely weaker.
   local advice="$REPO_ROOT/plugins/aid-orchestrator/scripts/tests/bats/test-run-mode-advice.bats"
   [ -f "$advice" ] || _fail "both surfaces cite test-run-mode-advice.bats, which does not exist"
-  local cases; cases="$(grep -c '^@test' "$advice")"
+  # `|| true`: `grep -c` prints `0` and EXITS 1 on no match, so under `set -e`
+  # a file with no @test at all aborted this case before its own message could
+  # print — the one outcome the assertion exists to report.
+  local cases; cases="$(grep -c '^@test' "$advice" || true)"
   [ "$cases" -ge 4 ] \
     || _fail "both surfaces say 'four cases over the real gate runner'; test-run-mode-advice.bats defines ${cases}"
 }
