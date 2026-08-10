@@ -50,11 +50,14 @@ linked worktree has no `.aid-o` of its own.
      on disk. `marker=unreadable` — the plan-state file did not parse.
 2. **Scan EPIC runs** — `.aid-o/work/active-runs.json`, the map keyed by
    `epic_id` with `{run_id, state, branch, plan_id, governs_main, updated_at,
-   state_file}`. Recipe **`plan-epics`** returns the EPIC rows of one plan;
-   recipe **`planless-epics`** returns entries with no `plan_id` (Fast Mode and
-   pre-plan runs). Both sort by `epic_id` — a JSON object's key order is not an
-   ordering and must never be rendered as one. Both annotate a run that recipe
-   **`stalled-runs`** derives as stalled (see "Stalled runs" below).
+   state_file}` plus the two optional live-controller fields `auto_controller`
+   and `resume_artifact`. Recipe **`plan-epics`** returns the EPIC rows of one
+   plan; recipe **`planless-epics`** returns entries with no `plan_id` (Fast
+   Mode and pre-plan runs). Both sort by `epic_id` — a JSON object's key order
+   is not an ordering and must never be rendered as one. Both render every row
+   through recipe **`controller-state`**, which supplies the `ctl=` column, the
+   `STALLED?` marker (recipe **`stalled-runs`**) and the resume lines — see
+   "The controller column" and "Stalled runs" below.
 3. **Read the queue** — recipe **`queue-rows`** (which defines both
    `queue_rows`, the plan's rows, and `queue_candidate`, its next claimable
    entry) and recipe **`queue-summary`** (the `N queued, N running, N done`
@@ -85,8 +88,15 @@ AID Status
 Plan P901 — EPIC_INTEGRATION
   worktree: .aid-worktrees/plan-P901
   EPICs:
-    E-901-1_2  [EXECUTE]  run=R-A  branch=task/E-901-1_2/main  governs-main
-    E-901-2_2  [READY]  run=R-B  branch=task/E-901-2_2/main
+    E-901-1_2  [EXECUTE]  run=R-A  branch=task/E-901-1_2/main  ctl=active  governs-main
+    E-901-2_2  [READY]  run=R-B  branch=task/E-901-2_2/main  ctl=manual
+    E-901-4_4  [EXECUTE]  run=R-F  branch=task/E-901-4_4/main  ctl=blocked_for_pm
+    E-901-5_5  [GATES]  run=R-E  branch=task/E-901-5_5/main  ctl=awaiting_host_resume  STALLED?
+      awaiting host resume — .aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json is still on disk and no liveness signal is within the stall threshold. Claim it with: aid-fsm.sh resume E-901-5_5
+      then run the action that artifact recorded, verbatim (nothing here runs it): bash /x/aid-run-gates.sh run-all exec.yaml E-901-5_5 R-E
+      STALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume E-901-5_5
+    E-901-6_6  [EXECUTE]  run=R-G  branch=task/E-901-6_6/main  ctl=active  STALLED?
+      STALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume E-901-6_6
   Queue:
     E-901-3_3  [pending]  high
   next: E-901-1_2  [EXECUTE]
@@ -102,7 +112,7 @@ Plan P902 — PLAN_GATES
 plan P904: state unreadable — run plan-state P904 --repair
 
 Unassigned EPIC runs (no plan):
-  E-900-1_1  [GATES]  run=R-D  branch=task/E-900-1_1/main
+  E-900-1_1  [GATES]  run=R-D  branch=task/E-900-1_1/main  ctl=manual
 
 Closing:
   P903 — PLAN_MERGING (worktree -)
@@ -126,7 +136,7 @@ AID Status
 ====================================
 
 Active EPICs:
-  E-900-1_1  [GATES]  run=R-D  branch=task/E-900-1_1/main
+  E-900-1_1  [GATES]  run=R-D  branch=task/E-900-1_1/main  ctl=manual
 
 Recent Quick Tasks:
   Q-007 — Add login button
@@ -143,6 +153,102 @@ the state layer is healthy (plan-state is written at `plan-start`, before any of
 that plan's EPICs is initialized). If a project shows plan-less streams and you
 suspect an orphaned entry, the map is stale, not the surface: run
 `aid-fsm.sh active-runs prune`.
+
+**The controller column.** Every EPIC row carries `ctl=<value>` — what is known
+about the controller that owns that run. Three values are STORED in
+`active-runs.json` by that run's own writers (`active`, `manual`,
+`blocked_for_pm`) and a fourth is DERIVED at render time and stored nowhere:
+
+- `ctl=active` — an autonomous controller is alive and owns the run.
+- `ctl=manual` — a person drives it. Also what a **legacy entry** renders: an
+  entry written before these fields existed has no `auto_controller`, and the
+  render maps that absence to the run's recorded mode (`auto` → `active`,
+  anything else → `manual`). It is rendered, never written back: the map is
+  written only by its own writers, and this surface backfills nothing.
+- `ctl=blocked_for_pm` — the run stopped at a PM-authority decision.
+- `ctl=awaiting_host_resume` — **derived, never stored.** A controller that has
+  died cannot write its own epitaph, so this state is computed from the two
+  facts it provably left behind, and BOTH must hold: the run's continuation
+  artifact `auto_resume_required.json` is still on disk, and no liveness signal
+  is recent enough (`aid-fsm.sh active-runs stalled`). One fact alone is not
+  it — an artifact beside a live controller is simply a background gate in
+  flight. Such a row prints the artifact path, the claim command
+  (`aid-fsm.sh resume <epic_id>` — when that id may be rendered as a command at
+  all, see below), and then the action that artifact recorded, **verbatim**, so
+  what is pasted is what was recorded.
+
+**The pointer gives a location; the file is the fact.** `resume_artifact` is a
+map field like any other, and its writer validates it against nothing — so this
+surface believes it only when it passes BOTH checks, and a pointer failing
+either is ignored while the conventional evidence path is probed instead:
+
+1. **Shape.** Its basename is the shared `AID_RESUME_ARTIFACT_BASENAME`
+   (`scripts/lib/aid-resume-artifact.sh`, read from there rather than spelled
+   again here). A file with any other name is not the continuation artifact.
+2. **Containment.** It resolves (`realpath -m`) INSIDE this run's own evidence
+   directory, `.aid-o/work/evidence/<epic_id>/<run_id>` — the same rule
+   `lib/aid-service.sh:_aid_svc_safe_jobs_dir` applies to a registry-recorded
+   `jobs_dir`. Shape alone was not containment: a correctly-named regular file
+   anywhere the process could `stat` it — another run's leftovers, `/tmp`,
+   outside the repository entirely — was accepted as proof, and this row then
+   asserted `awaiting_host_resume` and printed that file's recorded action as a
+   pasteable command.
+
+   **And the root that containment is measured against is not the map's to
+   choose.** `_aid_svc_safe_jobs_dir` is handed its evidence directory by its
+   CALLER — exactly one of the two sides is untrusted, which is the whole
+   reason the comparison means anything. A first attempt here assembled the
+   root from `<epic_id>/<run_id>` read out of the very entry supplying the
+   pointer, so both sides were attacker-chosen and a `run_id` of `../../…`
+   (nothing validates that field on the write path either) simply moved the
+   root onto the planted file. The root is therefore built from
+   `<state_root>/.aid-o/work/evidence` — which the map cannot influence — and
+   the two recorded components are admitted only after each is proved to be a
+   single path segment (not empty, not `.`, not `..`, no `/`) AND the assembled
+   root still canonicalizes inside that base, which also refuses a root reached
+   through a symlink that leaves the tree. A component failing either test
+   establishes no fact at all: the row falls back to its recorded controller
+   value and claims nothing.
+
+   **An entry with no `run_id` is one of those failures.** A single path segment
+   is what each component must be, and the empty string is not one: with no
+   `run_id` there is no run directory to name, and admitting the entry would
+   measure containment against the whole `<epic_id>` directory instead — under
+   which another run's leftovers under the same epic, the first case this
+   section says is refused, would pass. Such a row claims nothing.
+
+3. **And containment is refused outright when it cannot be computed.** `-m` is a
+   GNU coreutils extension and BSD/macOS `realpath(1)` lacks it, so every
+   canonicalization here yields the empty string on failure and an empty result
+   is refused — the row degrades to its recorded controller value exactly as an
+   unreadable basename does. It is never replaced by the un-normalized string: a
+   plain prefix comparison of raw strings reproduces the escape this check
+   exists to close, because the kernel resolves `..` in a path the comparison
+   accepted whole. This is the refusal `_aid_svc_safe_jobs_dir` also makes when
+   its own canonicalization comes back empty.
+
+A regular file sitting at an arbitrary recorded path is not evidence that a
+controller left a continuation behind, and this row must never assert a state it
+cannot prove. A render therefore still never depends on a pointer — or on
+`prune` — having been written.
+
+**A printed command is only ever printed for an id that may be one.** Nothing
+constrains the charset of a map key (`aid-fsm.sh init` upserts whatever it is
+given), so both the claim line above and the `STALLED?` recovery line take their
+permission from the shipped derivation: `active-runs stalled` renders
+`resume_command` only for an id that would survive `resume`, and returns null
+otherwise. When it is null this surface names no command either — the line says
+the id is not usable in a command and stops. That gate covers the `verbatim`
+action line too: it is the line that actually hands over something to paste, and
+it is withheld with the others rather than printed beside a refusal. The
+artifact's own path is still named, so the action remains one `cat` away. One
+validator, and the surface never contradicts the derivation it quotes.
+
+The `verbatim` line is printed through the same renderer `aid-fsm.sh resume`
+uses: a plain command is echoed byte-for-byte, and one carrying shell
+metacharacters is shown in `printf %q` form with a warning. The recorded action
+is composed by unquoted interpolation upstream, and a status page is a paste
+target — a printed line must not be able to do something other than what it says.
 
 **Stalled runs are visible, and the marker is derived — never stored.** A
 controller that dies mid-EXECUTE leaves its state file exactly where it was, so
@@ -165,8 +271,14 @@ the run's `timeline.jsonl`. Three consequences worth knowing:
   invisible dead controller.
 - **An entry whose state file is gone is not stalled** — that is `prune`'s
   removal criterion, and a phantom entry must not be dressed up as a resumable
-  run. This is why the published example renders above carry no marker: their
-  fixture records runs whose state files were never created.
+  run. This is why most rows in the published example render carry no marker:
+  the fixture records runs whose state files were never created.
+- **When the derivation cannot run, the row says so.** If
+  `aid-fsm.sh active-runs stalled` fails or returns something that is not an
+  object, the row renders `liveness?` instead of `STALLED?` and keeps the
+  RECORDED `ctl=` value: with fact 2 unknown, `awaiting_host_resume` cannot be
+  claimed either. A status view never fails because a derivation did, and it
+  never guesses in place of one.
 
 **Worktree column rules.**
 - A relative `worktree_path` is probed against the state root; an absolute one
@@ -266,7 +378,7 @@ plan_rows() {
 ```
 
 ```bash
-# recipe: stalled-runs — defines stalled_epics() and stall_hint <epic_id>: the
+# recipe: stalled-runs — defines stalled_json() and stall_hint <epic_id>: the
 # STALLED? marker's single authority. The rule (non-terminal entry AND nothing
 # newer than the stall threshold in either the map's `updated_at` or the run's
 # timeline) is NOT re-implemented here — it lives in exactly one place,
@@ -274,74 +386,368 @@ plan_rows() {
 # controller loop's watchdog step both call. It is DERIVED at read time and
 # stored nowhere, so a controller that wakes up and writes anything clears the
 # marker by itself; nothing has to run a sweep first. A failed call renders no
-# markers at all — a status view must never fail because a derivation did.
-stalled_epics() {
+# STALLED? marker at all — a status view must never fail because a derivation
+# did — and the affected rows say `liveness?` instead of claiming either way.
+stalled_json() {
   bash "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/aid-fsm.sh" \
-    active-runs stalled 2>/dev/null \
-    | jq -r 'to_entries[] | select(.value.stalled == true) | .key' 2>/dev/null || true
+    active-runs stalled 2>/dev/null || true
 }
 
 # The honest caveat belongs in the render, not in a footnote: a FOREGROUND gate
 # emits no heartbeat, so a long one can trip this marker. That is the deliberate
 # trade — a visible false STALLED? beats an invisible dead controller.
+#
+# stall_hint <epic_id> <indent> <id_is_renderable 0|1> — the third argument is
+# the SHIPPED derivation's verdict on whether this epic id may be interpolated
+# into a command at all (`resume_command` non-null in `active-runs stalled`; see
+# controller_facts below). `cmd_init` puts no charset constraint on the map key
+# it upserts, so a key like `E-OK; curl … | sh` interpolated raw here would be a
+# printed, runnable-looking recovery line — the incident that derivation
+# documents and refuses. A status page is a paste target: when the id is not
+# renderable, this line names no command rather than a plausible-looking one,
+# and it DEFAULTS to that (0), so a caller that forgets the argument gets the
+# safe answer.
 stall_hint() {
-  printf '%sSTALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume %s\n' "${2:-      }" "${1:-}"
+  local _epic="${1:-}" _in="${2:-      }" _ok="${3:-0}"
+  local _pre='STALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background.'
+  if [ "$_ok" = "1" ]; then
+    printf '%s%s Recover with: aid-fsm.sh resume %s\n' "$_in" "$_pre" "$_epic"
+  else
+    printf '%s%s This run'"'"'s id is not usable in a command; recover it by hand.\n' "$_in" "$_pre"
+  fi
+}
+```
+
+```bash
+# recipe: controller-state — defines _safe_action(), controller_facts() and
+# epic_row(): the `ctl=` column, the DERIVED awaiting_host_resume state, and the
+# resume lines. Read-only from end to end: nothing here writes to the map, and
+# nothing here depends on `active-runs prune` having run.
+#
+# _safe_action <artifact_abs> — the artifact's `safe_next_action`, rendered by
+# THE shipped renderer (`_resume_render_command` in scripts/aid-fsm.sh, sourced
+# in a child shell), never by a second copy of its allowlist. A plain command
+# comes back VERBATIM — that is the promise this surface makes, because an
+# operator pastes what is printed and a "helpful" reconstruction would be a
+# command the artifact never recorded. Anything carrying shell metacharacters
+# comes back in `printf %q` form (inert when pasted) with rc 1, so the caller
+# can flag it: a status page prints attacker-influenceable strings (the recorded
+# action is composed by unquoted interpolation upstream), and a printed line
+# must not be able to do something other than what it says.
+#   rc 0 = verbatim   rc 1 = quoted   rc ≥ 2 = renderer unavailable
+_safe_action() {
+  bash -c '
+    source "$1" >/dev/null 2>&1 || exit 2
+    s="$(jq -r ".safe_next_action // \"\"" "$2" 2>/dev/null || true)"
+    [ -n "$s" ] || { printf "%s" "(none recorded)"; exit 0; }
+    rc=0
+    r="$(_resume_render_command "$s")" || rc=$?
+    printf "%s" "$r"
+    exit "$rc"
+  ' _ "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/aid-fsm.sh" "${1:-}"
+}
+
+# _resume_basename — THE continuation artifact's filename, read from the shared
+# vocabulary (`lib/aid-resume-artifact.sh`, where it has its single definition)
+# rather than spelled a fourth time here. A private copy fails open in exactly
+# the way that library's own header describes: rename the artifact and this
+# surface would keep probing the old name. Read in a child shell so sourcing the
+# library cannot leak names into the render. Empty = unreadable.
+_resume_basename() {
+  bash -c '
+    source "$1" >/dev/null 2>&1 || exit 1
+    printf "%s" "${AID_RESUME_ARTIFACT_BASENAME:-}"
+  ' _ "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/lib/aid-resume-artifact.sh" 2>/dev/null
+}
+
+# _path_segment <s> — true when <s> is ONE path segment that cannot ascend:
+# non-empty, not `.`, not `..`, and containing no `/`. Deliberately a structural
+# test and not a charset allowlist — this surface already consumes the SHIPPED
+# id verdict (`idok`) for anything that renders a command, and a second private
+# allowlist would be free to drift from it. What this rules out is narrower and
+# absolute: a map-supplied value that changes which DIRECTORY a path names.
+_path_segment() {
+  case "${1:-}" in ""|.|..|*/*) return 1 ;; esac
+  return 0
+}
+
+# controller_facts — one TSV row per map entry:
+#   epic · ctl · stalled(true|false|unknown) · quoted(0|1|x|-) · idok(0|1) ·
+#   artifact · action
+# `action` is LAST because a rendered command may legitimately contain a tab.
+#
+# THE DERIVATION. `awaiting_host_resume` is never stored — a dying controller
+# cannot write its own epitaph — so it is computed here from the two facts the
+# controller provably LEFT BEHIND, and both must hold:
+#   1. the run's continuation artifact is STILL ON DISK. The map's
+#      `resume_artifact` pointer supplies a LOCATION, never the fact itself, and
+#      it is believed only when it actually NAMES that artifact — its basename
+#      must equal the shared `AID_RESUME_ARTIFACT_BASENAME`. A pointer to
+#      anything else (`update_active_run_field` validates `auto_controller`
+#      against a closed vocabulary and `resume_artifact` not at all) is ignored,
+#      because a regular file at an arbitrary path is not evidence that a
+#      controller left a continuation behind, and a row must never assert a
+#      state it cannot prove. With no usable pointer the conventional evidence
+#      path is probed instead, so a render never depends on a pointer (or on a
+#      prune) having been written. When the shared basename cannot be read at
+#      all, fact 1 is simply not established — the surface claims nothing.
+#   2. no liveness signal is recent enough — `stalled == true` from the ONE
+#      shared derivation above.
+# Neither fact alone renders it: an artifact beside a live controller is an
+# in-flight background gate, and a stall with no artifact is a stall.
+#
+# When the stall derivation itself is unavailable, fact 2 is UNKNOWN: the row
+# reports the recorded value with a `liveness?` marker and claims neither
+# awaiting_host_resume nor STALLED?. Saying "I cannot tell" is the only honest
+# third answer.
+#
+# MISSING FIELDS ARE RENDERED, NEVER WRITTEN. A legacy entry predating these
+# fields renders `manual` unless its state file records `mode: auto` — the same
+# conservative default the writer applies (`_active_runs_auto_controller`):
+# claiming a live autonomous controller for a run nothing stamped AUTO is
+# exactly the false claim the field exists to prevent. Nothing is backfilled;
+# the map is written only by its own writers.
+#
+# The `idok` column is the SHIPPED derivation's verdict on the epic id itself:
+# `resume_command` non-null means that derivation was willing to render
+# `resume <id>` for this key, having checked it against the same charset
+# `resume` enforces before it will act. This surface consumes that verdict
+# instead of re-deriving it — one validator, no second allowlist free to drift —
+# and prints no command line at all when it is 0.
+controller_facts() {
+  local _root _map _stall _bn _epic _ac _sf _run _ptr _mode _abs _rel _art _st _ctl _cmd _rc _q _idok
+  local _evbase _evbrp _evd _evrp _rp
+  _root="$(aid_state_root)" || return 1
+  _map="$_root/.aid-o/work/active-runs.json"
+  [ -f "$_map" ] || return 0
+  _stall="$(stalled_json)"
+  printf '%s' "$_stall" | jq -e 'type == "object"' >/dev/null 2>&1 || _stall=""
+  _bn="$(_resume_basename)" || _bn=""
+  # THE CONTAINMENT BASE, DERIVED FROM THE STATE ROOT ALONE — nothing the map
+  # supplies contributes to it. This is the half of the containment rule that a
+  # first attempt lost: the per-run root was assembled as
+  # `evidence/${_epic}/${_run}` from the SAME attacker-writable map that
+  # supplies the pointer being checked, so the check compared untrusted input
+  # against a root the same input had chosen. A valid epic id with
+  # `run_id: ../../../../../OUT2` — or a map key spelled the same way — walked
+  # the root out to the planted file and the escape reopened one field over.
+  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir`, the rule this borrows, takes
+  # its evidence dir as a CALLER-supplied argument: exactly one side is
+  # untrusted, and that asymmetry is what makes the comparison mean anything.
+  #
+  # AND IT FAILS CLOSED WHEN IT CANNOT CANONICALIZE. `-m` is a GNU coreutils
+  # extension; BSD/macOS `realpath(1)` does not have it, so "no `-m`" is a
+  # DEFAULT platform, not an exotic edge. A first fix fell back to the raw
+  # string (`|| printf '%s' "$_evbase"`) on both sides, which degraded the whole
+  # rule to a string-prefix test and reproduced the very escape it closes: with
+  # `_abs` = `<root>/.aid-o/work/evidence/E/R/../../../../../tmp/<basename>` and
+  # `_evrp` = `<root>/.aid-o/work/evidence/E/R`, the prefix matched, the check
+  # PASSED, and `[ -f ]` then succeeded because the KERNEL resolves `..` even
+  # though the comparison did not. Every canonicalization below therefore yields
+  # the empty string on failure and an empty result is REFUSED, never used:
+  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir` does the same (`rp` is required
+  # non-empty before the recorded value is honoured), and refusing to claim
+  # containment you cannot compute is the only honest answer. The consequence is
+  # stated rather than hidden: on a host whose `realpath` lacks `-m`, fact 1 is
+  # never established and every row degrades to its recorded controller value —
+  # exactly as an unreadable basename does. A surface that cannot prove a state
+  # says nothing; it does not lower the bar until it can.
+  _evbase="$_root/.aid-o/work/evidence"
+  _evbrp="$(realpath -m -- "$_evbase" 2>/dev/null || printf '')"
+  while IFS="$(printf '\t')" read -r _epic _ac _sf _run _ptr; do
+    [ -n "$_epic" ] || continue
+    # A TAB is an IFS *whitespace* character, so `read` collapses a run of them
+    # and an empty middle field would silently shift every later one. Absent
+    # values therefore travel as the literal `-` and are decoded here.
+    [ "$_ac"  != "-" ] || _ac=""
+    [ "$_sf"  != "-" ] || _sf=""
+    [ "$_run" != "-" ] || _run=""
+    [ "$_ptr" != "-" ] || _ptr=""
+    _art=""
+    # THE CONTAINMENT ROOT: this run's own evidence directory, assembled from
+    # the trusted base above and the two map-supplied components — but only
+    # after each of those has been proved incapable of choosing a different
+    # directory. Two steps, both required:
+    #   1. `_epic` and `_run` must each be a SINGLE path segment (`_path_segment`),
+    #      so neither can ascend out of the base or reach sideways into another
+    #      run's directory. `run_id` is validated NOWHERE on the write path, and
+    #      the map key carries no charset constraint either, so this surface
+    #      cannot assume either is a name. `_path_segment` rejects the EMPTY
+    #      string too, and that is deliberate: an entry with no `run_id` names no
+    #      run directory, and treating it as "the epic directory will do" widened
+    #      the root by one level — under which ANOTHER run's artifact under the
+    #      same epic satisfied containment, the first case §2 above says is
+    #      refused, while the conventional candidate two lines below still hard-
+    #      codes `/${_run}/`. The two would then disagree. A missing `run_id`
+    #      therefore establishes no fact 1, the same as any other component this
+    #      surface cannot pin to one directory.
+    #   2. the assembled root must still canonicalize INSIDE the canonicalized
+    #      base — which additionally refuses a root reached through a symlink
+    #      that leaves the tree, the one ascent step 1 cannot see. The base must
+    #      itself have canonicalized (`_evbrp` non-empty): with an empty base the
+    #      containment pattern would degenerate to `/*` and match every absolute
+    #      path there is.
+    # A row that fails any step establishes no fact 1 at all: it degrades to
+    # its recorded controller value, exactly as an unreadable basename does.
+    # Canonicalized once per row, `-m` so a directory that does not exist yet
+    # still yields a comparable answer, and — per the base above — an empty
+    # result is refused rather than replaced by the raw string.
+    _evrp=""
+    if [ -n "$_bn" ] && [ -n "$_evbrp" ] && _path_segment "$_epic" && _path_segment "$_run"; then
+      _evd="$_evbase/$_epic/$_run"
+      _evrp="$(realpath -m -- "$_evd" 2>/dev/null || printf '')"
+      case "$_evrp" in "$_evbrp"/*) ;; *) _evrp="" ;; esac
+    fi
+    if [ -n "$_evrp" ]; then
+      for _rel in "$_ptr" ".aid-o/work/evidence/${_epic}/${_run}/${_bn}"; do
+        [ -n "$_rel" ] || continue
+        # THE SHAPE CHECK: a pointer that does not name the continuation
+        # artifact is not a pointer to one, whatever happens to sit there.
+        [ "${_rel##*/}" = "$_bn" ] || continue
+        case "$_rel" in /*) _abs="$_rel" ;; *) _abs="$_root/$_rel" ;; esac
+        # THE CONTAINMENT CHECK: shape alone let a correctly-named file at ANY
+        # location — another run's evidence, /tmp, outside the repository — be
+        # accepted as proof that this run's controller left a continuation
+        # behind, and its recorded action was then printed as a pasteable
+        # command. Same rule as lib/aid-service.sh:_aid_svc_safe_jobs_dir,
+        # INCLUDING its refusal: a canonicalization that did not happen is not a
+        # containment result, so an empty `_rp` skips the candidate instead of
+        # falling back to the un-normalized string (see the base above for what
+        # that fallback actually let through).
+        _rp="$(realpath -m -- "$_abs" 2>/dev/null || printf '')"
+        [ -n "$_rp" ] || continue
+        case "$_rp" in "$_evrp"/*) ;; *) continue ;; esac
+        if [ -f "$_abs" ]; then _art="$_rel"; break; fi
+      done
+    fi
+    if [ -z "$_stall" ]; then
+      _st="unknown"; _idok=0
+    else
+      _st="$(printf '%s' "$_stall" | jq -r --arg e "$_epic" '.[$e].stalled // false' 2>/dev/null || echo false)"
+      _idok="$(printf '%s' "$_stall" | jq -r --arg e "$_epic" \
+        'if (.[$e].resume_command // null) == null then "0" else "1" end' 2>/dev/null || echo 0)"
+    fi
+    if [ -n "$_art" ] && [ "$_st" = "true" ]; then
+      _ctl="awaiting_host_resume"
+    elif [ -n "$_ac" ]; then
+      _ctl="$_ac"
+    else
+      _mode=""
+      case "$_sf" in "") _abs="" ;; /*) _abs="$_sf" ;; *) _abs="$_root/$_sf" ;; esac
+      [ -n "$_abs" ] && [ -f "$_abs" ] && _mode="$(yq -r '.mode // ""' "$_abs" 2>/dev/null)"
+      case "$_mode" in auto) _ctl="active" ;; *) _ctl="manual" ;; esac
+    fi
+    _cmd=""; _q="-"
+    if [ "$_ctl" = "awaiting_host_resume" ]; then
+      case "$_art" in /*) _abs="$_art" ;; *) _abs="$_root/$_art" ;; esac
+      _rc=0; _cmd="$(_safe_action "$_abs")" || _rc=$?
+      case "$_rc" in
+        0) _q=0 ;;
+        1) _q=1 ;;
+        *) _q=x; _cmd="(unavailable — the shared renderer could not be loaded; read the artifact itself)" ;;
+      esac
+    fi
+    # DISPLAY-ONLY HYGIENE, applied after the artifact has been read and never
+    # before: the path is echoed into a terminal, so its control bytes go here.
+    # TSV framing already neutralizes TAB/CR/LF (jq's `@tsv` escapes them, and a
+    # key carrying either fails the lookup and degrades to `manual`); this
+    # removes the rest, ESC included, so a crafted directory name cannot
+    # recolour or overpaint the rendered line.
+    [ -z "$_art" ] || _art="$(printf '%s' "$_art" | tr -d '[:cntrl:]')"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_epic" "$_ctl" "$_st" "$_q" "${_idok:-0}" "${_art:--}" "${_cmd:--}"
+  done <<EOF
+$(jq -r 'to_entries[] | [.key, (.value.auto_controller // "-"), (.value.state_file // "-"),
+                         (.value.run_id // "-"), (.value.resume_artifact // "-")] | @tsv' \
+    "$_map" 2>/dev/null)
+EOF
+}
+
+# epic_row <indent> <epic> <state> <run> <branch> <governs> <facts> — ONE
+# rendered EPIC row plus the note lines that belong to it, shared by both
+# listings so the two can never drift apart.
+epic_row() {
+  local _in="$1" _epic="$2" _state="$3" _run="$4" _branch="$5" _gm="$6" _facts="$7"
+  local _line _f _ctl _st _q _idok _art _cmd
+  _f="$(printf '%s\n' "$_facts" | awk -F'\t' -v e="$_epic" '$1 == e { print; exit }')"
+  _ctl=""; _st=""; _q=""; _idok=""; _art=""; _cmd=""
+  IFS="$(printf '\t')" read -r _ _ctl _st _q _idok _art _cmd <<EOF
+$_f
+EOF
+  [ -n "$_ctl" ] || _ctl="manual"
+  [ "$_idok" = "1" ] || _idok=0
+  [ "$_art" != "-" ] || _art=""
+  [ "$_cmd" != "-" ] || _cmd=""
+  _line="${_in}${_epic}  [${_state}]  run=${_run}  branch=${_branch}  ctl=${_ctl}"
+  [ -n "$_gm" ] && [ "$_gm" != "-" ] && _line="${_line}  ${_gm}"
+  case "$_st" in
+    true)    _line="${_line}  STALLED?" ;;
+    unknown) _line="${_line}  liveness?" ;;
+  esac
+  printf '%s\n' "$_line"
+  if [ "$_ctl" = "awaiting_host_resume" ]; then
+    # The claim command carries the epic id, so it is offered only when the
+    # SHIPPED derivation was willing to render one for that id (`idok`). An
+    # unrenderable id gets the same answer that derivation gives: no command.
+    #
+    # THE ACTION LINE IS GATED THE SAME WAY, and this is the CP3 correction: it
+    # was printed unconditionally, so the id-renderability guard did not gate
+    # the one line that hands over a PASTEABLE COMMAND. An id the shipped
+    # derivation refuses is an id this surface will not build a recovery flow
+    # around — step 2 without step 1 is not advice, and the artifact that
+    # supplied the action was located through a path component named by the
+    # very id just declared unusable. The artifact's own path is still printed
+    # on the line above, so nothing is hidden: read it there.
+    if [ "$_idok" = "1" ]; then
+      printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. Claim it with: aid-fsm.sh resume %s\n' "$_in" "$_art" "$_epic"
+      printf '%s  then run the action that artifact recorded, verbatim (nothing here runs it): %s\n' "$_in" "$_cmd"
+      [ "$_q" = "1" ] && printf '%s  WARNING: that recorded action carries shell metacharacters and is shown QUOTED — read it before running it.\n' "$_in"
+    else
+      printf '%s  awaiting host resume — %s is still on disk and no liveness signal is within the stall threshold. This run'"'"'s id is not usable in a command; claim it by hand.\n' "$_in" "$_art"
+    fi
+  fi
+  [ "$_st" = "true" ] && stall_hint "$_epic" "${_in}  " "$_idok"
+  return 0
 }
 ```
 
 ```bash
 # recipe: plan-epics — defines plan_epics <plan_id>: that plan's EPIC runs,
-# indented for a plan block, sorted by epic_id. A run derived STALLED gets the
-# `STALLED?` marker plus the recovery line beneath its row.
+# indented for a plan block, sorted by epic_id. Every row goes through
+# epic_row, so the controller column, the STALLED? marker and the resume lines
+# are rendered in exactly one place.
 plan_epics() {
-  local _root _map _stalled _row _id
+  local _root _map _facts _epic _state _run _branch _gm
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
-  _stalled="$(stalled_epics)"
-  # Sorted FIRST, then annotated: the hint line is attached to its own row, so
+  _facts="$(controller_facts)"
+  # Sorted FIRST, then annotated: a note line is emitted with its own row, so
   # it can never be sorted away from it.
   jq -r --arg p "${1:-}" '
     to_entries[] | select((.value.plan_id // "") == $p)
-    | "    \(.key)  [\(.value.state // "?")]  run=\(.value.run_id // "?")  branch=\(.value.branch // "?")"
-      + (if .value.governs_main then "  governs-main" else "" end)' \
-    "$_map" 2>/dev/null | sort | while IFS= read -r _row; do
-      _id="${_row#    }"; _id="${_id%% *}"
-      case "
-$_stalled
-" in
-        *"
-$_id
-"*) printf '%s  STALLED?\n' "$_row"; stall_hint "$_id" "      " ;;
-        *) printf '%s\n' "$_row" ;;
-      esac
+    | [.key, (.value.state // "?"), (.value.run_id // "?"), (.value.branch // "?"),
+       (if .value.governs_main then "governs-main" else "-" end)] | @tsv' \
+    "$_map" 2>/dev/null | sort | while IFS="$(printf '\t')" read -r _epic _state _run _branch _gm; do
+      epic_row "    " "$_epic" "$_state" "$_run" "$_branch" "$_gm" "$_facts"
     done
 }
 ```
 
 ```bash
 # recipe: planless-epics — defines planless_epics(): EPIC runs with no plan_id
-# (Fast Mode, pre-plan runs), sorted by epic_id. Same STALLED? rule as
-# plan_epics — one derivation, both lists.
+# (Fast Mode, pre-plan runs), sorted by epic_id. Same epic_row renderer as
+# plan_epics — one derivation, one row shape, both lists.
 planless_epics() {
-  local _root _map _stalled _row _id
+  local _root _map _facts _epic _state _run _branch _gm
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
-  _stalled="$(stalled_epics)"
+  _facts="$(controller_facts)"
   jq -r '
     to_entries[] | select((.value.plan_id // "") == "")
-    | "  \(.key)  [\(.value.state // "?")]  run=\(.value.run_id // "?")  branch=\(.value.branch // "?")"' \
-    "$_map" 2>/dev/null | sort | while IFS= read -r _row; do
-      _id="${_row#  }"; _id="${_id%% *}"
-      case "
-$_stalled
-" in
-        *"
-$_id
-"*) printf '%s  STALLED?\n' "$_row"; stall_hint "$_id" "    " ;;
-        *) printf '%s\n' "$_row" ;;
-      esac
+    | [.key, (.value.state // "?"), (.value.run_id // "?"), (.value.branch // "?"), "-"] | @tsv' \
+    "$_map" 2>/dev/null | sort | while IFS="$(printf '\t')" read -r _epic _state _run _branch _gm; do
+      epic_row "  " "$_epic" "$_state" "$_run" "$_branch" "$_gm" "$_facts"
     done
 }
 ```
@@ -547,7 +953,7 @@ EPIC Status: E-003-1_2 — Add Auth System
 ====================================
 State: EXECUTE          ← from fsm-state.yaml .state
 Step: 4/7               ← executing_step / total_steps (see the rule below)
-Mode: manual            ← from fsm-state.yaml .mode
+Controller: manual (mode: manual)   ← ctl from active-runs.json (see the rule below), mode from fsm-state.yaml .mode
 Branch: task/E-003-1_2  ← from fsm-state.yaml .branch
 Gate retries: 0/2       ← gate_retries
 Escalations: 1          ← escalation_count
@@ -562,6 +968,18 @@ Recent events (last 5 from timeline.jsonl):
 
 Evidence: .aid-o/work/evidence/E-003-1_2/{run_id}/
 ```
+
+**Controller rendering rule.** The old `Mode:` line named only half of what a
+reader needs. `Controller: <ctl> (mode: <mode>)` renders BOTH: `<ctl>` is the
+run's `auto_controller` from `.aid-o/work/active-runs.json`, derived exactly as
+the overview derives it (`awaiting_host_resume` when the continuation artifact
+is still on disk AND no liveness signal is recent enough; the recorded value
+otherwise; `manual` when the entry has no such field and the run's mode is not
+`auto`), and `<mode>` is `fsm-state.yaml`'s own `.mode`, unchanged. An
+`awaiting_host_resume` detail view repeats the overview's resume lines — the
+artifact path, `aid-fsm.sh resume <epic_id>`, and the recorded action verbatim.
+When the EPIC has no entry in the map at all, render `Controller: (no active
+run entry) (mode: <mode>)` — never a value nothing recorded.
 
 **Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
 
@@ -657,7 +1075,7 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-10
 
 ## Plan mode
 

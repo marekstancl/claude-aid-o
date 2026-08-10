@@ -1202,6 +1202,53 @@ worktree.
 
 ## 16. Validated follow-up — make auto mode own waits instead of pretending
 
+> **Plan written: P076** — D22 (owned jobs: `run_mode: background` gates delegated
+> to `aid-job.sh`, supervised-resumable-synchronous, crash-rerun re-attaches by
+> command fingerprint), D23 (declared services + `lib/aid-service.sh` over
+> aid-job: health probes, per-run ports, acquire-once/release-once lifecycle),
+> D24 (eager `auto_resume_required.json` + single-use-claimed `resume` command +
+> `auto_controller` status states + honest host card), D25 (machine-readable
+> `auto-recovery.yaml` superseding the 2026-07-21 stop-taxonomy design,
+> named per-class emitters, formalized Codex adjudication ending in
+> ESCALATION / P073 force). The plan itself is
+> `.aid-o/plans/P076-auto-mode-owned-waits.md` (2026-08-08) — **untracked**:
+> `.gitignore` ignores `**/.aid-o/`, so that path resolves to nothing outside
+> the authoring checkout and is named here as provenance, not as a citation a
+> reader can follow. The supersede record is likewise split: the shipped half
+> lives in `auto-recovery.yaml`'s own `supersedes:` block, because the
+> 2026-07-21 document is untracked too and its section markers are not on the
+> branch. (Plan-vs-shipped divergence, recorded rather than absorbed: this
+> paragraph originally read *"reconciled with the 2026-07-21 stop-taxonomy
+> design"*. Step 17 changed it to *"superseding"* because that is what shipped —
+> `auto-recovery.yaml` carries a `supersedes:` block, not a reconciliation. The
+> word was wrong, not the intent; the original wording is kept here so the
+> correction is visible instead of silently overwritten.) Two config layers made
+> explicit: `/aid-init`'s `execution.yaml`
+> template gains the FIELDS only (`run_mode`, `needs_services` and a `services:`
+> block that ships as commentary with zero active services), while
+> `auto-recovery.yaml` and three JSON schemas ship as new template files with
+> content; the bats_all/bats_boundary background flip lands solely in
+> aid-orchestrator's own project config.
+>
+> **STILL OPEN after P076 (each registered as an IMP backlog entry by the plan —
+> numbers allocated 2026-08-09 in `docs/plans/2026-06-29-BACKLOG.md`):**
+> - **IMP-476** — fire-and-return ASYNC gates (the runner returning before job
+>   completion); P076 ships the supervised-synchronous variant only;
+> - **IMP-477** — services↔resource-map integration (`service-resources.jsonl`
+>   emission is observe-only evidence; the shared-port classifier stays
+>   untouched);
+> - **IMP-478** — foreground-gate `timeout -k` hardening (foreground path kept
+>   byte-identical);
+> - **IMP-479** — visual-companion server migration onto `lib/aid-service.sh`;
+> - **IMP-480** — a true host push-continuation adapter (task-notification
+>   behaviour stays instruction-only host guidance; the artifact is the enforced
+>   fallback).
+>
+> Each backlog entry states what shipped instead, why it was deferred, and the
+> `file:line` hook point of the P076 mechanism it would extend. Cross-reference
+> consistency between this block and the backlog is enforced by
+> `plugins/aid-orchestrator/scripts/tests/bats/test-p076-backlog-closure.bats`.
+
 ### Current state and root cause
 
 The desired rule is already written in `aid-run.md` and `pipeline.md`: in auto

@@ -3851,11 +3851,15 @@ _fsm_service_sweep() {
   local rc=0
   aid_service_down_all "$ev" "$yaml" || rc=$?
   if (( rc == 2 )); then
-    # The one authority refused: a different process still provably owns these
-    # services. Nothing was cancelled, nothing was stopped. Said plainly,
+    # The one authority refused. rc 2 has SEVERAL causes — a live owner's claim,
+    # jq missing so the claim cannot be read, yq missing or the declaration
+    # unreadable so a recorded stop_cmd would run unreconciled — and
+    # aid_service_down_all's own header says a caller must not assume which. It
+    # prints its named line immediately above this one, so this message defers
+    # to that line instead of inventing a cause it cannot know. Said plainly,
     # because "the services are still up" is the CORRECT outcome here and must
     # not read as a failure of this command.
-    echo "aid-fsm.sh ${caller}: the services recorded under ${ev} were NOT swept — another process still holds this run's ownership claim and is alive (named above). That is deliberate: sweeping a live run's services would report gates that are passing as failed. This ${caller} changed nothing about the services." >&2
+    echo "aid-fsm.sh ${caller}: the services recorded under ${ev} were NOT swept — the teardown REFUSED, for the reason named in the line above (a live owner, or a dependency/declaration it could not read). That refusal is deliberate: sweeping on an unverified answer would either report passing gates as failed or run a command the project's config never authorised. This ${caller} changed nothing about the services." >&2
     return 0
   fi
   if (( rc != 0 )); then

@@ -63,7 +63,7 @@ values are **storable**, and the fourth state is never stored at all.
 |-------|---------|---------------|-------------|
 | `active` | yes | An autonomous controller is alive and owns this run. | `init`, when `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
 | `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when `AID_AUTO_MODE=1` is not set |
-| `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | *Nothing writes it yet.* The value is accepted by the writer and reserved for the escalation ladder's terminus, which is a later plan step. Treat it today as vocabulary, not as observed state. |
+| `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | `aid_ladder_escalate` (`lib/aid-recovery-ladder.sh`), through the single map writer, when a class's terminus reaches escalation. |
 | `awaiting_host_resume` | **never** | A background gate was handed off and the controller then died: the run's continuation artifact is still on disk and nothing has signalled liveness. | Nobody. It is **derived** at read time. |
 
 `awaiting_host_resume` is derived rather than stored for one reason: a controller that has died
@@ -77,10 +77,12 @@ facts the dead controller provably left behind:
 2. no liveness signal is recent enough. `aid-fsm.sh active-runs stalled` is the shipped derivation
    of that half — newest of the entry's `updated_at` and the run timeline's newest event, against
    `AID_ACTIVE_RUN_STALL_SEC` (default 2100 s) — and `/aid-status` renders its verdict as the
-   `STALLED?` marker plus the recovery line. The string `awaiting_host_resume` does appear in
-   output — as the writer's rejection message (`aid-fsm.sh`) and in `/aid-help` prose — but no
-   surface ever reports it as an observed state of a run: it names the two facts holding together,
-   not a value anything stores or emits as a verdict.
+   `STALLED?` marker plus the recovery line. `/aid-status` does report
+   `ctl=awaiting_host_resume` for a run — but it COMPUTES that word from both facts at render time
+   and writes nothing back: the map's sha256 is unchanged across a render, and with either fact
+   missing the row falls back to the RECORDED value (or to `liveness?` when the derivation cannot
+   run at all). So the word names two facts holding together, never a value anything stored or
+   emitted as a verdict.
 
 **The resume flow.** When both hold, run `bash {plugin_path}/scripts/aid-fsm.sh resume <epic_id>`.
 It claims the artifact exactly once, collects the referenced job's terminal result, records it as a

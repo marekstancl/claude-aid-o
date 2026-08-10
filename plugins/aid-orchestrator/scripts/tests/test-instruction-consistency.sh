@@ -60,12 +60,24 @@ if [[ -f "$ORCH_FILE" ]]; then
   done
 fi
 
-# Check pipeline.md state table has correct count
-PIPELINE_STATE_TABLE_COUNT=$(grep -cE '^\| \*\*[A-Z]+\*\*' "$PLUGIN_DIR/skills/pipeline.md" 2>/dev/null || echo 0)
-if [[ "$PIPELINE_STATE_TABLE_COUNT" -eq "$BASH_STATE_COUNT" ]]; then
-  pass "pipeline.md state table has $BASH_STATE_COUNT rows (matches bash)"
+# Check pipeline.md has exactly one state-table row per FSM state.
+# The row identity is the state name itself, not "any bold-caps table row":
+# a bare '^\| \*\*[A-Z]+\*\*' counter matched every such row in the file
+# (e.g. the recovery stop-class table's **UNCLASSIFIED** row) and equally
+# would have accepted six rows naming states that do not exist.
+PIPELINE_BOLD_ROWS=$(grep -oE '^\| \*\*[A-Z_]+\*\*' "$PLUGIN_DIR/skills/pipeline.md" 2>/dev/null \
+  | sed -E 's/^\| \*\*//; s/\*\*$//')
+STATE_ROW_PROBLEMS=""
+for state in $BASH_STATES; do
+  n=$(printf '%s\n' "$PIPELINE_BOLD_ROWS" | grep -cx "$state" || true)
+  if [[ "$n" -ne 1 ]]; then
+    STATE_ROW_PROBLEMS="$STATE_ROW_PROBLEMS $state=$n"
+  fi
+done
+if [[ -z "$STATE_ROW_PROBLEMS" ]]; then
+  pass "pipeline.md state table has exactly one row per FSM state ($BASH_STATE_COUNT states)"
 else
-  fail "pipeline.md state table has $PIPELINE_STATE_TABLE_COUNT rows (bash has $BASH_STATE_COUNT)"
+  fail "pipeline.md state table rows wrong (expected 1 row per state, got:$STATE_ROW_PROBLEMS)"
 fi
 
 # ─── 2. FSM Transitions ────────────────────────────────────────────────────

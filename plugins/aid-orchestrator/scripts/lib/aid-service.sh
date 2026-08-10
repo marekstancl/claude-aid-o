@@ -1401,14 +1401,19 @@ aid_service_up_all() {
 #   cannot fail (`probe_cmd: /bin/true`) cannot prove a teardown succeeded, so
 #   rc 1 says exactly what it says — the probe still passes — and no more.
 #
-#     rc 2  REFUSED — a DIFFERENT, provably live process holds the ownership
-#           claim for this evidence directory. Nothing was cancelled, nothing
-#           was stopped, no state was written. This is the one gate that makes
-#           the claim record an enforcement rather than a note, and it is here —
-#           inside the single teardown definition — precisely so that every
-#           teardown path in the system inherits it: the run-all entry sweep,
-#           the release, `fsm resume` and `fsm done-advance` all consult one
-#           authority instead of each carrying a copy of the question.
+#     rc 2  REFUSED — nothing was cancelled, nothing was stopped, no state was
+#           written. TWO conditions produce it, and a caller that reports a
+#           cause must read the named line on stderr rather than assume one:
+#             (a) a DIFFERENT, provably live process holds the ownership claim
+#                 for this evidence directory. This is the gate that makes the
+#                 claim record an enforcement rather than a note, and it is
+#                 here — inside the single teardown definition — precisely so
+#                 that every teardown path inherits it: the run-all entry sweep,
+#                 the release, `fsm resume` and `fsm done-advance` all consult
+#                 one authority instead of each carrying a copy of the question.
+#             (b) the DECLARATIONS cannot be read (no yq, or no readable
+#                 <execution_yaml>) for a run that has a registry — see the
+#                 declaration preflight below.
 aid_service_down_all() {
   local evidence="${1:-}" yaml="${2:-$AID_SERVICE_CONFIG}"
   [[ -n "$evidence" ]] || { _aid_svc_err "aid_service_down_all requires <run_evidence_dir>"; return 1; }
@@ -1439,15 +1444,34 @@ aid_service_down_all() {
     fi
   fi
 
-  # yq preflight, matching `aid_service_up_all`'s. Without it
-  # `_aid_svc_declares` cannot answer, every service falls onto the
-  # UNRECONCILED branch, and the registry's RECORDED `stop_cmd` — a string from
-  # a file inside the subagent-writable evidence directory — is what runs. The
-  # up path has refused that for a missing yq since it shipped; the down path
-  # simply had not been given the same floor.
-  if [[ -f "$reg" ]] && ! command -v yq >/dev/null 2>&1; then
-    _aid_svc_err "REFUSING to tear down the services recorded under '${evidence}': yq is not available, so the declarations in '${yaml}' cannot be read and every recorded stop_cmd would run UNRECONCILED — a command chosen by a file in the evidence directory rather than by the project's config. Recorded jobs can still be cancelled by hand with aid-job.sh."
-    return 2
+  # ── THE DECLARATION PREFLIGHT ───────────────────────────────────────────
+  # `_aid_svc_declares` is what stands between the registry and execution: when
+  # it can answer, `_aid_svc_reconcile_cmd` runs the DECLARED stop_cmd (or, for
+  # a service the config does not name, refuses outright). When it cannot
+  # answer, every service falls onto the UNRECONCILED branch and the registry's
+  # RECORDED stop_cmd — a string from a file inside the subagent-writable
+  # evidence directory — is what runs.
+  #
+  # `_aid_svc_declares` has exactly two ways to be unable to answer, and they
+  # are the same door: no yq, or no readable yaml. The first has been refused
+  # since this preflight shipped; the second had not, so `execution.yaml`
+  # absent reached the identical UNRECONCILED branch with the identical
+  # consequence — the recorded stop_cmd executed. (CP3 MEDIUM, P076 Step 16.)
+  # Both are refused here, symmetrically: rc 2, nothing cancelled, nothing
+  # stopped, no state written.
+  #
+  # Scoped to `[[ -f "$reg" ]]` exactly as before: with no registry there is no
+  # recorded command to run UNRECONCILED, and the orphan sweep below cancels by
+  # job id, which is not a channel the evidence directory chooses.
+  if [[ -f "$reg" ]]; then
+    if ! command -v yq >/dev/null 2>&1; then
+      _aid_svc_err "REFUSING to tear down the services recorded under '${evidence}': yq is not available, so the declarations in '${yaml}' cannot be read and every recorded stop_cmd would run UNRECONCILED — a command chosen by a file in the evidence directory rather than by the project's config. Recorded jobs can still be cancelled by hand with aid-job.sh."
+      return 2
+    fi
+    if [[ -z "$yaml" || ! -f "$yaml" || ! -r "$yaml" ]]; then
+      _aid_svc_err "REFUSING to tear down the services recorded under '${evidence}': the service declarations at '${yaml:-<none given>}' cannot be read (missing or unreadable), so every recorded stop_cmd would run UNRECONCILED — a command chosen by a file in the evidence directory rather than by the project's config. Pass the project's execution.yaml as the second argument (or set AID_SERVICE_CONFIG). Recorded jobs can still be cancelled by hand with aid-job.sh."
+      return 2
+    fi
   fi
 
   AID_SERVICE_EVIDENCE_DIR="$evidence"
