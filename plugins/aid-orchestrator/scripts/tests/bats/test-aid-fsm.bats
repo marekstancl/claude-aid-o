@@ -1342,6 +1342,85 @@ PLAN
   [ "$status" -ne 0 ]
 }
 
+# ─── P079 Step 4 (IMP-472): casing equivalence, not casing pedantry ──────────
+#
+# THE LIVE FAILURE: one function carried two OPPOSITE conventions —
+# classification UPPERCASE, verdict lowercase — and the step-verify template
+# shows `## Result: PASS`. A verifier that carried that casing into the
+# `verdict:` field had its entire review rejected as garbage. Equivalent forms
+# are now accepted; genuinely unknown values still fail loudly (the banana case
+# above, and PASSED below).
+
+@test "P079 Step 4: verdict: PASS (uppercase) is accepted as the same claim as pass" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: PASS\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+}
+
+@test "P079 Step 4: verdict: Fail (mixed case) is accepted — a fail is still a completed verdict" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: Fail\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+}
+
+@test "P079 Step 4: verdict: PASSED is still rejected — normalization covers casing, never near-misses" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: PASSED\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+}
+
+@test "P079 Step 4: verdict: pending is STILL rejected (prefilter placeholder semantics unchanged)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: PENDING\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+}
+
+@test "P079 Step 4: classification: skip (lowercase) with a reason is accepted" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-prefilter.sh@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: skip\nreason: docs-only change\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+}
+
+@test "P079 Step 4: '## Result: pass' passes the increment anchor (canonical heading stays uppercase)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  # Same file, only the heading's casing differs.
+  local vf="$TEST_EVIDENCE_DIR/step-3-verify.md"
+  sed -i 's|## Result: PASS|## Result: pass|' "$vf"
+  grep -q '## Result: pass' "$vf"
+  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+}
+
 # ─── E-046-1_3 post-audit: blocking_findings fail-closed on non-false values ──
 # Auditor finding: only exact "true" was blocked; "maybe", "\"true\"", comments
 # all passed silently as clean. Fix: accept ONLY scalar "false", block everything else.

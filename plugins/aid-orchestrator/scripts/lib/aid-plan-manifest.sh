@@ -1082,6 +1082,63 @@ _AID_EPIC_STATUS_TRANSITIONS=(
 )
 
 # ===========================================================================
+# plan_manifest_update_epic_base <plan_id> <epic_id> <old_base> <new_base>
+#
+# P079 Step 3 (IMP-478). A chained EPIC's task branch is cut when the plan
+# REGISTERS its EPICs — all of them at once — so by the time a later member
+# actually executes, its branch can predate everything its predecessors
+# merged. epic-start fast-forwards such a branch, and the recorded
+# `epic_base_commit` has to move with it or the lineage check (merge-base ==
+# recorded base) starts refusing the repaired branch.
+#
+# COMPARE-AND-SWAP against <old_base>, expressed inside the jq filter so the
+# guard is evaluated under `_plan_manifest_atomic_mutate`'s lock on the
+# re-read file — a concurrent mutation loses instead of being overwritten.
+#
+# IDEMPOTENT BY DESIGN: when the entry ALREADY reads <new_base> the call is a
+# no-op success. epic-start can crash between the fast-forward and this write,
+# or between this write and the fsm-state write, and every re-run has to be
+# able to walk forward through the remaining writes rather than deadlock on
+# its own completed work.
+#
+# Returns: 0 success (written or already at new_base), 1 bad args / unknown
+# epic_id / CAS mismatch, 2 missing jq, 3 lock timeout, 5 corrupt.
+# ===========================================================================
+plan_manifest_update_epic_base() {
+  local plan_id="$1" epic_id="$2" old_base="$3" new_base="$4"
+
+  _plan_manifest_require_jq || return 2
+  _pm_validate_plan_id_charset "$plan_id" || return 1
+  if [[ -z "$epic_id" ]]; then
+    _pm_warn "plan_manifest_update_epic_base: epic_id is required"
+    return 1
+  fi
+  local b
+  for b in "$old_base" "$new_base"; do
+    if ! [[ "$b" =~ ^[0-9a-f]{40}$ ]]; then
+      _pm_warn "plan_manifest_update_epic_base: bases must be 40-hex shas (got '${b:-<empty>}')"
+      return 1
+    fi
+  done
+
+  local filter='
+    (.plan_boundary_manifest.epic_runs // []) as $runs
+    | (if any($runs[]; .epic_id == $epic_id) | not
+       then error("plan_manifest_update_epic_base: no epic_runs entry for \($epic_id)")
+       else . end)
+    | (first($runs[] | select(.epic_id == $epic_id) | .epic_base_commit // "")) as $cur
+    | (if $cur == $new then .
+       elif $cur != $old
+       then error("CAS FAILED: \($epic_id) epic_base_commit is now \($cur), not the \($old) this reconciliation saw")
+       else .plan_boundary_manifest.epic_runs =
+              [$runs[] | if .epic_id == $epic_id then .epic_base_commit = $new else . end]
+       end)
+  '
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" \
+    --arg epic_id "$epic_id" --arg old "$old_base" --arg new "$new_base"
+}
+
+# ===========================================================================
 # plan_manifest_set_epic_status <plan_id> <epic_id> <status> [merge_commit]
 #
 # Sets an EXISTING epic_runs[] entry's status (rejected — exit 1, no write —

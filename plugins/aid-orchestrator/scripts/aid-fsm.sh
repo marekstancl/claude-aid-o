@@ -1239,16 +1239,23 @@ fsm_check_verifier_output() {
   generated_at=$(yaml_field "$file" _generated_at)
   [[ -z "$generated_at" ]] && return 1  # non-empty: ensures verifier wrote a real timestamp
 
+  # P079 Step 4 (IMP-472): these two fields are the only ones a HUMAN-facing
+  # agent writes by hand, and they carry OPPOSITE casing conventions —
+  # classification uppercase, verdict lowercase — so a verifier that followed
+  # the template's `## Result: PASS` into the verdict field had its whole
+  # review rejected for the casing. Equivalent forms are normalized; genuinely
+  # unknown values (`banana`, `PASSED`) still fail loudly. Only the extracted
+  # TOKEN is lowercased — the evidence file's bytes are never touched.
   classification=$(yaml_field "$file" classification)
-  case "$classification" in
-    SKIP)
+  case "$(printf '%s' "$classification" | tr '[:upper:]' '[:lower:]')" in
+    skip)
       grep -q '^reason:' "$file" || return 1
       ;;
-    RUN|FAIL|FULL_REVIEW)
+    run|fail|full_review)
       grep -q '^verdict:' "$file" || return 1
       local verdict
       verdict=$(yaml_field "$file" verdict)
-      case "$verdict" in
+      case "$(printf '%s' "$verdict" | tr '[:upper:]' '[:lower:]')" in
         pass|fail) ;;          # only valid completed verdicts
         pending)   return 1 ;; # pre-filter placeholder: verifier not dispatched
         *)         return 1 ;; # unknown/garbage verdict (e.g. banana, empty, typo)
@@ -5497,7 +5504,11 @@ cmd_increment_step() {
     local _verify_content
     _verify_content=$(<"$verify_file")
 
-    [[ "$_verify_content" == *"## Result: PASS"* ]] || _increment_fail step_verify_not_pass \
+    # P079 Step 4 (IMP-472): case-tolerant, same rule as the verdict field.
+    # The canonical form in every template stays uppercase; a verifier writing
+    # `## Result: pass` means the same thing and is no longer rejected for it.
+    local _verify_content_lc="${_verify_content,,}"
+    [[ "$_verify_content_lc" == *"## result: pass"* ]] || _increment_fail step_verify_not_pass \
       "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." \
       "File: ${verify_file}" \
       "Fix failing AC or mark '## Result: PASS' when all criteria met."

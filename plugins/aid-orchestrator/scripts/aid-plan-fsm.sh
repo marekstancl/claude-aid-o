@@ -833,6 +833,190 @@ _pfsm_last_resulting_sha() {
 }
 
 # ---------------------------------------------------------------------------
+# _pfsm_task_branch_worktree <project_root> <task_branch>
+# The worktree path <task_branch> is checked out in, or empty. `branch -f` is
+# refused by git for a checked-out branch, so the fast-forward below has to
+# know which mechanism applies.
+# ---------------------------------------------------------------------------
+_pfsm_task_branch_worktree() {
+  local root="$1" branch="$2"
+  git -C "$root" worktree list --porcelain 2>/dev/null | awk -v b="refs/heads/${branch}" '
+    /^worktree /  { wt = substr($0, 10) }
+    /^branch /    { if (substr($0, 8) == b) { print wt; exit } }
+  '
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_reconcile_task_branch <project_root> <plan_id> <epic_id> <task_branch>
+#                              <entry_json>
+#
+# P079 Step 3 (IMP-478): a chained EPIC executes on a branch that is too old.
+#
+# Chain generation registers EVERY EPIC of a plan at once, and epic-start cuts
+# `task/<epic>/main` from the plan head at REGISTRATION time. That cut is
+# correct when it happens and stale by the time a later chain member starts:
+# its predecessors have merged into `plan/<id>` since. The existing lineage
+# check cannot see this — merge-base(stale branch, plan) still equals the
+# recorded base, which is exactly what "merely behind" means — so EPIC 2 ran
+# against a tree without EPIC 1's work in it.
+#
+# Runs BEFORE the lineage precondition, deliberately: after a crash mid-repair
+# the merge-base no longer equals the recorded base, and an untouched lineage
+# check would refuse before any repair code could run. The precondition itself
+# is unchanged and still runs afterwards — the reconciliation restores its
+# invariant rather than replacing it.
+#
+# Three shapes converge here, so every crash window re-runs cleanly:
+#   (a) branch strictly BEHIND the plan head  -> fast-forward, then both writes
+#   (b) branch AT the plan head, manifest behind (crash after the ff)
+#                                             -> the two writes only
+#   (c) manifest at the plan head, fsm-state behind (crash after the CAS)
+#                                             -> the fsm-state write only
+# A branch with unique commits that does not contain the plan head has
+# DIVERGED: refused by name, never merged automatically.
+#
+# Returns 0 when the branch is usable (reconciled or already fresh), 1 on a
+# refusal or a failed repair — the caller exits on 1.
+# ---------------------------------------------------------------------------
+_pfsm_reconcile_task_branch() {
+  local root="$1" plan_id="$2" epic_id="$3" task_branch="$4" entry_json="$5"
+  local plan_branch="plan/${plan_id}"
+
+  local plan_head branch_head recorded_base
+  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  branch_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${task_branch}" 2>/dev/null)" || branch_head=""
+  recorded_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || recorded_base=""
+  # Nothing to reconcile against — leave the diagnosis to the lineage check,
+  # which names these cases already.
+  [[ -n "$plan_head" && -n "$branch_head" && -n "$recorded_base" ]] || return 0
+
+  if [[ "$branch_head" != "$plan_head" ]]; then
+    # Does the branch already CONTAIN the plan head? That is the normal
+    # mid-execution shape (the EPIC has its own commits on a fresh base) and
+    # must never be touched.
+    local rc=0
+    git -C "$root" merge-base --is-ancestor "$plan_head" "$branch_head" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then return 0; fi
+    if [[ "$rc" -gt 1 ]]; then
+      echo "PRECONDITION FAIL: git merge-base --is-ancestor ${plan_head} ${branch_head} failed (rc=${rc}) — refusing to guess whether ${task_branch} is fresh." >&2
+      return 1
+    fi
+
+    # Strictly behind (an ancestor of the plan head, no unique commits) is the
+    # repairable shape. Anything else has diverged.
+    rc=0
+    git -C "$root" merge-base --is-ancestor "$branch_head" "$plan_head" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -gt 1 ]]; then
+      echo "PRECONDITION FAIL: git merge-base --is-ancestor ${branch_head} ${plan_head} failed (rc=${rc}) — refusing to guess whether ${task_branch} is fresh." >&2
+      return 1
+    fi
+    if [[ "$rc" -eq 1 ]]; then
+      echo "PRECONDITION FAIL: ${task_branch} (${branch_head}) has diverged from ${plan_branch} (${plan_head}) — it carries commits the plan branch does not, and it is missing commits the plan branch has. ${epic_id} must not execute on either half. Repair by hand: merge ${plan_branch} into ${task_branch}, or re-cut the branch after saving its work." >&2
+      return 1
+    fi
+
+    local wt; wt="$(_pfsm_task_branch_worktree "$root" "$task_branch")"
+    local ff_err="" ff_rc=0
+    if [[ -n "$wt" ]]; then
+      ff_err="$(git -C "$wt" merge --ff-only "$plan_branch" 2>&1)" || ff_rc=$?
+    else
+      ff_err="$(git -C "$root" branch -f "$task_branch" "$plan_head" 2>&1)" || ff_rc=$?
+    fi
+    if [[ "$ff_rc" -ne 0 ]]; then
+      echo "PRECONDITION FAIL: could not fast-forward ${task_branch} to ${plan_branch} (${plan_head}): ${ff_err}" >&2
+      return 1
+    fi
+    echo "NOTE: ${task_branch} was behind ${plan_branch} — fast-forwarded ${branch_head} -> ${plan_head} so ${epic_id} executes on its predecessors' work." >&2
+  fi
+
+  # Both persisted base records must follow the branch. Each write is
+  # idempotent on the value it would set, so a crash between them converges.
+  if [[ "$recorded_base" != "$plan_head" ]]; then
+    local mrc=0
+    plan_manifest_update_epic_base "$plan_id" "$epic_id" "$recorded_base" "$plan_head" >/dev/null || mrc=$?
+    if [[ "$mrc" -ne 0 ]]; then
+      echo "PRECONDITION FAIL: ${task_branch} is at ${plan_head} but the manifest's epic_base_commit for ${epic_id} could not be moved from ${recorded_base} (rc=${mrc}) — refusing to run on records that disagree." >&2
+      return 1
+    fi
+  fi
+  _pfsm_update_fsm_state_base "$root" "$plan_id" "$epic_id" "$entry_json" "$plan_head" || return 1
+
+  [[ "$branch_head" != "$plan_head" ]] && \
+    _pfsm_log_branch_fastforward "$root" "$plan_id" "$epic_id" "$entry_json" \
+      "$task_branch" "$branch_head" "$plan_head"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_update_fsm_state_base <project_root> <plan_id> <epic_id> <entry_json>
+#                              <new_base>
+# The SECOND persisted base record. Generation creates every chain member's
+# fsm-state.yaml before EPIC 1 even merges, so a chained EPIC's `base_commit`
+# is written long before the branch it describes is fast-forwarded — and the
+# gate runner's diff, the risk resolver and the pre-commit hook all read it.
+#
+# Same discipline as the manifest CAS: write when the recorded value is the
+# old base, no-op when it already is the new one, refuse on any third value.
+# An ABSENT state file is not an error — planless and not-yet-initialized runs
+# are the normal case, and aid-json-to-run.sh initializes those from the task
+# branch head itself.
+# ---------------------------------------------------------------------------
+_pfsm_update_fsm_state_base() {
+  local root="$1" plan_id="$2" epic_id="$3" entry_json="$4" new_base="$5"
+  local ev_dir state_file current
+  ev_dir="$(jq -r '.evidence_dir // empty' <<<"$entry_json" 2>/dev/null)" || ev_dir=""
+  [[ -n "$ev_dir" ]] || return 0
+  [[ "$ev_dir" == /* ]] || ev_dir="${root}/${ev_dir}"
+  state_file="${ev_dir}/fsm-state.yaml"
+  [[ -f "$state_file" ]] || return 0
+
+  current="$(grep '^base_commit:' "$state_file" 2>/dev/null | head -1 | awk '{print $2}')" || current=""
+  [[ "$current" == "$new_base" ]] && return 0
+
+  local lock_path fd
+  lock_path="$(_pfsm_plan_lock_path "$plan_id")"
+  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || {
+    echo "PRECONDITION FAIL: could not acquire the plan lock for ${plan_id} to move ${epic_id}'s fsm-state base_commit." >&2
+    return 1
+  }
+  fd="$AID_LOCK_FD"
+  local tmp="${state_file}.p079.$$"
+  if ! sed "s|^base_commit:.*|base_commit: ${new_base}|" "$state_file" > "$tmp" 2>/dev/null \
+     || ! mv -- "$tmp" "$state_file"; then
+    rm -f "$tmp"
+    aid_lock_release "$fd"
+    echo "PRECONDITION FAIL: could not rewrite base_commit in ${state_file}." >&2
+    return 1
+  fi
+  aid_lock_release "$fd"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_log_branch_fastforward — the audit trail for a repair that silently
+# changes which commits an EPIC executes on. Best-effort, exactly like every
+# other timeline write in this file: a missing evidence dir must not fail a
+# reconciliation that already succeeded.
+# ---------------------------------------------------------------------------
+_pfsm_log_branch_fastforward() {
+  local root="$1" plan_id="$2" epic_id="$3" entry_json="$4" \
+        task_branch="$5" old_head="$6" new_head="$7"
+  local ev_dir
+  ev_dir="$(jq -r '.evidence_dir // empty' <<<"$entry_json" 2>/dev/null)" || ev_dir=""
+  [[ -n "$ev_dir" ]] || return 0
+  [[ "$ev_dir" == /* ]] || ev_dir="${root}/${ev_dir}"
+  [[ -d "$ev_dir" ]] || return 0
+  local ev
+  ev="$(jq -nc --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    --arg plan "$plan_id" --arg epic "$epic_id" --arg branch "$task_branch" \
+    --arg old "$old_head" --arg new "$new_head" \
+    '{ts:$ts, event:"task_branch_fastforward", plan_id:$plan, epic_id:$epic,
+      task_branch:$branch, old_head:$old, new_head:$new}' 2>/dev/null)" || return 0
+  [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "${ev_dir}/timeline.jsonl" 2>/dev/null
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # _pfsm_verify_epic_lineage <project_root> <plan_id> <epic_id> <task_branch>
 #                            <entry_json>
 # The lineage check for an ALREADY-EXISTING task branch. `entry_json` is the
@@ -2195,6 +2379,16 @@ cmd_epic_start() {
 
   if [[ "$branch_exists" -eq 0 ]]; then
     if [[ -n "$entry_json" ]]; then
+      # P079 Step 3: bring a stale chained branch up to the live plan head
+      # BEFORE the lineage check reads the merge-base it is about to assert on
+      # (see _pfsm_reconcile_task_branch for why the order matters). NOT
+      # forceable: a --force here would run the EPIC on a tree missing its
+      # predecessors' work, which is the defect, not a bookkeeping obstacle.
+      _pfsm_reconcile_task_branch "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
+      # The entry is re-read because the reconciliation may have moved its
+      # epic_base_commit — the lineage check compares against that value.
+      entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || true
+
       # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
       # bookkeeping obstacle, not a physical impossibility, so an audited
       # --force may pass it. The check still prints its own recovery first.

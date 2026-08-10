@@ -89,6 +89,32 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
 }
 
 # ── usage / IO ───────────────────────────────────────────────────────────────
+# ── P079 Step 5 (IMP-480): the drop shape the live P076 run actually hit ─────
+#
+# Its Files bullet was CANONICAL and parsed cleanly; the second path lived in
+# the bullet's DESCRIPTION, so it never reached allowed_paths and the
+# implementer was forbidden to touch a file the step's own plan assigned it.
+# Advisory, never blocking — a description path is as often a reference as a
+# forgotten scope entry.
+
+@test "P079 Step 5: a path named only in a bullet's description is reported (the live P076 shape) and never blocks" {
+  _plan p.md strict '- Test: `plugins/x/tests/test-skill-lint.sh` — run over all modified cards; plus a grep test in `plugins/x/tests/bats/test-instruction-closure.bats` asserting every agent card references the shared section.'
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]                                   # advisory, not a block
+  [[ "$output" == *"ADVISORY"* ]]
+  [[ "$output" == *"test-instruction-closure.bats"* ]]
+  [[ "$output" != *"test-skill-lint.sh\` is named only"* ]]   # the declared path is not flagged
+}
+
+@test "P079 Step 5: declared paths, directories and placeholders in a description are NOT flagged" {
+  _plan p.md strict \
+    '- Modify: `src/a.ts` + `src/b.ts` — b is edited alongside a.' \
+    '- Modify: `src/c.ts` — writes into `<evidence_dir>/jobs/` and reads `some/dir/`.'
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ADVISORY"* ]]
+}
+
 @test "lint: missing file -> usage exit 2" {
   run "$LINT" /nonexistent/plan.md; [ "$status" -eq 2 ]
 }
@@ -138,6 +164,31 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
 # outright rather than silently narrowing allowed_paths to the first path
 # (the historical bug this test guards against). Legacy plan, so this proves
 # the fail-closed behavior is NOT gated behind lifecycle_strict.
+@test "P079 Step 5: an UNLABELLED Files bullet fails generation by name instead of vanishing" {
+  # The lint calls this bad-shape and blocks it too; generation is the
+  # defense-in-depth half, because a plan can reach the generator without the
+  # preflight (direct invocation, an older plan, a --force path).
+  _plan dirty.md legacy '- Create: `src/a.ts` — fine' '- `src/forgotten.ts` — no verb label'
+  mkdir -p out
+  run "$P2E" --plan dirty.md --phase 1 --total 1 \
+    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
+    --output-dir out --counter-yaml counter.yaml
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"src/forgotten.ts"* ]]                     # named, not counted
+  [ -z "$(ls out/ 2>/dev/null)" ]
+}
+
+@test "P079 Step 5: a Files bullet with a verb but no path fails generation instead of producing an empty entry" {
+  _plan dirty.md legacy '- Create: `src/a.ts` — fine' '- Modify:'
+  mkdir -p out
+  run "$P2E" --plan dirty.md --phase 1 --total 1 \
+    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
+    --output-dir out --counter-yaml counter.yaml
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"verb but no path"* ]]
+  [ -z "$(ls out/ 2>/dev/null)" ]
+}
+
 @test "integration: comma-separated Files entry fails aid-plan-to-epic generation (legacy plan), never silently narrows" {
   _plan dirty.md legacy '- Modify: `src/a.ts`, `src/b.ts`'
   mkdir -p out

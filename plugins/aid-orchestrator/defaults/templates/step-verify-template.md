@@ -117,8 +117,13 @@ N/A — mechanical addition following the existing requireAuth chain pattern; no
 
 ## Result: PASS
 <!-- ABSOLUTELY REQUIRED — FSM precondition fails with `step_verify_not_pass`
-     if the literal string `## Result: PASS` is absent.
-     Enforced via `grep -q '## Result: PASS'` in cmd_increment_step.
+     if the string `## Result: PASS` is absent.
+     Enforced by a case-insensitive substring match in cmd_increment_step
+     (P079 Step 4). Note the two casing conventions this file spans: this
+     HEADING is canonical uppercase, while `verdict:` lines in verifier
+     output are canonical lowercase (`verdict: pass|fail`). Both parsers now
+     accept either casing, so following one convention into the other field
+     no longer costs a rejected review — write the canonical form anyway.
 
      Replace with `## Result: FAIL` ONLY to deliberately keep the file for
      forensic purposes (in which case do NOT run increment-step — fix the AC

@@ -9,13 +9,18 @@
 # predicate (_aid_path_shape_ok) as the generator + contract gate via
 # lib/aid-scoping.sh, so a plan that passes this lint provably passes the gate.
 #
-# Two-tier severity (see _aid_classify_files_bullet):
+# Two blocking tiers (see _aid_classify_files_bullet) plus one advisory:
 #   ERROR  — the shared cleaner yields no path or a bad-shape path. This WILL
 #            break EPIC generation, so it is ALWAYS blocking (strict + legacy).
 #   STRICT — the cleaner rescues a clean path but the entry is non-canonical
 #            (no `backtick` path, or a non-(lines …) parenthetical). Blocking
 #            for lifecycle_strict plans (new default); a loud advisory for
 #            legacy plans (never a sudden global block of already-working plans).
+#   ADVISORY — a backticked, path-shaped token that appears only in an entry's
+#            DESCRIPTION, so it is not in the step's allowed_paths (P079 Step 5,
+#            IMP-480 — the live P076 drop shape). Never blocking in either mode:
+#            a description path is as often a reference as a forgotten scope
+#            entry, and only the author can tell them apart.
 #
 # Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet]
 # Exit:  0 = no blocking violations   1 = blocking violation(s)   2 = usage/IO
@@ -51,6 +56,49 @@ fi
 
 errors=0
 strict_hits=0
+advisories=0
+
+# _prose_paths <bullet> — P079 Step 5 (IMP-480), the drop shape the live P076
+# run actually hit. Its Files bullet was CANONICAL and parsed fine:
+#
+#   - Test: `…/test-skill-lint.sh` — … plus a grep test in
+#     `…/bats/test-instruction-closure.bats` asserting every agent card …
+#
+# Only the first path is a scope declaration; the second lives in the
+# description, so it never reached allowed_paths — and the implementer was
+# then forbidden to touch a file the step's own plan text assigned to it.
+#
+# ADVISORY, never blocking, deliberately: a backticked path after the em dash
+# is just as often a legitimate REFERENCE ("mirroring `aid-fsm.sh`'s call
+# shape") as a forgotten scope entry, and only the plan author can tell them
+# apart. The lint's job here is to say the sentence out loud at plan-write
+# time; the hard refusal ships where the answer is unambiguous (generation
+# fails on a bullet it cannot parse at all).
+#
+# Echoes one path per line: backticked, path-shaped tokens found AFTER the
+# em dash that are not among the bullet's declared paths.
+_prose_paths() {
+  local bullet="${1#- }" body prose declared tok
+  body="$(printf '%s' "$bullet" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
+  # Nothing after the em dash (or "--") means no description to mine.
+  case "$body" in
+    *$'\xe2\x80\x94'*) prose="${body#*$'\xe2\x80\x94'}" ;;
+    *--*)              prose="${body#*--}" ;;
+    *)                 return 0 ;;
+  esac
+  declared="$(_aid_split_path_entry "$body" 2>/dev/null)" || declared=""
+  while IFS= read -r tok; do
+    [[ -n "$tok" ]] || continue
+    # A real repo file, deliberately narrow: at least one directory segment and
+    # a file extension, no placeholder brackets, no trailing slash. Directories
+    # (`<evidence_dir>/jobs/`),command fragments and prose punctuation are not
+    # scope declarations and must not generate noise.
+    [[ "$tok" =~ ^[A-Za-z0-9._/-]+/[A-Za-z0-9._-]+\.[A-Za-z0-9]+$ ]] || continue
+    _aid_path_shape_ok "$tok" || continue
+    grep -qxF "$tok" <<<"$declared" && continue        # already in scope
+    printf '%s\n' "$tok"
+  done < <(printf '%s\n' "$prose" | grep -oP '(?<=`)[^`]+(?=`)' 2>/dev/null || true)
+}
 
 # Reason -> human message.
 _reason_msg() {
@@ -66,6 +114,11 @@ _reason_msg() {
 
 while IFS=$'\t' read -r lineno bullet; do
   [[ -z "${bullet:-}" ]] && continue
+  while IFS= read -r prose_path; do
+    [[ -n "$prose_path" ]] || continue
+    advisories=$((advisories+1))
+    [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: [ADVISORY] \`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}" >&2
+  done < <(_prose_paths "$bullet")
   verdict="$(_aid_classify_files_bullet "$bullet")"
   sev="${verdict%%:*}"; reason="${verdict#*:}"
   [[ "$sev" == "clean" ]] && continue
@@ -95,6 +148,7 @@ if [[ "$QUIET" -eq 0 ]]; then
   else
     echo "aid-plan-lint: PASS — all Files entries are canonical." >&2
   fi
+  [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} description-only path advisory/-ies (never blocking — declare them as their own bullets if the step edits them)." >&2
 fi
 
 [[ "$blocking" -gt 0 ]] && exit 1

@@ -658,6 +658,20 @@ fsm_state_file="${fsm_evidence_dir}/fsm-state.yaml"
 fsm_mode="full"
 fsm_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 fsm_base_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+# P079 Step 3 (IMP-478): for a plan that owns an execution worktree, the EPIC
+# will execute on `task/<epic_id>/main`, not on whatever generation happened to
+# have checked out — and generation runs for EVERY chain member at once, long
+# before the later ones' branches exist in their final shape. Record the task
+# branch head when it is already there; epic-start's reconciliation moves this
+# field again if the branch is later fast-forwarded.
+_p079_plan_nnn="${epic_id%%_*}"
+if [[ "$_p079_plan_nnn" =~ ^E-([0-9]+) ]] \
+   && [[ -n "$(AID_PLAN_STATE_PROJECT_ROOT="$(aid_state_root 2>/dev/null || pwd)" \
+        bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "P${BASH_REMATCH[1]}" worktree_path 2>/dev/null \
+        | grep -v '^not_found$\|^null$')" ]]; then
+  _p079_task_head="$(git rev-parse --verify --quiet "refs/heads/task/${epic_id}/main" 2>/dev/null || true)"
+  [[ -n "$_p079_task_head" ]] && fsm_base_commit="$_p079_task_head"
+fi
 [[ -z "$fsm_branch" || "$fsm_branch" == "HEAD" ]] && error_exit "aid-json-to-run.sh Step 18: cannot determine current git branch (detached HEAD?)" 1
 [[ -z "$fsm_base_commit" ]] && error_exit "aid-json-to-run.sh Step 18: cannot read git HEAD SHA for base_commit" 1
 
