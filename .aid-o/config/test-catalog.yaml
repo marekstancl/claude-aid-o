@@ -4773,9 +4773,6 @@ run_units:
       - test_case_id: non-keep-findings-without-proposals-surface-in-section-2-not-only-in-the-appendix
         name: non-keep findings WITHOUT proposals surface in section 2, not only in the appendix
         filter_expression: non-keep findings WITHOUT proposals surface in section 2, not only in the appendix
-      - test_case_id: nothing-parallel-names-the-fixable-blocker-count-instead-of-implying-impossibility
-        name: '''nothing parallel'' names the fixable-blocker count instead of implying impossibility'
-        filter_expression: '''nothing parallel'' names the fixable-blocker count instead of implying impossibility'
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-command-allowlist
@@ -5045,18 +5042,6 @@ run_units:
       - test_case_id: an-empty-actions-is-legal-and-is-not-conflated-with-incomplete
         name: an empty actions[] is legal and is NOT conflated with incomplete
         filter_expression: an empty actions[] is legal and is NOT conflated with incomplete
-      - test_case_id: a-proposed-parallel-lane-with-no-evidence-is-rejected
-        name: a proposed_parallel lane with no evidence is rejected
-        filter_expression: a proposed_parallel lane with no evidence is rejected
-      - test_case_id: a-keep-serial-lane-with-no-evidence-is-accepted
-        name: a keep_serial lane with no evidence is accepted
-        filter_expression: a keep_serial lane with no evidence is accepted
-      - test_case_id: an-invalid-resource-basis-pair-is-rejected
-        name: an invalid resource_basis pair is rejected
-        filter_expression: an invalid resource_basis pair is rejected
-      - test_case_id: two-lanes-sharing-a-run-unit-exit-4-naming-both-lane-ids
-        name: two lanes sharing a run unit exit 4 naming BOTH lane ids
-        filter_expression: two lanes sharing a run unit exit 4 naming BOTH lane ids
       - test_case_id: an-evidence-ref-escaping-via-an-embedded-exits-5
         name: an evidence_ref escaping via an embedded .. exits 5
         filter_expression: an evidence_ref escaping via an embedded .. exits 5
@@ -5081,9 +5066,6 @@ run_units:
       - test_case_id: a-wrong-schema-version-is-rejected
         name: a wrong schema_version is rejected
         filter_expression: a wrong schema_version is rejected
-      - test_case_id: lane-units-returns-the-sorted-union-across-lanes
-        name: lane_units returns the sorted union across lanes
-        filter_expression: lane_units returns the sorted union across lanes
       - test_case_id: a-decision-artifact-without-an-audit-id-is-rejected-it-could-not-be-bound-to-its-audit
         name: a decision artifact without an audit_id is rejected (it could not be bound to its audit)
         filter_expression: a decision artifact without an audit_id is rejected (it could not be bound to its audit)
@@ -5173,9 +5155,6 @@ run_units:
       - test_case_id: max-agents-bound-honors-a-project-s-real-test-audit-yaml-override-from-file-path
         name: max-agents bound honors a project's real test-audit.yaml override (from-file path)
         filter_expression: max-agents bound honors a project's real test-audit.yaml override (from-file path)
-      - test_case_id: wave-2-s-3-specialists-are-batched-so-no-more-than-max-concurrent-agents-run-at-once
-        name: Wave 2's 3 specialists are batched so no more than max_concurrent_agents run at once
-        filter_expression: Wave 2's 3 specialists are batched so no more than max_concurrent_agents run at once
       - test_case_id: every-manifest-entry-has-a-real-rendered-prompt-path-with-no-leftover-placeholder
         name: every manifest entry has a real rendered_prompt_path with no leftover {{ placeholder
         filter_expression: every manifest entry has a real rendered_prompt_path with no leftover {{ placeholder
@@ -5505,9 +5484,6 @@ run_units:
       - test_case_id: every-template-explicitly-prohibits-executing-any-test-command-not-just-read-only-prose
         name: every template explicitly prohibits executing any test command (not just 'read-only' prose)
         filter_expression: every template explicitly prohibits executing any test command (not just 'read-only' prose)
-      - test_case_id: the-parallel-safety-template-states-its-output-is-consumed-and-forbids-grep-alone-reasoning
-        name: the parallel_safety template states its output IS consumed, and forbids grep-alone reasoning
-        filter_expression: the parallel_safety template states its output IS consumed, and forbids grep-alone reasoning
       - test_case_id: each-of-the-6-templates-matches-its-focus-s-exact-enum-value-in-its-output-contract
         name: each of the 6 templates matches its focus's exact enum value in its output contract
         filter_expression: each of the 6 templates matches its focus's exact enum value in its output contract
@@ -5529,12 +5505,6 @@ run_units:
       - test_case_id: the-card-and-the-shard-prompt-agree-on-which-mode-owes-dispositions
         name: the card and the shard prompt agree on WHICH MODE owes dispositions
         filter_expression: the card and the shard prompt agree on WHICH MODE owes dispositions
-      - test_case_id: the-parallel-safety-template-requires-a-resource-and-its-namespace-not-a-bare-label
-        name: the parallel_safety template requires a resource AND its namespace, not a bare label
-        filter_expression: the parallel_safety template requires a resource AND its namespace, not a bare label
-      - test_case_id: the-parallel-safety-template-demands-a-proposed-lane-or-a-named-bounded-proof
-        name: the parallel_safety template demands a proposed lane or a named bounded proof
-        filter_expression: the parallel_safety template demands a proposed lane or a named bounded proof
       - test_case_id: the-adversarial-template-names-all-five-challenge-classes
         name: the adversarial template names all five challenge classes
         filter_expression: the adversarial template names all five challenge classes
@@ -5547,9 +5517,6 @@ run_units:
       - test_case_id: the-agent-card-restates-the-terminal-disposition-obligation-it-can-lag-the-prompt
         name: the agent card restates the terminal-disposition obligation (it can lag the prompt)
         filter_expression: the agent card restates the terminal-disposition obligation (it can lag the prompt)
-      - test_case_id: the-agent-card-no-longer-claims-the-parallel-classification-has-no-consumer
-        name: the agent card no longer claims the parallel classification has no consumer
-        filter_expression: the agent card no longer claims the parallel classification has no consumer
       - test_case_id: the-shard-template-s-worked-examples-are-themselves-valid-against-the-real-disposition-schema
         name: the shard template's worked examples are themselves valid against the real disposition schema
         filter_expression: the shard template's worked examples are themselves valid against the real disposition schema
@@ -5985,9 +5952,6 @@ run_units:
       - test_case_id: test-catalog-schema-json-command-union-rejects-a-bare-scalar
         name: 'test-catalog.schema.json: command union rejects a bare scalar'
         filter_expression: 'test-catalog.schema.json: command union rejects a bare scalar'
-      - test_case_id: test-catalog-schema-json-parallel-status-unknown-with-non-empty-exclusive-resources-fails
-        name: 'test-catalog.schema.json: parallel.status unknown with non-empty exclusive_resources fails'
-        filter_expression: 'test-catalog.schema.json: parallel.status unknown with non-empty exclusive_resources fails'
       - test_case_id: test-catalog-schema-json-mapping-approval-approved-requires-approved-by-approved-at-reviewed-diff-hash
         name: 'test-catalog.schema.json: mapping_approval approved requires approved_by/approved_at/reviewed_diff_hash'
         filter_expression: 'test-catalog.schema.json: mapping_approval approved requires approved_by/approved_at/reviewed_diff_hash'
@@ -6247,9 +6211,6 @@ run_units:
       - test_case_id: p072-step-10-contains-is-derived-from-the-gate-command-not-its-source-paths
         name: 'P072 Step 10: contains[] is derived from the gate COMMAND, not its source_paths'
         filter_expression: 'P072 Step 10: contains[] is derived from the gate COMMAND, not its source_paths'
-      - test_case_id: p072-step-10-the-two-lane-gates-are-complementary-partitions-not-overlapping-sets
-        name: 'P072 Step 10: the two lane gates are complementary partitions, not overlapping sets'
-        filter_expression: 'P072 Step 10: the two lane gates are complementary partitions, not overlapping sets'
       - test_case_id: p072-step-10-a-candidate-set-is-marked-runtime-partitioned-never-asserted-as-exact
         name: 'P072 Step 10: a candidate set is marked runtime_partitioned, never asserted as exact'
         filter_expression: 'P072 Step 10: a candidate set is marked runtime_partitioned, never asserted as exact'
@@ -7624,15 +7585,6 @@ run_units:
       - test_case_id: proposed-requires-a-value-and-rejects-a-nonexistent-path
         name: --proposed requires a value and rejects a nonexistent path
         filter_expression: --proposed requires a value and rejects a nonexistent path
-      - test_case_id: approving-a-freshly-scanned-proposal-over-provenance-bound-evidence-is-refused-and-names-what-it-would-revoke
-        name: approving a freshly-scanned proposal over provenance-bound evidence is REFUSED, and names what it would revoke
-        filter_expression: approving a freshly-scanned proposal over provenance-bound evidence is REFUSED, and names what it would revoke
-      - test_case_id: the-revocation-is-allowed-when-the-operator-says-they-meant-it
-        name: the revocation is allowed when the operator says they meant it
-        filter_expression: the revocation is allowed when the operator says they meant it
-      - test_case_id: a-proposal-that-preserves-the-evidence-approves-without-any-override
-        name: a proposal that PRESERVES the evidence approves without any override
-        filter_expression: a proposal that PRESERVES the evidence approves without any override
     provenance:
       - bats
   - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-ci-floor
