@@ -5212,9 +5212,17 @@ cmd_advance_to_gates() {
 
   # Invoke runner with explicit FSM signal — Step 2 makes runner accept this.
   local rc=0
+  # P079 Step 2: pass the ALREADY-RESOLVED timeline in the runner's positional
+  # slot instead of leaving it to the runner's default — the FSM path then
+  # never depends on where the runner was invoked from. The slot is skipped
+  # when the timeline could not be derived (the runner's own default and its
+  # fixture fallback still apply).
+  local -a timeline_arg=()
+  [[ -n "$timeline" ]] && timeline_arg=("$timeline")
   AID_GATES_TRIGGERED_BY_FSM=1 \
     "${SCRIPT_DIR}/aid-run-gates.sh" run-all \
       "$execution_yaml" "$epic_id" "$run_id" \
+      "${timeline_arg[@]}" \
       --state-file "$state_file" \
       --report-file "$report_file" \
       "${plan_json_arg[@]}" \

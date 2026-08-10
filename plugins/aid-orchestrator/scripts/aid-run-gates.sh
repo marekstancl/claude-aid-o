@@ -79,6 +79,36 @@ if [[ ! -f "${SCRIPT_DIR}/lib/aid-resume-artifact.sh" ]]; then
   exit 2
 fi
 source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+
+# ─── State paths vs the tree under test (P079 Step 2, IMP-479) ──────────────
+# Two different roots meet in this file and used to be the same one by
+# accident:
+#
+#   the TREE UNDER TEST — the caller's cwd. Gate COMMANDS run there, and the
+#   report's head_sha describes it. That contract is deliberate and unchanged:
+#   a gate must see the candidate code.
+#
+#   the STATE ROOT — where `.aid-o` lives. It is the primary checkout and never
+#   moves into a worktree, so every STATE artifact this runner writes or reads
+#   (timeline, report, ledger, waivers, project config) belongs there.
+#
+# Before this step both were "whatever cwd happened to be", so a worktree run
+# wrote its evidence into a `.aid-o` the primary checkout could not see — and
+# where the directory did not exist, the guarded writers below simply went
+# quiet. `_gates_state_path` resolves the state root and keeps the historic
+# relative form when invoked AT that root; the printf fallback keeps fixtures
+# that run outside any git repository byte-identical.
+_gates_state_path() {
+  aid_state_path "$1" 2>/dev/null || printf '%s' "$1"
+}
+
+# _gates_evidence_dir <epic_id> <run_id> — this run's evidence directory,
+# state-root resolved. The one place the layout is spelled out.
+_gates_evidence_dir() {
+  _gates_state_path ".aid-o/work/evidence/${1}/${2}"
+}
 
 # ─── Recovery-ladder emitters (P076 Step 13) ────────────────────────────────
 # The ladder RECORDS and ROUTES; it never replaces a verdict. Every call below
@@ -144,8 +174,16 @@ aid_gate_baseline_ensure_gitignored() {
   # backfill) — nothing to do.
   git check-ignore -q ".aid-o/metrics/__aid_gate_baseline_probe__" 2>/dev/null && return 0
 
-  gitignore_exclude_append ".git/info/exclude" ".aid-o/metrics/"
-  gitignore_exclude_append ".git/info/exclude" ".aid-o/metrics/*.lock"
+  # P079 Step 2: from a LINKED worktree `.git` is a file, not a directory, so
+  # the literal `.git/info/exclude` path named nothing writable. The common dir
+  # is the one every worktree of this clone shares — the exclude lands once
+  # there and applies to all of them, which is what "LOCAL-ONLY to this clone"
+  # meant all along.
+  local _common_dir
+  _common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  [[ -n "$_common_dir" ]] || return 0
+  gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/"
+  gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/*.lock"
   return 0
 }
 
@@ -1438,7 +1476,9 @@ run_scheduled_targeted_tests() {
         epic_id="$5" run_id="$6" project_root="$7" timeout_s="$8" attempt="${9:-1}"
 
   local start_ms; start_ms=$(date +%s%3N)
-  local units_file="${project_root}/.aid-o/work/evidence/${epic_id}/${run_id}/gates/targeted-units.json"
+  # P079 Step 2: an evidence write, so state-root resolved like every other one
+  # (`$project_root` is the tree under test and may be a worktree without .aid-o).
+  local units_file="$(_gates_evidence_dir "$epic_id" "$run_id")/gates/targeted-units.json"
   mkdir -p "$(dirname "$units_file")"
 
   local select_output select_ec=0
@@ -1515,7 +1555,7 @@ run_all_gates() {
   # Bug fix (PM-reported): the previous `${4:-default}` + unconditional
   # `shift` swallowed `--state-file` when caller skipped the positional
   # arg, causing log_event to write to a literal file named "--state-file".
-  local timeline_file=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+  local timeline_file="$(_gates_evidence_dir "$epic_id" "$run_id")/timeline.jsonl"
   if [[ -n "${1:-}" && "${1}" != --* ]]; then
     timeline_file="$1"
     shift
@@ -1637,7 +1677,7 @@ run_all_gates() {
 
   # Resolve report path early so we can put it in the gate_runner_start event.
   local report_path="${report_file:-}"
-  [[ -z "$report_path" ]] && report_path=".aid-o/work/evidence/${epic_id}/${run_id}/gates/gates_report.json"
+  [[ -z "$report_path" ]] && report_path="$(_gates_evidence_dir "$epic_id" "$run_id")/gates/gates_report.json"
 
   # Phase 2 (P037) — pull base_commit and plan_path from fsm-state.yaml for placeholder resolution.
   # Falls back to empty/null when fsm-state.yaml is absent (e.g., legacy/source-mode invocations).
@@ -1663,8 +1703,15 @@ run_all_gates() {
   local plugin_path_resolved=""
   local _plugin_project_root
   _plugin_project_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-  if [[ -f "${_plugin_project_root}/.aid-o/config/plugin.yaml" ]]; then
-    plugin_path_resolved="$(yq -r '.plugin_path // ""' "${_plugin_project_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "")"
+  # P079 Step 2: the CONFIG root is not the tree under test. `_plugin_project_root`
+  # stays the invoking tree — gate-row revisions and background jobs are claims
+  # about THAT tree — but `.aid-o` never moves into a worktree, so plugin.yaml
+  # must be read from the state root or a worktree run silently fell through to
+  # AID_PLUGIN_PATH.
+  local _config_root
+  _config_root="$(aid_state_root 2>/dev/null || printf '%s' "$_plugin_project_root")"
+  if [[ -f "${_config_root}/.aid-o/config/plugin.yaml" ]]; then
+    plugin_path_resolved="$(yq -r '.plugin_path // ""' "${_config_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "")"
   fi
   [[ -z "$plugin_path_resolved" ]] && plugin_path_resolved="${AID_PLUGIN_PATH:-}"
 
@@ -1725,7 +1772,7 @@ run_all_gates() {
   # Both live under THIS run's evidence directory. Resolved once, and only when
   # that directory already exists — the gate runner writes into evidence, it
   # never invents evidence directories (same rule the execution ledger follows).
-  local _evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local _evidence_dir; _evidence_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
   local _jobs_dir="" _rows_dir=""
   if [[ -d "$_evidence_dir" ]]; then
     _jobs_dir="${_evidence_dir}/jobs"
@@ -1778,7 +1825,7 @@ run_all_gates() {
     # `.aid-o/work/evidence/execution-ledger/` is an untracked path, and a gate
     # run that dirties `git status` is one that cannot be run safely from a
     # checkout somebody is working in.
-    local _ledger_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    local _ledger_dir; _ledger_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
     if [[ -d "$_ledger_dir" ]]; then
       _ledger_path="${_ledger_dir}/execution-ledger.json"
       # A failed open is NOT a reason to run unaccounted. Swallowing it produced
@@ -2169,7 +2216,7 @@ run_all_gates() {
     # evidence. A waiver present but failing check for ANY reason leaves the
     # result "fail" and records waiver_rejected:<verdict> on the row.
     if [[ "$final_result" == "fail" ]]; then
-      local _wv_ev_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+      local _wv_ev_dir; _wv_ev_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
       local _wv_file="${_wv_ev_dir}/waivers/gate-waiver-${gate_name}.json"
       if [[ -f "$_wv_file" ]]; then
         local _wv_head _wv_cmd_sha _wv_verdict _wv_rc
