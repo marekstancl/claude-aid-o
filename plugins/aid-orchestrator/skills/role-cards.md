@@ -215,7 +215,25 @@ the implementation actually functions across every layer it touches.
   - **Database:** rows created/modified, relationships, field values, migrations applied
   - **API:** endpoint responses, status codes, payload structure, auth flow
   - **Playwright UI:** page renders, interactions work, data displays correctly
-- Infrastructure startup (docker compose up, migrations, seed data, healthcheck)
+- Infrastructure startup — **declare it, never improvise it.** Long-lived infrastructure a run
+  needs (database, dev server, queue) belongs in the `services:` block of
+  `.aid-o/config/execution.yaml`, and the gate that needs it names it in that gate's
+  `needs_services: [...]`. The run then acquires every declared service ONCE before its first gate
+  and releases it ONCE after the report — you neither start nor stop it, and a gate whose service
+  is not healthy fails fast by name instead of failing later about something else.
+  - `probe_cmd` is the alternative the no-arbitrary-sleeps rule always implied and never named:
+    readiness is a command that exits 0 when the service is genuinely serving (`pg_isready`, a
+    `curl` on the health endpoint), polled by the runner until `startup_deadline_seconds` runs
+    out. A `sleep 10` before a check is a guess; `probe_cmd` is an answer. It must RETURN — each
+    invocation is bounded by what remains of `startup_deadline_seconds`, and `stop_cmd` by
+    `AID_SERVICE_STOP_TIMEOUT_SEC` (30 s), so a probe that blocks is killed and counted as
+    not-ready rather than holding the deadline open.
+  - `port_env` gives the service a per-run port instead of a fixed one, so two runs on the same
+    machine cannot collide.
+  - **Fallback, only when nothing is declared:** run the infrastructure by hand (docker compose up,
+    migrations, seed data, healthcheck) — and say so in the E2E report, because a hand-started
+    service is not owned by the run and will not be cleaned up by it. Prefer adding the
+    declaration to repeating the manual steps.
 - Stateful test flows (Test 1 creates data → Test 3 verifies it)
 - Fix loop: diagnose failed check → fix code → rerun ONLY failed checks → repeat
 
@@ -233,7 +251,8 @@ the implementation actually functions across every layer it touches.
   - Assert on user-visible state (text, role, value, URL) — never just "page loaded" / "no error"
   - "Compiles" ≠ "looks right": compare the rendered page against the mockup/plan screenshot and
     put the comparison in step-verify
-  - Wait for real data/state, not arbitrary sleeps (flake = false confidence)
+  - Wait for real data/state, not arbitrary sleeps (flake = false confidence). For infrastructure
+    readiness the named alternative is a service's `probe_cmd`, not a sleep.
   - Tie each assertion to a specific DoD item; navigation-only checks are not acceptance
   - Cover negative/error paths and at least desktop (1280×720) + mobile (375×667) viewports
 - Fix loop: max 3 repair cycles per failed check, then ESCALATION
@@ -568,7 +587,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-10
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

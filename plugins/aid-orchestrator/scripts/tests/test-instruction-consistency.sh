@@ -60,12 +60,24 @@ if [[ -f "$ORCH_FILE" ]]; then
   done
 fi
 
-# Check pipeline.md state table has correct count
-PIPELINE_STATE_TABLE_COUNT=$(grep -cE '^\| \*\*[A-Z]+\*\*' "$PLUGIN_DIR/skills/pipeline.md" 2>/dev/null || echo 0)
-if [[ "$PIPELINE_STATE_TABLE_COUNT" -eq "$BASH_STATE_COUNT" ]]; then
-  pass "pipeline.md state table has $BASH_STATE_COUNT rows (matches bash)"
+# Check pipeline.md has exactly one state-table row per FSM state.
+# The row identity is the state name itself, not "any bold-caps table row":
+# a bare '^\| \*\*[A-Z]+\*\*' counter matched every such row in the file
+# (e.g. the recovery stop-class table's **UNCLASSIFIED** row) and equally
+# would have accepted six rows naming states that do not exist.
+PIPELINE_BOLD_ROWS=$(grep -oE '^\| \*\*[A-Z_]+\*\*' "$PLUGIN_DIR/skills/pipeline.md" 2>/dev/null \
+  | sed -E 's/^\| \*\*//; s/\*\*$//')
+STATE_ROW_PROBLEMS=""
+for state in $BASH_STATES; do
+  n=$(printf '%s\n' "$PIPELINE_BOLD_ROWS" | grep -cx "$state" || true)
+  if [[ "$n" -ne 1 ]]; then
+    STATE_ROW_PROBLEMS="$STATE_ROW_PROBLEMS $state=$n"
+  fi
+done
+if [[ -z "$STATE_ROW_PROBLEMS" ]]; then
+  pass "pipeline.md state table has exactly one row per FSM state ($BASH_STATE_COUNT states)"
 else
-  fail "pipeline.md state table has $PIPELINE_STATE_TABLE_COUNT rows (bash has $BASH_STATE_COUNT)"
+  fail "pipeline.md state table rows wrong (expected 1 row per state, got:$STATE_ROW_PROBLEMS)"
 fi
 
 # ─── 2. FSM Transitions ────────────────────────────────────────────────────
@@ -272,15 +284,19 @@ assert_instruction "$PLUGIN_DIR/commands/aid-run.md" \
 assert_instruction "$PLUGIN_DIR/skills/pipeline.md" \
   'Only the controller mutates FSM state,' \
   "pipeline assigns FSM ownership to controller"
-assert_instruction "$PLUGIN_DIR/agents/implementer.md" \
+# P076 Step 7: the Controller-boundary contract MOVED out of implementer.md into
+# skills/agent-protocol.md, where all nine agent cards reference it. These two
+# assertions follow the contract to its single source; that every card still
+# points at it is enforced by bats/test-instruction-closure.bats.
+assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'Do not call FSM transition/increment commands' \
-  "implementer cannot advance FSM"
+  "dispatched agents cannot advance FSM"
 assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'the controller normally owns commits after validating agent output.' \
   "agent protocol assigns orchestrated commits to controller"
-assert_instruction "$PLUGIN_DIR/agents/implementer.md" \
+assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'Do not detach long-running work with `nohup`, `disown`, `tail -f`' \
-  "implementer cannot orphan long-running work"
+  "dispatched agents cannot orphan long-running work"
 assert_instruction "$PLUGIN_DIR/agents/verifier.md" \
   'Review an immutable revision in an isolated worktree' \
   "verifier reviews immutable isolated revision"

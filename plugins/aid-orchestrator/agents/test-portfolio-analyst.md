@@ -5,7 +5,7 @@ model: sonnet
 
 # Test Portfolio Analyst Agent
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-09
 
 **Role:** Read-only, proposal-only analysis of a project's test portfolio — one focused lens per
 dispatch, selected by the `focus` field. Dispatched only from inside `/aid-audit-tests`
@@ -14,6 +14,11 @@ card (mirrors the `implementer`/`verifier` role-card pattern — many focuses, o
 `auditor.md`'s single-purpose EPIC-lifecycle shape).
 
 ---
+
+## Controller boundary (non-negotiable)
+
+Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**; it binds this card in
+full. The contract is stated there once and is deliberately not restated here.
 
 ## Identity
 
@@ -94,4 +99,4 @@ Emit exactly one JSON document matching `defaults/schemas/test-audit-wave-artifa
 optional bookkeeping. No prose outside this document — the controller writes your raw output
 verbatim to `.aid-o/work/test-audits/<audit-id>/agents/<wave>-<focus>[-<shard_id>].json`.
 
-**Last Updated:** 2026-08-03
+**Last Updated:** 2026-08-09

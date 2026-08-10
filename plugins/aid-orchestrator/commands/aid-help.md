@@ -155,6 +155,39 @@ Flags:
   --auto    Autonomous mode (S-effort auto-fix, L-effort always escalates)
   --resume  Resume from fsm-state.yaml after crash
   --epic    Specify EPIC ID
+
+AUTO MODE, BACKGROUND GATES AND RESUME
+A gate whose execution.yaml entry says run_mode: background is started as a
+supervised job (aid-job.sh) instead of a plain in-line command, and the gate
+runner polls that job to completion in the same invocation — so nothing is
+fire-and-forget, and a run killed mid-gate re-attaches to the still-live job
+next time instead of paying the whole suite twice. Before spawning, the run
+writes ONE continuation pointer, .aid-o/work/evidence/<epic>/<run>/
+auto_resume_required.json, and deletes it only on a clean terminal collect.
+
+  aid-fsm.sh resume <epic-id>
+
+claims that pointer exactly once, collects the job's terminal result, records
+it as a gate-row checkpoint the next run-all assembles, and prints what it
+found, what it recorded and the next action. A job still running is a
+read-only status report — nothing is claimed. It never invents a result: a
+missing job record, a lost job or a stale result each come back as such, with
+the rerun instruction.
+
+Run state lives in .aid-o/work/active-runs.json as auto_controller:
+  active           an autonomous controller is alive and owns the run
+  manual           a human drives it (the default for a non-AUTO run)
+  blocked_for_pm   the run stopped at a PM-authority decision and waits for a
+                   person; written by aid_ladder_escalate
+                   (lib/aid-recovery-ladder.sh) when a class's recovery
+                   terminus reaches escalation
+  awaiting_host_resume
+                   DERIVED, never stored — the pointer is still on disk and
+                   nothing has signalled liveness. A dead controller cannot
+                   write a flag on its way out, so consumers compute this one
+                   instead; the writer rejects any attempt to store it.
+
+  aid-fsm.sh active-runs stalled     which runs look stuck, and why
 ```
 
 ### Topic: plan
@@ -281,4 +314,4 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-08-10

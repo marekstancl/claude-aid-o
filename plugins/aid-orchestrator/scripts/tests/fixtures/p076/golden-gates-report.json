@@ -1,0 +1,116 @@
+{
+  "_command_log": [
+    {
+      "command": "echo alpha-ok",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "name": "alpha"
+    },
+    {
+      "command": "printf 'beta-ok'",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "name": "beta"
+    },
+    {
+      "command": "echo gamma-broke >&2; exit 1",
+      "duration_ms": 0,
+      "exit_code": 1,
+      "name": "gamma"
+    }
+  ],
+  "_generated_at": "NORMALIZED",
+  "_generated_by": "aid-run-gates.sh@v2.16.0",
+  "changed_paths_covered": false,
+  "completed_at": "NORMALIZED",
+  "covered_paths": [],
+  "epic_id": "E-P076",
+  "excluded_gates": [],
+  "gates": {
+    "_execution_ledger": {
+      "dispatched": 0,
+      "duplicates": [],
+      "path": ".aid-o/work/evidence/E-P076/R-1/execution-ledger.json"
+    },
+    "alpha": {
+      "attempts": 1,
+      "duration_ms": 0,
+      "exit_code": 0,
+      "gate": "alpha",
+      "output": "alpha-ok",
+      "result": "pass",
+      "runtime_baseline": {
+        "data_sufficient": false,
+        "last_attempt_result": "pass",
+        "non_censored_samples_count": 1,
+        "operator_action": null,
+        "p95_ms": 0,
+        "policy_result": "none",
+        "retryable": true,
+        "run_mode_recommended": null,
+        "samples_count": 1,
+        "timeout_recommended_seconds": null
+      }
+    },
+    "beta": {
+      "attempts": 1,
+      "duration_ms": 0,
+      "exit_code": 0,
+      "gate": "beta",
+      "output": "beta-ok",
+      "result": "pass",
+      "runtime_baseline": {
+        "data_sufficient": false,
+        "last_attempt_result": "pass",
+        "non_censored_samples_count": 1,
+        "operator_action": null,
+        "p95_ms": 0,
+        "policy_result": "none",
+        "retryable": true,
+        "run_mode_recommended": null,
+        "samples_count": 1,
+        "timeout_recommended_seconds": null
+      }
+    },
+    "delta_nocmd": {
+      "attempts": 0,
+      "duration_ms": 0,
+      "exit_code": 0,
+      "gate": "delta_nocmd",
+      "output": "",
+      "reason": "no_command",
+      "result": "skip"
+    },
+    "gamma": {
+      "attempts": 3,
+      "duration_ms": 0,
+      "exit_code": 1,
+      "gate": "gamma",
+      "output": "gamma-broke",
+      "result": "fail",
+      "runtime_baseline": {
+        "data_sufficient": false,
+        "last_attempt_result": "fail",
+        "non_censored_samples_count": 2,
+        "operator_action": null,
+        "p95_ms": 0,
+        "policy_result": "none",
+        "retryable": true,
+        "run_mode_recommended": null,
+        "samples_count": 2,
+        "timeout_recommended_seconds": null
+      }
+    }
+  },
+  "overall": "pass",
+  "plan_gates_reconciled": false,
+  "profile": null,
+  "profile_reason": null,
+  "profile_source": null,
+  "relevance": "unknown",
+  "revision": {
+    "head_sha": "NORMALIZED"
+  },
+  "run_id": "R-1",
+  "waived_gates": []
+}

@@ -66,6 +66,49 @@ source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
 source "${SCRIPT_DIR}/lib/aid-test-scheduler-report.sh"
 # shellcheck source=lib/aid-run-gates-report.sh
 source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
+# shellcheck source=lib/aid-gate-row.sh
+source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
+# shellcheck source=lib/aid-resume-artifact.sh
+# THE shared continuation vocabulary (artifact basename, revision pair,
+# pending-pointer resolution, gate-row binding key). Sourced fail-CLOSED: this
+# file's live-job refusal and row-freshness checks are only as good as these
+# definitions, and a missing lib that degraded to a local default is precisely
+# the fail-open the duplicate constant produced.
+if [[ ! -f "${SCRIPT_DIR}/lib/aid-resume-artifact.sh" ]]; then
+  echo "ERROR: aid-run-gates.sh: missing ${SCRIPT_DIR}/lib/aid-resume-artifact.sh — refusing to run gates without the shared continuation definitions" >&2
+  exit 2
+fi
+source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
+
+# ─── Recovery-ladder emitters (P076 Step 13) ────────────────────────────────
+# The ladder RECORDS and ROUTES; it never replaces a verdict. Every call below
+# is additive: the gate's fail, its 124 streak accounting, the repeated-timeout
+# policy block and the job_lost row all behave exactly as they did before, and
+# a ladder that cannot be loaded or cannot be written changes nothing at all.
+#
+# Sourced LAZILY and BEST-EFFORT (the opposite discipline from
+# aid-resume-artifact.sh above, on purpose): those definitions are load-bearing
+# for a gate's correctness, this one is evidence. Failing a gate run because a
+# recovery record could not be written would be the ladder replacing a verdict.
+_AID_GATE_LADDER_STATE=""   # "" untried | "ok" | "no"
+_gate_ladder_emit() {
+  local class="$1" emitter="$2" detail="${3:-}" dir="${_evidence_dir:-}"
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  if [[ -z "$_AID_GATE_LADDER_STATE" ]]; then
+    _AID_GATE_LADDER_STATE="no"
+    if [[ -f "${SCRIPT_DIR}/lib/aid-recovery-ladder.sh" ]]; then
+      # shellcheck source=lib/aid-recovery-ladder.sh
+      source "${SCRIPT_DIR}/lib/aid-recovery-ladder.sh" >/dev/null 2>&1 \
+        && declare -F aid_ladder_emit >/dev/null 2>&1 \
+        && _AID_GATE_LADDER_STATE="ok"
+    fi
+  fi
+  [[ "$_AID_GATE_LADDER_STATE" == "ok" ]] || return 0
+  # stdout is muted deliberately: several callers of this helper have a GATE ROW
+  # on their own stdout, and one stray line there would corrupt the report.
+  aid_ladder_emit "$dir" "$class" "$emitter" "$detail" >/dev/null 2>&1 || true
+  return 0
+}
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
 
@@ -174,6 +217,1155 @@ run_gate() {
   [[ "$log_file" != "/dev/null" ]] && echo "$json" >> "$log_file"
 
   [[ $exit_code -eq 0 ]] && return 0 || return 1
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 2 — the background gate path.
+#
+# A gate declaring `run_mode: background` (Step 1's field) does NOT run under a
+# bare `timeout` in this shell. It runs through aid-job.sh, which already owns
+# every piece this runner would otherwise have to re-implement: a session/
+# process-group of its own (so a cancelled gate leaves no surviving child), a
+# PID-reuse-safe liveness check, a hard deadline timer, and a terminal result
+# bound to the HEAD/tree it started from. NOTHING here spawns, supervises or
+# reaps a process itself — the registry's no-second-supervisor grep guard stays
+# green by construction.
+#
+# The semantics are supervised-resumable-SYNCHRONOUS: the runner polls the job
+# to completion inside its own invocation. Nothing is fire-and-return, there is
+# no daemon and no cron. What background buys is not concurrency — it is that a
+# runner killed mid-gate leaves a job that is still alive and still recording,
+# so the next invocation re-attaches by command fingerprint and collects the
+# result instead of paying for the whole suite a second time.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Poll cadence, heartbeat cadence, and the grace period added to a gate's own
+# timeout before the runner stops believing the job's deadline timer. The
+# defaults are the specified 5 s / 60 s / 30 s; the env vars exist so a test can
+# exercise a full poll-and-heartbeat cycle in seconds instead of minutes.
+AID_GATE_POLL_INTERVAL_SEC="${AID_GATE_POLL_INTERVAL_SEC:-5}"
+AID_GATE_HEARTBEAT_SEC="${AID_GATE_HEARTBEAT_SEC:-60}"
+AID_GATE_DEADLINE_GRACE_SEC="${AID_GATE_DEADLINE_GRACE_SEC:-30}"
+
+# resolve_run_mode <execution_yaml> <gate_name>
+#   Step 1's field, read here for the first time. Absent/null → "foreground",
+#   which is what makes every pre-P076 consumer config behave identically.
+resolve_run_mode() {
+  local file="$1" gate="$2"
+  yq ".gates.\"${gate}\".run_mode // \"foreground\"" "$file"
+}
+
+# _run_mode_declared <execution_yaml> <gate_name>
+#   True iff the gate DECLARES a run_mode key at all. Not a second run_mode
+#   reader — it resolves no value and applies no default; resolve_run_mode above
+#   stays the only place that turns config into a mode. It exists because
+#   resolve_run_mode deliberately collapses "absent" and "explicit foreground"
+#   into the same answer, and the P076 Step 3 advice must stay silent for BOTH
+#   explicit values: a PM who already wrote `run_mode: foreground` has made the
+#   decision this advice exists to prompt.
+_run_mode_declared() {
+  local file="$1" gate="$2"
+  [[ "$(yq ".gates.\"${gate}\" | has(\"run_mode\")" "$file" 2>/dev/null)" == "true" ]]
+}
+
+# validate_all_run_modes <execution_yaml>
+#   Fail-loud sweep over EVERY defined gate, run BEFORE any gate command is
+#   spawned — exactly like the gate-profile validation above it. A typo
+#   (`backgroud`) must never degrade silently to the default: a background
+#   declaration is a contract, and a run that quietly ignored it would produce
+#   an unowned gate with no job record while reporting success.
+validate_all_run_modes() {
+  local file="$1" gate mode
+  while IFS= read -r gate; do
+    [[ -z "$gate" ]] && continue
+    mode="$(resolve_run_mode "$file" "$gate")"
+    case "$mode" in
+      foreground|background) ;;
+      *)
+        echo "ERROR: aid-run-gates.sh: gate '${gate}' has invalid run_mode: '${mode}' (accepted values: foreground, background)" >&2
+        return 1
+        ;;
+    esac
+  done < <(yq '.gates | keys | .[]' "$file")
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 8 — service declarations.
+#
+# execution.yaml may carry an OPTIONAL `services:` map: the per-project
+# declaration of long-lived processes a run needs standing up before its gates
+# mean anything. It lives here, and not in some new file, because execution.yaml
+# is already the per-project gate/runtime contract every project owns.
+#
+# Two authorities, deliberately, and they must agree:
+#   • defaults/schemas/service-declaration.schema.json — the documentation and
+#     test authority for the shape.
+#   • _validate_services_config below — the RUNTIME enforcement, mirroring every
+#     constraint in that schema plus the one JSON Schema cannot express across
+#     sibling properties (duplicate port_env).
+# scripts/tests/bats/test-service-declaration.bats drives BOTH from one shared
+# case table, so the two cannot drift apart silently.
+#
+# Nothing in this step starts, stops or supervises a service. This is validation
+# only: shape refused early, loudly, by service and field.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _svc_err <service> <message>
+#   Every service violation names the service; the message names the field.
+_svc_err() {
+  echo "ERROR: aid-run-gates.sh: services: service '${1}': ${2}" >&2
+}
+
+# _svc_denied_port_env <name>
+#   True when <name> is a variable the runner's own children depend on.
+#
+#   port_env names the variable carrying the per-run allocated port, and that
+#   variable is exported into the environment of every service and gate command.
+#   So the name is not merely cosmetic: `port_env: PATH` would set PATH to a port
+#   number for the whole run and no command would resolve a binary again;
+#   `BASH_ENV`, `LD_PRELOAD` or `NODE_OPTIONS` would point a code-loading hook at
+#   one. This is refused at declaration time, in the same sweep as every other
+#   shape rule, rather than at export time — the exporting step should inherit a
+#   name it can already trust.
+#
+#   Matching is EXACT and CASE-SENSITIVE for the enumerated names, and
+#   case-sensitive PREFIX for the open-ended families (LD_, DYLD_, BASH_FUNC_,
+#   AID_). Case-sensitive because environment variables are: `Path` is not `PATH`
+#   and nothing on the system honours it, so refusing the case variant would be a
+#   false refusal that buys no safety. Prefix only where the family is genuinely
+#   open-ended and libc/shell-version dependent (LD_PRELOAD, LD_AUDIT,
+#   LD_LIBRARY_PATH, …), so an enumeration would silently go stale.
+#
+#   THE LIST ITSELF LIVES IN lib/aid-env-name-denylist.sh, because there are two
+#   consumers — this declaration-time check and the export-time guard in
+#   lib/aid-service.sh — and a second enumeration is a list that drifts. It did:
+#   the export-time copy was missing the interpreter-hook and git families while
+#   advertising that it covered them.
+#
+#   MIRRORED BY: defaults/schemas/service-declaration.schema.json
+#   (port_env.allOf) — keep the two lists in the same order.
+_svc_denied_port_env() {
+  if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
+    # shellcheck source=lib/aid-env-name-denylist.sh
+    source "${SCRIPT_DIR}/lib/aid-env-name-denylist.sh" 2>/dev/null || true
+  fi
+  if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
+    # FAIL CLOSED, and say why: with no denylist available every name is denied,
+    # which refuses a legitimate declaration rather than admitting a hostile one.
+    echo "ERROR: aid-run-gates.sh: the shared env-name denylist (${SCRIPT_DIR}/lib/aid-env-name-denylist.sh) could not be loaded — refusing every port_env name rather than exporting one unchecked" >&2
+    return 0
+  fi
+  aid_env_name_denied "$1"
+}
+
+# _svc_backgrounding_form <start_cmd>
+#   Echoes the backgrounding form found in a start_cmd, or nothing.
+#
+#   start_cmd MUST remain the foreground process of its job: the supervisor owns
+#   the process group, and a command that backgrounds itself hands back a pid
+#   owning nothing — the one violation that produces an UNSTOPPABLE orphan.
+#
+#   HONEST LIMIT: this is a SYNTACTIC lint, not a proof. It catches the obvious
+#   forms — a trailing `&` (a trailing `&&` is not one, that is a shell syntax
+#   error to be reported by the shell), and `nohup`, `disown` or `setsid` used as
+#   a command word. It CANNOT see a command that daemonises inside itself (a
+#   wrapper script that forks and exits, a `docker run -d` behind an npm script).
+#   That case is deliberately not chased here: it is caught at runtime instead, by
+#   the rule that a TERMINAL job whose probe still reports healthy is exactly the
+#   daemonised-start_cmd violation. A clean result here means "no obvious
+#   backgrounding syntax", never "proven foreground".
+#
+#   MIRRORED BY: defaults/schemas/service-declaration.schema.json
+#   (start_cmd.allOf).
+_svc_backgrounding_form() {
+  local cmd="$1" trimmed
+  # Regexes held in variables: an unquoted ERE containing ';', '|' and '(' is
+  # fragile inline, and BASH_REMATCH still works through a variable.
+  local re_amp='(^|[^&])&$'
+  local re_word='(^|[[:space:];&|(])(nohup|disown|setsid)[[:space:]]'
+  trimmed="${cmd%"${cmd##*[![:space:]]}"}"
+  if [[ "$trimmed" =~ $re_amp ]]; then
+    echo "a trailing '&'"
+    return 0
+  fi
+  if [[ "$cmd" =~ $re_word ]]; then
+    echo "'${BASH_REMATCH[2]}'"
+    return 0
+  fi
+  return 1
+}
+
+# _validate_needs_services <execution_yaml> <declared_names_newline_separated>
+#   A gate may declare `needs_services: [names]` — the services that must be
+#   HEALTHY before that gate is allowed to run. The list is validated against the
+#   DECLARED service names here, at the same config check as everything else,
+#   because the failure it prevents is silent: a gate naming a service that no
+#   longer exists (renamed, removed, typo'd) would otherwise either wait on
+#   nothing or fail at gate time with a diagnosis about readiness when the truth
+#   is a stale config line.
+#
+#   Runs even when there is NO `services:` block at all — that is precisely the
+#   case where every name is unknown, and it is the loudest one worth catching.
+#
+#   rc 0 nothing to complain about · rc 1 a refused declaration (named).
+_validate_needs_services() {
+  local file="$1" declared="$2"
+  local gate n tag
+  [[ "$(yq 'has("gates")' "$file" 2>/dev/null || echo false)" == "true" ]] || return 0
+
+  # ONE yq call for the whole check in the overwhelmingly common case: the gates
+  # that carry the key at all. A project using none pays a single query.
+  local carriers
+  # `select(.value | has(...))` and NOT `select(.value | type == "!!map" and
+  # has(...))`: the second form's operator precedence makes yq evaluate the
+  # `and` as the right-hand side of the `==`, so it selects NOTHING and the whole
+  # check silently passes — which is exactly how this was first written, and the
+  # unknown name reached the gate loop instead of the config check. `has` on a
+  # non-map gate value is simply false, so the type test bought nothing anyway.
+  carriers="$(yq '.gates | to_entries[] | select(.value | has("needs_services")) | .key' "$file" 2>/dev/null || true)"
+  [[ -n "$carriers" ]] || return 0
+
+  while IFS= read -r gate; do
+    [[ -z "$gate" ]] && continue
+    tag="$(GATE="$gate" yq '.gates[strenv(GATE)].needs_services | tag' "$file" 2>/dev/null || echo '!!null')"
+    if [[ "$tag" != '!!seq' ]]; then
+      echo "ERROR: aid-run-gates.sh: gate '${gate}': 'needs_services' must be a list of declared service names (found ${tag#\!\!})" >&2
+      return 1
+    fi
+    while IFS= read -r n; do
+      [[ -z "$n" ]] && continue
+      if ! grep -qxF "$n" <<<"$declared"; then
+        echo "ERROR: aid-run-gates.sh: gate '${gate}': 'needs_services' names '${n}', which is not a declared service. Declared services: ${declared//$'\n'/, }" >&2
+        echo "  A gate cannot wait on a service this project does not declare — add it under 'services:' in ${file}, or drop the name." >&2
+        return 1
+      fi
+    done < <(GATE="$gate" yq '.gates[strenv(GATE)].needs_services | .[]' "$file" 2>/dev/null)
+  done <<< "$carriers"
+  return 0
+}
+
+# _validate_services_config <execution_yaml>
+#   Fail-loud sweep over every declared service, run at run_all entry BEFORE any
+#   service or gate action. Also validates every gate's optional `needs_services`
+#   list against the names this same sweep just accepted (see
+#   _validate_needs_services) — the two belong to one config check, because a
+#   reference is only checkable next to the thing it references.
+#
+#   Exit contract — three outcomes, not two:
+#     0  nothing to complain about. Either there is no `services:` block (or an
+#        empty one), in which case the function touches nothing and this is the
+#        byte-identical path every pre-P076 project stays on; or every declared
+#        service was inspected and is well-formed.
+#     1  a declaration was inspected and REFUSED — the message names the service
+#        and the field.
+#     2  the config could NOT be inspected (file missing, yq missing, yq could
+#        not parse the file). This is the fail-CLOSED outcome and it is
+#        deliberately not 0: "I could not look" must never read as "it is fine".
+#        run_all cannot reach it today — it guards with `[[ -f ]]` and
+#        require_yq_mikefarah before calling — but the function is a
+#        general-purpose primitive now, and a future second caller without those
+#        guards must inherit a refusal, not a silent skip.
+#   Every non-zero outcome is a refusal for callers that use `|| exit 1`.
+_validate_services_config() {
+  local file="$1"
+  local svc key tag val
+  local -a env_names=() env_owners=()
+
+  # ── fail-closed preflight: distinguish "nothing to validate" from "could not
+  # look at it". Both used to return 0; only the first one still does.
+  if [[ ! -f "$file" ]]; then
+    echo "ERROR: aid-run-gates.sh: services: cannot validate '${file}': file not found (refusing rather than assuming there are no services)" >&2
+    return 2
+  fi
+  if ! command -v yq >/dev/null 2>&1; then
+    echo "ERROR: aid-run-gates.sh: services: cannot validate '${file}': yq is not available (refusing rather than assuming there are no services)" >&2
+    return 2
+  fi
+
+  local has_services
+  if ! has_services="$(yq 'has("services")' "$file" 2>&1)"; then
+    echo "ERROR: aid-run-gates.sh: services: cannot parse '${file}': ${has_services}" >&2
+    return 2
+  fi
+  # No services block: there is nothing to validate about services, but a gate
+  # naming one is still a config error — and the most obvious one there is.
+  [[ "$has_services" == "true" ]] || { _validate_needs_services "$file" ""; return $?; }
+
+  local root_tag
+  if ! root_tag="$(yq '.services | tag' "$file" 2>&1)"; then
+    echo "ERROR: aid-run-gates.sh: services: cannot read the services block of '${file}': ${root_tag}" >&2
+    return 2
+  fi
+  case "$root_tag" in
+    '!!null') _validate_needs_services "$file" ""; return $? ;;   # `services:` with no entries is the same as absent
+    '!!map') ;;
+    *)
+      echo "ERROR: aid-run-gates.sh: services: must be a map of service name -> declaration (found ${root_tag#\!\!})" >&2
+      return 1
+      ;;
+  esac
+
+  # The sweep below reads service names line by line, so a name containing a
+  # NEWLINE would arrive as two names and be blamed on the wrong field ("api":
+  # declaration must be a map, found null). Catch it here, where the diagnosis is
+  # still true: if the key list produces more lines than there are keys, some name
+  # contains a newline. Fail-closed either way — this only replaces a misleading
+  # refusal with an accurate one.
+  local declared_keys key_lines
+  declared_keys="$(yq '.services | keys | length' "$file")"
+  key_lines="$(yq '.services | keys | .[]' "$file" | wc -l)"
+  if [[ "$key_lines" != "$declared_keys" ]]; then
+    echo "ERROR: aid-run-gates.sh: services: a service name contains a newline (${declared_keys} name(s) declared, ${key_lines} line(s) of text) — service names must match ^[a-z0-9][a-z0-9_-]*\$" >&2
+    return 1
+  fi
+
+  # Every name this sweep ACCEPTS, for the needs_services cross-check below. It
+  # is built from the accepted names rather than from a second yq read, so a gate
+  # can never reference a service the sweep refused.
+  local accepted_names=""
+
+  while IFS= read -r svc; do
+    [[ -z "$svc" ]] && continue
+
+    # Service name: it becomes part of log lines, job directory names and error
+    # messages, so it stays filesystem- and shell-safe.
+    if [[ ! "$svc" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+      _svc_err "$svc" "invalid service name (allowed: lowercase letters, digits, '_' and '-', starting with a letter or digit)"
+      return 1
+    fi
+
+    tag="$(SVC="$svc" yq '.services[strenv(SVC)] | tag' "$file" 2>/dev/null || echo '!!null')"
+    if [[ "$tag" != '!!map' ]]; then
+      _svc_err "$svc" "declaration must be a map of fields (found ${tag#\!\!})"
+      return 1
+    fi
+
+    # additionalProperties: false — an unknown key is a typo, and a typo that is
+    # silently ignored is a contract the project believes it declared.
+    while IFS= read -r key; do
+      [[ -z "$key" ]] && continue
+      case "$key" in
+        start_cmd|probe_cmd|stop_cmd|startup_deadline_seconds|max_lifetime_seconds|log_hint|restart_authorized|port_env) ;;
+        *)
+          _svc_err "$svc" "unknown field '${key}' (accepted: start_cmd, probe_cmd, stop_cmd, startup_deadline_seconds, max_lifetime_seconds, log_hint, restart_authorized, port_env)"
+          return 1
+          ;;
+      esac
+    done < <(SVC="$svc" yq '.services[strenv(SVC)] | keys | .[]' "$file")
+
+    # Required fields.
+    for key in start_cmd probe_cmd startup_deadline_seconds; do
+      if [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" != "true" ]]; then
+        _svc_err "$svc" "missing required field '${key}'"
+        return 1
+      fi
+    done
+
+    # Non-empty strings.
+    for key in start_cmd probe_cmd stop_cmd log_hint; do
+      [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
+      tag="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)] | tag' "$file")"
+      val="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)]' "$file")"
+      if [[ "$tag" != '!!str' || -z "$val" ]]; then
+        _svc_err "$svc" "field '${key}' must be a non-empty string"
+        return 1
+      fi
+    done
+
+    # start_cmd stays in the FOREGROUND of its job. Syntactic lint only — see
+    # _svc_backgrounding_form for exactly what it does and does not catch.
+    local bgform
+    if bgform="$(_svc_backgrounding_form "$(SVC="$svc" yq '.services[strenv(SVC)].start_cmd' "$file")")"; then
+      _svc_err "$svc" "field 'start_cmd' must stay in the FOREGROUND of its job, but it contains ${bgform}: the supervisor owns the process group, and a command that backgrounds itself returns a pid owning nothing, so the run can no longer stop what it started. (This check is syntactic: it catches a trailing '&', 'nohup', 'disown' and 'setsid'; it cannot catch a command that daemonises internally, which is caught at runtime instead — a TERMINAL job whose probe still reports healthy.)"
+      return 1
+    fi
+
+    # Positive integers.
+    for key in startup_deadline_seconds max_lifetime_seconds; do
+      [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
+      tag="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)] | tag' "$file")"
+      val="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)]' "$file")"
+      if [[ "$tag" != '!!int' || ! "$val" =~ ^[0-9]+$ || "$val" -lt 1 ]]; then
+        _svc_err "$svc" "field '${key}' must be an integer >= 1"
+        return 1
+      fi
+    done
+
+    # Booleans. Absent restart_authorized defaults to false — repairs are opt-in
+    # authority, so the default is the one that grants nothing.
+    if [[ "$(SVC="$svc" yq '.services[strenv(SVC)] | has("restart_authorized")' "$file")" == "true" ]]; then
+      tag="$(SVC="$svc" yq '.services[strenv(SVC)].restart_authorized | tag' "$file")"
+      if [[ "$tag" != '!!bool' ]]; then
+        _svc_err "$svc" "field 'restart_authorized' must be true or false"
+        return 1
+      fi
+    fi
+
+    # port_env: optional (a service on a fixed external port declares none and
+    # allocation is skipped for it), but when present it must be a legal env var
+    # name AND unowned by any other service.
+    if [[ "$(SVC="$svc" yq '.services[strenv(SVC)] | has("port_env")' "$file")" == "true" ]]; then
+      tag="$(SVC="$svc" yq '.services[strenv(SVC)].port_env | tag' "$file")"
+      val="$(SVC="$svc" yq '.services[strenv(SVC)].port_env' "$file")"
+      if [[ "$tag" != '!!str' || ! "$val" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        _svc_err "$svc" "field 'port_env' must be a valid environment variable name (^[A-Za-z_][A-Za-z0-9_]*\$)"
+        return 1
+      fi
+      if _svc_denied_port_env "$val"; then
+        _svc_err "$svc" "field 'port_env' must not name the reserved variable '${val}': it is exported into every service and gate command, and that variable controls how commands are found, parsed or loaded (or is AID's own runtime state) — setting it to a port number would break or hijack the whole run. Pick a service-specific name such as '$(printf '%s' "${svc^^}" | tr -c 'A-Z0-9_' '_')_PORT'."
+        return 1
+      fi
+      local i
+      for i in "${!env_names[@]}"; do
+        if [[ "${env_names[$i]}" == "$val" ]]; then
+          _svc_err "$svc" "field 'port_env' duplicates '${val}', already declared by service '${env_owners[$i]}' — one env var, one owner"
+          return 1
+        fi
+      done
+      env_names+=("$val")
+      env_owners+=("$svc")
+    fi
+    accepted_names+="${svc}"$'\n'
+  done < <(yq '.services | keys | .[]' "$file")
+
+  _validate_needs_services "$file" "${accepted_names%$'\n'}" || return 1
+
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P076 Step 10 — the service LIFECYCLE, wired into a real run.
+#
+# Step 8 gave the declaration a validator; Step 9 gave it a library. This is the
+# step that makes either reachable, and its whole shape is one rule:
+#
+#   ACQUIRE ONCE before the gate loop, RELEASE ONCE after the report is written.
+#
+# Never per gate. Two gates sharing a service must not let the first one tear it
+# down under the second (the Codex round's parallel-teardown finding), and a
+# service is declared for the RUN, not for a gate — so a service no gate names is
+# still brought up and taken down with the run.
+#
+# There is no completion hook anywhere in this file that a SIGKILLed runner can
+# reach, so the crash safety net is not a hook: a RERUN sweeps at ENTRY, before it
+# acquires, and `resume`/`done-advance` sweep for a run that is being wrapped up
+# without a rerun. All of them call `aid_service_down_all` — ONE teardown
+# definition, four callers.
+#
+# A project that declares no services makes ZERO of these calls: every one of
+# them is behind `_svc_declared_count > 0`, and the library is not even sourced.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Set to 1 once this invocation has acquired services, so the release is exactly
+# once and a release without an acquire is a no-op.
+_SVC_ACQUIRED=0
+
+# _svc_declared_count <execution_yaml> — how many services the config declares.
+# ONE yq call; 0 for a config with no block, an empty block, or an unreadable
+# file (the shape is refused upstream by _validate_services_config, which runs
+# first — this function only decides whether the lifecycle applies at all).
+_svc_declared_count() {
+  local n
+  n="$(yq '.services // {} | length' "$1" 2>/dev/null || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
+# _svc_lib_load — source lib/aid-service.sh, fail CLOSED.
+#   Called only when services are declared. A missing library with declared
+#   services is not a run that can proceed: the gates would run against
+#   infrastructure nobody started and report on it as if they had.
+_svc_lib_load() {
+  declare -F aid_service_up_all >/dev/null 2>&1 && return 0
+  if [[ ! -f "${SCRIPT_DIR}/lib/aid-service.sh" ]]; then
+    echo "ERROR: aid-run-gates.sh: services are declared but ${SCRIPT_DIR}/lib/aid-service.sh is missing — refusing to run gates against infrastructure nothing brought up" >&2
+    return 1
+  fi
+  # shellcheck source=lib/aid-service.sh
+  source "${SCRIPT_DIR}/lib/aid-service.sh" || return 1
+  declare -F aid_service_up_all >/dev/null 2>&1
+}
+
+# _svc_stale_state_present <evidence_dir>
+#   True when THIS run's evidence already holds service state that is not
+#   accounted for as stopped — a registry entry in any non-stopped state, or a
+#   job directory under the supervisor's layout. That is the signature of a run
+#   that died before its release, and it is the only thing the entry sweep needs
+#   to decide on: `aid_service_down_all` does the actual reasoning.
+_svc_stale_state_present() {
+  local ev="$1" reg="$1/services.json" jr="$1/service-jobs"
+  if [[ -f "$reg" ]] \
+     && jq -e '[.services[]? | select(.state != "stopped")] | length > 0' "$reg" >/dev/null 2>&1; then
+    return 0
+  fi
+  # if/fi rather than an `&&` chain: this file runs under `set -e`, and a
+  # trailing false `&&` list as a statement is the shape that exits a script.
+  if [[ -d "$jr" ]]; then
+    if compgen -G "${jr}/*/*/job.json" >/dev/null 2>&1; then return 0; fi
+  fi
+  return 1
+}
+
+# ─── WHO OWNS THIS RUN'S SERVICES (P076 Step 10 fix) ────────────────────────
+# `_svc_stale_state_present` answers "is there service state that is not
+# stopped". That is NOT the question the entry sweep needs, and the difference
+# is destructive: a run that is HEALTHY and mid-gates looks exactly like a run
+# that died with its services up. Asking only the first question means a second
+# `run-all` entering the same evidence directory tears a LIVE run's database
+# down under its running gates.
+#
+# So the acquire path proves the previous owner is GONE before it touches
+# anything, and it proves it about a process rather than about a state string.
+# The claim record is written BEFORE the acquire, so any service state that
+# exists was preceded by a live claim — there is no window in which state exists
+# and no owner is recorded.
+#
+# THE CLAIM IS NOT DEFINED HERE ANY MORE, and that is the CP3 BLOCKING fix. It
+# used to be, and the consequence was that only this file could read it: the
+# FSM's `_fsm_service_sweep` — the teardown on `resume` and `done-advance` —
+# never consulted it, so a `resume` against a run whose background gate had
+# finished while its FOREGROUND gate was still running swept that live run's
+# services away and reported two passing gates as `service_unhealthy`. The
+# definitions now live in `lib/aid-service.sh`, beside `aid_service_down_all`,
+# which refuses while a live owner holds the claim — so every teardown path in
+# the system reads ONE authority. These four wrappers keep this file's local
+# vocabulary and add only the `_SVC_OWNER_CLAIMED` bookkeeping, which is this
+# invocation's own business.
+#
+# WHAT IS NOT HERE, deliberately: no `flock` held across the run. I measured the
+# reason rather than assuming it — a descriptor opened with `exec {fd}>>lock` is
+# NOT close-on-exec in bash 5.2, so a run-scoped lock is inherited by every
+# service `aid-job.sh` detaches, and the lock then outlives the runner for the
+# whole lifetime of the service (verified: parent locks, spawns a setsid'd
+# child, closes its own fd — the lock is still held). That converts a crash into
+# a permanently unrunnable project, which is worse than what it prevents. The
+# claim-before-acquire ordering gives the same mutual exclusion for the case
+# that matters without putting a descriptor into a detached process.
+#
+# THE ONE CASE THAT DOES NOT FAIL CLOSED, named: service state with NO claim
+# record. It is swept, as before. Every acquire in this file writes a claim
+# first, so an unclaimed registry is either from a build older than this change
+# or hand-written — never a live run of this code. Refusing there would make the
+# crash recovery unreachable for exactly the runs it exists for.
+_SVC_OWNER_CLAIMED=0
+_svc_owner_file()     { aid_service_owner_file "$1"; }
+_svc_owner_live()     { aid_service_owner_live "$1"; }
+_svc_owner_describe() { aid_service_owner_describe "$1"; }
+
+_svc_owner_claim() {
+  aid_service_owner_claim "$1" "${2:-}" || return 1
+  _SVC_OWNER_CLAIMED=1
+  return 0
+}
+
+_svc_owner_clear() {
+  (( _SVC_OWNER_CLAIMED == 1 )) || return 0
+  _SVC_OWNER_CLAIMED=0
+  aid_service_owner_clear "$1"
+  return 0
+}
+
+# _svc_manual_commands <evidence_dir> <execution_yaml>
+#   The commands a human would run to finish a teardown this run could not. Read
+#   from the registry, which is the only record of what was allocated — printed
+#   verbatim so the line can be pasted rather than reconstructed.
+_svc_manual_commands() {
+  local ev="$1" reg="$1/services.json"
+  [[ -f "$reg" ]] || return 0
+  jq -r --arg job "${SCRIPT_DIR}/aid-job.sh" '
+    .services // {} | to_entries[] | select(.value.state != "stopped") |
+    "  service " + .key + ":"
+    + (if (.value.stop_cmd // "") != "" then "\n    " + .value.stop_cmd else "" end)
+    + (if (.value.job_id // "") != "" then
+         "\n    bash " + $job + " cancel --jobs-dir " + (.value.jobs_dir // "?") + " --id " + .value.job_id
+       else "" end)
+  ' "$reg" 2>/dev/null || true
+}
+
+# _svc_release_run <evidence_dir> <execution_yaml>
+#   THE release. Idempotent, called exactly once per invocation that acquired,
+#   and NEVER able to un-write evidence: it runs after the report is written, and
+#   a failure is a warning naming the manual commands — not a failed run.
+_svc_release_run() {
+  local ev="$1" yaml="$2"
+  (( _SVC_ACQUIRED == 1 )) || return 0
+  _SVC_ACQUIRED=0
+  local _down_rc=0
+  aid_service_down_all "$ev" "$yaml" || _down_rc=$?
+  if (( _down_rc == 2 )); then
+    # rc 2 is a REFUSAL, and it has several causes: a live foreign owner (which
+    # should indeed be impossible while releasing our own claim), but also jq
+    # missing so the claim cannot be read, or yq missing / the declaration
+    # unreadable so a recorded stop_cmd would run unreconciled. The library
+    # prints its named line immediately above, and its header tells callers not
+    # to assume a cause — so this message reports the outcome and defers.
+    echo "WARN: aid-run-gates.sh: the service teardown REFUSED for the reason named in the line above (a live owner's claim, or a dependency/declaration it could not read). The claim record under '${ev}' has NOT been cleared and no service was stopped. If that line names a live foreign owner, that should be impossible while releasing our own claim — investigate before rerunning:" >&2
+    _svc_manual_commands "$ev" "$yaml" >&2
+    return 0
+  fi
+  if (( _down_rc != 0 )); then
+    echo "WARN: aid-run-gates.sh: service teardown did not fully succeed — at least one declared service still answers its probe. The gate report is already written and is NOT affected. Finish the teardown by hand:" >&2
+    _svc_manual_commands "$ev" "$yaml" >&2
+  fi
+  # The claim covered the services this invocation owned; they are down, so it
+  # is dropped LAST — a claim removed before the teardown would let a runner
+  # entering in that window sweep a service that is still being stopped.
+  _svc_owner_clear "$ev"
+  return 0
+}
+
+# _gate_expect_p95_seconds <gate_name>
+#   The gate's runtime-baseline p95 in SECONDS for aid-job.sh's --expect-p95,
+#   but only once the baseline holds >= 3 non-censored samples (the same
+#   "enough data to quote" threshold gate_baseline_recommend_timeout uses).
+#   Echoes nothing for a young gate, so the flag is simply omitted and the job
+#   record legitimately lacks the field.
+_gate_expect_p95_seconds() {
+  local gate_name="$1" bj p95 nc
+  bj="$(gate_baseline_report_json "$gate_name" 2>/dev/null || true)"
+  [[ -z "$bj" || "$bj" == "null" ]] && return 0
+  p95="$(jq -r '.p95_ms // "null"' <<<"$bj" 2>/dev/null || echo null)"
+  nc="$(jq -r '.non_censored_samples_count // 0' <<<"$bj" 2>/dev/null || echo 0)"
+  [[ "$p95" =~ ^[0-9]+$ ]] || return 0
+  [[ "$nc" =~ ^[0-9]+$ ]] || return 0
+  if (( nc < 3 )); then return 0; fi
+  printf '%s' "$(( (p95 + 999) / 1000 ))"
+  return 0
+}
+
+# _bg_fail_row <gate_name> <reason> <message> [job_id]
+#   The gate row for a background gate that never got a supervised job at all.
+#   Deliberately a plain `fail` in the existing vocabulary — the reason field
+#   says WHY, and no consumer needs a new result enum to handle it.
+_bg_fail_row() {
+  local gate_name="$1" reason="$2" message="$3" job_id="${4:-}"
+  jq -nc --arg g "$gate_name" --arg r "$reason" --arg o "$message" \
+        --arg jid "$job_id" \
+    '{gate:$g, result:"fail", exit_code:1, duration_ms:0, output:$o,
+      reason:$r, job_id:(if $jid == "" then null else $jid end),
+      job_state:"none"}'
+}
+
+# ─── P076 Step 4 — the eager continuation pointer ───────────────────────────
+# One artifact per RUN (one path), written BEFORE a background job is spawned
+# and deleted only once the run's LAST outstanding background job has been
+# collected. It exists because a controller that dies mid-EXECUTE cannot write
+# anything on its way out: "a resume is required" must be derivable from what
+# the controller provably LEFT BEHIND. `awaiting_host_resume` is therefore never
+# stored anywhere — consumers derive it from (artifact exists) AND (no liveness
+# signal). These globals are populated once in run_all_gates(); they are read
+# (never written) inside run_background_gate, which runs in a command
+# substitution subshell.
+# AID_RESUME_ARTIFACT_BASENAME is defined ONCE, in lib/aid-resume-artifact.sh,
+# and sourced above. It used to be declared here AND in aid-fsm.sh: two string
+# literals with no shared source and no test binding them, so renaming one made
+# the FSM's live-job refusal evaluate an empty glob and return 0 — a guard whose
+# failure mode was indistinguishable from "nothing to guard".
+_RESUME_ARTIFACT=""
+_RESUME_PLAN_ID=""
+_RESUME_EPIC_ID=""
+_RESUME_RUN_ID=""
+_RESUME_SAFE_NEXT_ACTION=""
+# aid-job.sh's terminal vocabulary, verbatim (see its `_derive_state` / the
+# states its result.json records). Never re-derived, never abbreviated.
+AID_JOB_TERMINAL_STATES='["terminal_pass","terminal_fail","timed_out","cancelled"]'
+
+# _job_head_drifted <recorded_head> <current_head>
+#   THE single revision-drift judgement in this file, shared by the two places
+#   that need it: re-attaching a supervised job, and restoring a checkpointed
+#   gate row. Returns 0 (drifted) only when both heads are known, the recorded
+#   one is a real sha ("none" is the supervisor's own no-git marker), and they
+#   differ. Unknowable → not drifted: a repo with no git is not a moved tree.
+_job_head_drifted() {
+  local rec="$1" cur="$2"
+  [[ -n "$rec" && -n "$cur" && "$rec" != "none" && "$rec" != "$cur" ]]
+}
+
+# _job_result_stale <job_sh> <jobs_dir> <job_id> <repo>
+#   rc 0 iff the job has a TERMINAL result that the CURRENT tree did not earn.
+#
+#   THE freshness judgement for replaying an existing job's result, and it is
+#   deliberately not a third notion of "current": it asks `aid-job.sh collect
+#   --require-current`, the same primitive `aid-fsm.sh resume` asks, which
+#   compares the recorded start HEAD *and* start TREE and answers rc 4 when
+#   either moved.
+#
+#   Why HEAD alone was not enough (CP3 blocking finding, reproduced in both
+#   directions): the ordinary state of a gate re-run is a tree that MOVED without
+#   a commit. Head-only re-attach therefore replayed `terminal_pass` for a
+#   command that now fails (a green report for a broken tree), and replayed
+#   `terminal_fail` after a gate-fixer had already repaired the tree (a fix loop
+#   that burns its iterations on an already-green gate and can never converge).
+#
+#   It answers exactly one question — "did the tree that produced this result
+#   move?" — and the two callers do DIFFERENT things with the answer: the
+#   re-attach decision refuses to replay on it, while the post-supervision read
+#   only records it. The judgement is shared; the consequence is not.
+#
+#   A job with NO terminal result is never "stale": a still-LIVE job whose tree
+#   has not moved must keep re-attaching — that is the whole crash-resume story —
+#   and drift on a live job is judged by the head/fingerprint check at the call
+#   site, exactly as before.
+_job_result_stale() {
+  local job_sh="$1" jobs_dir="$2" job_id="$3" repo="$4" rc=0
+  [[ -f "${jobs_dir}/${job_id}/result.json" ]] || return 1
+  local -a args=(collect --jobs-dir "$jobs_dir" --id "$job_id")
+  [[ -n "$repo" ]] && args+=(--repo "$repo")   # array, so a path with spaces survives
+  args+=(--require-current)
+  bash "$job_sh" "${args[@]}" >/dev/null 2>&1 || rc=$?
+  (( rc == 4 ))
+}
+
+# _resume_artifact_write <job_id> <gate_name> <fingerprint> <jobs_dir>
+#   Atomic (mktemp + mv) rewrite of the run's ONE continuation pointer.
+#   rc 1 on any failure — the caller must then refuse to leave a background job
+#   running that nothing points at.
+_resume_artifact_write() {
+  local job_id="$1" gate_name="$2" fp="$3" jobs_dir="$4"
+  [[ -n "$_RESUME_ARTIFACT" ]] || return 1
+  # The schema forbids '<' in safe_next_action so an unresolved placeholder can
+  # never persist. Enforce it at the writer too: a pointer that would not
+  # validate is not written, and the gate refuses rather than spawning.
+  [[ "$_RESUME_SAFE_NEXT_ACTION" != *"<"* ]] || return 1
+  [[ -n "$_RESUME_SAFE_NEXT_ACTION" ]] || return 1
+  local dir; dir="$(dirname "$_RESUME_ARTIFACT")"
+  [[ -d "$dir" ]] || return 1
+  local tmp
+  tmp="$(mktemp "${_RESUME_ARTIFACT}.XXXXXX" 2>/dev/null)" || return 1
+  if ! jq -nc \
+        --arg plan "${_RESUME_PLAN_ID:-unknown}" \
+        --arg epic "$_RESUME_EPIC_ID" \
+        --arg run "$_RESUME_RUN_ID" \
+        --arg job "$job_id" \
+        --arg jobs "$jobs_dir" \
+        --arg gate "$gate_name" \
+        --arg fp "$fp" \
+        --argjson terminal "$AID_JOB_TERMINAL_STATES" \
+        --arg next "$_RESUME_SAFE_NEXT_ACTION" \
+        --arg now "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+        '{schema:"aid-auto-resume/1", plan_id:$plan, epic_id:$epic, run_id:$run,
+          job_id:$job, jobs_dir:$jobs, gate:$gate, command_fingerprint:$fp,
+          expected_terminal_states:$terminal, safe_next_action:$next,
+          created_at:$now}' > "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+  fi
+  mv -f "$tmp" "$_RESUME_ARTIFACT" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  return 0
+}
+
+# _resume_map_field <field> <value>
+#   Best-effort pointer maintenance on the active-runs entry. The ARTIFACT is
+#   authoritative; the map is presentation, so a failure here warns and never
+#   fails the gate (the accepted error-handling split for this step).
+_resume_map_field() {
+  local field="$1" value="$2"
+  [[ -n "$_RESUME_EPIC_ID" ]] || return 0
+  [[ -f "${SCRIPT_DIR}/aid-fsm.sh" ]] || return 0
+  if ! bash "${SCRIPT_DIR}/aid-fsm.sh" active-runs set "$_RESUME_EPIC_ID" "$field" "$value" >/dev/null 2>&1; then
+    echo "WARNING: aid-run-gates.sh: could not update active-runs field '${field}' for ${_RESUME_EPIC_ID} — the resume artifact at ${_RESUME_ARTIFACT} remains authoritative" >&2
+  fi
+  return 0
+}
+
+# _resume_jobs_still_live <jobs_dir>
+#   Cheap `aid-job.sh status` sweep over the run's jobs dir. rc 0 iff at least
+#   one supervised job is still started/running — i.e. the continuation pointer
+#   must NOT be deleted yet.
+_resume_jobs_still_live() {
+  local jobs_dir="$1" d id st
+  [[ -d "$jobs_dir" ]] || return 1
+  for d in "$jobs_dir"/*/; do
+    [[ -f "${d}job.json" ]] || continue
+    id="$(basename "$d")"
+    st="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$id" 2>/dev/null || echo unknown)"
+    case "$st" in started|running) return 0 ;; esac
+  done
+  return 1
+}
+
+# run_background_gate <gate_name> <resolved_cmd> <timeout_s> <attempt>
+#                     <jobs_dir> <timeline_file> <repo>
+#   Drop-in replacement for run_gate() on a background gate: emits ONE gate-row
+#   JSON object on stdout with the same shape every other row has (plus job_id
+#   and job_state), returns 0 iff the gate passed.
+#
+#   Branch outcomes, exhaustively:
+#     • a job dir for THIS attempt exists, same fingerprint, same start HEAD
+#         – still live      → re-attach and poll
+#         – already terminal → `collect` idempotently; the suite NEVER re-runs
+#     • a job dir exists but the fingerprint or the start HEAD moved
+#                           → cancel it, ARCHIVE the dir to `.superseded-<epoch>`
+#                             (aid-job.sh run refuses an existing dir, so the
+#                             deterministic id has to be freed), start fresh
+#     • no job dir          → start fresh
+#
+#   The id is ALWAYS the deterministic `<gate>-attempt-<N>`: that keeps the jobs
+#   root FLAT (`jobs/<gate>-attempt-N/`), which is the only topology the
+#   supervisor's watchdog can scan (it reads immediate children only), and it
+#   keeps each retry attempt a distinct job — so a failed terminal job is never
+#   re-attached as the NEXT attempt's result.
+run_background_gate() {
+  local gate_name="$1" command="$2" timeout_s="$3" attempt="$4" \
+        jobs_dir="$5" timeline_file="$6" repo="$7"
+
+  local job_sh="${SCRIPT_DIR}/aid-job.sh"
+  if [[ ! -f "$job_sh" ]]; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' declares run_mode: background but the supervisor is unavailable at ${job_sh} — refusing to fall back to the unowned foreground path" >&2
+    _bg_fail_row "$gate_name" "job_supervisor_unavailable" "aid-job.sh not found at ${job_sh}"
+    return 1
+  fi
+
+  mkdir -p "$jobs_dir" 2>/dev/null || true
+  local job_id="${gate_name}-attempt-${attempt}"
+  local job_dir="${jobs_dir}/${job_id}"
+
+  # The EXACT argv the supervisor will run — and therefore the exact argv the
+  # fingerprint has to cover. Computed by aid-job.sh itself: one definition of
+  # the sha256-over-NUL-joined-argv formula, never a copy of it here.
+  local -a job_argv=(bash -c "$command")
+  # stdout and stderr captured SEPARATELY via a temp file — an assignment made
+  # inside a command substitution happens in a subshell and would never reach
+  # this scope.
+  local fp="" fp_err="" fp_rc=0 fp_errfile
+  fp_errfile="$(mktemp)"
+  fp="$(bash "$job_sh" fingerprint -- "${job_argv[@]}" 2>"$fp_errfile")" || fp_rc=$?
+  fp_err="$(cat "$fp_errfile" 2>/dev/null || true)"
+  rm -f "$fp_errfile"
+  if (( fp_rc != 0 )) || [[ -z "$fp" ]]; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — aid-job.sh fingerprint failed (exit ${fp_rc}): ${fp_err}" >&2
+    _bg_fail_row "$gate_name" "job_fingerprint_failed" "${fp_err}" "$job_id"
+    return 1
+  fi
+
+  # `replayed_result` is the ONE thing that decides whether the working tree gets
+  # a veto over this gate's outcome, and it is a statement about provenance, not
+  # about timing: it is 1 only when this invocation found an ALREADY-TERMINAL job
+  # and reported a result it never watched being produced. A job this invocation
+  # spawned, or one it re-attached to while still live and polled to completion,
+  # is watched — its result is this run's own work.
+  local replayed_result=0
+  local reattach=0
+  if [[ -d "$job_dir" && -f "$job_dir/job.json" ]]; then
+    local rec_fp rec_head cur_head drift_reason=""
+    rec_fp="$(jq -r '.command_fingerprint // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
+    rec_head="$(jq -r '.start_head // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
+    cur_head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
+    if [[ "$rec_fp" != "$fp" ]]; then
+      drift_reason="command_fingerprint_mismatch"
+    elif _job_head_drifted "$rec_head" "$cur_head"; then
+      # Same command, but HEAD moved since the job started. Re-attaching would
+      # answer a question about a revision nobody is asking about any more.
+      drift_reason="start_head_moved"
+    elif _job_result_stale "$job_sh" "$jobs_dir" "$job_id" "$repo"; then
+      # Same command, same HEAD — but the job's TERMINAL result was produced
+      # against a different working tree. That result is not this run's evidence,
+      # so the job is superseded and the gate genuinely re-runs. Judged by the
+      # supervisor's own `collect --require-current`, so the runner and `resume`
+      # cannot disagree about what "current" means.
+      drift_reason="result_tree_moved"
+    fi
+    if [[ -n "$drift_reason" ]]; then
+      local sup_ts sup_dir sup_log
+      sup_ts="$(date -u +%s)"
+      sup_dir="${job_dir}.superseded-${sup_ts}"
+      sup_log="${jobs_dir}/${job_id}.superseded-${sup_ts}.log"
+      {
+        echo "aid-run-gates.sh: gate '${gate_name}' job '${job_id}' superseded (${drift_reason})"
+        echo "  recorded fingerprint: ${rec_fp}"
+        echo "  current fingerprint:  ${fp}"
+        echo "  recorded start_head:  ${rec_head}"
+        echo "  current HEAD:         ${cur_head}"
+        echo "-- cancel --"
+        bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" 2>&1 || true
+        echo "-- archive to ${sup_dir} --"
+        mv "$job_dir" "$sup_dir" 2>&1 || true
+      } >"$sup_log" 2>&1 || true
+      log_event "$timeline_file" "gate_job_superseded" gate="$gate_name" \
+        job_id="$job_id" reason="$drift_reason" archived_to="$sup_dir" log="$sup_log"
+      # If the archive did not happen the id is still occupied; `run` below
+      # fails loudly rather than pretending a stale job is this attempt.
+    else
+      reattach=1
+    fi
+  fi
+
+  # ── P076 Step 4: PRE-SPAWN pointer ───────────────────────────────────────
+  # Written BEFORE aid-job.sh is asked to start anything, carrying job_id
+  # "pending" plus the jobs_dir and the command fingerprint. That closes the
+  # only crash window that could produce a started job nothing points at: a
+  # death between this write and the spawn leaves a pointer that says "a job
+  # with THIS fingerprint was about to be started HERE", which a resume can
+  # resolve by scanning the jobs dir (found → collect; none → nothing ran).
+  # An unwritable evidence directory refuses the gate HERE — before the spawn —
+  # because an unresumable background job must never come into existence.
+  if ! _resume_artifact_write "pending" "$gate_name" "$fp" "$jobs_dir"; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — could not write the continuation pointer at '${_RESUME_ARTIFACT:-<unset>}'; refusing to spawn a background job nothing can resume" >&2
+    _bg_fail_row "$gate_name" "resume_artifact_write_failed" "could not write ${_RESUME_ARTIFACT:-<unset>} — no background job was started" "$job_id"
+    return 1
+  fi
+
+  if (( reattach )); then
+    local pre_state
+    pre_state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo unknown)"
+    # Already terminal at re-attach time → whatever this invocation reports for
+    # it is a REPLAY of a result produced before this invocation existed.
+    case "$pre_state" in
+      terminal_pass|terminal_fail|timed_out|cancelled) replayed_result=1 ;;
+    esac
+    log_event "$timeline_file" "gate_job_reattached" gate="$gate_name" \
+      job_id="$job_id" state="$pre_state" attempt="$attempt"
+  else
+    local -a run_args=(run --jobs-dir "$jobs_dir" --id "$job_id"
+                       --label "$gate_name" --deadline "$timeout_s")
+    local p95_sec
+    p95_sec="$(_gate_expect_p95_seconds "$gate_name")"
+    [[ -n "$p95_sec" ]] && run_args+=(--expect-p95 "$p95_sec")
+    run_args+=(-- "${job_argv[@]}")
+
+    local start_err start_rc=0
+    start_err="$(bash "$job_sh" "${run_args[@]}" 2>&1 >/dev/null)" || start_rc=$?
+    if (( start_rc != 0 )); then
+      # A background declaration is a contract. The supervisor's own stderr is
+      # surfaced verbatim; there is deliberately NO fallback to run_gate().
+      echo "ERROR: aid-run-gates.sh: gate '${gate_name}' run_mode: background — aid-job.sh run failed (exit ${start_rc}): ${start_err}" >&2
+      _bg_fail_row "$gate_name" "job_start_failed" "aid-job.sh run exit ${start_rc}: ${start_err}" "$job_id"
+      return 1
+    fi
+    log_event "$timeline_file" "gate_job_started" gate="$gate_name" \
+      job_id="$job_id" attempt="$attempt" deadline_sec="$timeout_s" \
+      jobs_dir="$jobs_dir"
+  fi
+
+  # ── P076 Step 4: POST-SPAWN rewrite ──────────────────────────────────────
+  # Immediately after the job exists, the same single path is atomically
+  # rewritten with the REAL job id. A crash in the window between the spawn and
+  # this line still leaves the pending pointer, and the fingerprint scan covers
+  # it — so no window produces a job without a pointer, only a pointer that is
+  # one field less precise.
+  #
+  # If THIS write fails the job is already running, so refusing is not enough:
+  # the just-started job is CANCELLED (fail closed WITH cleanup — an
+  # unresumable background job must not keep running). A cancel that also fails
+  # is reported with the exact manual command.
+  if ! _resume_artifact_write "$job_id" "$gate_name" "$fp" "$jobs_dir"; then
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — could not rewrite the continuation pointer at '${_RESUME_ARTIFACT:-<unset>}' with job id '${job_id}'; cancelling the job rather than leaving it unresumable" >&2
+    local _cancel_rc=0
+    bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || _cancel_rc=$?
+    if (( _cancel_rc != 0 )); then
+      echo "ERROR: aid-run-gates.sh: the compensating cancel ALSO failed (exit ${_cancel_rc}). Cancel it by hand: bash ${job_sh} cancel --jobs-dir ${jobs_dir} --id ${job_id}" >&2
+    fi
+    _bg_fail_row "$gate_name" "resume_artifact_write_failed" "could not record job ${job_id} in ${_RESUME_ARTIFACT:-<unset>}; job cancelled (cancel exit ${_cancel_rc})" "$job_id"
+    return 1
+  fi
+  # Pointer maintenance on the live map entry — warn-only by design.
+  _resume_map_field resume_artifact "$_RESUME_ARTIFACT"
+
+  # ── poll to completion, inside THIS invocation ────────────────────────────
+  local poll_start=$SECONDS last_heartbeat=$SECONDS state=""
+  local grace_budget=$(( timeout_s + AID_GATE_DEADLINE_GRACE_SEC ))
+  while true; do
+    state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo unknown)"
+    case "$state" in
+      terminal_pass|terminal_fail|timed_out|cancelled) break ;;
+      lost)
+        # The owned process vanished without a terminal record. That proves no
+        # outcome, so it is never a pass and never an ordinary command failure.
+        break
+        ;;
+    esac
+
+    local elapsed=$(( SECONDS - poll_start ))
+    # The deadline is the JOB's, not this invocation's: a re-attached job that
+    # has already been running for an hour must not be handed a fresh timeout
+    # window. Measured from the job's own started_epoch when it is readable,
+    # falling back to this poll loop's elapsed time.
+    local job_started job_elapsed="$elapsed"
+    job_started="$(jq -r '.started_epoch // empty' "$job_dir/job.json" 2>/dev/null || true)"
+    if [[ "$job_started" =~ ^[0-9]+$ ]]; then
+      job_elapsed=$(( $(date -u +%s) - job_started ))
+    fi
+    if (( timeout_s > 0 && job_elapsed > grace_budget )); then
+      # The job's OWN deadline timer is authoritative for killing. Being this
+      # far past due with no terminal result means that timer did not land, so
+      # the runner takes over: cancel (group-owned — no child survives) and
+      # read whatever terminal record that produced.
+      log_event "$timeline_file" "gate_job_deadline_exceeded" gate="$gate_name" \
+        job_id="$job_id" elapsed_sec="$job_elapsed" poll_elapsed_sec="$elapsed" \
+        deadline_sec="$timeout_s" grace_sec="$AID_GATE_DEADLINE_GRACE_SEC"
+      # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. Recorded here and
+      # nothing else: the cancel below, the state re-read and the row mapping
+      # are untouched.
+      _gate_ladder_emit GATE_TIMEOUT gate_job_deadline_exceeded \
+        "gate ${gate_name} job ${job_id} ran ${job_elapsed}s past a ${timeout_s}s deadline plus ${AID_GATE_DEADLINE_GRACE_SEC}s grace; the runner is cancelling it"
+      bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" >/dev/null 2>&1 || true
+      state="$(bash "$job_sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null || echo lost)"
+      break
+    fi
+
+    if (( SECONDS - last_heartbeat >= AID_GATE_HEARTBEAT_SEC )); then
+      last_heartbeat=$SECONDS
+      # The progress signal a stall consumer reads: a long gate that is still
+      # polling is WORKING, not hung.
+      log_event "$timeline_file" "gate_job_heartbeat" gate="$gate_name" \
+        job_id="$job_id" state="$state" elapsed_sec="$elapsed"
+    fi
+
+    sleep "$AID_GATE_POLL_INTERVAL_SEC"
+  done
+
+  # `collect` is the idempotent terminal read — it NEVER relaunches, which is
+  # what makes a crash cost zero re-execution: a job that finished while nobody
+  # was watching is simply collected.
+  #
+  # `--require-current` is passed ONLY on the replay path, and the distinction is
+  # the whole point. Two different questions are asked at two different places:
+  #
+  #   line ~494, before anything is spawned: "may I REPLAY a result I did not
+  #     watch?" The tree must answer that — a terminal record from an earlier
+  #     invocation is evidence about the tree it ran against, and replaying it
+  #     over a moved tree is what produced the stale PASS and the fix loop that
+  #     could not converge. That check stands, unchanged.
+  #
+  #   here, after this invocation spawned (or re-attached to) the job, supervised
+  #     it and polled it to completion: "may I REPORT a result I DID watch?" The
+  #     tree has no standing to veto that. The command ran, it exited, and the
+  #     exit code is the gate's answer. Binding it to the tree here meant a
+  #     background gate failed for writing a file — something the foreground path
+  #     lets any gate do freely — and no retry could ever help, because every
+  #     attempt re-dirtied the tree the same way. A concurrent editor save during
+  #     a 26-minute suite had the same effect.
+  #
+  # rc 4 is therefore reachable only when `replayed_result` is 1. rc 0 (pass) and
+  # 1 (non-pass terminal) are ordinary results, and 3 (not terminal, i.e. `lost`)
+  # is handled by the row mapping below exactly as before.
+  local _collect_rc=0
+  local -a _collect_args=(collect --jobs-dir "$jobs_dir" --id "$job_id")
+  [[ -n "$repo" ]] && _collect_args+=(--repo "$repo")
+  (( replayed_result )) && _collect_args+=(--require-current)
+  bash "$job_sh" "${_collect_args[@]}" >/dev/null 2>&1 || _collect_rc=$?
+
+  # ── P076 Step 4: the pointer's only deletion site ─────────────────────────
+  # A SUCCESSFUL collect means the job reached one of the supervisor's terminal
+  # states. The pointer then goes away — but only if no OTHER background job of
+  # this run is still live (checked with the cheap `status` sweep), because one
+  # artifact serves the whole run. A `lost` job is deliberately NOT a successful
+  # collect: the pointer stays so a resume reports the truth about it.
+  case "$state" in
+    terminal_pass|terminal_fail|timed_out|cancelled)
+      if ! _resume_jobs_still_live "$jobs_dir"; then
+        rm -f "$_RESUME_ARTIFACT" 2>/dev/null || true
+        _resume_map_field resume_artifact ""
+        # Only an AUTO run may be re-asserted as `active`: a manual run's
+        # controller is a human, and stamping `active` over `manual` would be
+        # this map claiming an autonomous controller that does not exist.
+        if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then
+          _resume_map_field auto_controller active
+        fi
+      fi
+      ;;
+  esac
+
+  # REPLAY ONLY (see the collect comment above): an already-terminal job whose
+  # result this invocation never watched, against a tree that moved since. The
+  # supervisor's result is real, but it is evidence about a different tree — so
+  # it is refused, loudly, instead of replayed. A plain `fail` in the existing
+  # vocabulary: the retry loop's next attempt gets its own job id and genuinely
+  # re-runs the gate at the current tree, which is how the fix loop converges
+  # instead of replaying a verdict nobody can change.
+  if (( _collect_rc == 4 )); then
+    log_event "$timeline_file" "gate_job_result_stale" gate="$gate_name" \
+      job_id="$job_id" state="$state"
+    echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — job '${job_id}' is ${state}, but its result was produced by an EARLIER invocation against a different working tree; refusing to replay it as this run's result" >&2
+    _bg_fail_row "$gate_name" "job_result_not_current" \
+      "job ${job_id} is ${state} but its result was produced by an earlier invocation against a different working tree — it was not replayed" "$job_id"
+    return 1
+  fi
+
+  # The tree moved while this gate was being supervised. That is RECORDED, never
+  # a verdict: the gate ran, this invocation watched it, and what it returned is
+  # what the row says. The observation exists because "the suite passed but
+  # something edited the tree underneath it" is worth seeing when a later result
+  # looks inconsistent — an additive field and one timeline event, both absent on
+  # an undisturbed run, so no existing consumer sees a change.
+  local _tree_moved=0
+  if (( ! replayed_result )) && _job_result_stale "$job_sh" "$jobs_dir" "$job_id" "$repo"; then
+    _tree_moved=1
+    log_event "$timeline_file" "gate_job_tree_moved" gate="$gate_name" \
+      job_id="$job_id" state="$state"
+  fi
+
+  local row row_rc=0
+  row="$(gate_row_from_job "$gate_name" "$job_dir" "$job_id" "$state")" || row_rc=$?
+
+  # P076 Step 13 — JOB_LOST, mechanical ladder entry. The MAPPING is what is
+  # observed (`reason:"job_lost"` — no terminal record exists, so nothing about
+  # the outcome is proven), read back off the row rather than re-derived, so the
+  # ladder can never disagree with the row it is recording. The row itself, its
+  # fail result and `row_rc` are untouched.
+  if [[ "$(jq -r '.reason // ""' <<<"$row" 2>/dev/null || true)" == "job_lost" ]]; then
+    _gate_ladder_emit JOB_LOST gate_job_lost \
+      "gate ${gate_name} job ${job_id} is '${state}' with no terminal record — the absence of a result is not a pass"
+  fi
+
+  if (( _tree_moved )); then
+    # A jq failure must never blank a row that already exists — keep the row.
+    local _annotated=""
+    _annotated="$(jq -c '. + {tree_moved_during_run:true}' <<<"$row" 2>/dev/null || true)"
+    if [[ -n "$_annotated" ]]; then row="$_annotated"; fi
+  fi
+  printf '%s\n' "$row"
+  return "$row_rc"
+}
+
+# _gate_row_checkpoint <rows_dir> <gate_name> <row_json> <head>
+#   Durable incremental checkpoint (P076 Step 2). As each gate COMPLETES, its
+#   row is written beside the run's evidence with an atomic tmp+mv. This is
+#   what a rerun after a crash assembles from — and what Step 5's resume writes
+#   into. Never brings the evidence directory into being (the same discipline
+#   the execution ledger follows): a gate run must not dirty a working tree.
+#
+#   The row is BOUND to the revision it was produced at AND to the run that
+#   produced it, in an additive `_checkpoint` envelope carrying
+#   {head, tree, key, written_at}:
+#     • head + tree — the same PAIR aid-job.sh binds a job result to, read from
+#       `aid-job.sh revision`. HEAD alone was tree-blind: an uncommitted edit
+#       never invalidated a row, which is the same one-sided binding that let a
+#       background job replay a result the working tree had not earned.
+#     • key — a keyed digest over the RUN's own secret (lib/aid-resume-artifact.sh),
+#       the gate name and that revision pair. `head` is public and guessable, so
+#       it could never establish that this run's writers produced the row: a
+#       hand-written `gates_rows/<gate>.json` satisfied it and replayed as a
+#       required-gate PASS. The key cannot be produced without reading the run's
+#       own 0600 key file (see the honest limit stated on that helper).
+#   The restore pass below refuses — as an explicit FAIL row, never silence —
+#   any row whose envelope is missing, whose head or tree has moved, or whose
+#   key does not verify. Fail closed in every direction: a run that could not
+#   establish a key writes no binding and accepts none.
+_gate_row_checkpoint() {
+  local rows_dir="$1" gate_name="$2" row_json="$3" head="${4:-}" \
+        tree="${5:-}" run_key="${6:-}" home="${7:-}"
+  [[ -n "$rows_dir" ]] || return 0
+  # The gate name becomes a filename — never let it become a path.
+  case "$gate_name" in */*|*..*|"") return 0 ;; esac
+  mkdir -p "$rows_dir" 2>/dev/null || return 0
+  local dest="${rows_dir}/${gate_name}.json" tmp
+  tmp="$(mktemp "${dest}.XXXXXX" 2>/dev/null)" || return 0
+  local bound key
+  key="$(aid_gate_row_binding_key "$run_key" "$gate_name" "$head" "$tree" "$home")"
+  bound="$(jq -c --arg h "$head" --arg tr "$tree" --arg k "$key" \
+             --arg t "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+             '. + {_checkpoint: {head: $h, tree: $tr, key: $k, written_at: $t}}' \
+             <<<"$row_json" 2>/dev/null)" \
+    || bound=""
+  [[ -n "$bound" ]] && row_json="$bound"
+  if printf '%s\n' "$row_json" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$dest" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  else
+    rm -f "$tmp" 2>/dev/null
+  fi
+  return 0
 }
 
 # Verify yq is the mikefarah Go-based variant.
@@ -368,6 +1560,20 @@ run_all_gates() {
 
   require_yq_mikefarah
 
+  # ─── run_mode validation (P076 Step 2) ─────────────────────────────────
+  # Swept over EVERY defined gate here, before a single gate command is
+  # spawned — a typo on the third gate must not be discovered after the first
+  # two have already run.
+  validate_all_run_modes "$execution_yaml" || exit 1
+
+  # ─── services validation (P076 Step 8) ─────────────────────────────────
+  # Same entry point, same spirit: the OPTIONAL `services:` block is checked
+  # here, before any service or gate action, so a malformed declaration is
+  # refused by service and field instead of surfacing as a mystery failure in
+  # the middle of a gate. An absent block is a no-op — nothing changes for a
+  # project that declares no services.
+  _validate_services_config "$execution_yaml" || exit 1
+
   # One-time-per-clone lazy bootstrap (P063 Step 2) — see
   # aid_gate_baseline_ensure_gitignored above. Called once per run (not per
   # gate/attempt): idempotent, and there's nothing gate-specific about it.
@@ -497,6 +1703,13 @@ run_all_gates() {
   # never re-queries gates that were profile_excluded/skipped/never run this
   # round, and never re-fetches the same gate's baseline twice.
   declare -a baseline_summary_gates=()
+  # P076 Step 3 — gates whose own telemetry recommends `background` while their
+  # config declares no run_mode at all. Appended EXACTLY ONCE per gate, at the
+  # single post-retry merge point below (never per attempt), from the
+  # runtime_baseline JSON already fetched there — no second baseline pass.
+  # Emitted after the run as one named timeline event per gate, observe-only:
+  # flipping a gate stays a one-line human edit (P069 observe-then-promote).
+  declare -a run_mode_advice_gates=()
 
   # P069 Step 14 — targeted_tests escalation (exit 3 unknown_production /
   # exit 11 mapping_gap). Set inline when that gate's FINAL result settles
@@ -507,6 +1720,49 @@ run_all_gates() {
   # mutating this pass's own `gates_json`/`processed`/`gate_count` bookkeeping.
   local escalation_triggered=false
   local escalation_reason=""
+
+  # ─── Background job + row-checkpoint locations (P076 Step 2) ─────────────
+  # Both live under THIS run's evidence directory. Resolved once, and only when
+  # that directory already exists — the gate runner writes into evidence, it
+  # never invents evidence directories (same rule the execution ledger follows).
+  local _evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local _jobs_dir="" _rows_dir=""
+  if [[ -d "$_evidence_dir" ]]; then
+    _jobs_dir="${_evidence_dir}/jobs"
+    _rows_dir="${_evidence_dir}/gates_rows"
+  fi
+
+  # The revision every row produced by THIS invocation is bound to, and the one
+  # a restored row's binding is compared against. HEAD *and* tree, read from the
+  # supervisor's own `revision` so the checkpoint envelope and a job record
+  # cannot mean different things by "the current revision".
+  # ONE derivation, shared with `resume`'s writer (lib/aid-resume-artifact.sh):
+  # the repo whose tree a row is about is the repo the JOB runs in, which is the
+  # same `--repo` this runner hands the supervisor.
+  local _rows_rev _rows_head _rows_tree _rows_key _rows_home
+  _rows_rev="$(aid_gate_row_revision "$_plugin_project_root")"
+  _rows_head="${_rows_rev%% *}"; _rows_tree="${_rows_rev##* }"
+  # The run's own gate-row secret. Created on first use beside the run's other
+  # evidence, never bringing an evidence directory into being; empty when there
+  # is no evidence directory, which makes every checkpoint unbindable and every
+  # restore a refusal — the fail-closed direction.
+  _rows_key="$(aid_gate_row_run_key "$_evidence_dir")"
+  # The checkpoint's HOME — the canonical path of the directory it lives in, so a
+  # binding written here verifies only here. See the lifecycle note on the key.
+  _rows_home="$(aid_gate_row_home "$_evidence_dir")"
+
+  # ─── P076 Step 4 — continuation pointer identity, resolved ONCE ──────────
+  # `safe_next_action` is stored FULLY RESOLVED: this plugin's real path (never
+  # a {plugin_path} token), the literal epic and run ids, the real execution.yaml
+  # and report paths. The schema forbids '<' in the field precisely so no
+  # '<epic_id>'-style placeholder can survive into a continuation instruction.
+  _RESUME_EPIC_ID="$epic_id"
+  _RESUME_RUN_ID="$run_id"
+  _RESUME_PLAN_ID="unknown"
+  [[ "$epic_id" =~ ^E-([0-9]+) ]] && _RESUME_PLAN_ID="P${BASH_REMATCH[1]}"
+  _RESUME_ARTIFACT=""
+  [[ -d "$_evidence_dir" ]] && _RESUME_ARTIFACT="${_evidence_dir}/${AID_RESUME_ARTIFACT_BASENAME}"
+  _RESUME_SAFE_NEXT_ACTION="bash ${SCRIPT_DIR}/aid-run-gates.sh run-all ${execution_yaml} ${epic_id} ${run_id} --report-file ${report_path}"
 
   # ─── Execution ledger (P072 Step 26) ─────────────────────────────────────
   # The gate runner owns the ledger's LIFECYCLE only; the dispatch points own
@@ -550,6 +1806,94 @@ run_all_gates() {
     fi
   fi
 
+  # ─── Services: entry sweep, then ACQUIRE ONCE (P076 Step 10) ─────────────
+  # HERE, and not earlier or later, for four reasons that each pin one edge:
+  #   • after `_validate_services_config`, so a malformed declaration is refused
+  #     before anything is started;
+  #   • after `_evidence_dir` is resolved, because the service registry lives in
+  #     the run's evidence and nothing here invents an evidence directory;
+  #   • after the ledger is opened, so a run that cannot be accounted refuses
+  #     before it starts a process;
+  #   • BEFORE the gate loop, so a service failure fails the whole run before a
+  #     single gate has run and reported on infrastructure that never came up.
+  #
+  # The sweep runs before the acquire because a SIGKILLed runner reaches no
+  # completion hook, ever: the next `run-all` IS the crash recovery. It tears
+  # down whatever the dead run left non-stopped (registry entries plus, inside
+  # `aid_service_down_all`, any live job the registry does not name), and the
+  # idempotent `up_all` then starts cleanly instead of beside an orphan.
+  #
+  # ONE OWNER PER RUN, and it is enforced two different ways for two different
+  # kinds of second runner — say which is which, because a single sentence here
+  # previously implied a guarantee only one half of it delivered:
+  #   • the KNOWN re-entry. The targeted_tests escalation re-enters this script
+  #     as a subprocess against the SAME epic/run — and therefore the same
+  #     registry — while this invocation's services are up. It is handed
+  #     AID_SERVICE_LIFECYCLE_OWNED=1, which makes it a CONSUMER: it still reads
+  #     the registry for its own `needs_services` checks, and it neither sweeps,
+  #     acquires nor releases. An environment variable is enough here and only
+  #     here, because we are the parent that sets it.
+  #   • ANY OTHER second runner — a rerun launched while the first is still mid
+  #     gates, from a script, a second session, or a scheduler. Nothing tells us
+  #     about that one, so we ask the operating system: the claim record left by
+  #     the current owner is checked against a LIVE PROCESS, and a second runner
+  #     REFUSES rather than sweeping a running run's services out from under it.
+  #     Refusing is the fail-closed direction: a run that will not start is an
+  #     error message, a database torn down mid-gates is a corrupted verdict.
+  local _svc_count=0 _svc_manage=1
+  _svc_count="$(_svc_declared_count "$execution_yaml")"
+  [[ "${AID_SERVICE_LIFECYCLE_OWNED:-}" == "1" ]] && _svc_manage=0
+  if (( _svc_count > 0 )); then
+    _svc_lib_load || exit 1
+  fi
+  # A run that declares services and does not manage them is a legitimate but
+  # UNUSUAL shape: every gate that does not name `needs_services` runs against
+  # infrastructure nobody started, and passes. Recorded, so that run's evidence
+  # cannot be mistaken for a run that had its services (finding 3).
+  if (( _svc_count > 0 && _svc_manage == 0 )); then
+    log_event "$timeline_file" "services_lifecycle_delegated" \
+      declared="$_svc_count" reason="AID_SERVICE_LIFECYCLE_OWNED"
+  fi
+  if (( _svc_count > 0 && _svc_manage == 1 )); then
+    if [[ -z "$_evidence_dir" || ! -d "$_evidence_dir" ]]; then
+      echo "ERROR: aid-run-gates.sh: ${_svc_count} service(s) declared in ${execution_yaml} but there is no evidence directory at '${_evidence_dir}' to hold the service registry — refusing to start a service this run could not record, and therefore could not stop" >&2
+      exit 1
+    fi
+    # BEFORE the sweep, because the sweep is the destructive step.
+    if _svc_owner_live "$_evidence_dir"; then
+      log_event "$timeline_file" "service_owner_conflict" evidence_dir="$_evidence_dir"
+      echo "ERROR: aid-run-gates.sh: another gate runner is still managing the services recorded under '${_evidence_dir}' ($(_svc_owner_describe "$_evidence_dir")) — refusing to run. Two runners sharing one run's service registry cannot both own it: this one would sweep the live run's services out from under its gates. Wait for that run, or stop it; if it is gone and this message persists, its claim record is ${_evidence_dir}/services.owner.json." >&2
+      exit 1
+    fi
+    if _svc_stale_state_present "$_evidence_dir"; then
+      echo "aid-run-gates.sh: this run's evidence still holds service state from an earlier, unfinished invocation — sweeping it before acquiring (a killed runner reaches no cleanup hook; this rerun is the cleanup)" >&2
+      log_event "$timeline_file" "service_stale_sweep" evidence_dir="$_evidence_dir"
+      aid_service_down_all "$_evidence_dir" "$execution_yaml" || true
+    fi
+    # The claim goes down BEFORE anything is started, so there is no window in
+    # which this run owns a service that no record names as ours. A claim we
+    # cannot write is a claim the next runner cannot check, so it fails the run
+    # rather than starting services nobody can prove ownership of.
+    if ! _svc_owner_claim "$_evidence_dir" "$run_id"; then
+      echo "ERROR: aid-run-gates.sh: could not record the service ownership claim at '$(_svc_owner_file "$_evidence_dir")' — refusing to start services whose owner a second runner could not check (it would read the absence as 'nobody owns these' and sweep them)" >&2
+      exit 1
+    fi
+    log_event "$timeline_file" "services_acquire_start" declared="$_svc_count"
+    local _svc_up_rc=0
+    aid_service_up_all "$_evidence_dir" "$execution_yaml" || _svc_up_rc=$?
+    if (( _svc_up_rc != 0 )); then
+      # Whatever DID come up is recorded and therefore stoppable — release it
+      # through the one teardown definition before failing.
+      _SVC_ACQUIRED=1
+      log_event "$timeline_file" "services_acquire_fail" declared="$_svc_count" exit_code="$_svc_up_rc"
+      _svc_release_run "$_evidence_dir" "$execution_yaml"
+      echo "ERROR: aid-run-gates.sh: the declared services for this run did not come up (aid_service_up_all exit ${_svc_up_rc}) — refusing to run any gate against infrastructure that is not there. The named service failure is above." >&2
+      exit 1
+    fi
+    _SVC_ACQUIRED=1
+    log_event "$timeline_file" "services_acquired" declared="$_svc_count"
+  fi
+
   # Iterate gate names via yq (mikefarah)
   local gate_names
   gate_names=$(yq '.gates | keys | .[]' "$execution_yaml")
@@ -562,6 +1906,25 @@ run_all_gates() {
     # silently-lost gate so the defined==processed integrity assert below can be
     # exercised end-to-end (OBS-20260708-07 F4c).
     if [[ -n "${AID_TEST_DROP_GATE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE}" ]]; then
+      continue
+    fi
+
+    # Test-only fault injection (never set in production): skip a gate's
+    # iteration to simulate a runner that DIED before reaching it. Unlike
+    # AID_TEST_DROP_GATE above, this seam deliberately does NOT suppress the
+    # checkpoint-restore pass — a crashed run's un-iterated gate is exactly what
+    # that pass exists for, and no ordinary path through this loop leaves a gate
+    # rowless, so this is the only way to exercise it.
+    #
+    # Setting it can no longer MANUFACTURE a result. It used to: combined with a
+    # hand-written `gates_rows/<gate>.json` whose only binding was the public
+    # HEAD, a required gate declaring `command: "exit 1"` reported `pass`. The
+    # restore pass now requires a keyed binding only this run's own writers can
+    # produce, so this seam can skip a gate's execution but the outcome is either
+    # a genuine row the run itself checkpointed, or an explicit refusal — and a
+    # gate with no restorable row at all trips the defined==processed integrity
+    # assert and fails the run.
+    if [[ -n "${AID_TEST_DROP_GATE_RESTORE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE_RESTORE}" ]]; then
       continue
     fi
 
@@ -583,12 +1946,15 @@ run_all_gates() {
       continue
     fi
 
-    local cmd required max_retries timeout_s pass_criteria
+    local cmd required max_retries timeout_s pass_criteria run_mode
     cmd=$(yq ".gates.\"${gate_name}\".command" "$execution_yaml")
     required=$(yq ".gates.\"${gate_name}\".required // false" "$execution_yaml")
     max_retries=$(yq ".gates.\"${gate_name}\".max_retries // 1" "$execution_yaml")
     timeout_s=$(yq ".gates.\"${gate_name}\".timeout_seconds // 60" "$execution_yaml")
     pass_criteria=$(yq ".gates.\"${gate_name}\".pass_criteria // \"\"" "$execution_yaml")
+    # P076 Step 2 — already validated for every gate above; re-read here as the
+    # per-gate dispatch input. Absent → "foreground" → the untouched code path.
+    run_mode=$(resolve_run_mode "$execution_yaml" "$gate_name")
 
     if [[ -z "$cmd" || "$cmd" == "null" ]]; then
       # A null-command gate must leave an explicit skip row — never a bare
@@ -601,6 +1967,46 @@ run_all_gates() {
       gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"skip\",\"reason\":\"no_command\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0}"
       processed=$((processed+1))
       continue
+    fi
+
+    # ─── needs_services fail-fast (P076 Step 10) ──────────────────────────
+    # A gate that declares `needs_services` runs ONLY when every named service is
+    # healthy right now. The check is here — before placeholder resolution, before
+    # the ledger append, before any dispatch — so a gate whose dependency is down
+    # fails FAST and by name instead of failing slowly, in its own words, about
+    # something else. The names were validated against the declarations at config
+    # check, so anything unhealthy here is a runtime fact, never a typo.
+    #
+    # This is a READ of the registry plus one probe per service: cheap enough to
+    # sit on the `background` path too, where it happens at gate start, before the
+    # job is spawned. And it never touches the service — checking is not managing;
+    # the run acquired once and will release once.
+    #
+    # Other gates are completely unaffected: one unhealthy dependency fails ONE
+    # gate, and the loop continues.
+    if (( _svc_count > 0 )); then
+      local _needs_json _need _unhealthy=""
+      _needs_json="$(GATE="$gate_name" yq -o=json '.gates[strenv(GATE)].needs_services // []' "$execution_yaml" 2>/dev/null | tr -d '\n ' || echo '[]')"
+      if [[ -n "$_needs_json" && "$_needs_json" != "[]" && "$_needs_json" != "null" ]]; then
+        while IFS= read -r _need; do
+          [[ -z "$_need" ]] && continue
+          if ! aid_service_status "$_need" "$_evidence_dir" "$execution_yaml" >/dev/null 2>&1; then
+            _unhealthy+="${_unhealthy:+, }${_need}"
+          fi
+        done < <(jq -r '.[]' <<<"$_needs_json" 2>/dev/null || true)
+      fi
+      if [[ -n "$_unhealthy" ]]; then
+        echo "ERROR: aid-run-gates.sh: gate '${gate_name}' needs service(s) that are not healthy: ${_unhealthy} — failing this gate fast rather than running it against infrastructure that is not there" >&2
+        log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="service_unhealthy" services="$_unhealthy"
+        $first || gates_json+=","
+        first=false
+        gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_unhealthy" \
+          '{gate:$g, result:"fail", reason:"service_unhealthy", exit_code:1, duration_ms:0,
+            output:("required service(s) not healthy: " + $s), attempts:0, unhealthy_services:($s | split(", "))}')"
+        processed=$((processed+1))
+        if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
+        continue
+      fi
     fi
 
     # Phase 2 (P037) — resolve {token} placeholders before bash -c execution.
@@ -658,6 +2064,8 @@ run_all_gates() {
              --fingerprint "$(printf '%s' "$resolved_cmd" | sha256sum | cut -c1-16)" \
              --dispatch-point gate_runner_direct >/dev/null 2>&1; then
           echo "ERROR: aid-run-gates.sh: execution-ledger append failed for gate '$gate_name' — refusing to continue with incomplete accounting" >&2
+          # An abandoned run must not abandon its services. Same one teardown.
+          _svc_release_run "$_evidence_dir" "$execution_yaml"
           return 3
         fi
       done < <(grep -oE '[A-Za-z0-9_./-]+\.bats' <<<"$resolved_cmd" 2>/dev/null \
@@ -669,6 +2077,18 @@ run_all_gates() {
       gate_exit=0
       if $use_scheduled_dispatch; then
         gate_result=$(run_scheduled_targeted_tests "$gate_name" "$rollout_effective_mode" "$base_commit_resolved" "$plugin_path_resolved" "$epic_id" "$run_id" "$_plugin_project_root" "$timeout_s" "$attempt") || gate_exit=$?
+      elif [[ "$run_mode" == "background" ]]; then
+        # P076 Step 2 — delegated, group-owned, re-attachable. Each RETRY gets
+        # its own deterministic job id (`<gate>-attempt-<N>`), so the existing
+        # retry budget and code path are untouched: this branch declares how an
+        # attempt runs, it never rewires how many attempts there are.
+        if [[ -z "$_jobs_dir" ]]; then
+          echo "ERROR: aid-run-gates.sh: gate '${gate_name}' declares run_mode: background but there is no evidence directory at '${_evidence_dir}' to hold its job record — refusing to run it unowned" >&2
+          gate_result=$(_bg_fail_row "$gate_name" "no_jobs_dir" "no evidence directory at ${_evidence_dir}")
+          gate_exit=1
+        else
+          gate_result=$(run_background_gate "$gate_name" "$resolved_cmd" "$timeout_s" "$attempt" "$_jobs_dir" "$timeline_file" "$_plugin_project_root") || gate_exit=$?
+        fi
       else
         gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       fi
@@ -723,6 +2143,11 @@ run_all_gates() {
         # reason/recommendation are purely additive fields describing WHY no
         # further attempt was made.
         gate_result=$(echo "$gate_result" | jq '.result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
+        # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. AFTER the row is
+        # final, so the recorded stop is the verdict that was actually reached;
+        # `gate_result` is never touched from here, and `break` still happens.
+        _gate_ladder_emit GATE_TIMEOUT timeout_policy_block \
+          "gate ${gate_name}: three censored samples at or above the configured ${timeout_s}s timeout — no further attempt is spent"
         break
       fi
 
@@ -817,10 +2242,30 @@ run_all_gates() {
     [[ -z "$runtime_baseline_json" ]] && runtime_baseline_json='null'
     runtime_baseline_nc=$(jq -r '.non_censored_samples_count // 0' <<<"$runtime_baseline_json" 2>/dev/null)
     [[ "$runtime_baseline_nc" =~ ^[0-9]+$ ]] && (( runtime_baseline_nc >= 5 )) && baseline_summary_gates+=("$gate_name")
+
+    # ─── P076 Step 3 — run_mode advice collection (observe-only) ───────────
+    # Same already-fetched runtime_baseline_json, no extra read. The
+    # recommendation itself carries the library's rules (>= 5 non-censored
+    # samples AND p95 > 10 min → "background"; anything else → null or
+    # "foreground"), so nothing is re-derived here. An unreadable/absent
+    # baseline yields null → no advice, no failure (fail-open telemetry).
+    local _advice_rec _advice_p95
+    _advice_rec=$(jq -r '.run_mode_recommended // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
+    if [[ "$_advice_rec" == "background" ]] && ! _run_mode_declared "$execution_yaml" "$gate_name"; then
+      _advice_p95=$(jq -r '.p95_ms // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
+      [[ "$_advice_p95" =~ ^[0-9]+$ ]] || _advice_p95="null"
+      run_mode_advice_gates+=("${gate_name}|${_advice_p95}")
+    fi
     $first || gates_json+=","
     first=false
-    gates_json+="\"${gate_name}\":$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" ". + {\"attempts\":${attempt}, \"runtime_baseline\": \$rb}")"
+    local merged_row
+    merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" ". + {\"attempts\":${attempt}, \"runtime_baseline\": \$rb}")
+    gates_json+="\"${gate_name}\":${merged_row}"
     processed=$((processed+1))
+
+    # P076 Step 2 — durable incremental checkpoint of the COMPLETED row.
+    _gate_row_checkpoint "$_rows_dir" "$gate_name" "$merged_row" "$_rows_head" \
+      "$_rows_tree" "$_rows_key" "$_rows_home"
 
     # ─── command_log entry (P032 Step 3 provenance) ──────────────────
     local exit_code dur_ms
@@ -840,6 +2285,92 @@ run_all_gates() {
   done <<< "$gate_names"
   unset AID_CURRENT_GATE_ID
 
+  # ─── restore checkpointed rows this invocation did not produce (P076 S2) ──
+  # The other half of the incremental checkpoint: the in-memory rows above are
+  # read exactly as before, AND any gate that already has a durable row file
+  # but produced no row in THIS invocation is restored from it, verbatim and
+  # authoritative. That is what a rerun after a crash assembles from — the
+  # finished suite is not re-executed to reproduce a row that already exists.
+  #
+  # Only DEFINED gates are restored: a row file for a gate that execution.yaml
+  # no longer declares is not this run's business, and counting it would break
+  # the defined==processed assert below. The membership test is anchored by the
+  # opening quote (`"name":`), so gate `a` never matches inside gate `ba`.
+  #
+  # A row file is authoritative only for the REVISION it was produced at AND
+  # only when THIS RUN's own writers produced it. Every checkpoint carries a
+  # `_checkpoint` envelope of {head, tree, key}; a row whose envelope is missing
+  # (an older runner, or a jq failure at write time), whose head or tree has
+  # since moved, or whose keyed binding does not verify against this run's
+  # secret, is NEVER restored as a pass. It is replaced by an explicit
+  # `gate_row_stale` FAIL row, which still counts toward `processed` — so the
+  # defined==processed integrity assert keeps holding — and still forces
+  # overall=fail when the gate is required. Refusal, not silence: "this gate has
+  # no current result" must look different from "this gate passed".
+  #
+  # The key check is what closes the demonstrated forgery: a hand-written row
+  # carrying the current HEAD used to replay as a required-gate PASS, because
+  # HEAD is public and readable by anything that can write the row file. It also
+  # fails closed on its own inputs — no run key (no evidence directory, or an
+  # unwritable/corrupt key file) means EVERY row is refused, never accepted.
+  if [[ -n "$_rows_dir" && -d "$_rows_dir" ]]; then
+    local _rf _rg _rrow _rec_head _rec_tree _rec_key _want_key _stale_reason _required_rg
+    for _rf in "$_rows_dir"/*.json; do
+      [[ -f "$_rf" ]] || continue
+      _rg="$(basename "$_rf" .json)"
+      [[ "$gates_json" == *"\"${_rg}\":"* ]] && continue
+      grep -qxF "$_rg" <<< "$gate_names" || continue
+      # The lost-gate fault injection simulates a row that was never produced;
+      # restoring one from an earlier run would defeat the very assert it feeds.
+      [[ -n "${AID_TEST_DROP_GATE:-}" && "$_rg" == "${AID_TEST_DROP_GATE}" ]] && continue
+      _rrow="$(jq -c '.' "$_rf" 2>/dev/null)" || continue
+      [[ -z "$_rrow" || "$_rrow" == "null" ]] && continue
+
+      _rec_head="$(jq -r '._checkpoint.head // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _rec_tree="$(jq -r '._checkpoint.tree // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _rec_key="$(jq -r '._checkpoint.key // ""' <<<"$_rrow" 2>/dev/null || echo "")"
+      _want_key="$(aid_gate_row_binding_key "$_rows_key" "$_rg" "$_rows_head" "$_rows_tree" "$_rows_home")"
+      _stale_reason=""
+      if [[ -z "$_rec_head" ]]; then
+        _stale_reason="row_not_bound_to_a_revision"
+      elif _job_head_drifted "$_rec_head" "$_rows_head"; then
+        _stale_reason="start_head_moved"
+      elif [[ -z "$_rec_tree" ]] || { [[ -n "$_rows_tree" ]] && [[ "$_rec_tree" != "$_rows_tree" ]]; }; then
+        _stale_reason="start_tree_moved"
+      elif [[ -z "$_want_key" ]]; then
+        _stale_reason="run_key_unavailable"
+      elif [[ "$_rec_key" != "$_want_key" ]]; then
+        _stale_reason="row_not_written_by_this_run"
+      fi
+
+      _required_rg="$(yq ".gates.\"${_rg}\".required // false" "$execution_yaml")"
+      $first || gates_json+=","
+      first=false
+      if [[ -n "$_stale_reason" ]]; then
+        gates_json+="\"${_rg}\":$(jq -nc --arg g "$_rg" --arg sr "$_stale_reason" \
+          --arg rec "$_rec_head" --arg cur "$_rows_head" --arg src "$_rf" \
+          '{gate:$g, result:"fail", exit_code:1, duration_ms:0, attempts:0,
+            output:("checkpointed gate row at " + $src + " is not valid for the current revision (" + $sr + "); the gate did not run in this invocation"),
+            reason:"gate_row_stale", stale_reason:$sr,
+            recorded_head:(if $rec == "" then null else $rec end),
+            current_head:(if $cur == "" then null else $cur end)}')"
+        processed=$((processed+1))
+        log_event "$timeline_file" "gate_row_stale" gate="$_rg" source="$_rf" \
+          reason="$_stale_reason" recorded_head="$_rec_head" current_head="$_rows_head"
+        if [[ "$_required_rg" == "true" ]]; then overall="fail"; fi
+      else
+        gates_json+="\"${_rg}\":${_rrow}"
+        processed=$((processed+1))
+        log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf" \
+          head="$_rec_head"
+        if [[ "$(jq -r '.result // ""' <<<"$_rrow")" == "fail" ]] \
+           && [[ "$_required_rg" == "true" ]]; then
+          overall="fail"
+        fi
+      fi
+    done
+  fi
+
   # ─── Close the ledger, and evaluate it ───────────────────────────────────
   # `close` is where the duplicate check actually runs. Opening a ledger and
   # never closing it would be a detector with no consumer — the exact shape
@@ -858,6 +2389,9 @@ run_all_gates() {
     if [[ "$_ledger_rc" -ne 0 && "$_ledger_rc" -ne 7 ]]; then
       echo "ERROR: aid-run-gates.sh: the execution ledger could not be closed or evaluated (exit ${_ledger_rc}): ${_ledger_out}" >&2
       unset AID_EXECUTION_LEDGER
+      # Same rule as the append path: no return from this function leaves a
+      # service this invocation acquired still running.
+      _svc_release_run "$_evidence_dir" "$execution_yaml"
       return 3
     fi
     if [[ "$_ledger_rc" -eq 7 ]]; then
@@ -1069,7 +2603,12 @@ run_all_gates() {
     # the parent's AID_EXECUTION_LEDGER, so without this marker the escalation
     # re-running the same units under the full profile would be recorded as an
     # accidental double execution and fail a run that behaved correctly.
-    AID_EXECUTION_KIND=escalation bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
+    # The escalation is a CONSUMER of this run's services, never their owner —
+    # see the acquire block. Without this it would sweep the services THIS
+    # invocation is still holding, which is the parallel-teardown race in its
+    # most literal form: one runner tearing a service down under another.
+    AID_EXECUTION_KIND=escalation AID_SERVICE_LIFECYCLE_OWNED=1 \
+      bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
     if [[ -f "$full_escalation_report_path" ]]; then
       local full_report_json; full_report_json="$(cat "$full_escalation_report_path")"
       report="$(merge_escalation_report "$report" "$full_report_json" "$escalation_reason")"
@@ -1099,6 +2638,16 @@ run_all_gates() {
     echo "$report" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file"
   fi
 
+  # ─── Services: RELEASE ONCE (P076 Step 10) ───────────────────────────────
+  # AFTER the report is written and echoed, on both the pass and the fail path,
+  # and exactly once for the whole run. Cleanup never un-writes evidence: if the
+  # teardown does not fully succeed the run still reports what the gates found,
+  # and the failure is a warning naming the manual commands.
+  if (( _SVC_ACQUIRED == 1 )); then
+    _svc_release_run "$_evidence_dir" "$execution_yaml"
+    log_event "$timeline_file" "services_released" declared="$_svc_count"
+  fi
+
   # Existing per-run completion event (kept for backward compat)
   log_event "$timeline_file" "gates_complete" overall="$overall" epic_id="$epic_id"
 
@@ -1121,6 +2670,34 @@ run_all_gates() {
     local baseline_summary_gate
     for baseline_summary_gate in "${baseline_summary_gates[@]}"; do
       gate_baseline_show "$baseline_summary_gate" >&2
+    done
+  fi
+
+  # ─── run_mode advice (P076 Step 3) ─────────────────────────────────────
+  # The first behavioural consumer of gate_baseline_recommend_run_mode, and
+  # deliberately the mildest one: a named timeline event carrying the exact
+  # one-line edit, once per gate per run. It changes NOTHING about how any gate
+  # ran — the run is already over at this point, the report is written, and the
+  # decision to flip stays a human one. The edit string is built from the gate
+  # name alone, so it is copy-pasteable in any consumer project.
+  if (( ${#run_mode_advice_gates[@]} > 0 )); then
+    local _advice_entry _advice_gate_name _advice_gate_p95
+    for _advice_entry in "${run_mode_advice_gates[@]}"; do
+      _advice_gate_name="${_advice_entry%|*}"
+      _advice_gate_p95="${_advice_entry##*|}"
+      # Once per gate per RUN, not per invocation: a targeted pass that
+      # escalates re-enters this script as a subprocess writing to the SAME
+      # run timeline, and a gate present in both passes must still be advised
+      # exactly once. Cheap because the advice list is normally empty.
+      if [[ -f "$timeline_file" ]] && jq -se --exit-status --arg g "$_advice_gate_name" \
+           'any(.[]; .event == "gate_run_mode_advice" and .gate == $g)' \
+           "$timeline_file" >/dev/null 2>&1; then
+        continue
+      fi
+      log_event "$timeline_file" "gate_run_mode_advice" \
+        gate="$_advice_gate_name" \
+        p95_ms="$_advice_gate_p95" \
+        edit="set gates.${_advice_gate_name}.run_mode: background in .aid-o/config/execution.yaml"
     done
   fi
 
