@@ -198,8 +198,7 @@ entries_json="$(jq -n \
     else
       ([
         {focus: "performance_cost"},
-        {focus: "flake_isolation"},
-        {focus: "parallel_safety"}
+        {focus: "flake_isolation"}
       ] | map({
         wave: 2,
         focus: .focus,
@@ -276,14 +275,6 @@ for ((i = 0; i < entry_count; i++)); do
         --arg repeat_runs_path "${output_dir%/}/repeat-runs.jsonl" --arg catalog_path "$catalog" \
         --arg output_schema_path "$WAVE_ARTIFACT_SCHEMA" --arg producer_agent_dispatch_id "$dispatch_id" \
         '{audit_id:$audit_id, wave:$wave, measurements_path:$measurements_path, repeat_runs_path:$repeat_runs_path, catalog_path:$catalog_path, output_schema_path:$output_schema_path, producer_agent_dispatch_id:$producer_agent_dispatch_id}' \
-        > "$vars_file"
-      ;;
-    parallel_safety)
-      template="${PROMPTS_DIR}/test-audit-parallel-safety-prompt-v1.md"
-      jq -n --arg audit_id "$audit_id" --arg wave "$wave" --arg catalog_path "$catalog" \
-        --arg measurements_path "${output_dir%/}/measurements.jsonl" \
-        --arg output_schema_path "$WAVE_ARTIFACT_SCHEMA" --arg producer_agent_dispatch_id "$dispatch_id" \
-        '{audit_id:$audit_id, wave:$wave, catalog_path:$catalog_path, measurements_path:$measurements_path, output_schema_path:$output_schema_path, producer_agent_dispatch_id:$producer_agent_dispatch_id}' \
         > "$vars_file"
       ;;
     adversarial_review)

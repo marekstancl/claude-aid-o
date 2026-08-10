@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/execution-unit-receipt.schema.json",
   "title": "AID Test Portfolio — Execution Unit Receipt",
-  "$comment": "producer: aid-test-scheduler.sh (P069 Step 5) + aid-run-gates.sh's scheduler dispatch (Step 14); consumers: report merge (Step 8), gate-runner integration (Step 14). Defined here, before either producer exists, to pin the one canonical shape both target — see this plan's Step 4.",
+  "$comment": "producer: scripts/lib/aid-test-execution-unit.sh (execution_unit_receipt); consumer: any caller aggregating per-unit results. P078 removed the scheduler producer and its report merge with the parallelism machinery; the shape is unchanged.",
   "description": "Deterministic report shape for a scheduled batch of execution units (Step 1's shape) and their terminal/non-terminal outcomes. Sort key for `units[]` is ALWAYS unit_id — never arrival or completion order — so two batches built from the same units in a different execution order serialize to byte-identical output.",
   "$defs": {
     "receipt": {
@@ -31,8 +31,8 @@
         },
         "concurrency_context": {
           "type": "string",
-          "enum": ["sequential", "observe_parallel", "parallel"],
-          "description": "P069 Step 3's vocabulary — which baseline series (if any) this unit's timing was recorded into."
+          "enum": ["sequential"],
+          "description": "Always \"sequential\" since P078 removed parallel execution; kept so historical receipts and the baseline series keep a stable field."
         },
         "co_scheduled_with": {
           "type": "array",

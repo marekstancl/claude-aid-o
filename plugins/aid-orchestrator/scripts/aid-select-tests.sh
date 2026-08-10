@@ -480,7 +480,7 @@ if [[ -n "$EMIT_UNITS_FILE" ]]; then
       exit 1
     fi
     units_json="$(jq -c --arg u "$unit_id" --argjson cmd "$cmd" \
-      '. + [{unit_id:$u, command:$cmd, deadline_seconds:300, resource_locks:[], parallel_eligible:false, membership_verified:false, dedup:false}]' \
+      '. + [{unit_id:$u, command:$cmd, deadline_seconds:300, membership_verified:false, dedup:false}]' \
       <<<"$units_json")"
   done
 
@@ -489,14 +489,10 @@ if [[ -n "$EMIT_UNITS_FILE" ]]; then
       echo "ERROR: --emit-units: membership verification failed" >&2
       exit 1
     }
-    # parallel_eligible comes from the SHARED effective-status resolver, not
-    # from a raw `.parallel.status` read. A raw read skips the provenance
-    # reversion rule, so this consumer and the lane runner could disagree about
-    # the same unit — one seeing a status the other had already retired.
-    _eff_map="$(aid_test_catalog_effective_status_map "$catalog_path" "$project_root" 2>/dev/null || echo '{}')"
-    units_json="$(jq -c --argjson eff "${_eff_map:-\{\}}" '
-      map(.parallel_eligible = (($eff[.unit_id] // "unknown") as $s | $s == "safe" or $s == "constrained"))
-    ' <<<"$verified_json")"
+    # P078: the parallel_eligible/resource_locks fields and their
+    # effective-status resolver were removed with the parallelism machinery —
+    # units carry only what sequential execution needs.
+    units_json="$verified_json"
   fi
 
   tmp="$(mktemp)"

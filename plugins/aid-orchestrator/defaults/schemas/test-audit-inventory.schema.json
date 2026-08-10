@@ -168,7 +168,7 @@
               "kind": {
                 "enum": [
                   "aggregate_runner",
-                  "catalog_pool_runner",
+                  "bats_tree_runner",
                   "direct_invocation",
                   "context_required"
                 ]

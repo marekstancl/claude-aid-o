@@ -91,65 +91,30 @@ PATH_add "$AID_PLUGIN_PATH/scripts"
 ## Test portfolio audit (`/aid-audit-tests`)
 
 Inventories a project's tests, optionally measures a bounded subset, and ends
-with a six-part plain-language summary that answers **what to do** before it
-shows any evidence: what to do now, what to fix or remove, what can run in
-parallel, what must stay serial, test time now and after, and what is not
-proved yet.
+with a plain-language summary that answers **what to do** before it shows any
+evidence: what to do now, what to fix or remove, test time now and after, and
+what is not proved yet.
 
-**It recommends; it does not act.** The audit never edits a test, never writes
-the catalog's `parallel.status`, never changes `execution.yaml` and never
-changes a scheduler mode. What a `full` run produces is a decision artifact
-whose lanes and actions are proposals — acting on one is a separate, explicit
-step you take.
+**It recommends; it does not act.** The audit never edits a test and never
+changes `execution.yaml`. What a `full` run produces is a decision artifact
+whose actions are proposals — acting on one is a separate, explicit step you
+take.
 
-Two properties are worth knowing before you run it:
+One property is worth knowing before you run it: an audit that did not finish
+deciding says so (`audit_status: incomplete`) and **refuses** to hand over a
+remediation plan. A plan built on the part it skipped would make those units
+read as examined-and-healthy.
 
-- An audit that did not finish deciding says so (`audit_status: incomplete`)
-  and **refuses** to hand over a remediation plan. A plan built on the part it
-  skipped would make those units read as examined-and-healthy.
-- Parallel safety has exactly one authority — the catalog's `parallel` block,
-  bound to the content it was verified against, read by every consumer through
-  one resolver. See
-  [`docs/plans/P072-authority-boundary.md`](../../docs/plans/P072-authority-boundary.md).
+## Test execution is sequential by design
 
-## Test scheduler (opt-in, staged rollout)
-
-Every generated `execution.yaml` carries a `targeted_tests` gate plus a
-`test_audit.scheduler` block:
-
-```yaml
-test_audit:
-  scheduler:
-    mode: sequential        # sequential | observe_parallel | parallel
-    resource_locks: {}
-```
-
-`sequential` (the default) runs targeted_tests exactly as before this
-plan — one selected test at a time, no scheduler involved. Moving to
-`observe_parallel`/`parallel` is a project's own opt-in decision, but the
-mode written here is only a *request*: `aid-scheduler-rollout-gate.sh`
-resolves the actual *effective* mode on every run, and can force it back
-down to `sequential` if the evidence isn't there yet.
-
-**Staged rollout (never configure-your-way-past-it):**
-
-1. Run `aid-test-schedule-divergence-check.sh` against the project's own
-   full test-catalog run_unit set, in both sequential and the target
-   mode, inside a fresh disposable clone, at least 3 times, until 3
-   `pass:true` artifacts exist for the current commit.
-2. `observe_parallel` unlocks once 3 such artifacts (mode_tested:
-   `observe_parallel`, covering the *entire* current catalog — a partial
-   subset never counts) exist for the current commit.
-3. `parallel` additionally requires 3 *separate* qualifying artifacts
-   with mode_tested: `parallel` — evidence from one stage never
-   substitutes for the other.
-
-Missing, stale, or partial-coverage evidence fails closed to
-`sequential`, never open. `aid-run-gates.sh` records the real mode each
-`targeted_tests` run actually executed under in the gate's own
-runtime-baseline sample (`concurrency_context`) — every other gate is
-always recorded as `sequential`, since only `targeted_tests` ever goes
-through the scheduler at all.
+Tests run one at a time. The P069 test scheduler, its staged rollout
+(observe_parallel/parallel), the divergence-evidence campaign and the
+catalog-driven parallel lane were removed in P078 (PM decision 2026-08-09):
+the measured speedup was 3-6 % of a full run, qualification cost ~15 h of
+compute per commit, and the machinery's own test suites were among the most
+expensive in the portfolio. Every generated `execution.yaml` carries a
+`targeted_tests` gate (the change-based test selector — unrelated to
+parallel execution, it stays).
 
 A `targeted_tests` run that hits exit 3 (unverifiable path) or exit 11
 (no approved-catalog mapping row) never resolves silently — it escalates

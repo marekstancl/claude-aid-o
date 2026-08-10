@@ -1453,10 +1453,12 @@ enforcements:
     instruction: ".aid-o/plans/P069-scheduler-gate-integration.md Step 5 Implementation Detail"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P069 Step 5 — a run_unit whose catalog parallel.status is 'unknown' (the default for every unit until an explicit promotion) or 'exclusive' is NEVER batched alongside another unit, in ANY scheduler mode (sequential, observe_parallel, or parallel) — it always gets its own size-1 batch, identical in shape to what mode=sequential would have produced for it. Only 'safe'/'constrained' units (an explicit, catalog-recorded promotion) are ever eligible for co-scheduling, and even then only with a peer whose resolved_locks[] don't overlap. This is what makes 'unknown' a genuinely safe default rather than an optimistic one — a project with zero promoted units behaves identically to pure sequential execution regardless of its configured mode."
-    test: "scripts/tests/bats/test-aid-test-scheduler.bats"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: scheduler_rollout_requires_divergence_evidence
     type: 1
@@ -1464,21 +1466,23 @@ enforcements:
     instruction: ".aid-o/plans/P069-scheduler-gate-integration.md Step 13 (Constraint 8 staged rollout)"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P069 Step 13 — a project cannot configure its way into observe_parallel/parallel execution merely by editing execution.yaml's test_audit.scheduler.mode. aid-run-gates.sh (Step 14) calls this gate before every targeted_tests dispatch; it resolves the EFFECTIVE mode by requiring 3 qualifying divergence-evidence artifacts (commit-matched, pass:true, fingerprint-fresh, run_id-deduplicated, and — EPIC 4 whole-diff review fix — covering the FULL current catalog, never an arbitrary subset) for observe_parallel, and BOTH that stage's 3 artifacts AND 3 separate qualifying parallel-tested artifacts for parallel (cross-mode evidence substitution rejected). Missing/insufficient/stale evidence fails closed to sequential, never open."
-    test: "scripts/tests/bats/test-aid-scheduler-rollout-gate.bats"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: scheduler_no_second_job_supervisor
     type: 1
-    source: "scripts/lib/aid-test-execution-unit.sh (execution_unit_run); scripts/aid-test-scheduler.sh (cmd_dispatch)"
+    source: "scripts/lib/aid-test-execution-unit.sh (execution_unit_run)"
     instruction: ".aid-o/plans/P069-scheduler-gate-integration.md Constraint 4"
     severity: advisory
     surface: internal-guard
     status: active
     verdict: ALIGNED
     description: "P069 Constraint 4 — execution units (Step 1, execution_unit_run) and the scheduler's own per-unit dispatch (Step 5, cmd_dispatch) both delegate ALL actual process creation, deadline enforcement, and process-group lifecycle to aid-job.sh's existing, already-tested primitives (setsid detach, terminal states terminal_pass|terminal_fail|timed_out|cancelled) — never a second, parallel reimplementation of THAT layer. This does not claim the scheduler itself does nothing: cmd_dispatch legitimately owns batch-level coordination (outstanding-job tracking, TERM/INT cancellation fan-out, terminal-receipt polling) — the constraint is specifically that none of that coordination logic re-implements what aid-job.sh already owns (spawning, supervising, or reaping the underlying OS process). Advisory (not blocking) because this is an architectural discipline verified by code inspection/grep at review time, not something a single runtime precondition can mechanically re-verify on every invocation the way a gate does."
-    test: "grep guard — no second job-supervision implementation (setsid/process-group management) exists outside scripts/aid-job.sh"
+    test: "grep guard — no second job-supervision implementation (setsid/process-group management) exists outside scripts/aid-job.sh (P078: the scheduler that was this row's second subject is deleted; the constraint continues to bind execution units)"
 
   - id: test_audit_profile_ingestion_fail_closed
     type: 1
@@ -1522,11 +1526,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md step 5c"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P072 Step 14 — parallel-safety reasoning rests on read source rather than on a pattern match. The builder follows source/./load directives to a recorded depth cap and cites file:line for every resource; the schema rejects a `shared` entry that names no location. Because only per-test/per-run units may share a pool downstream, every rule resolves toward `unknown` (which costs exactly what `shared` costs) rather than toward private: an explicit `git -C`/GIT_DIR selector overrides the working directory, an absolute or $VAR-anchored path ignores it entirely, an unresolvable or conditional `cd` makes the directory unknown rather than leaving a stale value standing, and a helper that exists but sits beyond the depth cap caps the whole unit."
     recovery: "A `shared` entry cites the file:line that justifies it — go read it. An `unknown` namespace names what defeated the analysis (an unresolvable cd, a computed path, a helper beyond the depth cap); making that construct readable, or raising --depth-cap, resolves it."
-    test: "scripts/tests/bats/test-aid-test-resource-map.bats"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: test_audit_pilot_evidence_bound
     type: 1
@@ -1534,11 +1540,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md step 5c"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P072 Step 15 (this row also carries the plan's `test_audit_pilot_requires_disposable_root`: the pilot exits 10 against the live checkout or a linked worktree, before any process starts) — a lane may be proposed only on a pilot that ran its own membership in a disposable clone bound to the audited tree's HEAD and tree hash. Every side of every repetition runs in its own fresh snapshot (a shared tree let the serial side warm state that made a cold concurrency race vanish); both sides must exit zero from a terminal_pass job; the per-case comparison is positional rather than name-keyed (two cases sharing a name are two facts); leak detection digests the whole snapshot including git-ignored files and edits to pre-existing ones. A failing repetition ends the pilot with the failing index and NO retry, because retrying until green is how a flaky lane gets promoted. The schema rejects `proposed` without as many matching repetitions as were requested, and rejects it outright when GNU parallel was unavailable and no concurrent run actually happened."
     recovery: "A refusal names the failing repetition and what differed. Fix the shared state the concurrent run exposed, then re-pilot. Never re-run hoping for green: the refusal is the finding."
-    test: "scripts/tests/bats/test-aid-test-parallel-pilot.bats"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: test_catalog_parallel_provenance_binding
     type: 1
@@ -1546,11 +1554,13 @@ enforcements:
     instruction: "defaults/config/bats-parallel-safe-allowlist.txt (retirement notice)"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P072 Step 16 (hardened by pre-merge review; this row is the plan's `test_audit_parallel_promotion_requires_provenance`) — provenance binds a status to the unit's whole DEPENDENCY CLOSURE, not only its declared source_paths: a status covering just the unit's own file survived its shared helper acquiring a lock, since the unit's bytes were unchanged and the resource digest was therefore never recomputed. A non-`unknown` parallel.status must carry its evidence_ref, verified_at, method, source_sha256 and resource_digest, enforced by the catalog schema. Every consumer resolves the field through aid_test_catalog_provenance_effective_status, which applies a two-tier reversion: an unchanged source keeps the status; a changed source whose resource digest is unchanged keeps it and refreshes the hash; a changed digest or a deleted source path reverts to `unknown`. One tier would cost a full pilot for a comment fix and stop being obeyed. The digest covers each resource's identifying detail, not merely its kind — a unit already writing one shared path that starts writing a second one changes its sharing proposition and must revert. A recheck that cannot finish within decision.provenance_recheck_budget_ms fails closed."
     recovery: "A unit that reverted to `unknown` runs sequentially until re-piloted — that is the safe state, not an outage. Re-run the pilot for it and record the result with method resource_map_plus_pilot."
-    test: "scripts/tests/bats/test-aid-test-catalog-provenance.bats; scripts/tests/test-integration-parallel-authority-e2e.sh"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: test_lane_single_parallel_authority
     type: 1
@@ -1558,11 +1568,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md; defaults/config/bats-parallel-safe-allowlist.txt"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P072 Step 17 (hardened by pre-merge review) — pool eligibility has exactly one authority, and all three consumers use it: aid-bats-parallel-lane.sh, aid-select-tests.sh and aid-test-scheduler.sh all call aid_test_catalog_effective_status_map. The scheduler's approved overlay is an INPUT to that resolver rather than a competing one, and provenance is a floor: an overlay can promote a unit provenance still trusts and can never rescue one it has revoked, because an overlay entry vouches for content it never saw. The authoritative catalog is committed, so a clean clone reproduces the pool. The lane runner reads each unit's effective status from a single catalog snapshot (per-unit re-reads let a concurrent rewrite attach a verdict to a different path than it was made about) and re-hashes every pooled file immediately before dispatch, aborting rather than running content nothing verified. The competing text allowlist is retired to a notice; --allowlist is accepted with a warning that it is not read. The migration carries P071's evidence across with method: migrated_p071_step3, requires each listed path to be its unit's executable source, and REFUSES to migrate a file changed since P071 verified it — hashing edited content into a `safe` status would launder a post-pilot change into fresh-looking evidence."
     recovery: "When the pre-dispatch re-hash aborts, a pooled file changed mid-run: re-run the gate against a settled tree. For the migration, a file listed as changed since P071 is re-piloted rather than re-blessed."
-    test: "scripts/tests/bats/test-aid-catalog-parallel-authority.bats; scripts/tests/bats/test-aid-bats-parallel-lane.bats; scripts/tests/test-integration-parallel-authority-e2e.sh"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: test_audit_lane_membership_exact
     type: 1
@@ -1570,11 +1582,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md step 6"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P078 (2026-08-10) — the test-parallelism machinery this row guarded was deleted outright (PM decision 2026-08-09: negative economics — 3-6 % speedup, ~15 h qualification per commit)."
+    replacement_guard: "none needed — execution is sequential by design; the guarded machinery no longer exists"
     verdict: ALIGNED
     description: "P072 Step 18 (hardened by pre-merge review) — resource maps and pilot receipts are FAIL-CLOSED inputs, validated against their schemas and bound to this audit's inventory and audit id before any lane is built; a pilot's membership hash must cover the membership it names and its repetition contract is re-checked rather than trusted. Selecting these by a schema_version string match alone let a receipt claiming `proposed` with an empty repetitions array promote a lane. A candidate lane reaches `proposed_parallel` only when a pilot receipt reports `promotion: proposed` for its EXACT membership; evidence gathered for any other set promotes nothing. A unit with any shared resource becomes its own keep_serial entry naming that resource, a named removable conflict (fixed path or port) becomes blocked_pending_fix, and a unit whose dependencies could not be read becomes context_required rather than keep_serial — filing an unevaluated unit as 'considered and kept serial' would claim an assessment nobody made. Lane assignment is deterministic by sorted run_unit_id so repeated runs on identical input produce identical lanes. Lanes are proposals written into the decision artifact; nothing here writes the catalog or a scheduler mode."
     recovery: "The halt names the invalid or foreign lane input. Re-run the map or pilot for this audit, or remove an artifact belonging to a different one. A lane that stays keep_serial simply has no pilot for its exact membership yet."
-    test: "scripts/tests/bats/test-aid-test-audit-lanes.bats"
+    test: "removed with the machinery (P078) — the named suites were deleted"
 
   - id: test_audit_incomplete_blocks_write_plan
     type: 1
@@ -1650,13 +1664,13 @@ enforcements:
 
   - id: test_execution_no_double_dispatch
     type: 1
-    source: "scripts/aid-test-execution-ledger.sh (open/append/close, exit 7); scripts/aid-run-gates.sh (lifecycle + gate_runner_direct emission); scripts/aid-bats-parallel-lane.sh; scripts/tests/run-all-tests.sh"
+    source: "scripts/aid-test-execution-ledger.sh (open/append/close, exit 7); scripts/aid-run-gates.sh (lifecycle + gate_runner_direct emission); scripts/tests/run-all-tests.sh"
     instruction: "docs/extending-aid.md — Test-portfolio decision quality (P072)"
     severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "P072 Step 26 — a ledger proving no run unit is executed twice within one gate run. FOUR emission paths, not three: the bats lane, the aggregate runner, the scheduler, and — critically — `aid-run-gates.sh` itself for any gate whose command invokes a runner directly. Instrumenting only the three fan-out points would have recorded ONE entry for `gate:bats_fsm` (which runs a file the pool also runs) and reported zero duplicates, certifying as clean the exact defect the ledger exists to detect. There is deliberately NO membership exemption: it was built, and it silenced that same defect, because each dispatch point appends once per execution it actually performs — so two entries under two gate ids are two executions. FAIL-CLOSED throughout (PM review 2026-08-04): once a gate run has opened a ledger, a failed open, a failed append, a named-but-absent ledger file, or a close that cannot be evaluated each fail the whole gate run — the `|| true` that used to wrap the emission paths is gone, and a failed open no longer degrades silently to running unaccounted. A ledger with a gap is indistinguishable from one showing no duplication, so it is never permitted to read as one. The ONE permitted no-op is a dispatch point carrying no ledger path at all — a developer invoking a suite by hand, where there is no accounted run to record against. The scheduler is the fourth real emission path and appends BEFORE launching each unit — a failed append cancels that dispatch, since running a unit no ledger will record is the gap this refuses to produce. Deliberate repeats are declared at the time they happen via `execution_kind` (normal|retry|escalation; `AID_EXECUTION_KIND` declares a whole subprocess, which is how P069 escalation marks itself) and are reported as `deliberate_repeats` instead of failing; the default is `normal`, so an undeclared repeat is still a double execution. Containment NEVER suppresses a finding."
+    description: "P072 Step 26 — a ledger proving no run unit is executed twice within one gate run. FOUR emission paths, not three: the bats lane, the aggregate runner, the scheduler, and — critically — `aid-run-gates.sh` itself for any gate whose command invokes a runner directly. Instrumenting only the three fan-out points would have recorded ONE entry for `gate:bats_fsm` (which runs a file the pool also runs) and reported zero duplicates, certifying as clean the exact defect the ledger exists to detect. There is deliberately NO membership exemption: it was built, and it silenced that same defect, because each dispatch point appends once per execution it actually performs — so two entries under two gate ids are two executions. FAIL-CLOSED throughout (PM review 2026-08-04): once a gate run has opened a ledger, a failed open, a failed append, a named-but-absent ledger file, or a close that cannot be evaluated each fail the whole gate run — the `|| true` that used to wrap the emission paths is gone, and a failed open no longer degrades silently to running unaccounted. A ledger with a gap is indistinguishable from one showing no duplication, so it is never permitted to read as one. The ONE permitted no-op is a dispatch point carrying no ledger path at all — a developer invoking a suite by hand, where there is no accounted run to record against. The scheduler is the fourth real emission path and appends BEFORE launching each unit — a failed append cancels that dispatch, since running a unit no ledger will record is the gap this refuses to produce. Deliberate repeats are declared at the time they happen via `execution_kind` (normal|retry|escalation; `AID_EXECUTION_KIND` declares a whole subprocess, which is how P069 escalation marks itself) and are reported as `deliberate_repeats` instead of failing; the default is `normal`, so an undeclared repeat is still a double execution. Containment NEVER suppresses a finding. P078 amendment (2026-08-10): the bats lane and the scheduler emission paths were deleted with the parallelism machinery — the live emission paths are the aggregate runner and gate_runner_direct; the ledger contract itself is unchanged."
     recovery: "The close names the unit and both gates. Remove the unit from one of them — usually by dropping the standalone gate whose file the pool already covers — or, if both dispatches are deliberate, split them across profiles so no single run does both."
     test: "scripts/tests/bats/test-aid-test-execution-ledger.bats"
 

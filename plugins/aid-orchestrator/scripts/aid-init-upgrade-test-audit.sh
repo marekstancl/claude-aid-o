@@ -2,18 +2,18 @@
 # aid-init-upgrade-test-audit.sh — P069 Step 12.
 #
 # Explicit, non-invasive upgrade path for an EXISTING project's already-
-# generated .aid-o/config/execution.yaml: adds whichever of the two P069
-# Step 12 stack-independent additions is missing — the targeted_tests gate
-# and/or the test_audit.scheduler block (see render_test_audit_scheduler_block
-# in lib/aid-init-execution-yaml.sh, the SAME renderer compose_execution_yaml
-# uses for a fresh project, so the two paths can never drift). Presence is
-# detected by KEY EXISTENCE (`.gates | has("targeted_tests")` /
-# `.test_audit | has("scheduler")`), never by exact text or a non-null check
-# — a hand-edited `targeted_tests: null` placeholder or `scheduler: null`
-# still counts as "already present" (the key exists) and is never
-# overwritten (Codex review: an earlier `!= null` check misclassified an
-# explicit null value as "missing" and would have inserted a shadowing
-# duplicate key next to it).
+# generated .aid-o/config/execution.yaml: adds the P069 Step 12
+# stack-independent targeted_tests gate when it is missing (see
+# render_targeted_tests_gate_block in lib/aid-init-execution-yaml.sh, the
+# SAME renderer compose_execution_yaml uses for a fresh project, so the two
+# paths can never drift). The test_audit.scheduler half of this upgrade was
+# REMOVED in P078 with the parallelism machinery (PM decision 2026-08-09).
+# Presence is detected by KEY EXISTENCE (`.gates | has("targeted_tests")`),
+# never by exact text or a non-null check — a hand-edited
+# `targeted_tests: null` placeholder still counts as "already present" (the
+# key exists) and is never overwritten (Codex review: an earlier `!= null`
+# check misclassified an explicit null value as "missing" and would have
+# inserted a shadowing duplicate key next to it).
 #
 # Confirm-hash convention mirrors aid-test-catalog-confirm-mapping.sh: no
 # --confirm-upgrade -> print the proposed diff + hash, exit 0 (preview only,
@@ -25,20 +25,14 @@
 # to the file between preview and confirm — neither of which is "confirming
 # THIS exact upgrade").
 #
-# The write is NOT a blind end-of-file append for either piece — both
-# targeted_tests and test_audit.scheduler are inserted as new lines
-# immediately after an EXISTING anchor line (`^gates:` / `^test_audit:`)
-# whenever that top-level key already exists, and only pure-appended at
-# file end when the top-level key is entirely absent. This matters because
-# mikefarah/yq (and aid-run-gates.sh's own `.gates` reads) resolve a SECOND
-# top-level key of the same name by silently taking the LAST occurrence —
-# blindly appending a second `gates:` or `test_audit:` block would silently
-# delete every sibling already defined under the first one (verified
-# empirically before writing this; Codex review caught the test_audit case
-# specifically, where a fixture with `test_audit: {note: ..., scheduler:
-# null}` would otherwise have its `note` field silently destroyed by a
-# naive full-block append). A hand-edited file with MORE THAN ONE top-level
-# `gates:` or `test_audit:` line already (a pre-existing user error this
+# The write is NOT a blind end-of-file append — targeted_tests is inserted
+# as new lines immediately after the EXISTING `^gates:` anchor line. This
+# matters because mikefarah/yq (and aid-run-gates.sh's own `.gates` reads)
+# resolve a SECOND top-level key of the same name by silently taking the
+# LAST occurrence — blindly appending a second `gates:` block would
+# silently delete every sibling already defined under the first one
+# (verified empirically before writing this). A hand-edited file with MORE
+# THAN ONE top-level `gates:` line already (a pre-existing user error this
 # script did not create) is refused outright — this script's single-anchor
 # insertion technique cannot safely resolve which occurrence is the
 # effective one without becoming a full YAML-aware rewrite, which would
@@ -78,33 +72,25 @@ execution_yaml="${project_root}/.aid-o/config/execution.yaml"
 # shadowed mapping).
 gates_count="$(grep -c '^gates:' "$execution_yaml" || true)"
 (( gates_count <= 1 )) || _die 1 "execution.yaml already has ${gates_count} top-level 'gates:' lines — refusing to upgrade a file with a pre-existing duplicate-key hazard; resolve the duplicate by hand first"
-test_audit_count="$(grep -c '^test_audit:' "$execution_yaml" || true)"
-(( test_audit_count <= 1 )) || _die 1 "execution.yaml already has ${test_audit_count} top-level 'test_audit:' lines — refusing to upgrade a file with a pre-existing duplicate-key hazard; resolve the duplicate by hand first"
 
 has_gate="$(yq '(.gates // {}) | has("targeted_tests")' "$execution_yaml" 2>/dev/null || echo "false")"
-has_test_audit_key="$(yq 'has("test_audit")' "$execution_yaml" 2>/dev/null || echo "false")"
-has_scheduler="$(yq '(.test_audit // {}) | has("scheduler")' "$execution_yaml" 2>/dev/null || echo "false")"
 
-if [[ "$has_gate" == "true" && "$has_scheduler" == "true" ]]; then
-  echo "aid-init-upgrade-test-audit.sh: both targeted_tests gate and test_audit.scheduler already present — nothing to upgrade"
+# P078: the test_audit.scheduler half of this upgrade was removed with the
+# parallelism machinery — the upgrade now adds only the targeted_tests gate.
+if [[ "$has_gate" == "true" ]]; then
+  echo "aid-init-upgrade-test-audit.sh: targeted_tests gate already present — nothing to upgrade"
   exit 0
 fi
 
-gate_block=""
-test_audit_block=""
-[[ "$has_gate" != "true" ]] && gate_block="$(render_test_audit_scheduler_block gate)"
-[[ "$has_scheduler" != "true" ]] && test_audit_block="$(render_test_audit_scheduler_block test_audit)"
+gate_block="$(render_targeted_tests_gate_block)"
 
-# Fixed, deterministic concatenation order (gate piece first, then
-# test_audit piece) for the hash. Bound to the CURRENT file's exact
+# Hash bound to the CURRENT file's exact
 # content too (sha256 of the file itself) — so the hash is specific to
 # THIS file's current state, not just to which pieces happen to be
 # missing: two different projects (or the same project edited between
 # preview and confirm) never share a hash merely because they're both
 # missing the same subset.
-proposed_text=""
-[[ -n "$gate_block" ]] && proposed_text+="${gate_block}"$'\n'
-[[ -n "$test_audit_block" ]] && proposed_text+="${test_audit_block}"$'\n'
+proposed_text="${gate_block}"$'\n'
 
 file_hash="$(sha256sum "$execution_yaml" | cut -d' ' -f1)"
 computed_hash="sha256:$(printf '%s\n%s' "$file_hash" "$proposed_text" | sha256sum | cut -d' ' -f1)"
@@ -113,18 +99,8 @@ _print_diff() {
   echo "Proposed additions to ${execution_yaml} (nothing else in the file changes):"
   echo "--- current"
   echo "+++ proposed"
-  if [[ -n "$gate_block" ]]; then
-    echo "  (inserted as a new member of the existing top-level gates: mapping)"
-    printf '%s\n' "$gate_block"
-  fi
-  if [[ -n "$test_audit_block" ]]; then
-    if [[ "$has_test_audit_key" == "true" ]]; then
-      echo "  (scheduler: inserted as a new member of the existing top-level test_audit: mapping)"
-    else
-      echo "  (appended as a new top-level test_audit: key)"
-    fi
-    printf '%s\n' "$test_audit_block"
-  fi
+  echo "  (inserted as a new member of the existing top-level gates: mapping)"
+  printf '%s\n' "$gate_block"
   echo ""
   echo "diff_hash: ${computed_hash}"
   echo ""
@@ -165,32 +141,8 @@ _insert_after_anchor() {
 # ─── Write ──────────────────────────────────────────────────────────────
 # targeted_tests gate: inserted immediately after the file's first
 # top-level `gates:` line (never a second, duplicate `gates:` key).
-if [[ -n "$gate_block" ]]; then
-  _insert_after_anchor "$execution_yaml" '^gates:' "$gate_block"
-fi
-
-# test_audit.scheduler: if a top-level `test_audit:` key ALREADY exists
-# (just missing `.scheduler`), splice ONLY the "  scheduler: ..." lines in
-# after that existing anchor — never append a second, duplicate top-level
-# `test_audit:` key, which would silently shadow/destroy whatever else is
-# already under the existing one. Only when NO top-level `test_audit:` key
-# exists at all is a full end-of-file append safe (mirrors
-# append_gate_profiles_block's own precedent).
-if [[ -n "$test_audit_block" ]]; then
-  if [[ "$has_test_audit_key" == "true" ]]; then
-    # Drop the rendered block's own leading "test_audit:" line — only the
-    # nested "  scheduler:" lines are inserted under the EXISTING anchor.
-    scheduler_only="$(tail -n +2 <<< "$test_audit_block")"
-    _insert_after_anchor "$execution_yaml" '^test_audit:' "$scheduler_only"
-  else
-    {
-      echo ""
-      printf '%s\n' "$test_audit_block"
-    } >> "$execution_yaml"
-  fi
-fi
+_insert_after_anchor "$execution_yaml" '^gates:' "$gate_block"
 
 echo "aid-init-upgrade-test-audit.sh: upgraded ${execution_yaml}"
-[[ -n "$gate_block" ]] && echo "  + added targeted_tests gate"
-[[ -n "$test_audit_block" ]] && echo "  + added test_audit.scheduler block"
+echo "  + added targeted_tests gate"
 exit 0

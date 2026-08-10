@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # aid-test-audit-chat-summary.sh — P066 Step 15.
 #
-# Renders the mandatory SIX-part plain-language chat message — P072 Step 19.
+# Renders the mandatory FOUR-part plain-language chat message — P072 Step 19,
+# narrowed by P078 (the two lane sections went with the parallelism machinery).
 #
 # THE ORDER IS THE POINT
 #   1. What to do now
 #   2. What to fix, merge, split or remove
-#   3. What can run in parallel
-#   4. What must remain serial
-#   5. Test time now, and after the proposed work
-#   6. What is not proved yet
+#   3. Test time now, and after the proposed work
+#   4. What is not proved yet
 #   + Technical evidence (appendix)
 #
 #   The five-part predecessor led with a verdict and a severity-ranked list of
@@ -219,7 +218,7 @@ aid_test_audit_render_chat_summary() {
     if aid_test_audit_decision_read "$_tacs_decision_path" >/dev/null 2>&1; then
       _d="$_tacs_decision_path"; _have_decision="true"
     else
-      echo "**Audit did not complete cleanly** — the decision artifact at ${_tacs_decision_path} is invalid or incompatible (\`aid-test-audit-decision-v1\`). No decision, parallelization or proof-completeness claim can be made from it. Do not attempt \`--write-plan\`."
+      echo "**Audit did not complete cleanly** — the decision artifact at ${_tacs_decision_path} is invalid or incompatible (\`aid-test-audit-decision-v1\`). No decision or proof-completeness claim can be made from it. Do not attempt \`--write-plan\`."
       return 1
     fi
   fi
@@ -228,7 +227,7 @@ aid_test_audit_render_chat_summary() {
   # "No action needed." over an audit that had decided nothing — the single
   # most misleading sentence this renderer can emit.
   if [[ "$_tacs_audit_mode" == "full" && "$_have_decision" != "true" ]]; then
-    echo "**Audit did not complete cleanly** — a full audit requires a decision artifact and none was produced. Findings may exist below, but the portfolio decisions, the parallel-safety assessment and the remediation handoff are NOT established. Do not attempt \`--write-plan\`."
+    echo "**Audit did not complete cleanly** — a full audit requires a decision artifact and none was produced. Findings may exist below, but the portfolio decisions and the remediation handoff are NOT established. Do not attempt \`--write-plan\`."
     return 1
   fi
 
@@ -343,12 +342,7 @@ aid_test_audit_render_chat_summary() {
   if [[ "$_tacs_incomplete" == "true" ]]; then
     # A bounded next diagnostic action, never a suggestion to plan remediation.
     section_now="$(jq -r '
-      if (.parallelization.smallest_safe_pilot // null) != null
-      then "Run the smallest bounded pilot that would settle the most units: "
-           + (.parallelization.smallest_safe_pilot.run_unit_ids | join(", "))
-           + " (at " + ((.parallelization.smallest_safe_pilot.workers)|tostring) + " workers, repeated "
-           + ((.parallelization.smallest_safe_pilot.repeat)|tostring) + " times)."
-      elif ([.actions[] | select(.action == "measure")] | length) > 0
+      if ([.actions[] | select(.action == "measure")] | length) > 0
       then "Measure before deciding anything else: "
            + ([.actions[] | select(.action == "measure")] | sort_by(.priority) | .[0].reason)
       else "Decide the units listed as undecided below, then re-run this audit."
@@ -369,9 +363,7 @@ A remediation plan cannot be created from it: the \`--write-plan\` handoff refus
           (if ((.portfolio_change.rewrite_unit // []) | length) > 0
            then "rewrite " + (((.portfolio_change.rewrite_unit) | length)|tostring) + " unit(s)" else empty end),
           (if ((.portfolio_change.merge_groups // []) | length) > 0
-           then "merge " + (((.portfolio_change.merge_groups) | length)|tostring) + " group(s)" else empty end),
-          (if ([.parallelization.lanes[]? | select(.disposition == "proposed_parallel")] | length) > 0
-           then "adopt " + (([.parallelization.lanes[]? | select(.disposition == "proposed_parallel")] | length)|tostring) + " parallel lane(s)" else empty end)
+           then "merge " + (((.portfolio_change.merge_groups) | length)|tostring) + " group(s)" else empty end)
         ] | join(", ")' "$_d" 2>/dev/null)"
     fi
     if [[ -n "$_proposed" ]]; then
@@ -437,33 +429,7 @@ Treat every one of them as unexamined, not as healthy."
   fi
   [[ -n "$section_unproved" ]] || section_unproved="Everything this audit examined reached a decision it can defend."
 
-  # 3/4 — Lanes.
-  local section_parallel section_serial
-  if [[ "$_have_decision" == "true" ]]; then
-    section_parallel="$(jq -r '
-      [ .parallelization.lanes[]? | select(.disposition == "proposed_parallel") ] as $l
-      | ([ .parallelization.lanes[]? | select(.disposition == "blocked_pending_fix") | .run_unit_ids[] ] | unique | length) as $fixable
-      | if ($l | length) == 0
-        # "Nothing" alone reads as "parallelism is impossible here" — while the
-        # very next section may list seventy units blocked by a FIXABLE
-        # resource. The unlockable count belongs in the same breath.
-        then ("Nothing runs in parallel on current evidence"
-              + (if $fixable > 0 then " — but " + ($fixable | tostring) + " unit(s) are blocked by a FIXABLE resource (see section 4); fixing those is what opens the pool." else "." end))
-        else ($l | map("- " + .lane_id + ": " + (.run_unit_ids | join(", "))
-                       + " (evidence: " + ((.evidence_refs // []) | join(", ")) + ")") | join("\n"))
-        end' "$_d" 2>/dev/null)"
-    section_serial="$(jq -r '
-      [ .parallelization.lanes[]? | select(.disposition != "proposed_parallel") ] as $l
-      | if ($l | length) == 0
-        then "Nothing was found that must stay serial."
-        else ($l | map("- " + (.run_unit_ids | join(", ")) + " — " + .disposition
-                       + (if ((.resource_basis // []) | length) > 0
-                          then " (" + (.resource_basis | join(", ")) + ")" else "" end)) | join("\n"))
-        end' "$_d" 2>/dev/null)"
-  else
-    section_parallel="Not assessed. Parallel safety requires a full audit."
-    section_serial="Not assessed. Parallel safety requires a full audit."
-  fi
+  # (P078: sections 3/4 — parallel lanes — were removed with the machinery.)
 
   # 2 — The portfolio sets, plus the exact no-removal sentence.
   local removal_line=""
@@ -511,19 +477,11 @@ ${removal_line}
 $(_tacs_proposed_actions)
 $(_tacs_unproposed_findings)
 
-## 3. What can run in parallel
-
-${section_parallel}
-
-## 4. What must remain serial
-
-${section_serial}
-
-## 5. Test time now, and after the proposed work
+## 3. Test time now, and after the proposed work
 
 ${section_time}
 
-## 6. What is not proved yet
+## 4. What is not proved yet
 
 ${section_unproved}
 ${_tacs_undecided_line}

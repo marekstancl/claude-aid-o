@@ -115,44 +115,12 @@ jobs:
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats
         timeout-minutes: 35
 
-  isolation-experiment-tests:
-    runs-on: [self-hosted, eco-dev]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install jq + bats + yq
-        # Same shape and same reason as plan-boundary-tests/plan-final-tests
-        # above: this suite (test-aid-test-isolation-experiment.bats, P069
-        # Step 6) creates a REAL disposable git worktree per test (git
-        # worktree add/remove) rather than a mocked one, so it gets its own
-        # job and its own budget instead of eating the bash-tests job's
-        # headroom. yq is needed for the fixture test-catalog.yaml setup.
-        run: |
-          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
-            sudo apt-get install -y jq bats
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          }
-          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
-          # each skip (not fail) their assertions when python3-jsonschema is
-          # absent — install it so a lost package reads as a red build, not a
-          # silently growing skip count (P075 Step 4).
-          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
-      - name: Run isolation-experiment suite
-        # 11 tests; all assertions genuinely pass (confirmed: two clean local
-        # reproductions both exited 0, ~6 min each) — this suite's own real
-        # git worktree add/remove I/O is just markedly slower on GitHub's
-        # shared runners than on a local dev machine. A first attempt at
-        # 15 min (chosen from the local ~6 min number with what looked like
-        # generous headroom) still hit its OWN timeout on this exact suite in
-        # CI, confirming the slowdown is real, not a one-off flake. 30 min
-        # matches the wide margin plan-final-tests already uses for a
-        # comparably heavy real-git suite.
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment.bats
-        timeout-minutes: 30
+  # (isolation-experiment-tests job removed in P078 — its suite tested the
+  # deleted parallelism machinery; dead job removal, not a CI redesign.)
 
   # ── P079 Step 12 (IMP-483): the three heaviest P076 suites ───────────────
-  # Same shape and same reason as plan-boundary-tests / plan-final-tests /
-  # isolation-experiment-tests above. Each of these drives REAL processes — a
+  # Same shape and same reason as plan-boundary-tests / plan-final-tests
+  # above. Each of these drives REAL processes — a
   # bash fixture service under aid-job.sh's supervisor, real port allocation,
   # /proc identity checks — so each gets its own job and its own budget rather
   # than eating the bash-tests job's headroom. run-all-tests.sh skips them

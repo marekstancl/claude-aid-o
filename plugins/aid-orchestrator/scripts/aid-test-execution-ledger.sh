@@ -11,8 +11,9 @@
 #   and `release` profiles include both gates. The file therefore executes
 #   twice on every full run.
 #
-#   Instrumenting only the three fan-out points — the bats lane, the aggregate
-#   runner, the scheduler — would have recorded ONE entry for it and reported
+#   Instrumenting only the fan-out point (the aggregate runner; historically
+#   also the bats lane and scheduler, both removed in P078) would have
+#   recorded ONE entry for it and reported
 #   zero duplicates. The ledger would have certified as clean the exact defect
 #   it was built to detect. So there is a fourth emission path: the gate runner
 #   itself appends for any gate whose command is a direct runner invocation it

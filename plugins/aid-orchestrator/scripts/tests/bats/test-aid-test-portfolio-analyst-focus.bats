@@ -34,16 +34,16 @@ teardown() {
 }
 
 @test "all 6 focus enum values are named, each mapping to exactly one Step 10 prompt file" {
-  local focuses=(shard_portfolio performance_cost flake_isolation parallel_safety adversarial_review consolidator)
+  local focuses=(shard_portfolio performance_cost flake_isolation adversarial_review consolidator)
   local f
   for f in "${focuses[@]}"; do
     grep -q "\`$f\`" "$CARD"
   done
-  # Exactly 6 distinct focus values named in the mode-selection table — never
-  # a 7th invented value, never fewer.
+  # Exactly 5 distinct focus values named in the mode-selection table — never
+  # a 6th invented value, never fewer (P078 removed parallel_safety).
   local count
-  count="$(grep -oE '`(shard_portfolio|performance_cost|flake_isolation|parallel_safety|adversarial_review|consolidator)`' "$CARD" | sort -u | wc -l)"
-  [ "$count" -eq 6 ]
+  count="$(grep -oE '`(shard_portfolio|performance_cost|flake_isolation|adversarial_review|consolidator)`' "$CARD" | sort -u | wc -l)"
+  [ "$count" -eq 5 ]
 }
 
 @test "constraints explicitly forbid editing/deleting/quarantining tests and touching execution.yaml" {

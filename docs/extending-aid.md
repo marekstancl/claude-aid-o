@@ -1266,17 +1266,17 @@ EPIC — if you are budgeting dispatches, budget them per plan.
 
 ## Test-portfolio decision quality (P072)
 
-Fifteen enforcements were added by P072. This section is a contributor's index
-to them; the parallel-safety rules live on one page of their own, in
-[`P072-authority-boundary.md`](plans/P072-authority-boundary.md), and are not
-restated here — one source, linked to, rather than two that drift.
+Fifteen enforcements were added by P072; five of them guarded the parallelism
+machinery and were retired with it in P078 (`status: removed_scoped` in the
+registry, with the removal recorded rather than the row deleted). This section
+is a contributor's index to the ten that remain.
 
 ### The decision artifact
 
 A `full` audit produces `decision.json` (`aid-test-audit-decision-v1`) beside
 its findings. It carries `audit_status`, one terminal disposition per run unit,
-the portfolio arithmetic, the proposed actions with their impact, the
-parallelization lanes, and what remains unresolved.
+the portfolio arithmetic, the proposed actions with their impact, and what
+remains unresolved.
 
 Two properties make it worth having, and both are enforced rather than
 conventional:
@@ -1290,7 +1290,7 @@ conventional:
   but must then qualify it, because a bare number on an unfinished run reads as
   a measured total.
 
-### The fifteen enforcements
+### The ten live enforcements (five retired in P078)
 
 | Row | What it stops |
 |---|---|
@@ -1303,44 +1303,37 @@ conventional:
 | `test_audit_profile_ingestion_fail_closed` | A corrupt profile receipt becoming an empty action list that reads as "nothing needed doing" |
 | `test_audit_profile_selection_owed` | A slow suite the audit selected for diagnosis, and nobody diagnosed |
 | `test_audit_profile_supervised_execution` | A deadline kill filed as an operator cancel — both arrive as exit 143 |
-| `test_audit_resource_map_shared_evidence` | A shared-state claim resting on a pattern match rather than read source |
-| `test_audit_pilot_evidence_bound` | A lane promoted on a pilot that was retried until it went green |
-| `test_catalog_parallel_provenance_binding` | A `safe` status outliving the content it was verified against |
-| `test_lane_single_parallel_authority` | Two consumers disagreeing about the same unit |
-| `test_audit_lane_membership_exact` | A lane promoted on evidence gathered for a different set |
 | `test_execution_no_double_dispatch` | A run unit executed twice in one gate run |
+
+Retired in P078 with the parallelism machinery they guarded:
+`test_audit_resource_map_shared_evidence`, `test_audit_pilot_evidence_bound`,
+`test_catalog_parallel_provenance_binding`, `test_lane_single_parallel_authority`,
+`test_audit_lane_membership_exact`. Their rows survive as `removed_scoped`
+records — the registry keeps the history rather than pretending the guards
+never existed.
 
 Each row records its **recovery behaviour**: what an operator actually does
 when it fires. A blocking enforcement with no stated recovery is a wall, and
 the registry test refuses a row that omits it.
 
-### The execution ledger, and its fourth emission path
+### The execution ledger, and the emission path that is easy to forget
 
 `test_execution_no_double_dispatch` is worth reading about before you touch the
-gate runner. The ledger records one entry per run unit ACTUALLY DISPATCHED, and
-it has **four** emission points, not the three obvious ones:
+gate runner. The ledger records one entry per run unit ACTUALLY DISPATCHED,
+from two emission points (P078 deleted the other two — the bats lane and the
+scheduler — with the parallelism machinery):
 
-1. `aid-bats-parallel-lane.sh` — pool, sequential and boundary buckets alike
-2. `run-all-tests.sh` — one per suite
-3. `aid-test-scheduler.sh` — one per scheduled unit
-4. `aid-run-gates.sh` — for any gate whose command invokes a runner **directly**
+1. `run-all-tests.sh` — one per suite
+2. `aid-run-gates.sh` — for any gate whose command invokes a runner **directly**
 
-The fourth is the one that matters and the one easiest to leave out. This
+The second is the one that matters and the one easiest to leave out. This
 repository HAD a gate that ran `test-aid-fsm.bats` on its own while the
-parallel pool ran it too, with the `full` and `release` profiles including
-both, so that file executed twice on every full run. With only the fan-out
-points instrumented, the ledger would have recorded one entry for it and
-reported zero duplicates — certifying as clean the exact defect it was built to
-detect. It found it instead, and `bats_fsm` is now absent from those two
-profiles; the red proof lives in a fixture so fixing the waste did not blind
-the check.
-
-The third point was also missing for a while, which is worth knowing because it
-failed quietly: units the SCHEDULER ran were absent from the accounting
-entirely, so a unit run by both the scheduler and a gate looked like a unit run
-once. The scheduler now appends BEFORE launching each unit, and a failed append
-cancels that dispatch — recording an execution that then does not happen is
-recoverable; running one that nothing records is not.
+aggregate ran it too, with the `full` and `release` profiles including both, so
+that file executed twice on every full run. With only the fan-out point
+instrumented, the ledger would have recorded one entry for it and reported zero
+duplicates — certifying as clean the exact defect it was built to detect. It
+found it instead, and `bats_fsm` is now absent from those two profiles; the red
+proof lives in a fixture so fixing the waste did not blind the check.
 
 There is deliberately **no membership exemption**. Exempting "the pool gate
 contains this unit" was implemented, and it silenced that same defect. Each
@@ -1359,9 +1352,9 @@ treated as though it were.
 
 What DOES excuse a repeat is a declaration made when it happens.
 `--execution-kind normal|retry|escalation` marks a single append;
-`AID_EXECUTION_KIND` marks a whole subprocess, which is how P069's escalation —
-which re-invokes the gate runner with the parent's ledger inherited — avoids
-being recorded as an accident. Declared repeats appear in the summary as
+`AID_EXECUTION_KIND` marks a whole subprocess, which is how the targeted-tests
+escalation — which re-invokes the gate runner with the parent's ledger
+inherited — avoids being recorded as an accident. Declared repeats appear in the summary as
 `deliberate_repeats`: never failing, never invisible, because a rerun somebody
 asked for still costs the wall clock twice. The default is `normal`, so silence
 is not a declaration and a forgotten mark stays a defect.

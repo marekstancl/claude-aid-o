@@ -86,39 +86,6 @@ _shard() {
      producer_agent_dispatch_id:"d0", dispositions:$d}' \
     > "$ART/1-shard_portfolio-shard-0.json"
 }
-# _map <id> <kind/namespace>...
-_map() {
-  local id="$1"; shift
-  mkdir -p "$OUT/resource-maps"
-  local res="[]" pair
-  for pair in "$@"; do
-    res="$(jq -c --arg k "${pair%%/*}" --arg n "${pair##*/}" \
-      '. + [{kind:$k, namespace:$n, detail:"d", location:"tests/x.bats:1"}]' <<<"$res")"
-  done
-  jq -nc --arg id "$id" --argjson res "$res" \
-    '{schema_version:"aid-test-resource-map-v1", run_unit_id:$id, source_paths:["tests/x.bats"],
-      follow_depth_cap:3, resources:$res, unresolved_sources:[], capped_at_unknown:false}' \
-    > "$OUT/resource-maps/$(echo "$id" | tr '/:' '__').json"
-}
-# _pilot <lane> <promotion> <id>...
-_pilot() {
-  local lane="$1" promo="$2"; shift 2
-  mkdir -p "$OUT/pilots"
-  local sha; sha="$(printf '%s\n' "$@" | sort | tr '\n' '\0' | sha256sum | cut -d' ' -f1)"
-  local reps='[]'
-  [[ "$promo" == "proposed" ]] && reps="$(jq -nc '[{index:1, verdict:"match",
-    serial:{duration_ms:20, exit_code:0, job_state:"terminal_pass", results:[], dirty_paths:[], escaped_paths:[]},
-    parallel:{duration_ms:10, exit_code:0, job_state:"terminal_pass", results:[], dirty_paths:[], escaped_paths:[]}}]')"
-  jq -nc --arg l "$lane" --arg p "$promo" --arg sha "$sha" --argjson reps "$reps" \
-    --arg aid "$AUDIT_ID" --args \
-    '{schema_version:"aid-test-parallel-pilot-v1", lane_id:$l, audit_id:$aid,
-      target_root:"/tmp/clone", membership:($ARGS.positional | sort), membership_sha256:$sha,
-      workers:2, repeat:1, promotion:$p, reason:"shape fixture receipt for the report-shape suite",
-      benefit_ms:5000, noise_threshold_ms:2000, failing_repetition:null,
-      repetitions:$reps, parallelism:{available:true, note:"GNU parallel is present"}}' \
-    -- "$@" > "$OUT/pilots/$lane.json"
-}
-
 _finalize() {
   bash "$FINALIZE" --audit-id "$AUDIT_ID" --wave-artifacts-dir "$ART" \
     --dispatch-manifest "$MAN" --output-dir "$OUT" \
@@ -222,63 +189,10 @@ else
 fi
 _assert_contained "$BEFORE" "$(_snapshot_proj)"
 
-# ─── Shape 4: serial only ───────────────────────────────────────────────────
-_shape serial-only
-_inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
-_shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
-_map "bats:a" "lock/shared"
-_map "bats:b" "aid_state/shared"
-_assert_units
-BEFORE="$(_snapshot_proj)"
-echo "TEST: serial-only shape"
-if TEXT="$(_finalize 2>&1)"; then
-  [[ "$(jq -r '[.parallelization.lanes[] | select(.disposition == "proposed_parallel")] | length' "$OUT/decision.json")" == "0" ]] \
-    && pass_msg "serial-only: zero proposed_parallel lanes" \
-    || fail_msg "serial-only: a lane was proposed despite every unit sharing a resource"
-  [[ "$(jq -r '[.parallelization.lanes[] | select(.run_unit_ids[0] == "bats:a")][0].resource_basis | join(",")' "$OUT/decision.json")" == *"lock/shared"* ]] \
-    && pass_msg "serial-only: the serial entry names the resource that forced it" \
-    || fail_msg "serial-only: the serial entry does not name its resource"
-  [[ "$(jq -r '.audit_status' "$OUT/decision.json")" == "complete" ]] \
-    && pass_msg "serial-only: an unparallelisable portfolio is still a COMPLETE audit" \
-    || fail_msg "serial-only: audit_status is not complete"
-else
-  fail_msg "serial-only: finalize failed: $(tail -2 <<<"$TEXT")"
-fi
-_assert_contained "$BEFORE" "$(_snapshot_proj)"
-
-# ─── Shape 5: proven parallel ───────────────────────────────────────────────
-_shape proven-parallel
-_inventory "bats:a" "bats:b"; _manifest "bats:a" "bats:b"
-_shard "$(_disposition "bats:a")" "$(_disposition "bats:b")"
-_map "bats:a" "temp_path/per-test"
-_map "bats:b" "temp_path/per-test"
-_pilot "candidate-pool" proposed "bats:a" "bats:b"
-# A catalog and an execution.yaml the audit must NOT touch.
-cat > "$PROJ/.aid-o/config/test-catalog.yaml" <<'YAML'
-schema_version: "1.0.0"
-status: approved
-run_units: []
-YAML
-printf 'gates: []\n' > "$PROJ/.aid-o/config/execution.yaml"
-CATALOG_BEFORE="$(sha256sum "$PROJ/.aid-o/config/test-catalog.yaml" | cut -d' ' -f1)"
-EXEC_BEFORE="$(sha256sum "$PROJ/.aid-o/config/execution.yaml" | cut -d' ' -f1)"
-_assert_units
-BEFORE="$(_snapshot_proj)"
-echo "TEST: proven-parallel shape"
-if TEXT="$(_finalize 2>&1)"; then
-  [[ "$(jq -r '[.parallelization.lanes[] | select(.disposition == "proposed_parallel")] | length' "$OUT/decision.json")" -ge 1 ]] \
-    && pass_msg "proven-parallel: a lane is proposed on its own pilot" \
-    || fail_msg "proven-parallel: no lane was proposed despite a matching pilot"
-  [[ "$(sha256sum "$PROJ/.aid-o/config/test-catalog.yaml" | cut -d' ' -f1)" == "$CATALOG_BEFORE" ]] \
-    && pass_msg "proven-parallel: the catalog is byte-identical — the audit proposes, it does not act" \
-    || fail_msg "proven-parallel: the audit MODIFIED the catalog"
-  [[ "$(sha256sum "$PROJ/.aid-o/config/execution.yaml" | cut -d' ' -f1)" == "$EXEC_BEFORE" ]] \
-    && pass_msg "proven-parallel: execution.yaml is byte-identical" \
-    || fail_msg "proven-parallel: the audit MODIFIED execution.yaml"
-else
-  fail_msg "proven-parallel: finalize failed: $(tail -2 <<<"$TEXT")"
-fi
-_assert_contained "$BEFORE" "$(_snapshot_proj)"
+# ─── Shapes 4 and 5 (serial-only / proven-parallel) were removed in P078
+# with the parallelism machinery — the audit no longer proposes lanes, so
+# there is no lane shape to assert. Shapes 1-3 (complete / incomplete /
+# no-removal) are the surviving report-shape contract.
 
 echo "Results: ${pass}/$(( pass + fail )) passed, ${fail} failed"
 [[ "$fail" -eq 0 ]]

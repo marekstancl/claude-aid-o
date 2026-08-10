@@ -235,7 +235,7 @@ _clone() {
   "run_unit_ids":["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary"]},
  {"gate":"gate:b","kind":"direct_invocation","partition":"all","membership":"exact",
   "run_unit_ids":["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary"]},
- {"gate":"gate:pool","kind":"catalog_pool_runner","partition":"pool","membership":"runtime_partitioned",
+ {"gate":"gate:pool","kind":"bats_tree_runner","partition":"pool","membership":"runtime_partitioned",
   "run_unit_ids":["bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary"]}]
 JSON
   r="$(bash "$PROFILE" \

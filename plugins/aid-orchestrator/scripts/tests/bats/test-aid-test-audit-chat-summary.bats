@@ -174,10 +174,8 @@ _write_findings() {
   local expected=(
     "## 1. What to do now"
     "## 2. What to fix, merge, split or remove"
-    "## 3. What can run in parallel"
-    "## 4. What must remain serial"
-    "## 5. Test time now, and after the proposed work"
-    "## 6. What is not proved yet"
+    "## 3. Test time now, and after the proposed work"
+    "## 4. What is not proved yet"
     "### Technical evidence"
   )
   local prev=0 pos h
@@ -196,8 +194,8 @@ _write_findings() {
   _write_findings "$f" '[]'
   run aid_test_audit_render_chat_summary "$f"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"## 3. What can run in parallel"* ]]
-  [[ "$output" == *"## 6. What is not proved yet"* ]]
+  [[ "$output" == *"## 3. Test time now, and after the proposed work"* ]]
+  [[ "$output" == *"## 4. What is not proved yet"* ]]
 }
 
 # ─── What an adversarial review of the renderer found ──────────────────────
@@ -365,21 +363,6 @@ JSON
   [[ "$output" == *"Needs work, no ready-made proposal yet (2"* ]]
   [[ "$output" == *"fix gate:bats_all"* ]]
   [[ "$output" == *"split gate:shell_pipeline_smoke"* ]]
-}
-
-@test "'nothing parallel' names the fixable-blocker count instead of implying impossibility" {
-  local f="$TEST_TMPDIR/findings.json"
-  local d="$TEST_TMPDIR/decision.json"
-  _write_findings "$f" '[]'
-  _valid_decision_base '.parallelization.lanes = [
-    {lane_id:"serial-1", disposition:"blocked_pending_fix",
-     run_unit_ids:["bats:a","bats:b","bats:c"],
-     resource_basis:["fixed_path/shared"], evidence_refs:["m1"]}]' > "$d"
-
-  run aid_test_audit_render_chat_summary "$f" "" "full" "$d"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"3 unit(s) are blocked by a FIXABLE resource"* ]]
-  [[ "$output" != *"Nothing is proposed to run in parallel on current evidence."* ]]
 }
 
 @test "the ranked proposals section actually renders, critical first" {

@@ -17,7 +17,7 @@ and ends every run with a mandatory plain-language chat recommendation.
 
 - Never edits, deletes, renames, or quarantines any test file.
 - Never changes `execution.yaml`/gate/quarantine state.
-- Never schedules or batches test execution (no scheduler exists in this plan —
+- Never schedules or batches test execution (test execution is sequential by design; P078 removed the scheduler —
   see P069, a separate, dependent follow-up).
 - Never modifies `aid-select-tests.sh`.
 - **Never auto-invokes itself** — this command runs only when a user (or the
@@ -47,18 +47,18 @@ pre-filled so a bare "ano" is enough:
 > - **rychlý** — jen soupis testů, nic nespouští (minuty)
 
 **Present the verdict in the user's own language, and never softer than the
-evidence.** The six-part block below stays verbatim (it is the durable record,
+evidence.** The four-part block below stays verbatim (it is the durable record,
 in English), but the controller MUST precede it with a 3–5 sentence summary in
 the language the user has been speaking, and that summary leads with what is
 WRONG: the finding counts by severity, the fixable-blocker count, the gates
 that never complete. A Czech user who reads "Keep as-is (162), Remove: none,
-nothing parallel" above an English appendix listing five high findings has been
+nothing wrong" above an English appendix listing five high findings has been
 told, in effect, that everything is fine — a real run did exactly this and the
 owner rightly called it worthless. The lead summary may never claim less work
 than the findings imply.
 
 Then run what they confirm. `full` + 180 minutes is the recommended default
-because it is the only mode that fills in the catalog's parallel column, which
+because it is the only mode that produces dispositions and a decision artifact, which
 is what makes the test suite fast afterwards.
 
 Explicit arguments always win — a user who typed them has already answered.
@@ -163,24 +163,9 @@ parser's own project-root validation load-bearing rather than advisory.
    unit has no receipt (see step 6), so skipping it does not produce a
    quieter audit — it produces no audit.
 
-   c. In `full` mode, assess **parallel safety**, which takes two kinds of
-      evidence and never one:
-
-      `aid-test-resource-map.sh --run-unit-id <id> --catalog <catalog>
-      --project-root <root> --output <output-dir>/resource-maps/<slug>.json`
-      reads each unit's source — following `source`/`.`/`load` to a recorded
-      depth cap — and records every resource it touches with the `file:line`
-      that justifies it. It executes nothing.
-
-      `aid-test-parallel-pilot.sh --lane-id <id> --unit <id>… --catalog
-      <catalog> --output-dir <output-dir> --target-root <disposable clone>
-      --project-root <root> --workers N --repeat N` then runs a candidate
-      membership serially and concurrently in a clone bound to the audited
-      tree, and reports whether concurrency changed anything.
-
-      Only `per-test`/`per-run` units are candidates, and only a pilot for a
-      lane's exact membership can propose it. Everything else stays
-      sequential — the direction the default has always pointed.
+   (Step 5c — the parallel-safety assessment, its resource maps and its
+   pilots — was removed in P078 with the parallelism machinery. Measurement
+   receipts from 5a/5b remain the full extent of executed evidence.)
 
 6. **Finalize via `aid-audit-tests-finalize.sh` — the ONE mandatory production
    entrypoint for this closing chain (Step 24, E4 release blocker).** The
@@ -189,13 +174,11 @@ parser's own project-root validation load-bearing rather than advisory.
    `aid-audit-tests-finalize.sh --audit-id <id> --wave-artifacts-dir <dir>
    --dispatch-manifest <path> --output-dir <dir> --mode <static|measure|full>
    [--inventory <path>] [--project-root <path>] [--catalog <path>]
-   [--profiles-dir <dir>] [--profile-selection <path>]
-   [--resource-maps-dir <dir>] [--pilots-dir <dir>] [--write-plan]`.
+   [--profiles-dir <dir>] [--profile-selection <path>] [--write-plan]`.
 
-   All four directory arguments default to their conventional locations under
-   `<output-dir>` (`profiles`, `profile-selection.json`, `resource-maps`,
-   `pilots`) when those exist, so step 5's artifacts are picked up without
-   being named again. What
+   The profile arguments default to their conventional locations under
+   `<output-dir>` (`profiles`, `profile-selection.json`) when those exist, so
+   step 5's artifacts are picked up without being named again. What
    they buy is refusal: a receipt that fails schema validation, belongs to
    another audit, or whose evidence log no longer hashes to what the receipt
    recorded stops finalization — as does a selected unit with no receipt at
@@ -267,38 +250,13 @@ stale one); every cited `run_unit_id` still resolves in the current catalog. A
 `{ready:false, reason:...}` and blocks the handoff — verified to block it, not
 merely asserted to.
 
-## Parallel-safety findings
+## Parallel safety is no longer assessed
 
-`safe|constrained|exclusive|unknown` on a run unit is **consumed**, and it is the
-single authority for whether that unit may run concurrently with others. Three
-consumers read it, all through the same resolver
-(`aid_test_catalog_provenance_effective_status`): `aid-bats-parallel-lane.sh`,
-`aid-test-scheduler.sh` and `aid-select-tests.sh`. The separate text allowlist
-that used to govern the pool is retired.
-
-Promotion out of `unknown` requires TWO kinds of evidence, never one: a
-resource map read from source (`aid-test-resource-map.sh`) and a pilot that ran
-the exact membership serially and concurrently in a disposable clone
-(`aid-test-parallel-pilot.sh`).
-
-A recorded status is bound to the content it was verified against — the unit's
-whole dependency closure, including the helpers it sources. Change that
-content's resources and the status reverts to `unknown` on its own, with nobody
-editing anything.
-
-Reading a run_unit's `parallel.status`:
-
-| Value | Meaning |
-|---|---|
-| `safe` | Adapter evidence shows no shared fixed ports, no shared mutable paths, and no lock usage that would conflict with a concurrent peer. |
-| `constrained` | Can run concurrently, but only under a specific limit — see `parallel.exclusive_resources[]`/`max_workers` for what it actually shares (e.g. a fixed port, a lock target) and how many peers it tolerates at once. |
-| `exclusive` | Must run alone — a genuine mutual-exclusion requirement was found (a fixed port, a shared mutable path, or lock usage with no safe concurrency margin). |
-| `unknown` | The default absent direct, cited adapter evidence. This command **never promotes a test to `safe` optimistically** — an unexamined or ambiguous run_unit stays `unknown` rather than being guessed into a more permissive class. |
-
-**The audit still recommends; it does not act.** It never writes
-`parallel.status`, never edits `execution.yaml`, and never changes a scheduler
-mode. What it produces is a decision artifact whose lanes are proposals. Acting
-on them is a separate, explicit step.
+The parallel-safety wave, the catalog's `parallel.status` authority, the
+resource-map/pilot evidence protocol and every consumer of them (the bats
+lane, the scheduler, select-tests' `parallel_eligible`) were removed in P078 —
+test execution is sequential by design (PM decision 2026-08-09). The audit
+neither classifies nor proposes concurrency.
 
 ## `audit_status`, and what an `incomplete` audit refuses
 
@@ -324,18 +282,16 @@ extending it is a deliberate schema change, which is the point.
 Recovery is the same in each case: the chat summary's first section names the
 smallest bounded next action, and the audit is re-run after it.
 
-## The six-part chat handoff
+## The four-part chat handoff
 
 Every run ends with a summary in this exact order — the decision first, the
-evidence last:
+evidence last (P078 removed the two parallel-lane sections):
 
 1. What to do now
 2. What to fix, merge, split or remove
-3. What can run in parallel
-4. What must remain serial
-5. Test time now, and after the proposed work
-6. What is not proved yet
-7. Technical evidence (appendix)
+3. Test time now, and after the proposed work
+4. What is not proved yet
+5. Technical evidence (appendix)
 
 Every heading renders even when its section is empty, with an explicit
 statement of that: a missing heading reads as an omission, and "nothing here"
@@ -359,7 +315,7 @@ ALWAYS all of them. A section whose data is missing still renders and says what
 is missing and why; an absent section reads as "nothing to see here", and that
 lie by omission is what four days of fragmented outputs taught. The sections:
 
-1. **Hlavní čísla** — units, examined vs NOT examined, measured cost, parallel, and the trend against the previous round
+1. **Hlavní čísla** — units, examined vs NOT examined, measured cost, and the trend against the previous round
 2. **Prověřenost** — "keep — unproved" is named as *not examined*, never as health
 3. **Skupiny** — the portfolio grouped so a human can hold it
 4. **Co žere čas** — top costs and every timeout-censored unit
@@ -372,7 +328,7 @@ lie by omission is what four days of fragmented outputs taught. The sections:
 11. **Zdroje** — which artifact every number came from
 
 **The controller MUST publish this page as an Artifact and lead the closing
-message with its link** — the page IS the audit's answer; the six-part text
+message with its link** — the page IS the audit's answer; the four-part text
 block below it is the durable record. Then, in this order: offer the catalog
 approval, then offer the remediation plan. The lead sentence is in the user's
 language and never claims less work than the findings imply.
@@ -415,7 +371,7 @@ estimated or **unknown** — unknown being a normal answer, never dressed up as
 a number. Time benefits count only on the critical path.
 
 The categories span both directions: remove/merge/strengthen a weak oracle,
-fix a fixable parallel blocker (fixed path → temp dir), move tests off a
+move tests off a
 genuinely unfixable shared resource, `add` a missing error-path test, `rewire`
 a gate that runs a unit twice or a timeout below real runtime. Destructive
 proposals (remove, merge) are always decision-required and guarded — a test

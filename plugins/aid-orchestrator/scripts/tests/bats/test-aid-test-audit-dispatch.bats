@@ -76,12 +76,12 @@ teardown() {
   [ "$waves" = "[1,3]" ]
 }
 
-@test "--mode measure produces Waves 1, 2 (all 3 specialists), and 3" {
+@test "--mode measure produces Waves 1, 2 (both specialists), and 3" {
   run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode measure --max-agents 10 --audit-id a3
   [ "$status" -eq 0 ]
   local wave2_focuses
   wave2_focuses="$(echo "$output" | jq -c '[.entries[] | select(.wave == 2) | .focus] | sort')"
-  [ "$wave2_focuses" = '["flake_isolation","parallel_safety","performance_cost"]' ]
+  [ "$wave2_focuses" = '["flake_isolation","performance_cost"]' ]
 }
 
 @test "shard count never exceeds --max-agents, even with more natural groups than the ceiling" {
@@ -116,16 +116,18 @@ YAML
   [ "$shard_count" -eq 1 ]
 }
 
-@test "Wave 2's 3 specialists are batched so no more than max_concurrent_agents run at once" {
-  # Regression: an earlier version always emitted all 3 Wave 2 specialists
+@test "Wave 2's specialists are batched so no more than max_concurrent_agents run at once" {
+  # Regression: an earlier version always emitted every Wave 2 specialist
   # with no batching info, so a max-agents:1 ceiling was silently violated
-  # (3 simultaneous agents despite a ceiling of 1) — Codex review.
+  # (simultaneous agents despite a ceiling of 1) — Codex review.
+  # P078: wave 2 is 2 specialists now (parallel_safety was removed with the
+  # parallelism machinery), so a ceiling of 1 yields batches [0,1].
   run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode measure --max-agents 1 --audit-id a7
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.max_concurrent_agents == 1' >/dev/null
   local wave2_batches
   wave2_batches="$(echo "$output" | jq -c '[.entries[] | select(.wave == 2) | .batch] | sort')"
-  [ "$wave2_batches" = "[0,1,2]" ]
+  [ "$wave2_batches" = "[0,1]" ]
 }
 
 @test "every manifest entry has a real rendered_prompt_path with no leftover {{ placeholder" {

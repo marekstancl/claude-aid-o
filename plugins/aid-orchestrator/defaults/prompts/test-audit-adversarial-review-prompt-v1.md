@@ -55,7 +55,7 @@ explicitly rather than reading for general plausibility.
    fixed port, a working directory or a lock.
 4. **Membership mismatch.** A conclusion drawn from one set of units and applied to another —
    evidence gathered for a sample presented as covering the whole, or a serial baseline compared
-   against a parallel run whose membership differed.
+   against another run whose membership differed.
 5. **A saving claimed as `measured` without two comparable runs.** A single run, a projection, or a
    before-figure paired with an estimated after-figure. `measured` requires both endpoints really
    observed under comparable conditions; anything else is `estimated` and must state its assumptions.

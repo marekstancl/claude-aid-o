@@ -46,7 +46,7 @@ gates:
   core_direct:
     command: bats tests/test-core.bats
   all_pool:
-    command: bash scripts/aid-bats-parallel-lane.sh --pool-only
+    command: bash -c 'bats tests/*.bats'
 YAML
   run bash "$SCAN" --project-root "$PROJ" --output "$OUT"
   [ "$status" -eq 0 ]

@@ -75,9 +75,7 @@
           "description": "Which of the four emission paths appended this. `gate_runner_direct` is the fourth and least obvious one: a gate whose command invokes a runner directly passes through none of the fan-out points, so without it the ledger would have certified this repository's own known double execution as clean.",
           "type": "string",
           "enum": [
-            "bats_lane",
             "aggregate_runner",
-            "scheduler",
             "gate_runner_direct"
           ]
         },

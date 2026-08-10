@@ -37,7 +37,6 @@ _tac_defaults_json() {
       profile_max_units: 3,
       profile_log_max_bytes: 10485760,
       rootcause_tie_tolerance: 0.1,
-      pilot_noise_ms: 2000,
       chat_render_max_ids: 25,
       prompt_max_bytes: 65536,
       provenance_recheck_budget_ms: 5000

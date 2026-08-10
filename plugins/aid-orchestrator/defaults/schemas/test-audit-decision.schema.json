@@ -133,8 +133,6 @@
               "merge",
               "remove",
               "split",
-              "parallelize",
-              "keep_serial",
               "measure",
               "add",
               "strengthen",

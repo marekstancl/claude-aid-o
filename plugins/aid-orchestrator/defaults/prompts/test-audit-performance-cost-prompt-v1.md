@@ -72,8 +72,8 @@ later audit propose it properly.
 
 - **`fix` (slow for a fixable reason)** — accumulating state, expensive
   per-case setup re-done. GUARD: a setup-sharing proposal trades away the very
-  isolation the parallel-safety wave is buying — refuse it for any unit in a
-  parallel lane, and where you emit it anyway, fill `conflicts_with`.
+  isolation other findings may depend on — where two proposals touch the
+  same unit, fill `conflicts_with`.
 - **`split` (tail domination)** — name the single file that sets the wall
   clock; splitting a monolith is measured-benefit, near-zero-risk. Also gate
   ORDER: cheapest and most-likely-to-fail first is a config-only proposal.

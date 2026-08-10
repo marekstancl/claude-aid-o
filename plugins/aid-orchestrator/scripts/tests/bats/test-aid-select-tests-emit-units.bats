@@ -90,14 +90,10 @@ _write_catalog() {
   [ "$output" = "true" ]
   run jq -r '.[0].membership_binding.catalog_fingerprint' "$units_file"
   [ "$output" = "sha256:aaaaaaaaaaaa" ]
-  # NOT true. Since P072 an UNBOUND status is not evidence: `safe` with no
-  # provenance object resolves to `unknown`, so the unit is not parallel
-  # eligible. This fixture writes no provenance — deliberately, because binding
-  # it would mean creating the source file, which changes what the selector
-  # sees and is a different test. The assertion is corrected to the contract
-  # that actually holds; the bound case is covered by
-  # test-aid-catalog-parallel-authority.bats.
-  run jq -r '.[0].parallel_eligible' "$units_file"
+  # P078: parallel_eligible was removed with the parallelism machinery —
+  # a unit carries only what sequential execution needs, so the field must
+  # be ABSENT, not false.
+  run jq -r '.[0] | has("parallel_eligible")' "$units_file"
   [ "$output" = "false" ]
   run jq -r '.[0].command.argv | join(",")' "$units_file"
   [ "$output" = "bats,plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats" ]
@@ -194,13 +190,9 @@ for u in units:
 sys.exit(1 if errs else 0)
 "
   [ "$status" -eq 0 ]
-  # NOT true. Since P072 an UNBOUND status is not evidence: `safe` with no
-  # provenance object resolves to `unknown`, so the unit is not parallel
-  # eligible. This fixture writes no provenance — deliberately, because binding
-  # it would mean creating the source file, which changes what the selector
-  # sees and is a different test. The assertion is corrected to the contract
-  # that actually holds; the bound case is covered by
-  # test-aid-catalog-parallel-authority.bats.
-  run jq -r '.[0].parallel_eligible' "$units_file"
+  # P078: parallel_eligible was removed with the parallelism machinery —
+  # a unit carries only what sequential execution needs, so the field must
+  # be ABSENT, not false.
+  run jq -r '.[0] | has("parallel_eligible")' "$units_file"
   [ "$output" = "false" ]
 }

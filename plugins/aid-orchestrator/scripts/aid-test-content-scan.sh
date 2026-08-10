@@ -120,7 +120,12 @@ try:
     import yaml
     ey = yaml.safe_load(open(EXY)) or {}
     gates = ey.get("gates") or {}
-    POOLISH = re.compile(r"parallel-lane\.sh|run-all-tests\.sh")
+    # A gate is "poolish" when its file list is expanded at runtime rather
+    # than named: the aggregate runner, or a directory-wide glob. P078
+    # replaced the parallel lane with a plain globbed bats invocation — the
+    # overlap risk is identical (a file another gate names directly is run
+    # twice), so the pattern follows the shape, not the deleted script name.
+    POOLISH = re.compile(r"run-all-tests\.sh|\*\.bats|bats\s+\S*tests/bats/?\s*$")
     for g, spec in gates.items():
         cmd = (spec or {}).get("command") or ""
         direct = set(re.findall(r"[\w./-]+\.bats", cmd))

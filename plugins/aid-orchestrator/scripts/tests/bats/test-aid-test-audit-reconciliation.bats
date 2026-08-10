@@ -810,7 +810,7 @@ _run_full_profiled() {
   _profile "bats:a" "test_body" true 900
   _run_full_profiled
 
-  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "keep_serial" ]
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "measure" ]
   [ "$(jq -r '.actions[0].impact.kind' "$OUT/decision.json")" = "unknown" ]
   [ "$(jq -r '.actions[0].impact.before_ms' "$OUT/decision.json")" = "null" ]
 }
@@ -935,7 +935,7 @@ _run_full_profiled() {
 
   run _run_full_profiled --profile-selection "$OUT/profile-selection.json"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "keep_serial" ]
+  [ "$(jq -r '.actions[0].action' "$OUT/decision.json")" = "measure" ]
 }
 
 @test "STEP 13 SELECTION: a DEFERRED unit is reported with its measured cost, not dropped" {
@@ -1026,7 +1026,7 @@ _disposition_with_proposal() {   # <unit-id>
 
 _finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
   jq -nc --arg id "$1" --arg rec "$2" --argjson conf "${3:-[]}" '
-    {run_unit_id:$id, category:"parallel_safety", severity:"high",
+    {run_unit_id:$id, category:"isolation", severity:"high",
      evidence_refs:["resource-maps/x.json"],
      recommendation:$rec, confidence:"high",
      falsification_check:"delete the fixed path write and the map goes clean",
@@ -1110,7 +1110,7 @@ _finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
   local art="$ART/1-shard_portfolio-shard-0.json"
   jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" '
     {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
-     findings:[{run_unit_id:"bats:a", category:"parallel_safety", severity:"high",
+     findings:[{run_unit_id:"bats:a", category:"isolation", severity:"high",
                 evidence_refs:["x"], recommendation:"fix", confidence:"low",
                 falsification_check:"none"}],
      produced_at:"2026-08-05T00:00:00Z",
@@ -1174,7 +1174,7 @@ _finding_with_proposal() {   # <unit-id> <recommendation> [conflicts_json]
   local art="$ART/1-shard_portfolio-shard-0.json"
   jq -n --argjson d "[$(_disposition_with_proposal "bats:a")]" --arg lr "$long_risk" '
     {schema_version:"1.0.0", focus:"shard_portfolio", wave:1, shard_id:"shard-0",
-     findings:[{run_unit_id:"bats:a", category:"parallel_safety", severity:"high",
+     findings:[{run_unit_id:"bats:a", category:"isolation", severity:"high",
                 evidence_refs:["resource-maps/x.json"],
                 recommendation:"fix", confidence:"high", falsification_check:"n/a",
                 proposal:{change:"a.bats:359 fixed path -> temp dir",

@@ -236,36 +236,28 @@ _aid_inventory_reconcile() {
             {gate: $g.run_unit_id, kind: "aggregate_runner",
              partition: "all", membership: "runtime_partitioned",
              run_unit_ids: ($tests | map(.run_unit_id))}
-          elif ($cmd | test("aid-bats-parallel-lane\\.sh")) then
-            # The lane PARTITIONS the bats units — `--pool-only` runs the
-            # pool, `--dedicated-only` runs the boundary files — so the two
-            # gates are complementary, not overlapping. Claiming both contain
-            # every bats unit produced 105 false double-execution reports.
-            # Which unit lands in which bucket is a RUNTIME fact (it depends
-            # on the catalog/allowlist at dispatch time), so the candidate set
-            # is recorded with membership: "runtime_partitioned" rather than
-            # asserted as exact.
+          elif ($cmd | test("tests/bats/\\*\\.bats")) then
+            # A DIRECTORY-WIDE bats invocation (gate:bats_all). Its file list
+            # is expanded by the shell at dispatch time, so no literal test
+            # path appears in the command string and the substring branch
+            # below would find nothing — reading as "this gate runs no test"
+            # and silencing every double-execution report about it.
             #
-            # `--dedicated-only` does NOT get the full bats set: it only ever
-            # runs the 2 boundary files hard-coded in
-            # aid-bats-parallel-lane.sh:74-77 (BOUNDARY_RELATIVE_PATHS) — kept
-            # in sync here by literal cross-reference, not re-derived, so a
-            # future edit to that list needs a matching edit here. Giving
-            # gate:bats_boundary the same 132-member candidate set as
-            # gate:bats_all made every reconciliation reader believe it
-            # re-runs the whole pool (P075 Step 3).
+            # The partition survived the P078 removal of the parallel lane: the
+            # 2 boundary files are excluded from this gate and run under
+            # gate:bats_boundary instead (a budget split, never a pooling
+            # decision). Claiming both gates contain every bats unit produced
+            # 105 false double-execution reports (P075 Step 3), so the
+            # exclusion is honoured here, keyed on the filter in the command.
             ["plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary",
              "plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary"] as $boundary_ids
             | ($boundary_ids | map("bats:" + .)) as $boundary_run_unit_ids
-            | {gate: $g.run_unit_id, kind: "catalog_pool_runner",
-               partition: (if ($cmd | test("--dedicated-only")) then "dedicated"
-                           elif ($cmd | test("--pool-only")) then "pool"
-                           else "all" end),
+            | ($boundary_ids | map(select(. as $b | $cmd | test(($b | split("/") | last)))) | length > 0) as $excludes_boundary
+            | {gate: $g.run_unit_id, kind: "bats_tree_runner",
+               partition: (if $excludes_boundary then "pool" else "all" end),
                membership: "runtime_partitioned",
                run_unit_ids: (
-                 if ($cmd | test("--dedicated-only"))
-                 then $boundary_run_unit_ids
-                 elif ($cmd | test("--pool-only"))
+                 if $excludes_boundary
                  then ($tests | map(select(.runner == "bats") | .run_unit_id)
                               | map(select(. as $id | ($boundary_run_unit_ids | index($id)) | not)))
                  else ($tests | map(select(.runner == "bats") | .run_unit_id))

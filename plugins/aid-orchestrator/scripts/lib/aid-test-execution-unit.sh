@@ -70,13 +70,13 @@ execution_unit_run() {
       mapfile -d '' -t argv < <(jq -j '.command.argv[] | . + "\u0000"' <<<"$unit_json")
       [[ ${#argv[@]} -gt 0 ]] || { echo "execution_unit_run: command.argv must be non-empty" >&2; return 1; }
       bash "$_AID_JOB_SH" run --jobs-dir "$jobs_dir" --id "$job_id" \
-        --deadline "$deadline" --label test-scheduler -- "${argv[@]}"
+        --deadline "$deadline" --label test-execution -- "${argv[@]}"
       ;;
     shell)
       local shell_cmd
       shell_cmd="$(jq -r '.command.shell' <<<"$unit_json")"
       bash "$_AID_JOB_SH" run --jobs-dir "$jobs_dir" --id "$job_id" \
-        --deadline "$deadline" --label test-scheduler -- bash -c "$shell_cmd"
+        --deadline "$deadline" --label test-execution -- bash -c "$shell_cmd"
       ;;
     *)
       echo "execution_unit_run: unsupported command.type '$cmd_type' — must be argv|shell (P066's exact discriminated union)" >&2
@@ -86,7 +86,7 @@ execution_unit_run() {
 }
 
 # execution_unit_status <jobs_dir> <job_id>
-#   Thin pass-through. The scheduler-visible state IS aid-job.sh's own state
+#   Thin pass-through. The caller-visible state IS aid-job.sh's own state
 #   vocabulary (started|running|terminal_pass|terminal_fail|timed_out|
 #   cancelled|lost) — this step introduces no second, competing vocabulary.
 execution_unit_status() {
@@ -111,7 +111,8 @@ execution_unit_cancel() {
 #   Step 4's canonical schema at all since it never emitted either field):
 #   this function has no batch/scheduling knowledge of its own, so a
 #   standalone call is, correctly, a sequential size-1 batch of one; Step 5's
-#   scheduler overrides both with the real batch composition it alone knows.
+#   (P078: the scheduler that once overrode both is removed — every caller
+#   is sequential now, so the defaults are simply the truth.)
 #
 #   duration_ms/exit_code are null while non-terminal — never fabricated
 #   from a partial run. Exit code mirrors aid-job.sh collect's own contract
