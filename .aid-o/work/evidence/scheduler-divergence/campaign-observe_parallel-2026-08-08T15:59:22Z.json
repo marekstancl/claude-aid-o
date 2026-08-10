@@ -1,0 +1,6 @@
+{
+  "campaign_status": "evidence_incomplete",
+  "attempts_made": 3,
+  "qualifying_runs_collected": 1,
+  "budget_exhausted_reason": "max_wall_clock"
+}

@@ -2,13 +2,16 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064, Phase 1, P068, Phase 4, P066 and P069
-are complete and released. P071 implementation is complete and is being
-prepared for release. Two follow-up plans are now recorded below:
-decision-quality test audit and entry-point UX.
-**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–281,
-IMP-464–468, `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
-`IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`
+**Status:** active PM checklist — refreshed 2026-08-08. P064, Phase 1, P068,
+P066, P069, P071, P072, P073 and P074 are implemented and released. The
+repository-visible P075 fix is also merged and released. The next unresolved
+delivery gate is not another framework plan: it is the measured end-to-end
+test-acceleration campaign, followed by the entry-point UX stream, P061 close
+and P062/E10 re-grounding.
+**Sources:** P061, P062, P064, P066 interim, P068, P072–P075, IMP-258 and
+IMP-261–281, IMP-464–468,
+`2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
+`2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`
 
 ## Current checkpoint
 
@@ -22,15 +25,19 @@ IMP-464–468, `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
 | **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
 | **P068** | **DONE** — released v2.63.0; v2.63.1 repaired CI; v2.63.2 records final backlog/checklist repair |
 | P068 delivery proof | P077 clean dogfood reached `release_ready=true` → merge → durable receipt → `CLOSED`; its isolated history is archived on `archive/P068-dogfood-P067-P077-20260727` |
-| **Current pushed version** | `v2.67.0` at `6ae0a55`; P069 released |
-| P071 | implementation complete on `release-prep-p071`; release/push still pending at this checkpoint |
-| Remote | `origin/main` contains v2.67.0; local documentation main intentionally contains the newer planning records |
+| **Current pushed version** | `v2.79.0` at `83a09f5` on `origin/main` |
+| P071 | **DONE** — released in the v2.68.0 line |
+| P072 | **IMPLEMENTATION DONE** — decision-quality audit and subsequent report/collector hardening released through v2.79.0; the portfolio-wide acceleration campaign remains unrun and no whole-suite speedup may yet be claimed |
+| P073 | **DONE** — all three EPICs merged; released in v2.72.0 |
+| P074 | **DONE** — per-plan worktrees and resumable generation transaction merged; released in v2.75.0 after integration with the concurrent release line |
+| P075 | **DONE in the repository currently visible here** — `3f284c5` merged the epic-start/generation wiring and branch restoration; released as v2.77.0. If another window still reports P075 active, reconcile it before allowing further writes: it is operating from stale state or doing a distinct, not-yet-recorded continuation. |
+| Local/remote topology | local `main` is at `46a026a`, one Docker-layout commit ahead but nine commits behind `origin/main`; reconcile this divergence before the next commit/push instead of developing further directly on the stale checkout |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
 | IMP-266 | **RESOLVED — PM ratified Option B (2026-07-24)**: `merged_to_plan` stays terminal; wrong entries corrected via the documented recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`), doc-only, no code edge; Option A deferred to P068+ |
-| Next work | Phase 4, **P066 audit capability and P069 scheduler integration are DONE**. Finish/release P071, then implement `IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`; afterward run the corrected full audit and its concrete remediation. The separate `IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md` stream follows. |
+| Next work | Close Phase 5 operationally: run one frozen-SHA sequential-vs-scheduled campaign through the installed plugin, prove identical membership/verdicts, no duplicate execution and real before/after wall-clock, then take an explicit PM quarantine decision. After that implement the separate Help/Init/Setup/Release UX stream, finish P061 E4/E5 and re-ground P062/E10. |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -49,52 +56,45 @@ Reach E10 only after AID has:
 5. completed risk-based profiles; and
 6. a re-grounded E10 plan whose preconditions match the current repository.
 
-## Current continuation — authoritative order after P071 (2026-08-02)
+## Current continuation — authoritative order after P075 (2026-08-08)
 
-This section supersedes stale "P066/P069 awaiting implementation" wording
-elsewhere in this historical checklist.
+This section supersedes both duplicated 2026-08-02 continuation sections and
+all stale wording that calls P069, P071, P072, P073 or P074 pending.
 
-1. [ ] **Finish and release P071**, then leave its implementation stable. Treat
-   it as a component result, not proof that the complete release path is fast.
-2. [ ] **Land and re-ground the P066 decision-quality follow-up** against the
-   released P069/P071 code:
-   `docs/plans/2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`
-   (documentation branch `docs/p066-decision-quality-followup`, current update
-   `12b37b9`).
-3. [ ] **Fold the unfinished P070 discovery gap into that follow-up** instead
-   of running P070 separately: inventory all standalone `test-*.sh` suites as
-   run units and reconcile Bats, shell, declared gates, package scripts and
-   CI-only suites without omissions or double counting.
-4. [ ] **Implement the follow-up outside an open-ended AID review loop.** A
-   full audit must give exactly one evidence-backed disposition to every test
-   unit (`keep|rewrite|merge|remove|split|parallelize|keep_serial|measure`),
-   identify unique/duplicate value, and report current/proposed portfolio size
-   and runtime. Portfolio-wide `unknown` is `incomplete`, never success.
-5. [ ] **Run the corrected full self-host audit once** and create the concrete
-   PM-reviewed reduction/remediation plan from its named results. Implement
-   approved removals, merges, cheaper rewrites and serial/parallel lanes.
-6. [ ] **Prove the whole installed path**, not the individual components:
-   `/aid-audit-tests` -> complete decision artifact -> approved catalog/mapping
-   -> P069 -> generated `execution.yaml` -> real `aid-run-gates.sh` receipts.
-   The final ledger must prove no test ran twice and record real before/after
-   wall-clock. Until this passes, do not claim P066/P069/P071 delivered test
-   acceleration as a whole.
-7. [ ] **Then execute the separate Help/Init/Setup/Release maintenance stream.**
-   Grounding source:
-   `.aid-o/work/interim-AID-HELP-INIT-SETUP-AND-HUMAN-HANDOFF-UX.md`;
-   configuration authority source: `docs/plans/2026-06-29-BACKLOG.md` IMP-261. Its writer
-   must inventory every current `/aid-help`, `/aid-init`, `/aid-setup` and
-   `aid-release.sh` behavior, merge/precedence rule, upgrade path and user-facing
-   instruction before changing commands. Include the recurring release defects
-   recorded in `BACKLOG.md` (notably OBS-20260711-05: `[Unreleased]` CHANGELOG
-   handling, blind README version substitution and missing post-release
-   verification), plus the fail-loud no-numeric-CHANGELOG-header liveness fix.
-8. [ ] Resume **P061 E4/E5 -> P061 close -> P062/E10 re-grounding** only after
-   the test path and command/configuration maintenance above have truthful
-   fresh-clone evidence.
+1. [x] Release P071 and integrate its parallel Bats lane and gate fixes.
+2. [x] Implement the P066 decision-quality follow-up as P072, including the
+   P070 discovery gap: Bats, standalone shell, declared gates, package scripts
+   and CI-only suites are inventory inputs rather than invisible work.
+3. [x] Complete P073 process loosening/recovery and P074 per-plan concurrency
+   plus resumable generation; land the P075 epic-start/restore integration fix.
+4. [ ] **Reconcile local `main` with `origin/main` first.** Preserve local
+   Docker commit `46a026a`, but do not build or release from a branch nine
+   remote commits behind v2.79.0.
+5. [ ] **Run the one missing acceleration campaign on one frozen SHA.** Use the
+   installed plugin path, approved catalog/mapping and real gate runner. Record
+   a sequential baseline and scheduled run with identical membership and
+   verdicts, terminal receipts, execution-ledger proof that no unit ran twice,
+   and measured before/after wall-clock. Do not substitute another schema or
+   fixture review for this run.
+6. [ ] **Take the explicit PM quarantine decision from that evidence.** Remove
+   or narrow `bats_all`/`plan_diff` quarantine only for gates whose replacement
+   coverage and runtime are proven; otherwise retain the truthful waived state
+   with a named follow-up. This is the point where the project may finally
+   claim a real acceleration — not at component release time.
+7. [ ] **Then implement the separate Help/Init/Setup/Release maintenance
+   stream** from
+   `docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`,
+   including the release-liveness items routed through
+   `docs/plans/2026-08-02-IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`.
+8. [ ] Finish P061 E4/E5, reconcile superseded work, record E6 as backlog and
+   close P061 durably.
+9. [ ] Re-ground P062/E10 against the released P061/P068/P069/P072/P074
+   contracts; regenerate its EPICs and execute E10 only from that reviewed
+   plan.
 
-**Immediate next action:** finish P071, then hand the decision-quality document
-to the writer. Do not start P070 as a separate plan.
+**Immediate next action:** reconcile `main`, then run and adjudicate the single
+measured acceleration campaign. Do not start another test-framework plan before
+that result; the missing deliverable is operational proof, not another layer.
 
 This order is deliberate:
 
@@ -103,44 +103,14 @@ P064 close
   → critical maintenance
   → P068 plan-final cutover
   → EPIC-generation integrity maintenance
-  → P066 test audit/scheduler + remediation
+  → P066/P069/P071/P072 test audit + scheduler + decision quality
+  → P073/P074/P075 liveness, concurrency and generation wiring
+  → measured acceleration campaign + quarantine decision
+  → Help/Init/Setup/Release entry-point UX
   → P061 E4/E5 completion and P061 close
   → P062 re-grounding/preflight
   → P062 E10 execution
 ```
-
-## Current continuation — authoritative order after P071 (2026-08-02)
-
-This section supersedes stale historical wording that describes P066 or P069
-as awaiting implementation.
-
-1. [ ] Finish and release P071, then keep its implementation stable. P071 is a
-   component result, not proof that the complete test path is fast.
-2. [ ] Re-ground and implement
-   `docs/plans/2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md` against the
-   released P069/P071 contracts.
-3. [ ] Fold the unfinished P070 discovery gap into that follow-up rather than
-   running P070 separately: inventory Bats, standalone shell suites, declared
-   gates, package scripts and CI-only suites without omissions or double runs.
-4. [ ] Require one evidence-backed disposition for every test unit
-   (`keep|rewrite|merge|remove|split|parallelize|keep_serial|measure`). A
-   portfolio-wide `unknown` result is incomplete, never remediation-ready.
-5. [ ] Run the corrected full self-host audit once, approve its concrete
-   reduction/remediation plan, then implement the named removals, merges,
-   cheaper rewrites and serial/parallel lanes.
-6. [ ] Prove the installed end-to-end path:
-   `/aid-audit-tests` → complete decision artifact → approved catalog/mapping
-   → P069 → generated `execution.yaml` → real `aid-run-gates.sh` receipts.
-   Evidence must show no duplicate execution and real before/after wall-clock.
-7. [ ] Execute the separate Help/Init/Setup/Release stream from
-   `docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`, including
-   the release-liveness defects routed through
-   `docs/plans/2026-08-02-IMP-POST-P068-INTEGRITY-LIVENESS-HARDENING.md`.
-8. [ ] Resume P061 E4/E5 → P061 close → P062/E10 re-grounding only after the
-   test and command/configuration paths have truthful fresh-clone evidence.
-
-**Immediate next action:** finish P071 release, then hand the decision-quality
-plan to its implementer. Do not start P070 as a separate plan.
 
 ## Temporary policy currently in force
 
@@ -353,6 +323,22 @@ making ordinary EPIC generation truthful.
 **GO to Phase 5:** a valid plan can generate EPICs without a fake graph or PM
 override, while an invalid or later-divergent graph fails closed.
 
+### Phase 4.5 — later process and concurrency hardening — DONE
+
+- [x] **P073:** five-session review budgets, fail-loud release probes,
+  supported force/recovery paths and review-equivalent ancillary writes;
+  released in v2.72.0.
+- [x] **P074:** per-plan execution worktrees, locked identifiers, multi-run
+  accounting and resumable all-phase generation transaction; released in the
+  v2.75.0 line.
+- [x] **P075:** connect the previously dormant `epic-start` producer to real
+  generation and restore every checkout/worktree moved by init, including
+  multi-phase runs; merged at `3f284c5`, released as v2.77.0.
+
+These plans make parallel project work and generation survivable. They do not
+replace the Phase-5 measurement campaign and do not prove that the test
+portfolio is faster.
+
 ## Phase 5 — P066 test portfolio audit, scheduler and remediation
 
 ### 5A — P066 audit capability — DONE
@@ -363,29 +349,33 @@ receipts, and can produce a remediation brief. Historical checklist entries
 below explain the original delivery intent; they are not evidence that P066 is
 still merely an interim specification.
 
-### 5B — P069 scheduler/gate integration — ACTIVE
+### 5B — P069 scheduler/gate integration — DONE
 
-P069 is the separate implementation stream that connects only approved,
-evidence-backed catalog mappings to the real gate runner and consumer
-`/aid-init` configuration path. It owns scheduler execution, not audit
-diagnosis. Do not alter its branch from either follow-up below.
+P069 connects approved, evidence-backed catalog mappings to the real gate
+runner and consumer `/aid-init` configuration path. It owns scheduler
+execution, not audit diagnosis, and is released in the v2.67.0 line.
 
-### 5C — decision-quality audit follow-up — PLANNED
+### 5C — decision-quality audit follow-up — IMPLEMENTED; CAMPAIGN OPEN
 
 Canonical plan:
 `docs/plans/2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`.
 
-- [ ] Re-ground the narrow P066↔P069 catalog contract after P069 is merged or
+- [x] Re-ground the narrow P066↔P069 catalog contract after P069 is merged or
   frozen.
-- [ ] Make a materially unresolved audit return `audit_status: incomplete`,
+- [x] Make a materially unresolved audit return `audit_status: incomplete`,
   not a remediation-ready portfolio-wide `unknown`.
-- [ ] Add bounded root-cause profiling for high-cost run units, source-aware
+- [x] Add bounded root-cause profiling for high-cost run units, source-aware
   resource maps and disposable-clone parallel pilots.
-- [ ] Produce a strict decision artifact and a human-first output: fix/merge/
+- [x] Produce a strict decision artifact and a human-first output: fix/merge/
   remove/split, proposed parallel lanes, serial exceptions, current time and
   measured/estimated/unknown future impact.
-- [ ] Keep all scheduler activation and catalog approval in P069's explicit
+- [x] Keep all scheduler activation and catalog approval in P069's explicit
   authority boundary.
+- [x] Extend discovery and reporting across runner types and CI/wrapper
+  reachability; subsequent hardening is released through v2.79.0.
+- [ ] Run the frozen-SHA sequential-vs-scheduled acceleration campaign and
+  record the PM quarantine decision. P072's own campaign ledger explicitly
+  says this has not happened; implementation completion is not speed proof.
 
 ### 5D — entry-point UX and human handoffs — PLANNED, independent
 
@@ -404,9 +394,8 @@ Canonical plan:
   settings schema inside the UX rewrite.
 
 The historical P066 roadmap tasks below are retained as context. The current
-implementation order is **finish/freeze P069 → re-ground 5C → implement 5C →
-implement 5D as a separate stream**. Planning/grounding 5D may happen earlier;
-neither implementation may modify P069's active branch.
+order is **finish the measured 5C campaign and quarantine decision → implement
+5D → close P061 → re-ground P062/E10**.
 
 ### Verified standalone release hygiene — before the next release automation use
 

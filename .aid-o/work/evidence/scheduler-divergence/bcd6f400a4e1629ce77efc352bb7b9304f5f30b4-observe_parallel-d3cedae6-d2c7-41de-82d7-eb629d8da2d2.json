@@ -1,0 +1,1648 @@
+{
+  "run_id": "d3cedae6-d2c7-41de-82d7-eb629d8da2d2",
+  "catalog_fingerprint_set": "sha256:db26d3c02850cfdacd561ac2957b9f6ad843e12900b80b1af5faf1682fef2871",
+  "commit_sha": "bcd6f400a4e1629ce77efc352bb7b9304f5f30b4",
+  "worktree_kind": "disposable_clone",
+  "mode_tested": "observe_parallel",
+  "selected_unit_ids": [
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-cli",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-finalize-production",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-bats-parallel-lane",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-c3-dispatch",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-catalog-parallel-authority",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-compliance",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-emit-dispatch",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-execution-unit-membership",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-profile",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline-concurrency",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-report",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-waiver",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gitignore-backfill",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-test-audit-config",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-upgrade-test-audit",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-job",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-lock-target-audit",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-to-epic-fence",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-release",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates-scheduler-dispatch",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-scheduler-overlay-approve",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-scheduler-rollout-gate",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests-catalog-convergence",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests-emit-units",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-self-host-migrate-p071-gates",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-bats",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-declared-command",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-package-script",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-shell-suite",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-chat-summary",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-command-allowlist",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-consolidate",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-decision",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-dispatch",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-lanes",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-measure",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-profile-select",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-profile",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-prompts-golden",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-reconciliation",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-state",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-write-plan-bridge",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-provenance",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-schema",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-divergence-campaign",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-execution-ledger",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-execution-unit",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-inventory",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-parallel-pilot",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-portfolio-analyst-focus",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-resource-map",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-schedule-divergence-check",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler-report",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-timing-bats",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-anti-fabrication",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-behavior-trace",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-branch-restore",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-review",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-activation",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-advisory",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit-prompt",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-fix-loop",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cache-preflight",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-catalog-confirm-mapping",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-catalog-force-tracked",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ci-floor",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-commit-guard",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-committed-source",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-compose-execution-yaml-scheduler-block",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-contract-validate",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cp1-ledger",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cp3-freshness",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-delivery-report",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-dep-grammar",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-e2e-evidence-clean",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-execution-unit-receipt-schema",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-force-anomalies",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-dg07-observe",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-step-render",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-invalidation-map",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-e2e",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-reconcile",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pipeline-c3-dispatch",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-ac-diff",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-close",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-force-commands",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-force",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-lint",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-writing-rules",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pm-brief",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pm-override",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-queue-revalidation",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-registry-ttl",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-changelog-entry",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-detection",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy-surface-check",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-reporter-boundary",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-run-all-tests-result-grammar",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-selector-mappings-real-seed",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-selector-snapshot-readonly",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-tiered-severity",
+    "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ui-calibration-verify",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-fsm.sh",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-integration-phase1.sh",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-release.sh",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-run-gates.sh",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-scope-check.sh",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-stage-log.sh",
+    "bats:plugins/aid-orchestrator/scripts/tests/test-token-count.sh",
+    "npm:test",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-c0-contract",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-check-severity-sync",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-control-boundary",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-cp1-gate",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-cp1-grounding",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-delivery-gate",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-delivery-profile",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-scheduler",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-test-audit",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-epic-to-json-regression",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-epic-to-json",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-evidence-verify",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-force-init-passthrough",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-fsm-ui-fidelity",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-full-pipeline",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-generation-finalize",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-generation-readiness",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-instruction-consistency",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-instruction-sweep",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-audit-report-shapes",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-audit-pipeline",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-full-path-proof",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-whole-path",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-parallel-authority-e2e",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-quarantine-pm-decision",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-quarantine-remediation-evidence",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-remediation-handoff",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-scheduler-catalog-consumption",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-integration-self-host-audit",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-json-to-run",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-plan-diff",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-plan-quality-enforcement",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-plan-to-epic",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-protocol-validate",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-queue-add",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-regression",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-review-profile",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-semantic-review",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-skill-lint",
+    "sh:plugins/aid-orchestrator/scripts/tests/test-ui-fidelity-e2e",
+    "gate:bats_all",
+    "gate:bats_boundary",
+    "gate:bats_fsm",
+    "gate:docs_updated",
+    "gate:shell_pipeline_smoke",
+    "gate:targeted_tests",
+    "gate:ui_calibration_result",
+    "gate:ui_calibration_signoff"
+  ],
+  "sequential_verdicts": [
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-cli",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-finalize-production",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-bats-parallel-lane",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-c3-dispatch",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-catalog-parallel-authority",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-compliance",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-emit-dispatch",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-execution-unit-membership",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-profile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline-concurrency",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-report",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-waiver",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gitignore-backfill",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-test-audit-config",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-upgrade-test-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-job",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-lock-target-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-to-epic-fence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-release",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates-scheduler-dispatch",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-scheduler-overlay-approve",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-scheduler-rollout-gate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests-catalog-convergence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests-emit-units",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-self-host-migrate-p071-gates",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-bats",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-declared-command",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-package-script",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-shell-suite",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-chat-summary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-command-allowlist",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-consolidate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-decision",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-dispatch",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-lanes",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-measure",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-profile",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-profile-select",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-prompts-golden",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-reconciliation",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-state",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-write-plan-bridge",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-provenance",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-schema",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-divergence-campaign",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-execution-ledger",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-execution-unit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-inventory",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-parallel-pilot",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-portfolio-analyst-focus",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-resource-map",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-schedule-divergence-check",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler-report",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-timing-bats",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-anti-fabrication",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-behavior-trace",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-branch-restore",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-review",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-activation",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-advisory",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit-prompt",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-fix-loop",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cache-preflight",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-catalog-confirm-mapping",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-catalog-force-tracked",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ci-floor",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-commit-guard",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-committed-source",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-compose-execution-yaml-scheduler-block",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-contract-validate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cp1-ledger",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cp3-freshness",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-delivery-report",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-dep-grammar",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-e2e-evidence-clean",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-execution-unit-receipt-schema",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-force-anomalies",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-dg07-observe",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-step-render",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-invalidation-map",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-e2e",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-reconcile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pipeline-c3-dispatch",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-ac-diff",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-close",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-force",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-force-commands",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-lint",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-writing-rules",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pm-brief",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pm-override",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-queue-revalidation",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-registry-ttl",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-changelog-entry",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-detection",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy-surface-check",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-reporter-boundary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-run-all-tests-result-grammar",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-selector-mappings-real-seed",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-selector-snapshot-readonly",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-tiered-severity",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ui-calibration-verify",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-fsm.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-integration-phase1.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-release.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-run-gates.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-scope-check.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-stage-log.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-token-count.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "gate:bats_all",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:bats_boundary",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:bats_fsm",
+      "result": "pass"
+    },
+    {
+      "unit_id": "gate:docs_updated",
+      "result": "pass"
+    },
+    {
+      "unit_id": "gate:shell_pipeline_smoke",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:targeted_tests",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:ui_calibration_result",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:ui_calibration_signoff",
+      "result": "fail"
+    },
+    {
+      "unit_id": "npm:test",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-c0-contract",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-check-severity-sync",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-control-boundary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-cp1-gate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-cp1-grounding",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-delivery-gate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-delivery-profile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-scheduler",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-test-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-epic-to-json",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-epic-to-json-regression",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-evidence-verify",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-force-init-passthrough",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-fsm-ui-fidelity",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-full-pipeline",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-generation-finalize",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-generation-readiness",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-instruction-consistency",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-instruction-sweep",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-audit-report-shapes",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-audit-pipeline",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-full-path-proof",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-whole-path",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-parallel-authority-e2e",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-quarantine-pm-decision",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-quarantine-remediation-evidence",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-remediation-handoff",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-scheduler-catalog-consumption",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-self-host-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-json-to-run",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-plan-diff",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-plan-quality-enforcement",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-plan-to-epic",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-protocol-validate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-queue-add",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-regression",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-review-profile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-semantic-review",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-skill-lint",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-ui-fidelity-e2e",
+      "result": "pass"
+    }
+  ],
+  "scheduled_verdicts": [
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-cli",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-audit-tests-finalize-production",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-bats-parallel-lane",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-c3-dispatch",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-catalog-parallel-authority",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-compliance",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-emit-dispatch",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-epic-summary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-execution-unit-membership",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-profile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-baseline-concurrency",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-runtime-report",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gate-waiver",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-gitignore-backfill",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-test-audit-config",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-init-upgrade-test-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-job",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-lock-target-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-to-epic-fence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-release",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates-scheduler-dispatch",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-scheduler-overlay-approve",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-scheduler-rollout-gate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests-catalog-convergence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-select-tests-emit-units",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-self-host-migrate-p071-gates",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-bats",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-declared-command",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-package-script",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-adapter-shell-suite",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-chat-summary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-command-allowlist",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-config",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-consolidate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-decision",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-dispatch",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-lanes",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-measure",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-profile",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-profile-select",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-prompts-golden",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-reconciliation",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-state",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-audit-write-plan-bridge",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-apply-evidence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-provenance",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-catalog-schema",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-divergence-campaign",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-execution-ledger",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-execution-unit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-inventory",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-isolation-experiment",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-parallel-pilot",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-portfolio-analyst-focus",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-resource-map",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-schedule-divergence-check",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler-report",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-timing-bats",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ancillary-classifier",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-anti-fabrication",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-behavior-trace",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-branch-restore",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-review",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-activation",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-advisory",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-audit-prompt",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-c3-fix-loop",
+      "result": "fail"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cache-preflight",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-catalog-confirm-mapping",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-catalog-force-tracked",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ci-floor",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-commit-guard",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-committed-source",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-compose-execution-yaml-scheduler-block",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-contract-validate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cp1-ledger",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-cp3-freshness",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-delivery-report",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-dep-grammar",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-drift-equivalence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-e2e-evidence-clean",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-execution-unit-receipt-schema",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-force-anomalies",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-dg07-observe",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-fsm-step-render",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-invalidation-map",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-e2e",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-lifecycle-reconcile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pipeline-c3-dispatch",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-ac-diff",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-close",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-force",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-force-commands",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-lint",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-plan-writing-rules",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pm-brief",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-pm-override",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-protected-surface",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-queue-revalidation",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-registry-ttl",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-changelog-entry",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-detection",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-release-policy-surface-check",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-reporter-boundary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-review-equivalence",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-run-all-tests-result-grammar",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-selector-mappings-real-seed",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-selector-snapshot-readonly",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-tiered-severity",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/bats/test-ui-calibration-verify",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-fsm.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-integration-phase1.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-release.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-run-gates.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-scope-check.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-stage-log.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "bats:plugins/aid-orchestrator/scripts/tests/test-token-count.sh",
+      "result": "pass"
+    },
+    {
+      "unit_id": "gate:bats_all",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:bats_boundary",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:bats_fsm",
+      "result": "pass"
+    },
+    {
+      "unit_id": "gate:docs_updated",
+      "result": "pass"
+    },
+    {
+      "unit_id": "gate:shell_pipeline_smoke",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:targeted_tests",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:ui_calibration_result",
+      "result": "fail"
+    },
+    {
+      "unit_id": "gate:ui_calibration_signoff",
+      "result": "fail"
+    },
+    {
+      "unit_id": "npm:test",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-c0-contract",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-check-severity-sync",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-control-boundary",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-cp1-gate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-cp1-grounding",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-delivery-gate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-delivery-profile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-scheduler",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-test-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-epic-to-json",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-epic-to-json-regression",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-evidence-verify",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-force-init-passthrough",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-fsm-ui-fidelity",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-full-pipeline",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-generation-finalize",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-generation-readiness",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-instruction-consistency",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-instruction-sweep",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-audit-report-shapes",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-audit-pipeline",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-full-path-proof",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-e2e-whole-path",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-parallel-authority-e2e",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-quarantine-pm-decision",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-quarantine-remediation-evidence",
+      "result": "fail"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-remediation-handoff",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-scheduler-catalog-consumption",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-integration-self-host-audit",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-json-to-run",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-plan-diff",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-plan-quality-enforcement",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-plan-to-epic",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-protocol-validate",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-queue-add",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-regression",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-review-profile",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-semantic-review",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-skill-lint",
+      "result": "pass"
+    },
+    {
+      "unit_id": "sh:plugins/aid-orchestrator/scripts/tests/test-ui-fidelity-e2e",
+      "result": "pass"
+    }
+  ],
+  "membership_diff": [],
+  "verdict_diff": [],
+  "pass": true,
+  "sequential_duration_ms": 9006605,
+  "scheduled_duration_ms": 8702321,
+  "evaluated_at": "2026-08-08T20:55:22Z"
+}
