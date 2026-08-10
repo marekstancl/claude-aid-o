@@ -78,6 +78,14 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-active-index.sh" ]]; then
   # shellcheck disable=SC1091
   source "${SCRIPT_DIR}/lib/aid-active-index.sh" || true
 fi
+# P079 Step 7 — the routed-findings journal (aid_finding_open_for_epic,
+# aid_finding_recorded), read by done-advance. Guarded exactly like the two
+# libs above: a missing lib must not abort the CLI, and the check that uses it
+# fails closed on its own when the functions are not there.
+if [[ -f "${SCRIPT_DIR}/lib/aid-routed-findings.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-routed-findings.sh" || true
+fi
 
 # P074 Step 8 — the verbatim argv of this process, captured by the dispatcher
 # at the bottom of this file before any parsing, so the plan-worktree redirect
@@ -1279,6 +1287,85 @@ fsm_check_verifier_output() {
     fi
   fi
 
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _fsm_routed_findings_check <epic_id> <evidence_dir>  (P079 Step 7, IMP-473)
+#
+# TWO halves, because either alone is a half-truth:
+#
+#   CONSUMER — a finding routed to THIS epic (or one of its steps) that is not
+#   yet resolved blocks completion. This is the ordinary carrier check.
+#
+#   PRODUCER RECONCILIATION — every finding in the run's canonical CP3
+#   artifact whose target file lies OUTSIDE the union of all steps'
+#   allowed_paths must have a journal entry, open or resolved. Without this the
+#   carrier only remembers what the controller chose to write down, and the
+#   live failure was precisely a controller that wrote nothing.
+#
+# ZERO-COST when the run never routed anything and its CP3 findings are all
+# in scope: no journal and no out-of-scope findings means no work and no
+# behaviour change, which is what every legacy run looks like.
+#
+# Returns 0 when the EPIC may complete, 1 when it may not (message on stderr).
+# ---------------------------------------------------------------------------
+_fsm_routed_findings_check() {
+  local epic_id="$1" evidence_dir="$2"
+  local plan_nnn plan_id
+  plan_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  # An ad-hoc EPIC belongs to no plan, so there is no plan-scoped journal to
+  # consult. The instruction still applies (route to backlog), but there is
+  # nothing mechanical to check here.
+  [[ -n "$plan_nnn" ]] || return 0
+  plan_id="P${plan_nnn}"
+  declare -F aid_finding_open_for_epic >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: lib/aid-routed-findings.sh is missing, so ${epic_id}'s routed review findings cannot be checked — refusing to complete an EPIC whose out-of-scope findings cannot be accounted for." >&2
+    return 1
+  }
+
+  local rc=0 open_out
+  open_out="$(aid_finding_open_for_epic "$plan_id" "$epic_id" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: ${open_out}" >&2
+    return 1
+  fi
+  local failed=0
+  if [[ -n "$open_out" ]]; then
+    local fp src target
+    while IFS=$'\t' read -r fp src target; do
+      [[ -n "$fp" ]] || continue
+      echo "PRECONDITION FAIL: review finding ${fp} (from ${src}, routed ${target}) is still open — fix it in an authorized step and record that, or route it to the backlog: aid_finding_resolve ${plan_id} ${fp} \"<where it was fixed>\" | aid_finding_route ${plan_id} ${fp} ${src} backlog:IMP-<n> ${epic_id}" >&2
+      failed=1
+    done <<< "$open_out"
+  fi
+
+  # ── Producer reconciliation against the canonical CP3 artifact ────────────
+  local review_json="${evidence_dir}/semantic-review-final.json"
+  local plan_json="${evidence_dir}/plan.json"
+  [[ -f "$review_json" && -f "$plan_json" ]] || { [[ "$failed" -eq 1 ]] && return 1; return 0; }
+
+  # The scope union is the same one the pre-commit hook computes for GATES and
+  # DONE: every step's allowed_paths, flattened. A finding inside it had an
+  # authorized place to be fixed and needs no route.
+  local scope_list
+  scope_list="$(jq -r '[ .steps[]?.allowed_paths[]? ] | unique | .[]' "$plan_json" 2>/dev/null)" || scope_list=""
+  local fp tp in_scope p
+  while IFS=$'\t' read -r fp tp; do
+    [[ -n "$fp" && -n "$tp" ]] || continue
+    in_scope=0
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      if [[ "$tp" == "$p" || "$tp" == "$p"/* ]]; then in_scope=1; break; fi
+    done <<< "$scope_list"
+    [[ "$in_scope" -eq 1 ]] && continue
+    if ! aid_finding_recorded "$plan_id" "$fp"; then
+      echo "PRECONDITION FAIL: CP3 finding ${fp} targets ${tp}, which no step of ${epic_id} was allowed to touch, and nothing recorded what happens to it. Route it before completing: aid_finding_route ${plan_id} ${fp} cp3 <step:<n>|epic:<id>|backlog:IMP-<n>> ${epic_id}" >&2
+      failed=1
+    fi
+  done < <(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>/dev/null || true)
+
+  [[ "$failed" -eq 1 ]] && return 1
   return 0
 }
 
@@ -6792,6 +6879,16 @@ EOF
         echo "Move to tasks/archive/ before advancing: mv $task_file ${_tasks_dir}/archive/" >&2
         errors=$((errors + 1))
       fi
+
+      # ── Routed review findings (EPIC-LOCAL, BOTH modes) — P079 Step 7 ───────
+      #
+      # Three times in one P076 run a review produced a finding whose file lay
+      # outside every remaining step's allowed_paths. No authorized step could
+      # fix it, so it lived in the controller's prose — and one of them crossed
+      # an EPIC boundary and was never seen again. Two halves are checked here,
+      # and BOTH are needed: the first only catches findings somebody already
+      # decided about, the second catches the ones nobody did.
+      _fsm_routed_findings_check "$epic_id" "$evidence_dir" || errors=$((errors + 1))
 
       # ── The auditor's `blocking_findings` verdict (EPIC-LOCAL, BOTH modes) ───
       # HOISTED out of the release stack by the Step 4 CP2 review (finding 1). It

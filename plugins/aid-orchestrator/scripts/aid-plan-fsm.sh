@@ -900,8 +900,10 @@ _pfsm_reconcile_task_branch() {
   # `cmd_epic_start`'s branch-creation path takes for the same reason.
   local plan_id="$2" task_branch="$4"
   local lock_path fd rc=0
-  # Set by the body when it MOVES the recorded base, so the caller re-reads the
-  # manifest entry only when there is something new to read.
+  # Set by the body whenever the manifest's recorded base needed reconciling —
+  # including the idempotent no-op when a prior crashed run already moved it, in
+  # which case the caller's in-memory entry is stale and the re-read is exactly
+  # what is required. Left at 0 on the common path, where nothing was touched.
   _PFSM_RECONCILE_MUTATED=0
   lock_path="$(_pfsm_plan_lock_path "$plan_id")"
   aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || {
