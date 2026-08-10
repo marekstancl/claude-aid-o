@@ -248,3 +248,25 @@ make_plan_worktree() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"HARD STOP"* ]]
 }
+
+@test "P079 Step 8: a worktree the registry records ELSEWHERE does not downgrade (the record wins over the path)" {
+  # The path convention is only the fallback for when there is no record to
+  # consult. A record that names a DIFFERENT directory is an authoritative no.
+  local primary="$WORK/primary" wt="$WORK/primary/.aid-worktrees/plan-P900"
+  make_dogfood_fixture "$primary" match
+  init_git_repo "$primary"
+  mkdir -p "$primary/.aid-o/work/plan-state/P900"
+  cat > "$primary/.aid-o/work/plan-state/P900/plan-state.yaml" <<EOF
+plan_id: P900
+plan_state: OPEN
+worktree_path: ${primary}/.aid-worktrees/plan-P901
+EOF
+  git -C "$primary" worktree add -q "$wt" -b plan/P900
+  make_dogfood_fixture "$wt" skew
+  git -C "$wt" add -A
+  git -C "$wt" -c user.email=t@e -c user.name=t commit -q -m "plugin work in a worktree the plan does not claim"
+
+  run bash -c "cd '$wt' && exec bash '$LIB' '$wt/nonexistent-state.yaml' '$WORK/tl.jsonl'" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"HARD STOP"* ]]
+}

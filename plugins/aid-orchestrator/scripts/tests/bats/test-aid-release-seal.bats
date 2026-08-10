@@ -106,7 +106,11 @@ _release() { bash -c "cd '$REPO' && exec bash '$RELEASE' patch" 3>&-; }
   ( cd "$REPO" && git add -A && git commit -q -m "second changelog" )
 
   run _release
-  [[ "$output" == *"Sealed: $REPO/plugins/x/CHANGELOG.md left untouched"* ]]
+  # It gets the SAME treatment as the primary CHANGELOG — heading preserved and
+  # a new entry prepended — not merely skipped, which would leave a canonical
+  # changelog behind at the old version while the release moved on. (Both are
+  # then rolled back by the P073 completeness gate, as the primary one is.)
+  [[ "$output" == *"$REPO/plugins/x/CHANGELOG.md keeps its heading; prepended a new 1.0.1 entry"* ]]
   grep -q '^## \[1\.0\.0\] — 2026-08-01$' "$REPO/plugins/x/CHANGELOG.md"
   grep -qF -- "$RELEASED_LINE" "$REPO/plugins/x/CHANGELOG.md"
 }

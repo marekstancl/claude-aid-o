@@ -139,6 +139,10 @@ aid_obligation_open() {
   local plan_id="${1:-}" want="${2:-}" file
   file="$(_aid_obligation_file "$plan_id")" || return 2
   [[ -f "$file" ]] || return 0
+  # An EMPTY journal is a journal with nothing in it, not an unreadable one —
+  # `jq -e .` has no result on empty input and would otherwise block a close
+  # over a file that says nothing is owed.
+  [[ -s "$file" ]] || return 0
   local bad
   bad="$(grep -cvE '^[[:space:]]*\{.*\}[[:space:]]*$' "$file" 2>/dev/null || true)"
   if ! jq -e . "$file" >/dev/null 2>&1; then

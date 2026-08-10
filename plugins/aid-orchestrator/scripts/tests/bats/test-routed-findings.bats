@@ -14,7 +14,7 @@
 # nothing in the live incident either.
 #
 # FD-3 HYGIENE: every FSM invocation runs with `3>&-`. After any edit:
-#   bats --tap test-routed-findings.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-routed-findings.bats | grep -cE '^(ok|not ok)'   # == 11
 
 load test-helpers.bash
 
@@ -176,4 +176,38 @@ _done_advance() {
   run _done_advance
   [[ "$output" != *"routed"* ]]
   [[ "$output" != *"aid-routed-findings"* ]]
+}
+
+# ─── review-round regressions (P079 EPIC 2 review) ─────────────────────────
+
+@test "P079 Step 7: a step: route with NO epic id is refused — it would satisfy the producer check while blocking nothing" {
+  _seed_done_review
+  run _lib "aid_finding_route P900 '$FP_A' cp3-code-review step:2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must name the EPIC"* ]]
+
+  # And nothing was recorded, so the producer check still catches the finding.
+  _seed_plan_json "src/in-scope.ts"
+  _seed_review "docs/somewhere-else.md"
+  run _done_advance
+  [[ "$output" == *"no step of"* ]]
+}
+
+@test "P079 Step 7: an UNREADABLE CP3 artifact fails closed — silence is not 'no findings'" {
+  _seed_done_review
+  _seed_plan_json "src/in-scope.ts"
+  printf 'this is not json\n' > "$EV/semantic-review-final.json"
+
+  run _done_advance
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"will not parse"* ]]
+}
+
+@test "P079 Step 7: a GLOB allowed_path counts as scope (scripts/** covers scripts/x.sh)" {
+  _seed_done_review
+  _seed_plan_json "scripts/**"
+  _seed_review "scripts/x.sh"
+
+  run _done_advance
+  [[ "$output" != *"no step of"* ]]
 }

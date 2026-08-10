@@ -163,8 +163,14 @@ _aid_cp_is_plugin_wip() {
   cd_="$(git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
   [[ -n "$gd" && -n "$cd_" && "$gd" != "$cd_" ]] || return 1
 
-  # 2. THE plan's registered execution worktree
-  local phys recorded="" plan_id=""
+  # 2. THE plan's registered execution worktree.
+  #
+  # The path convention is only the FALLBACK for when there is no registry to
+  # ask (no plan-state library, or a directory name that is not a plan id). When
+  # a registry CAN be asked, its answer is authoritative and a failed lookup is
+  # a refusal — otherwise a hand-made worktree at the conventional path, or a
+  # transient read error, would downgrade a genuinely stale cache.
+  local phys recorded="" plan_id="" rc=0
   phys="$(cd "$top" 2>/dev/null && pwd -P)" || return 1
   plan_id="$(basename "$phys")"; plan_id="${plan_id#plan-}"
   if [[ -f "${_AID_CP_LIB_DIR}/aid-plan-state.sh" && "$plan_id" =~ ^P[0-9]{3}$ ]]; then
@@ -172,12 +178,20 @@ _aid_cp_is_plugin_wip() {
     # checkout, which is where `.aid-o` lives.
     local state_root="${cd_%/.git}"
     recorded="$(AID_PLAN_STATE_PROJECT_ROOT="$state_root" \
-      bash "${_AID_CP_LIB_DIR}/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || recorded=""
+      bash "${_AID_CP_LIB_DIR}/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
+    # rc > 1 is an UNREADABLE registry (missing yq, corrupt state, lock
+    # timeout) — the one case that must never be read as permission.
+    [[ "$rc" -le 1 ]] || return 1
     [[ "$recorded" == "not_found" || "$recorded" == "null" ]] && recorded=""
   fi
   if [[ -n "$recorded" ]]; then
+    # A recorded worktree is authoritative: this must BE it, not merely sit at
+    # a path that looks like it.
     [[ "$(cd "$recorded" 2>/dev/null && pwd -P)" == "$phys" ]] || return 1
   else
+    # No record to consult (a plan-state-less project, or a worktree made by
+    # hand for plugin work — how this repository's own EPICs run). The path
+    # convention is the fallback, and it is still one of three conditions.
     [[ "$phys" == */.aid-worktrees/plan-* ]] || return 1
   fi
 

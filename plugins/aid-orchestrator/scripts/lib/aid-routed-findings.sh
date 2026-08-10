@@ -90,6 +90,14 @@ aid_finding_route() {
   fi
   [[ -n "$source_cp" ]] || { echo "ERROR: aid-routed-findings: name the checkpoint the finding came from" >&2; return 1; }
   _aid_rf_valid_target "$target" "$total_steps" || return 1
+  # A `step:` route names a step OF AN EPIC. Without the epic id the entry
+  # satisfies the producer reconciliation (its fingerprint is recorded) while
+  # `aid_finding_open_for_epic` can never match it — the finding would be
+  # accounted for and blocking nothing, which is worse than not routing it.
+  if [[ "$target" == step:* && -z "$epic_id" ]]; then
+    echo "ERROR: aid-routed-findings: a step: route must name the EPIC whose step it is (5th argument) — otherwise nothing would ever block on it" >&2
+    return 1
+  fi
   file="$(_aid_rf_file "$plan_id")" || return 2
   mkdir -p "$(dirname "$file")" 2>/dev/null || {
     echo "ERROR: aid-routed-findings: cannot create $(dirname "$file")" >&2; return 2; }
@@ -143,6 +151,7 @@ aid_finding_open_for_epic() {
   local plan_id="${1:-}" epic_id="${2:-}" file
   file="$(_aid_rf_file "$plan_id")" || return 2
   [[ -f "$file" ]] || return 0
+  [[ -s "$file" ]] || return 0
   if ! jq -e . "$file" >/dev/null 2>&1; then
     echo "ERROR: aid-routed-findings: ${file} has unreadable line(s) — refusing to report 'no open findings' from a journal that cannot be parsed" >&2
     return 2

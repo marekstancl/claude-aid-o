@@ -603,9 +603,25 @@ else
     [[ "$cl" == "$REPO_ROOT/CHANGELOG.md" ]] && continue
     if grep -q "## \[$CURRENT\]" "$cl" 2>/dev/null; then
       # P079 Step 10: the same seal as update_changelog above — this fallback
-      # applies the identical blind sed, so it needs the identical guard.
+      # applies the identical blind sed, so it takes the identical branch:
+      # preserve the released heading AND prepend a new entry. Skipping the
+      # file entirely would leave a canonical CHANGELOG behind at the old
+      # version while the rest of the release moved on.
       if _release_version_sealed "$CURRENT"; then
-        echo "Sealed: $cl left untouched — v$CURRENT is tagged (write the new entry by hand)"
+        cl_tmp=$(mktemp)
+        {
+          head -4 "$cl"
+          echo ""
+          echo "## [$NEW_VERSION] — $TODAY"
+          echo ""
+          echo "### Changed"
+          echo ""
+          echo "- _PM/agent: fill in entry content_"
+          echo ""
+          tail -n +5 "$cl"
+        } > "$cl_tmp" && mv "$cl_tmp" "$cl"
+        UPDATED+=("$cl")
+        echo "Sealed: v$CURRENT is tagged — $cl keeps its heading; prepended a new $NEW_VERSION entry"
         continue
       fi
       sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$cl"

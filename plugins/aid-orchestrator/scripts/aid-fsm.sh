@@ -1348,22 +1348,40 @@ _fsm_routed_findings_check() {
   # The scope union is the same one the pre-commit hook computes for GATES and
   # DONE: every step's allowed_paths, flattened. A finding inside it had an
   # authorized place to be fixed and needs no route.
-  local scope_list
-  scope_list="$(jq -r '[ .steps[]?.allowed_paths[]? ] | unique | .[]' "$plan_json" 2>/dev/null)" || scope_list=""
-  local fp tp in_scope p
+  local scope_list findings
+  if ! scope_list="$(jq -r '[ .steps[]?.allowed_paths[]? ] | unique | .[]' "$plan_json" 2>&1)"; then
+    echo "PRECONDITION FAIL: cannot read allowed_paths from ${plan_json} (${scope_list}) — refusing to decide which review findings were in scope from a file that will not parse." >&2
+    return 1
+  fi
+  # A jq failure here must NOT read as "no findings": an unreadable review is
+  # the one input whose silence would pass this whole check open.
+  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
+    echo "PRECONDITION FAIL: cannot read findings from ${review_json} (${findings}) — refusing to complete ${epic_id} on a review artifact that will not parse." >&2
+    return 1
+  fi
+
+  local fp tp in_scope pat
   while IFS=$'\t' read -r fp tp; do
     [[ -n "$fp" && -n "$tp" ]] || continue
     in_scope=0
-    while IFS= read -r p; do
-      [[ -n "$p" ]] || continue
-      if [[ "$tp" == "$p" || "$tp" == "$p"/* ]]; then in_scope=1; break; fi
+    while IFS= read -r pat; do
+      [[ -n "$pat" ]] || continue
+      # Same two-part rule the shipped scope gate uses: a bash GLOB match
+      # (`scripts/**`, `src/*.ts`) or a plain directory prefix (`src` covering
+      # `src/nested/thing.ts`). Matching only the prefix would have called a
+      # legitimately in-scope glob path out-of-scope and demanded a route.
+      # shellcheck disable=SC2254
+      case "$tp" in
+        $pat) in_scope=1; break ;;
+      esac
+      if [[ "$tp" == "$pat" || "$tp" == "$pat"/* ]]; then in_scope=1; break; fi
     done <<< "$scope_list"
     [[ "$in_scope" -eq 1 ]] && continue
     if ! aid_finding_recorded "$plan_id" "$fp"; then
       echo "PRECONDITION FAIL: CP3 finding ${fp} targets ${tp}, which no step of ${epic_id} was allowed to touch, and nothing recorded what happens to it. Route it before completing: aid_finding_route ${plan_id} ${fp} cp3 <step:<n>|epic:<id>|backlog:IMP-<n>> ${epic_id}" >&2
       failed=1
     fi
-  done < <(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>/dev/null || true)
+  done <<< "$findings"
 
   [[ "$failed" -eq 1 ]] && return 1
   return 0

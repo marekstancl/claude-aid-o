@@ -12,7 +12,7 @@
 #
 # FD-3 HYGIENE: every plan-close-check invocation runs with `3>&-`. After any
 # edit verify the result count:
-#   bats --tap test-aid-obligations.bats | grep -cE '^(ok|not ok)'   # == 9
+#   bats --tap test-aid-obligations.bats | grep -cE '^(ok|not ok)'   # == 10
 
 load test-helpers.bash
 
@@ -136,4 +136,15 @@ _lib() {
   run bash -c "cd '$ROOT' && exec bash '$CLOSE_CHECK' P900" 3>&-
   [[ "$output" == *"PASS  [obligations]"* ]]
   [[ "$output" != *"FAIL  [obligations]"* ]]
+}
+
+@test "P079 Step 6: an EMPTY journal file reads as 'nothing owed', not as 'unreadable'" {
+  : > "$(_journal P900)"
+
+  run _lib "$ROOT" "aid_obligation_open P900"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  run bash -c "cd '$ROOT' && exec bash '$CLOSE_CHECK' P900" 3>&-
+  [[ "$output" == *"PASS  [obligations]"* ]]
 }
