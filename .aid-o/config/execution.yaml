@@ -159,7 +159,14 @@ gates:
     #   - The 2 boundary files (test-aid-plan-final-boundary.bats,
     #     test-aid-plan-release-boundary.bats) are skipped by BOTH gates;
     #     gate:bats_boundary is what runs them.
-    timeout_seconds: 7200
+    # P079 obligation 1 resolution (2026-08-10): cap from the honest measurement
+    # on 102a5f3 — 12200 s (3 h 23 min) full portfolio, RC=1 with all failures in
+    # the cancelled test-audit line; delegation since REMOVED the three heaviest
+    # suites, so 12200 s is a conservative upper bound. max(12200*1.5, +60) =
+    # 18300 s. No routine re-measurement — re-derive only when the portfolio
+    # grows materially (PM decision 2026-08-10).
+    timeout_seconds: 18300
+    run_mode: background
     max_retries: 0
   plan_diff:
     note: 'required=false for AID self-host: P037 plan predates plan-level AC convention;
