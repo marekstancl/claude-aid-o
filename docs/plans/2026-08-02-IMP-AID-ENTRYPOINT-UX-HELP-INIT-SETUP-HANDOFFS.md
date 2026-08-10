@@ -1,12 +1,20 @@
 # AID Entry-Point UX — Help, Init, Setup and Human Handoffs
 
-**Status:** proposed implementation plan; planning only, no production changes
-are authorized by this document.
+**Status (refreshed 2026-08-10):** requirements document, partially delivered.
+Its follow-up sections have shipped as their own plans — **§10–§13 → P073**
+(v2.72.0), **§16 → P076** (v2.80.0), **§16a + §17 → P074**, **§18 → CANCELLED**
+with the whole test-parallelism line. **The original core, §1–§9, is now the
+executable plan `.aid-o/plans/P080-entrypoint-ux-help-handoffs.md`** (written
+2026-08-09, CP1 + lint + generation-readiness all pass; EPICs deliberately not
+generated). §14's decision cards are folded into P080 EPIC 3; §14 D18 (evidence
+minimisation) and §15 (visual proof) are split out into a later follow-up plan.
+**Queued behind** the ecosystem test-tier pilot, which moves the test paths
+§1–§9 describes.
 **Prepared:** 2026-08-02.
-**Base:** `main` at v2.66.2 (`281f87f`).
-**Relationship:** separate from P066/P069. It may be planned while P069 is
-active, but implementation begins only from a clean post-P069 base and must
-not redefine P069's scheduler or catalog contract.
+**Base at writing:** `main` at v2.66.2 (`281f87f`); current `main` is v2.82.0.
+**Relationship:** P066/P069 are closed and the scheduler/catalog contract it
+deferred to no longer exists — P078 removed it. The surviving constraint is the
+tier pilot, not the scheduler.
 
 ## 1. User problem
 
@@ -301,9 +309,18 @@ P066/P069 contract re-grounding; do not fold it into either active plan.
 > are folded into the same plan (EPIC 2 / EPIC 1).
 >
 > **TODO — remaining after P073 (PM 2026-08-04: must be finished in a later plan):**
-> - D7.3(a) as a SEPARATE `--rebase-epic` transaction was replaced by extending
->   `plan-state --attest-source-ref --recompute-base`; if dogfood shows that
->   extension does not cover a real rebase case, deliver the full transaction.
+> - D7.3(a) — **correction (2026-08-08 verification):** the planned
+>   `--attest-source-ref --recompute-base` extension was NEVER BUILT (only
+>   plain `--attest-source-ref` and `--supersede-epic` shipped; zero grep hits
+>   for `recompute-base`). The rebase-recovery half of D7.3(a) — verify a
+>   legitimate task-branch rebase and update the recorded base — is fully open.
+> - **NEW (2026-08-08 dogfood, stranded-P071 closure):** `plan-close --force`
+>   parses but has NO preconditions wired to the forceable classifier, so a
+>   pre-P073 plan stranded in EPIC_INTEGRATION (branch deleted, content shipped)
+>   cannot be closed by any supported path — P071 required manual state
+>   reconciliation (see `.aid-o/work/plan-state/P071/operations.jsonl`). Wire
+>   plan-close's state-order precondition as forceable, or add a supported
+>   administrative-close transaction.
 > - D7.5 item 2 (lint Testing Strategy/AC file references against the step
 >   `Files:` allowlist) was consciously DROPPED from P073 as new ceremony —
 >   revisit only with a concrete incident justifying it.
@@ -1410,6 +1427,13 @@ actually need PM authority.
 > the plan-branch lineage check, because the pipeline never runs `epic-start`
 > for the EPICs it has just generated. Both are pinned as tests with their exact
 > production messages.
+>
+> **UPDATE (2026-08-08 verification):** the `plan_branch` half — the missing
+> `epic-start` — was RESOLVED by P075 (commit `f9d47d9`, merged `3f284c5`):
+> `aid-json-to-run.sh` now invokes `aid-plan-fsm.sh epic-start` before FSM init
+> with resume-tolerant rc handling. The LEGACY half (init still refuses on an
+> unrelated dirty tracked edit in the primary checkout) remains open; the guard
+> is now tree-scoped through the ancillary classifier but still refuses.
 
 ### Confirmed current failure
 
@@ -1527,12 +1551,16 @@ misdiagnosed as an AID gate.
 > (`docs/plans/archive/AID-parallelism-re-enable-plan.md`, multiple agents
 > inside one plan) — that remains deferred.
 >
-> **STILL OPEN after P074:** the ~17 class-B root-resolution sites using
-> `git rev-parse --show-toplevel` (each already honours the `AID_PROJECT_ROOT`
-> override, now canonicalized) — deferred to a later normalization sweep;
-> stale line cites in this section (init dirty guard is at `aid-fsm.sh:2824-2825`,
-> not `:2661`); the legacy `active-run-pointer.json` fallback reader, kept for
-> one release and due for removal after it.
+> **STILL OPEN after P074 (counts refreshed 2026-08-08):** 19 class-B
+> root-resolution sites using `git rev-parse --show-toplevel` (each honours the
+> canonicalized `AID_PROJECT_ROOT` override; concentrated in
+> `scripts/lib/delivery-checks/dg*.sh` plus `review-profile-check.sh` and
+> `aid-prefilter.sh`) — deferred to a later normalization sweep; stale line
+> cites in this section (the init dirty guard has drifted again to
+> `aid-fsm.sh:3592-3598`; the earlier `:2824-2825` correction now points at the
+> CP3 freshness probe — prefer function-name anchors here); the legacy
+> `active-run-pointer.json` fallback reader, promised removal "next cleanup
+> release" and still present at `aid-fsm.sh:240-241` several releases later.
 >
 > **ALSO STILL OPEN — the concurrency promise stops at run initialisation.**
 > P074's own two-stream fixture (`test-p074-integration.bats`) proves plan B can
@@ -1597,3 +1625,50 @@ one active stream per checkout.
 **Sequencing:** design AFTER P073 merges (its force/ancillary/preflight changes
 touch the same files); candidate ID P074. Intra-plan parallelism (the archived
 plan) stays a separate, later decision.
+
+## 18. PM requirement — IMP-469: parallelism for every caller, not only the gate runner
+
+> **Status: CANCELLED (PM decision, 2026-08-09).** The P077 brainstorm
+> (grounding + 2 Codex opponent rounds, record in
+> `.aid-o/work/interim-P077.md`) put numbers on the line before any code was
+> written: measured parallel speedup 3–6 % (5–9 min on a ~2.5 h run, because
+> only 54/181 units are safe and the longest suites are not among them),
+> qualification cost ~15 h of compute per commit, and rollout evidence is
+> invalidated by every commit — so the speedup is almost never unlocked in
+> practice. On these numbers the PM cancelled not only this runner but the
+> ENTIRE test-parallelism line: the audit and the code are to be reworked so
+> parallelism no longer exists (separate session, different agent — not done
+> here). IMP-469 in the backlog is marked rejected with the same rationale.
+
+**Trigger:** the first full test audit round (TAUD-20260806-0440) proved 54 of
+181 suites parallel-safe and P069 wired a scheduler-backed dispatch path — but
+that path lives inside `aid-run-gates.sh`, so the ONLY caller that benefits is
+an AID pipeline run. The PM's requirement, verbatim in intent: *"chci aby
+paralelismus mohl využít kdokoliv, kdo pouští sady — agent ručně, CI, atd."*
+A proven-safe catalog that only one caller can consume is evidence without an
+entry point — the same shape as a detector without enforcement.
+
+**Product outcome:** a self-contained `aid-test-parallel.sh <profile|gate...>`
+that any caller (developer terminal, agent, CI job) can invoke:
+
+- reads the APPROVED catalog only (`.aid-o/config/test-catalog.yaml`), never a
+  proposed one — approval remains the single human act, nothing is approved
+  twice;
+- partitions `parallel.status: safe` lanes across N workers, runs
+  unsafe/unknown units sequentially afterwards, exits nonzero on any failure;
+- refuses to parallelize at execution time when no approved catalog exists or
+  a lane's content binding no longer matches (enforcement per AID-v3 §1 —
+  the runner enforces, prose does not);
+- `--observe` mode mirrors the gate runner's rollout discipline: parallel run
+  first, failures re-verified against a sequential rerun before they are
+  reported as real;
+- documented for CI usage in `docs/extending-aid.md`.
+
+**Non-goals:** intra-plan multi-agent parallelism (archived plan, separate
+decision); changing how the catalog gains evidence (audit rounds remain the
+only source); any new approval surface.
+
+**Sequencing:** after the AID catalog is approved and `observe_parallel` has a
+few observed runs (both landed 2026-08-08) — the standalone runner then reuses
+a rollout pattern already proven in the gate runner. Candidate: next AID plan
+after the P075 line closes.

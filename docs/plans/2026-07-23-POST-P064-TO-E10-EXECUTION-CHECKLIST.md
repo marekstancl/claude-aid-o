@@ -2,12 +2,14 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — refreshed 2026-08-08. P064, Phase 1, P068,
-P066, P069, P071, P072, P073 and P074 are implemented and released. The
-repository-visible P075 fix is also merged and released. The next unresolved
-delivery gate is not another framework plan: it is the measured end-to-end
-test-acceleration campaign, followed by the entry-point UX stream, P061 close
-and P062/E10 re-grounding.
+**Status:** active PM checklist — refreshed **2026-08-10**. P064, Phase 1,
+P068, P066, P069, P071, P072, P073, P074, P075, **P076 (v2.80.0)**,
+**P079 (v2.81.0)** and **P078 (v2.82.0)** are implemented and released.
+**The test-acceleration campaign is CANCELLED**: the PM cancelled the entire
+test-parallelism line on 2026-08-09 (P077 allocated-then-cancelled, IMP-469
+rejected) and P078 removed the machinery. The delivery order that replaces it
+is: **green `bats_all` (IMP-494) → ecosystem test-tier standard → AID tier
+pilot → entry-point UX (now P080) → P061 close → P062/E10 re-grounding.**
 **Sources:** P061, P062, P064, P066 interim, P068, P072–P075, IMP-258 and
 IMP-261–281, IMP-464–468,
 `2026-08-02-IMP-TEST-AUDIT-DECISION-QUALITY-AND-DIAGNOSTICS.md`,
@@ -25,7 +27,12 @@ IMP-261–281, IMP-464–468,
 | **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
 | **P068** | **DONE** — released v2.63.0; v2.63.1 repaired CI; v2.63.2 records final backlog/checklist repair |
 | P068 delivery proof | P077 clean dogfood reached `release_ready=true` → merge → durable receipt → `CLOSED`; its isolated history is archived on `archive/P068-dogfood-P067-P077-20260727` |
-| **Current pushed version** | `v2.79.0` at `83a09f5` on `origin/main` |
+| **Current pushed version** | `v2.82.0` at `ae6ac60`; `main` head `704e94a` on `origin/main` |
+| **P076** | **DONE** — auto mode owns its waits; released v2.80.0. Merged by direct git merge outside the FSM (plan-final gate could not complete; gap recorded as IMP-490) |
+| **P079** | **DONE** — twelve fixes found by the first live P076 run; released v2.81.0 |
+| **P078** | **DONE** — test-parallelism machinery removed; released v2.82.0. Portfolio 170→150 bats, 48→41 sh |
+| **P077** | **CANCELLED** — standalone parallel runner; number burned, never planned |
+| **P080** | **WRITTEN, not implemented** — entry-point UX (renumbered from P078 after an ID collision with the removal plan); lint + readiness + CP1 all pass |
 | P071 | **DONE** — released in the v2.68.0 line |
 | P072 | **IMPLEMENTATION DONE** — decision-quality audit and subsequent report/collector hardening released through v2.79.0; the portfolio-wide acceleration campaign remains unrun and no whole-suite speedup may yet be claimed |
 | P073 | **DONE** — all three EPICs merged; released in v2.72.0 |
@@ -56,10 +63,29 @@ Reach E10 only after AID has:
 5. completed risk-based profiles; and
 6. a re-grounded E10 plan whose preconditions match the current repository.
 
-## Current continuation — authoritative order after P075 (2026-08-08)
+## Current continuation — authoritative order after P078 (2026-08-10)
 
-This section supersedes both duplicated 2026-08-02 continuation sections and
-all stale wording that calls P069, P071, P072, P073 or P074 pending.
+This section supersedes every earlier continuation section, including the
+2026-08-08 one below it, and all wording that calls P069, P071–P076, P078 or
+P079 pending. **It also retires the acceleration campaign as a delivery gate.**
+
+**Order in force:**
+
+1. [ ] **IMP-494 — make `gate:bats_all` genuinely green on `main`.** One of its
+   two red suites is fixed (`test-aid-test-content-scan.bats`, phantom tests
+   from heredoc'd fixtures); the other (`test-aid-test-audit-profile.bats`)
+   depends on the PM's gitignored workspace catalog and needs either a mapping
+   confirmation or a fixture redesign — see IMP-494's diagnosis. A permanently
+   red required gate is why two orphaned suites reached a merge request.
+2. [ ] **Ecosystem test-tier standard** (`/ecosystem/specs/test-standard`,
+   drafted 2026-08-10, Codex-reviewed) — PM approval, then publish.
+3. [ ] **AID tier pilot** — T0/T1/T2 split, nightly cron for the full suite,
+   naming + tier migration, selector honesty check, budget-in/reaper-out.
+4. [ ] **P080 entry-point UX** — after the pilot, because the pilot moves the
+   test paths P080 documents.
+5. [ ] Close P061; then re-ground P062/E10.
+
+*(Historical 2026-08-08 list retained below for provenance.)*
 
 1. [x] Release P071 and integrate its parallel Bats lane and gate fixes.
 2. [x] Implement the P066 decision-quality follow-up as P072, including the
@@ -373,14 +399,22 @@ Canonical plan:
   authority boundary.
 - [x] Extend discovery and reporting across runner types and CI/wrapper
   reachability; subsequent hardening is released through v2.79.0.
-- [ ] Run the frozen-SHA sequential-vs-scheduled acceleration campaign and
-  record the PM quarantine decision. P072's own campaign ledger explicitly
-  says this has not happened; implementation completion is not speed proof.
+- [~] **CANCELLED 2026-08-09.** The frozen-SHA sequential-vs-scheduled
+  acceleration campaign will never run: the PM cancelled the whole
+  test-parallelism line after the measured economics came in — 3–6 % speedup
+  (5–9 min on a 212-min portfolio), ~15 h of qualification compute per HEAD,
+  and rollout evidence invalidated by every commit. P078 removed the
+  machinery (v2.82.0). The replacement for "make the suite faster" is
+  **"take the suite off the merge path"** — the test-tier standard.
 
-### 5D — entry-point UX and human handoffs — PLANNED, independent
+### 5D — entry-point UX and human handoffs — PLAN WRITTEN (P080), queued behind the tier pilot
 
-Canonical plan:
+Canonical requirements:
 `docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md`.
+Executable plan: `.aid-o/plans/P080-entrypoint-ux-help-handoffs.md` (written
+2026-08-09 as P078, **renumbered to P080** on 2026-08-10 after an ID collision
+with the parallelism-removal plan; lint, generation-readiness and CP1 all
+pass; EPICs deliberately not generated).
 
 - [ ] Ground every public command and every init/setup write authority.
 - [ ] Make `/aid-help` mechanically complete, while keeping its prose concise
@@ -394,8 +428,8 @@ Canonical plan:
   settings schema inside the UX rewrite.
 
 The historical P066 roadmap tasks below are retained as context. The current
-order is **finish the measured 5C campaign and quarantine decision → implement
-5D → close P061 → re-ground P062/E10**.
+order is **IMP-494 green gate → tier standard → AID tier pilot → 5D/P080 →
+close P061 → re-ground P062/E10**. The 5C campaign is cancelled, not pending.
 
 ### Verified standalone release hygiene — before the next release automation use
 

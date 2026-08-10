@@ -1,3 +1,12 @@
+> **STATUS 2026-08-10 — PARTIALLY SUPERSEDED.** The decision-quality half of
+> this document shipped (P072, released through v2.79.0) and its audit,
+> profiler, resource map and decision artifact are live. Everything about
+> **parallel lanes, scheduled dispatch and the acceleration campaign is dead**:
+> the PM cancelled the test-parallelism line on 2026-08-09 and P078 removed the
+> machinery in v2.82.0. The replacement for "make the suite faster" is
+> "take the suite off the merge path" — see the ecosystem test-tier standard
+> (`/ecosystem/specs/test-standard`). Read the parallel sections as history.
+
 # Test-Audit Decision Quality and Diagnostic Depth
 
 **Status:** proposed implementation plan; write-only design work, no production

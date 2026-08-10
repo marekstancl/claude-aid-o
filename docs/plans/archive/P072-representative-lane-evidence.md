@@ -1,3 +1,9 @@
+> **ARCHIVED 2026-08-10.** Superseded by the cancellation of the entire
+> test-parallelism line (PM 2026-08-09, IMP-469 rejected) and its removal in
+> P078 (v2.82.0). The scheduler, parallel lane, rollout gate, divergence check
+> and the acceleration campaign this document serves no longer exist. Kept as
+> historical record only — do not use it to plan work.
+
 # P072 Step 18 — Representative lane evidence
 
 **Run:** 2026-08-03, disposable clone of `feat/p072-test-audit-decision-quality`,
