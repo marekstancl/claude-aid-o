@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 > 2.79.3's released history is absorbed into the new release and THIS entry stays
 > `[Unreleased]`. The IMP-093 two-source guard cannot see a heading the probe skipped.
 > Replace `[Unreleased]` with the intended `[X.Y.Z] — YYYY-MM-DD` (in BOTH CHANGELOGs,
-> which must stay byte-identical) before any release automation runs. Tracked as IMP-481.
+> which must stay byte-identical) before any release automation runs. Tracked as IMP-489.
 >
 > **And the byte-identity check will not catch it.** Driven live against a throwaway
 > repository shaped exactly like this plan worktree (no `.aid-o/config/project.yaml`,
@@ -47,7 +47,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **The recovery ladder** — `lib/aid-recovery-ladder.sh` records every attempt in a per-run append-only JSONL, counting and appending in one locked critical section, failing closed to adjudication on an unreadable policy, and defending the budget against a silent reset with a hash chain plus a high-water mark; three mechanical emitters (gate timeout, lost job, unhealthy service) write from real code paths, and the terminus stamps `auto_controller: blocked_for_pm` through the single map writer.
 - **Shared libraries and one new subcommand** — `lib/aid-gate-row.sh` (the single job-result-to-gate-row mapping), `lib/aid-resume-artifact.sh` (one definition of the continuation artifact's name), `lib/aid-env-name-denylist.sh` (one `port_env` denylist for both authorities) and a read-only `aid-job.sh fingerprint`, each replacing a constant or a mapping that had already begun to exist twice.
 - **The controller boundary as one shared contract** — `skills/agent-protocol.md` states it once (no detached processes, no FSM mutation, no commits unless delegated, no stale results, no controller-owned file edits) and all nine agent cards reference that section, with a structural test that fails if a card carries a divergent copy or merely quotes it.
-- **Five deferred items recorded as backlog entries** — IMP-476 (fire-and-return async gates), IMP-477 (services to resource-map classification), IMP-478 (foreground `timeout -k` hardening), IMP-479 (visual-companion server onto `lib/aid-service.sh`) and IMP-480 (a host push-continuation adapter), each naming what shipped instead and the hook point it would extend.
+- **Five deferred items recorded as backlog entries** — IMP-484 (fire-and-return async gates), IMP-485 (services to resource-map classification), IMP-486 (foreground `timeout -k` hardening), IMP-487 (visual-companion server onto `lib/aid-service.sh`) and IMP-488 (a host push-continuation adapter), each naming what shipped instead and the hook point it would extend.
 
 ### Changed
 - **`run_mode` is a documented per-gate key** — every gate's value is validated before any command is spawned, so a typo fails loudly naming the gate; the shipped template documents the field and no template gate sets it, and this repository's own two long suites are the only gates anywhere that declare `background`.

@@ -187,7 +187,7 @@ $naked"
 
   # And the five this plan allocated are all still there.
   local n
-  for n in 476 477 478 479 480; do
+  for n in 484 485 486 487 488; do
     grep -q "IMP-${n}" "$block" \
       || _fail "IMP-${n} is no longer cross-referenced from the §16 STILL OPEN block"
   done

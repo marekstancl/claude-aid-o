@@ -1232,15 +1232,15 @@ worktree.
 >
 > **STILL OPEN after P076 (each registered as an IMP backlog entry by the plan —
 > numbers allocated 2026-08-09 in `docs/plans/2026-06-29-BACKLOG.md`):**
-> - **IMP-476** — fire-and-return ASYNC gates (the runner returning before job
+> - **IMP-484** — fire-and-return ASYNC gates (the runner returning before job
 >   completion); P076 ships the supervised-synchronous variant only;
-> - **IMP-477** — services↔resource-map integration (`service-resources.jsonl`
+> - **IMP-485** — services↔resource-map integration (`service-resources.jsonl`
 >   emission is observe-only evidence; the shared-port classifier stays
 >   untouched);
-> - **IMP-478** — foreground-gate `timeout -k` hardening (foreground path kept
+> - **IMP-486** — foreground-gate `timeout -k` hardening (foreground path kept
 >   byte-identical);
-> - **IMP-479** — visual-companion server migration onto `lib/aid-service.sh`;
-> - **IMP-480** — a true host push-continuation adapter (task-notification
+> - **IMP-487** — visual-companion server migration onto `lib/aid-service.sh`;
+> - **IMP-488** — a true host push-continuation adapter (task-notification
 >   behaviour stays instruction-only host guidance; the artifact is the enforced
 >   fallback).
 >
