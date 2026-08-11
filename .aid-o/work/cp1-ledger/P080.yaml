@@ -1,6 +1,6 @@
 schema_version: aid-2.0
 plan_id: P080
-attempts: 4
+attempts: 5
 max: 5
 pre_enforcement: true
 pm_override:
@@ -9,7 +9,7 @@ pm_override:
   claim_artifact: null
   claim_sha256: null
 created_at: "2026-08-11T04:26:33Z"
-updated_at: "2026-08-11T05:41:21Z"
+updated_at: "2026-08-11T05:46:46Z"
 attempts_log:
   - n: 1
     plan_hash: sha256:3628cc11acbb77c942b0fa0b8b6e60365c19fd42063e8988d65283d57f83be47
@@ -27,3 +27,7 @@ attempts_log:
     plan_hash: sha256:1792b16eaebe31431203689d8dd08d194a184d4ca1a083e65d3a069feb48447b
     codex_session: 019fef53-c49d-7c12-9770-37a4e587fc7c
     at: "2026-08-11T05:41:21Z"
+  - n: 5
+    plan_hash: sha256:83707d1d73c0e1e06969c29e718a4cb6ff2332a890a4c047b753040e765c8719
+    codex_session: 019fef59-4d32-71c2-86d6-90b57cc33439
+    at: "2026-08-11T05:46:46Z"
