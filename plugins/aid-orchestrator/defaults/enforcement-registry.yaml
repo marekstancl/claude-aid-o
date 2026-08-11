@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 427          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 429          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -154,7 +154,7 @@ enforcements:
   # ── Type 2: FSM-precondition (subagent output) ─────────────────────────────
   - {id: cp2_verifier_output,          type: 2, source: "scripts/aid-fsm.sh:720",  instruction: "agents/verifier.md:71", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP2 per-step verifier-output with _generated_by + classification; C2 dual-emits semantic-review.json alongside (E5 observe, E10 gate migration)"}
   - {id: verifier_provenance,          type: 2, source: "scripts/aid-fsm.sh:614",  instruction: "skills/agent-protocol.md:197", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "verify_provenance cross-ref _generated_by vs timeline/git", test: "scripts/tests/bats/test-anti-fabrication.bats"}
-  - {id: provenance_aggregate_fabricated, type: 2, source: "scripts/aid-fsm.sh:975", instruction: "docs/plans/AID-v3-agents-outputs.md NR17§4D", severity: blocking, surface: llm-facing, status: active, verdict: CONTRADICTORY, description: "fabricated provenance forces overall=fail; reflection reframes as timestamp false-positive"}
+  - {id: provenance_aggregate_fabricated, type: 2, source: "scripts/aid-fsm.sh:verify_provenance", instruction: "skills/pipeline.md (grep: 'Non-negotiable anti-fabrication rule') + skills/agent-protocol.md (grep: 'anti-fabrication defense')", severity: blocking, surface: llm-facing, status: active, verdict: CONTRADICTORY, description: "fabricated provenance forces overall=fail; reflection reframes as timestamp false-positive (P080 Step 4: REPOINTED — the instruction cited docs/plans/AID-v3-agents-outputs.md NR17§4D, which now lives only under docs/plans/archive/. That file IS tracked — the reason for the repoint is not tracking but ROLE: it is a repo-level design record outside plugins/aid-orchestrator/, so it is not part of what /aid-init installs into a project and is not a durable instruction home (the marketplace cache does clone the whole repo, so the file is reachable there — reachable is not the same as being where a rule is read). The tracked llm-facing rule is pipeline.md's anti-fabrication block plus agent-protocol.md's provenance note. The stale source line number was replaced by a grep anchor.)"}
   - {id: cp3_generated_by,             type: 2, source: "scripts/aid-fsm.sh:758",  instruction: "agents/verifier.md:72", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP3 code-review+security need _generated_by to count as dispatched; C2 dual-emits semantic-review.json alongside (E5 observe, E10 gate migration)"}
   - {id: memory_writes_validation,     type: 2, source: "skills/memory-mcp.md:240", instruction: "skills/memory-mcp.md:96", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "controller validates memory_writes block, rejects + re-dispatches"}
   - {id: memory_writes_na_reject,      type: 2, source: "skills/memory-mcp.md:264", instruction: "skills/memory-mcp.md:229", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "memory_writes N/A rejected when code files changed"}
@@ -187,7 +187,7 @@ enforcements:
   - {id: token_resolver_failloud,      type: 4, source: "scripts/aid-run-gates.sh:36", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: GAP, description: "unknown {token} in gate command → fail-loud exit 1", test: "scripts/tests/bats/test-plan-ac-diff.bats:149"}
   - {id: release_done_gate,            type: 4, source: "scripts/aid-release.sh:101", instruction: "skills/pipeline.md:748", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "release refuses unless FSM DONE + version registry sync"}
   - {id: runtime_deps_gate,            type: 4, source: "scripts/aid-check-deps.sh:60", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: GAP, description: "bash/git/jq/yq required → exit 1 if missing"}
-  - {id: research_quality_gates,       type: 4, source: "commands/aid-research.md:128", instruction: "commands/aid-research.md:184", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "run_quality_gates rejects low-value knowledge chunks"}
+  - {id: research_quality_gates,       type: 4, source: "commands/aid-research.md:128", instruction: "commands/aid-research.md:184", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "run_quality_gates rejects low-value knowledge chunks (P080 Step 4: DEAD — /aid-research and the whole knowledge/Context7 layer were removed from the distribution; the command file this row enforces through no longer ships, so the rule can never fire. The cite is kept verbatim as the record of what was retired, which is what status: dead is for.)"}
   - {id: json_to_run_detached_head,    type: 4, source: "scripts/aid-json-to-run.sh:634", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: GAP, description: "detached HEAD → hard fail (unanchorable base_commit)"}
   - {id: pipeline_subscripts_exec,     type: 4, source: "scripts/aid-auto-pipeline.sh:82", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "all generation, finalization, run and queue sub-scripts must exist + be executable", test: "scripts/tests/test-full-pipeline.sh"}
   - {id: generation_receipt_before_init, type: 4, source: "scripts/aid-json-to-run.sh:generation_receipt_required", instruction: "skills/planner.md:Two-stage generation", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "strict/high-risk plan FSM init requires a hash-bound complete-package receipt; --force cannot substitute it", test: "scripts/tests/test-generation-finalize.sh"}
@@ -223,7 +223,7 @@ enforcements:
   - {id: run_file_location_invariant,  type: 4, source: "skills/run-management.md:42", instruction: "skills/run-management.md:42", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "never save run files into .aid-o/ root; never mix locations"}
   - {id: memory_write_protection,      type: 4, source: "skills/memory.md:64", instruction: "skills/memory.md:64", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "never write project.yaml (read-only); never delete backlog entries"}
   - {id: planner_parallel_conflict,    type: 4, source: "skills/planner.md:172", instruction: "skills/planner.md:172", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "parallel-group file conflict → forced sequential; waves 5+ split to 4"}
-  - {id: knowledge_base_write_protect, type: 4, source: "defaults/templates/knowledge-base.yaml:10", instruction: "defaults/templates/knowledge-base.yaml:10", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "AI-managed, do not edit manually (only aid-setup/aid-research mutate)"}
+  - {id: knowledge_base_write_protect, type: 4, source: "defaults/templates/knowledge-base.yaml:10", instruction: "defaults/templates/knowledge-base.yaml:10", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "AI-managed, do not edit manually (only aid-setup/aid-research mutate) (P080 Step 4: DEAD — the knowledge-base template was deleted together with the knowledge/Context7 layer; there is no file to write-protect and no writer left to protect it from.)"}
 
   # ── Type 5: Pre-filter-regex ───────────────────────────────────────────────
   - {id: prefilter_fail_rules,         type: 5, source: "scripts/aid-prefilter.sh:80", instruction: "skills/pipeline.md:1178", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "fail_rules match → exit 20 FAIL (security verifier mandatory)", test: "scripts/tests/bats/test-aid-prefilter.bats"}
@@ -249,11 +249,11 @@ enforcements:
   - {id: aid_run_fsm_enforced,         type: 7, source: "commands/aid-run.md:42",  instruction: "commands/aid-run.md:42", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "FSM mechanically enforced, scripts refuse to proceed"}
   - {id: aid_do_prefilter_fixloop,     type: 7, source: "commands/aid-do.md:81",   instruction: "commands/aid-do.md:81", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "Fast Mode pre-filter FAIL + fix loop max 2 iterations"}
   - {id: aid_plan_cp1_dispatch,        type: 7, source: "commands/aid-plan.md:103", instruction: "commands/aid-plan.md:103", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP1 docs-review verifier dispatch on written plan"}
-  - {id: research_idempotency,         type: 7, source: "commands/aid-research.md:104", instruction: "commands/aid-research.md:104", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "framework active + sufficient depth → STOP (no re-fetch)"}
+  - {id: research_idempotency,         type: 7, source: "commands/aid-research.md:104", instruction: "commands/aid-research.md:104", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "framework active + sufficient depth → STOP (no re-fetch) (P080 Step 4: DEAD — the /aid-research command was removed with the knowledge layer; there is no re-fetch to suppress and no file left to enforce it.)"}
   - {id: status_duplicate_reject,      type: 7, source: "commands/aid-status.md:123", instruction: "commands/aid-status.md:123", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "queue-add rejects duplicate EPIC"}
   - {id: status_read_only,             type: 7, source: "commands/aid-status.md:177", instruction: "commands/aid-status.md:177", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "/aid-status never modifies files"}
   - {id: setup_requires_project_yaml,  type: 7, source: "commands/aid-setup.md:24", instruction: "commands/aid-setup.md:24", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "/aid-setup refuses if project.yaml missing"}
-  - {id: init_idempotency,             type: 7, source: "commands/aid-init.md:333", instruction: "commands/aid-init.md:333", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "/aid-init never overwrites existing config/work files"}
+  - {id: init_idempotency,             type: 7, source: "commands/aid-init.md:588", instruction: "commands/aid-init.md:588", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "/aid-init never overwrites existing config/work files (P080 Step 4: line cite refreshed 333 → 588, the current `## Idempotency` section; the file resolved either way, so only the navigation hint moved.)"}
   - {id: release_changelog_paths,      type: 7, source: "scripts/aid-release.sh:48", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "CHANGELOG header 3-path bump logic (no double-bump, no collapse)", test: "scripts/tests/bats/test-aid-release.bats"}
 
   # ── Type 8: Hook-enforcement ───────────────────────────────────────────────
@@ -280,7 +280,7 @@ enforcements:
   - {id: curator_auto_rules,           type: 9, source: "defaults/execution.yaml:219", instruction: "agents/curator.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "always_defer architecture; always_approve dx/security-high/docs"}
   - {id: retry_max_escalate,           type: 9, source: "defaults/execution.yaml:106", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "retry max 3 then on_failure:escalate"}
   - {id: memory_search_min_score,      type: 9, source: "defaults/integrations.yaml:67", instruction: "skills/memory-mcp.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "search.min_score:0.4 floor; below dropped"}
-  - {id: knowledge_dedup_threshold,    type: 9, source: "defaults/integrations.yaml:101", instruction: "commands/aid-research.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "knowledge dedup:0.85 / merge:0.70 thresholds"}
+  - {id: knowledge_dedup_threshold,    type: 9, source: "defaults/integrations.yaml:101", instruction: "commands/aid-research.md", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "knowledge dedup:0.85 / merge:0.70 thresholds (P080 Step 4: DEAD — the integrations `knowledge:` block that held these thresholds was removed with the knowledge layer (defaults/integrations.yaml no longer contains the word `knowledge`), so the values this row governs no longer exist.)"}
   - {id: scanner_budgets,              type: 9, source: "defaults/integrations.yaml:40", instruction: "agents/project-scanner.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "scanner per-scan entry budgets (150/50/100)"}
   - {id: yellow_tools_not_whitelisted, type: 9, source: "defaults/policies/permissions.yaml:107", instruction: "defaults/policies/permissions.yaml", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "YELLOW eco-admin tools require out-of-band Telegram approval"}
   - {id: streamlined_cp4_advisory,     type: 9, source: "scripts/aid-fsm.sh:496",  instruction: "skills/agent-protocol.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "streamlined CP4 advisory short-circuit (no fail-closed)", test: "scripts/tests/bats/test-aid-fsm.bats:496"}
@@ -370,7 +370,7 @@ enforcements:
   # ── E-046-3_3: CP1/behavior_trace enforcement registration ─────────────────
   - id: cp1_critical_path_flow_trace
     type: 9
-    source: plan-writing.md
+    source: skills/plan-writing.md
     instruction: "Rule #21: every plan step introducing a handler must declare explicit outcomes for every branch; undeclared branch → REVISE_REQUIRED (advisory)"
     severity: medium
     surface: cp1
@@ -953,7 +953,7 @@ enforcements:
   - id: release_policy_preempted
     type: 1
     source: "scripts/aid-fsm.sh (grep: 'release_policy_preempted')"
-    instruction: "docs/plans/AID-audit-2026-06 (E10 handoff — dual-run sampling-bias correction)"
+    instruction: "n/a"
     severity: advisory
     surface: internal-guard
     enforcement: observe
@@ -961,7 +961,7 @@ enforcements:
     deadline: "2026-12-31"
     promotion_phase: E10
     deferred_until: "2026-12-31"
-    description: "observe telemetry emitted before the four UNCONDITIONAL hard-exits that preempt the C4 dual-run slot (gate=streamlined_integration|streamlined_abandoned|tiered_compliance|cp4_curator) so E10 can correct the dual-run for sampling bias (runs that die before reaching the C4 slot are otherwise invisible); the other 4 hard-exits (DG-07/E3/C3-presence/invalidation) are observe-by-default and do not exit in shipped E9, so they carry no preempted event — that is an E10 handoff item; no gate behavior change; blocking promotion E10"
+    description: "observe telemetry emitted before the four UNCONDITIONAL hard-exits that preempt the C4 dual-run slot (gate=streamlined_integration|streamlined_abandoned|tiered_compliance|cp4_curator) so E10 can correct the dual-run for sampling bias (runs that die before reaching the C4 slot are otherwise invisible); the other 4 hard-exits (DG-07/E3/C3-presence/invalidation) are observe-by-default and do not exit in shipped E9, so they carry no preempted event — that is an E10 handoff item; no gate behavior change; blocking promotion E10 (P080 Step 4: REPOINTED to n/a — the instruction cited the directory docs/plans/AID-audit-2026-06, which no longer exists at that path (its content now lives under docs/plans/archive/ — a repo-level design record outside plugins/aid-orchestrator/, so it is not part of what /aid-init installs into a project and is not a durable instruction home (the marketplace cache does clone the whole repo, so the file is reachable there — reachable is not the same as being where a rule is read); the archive itself is tracked, so tracking is not the reason). This is observe-only internal telemetry with no human-facing rule, so `n/a (internal guard)` is what this file's own schema calls for; the E10 handoff it named is stated above in this description.)"
     test: "scripts/tests/bats/test-release-policy.bats"
 
   - {id: force_writes_waiver, type: 4, source: "scripts/aid-fsm.sh (grep: 'every --force writes a visible protocol-v2 waiver')", instruction: "defaults/schemas/waiver.schema.json", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "fsm_handle_force_override writes a protocol-v2 waiver-<transition>-<ts>.json (payload waived_check/reason>=20/waived_by/waived_at/scope/visible:true) on EVERY --force across all 4 call sites (init plan-gate, transition, increment-step, done-advance); mkdir -p empty-guards the plan-gate site where the evidence dir may not be materialized yet; the C4 aggregator surfaces it in waivers_applied[] (Waived != pass); immediate structural guarantee — active, no TTL", test: "scripts/tests/bats/test-release-policy.bats"}
@@ -1428,23 +1428,23 @@ enforcements:
   - id: test_audit_catalog_approval_boundary
     type: 9
     source: "scripts/lib/aid-test-audit-command-allowlist.sh (reads only .aid-o/config/test-catalog.yaml); scripts/aid-test-catalog-approve.sh (the only writer of that path)"
-    instruction: "plans/P066-test-portfolio-audit-capability.md Step 17"
+    instruction: "commands/aid-audit-tests.md (grep: 'Closing the loop: OFFER the approval')"
     severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "A discovered command in the gitignored, evidence-only test-catalog.proposed.yaml is never eligible for execution — the command-allowlist's measure/full-mode check reads only the tracked, force-added .aid-o/config/test-catalog.yaml, and the ONLY script that ever writes that path is aid-test-catalog-approve.sh, an explicit, PM-invoked action. Enforced by file-location separation (proposed vs approved are different files, only one of which the allowlist consults), not a soft flag any caller could bypass. Approving the catalog file as a whole never approves source_pattern_mappings[] — that requires the separate, mandatory aid-test-catalog-confirm-mapping.sh gate with a matching reviewed_diff_hash."
+    description: "A discovered command in the gitignored, evidence-only test-catalog.proposed.yaml is never eligible for execution — the command-allowlist's measure/full-mode check reads only the tracked, force-added .aid-o/config/test-catalog.yaml, and the ONLY script that ever writes that path is aid-test-catalog-approve.sh, an explicit, PM-invoked action. Enforced by file-location separation (proposed vs approved are different files, only one of which the allowlist consults), not a soft flag any caller could bypass. Approving the catalog file as a whole never approves source_pattern_mappings[] — that requires the separate, mandatory aid-test-catalog-confirm-mapping.sh gate with a matching reviewed_diff_hash. (P080 Step 4: REPOINTED — the instruction cited plans/P066-test-portfolio-audit-capability.md, which lives at .aid-o/plans/archive/ — force-added, so it IS tracked; tracking is not the reason. A plan is a record of a decision, not a shipped instruction surface; the rule a user actually reads is the approval section of commands/aid-audit-tests.md, which is where the cite now points.)"
     test: "scripts/tests/bats/test-aid-test-audit-command-allowlist.bats"
 
   - id: test_audit_never_auto_invoked
     type: 9
     source: "commands/aid-audit-tests.md (What this command never does on its own)"
-    instruction: "plans/P066-test-portfolio-audit-capability.md Constraint 10 (same-conversation convention, never a global interceptor)"
+    instruction: "commands/aid-audit-tests.md (grep: 'Chat handoff (natural-language continuation)') — the same-conversation convention, never a global interceptor"
     severity: blocking
     surface: llm-facing
     status: active
     verdict: ALIGNED
-    description: "/aid-audit-tests runs only when a user (or the controller, on an explicit user request) types the command — it is never dispatched after an EPIC, a plan, or a release, and carries no FSM/gate/CI wiring of any kind. The same-conversation NL-continuation convention (a reply like 'pokračuj' after the audit's own final turn) is scoped to that ONE audit's durable record and never fires from outside an active /aid-audit-tests conversation; it enforces nothing at any FSM/gate/release boundary."
+    description: "/aid-audit-tests runs only when a user (or the controller, on an explicit user request) types the command — it is never dispatched after an EPIC, a plan, or a release, and carries no FSM/gate/CI wiring of any kind. The same-conversation NL-continuation convention (a reply like 'pokračuj' after the audit's own final turn) is scoped to that ONE audit's durable record and never fires from outside an active /aid-audit-tests conversation; it enforces nothing at any FSM/gate/release boundary. (P080 Step 4: REPOINTED — the instruction cited plans/P066-test-portfolio-audit-capability.md Constraint 10, which lives at .aid-o/plans/archive/ — force-added and therefore tracked, so the repoint is about ROLE (a plan is a record, not a shipped instruction surface), not about tracking. The shipped, tracked statement of the same constraint is the command file's own chat-handoff section, so the cite now names that.)"
     test: "grep guard, Step 24 Part A (this command file never appears in any dispatch/FSM/gate wiring path)"
 
   - id: scheduler_unknown_parallelism_sequential
@@ -2745,3 +2745,29 @@ enforcements:
     description: "P081 Step 9 — once the merge path is T0+T1, the targeted selector is most of what stands between a change and a merge, and a selector nobody can audit is worse than none because it looks like coverage. `mapped_but_thin` is the class that matters: for a path the mapping DOES claim, the selector exits 0 and its exit-3/exit-11 escalation is structurally unreachable, so a thin mapping fails silently and confidently. The two escalating exits COUNT AS SELECTION — a merge that hit them ran a fuller profile — because manufacturing gaps from a safety net produces a report nobody believes."
     recovery: "Gaps are reported in <nightly dir>/<date>-selector-gaps.json and named in the nightly's Telegram line; the check never fails the job."
     test: "scripts/tests/bats/test-selector-honesty-check.bats"
+
+  - id: help_index_coverage
+    type: 3
+    source: "scripts/tests/bats/test-help-index-coverage.bats + scripts/lib/aid-help-index.sh + defaults/help-index.yaml"
+    instruction: "commands/aid-help.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P080 Step 2 — a command a user cannot find is a command that does not ship. Three artifacts have to agree or the suite fails: the surfaces the repo mechanically ships (aid-help-index.sh), defaults/help-index.yaml which claims to be the authority on them, and commands/aid-help.md which is generated from the index and is the only thing a user reads. A newly added public command fails here until it is INTENTIONALLY indexed and routed — silence is not a pass. Registered by P080 Step 4. TIER: t1, so it is on the MERGE PATH (CI runs --tier t0 then --tier t1; t2 is nightly-only) — this row's blocking claim is real, not a nightly-only aspiration."
+    recovery: "The failure names the unindexed surface; add it to defaults/help-index.yaml and regenerate commands/aid-help.md."
+    test: "scripts/tests/bats/test-help-index-coverage.bats"
+
+  - id: registry_cite_validation
+    type: 3
+    source: "scripts/tests/test-enforcement-registry-cites.sh"
+    instruction: "CLAUDE.md (section: 'Register + document every enforcement')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P080 Step 4 — a registry row is this plugin's promise that a detector has a real enforcing surface, so a row citing a file that was deleted, renamed or moved still LOOKS wired while enforcing nothing: the P026 'detector without enforcement' failure one level up, hiding inside the very file that is supposed to make enforcement auditable. Every source:/instruction: cite must resolve against one of the registry's three real bases (plugin root, repo root, plugin+scripts/); row ids must be unique, because this file is edited by appending and a duplicate id silently shadows whichever row a consumer's select() reaches first. Line numbers are deliberately NOT asserted — they drift on every edit above them and asserting them would make the registry unmaintainable; file existence is the invariant. Named registry_cite_validation because that is the id plan P080 Step 16 expects; a differently-named row would have let Step 16 honestly create a SECOND row for one check, and the id-uniqueness assertion cannot catch that because the names differ. Registers itself here because a checker absent from the thing it checks is exactly the omission it exists to catch. TIER: t0, so it is on the MERGE PATH (CI runs --tier t0 then --tier t1; t2 is nightly-only). The harness fails CLOSED by construction: it materialises rows before iterating, checks jq's exit code, and asserts the extracted row count equals the registry's own length — an earlier draft let one non-scalar cite field abort extraction mid-pipeline and reported success having checked 0 of 428 rows."
+    recovery: "The failure prints one CITE|<row-id>|<field>|<path> line per unresolvable cite. Repoint the row to the surface that really carries the rule, or mark it status: dead with a rationale if the enforcement died with what it cited. Never allowlist a path to make a row pass."
+    test: "scripts/tests/test-enforcement-registry-cites.sh"

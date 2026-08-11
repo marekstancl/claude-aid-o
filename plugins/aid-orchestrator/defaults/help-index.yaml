@@ -1,0 +1,123 @@
+# help-index.yaml — the authority file for AID's public surfaces.
+#
+# CHECKED-IN ONLY. /aid-init never copies this into .aid-o/ — one source of
+# truth, no init idempotency complication.
+#
+# COLUMNS (all 8 required on every row; `writes` may be an empty list):
+#   command     slash name of the surface
+#   file        repo-relative path to its source file
+#   purpose     one line, taken from the surface's own frontmatter/prose
+#   topic       /aid-help topic route, or `none`
+#   audience    beginner | regular | power | internal
+#   disposition current | update | index_only | intentionally_internal
+#               | remove_or_deprecate
+#   writes      config files this surface may write; [] = read-only
+#   final_turn  renderer:<script> | card:<type> | internal
+#
+# DISPOSITION SEMANTICS (exact):
+#   current                 surface is correct as shipped; REQUIRES a topic route.
+#   update                  surface is correct but its prose changes in this plan;
+#                           REQUIRES a topic route.
+#   index_only              indexed here without a topic route. TRANSITIONAL, not a
+#                           resting place: NO indexed public surface may rest here
+#                           once Step 3 lands — Step 3 flips every one to `current`
+#                           with a real topic. The rule covers ANY indexed surface,
+#                           not only files under `commands/`: /visual-companion is
+#                           `user_invocable: true` without being a command file, and
+#                           a rule phrased around "command" would strand it unrouted.
+#   intentionally_internal  MUST NOT appear in /aid-help output. Internal commands are
+#                           still given a row, so the classification is explicit rather
+#                           than an accidental omission. FOURTH REQUIREMENT: the command
+#                           file must itself declare `user_invocable: false` — otherwise
+#                           the enumerator sees the surface, the bijection reports it as
+#                           shipped-but-not-indexed, and the row asserts something false
+#                           about the product.
+#   remove_or_deprecate     may appear in help with a deprecation note; takes no topic route.
+#
+# ONE NAMED EXEMPTION: `/aid-help` carries `topic: none` though it is `update` — the
+# router cannot route to itself. Step 2 encodes this by command name, not as a general
+# loophole; any OTHER current/update row without a topic is a violation.
+#
+# THIS INDEX IS THE AUTHORITY: `commands/aid-help.md` is regenerated FROM it, never the
+# other way round. A topic named here that does not exist there yet is a gap in the help
+# file, and the coverage suite says so. Change a route here first, then make help match.
+#
+# ENUMERATION CONTRACT (what a surface is, mechanically):
+#   1. Frontmatter scan of `plugins/aid-orchestrator/commands/*.md` — indexed iff
+#      `user_invocable: true`. The flag value is the key: a future command with
+#      `user_invocable: false` is indexed as `intentionally_internal`, never dropped.
+#   2. The glob `plugins/aid-orchestrator/skills/*/SKILL.md`.
+#   Flat `skills/*.md` files are NOT surfaces — they are agent-loaded reference
+#   documents, and any `user_invocable` key on them is inert metadata. A skills
+#   directory without SKILL.md (e.g. `skills/setup/`) is likewise not a surface.
+
+surfaces:
+  - { command: /aid-do, file: plugins/aid-orchestrator/commands/aid-do.md,
+      purpose: "Fast Mode — implement small tasks with minimal overhead (<2 min)",
+      topic: do, audience: beginner, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-run, file: plugins/aid-orchestrator/commands/aid-run.md,
+      purpose: "Execute EPIC pipeline — 6-state FSM with optional autonomous mode",
+      topic: run, audience: beginner, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
+      purpose: "Show EPIC status, queue, and pipeline overview",
+      topic: status, audience: beginner, disposition: current,
+      writes: [".aid-o/config/queue.yaml"], final_turn: "card:finished" }
+
+  - { command: /aid-stop, file: plugins/aid-orchestrator/commands/aid-stop.md,
+      purpose: "Emergency stop — disengage FIRST AID auto-mode immediately",
+      topic: recovery, audience: regular, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-audit, file: plugins/aid-orchestrator/commands/aid-audit.md,
+      purpose: "Project health audit (0-100 score) across categories A–J",
+      topic: audit, audience: power, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-help, file: plugins/aid-orchestrator/commands/aid-help.md,
+      purpose: "AID help with progressive disclosure (Level 0–3)",
+      topic: none, audience: beginner, disposition: update,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-init, file: plugins/aid-orchestrator/commands/aid-init.md,
+      purpose: "Initialize or upgrade .aid-o/ workspace (10-file init, idempotent)",
+      topic: init, audience: beginner, disposition: update,
+      writes: [".aid-o/config/project.yaml", ".aid-o/config/execution.yaml",
+               ".aid-o/config/plugin.yaml",
+               ".aid-o/config/check-severity.yaml", ".aid-o/config/test-audit.yaml"],
+      final_turn: "card:finished" }
+
+  - { command: /aid-setup, file: plugins/aid-orchestrator/commands/aid-setup.md,
+      purpose: "Modular project configuration — permissions, integrations, CLAUDE.md, stack scan",
+      topic: setup, audience: regular, disposition: update,
+      writes: [".aid-o/config/permissions.yaml", ".aid-o/config/integrations.yaml",
+               "CLAUDE.md", ".aid-o/config/project.yaml"],
+      final_turn: "card:finished" }
+
+  - { command: /aid-plan, file: plugins/aid-orchestrator/commands/aid-plan.md,
+      purpose: "Plan a task — brainstorm, write plan, or generate EPIC (auto-detected or forced)",
+      topic: plan, audience: regular, disposition: update,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-verify-plan, file: plugins/aid-orchestrator/commands/aid-verify-plan.md,
+      purpose: "Independent adversarial review of an implementation plan before it goes to execution",
+      topic: plan-lifecycle, audience: power, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-verify-implementation, file: plugins/aid-orchestrator/commands/aid-verify-implementation.md,
+      purpose: "Independent adversarial DONE review of an implementation before it is trusted as complete",
+      topic: plan-lifecycle, audience: power, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /aid-audit-tests, file: plugins/aid-orchestrator/commands/aid-audit-tests.md,
+      purpose: "Test portfolio audit — inventory, safe measurement, and a plain-language recommendation",
+      topic: tests, audience: power, disposition: current,
+      writes: [], final_turn: "renderer:scripts/lib/aid-test-audit-chat-summary.sh" }
+
+  - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,
+      purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",
+      topic: plan, audience: power, disposition: current,
+      writes: [], final_turn: "card:finished" }
