@@ -1,11 +1,19 @@
 ---
 id: P082
 type: plan
-status: draft
+status: superseded
 created: 2026-08-11
 author: PM + AI
 risk: high
 ---
+
+> **SUPERSEDED 2026-08-11 by P083.** CP1-deep returned `verdict: fail` with 15
+> accepted blockers: seven of twelve steps were grounded against code that does
+> not exist, is not the runtime path, or reverses a documented deliberate
+> decision. Cause: this plan was written from the backlog's own descriptions
+> rather than from the tree. Do NOT generate. Review evidence:
+> `.aid-o/work/evidence/P082/cp1-deep/`. Replacement: `P083-ten-verified-defects.md`,
+> written from `.aid-o/work/evidence/backlog-verify-2026-08-11/`.
 
 # Plan: Close the Live Holes the Backlog Audit Found, and Make the Backlog Tell the Truth
 
