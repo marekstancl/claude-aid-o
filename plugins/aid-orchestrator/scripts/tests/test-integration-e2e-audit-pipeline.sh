@@ -84,20 +84,25 @@ chat_text="$(bash "$FINALIZE" --audit-id e2e-vitest-only --wave-artifacts-dir "$
   --dispatch-manifest "${WORK_DIR}/manifest.json" --output-dir "$FIXTURE_OUT" --mode measure)"
 finalize_status=$?
 if [[ "$finalize_status" -eq 0 ]]; then
-  # P072 Step 19 replaced the five-part findings handoff with six
-  # decision-first sections plus a technical appendix. The ORDER is the
-  # contract — a reader must meet the decision before the evidence — so this
-  # asserts position, not merely presence.
+  # P072 Step 19 replaced the five-part findings handoff with decision-first
+  # sections plus a technical appendix. The ORDER is the contract — a reader
+  # must meet the decision before the evidence — so this asserts position, not
+  # merely presence.
+  #
+  # FOUR sections, not six: P078 removed the parallelism line and with it the
+  # "what can run in parallel" / "what must remain serial" pair, renumbering
+  # what followed. This expectation was left naming the deleted sections and
+  # had been red on main ever since — an orphan assertion, repaired here in
+  # passing because a permanently red suite is exactly what the nightly is
+  # meant to make impossible to ignore.
   ok=1
   missing=""
   prev=0
   for marker in \
     '## 1. What to do now' \
     '## 2. What to fix, merge, split or remove' \
-    '## 3. What can run in parallel' \
-    '## 4. What must remain serial' \
-    '## 5. Test time now, and after the proposed work' \
-    '## 6. What is not proved yet' \
+    '## 3. Test time now, and after the proposed work' \
+    '## 4. What is not proved yet' \
     '### Technical evidence'; do
     if [[ "$chat_text" != *"$marker"* ]]; then
       ok=0; missing="${missing}${missing:+, }${marker}"

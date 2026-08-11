@@ -102,9 +102,11 @@ Interactive 9-step brainstorming flow — collaborate with PM to explore an idea
 
 ### Step 1: Context
 0. **Orient on the other streams first** — see "Working while another plan is
-   live" below. Run the three reads, and if anything is active, tell the PM
+   live" below. Run the four reads, and if anything is active, tell the PM
    what is running and that this plan can proceed anyway. Never ask them to
-   clean up or wait without a reason from those reads.
+   clean up or wait without a reason from those reads. The fourth read is the
+   nightly result: report it in one line if there is one, and never let it
+   block planning.
 1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md` (generated index of active streams — read-only, never hand-write it), scan `plans/`
 2. If topic provided: use as brainstorming seed; if empty: ask PM
 3. Read `skills/brainstorming.md` for process rules
@@ -766,7 +768,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-08-10
 
 ## Plan mode
 

@@ -42,16 +42,27 @@ _need_project_config() {
 # each asserted on its own terms below.
 MERGE_PATH_PROFILES="quick targeted standard full release"
 
-_include() { yq -r ".profiles.\"$1\".include[]" "$EXEC_YAML"; }
+# `gate_profiles:`, not `profiles:` — the live config's own key. An earlier
+# version of this suite read `.profiles.`, which yq resolves to nothing with
+# exit 0, so three of these cases asserted over an EMPTY list and passed while
+# proving nothing. Hence `_include_or_die`: every read of a profile is checked
+# for non-emptiness before anything is concluded from it.
+_include() { yq -r ".gate_profiles.\"$1\".include[]" "$EXEC_YAML"; }
 _command() { yq -r ".gates.\"$1\".command // \"\"" "$EXEC_YAML"; }
+
+# _include_or_die <profile> — the include list, or a failed test.
+_include_or_die() {
+  local out; out="$(_include "$1")"
+  [[ -n "$out" ]] || fail "profile '$1' has an empty or unreadable include[] in $EXEC_YAML"
+  printf '%s\n' "$out"
+}
 
 @test "1: no merge-path profile runs the whole portfolio" {
   _need_project_config
   for p in $MERGE_PATH_PROFILES; do
-    run bash -c "yq -r '.profiles.\"$p\".include[]' '$EXEC_YAML'"
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"shell_pipeline_smoke"* ]] || fail "profile $p still includes shell_pipeline_smoke"
-    [[ "$output" != *"bats_boundary"* ]] || fail "profile $p still includes bats_boundary"
+    inc="$(_include_or_die "$p")"
+    [[ "$inc" != *"shell_pipeline_smoke"* ]] || fail "profile $p still includes shell_pipeline_smoke"
+    [[ "$inc" != *"bats_boundary"* ]] || fail "profile $p still includes bats_boundary"
   done
 }
 
@@ -66,7 +77,7 @@ _command() { yq -r ".gates.\"$1\".command // \"\"" "$EXEC_YAML"; }
       fi
       # The old whole-directory glob must not come back by another name.
       [[ "$cmd" != *"tests/bats/*.bats"* ]] || fail "gate $gate (profile $p) globs the whole bats directory"
-    done < <(_include "$p")
+    done < <(_include_or_die "$p")
   done
 }
 
@@ -103,8 +114,9 @@ _command() { yq -r ".gates.\"$1\".command // \"\"" "$EXEC_YAML"; }
 
 @test "6: release_quarantine is still exactly release minus bats_all" {
   _need_project_config
-  expected="$(_include release | grep -v '^bats_all$' | sort | tr '\n' ' ')"
-  actual="$(_include release_quarantine | sort | tr '\n' ' ')"
+  expected="$(_include_or_die release | grep -v '^bats_all$' | sort | tr '\n' ' ')"
+  actual="$(_include_or_die release_quarantine | sort | tr '\n' ' ')"
+  [ -n "$expected" ]
   [ "$expected" = "$actual" ]
 }
 

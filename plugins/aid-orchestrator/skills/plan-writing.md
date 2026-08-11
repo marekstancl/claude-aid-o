@@ -1158,7 +1158,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-08-10
 
 ## Plan-boundary note
 
