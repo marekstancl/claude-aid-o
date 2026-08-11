@@ -58,7 +58,7 @@ Three groups.
 
 1. **The live path (Steps 1-4).** `fsm_check_streamlined_integration_review` reads a flat `gates_report.json` while every writer and every other reader uses the `gates/` subdirectory, so a correct streamlined run is pushed toward a force waiver. `aid-plan-to-epic.sh` filters acceptance criteria to flush-left bullet lines in two copy-pasted awk blocks, so continuation lines vanish from both the human EPIC and the machine-read `ac[]`. `_release_update_files`' fallback path omits three files from `UPDATED[]`, and `_release_rollback_updated` restores only what that array holds. And the README tagline is frozen at v2.69.0 because its configured pattern escapes literal parentheses as BRE groups, so it can never match the line it is aimed at.
 2. **Guards that pass without checking (Steps 5-7).** A gate with no `command` records `skip/no_command` and never touches `overall`; `plan_diff` sits in five profiles in exactly that state. A `grep -qP` inside an `if` returns "enabled" on any grep without PCRE. A profile table that omits `release` cannot satisfy a policy floor of `release`.
-3. **Decided by measurement (Steps 8-10).** Each of these carried an open question that was answered before the plan was finalised, not handed to the implementer: dead vocabulary is deleted; the graph is produced earlier, because its producer needs nothing but the plan file; and the backlog is reconciled with the verification's verdicts. The catalog-status question was answered too — retire the audit — but measuring its blast radius moved it out of this plan (see Deferred).
+3. **Decided by measurement (Steps 8-10).** Each carried an open question answered before generation rather than handed to the implementer: the dead parallel vocabulary is deleted outright; the C0 prompt stops requiring a dependency graph the review never receives (producing it early was measured, then rejected on review because it would have made C0 a second writer of a producer-integrity seal); and the backlog is reconciled with the verification's verdicts. The catalog-status question was answered too — retire the audit — but measuring its blast radius moved it out of this plan (see Deferred).
 
 ## Implementation Steps
 
@@ -141,10 +141,11 @@ Three groups.
 
 **Error Handling:** A file that cannot be restored is a loud failure naming the file and the version it is stranded at; a partial rollback that reports success is the exact defect being fixed. The deliberate pre-dirty exclusion at `:785` stays — the rollback must not discard a PM's uncommitted work — but it is now *named in the output* instead of silently skipped, because "rolled back successfully" while a file still carries the new version is the same lie in a smaller costume.
 
+**Edge Cases:**
 - A file listed by config and by fallback, or carrying two version fields — recorded and restored once (the `# Don't double-add` intent is preserved, only its bookkeeping corrected).
 - A rollback with an empty `UPDATED[]` — prints that nothing needed restoring, exit 0.
 - A repo where `project.yaml` IS present — the config path is unaffected and its existing suites stay green.
-- **Declared consequence:** with the array corrected, the prepare commit now also stages `marketplace.json` and the plugin README, because the staging loop reads the same array. That changes what the frozen review candidate contains, and is stated rather than discovered.
+- **Declared consequence:** with the array corrected, the prepare commit now also stages `marketplace.json`, because the staging loop reads the same array. That changes what the frozen review candidate contains, and is stated rather than discovered. The plugin README's `Plugin: ` branch is included in the correction for symmetry, but the review found it does not fire on the current file shape; the step must report which of the two it actually observed rather than assuming both.
 
 **Dependencies:**
 - Depends on: none
@@ -163,15 +164,20 @@ Three groups.
 **Objective:** `README.md`'s tagline stops being frozen at a version nobody released, and cannot silently freeze again.
 
 **Files:**
-- Modify: `.aid-o/config/project.yaml` (lines ~27-32) — the third README `versioning.files[]` row escapes the URL parentheses as `\(` … `\)`, which POSIX BRE reads as group delimiters, so the pattern can never match a line containing literal `(https://…)`; they become bracket expressions (`[(]`, `[)]`), and the row gains a comment naming this failure so the next author does not re-escape them.
-- Modify: `README.md` (line 3) — a one-time repair of the tagline to the current version. Without it the fix changes nothing: the search token is substituted from `CURRENT`, so a line stranded at an older version can never be matched by any future release either. The miss is self-perpetuating and needs a manual reset exactly once.
-- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-release-readme.bats` — the real row-3 pattern substitutes on a fixture line containing literal parentheses; the sibling `(current)` row keeps working; a line stranded at an older version is detected and reported by name rather than silently skipped (tier: t1).
+- Modify: `plugins/aid-orchestrator/scripts/aid-release.sh` (lines ~571-577) — the `regex` branch reports, by file and by row, a configured pattern that matched nothing, instead of printing `Updated: <file> (regex)` unconditionally. This is the shipped, tracked half: it is why a frozen version line cannot hide again in this project or in any consumer.
+- Modify: `README.md` (line 3) — a one-time repair of the tagline to the current version. Without it nothing changes: `SEARCH` substitutes `{VERSION}` → `$CURRENT`, so a line stranded at an older version can never be matched by any future release either. The miss is self-perpetuating and needs a manual reset exactly once.
+- Modify: `.aid-o/config/project.yaml` (lines ~27-32) — the third README row's URL parentheses lose their backslashes entirely. POSIX BRE already treats a bare `(` as a literal; the sibling `(current)` row has tracked correctly for fourteen releases precisely because it has no such escape. **The file is untracked, so this repair reaches only this working copy** — it is recorded as a workspace fix, not as something the plan ships, and the shipped protection is the no-match report above.
+- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-release-readme.bats` — a configured pattern that matches nothing is reported by name and does not print `Updated`; a bare-parenthesis pattern substitutes across two consecutive releases with the markdown link intact; a backslash-escaped parenthesis pattern is shown to corrupt the line, so the trap is pinned rather than remembered (tier: t1).
 
 **Architecture Context:** Group 1, and the one step whose diagnosis the CP1 review overturned. The visible symptom is real — `README.md:3` reads v2.69.0 while main is v2.83.1 — but the cause is not the fallback's blind substitution. It is the CONFIG path: `.aid-o/config/project.yaml:32`'s pattern is applied through `aid-release.sh:568-576`'s `sed -i "s|…|…|g"`, and its `\(`/`\)` are group delimiters there. The sibling row that keeps `README.md:120` current has no such escape, which is exactly why one line tracks and the other does not.
 
-**Implementation Detail — scope deliberately shrunk after review.** The original step rewrote the fallback updater to discover an anchor and edit by structure. That is dropped: the fallback greps `v$CURRENT` and never matched the stale line either, so rewriting it fixes nothing; and a version-file registry already exists twice in tracked files (`defaults/orchestration.yaml:64-83`, `.aid-o/config/policies/release-policy.yaml:76+`), read by nothing — a fourth declaration of the same fact is precisely the machinery this plan's sieve rejects. Reconciling those three registries is recorded as deferred work, not done here.
+**Implementation Detail — the escaping fix goes the OPPOSITE way, and the review caught me prescribing the wrong one.** Revision 1 said to replace `\(` with a bracket expression `[(]`. Two lenses independently reproduced that this **corrupts the file**: `aid-release.sh:573-575` derives `SEARCH` and `REPLACE` from the same `pattern` string, so a bracket expression is written through verbatim into the replacement and the line becomes `[Claude Code][(]https://…[)]` — a destroyed markdown link that then re-freezes, and it survives the first release so only a second one exposes it. The config schema has no search-side-only escape to express. Removing the backslashes works and was reproduced over three consecutive releases with the link intact.
 
-**Error Handling:** A configured pattern that matches nothing is reported per file and per row at the end of the release, by name. Today a no-match `sed` still prints `Updated: README.md (regex)`, which is how this survived fourteen releases.
+**Scope shrunk after review.** The original step rewrote the fallback updater to discover an anchor and edit by structure. That is dropped: the fallback greps `v$CURRENT` and never matched the stale line either, so rewriting it fixes nothing; and a version-file registry already exists twice in tracked files (`defaults/orchestration.yaml:64-83`, `.aid-o/config/policies/release-policy.yaml:76+`), read by nothing — a fourth declaration of the same fact is precisely the machinery this plan's sieve rejects.
+
+**What this step deliberately does not fix, stated so it is not mistaken for done:** `aid-release.sh`'s config path reads an UNTRACKED file (`.aid-o/config/project.yaml`), which is why the repair cannot ship and why every worktree silently takes the fallback (Step 3's premise). Teaching the release script to read one of the two tracked registries would fix both at once — it is deferred work with its own plan, not a fourth mechanism.
+
+**Error Handling:** A configured pattern that matches nothing is reported per file and per row, by name, and is not counted as an update. Today `aid-release.sh:576` prints `Updated: $FILE_PATH (regex)` whether or not the `sed` changed a byte, which is how this survived fourteen releases.
 
 **Edge Cases:**
 - A pattern that matches more than one line — substitutes all, unchanged behaviour, asserted.
@@ -183,9 +189,9 @@ Three groups.
 - Blocks: none
 
 **Acceptance Criteria:**
-- [ ] The row-3 pattern substitutes on a line containing literal `(https://…)`.
-- [ ] `README.md:3` states the current version after this step, and after the next release.
-- [ ] A configured pattern that matches nothing is reported by name rather than counted as an update.
+- [ ] A bare-parenthesis pattern substitutes on a line containing literal `(https://…)` and leaves the markdown link byte-intact across two consecutive releases.
+- [ ] `README.md:3` states the current version after this step.
+- [ ] A configured pattern that matches nothing is reported by name and is not printed as `Updated`.
 
 **Effort:** S
 **AID Role:** backend
@@ -200,6 +206,7 @@ Three groups.
 - Modify: `.aid-o/config/execution.yaml` (lines ~218-243) — the self-host `plan_diff` gate gains the `command:` the shipped default has always had (`defaults/execution.yaml:109-116`) and an explicit `required: false` for the duration of this plan; the self-expiring exemption note that still names "P038+" is replaced by the resolved decision with its date, and by the true history (the command was never present, so this is an addition).
 - Modify: `plugins/aid-orchestrator/scripts/aid-run-gates.sh` (lines ~1944-1963) — a gate that appears in a profile's `include[]` with no `command` is a loud configuration refusal, not a `skip/no_command` row, so this cannot silently recur in any project.
 - Modify: `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` — the new runner refusal is registered with its `type`/`source`/`instruction`/`severity`/`surface`, as this repository's contributor rules require of every new enforcement.
+- Modify: `CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md` — the refusal is a breaking configuration check for consumers mid-rollout, so it is named in both identical CHANGELOGs rather than left to be discovered on a first failed run.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats` — a profile including a command-less gate fails the runner with a message naming the gate and the profile; a gate absent from every profile with no command is ignored; the shipped defaults pass unchanged; the refusal is present in the enforcement registry (tier: t1).
 
 **Architecture Context:** Group 2. Verified: `yq '.gates.plan_diff.command'` returns null on the self-host config while the gate sits in **five** profiles — `standard`, `full`, `release`, `bats_all_quarantine`, `release_quarantine` — and `aid-run-gates.sh:1953-1963` turns a null command into `skip/no_command` with `required` defaulting to false. The history is knowable and the CP1 review corrected an earlier claim here: `.aid-o/config/execution.yaml` is force-added and tracked, with 16 commits since 2026-08-04, and `git log -S 'aid-plan-diff.sh --plan'` over that window returns nothing — so the command was **never** there. This is a first-time addition, not a restoration, and the same false "no history" claim embedded in the config file's own `plan_diff` note is corrected while the step is in there.
@@ -279,7 +286,7 @@ Three groups.
 
 **Error Handling:** A composed profile naming a gate the composed file does not define is a build-time failure in the new test, not a consumer's first-run surprise.
 
-**The second consumer, named because the review found it and the plan had not.** `render_gate_profiles_block` also feeds the `/aid-init` EXISTING-project upgrade path, which appends its output verbatim to a PM's hand-authored `execution.yaml` whose `gates:` mapping the composer never wrote. A five-profile ladder appended there can name a gate that project does not define, and `aid-run-gates.sh:1583,1596` makes that a hard `exit 1`. Since `commands/aid-init.md` belongs to P080 and this step may not edit it, the upgrade path is handled the only way left open: the emitted ladder is derived from the gates present in the TARGET file when one exists, and the step's test covers an upgrade against a hand-authored config with a narrower gate set. If that proves impossible without editing the command file, the step stops and reports rather than shipping an appended profile that can hard-fail a consumer.
+**The second consumer, named because the review found it and the plan had not.** `render_gate_profiles_block` also feeds the `/aid-init` EXISTING-project upgrade path, which appends its output verbatim to a PM's hand-authored `execution.yaml` whose `gates:` mapping the composer never wrote. A five-profile ladder appended there can name a gate that project does not define, and `aid-run-gates.sh:1583,1596` makes that a hard `exit 1`. Since `commands/aid-init.md` belongs to P080 and this step may not edit it, the route is fixed rather than left open: `render_gate_profiles_block` takes varargs-of-stacks and both callers pass stacks alone, so a new positional parameter would break the upgrade caller — the ladder is therefore derived from the gates present in the target `execution.yaml` discovered by the library itself when one exists, falling back to the stack-derived set when it does not. The step's test covers an upgrade against a hand-authored config with a narrower gate set. "Stop and report" is NOT an acceptable landing here: both paths share one derivation, so an abandoned step leaves the composer half-migrated.
 
 **Edge Cases:**
 - Zero stacks detected — unchanged, still no table, still the audited legacy fallback.
@@ -502,8 +509,8 @@ verification_pattern:
 
 - **Step 5's decision could go either way and the profiles are the merge path.** Mitigation: the decision is made from one real `aid-plan-diff.sh` run against this plan, before the config is edited, and the runner-side refusal lands regardless of which way it goes.
 - **Step 7 changes what every future consumer's workspace looks like.** Mitigation: the zero-stacks branch is untouched and asserted byte-identical; only the populated branch grows, and the new test proves every emitted profile is internally satisfiable.
-- **Step 8 deletes ~90 lines from a hot library.** Mitigation: the live data has nothing to migrate (verified empty `*_by_context` maps); the entire risk is other projects' files, which is exactly what the read-compat test pins.
-- **Step 3 and Step 4 edit the same block.** Mitigation: explicit dependency and a shared fallback fixture, so the second inherits the first's regression rather than re-deriving it.
+- **Step 8 deletes ~90 lines from a hot library.** Mitigation: measured — no reader outside the writer library touches the `*_by_context` fields, and a legacy fixture with populated maps was shown to produce byte-identical output with and without them, so the deletion is strictly more convergent than emitting the fields empty.
+- **Step 4 prescribes an edit to a regex whose search and replacement are the same string.** Mitigation: the corrupting form is pinned by a test of its own, not merely avoided in prose — the review caught this plan prescribing exactly that corruption once already.
 - **The verification itself could be wrong somewhere.** Mitigation: every step names the line range its premise came from, and any step whose first read contradicts its premise stops and reports instead of proceeding — the P082 failure is the reason this sentence is here.
 
 ## Deferred
