@@ -2,56 +2,22 @@
   "schema_version": "aid-2.0",
   "artifact_type": "c0_plan_review",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-08-11T05:30:37Z",
+  "created_at": "2026-08-11T05:36:05Z",
   "identity": {
     "plan_id": "P080"
   },
-  "reviewed_plan_hash": "sha256:455791de0677177dc240e93573f4591f38f7deda127f88d8b15cf7f8ce49714d",
-  "reviewed_head": "da144afea1080929978c5b5d233637fe9607c977",
-  "input_manifest_hash": "sha256:ebabe7b76e7789057a5e7812e14952039e8c1a3183650c79563ba60568f77351",
-  "review_status": "findings",
-  "blocking_findings": true,
-  "findings": [
-    {
-      "fingerprint": "sha256:6d5befba9ceb9cf58f6d63df58b3c8a401a13ca653b0373e94a160a11dc44cdd",
-      "occurrence_id": "c0-P080-0",
-      "severity": "high",
-      "action_owner": "implementer",
-      "area": "testability",
-      "finding": "Step 8 explicitly says its harness cannot exercise or detect drift in `/aid-init` prose for hook installation, yet calls itself proof of init idempotency and is the sole protection for Success Criterion 3. Its hook replay tests harness-owned marker replacement, not the product instruction that installs hooks; the same limitation applies to other prose-directed init behavior not delegated to a shared executable.",
-      "recommendation": "Extract every claimed idempotent init operation, including hook installation, into a shared executable library that `/aid-init` instructs the controller to invoke, then test that library. Otherwise narrow Step 8 and Success Criterion 3 to the scripted substrate and remove the claim that it protects full init behavior."
-    },
-    {
-      "fingerprint": "sha256:e467274546017b0be4111a17fcc2cd2cc4b081eac7c42550806090cae4f251b8",
-      "occurrence_id": "c0-P080-1",
-      "severity": "high",
-      "action_owner": "implementer",
-      "area": "contracts",
-      "finding": "Step 11's renderer-failure path instructs the controller to hand-write a Blocked card from raw gate output. The plan acknowledges gate output is arbitrary and adds redaction only at the renderer boundary. This bypass path has no redaction requirement or test, conflicting with the cited artifact standard's prohibition on passwords, tokens, keys, or fragments in human-facing artifacts/outcomes.",
-      "recommendation": "Require the fallback to use only bounded computed facts, or pass all raw-derived text through the same deterministic redactor before presentation. Add a forced-renderer-failure fixture containing each supported secret pattern and assert neither fallback card nor artifact leaks it."
-    },
-    {
-      "fingerprint": "sha256:14ac33d18a5a88f6b44833f91bc2ec50aadbb4a3e8d4e64a6c79b9be00b414cc",
-      "occurrence_id": "c0-P080-2",
-      "severity": "medium",
-      "area": "contract-mismatch",
-      "finding": "Step 10 calls all seven blocks mandatory and its golden test requires all seven, but the cited artifact standard makes related links conditional on links existing and the detail link conditional on a detail existing. The generic renderer contract does not define a detail source for every invocation, so its required behavior conflicts with the cited contract for no-detail inputs.",
-      "recommendation": "Define detail-link availability as an explicit input and render blocks 5 and 7 conditionally per the standard; add no-links/no-detail fixture coverage. If every P080 consumer always has detail, state and test that per renderer rather than imposing it on the generic library."
-    },
-    {
-      "fingerprint": "sha256:bebcf5257a0ee0955fb697a837606d04f0f809a7fe188248a500a5ca6b551be2",
-      "occurrence_id": "c0-P080-3",
-      "severity": "medium",
-      "area": "acceptance-criteria",
-      "finding": "The requirement that the vendored template be “VISUALLY IDENTICAL” to `/opt/eco/services/agent-runtime/agent-report.py` is not verified. Step 10 only greps a few CSS selectors/theme markers, which can pass for materially different layout, typography, spacing, or template structure.",
-      "recommendation": "Replace “visually identical” with a defined, testable compatibility contract, or add a deterministic source/template comparison and visual snapshot comparison against approved reference fixtures."
-    }
-  ],
+  "reviewed_plan_hash": "sha256:ebf10309aaec3056eca91d64ec54692b88d7116dfff908efbabf54f1435defbd",
+  "reviewed_head": "27a0cf1d098918bb5b4d4cf87510a2fd49c1af60",
+  "input_manifest_hash": "sha256:b225491d27c35475d9c5411428ee185d0294913bfd8d47eae06057bd4dc6d09e",
+  "review_status": "unverifiable",
+  "blocking_findings": false,
+  "unverifiable_reasons": [],
+  "findings": [],
   "codex": {
     "provider": "codex",
     "model": "gpt-5.6-terra",
-    "session_id": "019fef4a-1974-78a2-a054-acdcdb1a6e4d",
+    "session_id": "019fef4f-4a72-7eb3-8a4f-64ecb63a3c85",
     "achieved_independence_level": "cross_provider"
   },
-  "outcome": "dispatched"
+  "outcome": "head_mismatch"
 }
