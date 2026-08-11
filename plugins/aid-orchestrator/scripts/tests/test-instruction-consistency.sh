@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-instruction-consistency.sh — Verify instruction files match bash reality
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-force-commands.bats — P073 Step 8: --force wired into the public
 # plan-lifecycle commands.
 #

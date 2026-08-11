@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 423          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 427          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2363,7 +2363,7 @@ enforcements:
     verdict: ALIGNED
     description: "P075 — `epic-start` was a fully built, tested command with NO production caller: the plan-branch lifecycle was assembled across P064/P068 and this link was never wired. `aid-fsm.sh init` will not adopt `task/<epic>/main` for a plan_branch plan unless that branch is a registered ref with recorded lineage back to `plan/<plan_id>`, and nothing registered it. Single-stream runs never noticed, because init ran in the operator's own checkout where the lineage precondition was not reached; once P074 made init redirect into the plan's own worktree the precondition began to be evaluated for real and refused — correctly — on an unregistered task branch, so a second stream could not reach a queued EPIC at all. The registration is now a named stage of the generation chain, placed AFTER per-phase plan.json/contract validation (the epic_id is only final once the package verifies) and BEFORE `aid-json-to-run.sh` drives init (the first consumer). The mode is read from the plan's COMMITTED lifecycle manifest, never from the default-mode resolver: the resolver answers 'what mode would a NEW plan get' and downgrades to legacy without a gate_profiles table, which would put generation and init on two different authorities. Deliberately best-effort: a non-zero is reported and left to init, which owns the verdict, because an already-registered branch is the normal resumed-generation case and failing on it would make a resume impossible. Legacy plans skip it entirely — they have no plan branch to descend from and epic-start rightly refuses without a plan-boundary manifest. Every phase is covered, not only the first: init leaves the plan's execution worktree on that phase's task branch, so `aid-json-to-run.sh` returns the worktree to `plan/<plan_id>` after each init (the caller-side restore cannot help — for a redirected init the caller's checkout never moved). Without it phase 2 redirected into a tree still on phase 1's branch and hard-failed the cross-EPIC mismatch."
     recovery: "A refusing init names the plan-branch lineage check and `epic-start` as the fix; the pipeline's own line reports whether the registration ran and what it returned."
-    test: "scripts/tests/bats/test-p074-integration.bats"
+    test: "scripts/tests/bats/test-plan-worktree-integration.bats"
 
   - id: json_to_run_branch_restore_before_failure
     type: 4
@@ -2375,7 +2375,7 @@ enforcements:
     verdict: ALIGNED
     description: "P075 — the branch restore after FSM init only ever ran when init SUCCEEDED. `aid-json-to-run.sh` runs under `set -euo pipefail`, so a refusing init aborted the script at the call site, before the restore, and left the operator's own checkout parked on the `task/<epic>/main` that init had auto-created on its way to refusing — the 'borrowed the PM's tree' outcome the plan-branch topology exists to remove, produced by the very check that was protecting it. Init's exit status is now captured, the existing restore block runs whether init succeeded or refused, and only then is init's own failure re-raised with a line stating the checkout was restored first. The restore's OWN failure keeps its distinct exit 4 and its git-checkout recovery instruction; it is not swallowed by the new path."
     recovery: "The failure line names the branch the checkout was restored to. A restore that itself fails still exits 4 with the exact `git checkout` command."
-    test: "scripts/tests/bats/test-p074-integration.bats"
+    test: "scripts/tests/bats/test-plan-worktree-integration.bats"
 
   # ══ P076: crash survival, declared services, and the recovery ladder ═══════
   # Fourteen rows for one plan, and the `instruction:` anchor on each is the
@@ -2426,7 +2426,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 4 — a controller that dies mid-EXECUTE cannot write anything on its way out, so 'a resume is required' must be derivable from what it provably LEFT BEHIND: one continuation pointer per run, written BEFORE the background job is handed to the supervisor and deleted only once the run's last outstanding job is collected. It is fail-closed in both directions. An unwritable evidence directory refuses the gate BEFORE the spawn, because an unresumable background job must never come into existence. A failure of the POST-SPAWN rewrite is not merely refused — the job is already running, so it is CANCELLED as compensation, and a cancel that also fails prints the exact manual command. The crash window between the two writes leaves the `pending` pointer, which resume resolves by scanning the jobs dir for the recorded fingerprint: no window produces a job without a pointer, only a pointer one field less precise."
     recovery: "Both refusals name the pointer path and the gate; the compensating-cancel failure prints the `aid-job.sh cancel` command verbatim."
-    test: "scripts/tests/bats/test-auto-resume-artifact.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-auto-resume-artifact.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   - id: resume_single_use_claim
     type: 4
@@ -2438,7 +2438,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 5 — `aid-fsm.sh resume <epic>` claims the continuation artifact EXACTLY ONCE and only then consumes the job's terminal result, so two racing resumes cannot both record a row for the same job. The primitive is the one the shipped pm-override path already uses, not a second implementation: `mv -n` with a mandatory source-gone post-check, because on the installed coreutils a SKIPPED `mv -n` still exits 0 — the check is the enforcement, not the mv. Every loser prints the WINNER's claim file, so a race names who took it instead of failing anonymously. SINGLE-WRITER: a status look at a still-live job claims nothing and leaves the artifact byte-identical; only the terminal-collect path claims."
     recovery: "A losing resume exits 0 and names the winner's `.claimed-<epoch>` file; nothing is left half-consumed."
-    test: "scripts/tests/bats/test-resume-command.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-resume-command.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   - id: active_run_stall_derivation
     type: 9
@@ -2450,7 +2450,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 6 + Step 15 — a controller that dies mid-EXECUTE leaves its state file exactly where it was, so prune's file-existence criterion keeps the run looking healthy forever. `stalled` makes it visible, and like `awaiting_host_resume` it is DERIVED at read time and stored NOWHERE: a dying controller cannot write a flag on its way out, and a flag nobody clears is a lie the moment the controller wakes. One definition (non-terminal entry AND nothing newer than the threshold in either the map's `updated_at` or the run's timeline), two consumers — the `/aid-status` render and the AUTO watchdog — both through the same command. The MECHANICAL half of this row is the writer's refusal: passing `awaiting_host_resume` to `active-runs set` is rejected with a message saying it is derived. The rendering itself is advisory: a false STALLED? on a long foreground gate is the deliberate trade against an invisible dead controller."
     recovery: "The rendered row names the artifact and prints `aid-fsm.sh resume <epic>` — or, for an id that would not survive `resume`'s own charset check, no command at all."
-    test: "scripts/tests/bats/test-status-two-streams.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-status-two-streams.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   - id: instruction_closure_structural_check
     type: 9
@@ -2510,7 +2510,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 10 — declared services are acquired exactly once per run and released exactly once, on every exit path the runner has, with `services_acquired`/`services_released` framing the run on the timeline. The ownership CLAIM is what makes this safe under a crash: a second runner entering a run whose owner is still alive refuses instead of tearing the live run's services down, and a run whose owner is provably dead has its stale services swept at entry before re-acquiring. There is ONE teardown definition, so `run-all`'s entry sweep, its release, `fsm resume` and `fsm done-advance` all inherit the same refusal from the same authority rather than each carrying a copy of the question."
     recovery: "The refusal names the live owner and its claim record; nothing is cancelled or stopped."
-    test: "scripts/tests/bats/test-service-lifecycle.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-service-lifecycle.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   - id: service_teardown_declaration_preflight
     type: 4
@@ -2546,7 +2546,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 12 — the adjudication dispatch codifies what commands/aid-run.md used to carry as prose, and the property that matters is that the adjudicator CANNOT widen its own remit whatever it replies. The ceiling is mechanical, not persuasive: the reply's ACTION line is the decision (never the prose around it), it must be a member of the CLASS's allowlist, and the six-name action vocabulary is compiled into the lib and drift-tested equal to the policy and the schema. `escalate` is deliberately NOT in the vocabulary — no caller can execute it — so every refusal path ends there: an unreadable or schema-invalid policy, an undeclared class, an empty allowlist (no dispatch at all), an empty or ambiguous or out-of-allowlist reply, a reply demanding PM authority or a gate waiver, and an unavailable transport. Every exchange, including the refusals that never dispatch, leaves an audit artifact."
     recovery: "The returned decision is `escalate` with a `rejected_*`/`refused_*` verdict recorded in the timeline and the ladder record, plus a per-exchange artifact."
-    test: "scripts/tests/bats/test-recovery-adjudicate.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-recovery-adjudicate.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   - id: recovery_ladder_budget_refusal
     type: 4
@@ -2558,7 +2558,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 13 — the recovery budget is spent under a lock, and that is the whole enforcement: counting outside the lock let two concurrent attempts of a one-attempt class both see zero spent and both proceed, so the count and the append are now one critical section. Budgets are strictly per class and the wall clock runs from the class's FIRST line in the record — an emitter line counts, so the clock starts when the stop was first SEEN, not when recovery was first attempted. Every refusal routes to adjudication and none of them grants anything: over attempts, past the wall clock, an action the class does not allow (named), an undeclared class, an unreadable policy, an unparseable record, a record that shrank against its own high-water mark, and a lock timeout. A refusal is itself recorded and never spends an attempt of its own."
     recovery: "stdout is `adjudicate <reason>` with rc 4; the reason and its detail are appended to the run's recovery-ladder.jsonl."
-    test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   - id: recovery_escalation_terminus
     type: 4
@@ -2570,7 +2570,7 @@ enforcements:
     verdict: ALIGNED
     description: "P076 Step 13 — the ladder's terminus stops the run at a person and cannot walk past one. It writes the terminus line, then sets `auto_controller: blocked_for_pm` on the active-runs entry through the FSM's single writer (which validates the value against the closed vocabulary and refuses the derived `awaiting_host_resume`), so the map stops claiming a live autonomous controller. The load-bearing property is what it did NOT do: reaching ESCALATION automatically did not make ESCALATION leavable — the transition still refuses without `escalation_decision`, and the ladder ships no function that continues past a refused terminal state. Continuation remains the audited PM `--force` surface and nothing else, grep-guarded in the ladder's own regression suite."
     recovery: "The refusing transition names `escalation_decision`; a PM records the decision and the transition proceeds."
-    test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-p076-integration.bats"
+    test: "scripts/tests/bats/test-recovery-ladder.bats + scripts/tests/bats/test-owned-jobs-integration.bats"
 
   # ── P079 (IMP-472..483): the aftermath layer ──────────────────────────────
   # Every mechanical refusal the first live P076 run made necessary. Each row's
@@ -2664,7 +2664,7 @@ enforcements:
   - id: release_version_sealed
     type: 6
     source: "scripts/aid-release.sh:_release_version_sealed (guarding update_changelog's retitle AND the no-config fallback loop)"
-    instruction: "CLAUDE.md (Release Workflow) + defaults/policies/release-policy.yaml"
+    instruction: "defaults/orchestration.yaml (release.version_files)"
     severity: blocking
     surface: internal-guard
     status: active
@@ -2696,3 +2696,51 @@ enforcements:
     description: "P079 Step 12 (IMP-483) — delegation moves a suite OUT of the inline run, so a missing, renamed or duplicated CI job stops that suite being run by anything, and the inline run gets FASTER, which reads as success. The test asserts every mapped suite has exactly one owning job that names it, and that the inline runner really skips it and says who owns it. The map is READ from the runner rather than restated, so the two cannot drift. Explicitly not parallelism: this is placement and ownership only."
     recovery: "Each failure names the suite and whether its job is missing or duplicated."
     test: "scripts/tests/test-run-all-delegation.sh"
+
+  - id: test_tier_declared
+    type: 6
+    source: "scripts/aid-test-tier-lint.sh"
+    instruction: "skills/plan-writing.md (Files block grammar)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P081 Step 3 — the tier is what decides whether a suite blocks a merge or runs at night, so an undeclared, contradicted or contradictory tag is a portfolio drifting back to 'everything is cheap'. The reader (lib/aid-test-tier.sh) scans the whole LEADING COMMENT BLOCK however long — measured: nine suites in this tree open with 40-47-line headers, which a fixed window would have read as untagged — and two tags anywhere in a file is a violation naming both lines, never first-wins. The filename rule matches SEGMENT-wise and case-insensitively (`p073`, `e-064`), so `test-cp1-gate.sh` is not condemned for containing 'p1'. A suite with no measurement is reported UNVERIFIED and does not fail: measurement moves a tier, and its absence is not evidence of cheapness."
+    recovery: "Each violation names the file and what to add; the lint exits 1 with the full list, never on the first one."
+    test: "scripts/tests/bats/test-aid-test-tier-lint.bats"
+
+  - id: test_tier_runner_refusal
+    type: 6
+    source: "scripts/tests/run-all-tests.sh"
+    instruction: "scripts/README.md (Testing — tiers)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P081 Step 5 — the enforcement half of the tag. Once the merge path runs `--tier t0`/`--tier t1` only, an UNTAGGED suite is a suite that silently never runs again, which is exactly the failure the tier work exists to prevent; so inside an already-tiered tree the runner refuses the whole run naming the file and the lint. The rule is stated once and is deliberately conditional: a project that has never tagged a suite runs everything exactly as before, so a plugin upgrade never breaks an untiered consumer. Skipped-by-tier suites are COUNTED and printed — a suite not running is never silent."
+    recovery: "The refusal names every untagged file and points at aid-test-tier-lint.sh for the full rule set."
+    test: "scripts/tests/bats/test-run-all-tier-filter.bats"
+
+  - id: test_tier_declared_at_plan_time
+    type: 3
+    source: "scripts/aid-plan-to-epic.sh + scripts/lib/aid-scoping.sh"
+    instruction: "skills/plan-writing.md (Files block grammar + mandatory-fields table)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P081 Step 10 — the budget on the way IN, at the only point where a new suite is still cheap to argue about. Only NEW suites need a declaration: a bullet naming an existing file inherits that file's tag, so adding a case to an existing suite — the move the standard wants to encourage — stays free. Fixtures are not suites and are never asked. The check activates only once some suite in the tree carries a tag, so an untiered consumer project generates exactly as before. An unknown tier value is refused rather than ignored: `(tier: t9)` is a declaration somebody meant."
+    recovery: "Generation stops naming the step, the bullet and the accepted set, in the same message class as P079's dropped-bullet refusal."
+    test: "scripts/tests/bats/test-plan-tier-declaration.bats"
+
+  - id: selector_honesty_check
+    type: 6
+    source: "scripts/aid-selector-honesty-check.sh"
+    instruction: "docs/extending-aid.md (Test tiers — the selector's honesty check)"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P081 Step 9 — once the merge path is T0+T1, the targeted selector is most of what stands between a change and a merge, and a selector nobody can audit is worse than none because it looks like coverage. `mapped_but_thin` is the class that matters: for a path the mapping DOES claim, the selector exits 0 and its exit-3/exit-11 escalation is structurally unreachable, so a thin mapping fails silently and confidently. The two escalating exits COUNT AS SELECTION — a merge that hit them ran a fuller profile — because manufacturing gaps from a safety net produces a report nobody believes."
+    recovery: "Gaps are reported in <nightly dir>/<date>-selector-gaps.json and named in the nightly's Telegram line; the check never fails the job."
+    test: "scripts/tests/bats/test-selector-honesty-check.bats"

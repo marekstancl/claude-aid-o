@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-audit-report.bats — the ONE fixed-form report page.
 #
 # The contract is completeness: nine sections, always, whether or not the data

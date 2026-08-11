@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # F13 (NR 14 §4D) — aid-plan-to-epic.sh: ### Step headers and **EPIC**
 # markers inside fenced code blocks must NOT be counted as real steps
 # (regression for meta-plans that quote AID syntax).

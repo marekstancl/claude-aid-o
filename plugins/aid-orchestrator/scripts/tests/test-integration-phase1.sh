@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # Integration tests for Phase 1 scripts (Steps 4–8)
 # Tests end-to-end interactions between FSM, logging, gates, and token counting
 

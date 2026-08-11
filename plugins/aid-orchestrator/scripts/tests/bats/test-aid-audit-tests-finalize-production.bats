@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-audit-tests-finalize-production.bats — P072 EPIC 1 wiring proof.
 #
 # Every case here drives the PUBLIC entrypoint `aid-audit-tests-finalize.sh`,

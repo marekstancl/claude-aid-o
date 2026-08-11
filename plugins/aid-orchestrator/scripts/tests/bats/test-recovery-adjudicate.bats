@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-recovery-adjudicate.bats — P076 EPIC 2, Step 12.
 #
 # `lib/aid-recovery-adjudicate.sh` is the codification of the dispatch

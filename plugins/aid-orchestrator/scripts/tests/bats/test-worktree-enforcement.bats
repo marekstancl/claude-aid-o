@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-worktree-enforcement.bats — P074 Step 8: every plan-linked lifecycle
 # command that touches a tree runs in the PLAN's tree, or refuses.
 #

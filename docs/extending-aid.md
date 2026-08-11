@@ -1974,4 +1974,130 @@ pretended to be mechanical.
 deterministic and its false-positive shape is pinned by a test. If it needs
 judgment, write it as a rule where test authors read and say so.
 
+## Test tiers (P081)
+
+AID is the ecosystem's pilot for `/ecosystem/specs/test-standard`. The whole
+point of the change: **the merge path stopped running the full portfolio.**
+191 suites, last timed at 12 200 s (3 h 23 min), used to gate every plan
+closure. They now run at 02:40 UTC, where they delay nobody.
+
+### Choosing a tier
+
+A suite declares its tier in its leading comment block, once:
+
+```bash
+#!/usr/bin/env bats
+# aid-tier: t1
+```
+
+| Tier | Cost per case | Whole-tier budget | Runs |
+|------|---------------|-------------------|------|
+| `t0` | under 2 s     | under 2 min       | merge path |
+| `t1` | under 30 s    | under 10 min      | merge path — this is what blocks a merge |
+| `t2` | more than that, **or cross-component whatever it costs** | none | nightly |
+
+Tier follows **measured cost and scope**. Not importance. Not "this one matters,
+so it should block". A suite you cannot resolve to a subject file is
+cross-component and therefore t2 however cheap it is — the scope half of the
+rule is what stops T1 filling up with integration suites.
+
+`aid-test-tier-assign.sh` proposes tiers from real measurements and ENFORCES the
+aggregate budgets: while T0 exceeds 2 min or T1 exceeds 10 min it demotes the
+most expensive member and prints why. The standard forbids tolerating an
+overflow quietly, and a tool that only warned would be tolerating it.
+
+### How the tag is read, and why it is a tag
+
+`lib/aid-test-tier.sh` is the ONE reader — the runner's `--tier` filter, the
+lint and the plan-time check all come through it. It scans the whole leading
+comment block however long (nine suites in this tree open with 40-47-line
+headers), and two tags anywhere in a file is a violation naming both lines,
+never first-wins.
+
+It is a tag and not a `tests/t0|t1|t2/` directory because the directories were
+COSTED: ≈420 literal path references would have had to move with the files —
+201 enforcement-registry `test:` fields with line anchors, ~468 catalog fields
+whose ids are join keys for the ledger and receipts, every CI job, every gate
+command. The tag costs zero of those. Re-open the decision only with a plan that
+counts again.
+
+### Measuring
+
+```bash
+run-all-tests.sh --timing --include-delegated     # one record per suite
+aid-test-tier-assign.sh --format md               # the proposed table
+aid-test-tier-lint.sh                             # the tree agrees with itself
+```
+
+`--timing` is opt-in and every existing invocation is byte-identical without it.
+Records append to `.aid-o/work/test-durations.jsonl` under the STATE root, so a
+measurement taken from a plan worktree survives that worktree's teardown. The
+nightly passes `--timing`, which is why tier assignments stay honest without
+anyone ever running a measurement campaign again.
+
+An unmeasured suite is never defaulted into a tier, and a run cut short is
+recorded `censored` and treated as unmeasured. A partial table exits non-zero
+so nobody mistakes it for a complete one.
+
+### What the nightly does
+
+`.github/workflows/nightly-tests.yml` runs T2, then:
+
+* writes `/opt/eco/data/aid-nightly/aid-orchestrator/<date>.json` plus
+  `latest.json` — a shared HOST path, deliberately NOT under `.aid-o/`, because
+  the CI job runs in the runner's own checkout where `.aid-o/work/` is
+  gitignored and nothing written there could ever be read from your checkout;
+* retries each failing suite exactly ONCE — passing on the retry makes it
+  `flaky`, which is quarantined (`aid-test-quarantine.sh`) rather than counted
+  as a failure or waved through as green;
+* sends ONE Telegram message on a NEW failure; a failure already in last
+  night's artifact increments a streak instead of sending again; a green night
+  sends nothing;
+* renders one line in `/aid-status` and at `/aid-plan` orientation — the second
+  surface exists so a muted channel never means a lost result, and a nightly
+  that silently STOPPED running renders as its own finding.
+
+### The selector's honesty check
+
+Once the merge path is T0+T1, the targeted selector is most of what stands
+between a change and a merge. `aid-selector-honesty-check.sh` replays
+`aid-select-tests.sh --dry-run` over the merges since the last nightly and asks,
+of every failing suite, whether that merge's own gate would have picked it.
+
+Three classes, because they need three different fixes: `unmapped` (the mapping
+has no opinion), `mapped_but_thin` (it had an opinion and it was wrong — the
+class that matters most, because for a mapped path the selector's exit-3/exit-11
+escalation is structurally unreachable, so it fails silently and confidently),
+and `unmappable` (a cross-cutting invariant no path could ever select — not a
+gap). An escalating exit COUNTS AS SELECTION: manufacturing gaps out of a safety
+net produces a report nobody believes.
+
+### The reaper
+
+Five places in this process add tests and, before this, none removed any.
+`aid-test-reaper.sh` runs on the first nightly of each month and PROPOSES, with
+a reason per row, from the content scanner's vacuous-green and duplicate
+findings and from the durations journal. It performs no deletion — deleting is a
+normal reviewed PR — and it has **no quota**, because a quota turns a clean-up
+into a hunt for something to sacrifice.
+
+It names the input it does not have. The standard's fourth signal — how long
+since a suite last caught a REAL regression — had no source in this tree (`git
+log` gives change age, not failure age), so it fills in as nightly artifacts
+accumulate and the tool says so rather than proposing from three while implying
+four.
+
+### Adding to this area
+
+A new suite declares its tier in the plan that creates it — `- Test: \`path\`
+(tier: t1) — what it proves` — and generation refuses without it. Adding a case
+to an EXISTING suite needs no declaration and never will: that is the move worth
+encouraging. If you add a signal to the reaper, it proposes; if you add a check
+to the lint, it must be mechanical and its false-positive shape pinned by a test
+(the naming rule matches segment-wise precisely so `test-cp1-gate.sh` is not
+condemned for containing "p1"). And if you find yourself wanting a tier for a
+reason that is not cost or scope, the answer is no — that is the rule the whole
+standard rests on.
+
+
 **Last Updated:** 2026-08-10

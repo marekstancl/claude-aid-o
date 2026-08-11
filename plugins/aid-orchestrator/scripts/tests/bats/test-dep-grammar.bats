@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-dep-grammar.bats — P073 Step 5: one dependency grammar across both
 # source-plan parsers.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-force.bats — P073 Step 7: the plan-level force framework.
 #
 # aid-plan-fsm.sh hard-rejected `--force` on every subcommand, so a defective

@@ -3,6 +3,74 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.83.0] — 2026-08-11
+
+> The full test portfolio is off the merge path. AID is the ecosystem's pilot
+> for `/ecosystem/specs/test-standard`: every suite now declares a tier that was
+> assigned from a measured duration, merges run only T0+T1, and the whole
+> portfolio runs once a night where it delays nobody. The portfolio also gains
+> a budget on the way in and a reaper on the way out — the first mechanism in
+> this repo that ever proposed removing a test.
+
+### Added
+- **Per-suite timing pipeline** — `run-all-tests.sh --timing` finally gives the
+  shipped-but-uncalled `bats --timing` parser a portfolio caller, and appends
+  one duration record per suite to a journal under the state root; the flag is
+  opt-in and a run without it is byte-identical to before.
+- **Measured tier assignment** — `aid-test-tier-assign.sh` proposes a tier for
+  every suite from its measured cost AND its scope, and ENFORCES the standard's
+  aggregate budgets by demoting the most expensive member while T0 exceeds
+  2 min or T1 exceeds 10 min, printing every demotion with its reason.
+- **Tier tags and their lint** — every suite declares `# aid-tier: t0|t1|t2` in
+  its header; `aid-test-tier-lint.sh` fails a missing, duplicated, unknown or
+  too-cheap tag, and a filename carrying a plan, EPIC or task number.
+- **Tier-aware runner** — `run-all-tests.sh --tier` runs exactly one tier,
+  reports what it skipped, and refuses to run at all while any suite in an
+  already-tiered tree carries no tag.
+- **Nightly portfolio job** — a `schedule:`-triggered workflow (this repo had no
+  scheduled trigger at all), `aid-nightly-report.sh` writing a durable result to
+  a shared host path, one Telegram message on a NEW failure with a streak count
+  for known ones, and `aid-test-quarantine.sh` giving a flaky suite its own
+  aged, owned, deadline-carrying state.
+- **The nightly result where work starts** — one derived line in `/aid-status`
+  and at `/aid-plan` orientation, including "not run since <date>" when the
+  nightly itself has quietly stopped.
+- **Selector honesty check** — `aid-selector-honesty-check.sh` replays the last
+  merges through `aid-select-tests.sh --dry-run` and reports every nightly
+  failure the merge gate would have missed, in three classes; `mapped_but_thin`
+  is the one that matters once the merge path narrows.
+- **A budget on the way in** — a plan's `Test:` bullet naming a NEW suite must
+  declare `(tier: t0|t1|t2)` or generation refuses; an existing suite needs
+  nothing, and a project with no tiers is unaffected.
+- **A reaper on the way out** — `aid-test-reaper.sh` proposes deletions monthly
+  with a reason per row and no quota, deletes nothing itself, and names the one
+  input it does not yet have.
+- **Review's second question** — CP2 and CP3 now ask whether each added test is
+  the cheapest sufficient proof, with a redundant test weighing the same as a
+  missing one and "it is probably covered somewhere" ruled out as an answer.
+
+### Changed
+- **The merge path no longer runs the full portfolio** — `bats_all` is the
+  T0+T1 selection with a 900 s cap bounded by the tier budgets rather than by
+  hope; `shell_pipeline_smoke` and `bats_boundary` left every merge-path profile
+  and run in the nightly, and `release_quarantine` is once again exactly
+  `release` minus the quarantinable gate.
+- **Six suites renamed after what they prove** — the plan numbers move into
+  their headers, `git mv` keeps the history the reaper's age signals depend on,
+  and the migration allowlist is empty rather than merely tolerated.
+- **`aid-select-tests.sh --dry-run`** — reports its selection and runs nothing,
+  so the merge path can be audited for merges that already happened; unlike
+  `--emit-units` it needs no catalog and therefore works inside a CI checkout.
+- **The shipped `execution.yaml` template teaches tiers** — consumer projects
+  inherit a T0+T1 merge gate and a commented nightly, and an untiered project
+  behaves exactly as it did.
+
+### Fixed
+- **Two suites that had been red on `main`** — `test-integration-self-host-audit`
+  asserted a `bats_all` command shape this release replaces, and
+  `test-integration-e2e-audit-pipeline` still expected the two chat sections
+  P078 deleted with the parallelism line, renumbering the rest.
+
 ## [2.82.0] — 2026-08-10
 
 > The test-parallelism line is over. Measured on this repository's own

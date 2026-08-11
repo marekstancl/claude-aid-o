@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-test-audit-prompts-golden.bats — P066 Step 10.
 #
 # Runs the REAL, existing renderer (aid-render-prompt.sh) against each of the

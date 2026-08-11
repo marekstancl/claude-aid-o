@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-service-lifecycle.bats — P076 Step 10: services wired into a real run.
 #
 # Everything here drives the REAL aid-run-gates.sh, the REAL aid-fsm.sh, the

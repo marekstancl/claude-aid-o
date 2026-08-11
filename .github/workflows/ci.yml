@@ -48,10 +48,16 @@ jobs:
         # disk/CPU contention (still being measured in isolation to get a
         # clean number). 60 min is a wide, non-final safety margin — revisit
         # once a clean, uncontended local measurement exists.
+        # P081 whole-diff review fix: this job is the REAL merge gate on
+        # GitHub. Converting only the AID gate layer (execution.yaml) left the
+        # whole portfolio running here, in front of every merge — the exact
+        # thing the pilot exists to end, and nightly-tests.yml already claimed
+        # was done. The merge path is T0 + T1; the rest runs nightly.
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
-          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --verbose
-        timeout-minutes: 60
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --verbose
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --verbose
+        timeout-minutes: 20
 
   plan-boundary-tests:
     runs-on: [self-hosted, eco-dev]
@@ -159,7 +165,7 @@ jobs:
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-service-lifecycle.bats
         timeout-minutes: 20
 
-  p076-integration-tests:
+  owned-jobs-integration-tests:
     runs-on: [self-hosted, eco-dev]
     steps:
       - uses: actions/checkout@v5
@@ -175,7 +181,7 @@ jobs:
         # The four-phase integration fixture: it starts real services, kills a
         # runner mid-gate and re-attaches. Budget matched to the other
         # real-process suites above.
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-p076-integration.bats
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-owned-jobs-integration.bats
         timeout-minutes: 30
 
   vitest:

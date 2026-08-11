@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-generation-resume.bats — P074 Step 15: the transaction manifest,
 # hash-derived resume, and the one-hold concurrency contract.
 #

@@ -8915,12 +8915,12 @@ run_units:
         filter_expression: 'target-branch: reads config, default main'
     provenance:
       - bats
-  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration
+  - run_unit_id: bats:plugins/aid-orchestrator/scripts/tests/bats/test-force-framework-integration
     runner: bats
     source_paths:
-      - plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration.bats
+      - plugins/aid-orchestrator/scripts/tests/bats/test-force-framework-integration.bats
     production_surfaces:
-      - plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration.bats
+      - plugins/aid-orchestrator/scripts/tests/bats/test-force-framework-integration.bats
     test_level: suite
     risk_tags: []
     profiles:
@@ -8930,7 +8930,7 @@ run_units:
     command:
       argv:
         - bats
-        - plugins/aid-orchestrator/scripts/tests/bats/test-p073-integration.bats
+        - plugins/aid-orchestrator/scripts/tests/bats/test-force-framework-integration.bats
       type: argv
     runtime:
       fingerprint: sha256:f55287f442e8

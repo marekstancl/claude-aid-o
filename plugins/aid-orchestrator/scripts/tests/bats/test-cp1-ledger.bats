@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-cp1-ledger.bats — P065 E-065-7_7 Step 19: aid-cp1-ledger.sh unit tests.
 #
 # aid-cp1-ledger.sh is the mechanical CP1 revision-limit AUTHORITY: a

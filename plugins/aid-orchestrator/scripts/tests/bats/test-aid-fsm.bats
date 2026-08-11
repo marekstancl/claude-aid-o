@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # P032 Step 7 — aid-fsm.sh PRE-FLIGHT branch enforcement (Step 2)
 # + EXECUTE→GATES gates_report._generated_by precondition (Step 3) +
 # grandfather behavior. P033 Step 9 adds CP2 verifier-output preconditions +

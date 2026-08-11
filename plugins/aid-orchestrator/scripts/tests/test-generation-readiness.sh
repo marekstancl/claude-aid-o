@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # Focused adversarial tests for source-plan readiness.  These are intentionally
 # small: they prove the pre-generation contract without invoking the full suite.
 set -uo pipefail

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-resume-command.bats — P076 Step 5: `aid-fsm.sh resume <epic_id>`.
 #
 # The mechanical half of the continuation, and nothing more: claim the

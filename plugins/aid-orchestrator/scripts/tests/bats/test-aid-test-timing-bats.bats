@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-timing-bats.bats — P072 Step 11.
 #
 # The parser is tested against RECORDED output, not by invoking bats: a parser

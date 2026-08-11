@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-test-inventory.bats — P066 Step 4.
 
 load test-helpers.bash

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-test-audit-reconciliation.bats — P072 Step 4.
 #
 # The three-way reconciliation (inventory / assignment / disposition) is what

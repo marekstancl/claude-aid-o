@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-release-detection.bats — P073 Step 2: fail-loud optional probes in
 # aid-release.sh.
 #

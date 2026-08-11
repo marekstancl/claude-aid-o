@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-init-upgrade-test-audit.bats — P069 Step 12.
 #
 # Proves aid-init-upgrade-test-audit.sh's non-invasive existing-project

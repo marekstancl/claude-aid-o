@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-gate-profile.bats — P061 EPIC 2/6, plan Step 7 (plan.json step_1_backend):
 # aid-gate-profile.sh shared risk-classification resolver + profile ordering.
 #

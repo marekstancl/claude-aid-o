@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-fsm-step-render.bats — P073 Step 4: human "Step N/T" rendering.
 #
 # `current_step` in fsm-state.yaml is 0-BASED and counts COMPLETED steps, so

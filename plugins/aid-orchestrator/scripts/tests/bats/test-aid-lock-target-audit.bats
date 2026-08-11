@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-lock-target-audit.bats — P066 Step 7.
 #
 # Confirms every flock/.lock usage the Step 4 scanner reports for the

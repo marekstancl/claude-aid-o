@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-gate-background.bats — P076 Step 2: the background gate path.
 #
 # Every case here drives the REAL aid-run-gates.sh over a real fixture repo and

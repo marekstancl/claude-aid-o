@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-alloc-lock.bats — P074 Step 3: locked plan-ID/EPIC-ID allocation
 # (`aid-fsm.sh alloc plan-id` / `alloc epic-id`).
 #

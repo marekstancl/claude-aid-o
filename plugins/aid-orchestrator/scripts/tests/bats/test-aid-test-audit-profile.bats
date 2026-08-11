@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-test-audit-profile.bats — P072 Step 12.
 #
 # The profiler's value is in what it REFUSES to claim. A file-level timeout

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-gate-runtime-baseline.bats — P063 Step 1: aid-gate-runtime-baseline.sh
 # (Gate Runtime Baselines EPIC). Owns AC1-AC5, AC12, AC13's tests directly, per
 # the plan's Step 1 file list (Step 1 is the single source of truth all later

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-c0-contract.sh — C0 Plan Contract Gate test harness (E-053-1_1 QA Step 6)
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-pm-brief.bats — aid-pm-brief.sh (deterministic PM decision brief, E-059-2_2 Step 6).
 #
 # The decision fixtures are built at runtime with `jq` from the tracked protocol-v2 fixture

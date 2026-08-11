@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-hooks-worktree.bats — P074 Step 2: worktree-safe git hooks.
 #
 # THE GROUNDED FAILURE MODE UNDER TEST: hooks live in the COMMON .git/hooks and

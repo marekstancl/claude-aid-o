@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-auto-recovery-policy.bats — P076 EPIC 2, Step 11.
 #
 # The shipped AUTO-mode recovery policy is a POLICY, not code: nothing reads it

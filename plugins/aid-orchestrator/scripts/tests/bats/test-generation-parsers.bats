@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-generation-parsers.bats — P074 Step 17: parser and diagnosis defect
 # fixes for the three generation defects found live on 2026-08-04.
 #

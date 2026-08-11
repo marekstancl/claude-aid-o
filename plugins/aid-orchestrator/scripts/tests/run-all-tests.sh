@@ -105,10 +105,36 @@ INCONSISTENT_SUITES=()
 # Suites whose TAP plan promised more results than arrived (P074 EPIC 1).
 TRUNCATED_SUITES=()
 LIST_ONLY=0
-for arg in "$@"; do
-  case "$arg" in
+# P081 Step 1 — timing is OPT-IN. Without the flag this runner's output, its
+# exit code and its cost are exactly what they were: every gate, CI job and
+# developer invocation keeps paying nothing for a measurement it did not ask
+# for.
+TIMING=0
+INCLUDE_DELEGATED=0
+DURATIONS_WARNED=0
+# P081 Step 5 — empty means every tier, which is exactly today's behaviour.
+TIER=""
+USAGE="Usage: $(basename "$0") [--verbose] [--list] [--tier t0|t1|t2] [--timing] [--include-delegated]"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --verbose|-v)
       VERBOSE=1
+      ;;
+    --timing)
+      TIMING=1
+      ;;
+    --tier)
+      TIER="${2:-}"; shift
+      case "$TIER" in
+        t0|t1|t2) ;;
+        *) echo "Unknown tier: '$TIER' (accepted: t0 t1 t2)" >&2; exit 2 ;;
+      esac
+      ;;
+    --include-delegated)
+      # Measurement runs only: a delegated suite is skipped here because its
+      # own CI job owns it, but it still needs a duration like any other suite
+      # or it can never be tiered from a number.
+      INCLUDE_DELEGATED=1
       ;;
     --list)
       # P079 Step 12: enumerate WITHOUT running anything. The delegation test
@@ -118,23 +144,93 @@ for arg in "$@"; do
       LIST_ONLY=1
       ;;
     --help|-h)
-      echo "Usage: $(basename "$0") [--verbose] [--list]"
+      echo "$USAGE"
       echo ""
       echo "Runs all test-*.sh scripts in the tests directory."
       echo ""
       echo "Options:"
-      echo "  --verbose, -v   Show full output from each test suite"
-      echo "  --list          List discovered and DELEGATED suites, run nothing"
-      echo "  --help, -h      Show this help message"
+      echo "  --verbose, -v        Show full output from each test suite"
+      echo "  --list               List discovered and DELEGATED suites, run nothing"
+      echo "  --tier <t0|t1|t2>    Run only suites declaring that tier (see aid-test-tier-lint.sh)"
+      echo "  --timing             Record one duration per suite into the durations journal"
+      echo "  --include-delegated  Also run suites owned by a dedicated CI job (measurement runs)"
+      echo "  --help, -h           Show this help message"
       exit 0
       ;;
     *)
-      echo "Unknown argument: $arg" >&2
-      echo "Usage: $(basename "$0") [--verbose]" >&2
+      echo "Unknown argument: $1" >&2
+      echo "$USAGE" >&2
       exit 1
       ;;
   esac
+  shift
 done
+
+# ---------------------------------------------------------------------------
+# Timing mode (P081 Step 1)
+#
+# The parser `lib/aid-test-timing-bats.sh` has shipped since P072 with exactly
+# one caller — the per-unit profiler. This is its PORTFOLIO caller; nothing
+# here re-implements timing. The libs are sourced only under --timing so a
+# normal run gains no dependency it did not already have.
+# ---------------------------------------------------------------------------
+BATS_TIMED=0
+if [[ "$TIMING" -eq 1 ]]; then
+  # shellcheck source=../lib/aid-test-timing-bats.sh
+  source "$SCRIPT_DIR/../lib/aid-test-timing-bats.sh"
+  # shellcheck source=../lib/aid-test-durations.sh
+  source "$SCRIPT_DIR/../lib/aid-test-durations.sh"
+  bats_timing_supported && BATS_TIMED=1
+fi
+
+# ─── record_suite_duration <suite> <runner> <wall_ms> <exit> <output> ────────
+#
+# One journal record per executed suite. A bats suite's duration is the SUM of
+# its per-test durations when the runner reported them, and the wall-clock
+# bracket otherwise; the record says which, so a later reader can tell a
+# measured figure from a bracketed one. A truncated TAP stream is recorded
+# `censored` — its duration is a partial and must never be tiered.
+#
+# Timing is observational: an unwritable journal warns ONCE and the run
+# continues. A measurement must never be able to fail a test run.
+record_suite_duration() {
+  local suite="$1" runner="$2" wall_ms="$3" exit_code="$4" output="$5"
+  local never_ran="${6:-false}"
+  local duration_ms="$wall_ms" source="wallclock" cases=1 censored="false"
+
+  # A suite that never executed (bats absent) took ~0 ms and passed no cases.
+  # Recorded plainly, the assigner would read that as the cheapest suite in the
+  # portfolio and put it in T0 — an unrun suite promoted to the merge path's
+  # fastest tier. `censored` is exactly the "this duration is not a
+  # measurement" marker, and the assigner already refuses to tier it.
+  if [[ "$never_ran" == "true" ]]; then
+    censored="true"
+  fi
+
+  if [[ "$runner" == "bats" && "$BATS_TIMED" -eq 1 && "$never_ran" != "true" ]]; then
+    local parsed sum n
+    parsed="$(bats_timing_parse "$output" "$(basename "$suite")" 2>/dev/null)" || parsed=""
+    if [[ -n "$parsed" ]]; then
+      sum="$(jq -r '[.cases[].duration_ms] as $d
+                    | if ($d | length) == 0 or ($d | map(. == null) | any)
+                      then "" else ($d | add) end' <<<"$parsed" 2>/dev/null)"
+      if [[ "$sum" =~ ^[0-9]+$ ]]; then
+        duration_ms="$sum"; source="bats_timing"
+      fi
+      n="$(jq -r '.cases | length' <<<"$parsed" 2>/dev/null)"
+      [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] && cases="$n"
+      [[ "$(jq -r '.truncated' <<<"$parsed" 2>/dev/null)" == "true" ]] && censored="true"
+    fi
+  fi
+
+  if ! aid_durations_append "$(basename "$suite")" "$runner" \
+        "$duration_ms" "$exit_code" "$source" "$cases" "$censored"; then
+    if [[ "$DURATIONS_WARNED" -eq 0 ]]; then
+      echo "WARNING: suite durations are not being recorded (timing is observational; the run continues)" >&2
+      DURATIONS_WARNED=1
+    fi
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Suites delegated to a dedicated CI job (P064 E-064-1_2 Step 1)
@@ -161,7 +257,7 @@ declare -A DELEGATED_SUITES=(
   # Together they are the bulk of what the plan-final broad gate spends inline.
   ["test-aid-service.bats"]="service-lib-tests"
   ["test-service-lifecycle.bats"]="service-lifecycle-tests"
-  ["test-p076-integration.bats"]="p076-integration-tests"
+  ["test-owned-jobs-integration.bats"]="owned-jobs-integration-tests"
 )
 
 # ---------------------------------------------------------------------------
@@ -177,9 +273,14 @@ done
 for f in "$SCRIPT_DIR"/bats/test-*.bats; do
   [[ -f "$f" ]] || continue
   bn="$(basename "$f")"
-  if [[ -n "${DELEGATED_SUITES[$bn]:-}" ]]; then
+  if [[ -n "${DELEGATED_SUITES[$bn]:-}" && "$INCLUDE_DELEGATED" -eq 0 ]]; then
     DELEGATED_LOG+=("$bn -> ${DELEGATED_SUITES[$bn]}")
     continue
+  fi
+  if [[ -n "${DELEGATED_SUITES[$bn]:-}" ]]; then
+    # Never silent: a delegated suite running here is a deliberate override,
+    # so the output says so rather than looking like an ordinary inline suite.
+    DELEGATED_LOG+=("$bn -> ${DELEGATED_SUITES[$bn]} (RUN HERE ANYWAY: --include-delegated)")
   fi
   SUITES+=("$f")
 done
@@ -189,10 +290,97 @@ if [[ ${#SUITES[@]} -eq 0 && ${#DELEGATED_LOG[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Tiers (P081 Step 5)
+#
+# Filtering happens AFTER discovery on purpose: the globs, the empty-set guard,
+# the delegation map and the ledger's unit-id derivation all keep working on
+# the paths they already knew. That is the whole argument for a header tag over
+# tier directories — moving the files would have broken every one of them.
+#
+# ONE REFUSAL RULE, stated once and used by both layers: an untagged suite is
+# refused only when at least one suite in the tree already carries a tag. A
+# project that has never adopted tiers runs everything exactly as it does
+# today; inside a tree that HAS adopted them, defaulting an untagged suite into
+# a tier is how a portfolio drifts back into "everything is cheap", so there
+# the refusal is absolute.
+# ---------------------------------------------------------------------------
+# shellcheck source=../lib/aid-test-tier.sh
+source "$SCRIPT_DIR/../lib/aid-test-tier.sh"
+declare -A SUITE_TIER=()
+TAGGED_COUNT=0
+UNTAGGED_SUITES=()
+# A tag that is DUPLICATED or names an unknown tier is kept apart from a
+# missing one. Folding it into "untagged" made an invalid declaration look like
+# a project that has not adopted tiers — so a tree where every tag was
+# misspelled would run happily and match no tier filter at all.
+INVALID_TAG_SUITES=()
+while IFS= read -r _s; do
+  [[ -n "$_s" ]] || continue
+  _rc=0
+  _t="$(aid_test_tier_of "$_s" 2>/dev/null)" || _rc=$?
+  case "$_rc" in
+    0) SUITE_TIER["$(basename "$_s")"]="$_t"; TAGGED_COUNT=$(( TAGGED_COUNT + 1 )) ;;
+    1) UNTAGGED_SUITES+=("$(basename "$_s")") ;;
+    *) INVALID_TAG_SUITES+=("$(basename "$_s")") ;;
+  esac
+done < <(aid_test_discover_suites "$SCRIPT_DIR")
+
+if [[ "${#INVALID_TAG_SUITES[@]}" -gt 0 ]]; then
+  echo "ERROR: ${#INVALID_TAG_SUITES[@]} suite(s) carry an aid-tier tag that is duplicated or names an unknown tier:" >&2
+  for _u in "${INVALID_TAG_SUITES[@]}"; do echo "  - $_u" >&2; done
+  echo "A tag nobody can read is not the same as no tag — see aid-test-tier-lint.sh." >&2
+  exit 1
+fi
+
+if [[ "$TAGGED_COUNT" -gt 0 && "${#UNTAGGED_SUITES[@]}" -gt 0 ]]; then
+  echo "ERROR: this portfolio declares test tiers, but ${#UNTAGGED_SUITES[@]} suite(s) carry no '# aid-tier:' tag:" >&2
+  for _u in "${UNTAGGED_SUITES[@]}"; do echo "  - $_u" >&2; done
+  echo "An untagged suite would silently never run under --tier. Tag them, then re-run;" >&2
+  echo "aid-test-tier-lint.sh reports the same thing with the full rule set." >&2
+  exit 1
+fi
+
+SKIPPED_BY_TIER=0
+if [[ -n "$TIER" ]]; then
+  _kept=()
+  for suite in ${SUITES[@]+"${SUITES[@]}"}; do
+    if [[ "${SUITE_TIER[$(basename "$suite")]:-}" == "$TIER" ]]; then
+      _kept+=("$suite")
+    else
+      SKIPPED_BY_TIER=$(( SKIPPED_BY_TIER + 1 ))
+    fi
+  done
+  SUITES=(${_kept[@]+"${_kept[@]}"})
+
+  # P081 whole-diff review fix: a tier that selects NOTHING is not a pass.
+  # Without this, an untiered tree (TAGGED_COUNT == 0, so the untagged refusal
+  # above never fires) ran zero suites and reported RESULT: PASS / exit 0 —
+  # and defaults/execution.yaml ships exactly that invocation as a consumer's
+  # `required: true` gate. An empty selection is now a loud refusal; a project
+  # that has genuinely adopted no tiers must run without --tier at all.
+  if [[ "${#SUITES[@]}" -eq 0 ]]; then
+    echo "ERROR: --tier $TIER selected 0 of $SKIPPED_BY_TIER discovered suite(s)." >&2
+    if [[ "$TAGGED_COUNT" -eq 0 ]]; then
+      echo "No suite in this portfolio carries an '# aid-tier:' tag, so no tier can ever match." >&2
+      echo "A project that has not adopted tiers must invoke this runner WITHOUT --tier." >&2
+    else
+      echo "Tier '$TIER' has no members. If that is intended, remove this tier from the gate" >&2
+      echo "rather than running a gate that verifies nothing." >&2
+    fi
+    exit 1
+  fi
+fi
+
 if [[ "$LIST_ONLY" -eq 1 ]]; then
   echo "Discovered ${#SUITES[@]} test suite(s)"
-  for suite in "${SUITES[@]}"; do echo "INLINE: $(basename "$suite")"; done
-  for entry in "${DELEGATED_LOG[@]+"${DELEGATED_LOG[@]}"}"; do echo "DELEGATED: $entry"; done
+  for suite in ${SUITES[@]+"${SUITES[@]}"}; do
+    echo "INLINE: $(basename "$suite") [${SUITE_TIER[$(basename "$suite")]:-untagged}]"
+  done
+  for entry in "${DELEGATED_LOG[@]+"${DELEGATED_LOG[@]}"}"; do
+    echo "DELEGATED: $entry [${SUITE_TIER[${entry%% *}]:-untagged}]"
+  done
+  [[ "$SKIPPED_BY_TIER" -gt 0 ]] && echo "SKIPPED-BY-TIER: $SKIPPED_BY_TIER suite(s) not in $TIER"
   exit 0
 fi
 
@@ -223,6 +411,8 @@ if [[ ${#DELEGATED_LOG[@]} -gt 0 ]]; then
     echo "DELEGATED: $entry"
   done
 fi
+# Never silent: a suite that does not run is exactly what this reports.
+[[ "$SKIPPED_BY_TIER" -gt 0 ]] && echo "SKIPPED-BY-TIER: $SKIPPED_BY_TIER suite(s) not in $TIER"
 echo ""
 
 for suite in "${SUITES[@]}"; do
@@ -261,6 +451,8 @@ for suite in "${SUITES[@]}"; do
   suite_output=""
   suite_exit=0
   bats_missing_hard_fail=0
+  wall_start_ms=0
+  [[ "$TIMING" -eq 1 ]] && wall_start_ms="$(date -u +%s%3N)"
   if [[ "$is_bats" -eq 1 ]]; then
     # bats test: requires bats binary. A missing binary is a HARD FAILURE,
     # not a green skip — every bats suite in the repo used to report green
@@ -278,6 +470,8 @@ for suite in "${SUITES[@]}"; do
         suite_exit=1
         bats_missing_hard_fail=1
       fi
+    elif [[ "$BATS_TIMED" -eq 1 ]] && bats_timing_can_time_argv "$BATS_BIN"; then
+      suite_output="$("$BATS_BIN" --timing "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
     else
       suite_output="$("$BATS_BIN" "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
     fi
@@ -288,6 +482,13 @@ for suite in "${SUITES[@]}"; do
     echo "$suite_output"
   else
     suite_output="$(bash "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
+  fi
+
+  if [[ "$TIMING" -eq 1 ]]; then
+    record_suite_duration "$suite" \
+      "$([[ "$is_bats" -eq 1 ]] && echo bats || echo sh)" \
+      "$(( $(date -u +%s%3N) - wall_start_ms ))" "$suite_exit" "$suite_output" \
+      "$([[ "$bats_missing_hard_fail" -eq 1 ]] && echo true || echo false)"
   fi
 
   suite_passed=0

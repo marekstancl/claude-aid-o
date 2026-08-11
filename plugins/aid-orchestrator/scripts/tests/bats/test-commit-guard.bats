@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-commit-guard.bats — P060 Step 6 (E-060-2_2) behavioral suite for the
 # commit-scope + branch pre-commit guard (D7) and its controller-side companion.
 #

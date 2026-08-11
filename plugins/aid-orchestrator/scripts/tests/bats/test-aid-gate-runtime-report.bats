@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-gate-runtime-report.bats — P063 Step 4: aid-gate-runtime-report.sh
 # (Gate Runtime Baselines EPIC, final step).
 #

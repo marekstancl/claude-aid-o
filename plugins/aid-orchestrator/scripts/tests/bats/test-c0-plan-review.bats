@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-c0-plan-review.bats — P065 E-065-7_7 Step 18 behavioral red-green tests
 # for scripts/lib/aid-c0-plan-review.sh.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-delivery-profile.sh — Tests for aid-delivery-profile.sh resolver
 #

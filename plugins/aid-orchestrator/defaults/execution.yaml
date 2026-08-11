@@ -48,13 +48,38 @@
 #   event (with the exact one-line edit) whenever measured runtimes recommend
 #   background for a gate that declares no run_mode. See also
 #   `aid-gate-runtime-report.sh`, which prints the same recommendation.
+#
+# TEST TIERS (P081). A suite declares its tier in a header comment,
+# `# aid-tier: t0|t1|t2`, and the runner filters on it:
+#   t0  under 2 s per case   — the pulse, whole tier under 2 min
+#   t1  under 30 s per case  — what blocks a merge, whole tier under 10 min
+#   t2  everything else, and anything cross-component — runs nightly
+# The merge-path gate below therefore runs T0+T1 and NOT the whole portfolio.
+# A project that has adopted NO tiers must run this runner WITHOUT `--tier`:
+# with no suite carrying a tag, a tier selects NOTHING, and since 2026-08-11
+# the runner refuses an empty selection rather than reporting a green gate
+# that executed nothing. Adopt tiers with `aid-test-tier-assign.sh` (assign
+# from measured cost), stamp them, and keep them honest with
+# `aid-test-tier-lint.sh` — only then point a gate at `--tier`.
 gates:
   tests_pass:
-    description: "All tests pass via project test runner"
+    description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"
     required: true
-    command: "./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh"
-    timeout_seconds: 300
+    command: "bash -c './plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 && ./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1'"
+    timeout_seconds: 900
     pass_criteria: "exit code 0"
+
+  # The rest of the portfolio, off the merge path. Wire this to a scheduled CI
+  # job rather than to a gate profile — see .github/workflows/nightly-tests.yml
+  # in the aid-orchestrator repo for the shape, including the result artifact
+  # and the red-only report.
+  #
+  # nightly_tests:
+  #   description: "The full portfolio, once a night, blocking nobody"
+  #   required: false
+  #   command: "./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing --include-delegated"
+  #   timeout_seconds: 18000
+  #   run_mode: background
 
   security_scan_pass:
     description: "No high/critical security findings"

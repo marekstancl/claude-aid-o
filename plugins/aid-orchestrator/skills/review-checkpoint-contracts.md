@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-10
 
 ## False-Green Guardrails
 
@@ -68,12 +68,34 @@ When diff is trivial (no high-risk patterns) or `classification: SKIP`:
 FSM enforcement: `fsm_check_verifier_output` validates `behavior_trace_count > 0`
 when `behavior_trace_required: true` in the verifier output.
 
+## The Two Test Questions (CP2 and CP3, both mandatory)
+
+Review has always asked the first one. The second is what stops a portfolio
+growing forever, and it is answered with the SAME weight as the first.
+
+1. **Is anything added here untested?** — a missing test is a finding.
+2. **Is each added test the cheapest sufficient proof — does an existing test
+   already cover it?** — a REDUNDANT test is a finding of the same weight as a
+   missing one. Five places in this process add tests and, before the reaper,
+   none removed any; a review that only ever asks question 1 is one of those
+   five places.
+
+**"It is probably covered somewhere" is not a valid answer to question 2.** The
+answer NAMES the covering test — file and case — or it concedes the test is
+needed. An unnamed claim of coverage is how a duplicate suite gets waved
+through, and it costs the portfolio the same as the duplicate it excuses.
+
+A new suite must also carry a tier tag (`# aid-tier: t0|t1|t2`) matching what
+its plan declared; `aid-test-tier-lint.sh` is the mechanical half, and review
+is where an over-cheap or over-expensive CHOICE gets questioned.
+
 ## CP2 Contract
 
 Focus: `code-review` (default) or `security`
 Scope: Step diff only (`HEAD~1..HEAD`)
 Required fields: all standard verifier fields + `checkpoint: cp2`
 High-risk gate: if diff matches patterns above, `behavior_trace_count > 0` required
+Test questions: both of the above, on the step's own added tests
 
 ## CP3 Contract
 
@@ -81,6 +103,8 @@ Focus: `code-review` + `security` (parallel)
 Scope: Full EPIC diff (`base_commit..HEAD`)
 Required fields: all standard verifier fields + `checkpoint: cp3`
 High-risk gate: same as CP2
+Test questions: both of the above, across the EPIC's whole added test surface —
+CP3 is the first point where two steps' suites can be seen to overlap
 
 ## CP4 Contract
 

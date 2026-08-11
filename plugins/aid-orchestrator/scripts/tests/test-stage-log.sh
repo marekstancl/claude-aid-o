@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # Tests for aid-stage-log.sh
 
 setup() {

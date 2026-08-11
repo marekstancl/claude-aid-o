@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-integration-self-host-audit.sh — P066 Step 21.
 #
 # Drives a REAL invocation of the Wave-0 scanner (aid-test-inventory.sh)
@@ -135,18 +136,23 @@ echo "TEST: cross-check 2 — bats_all's declared target (the whole bats/ direct
 # which is exactly the drift class this audit capability exists to catch, so it
 # is corrected rather than deleted.
 #
-# P078: bats_all runs plain sequential bats over the suite directory
-# (excluding the two boundary files, which own gate:bats_boundary). The
-# cross-check verifies the live command really targets the bats/ tree and
-# not some narrower target that would silently under-run the portfolio.
+# P078: bats_all ran plain sequential bats over the suite directory.
+# P081: it runs the portfolio runner filtered to the merge-path tiers instead —
+# the same partition expressed by measured cost rather than by a hand-kept
+# exclusion list. The cross-check is unchanged in PURPOSE: the live command
+# must dispatch the real portfolio runner, not some narrower target that would
+# silently under-run it. A tier filter is a declared partition; a bare narrower
+# path is not.
 live_command="$(yq -r '.gates.bats_all.command // ""' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)"
 quarantine_block="$(yq -r '.gates.bats_all.quarantine // "absent"' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)"
-if [[ "$live_command" == *"tests/bats"* && "$live_command" == *"bats "* ]]; then
+if [[ "$live_command" == *"run-all-tests.sh"* && "$live_command" == *"--tier "* ]]; then
+  pass_msg "bats_all dispatches the portfolio runner filtered to its merge-path tiers (${actual_bats_files} .bats files discovered), consistent with the bats-adapter count"
+elif [[ "$live_command" == *"tests/bats"* && "$live_command" == *"bats "* ]]; then
   pass_msg "bats_all dispatches a plain bats run over the suite tree (${actual_bats_files} .bats files discovered), consistent with the bats-adapter count"
 elif [[ "$quarantine_block" != "absent" && "$(yq -r '.gates.bats_all.quarantine.original_command // ""' "$CLONE_DIR/.aid-o/config/execution.yaml" 2>/dev/null)" == *"bats/"* ]]; then
   pass_msg "bats_all is quarantined; its documented original_command targets the bats/ directory (${actual_bats_files} files)"
 else
-  fail_msg "bats_all's command does not resolve to a bats run over the suite tree: '${live_command}'"
+  fail_msg "bats_all's command resolves to neither a tier-filtered portfolio run nor a bats run over the suite tree: '${live_command}'"
 fi
 
 echo "TEST: cross-check 3 — both of CI's dedicated bats jobs resolve to real run_unit_ids in the catalog"

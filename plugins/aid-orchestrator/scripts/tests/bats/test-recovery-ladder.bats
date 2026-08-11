@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-recovery-ladder.bats — P076 EPIC 2, Step 13.
 #
 # `lib/aid-recovery-ladder.sh` is the runtime the recovery policy shipped

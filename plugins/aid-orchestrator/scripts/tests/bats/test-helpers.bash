@@ -204,3 +204,24 @@ aid_test_mk_repo() {
     git commit -q -m "seed repo"
   )
 }
+
+# aid_test_mk_runner_tree <repo_dir> — a miniature copy of the plugin's own
+# scripts layout inside <repo_dir>, holding the REAL run-all-tests.sh over a
+# fixture portfolio of the caller's making (P081 Step 1).
+#
+# The runner resolves both its libs and its suites from its own location, so
+# testing it against fixture suites means giving it a fixture location — the
+# alternative is running the live 191-suite portfolio to answer a question
+# about argument handling. `lib/` is symlinked, never copied, so a suite can
+# never pass against a stale snapshot of the library it is exercising.
+#
+# Echoes the path of the fixture tests directory; suites go in there
+# (`test-*.sh`) and in its `bats/` subdirectory (`test-*.bats`).
+aid_test_mk_runner_tree() {
+  local repo="$1"
+  local plugin; plugin="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  mkdir -p "$repo/scripts/tests/bats"
+  ln -sfn "$plugin/scripts/lib" "$repo/scripts/lib"
+  cp "$plugin/scripts/tests/run-all-tests.sh" "$repo/scripts/tests/run-all-tests.sh"
+  printf '%s\n' "$repo/scripts/tests"
+}

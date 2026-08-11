@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # Tests for scope-check.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-obligations.bats — P079 Step 6 (IMP-476): a deferral that survives.
 #
 # THE LIVE FAILURE MODE UNDER TEST: the first P076 run deferred a

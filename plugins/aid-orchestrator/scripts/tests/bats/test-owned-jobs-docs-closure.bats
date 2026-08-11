@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# test-p076-docs-closure.bats — P076 Step 17: the release metadata and the
+# aid-tier: t2
+# test-owned-jobs-docs-closure.bats — P076 Step 17: the release metadata and the
 # contributor documentation say what shipped.
 #
 # WHAT THIS PROVES.
@@ -87,7 +88,7 @@ _p076_entry() {
 }
 
 # _still_open_block — §16's STILL OPEN blockquote, and nothing else. Same bounds
-# as test-p076-backlog-closure.bats: §16 ends at the next `## ` heading (§16a),
+# as test-deferred-work-registration.bats: §16 ends at the next `## ` heading (§16a),
 # and the block ends at the first line that is not a `>` line, so the STILL OPEN
 # blocks of §16a and §17 can never satisfy an assertion here.
 _still_open_block() {

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-c3-advisory.bats — P065 Step 15 (E-065-5_7) behavioral coverage for the
 # `degraded_advisory` C3 fallback: pipeline.md's advisory dispatch wiring,
 # aid-fsm.sh's `c3_advisory_not_independent` block reason, and the FINAL policy

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-ac-diff.bats — Phase 2 (P037) plan-AC executable verification
 
 setup() {

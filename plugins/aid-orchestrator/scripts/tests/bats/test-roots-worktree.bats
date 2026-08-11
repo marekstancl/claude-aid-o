@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-roots-worktree.bats — P074 Step 1: shared invoke-root/state-root
 # resolver (lib/aid-roots.sh) + cwd-relative site migration.
 #

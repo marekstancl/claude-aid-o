@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-ci-floor.bats — tests for the CI plan-boundary-required-check logic
 # E-046-2_3 Step 7 — verifies the shell script extracted from
 # defaults/ci/plan-boundary-required-check.yml behaves correctly.

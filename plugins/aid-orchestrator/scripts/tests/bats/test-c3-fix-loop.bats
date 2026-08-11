@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-c3-fix-loop.bats — P065 Step 17 (E-065-6_7): per-attempt evidence
 # layering in aid-c3-dispatch.sh's cmd_dispatch.
 #

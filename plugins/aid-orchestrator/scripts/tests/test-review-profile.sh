@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-review-profile.sh — E3 Adaptive Review Profile resolver test harness
 #
 # Tests aid-prefilter.sh profile, aid-profile-hash.sh, review-profile-check.sh

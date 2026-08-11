@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-tiered-severity.bats — P038 Phase 2 tiered severity + merge blocking smoke test.
 # Extended by P042: compliance recovery alert (fixtures 7a-7c).
 #

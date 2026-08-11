@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-review-equivalence.bats — P073 Step 16: the equivalence predicate and
 # the acceptance receipt.
 #

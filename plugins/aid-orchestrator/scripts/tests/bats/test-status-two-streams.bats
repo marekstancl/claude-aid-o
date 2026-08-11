@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-status-two-streams.bats — P074 Step 12: the two-stream `/aid-status`
 # surface, its rendering recipes, and the rendered overview itself.
 #

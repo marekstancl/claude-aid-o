@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-evidence-verify.sh — Evidence Pack Verifier test harness (E-051-1_1 QA)
 #

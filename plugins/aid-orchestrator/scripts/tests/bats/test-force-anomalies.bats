@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-force-anomalies.bats — P073 Step 9: the three inconsistencies in the
 # force landscape.
 #

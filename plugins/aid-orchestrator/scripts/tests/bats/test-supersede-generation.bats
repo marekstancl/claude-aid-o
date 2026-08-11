@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-supersede-generation.bats — P074 Step 16: PM recovery for an incomplete
 # generation transaction.
 #

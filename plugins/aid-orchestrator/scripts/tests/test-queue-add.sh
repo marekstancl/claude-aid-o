@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-queue-add.sh — Unit tests for aid-queue-add.sh
 #

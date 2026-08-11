@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-fsm-ui-fidelity.sh — Proves the existing_ui FSM guard ACTUALLY blocks
 # (not just grep for presence). Tests cmd_increment_step with fake plan.json + verdict.json.
 # Part of AID E7B wiring (E-056-3_3 Step 4). Pattern: P026 "detector without enforcement".

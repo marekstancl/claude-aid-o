@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-active-index.bats — P074 Step 6: work/active.md as a generated index
 # with four named writers.
 #

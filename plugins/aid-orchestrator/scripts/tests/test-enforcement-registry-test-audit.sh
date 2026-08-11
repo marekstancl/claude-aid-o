@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-enforcement-registry-test-audit.sh — P066 Step 19, extended by P072 Step 22.
 #
 # Verifies the 3 enforcement rows this plan registers
@@ -21,6 +22,10 @@ REQUIRED_IDS=(
   test_audit_static_command_allowlist
   test_audit_catalog_approval_boundary
   test_audit_never_auto_invoked
+  test_tier_declared
+  test_tier_runner_refusal
+  test_tier_declared_at_plan_time
+  selector_honesty_check
 )
 REQUIRED_FIELDS=(id type source description instruction severity surface status verdict test)
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# test-p076-backlog-closure.bats — P076 Step 14: the deferred-work registry.
+# aid-tier: t2
+# test-deferred-work-registration.bats — P076 Step 14: the deferred-work registry.
 #
 # WHAT THIS PROVES. Every item P076 consciously deferred exists as a numbered
 # IMP entry in the project backlog AND is cross-referenced from the source

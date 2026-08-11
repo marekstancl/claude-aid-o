@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-release-policy-surface-check.bats — P061 D8 bootstrap surface rule regression guard.
 # See scripts/tests/release-policy-surface-check.sh header for the full rule + rationale.
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-integration-audit-report-shapes.sh — P072 Step 21.
 #
 # Five report shapes, each driven end to end through the ONE production

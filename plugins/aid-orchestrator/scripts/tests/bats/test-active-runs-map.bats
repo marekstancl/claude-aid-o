@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-active-runs-map.bats — P074 Step 4: multi-run active-runs map.
 #
 # THE GROUNDED FAILURE MODE UNDER TEST: the single-slot

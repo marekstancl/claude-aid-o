@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-service.bats — P076 Step 9, lib/aid-service.sh.
 #
 # Real listeners, real ports, real SIGKILLs, real orphan sweeps. Nothing here is

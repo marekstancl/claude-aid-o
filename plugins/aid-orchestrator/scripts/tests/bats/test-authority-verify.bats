@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-authority-verify.bats — P074 Step 14: the phase generator VERIFIES the
 # sealed generation authority instead of re-running the CP1 gate.
 #

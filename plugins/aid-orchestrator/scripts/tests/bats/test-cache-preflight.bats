@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-cache-preflight.bats — P060 Step 5: controller plugin-cache staleness guard.
 # Covers the 7 F4 scenarios of aid-cache-preflight.sh + its wiring into aid-fsm.sh:
 #   (a) dogfood + skew   → hard stop, exit != 0

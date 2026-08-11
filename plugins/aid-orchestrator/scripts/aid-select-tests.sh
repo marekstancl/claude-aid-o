@@ -110,6 +110,12 @@ Options:
                          unchanged; exit 3 (D-selector-1 unverifiable) and
                          exit 11 (P069 Step 10 mapping_gap) both write no
                          units file.
+  --dry-run              Report the selection and exit WITHOUT running any of
+                         it (P081 Step 9). The exit-code contract is unchanged
+                         except that 1 (a test failed) can no longer occur,
+                         because no test runs. Unlike --emit-units this needs
+                         no catalog, so it works inside a CI checkout where
+                         .aid-o/ does not exist.
 EOF
 }
 
@@ -118,6 +124,7 @@ BASE_REF=""
 PATHS_FILE=""
 EVIDENCE_FILE=""
 EMIT_UNITS_FILE=""
+DRY_RUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base)
@@ -132,6 +139,8 @@ while [[ $# -gt 0 ]]; do
     --emit-units)
       [[ $# -lt 2 ]] && { echo "ERROR: --emit-units requires a value" >&2; usage; exit 10; }
       EMIT_UNITS_FILE="$2"; shift 2 ;;
+    --dry-run)
+      DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 10 ;;
   esac
@@ -524,9 +533,26 @@ if [[ -n "$EMIT_UNITS_FILE" ]]; then
 fi
 
 # ─── Run the selected tests (real gate command — not a suggestion) ─────────
+#
+# …unless --dry-run (P081 Step 9). The selector's honesty check has to ask
+# "which suites WOULD this selection have run for that merge?" for every
+# failing suite in a nightly, and it must ask without executing anything: the
+# answer is needed for merges that already happened, and running the selection
+# again would cost the very time the tier work exists to remove. `--emit-units`
+# is not that mode — it needs an approved catalog at the checkout root, and
+# `.aid-o/` is gitignored, so it can never resolve inside a CI checkout.
+#
+# Everything above this point is unchanged, so the exit contract still holds:
+# an unverifiable path still exits 3 and a mapping gap still exits 11.
 run_failed=false
 declare -a test_results=()
-for entry in "${selected_tests_lines[@]}"; do
+if $DRY_RUN; then
+  reasoning+=("dry-run: selection reported, nothing executed")
+  selected_tests_lines_to_run=()
+else
+  selected_tests_lines_to_run=("${selected_tests_lines[@]}")
+fi
+for entry in ${selected_tests_lines_to_run[@]+"${selected_tests_lines_to_run[@]}"}; do
   IFS=$'\t' read -r runner test_path <<< "$entry"
   abs_test_path="${PLUGIN_ROOT}/${test_path#"${PLUGIN_PREFIX}"/}"
 

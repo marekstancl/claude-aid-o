@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-selector-mappings-real-seed.bats — P069 Step 11.
 #
 # Proves aid-test-catalog-approve.sh's new pre-approval zero-gap

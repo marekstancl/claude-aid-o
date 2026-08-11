@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# test-p073-integration.bats — P073 Step 19: the cross-cutting fixture.
+# aid-tier: t2
+# test-force-framework-integration.bats — P073 Step 19: the cross-cutting fixture.
 #
 # The per-step suites prove each mechanism in isolation. This one proves the
 # CLAIM: one ancillary commit travels drift -> accept -> merge without a second

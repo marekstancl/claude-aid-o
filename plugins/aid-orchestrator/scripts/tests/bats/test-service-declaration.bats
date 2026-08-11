@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-service-declaration.bats — P076 Step 8: the OPTIONAL `services:` block
 # in execution.yaml.
 #

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# test-p074-integration.bats — P074 Step 19: the whole promise, in one fixture.
+# aid-tier: t2
+# test-plan-worktree-integration.bats — P074 Step 19: the whole promise, in one fixture.
 #
 # WHAT THIS SUITE IS FOR. Every other P074 suite proves one mechanism against a
 # fixture built for that mechanism. None of them proves the thing the PM asked
@@ -50,7 +51,7 @@
 # outright (the bats warning is written to fd 3, which `3>&-` has closed). So
 # every invocation runs with `3>&-` and every `run` goes through a `bash -c`,
 # which can never itself be a missing command. After any edit verify:
-#   bats --tap test-p074-integration.bats | grep -cE '^(ok|not ok)'   # == 9
+#   bats --tap test-plan-worktree-integration.bats | grep -cE '^(ok|not ok)'   # == 9
 
 load test-helpers.bash
 

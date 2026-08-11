@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-ui-calibration-verify.bats — Prevents false-green ui_calibration_result gate
 #
 # Verifies that ui-calibration-verify.sh correctly rejects records that are structurally

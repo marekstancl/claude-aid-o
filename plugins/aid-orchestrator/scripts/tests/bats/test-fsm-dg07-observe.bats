@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-fsm-dg07-observe.bats — DG-07 integration with aid-fsm.sh done-advance.
 #
 # Case 1: observe mode (default E2) — DG-07 detects pending child step →

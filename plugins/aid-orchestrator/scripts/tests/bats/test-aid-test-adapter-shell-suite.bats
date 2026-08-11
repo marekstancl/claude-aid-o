@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-test-adapter-shell-suite.bats — P072 Step 7.
 #
 # Classification is by SHEBANG, never by filename and never by the executable

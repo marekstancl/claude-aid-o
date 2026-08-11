@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-full-pipeline.sh — Integration tests for aid-auto-pipeline.sh
 #

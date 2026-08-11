@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-select-tests.bats — aid-select-tests.sh targeted test selector
 # (P061 EPIC 3 Step 9). Covers the Initial mapping, CHECKPOINT 3 (a single
 # aid-plan-diff.sh change selects ONLY test-plan-diff.sh), the D-selector-1

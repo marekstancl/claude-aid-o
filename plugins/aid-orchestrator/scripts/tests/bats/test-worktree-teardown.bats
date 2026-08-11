@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-worktree-teardown.bats — P074 Step 11: worktree teardown and audited
 # repair.
 #

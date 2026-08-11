@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-branch-restore.bats — P073 Step 6: hard stop with recovery instructions
 # when batch generation cannot restore the original branch.
 #

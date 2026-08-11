@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-lint.bats — plan-time Files-shape lint (v2.58.3; P079 Step 5).
 # Unit: every violation class, the two blocking tiers + legacy tolerance, and
 # the non-blocking description-path advisory.

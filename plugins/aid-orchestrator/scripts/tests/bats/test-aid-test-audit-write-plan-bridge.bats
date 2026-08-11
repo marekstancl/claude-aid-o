@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-test-audit-write-plan-bridge.bats — P066 Step 16.
 
 load test-helpers.bash

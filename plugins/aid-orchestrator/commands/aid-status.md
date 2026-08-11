@@ -344,6 +344,69 @@ source "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/s
 ```
 
 ```bash
+# recipe: nightly-line — defines nightly_line(): the last nightly portfolio
+# result, in ONE line, where work starts (P081 Step 8).
+#
+# WHY IT IS NOT A `.aid-o/` PATH, unlike every other read in this file: the
+# nightly job runs in the CI runner's own checkout, where `aid_state_root`
+# resolves to that checkout and `.aid-o/work/` is gitignored. An artifact
+# written there could never be read from the PM's checkout — this surface
+# would render nothing forever and look exactly like a healthy fresh project.
+# The nightly writes to a shared HOST path instead, and this reads the same
+# one.
+#
+# The line is DERIVED, never authored: it states what the artifact says. An
+# artifact older than two days is itself a finding — a nightly that quietly
+# stopped running is the failure mode a "green" memory hides. No artifact at
+# all renders NOTHING: a project without a nightly is not in a red state.
+nightly_line() {
+  local _dir _latest _date _today _age _failed _streak _quar _colour
+  _dir="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
+  _latest="$_dir/latest.json"
+  [ -f "$_latest" ] || return 0
+
+  _date="$(jq -r '.date // empty' "$_latest" 2>/dev/null)" || _date=""
+  if [ -z "$_date" ]; then
+    printf 'Nightly: result unreadable — %s\n\n' "$_latest"
+    return 0
+  fi
+
+  _failed="$(jq -r '.failed | length' "$_latest" 2>/dev/null)"; : "${_failed:=0}"
+  _streak="$(jq -r '[.failed[]?.streak] | max // 0' "$_latest" 2>/dev/null)"; : "${_streak:=0}"
+  _quar="$(jq -r '.quarantined | length' "$_latest" 2>/dev/null)"; : "${_quar:=0}"
+  [ "$_quar" -gt 0 ] 2>/dev/null && _quar=" — ${_quar} quarantined" || _quar=""
+
+  _today="$(date -u +%s)"
+  _age=$(( ( _today - $(date -u -d "$_date" +%s 2>/dev/null || echo "$_today") ) / 86400 ))
+  if [ "$_age" -gt 2 ]; then
+    printf 'Nightly: NOT RUN since %s (%s days) — %s\n\n' "$_date" "$_age" "$_latest"
+    return 0
+  fi
+
+  if [ "$_failed" -gt 0 ]; then
+    printf 'Nightly: RED (%s) — %s suite(s) failing, worst streak %s%s — %s\n\n' \
+      "$_date" "$_failed" "$_streak" "$_quar" "$_dir/$_date.json"
+  else
+    printf 'Nightly: green (%s)%s\n\n' "$_date" "$_quar"
+  fi
+}
+```
+
+The line appears in four shapes and no others — a green night with its date, a
+red one with the failing count and the worst streak, a nightly that stopped
+running, and an artifact this cannot read:
+
+```
+Nightly: green (2026-08-10)
+Nightly: green (2026-08-10) — 2 quarantined
+Nightly: RED (2026-08-10) — 3 suite(s) failing, worst streak 4 — /opt/eco/data/aid-nightly/aid-orchestrator/2026-08-10.json
+Nightly: NOT RUN since 2026-08-04 (6 days) — /opt/eco/data/aid-nightly/aid-orchestrator/latest.json
+```
+
+A project with no nightly artifact renders none of them, which is why the
+example renders below — whose fixtures have no artifact — are unchanged.
+
+```bash
 # recipe: plan-rows — defines plan_rows(): one TSV row per plan-state file,
 # columns: id, phase, worktree, marker (ok|missing!|unreadable), bucket
 # (active|closing). Sorted by plan id.
@@ -890,6 +953,7 @@ render_overview() {
   _rows="$(plan_rows)"
   printf 'AID Status\n'
   printf '====================================\n\n'
+  nightly_line
   if [ -z "$_rows" ]; then
     printf 'Active EPICs:\n'
     _body="$(planless_epics)"

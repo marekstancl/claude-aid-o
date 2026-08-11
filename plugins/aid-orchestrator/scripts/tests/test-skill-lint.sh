@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-skill-lint.sh — governance guard for skill-writing.md / command-writing.md.
 #
 # Runs aid-lint-skill.sh over every skills/*.md and commands/*.md and enforces:

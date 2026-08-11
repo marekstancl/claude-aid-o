@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-test-audit-state.bats — P066 Step 6.
 
 load test-helpers.bash

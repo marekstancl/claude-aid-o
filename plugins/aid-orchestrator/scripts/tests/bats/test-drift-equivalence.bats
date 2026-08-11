@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-drift-equivalence.bats — P073 Step 17: equivalence wired into the
 # candidate-drift detector, and through it into review, C4 and summary.
 #

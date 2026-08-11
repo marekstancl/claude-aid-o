@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-pipeline-c3-dispatch.bats — E-065-3_7 Step 10 (17e grounding) for the
 # pipeline.md DONE-review rewiring: `c3` mode now drives the deterministic bridge
 # `aid-c3-dispatch.sh` (build-manifest → dispatch → verify) instead of an

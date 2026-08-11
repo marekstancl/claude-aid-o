@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-regression.sh — Structural equivalence tests for aid-auto-pipeline.sh
 #
