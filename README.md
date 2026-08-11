@@ -117,7 +117,7 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.83.0** (current) — the full test portfolio leaves the merge path: every suite declares a measured tier, merges run T0+T1 in 13 min instead of 6 h 49 min, and the whole portfolio runs nightly with a budget on the way in and a reaper on the way out
+- **v2.83.1** (current) — the full test portfolio leaves the merge path: every suite declares a measured tier, merges run T0+T1 in 13 min instead of 6 h 49 min, and the whole portfolio runs nightly with a budget on the way in and a reaper on the way out
 - **v2.82.0** — the test-parallelism line is removed: scheduler, rollout gate, divergence campaign, parallel lane and the catalog's parallel evidence are gone; tests run sequentially by design
 - **v2.81.0** — the run can trust its own tree: gates execute in the plan's worktree and write evidence where the run can find it, a chained EPIC starts on its predecessors' work, and a deferral or an out-of-scope review finding cannot be lost in prose
 - **v2.80.0** — auto mode owns its waits: background gates survive a killed session and re-attach, declared services live and die with the run, and a recovery ladder with budgets it cannot silently reset

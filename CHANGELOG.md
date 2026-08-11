@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.83.1] — 2026-08-11
+
+### Fixed
+- **A Quarantined Test Could Never Get an Owner** — `add` is deliberately a no-op once an entry is open, so a weekly flake cannot reset its own 14-day deadline; but the nightly was the only automatic producer and always passed an empty owner, and there was no other way in. Every entry was ownerless for ever and escalated weekly with no way to acknowledge it. `aid-test-quarantine.sh assign <suite> <owner>` sets the owner on an open entry without touching its `opened` date, so taking ownership never buys extra days.
+- **A Retry Could Launder a Real Failure Into a Green Night** — the nightly re-ran a failed suite with bare `bats`, outside the runner’s working directory, delegation handling, fd discipline and exported environment; a suite that fails only under runner conditions passed standalone, was filed flaky instead of failed and dropped out of the report, so the night read green while a real regression sat in the tree. The retry now re-invokes the runner for that one suite, and with no reachable runner the suite stays failed rather than being quarantined silently.
+
+### Added
+- **`run-all-tests.sh --only <suite>`** — runs exactly one suite under the runner’s own conditions, which is what makes an honest retry possible.
+
 ## [2.83.0] — 2026-08-11
 
 > The full test portfolio is off the merge path. AID is the ecosystem's pilot
