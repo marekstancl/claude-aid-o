@@ -1,0 +1,46 @@
+# Gate names that predate the naming rules (/ecosystem/specs/test-standard,
+# "Jména bran", rules 6-10, written 2026-08-11).
+#
+# These are GRANDFATHERED, not approved. Renaming them is ~575 literal
+# occurrences across ~60 files (measured 2026-08-11) plus an alias period for
+# consumers, so it is a plan of its own. Until then the lint reports them as
+# advisory; a NEW or RENAMED gate must lint clean.
+#
+# When a name is fixed, delete its line here. When the list is empty, run the
+# lint with --strict and wire that into the merge path.
+#
+# The proposed replacements, so the next author does not have to re-derive them:
+#   bats_all               -> tests_merge_path      (it runs T0+T1, never "all")
+#   bats_fsm               -> tests_fsm
+#   bats_boundary          -> tests_plan_boundary
+#   shell_pipeline_smoke   -> tests_full_portfolio  ("full" is TRUE here)
+#   targeted_tests         -> tests_targeted
+#   tier_lint              -> lint_test_tiers
+#   plan_diff              -> check_plan_criteria
+#   docs_updated           -> check_docs_updated
+#   ui_calibration_result  -> check_ui_calibration
+#   ui_calibration_signoff -> review_ui_calibration
+#   tests_pass (defaults)  -> tests_merge_path
+#   lint_pass (defaults)   -> lint_style
+#   build_pass (defaults)  -> build_app
+#   security_scan_pass     -> check_security_scan
+#   scope_check            -> check_scope
+#   type_check             -> check_types
+#   standards_compliance   -> check_standards
+bats_all
+bats_fsm
+bats_boundary
+shell_pipeline_smoke
+tier_lint
+plan_diff
+targeted_tests
+docs_updated
+ui_calibration_result
+ui_calibration_signoff
+tests_pass
+lint_pass
+build_pass
+security_scan_pass
+scope_check
+type_check
+standards_compliance

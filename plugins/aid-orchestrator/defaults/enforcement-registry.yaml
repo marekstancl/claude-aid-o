@@ -2745,3 +2745,15 @@ enforcements:
     description: "P081 Step 9 — once the merge path is T0+T1, the targeted selector is most of what stands between a change and a merge, and a selector nobody can audit is worse than none because it looks like coverage. `mapped_but_thin` is the class that matters: for a path the mapping DOES claim, the selector exits 0 and its exit-3/exit-11 escalation is structurally unreachable, so a thin mapping fails silently and confidently. The two escalating exits COUNT AS SELECTION — a merge that hit them ran a fuller profile — because manufacturing gaps from a safety net produces a report nobody believes."
     recovery: "Gaps are reported in <nightly dir>/<date>-selector-gaps.json and named in the nightly's Telegram line; the check never fails the job."
     test: "scripts/tests/bats/test-selector-honesty-check.bats"
+
+  - id: gate_name_lint
+    type: 3
+    source: "scripts/aid-gate-name-lint.sh"
+    instruction: "/ecosystem/specs/test-standard — 'Jména bran' (rules 6-10)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2026-08-11 — a gate named `bats_all` had run only T0+T1 since the tier pilot. The PM read 'gate bats_all failed', reasonably concluded an agent was running the whole portfolio in front of every merge, and lost half a day to a misdirected diagnosis. The name was true once and nobody revisited it. Four mechanical checks: a kind prefix from a fixed vocabulary so a failure line groups; no tool name (the tool gets swapped and the name starts lying); a word of totality only when the command really covers that universe — the check that would have caught `bats_all` the day tiers landed; and no outcome word, because every gate either passes or fails. Existing names are grandfathered in scripts/tests/gate-name-allowlist.txt with their proposed replacements written down, since renaming is ~575 literal occurrences across ~60 files and needs an alias period for consumers; a NEW or renamed gate must lint clean."
+    recovery: "The gate fails naming the offending gate and every rule it breaks; the allowlist is fail-closed — a missing file means no exceptions, never 'allow everything'."
+    test: "scripts/tests/bats/test-gate-name-lint.bats"

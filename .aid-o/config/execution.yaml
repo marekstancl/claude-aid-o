@@ -214,6 +214,17 @@ gates:
   # measurement) had no enforcement path at all. Cheap, seconds, no processes.
   # Check 3 is machine-local until the durations journal has a CI transport;
   # it reports UNVERIFIED rather than failing, which is stated in the script.
+  # Named per the very rules it enforces (test-standard "Jména bran" 6-10):
+  # kind first, no tool, no outcome word. Existing gates are grandfathered in
+  # scripts/tests/gate-name-allowlist.txt and reported as advisory; a NEW or
+  # renamed gate must lint clean, which is what makes this a control and not a
+  # comment (AID-v3 principle #1).
+  lint_gate_names:
+    command: "bash plugins/aid-orchestrator/scripts/aid-gate-name-lint.sh --config .aid-o/config/execution.yaml"
+    required: true
+    timeout_seconds: 60
+    max_retries: 0
+
   tier_lint:
     command: "bash plugins/aid-orchestrator/scripts/aid-test-tier-lint.sh"
     required: true
@@ -371,17 +382,20 @@ gate_profiles:
   quick:
     include:
       - tier_lint
+      - lint_gate_names
       - bats_fsm
       - docs_updated
   targeted:
     include:
       - tier_lint
+      - lint_gate_names
       - targeted_tests
       - bats_fsm
       - docs_updated
   standard:
     include:
       - tier_lint
+      - lint_gate_names
       - targeted_tests
       - bats_fsm
       - plan_diff
@@ -407,6 +421,7 @@ gate_profiles:
   full:
     include:
       - tier_lint
+      - lint_gate_names
       - bats_all
       - bats_fsm
       - plan_diff
@@ -414,6 +429,7 @@ gate_profiles:
   release:
     include:
       - tier_lint
+      - lint_gate_names
       - bats_all
       - bats_fsm
       - plan_diff
@@ -427,6 +443,7 @@ gate_profiles:
       audited --force reason naming bats_all_quarantine.
     include:
       - tier_lint
+      - lint_gate_names
       - bats_fsm
       - plan_diff
       - docs_updated
@@ -454,6 +471,7 @@ gate_profiles:
       targeted-substitute receipt in the report's `quarantine_substitutes[]`.
     include:
       - tier_lint
+      - lint_gate_names
       - bats_fsm
       - plan_diff
       - docs_updated
