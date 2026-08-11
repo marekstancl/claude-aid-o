@@ -1,0 +1,13 @@
+schema_version: aid-2.0
+plan_id: P080
+attempts: 0
+max: 5
+pre_enforcement: true
+pm_override:
+  present: false
+  ref: null
+  claim_artifact: null
+  claim_sha256: null
+created_at: "2026-08-11T04:26:33Z"
+updated_at: "2026-08-11T04:26:33Z"
+attempts_log: []
