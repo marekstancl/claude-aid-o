@@ -93,12 +93,49 @@ _cite_resolves() {
 # Emits one `CITE|<row-id>|<field>|<path>` line per unresolvable cite.
 _cite_violations() {
   local registry="$1" plugin_dir="$2" repo_dir="$3"
-  local id status source instruction field val part tok parts
-  yq -o=json '.' "$registry" \
-    | jq -r '.enforcements[] | [(.id // ""), (.status // ""), (.source // ""), (.instruction // "")] | @tsv' \
-    | while IFS=$'\t' read -r id status source instruction; do
+  local id status source instruction field val part tok parts rows rc seen=0
+
+  # THE FAIL-OPEN THIS GUARD EXISTS FOR: a single row whose `source:` is a LIST
+  # rather than a scalar makes `@tsv` abort. In a pipeline that error is invisible
+  # — every row after it is simply never read, the violation list comes back
+  # empty, and the harness reports "all cites resolve" with exit 0. Measured on
+  # the real registry: 0 of 428 rows checked, two deliberately broken cites
+  # missed, exit 0. A cite checker that under-reports is worse than none, because
+  # it certifies a lying registry.
+  #
+  # So the rows are materialised FIRST, jq's exit code is checked, and the row
+  # count is compared against the registry's own length. Anything short is a hard
+  # failure, never a quiet pass.
+  # FIELDS ARE JOINED ON \x1f (unit separator), NOT on a tab, and IFS is set to it
+  # below. A tab is an IFS *whitespace* character, so bash collapses runs of them:
+  # a row with an empty `status` produced `id<TAB><TAB>source`, read collapsed the
+  # pair, and `source` landed in `status` while `source` came out empty — the row's
+  # cites were then silently never checked. `status` is not a required key
+  # anywhere, so that was a field a row could omit to opt out of validation.
+  # \x1f is non-whitespace, so consecutive separators keep their empty fields.
+  rows="$(yq -o=json '.' "$registry" \
+    | jq -r '.enforcements[] | [(.id // ""), (.status // ""), (.source // ""), (.instruction // "")] | join("")')"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    printf 'CITE|<harness>|extract|jq failed (rc=%s) — a non-scalar cite field aborts @tsv; rows were NOT checked\n' "$rc"
+    return 0
+  fi
+  local declared actual
+  declared="$(yq '.enforcements | length' "$registry" 2>/dev/null || echo 0)"
+  actual="$(printf '%s\n' "$rows" | grep -c . || true)"
+  if [[ "$declared" != "$actual" ]]; then
+    printf 'CITE|<harness>|extract|extracted %s of %s rows — the rest were never checked\n' "$actual" "$declared"
+    return 0
+  fi
+
+  printf '%s\n' "$rows" \
+    | while IFS=$'\x1f' read -r id status source instruction; do
+        seen=$((seen + 1))
         # Rows with status dead / removed_scoped keep citing removed files BY
         # DESIGN — that is what the status means. Skip their path validation.
+        # Anything else, INCLUDING an empty status, is validated: `status` is not
+        # a required key anywhere, and treating "no status" as a reason to skip
+        # would let a row opt out of the check by omitting a field.
         case "$status" in dead|removed_scoped) continue ;; esac
         for field in source instruction; do
           val="$source"; [[ "$field" == "instruction" ]] && val="$instruction"
