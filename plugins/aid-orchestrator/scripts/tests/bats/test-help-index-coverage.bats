@@ -318,8 +318,14 @@ router_topics() {
   while IFS=$'\t' read -r command _file _topic _audience disposition _rest; do
     [ "$disposition" = "index_only" ] || continue
     flag="${ENUM_FLAG[$command]:-}"
+    # `__late__` counts here too. It means the surface DOES declare a flag, just
+    # past the scan window — so parking it at index_only is the same cheap dodge
+    # this case exists to kill, and skipping it would leave the hole one step
+    # further along.
     if [ "$flag" = "true" ]; then
       violations+=$'\n'"    $command is 'user_invocable: true' but parked as index_only — give it a topic and a '### Topic:' section (disposition 'current')"
+    elif [ "$flag" = "__late__" ]; then
+      violations+=$'\n'"    $command declares user_invocable past the frontmatter scan window AND is parked as index_only — move the flag into the first ${AID_HELP_COMMAND_FM_LINES:-6} lines, then give it a topic and a '### Topic:' section"
     fi
   done < <(index_rows)
 
