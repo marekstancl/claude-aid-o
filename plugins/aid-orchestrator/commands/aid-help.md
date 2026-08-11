@@ -89,6 +89,10 @@ FSM debugging:
   /aid-status <epic-id>                    → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
+Token monitoring (a script, not a command):
+  bash {plugin_path}/scripts/lib/aid-token-count.sh {plugin_path}/skills/*.md
+  → token count per file (target: total under 50K)
+
 Audit: /aid-audit → project health, gate failure rates, recommendations
 Emergency: /aid-stop → halt auto-mode and return control to you
 ```
@@ -231,6 +235,10 @@ Each plan implements in its own git worktree:
   .aid-worktrees/plan-P080/           one plan, on its plan/<id> branch
   .aid-worktrees/plan-P081/           another plan, on its own branch
 
+So you can write and fully generate a new plan while another one implements —
+with uncommitted work in your checkout, and without your HEAD moving. An edit
+you make during another plan's review window no longer invalidates that review.
+
 Plan-linked commands find the right tree themselves; you never cd. The
 exception is plan-close and plan-rollback, which refuse to run from INSIDE
 the worktree they are about to remove — run those from your own checkout.
@@ -295,7 +303,7 @@ This is about **tests**; for the project's overall health score see
 ```
 /aid-audit-tests                  bare invocation ASKS which mode + budget
   --mode static                   discovery only, executes nothing (minutes)
-  --mode measured                 measures runtimes (tens of minutes)
+  --mode measure                  measures runtimes (tens of minutes)
   --mode full                     the complete audit (hours)
 
 Tiers: t0 = the pulse, t1 = what blocks a merge, t2 = nightly.
@@ -378,8 +386,11 @@ Run state lives in .aid-o/work/active-runs.json as auto_controller:
 
 ### Topic: config
 
-Four config files under `.aid-o/config/`. `/aid-init` creates them; `/aid-setup`
-fills in the permissions and integrations ones.
+The config files you will actually touch live under `.aid-o/config/`. `/aid-init`
+creates them at workspace setup — except `queue.yaml`, which appears on the first
+`/aid-status queue add` — and `/aid-setup` is what changes them afterwards. The
+full list of what a fresh init produces is in `/aid-help init`; the four below are
+the ones worth knowing by name.
 
 ```
 Configuration Files
@@ -430,8 +441,10 @@ Permission presets:
 
 ### Topic: fsm
 
-The six states an EPIC run moves through, and the only transitions between them.
-`/aid-status <epic-id>` shows where a run currently sits.
+The six states an EPIC run moves through. `/aid-status <epic-id>` shows where a run
+currently sits. The list below is the normal path; on top of it, READY, EXECUTE, GATES
+and ESCALATION can each go to the terminal `ERROR` state on an unrecoverable failure
+or a PM abort.
 
 ```
 6-State FSM Reference
@@ -446,6 +459,10 @@ Valid transitions:
   GATES → ESCALATION      (retries exhausted)
   ESCALATION → EXECUTE    (fix applied, resume)
   ESCALATION → GATES      (skip gate)
+  READY → ERROR           (PM abort)
+  EXECUTE → ERROR         (unrecoverable failure)
+  GATES → ERROR           (unrecoverable failure)
+  ESCALATION → ERROR      (PM abort)
 
 State file: .aid-o/work/evidence/{id}/{run_id}/fsm-state.yaml
 Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
