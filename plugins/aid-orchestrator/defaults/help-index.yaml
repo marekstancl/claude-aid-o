@@ -49,6 +49,12 @@
 #   this file — `test-help-index-coverage.bats` asserts the column's presence and TYPE,
 #   never its content against the prose. When the two disagree, THIS FILE WINS and the
 #   prose is the thing to fix.
+#   HONEST PROVENANCE: this divergence is not inherited housekeeping — Step 5 CREATED it.
+#   Before this commit the five filenames in the help prose and the five in this column
+#   matched exactly. Adding the `creates:`/`mutates:` prefixes changed the shape here and
+#   nowhere else, so the two now differ in form while claiming one fact. That is a
+#   regression this step introduced knowingly, recorded as such rather than filed under
+#   pre-existing drift.
 #   This is a written-down stopgap, not the intended end state. The intended end state is
 #   to delete the duplication — have the help prose point here instead of restating the
 #   list, so one copy cannot diverge from itself. That edit lands in `commands/aid-help.md`,
@@ -85,12 +91,12 @@ surfaces:
   - { command: /aid-run, file: plugins/aid-orchestrator/commands/aid-run.md,
       purpose: "Execute EPIC pipeline — 6-state FSM with optional autonomous mode",
       topic: run, audience: beginner, disposition: current,
-      writes: [], final_turn: "card:finished" }
+      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "card:finished" }
 
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
       purpose: "Show EPIC status, queue, and pipeline overview",
       topic: status, audience: beginner, disposition: current,
-      writes: [".aid-o/config/queue.yaml"], final_turn: "card:finished" }
+      writes: ["creates:.aid-o/config/queue.yaml"], final_turn: "card:finished" }
 
   - { command: /aid-stop, file: plugins/aid-orchestrator/commands/aid-stop.md,
       purpose: "Emergency stop — disengage FIRST AID auto-mode immediately",

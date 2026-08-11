@@ -50,9 +50,20 @@ when a condition holds).
   work/evidence/          # empty directory (for run evidence)
 ```
 
-**Total: 10 files + 5 empty directories = 15 items.** This is the only count statement in this
-document; every other place that describes the fresh-init product refers back to it rather than
-restating a number.
+**Total: 9 files under `.aid-o/` + 4 empty directories = 13 items.** This is the only count
+statement in this document; every other place that describes the fresh-init product refers back
+to it rather than restating a number.
+
+Two things in the block above are deliberately NOT in that number, and the reasons are the
+document's own rules rather than convenience:
+
+- **`.gitignore`** is a consumer-repo file that AID backfills per line — the identical category
+  as the git hooks below, which this document already excludes. Counting one and excluding the
+  other would be the same inconsistency this section exists to remove.
+- **`config/` and `work/` are not empty** — they hold the nine files. The four genuinely empty
+  directories are `plans/`, `tasks/`, `work/quick/` and `work/evidence/`. An earlier draft of
+  this line said "5 empty directories" while listing `config/` among them, which was false on
+  its face.
 
 ### Git hooks (not counted above)
 
@@ -430,6 +441,15 @@ prompt or a manual edit changes it. (Before v2.33.0 the whole file was overwritt
 resetting a manual `inline`/`subagent` choice back to `agent_tool` on every re-init — the
 misconfiguration class behind P043/P044 provenance false-blocks.)
 
+**Ownership — `plugin.yaml` has a SECOND writer, and it is not `/aid-setup`.** `/aid-run`'s
+PRE-FLIGHT rewrites `plugin_path` when it finds the recorded path stale or missing
+(`commands/aid-run.md`, PRE-FLIGHT step 3). That is deliberate self-repair, not drift: a plugin
+update moves the path, and a run that refused to fix it would simply fail. So the rule for this
+file is narrower than "init creates, setup configures" — **`/aid-init` and `/aid-run` both write
+`plugin_path`/`discovered_at`; nobody but the fresh-init prompt or a human writes
+`dispatch_mode`.** Stated here because an undeclared second writer is exactly what this
+document is being corrected to stop hiding.
+
 ### Dispatch Mode Selection
 
 On fresh init (no existing `plugin.yaml`), ask the PM:
@@ -599,6 +619,13 @@ After workspace creation (and on every re-run), copy project-level config defaul
 3. **Logic:**
    - If target does NOT exist → copy template
    - If target exists → **skip** (do not overwrite; PM may have promoted/demoted checks)
+
+**Ownership — this file also has a second writer, and again it is not `/aid-setup`.**
+`aid-fsm.sh promote-check` edits it in place with `yq -i` to promote or demote a check's
+severity. That is the mechanism the "PM may have promoted/demoted checks" line above is
+already talking about, so the two are consistent — but the writer was never named. Rule:
+**`/aid-init` creates it once and never overwrites it; `aid-fsm.sh promote-check` is the
+sanctioned mutator; `/aid-setup` does not touch it at all.**
 
 ```
 Config defaults installation:
