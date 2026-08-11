@@ -78,6 +78,14 @@ setup() {
 index_rows()      { printf '%s\n' "$INDEX_TSV"; }
 enumerated_rows() { printf '%s\n' "$ENUM_TSV"; }
 
+# A slash command as a WHOLE WORD. `/aid-audit` must not be matched inside
+# `/aid-audit-tests`: AID command names are prefixes of one another, so a plain
+# substring test would report the shorter command as routed by a section that only
+# ever names the longer one. The trailing guard is "not followed by a word char or a
+# hyphen"; the leading guard is "not preceded by a word char or a hyphen", which keeps
+# a match at start-of-line working while rejecting `x/aid-do`.
+command_word_re() { printf '(^|[^[:alnum:]_-])%s([^[:alnum:]_-]|$)' "$1"; }
+
 # enumerated_commands — slash names of every shipped surface, sorted.
 enumerated_commands() { enumerated_rows | cut -f1; }
 
@@ -211,7 +219,11 @@ router_topics() {
     fi
 
     body="$(section_body_unfenced "$topic")"
-    if ! grep -qF -- "$command" <<<"$body"; then
+    # Word-boundary match, NOT a substring: `/aid-audit` must not be satisfied by a
+    # section that only ever names `/aid-audit-tests`. Every AID command is a prefix
+    # of some other command or could become one, so a substring match would silently
+    # declare the shorter one routed — in the exact assertion this suite exists for.
+    if ! grep -qE -- "$(command_word_re "$command")" <<<"$body"; then
       violations+=$'\n'"    $command: '### Topic: $topic' exists but never names $command outside a code fence"
     fi
   done < <(index_rows)
@@ -249,7 +261,7 @@ router_topics() {
   stripped="$(fenced_stripped "$HELP_MD")"
   while IFS=$'\t' read -r command _file _topic _audience disposition _rest; do
     [ "$disposition" = "intentionally_internal" ] || continue
-    if grep -qF -- "$command" <<<"$stripped"; then
+    if grep -qE -- "$(command_word_re "$command")" <<<"$stripped"; then
       violations+=$'\n'"    $command is intentionally_internal but is named in aid-help.md"
     fi
   done < <(index_rows)

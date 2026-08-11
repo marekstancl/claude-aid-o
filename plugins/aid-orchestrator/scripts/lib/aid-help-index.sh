@@ -74,11 +74,26 @@ _aid_help_fm_scan() {
   local win="$1"; shift
   [[ $# -gt 0 ]] || return 0
   awk -v win="$win" '
-    FNR == 1 { flag[FILENAME] = ""; order[++n] = FILENAME }
-    FNR <= win && $1 == "user_invocable:" && flag[FILENAME] == "" {
-      gsub(/[[:space:]"]/, "", $2); flag[FILENAME] = $2
+    FNR == 1 { flag[FILENAME] = ""; late[FILENAME] = ""; order[++n] = FILENAME }
+    # Match the KEY by regex, not by field equality: `user_invocable:true` with no
+    # space is one awk field, so `$1 == "user_invocable:"` silently missed it and the
+    # surface vanished from the enumeration — the one failure mode this whole suite
+    # exists to make impossible.
+    /^[[:space:]]*user_invocable[[:space:]]*:/ {
+      v = $0; sub(/^[[:space:]]*user_invocable[[:space:]]*:/, "", v)
+      gsub(/[[:space:]"'"'"']/, "", v)
+      if (FNR <= win) { if (flag[FILENAME] == "") flag[FILENAME] = v }
+      else            { if (flag[FILENAME] == "" && late[FILENAME] == "") late[FILENAME] = v }
     }
-    END { for (i = 1; i <= n; i++) printf "%s\t%s\n", order[i], flag[order[i]] }
+    # A flag sitting past the scan window is NOT the same as no flag. Reporting it as
+    # absent would drop a real public command out of the bijection without a word;
+    # `__late__` makes the caller fail loudly instead of guessing.
+    END {
+      for (i = 1; i <= n; i++) {
+        f = order[i]
+        printf "%s\t%s\n", f, (flag[f] != "" ? flag[f] : (late[f] != "" ? "__late__" : ""))
+      }
+    }
   ' "$@" 2>/dev/null
 }
 
@@ -97,7 +112,11 @@ aid_help_enumerate_surfaces() {
   local file flag name
   {
     while IFS=$'\t' read -r file flag; do
-      [[ "$flag" == "true" ]] || continue
+      # `__late__` is emitted when the flag exists but sits past the scan window. It
+      # is deliberately NOT filtered out here: dropping it would restore the silent
+      # hole in a second place. It is enumerated with its marker value so the caller
+      # sees a surface it cannot classify, and fails, instead of never hearing of it.
+      [[ "$flag" == "true" || "$flag" == "__late__" ]] || continue
       name="${file##*/}"; name="${name%.md}"
       printf '/%s\tcommands/%s.md\t%s\n' "$name" "$name" "$flag"
     done < <(_aid_help_fm_scan "$AID_HELP_COMMAND_FM_LINES" "${cmd_files[@]}")
