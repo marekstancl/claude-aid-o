@@ -87,7 +87,10 @@ For each selected module:
 - `skills/setup/integrations.md` — MCP server detection and enablement
 - `skills/setup/claude-md.md` — CLAUDE.md generation
 - `skills/setup/project-scan.md` — tech stack re-detection
-- `defaults/policies/permissions.yaml` — preset definitions (autonomous, aspirin, steroids)
+- `defaults/policies/permissions.yaml` — preset definitions: `autonomous` (the only preset the
+  policy file defines) plus the `custom` overlay. This line used to name two further presets
+  that exist nowhere in that file; the policy file is the authority, and this was the last
+  surface still restating a list instead of citing it.
 - `defaults/integrations.yaml` — integration config template
 
 ## File ownership

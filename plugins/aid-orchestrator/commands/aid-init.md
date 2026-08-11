@@ -364,10 +364,24 @@ for **memory agents**, which are not the scanner in Mode A/B. Nothing else write
 
 ```yaml
 # AID permissions — controls autonomous behavior
+active_preset: autonomous # preset catalog: defaults/policies/permissions.yaml
 autonomous_mode: false    # set true to enable /aid-run --auto
 auto_commit: false        # set true to allow auto-commits
 auto_push: false          # set true to allow auto-push (requires auto_commit)
 ```
+
+`active_preset` is seeded because `/aid-setup`'s first menu read expects it; without the key a
+fresh workspace made setup fall back before it could show anything.
+
+**How the pair is displayed — two cases, two strings, used verbatim by `/aid-init`,
+`skills/setup/permissions.md` and `scripts/aid-config-summary.sh`. No third phrasing anywhere,
+because `active_preset: autonomous` next to `autonomous_mode: false` is contradictory on its
+face and needs one honest rendering rather than three improvised ones.**
+
+- Key present: `<preset> (preset) — autonomous_mode: <value>` — a fresh workspace therefore
+  reads `autonomous (preset) — autonomous_mode: false`.
+- Key absent (a workspace created before this key existed):
+  `autonomous (implicit — key missing, will be written on first change)`.
 
 **Ownership — `permissions.yaml`:** created here from the template; subsequent changes are owned
 by `/aid-setup` (module `permissions`) — `/aid-init` re-runs never rewrite it, including a file a

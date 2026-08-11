@@ -59,6 +59,21 @@ Merge `permissions.allow` and `permissions.deny` arrays from the chosen preset's
 - Preset definitions: `defaults/policies/permissions.yaml`
 - Two presets: autonomous (default), custom
 
+**Reading `active_preset`, including on a workspace that predates the key.** The menu's first
+read is `active_preset` from `.aid-o/config/permissions.yaml`. Two cases, and the display
+strings are fixed — the same two `/aid-init` seeds and `scripts/aid-config-summary.sh` prints,
+so a PM never meets three phrasings of one state:
+
+- key present → `<preset> (preset) — autonomous_mode: <value>`
+- key absent → `autonomous (implicit — key missing, will be written on first change)`, and the
+  menu offers to write it. Treat the absent key as `autonomous`; do NOT refuse, and do not
+  silently rewrite the file just to add the key — it is written on the first change the PM
+  actually makes.
+
+If `defaults/policies/permissions.yaml` is missing from the workspace (a consumer project that
+has not re-run `/aid-init` since it shipped), read the plugin's own copy at
+`{plugin_path}/defaults/policies/permissions.yaml` — the plugin path is always resolvable.
+
 ## Output
 
 Confirm to PM:
