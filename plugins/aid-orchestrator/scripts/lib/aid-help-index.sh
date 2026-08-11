@@ -37,8 +37,8 @@
 #
 #   aid_help_index_rows <index_path>
 #     Prints one TSV row per `surfaces[]` entry, in file order:
-#         <command>\t<file>\t<topic>\t<audience>\t<disposition>\t<final_turn>\t<purpose>
-#     An absent key prints as `null` rather than shifting the columns, so a
+#         <command>\t<file>\t<topic>\t<audience>\t<disposition>\t<final_turn>\t<purpose>\t<writes type tag>
+#     An absent key prints its type tag rather than shifting the columns, so a
 #     caller can fail on it explicitly. Requires `yq` (a repo-wide hard
 #     dependency): missing yq or a missing/unparsable index returns 1 with a
 #     message on stderr, never an empty success.
@@ -146,7 +146,7 @@ aid_help_index_rows() {
   # while ten of thirteen rows could lose it with every test still green. That is
   # the "declared but unenforced" defect this plan exists to kill, sitting inside
   # the file meant to prevent it, in the very column Step 5 writes its ownership
-  # decisions into. `-` = key absent, `[]` = present and empty, `N` = N entries.
+  # decisions into. The value is yq's TYPE TAG: `!!seq` for a real list (empty or not), `!!null` when the key is absent. The caller asserts the tag, so a scalar in that column — `writes: "read-only"`, `writes: 5` — is a violation rather than a filled-in field.
   out="$(yq -r '.surfaces[] | [.command, .file, .topic, .audience, .disposition, .final_turn, .purpose, (.writes | tag)] | @tsv' "$index" 2>&1)" || {
     printf 'aid_help_index_rows: yq failed to read %s: %s\n' "$index" "$out" >&2
     return 1

@@ -354,7 +354,12 @@ router_topics() {
     # Step 5 writes the init/setup ownership decisions into exactly this column,
     # so an unchecked column is an unchecked deliverable. `!!null` means the key is
     # absent; `[]` (read-only) and a count are both legitimate.
-    [ "$writes" = "!!null" ] && violations+=$'\n'"    $command: required column 'writes' is missing (use [] for a read-only surface)"
+    # Assert the TYPE, not merely "not null". Checking only for `!!null` accepted
+    # `writes: ""`, `writes: "read-only"`, `writes: {}` and `writes: 5` — every one
+    # of which reads as a filled-in column while carrying no list of files at all.
+    # The column's whole purpose is to name what a surface may write; a scalar
+    # there is a claim with no content.
+    [ "$writes" = "!!seq" ] || violations+=$'\n'"    $command: column 'writes' must be a list (got ${writes:-<empty>}; use [] for a read-only surface)"
     for pair in "command=$command" "file=$file" "topic=$topic" \
                 "audience=$audience" "disposition=$disposition" \
                 "final_turn=$final_turn" "purpose=$purpose"; do

@@ -93,6 +93,25 @@ _cite_resolves() {
   return 1
 }
 
+# _cite_first_segment_is_dir <token> <plugin_dir> <repo_dir>
+# True when the token's FIRST path segment is a real directory under one of the
+# three resolution bases. This is how a non-leading word earns a path check.
+#
+# Derived rather than hand-listed on purpose: an enumerated allowlist
+# (`scripts/|skills/|commands/|…`) could not see `plugins/`, `.aid-o/`,
+# `.claude-plugin/` or `tests/`, and 11 of 13 probe rows walked past it in
+# silence. Deriving from the same bases `_cite_resolves` uses admits every shape
+# that could possibly resolve, while still rejecting prose like `pre/post` or
+# `plan/<id>` — whose first segment is a directory nowhere.
+_cite_first_segment_is_dir() {
+  local t="$1" plugin_dir="$2" repo_dir="$3" seg="${1%%/*}"
+  [[ -n "$seg" && "$seg" != "$t" ]] || return 1
+  [[ -d "${plugin_dir}/${seg}" ]] && return 0
+  [[ -d "${repo_dir}/${seg}" ]] && return 0
+  [[ -d "${plugin_dir}/scripts/${seg}" ]] && return 0
+  return 1
+}
+
 # _cite_violations <registry> <plugin_dir> <repo_dir>
 # Emits one `CITE|<row-id>|<field>|<path>` line per unresolvable cite.
 _cite_violations() {
@@ -181,8 +200,18 @@ _cite_violations() {
             #
             # What this still misses: a second FULL path inside one part that does
             # not start with a known segment. Recorded rather than papered over.
+            # `read -ra`, NOT `for word in $part`. An unquoted expansion is
+            # GLOB-EXPANDED against the caller's cwd, so a cite containing `**bold**`
+            # became whatever files happened to sit next to the runner — and every
+            # one of them resolved, so the harness reported no violation from the
+            # plugin root and a violation from `/`. A checker whose answer depends on
+            # where it was invoked, with the convenient answer being the wrong one,
+            # is the failure this whole file exists to prevent. Introduced by my own
+            # fix for the leading-word hole; caught by CP3.
+            local -a words=()
+            read -ra words <<<"$part"
             local first=1
-            for word in $part; do
+            for word in "${words[@]}"; do
               _cite_normalise_token "$word"; tok="$CITE_TOKEN"
               if [[ $first -eq 1 ]]; then
                 first=0
@@ -192,10 +221,15 @@ _cite_violations() {
                   *) continue ;;
                 esac
               else
-                case "$tok" in
-                  scripts/*|skills/*|commands/*|agents/*|defaults/*|docs/*|lib/*|.github/*) ;;
-                  *) continue ;;
-                esac
+                # DERIVED, not hand-listed. The earlier version enumerated
+                # `scripts/|skills/|commands/|…` by hand and therefore could not see
+                # `plugins/`, `.aid-o/`, `.claude-plugin/` or `tests/` — 11 of 13
+                # probe rows passed silently. A non-leading token qualifies when its
+                # FIRST SEGMENT is a real directory under one of the three resolution
+                # bases; that admits every shape `_cite_resolves` can resolve and
+                # still rejects prose like `pre/post` or `plan/<id>`, whose first
+                # segment is not a directory anywhere.
+                _cite_first_segment_is_dir "$tok" "$plugin_dir" "$repo_dir" || continue
               fi
               _cite_resolves "$tok" "$plugin_dir" "$repo_dir" \
                 || printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok"
@@ -213,6 +247,25 @@ else
   fail_msg "$REGISTRY did not parse as YAML"
   echo "Results: ${pass}/$((pass + fail)) passed, ${fail} failed"
   exit 1
+fi
+
+# ─── 1b. The registry is not EMPTY ──────────────────────────────────────────
+# Truncate the file to `enforcements: []` and every check above and below goes
+# green: zero rows have zero bad cites and zero duplicate ids. All-quiet and
+# all-gone read identically, which is the one thing this harness must never
+# allow — it exists so an unenforced claim cannot hide. `totals.enforcements`
+# sits three lines from the parser and is the registry's own statement of how
+# many rows it should have, so the count is checked against it rather than
+# against a number nobody maintains.
+echo "TEST: the registry is non-empty and matches its own declared total"
+_reg_rows="$(yq '.enforcements | length' "$REGISTRY" 2>/dev/null || echo 0)"
+_reg_declared="$(yq '.totals.enforcements // ""' "$REGISTRY" 2>/dev/null || echo "")"
+if [[ "${_reg_rows:-0}" -lt 1 ]]; then
+  fail_msg "the registry has no enforcement rows — an empty registry passes every other check in this file"
+elif [[ -n "$_reg_declared" && "$_reg_declared" != "null" && "$_reg_declared" != "$_reg_rows" ]]; then
+  fail_msg "row count ${_reg_rows} does not match the declared totals.enforcements ${_reg_declared} — one of them is stale"
+else
+  pass_msg "${_reg_rows} rows present, matching the declared total"
 fi
 
 # ─── 2. Every row has an id ─────────────────────────────────────────────────
