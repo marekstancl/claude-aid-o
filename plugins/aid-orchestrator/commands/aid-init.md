@@ -373,6 +373,16 @@ auto_push: false          # set true to allow auto-push (requires auto_commit)
 `active_preset` is seeded because `/aid-setup`'s first menu read expects it; without the key a
 fresh workspace made setup fall back before it could show anything.
 
+**The seeded preset NAME is not the preset APPLIED, and that is deliberate.** The `autonomous`
+preset as described in `defaults/policies/permissions.yaml` and in `/aid-help` carries
+`auto_commit: true`; this template seeds `false` for all three switches. Init records which
+preset a workspace is heading for; it does not turn autonomy on behind the PM's back. The
+switches become the preset's values when the PM applies it through
+`/aid-setup permissions` — which is the same "init creates, setup configures" boundary the rest
+of this document draws, applied to values rather than files. Seeding the name without this
+sentence would have created a fresh contradiction between the template and three surfaces that
+describe the preset.
+
 **How the pair is displayed — two cases, two strings, used verbatim by `/aid-init`,
 `skills/setup/permissions.md` and `scripts/aid-config-summary.sh`. No third phrasing anywhere,
 because `active_preset: autonomous` next to `autonomous_mode: false` is contradictory on its

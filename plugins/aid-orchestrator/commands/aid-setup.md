@@ -58,12 +58,18 @@ When no argument provided:
 2. Count enabled integrations from `.aid-o/config/integrations.yaml` (count keys where `enabled: true`)
 3. Check if `CLAUDE.md` exists in project root
 
+`{preset_display}` is the canonical permission rendering, not a bare preset name — the same two
+fixed strings `/aid-init`, `skills/setup/permissions.md` and `scripts/aid-config-summary.sh` use:
+`<preset> (preset) — autonomous_mode: <value>` when the key is present, and
+`autonomous (implicit — key missing, will be written on first change)` when it is not. A preset
+name on its own hides the very contradiction the rendering exists to surface.
+
 Present:
 
 ```
 AID Setup — Project Configuration
 ==================================
-  (1) Permissions     — choose autonomy level (current: {active_preset})
+  (1) Permissions     — choose autonomy level (current: {preset_display})
   (2) Integrations    — enable MCP servers ({enabled_count} enabled)
   (3) CLAUDE.md       — generate project context file ({exists|missing})
   (4) Project Scan    — re-detect tech stack
