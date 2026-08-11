@@ -7,3 +7,4 @@ declared_epics:
   - {id: E-080-2_3, scope: required}
   - {id: E-080-3_3, scope: required}
 depends_on_plans: []
+mode: plan_branch
