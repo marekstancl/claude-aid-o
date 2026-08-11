@@ -348,13 +348,15 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
-  # bats_fsm is deliberately ABSENT from full and release: `bats_all` runs
-  # test-aid-fsm.bats in its pool, so including both dispatched the same run
-  # unit twice in one gate run — real, and the defect the P072 execution ledger
-  # was built to surface. It surfaced it here. The detector's own red proof
-  # lives in a fixture (test-aid-test-execution-ledger.bats case 1), not in
-  # this configuration, so removing the duplication does not blind the check.
-  # The narrower profiles keep bats_fsm because they do not run bats_all.
+  # bats_fsm is BACK in full and release (P081 whole-diff review, 2026-08-11).
+  # It was removed because `bats_all` ran test-aid-fsm.bats in its pool, so
+  # including both dispatched the same run unit twice — true until this branch.
+  # test-aid-fsm.bats is `# aid-tier: t2` and `bats_all` now resolves to the
+  # T0+T1 selection, so it no longer dispatches that suite at all: leaving
+  # bats_fsm out left the two heaviest profiles — including the one plan-final
+  # runs — with NO FSM coverage. There is no double dispatch to avoid any more.
+  # `release_quarantine` gains it for the same reason and to keep the
+  # set-equality assertion (release MINUS the quarantined gate) satisfied.
   # P081 Step 6 (2026-08-10) — THE MERGE PATH IS T0 + T1.
   # `bats_all` now resolves to the tier-filtered runner, and the two gates that
   # carried the rest of the portfolio left these profiles entirely:
@@ -367,11 +369,13 @@ gate_profiles:
   full:
     include:
       - bats_all
+      - bats_fsm
       - plan_diff
       - docs_updated
   release:
     include:
       - bats_all
+      - bats_fsm
       - plan_diff
       - docs_updated
   bats_all_quarantine:
@@ -399,14 +403,16 @@ gate_profiles:
       docs_updated}: `bats_all` is the ONLY test gate `release` has left, which
       means a quarantined `bats_all` leaves this substitute with no test gate
       by construction. That is not an oversight to paper over with `bats_fsm`
-      — adding it is what made the old set-equality assertion unsatisfiable,
-      and `bats_fsm` would in any case re-run a suite `bats_all`'s own T0
-      selection already dispatches (the double-dispatch the execution ledger
-      exists to catch). The compensation is the one this profile already
+      — but that reasoning was written against a `bats_all` that still ran
+      test-aid-fsm.bats. It does not: that suite is t2 and `bats_all` is the
+      T0+T1 selection. So (2026-08-11) `release` gains `bats_fsm` and this
+      profile gains it too, which both restores FSM coverage and keeps the
+      set equality exact — this profile is still `release` MINUS `bats_all`. The compensation is the one this profile already
       names: the quarantined gate is never green, it is reported
       profile_excluded/waived, and it must carry its own marked
       targeted-substitute receipt in the report's `quarantine_substitutes[]`.
     include:
+      - bats_fsm
       - plan_diff
       - docs_updated
   p064-closure:

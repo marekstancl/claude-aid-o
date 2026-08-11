@@ -48,10 +48,16 @@ jobs:
         # disk/CPU contention (still being measured in isolation to get a
         # clean number). 60 min is a wide, non-final safety margin — revisit
         # once a clean, uncontended local measurement exists.
+        # P081 whole-diff review fix: this job is the REAL merge gate on
+        # GitHub. Converting only the AID gate layer (execution.yaml) left the
+        # whole portfolio running here, in front of every merge — the exact
+        # thing the pilot exists to end, and nightly-tests.yml already claimed
+        # was done. The merge path is T0 + T1; the rest runs nightly.
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
-          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --verbose
-        timeout-minutes: 60
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --verbose
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --verbose
+        timeout-minutes: 20
 
   plan-boundary-tests:
     runs-on: [self-hosted, eco-dev]

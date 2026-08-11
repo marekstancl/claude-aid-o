@@ -78,12 +78,29 @@ _suite() {
   [[ "$output" == *"Discovered 2 test suite(s)"* ]]
 }
 
-@test "5: an empty tier is a legitimate state, reported and green" {
+@test "5: a tier that selects NOTHING is a refusal, not a green run" {
+  # Contract flipped by the P081 whole-diff review (2026-08-11). It previously
+  # read "an empty tier is a legitimate state, reported and green" — and that
+  # is exactly how the shipped consumer gate became a green no-op: a project
+  # with no tags matched no tier, ran zero suites and exited 0 under a
+  # `required: true` gate. A gate that verifies nothing must not report pass.
   rm -f "$TESTS/bats/test-heavy.bats"
   run bash "$RUNNER" --tier t2 3>&-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Discovered 0 test suite(s)"* ]]
-  [[ "$output" == *"SKIPPED-BY-TIER: 2 suite(s) not in t2"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"selected 0 of"* ]]
+  [[ "$output" == *"has no members"* ]]
+}
+
+@test "5b: an untiered portfolio told to run a tier says so and refuses" {
+  # The consumer case: no suite carries a tag at all, so the untagged refusal
+  # never fires and the tier can never match. The message must name that,
+  # not merely report an empty tier.
+  rm -f "$TESTS"/bats/*.bats "$TESTS"/test-*.sh
+  printf '#!/usr/bin/env bats\n@test "x" { true; }\n' > "$TESTS/bats/test-untagged.bats"
+  run bash "$RUNNER" --tier t0 3>&-
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"carries an '# aid-tier:' tag"* ]]
+  [[ "$output" == *"WITHOUT --tier"* ]]
 }
 
 @test "6: an unknown tier is a usage error, not an empty run" {

@@ -55,10 +55,12 @@
 #   t1  under 30 s per case  — what blocks a merge, whole tier under 10 min
 #   t2  everything else, and anything cross-component — runs nightly
 # The merge-path gate below therefore runs T0+T1 and NOT the whole portfolio.
-# A project that has adopted no tiers is unaffected: with no suite carrying a
-# tag, `--tier` matches nothing to exclude and the runner behaves exactly as it
-# always did. Adopt tiers with `aid-test-tier-assign.sh` (assign from measured
-# cost) and keep them honest with `aid-test-tier-lint.sh`.
+# A project that has adopted NO tiers must run this runner WITHOUT `--tier`:
+# with no suite carrying a tag, a tier selects NOTHING, and since 2026-08-11
+# the runner refuses an empty selection rather than reporting a green gate
+# that executed nothing. Adopt tiers with `aid-test-tier-assign.sh` (assign
+# from measured cost), stamp them, and keep them honest with
+# `aid-test-tier-lint.sh` — only then point a gate at `--tier`.
 gates:
   tests_pass:
     description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"

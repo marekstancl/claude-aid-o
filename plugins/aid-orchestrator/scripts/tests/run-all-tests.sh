@@ -352,6 +352,24 @@ if [[ -n "$TIER" ]]; then
     fi
   done
   SUITES=(${_kept[@]+"${_kept[@]}"})
+
+  # P081 whole-diff review fix: a tier that selects NOTHING is not a pass.
+  # Without this, an untiered tree (TAGGED_COUNT == 0, so the untagged refusal
+  # above never fires) ran zero suites and reported RESULT: PASS / exit 0 —
+  # and defaults/execution.yaml ships exactly that invocation as a consumer's
+  # `required: true` gate. An empty selection is now a loud refusal; a project
+  # that has genuinely adopted no tiers must run without --tier at all.
+  if [[ "${#SUITES[@]}" -eq 0 ]]; then
+    echo "ERROR: --tier $TIER selected 0 of $SKIPPED_BY_TIER discovered suite(s)." >&2
+    if [[ "$TAGGED_COUNT" -eq 0 ]]; then
+      echo "No suite in this portfolio carries an '# aid-tier:' tag, so no tier can ever match." >&2
+      echo "A project that has not adopted tiers must invoke this runner WITHOUT --tier." >&2
+    else
+      echo "Tier '$TIER' has no members. If that is intended, remove this tier from the gate" >&2
+      echo "rather than running a gate that verifies nothing." >&2
+    fi
+    exit 1
+  fi
 fi
 
 if [[ "$LIST_ONLY" -eq 1 ]]; then

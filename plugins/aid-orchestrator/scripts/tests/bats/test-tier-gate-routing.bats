@@ -31,7 +31,12 @@ setup() {
   EXEC_YAML="$TREE_ROOT/.aid-o/config/execution.yaml"
   TEMPLATE="$PLUGIN/defaults/execution.yaml"
   WORKFLOW="$TREE_ROOT/.github/workflows/nightly-tests.yml"
-  export PLUGIN TREE_ROOT EXEC_YAML TEMPLATE WORKFLOW
+  # The AID gate layer is only HALF the merge path: ci.yml's bash-tests job is
+  # the gate GitHub actually enforces. P081 converted execution.yaml and left
+  # ci.yml running the whole portfolio, and this suite could not see it because
+  # it never opened the file. It does now.
+  CI_WORKFLOW="$TREE_ROOT/.github/workflows/ci.yml"
+  export PLUGIN TREE_ROOT EXEC_YAML TEMPLATE WORKFLOW CI_WORKFLOW
 }
 
 _need_project_config() {
@@ -126,4 +131,34 @@ _include_or_die() {
   [[ "$cmd" == *"--tier t0"* ]]
   [[ "$cmd" == *"--tier t1"* ]]
   grep -q 'aid-tier:' "$TEMPLATE"
+}
+
+@test "ci.yml's bash-tests job runs the merge-path tiers, not the whole portfolio" {
+  [ -f "$CI_WORKFLOW" ] || fail "ci.yml is missing — the enforced merge gate cannot be checked"
+  local job
+  job="$(awk '/^  bash-tests:/{f=1} f&&/^  [a-z][a-z0-9_-]*:/&&!/^  bash-tests:/{exit} f' "$CI_WORKFLOW")"
+  [ -n "$job" ] || fail "no bash-tests job found in ci.yml"
+  echo "$job" | grep -q -- "--tier t0" \
+    || fail "ci.yml bash-tests does not run --tier t0 — the enforced merge gate still runs the full portfolio"
+  echo "$job" | grep -q -- "--tier t1" \
+    || fail "ci.yml bash-tests does not run --tier t1"
+  echo "$job" | grep -qE "run-all-tests\.sh[^|]*--tier" \
+    || fail "ci.yml bash-tests invokes the runner without a tier filter"
+  # And it must NOT also invoke the runner untiered, which would put the whole
+  # portfolio back on the merge path beside the tiered runs. `chmod +x ...sh`
+  # is not an invocation, so it is excluded explicitly.
+  local untiered
+  untiered="$(echo "$job" | grep -E "run-all-tests\\.sh( --verbose)? *$" | grep -v chmod || true)"
+  [ -z "$untiered" ] || fail "ci.yml bash-tests still has an untiered run-all-tests.sh invocation: $untiered"
+}
+
+@test "the nightly workflow's claim about ci.yml is true" {
+  [ -f "$WORKFLOW" ] || skip "nightly workflow absent"
+  [ -f "$CI_WORKFLOW" ] || fail "ci.yml missing"
+  # nightly-tests.yml states in prose that ci.yml runs T0+T1. A claim a reader
+  # trusts must be mechanically true, or it is worse than no claim.
+  if grep -q "T0+T1 there" "$WORKFLOW"; then
+    grep -q -- "--tier t0" "$CI_WORKFLOW" \
+      || fail "nightly-tests.yml claims ci.yml runs T0+T1, but ci.yml has no tier filter"
+  fi
 }
