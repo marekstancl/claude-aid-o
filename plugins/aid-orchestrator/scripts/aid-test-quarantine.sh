@@ -19,8 +19,9 @@
 # that history is one of the reaper's inputs.
 #
 # Usage:
-#   aid-test-quarantine.sh add   <suite> [owner]
-#   aid-test-quarantine.sh list  [--json]
+#   aid-test-quarantine.sh add    <suite> [owner]
+#   aid-test-quarantine.sh assign <suite> <owner>
+#   aid-test-quarantine.sh list   [--json]
 #   aid-test-quarantine.sh close <suite> <fixed|deleted>
 #
 # The record lives beside the nightly artifacts, under
@@ -53,11 +54,22 @@ _ensure_dir() {
 # suite, the newest `add` that has no later `close`.
 _open_entries() {
   [[ -f "$QUARANTINE_FILE" ]] || { echo '[]'; return 0; }
+  # `assign` records must NOT take part in the last-record-wins fold that
+  # decides open-vs-closed — an assign is not a lifecycle event, it only
+  # supplies the owner of the entry that is already open. Folding it in made
+  # an assigned suite disappear from the list entirely.
   jq -Rcn '
-    [inputs | select(length > 0) | fromjson]
+    ([inputs | select(length > 0) | fromjson]) as $all
+    | ($all | map(select(.action == "assign"))) as $assigns
+    | $all
+    | map(select(.action == "add" or .action == "close"))
     | group_by(.suite)
     | map(sort_by(.at) | last)
     | map(select(.action == "add"))
+    | map(. as $e
+          | ([$assigns[] | select(.suite == $e.suite and .at >= $e.at)]
+             | sort_by(.at) | last | .owner // "") as $o
+          | if $o != "" then .owner = $o else . end)
     | sort_by(.at)' "$QUARANTINE_FILE"
 }
 
@@ -85,6 +97,26 @@ cmd_add() {
          --arg opened "$(_today)" \
     '{action:"add", suite:$suite, owner:$owner, opened:$opened, at:$at}' \
     >> "$QUARANTINE_FILE"
+}
+
+cmd_assign() {
+  local suite="${1:-}" owner="${2:-}"
+  [[ -n "$suite" ]] || { echo "aid-test-quarantine: assign needs a suite" >&2; return 2; }
+  [[ -n "$owner" ]] || { echo "aid-test-quarantine: assign needs an owner" >&2; return 2; }
+  # The gap this closes: `add` is deliberately a no-op once an entry is open
+  # (so a weekly flake cannot reset its own deadline), the nightly is the only
+  # automatic producer and it always passes an empty owner, and there was no
+  # other way in. Every entry was therefore ownerless for ever and escalated
+  # weekly with no way to say "mine" — the standard's owner+deadline rule was
+  # unreachable. `assign` sets the owner on an OPEN entry and deliberately does
+  # NOT touch `opened`, so taking ownership never buys extra days.
+  if [[ "$(_open_entries | jq --arg s "$suite" '[.[] | select(.suite == $s)] | length')" -eq 0 ]]; then
+    echo "aid-test-quarantine: '$suite' is not quarantined — nothing to assign" >&2
+    return 1
+  fi
+  _ensure_dir || return $?
+  jq -nc --arg suite "$suite" --arg owner "$owner" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{action:"assign", suite:$suite, owner:$owner, at:$at}' >> "$QUARANTINE_FILE"
 }
 
 cmd_close() {
@@ -120,6 +152,7 @@ cmd_list() {
 
 case "${1:-}" in
   add)   shift; cmd_add "$@" ;;
+  assign) shift; cmd_assign "$@" ;;
   close) shift; cmd_close "$@" ;;
   list)  shift; cmd_list "$@" ;;
   --help|-h|"")

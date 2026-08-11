@@ -119,6 +119,16 @@ _report() {
 }
 
 @test "4: a suite that passes on its single retry is flaky and quarantined" {
+  # The retry goes through the RUNNER now, not a bare `bats` — a suite that
+  # fails only under runner conditions must not be laundered into a silent
+  # quarantine. The fixture supplies a stub runner so the flaky path is still
+  # exercised; without a reachable runner the suite stays FAILED by design.
+  cat > "$TEST_TMPDIR/stub-runner.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/stub-runner.sh"
+  export AID_NIGHTLY_RUNNER="$TEST_TMPDIR/stub-runner.sh"
   _mk_bats "$FIXTURE_TESTS/bats/test-wobbly.bats" true
   run _report "$(_log 2 3 test-wobbly)" --exit-code 1
   [ "$status" -eq 0 ]
@@ -197,4 +207,16 @@ _report() {
   [ "$(jq -r '.censored' "$NIGHTLY_DIR/latest.json")" = "true" ]
   [ "$(jq -r '.exit_code' "$NIGHTLY_DIR/latest.json")" = "137" ]
   [ "$(jq -r '.failed[0].suite' "$NIGHTLY_DIR/latest.json")" = "(runner)" ]
+}
+
+@test "4b: with no reachable runner a retry does NOT launder a failure into flaky" {
+  # The defect this closes: the retry used to re-run `bats "$path"` bare, so a
+  # suite that fails only under the runner's own conditions passed standalone,
+  # was filed flaky, dropped out of failed[] and the night reported GREEN.
+  export AID_NIGHTLY_RUNNER="/nonexistent/runner.sh"
+  _mk_bats "$FIXTURE_TESTS/bats/test-wobbly.bats" true
+  run _report "$(_log 2 3 test-wobbly)" --exit-code 1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.failed | length' "$NIGHTLY_DIR/latest.json")" -ge 1 ]
+  [ "$(jq -r '.flaky | length' "$NIGHTLY_DIR/latest.json")" = "0" ]
 }
