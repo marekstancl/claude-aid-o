@@ -68,8 +68,14 @@ _cite_normalise_token() {
   # `… (lib/review-profile-check.sh:~84)`. Stripping the closing bracket but not the
   # opening one left `(lib/…` as the token — which resolves nowhere and reads as a
   # dangling cite for a file that is right there.
-  t="${t#\`}"; t="${t#\'}"; t="${t#\"}"; t="${t#(}"; t="${t#[}"
-  while [[ "$t" =~ [\`\'\"\,\)\.\;\:]$ ]]; do t="${t%?}"; done
+  # Stripped in a LOOP, not once each in a fixed order. The sequential version
+  # took the `(` and then stopped, so a cite written as (`scripts/aid-fsm.sh`) —
+  # a shape this very comment offers as the example — kept its backtick and was
+  # reported as a dangling reference to a file sitting right there. Leading
+  # position is where the checked cites live, so this was a false alarm in the
+  # one place that matters. (CP3 code-review, cc6246d.)
+  while [[ "$t" =~ ^[\`\'\"\(\[] ]]; do t="${t:1}"; done
+  while [[ "$t" =~ [\`\'\"\,\)\.\;\:\]]$ ]]; do t="${t%?}"; done
   t="${t%\'s}"
   if [[ "$t" == */* ]]; then dir="${t%/*}"; base="${t##*/}"; else dir=""; base="$t"; fi
   # Everything from the first `:` in the basename onwards is an annotation
