@@ -27,16 +27,20 @@
 #                           a rule phrased around "command" would strand it unrouted.
 #   intentionally_internal  MUST NOT appear in /aid-help output. Internal commands are
 #                           still given a row, so the classification is explicit rather
-#                           than an accidental omission.
+#                           than an accidental omission. FOURTH REQUIREMENT: the command
+#                           file must itself declare `user_invocable: false` — otherwise
+#                           the enumerator sees the surface, the bijection reports it as
+#                           shipped-but-not-indexed, and the row asserts something false
+#                           about the product.
 #   remove_or_deprecate     may appear in help with a deprecation note; takes no topic route.
 #
 # ONE NAMED EXEMPTION: `/aid-help` carries `topic: none` though it is `update` — the
 # router cannot route to itself. Step 2 encodes this by command name, not as a general
 # loophole; any OTHER current/update row without a topic is a violation.
 #
-# TOPICS HERE ARE THE TARGET STATE: this index is the authority and aid-help.md is
-# regenerated FROM it, so `recovery`, `tests` and `init` do not exist there until
-# Step 3 creates them. Step 2's test is EXPECTED to fail until then — see its ACs.
+# THIS INDEX IS THE AUTHORITY: `commands/aid-help.md` is regenerated FROM it, never the
+# other way round. A topic named here that does not exist there yet is a gap in the help
+# file, and the coverage suite says so. Change a route here first, then make help match.
 #
 # ENUMERATION CONTRACT (what a surface is, mechanically):
 #   1. Frontmatter scan of `plugins/aid-orchestrator/commands/*.md` — indexed iff
@@ -70,7 +74,7 @@ surfaces:
 
   - { command: /aid-audit, file: plugins/aid-orchestrator/commands/aid-audit.md,
       purpose: "Project health audit (0-100 score) across categories A–J",
-      topic: none, audience: power, disposition: index_only,
+      topic: audit, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }
 
   - { command: /aid-help, file: plugins/aid-orchestrator/commands/aid-help.md,
@@ -100,20 +104,20 @@ surfaces:
 
   - { command: /aid-verify-plan, file: plugins/aid-orchestrator/commands/aid-verify-plan.md,
       purpose: "Independent adversarial review of an implementation plan before it goes to execution",
-      topic: none, audience: power, disposition: index_only,
+      topic: plan-lifecycle, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }
 
   - { command: /aid-verify-implementation, file: plugins/aid-orchestrator/commands/aid-verify-implementation.md,
       purpose: "Independent adversarial DONE review of an implementation before it is trusted as complete",
-      topic: none, audience: power, disposition: index_only,
+      topic: plan-lifecycle, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }
 
   - { command: /aid-audit-tests, file: plugins/aid-orchestrator/commands/aid-audit-tests.md,
       purpose: "Test portfolio audit — inventory, safe measurement, and a plain-language recommendation",
-      topic: none, audience: power, disposition: index_only,
+      topic: tests, audience: power, disposition: current,
       writes: [], final_turn: "renderer:scripts/lib/aid-test-audit-chat-summary.sh" }
 
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,
       purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",
-      topic: none, audience: power, disposition: index_only,
+      topic: plan, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }

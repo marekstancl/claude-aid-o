@@ -42,7 +42,6 @@ skills/role-cards.md
 skills/run-management.md
 commands/aid-audit.md
 commands/aid-do.md
-commands/aid-help.md
 commands/aid-init.md
 commands/aid-plan.md
 commands/aid-run.md
