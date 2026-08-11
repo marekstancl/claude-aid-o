@@ -19,11 +19,12 @@
 #   update                  surface is correct but its prose changes in this plan;
 #                           REQUIRES a topic route.
 #   index_only              indexed here without a topic route. TRANSITIONAL, not a
-#                           resting place: a row whose command is a `user_invocable:
-#                           true` command may NOT rest here once Step 3 lands — Step 3
-#                           flips those to `current` with real topics. `index_only`
-#                           stays legal only for a public surface that is not a
-#                           `user_invocable: true` command.
+#                           resting place: NO indexed public surface may rest here
+#                           once Step 3 lands — Step 3 flips every one to `current`
+#                           with a real topic. The rule covers ANY indexed surface,
+#                           not only files under `commands/`: /visual-companion is
+#                           `user_invocable: true` without being a command file, and
+#                           a rule phrased around "command" would strand it unrouted.
 #   intentionally_internal  MUST NOT appear in /aid-help output. Internal commands are
 #                           still given a row, so the classification is explicit rather
 #                           than an accidental omission.
@@ -60,7 +61,7 @@ surfaces:
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
       purpose: "Show EPIC status, queue, and pipeline overview",
       topic: status, audience: beginner, disposition: current,
-      writes: [], final_turn: "card:finished" }
+      writes: [".aid-o/config/queue.yaml"], final_turn: "card:finished" }
 
   - { command: /aid-stop, file: plugins/aid-orchestrator/commands/aid-stop.md,
       purpose: "Emergency stop — disengage FIRST AID auto-mode immediately",
@@ -69,7 +70,7 @@ surfaces:
 
   - { command: /aid-audit, file: plugins/aid-orchestrator/commands/aid-audit.md,
       purpose: "Project health audit (0-100 score) across categories A–J",
-      topic: tests, audience: power, disposition: current,
+      topic: none, audience: power, disposition: index_only,
       writes: [], final_turn: "card:finished" }
 
   - { command: /aid-help, file: plugins/aid-orchestrator/commands/aid-help.md,
@@ -81,7 +82,7 @@ surfaces:
       purpose: "Initialize or upgrade .aid-o/ workspace (10-file init, idempotent)",
       topic: init, audience: beginner, disposition: update,
       writes: [".aid-o/config/project.yaml", ".aid-o/config/execution.yaml",
-               ".aid-o/config/queue.yaml", ".aid-o/config/plugin.yaml",
+               ".aid-o/config/plugin.yaml",
                ".aid-o/config/check-severity.yaml", ".aid-o/config/test-audit.yaml"],
       final_turn: "card:finished" }
 
@@ -110,7 +111,7 @@ surfaces:
   - { command: /aid-audit-tests, file: plugins/aid-orchestrator/commands/aid-audit-tests.md,
       purpose: "Test portfolio audit — inventory, safe measurement, and a plain-language recommendation",
       topic: none, audience: power, disposition: index_only,
-      writes: [], final_turn: "renderer:aid-test-audit-chat-summary.sh" }
+      writes: [], final_turn: "renderer:scripts/lib/aid-test-audit-chat-summary.sh" }
 
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,
       purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",
