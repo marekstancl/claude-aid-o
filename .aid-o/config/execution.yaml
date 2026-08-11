@@ -207,6 +207,19 @@ gates:
     timeout_seconds: 18300
     run_mode: background
     max_retries: 0
+  # P081 whole-diff review follow-up (2026-08-11): the tier lint was registered
+  # `severity: blocking` and invoked by NOTHING — check 1 (every suite declares
+  # a tier) survived only because run-all-tests.sh re-implements it, and checks
+  # 2 (no plan number in a filename) and 3 (a tier no cheaper than its newest
+  # measurement) had no enforcement path at all. Cheap, seconds, no processes.
+  # Check 3 is machine-local until the durations journal has a CI transport;
+  # it reports UNVERIFIED rather than failing, which is stated in the script.
+  tier_lint:
+    command: "bash plugins/aid-orchestrator/scripts/aid-test-tier-lint.sh"
+    required: true
+    timeout_seconds: 120
+    max_retries: 0
+
   plan_diff:
     note: 'required=false for AID self-host: P037 plan predates plan-level AC convention;
       gate becomes meaningful for P038+'
@@ -335,15 +348,18 @@ gate_profiles:
   # every profile costs nothing.
   quick:
     include:
+      - tier_lint
       - bats_fsm
       - docs_updated
   targeted:
     include:
+      - tier_lint
       - targeted_tests
       - bats_fsm
       - docs_updated
   standard:
     include:
+      - tier_lint
       - targeted_tests
       - bats_fsm
       - plan_diff
@@ -368,12 +384,14 @@ gate_profiles:
   # instead of in front of a merge.
   full:
     include:
+      - tier_lint
       - bats_all
       - bats_fsm
       - plan_diff
       - docs_updated
   release:
     include:
+      - tier_lint
       - bats_all
       - bats_fsm
       - plan_diff
@@ -386,6 +404,7 @@ gate_profiles:
       separate terminal evidence, then cross GATES:DONE with an explicit
       audited --force reason naming bats_all_quarantine.
     include:
+      - tier_lint
       - bats_fsm
       - plan_diff
       - docs_updated
@@ -412,6 +431,7 @@ gate_profiles:
       profile_excluded/waived, and it must carry its own marked
       targeted-substitute receipt in the report's `quarantine_substitutes[]`.
     include:
+      - tier_lint
       - bats_fsm
       - plan_diff
       - docs_updated

@@ -2698,6 +2698,7 @@ enforcements:
     test: "scripts/tests/test-run-all-delegation.sh"
 
   - id: test_tier_declared
+    wired_via: "gate:tier_lint in .aid-o/config/execution.yaml (added 2026-08-11 — the row was blocking and invoked by nothing)"
     type: 6
     source: "scripts/aid-test-tier-lint.sh"
     instruction: "skills/plan-writing.md (Files block grammar)"
