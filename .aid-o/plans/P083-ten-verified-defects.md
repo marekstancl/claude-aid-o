@@ -196,13 +196,13 @@ Three groups.
 **Objective:** The merge path stops carrying a gate row that verifies nothing.
 
 **Files:**
-- Modify: `.aid-o/config/execution.yaml` (lines ~218-228) — the self-host `plan_diff` gate regains the `command:` the shipped default has had all along (`defaults/execution.yaml:109-116`) and an explicit `required:` key; the self-expiring exemption note that still names "P038+" is replaced by the resolved decision with its date, or the gate is removed from `standard`/`full`/`release`/`release_quarantine` include lists — whichever the first real run supports.
+- Modify: `.aid-o/config/execution.yaml` (lines ~218-228) — the self-host `plan_diff` gate regains the `command:` the shipped default has had all along (`defaults/execution.yaml:109-116`) and an explicit `required: true`; the self-expiring exemption note that still names "P038+" is replaced by the resolved decision with its date.
 - Modify: `plugins/aid-orchestrator/scripts/aid-run-gates.sh` (lines ~1944-1963) — a gate that appears in a profile's `include[]` with no `command` is a loud configuration refusal, not a `skip/no_command` row, so this cannot silently recur in any project.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats` — a profile including a command-less gate fails the runner with a message naming the gate and the profile; a gate absent from every profile with no command is ignored; the shipped defaults pass unchanged (tier: t1).
 
 **Architecture Context:** Group 2. Verified: `yq '.gates.plan_diff.command'` returns null on the self-host config while the gate sits in four merge-path profiles, and `aid-run-gates.sh:1953-1963` turns a null command into `skip/no_command` with `required` defaulting to false. Because `.aid-o/` is gitignored there is no history to say when the command disappeared — which is precisely why the runner-side refusal matters more than the config fix.
 
-**Implementation Detail:** The decision between restoring and removing is made from evidence: run `aid-plan-diff.sh` against this plan and read the result. A gate that passes is restored; a gate that cannot run on the current plan shape is removed from the profiles with the reason recorded, and the backlog entry closed as a deletion. The step is allowed to end either way; what it may not do is leave the row.
+**Implementation Detail — decision made 2026-08-11, restore not remove.** Measured before writing this step: `aid-plan-diff.sh --plan <this plan> --evidence-dir <tmp> --base-commit HEAD` exits 0 and produces a valid `plan-diff.json`, and the machine-verifiable AC convention it executes is alive — P080 carries 8 `verification_pattern` blocks, P081 nine, P082 eight. The gate is therefore meaningful on every plan we currently write, and its `skip/no_command` row is a pure regression in the self-host config. The exemption note's own threshold ("meaningful for P038+") was reached 45 plans ago. Restoring it also closes OBS-20260702-09's heading concern, since `aid-plan-diff.sh:164` already accepts both `## Acceptance Criteria` and `## Success Criteria`.
 
 **Error Handling:** The runner's new refusal names the gate, the profile and the config file — a misconfiguration must be actionable without reading the runner's source.
 
@@ -325,13 +325,13 @@ Three groups.
 **Objective:** The dependency-graph question in the C0 review is either answered from a real artifact or removed from the prompt.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh` (lines ~440-465) — either the provisional graph is produced before the manifest is built, or the manifest's `absent_pre_generation` status is treated as a stated non-input; whichever is chosen, the review can no longer be described as graph-informed when the graph is absent.
-- Modify: `plugins/aid-orchestrator/defaults/prompts/c0-plan-review-prompt-v1.md` (lines ~30-45) — mandatory check-table item 2 either names the artifact it reads or states the text-derived substitute it must use; the phrase "the pre-generation authority" at :32 stops describing something the review has never once seen.
-- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-graph-input.bats` — a review whose manifest records `absent_pre_generation` does not present itself as graph-informed; if the producer is moved earlier, a dispatch for a plan with a producible graph records a real `plan_sha256`-bound artifact (tier: t1).
+- Modify: `plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh` (lines ~440-465) — `build-manifest` produces the provisional graph itself, by invoking `aid-generation-readiness.sh --write-provisional` for the plan under review, before sealing the manifest; the existing `absent_pre_generation` path survives only for a plan whose graph genuinely cannot be produced, and the reason is recorded rather than assumed.
+- Modify: `plugins/aid-orchestrator/defaults/prompts/c0-plan-review-prompt-v1.md` (lines ~30-45) — mandatory check-table item 2 names the artifact it now actually receives, and states the text-derived substitute it must use in the remaining absent case; the phrase "the pre-generation authority" at :32 becomes true.
+- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-graph-input.bats` — a `build-manifest` for a lint-clean plan seals a real `plan_sha256`-bound graph, not `absent_pre_generation`; a plan that fails readiness still seals the absent status with its recorded reason; a graph bound to a different plan hash is still refused (tier: t1).
 
 **Architecture Context:** Group 3. Measured, not inferred: `P080/c0/codex/codex-prompt-vars.json` records both graph paths as `absent_pre_generation`, and the graph file's mtime is 37 minutes *after* the review it feeds. P076 and P079 show the same. The zero-byte-seal complaint in the original entry is already fixed and the graph is validated when present — only the ordering defeats it.
 
-**Implementation Detail:** Producing the graph earlier is the better answer if `aid-generation-readiness.sh --write-provisional` can run before the manifest without requiring generation state; the step's first task is to establish that, and the decision is recorded either way. Removing the claim is an acceptable outcome, not a failure.
+**Implementation Detail — decision made 2026-08-11, produce it earlier.** The open question was whether the producer needs generation state. It does not: `aid-generation-readiness.sh` (`:16-27`) takes a plan path and nothing else, sources `lib/aid-source-plan-graph.sh`, and writes the artifact from the plan text alone. Run against this plan before generation existed, it exited 0 in about a second and emitted `aid-source-plan-graph/v1` with 11 steps, 2 edges, no cycles, bound to the plan's own sha256. So the graph is a pure function of the plan and there is no reason for the review not to have it — the 37-minute gap is ordering, not dependency.
 
 **Error Handling:** A graph present but not bound to the reviewed plan hash is refused as it is today; this step does not loosen that.
 
@@ -416,17 +416,99 @@ Three groups.
 
 ## Success Criteria
 
-- [ ] A streamlined-mode EPIC advances review→release without a force waiver, on a real run in this repository.
-- [ ] A multi-line acceptance criterion survives EPIC generation intact in both the human section and `ac[]`.
-- [ ] An aborted release in a worktree (no `project.yaml`) leaves a clean working tree.
-- [ ] `README.md` shows the current version after the next release.
-- [ ] No profile in this repository's `execution.yaml` includes a gate without a `command`, and the runner refuses one by name.
-- [ ] `enabled: false` is honoured with a grep that has no PCRE support.
-- [ ] A stack-detected `/aid-init` workspace yields a non-empty `release` profile.
-- [ ] The gate-runtime baseline contains no live non-sequential branch, and a legacy file still reads.
-- [ ] No shipped prompt claims an artifact the evidence records as absent.
-- [ ] The catalog status decision is made, implemented and recorded.
-- [ ] All 46 verified backlog entries carry a dated verdict.
+1. A streamlined-mode EPIC advances review→release without a force waiver, and a multi-line acceptance criterion survives generation intact in both the human section and `ac[]`.
+2. An aborted release in a worktree leaves a clean working tree, and `README.md` shows the current version after the next release.
+3. No profile in this repository's `execution.yaml` includes a gate without a `command`, the runner refuses one by name, and `plan_diff` verifies this plan's own criteria instead of skipping.
+4. `enabled: false` is honoured on a grep without PCRE support, and a stack-detected `/aid-init` workspace yields a non-empty `release` profile.
+5. The gate-runtime baseline carries no live non-sequential branch while a legacy file still reads, and the C0 review receives a plan-hash-bound dependency graph instead of describing one it never had.
+6. The catalog-status decision is made, implemented and recorded, and all 46 verified backlog entries carry a dated verdict.
+
+## Acceptance Criteria
+
+- [ ] AC1 — The streamlined integration review reads the gates report where gates write it.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-streamlined-integration-review.bats"
+  expected_exit: 0
+```
+- [ ] AC2 — Multi-line acceptance criteria survive generation in both extraction paths.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-ac-extraction.bats"
+  expected_exit: 0
+```
+- [ ] AC3 — A rolled-back release restores every file it touched.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-release-rollback.bats"
+  expected_exit: 0
+```
+- [ ] AC4 — The README version list is edited by structure, not by token substitution.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-release-readme.bats"
+  expected_exit: 0
+```
+- [ ] AC5 — A profile including a command-less gate is refused by name.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats"
+  expected_exit: 0
+```
+- [ ] AC6 — The self-host `plan_diff` gate has a command again.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "test -n \"$(yq -r '.gates.plan_diff.command // \"\"' .aid-o/config/execution.yaml)\""
+  expected_exit: 0
+```
+- [ ] AC7 — The review-signal toggle fails closed instead of open.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-review-signal-toggle.bats"
+  expected_exit: 0
+```
+- [ ] AC8 — A composed consumer workspace yields five profiles with a non-empty `release`.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-init-gate-profiles.bats"
+  expected_exit: 0
+```
+- [ ] AC9 — The gate-runtime baseline is sequential-only and still reads legacy files.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-gate-baseline-sequential-only.bats"
+  expected_exit: 0
+```
+- [ ] AC10 — The C0 manifest seals a real plan-bound dependency graph.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-graph-input.bats"
+  expected_exit: 0
+```
+- [ ] AC11 — The catalog status gate explains itself or no longer exists.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-catalog-status-gate.bats"
+  expected_exit: 0
+```
+- [ ] AC12 — Every verified backlog entry carries a dated verdict.
+```yaml
+verification_pattern:
+  type: cmd
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-backlog-verdicts.bats"
+  expected_exit: 0
+```
 
 ## Constraints
 
