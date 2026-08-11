@@ -93,7 +93,7 @@ _cite_resolves() {
 # Emits one `CITE|<row-id>|<field>|<path>` line per unresolvable cite.
 _cite_violations() {
   local registry="$1" plugin_dir="$2" repo_dir="$3"
-  local id status source instruction field val part tok parts rows rc seen=0
+  local id status source instruction field val part tok parts rows rc
 
   # THE FAIL-OPEN THIS GUARD EXISTS FOR: a single row whose `source:` is a LIST
   # rather than a scalar makes `@tsv` abort. In a pipeline that error is invisible
@@ -117,20 +117,19 @@ _cite_violations() {
     | jq -r '.enforcements[] | [(.id // ""), (.status // ""), (.source // ""), (.instruction // "")] | join("")')"
   rc=$?
   if [[ $rc -ne 0 ]]; then
-    printf 'CITE|<harness>|extract|jq failed (rc=%s) — a non-scalar cite field aborts @tsv; rows were NOT checked\n' "$rc"
+    printf 'CITE|<harness>|extract|row extraction failed (jq rc=%s) — a non-scalar cite field is the known cause; rows were NOT checked\n' "$rc"
     return 0
   fi
   local declared actual
   declared="$(yq '.enforcements | length' "$registry" 2>/dev/null || echo 0)"
   actual="$(printf '%s\n' "$rows" | grep -c . || true)"
   if [[ "$declared" != "$actual" ]]; then
-    printf 'CITE|<harness>|extract|extracted %s of %s rows — the rest were never checked\n' "$actual" "$declared"
+    printf 'CITE|<harness>|extract|extracted %s of %s rows — extraction stopped early (or yq/jq returned nothing); the rest were NOT checked\n' "$actual" "$declared"
     return 0
   fi
 
   printf '%s\n' "$rows" \
     | while IFS=$'\x1f' read -r id status source instruction; do
-        seen=$((seen + 1))
         # Rows with status dead / removed_scoped keep citing removed files BY
         # DESIGN — that is what the status means. Skip their path validation.
         # Anything else, INCLUDING an empty status, is validated: `status` is not
