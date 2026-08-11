@@ -64,7 +64,11 @@ done
 CITE_TOKEN=""
 _cite_normalise_token() {
   local t="$1" dir base
-  t="${t#\`}"; t="${t#\'}"; t="${t#\"}"
+  # Leading punctuation: a cite is routinely written parenthesised or quoted, e.g.
+  # `… (lib/review-profile-check.sh:~84)`. Stripping the closing bracket but not the
+  # opening one left `(lib/…` as the token — which resolves nowhere and reads as a
+  # dangling cite for a file that is right there.
+  t="${t#\`}"; t="${t#\'}"; t="${t#\"}"; t="${t#(}"; t="${t#[}"
   while [[ "$t" =~ [\`\'\"\,\)\.\;\:]$ ]]; do t="${t%?}"; done
   t="${t%\'s}"
   if [[ "$t" == */* ]]; then dir="${t%/*}"; base="${t##*/}"; else dir=""; base="$t"; fi
@@ -93,7 +97,7 @@ _cite_resolves() {
 # Emits one `CITE|<row-id>|<field>|<path>` line per unresolvable cite.
 _cite_violations() {
   local registry="$1" plugin_dir="$2" repo_dir="$3"
-  local id status source instruction field val part tok parts rows rc
+  local id status source instruction field val part word tok parts rows rc
 
   # THE FAIL-OPEN THIS GUARD EXISTS FOR: a single row whose `source:` is a LIST
   # rather than a scalar makes `@tsv` abort. In a pipeline that error is invisible
@@ -143,10 +147,35 @@ _cite_violations() {
           while IFS= read -r part; do
             part="${part#"${part%%[![:space:]]*}"}"
             [[ -z "$part" ]] && continue
-            _cite_normalise_token "${part%% *}"; tok="$CITE_TOKEN"
-            [[ "$tok" != */* ]] && continue   # prose label — per token, not per value
-            _cite_resolves "$tok" "$plugin_dir" "$repo_dir" \
-              || printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok"
+            # EVERY word of the part is considered, not just the leading one:
+            # taking only the first word meant `see scripts/does-not-exist.sh` was
+            # dropped whole, because `see` has no slash and read as a prose label —
+            # a zero-effort way to exempt a row from validation, in a file that
+            # already contains prose-styled cites so the shape looks unremarkable.
+            #
+            # But "contains a slash" alone is far too loose for a non-leading word:
+            # measured over the shipped registry it produces 12 false positives from
+            # ordinary prose — `pre/post`, `plan/<id>`, `run/status/collect/cancel`,
+            # `--plan-id/--plan-mode`, `files/paths`, `backslash/pipe`. A harness
+            # that cries wolf twelve times is a harness people learn to ignore, so a
+            # non-leading word must LOOK like a repo path: it starts with a known
+            # top-level segment, or it ends in a source-file extension.
+            local first=1
+            for word in $part; do
+              _cite_normalise_token "$word"; tok="$CITE_TOKEN"
+              if [[ $first -eq 1 ]]; then
+                first=0
+              else
+                case "$tok" in
+                  scripts/*|skills/*|commands/*|agents/*|defaults/*|docs/*|lib/*|.github/*) ;;
+                  *.sh|*.md|*.yaml|*.yml|*.json|*.bats) ;;
+                  *) continue ;;
+                esac
+              fi
+              [[ "$tok" != */* ]] && continue   # prose word — per token, never per value
+              _cite_resolves "$tok" "$plugin_dir" "$repo_dir" \
+                || printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok"
+            done
           done <<< "$parts"
         done
       done

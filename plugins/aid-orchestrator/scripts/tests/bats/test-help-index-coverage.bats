@@ -128,16 +128,25 @@ _section_headings_scan() {
 }
 
 # section_body_unfenced <topic> — the body of `### Topic: <topic>`, from its
-# heading to the next outside-fence `### ` heading or EOF, with fenced content
-# blanked out. Case 3 matches against THIS: a command named only inside a code
-# fence has not been routed to, it has been mentioned.
+# heading to the next outside-fence `### ` OR `## ` heading, or EOF, with fenced
+# content blanked out. Case 3 matches against THIS: a command named only inside a
+# code fence has not been routed to, it has been mentioned.
+#
+# Ending on `## ` as well as `### ` matters: with only `### ` the LAST topic ran
+# to EOF and swallowed every trailing `## ` block. Measured on the shipped file,
+# that made /aid-init, /aid-setup and /aid-do count as "routed by topic fsm"
+# purely because they are named in the closing sections. Nothing is falsely
+# routed today — those three have their own topics — but the hole was sitting
+# there waiting for a command whose topic happened to be last.
 section_body_unfenced() {
   awk -v want="$1" '
     /^[[:space:]]*```/ { infence = !infence; if (inside) print ""; next }
+    !infence && /^#### / { if (inside) print; next }
     !infence && /^### / {
       if ($0 == "### Topic: " want) { inside = 1; next }
       else if (inside) { exit }
     }
+    !infence && /^## / { if (inside) exit }
     inside { if (infence) print ""; else print }
   ' "$HELP_MD"
 }
