@@ -881,7 +881,16 @@ elif git check-ignore -q -- "$_p083_plan_abs" 2>/dev/null; then
   # so a hard tracked-only rule would break the plugin's own dogfood workflow.
   echo "[INFO] plan_source_binding: source_plan_sha (${plan} is gitignored — the committed manifest's source_plan_sha is the binding, not a tracked blob)" >&2
 else
-  _p083_target="$(aid_target_branch 2>/dev/null || echo "")"
+  # `_gen_target_branch`, NOT `aid_target_branch`: lib/aid-lifecycle.sh is not
+  # sourced until far below this preflight (see the _gen_target_branch header
+  # at the top of this file, which exists for exactly this reason). Calling the
+  # lib name here resolved to "command not found" -> empty -> every TRACKED
+  # plan was refused with "target branch '<unresolved>' does not exist", while
+  # the check it was written to perform — comparing the tracked plan against
+  # the target branch's copy — never ran at all. It went unnoticed because this
+  # repository gitignores `.aid-o/plans/`, so the dogfood path takes the
+  # gitignored branch above and never reaches this line.
+  _p083_target="$(_gen_target_branch 2>/dev/null || echo "")"
   _p083_rel="${_p083_plan_abs#"$_p083_repo_root"/}"
   if [[ -z "$_p083_target" ]] || ! git rev-parse --verify --quiet "$_p083_target" >/dev/null 2>&1; then
     # No integration branch exists to verify against. Refuse only when the plan
