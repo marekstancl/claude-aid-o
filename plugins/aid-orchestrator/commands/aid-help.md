@@ -89,10 +89,6 @@ FSM debugging:
   /aid-status <epic-id>                    → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
-Token monitoring (a script, not a command):
-  bash {plugin_path}/scripts/lib/aid-token-count.sh {plugin_path}/skills/*.md
-  → token count per file (target: total under 50K)
-
 Audit: /aid-audit → project health, gate failure rates, recommendations
 Emergency: /aid-stop → halt auto-mode and return control to you
 ```
