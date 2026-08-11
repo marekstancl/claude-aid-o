@@ -140,7 +140,14 @@ aid_help_index_rows() {
   fi
 
   local out
-  out="$(yq -r '.surfaces[] | [.command, .file, .topic, .audience, .disposition, .final_turn, .purpose] | @tsv' "$index" 2>&1)" || {
+  # `writes` is emitted LAST and as a marker rather than a value: it is a list, so
+  # it cannot share a @tsv row with scalars, but leaving it out of the reader
+  # entirely meant nothing read it at all — the header calls it a required column
+  # while ten of thirteen rows could lose it with every test still green. That is
+  # the "declared but unenforced" defect this plan exists to kill, sitting inside
+  # the file meant to prevent it, in the very column Step 5 writes its ownership
+  # decisions into. `-` = key absent, `[]` = present and empty, `N` = N entries.
+  out="$(yq -r '.surfaces[] | [.command, .file, .topic, .audience, .disposition, .final_turn, .purpose, (.writes | tag)] | @tsv' "$index" 2>&1)" || {
     printf 'aid_help_index_rows: yq failed to read %s: %s\n' "$index" "$out" >&2
     return 1
   }

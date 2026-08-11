@@ -347,8 +347,14 @@ router_topics() {
 }
 
 @test "case 9: every index row carries all inspected columns" {
-  local violations="" command file topic audience disposition final_turn purpose
-  while IFS=$'\t' read -r command file topic audience disposition final_turn purpose; do
+  local violations="" command file topic audience disposition final_turn purpose writes
+  while IFS=$'\t' read -r command file topic audience disposition final_turn purpose writes; do
+    # `writes` is the eighth required column and until now nothing read it: it
+    # could be deleted from ten of thirteen rows with the whole suite still green.
+    # Step 5 writes the init/setup ownership decisions into exactly this column,
+    # so an unchecked column is an unchecked deliverable. `!!null` means the key is
+    # absent; `[]` (read-only) and a count are both legitimate.
+    [ "$writes" = "!!null" ] && violations+=$'\n'"    $command: required column 'writes' is missing (use [] for a read-only surface)"
     for pair in "command=$command" "file=$file" "topic=$topic" \
                 "audience=$audience" "disposition=$disposition" \
                 "final_turn=$final_turn" "purpose=$purpose"; do

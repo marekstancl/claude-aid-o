@@ -370,7 +370,7 @@ enforcements:
   # ── E-046-3_3: CP1/behavior_trace enforcement registration ─────────────────
   - id: cp1_critical_path_flow_trace
     type: 9
-    source: plan-writing.md
+    source: skills/plan-writing.md
     instruction: "Rule #21: every plan step introducing a handler must declare explicit outcomes for every branch; undeclared branch → REVISE_REQUIRED (advisory)"
     severity: medium
     surface: cp1
@@ -2759,7 +2759,7 @@ enforcements:
     recovery: "The failure names the unindexed surface; add it to defaults/help-index.yaml and regenerate commands/aid-help.md."
     test: "scripts/tests/bats/test-help-index-coverage.bats"
 
-  - id: registry_cite_resolves
+  - id: registry_cite_validation
     type: 3
     source: "scripts/tests/test-enforcement-registry-cites.sh"
     instruction: "CLAUDE.md (section: 'Register + document every enforcement')"
@@ -2768,6 +2768,6 @@ enforcements:
     status: active
     verdict: ALIGNED
     tier: t0
-    description: "P080 Step 4 — a registry row is this plugin's promise that a detector has a real enforcing surface, so a row citing a file that was deleted, renamed or moved still LOOKS wired while enforcing nothing: the P026 'detector without enforcement' failure one level up, hiding inside the very file that is supposed to make enforcement auditable. Every source:/instruction: cite must resolve against one of the registry's three real bases (plugin root, repo root, plugin+scripts/); row ids must be unique, because this file is edited by appending and a duplicate id silently shadows whichever row a consumer's select() reaches first. Line numbers are deliberately NOT asserted — they drift on every edit above them and asserting them would make the registry unmaintainable; file existence is the invariant. Registers itself here because a checker absent from the thing it checks is exactly the omission it exists to catch. TIER: t0, so it is on the MERGE PATH (CI runs --tier t0 then --tier t1; t2 is nightly-only). The harness fails CLOSED by construction: it materialises rows before iterating, checks jq's exit code, and asserts the extracted row count equals the registry's own length — an earlier draft let one non-scalar cite field abort extraction mid-pipeline and reported success having checked 0 of 428 rows."
+    description: "P080 Step 4 — a registry row is this plugin's promise that a detector has a real enforcing surface, so a row citing a file that was deleted, renamed or moved still LOOKS wired while enforcing nothing: the P026 'detector without enforcement' failure one level up, hiding inside the very file that is supposed to make enforcement auditable. Every source:/instruction: cite must resolve against one of the registry's three real bases (plugin root, repo root, plugin+scripts/); row ids must be unique, because this file is edited by appending and a duplicate id silently shadows whichever row a consumer's select() reaches first. Line numbers are deliberately NOT asserted — they drift on every edit above them and asserting them would make the registry unmaintainable; file existence is the invariant. Named registry_cite_validation because that is the id plan P080 Step 16 expects; a differently-named row would have let Step 16 honestly create a SECOND row for one check, and the id-uniqueness assertion cannot catch that because the names differ. Registers itself here because a checker absent from the thing it checks is exactly the omission it exists to catch. TIER: t0, so it is on the MERGE PATH (CI runs --tier t0 then --tier t1; t2 is nightly-only). The harness fails CLOSED by construction: it materialises rows before iterating, checks jq's exit code, and asserts the extracted row count equals the registry's own length — an earlier draft let one non-scalar cite field abort extraction mid-pipeline and reported success having checked 0 of 428 rows."
     recovery: "The failure prints one CITE|<row-id>|<field>|<path> line per unresolvable cite. Repoint the row to the surface that really carries the rule, or mark it status: dead with a rationale if the enforcement died with what it cited. Never allowlist a path to make a row pass."
     test: "scripts/tests/test-enforcement-registry-cites.sh"

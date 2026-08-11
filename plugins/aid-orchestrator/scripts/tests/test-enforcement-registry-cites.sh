@@ -160,19 +160,43 @@ _cite_violations() {
             # that cries wolf twelve times is a harness people learn to ignore, so a
             # non-leading word must LOOK like a repo path: it starts with a known
             # top-level segment, or it ends in a source-file extension.
+            # The LEADING word of a part is the cite. Every later word is prose
+            # unless it unmistakably names a repo path — the two are held to
+            # different standards on purpose, and both standards were measured
+            # against the shipped registry rather than guessed:
+            #
+            #   leading    validated even without a slash, so `CLAUDE.md` — a real
+            #              instruction surface, and the shape this harness uses in
+            #              its OWN registry row — is checkable. Without this, the
+            #              tool for finding rows that merely look wired could not
+            #              check itself.
+            #   non-leading  must start with a known top-level segment. Accepting
+            #              "contains a slash" produced 12 false positives from
+            #              ordinary prose (`pre/post`, `plan/<id>`,
+            #              `run/status/collect/cancel`, `--plan-id/--plan-mode`);
+            #              also accepting a bare extension produced 8 more from
+            #              filenames mentioned mid-sentence (`plan-writing.md`,
+            #              `active.md`) that live in a subdirectory, not at root.
+            #              A harness that cries wolf is one people learn to ignore.
+            #
+            # What this still misses: a second FULL path inside one part that does
+            # not start with a known segment. Recorded rather than papered over.
             local first=1
             for word in $part; do
               _cite_normalise_token "$word"; tok="$CITE_TOKEN"
               if [[ $first -eq 1 ]]; then
                 first=0
+                case "$tok" in
+                  */*) ;;
+                  *.md|*.sh|*.yaml|*.yml|*.json|*.bats) ;;
+                  *) continue ;;
+                esac
               else
                 case "$tok" in
                   scripts/*|skills/*|commands/*|agents/*|defaults/*|docs/*|lib/*|.github/*) ;;
-                  *.sh|*.md|*.yaml|*.yml|*.json|*.bats) ;;
                   *) continue ;;
                 esac
               fi
-              [[ "$tok" != */* ]] && continue   # prose word — per token, never per value
               _cite_resolves "$tok" "$plugin_dir" "$repo_dir" \
                 || printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok"
             done
