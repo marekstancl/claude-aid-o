@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# aid-tier: t0
+# test-enforcement-registry-cites.sh — P080 Step 4.
+#
+# Registry hygiene: every `source:` / `instruction:` cite in
+# defaults/enforcement-registry.yaml must name a file (or directory) that
+# actually exists, and every row id must be unique.
+#
+# Why this exists: a registry row is the plugin's promise that a detector has a
+# real enforcing surface. A cite that points at a file which was deleted,
+# renamed, or moved into an untracked tree is the P026 failure mode one level
+# up — the row still LOOKS wired, and nothing notices that it isn't. Step 4 of
+# P080 found 8 such rows; this harness is what keeps the ninth from happening
+# silently.
+#
+# What is deliberately NOT asserted: line numbers. `file:123` drifts on every
+# edit above line 123 and asserting it would make the registry unmaintainable.
+# File existence is the invariant; the line is a navigation hint.
+#
+# The id-uniqueness check closes the append-duplication class: this file is
+# edited by appending rows, and an appended duplicate id silently shadows
+# whichever row a consumer's `select(.id == …) | head -1` happens to hit first.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_DIR="$(cd "${PLUGIN_DIR}/../.." && pwd)"
+REGISTRY="${PLUGIN_DIR}/defaults/enforcement-registry.yaml"
+
+pass=0; fail=0
+fail_msg() { echo "  FAIL: $1"; fail=$((fail + 1)); }
+pass_msg() { echo "  PASS: $1"; pass=$((pass + 1)); }
+
+for dep in jq yq; do
+  command -v "$dep" >/dev/null 2>&1 || {
+    echo "  FAIL: $dep not installed"
+    echo "Results: 0/1 passed, 1 failed"
+    exit 1
+  }
+done
+
+# ─── Tokeniser ──────────────────────────────────────────────────────────────
+#
+# All four annotation grammars below are present verbatim in the shipped
+# registry, so a parser that handles only `;` / `:N` / `§` reports hundreds of
+# false dangles:
+#
+#   scripts/aid-plan-fsm.sh:cmd_plan_finalize --stage gates   (:identifier)
+#   scripts/lib/review-profile-check.sh:~84                   (:~digits)
+#   scripts/aid-fsm.sh's existing ESCALATION precondition     (possessive)
+#   scripts/aid-plan-to-epic.sh (search: '…') + lib/aid-scoping.sh:_fn  (+ join)
+#
+# A value is split on `;` and ` + `; the LEADING whitespace-delimited token of
+# each part is the path candidate. A candidate containing no `/` is a prose
+# label and is dropped — and this drop is applied PER TOKEN, after tokenising,
+# never per whole value. Applied per value it leaves ~40 false positives,
+# because a value like `scripts/x.sh (search: 'foo') + Step 3` contains a slash
+# overall while several of its split tokens are pure prose.
+#
+# Result is returned in the global CITE_TOKEN rather than via `$(…)`: this runs
+# once per cite token over a ~430-row registry, and a command substitution forks
+# a subshell every time — enough to push the harness from t0 into t1 for nothing.
+CITE_TOKEN=""
+_cite_normalise_token() {
+  local t="$1" dir base
+  t="${t#\`}"; t="${t#\'}"; t="${t#\"}"
+  while [[ "$t" =~ [\`\'\"\,\)\.\;\:]$ ]]; do t="${t%?}"; done
+  t="${t%\'s}"
+  if [[ "$t" == */* ]]; then dir="${t%/*}"; base="${t##*/}"; else dir=""; base="$t"; fi
+  # Everything from the first `:` in the basename onwards is an annotation
+  # (`:128`, `:~84`, `:cmd_plan_finalize`, `:gates.d5`) — never part of the path.
+  base="${base%%:*}"
+  base="${base%\'s}"
+  while [[ "$base" =~ [\`\'\"\,\)\.]$ ]]; do base="${base%?}"; done
+  if [[ -n "$dir" ]]; then CITE_TOKEN="${dir}/${base}"; else CITE_TOKEN="$base"; fi
+}
+
+# The registry's cite base is MIXED — measured over the shipped file: the vast
+# majority of tokens resolve only under the plugin root, a handful only under
+# the repo root, and a third convention writes bare `lib/…` meaning
+# plugin + `scripts/`. A token resolving under NONE of the three is a violation.
+# `-e`, not `-f`: rows legitimately cite directories (e.g. `skills/visual-companion/`).
+_cite_resolves() {
+  local t="$1" plugin_dir="$2" repo_dir="$3"
+  [[ -e "${plugin_dir}/${t}" ]] && return 0
+  [[ -e "${repo_dir}/${t}" ]] && return 0
+  [[ -e "${plugin_dir}/scripts/${t}" ]] && return 0
+  return 1
+}
+
+# _cite_violations <registry> <plugin_dir> <repo_dir>
+# Emits one `CITE|<row-id>|<field>|<path>` line per unresolvable cite.
+_cite_violations() {
+  local registry="$1" plugin_dir="$2" repo_dir="$3"
+  local id status source instruction field val part tok parts
+  yq -o=json '.' "$registry" \
+    | jq -r '.enforcements[] | [(.id // ""), (.status // ""), (.source // ""), (.instruction // "")] | @tsv' \
+    | while IFS=$'\t' read -r id status source instruction; do
+        # Rows with status dead / removed_scoped keep citing removed files BY
+        # DESIGN — that is what the status means. Skip their path validation.
+        case "$status" in dead|removed_scoped) continue ;; esac
+        for field in source instruction; do
+          val="$source"; [[ "$field" == "instruction" ]] && val="$instruction"
+          case "$val" in ""|"n/a"|"planned"|"null") continue ;; esac
+          parts="${val// + /$'\n'}"; parts="${parts//;/$'\n'}"
+          while IFS= read -r part; do
+            part="${part#"${part%%[![:space:]]*}"}"
+            [[ -z "$part" ]] && continue
+            _cite_normalise_token "${part%% *}"; tok="$CITE_TOKEN"
+            [[ "$tok" != */* ]] && continue   # prose label — per token, not per value
+            _cite_resolves "$tok" "$plugin_dir" "$repo_dir" \
+              || printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok"
+          done <<< "$parts"
+        done
+      done
+}
+
+# ─── 1. The registry parses ─────────────────────────────────────────────────
+echo "TEST: the registry parses as YAML"
+if yq -o=json '.' "$REGISTRY" >/dev/null 2>&1; then
+  pass_msg "$REGISTRY parses"
+else
+  fail_msg "$REGISTRY did not parse as YAML"
+  echo "Results: ${pass}/$((pass + fail)) passed, ${fail} failed"
+  exit 1
+fi
+
+# ─── 2. Every row has an id ─────────────────────────────────────────────────
+# A hand-edited row that lost its `id` is caught HERE, with its index, rather
+# than as a mystery empty selector in a downstream consumer.
+echo "TEST: every enforcement row carries an id"
+missing_idx="$(yq -o=json '.' "$REGISTRY" \
+  | jq -r 'to_entries | .[] | select(.key == "enforcements") | .value
+           | to_entries | map(select((.value.id // "") == "") | .key) | join(", ")')"
+if [[ -z "$missing_idx" ]]; then
+  pass_msg "no row is missing its id"
+else
+  fail_msg "enforcement row(s) at index [$missing_idx] have no 'id' field"
+fi
+
+# ─── 3. Row ids are unique ──────────────────────────────────────────────────
+echo "TEST: every row id is unique"
+dupes="$(yq '.enforcements[].id' "$REGISTRY" 2>/dev/null | sort | uniq -d)"
+if [[ -z "$dupes" ]]; then
+  pass_msg "no duplicate row ids"
+else
+  fail_msg "duplicate row id(s): $(tr '\n' ' ' <<<"$dupes")"
+fi
+
+# ─── 4. Every cite resolves ─────────────────────────────────────────────────
+echo "TEST: every source/instruction cite resolves to a real file or directory"
+violations="$(_cite_violations "$REGISTRY" "$PLUGIN_DIR" "$REPO_DIR")"
+if [[ -z "$violations" ]]; then
+  pass_msg "all source/instruction cites resolve"
+else
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    echo "  $line"
+  done <<< "$violations"
+  fail_msg "$(grep -c . <<<"$violations") unresolvable cite(s) — see CITE| lines above"
+fi
+
+# ─── 5. Negative control: the check FIRES ───────────────────────────────────
+# Without this, a green run proves only that nothing happens to be broken —
+# not that a broken cite would be caught. The fixture is built in a temp dir so
+# no deliberately-corrupt registry ships in the tree.
+echo "TEST: the cite check FIRES on a deliberately corrupted fixture"
+fixture_dir="$(mktemp -d)"
+trap 'rm -rf "$fixture_dir"' EXIT
+cat > "${fixture_dir}/registry.yaml" <<'FIXTURE'
+enforcements:
+  - {id: control_good, type: 1, source: "scripts/aid-fsm.sh:1", instruction: "n/a", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "resolves"}
+  - {id: control_bad, type: 1, source: "scripts/this-file-does-not-exist.sh:12", instruction: "n/a", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "must be flagged"}
+  - {id: control_dead, type: 1, source: "scripts/also-gone.sh", instruction: "n/a", severity: advisory, surface: internal-guard, status: dead, verdict: ORPHAN, description: "dead rows keep citing removed files by design"}
+FIXTURE
+control="$(_cite_violations "${fixture_dir}/registry.yaml" "$PLUGIN_DIR" "$REPO_DIR")"
+if grep -q '^CITE|control_bad|source|scripts/this-file-does-not-exist\.sh$' <<<"$control"; then
+  pass_msg "the corrupted cite is flagged"
+else
+  fail_msg "the corrupted cite was NOT flagged — the guard cannot fire (got: ${control:-<nothing>})"
+fi
+if grep -q '^CITE|control_good|' <<<"$control"; then
+  fail_msg "a resolvable cite was flagged — false positive in the control fixture"
+else
+  pass_msg "the resolvable cite is not flagged"
+fi
+if grep -q '^CITE|control_dead|' <<<"$control"; then
+  fail_msg "a status: dead row was path-validated — dead rows cite removed files by design"
+else
+  pass_msg "status: dead rows are exempt from path validation"
+fi
+
+echo "----------------------------------------------------------------------"
+total=$((pass + fail))
+echo "Results: ${pass}/${total} passed, ${fail} failed"
+[[ "$fail" -eq 0 ]]

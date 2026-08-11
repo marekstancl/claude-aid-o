@@ -127,6 +127,20 @@ declare -A DECLARED_AMENDMENTS=(
   # neither the check nor the `grep -q` the row and the template both claimed)
   # and recorded that the anchor is now case-insensitive.
   ["increment_result_pass"]="P079 Step 4 (IMP-472) — stale cite repointed, case-tolerance recorded"
+  # P080 Step 4 added a test that resolves every registry cite against the three
+  # real cite bases, and repaired what it measured: 11 unresolvable tokens across
+  # 8 rows. Seven of those rows are in this baseline. Four cited the removed
+  # /aid-research and knowledge layer and are now `status: dead`; three were
+  # repointed from records (plans, archived docs) to the shipped instruction
+  # surfaces that actually carry the rule. None was deleted, and no path was
+  # allowlisted to make a row pass.
+  ["research_quality_gates"]="P080 Step 4 — cite dangled at removed commands/aid-research.md; row marked status: dead"
+  ["research_idempotency"]="P080 Step 4 — same removal; no re-fetch left to suppress; status: dead"
+  ["knowledge_base_write_protect"]="P080 Step 4 — defaults/templates/knowledge-base.yaml was deleted with the knowledge layer; status: dead"
+  ["knowledge_dedup_threshold"]="P080 Step 4 — the knowledge: block holding the thresholds is gone from defaults/integrations.yaml; status: dead"
+  ["provenance_aggregate_fabricated"]="P080 Step 4 — instruction repointed from an archived (gitignored) plan doc to the shipped anti-fabrication rules in skills/pipeline.md + skills/agent-protocol.md; stale source line repointed to aid-fsm.sh:verify_provenance"
+  ["release_policy_preempted"]="P080 Step 4 — instruction cited a directory that does not exist; observe-only internal telemetry has no human-facing rule, so the schema's n/a (internal guard) applies; E10 handoff note preserved in the description"
+  ["init_idempotency"]="P080 Step 4 — stale line cite refreshed commands/aid-init.md:333 -> :588, the current ## Idempotency section"
 )
 # Codex review: counting `- id:` lines only proved the registry didn't
 # SHRINK below a floor — it never proved that any SPECIFIC prior row
