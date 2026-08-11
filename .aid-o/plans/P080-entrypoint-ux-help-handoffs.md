@@ -160,7 +160,7 @@ Bats cases: (1) enumerated set == the PUBLIC subset of index `command` values (d
 - [ ] `grep -n 'execution.yaml.*lazy-created' commands/aid-help.md` returns nothing — narrowed deliberately: :263 (execution.yaml) is the stale claim, but :264 (queue.yaml, genuinely created by `aid-queue-add.sh`) is TRUE and a blanket ban on the phrase would delete a correct line.
 - [ ] The plan-lifecycle topic contains both mode names verbatim (`plan_branch`, `legacy_epic_release_mode`).
 - [ ] P076's landed text survives the move: a distinctive P076 literal (`awaiting_host_resume`) appears exactly once in the rewritten file.
-- [ ] `bash scripts/aid-lint-skill.sh commands/aid-help.md` reports zero findings, and the file no longer appears in `test-skill-lint.sh`'s GRANDFATHERED list.
+- [ ] `bash scripts/aid-lint-skill.sh commands/aid-help.md` reports zero findings, and the file no longer appears in the GRANDFATHERED list inside `scripts/tests/test-skill-lint.sh`.
 
 **Grandfathering decision (CP1) — binds Steps 3, 5 and 6, and each of them carries it in its OWN Files list and ACs (a decision stated only here would never reach a per-step dispatch):** `commands/aid-help.md`, `commands/aid-init.md` and `commands/aid-setup.md` sit on the GRANDFATHERED list in `scripts/tests/test-skill-lint.sh` (~:30-51), which downgrades their structural lint findings to advisory. All three are substantively rewritten by this plan, and the repo's CLAUDE.md requires delisting a file once it is brought up to standard. Measured at CP1: aid-help.md and aid-setup.md already lint clean, so delisting them is free; aid-init.md costs three `version_stamped_heading` fixes. Therefore Step 3 (aid-help.md) and Steps 5-6 (aid-init.md, aid-setup.md) each add `plugins/aid-orchestrator/scripts/tests/test-skill-lint.sh` to their Files list, remove their own file from the GRANDFATHERED array, and add the AC `bash scripts/aid-lint-skill.sh <their file>` reports zero findings. If a file cannot be brought clean inside its step, that step records an explicit PM-visible decision to keep it grandfathered — never a silent retention.
 
@@ -239,7 +239,7 @@ Emit one line per violation `CITE|<row-id>|<field>|<path>`; exit 1 on any. Repai
 - [ ] No content follows the `**Last Updated:**` footer line in aid-init.md (tail check).
 - [ ] Both files contain the string `lib/aid-roots.sh` at least once; each of the four filenames has a carve-out sentence naming the other command in both files, and the `project.yaml` carve-out names the project-scanner as a delegated writer.
 - [ ] Repo-root `README.md`'s command table lists all 13 public surfaces.
-- [ ] `bash scripts/aid-lint-skill.sh commands/aid-init.md` and the same for `commands/aid-setup.md` report zero findings, and neither file appears in `test-skill-lint.sh`'s GRANDFATHERED list.
+- [ ] `bash scripts/aid-lint-skill.sh commands/aid-init.md` and the same for `commands/aid-setup.md` report zero findings, and neither file appears in the GRANDFATHERED list inside `scripts/tests/test-skill-lint.sh`.
 
 **Effort:** M
 **AID Role:** docs-writer
