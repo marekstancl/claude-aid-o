@@ -1,6 +1,6 @@
 ---
 name: aid-init
-description: Create or upgrade the .aid-o/ workspace (15-item base manifest, idempotent)
+description: Create or upgrade the .aid-o/ workspace (13-item base manifest, idempotent)
 user_invocable: true
 ---
 
