@@ -270,11 +270,17 @@ tree_snapshot() {
   git -C "$TEST_PROJECT_ROOT" add -A
   git -C "$TEST_PROJECT_ROOT" commit -q -m "fixture"
   git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_TMPDIR/wt" -b fixture-wt
+  # A divergent local copy inside the worktree must be IGNORED — the state root
+  # is the primary checkout. Without this the next two assertions could pass on
+  # a cwd-relative read.
+  printf 'active_preset: worktree_fork\nautonomous_mode: false\n' \
+    > "$TEST_TMPDIR/wt/.aid-o/config/permissions.yaml"
   cd "$TEST_TMPDIR/wt"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   # Same root, same everything — a worktree must not fork the report.
   [[ "$(line_for 'state root')" == "state root: $(cd "$TEST_PROJECT_ROOT" && pwd -P)" ]]
+  [[ "$output" != *"worktree_fork"* ]]
   [[ "$output" == "$primary_output" ]]
 }
 
@@ -341,8 +347,18 @@ tree_snapshot() {
 }
 
 @test "the source carries no write operation" {
-  run grep -nE '(^|[^0-9&<>])>[^&]|>>|yq[^|]*-i |sed -i|tee |mktemp|mkdir |touch |rm ' "$SCRIPT"
-  # the only permitted matches are stderr-only redirections inside the
-  # here-doc-free guards; assert there are none at all
+  # Comment lines are stripped first: the header DESCRIBES the forbidden
+  # constructs, and a checker fooled by its own documentation is worthless.
+  local code="$TEST_TMPDIR/code.sh"
+  grep -v '^[[:space:]]*#' "$SCRIPT" > "$code"
+
+  # Categorical writers: none of these may appear at all.
+  run grep -nE '>>|yq +-i|sed +-i|\btee\b|\bmktemp\b|\bmkdir\b|\btouch\b|\brm\b|\bcp\b|\bmv\b' "$code"
   [ "$status" -ne 0 ]
+
+  # Every remaining redirection must target /dev/null or an existing fd —
+  # a redirection to a PATH would be a write, however it is spelled.
+  # Trailing shell punctuation (`)`, `;`, quotes) is not part of the target.
+  run bash -c "grep -oE '[0-9]?>[^ ]*' '$code' | grep -vE '^[0-9]?>(/dev/null|&1|&2)[);\"'\\''|]*\$' || true"
+  [ -z "$output" ]
 }

@@ -811,7 +811,8 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
   Upgrade" above
 - If `$ARGUMENTS` is empty → auto-detect mode (fresh init or upgrade)
 - **Standards** — selection stored in `project.yaml → standards.active`. Override individual rules via `standards.overrides.disabled_rules[]` or `standards.overrides.severity_overrides`
-- **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
+- **After init** → print the configuration summary (see "Closing output" below), then suggest:
+  "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 ## Plan mode
 
@@ -824,6 +825,24 @@ before. New plans default to `plan_branch` when the project declares a
 `plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
 creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
+
+## Closing output
+
+The LAST thing `/aid-init` does — after every file, hook and config-default step above — is run
+
+```
+{plugin_path}/scripts/aid-config-summary.sh
+```
+
+and present its output **verbatim**, unedited and unsummarized, followed by the next-step
+suggestion. Do not describe the resulting configuration in your own words: the script is the one
+place that renders it, and `/aid-setup` opens with the same block, so a PM sees the same eight
+lines from both commands.
+
+The script is read-only (it never writes, and a missing workspace is a report line rather than an
+error), so it is safe to run at the end of a fresh init, an idempotent re-run, or an upgrade.
+Exit codes: `0` rendered, `2` usage, `3` state root unresolvable (not a git repository — surface
+its stderr as-is and skip the block; the rest of init's report still stands).
 
 
 **Last Updated:** 2026-08-11

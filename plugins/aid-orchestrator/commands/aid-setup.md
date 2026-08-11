@@ -52,7 +52,18 @@ target outside `.aid-o/`; it is written at the primary checkout's project root f
 
 ## Interactive Menu
 
-When no argument provided:
+When no argument provided, **open with the configuration summary before the menu**: run
+
+```
+{plugin_path}/scripts/aid-config-summary.sh
+```
+
+and present its output verbatim. It is the same read-only block `/aid-init` closes with — one
+renderer, one wording, so setup never re-describes the configuration in its own words. It never
+writes anything; exit `3` (not a git repository) means show its stderr and stop, since setup has
+no workspace to configure either.
+
+Then:
 
 1. Read `active_preset` from `.aid-o/config/permissions.yaml`
 2. Count enabled integrations from `.aid-o/config/integrations.yaml` (count keys where `enabled: true`)
