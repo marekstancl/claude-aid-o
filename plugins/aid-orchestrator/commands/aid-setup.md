@@ -40,6 +40,16 @@ Parse `$ARGUMENTS`:
 | `scan` | Read `skills/setup/project-scan.md`, execute |
 | `all` | Execute sequentially: scan → permissions → integrations → claude-md |
 
+Every module **mutates files created by `/aid-init`**; `/aid-setup` never creates the workspace and
+never runs migrations or upgrades — those are init-owned.
+
+## Where setup writes
+
+The state root is the **primary checkout**, resolved per `lib/aid-roots.sh` semantics — never a
+linked worktree. Running `/aid-setup` from inside `.aid-worktrees/plan-*` therefore edits the
+**primary checkout's** `.aid-o/config/`, not a copy local to the worktree. `CLAUDE.md` is the one
+target outside `.aid-o/`; it is written at the primary checkout's project root for the same reason.
+
 ## Interactive Menu
 
 When no argument provided:
@@ -80,6 +90,18 @@ For each selected module:
 - `defaults/policies/permissions.yaml` — preset definitions (autonomous, aspirin, steroids)
 - `defaults/integrations.yaml` — integration config template
 
+## File ownership
+
+Each file below is created by `/aid-init`; subsequent changes are owned by the `/aid-setup` module
+named here. `/aid-init` re-runs never rewrite them.
+
+| File | Created by | Later changes owned by | Notes |
+|------|-----------|------------------------|-------|
+| `.aid-o/config/permissions.yaml` | `/aid-init` (from template) | `/aid-setup permissions` | preset and per-setting changes |
+| `.aid-o/config/project.yaml` | `/aid-init` (auto-detection) | `/aid-setup scan` | one delegated writer: `agents/project-scanner.md` (Quick Scan Mode A, triggered by this module; Deep Analysis Mode B, Orchestrator-triggered post-milestone, extends the same auto-detected sections). Merge rule from `skills/setup/project-scan.md` governs: auto-detected sections are replaced, PM-added custom fields are never overwritten. `skills/memory.md`'s "NEVER write to project.yaml" binds memory agents, not the scanner. |
+| `.aid-o/config/integrations.yaml` | `/aid-init` (only `memory.enabled: true`) | `/aid-setup integrations` | every enable/disable after creation |
+| `CLAUDE.md` | not created by `/aid-init` | `/aid-setup claude-md` | sole AID writer; never overwrites PM-authored content |
+
 **Not here: `gate_profiles` upgrade for an existing `execution.yaml`.** `(4) Project Scan` /
 `scan` re-detects `test_cmd`/`lint_cmd`/`build_cmd` in `project.yaml` — it does not touch
 `config/execution.yaml`. The non-destructive, PM-confirmed `gate_profile_defaults`/`gate_profiles`
@@ -96,4 +118,4 @@ path in one command avoids two commands independently deciding what belongs in `
 - **Modular** — each module is independent, load only what's needed
 
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-08-11
