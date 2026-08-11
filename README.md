@@ -69,7 +69,7 @@ Or go fully autonomous:
 | `/aid-plan [topic]` | Brainstorm → architecture → plan.json (merges old brainstorm + write-plan + plan-epic) |
 | `/aid-run [id]` | Execute full pipeline: READY → EXECUTE → GATES → DONE. Use `--auto` for autonomous mode |
 | `/aid-status [id]` | Pipeline status — FSM state, steps, gates, queue (merges old epic-status + epic-queue) |
-| `/aid-init` | Create or upgrade the `.aid-o/` workspace — 13-item base manifest, stack auto-detection, idempotent |
+| `/aid-init` | Create or upgrade the `.aid-o/` workspace — base manifest, stack auto-detection, idempotent |
 | `/aid-setup [module]` | Configure what init created — permissions, integrations, CLAUDE.md, stack re-scan |
 | `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
 | `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |

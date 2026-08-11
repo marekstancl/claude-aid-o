@@ -114,7 +114,7 @@ surfaces:
       writes: [], final_turn: "card:finished" }
 
   - { command: /aid-init, file: plugins/aid-orchestrator/commands/aid-init.md,
-      purpose: "Create or upgrade the .aid-o/ workspace (13-item base manifest, idempotent)",
+      purpose: "Create or upgrade the .aid-o/ workspace (base manifest, idempotent)",
       topic: init, audience: beginner, disposition: update,
       writes: ["creates:.aid-o/config/project.yaml",
                "creates:.aid-o/config/permissions.yaml",
