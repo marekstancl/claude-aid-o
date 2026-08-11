@@ -209,8 +209,19 @@ if [[ -f "$PERMISSIONS_YAML" ]]; then
     permissions="$(_unparseable "$PERMISSIONS_YAML" "$perm_err")"
   else
     preset="$(_get "$PERMISSIONS_YAML" '.active_preset // ""')"
-    auto="$(_get "$PERMISSIONS_YAML" '.autonomous_mode // ""')"
-    [[ -z "$auto" ]] && auto="absent"
+    # `// ""` is WRONG for a boolean. yq's alternative operator, like jq's, fires
+    # on false as well as on null — so `autonomous_mode: false` came back empty and
+    # was relabelled `absent`. That is a safety inversion on the one line a PM reads
+    # this block for: `absent` is this script's own word for "key missing", and the
+    # sibling canonical string tells the reader a missing key means IMPLICITLY
+    # AUTONOMOUS. A workspace that deliberately switched autonomy OFF therefore
+    # displayed as one that never set it — the safe state wearing the permissive
+    # state's face. The type tag separates the two: `!!null` only when truly absent.
+    if [[ "$(_get "$PERMISSIONS_YAML" '.autonomous_mode | tag')" == "!!null" ]]; then
+      auto="absent"
+    else
+      auto="$(_get "$PERMISSIONS_YAML" '.autonomous_mode')"
+    fi
     if [[ -n "$preset" ]]; then
       permissions="${preset} (preset) — autonomous_mode: ${auto}"
     else
@@ -223,14 +234,23 @@ fi
 printf 'permissions: %s\n' "$permissions"
 
 # ── 6. dispatch mode ─────────────────────────────────────────────────────
-# Resolution order is the FSM's own (defaults/orchestration.yaml documents it):
-# project plugin.yaml override, then orchestration config, then the plugin
-# default file. The winning source is named so the value is checkable.
+# Resolution order is the FSM's own, and it is EXACTLY TWO SOURCES
+# (aid-fsm.sh:2423-2427): the project's `.aid-o/config/plugin.yaml → dispatch_mode`,
+# then the PLUGIN's own `defaults/orchestration.yaml → dispatch.mode`, then the
+# built-in `agent_tool`.
+#
+# `.aid-o/config/orchestration.yaml` is DELIBERATELY NOT CONSULTED. Nothing in the
+# plugin reads it. An earlier version of this block did, and named it as the source
+# — so a project carrying `dispatch.mode: inline` there would have been told
+# "inline (source: .aid-o/config/orchestration.yaml)" while the FSM actually ran
+# `agent_tool`. A confident wrong answer with a citation attached is worse than no
+# answer, and it is the same defect the plan's own deviation was correcting, only
+# pointing the other way. This summary reports what the runtime does, not what a
+# file that nobody reads would suggest.
 dispatch="agent_tool"
 dispatch_src="built-in fallback"
 orch_file=""
-[[ -f "$ORCHESTRATION_YAML" ]] && orch_file="$ORCHESTRATION_YAML"
-[[ -z "$orch_file" && -f "$DEFAULT_ORCHESTRATION" ]] && orch_file="$DEFAULT_ORCHESTRATION"
+[[ -f "$DEFAULT_ORCHESTRATION" ]] && orch_file="$DEFAULT_ORCHESTRATION"
 
 if [[ "$have_yq" != "1" ]]; then
   dispatch="unknown"; dispatch_src="yq not installed"

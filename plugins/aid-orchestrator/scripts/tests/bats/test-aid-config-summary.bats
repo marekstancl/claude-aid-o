@@ -69,9 +69,13 @@ line_for() {
   printf '%s\n' "$output" | grep -m1 "^$1: "
 }
 
-# tree_snapshot — path/size/type of every entry under the project root.
+# tree_snapshot — path/type/size/MODE/mtime of every entry under the project root.
+# Mode and mtime are in the tuple because CP2 walked a `chmod 777` past the earlier
+# path/type/size version: a permission change alters nothing the old tuple recorded,
+# and the file's owner may chmod even a file the write-protection case made read-only.
+# mtime catches a rewrite that happens to preserve length.
 tree_snapshot() {
-  find "$TEST_PROJECT_ROOT" -mindepth 1 -printf '%P|%y|%s\n' 2>/dev/null | sort
+  find "$TEST_PROJECT_ROOT" -mindepth 1 -printf '%P|%y|%s|%m|%T@\n' 2>/dev/null | sort
 }
 
 # ─── rendering ───────────────────────────────────────────────────────────
@@ -137,6 +141,54 @@ tree_snapshot() {
   grep -qF '`autonomous (implicit — key missing, will be written on first change)`' "$AID_PLUGIN_PATH/skills/setup/permissions.md"
   grep -qF '${preset} (preset) — autonomous_mode: ${auto}' "$SCRIPT"
   grep -qF 'autonomous (implicit — key missing, will be written on first change)' "$SCRIPT"
+  # aid-setup.md is the THIRD documented surface and was missing from this guard,
+  # so a fourth phrasing could have appeared there with the suite still green —
+  # which is the precise failure this case exists to prevent.
+  grep -qF '`<preset> (preset) — autonomous_mode: <value>`' "$AID_PLUGIN_PATH/commands/aid-setup.md"
+  grep -qF '`autonomous (implicit — key missing, will be written on first change)`' "$AID_PLUGIN_PATH/commands/aid-setup.md"
+}
+
+@test "autonomous_mode: false renders false, never 'absent'" {
+  # The bug this pins: yq's `//`, like jq's, fires on false as well as null, so
+  # `.autonomous_mode // ""` returned empty for a deliberate `false` and the value
+  # was relabelled `absent`. `absent` is this script's own word for "key missing",
+  # and the sibling canonical string tells the reader a missing key means
+  # implicitly AUTONOMOUS — so a workspace that switched autonomy OFF displayed as
+  # one that never set it. The safe state wearing the permissive state's face, on
+  # the single line a PM reads this block for.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'active_preset: autonomous\nautonomous_mode: false\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/permissions.yaml"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"permissions: autonomous (preset) — autonomous_mode: false"* ]]
+  [[ "$output" != *"autonomous_mode: absent"* ]]
+}
+
+@test "autonomous_mode: true renders true, and a missing key still renders absent" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'active_preset: custom\nautonomous_mode: true\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/permissions.yaml"
+  run bash "$SCRIPT"
+  [[ "$output" == *"permissions: custom (preset) — autonomous_mode: true"* ]]
+
+  printf 'active_preset: custom\n' > "$TEST_PROJECT_ROOT/.aid-o/config/permissions.yaml"
+  run bash "$SCRIPT"
+  [[ "$output" == *"permissions: custom (preset) — autonomous_mode: absent"* ]]
+}
+
+@test "the dispatch source is one the runtime actually reads" {
+  # aid-fsm.sh:2423-2427 consults exactly two: the project's plugin.yaml and the
+  # PLUGIN's defaults/orchestration.yaml. A workspace orchestration.yaml is read by
+  # nothing, so naming it as the source would be a confident wrong answer with a
+  # citation attached.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'dispatch:\n  mode: inline\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/orchestration.yaml"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *".aid-o/config/orchestration.yaml"* ]]
+  [[ "$output" != *"dispatch mode: inline"* ]]
 }
 
 # ─── gate profiles / plan mode edge cases ────────────────────────────────
@@ -195,12 +247,20 @@ tree_snapshot() {
   [[ "$(line_for 'dispatch mode')" == "dispatch mode: $expected (source: plugin default orchestration.yaml)" ]]
 }
 
-@test "a project orchestration.yaml wins over the plugin default" {
+@test "a project orchestration.yaml is IGNORED, because the runtime ignores it" {
+  # This case previously asserted the opposite and locked in a wrong answer.
+  # aid-fsm.sh:2423-2427 reads exactly two sources — the project's plugin.yaml and
+  # the PLUGIN's defaults/orchestration.yaml. Nothing anywhere reads a workspace
+  # orchestration.yaml, so reporting `inline (source: .aid-o/config/orchestration.yaml)`
+  # for a project whose runtime is really running `agent_tool` was a confident wrong
+  # answer with a citation attached — worse than no answer, and the exact defect
+  # class the deviation it came from was meant to fix.
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   printf 'dispatch:\n  mode: inline\n' > "$TEST_PROJECT_ROOT/.aid-o/config/orchestration.yaml"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$(line_for 'dispatch mode')" == "dispatch mode: inline (source: .aid-o/config/orchestration.yaml)" ]]
+  [[ "$(line_for 'dispatch mode')" != *"inline"* ]]
+  [[ "$(line_for 'dispatch mode')" != *".aid-o/config/orchestration.yaml"* ]]
 }
 
 @test "a plugin.yaml dispatch_mode override wins over orchestration.yaml" {
@@ -353,7 +413,17 @@ tree_snapshot() {
   grep -v '^[[:space:]]*#' "$SCRIPT" > "$code"
 
   # Categorical writers: none of these may appear at all.
-  run grep -nE '>>|yq +-i|sed +-i|\btee\b|\bmktemp\b|\bmkdir\b|\btouch\b|\brm\b|\bcp\b|\bmv\b' "$code"
+  #
+  # `--inplace` and `--in-place` are listed beside `-i`: CP2 got a real write past
+  # the earlier pattern using yq's long form, which `yq +-i` does not match. A
+  # checker that only knows the short spelling of a flag checks the spelling, not
+  # the behaviour.
+  #
+  # `chmod`/`chown` are here because the tree snapshot cannot see them: it records
+  # `%P|%y|%s` — path, type, size — so a permission change is invisible to it, and
+  # the owner may chmod even a file made read-only by the write-protection case.
+  # That combination let a `chmod 777` slip through all four mechanisms.
+  run grep -nE '>>|yq +-i|yq +--in-?place|sed +-i|\btee\b|\bmktemp\b|\bmkdir\b|\btouch\b|\brm\b|\bcp\b|\bmv\b|\bchmod\b|\bchown\b|\bln\b|\bdd\b|\btruncate\b' "$code"
   [ "$status" -ne 0 ]
 
   # Every remaining redirection must target /dev/null or an existing fd —
