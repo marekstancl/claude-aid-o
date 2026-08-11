@@ -1,0 +1,12 @@
+{
+  "plan_path": ".aid-o/plans/P080-entrypoint-ux-help-handoffs.md",
+  "plan_sha256": "sha256:3628cc11acbb77c942b0fa0b8b6e60365c19fd42063e8988d65283d57f83be47",
+  "reviewed_head": "e15cb095bfcacf3d4fb70d46cc08b1f39bbb9076",
+  "input_manifest_path": ".aid-o/work/evidence/P080/c0/codex/audit-input-manifest.json",
+  "input_manifest_hash": "sha256:dedc98ece57b9c2ea9179f9bed14cd3c11ca38cd6a540db01c66d820f2fdbf7f",
+  "plan_graph_path": "absent_pre_generation",
+  "source_plan_graph_path": "absent_pre_generation",
+  "contracts_paths": "plugins/aid-orchestrator/defaults/policies/permissions.yaml",
+  "c0_evidence_paths": ".aid-o/work/evidence/P080/cp1-deep/cp1-adjudicator.md, .aid-o/work/evidence/P080/cp1-deep/cp1-lens-L1-behavior.md, .aid-o/work/evidence/P080/cp1-deep/cp1-lens-L2-feasibility.md, .aid-o/work/evidence/P080/cp1-deep/cp1-lens-L3-enforcement.md",
+  "output_schema_path": "../../../../home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/defaults/schemas/c0-plan-review.schema.json"
+}

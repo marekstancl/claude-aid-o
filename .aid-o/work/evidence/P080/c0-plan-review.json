@@ -1,0 +1,76 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c0_plan_review",
+  "producer": "orchestrator@cp1-deep",
+  "created_at": "2026-08-11T05:09:15Z",
+  "identity": {
+    "plan_id": "P080"
+  },
+  "reviewed_plan_hash": "sha256:3628cc11acbb77c942b0fa0b8b6e60365c19fd42063e8988d65283d57f83be47",
+  "reviewed_head": "e15cb095bfcacf3d4fb70d46cc08b1f39bbb9076",
+  "input_manifest_hash": "sha256:dedc98ece57b9c2ea9179f9bed14cd3c11ca38cd6a540db01c66d820f2fdbf7f",
+  "review_status": "findings",
+  "blocking_findings": true,
+  "findings": [
+    {
+      "fingerprint": "sha256:fc50a8e00bbda11d3dbea6d2f41cf264688ba97f1af859db5a6d1eac3f641239",
+      "occurrence_id": "c0-P080-0",
+      "severity": "high",
+      "action_owner": "implementer",
+      "area": "contracts",
+      "finding": "Step 11 misstates the canonical gate-report contract: it limits `.gates[].result` to `pass|fail|skip|profile_excluded` and makes waiver facts depend on an optional waiver directory. The current producer writes valid waived rows as `result: \"waived\"` and also emits the canonical top-level `waived_gates[]` array (`scripts/aid-run-gates.sh:2140-2176`, `:2512-2537`). The specified renderer can therefore omit or mishandle a valid waiver despite the plan's requirement never to render one as a pass.",
+      "recommendation": "Define `waived` as a supported gate-row result, use `waived_gates[]` from the report as the primary waiver source, and use receipts only to enrich details. Add a fixture containing only the current report shape, with no separately passed waiver directory, and assert the waiver remains visible and is not counted as passed."
+    },
+    {
+      "fingerprint": "sha256:169b3673d4d3b32b7e7ddb218c2d9b1cf82ef4cca37e5c6227c2ee8e5a272104",
+      "occurrence_id": "c0-P080-1",
+      "severity": "high",
+      "action_owner": "pm",
+      "area": "testability",
+      "finding": "The binding Artifact-publication outcome is not implemented or verifiable by the plan. Steps 10-12 only generate an HTML body and stdout; Step 9/14 only grep an instruction literal telling a controller to use an unspecified Artifact tool. No repository publication interface, receipt, or live integration check exists or is created. The existing audit renderer explicitly treats actual session presentation as outside its script-level test boundary (`scripts/lib/aid-test-audit-chat-summary.sh`).",
+      "recommendation": "Either add a defined publication adapter/receipt contract and an executable check for it, or explicitly make live publication a separately gated external controller responsibility and narrow this plan's acceptance criteria to deterministic artifact generation plus wiring evidence."
+    },
+    {
+      "fingerprint": "sha256:a89c2e6c93a8e3a11cb658e7e0656a871877e7a1c624bb0c01c410d6fe27f887",
+      "occurrence_id": "c0-P080-2",
+      "severity": "high",
+      "action_owner": "implementer",
+      "area": "acceptance_criteria",
+      "finding": "Step 12 requires a Decision card to render an exact public command for each merge/defer/abandon option, but it supplies no mapping to the real command API. At this HEAD, the available plan commands are `plan-merge-to-main <plan_id> --decision <path>`, `plan-close <plan_id>`, and `plan-rollback <plan_id> --revert-commit <sha> --reason <text>`; there is no plan-level defer or abandon command (`scripts/aid-plan-fsm.sh:10512-10517`). The renderer inputs also do not establish the required rollback commit for a pending decision. The current fixture criterion only requires one unspecified public command, so it cannot verify the promised option set.",
+      "recommendation": "Specify a valid command and all dynamic arguments for every supported card option, or reduce the card to options the current API actually supports. Add fixtures that assert each exact rendered invocation and its required source fields."
+    },
+    {
+      "fingerprint": "sha256:ee760326f74545c1f28fd034a71911a198c0e9fd5acfea73491b44f70852e4c6",
+      "occurrence_id": "c0-P080-3",
+      "severity": "high",
+      "action_owner": "pm",
+      "area": "scope_and_dependencies",
+      "finding": "The required cross-repository artifact-spec publication has no completion dependency despite being part of Success Criterion 6. Step 16 depends only on Steps 4, 8, and 15, while the plan states that a PM must separately commit `/opt/eco/docs`; its primary acceptance criterion permits a `PM-pending` report. The fallback is only activated when writing is refused, not when the required PM commit is pending. Thus the terminal step can finish without the required page being published.",
+      "recommendation": "Add an explicit PM-owned completion gate for the docs-repo commit, with fallback activation on any unavailable PM completion, and make release completion conditional on either the recorded docs commit or a tracked fallback artifact."
+    },
+    {
+      "fingerprint": "sha256:5ce0631706baace8bd02571f0b44efdfdeda0eea23dcfdf736b35a12c7ea0976",
+      "occurrence_id": "c0-P080-4",
+      "severity": "medium",
+      "action_owner": "implementer",
+      "area": "contracts",
+      "finding": "The help-index rules are internally inconsistent for internal surfaces. Step 1 says every future `user_invocable: false` command must receive an `intentionally_internal` row, while Step 2 requires exact equality between mechanically enumerated public surfaces and all index `command` values. The enumerator excludes `user_invocable: false` commands, so any required internal row makes the bijection fail. `remove_or_deprecate` is also in the declared enum without routing or coverage semantics.",
+      "recommendation": "Define the bijection over index rows classified as public, add separate assertions for internal and deprecated rows, and specify whether each disposition must correspond to an existing source file and a help route."
+    },
+    {
+      "fingerprint": "sha256:30bd887aea3971be66295fcb3ad605cd5f45445537f08f02afc4325954913d2f",
+      "occurrence_id": "c0-P080-5",
+      "severity": "low",
+      "area": "feasibility",
+      "finding": "Step 2 cites `plugins/aid-orchestrator/scripts/tests/bats/test-aid-test-scheduler.bats:26` as the `$AID_PLUGIN_PATH` precedent, but that file does not exist at the reviewed HEAD and is not created by the plan.",
+      "recommendation": "Replace the citation with an existing sibling suite or create the cited fixture if it is intended to be a dependency."
+    }
+  ],
+  "codex": {
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "session_id": "019fef35-ef3c-75c3-a9a5-4a00129a24e5",
+    "achieved_independence_level": "cross_provider"
+  },
+  "outcome": "dispatched"
+}
