@@ -1,9 +1,9 @@
 {
   "plan_path": ".aid-o/plans/P080-entrypoint-ux-help-handoffs.md",
-  "plan_sha256": "sha256:ebf10309aaec3056eca91d64ec54692b88d7116dfff908efbabf54f1435defbd",
-  "reviewed_head": "27a0cf1d098918bb5b4d4cf87510a2fd49c1af60",
+  "plan_sha256": "sha256:1792b16eaebe31431203689d8dd08d194a184d4ca1a083e65d3a069feb48447b",
+  "reviewed_head": "b3b3b8c282b9d0ba9fe57fbe41caa2900fe15e23",
   "input_manifest_path": ".aid-o/work/evidence/P080/c0/codex/audit-input-manifest.json",
-  "input_manifest_hash": "sha256:b225491d27c35475d9c5411428ee185d0294913bfd8d47eae06057bd4dc6d09e",
+  "input_manifest_hash": "sha256:7e714c0ddae702853f15325236e4b449f3dd39c141b8bcd227a1f603ef023527",
   "plan_graph_path": "absent_pre_generation",
   "source_plan_graph_path": "absent_pre_generation",
   "contracts_paths": "plugins/aid-orchestrator/defaults/policies/permissions.yaml",
