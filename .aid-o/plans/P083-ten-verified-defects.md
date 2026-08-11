@@ -7,11 +7,11 @@ author: PM + AI
 risk: high
 ---
 
-# Plan: Ten Defects That Survived a Live-Code Sieve
+# Plan: The Defects That Survived a Live-Code Sieve
 
 ## Stakeholder Brief
 
-Forty-six open backlog entries were re-verified against the tree on 2026-08-11, one at a time, with file:line evidence for every verdict. Eleven turned out to be already fixed, moot or deliberate decisions. Thirty-three were real, but most were smaller than their descriptions and seven named the wrong file entirely. The PM then applied a second sieve by hand: keep only what repairs the pipeline we actually run today, only where the benefit is demonstrable, and prefer removing machinery to adding it. Ten items survived. Four of them break something on the path we use every day — a gates report written where nobody reads it, acceptance criteria cut mid-sentence, a release rollback that strands one file, a README frozen at v2.69.0. Three are guards that report success while checking nothing, including one that fails open in production library code. Three are open decisions where both answers are cheap, and the plan's job is to decide them with evidence rather than carry them another month. Nothing here adds a new detector, a new event or a new ceremony; five of the ten steps delete code or narrow a contract.
+Forty-six open backlog entries were re-verified against the tree on 2026-08-11, one at a time, with file:line evidence for every verdict. Eleven turned out to be already fixed, moot or deliberate decisions. Thirty-three were real, but most were smaller than their descriptions and seven named the wrong file entirely. The PM then applied a second sieve by hand: keep only what repairs the pipeline we actually run today, only where the benefit is demonstrable, and prefer removing machinery to adding it. Ten items survived, and all three of their open questions were then decided by measurement before this plan was finalised. Four break something on the path we use every day — a gates report written where nobody reads it, acceptance criteria cut mid-sentence, a release rollback that strands one file, a README frozen at v2.69.0. Three are guards that report success while checking nothing, including one that fails open in production library code. Two are deletions of machinery that outlived its purpose. The tenth — retiring the test-portfolio audit, which the PM chose to delete outright — turned out to be entangled with a live merge-path selector and is therefore its own removal plan rather than a step here; this plan records the decision. Nothing here adds a new detector, a new event or a new ceremony.
 
 ## Context
 
@@ -27,14 +27,14 @@ Three verification results deserve recording because they changed what is worth 
 
 ## Goal
 
-The ten verified defects are fixed or consciously deleted, each with a regression that pins the specific behaviour the verification observed, and the backlog reflects the verification's verdicts.
+The nine verified defects this plan owns are fixed or consciously deleted, each with a regression that pins the specific behaviour the verification observed; the tenth's decision is recorded; and the backlog reflects the verification's verdicts.
 
 ## Scope
 
 **In scope:**
 - Four live-path repairs: the streamlined integration-review gates-report path; the EPIC generator's acceptance-criteria line filter; the release rollback's incomplete file bookkeeping; the README version updater.
 - Three guards that pass without checking: the self-host `plan_diff` gate with no `command`; the fail-open PCRE toggle read in `aid-review-signals.sh`; the consumer profile table that cannot satisfy its own policy floor.
-- Three decide-or-delete items: the dead parallel-concurrency vocabulary in the gate-runtime baseline; the C0 plan-review's dependency graph that is always produced after the review it feeds; the test catalog's root `status` that gates every catalog-derived audit command.
+- Two decided deletions/orderings: the dead parallel-concurrency vocabulary in the gate-runtime baseline, and the C0 plan-review's dependency graph that has never once reached the review it feeds.
 - Backlog reconciliation for exactly these ten entries plus the eleven the verification closed.
 
 **Out of scope:**
@@ -58,7 +58,7 @@ Three groups.
 
 1. **The live path (Steps 1-4).** `fsm_check_streamlined_integration_review` reads a flat `gates_report.json` while every writer and every other reader uses the `gates/` subdirectory, so a correct streamlined run is pushed toward a force waiver. `aid-plan-to-epic.sh` filters acceptance criteria to flush-left bullet lines in two copy-pasted awk blocks, so continuation lines vanish from both the human EPIC and the machine-read `ac[]`. `_release_update_files`' fallback path omits three files from `UPDATED[]`, and `_release_rollback_updated` restores only what that array holds. The README updater substitutes a version token with no notion of the structure it edits.
 2. **Guards that pass without checking (Steps 5-7).** A gate with no `command` records `skip/no_command` and never touches `overall`; `plan_diff` sits in four merge-path profiles in exactly that state. A `grep -qP` inside an `if` returns "enabled" on any grep without PCRE. A profile table that omits `release` cannot satisfy a policy floor of `release`.
-3. **Decide or delete (Steps 8-10).** Each of these three has two acceptable answers and the plan commits to one with evidence: dead vocabulary is deleted; a graph produced after its consumer is either produced earlier or stops being claimed; a catalog whose root status silently disables every catalog-derived command is either approved or the gating is removed with the audit.
+3. **Decided by measurement (Steps 8-10).** Each of these carried an open question that was answered before the plan was finalised, not handed to the implementer: dead vocabulary is deleted; the graph is produced earlier, because its producer needs nothing but the plan file; and the backlog is reconciled with the verification's verdicts. The catalog-status question was answered too — retire the audit — but measuring its blast radius moved it out of this plan (see Deferred).
 
 ## Implementation Steps
 
@@ -287,7 +287,7 @@ Three groups.
 **Effort:** M
 **AID Role:** backend
 
-**EPIC 3: Steps 8-10 — Three decisions, both answers cheap**
+**EPIC 3: Steps 8-10 — Two decided deletions and the record**
 
 ### Step 8: The parallel-concurrency vocabulary leaves the gate-runtime baseline
 
@@ -352,39 +352,7 @@ Three groups.
 **Effort:** S
 **AID Role:** backend
 
-### Step 10: The test catalog's root status stops silently disabling the audit
-
-**Objective:** A `--mode measure|full` audit either runs its catalog commands or the catalog gating is removed with the audit that needed it.
-
-**Files:**
-- Modify: `.aid-o/config/test-catalog.yaml` (line 3) — the root `status` is set to `approved` through the sanctioned writer (`aid-test-catalog-approve.sh:136`), or the file and its gating are removed together.
-- Modify: `plugins/aid-orchestrator/scripts/lib/aid-test-audit-command-allowlist.sh` (lines ~117-119) — if the decision is removal, `_tacl_matches_approved_catalog_command`'s root-status gate goes with it; if the decision is approval, the refusal at :117-119 gains a message naming the field and the approval command, because today it returns 1 silently.
-- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-catalog-status-gate.bats` — a `proposed` catalog refuses catalog-derived commands with a message naming the field; gate-registered commands still pass through their independent path; an `approved` catalog admits both (tier: t1).
-
-**Architecture Context:** Group 3. The original backlog entry claimed the field had no reader; that is false and the correction is verified — `:117-119` gates every catalog-derived command, while `aid_test_audit_check_allowed` keeps an independent allow-path for gate-registered commands. The live value is `proposed` despite commit `5f24304` announcing approval, so a real audit measures only registered gates, which for a bats portfolio is almost nothing.
-
-**Implementation Detail:** The decision turns on whether test-portfolio audits are still wanted after the parallelism line was cancelled. The step must answer that question explicitly and record the answer in the backlog entry, replacing the entry's retracted original framing rather than leaving both versions side by side.
-
-**Error Handling:** Whichever way it goes, a silent `return 1` is not acceptable: either the refusal explains itself, or the code path does not exist.
-
-**Edge Cases:**
-- A consumer project with an approved catalog — unaffected by either outcome.
-- A catalog file absent entirely — existing behaviour, asserted so this step does not change it accidentally.
-- Removal chosen — the enforcement registry entry goes too, in the same commit.
-
-**Dependencies:**
-- Depends on: none
-- Blocks: Step 11's backlog reconciliation records this decision.
-
-**Acceptance Criteria:**
-- [ ] A `--mode measure` audit either admits its catalog commands or the catalog path no longer exists.
-- [ ] No silent `return 1` remains on the status check.
-- [ ] The backlog entry states the decision and its date, with the retracted framing deleted.
-
-**Effort:** S
-**AID Role:** backend
-
-### Step 11: The backlog records what the verification found
+### Step 10: The backlog records what the verification found
 
 **Objective:** Every entry the 2026-08-11 verification touched carries its verdict, so no later plan is written from a stale description again.
 
@@ -403,7 +371,7 @@ Three groups.
 - An entry outside the verification's 46 — untouched and unmarked, so the absence of a verdict line means "not examined", which is honest.
 
 **Dependencies:**
-- Depends on: Step 10 — its decision is one of the verdicts recorded.
+- Depends on: none
 - Blocks: none
 
 **Acceptance Criteria:**
@@ -421,7 +389,7 @@ Three groups.
 3. No profile in this repository's `execution.yaml` includes a gate without a `command`, the runner refuses one by name, and `plan_diff` verifies this plan's own criteria instead of skipping.
 4. `enabled: false` is honoured on a grep without PCRE support, and a stack-detected `/aid-init` workspace yields a non-empty `release` profile.
 5. The gate-runtime baseline carries no live non-sequential branch while a legacy file still reads, and the C0 review receives a plan-hash-bound dependency graph instead of describing one it never had.
-6. The catalog-status decision is made, implemented and recorded, and all 46 verified backlog entries carry a dated verdict.
+6. All 46 verified backlog entries carry a dated verdict, including the recorded decision to retire the test-portfolio audit.
 
 ## Acceptance Criteria
 
@@ -495,14 +463,7 @@ verification_pattern:
   cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-graph-input.bats"
   expected_exit: 0
 ```
-- [ ] AC11 — The catalog status gate explains itself or no longer exists.
-```yaml
-verification_pattern:
-  type: cmd
-  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-catalog-status-gate.bats"
-  expected_exit: 0
-```
-- [ ] AC12 — Every verified backlog entry carries a dated verdict.
+- [ ] AC11 — Every verified backlog entry carries a dated verdict.
 ```yaml
 verification_pattern:
   type: cmd
@@ -528,6 +489,7 @@ verification_pattern:
 
 ## Deferred
 
+- **Retiring the test-portfolio audit — decided, sized, and moved to its own removal plan.** The PM chose deletion over approval on 2026-08-11: the capability was built to decide test parallelism, that line was cancelled in P078, and the tier standard now answers the questions it was meant to answer, more cheaply. Measuring the blast radius is what moved it out of this plan: the audit layer is **16 scripts, 5 260 lines** (`aid-test-audit-*`, `aid-test-catalog-*`, `aid-audit-tests-finalize.sh`, `aid-init-upgrade-test-audit.sh`, `lib/aid-test-audit-*`), plus the `/aid-audit-tests` command, the `test-portfolio-analyst` agent, `defaults/config/test-audit.yaml`, enforcement-registry rows and their suites. But `aid-select-tests.sh` is **not** part of it: it is gate `targeted_tests` in the `targeted`, `standard` and `p064-closure` profiles, and it reads the catalog's `source_pattern_mappings[]` as its path→suite map. So the catalog file survives as the selector's mapping table while the audit around it goes, and the root `status` field with its command allowlist dies with the audit — which is how IMP-492 closes. That is a P078-shaped removal plan, not a step, and it must not be attempted inside this one.
 - Widening the `grep -oP` guard to see all 13 live PCRE sites, `.bats` files included, and re-deriving its stale allowlist (the counts are recorded in the backlog entry).
 - The 22 verified-real entries the PM's sieve rejected, each with its recorded reason.
 - IMP-261, IMP-490, IMP-471, IMP-487, OBS-20260702-07 — separate plans.
