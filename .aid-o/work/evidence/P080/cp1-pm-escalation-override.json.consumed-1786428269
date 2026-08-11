@@ -1,0 +1,42 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "cp1_pm_escalation_override",
+  "identity": {
+    "plan_id": "P080"
+  },
+  "pm_ref": "PM (Marek) chose option A in chat on 2026-08-11 after being shown the exhausted CP1 revision ledger (5/5), the seven completed C0 cross-provider Codex rounds, the 26 findings folded into the plan across those rounds, and the two remaining round-7 findings which were fixed but not re-reviewed because the ledger was already spent. The escalation is a deliberate, informed decision to unblock EPIC generation, not a waiver of any finding: every finding raised in all seven rounds was applied to the plan, none was dismissed, and nothing was accepted as a known defect.",
+  "granted_by": "PM",
+  "granted_at": "2026-08-11T06:20:00Z",
+  "scope": "one-shot bypass of the exhausted CP1 revision-limit ledger for plan P080 so EPIC generation may proceed",
+  "what_is_bypassed": [
+    "aid-cp1-ledger.sh check-budget reporting exhausted at 5/5 attempts",
+    "a further C0 cross-provider verification round over the two round-7 fixes"
+  ],
+  "what_is_NOT_bypassed": [
+    "the CP1-deep 4-file evidence requirement (present, complete)",
+    "the CP1-deep adjudicator verdict (iteration 2: pass, 0 accepted blockers)",
+    "any individual C0 finding — all 26 across 7 rounds were applied to the plan"
+  ],
+  "unreviewed_delta": {
+    "commit": "1076fc4",
+    "changes": [
+      "index_only is declared a transitional disposition: a user_invocable:true surface may not rest there once Step 3 lands, and the Step 2 negative control fails when a dummy public command is given that disposition",
+      "tier tags must be VERIFIED against a recorded duration: steps run their suites with --timing and an UNVERIFIED lint result fails the step"
+    ],
+    "risk_assessment": "low — both are self-contained tightenings of existing acceptance criteria; neither adds a new component, changes a file contract, or relaxes an existing check"
+  },
+  "ceremony_record": {
+    "cp1_deep_lenses": 8,
+    "cp1_deep_iterations": 2,
+    "cp1_adjudicator_verdict": "pass",
+    "cp1_adjudicator_accepted_blockers": 0,
+    "c0_rounds_dispatched": 7,
+    "c0_rounds_verified": 4,
+    "c0_rounds_head_mismatch": 3,
+    "c0_findings_total": 26,
+    "c0_findings_applied": 26,
+    "c0_findings_dismissed": 0,
+    "findings_per_round_trend": [6, 5, 4, 3, 2],
+    "note": "three rounds returned head_mismatch because a concurrent session merged P081 (v2.83.0) and two further commits into main while Codex was running; those attempts correctly did not consume ledger budget, and P081's test-tiering was folded into the plan as a result"
+  }
+}
