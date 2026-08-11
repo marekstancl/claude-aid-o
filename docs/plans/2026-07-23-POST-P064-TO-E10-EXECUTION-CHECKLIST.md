@@ -71,7 +71,24 @@ P079 pending. **It also retires the acceleration campaign as a delivery gate.**
 
 **Order in force:**
 
-1. [ ] **IMP-494 — make `gate:bats_all` genuinely green on `main`.** One of its
+0. [x] **IMP-494 — `gate:bats_all` is green.** Both red suites fixed
+   2026-08-10 (phantom tests from heredoc'd fixtures; a profiler suite that
+   decided on the PM's workspace catalog).
+0b. [x] **Ecosystem test-tier standard published** 2026-08-10
+   (`/ecosystem/specs/test-standard`), Codex-reviewed, amended 2026-08-11 with
+   the pilot's finding that a tier budget must be verified by one real run,
+   not by summing its suites.
+0c. [~] **P081 AID tier pilot IMPLEMENTED** 2026-08-11 (v2.83.0, worktree
+   `.claude/worktrees/p081-test-tier-pilot`, head `4ec1946`): 202 suites
+   measured and tagged, **merge path 24 542 s → 793 s (6 h 49 min → 13 min)**,
+   25/25 targeted suites green. Awaiting whole-diff review → merge → tag →
+   release → cache refresh. `CLAUDE.md`'s `## Conventions` block was inserted
+   by hand (the file is gitignored, so no merge delivers it).
+0d. [x] **Backlog audited entry by entry** 2026-08-11 against v2.82.0: 45 of
+   101 entries were already done and are now closed with their evidence, 3 are
+   dead, ~30 remain (half consciously parked). The surviving live holes are
+   planned as **P082** (written, lint + readiness PASS, CP1 pending).
+1. [~] **SUPERSEDED — IMP-494 is closed; kept for provenance:** One of its
    two red suites is fixed (`test-aid-test-content-scan.bats`, phantom tests
    from heredoc'd fixtures); the other (`test-aid-test-audit-profile.bats`)
    depends on the PM's gitignored workspace catalog and needs either a mapping
