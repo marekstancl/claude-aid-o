@@ -31,6 +31,8 @@ source "${SCRIPT_DIR}/lib/common.sh"
 # bullet extractor (_aid_extract_files_bullets) + path cleaner (_aid_split_path_entry).
 # shellcheck source=lib/aid-scoping.sh
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
+# shellcheck source=lib/aid-test-tier.sh
+source "${SCRIPT_DIR}/lib/aid-test-tier.sh"   # AID_TEST_TIER_TAG_RE
 check_prerequisites
 
 # ---------------------------------------------------------------------------
@@ -815,6 +817,23 @@ all_step_scoping_meta=""
 # "-->" when parsing block values — this exact token is the parse contract.
 AID_ARROW_SENTINEL='@@AID_ARROW@@'
 
+# P081 Step 10 — has THIS project adopted tiers? The same rule the runner
+# uses, for the same reason: a project that has never tagged a suite must
+# generate exactly as it does today, so taking a plugin upgrade never
+# invalidates a plan that was correct when it was written. Answered once per
+# generation, from the tree being generated, not from the installed plugin.
+_p081_tiers_adopted() {
+  if [[ -z "${_P081_TIERS_ADOPTED:-}" ]]; then
+    if grep -rlq --include='test-*.bats' --include='test-*.sh' \
+         "$AID_TEST_TIER_TAG_RE" . 2>/dev/null; then
+      _P081_TIERS_ADOPTED=yes
+    else
+      _P081_TIERS_ADOPTED=no
+    fi
+  fi
+  [[ "$_P081_TIERS_ADOPTED" == "yes" ]]
+}
+
 for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
   step_content="$(extract_step_content "$sn")"
@@ -987,23 +1006,6 @@ for sn in "${phase_steps[@]}"; do
   # succeeded with a narrower scope than the plan declared — and the EPIC ran
   # with a file its own plan named missing from allowed_paths, which nothing
   # downstream could notice. A parser may refuse, it may not narrow silently.
-  # P081 Step 10 — has THIS project adopted tiers? The same rule the runner
-  # uses, for the same reason: a project that has never tagged a suite must
-  # generate exactly as it does today, so taking a plugin upgrade never
-  # invalidates a plan that was correct when it was written. Answered once per
-  # generation, from the tree being generated, not from the installed plugin.
-  _p081_tiers_adopted() {
-    if [[ -z "${_P081_TIERS_ADOPTED:-}" ]]; then
-      if grep -rlq --include='test-*.bats' --include='test-*.sh' \
-           '^[[:space:]]*#[[:space:]]*aid-tier:' . 2>/dev/null; then
-        _P081_TIERS_ADOPTED=yes
-      else
-        _P081_TIERS_ADOPTED=no
-      fi
-    fi
-    [[ "$_P081_TIERS_ADOPTED" == "yes" ]]
-  }
-
   step_files=""
   _dropped_bullets=""
   while IFS= read -r _raw_file; do

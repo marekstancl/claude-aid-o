@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-owned-jobs-review-regressions.bats — P076 CP3: the integration-review
 # findings, each reproduced as a test that FAILS against the pre-fix runner and
 # passes after.

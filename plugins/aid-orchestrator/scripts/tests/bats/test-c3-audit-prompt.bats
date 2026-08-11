@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-c3-audit-prompt.bats — P065 E-065-4_7 Step 11 (docs-writer)
 #
 # Tests the C3 PROMPT PROTOCOL + RENDERER CONTRACT — the shipped, versioned

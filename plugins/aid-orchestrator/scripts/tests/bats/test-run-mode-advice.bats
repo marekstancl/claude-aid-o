@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-run-mode-advice.bats — P076 Step 3: the observe-only run_mode advice.
 #
 # Every case drives the REAL aid-run-gates.sh over a real fixture repo and a

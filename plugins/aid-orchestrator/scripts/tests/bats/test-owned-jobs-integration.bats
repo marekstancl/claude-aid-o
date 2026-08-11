@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-owned-jobs-integration.bats — P076 Step 16: the plan's acceptance instrument.
 #
 # Every other suite in this plan proves one mechanism. This one proves the

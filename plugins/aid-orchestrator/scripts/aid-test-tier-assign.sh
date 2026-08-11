@@ -130,14 +130,15 @@ if [[ "$discovered" -eq 0 ]]; then
 fi
 
 # ─── Classify, then enforce the aggregate budgets ───────────────────────────
-assigned="$(jq -sc '
+assigned="$(jq -sc --argjson t0 "$AID_TIER_T0_MAX_MS" --argjson t1 "$AID_TIER_T1_MAX_MS" '
   def per_case: if .cases > 0 then (.duration_ms / .cases) else .duration_ms end;
+  def secs($ms): ($ms / 1000 | tostring);
   def base_tier:
     if .subject == "unresolvable"
       then {tier:"t2", reason:"unresolvable subject — cross-component by the standard scope rule"}
-    elif (per_case < 2000)  then {tier:"t0", reason:"under 2s per case"}
-    elif (per_case < 30000) then {tier:"t1", reason:"under 30s per case"}
-    else                         {tier:"t2", reason:"30s or more per case"}
+    elif (per_case < $t0) then {tier:"t0", reason:("under " + secs($t0) + "s per case")}
+    elif (per_case < $t1) then {tier:"t1", reason:("under " + secs($t1) + "s per case")}
+    else                       {tier:"t2", reason:(secs($t1) + "s or more per case")}
     end;
   def total($t): ([.[] | select(.tier == $t) | .duration_ms] | add) // 0;
   def demote($from; $to; $budget; $why):

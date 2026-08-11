@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-epic-chain-freshness.bats — P079 Step 3 (IMP-478): a chained EPIC's task
 # branch is brought up to the live plan head before it executes.
 #

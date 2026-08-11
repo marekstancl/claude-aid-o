@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-writing-rules.bats — plan-writing.md rule #21 pre-screen activation tests
 #
 # Verifies that the mechanical handler-pattern heuristic (rule #21) correctly

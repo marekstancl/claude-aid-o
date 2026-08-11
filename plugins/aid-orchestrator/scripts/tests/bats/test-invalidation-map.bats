@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-invalidation-map.bats — E-057-2_2 Step 2 (E8 D3) behavioral red-green
 # tests for scripts/lib/aid-invalidation-map.sh.
 #

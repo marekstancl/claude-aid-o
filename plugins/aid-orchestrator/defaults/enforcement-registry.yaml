@@ -2664,7 +2664,7 @@ enforcements:
   - id: release_version_sealed
     type: 6
     source: "scripts/aid-release.sh:_release_version_sealed (guarding update_changelog's retitle AND the no-config fallback loop)"
-    instruction: "CLAUDE.md (Release Workflow) + defaults/policies/release-policy.yaml"
+    instruction: "defaults/orchestration.yaml (release.version_files)"
     severity: blocking
     surface: internal-guard
     status: active

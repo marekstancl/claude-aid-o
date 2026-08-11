@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-plan-final-boundary.bats — P068 "Plan-final release boundary"
 # (EPIC E-068-1_2). THE single mandatory integration suite for this plan (see
 # .aid-o/plans/P068-plan-final-release-boundary.md — this file is named and

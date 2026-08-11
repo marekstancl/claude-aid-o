@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-tier-lint.bats — P081 Step 3: the tag keeps telling the truth.
 #
 # WHAT THIS SUITE PROVES: each of the lint's three checks fires on the thing it

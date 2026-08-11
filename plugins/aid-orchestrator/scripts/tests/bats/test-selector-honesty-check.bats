@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-selector-honesty-check.bats — P081 Step 9: gaps are detected, and never
 # manufactured.
 #

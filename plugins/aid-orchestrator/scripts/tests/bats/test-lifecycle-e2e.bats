@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-lifecycle-e2e.bats — IMP-232 v2.58.1 END-TO-END wiring proof. Verifies the
 # closure model is actually INVOKED by the runtime path (not a library nobody
 # calls), via aid-fsm.sh's real subcommands + the post-merge record-delivery hook.

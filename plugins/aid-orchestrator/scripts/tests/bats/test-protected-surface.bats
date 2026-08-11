@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-protected-surface.bats — P073 Step 15: the protected path set stored at
 # freeze.
 #

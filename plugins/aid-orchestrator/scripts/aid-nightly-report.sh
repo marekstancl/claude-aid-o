@@ -53,17 +53,23 @@ source "$SCRIPT_DIR/lib/aid-test-tier.sh"
 source "$SCRIPT_DIR/lib/aid-test-durations.sh"
 
 QUARANTINE_SH="$SCRIPT_DIR/aid-test-quarantine.sh"
+ESCALATE_DAYS="${AID_QUARANTINE_ESCALATE_DAYS:-14}"
 TELEGRAM_LIB="${AID_TELEGRAM_LIB:-/opt/eco/services/scripts/lib/telegram-notify.sh}"
 
 RUNNER_LOG=""; EXIT_CODE=0; LOG_URL=""; TESTS_DIR=""; NOTIFY=1
 NIGHTLY_DIR="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --runner-log) RUNNER_LOG="${2:-}"; shift 2 ;;
-    --exit-code)  EXIT_CODE="${2:-0}"; shift 2 ;;
-    --log-url)    LOG_URL="${2:-}"; shift 2 ;;
-    --tests-dir)  TESTS_DIR="${2:-}"; shift 2 ;;
-    --dir)        NIGHTLY_DIR="${2:-}"; shift 2 ;;
+    --runner-log) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --runner-log needs a value" >&2; exit 2; }
+                  RUNNER_LOG="$2"; shift 2 ;;
+    --exit-code) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --exit-code needs a value" >&2; exit 2; }
+                 EXIT_CODE="$2"; shift 2 ;;
+    --log-url) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --log-url needs a value" >&2; exit 2; }
+               LOG_URL="$2"; shift 2 ;;
+    --tests-dir) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --tests-dir needs a value" >&2; exit 2; }
+                 TESTS_DIR="$2"; shift 2 ;;
+    --dir) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --dir needs a value" >&2; exit 2; }
+           NIGHTLY_DIR="$2"; shift 2 ;;
     --no-notify)  NOTIFY=0; shift ;;
     --help|-h)
       sed -n '/^# Usage:/,/^# Exit codes:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -169,19 +175,21 @@ fi
 # The night's portfolio cost, summed from the durations the run itself just
 # refreshed — never a figure carried over from another machine or another day.
 duration_ms=0
-while IFS= read -r suite; do
-  [[ -n "$suite" ]] || continue
-  d="$(aid_durations_latest "$(basename "$suite")" 2>/dev/null)" || continue
+while IFS=$'\t' read -r _ d; do
   duration_ms=$(( duration_ms + d ))
-done < <(aid_test_discover_suites "$TESTS_DIR")
+done < <(aid_durations_by_suite "$TESTS_DIR")
 
 # An ownerless overdue entry escalates the night it crosses the deadline and
 # then once a week — not every single night. A daily repeat of the same
 # sentence is how a channel gets muted, which costs the streak counting its
 # whole point.
-escalating="$(jq --argjson limit "${AID_QUARANTINE_ESCALATE_DAYS:-14}" \
+# Selected ONCE. Counting the set with one filter and printing it with a second
+# copy of the same filter is how a message stops matching the count that decided
+# to send it.
+escalating_json="$(jq -c --argjson limit "$ESCALATE_DAYS" \
   '[.[] | select(.owner == "" and .age_days >= $limit
-                 and ((.age_days - $limit) % 7 == 0))] | length' <<<"$quarantined_json")"
+                 and ((.age_days - $limit) % 7 == 0))]' <<<"$quarantined_json")"
+escalating="$(jq 'length' <<<"$escalating_json")"
 new_failures="$(jq '[.[] | select(.known | not)] | length' <<<"$failed_json")"
 
 # A message that was never delivered leaves the failure "known" but UNREPORTED.
@@ -222,10 +230,8 @@ if [[ "$NOTIFY" -eq 1 ]] \
     "$(jq 'length' <<<"$quarantined_json")")"
   msg+="$(jq -r '.[] | "  - \(.suite)\(if .streak > 1 then " — \(.streak). night in a row" else "" end)"' <<<"$failed_json")"
   if [[ "$escalating" -gt 0 ]]; then
-    msg+=$'\n'"$(jq -r --argjson limit "${AID_QUARANTINE_ESCALATE_DAYS:-14}" \
-      '.[] | select(.owner == "" and .age_days >= $limit and ((.age_days - $limit) % 7 == 0))
-       | "  ! quarantined \(.age_days)d with no owner: \(.suite)"' \
-      <<<"$quarantined_json")"
+    msg+=$'\n'"$(jq -r '.[] | "  ! quarantined \(.age_days)d with no owner: \(.suite)"' \
+      <<<"$escalating_json")"
   fi
   [[ "$quarantine_unreadable" == "true" ]] && msg+=$'\n'"  ! the quarantine record is unreadable"
   [[ -n "$LOG_URL" ]] && msg+=$'\n'"$LOG_URL"
@@ -252,9 +258,12 @@ echo "aid-nightly-report: $ARTIFACT ($(jq 'length' <<<"$failed_json") failed, $(
 # Attached to the report rather than mailed separately: the reaper's list is a
 # proposal a PM reads beside the night's result, and a separate channel is a
 # channel that gets muted. It proposes only — nothing here deletes anything.
+# ONE caller. The nightly workflow briefly had a step of its own gated on the
+# same date, so on the 1st the reaper ran twice and wrote its artifact twice.
+# The list belongs here, beside the night's result — a proposal in a separate
+# channel is a channel that gets muted.
 if [[ "$(date -u +%d)" == "01" ]]; then
   echo ""
-  bash "$SCRIPT_DIR/aid-test-reaper.sh" --dir "$NIGHTLY_DIR" --tests-dir "$TESTS_DIR" \
-    ${AID_CONTENT_SCAN:+--content-scan "$AID_CONTENT_SCAN"} || true
+  bash "$SCRIPT_DIR/aid-test-reaper.sh" --dir "$NIGHTLY_DIR" --tests-dir "$TESTS_DIR" || true
 fi
 exit 0

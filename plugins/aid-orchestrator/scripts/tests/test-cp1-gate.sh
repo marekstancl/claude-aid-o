@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-cp1-gate.sh — Unit tests for aid-cp1-gate.sh
 #

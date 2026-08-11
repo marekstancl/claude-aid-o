@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-release-policy.bats — aid-release-policy.sh (C4 release aggregator, E-059-2_2 Step 4)
 # plus the B1 shared-lib (lib/aid-review-signals.sh) cross-check against the FSM.
 #

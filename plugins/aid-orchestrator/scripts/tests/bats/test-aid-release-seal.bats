@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-release-seal.bats — P079 Step 10 (IMP-482): a released version's
 # CHANGELOG heading is immutable.
 #

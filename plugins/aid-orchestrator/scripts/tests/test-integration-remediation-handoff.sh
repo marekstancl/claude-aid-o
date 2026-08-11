@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-integration-remediation-handoff.sh — P066 Step 22.
 #
 # Confirms the sanctioned handoff (Step 16) works end to end against a

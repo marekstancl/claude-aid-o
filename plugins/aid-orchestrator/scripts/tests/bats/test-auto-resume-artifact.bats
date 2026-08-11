@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-auto-resume-artifact.bats — P076 Step 4: the eager continuation pointer,
 # the live active-runs writer, and the freshness binding on checkpointed rows.
 #

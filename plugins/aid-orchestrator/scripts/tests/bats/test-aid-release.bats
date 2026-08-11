@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # aid-release.sh — IMP-093 fix: CHANGELOG header detection + prepend logic.
 # Verifies the script does not silently collapse a pre-written CHANGELOG entry
 # when bumping the version (3x-observed bug across v2.18.3 + v2.19.0 releases).

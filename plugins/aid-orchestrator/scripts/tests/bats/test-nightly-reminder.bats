@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-nightly-reminder.bats — P081 Step 8: the second surface.
 #
 # WHAT THIS SUITE PROVES: the nightly result is stated where work starts, in

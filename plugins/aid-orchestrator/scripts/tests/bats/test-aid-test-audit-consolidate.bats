@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-test-audit-consolidate.bats — P066 Step 14 (+ EPIC 3 whole-diff
 # completeness fix-loop).
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-deferred-work-registration.bats — P076 Step 14: the deferred-work registry.
 #
 # WHAT THIS PROVES. Every item P076 consciously deferred exists as a numbered

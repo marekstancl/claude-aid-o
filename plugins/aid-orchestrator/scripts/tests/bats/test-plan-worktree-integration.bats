@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-worktree-integration.bats — P074 Step 19: the whole promise, in one fixture.
 #
 # WHAT THIS SUITE IS FOR. Every other P074 suite proves one mechanism against a

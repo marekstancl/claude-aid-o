@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-cp1-grounding.sh — Smoke test for CP1 grounding sub-checks 17a–17d
 #

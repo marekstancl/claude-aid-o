@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-catalog-force-tracked.bats — P066 Step 17.
 
 load test-helpers.bash

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-select-tests-emit-units.bats — P069 Step 9.
 #
 # Proves aid-select-tests.sh's --emit-units flag:

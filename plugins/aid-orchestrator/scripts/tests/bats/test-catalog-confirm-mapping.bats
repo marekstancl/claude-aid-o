@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-catalog-confirm-mapping.bats — P066 Step 17 (+ EPIC 3 whole-diff
 # re-staging fix-loop).
 

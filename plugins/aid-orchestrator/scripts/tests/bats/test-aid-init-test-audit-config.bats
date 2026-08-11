@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-init-test-audit-config.bats — P066 Step 18.
 #
 # /aid-init has no dedicated distribution script (same as the check-severity.yaml

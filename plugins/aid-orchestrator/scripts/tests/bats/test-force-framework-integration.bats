@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-force-framework-integration.bats — P073 Step 19: the cross-cutting fixture.
 #
 # The per-step suites prove each mechanism in isolation. This one proves the

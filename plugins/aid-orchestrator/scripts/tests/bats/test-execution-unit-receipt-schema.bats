@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-execution-unit-receipt-schema.bats — P069 Step 4.
 #
 # Validates execution-unit-receipt.schema.json: minimal-valid + invalid

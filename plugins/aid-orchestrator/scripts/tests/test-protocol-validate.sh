@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # Test harness for aid-protocol-validate.sh
 # Usage: test-protocol-validate.sh [--consistency]
 #

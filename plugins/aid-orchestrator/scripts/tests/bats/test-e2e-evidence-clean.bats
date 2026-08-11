@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # P065 Step 13 (E-065-4_7) — Evidence sanitization backstop.
 #
 # Committed e2e evidence (the P065 Step 1 codex-stream-sample/ grounding

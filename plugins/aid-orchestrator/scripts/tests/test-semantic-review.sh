@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-semantic-review.sh — E5 C2 Semantic Review Engine test harness
 # Tests: aid-finding-merge.sh, aid-acceptance-evidence.sh, aid-consumption-proof.sh,
 #        review-profile-check.sh (completed_lenses E5 path)

@@ -59,10 +59,14 @@ GRACE_DAYS="${AID_REAPER_GRACE_DAYS:-30}"     # too young to judge
 FAILURE_WINDOW_DAYS="${AID_REAPER_FAILURE_WINDOW_DAYS:-180}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --content-scan) CONTENT_SCAN="${2:-}"; shift 2 ;;
-    --dir)          NIGHTLY_DIR="${2:-}"; shift 2 ;;
-    --tests-dir)    TESTS_DIR="${2:-}"; shift 2 ;;
-    --repo)         REPO="${2:-}"; shift 2 ;;
+    --content-scan) [[ $# -ge 2 ]] || { echo "aid-test-reaper: --content-scan needs a value" >&2; exit 2; }
+                    CONTENT_SCAN="$2"; shift 2 ;;
+    --dir) [[ $# -ge 2 ]] || { echo "aid-test-reaper: --dir needs a value" >&2; exit 2; }
+           NIGHTLY_DIR="$2"; shift 2 ;;
+    --tests-dir) [[ $# -ge 2 ]] || { echo "aid-test-reaper: --tests-dir needs a value" >&2; exit 2; }
+                 TESTS_DIR="$2"; shift 2 ;;
+    --repo) [[ $# -ge 2 ]] || { echo "aid-test-reaper: --repo needs a value" >&2; exit 2; }
+            REPO="$2"; shift 2 ;;
     --json)         AS_JSON=1; shift ;;
     --help|-h)
       sed -n '/^# Usage:/,/^# Exit codes:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -99,13 +103,10 @@ fi
 # ─── Input 3: cost ──────────────────────────────────────────────────────────
 total_ms=0
 declare -A COST=()
-while IFS= read -r suite; do
-  [[ -n "$suite" ]] || continue
-  base="$(basename "$suite")"
-  d="$(aid_durations_latest "$base" 2>/dev/null)" || continue
+while IFS=$'\t' read -r base d; do
   COST["$base"]="$d"
   total_ms=$(( total_ms + d ))
-done < <(aid_test_discover_suites "$TESTS_DIR")
+done < <(aid_durations_by_suite "$TESTS_DIR")
 [[ "$total_ms" -gt 0 ]] || MISSING_INPUTS+=("durations journal (cost) — run run-all-tests.sh --timing")
 
 # ─── Input 4: failure age, from whatever nightly history exists ─────────────

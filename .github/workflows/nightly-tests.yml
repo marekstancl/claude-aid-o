@@ -77,12 +77,6 @@ jobs:
         continue-on-error: true
         run: bash plugins/aid-orchestrator/scripts/aid-selector-honesty-check.sh --repo .
 
-      - name: Propose deletions (first run of the month)
-        continue-on-error: true
-        run: |
-          [ "$(date -u +%d)" = "01" ] || exit 0
-          bash plugins/aid-orchestrator/scripts/aid-test-reaper.sh --repo .
-
       - name: Attach the night's artifacts
         if: always()
         uses: actions/upload-artifact@v4

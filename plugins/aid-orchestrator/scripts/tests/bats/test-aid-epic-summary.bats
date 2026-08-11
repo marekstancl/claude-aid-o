@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # IMP-090 — aid-epic-summary.sh: epic-summary.md generation (2 assertions)
 
 load test-helpers.bash

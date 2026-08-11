@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-tier-declaration.bats — P081 Step 10: the budget on the way in.
 #
 # WHAT THIS SUITE PROVES: generation refuses a plan that would add an UNTIERED

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-run-mode-field.bats — P076 Step 1: the `run_mode` configuration field.
 #
 # Step 1 creates the LANDING FIELD only. The runner-side read/validation lives

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-behavior-trace.bats — behavior_trace_count gate tests (aid-fsm.sh v2.35+).
 #
 # Tests the structural gate in fsm_check_verifier_output that enforces

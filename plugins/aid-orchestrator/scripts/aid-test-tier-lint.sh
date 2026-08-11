@@ -96,14 +96,17 @@ is_plan_numbered() {
 
 # ─── cost_tier <suite_basename> ─────────────────────────────────────────────
 # The cheapest tier the newest measurement allows, or empty when unmeasured.
-# Same thresholds as aid-test-tier-assign.sh, cost half only — scope and the
-# budgets can only push a tier UP, and this check is about the floor.
+# The thresholds come from lib/aid-test-tier.sh, the same two variables
+# aid-test-tier-assign.sh assigns from — this check is the floor under a tier
+# that tool proposed, so the two cannot be allowed to disagree. Cost half only:
+# scope and the aggregate budgets can push a tier UP, never down.
 cost_tier() {
   local rec
   rec="$(aid_durations_latest_json "$1" 2>/dev/null)" || return 1
   [[ "$(jq -r '.censored' <<<"$rec")" == "true" ]] && return 1
-  jq -r 'if .cases > 0 then (.duration_ms / .cases) else .duration_ms end
-         | if . < 2000 then "t0" elif . < 30000 then "t1" else "t2" end' <<<"$rec"
+  jq -r --argjson t0 "$AID_TIER_T0_MAX_MS" --argjson t1 "$AID_TIER_T1_MAX_MS" \
+     'if .cases > 0 then (.duration_ms / .cases) else .duration_ms end
+      | if . < $t0 then "t0" elif . < $t1 then "t1" else "t2" end' <<<"$rec"
 }
 
 _tier_rank() { case "$1" in t0) echo 0 ;; t1) echo 1 ;; t2) echo 2 ;; *) echo -1 ;; esac; }

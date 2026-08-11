@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-release-changelog-entry.bats — P073 Step 3: no release commit or
 # plan-candidate preparation may succeed while the TARGET version's CHANGELOG
 # section is missing, empty, or still the generated placeholder.

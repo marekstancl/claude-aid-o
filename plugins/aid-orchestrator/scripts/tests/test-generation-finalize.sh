@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 set -euo pipefail
 
 # ─── P072 Step 9: canonical result line for the aggregate collector ─────────

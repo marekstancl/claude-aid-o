@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-audit-profile-select.bats — P072 Step 13 (production wiring).
 #
 # The selector exists so that "was that slow suite ever diagnosed?" is a

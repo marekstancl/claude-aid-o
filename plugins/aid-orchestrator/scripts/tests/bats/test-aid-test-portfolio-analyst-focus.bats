@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-test-portfolio-analyst-focus.bats — P066 Step 9.
 #
 # test-portfolio-analyst.md is a prose agent card (LLM-facing instructions,

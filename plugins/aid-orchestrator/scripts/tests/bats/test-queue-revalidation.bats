@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # P060 Step 7 — aid-fsm.sh queue dependency revalidation (OBS-20260709-06).
 #
 # Revalidates a queue entry's `depends_on` (the REAL schema field — epic IDs,

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-c3-activation.bats — E-059-1_2 Step 1 behavioral red-green suite for the
 # IMP-177 C3 activation: producer wiring + deterministic mode substrate + FSM
 # presence check (observe) + C3 gate enforcement toggle (observe/blocking).

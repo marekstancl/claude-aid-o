@@ -56,6 +56,8 @@ _AID_TEST_DURATIONS_SH_SOURCED=1
 _AID_TD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-roots.sh
 source "${_AID_TD_LIB_DIR}/aid-roots.sh"
+# shellcheck source=aid-test-tier.sh
+source "${_AID_TD_LIB_DIR}/aid-test-tier.sh"   # discovery, for aid_durations_by_suite
 
 AID_DURATIONS_REL="${AID_DURATIONS_REL:-.aid-o/work/test-durations.jsonl}"
 
@@ -163,4 +165,21 @@ aid_durations_latest() {
   local rec
   rec="$(aid_durations_latest_json "$@")" || return $?
   jq -r '.duration_ms' <<<"$rec"
+}
+
+# aid_durations_by_suite [tests_dir] — one `<basename><TAB><newest ms>` line per
+# discovered suite that HAS a usable measurement.
+#
+# The portfolio's measured cost is the sum of this. Both the nightly report
+# (which puts it in the artifact) and the reaper (which turns it into "N% of
+# the whole portfolio") ask here, so the two can never answer "what did the
+# portfolio cost" over different suite sets.
+aid_durations_by_suite() {
+  local suite base d
+  while IFS= read -r suite; do
+    [[ -n "$suite" ]] || continue
+    base="$(basename "$suite")"
+    d="$(aid_durations_latest "$base" 2>/dev/null)" || continue
+    printf '%s\t%s\n' "$base" "$d"
+  done < <(aid_test_discover_suites "$1")
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-lifecycle.bats — IMP-232 v2.58.0 canonical plan-level closure model.
 # Covers lib/aid-lifecycle.sh + aid-lifecycle.sh CLI: repo identity (stable +
 # immutable + schema-valid), strict legacy EPIC parser (required/backlog/

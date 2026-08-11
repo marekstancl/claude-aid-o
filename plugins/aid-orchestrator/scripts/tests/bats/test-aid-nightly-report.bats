@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-nightly-report.bats — P081 Step 7: the nightly result is durable
 # and the message is rare.
 #

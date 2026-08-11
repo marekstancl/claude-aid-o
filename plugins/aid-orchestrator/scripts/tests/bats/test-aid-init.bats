@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # P032 Step 7 — execution.yaml composer + stack auto-detection (Step 1).
 # 4 assertions covering the per-stack template fragment system.
 

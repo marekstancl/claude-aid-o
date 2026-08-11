@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-instruction-closure.bats — P076 E-076-1_3 Step 7.
 #
 # The Controller-boundary contract used to live in exactly ONE agent card

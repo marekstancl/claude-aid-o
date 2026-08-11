@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-run-all-tests-result-grammar.bats — P072 Step 9.
 #
 # Seven suites emitted nothing the aggregate collector could read and were

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-content-scan.bats — mechanical content checks run every audit.
 #
 # These findings existed exactly once, made by hand after the owner asked where

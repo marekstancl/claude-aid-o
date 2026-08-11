@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-delivery-report.bats — P045 regression for fsm_eval_delivery_report_present.
 #
 # The helper echoes a JSON literal — null | true | false — for the plan-boundary

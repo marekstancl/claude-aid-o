@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-test-catalog-schema.bats — P066 Step 1.
 #
 # Validates the five schemas every later P066 step reads/writes against:

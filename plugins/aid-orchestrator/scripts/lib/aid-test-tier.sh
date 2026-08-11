@@ -48,6 +48,18 @@ _AID_TT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The plugin's own tests directory, used when a caller names none.
 AID_TEST_TIERS="t0 t1 t2"
 
+# THE TAG'S ONE SPELLING. A second regex for the same tag is a second opinion
+# about what counts as a declaration.
+AID_TEST_TIER_TAG_RE='^[[:space:]]*#[[:space:]]*aid-tier:'
+
+# THE COST HALF OF THE TIER RULE, in one place. The assigner (which PROPOSES a
+# tier) and the lint (which checks a DECLARED tier against its floor) both read
+# these. They used to be two jq programs agreeing by comment, which is not a
+# mechanism: moving the T1 boundary would have made the lint disagree with the
+# tool that produced the tags it checks.
+AID_TIER_T0_MAX_MS="${AID_TIER_T0_MAX_MS:-2000}"
+AID_TIER_T1_MAX_MS="${AID_TIER_T1_MAX_MS:-30000}"
+
 aid_test_default_tests_dir() {
   printf '%s\n' "$(cd "${_AID_TT_LIB_DIR}/../tests" && pwd)"
 }
@@ -88,20 +100,29 @@ aid_test_tier_of() {
   local file="${1:?aid_test_tier_of: suite path required}"
   [[ -f "$file" ]] || return 1
 
-  local tags count
+  local tags count header
   # The tag is looked for in the WHOLE file, not only the header: a second tag
   # further down is a contradiction that must be reported, not hidden by a
   # scan that stops early.
-  tags="$(grep -nE '^[[:space:]]*#[[:space:]]*aid-tier:' "$file" || true)"
+  tags="$(grep -nE "$AID_TEST_TIER_TAG_RE" "$file" || true)"
   [[ -n "$tags" ]] || return 1
-  count="$(printf '%s\n' "$tags" | grep -c '')"
+  count="$(printf '%s\n' "$tags" | grep -c '' || true)"
   if [[ "$count" -ne 1 ]]; then
     echo "aid-test-tier: '$file' declares $count tiers, at line(s) $(printf '%s\n' "$tags" | cut -d: -f1 | tr '\n' ' ')— a suite has exactly one tier" >&2
     return 2
   fi
 
   # A tag outside the leading comment block is not a header declaration.
-  if ! _aid_tt_header "$file" | grep -qE '^[[:space:]]*#[[:space:]]*aid-tier:'; then
+  #
+  # NOT `_aid_tt_header "$file" | grep -qE …`. `grep -q` exits at the first
+  # match and closes the pipe; the header writer then takes SIGPIPE and exits
+  # 141, and under a caller's `pipefail` THAT becomes the pipeline's status —
+  # so this branch fired on perfectly well-formed files, and only sometimes,
+  # because whether the writer had finished first is a race. It reported
+  # between 25 and 32 violations over the same clean tree on consecutive runs.
+  # The header is materialised first; no pipeline, no signal, no race.
+  header="$(_aid_tt_header "$file")"
+  if ! grep -qE "$AID_TEST_TIER_TAG_RE" <<<"$header"; then
     echo "aid-test-tier: '$file' carries an aid-tier tag outside its leading comment block — the tag is a header declaration" >&2
     return 2
   fi

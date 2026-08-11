@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-integration-self-host-audit.sh — P066 Step 21.
 #
 # Drives a REAL invocation of the Wave-0 scanner (aid-test-inventory.sh)

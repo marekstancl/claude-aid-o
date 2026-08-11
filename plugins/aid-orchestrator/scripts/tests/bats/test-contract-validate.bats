@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-contract-validate.bats — P058 Step 4, D5 canonical behavioral test.
 #
 # Covers the contract-validation gate (aid-contract-validate.sh), its

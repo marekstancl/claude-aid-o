@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-lifecycle-reconcile.bats — IMP-232 v2.58.0 plan-close + legacy reconcile +
 # interruption safety (§5.8) + repo-local identity isolation. Complements
 # test-lifecycle.bats (foundation) and test-aid-fsm.bats (D1 gate).

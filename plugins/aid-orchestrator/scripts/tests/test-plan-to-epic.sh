@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-plan-to-epic.sh — Unit tests for aid-plan-to-epic.sh
 #

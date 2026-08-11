@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-instruction-sweep.sh — no unqualified per-EPIC release instruction
 # survives on an agent-facing surface, and every such surface has a disposition.
 # P068 Step 10 (E-068-2_2 Step 4).

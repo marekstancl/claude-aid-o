@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-generation-labels.bats — P074 Step 18: honest failure labels.
 #
 # WHAT THIS PINS. Generation failures render as EXACTLY TWO AID-owned labels

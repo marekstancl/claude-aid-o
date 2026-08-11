@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-run-gates-worktree-paths.bats — P079 Step 2 (IMP-479): the gate runner
 # resolves its own STATE paths through the state root.
 #

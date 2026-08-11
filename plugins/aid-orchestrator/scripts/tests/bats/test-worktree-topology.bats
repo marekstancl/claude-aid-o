@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-worktree-topology.bats — P074 Step 9: inside the plan worktree, EPIC
 # execution uses exactly today's branch model.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-run-all-timing.bats — P081 Step 1: the portfolio runner's timing mode.
 #
 # WHAT THIS SUITE PROVES: the shipped `bats --timing` parser finally has a

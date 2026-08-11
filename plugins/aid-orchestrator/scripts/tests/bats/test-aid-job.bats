@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-job.bats — IMP-262 controller-owned background job supervisor.
 #
 # Proves the two backlog failure modes are structurally prevented and every

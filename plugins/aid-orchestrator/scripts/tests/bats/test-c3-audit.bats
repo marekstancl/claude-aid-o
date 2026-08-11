@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # E-057-2_2 Step 3 — EPIC-level red-green integration suite for the C3
 # independent-audit pipeline. Exercises 4 scenarios from the plan, each with
 # a positive (blocks) and negative (passes) control, via REAL subprocess

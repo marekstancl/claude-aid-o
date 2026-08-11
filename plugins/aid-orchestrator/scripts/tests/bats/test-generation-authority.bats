@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-generation-authority.bats — P074 Step 13: CP1 runs ONCE per plan and the
 # decision is sealed into a generation-authority receipt.
 #

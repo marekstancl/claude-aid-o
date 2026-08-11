@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-drift-worktree.bats — P074 Step 10: the candidate-drift check and the
 # plan-final gate run are bound to the PLAN WORKTREE, not to whatever tree the
 # PM happens to be standing in.

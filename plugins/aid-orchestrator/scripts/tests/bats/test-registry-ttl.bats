@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # E-046-1_3 Step 6 — aid-registry-ttl-guard.sh regression (Step 5).
 # TTL-guard assertions: past-deadline stale, future deferral, expired deferral,
 # no-deadline opt-out, active-status skip, missing registry → exit 2 (inline +

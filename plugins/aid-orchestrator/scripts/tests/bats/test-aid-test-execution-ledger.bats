@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-execution-ledger.bats — P072 Step 26.
 #
 # The ledger answers one question: did anything run twice? Its value is

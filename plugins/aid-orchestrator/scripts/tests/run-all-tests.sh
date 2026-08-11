@@ -123,8 +123,8 @@ while [[ $# -gt 0 ]]; do
     --timing)
       TIMING=1
       ;;
-    --tier|--tier=*)
-      if [[ "$1" == --tier=* ]]; then TIER="${1#--tier=}"; else TIER="${2:-}"; shift; fi
+    --tier)
+      TIER="${2:-}"; shift
       case "$TIER" in
         t0|t1|t2) ;;
         *) echo "Unknown tier: '$TIER' (accepted: t0 t1 t2)" >&2; exit 2 ;;
@@ -195,9 +195,19 @@ fi
 # continues. A measurement must never be able to fail a test run.
 record_suite_duration() {
   local suite="$1" runner="$2" wall_ms="$3" exit_code="$4" output="$5"
+  local never_ran="${6:-false}"
   local duration_ms="$wall_ms" source="wallclock" cases=1 censored="false"
 
-  if [[ "$runner" == "bats" && "$BATS_TIMED" -eq 1 ]]; then
+  # A suite that never executed (bats absent) took ~0 ms and passed no cases.
+  # Recorded plainly, the assigner would read that as the cheapest suite in the
+  # portfolio and put it in T0 — an unrun suite promoted to the merge path's
+  # fastest tier. `censored` is exactly the "this duration is not a
+  # measurement" marker, and the assigner already refuses to tier it.
+  if [[ "$never_ran" == "true" ]]; then
+    censored="true"
+  fi
+
+  if [[ "$runner" == "bats" && "$BATS_TIMED" -eq 1 && "$never_ran" != "true" ]]; then
     local parsed sum n
     parsed="$(bats_timing_parse "$output" "$(basename "$suite")" 2>/dev/null)" || parsed=""
     if [[ -n "$parsed" ]]; then
@@ -300,15 +310,28 @@ source "$SCRIPT_DIR/../lib/aid-test-tier.sh"
 declare -A SUITE_TIER=()
 TAGGED_COUNT=0
 UNTAGGED_SUITES=()
+# A tag that is DUPLICATED or names an unknown tier is kept apart from a
+# missing one. Folding it into "untagged" made an invalid declaration look like
+# a project that has not adopted tiers — so a tree where every tag was
+# misspelled would run happily and match no tier filter at all.
+INVALID_TAG_SUITES=()
 while IFS= read -r _s; do
   [[ -n "$_s" ]] || continue
-  if _t="$(aid_test_tier_of "$_s" 2>/dev/null)"; then
-    SUITE_TIER["$(basename "$_s")"]="$_t"
-    TAGGED_COUNT=$(( TAGGED_COUNT + 1 ))
-  else
-    UNTAGGED_SUITES+=("$(basename "$_s")")
-  fi
+  _rc=0
+  _t="$(aid_test_tier_of "$_s" 2>/dev/null)" || _rc=$?
+  case "$_rc" in
+    0) SUITE_TIER["$(basename "$_s")"]="$_t"; TAGGED_COUNT=$(( TAGGED_COUNT + 1 )) ;;
+    1) UNTAGGED_SUITES+=("$(basename "$_s")") ;;
+    *) INVALID_TAG_SUITES+=("$(basename "$_s")") ;;
+  esac
 done < <(aid_test_discover_suites "$SCRIPT_DIR")
+
+if [[ "${#INVALID_TAG_SUITES[@]}" -gt 0 ]]; then
+  echo "ERROR: ${#INVALID_TAG_SUITES[@]} suite(s) carry an aid-tier tag that is duplicated or names an unknown tier:" >&2
+  for _u in "${INVALID_TAG_SUITES[@]}"; do echo "  - $_u" >&2; done
+  echo "A tag nobody can read is not the same as no tag — see aid-test-tier-lint.sh." >&2
+  exit 1
+fi
 
 if [[ "$TAGGED_COUNT" -gt 0 && "${#UNTAGGED_SUITES[@]}" -gt 0 ]]; then
   echo "ERROR: this portfolio declares test tiers, but ${#UNTAGGED_SUITES[@]} suite(s) carry no '# aid-tier:' tag:" >&2
@@ -446,7 +469,8 @@ for suite in "${SUITES[@]}"; do
   if [[ "$TIMING" -eq 1 ]]; then
     record_suite_duration "$suite" \
       "$([[ "$is_bats" -eq 1 ]] && echo bats || echo sh)" \
-      "$(( $(date -u +%s%3N) - wall_start_ms ))" "$suite_exit" "$suite_output"
+      "$(( $(date -u +%s%3N) - wall_start_ms ))" "$suite_exit" "$suite_output" \
+      "$([[ "$bats_missing_hard_fail" -eq 1 ]] && echo true || echo false)"
   fi
 
   suite_passed=0

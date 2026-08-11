@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-gitignore-backfill.bats — P063 Step 2: aid-gitignore-backfill.sh
 # (Gate Runtime Baselines EPIC).
 #

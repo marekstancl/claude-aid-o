@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-selector-snapshot-readonly.bats — P066 Step 17.
 
 load test-helpers.bash

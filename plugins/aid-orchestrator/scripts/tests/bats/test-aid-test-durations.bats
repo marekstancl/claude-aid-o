@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t0
 # test-aid-test-durations.bats — P081 Step 1: the per-suite duration journal.
 #
 # WHAT THIS SUITE PROVES: a tier is only as honest as the measurement behind

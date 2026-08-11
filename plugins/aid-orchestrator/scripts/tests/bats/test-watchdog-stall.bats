@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-watchdog-stall.bats — P076 Step 6: watchdog wiring and visible stalls,
 # plus the three review obligations carried into this step.
 #

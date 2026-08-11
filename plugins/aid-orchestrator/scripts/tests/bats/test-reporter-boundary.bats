@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-reporter-boundary.bats — P073 Step 12: the immutable review boundary
 # (P082).
 #

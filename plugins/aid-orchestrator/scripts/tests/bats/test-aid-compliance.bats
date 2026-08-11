@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # P033 Step 9 — aid-compliance-report.sh: --era filter, --era latest, --compare,
 # force triple-condition reflect detection (4 assertions)
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-plan-diff.sh — behavioral RED regression for aid-plan-diff.sh's AC
 # extraction (P058 Step 4).

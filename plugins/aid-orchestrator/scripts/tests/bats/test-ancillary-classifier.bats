@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-ancillary-classifier.bats — P073 Step 14: the ONE ancillary/delivery
 # classifier.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-close.bats — tests for cmd_plan_close in aid-fsm.sh
 # E-046-2_3 Step 7 — verifies plan-close precondition enforcement and toggle logic.
 # Extended (wiring fix): cmd_plan_close now also runs aid-plan-close-check.sh

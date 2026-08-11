@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-integration-e2e-audit-pipeline.sh — P066 Step 24, Part A.
 #
 # Automated, subprocess-level E2E scenarios — what Bats/plain-bash CAN

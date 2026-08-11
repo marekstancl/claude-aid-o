@@ -51,10 +51,14 @@ NIGHTLY_DIR="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
 ARTIFACT=""; SINCE_DATE=""; REPO="$PWD"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dir)        NIGHTLY_DIR="${2:-}"; shift 2 ;;
-    --artifact)   ARTIFACT="${2:-}"; shift 2 ;;
-    --since-date) SINCE_DATE="${2:-}"; shift 2 ;;
-    --repo)       REPO="${2:-}"; shift 2 ;;
+    --dir) [[ $# -ge 2 ]] || { echo "aid-selector-honesty-check: --dir needs a value" >&2; exit 2; }
+           NIGHTLY_DIR="$2"; shift 2 ;;
+    --artifact) [[ $# -ge 2 ]] || { echo "aid-selector-honesty-check: --artifact needs a value" >&2; exit 2; }
+                ARTIFACT="$2"; shift 2 ;;
+    --since-date) [[ $# -ge 2 ]] || { echo "aid-selector-honesty-check: --since-date needs a value" >&2; exit 2; }
+                  SINCE_DATE="$2"; shift 2 ;;
+    --repo) [[ $# -ge 2 ]] || { echo "aid-selector-honesty-check: --repo needs a value" >&2; exit 2; }
+            REPO="$2"; shift 2 ;;
     --help|-h)
       sed -n '/^# Usage:/,/^# Exit codes:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -121,6 +125,13 @@ fi
 # Reading the table over-reports rather than under-reports: a basename that
 # appears only in a comment is treated as mappable, so its miss is still
 # reported as a gap. Silence is the failure mode worth avoiding.
+#
+# `aid-test-catalog-selector-snapshot.sh` derives the same set more precisely
+# by extracting `map_path_to_tests()` verbatim and executing it. It is NOT used
+# here on purpose: it needs the plugin repo layout, costs a subprocess inside a
+# nightly step that must never fail, and would need a fallback for when it does
+# not apply — and the fallback would be this grep anyway. Revisit if the gap
+# report ever starts producing false `unmappable` verdicts.
 mappable="$(grep -oE 'test-[A-Za-z0-9_-]+\.(bats|sh)' "$SELECTOR" | sort -u | jq -Rc . | jq -sc '.')"
 
 gaps='[]'; unmappable='[]'

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-run-all-delegation.sh — P079 Step 12 (IMP-483): every delegated suite is
 # owned by exactly one CI job, and the inline runner really does skip it.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-check-severity-sync.sh — registry sync guard for the compliance system.
 #
 # evaluate_compliance_checks (aid-fsm.sh) emits check dimensions; fsm_build_failures

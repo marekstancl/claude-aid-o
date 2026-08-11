@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-scoped-preflights.bats — P074 Step 5: preflights scoped to what
 # operations actually touch.
 #

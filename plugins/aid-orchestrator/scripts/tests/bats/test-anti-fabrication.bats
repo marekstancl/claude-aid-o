@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-anti-fabrication.bats — Phase 1 (P037) provenance verification smoke test.
 #
 # Validates the end-to-end anti-fabrication enforcement chain:

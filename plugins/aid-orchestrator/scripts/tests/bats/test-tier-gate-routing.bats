@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-tier-gate-routing.bats — P081 Step 6: the merge path lost the portfolio.
 #
 # WHAT THIS SUITE PROVES, against the REAL execution.yaml rather than a

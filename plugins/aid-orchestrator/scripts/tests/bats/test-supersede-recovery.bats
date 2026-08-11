@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-supersede-recovery.bats — P073 Step 13: the supported recoveries.
 #
 # `aid-fsm.sh init` rejects a duplicate init unconditionally, which is right —

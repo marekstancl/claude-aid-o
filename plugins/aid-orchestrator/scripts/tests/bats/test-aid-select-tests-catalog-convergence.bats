@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-select-tests-catalog-convergence.bats — P069 Step 10.
 #
 # Proves aid-select-tests.sh's catalog↔selector convergence:

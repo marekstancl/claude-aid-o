@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-pm-override.bats — P073 Step 10: ONE PM-override artifact schema for
 # both bounded review loops.
 #

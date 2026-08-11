@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-c3-dispatch.bats — P065 E-065-1_7 Step 2 behavioral red-green tests
 # for scripts/lib/aid-c3-dispatch.sh `build-manifest`.
 #

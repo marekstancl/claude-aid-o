@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # P060 Step 4 — CP3 review freshness (OBS-20260702-03, head-side twin of B-008).
 # A STALE CP3 review must not pass as DONE evidence: fsm_check_cp3_freshness reads
 # `Reviewed-Head:` from the CP3 verifier-output files and, when HEAD has moved

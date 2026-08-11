@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-force-init-passthrough.sh — PM-authorized, audited force-init override
 #

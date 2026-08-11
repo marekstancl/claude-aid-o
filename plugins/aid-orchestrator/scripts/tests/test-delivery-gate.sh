@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-delivery-gate.sh — Delivery Gate Engine test harness (E-050-1_1 QA Step)
 #

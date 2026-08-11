@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-control-boundary.sh — assert the plan-boundary claims mechanically.
 # P068 Step 9 (E-068-2_2 Step 3).
 #

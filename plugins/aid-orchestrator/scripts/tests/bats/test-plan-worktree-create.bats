@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-plan-worktree-create.bats — P074 Step 7: `plan-start` creates the
 # plan's execution worktree, records it, and COMPENSATES on any failure.
 #

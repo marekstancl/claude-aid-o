@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-aid-plan-release-boundary.bats — P064 "Plan Branch Substrate"
 # (EPIC E-064-1_2). THE single mandatory integration suite for this plan
 # (see .aid-o/plans/P064-plan-branch-substrate.md — this file is named and

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-run-all-tier-filter.bats — P081 Step 5: the runner executes one tier.
 #
 # WHAT THIS SUITE PROVES: filtering never hides anything. A suite skipped for

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-enforcement-registry-test-audit.sh — P066 Step 19, extended by P072 Step 22.
 #
 # Verifies the 3 enforcement rows this plan registers

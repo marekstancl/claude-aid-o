@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # P033 Step 9 — aid-prefilter.sh classify: SKIP/RUN/FAIL + output format (6 assertions)
 # P060 Step 3 — cp2 step-boundary range resolution (F4 a-h) + fixture updates.
 #   OBS-20260705-01: cp2 must classify from the STEP boundary, not the last commit.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # =============================================================================
 # test-json-to-run.sh — Unit tests for aid-json-to-run.sh
 #

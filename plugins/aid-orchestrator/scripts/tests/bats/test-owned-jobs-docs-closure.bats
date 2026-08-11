@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-owned-jobs-docs-closure.bats — P076 Step 17: the release metadata and the
 # contributor documentation say what shipped.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t1
 # test-aid-test-audit-decision.bats — P072 Step 2.
 #
 # Every "cannot" in the decision contract gets a case that ATTEMPTS it and

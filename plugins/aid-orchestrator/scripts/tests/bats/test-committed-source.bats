@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# aid-tier: t2
 # test-committed-source.bats — P073 Step 11: the committed-source preflight
 # (P083).
 #

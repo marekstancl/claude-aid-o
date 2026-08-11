@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# aid-tier: t2
 # test-ui-fidelity-e2e.sh -- E2E scenarios for existing_ui FSM guard
 # Tests the full guard chain: verdict.json present/absent + result values.
 # 4 scenarios: happy / un-applied-delta / collateral-damage / capture-absent
