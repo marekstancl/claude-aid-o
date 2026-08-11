@@ -46,7 +46,7 @@ that only warned would be tolerating the overflow the standard forbids.
 | Three tiers with the 2 s / 30 s per-case thresholds | implemented | Header tag `# aid-tier:`, not directories — see §4. |
 | Whole-tier budgets (T0 ≤ 2 min, T1 ≤ 10 min) | implemented | Enforced by demotion, not by warning. |
 | Tier from measured cost and scope, never importance | implemented | `aid-test-tier-assign.sh`; an unresolvable subject is t2 at any cost. |
-| The full suite runs nightly and reports itself | implemented | `.github/workflows/nightly-tests.yml`, 02:40 UTC, AID's own hour. |
+| The full suite runs nightly and reports itself | implemented | `.github/workflows/nightly-tests.yml`, 21:00 UTC (23:00 Prague), AID's own hour. |
 | Red reported once, then counted | implemented | Streak counting; a green night sends nothing. |
 | A second surface that survives a missed message | implemented | One line in `/aid-status` and at `/aid-plan` orientation. |
 | Flaky quarantine with an owner and a deadline | implemented | `aid-test-quarantine.sh`; 14 days ownerless escalates. |
@@ -210,7 +210,7 @@ Every test suite declares its tier in its leading comment block, once:
 |------|---------------|-------------------|--------------|
 | `t0` | under 2 s     | under 2 min       | merge path (the pulse) |
 | `t1` | under 30 s    | under 10 min      | merge path — this is what blocks a merge |
-| `t2` | more, **or cross-component at any cost** | none | nightly, 02:40 UTC |
+| `t2` | more, **or cross-component at any cost** | none | nightly, 21:00 UTC = 23:00 Prague |
 
 Tier follows measured cost and scope — never importance, and never a wish to
 avoid blocking. `aid-test-tier-assign.sh` proposes from measurements and

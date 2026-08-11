@@ -7,12 +7,12 @@ name: Nightly tests
 # the repo had no `schedule:` trigger at all.
 #
 # The whole portfolio and not just T2: re-running T0+T1 costs ~12 minutes at
-# 02:40 and buys two things a T2-only run cannot — one place where the entire
+# 21:00 UTC and buys two things a T2-only run cannot — one place where the entire
 # suite is proved green together, and a `--timing` pass that refreshes EVERY
 # tier's durations, which is what lets the lint catch a T0 suite that has grown
 # into T1 territory.
 #
-# 02:40 UTC is AID's own slot. The self-hosted runner is shared across the
+# 21:00 UTC (23:00 Prague) is AID's own slot. The self-hosted runner is shared across the
 # ecosystem and cannot carry six portfolios at once, so each adopting project
 # gets a different hour — this one is AID's, and a project adopting the
 # standard later picks another.
@@ -22,7 +22,13 @@ name: Nightly tests
 # from a developer's checkout.
 on:
   schedule:
-    - cron: '40 2 * * *'
+    # 21:00 UTC = 23:00 Prague (CEST) / 22:00 (CET). The PM goes to bed early
+    # and starts early, so the run must FINISH before the working day, not
+    # during it: at ~3.5 h it lands around 00:30-01:30 local, and the result is
+    # already waiting in /aid-status and (if red) on Telegram at breakfast.
+    # GitHub cron is UTC and does not follow DST — in winter this is 22:00
+    # local, which is still comfortably before the morning.
+    - cron: '0 21 * * *'
   workflow_dispatch:
 
 jobs:
