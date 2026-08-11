@@ -198,8 +198,21 @@ _cite_violations() {
             #              `active.md`) that live in a subdirectory, not at root.
             #              A harness that cries wolf is one people learn to ignore.
             #
-            # What this still misses: a second FULL path inside one part that does
-            # not start with a known segment. Recorded rather than papered over.
+            # WHAT THIS STILL MISSES — the real gap, stated correctly. The class this
+            # comment used to name (a second full path not starting with a known
+            # segment) is now CAUGHT, because the segment test is derived from the
+            # resolution bases rather than hand-listed. What remains missed is a BARE
+            # FILENAME in a non-leading position: `see also NOPE.md` is silent, while
+            # the same token leading a value is checked — and that leading check is
+            # what produced this step's ninth real repair.
+            #
+            # Left missed DELIBERATELY, with the cost measured: validating bare
+            # filenames mid-sentence produced 8 false positives over the shipped
+            # registry (`plan-writing.md`, `active.md`, `review-profile.json` — real
+            # files named in prose that live in a subdirectory, so they resolve under
+            # no base as written). Trading 8 false alarms for 1 caught typo makes a
+            # harness people stop reading. Revisit if cites ever gain a grammar that
+            # marks a path as a path.
             # `read -ra`, NOT `for word in $part`. An unquoted expansion is
             # GLOB-EXPANDED against the caller's cwd, so a cite containing `**bold**`
             # became whatever files happened to sit next to the runner — and every
