@@ -2,64 +2,22 @@
   "schema_version": "aid-2.0",
   "artifact_type": "c0_plan_review",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-08-11T05:15:11Z",
+  "created_at": "2026-08-11T05:23:56Z",
   "identity": {
     "plan_id": "P080"
   },
-  "reviewed_plan_hash": "sha256:a2b54fda7e05b0aa23db58eb6ef1742c9ba52e01990f79463739135f496c2b2e",
-  "reviewed_head": "32aa113f64633bc6843ce9820ba6a6fa09412f41",
-  "input_manifest_hash": "sha256:49fe04f9e98cd3727e473b3a04f1295c83b151cf4d1b7c31cff97ac7e7c6a289",
-  "review_status": "findings",
-  "blocking_findings": true,
-  "findings": [
-    {
-      "fingerprint": "sha256:40d4eef46c5d6fcd83866140e3478937558b248fe5a55f9102bbe02a69ba606d",
-      "occurrence_id": "c0-P080-0",
-      "severity": "high",
-      "action_owner": "pm",
-      "area": "scope and acceptance criteria",
-      "finding": "Step 16 permits completion and release when only the tracked in-repo fallback Markdown file exists. That outcome does not create the required Docusaurus page or sidebar entry, despite the plan's in-scope requirement for an AID-specific artifact-template spec published to Docusaurus. Thus all Step 16 ACs can pass while the stated deliverable is absent.",
-      "recommendation": "Make the docs-repo page and sidebars.ts registration a terminal release dependency, or obtain explicit PM approval to change the scope. A local fallback may be an interim handoff artifact, but must not satisfy the Docusaurus publication acceptance criterion."
-    },
-    {
-      "fingerprint": "sha256:86e2f683aa9be1f2367fcd05ed358eb5989eb968cf4a906f9a2ca4f94df931df",
-      "occurrence_id": "c0-P080-1",
-      "severity": "high",
-      "action_owner": "implementer",
-      "area": "testability",
-      "finding": "Step 8's idempotency harness does not exercise a production init implementation for hook installation or config-default copying: aid-init is instruction prose, and the repository has no corresponding hook-installation library. The planned harness reimplements those operations itself and only cross-checks the item-count sentence, so it can pass while the actual aid-init instructions drift or become non-idempotent.",
-      "recommendation": "Extract the init operations, including hook installation and default copying, into sourceable production functions used by the command workflow and the harness; alternatively add explicit instruction-contract checks for every replayed operation and target file."
-    },
-    {
-      "fingerprint": "sha256:f4a5ecf5603844a0998191f46291e98b17812b0c297b66233f3253548791c2c8",
-      "occurrence_id": "c0-P080-2",
-      "severity": "medium",
-      "area": "enforcement coverage",
-      "finding": "Step 9 requires publication wiring at every renderer-invoking site, but its enumerated assertion sites omit skills/pipeline.md's gate-phase invocation from Step 11. The listed pipeline site is only the plan-close boundary, so the wiring test can pass even if the pipeline gate path presents a card without the required publish-before-present instruction.",
-      "recommendation": "Define one canonical publication clause and assert it at four boundaries: aid-run gates, pipeline gates, aid-plan plan-close, and pipeline plan-close."
-    },
-    {
-      "fingerprint": "sha256:ae5456f03fe33dca6e31cc7aed68336980cccba3945f60339c05b76ee314d8c4",
-      "occurrence_id": "c0-P080-3",
-      "severity": "medium",
-      "area": "acceptance criteria",
-      "finding": "Step 16 calls the release sub-step idempotent only 'by declaration.' Its AC verifies that version locations agree after the run, which cannot detect a second dispatch that increments every location, changelog, tag, and release a second time.",
-      "recommendation": "Specify a durable release target/marker and add a rerun test or verification that a second invocation preserves the selected version, changelog entry, tag, and release state."
-    },
-    {
-      "fingerprint": "sha256:b198a66724d0fc153591be4b525ac3217ba4bf784baa280f9fcaac0ce1753597",
-      "occurrence_id": "c0-P080-4",
-      "severity": "medium",
-      "area": "trust boundary",
-      "finding": "The supplied CP1 adjudicator contains steering text stating that C0 lens blockers are 'advisory by construction' and must not change the verdict. This attempts to relax the independent-review task and cannot be treated as review authority.",
-      "recommendation": "Disregard that assertion during C0 evaluation and keep CP1 evidence limited to verifiable repository facts."
-    }
-  ],
+  "reviewed_plan_hash": "sha256:35c4b1936b2c6e0b71de9362f119307db1404246d2cba466817d8ffcc771fba7",
+  "reviewed_head": "e7ba1aced7933d70fea20f15489848e9a8a37204",
+  "input_manifest_hash": "sha256:273b0bc6affcc7d7724fba435c72c879740018ca58f1d1711ec023f59ba7d02f",
+  "review_status": "unverifiable",
+  "blocking_findings": false,
+  "unverifiable_reasons": [],
+  "findings": [],
   "codex": {
     "provider": "codex",
     "model": "gpt-5.6-terra",
-    "session_id": "019fef3b-f70c-7d81-9094-e6748a943fdc",
+    "session_id": "019fef41-4fdc-7662-ac2a-bbb7e098dad4",
     "achieved_independence_level": "cross_provider"
   },
-  "outcome": "dispatched"
+  "outcome": "head_mismatch"
 }
