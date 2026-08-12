@@ -199,7 +199,7 @@ parser's own project-root validation load-bearing rather than advisory.
    It chains, in order, with no way to skip a stage:
    consolidate (`aid-test-audit-consolidate.sh`, Step 14 — fails closed on
    any wave artifact missing, extra, or mismatched against the dispatch
-   manifest) → render the mandatory 5-part chat summary
+   manifest) → render the mandatory four-part chat summary
    (`lib/aid-test-audit-chat-summary.sh`, Step 15 — persists the durable record
    as a side effect; fails closed if that persist fails) → (with
    `--write-plan`, or on a same-conversation continuation reply) the write-
@@ -214,6 +214,17 @@ parser's own project-root validation load-bearing rather than advisory.
    unreachable, not merely undocumented — verified directly:
    `test-integration-e2e-audit-pipeline.sh` (Part A) and a real fail-closed
    demonstration captured at this plan's own release (Part B).
+
+   The renderer's first line orders the artifact page published before anything
+   else is said, which is this repo's canonical publish-before-present rule —
+   carried here as the same literal every other renderer wiring site carries,
+   so the four indexed sites and this one cannot drift into two wordings:
+
+   Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+   For this command the "chat card" is the renderer's own four-part text, whose
+   shape is owned by this file (see "The four-part chat handoff"); only the card
+   VOCABULARY of the 3–5 sentence lead comes from `skills/communication.md`.
 
 ## Chat handoff (natural-language continuation)
 
@@ -291,7 +302,18 @@ evidence last (P078 removed the two parallel-lane sections):
 2. What to fix, merge, split or remove
 3. Test time now, and after the proposed work
 4. What is not proved yet
-5. Technical evidence (appendix)
+
+Then `### Technical evidence`, unnumbered. It is an appendix, not a fifth part:
+the four numbered sections ARE the decision, and "four-part" names them here,
+in `lib/aid-test-audit-chat-summary.sh`'s header and in the renderer's own
+output. The appendix always renders, including when it has nothing to list.
+
+This block is this command's own output contract and stays exactly as it is —
+the renderer owns it. The 3–5 sentence lead the controller writes above it
+takes its vocabulary from `skills/communication.md`: the Decision-required card
+when the audit needs the catalog approval or a plan choice, the Blocked or
+failed card when the audit is `incomplete`. Outcome first, counts and artifact
+paths last. The contract file never overrides the four-part block below it.
 
 Every heading renders even when its section is empty, with an explicit
 statement of that: a missing heading reads as an omission, and "nothing here"
@@ -384,4 +406,4 @@ never re-proposed. Contradicting proposals reference each other via
 shows the top slice ranked by priority and evidence strength; the full set
 stays in `decision.json`.
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-12

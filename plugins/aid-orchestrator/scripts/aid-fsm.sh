@@ -1126,17 +1126,23 @@ _fsm_require_plan_worktree() {
 # machine values so existing greps on those messages still match.
 #
 # _fsm_human_step <current> <total> — echoes " (human: ...)" or nothing.
-#   current >= total  -> "step T of T complete" (all done; there is no N+1)
+#   current >= total  -> "all T steps complete" (all done; there is no N+1)
 #   total == 0        -> nothing (degenerate plan: machine values only)
 #   non-integer input -> nothing (the caller's own malformed-state error fires)
+#
+# P080 Step 13: the wording carries the DISAMBIGUATOR ("is next" / "complete")
+# because the underlying field is 0-based and a bare "Plan Step N of T" cannot
+# be read against it. The authoritative definition of this wording lives in the
+# "Step rendering rule" section of skills/pipeline.md; every prose surface
+# references that section instead of restating it.
 _fsm_human_step() {
   local current="${1:-}" total="${2:-}"
   [[ "$current" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 0
   [[ "$total" -gt 0 ]] || return 0
   if [[ "$current" -ge "$total" ]]; then
-    printf ' (human: step %s of %s complete)' "$total" "$total"
+    printf ' (human: all %s steps complete)' "$total"
   else
-    printf ' (human: step %s of %s is next)' "$((current + 1))" "$total"
+    printf ' (human: Plan Step %s of %s is next)' "$((current + 1))" "$total"
   fi
 }
 

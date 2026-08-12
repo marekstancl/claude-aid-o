@@ -1,0 +1,21 @@
+{
+  "_provenance": "P080 Step 15. Hand-authored from build_brief_payload() in scripts/aid-pm-brief.sh (the 14-key jq object). Delivery case: FINISHED.",
+  "schema_version": "aid-2.0",
+  "artifact_type": "pm_decision_brief",
+  "pm_decision_brief": {
+    "communication_status": "complete",
+    "release_ready": true,
+    "blockers": [],
+    "waivers_applied": [],
+    "human_summary_path": "pm-summary.md",
+    "merge_mode": "auto",
+    "evidence_verification_status": "pass",
+    "evidence_verified_at_head": true,
+    "reporter_status": "ok",
+    "reporter_reason": "",
+    "simplifier_status": "ok",
+    "simplifier_reason": "",
+    "summary_for_pm": "Plán je hotový: všechny EPIKY prošly, evidence sedí na HEAD, blokátory žádné.",
+    "delivered_summary_ref": ".aid-o/work/evidence/P080/delivery.md"
+  }
+}

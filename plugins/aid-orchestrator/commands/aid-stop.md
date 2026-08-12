@@ -116,7 +116,7 @@ Resume options:
   /aid-status {id}       Check current EPIC status
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** Humans read `Plan Step N of T is next` (or `all T steps complete`) — never a bare `Plan Step N of T`, and never the raw field; the one exception is a degenerate `total_steps: 0` plan, which renders the machine values only. The `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md — do not restate it here.
 
 
 ---
@@ -170,4 +170,4 @@ Remaining EPICs in `.aid-o/config/queue.yaml` are untouched. They remain queued.
 - The stop sequence NEVER prompts for confirmation. When PM says stop, it stops. Immediately.
 
 
-**Last Updated:** 2026-08-04
+**Last Updated:** 2026-08-12

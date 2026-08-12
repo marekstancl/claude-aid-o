@@ -3,6 +3,38 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.85.0] — 2026-08-12
+
+> The front door tells the truth. `/aid-help` is now generated from a machine-
+> readable index that a test refuses to let drift, every file `/aid-init` and
+> `/aid-setup` write has exactly one declared owner, and every message AID
+> leaves a PM with at a boundary comes from one contract and three
+> deterministic renderers instead of whatever each surface improvised.
+
+### Added
+- **Machine-readable help index** — `defaults/help-index.yaml` is the authority on every surface the plugin ships (command, file, topic, audience, disposition, purpose, what it writes, and its final turn); `lib/aid-help-index.sh` is the one reader, and `commands/aid-help.md` is regenerated from it rather than maintained beside it.
+- **Help coverage test** — a new public command fails the suite until it is intentionally indexed and routed to a help topic. Silence is not a pass: a command a user cannot find is a command that does not ship.
+- **Enforcement-registry cite validation** — every `source:`/`instruction:` cite in the enforcement registry must resolve to a real file, and every row id must be unique. A row pointing at a deleted file still looked wired while enforcing nothing, which is the "detector without enforcement" failure hiding inside the file that exists to make enforcement auditable.
+- **One read-only configuration summary** — `scripts/aid-config-summary.sh` renders the effective configuration once and both `/aid-init` and `/aid-setup` present it verbatim. Read-only is proved rather than declared: the suite snapshots the whole tree around an invocation, runs against a write-protected tree, and greps the source for any write.
+- **Init idempotency harness** — `scripts/tests/test-init-idempotency.sh` pins the SCRIPTED substrate of the re-run contract (execution.yaml composition, `.gitignore` backfill, the base manifest, a declined `gate_profiles` upgrade). It deliberately does not cover the prose-executed steps such as hook installation, which have no shipped library to drive, and says so in its own header.
+- **Communication contract** — `skills/communication.md` defines the four PM decision cards, the output-product table, the ordering rule and the language rule ONCE; `scripts/tests/test-communication-wiring.sh` checks that every PM-facing boundary references it and that no other file redefines a card.
+- **Deterministic handoff renderers** — `lib/aid-gate-outcome-summary.sh` (the gates boundary) and `lib/aid-plan-close-summary.sh` (the plan-final boundary) render the card and an artifact body from canonical evidence only. Numbers are counted, never asserted; both fail closed when a canonical input is missing rather than narrating around the gap.
+- **Artifact rendering layer** — `lib/aid-artifact-render.sh` plus `defaults/templates/artifact-outcome.html` fill the ecosystem artifact skeleton deterministically: a placeholder grammar with single-pass substitution, the standard's brevity caps enforced in code with a counted overflow line, and secret redaction applied before a byte is written and counted in the provenance footer. The renderers write a body and print a card — publication through the Artifact tool remains the controller's live act.
+- **Golden handoff harness** — `scripts/tests/test-integration-handoff-rendering.sh` drives all three renderers over checked-in fixtures for five delivery cases, asserting the card comes first, the blocks stay in the standard's order, a raw technical list is never the only output, and no secret survives the page, the card or the fallback card.
+- **Artifact-template spec page, authored for handoff** — `defaults/templates/artifact-templates-spec.md` carries the 7-block mapping table and the placeholder grammar, ready for the PM to publish into the ecosystem docs.
+
+### Changed
+- **Init/setup ownership is declared per file** — every file the two commands write now names one owner at its write site, including the two that have a second writer that is not `/aid-setup` (`plugin.yaml`, repaired by `/aid-run`'s pre-flight; `check-severity.yaml`, mutated by `aid-fsm.sh promote-check`) and `project.yaml`'s delegated scanner writer. The fresh-init product is counted once and every other mention refers back to it.
+- **Boundary card shapes** — the DONE-review and escalation surfaces lead with the outcome instead of a metrics header, and the two verify commands drop their hardcoded language mandate in favour of the contract's rule.
+- **Step rendering has one authority** — the rule that turns the FSM's 0-based `current_step` into a human "Plan Step N of T" lived as six full copies across five files. `skills/pipeline.md` keeps the only definition and the other five carry a reference. The human form is appended after the machine values, so every machine-parsed seam is byte-unchanged.
+- **Release ceremony calls its own checker** — the pre-push check in `CLAUDE.md` now runs `scripts/tests/verify-version-files.sh` instead of four eyeball greps. It stays a release-boundary invocation and not a CI gate, because the 8 version locations legitimately diverge mid-development.
+
+### Fixed
+- **`/aid-help` stated things that were not true** — a `--mode` value the parser rejects, "the only" nine FSM transitions where there are thirteen, and a config-file count the same file contradicted four sections later.
+- **A fresh workspace could not open the permissions menu** — init's template carried no `active_preset` while setup's first read expects one, so setup fell back before it could show anything. The key is seeded, and the one surface still listing preset names by hand (two of which existed nowhere in the policy file) now cites the file instead.
+- **`active_preset: autonomous` next to `autonomous_mode: false`** — a contradiction on its face, previously improvised differently by three surfaces. Two cases, two fixed strings, used verbatim by init, setup's permissions module and the config summary.
+- **Eight dangling enforcement-registry rows** — cites pointing at files that had been deleted, renamed or moved out of the shipped tree; each is now repointed to the surface that really carries the rule, or marked `status: dead` with the reason it died.
+
 ## [2.84.0] — 2026-08-11
 
 ### Added

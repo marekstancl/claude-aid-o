@@ -1,0 +1,30 @@
+{
+  "_provenance": "P080 Step 15. PLAN-mode release decision, hand-authored from the plan_summary producer in scripts/aid-release-policy.sh (every release-decision.json in this repo is EPIC-mode and carries plan_summary: null, so there is nothing to copy). final_merge_sha is set: the plan is already on main and only close/rollback remain.",
+  "schema_version": "aid-2.0",
+  "artifact_type": "release_decision",
+  "release_decision": {
+    "release_ready": true,
+    "merge_mode": "auto",
+    "plan_summary": {
+      "plan_id": "P080",
+      "plan_final_run_id": "R-080-final",
+      "reviewed_candidate_sha": "1111111111111111111111111111111111111111",
+      "approved_target_sha": "2222222222222222222222222222222222222222",
+      "target_ref": "main",
+      "final_merge_sha": "3333333333333333333333333333333333333333",
+      "release_tag_status": "v2.85.0",
+      "epics": [
+        { "epic_id": "E-080-1", "run_id": "R-1", "status": "merged_to_plan", "skipped": false, "reason": null },
+        { "epic_id": "E-080-2", "run_id": "R-2", "status": "merged_to_plan", "skipped": false, "reason": null },
+        { "epic_id": "E-080-3", "run_id": "R-3", "status": "merged_to_plan", "skipped": false, "reason": null }
+      ],
+      "plan_final_gates": {
+        "report": ".aid-o/work/evidence/P080/plan-final/gates_report.json",
+        "result": "pass",
+        "quarantine_substitutes": []
+      },
+      "specialist_review": { "status": "clean" },
+      "remaining_backlog": []
+    }
+  }
+}

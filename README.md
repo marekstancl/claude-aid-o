@@ -69,9 +69,13 @@ Or go fully autonomous:
 | `/aid-plan [topic]` | Brainstorm → architecture → plan.json (merges old brainstorm + write-plan + plan-epic) |
 | `/aid-run [id]` | Execute full pipeline: READY → EXECUTE → GATES → DONE. Use `--auto` for autonomous mode |
 | `/aid-status [id]` | Pipeline status — FSM state, steps, gates, queue (merges old epic-status + epic-queue) |
-| `/aid-init` | Initialize `.aid-o/` workspace — 10-file structure, stack auto-detection, idempotent |
+| `/aid-init` | Create or upgrade the `.aid-o/` workspace — base manifest, stack auto-detection, idempotent |
+| `/aid-setup [module]` | Configure what init created — permissions, integrations, CLAUDE.md, stack re-scan |
+| `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
+| `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |
 | `/aid-audit` | Project health audit — code, docs, tests, dependencies |
 | `/aid-audit-tests` | Test portfolio audit — inventory, safe measurement, and a plain-language recommendation |
+| `/visual-companion` | Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision |
 | `/aid-stop` | Emergency stop — save progress, restore permissions |
 | `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |
 
@@ -107,30 +111,21 @@ Or go fully autonomous:
 
 ## Configuration
 
-`/aid-init` auto-configures everything. Fine-tune in `.aid-o/config/`:
+Init creates, setup configures: `/aid-init` writes the initial config files, `/aid-setup` owns
+every change after that. Both live in `.aid-o/config/`:
 
-| File | Controls |
-|------|----------|
-| `execution.yaml` | Gate commands, retry limits, dispatch strategy |
-| `project.yaml` | Stack detection, project preferences |
-| `permissions.yaml` | Agent permission presets |
+| File | Controls | Changed by |
+|------|----------|-----------|
+| `execution.yaml` | Gate commands, retry limits, dispatch strategy | hand-edited; `/aid-init` only offers additive upgrades |
+| `project.yaml` | Stack detection, project preferences | `/aid-setup scan` |
+| `permissions.yaml` | Agent permission presets | `/aid-setup permissions` |
+| `integrations.yaml` | MCP integrations (memory, …) | `/aid-setup integrations` |
 
 ## Changelog
 
-- **v2.84.0** (current) — a gate's name has to say what it checks and how much (`bats_all` ran only T0+T1 and cost half a day of misdirected diagnosis), an EPIC stops paying for the whole merge path, and CI cancels superseded runs
+- **v2.85.0** (current) — the front door tells the truth: `/aid-help` is generated from a machine-readable index a test keeps honest, every file `/aid-init` and `/aid-setup` write has one declared owner and one read-only summary, and every PM-facing boundary message comes from one contract and three deterministic renderers
+- **v2.84.0** — a gate's name has to say what it checks and how much (`bats_all` ran only T0+T1 and cost half a day of misdirected diagnosis), an EPIC stops paying for the whole merge path, and CI cancels superseded runs
 - **v2.83.0** — the full test portfolio leaves the merge path: every suite declares a measured tier, merges run T0+T1 in 13 min instead of 6 h 49 min, and the whole portfolio runs nightly with a budget on the way in and a reaper on the way out
-- **v2.82.0** — the test-parallelism line is removed: scheduler, rollout gate, divergence campaign, parallel lane and the catalog's parallel evidence are gone; tests run sequentially by design
-- **v2.81.0** — the run can trust its own tree: gates execute in the plan's worktree and write evidence where the run can find it, a chained EPIC starts on its predecessors' work, and a deferral or an out-of-scope review finding cannot be lost in prose
-- **v2.80.0** — auto mode owns its waits: background gates survive a killed session and re-attach, declared services live and die with the run, and a recovery ladder with budgets it cannot silently reset
-- **v2.79.3** — scheduler dispatch survives a real-size catalog (argv overflow fixed). Previously v2.79.2 — C4 plan-diff verdict vocabulary fixed (blocked every real plan). Previously v2.79.1 — audit-scoped findings no longer block the write-plan handoff. Previously v2.79.0 — the report answers "what is each suite for": per-gate purpose, counts, profiles, rename proposals for EPIC codenames
-- **v2.78.0** — the audit asks "what exists", not "what do gates run": CI test-execution check, wrapper-aware marker-exact reachability, per-test cost
-- **v2.77.4** — runner-aware test-case counting: pytest and js/ts cases counted alongside bats, per-runner breakdown in the report
-- **v2.76.0** — risk coverage, gate reliability and round-over-round trend join the report, each with a mechanical collector. Previously v2.74.0 — every report section has a collector: mechanical content scans each run, analysts deep-sample instead of skimming, censored measurements get a bounded retry. Previously v2.73.0 — every full audit ends with one fixed-form report page: nine sections, always all of them, published as an artifact automatically. Previously v2.72.4 — the ranked proposals section renders instead of dying on a jq scoping bug. Previously v2.72.3 — risk notes get their own field and the impact contract is enforced for every producer at the final wall. Previously v2.72.2 — analyst prose no longer kills finalization: annotated citations are normalized to bare paths at the schema boundary. Previously v2.72.1 — v2.72.0 plus the renderer honesty fixes from v2.71.1. Previously v2.72.0 — three loosenings, each paired with an audited receipt: a completed plan-level review survives an ancillary commit instead of dying to an audit-log append; every plan lifecycle command takes an audited `--force` bounded by a forceable/hard classification, so a plan that cannot be closed can no longer strand a PM; and a stale EPIC run is retired by one auditable transaction instead of hand-deleted state files. Plus the Codex review budget raised to 5 sessions.
-- **v2.75.0** — each plan gets its own git worktree, so you can write and fully generate plan B — locked id, plan file, one CP1 authority, every phase, queued — from your own checkout, with uncommitted work in it, while plan A implements in its worktree and your HEAD never moves. An edit in your checkout during a review window no longer invalidates it. Generation became one resumable transaction: a killed run continues instead of regenerating from the top, asking for the same approval again and dying on its own duplicate; `--force --reason` is a documented flag with a full audit trail, and a hard-blocked condition genuinely refuses the force instead of only saying so. Known limitation: starting a newly generated plan's EPIC while another stream is live is not yet supported. Plus fixes for a contract gate that reported its own SIGPIPE abort as "your EPIC is malformed", and an unreadable plan-state diagnosed as a killed plan-start.
-- **v2.71.0** — the audit ends with concrete remediation proposals: exact change with file:line, counted-facts effort, honest benefit, identity, a declined ledger and conflict cross-references. Plus v2.70.8 — the audit offers to approve the catalog it just built, so finishing the job no longer requires knowing two script names. Plus v2.70.7 — what the audit proves about parallel safety finally reaches the catalog, and a bare `/aid-audit-tests` asks what you want instead of guessing. Plus v2.70.6 — a full audit of a large portfolio can actually finish: nothing that scales with the project goes through argv any more. Plus v2.70.5 — an audit whose evidence disappears mid-run gets it back and carries on. Plus v2.70.4 — the profiler validates its own receipts instead of reporting success on artifacts nothing can consume, and a unit whose catalog and execution.yaml commands disagree is refused. Plus v2.70.3 — an audit can no longer lose its own evidence to its own diagnostics, and a unit that times out is finally eligible for cost profiling. Plus v2.70.2 — the resource map no longer dies with "Argument list too long" on large test files. Plus v2.70.1 — the three defects a real full audit found: an inventory key producer and consumer disagreed on, a profiler that refused every gate unit, and a catalog that could not be approved. Plus v2.70.0 — test-portfolio decision quality: a full audit now produces a schema-bound decision artifact, parallel safety has one content-bound authority read by all three consumers, and an execution ledger catches a run unit dispatched by two gates.
-- **v2.69.0** — fail-closed Files/Scope path parsing: the shared cleaner (`lib/aid-scoping.sh`) now rejects ambiguous multi-path entries (comma/conjunction-separated) instead of silently narrowing `allowed_paths` to the first path, enforced consistently across the per-step scoping block, the legacy Scope fallback, the generation-time preflight, and the D5 contract gate.
-- **v2.68.0** — real, explicit-allowlist-based parallel bats execution for this repo's own `gate:bats_all` (replacing the quarantine stub), a separate `gate:bats_boundary` for the 2 too-expensive-to-pool files, an idempotent self-host execution.yaml migration + verify mechanism, and `plan_diff`/`shell_pipeline_smoke` gate fixes (P071).
-- **v2.67.0** — opt-in test scheduler with staged rollout, real `aid-run-gates.sh` dispatch + escalation, a `bats_all` remediation-evidence collector + genuine E2E full-path proof, and a PM quarantine-decision-record mechanism (P069). This repo's own `bats_all` real measurement campaign remains deferred.
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

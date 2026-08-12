@@ -1,0 +1,33 @@
+<h1>Plán P080 — plan-final boundary</h1>
+<div class="tile state-critical">
+<span class="k">Výsledek</span>
+<span class="v">Blokováno</span>
+<div class="tile">
+<span class="k">Tag</span>
+<span class="v">not_tagged</span>
+<div class="tile state-warn">
+<span class="k">EPIKY</span>
+<span class="v">2/3 EPIKŮ</span>
+<div class="tile state-critical">
+<span class="k">Blokátory</span>
+<span class="v">1</span>
+<h2>Shrnutí</h2>
+<p>Běh spadl na autentizaci, v logu zůstalo &lt;redacted:assigned_secret&gt; a &lt;redacted:github_token&gt;.</p>
+<h2>Jádro</h2>
+<p>Plán NENÍ připravený k release a režim je blocked (1 blokátorů) — merge by přenesl neuzavřené nálezy do main.</p>
+<li>Recenzovaný kandidát: 444444444444 → schválený cíl 555555555555 (main)</li>
+<li>Merge do main: —</li>
+<li>Plan-final brány: fail (report: .aid-o/work/evidence/P080/plan-final/gates_report.json)</li>
+<li>Specialistická revize: neproběhl</li>
+<li>Evidence: fail (ověřeno na HEAD: false), waiverů 0, zbývá v backlogu 2</li>
+<h2>Jak pokračovat</h2>
+<li>nedělat nic — plán zůstává otevřený, žádný příkaz se nespouští.</li>
+<li>mergnout plán do main i tak, na vlastní riziko</li>
+<li>uzavřít plán bez merge</li>
+<h2>Čeho se to týká</h2>
+<li>Report plan-final bran: .aid-o/work/evidence/P080/plan-final/gates_report.json</li>
+<li>Dodané shrnutí: .aid-o/work/evidence/P080/delivery.md</li>
+<h2>Co se čeká ode mě</h2>
+<p>Rozhodni, jak plán uzavřít. Doporučení: nedělat nic — plán zůstává otevřený, žádný příkaz se nespouští.</p>
+<div class="golink">Technický detail: <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/pm-brief-malicious.json +… →</div>
+<footer>Vyrobil aid-plan-close-summary.sh z <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/pm-brief-malicious.json a <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/release-decision-open.json. Redigováno tajemství: 2.</footer>

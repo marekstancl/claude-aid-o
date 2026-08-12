@@ -1124,6 +1124,28 @@ aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
 **Enforcement:** `--state-file` ensures gates only run in GATES state. `--report-file` persists
 `gates_report.json` — required by `GATES→DONE` precondition. Without it, transition is rejected.
 
+### Gate-Boundary Message (deterministic)
+
+The gate boundary has no free-form summary. When the runner returns — on the DONE branch and on
+the failing branch alike, in manual and auto mode — source `scripts/lib/aid-gate-outcome-summary.sh`
+and run:
+
+```bash
+aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>" "<evidence_dir>/waivers"
+```
+
+It computes every number from the report (never re-derives one), writes
+`<evidence_dir>/gate-outcome-artifact.html`, and prints the Finished or Blocked card — selected
+from the envelope's `.overall`, never from a per-gate row — with a final `Artifact: <path>` line.
+A waived gate renders as PM risk acceptance, never as a pass.
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+The card shapes, the ordering rule and the language rule live in `skills/communication.md`; this
+section wires them, it does not restate them. If the renderer exits non-zero, say so and present a
+Blocked card built only from bounded computed facts, routing any raw-derived text through
+`aid_gate_outcome_redact` from the same library first.
+
 ### Gate Profiles (`--profile`, P061 E1)
 
 `aid-run-gates.sh run-all` accepts an optional `--profile <name>` flag that selects a named
@@ -1319,8 +1341,15 @@ Options:
 Recommendation: {auto-generated}
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** This section is the single authoritative definition of step numbering; every other surface references it rather than restating it. `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render it with the disambiguator that says which of the two situations it is: while steps remain, `Plan Step {executing_step} of {total_steps} is next`; once every step is done (`current_step == total_steps`, state GATES/DONE) `all {total_steps} steps complete`. Never a bare `Plan Step N of T` — against a 0-based field that phrasing is unreadable, and an uncapped `+1` renders a nonsensical `T+1 of T` for a finished run. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames (`step-{N}-verify.md`, with N 0-based) stay 0-based and are frozen compatibility surfaces. `aid-fsm.sh`'s `_fsm_human_step` helper emits exactly this wording, appended AFTER the machine values so existing greps keep matching.
 
+
+This block is the **Decision-required** card of `skills/communication.md` in its
+FSM form: present the blocker and the recommended option in plain language
+first, then the alternatives; the EPIC id, progress counter, failed state and
+attempt history are the technical context that follows the decision, never
+precedes it. The card shape, the ordering rule and the language rule are defined
+in that file only — do not restate them here.
 
 In FIRST AID mode, add option D: "Continue manual".
 
@@ -2174,27 +2203,28 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
 
 ```
 DONE REVIEW — {epic_id}
-Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
-
-Auditor Score: {overall}/100 (trend: {delta} vs previous)
-  Code: {score} | Security: {score} | Docs: {score} | Process: {score}
-
-{if audit mode was c3 — read from audit-report.json:}
-C3 Independence: {independence_level} achieved / {required_independence_level} required
-  {if status == unverifiable:} ⚠️ status: unverifiable — {reason}
-
-Curator: {applied} fixes applied (S/M/L), {deferred} deferred
-  Applied: {list of applied proposals with IDs}
-  Deferred: {list — always-defer rules (architecture, standards-L) or rejected — PM can approve in backlog}
-
-Auto-fixes: {count} applied from auditor recommendations
-  {list of fixes with file paths}
+{outcome in one plain sentence: what this EPIC now does for the PM}
+Changed: {1-3 user-relevant effects}
+Verified: {pass}/{total} gates pass; auditor {overall}/100 (trend: {delta} vs previous)
+         {or the concrete reason something is unverified}
+Next step: {the one recommended option below, with its one-line reason}
 
 {if blocking_findings:}
 ⛔ CRITICAL FINDINGS (block merge):
   1. [{audit_type}] {finding} — effort: {S|M|L}
      Recommendation: {recommendation}
   Audit report: .aid-o/work/evidence/{epic_id}/{run_id}/audit-report.md
+
+Detail — steps {done}/{total} | gates {pass}/{total} | duration {time}
+  Auditor: Code {score} | Security {score} | Docs {score} | Process {score}
+  {if audit mode was c3 — read from audit-report.json:}
+  C3 Independence: {independence_level} achieved / {required_independence_level} required
+    {if status == unverifiable:} ⚠️ status: unverifiable — {reason}
+  Curator: {applied} fixes applied (S/M/L), {deferred} deferred
+    Applied: {list of applied proposals with IDs}
+    Deferred: {list — always-defer rules (architecture, standards-L) or rejected — PM can approve in backlog}
+  Auto-fixes: {count} applied from auditor recommendations
+    {list of fixes with file paths}
 
 Key outputs: {artifact list}
 
@@ -2209,6 +2239,12 @@ Options (`plan_branch`):
   FIX   — provide guidance, re-run review cycle
   ABORT — stop EPIC, no merge (/aid-stop)
 ```
+
+This is the **Finished** card of `skills/communication.md` applied to DONE (the
+**Blocked or failed** card replaces it when the review ends in a blocker the PM
+must resolve): the outcome sentence leads, and every counter, score, report path
+and evidence dir sits on or below the `Detail —` line. `commands/aid-run.md`
+shows the same shape abridged — keep the two in step.
 
 > **PM machine handoff (D11 — E9).** Independently of this human summary, once the FSM advances
 > review→release (step 13 below), a deterministic PM brief is generated from `release-decision.json`
@@ -2294,6 +2330,33 @@ the new **canonical machine handoff** for a release decision; the older human ar
    when the brief does not faithfully echo the decision (catches over-optimism / tampering), but
    wiring that verdict as a *merge precondition* is **explicitly deferred to E10** — see *Honest
    limitation* below.
+
+4. **Presentation layer — `scripts/lib/aid-plan-close-summary.sh`.** At the plan-final / close
+   boundary of a `plan_branch` plan the controller renders the PM's card and artifact body from
+   the handoff pair, instead of listing files:
+
+   ```bash
+   source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh"
+   aid_plan_close_render "$evidence_dir/pm-decision-brief.json" \
+                         "$evidence_dir/release-decision.json" "$plan_id" "$evidence_dir"
+   ```
+
+   Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+   The card shapes are the ones `skills/communication.md` defines — Decision-required when the plan
+   is not release-ready or `merge_mode` is not `auto`, Finished when recording a completed close.
+   The renderer reads ONLY those two files (the same `release-decision.json` the brief was generated
+   from, no sibling evidence), so the D6/D9 cycle-break holds. `aid-pm-brief.sh`, `pm-summary.md` and
+   the plan-finalize labelled-fields guard are UNTOUCHED by this layer — it adds a rendering, never a
+   second source of truth.
+
+   It fails CLOSED, exit 1, when the brief lacks any of its eight required fields or the decision
+   carries no `.release_decision.plan_summary` (every EPIC-mode decision does not) — no page is
+   written at all. If the brief is absent at the boundary, report the Blocked card
+   "plan-close brief missing — run aid-pm-brief.sh"; never improvise a plan summary from evidence
+   files, which is exactly the cycle `aid-pm-brief.sh` exists to break. Under
+   `legacy_epic_release_mode` this layer does not apply — the per-EPIC release keeps its existing
+   text and is never retroactively re-shaped.
 
 **Coexistence (D9 narrowing).** `pm-decision-brief.json` / `pm-summary.md` are the new canonical
 machine handoff. The pre-existing PM outputs remain, unchanged, alongside it: `final_report.md`
@@ -2753,7 +2816,7 @@ Stale state detected: {state} at step {executing_step}/{total_steps}.
 Resume with: /aid-run --resume {run_id}
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** Humans read `Plan Step N of T is next` (or `all T steps complete`) — never a bare `Plan Step N of T`, and never the raw field; the one exception is a degenerate `total_steps: 0` plan, which renders the machine values only. The `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md (above) — do not restate it here.
 
 
 **Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume
@@ -2989,7 +3052,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-12
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

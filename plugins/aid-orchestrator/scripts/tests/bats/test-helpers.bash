@@ -225,3 +225,29 @@ aid_test_mk_runner_tree() {
   cp "$plugin/scripts/tests/run-all-tests.sh" "$repo/scripts/tests/run-all-tests.sh"
   printf '%s\n' "$repo/scripts/tests"
 }
+
+# ─── refute_grep — the negative assertion that can actually fail ─────────────
+#
+# `! grep -q needle file` DOES NOT WORK IN A BATS CASE, and reads as though it
+# does. Bash exempts a command whose status is inverted with `!` from `set -e`
+# (POSIX: "the shell does not exit if the command's return value is being
+# inverted"), and bats' ERR trap inherits that exemption. So a `! grep` line
+# reports NOTHING whether the pattern is there or not: it is a comment with a
+# process behind it. Probed on this host — a case containing `! grep -q hello`
+# over a file containing "hello" reports `ok`.
+#
+# That idiom is how "no secret leaks", "no external URL", "no pass label"
+# assertions were written, i.e. exactly the claims whose whole value is the
+# negative. Every such line is a claim nobody was checking.
+#
+# refute_grep takes the same arguments as grep and fails the case when grep
+# MATCHES, printing what matched so the failure names itself.
+refute_grep() {
+  local out
+  if out="$(grep "$@" 2>/dev/null)"; then
+    echo "refute_grep: pattern MATCHED but must not — grep $*" >&2
+    printf '%s\n' "${out:0:400}" >&2
+    return 1
+  fi
+  return 0
+}

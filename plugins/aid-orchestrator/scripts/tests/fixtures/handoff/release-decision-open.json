@@ -1,0 +1,30 @@
+{
+  "_provenance": "P080 Step 15. PLAN-mode release decision with final_merge_sha still null and the tag at its default not_tagged — nothing has reached main yet, so rollback has no revert commit to offer.",
+  "schema_version": "aid-2.0",
+  "artifact_type": "release_decision",
+  "release_decision": {
+    "release_ready": false,
+    "merge_mode": "blocked",
+    "plan_summary": {
+      "plan_id": "P080",
+      "plan_final_run_id": "R-080-final",
+      "reviewed_candidate_sha": "4444444444444444444444444444444444444444",
+      "approved_target_sha": "5555555555555555555555555555555555555555",
+      "target_ref": "main",
+      "final_merge_sha": null,
+      "release_tag_status": "not_tagged",
+      "epics": [
+        { "epic_id": "E-080-1", "run_id": "R-1", "status": "merged_to_plan", "skipped": false, "reason": null },
+        { "epic_id": "E-080-2", "run_id": "R-2", "status": "abandoned", "skipped": true, "reason": "superseded by E-080-3" },
+        { "epic_id": "E-080-3", "run_id": "R-3", "status": "merged_to_plan", "skipped": false, "reason": null }
+      ],
+      "plan_final_gates": {
+        "report": ".aid-o/work/evidence/P080/plan-final/gates_report.json",
+        "result": "fail",
+        "quarantine_substitutes": []
+      },
+      "specialist_review": null,
+      "remaining_backlog": ["IMP-490", "IMP-492"]
+    }
+  }
+}

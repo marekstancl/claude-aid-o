@@ -369,6 +369,30 @@ FSM initialized: READY
 3. Generate `gates_report.json`
 4. Log results to `timeline.jsonl`
 
+**Gate-boundary message (deterministic, both manual and auto mode).** When the gate runner
+returns — at the GATES→DONE boundary and equally on the failing branch — do NOT write a gate
+summary of your own. Source `scripts/lib/aid-gate-outcome-summary.sh` and run:
+
+```bash
+aid_gate_outcome_render "<the --report-file path you passed the runner>" "<evidence_dir>" "<evidence_dir>/waivers"
+```
+
+Pass the runner's own `--report-file` path explicitly — it is the preferred wiring; the
+renderer only falls back to `<evidence_dir>/gates/gates_report.json` and then the flat
+`<evidence_dir>/gates_report.json`. It writes `<evidence_dir>/gate-outcome-artifact.html` and
+prints the card (Finished, or Blocked when `overall: fail`) with a final `Artifact: <path>` line.
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+Card shapes, the ordering rule and the language rule are defined once in `skills/communication.md`
+— do not restate or re-word them here.
+
+**If the renderer exits non-zero** (missing or invalid report): say so, and present a Blocked
+card built from BOUNDED COMPUTED FACTS only — gate names, results, exit codes, counts. Never
+skip the boundary message, and never hand-write it from raw gate output: any raw-derived text
+must first pass through `aid_gate_outcome_redact` from the same library, which applies the same
+deterministic redactor the artifact body uses. No path from gate output to the PM skips redaction.
+
 **Transition:**
 - All gates pass → DONE
 - Gate fails + retries remaining → EXECUTE (dispatch gate-fixer, retry gate)
@@ -399,7 +423,7 @@ FSM initialized: READY
    Recommendation: {auto-generated}
    ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** Humans read `Plan Step N of T is next` (or `all T steps complete`) — never a bare `Plan Step N of T`, and never the raw field; the one exception is a degenerate `total_steps: 0` plan, which renders the machine values only. The `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md — do not restate it here.
 
 3. In auto mode → apply auto-decision rules:
    - S-effort fix patterns → auto-fix
@@ -438,20 +462,23 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 11. **PM Summary** (see `pipeline.md` §7 for full template):
     ```
     DONE REVIEW — {epic_id}
-    Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
-
-    Auditor Score: {overall}/100 (trend: {delta})
-      Code: {n} | Security: {n} | Docs: {n} | Process: {n}
-
-    Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
-    Auto-fixes: {count} from auditor recommendations
-    Simplifier: {applied} applied, {deferred} L-effort deferred
-    Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
+    {outcome in one plain sentence: what this EPIC now does for the PM}
+    Changed: {1-3 user-relevant effects}
+    Verified: {pass}/{total} gates pass; auditor {overall}/100 (trend: {delta})
+             {or the concrete reason something is unverified}
+    Next step: {the one recommended option below, with its one-line reason}
 
     {if blocking_findings:}
     ⛔ CRITICAL FINDINGS (block merge):
       1. [{type}] {finding} — effort: {S|M|L}
       Audit report: .aid-o/work/evidence/{id}/{run}/audit-report.md
+
+    Detail — steps {done}/{total} | gates {pass}/{total} | duration {time}
+      Auditor: Code {n} | Security {n} | Docs {n} | Process {n}
+      Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
+      Auto-fixes: {count} from auditor recommendations
+      Simplifier: {applied} applied, {deferred} L-effort deferred
+      Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
 
     Key outputs: {artifact list}
     Evidence: .aid-o/work/evidence/{id}/{run_id}/
@@ -467,6 +494,12 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
       FIX   — provide guidance, re-run review cycle
       ABORT — stop EPIC, no merge
     ```
+    This is the **Finished** card of `skills/communication.md` applied to DONE:
+    outcome sentence first, then what changed, what is verified and the one
+    recommended next step; counters, scores, report paths and evidence dirs
+    belong to the `Detail —` line and below it, never above it. If the review
+    ends in a blocker the PM must resolve, render the **Blocked or failed**
+    card instead and keep the same ordering.
     The summary above is the `legacy_epic_release_mode` shape. In `plan_branch`
     mode the Auditor/Curator/Simplifier/Reporter lines describe the PLAN-FINAL
     review, not a per-EPIC one — those roles run once per plan, at the boundary,
@@ -640,4 +673,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-12

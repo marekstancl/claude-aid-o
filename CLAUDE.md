@@ -261,16 +261,32 @@ Every push to main MUST ensure these 8 locations are in sync:
 | 7 | `README.md` | `- **vX.Y.Z** (current)` | Regex |
 | 8 | `README.md` | `AGPL-3.0-only — see [LICENSE](LICENSE)` | Exact |
 
-These are also defined in `defaults/policies/release-policy.yaml` → `version_files[]`.
-The Release Sub-Phase in `skills/pipeline.md` §7 automates this during EPIC runs.
+This table is the only definition of the 8 locations. `plugins/aid-orchestrator/scripts/tests/verify-version-files.sh`
+reads it and checks all 8; there is no `defaults/policies/release-policy.yaml` (an
+earlier version of this file cited one that does not exist).
 
-**Pre-push check:** Before every `git push`, verify all 8 files show the same version:
+**What `aid-release.sh` covers, and what stays manual.** In *this* repository the
+script bumps location 1 (root `CHANGELOG.md`) and, through its no-config fallback,
+any other `CHANGELOG.md` it finds — which is location 2. Its `versioning.files[]`
+loop never runs here, because that list lives in `.aid-o/config/project.yaml` and
+this repo has none. **Locations 3-8 are edited by hand every release.**
+
+**Pre-push check (release boundary):** Before pushing a release, run the checker —
+not a set of eyeball greps:
 ```bash
-grep -n '"version"' .claude-plugin/marketplace.json plugins/aid-orchestrator/.claude-plugin/plugin.json
-grep -n 'Plugin:' plugins/aid-orchestrator/README.md
-grep -n '(current)' README.md
-head -6 CHANGELOG.md plugins/aid-orchestrator/CHANGELOG.md
+bash plugins/aid-orchestrator/scripts/tests/verify-version-files.sh <new_version> --baseline <old_version>
 ```
+`<new_version>` is mandatory (without it the script exits with usage). `--baseline`
+is optional and adds the "the version actually moved" assertion. Exit 0 means all 8
+locations agree; any other exit prints one `FAIL:` line naming the location that
+disagrees.
+
+This is an **invocation-time, release-boundary** check, deliberately not a CI gate
+and not a member of the test suite: the 8 locations legitimately diverge in the
+middle of development, so a suite-wide run would fail every non-release commit. Its
+logic is regression-tested in `scripts/tests/bats/test-aid-release-seal.bats`;
+what is unenforced is that a human runs it. Registered as `version_registry_sync`
+in the enforcement registry with exactly that honest surface.
 
 ## Release Workflow
 

@@ -396,14 +396,19 @@ RULE 7: **MVP / multi-phase plans:** If the brainstormed plan has 3+ phases or i
 ## Language Handling
 
 **Conversation:** Follow PM's language (detect from first message, follow switches).
-**Documents:** Follow `.aid-o/config/language.yaml` → `document_language` (default: EN).
+**Documents:** Follow `defaults/orchestration.yaml` → `language.document_language`
+(default: EN).
 
-Resolution: config `document_language` → check `scope.plans` → fallback to EN.
+Resolution: `language.document_language` from the workspace's orchestration
+config → fallback to EN. `language.conversation_language: auto` means the
+conversation follows the PM, which is the shipped default.
 
 If conversation and document languages differ, mention once at start:
 "I'll respond in {PM language}, but the plan will be in {document language} per your config."
 
-See `.aid-o/config/language.yaml` for full configuration options (scope per document type).
+The same rule for chat cards and documents lives once in
+`skills/communication.md`; `defaults/orchestration.yaml` is the only home of
+the `document_language` key (there is no `language.yaml`).
 
 ---
 
@@ -501,8 +506,8 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 - `defaults/templates/design-sections.md` — design section templates for Step 5
 - `skills/planner.md` — how plans become Plan JSON
 - `skills/run-management.md` — lifecycle integration
-- `.aid-o/config/language.yaml` — document language configuration
+- `defaults/orchestration.yaml` — `language.document_language` (document language)
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-12

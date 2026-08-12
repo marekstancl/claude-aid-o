@@ -1154,11 +1154,12 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)
-- `.aid-o/config/language.yaml` — document language configuration
+- `defaults/orchestration.yaml` — `language.document_language`, the only home of the document
+  language setting (there is no `language.yaml`)
 
 ---
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-12
 
 ## Plan-boundary note
 
