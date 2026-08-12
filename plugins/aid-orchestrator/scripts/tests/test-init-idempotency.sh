@@ -124,7 +124,20 @@ source "$EXEC_YAML_LIB"
 # shellcheck source=/dev/null
 source "$GITIGNORE_LIB"
 
-TMPDIR_ROOT="$(mktemp -d)"
+# A FAILED mktemp must stop the harness, not be ignored. With `set -uo pipefail`
+# and no return-code check, a failure left TMPDIR_ROOT empty and every fixture
+# path collapsed to `/c1`, `/c2`, … at the filesystem root — verified live by CP3.
+# As an ordinary user that fails loudly and the tests report FAIL, so nothing
+# passes falsely; as root in a container it would create directories in `/`.
+# A test harness that can escape its own sandbox is not one to leave to luck.
+TMPDIR_ROOT="$(mktemp -d)" || {
+  echo "FATAL: mktemp -d failed — refusing to run with an unset fixture root" >&2
+  exit 1
+}
+if [[ -z "${TMPDIR_ROOT:-}" || ! -d "$TMPDIR_ROOT" ]]; then
+  echo "FATAL: fixture root is empty or not a directory ('${TMPDIR_ROOT:-}')" >&2
+  exit 1
+fi
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
 
 echo "=== test-init-idempotency.sh ==="

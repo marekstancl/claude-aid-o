@@ -101,16 +101,53 @@ _unparseable() {
 
 # _get <file> <expr> — a scalar read that never fails the script and never
 # yields an empty-looking "null".
+# _sanitise — one line, printable, bounded.
+#
+# WHY: both `/aid-init` and `/aid-setup` are instructed to present this output
+# VERBATIM to the PM. A value is workspace YAML that any contributor can edit, so
+# without this a block scalar in `active_preset` writes its own extra report lines —
+# CP3 produced a convincing fake `permissions: autonomous (implicit)` and a fake
+# `plan mode default: plan_branch (policy_default)` that way. Carriage returns
+# repaint the line in a terminal and ANSI escapes recolour or erase it. The fixed
+# label set is a contract; a value that can forge a label breaks it.
+#
+# Newlines and tabs become a visible marker rather than disappearing: a value that
+# was multi-line should LOOK wrong, not look tidy.
+_sanitise() {
+  local v="$1"
+  v="${v//$'\r'/}"
+  v="$(printf '%s' "$v" | tr '\n\t' '␞␞' 2>/dev/null || printf '%s' "$v")"
+  # Strip ANSI CSI/OSC sequences.
+  v="$(printf '%s' "$v" | sed -E $'s/\033\\[[0-9;?]*[A-Za-z]//g; s/\033\\][^\a]*(\a|\033\\\\)//g')"
+  # Remaining control characters -> a dot; an invisible byte must not stay invisible.
+  v="$(printf '%s' "$v" | tr -c '[:print:]␞' '.' 2>/dev/null || printf '%s' "$v")"
+  # Bounded: a megabyte value must not push the rest of the report off screen.
+  if [[ "${#v}" -gt 200 ]]; then v="${v:0:200}…(truncated)"; fi
+  printf '%s' "$v"
+}
+
 _get() {
   local f="$1" expr="$2" v=""
   [[ -f "$f" ]] || { printf ''; return 0; }
   v="$(yq -r "$expr" "$f" 2>/dev/null || true)"
   [[ "$v" == "null" ]] && v=""
-  printf '%s' "$v"
+  _sanitise "$v"
 }
 
+# yq presence is not enough — it has to be the RIGHT yq. Two incompatible tools
+# share the name: mikefarah's Go implementation (what this repo depends on) and the
+# Python wrapper around jq. Under the Python one every expression here fails, so the
+# summary would report the entire configuration as unparseable — including the
+# plugin's own shipped files — and still exit 0. A confident "everything is broken"
+# is as bad as a confident wrong value, and it points the reader at the wrong repo.
 have_yq=1
-command -v yq >/dev/null 2>&1 || have_yq=0
+if ! command -v yq >/dev/null 2>&1; then
+  have_yq=0
+  yq_flavour="not installed"
+elif ! yq --version 2>&1 | grep -qi 'mikefarah\|yq (https://github.com/mikefarah/yq'; then
+  have_yq=0
+  yq_flavour="wrong flavour ($(yq --version 2>&1 | head -1 | tr -d '\n' | cut -c1-60)); this report needs mikefarah/yq"
+fi
 
 # ── 1. state root ────────────────────────────────────────────────────────
 printf 'state root: %s\n' "$ROOT"
@@ -146,7 +183,7 @@ if [[ ! -f "$EXECUTION_YAML" ]]; then
   gate_profiles_value="absent"
 elif [[ "$have_yq" != "1" ]]; then
   gate_profiles_state="unknown"
-  gate_profiles_value="unknown (yq not installed)"
+  gate_profiles_value="unknown (yq: ${yq_flavour})"
 elif [[ -n "$exec_err" ]]; then
   gate_profiles_state="broken"
   gate_profiles_value="$(_unparseable "$EXECUTION_YAML" "$exec_err")"
@@ -204,7 +241,7 @@ if [[ -f "$PERMISSIONS_YAML" ]]; then
   perm_err=""
   [[ "$have_yq" == "1" ]] && perm_err="$(_yq_err "$PERMISSIONS_YAML")"
   if [[ "$have_yq" != "1" ]]; then
-    permissions="unknown (yq not installed)"
+    permissions="unknown (yq: ${yq_flavour})"
   elif [[ -n "$perm_err" ]]; then
     permissions="$(_unparseable "$PERMISSIONS_YAML" "$perm_err")"
   else
@@ -253,7 +290,7 @@ orch_file=""
 [[ -f "$DEFAULT_ORCHESTRATION" ]] && orch_file="$DEFAULT_ORCHESTRATION"
 
 if [[ "$have_yq" != "1" ]]; then
-  dispatch="unknown"; dispatch_src="yq not installed"
+  dispatch="unknown"; dispatch_src="yq: ${yq_flavour}"
 else
   if [[ -n "$orch_file" ]]; then
     orch_err="$(_yq_err "$orch_file")"
@@ -321,7 +358,7 @@ printf 'plan manifests: %s\n' "$manifests"
 version="absent"
 if [[ -f "$PLUGIN_JSON" ]]; then
   if [[ "$have_yq" != "1" ]]; then
-    version="unknown (yq not installed)"
+    version="unknown (yq: ${yq_flavour})"
   else
     v="$(yq -p json -o=yaml -r '.version // ""' "$PLUGIN_JSON" 2>/dev/null || true)"
     [[ "$v" == "null" ]] && v=""

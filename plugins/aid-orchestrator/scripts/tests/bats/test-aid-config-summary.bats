@@ -75,7 +75,17 @@ line_for() {
 # and the file's owner may chmod even a file the write-protection case made read-only.
 # mtime catches a rewrite that happens to preserve length.
 tree_snapshot() {
-  find "$TEST_PROJECT_ROOT" -mindepth 1 -printf '%P|%y|%s|%m|%T@\n' 2>/dev/null | sort
+  # THREE roots, not one. CP3 walked a write past every mechanism here simply by
+  # writing OUTSIDE the project — into the plugin's own defaults/orchestration.yaml
+  # and into $HOME. All four guards watched only the project root, so the suite
+  # stayed 32/32 green while the script modified the plugin under test. A read-only
+  # proof scoped to one directory proves nothing about the other two the script can
+  # reach.
+  {
+    find "$TEST_PROJECT_ROOT" -mindepth 1 -printf 'P|%P|%y|%s|%m|%T@\n' 2>/dev/null
+    find "$AID_PLUGIN_PATH"   -mindepth 1 -printf 'G|%P|%y|%s|%m|%T@\n' 2>/dev/null
+    find "$HOME"              -mindepth 1 -maxdepth 3 -printf 'H|%P|%y|%s|%m|%T@\n' 2>/dev/null
+  } | sort
 }
 
 # ─── rendering ───────────────────────────────────────────────────────────
@@ -423,7 +433,11 @@ tree_snapshot() {
   # `%P|%y|%s` — path, type, size — so a permission change is invisible to it, and
   # the owner may chmod even a file made read-only by the write-protection case.
   # That combination let a `chmod 777` slip through all four mechanisms.
-  run grep -nE '>>|yq +-i|yq +--in-?place|sed +-i|\btee\b|\bmktemp\b|\bmkdir\b|\btouch\b|\brm\b|\bcp\b|\bmv\b|\bchmod\b|\bchown\b|\bln\b|\bdd\b|\btruncate\b' "$code"
+  # `yq` with -i / --inplace ANYWHERE in its argument list, not just adjacent to the
+  # command name: CP3 walked `yq eval -i` past the previous pattern — the same tool
+  # this script legitimately calls, one word over. A pattern anchored to argument
+  # POSITION checks spelling; this one checks the flag.
+  run grep -nE '>>|yq [^|;&]*(-i|--in-?place)\b|sed +-i|\btee\b|\bmktemp\b|\bmkdir\b|\btouch\b|\brm\b|\bcp\b|\bmv\b|\bchmod\b|\bchown\b|\bln\b|\bdd\b|\btruncate\b' "$code"
   [ "$status" -ne 0 ]
 
   # Every remaining redirection must target /dev/null or an existing fd —
