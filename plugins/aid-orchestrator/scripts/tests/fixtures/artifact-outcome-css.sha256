@@ -1,0 +1,23 @@
+# Expected sha256 of the VENDORED STYLE BLOCK in
+# defaults/templates/artifact-outcome.html — the lines strictly between the
+# `<style>` and `</style>` lines, hashed exactly as they appear.
+#
+# WHY THIS FILE EXISTS, IN THE TEST TREE AND NOT IN THE TEMPLATE.
+# The template already carries a `sha256:` line in its own header, and
+# test-aid-artifact-render.bats used to check the CSS against that line alone.
+# Both values live in the same file, so editing the CSS and its header hash
+# together passed — the "guard" was a file agreeing with itself, which every
+# file does. The digest below is a SECOND, INDEPENDENTLY OWNED copy: a restyle
+# of the vendored block now has to be recorded here as well, in a different
+# tree, as a deliberate and reviewable act. That is the whole mechanism; it is
+# not cryptography, it is a second signature.
+#
+# Verified byte-identical against the upstream _CSS in
+# /opt/eco/projects/agents/agent-report.py on 2026-08-12.
+#
+# TO UPDATE: re-vendor the CSS, then run
+#   sed -n '/^<style>$/,/^<\/style>$/p' \
+#     plugins/aid-orchestrator/defaults/templates/artifact-outcome.html \
+#     | sed '1d;$d' | sha256sum
+# and paste the digest below, replacing the old one.
+fb48aa62b99ba7db4d36326876683584873c576005b34b0aad5492587be501b6

@@ -26,12 +26,27 @@
 #   commands/*.md and skills/pipeline.md. This harness runs anywhere, including
 #   a CI box with no Artifact tool at all.
 #
-# GOLDEN FIXTURES — REGENERATION IS A HUMAN ACT
-#   The goldens under fixtures/handoff/golden/ record the artifact BLOCK ORDER
-#   (headings and structural markers, in document order) for each rendered
-#   body. That is the only byte-golden here: everything else is asserted
-#   structurally, so a benign wording edit inside a block does not churn a
-#   fixture, while a block that moves, vanishes or appears does fail.
+# GOLDEN FIXTURES — TWO PER CASE, AND REGENERATION IS A HUMAN ACT
+#   Each case has two goldens under fixtures/handoff/golden/:
+#
+#     <case>.blocks.txt   the BLOCK ORDER — headings and structural markers in
+#                         document order. A LAYOUT SPINE, and nothing more: it
+#                         is identical across every case that renders the same
+#                         blocks, which is most of them.
+#     <case>.content.txt  the CONTENT — tile labels and values, every list item
+#                         and paragraph, the detail link, the provenance footer.
+#                         This is the golden that distinguishes one case from
+#                         another and pins the numbers, the redactions and the
+#                         offered commands.
+#
+#   The spine alone used to be the whole golden set, and seven of its nine
+#   files were byte-identical to one another: no tile value, redaction, link,
+#   command or footer change could move any of them. Nine fixtures asserted one
+#   property. The content golden is what makes "golden" true of this directory.
+#
+#   Both are byte-compared. Every input is a checked-in fixture, so both are
+#   fully deterministic; the price is that a deliberate template wording change
+#   churns the content goldens, which is why regeneration is explicit.
 #
 #   Regenerate with, and ONLY with:
 #
@@ -126,8 +141,33 @@ _spine() {
     | grep -oE '<header class="masthead">|<section class="tiles">|<section class="block[^"]*">|<h2>[^<]*</h2>|class="golink"|<footer>'
 }
 
-# _golden <case_name> <html_file> — compare the spine to its golden, or, in
-# the explicitly-invoked regeneration mode, rewrite it.
+# _content <html_file> — the artifact's CONTENT-BEARING elements, in document
+# order: headings, tile labels and VALUES, every list item, the detail link and
+# the provenance footer, plus the body paragraphs.
+#
+# WHY THIS EXISTS, AND WHY THE SPINE ALONE WAS NOT ENOUGH.
+# The spine reduces a page to its block markers. That was deliberate — a
+# wording edit inside a block should not churn nine fixtures — but the result
+# was that SEVEN OF THE NINE goldens were byte-identical to each other, and the
+# two that differed did so only by carrying the missing-prose block. A golden
+# set in which most members are the same file cannot detect a changed tile
+# value, a lost redaction, a dropped link, a rewritten command or a different
+# footer; it detects a block moving, and nothing else. Nine files were being
+# maintained to assert one property.
+#
+# Every input here is a checked-in fixture, so the content is fully
+# deterministic and there is nothing to normalise beyond the three sources the
+# header already enumerates. The tradeoff is accepted openly: a deliberate
+# template wording change now churns the content goldens, and regeneration
+# stays a human act.
+_content() {
+  _normalise < "$1" \
+    | sed 's/></>\n</g' \
+    | grep -E '^<(h1>|h2>|li>|p>|footer>|span class="[kv]">|div class="tile|a class="golink"|div class="golink")'
+}
+
+# _golden <case_name> <html_file> — compare the spine AND the content to their
+# goldens, or, in the explicitly-invoked regeneration mode, rewrite both.
 _golden() {
   # NOT one `local` statement: a name declared there is not yet visible to a
   # later assignment in the same statement, and under `set -u` that aborts.
@@ -135,6 +175,7 @@ _golden() {
   local g="${GOLDEN}/${name}.blocks.txt"
   local actual="${WORK}/${name}.blocks.actual"
   _spine "$html" > "$actual"
+  _golden_content "$name" "$html"
   if [[ "$REGEN" == "1" ]]; then
     if [[ -f "$g" ]] && diff -q "$g" "$actual" >/dev/null 2>&1; then
       echo "  REGEN: ${name} unchanged"
@@ -154,6 +195,35 @@ _golden() {
     return 0
   fi
   fail_msg "${name}: artifact block order differs from ${g}"
+  diff -u "$g" "$actual" | sed 's/^/    /'
+  return 1
+}
+
+# _golden_content <case_name> <html_file> — the content half of _golden.
+_golden_content() {
+  local name="$1" html="$2"
+  local g="${GOLDEN}/${name}.content.txt"
+  local actual="${WORK}/${name}.content.actual"
+  _content "$html" > "$actual"
+  if [[ "$REGEN" == "1" ]]; then
+    if [[ -f "$g" ]] && diff -q "$g" "$actual" >/dev/null 2>&1; then
+      echo "  REGEN: ${name} content unchanged"
+    else
+      [[ -f "$g" ]] && diff -u "$g" "$actual" | sed 's/^/    /'
+      cp "$actual" "$g"
+      echo "  REGEN: ${name} content rewritten"
+    fi
+    return 0
+  fi
+  if [[ ! -f "$g" ]]; then
+    fail_msg "${name}: no content golden at ${g} — regenerate deliberately (see this file's header)"
+    return 1
+  fi
+  if diff -q "$g" "$actual" >/dev/null 2>&1; then
+    pass_msg "${name}: tile values, list items, links and footer match their content golden"
+    return 0
+  fi
+  fail_msg "${name}: artifact CONTENT differs from ${g}"
   diff -u "$g" "$actual" | sed 's/^/    /'
   return 1
 }
@@ -306,14 +376,49 @@ if _run_renderer force-used "${WORK}/force-used.card" \
   _assert_seven_blocks force-used "${WRUN}/gate-outcome-artifact.html"
   _golden force-used "${WRUN}/gate-outcome-artifact.html"
   # A waiver is PM risk acceptance, never a pass — on BOTH surfaces.
-  if grep -qF 'waived' "${WRUN}/gate-outcome-artifact.html" \
-     && grep -qF 'waived' "${WORK}/force-used.card" \
-     && ! grep -qF 'passed' "${WRUN}/gate-outcome-artifact.html" \
-     && ! grep -qF 'passed' "${WORK}/force-used.card" \
-     && grep -qF '<span class="v">1/2 prošlo</span>' "${WRUN}/gate-outcome-artifact.html"; then
-    pass_msg "force-used: the waiver renders as risk acceptance on both surfaces and is counted unresolved"
+  #
+  # THE NEGATIVE IS SCOPED TO THE WAIVED GATE'S OWN LINE, AND COVERS CZECH.
+  # It used to be `! grep -qF 'passed' <whole file>` — one English word, over a
+  # document that is otherwise entirely Czech. A renderer that labelled the
+  # waived row `prošla` would have satisfied it exactly, which is the label a
+  # Czech renderer would actually reach for. It also could not be tightened
+  # document-wide, because the legitimate result tile says "1/2 prošlo": the
+  # word is fine on the COUNT and forbidden on the WAIVED ROW, so the row is
+  # what gets isolated and asserted.
+  # The page is one long line, so its unit is the <li>, not the line; the card's
+  # unit IS the line. Each surface is cut at its own granularity — cutting the
+  # page by line would drag the neighbouring "Prošlo 1, …" count sentence into
+  # the waived row and fail on legitimate text.
+  _waived_units_page() { grep -oE '<li>[^<]*</li>' "$1" | grep -F 'waived'; }
+  _waived_units_card() { grep -F 'waived' "$1"; }
+  _pass_semantics() {  # any pass label, English or Czech, in the given text
+    # Word forms are case-insensitive; the two-letter and all-caps LABELS are
+    # not. `OK` folded to lowercase matches inside ordinary Czech words — the
+    # first draft of this helper fired on "Další krok:" — so a label only
+    # counts as a label when it is written as one.
+    grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$1" && return 0
+    grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$1" && return 0
+    return 1
+  }
+  wl_page="$(_waived_units_page "${WRUN}/gate-outcome-artifact.html")"
+  wl_card="$(_waived_units_card "${WORK}/force-used.card")"
+  waiver_problems=()
+  [[ "$wl_page" == *'tests'* ]] || waiver_problems+=("the page has no result item marking gate 'tests' as waived")
+  [[ -n "$wl_card" ]] || waiver_problems+=("the card never says the word waived")
+  ! _pass_semantics "$wl_page" || waiver_problems+=("the page's waived row carries pass semantics: ${wl_page}")
+  ! _pass_semantics "$wl_card" || waiver_problems+=("the card's waived row carries pass semantics: ${wl_card}")
+  # The counts must not absorb the waiver on EITHER surface: the tile counts it
+  # out of the passes, and the card states the waived count explicitly.
+  grep -qF '<span class="v">1/2 prošlo</span>' "${WRUN}/gate-outcome-artifact.html" \
+    || waiver_problems+=("the page's result tile absorbed the waiver into the pass count")
+  grep -qF '<span class="v">1</span>' "${WRUN}/gate-outcome-artifact.html" \
+    || waiver_problems+=("the page's unresolved tile does not count the waived gate")
+  grep -qE 'waived 1\b' "${WORK}/force-used.card" \
+    || waiver_problems+=("the card does not state the waived count")
+  if (( ${#waiver_problems[@]} == 0 )); then
+    pass_msg "force-used: the waived row carries no pass label (EN or CZ) on either surface, and both surfaces count it unresolved"
   else
-    fail_msg "force-used: the waiver was rendered as a pass, or the counts absorbed it"
+    fail_msg "force-used: ${waiver_problems[*]}"
   fi
   if grep -qF 'flaky suite under investigation' "${WRUN}/gate-outcome-artifact.html"; then
     pass_msg "force-used: the waiver receipt enriched the line"
@@ -331,8 +436,14 @@ if _run_renderer incomplete "${WORK}/incomplete.card" \
   _assert_seven_blocks incomplete "${IOUT}/plan-close-artifact.html"
   _golden incomplete "${IOUT}/plan-close-artifact.html"
   # …and the page SAYS the summary is missing rather than quietly shrinking.
+  # THE LITERAL IS TYPED OUT HERE, NOT READ FROM THE LIBRARY UNDER TEST.
+  # This used to grep for "$_AID_ARTIFACT_PROSE_MISSING", sourced from the very
+  # renderer being driven — so a change that rewrote the sentence changed both
+  # sides of the comparison at once and the assertion could not notice. An
+  # expectation taken from the implementation is the implementation agreeing
+  # with itself. Editing the sentence must break this line; that is the point.
   if grep -qF 'class="block alarm"' "${IOUT}/plan-close-artifact.html" \
-     && grep -qF "$_AID_ARTIFACT_PROSE_MISSING" "${IOUT}/plan-close-artifact.html"; then
+     && grep -qF 'Shrnutí chybí — čísla výše jsou dopočítaná a platí.' "${IOUT}/plan-close-artifact.html"; then
     pass_msg "incomplete: the page carries the missing-summary alarm with the declared literal"
   else
     fail_msg "incomplete: prose was missing and the page did not say so"
@@ -356,8 +467,11 @@ if _run_renderer smoke-no-prose "${WORK}/smoke-no-prose.stdout" \
   # Block 6 never disappears, and the caps are enforced with a TRUE remainder.
   # 6 items against a cap of 5 and 4 next steps against a cap of 3 both leave a
   # remainder of exactly 1, so the overflow line must appear TWICE.
-  if grep -qF "$_AID_ARTIFACT_ASK_NOTHING" "$SOUT" \
-     && [[ "$(grep -oF "$(_aid_artifact_overflow 1)" "$SOUT" | wc -l)" == "2" ]]; then
+  # Both literals typed out, for the reason given at the incomplete case above:
+  # `$_AID_ARTIFACT_ASK_NOTHING` and `$(_aid_artifact_overflow 1)` both come
+  # from the library under test, so they moved with any change to it.
+  if grep -qF 'Nic — ozvu se, až bude hotovo' "$SOUT" \
+     && [[ "$(grep -oF 'a dalších 1 v technickém detailu' "$SOUT" | wc -l)" == "2" ]]; then
     pass_msg "smoke-no-prose: the ask block survives an empty prose input and the caps report true remainders"
   else
     fail_msg "smoke-no-prose: the ask block or the overflow literal is missing"

@@ -10,9 +10,15 @@
 #   skills/pipeline.md — nothing in this suite covers or claims it.
 #
 # THE RULE THIS SUITE EXISTS FOR
-#   A waiver is PM risk acceptance, never a pass. That is asserted by exact
-#   string: the waiver's rendered words carry `waived`, and the whole output
-#   never carries `passed`.
+#   A waiver is PM risk acceptance, never a pass. The waiver's own rendered
+#   result item carries `waived` and carries NO pass label — Czech forms
+#   included, because these surfaces are Czech and `passed` alone was a guard
+#   against a word the renderer would never have written anyway.
+#
+# NEGATIVE ASSERTIONS USE refute_grep, NOT `! grep`
+#   `! grep -q …` cannot fail a bats case: bash exempts a `!`-inverted command
+#   from `set -e` and bats' ERR trap inherits the exemption. Every `! grep`
+#   line in this file was inert. See refute_grep in test-helpers.bash.
 
 load test-helpers.bash
 
@@ -134,9 +140,29 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ "$status" -eq 0 ]
 
   grep -qF 'brána tests: waived — PM převzal riziko' "$(BODY)"
-  ! grep -qF 'passed' "$(BODY)"
   [[ "$output" == *"waived"* ]]
-  [[ "$output" != *"passed"* ]]
+
+  # "NEVER AS A PASS" IS A CLAIM ABOUT LABELS, NOT ABOUT ONE ENGLISH WORD.
+  # This used to forbid only the literal `passed`, on surfaces that are written
+  # in Czech throughout — a row labelled `prošla` would have satisfied it while
+  # saying exactly the thing the case is named for. The negative is now scoped
+  # to the waived gate's own result item (the page is one long line, so the
+  # unit is the <li>, and a document-wide grep would collide with the entirely
+  # legitimate "1/2 prošlo" count tile) and covers the Czech forms.
+  local waived_li
+  waived_li="$(grep -oE '<li>[^<]*</li>' "$(BODY)" | grep -F 'waived')"
+  [[ "$waived_li" == *"tests"* ]]
+  refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_li"
+  # `OK` is matched case-SENSITIVELY and as a whole word: folded to lowercase
+  # it hits inside ordinary Czech words such as "krok".
+  refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_li"
+
+  local waived_card
+  waived_card="$(grep -F 'waived' <<<"$output")"
+  [ -n "$waived_card" ]
+  refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_card"
+  refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_card"
+
   # A waived gate is unresolved, not a pass: 1 of 2 actually passed.
   grep -qF '<span class="v">1/2 prošlo</span>' "$(BODY)"
   grep -qF '<span class="k">Neuzavřeno</span><span class="v">1</span>' "$(BODY)"
@@ -152,7 +178,7 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
   grep -qF 'brána tests: waived — PM převzal riziko' "$(BODY)"
-  ! grep -qF 'passed' "$(BODY)"
+  refute_grep -qF 'passed' "$(BODY)"
 }
 
 @test "a waiver named only by waived_gates[] still renders — a missing row never hides it" {
@@ -354,6 +380,6 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
   aid_gate_outcome_render "" "$RUN_DIR"
 
-  ! grep -qF 'ghp_0123456789abcdefghij' "$(BODY)"
+  refute_grep -qF 'ghp_0123456789abcdefghij' "$(BODY)"
   grep -qE 'Redigováno tajemství: [1-9]' "$(BODY)"
 }

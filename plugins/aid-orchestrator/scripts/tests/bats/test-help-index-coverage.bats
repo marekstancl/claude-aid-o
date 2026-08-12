@@ -457,14 +457,68 @@ router_topics() {
   fi
 }
 
-@test "case 11: every final_turn renderer exists and is wired into its own surface" {
-  # The half that checks CONTENT, not shape. Two ways a `renderer:` value lies:
-  # it can name a script that does not exist (a rename, a deleted library), or it
-  # can name a real script the surface never sources — an inventory entry with no
-  # mechanism behind it, which is this plan's recurring defect wearing a filename.
-  # Both fail here. The wiring match is on the BASENAME because surfaces cite the
-  # library at whatever depth reads naturally (`lib/x.sh`, `scripts/lib/x.sh`).
-  local violations="" command file final_turn script base
+# _renderer_instruction_block <surface_file> <basename>
+#   Prints the paragraph(s) of <surface_file> that CITE <basename> as code —
+#   inside a fenced block, or wrapped in backticks — and nothing else. Empty
+#   output means the surface mentions the renderer only as bare prose, or not
+#   at all.
+#
+#   THE UNIT IS THE PARAGRAPH, NOT A LINE WINDOW. A fixed "and the next N
+#   lines" window is proximity, and proximity is what a stale mention next to
+#   an unrelated instruction satisfies by accident. Markdown's paragraph — from
+#   the preceding blank line to the following one, or the whole fenced block —
+#   is the structure the author actually wrote, so a cite and the instruction
+#   that uses it are in the same unit only when they belong together.
+_renderer_instruction_block() {
+  local file="$1" base="$2"
+  awk -v base="$base" '
+    function flush() {
+      if (buf != "" && cited) print buf
+      buf = ""; cited = 0
+    }
+    {
+      line = $0
+      if (line ~ /^[[:space:]]*(```|~~~)/) { infence = !infence; buf = buf line "\n"; next }
+      if (!infence && line ~ /^[[:space:]]*$/) { flush(); next }
+      buf = buf line "\n"
+      if (index(line, base) > 0) {
+        # Cited as CODE only: inside a fence, or backticked on this line.
+        if (infence || line ~ /`[^`]*`/) cited = 1
+      }
+    }
+    END { flush() }
+  ' "$file"
+}
+
+@test "case 11: every final_turn renderer exists and its surface instructs it as code, not merely names it" {
+  # The half that checks CONTENT, not shape. Three ways a `renderer:` value
+  # lies: it can name a script that does not exist (a rename, a deleted
+  # library); it can name a real script the surface never wires — an inventory
+  # entry with no mechanism behind it, which is this plan's recurring defect
+  # wearing a filename; or the surface can carry a leftover PROSE mention of a
+  # renderer it no longer runs.
+  #
+  # THE THIRD ONE IS WHY THIS CASE WAS REWRITTEN. It used to be
+  # `grep -qF "$base" "$file"` — the basename occurring ANYWHERE. A changelog
+  # line, a comment, a "we used to call" sentence, or an unrelated file with a
+  # colliding name all satisfied that, so the case could pass on a surface with
+  # no wiring at all while its name promised wiring. Two things are asserted
+  # instead: the cite is written as CODE (fenced or backticked — how these
+  # surfaces write something they mean to be executed), and the paragraph
+  # holding it carries an execution or presentation instruction.
+  #
+  # HONEST SCOPE, because the name of this case has to survive reading the
+  # body: these surfaces are LLM-executed prose. This proves the surface
+  # INSTRUCTS the renderer in an executable form. It cannot prove a process was
+  # spawned at runtime — that needs a live capture harness, which case 10's
+  # comment already records as out of scope for this plan.
+  #
+  # The match is on the BASENAME because surfaces cite the library at whatever
+  # depth reads naturally (`lib/x.sh`, `scripts/lib/x.sh`, `{plugin_path}/…`).
+  local violations="" command file final_turn script base block
+  # Execution / presentation verbs, English and Czech. A paragraph that cites a
+  # renderer and carries none of these is describing it, not running it.
+  local verbs='source|bash|sh |run|runs|invoke|execute|render|renders|print|prints|present|presents|output|spusť|vypiš|{plugin_path}|AID_PLUGIN_PATH'
   while IFS=$'\t' read -r command file _topic _audience _disposition final_turn _rest; do
     case "$final_turn" in renderer:?*) ;; *) continue ;; esac
     script="${final_turn#renderer:}"
@@ -477,8 +531,14 @@ router_topics() {
     if [ ! -f "$REPO_ROOT/$file" ]; then
       continue   # case 6 owns the missing-file report
     fi
-    if ! grep -qF -- "$base" "$REPO_ROOT/$file"; then
-      violations+=$'\n'"    $command: final_turn names $script but $file never mentions $base — the row claims a renderer the surface does not wire"
+
+    block="$(_renderer_instruction_block "$REPO_ROOT/$file" "$base")"
+    if [ -z "$block" ]; then
+      violations+=$'\n'"    $command: $file never cites $base as code (fenced or backticked) — a bare prose mention is not wiring"
+      continue
+    fi
+    if ! grep -qEi -- "$verbs" <<<"$block"; then
+      violations+=$'\n'"    $command: $file cites $base but no paragraph around the cite instructs running or presenting it"
     fi
   done < <(index_rows)
 

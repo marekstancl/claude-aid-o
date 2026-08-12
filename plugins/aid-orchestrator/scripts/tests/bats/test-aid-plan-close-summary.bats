@@ -300,8 +300,8 @@ _blockers_two() {
   [ "$status" -eq 0 ]
   body="$OUT_DIR/plan-close-artifact.html"
   # A BODY: the Artifact tool supplies the skeleton.
-  ! grep -qiF '<!doctype' "$body"
-  ! grep -qiF '<html' "$body"
+  refute_grep -qiF '<!doctype' "$body"
+  refute_grep -qiF '<html' "$body"
   # Counted, not asserted.
   grep -qF '2/3 EPIKŮ' "$body"
   grep -qF 'Plán P080 — plan-final boundary' "$body"
@@ -310,7 +310,7 @@ _blockers_two() {
   grep -qF 'Nic — ozvu se, až bude hotovo' "$body"
   # The full revert SHA never reaches the page — the label does (see the lib
   # header: a 40-hex run trips the renderer's high_entropy_blob detector).
-  ! grep -qF '3333333333333333333333333333333333333333' "$body"
+  refute_grep -qF '3333333333333333333333333333333333333333' "$body"
 }
 
 @test "the option labels reach the artifact's next-steps block" {

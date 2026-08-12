@@ -31,6 +31,19 @@ setup() {
   # setup_test_evidence_dir seeds an evidence dir; these fixtures decide their
   # own workspace shape, so start from a bare repo.
   rm -rf "$TEST_PROJECT_ROOT/.aid-o"
+
+  # ── the two roots the read-only proof cannot otherwise see ───────────────
+  # HOME and TMPDIR are redirected into the fixture, for the whole suite, so
+  # the snapshot below can walk them WHOLE. Against the real $HOME the
+  # snapshot had to stop at maxdepth 3 (walking a developer's home is not
+  # something a t0 case may do), which left every deeper path — the ordinary
+  # shape of a dotfile cache — outside the proof; and TMPDIR was not watched
+  # at all except by one case checking a directory of its own. A read-only
+  # proof with a depth limit is a proof about shallow writes.
+  HOME="$TEST_TMPDIR/home"; export HOME
+  TMPDIR="$TEST_TMPDIR/tmp"; export TMPDIR
+  mkdir -p "$HOME/.cache/deep/deeper/deepest" "$TMPDIR"
+  : > "$HOME/.cache/deep/deeper/deepest/canary"
 }
 
 teardown() {
@@ -75,16 +88,23 @@ line_for() {
 # and the file's owner may chmod even a file the write-protection case made read-only.
 # mtime catches a rewrite that happens to preserve length.
 tree_snapshot() {
-  # THREE roots, not one. CP3 walked a write past every mechanism here simply by
-  # writing OUTSIDE the project — into the plugin's own defaults/orchestration.yaml
-  # and into $HOME. All four guards watched only the project root, so the suite
-  # stayed 32/32 green while the script modified the plugin under test. A read-only
-  # proof scoped to one directory proves nothing about the other two the script can
-  # reach.
+  # FOUR roots, none of them depth-limited. CP3 walked a write past every
+  # mechanism here simply by writing OUTSIDE the project — into the plugin's own
+  # defaults/orchestration.yaml and into $HOME. All four guards watched only the
+  # project root, so the suite stayed 32/32 green while the script modified the
+  # plugin under test. A read-only proof scoped to one directory proves nothing
+  # about the others the script can reach.
+  #
+  # The HOME walk used to stop at `-maxdepth 3`, which is a depth a script has
+  # no reason to respect: a write to ~/.cache/a/b/c passed the proof. That limit
+  # existed because $HOME was the developer's real home. setup() now points HOME
+  # and TMPDIR at fixture directories, so both are walked whole and cheaply, and
+  # the case's name — "full tree snapshot" — is true.
   {
     find "$TEST_PROJECT_ROOT" -mindepth 1 -printf 'P|%P|%y|%s|%m|%T@\n' 2>/dev/null
     find "$AID_PLUGIN_PATH"   -mindepth 1 -printf 'G|%P|%y|%s|%m|%T@\n' 2>/dev/null
-    find "$HOME"              -mindepth 1 -maxdepth 3 -printf 'H|%P|%y|%s|%m|%T@\n' 2>/dev/null
+    find "$HOME"              -mindepth 1 -printf 'H|%P|%y|%s|%m|%T@\n' 2>/dev/null
+    find "$TMPDIR"            -mindepth 1 -printf 'T|%P|%y|%s|%m|%T@\n' 2>/dev/null
   } | sort
 }
 

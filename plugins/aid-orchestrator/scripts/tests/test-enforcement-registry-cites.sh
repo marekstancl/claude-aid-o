@@ -136,7 +136,14 @@ _cite_first_segment_is_dir() {
 }
 
 # _cite_violations <registry> <plugin_dir> <repo_dir>
-# Emits one `CITE|<row-id>|<field>|<path>` line per unresolvable cite.
+# Emits one line per cite token it looked at, tagged by outcome:
+#   `OK|<row-id>|<field>|<path>`       — resolved
+#   `EXTSKIP|<row-id>|<field>|<path>`  — an /ecosystem/ cite that COULD NOT be
+#                                        checked (docs tree absent)
+#   `CITE|<row-id>|<field>|<path>`     — unresolvable, a violation
+# The OK lines exist so the caller can report how many cites were actually
+# verified. Without them "no violations" and "nothing checked" are the same
+# empty string, and the pass message cannot tell the two apart.
 _cite_violations() {
   local registry="$1" plugin_dir="$2" repo_dir="$3"
   local id status source instruction field val part word tok parts rows rc
@@ -270,7 +277,7 @@ _cite_violations() {
               local rc=0
               _cite_resolves "$tok" "$plugin_dir" "$repo_dir" || rc=$?
               case "$rc" in
-                0) ;;
+                0) printf 'OK|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok" ;;
                 2) printf 'EXTSKIP|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok" ;;
                 *) printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok" ;;
               esac
@@ -340,15 +347,28 @@ all_lines="$(_cite_violations "$REGISTRY" "$PLUGIN_DIR" "$REPO_DIR")"
 # instead of reporting a clean bill of health it did not earn.
 violations="$(grep '^CITE|' <<<"$all_lines" || true)"
 extskips="$(grep '^EXTSKIP|' <<<"$all_lines" || true)"
+n_resolved="$(grep -c '^OK|' <<<"$all_lines" || true)"
+n_skipped="$(grep -c '^EXTSKIP|' <<<"$all_lines" || true)"
 if [[ -n "$extskips" ]]; then
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     echo "  $line"
   done <<< "$extskips"
-  echo "  NOTE: $(grep -c . <<<"$extskips") ecosystem-doc cite(s) NOT verified — ${ECO_DOCS_ROOT} is absent; set AID_ECO_DOCS_ROOT to check them"
+  echo "  NOTE: ${n_skipped} ecosystem-doc cite(s) NOT verified — ${ECO_DOCS_ROOT} is absent; set AID_ECO_DOCS_ROOT to check them"
 fi
+# THE PASS MESSAGE STATES WHAT WAS CHECKED, NOT WHAT WAS CLAIMED.
+# It used to read "all source/instruction cites resolve" whether or not the
+# ecosystem docs tree was present — so a run that skipped cites still reported
+# a clean bill of health for all of them. A green line that overstates its own
+# coverage is the failure this harness exists to remove, one level up. The
+# resolved and skipped counts are now both in the sentence, and a run with any
+# skip says so in the words a reader will quote.
 if [[ -z "$violations" ]]; then
-  pass_msg "all source/instruction cites resolve"
+  if (( n_skipped > 0 )); then
+    pass_msg "${n_resolved} cite(s) checked and resolved; ${n_skipped} ecosystem-doc cite(s) NOT checked (${ECO_DOCS_ROOT} absent) — coverage is partial"
+  else
+    pass_msg "all ${n_resolved} source/instruction cites resolve (0 skipped)"
+  fi
 else
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue

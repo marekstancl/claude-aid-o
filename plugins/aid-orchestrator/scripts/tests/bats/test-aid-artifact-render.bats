@@ -144,7 +144,7 @@ _pos() {
   local facts
   facts="$(_full_facts | jq '.tiles.result.state = "totally-made-up"')"
   _render "$facts" "$(_full_prose)"
-  ! grep -q 'totally-made-up' "$TEST_TMPDIR/body.html"
+  refute_grep -q 'totally-made-up' "$TEST_TMPDIR/body.html"
   grep -qF '<div class="tile"><span class="k">Výsledek</span>' "$TEST_TMPDIR/body.html"
 }
 
@@ -191,7 +191,7 @@ _pos() {
   facts="$(_full_facts | jq 'del(.links)')"
   _render "$facts" "$(_full_prose)"
   f="$TEST_TMPDIR/body.html"
-  ! grep -q 'Čeho se to týká' "$f"
+  refute_grep -q 'Čeho se to týká' "$f"
   local p4 p6
   p4="$(_pos "$f" '<h2>Jádro</h2>')"
   p6="$(_pos "$f" '<h2>Co se čeká ode mě</h2>')"
@@ -204,7 +204,7 @@ _pos() {
   _render "$facts" "$(_full_prose)"
   # `class="golink"`, not `golink`: the vendored stylesheet defines .golink
   # whether or not the block renders.
-  ! grep -q 'class="golink"' "$TEST_TMPDIR/body.html"
+  refute_grep -q 'class="golink"' "$TEST_TMPDIR/body.html"
 }
 
 @test "an explicit relative detail href becomes a link; an external one is named, not linked" {
@@ -215,7 +215,7 @@ _pos() {
 
   facts="$(_full_facts | jq '.detail.href = "https://example.com/detail"')"
   _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/abs.html"
-  ! grep -q 'example.com' "$TEST_TMPDIR/abs.html"
+  refute_grep -q 'example.com' "$TEST_TMPDIR/abs.html"
   grep -qF '<div class="golink">' "$TEST_TMPDIR/abs.html"
 }
 
@@ -227,7 +227,7 @@ _pos() {
   _render "$facts" "$(_full_prose)"
   local f="$TEST_TMPDIR/body.html"
   grep -qF '<li>i5</li>' "$f"
-  ! grep -qF '<li>i6</li>' "$f"
+  refute_grep -qF '<li>i6</li>' "$f"
   grep -qF 'a dalších 4 v technickém detailu' "$f"
 }
 
@@ -237,7 +237,7 @@ _pos() {
   _render "$facts" "$(_full_prose)"
   local f="$TEST_TMPDIR/body.html"
   grep -qF '<li>s3</li>' "$f"
-  ! grep -qF '<li>s4</li>' "$f"
+  refute_grep -qF '<li>s4</li>' "$f"
   grep -qF 'a dalších 2 v technickém detailu' "$f"
 }
 
@@ -248,7 +248,7 @@ _pos() {
   long="$(for i in $(seq 1 100); do printf 'slovo%s ' "$i"; done)"
   facts="$(_full_facts | jq --arg s "$long" '.items = [$s]')"
   _render "$facts" "$(_full_prose)"
-  ! grep -qF 'slovo100' "$TEST_TMPDIR/body.html"
+  refute_grep -qF 'slovo100' "$TEST_TMPDIR/body.html"
   grep -qF 'slovo1 ' "$TEST_TMPDIR/body.html"
   grep -qF '…</li>' "$TEST_TMPDIR/body.html"
 }
@@ -261,7 +261,7 @@ _pos() {
   _render "$facts" "$(_full_prose)"
   local f="$TEST_TMPDIR/body.html"
   grep -qF '&lt;script&gt;alert(1)&lt;/script&gt; &amp; spol.' "$f"
-  ! grep -qF '<script>' "$f"
+  refute_grep -qF '<script>' "$f"
 }
 
 @test "prose containing markup is escaped too" {
@@ -269,7 +269,7 @@ _pos() {
   prose="$(_full_prose | jq '.summary = "Rozbil se <b>build</b> & test."')"
   _render "$(_full_facts)" "$prose"
   grep -qF '&lt;b&gt;build&lt;/b&gt; &amp; test.' "$TEST_TMPDIR/body.html"
-  ! grep -qF '<b>build</b>' "$TEST_TMPDIR/body.html"
+  refute_grep -qF '<b>build</b>' "$TEST_TMPDIR/body.html"
 }
 
 @test "a fact containing a literal placeholder is inserted raw, never re-expanded" {
@@ -279,7 +279,7 @@ _pos() {
   local f="$TEST_TMPDIR/body.html"
   grep -qF '{{fact:tiles.result.value}} a {{prose:ask}}' "$f"
   # Substitution is single pass — the title did not become "PASS a …".
-  ! grep -qF '<h1>PASS a' "$f"
+  refute_grep -qF '<h1>PASS a' "$f"
 }
 
 # ─── secret policy: redact, count, never silent ─────────────────────────────
@@ -290,9 +290,9 @@ _pos() {
   prose="$(_full_prose | jq '.core = "Selhalo na ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123 a password=hunter2xyz"')"
   _render "$facts" "$prose"
   f="$TEST_TMPDIR/body.html"
-  ! grep -q 'AKIAIOSFODNN7EXAMPLE' "$f"
-  ! grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123' "$f"
-  ! grep -q 'hunter2xyz' "$f"
+  refute_grep -q 'AKIAIOSFODNN7EXAMPLE' "$f"
+  refute_grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123' "$f"
+  refute_grep -q 'hunter2xyz' "$f"
   grep -qF 'redacted:aws_access_key' "$f"
   grep -qF 'redacted:github_token' "$f"
   # The count is rendered, so a redaction can never be silent.
@@ -316,12 +316,12 @@ _pos() {
   # header comment.
   [ "$(sed -n '1p' "$f")" = "<style>" ]
   [ "$(sed -n '2p' "$f")" = ":root{" ]
-  ! grep -q 'artifact-outcome.html' "$f"
-  ! grep -q 'CONDITIONAL REGIONS' "$f"
-  ! grep -qiE '<!doctype' "$f"
-  ! grep -qiE '</?html[ >]' "$f"
-  ! grep -qiE '</?head[ >]' "$f"
-  ! grep -qiE '</?body[ >]' "$f"
+  refute_grep -q 'artifact-outcome.html' "$f"
+  refute_grep -q 'CONDITIONAL REGIONS' "$f"
+  refute_grep -qiE '<!doctype' "$f"
+  refute_grep -qiE '</?html[ >]' "$f"
+  refute_grep -qiE '</?head[ >]' "$f"
+  refute_grep -qiE '</?body[ >]' "$f"
 }
 
 @test "no external URL appears in any src, href or @import" {
@@ -329,9 +329,9 @@ _pos() {
   facts="$(_full_facts | jq '.links = ["https://example.com/nope"] | .detail.href = "https://example.com/nope"')"
   _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/csp.html"
   local f="$TEST_TMPDIR/csp.html"
-  ! grep -qiE '@import' "$f"
-  ! grep -qiE '(src|href)[[:space:]]*=[[:space:]]*"[[:space:]]*(https?:|//)' "$f"
-  ! grep -qiE 'url\([[:space:]]*["'"'"']?(https?:|//)' "$f"
+  refute_grep -qiE '@import' "$f"
+  refute_grep -qiE '(src|href)[[:space:]]*=[[:space:]]*"[[:space:]]*(https?:|//)' "$f"
+  refute_grep -qiE 'url\([[:space:]]*["'"'"']?(https?:|//)' "$f"
 }
 
 @test "a detail href whose scheme hides behind leading whitespace is not linked" {
@@ -342,8 +342,8 @@ _pos() {
   facts="$(_full_facts | jq '.detail = {label: "detail", href: " javascript:alert(1)"}')"
   _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/ws.html"
   local f="$TEST_TMPDIR/ws.html"
-  ! grep -qi 'javascript' "$f"
-  ! grep -qF '<a class="golink"' "$f"
+  refute_grep -qi 'javascript' "$f"
+  refute_grep -qF '<a class="golink"' "$f"
   grep -qF '<div class="golink">detail →</div>' "$f"
 }
 

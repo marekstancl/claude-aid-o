@@ -48,10 +48,44 @@ PUBLISH_CLAUSE='Publish the artifact body via the Artifact tool, then present th
 # The distinctive Decision-required card line. Exactly one file may DEFINE it.
 CARD_LINE='Potřebuji tvoje rozhodnutí:'
 
-# How far after a renderer anchor the clause may sit before it stops being
-# "at that site". Generous enough for a paragraph, tight enough that the gates
-# clause cannot satisfy the plan-boundary site two sections away.
-WINDOW=30
+# The SECTION, not a line count, is what bounds a renderer site.
+#
+# This used to be `WINDOW=30` — the clause counted if it fell within thirty
+# lines after any occurrence of the renderer's filename. Two things were wrong
+# with that. A line count is not a structure: thirty lines reaches into
+# whatever happens to follow, and the number was chosen to fit the current
+# spacing, so ordinary editing silently changes what the test means. And the
+# anchor was ANY occurrence of the filename — a prose mention, a changelog
+# line, a "we used to call" sentence — so a site could be credited with an
+# invocation it does not contain.
+#
+# Both are now structural. An anchor counts only when the filename is cited AS
+# CODE (inside a fence, or backticked), which is how these surfaces write
+# something meant to be executed. The clause must then appear between that
+# anchor and the end of its section — the next markdown heading — so the gates
+# clause still cannot satisfy the plan-boundary site, and the bound moves with
+# the document instead of with a magic number.
+#
+# HONEST SCOPE, unchanged: these are LLM-executed prose surfaces. This proves a
+# site INSTRUCTS publication in an executable form next to the invocation it
+# belongs to. It cannot prove the controller published at runtime.
+
+# _code_cite_lines <file> <needle> — line numbers where <needle> is cited as
+# code: inside a ``` / ~~~ fence, or backticked on that line.
+_code_cite_lines() {
+  awk -v needle="$2" '
+    /^[[:space:]]*(```|~~~)/ { infence = !infence; next }
+    index($0, needle) > 0 {
+      if (infence || $0 ~ /`[^`]*`/) print NR
+    }
+  ' "$1"
+}
+
+# _section_end <file> <from_line> — the last line of the section that begins at
+# or contains <from_line>: the line before the next markdown heading, or EOF.
+_section_end() {
+  awk -v from="$2" 'NR > from && /^#{1,6} / { print NR - 1; exit } END { print NR }' "$1"
+}
 
 pass=0
 fail=0
@@ -139,17 +173,28 @@ for site in "${RENDERER_SITES[@]}"; do
     continue
   fi
 
-  anchor_lines=$(grep -nF -- "$anchor" "$f" | cut -d: -f1)
+  anchor_lines=$(_code_cite_lines "$f" "$anchor")
   if [[ -z "$anchor_lines" ]]; then
-    bad "$rel ($label) never invokes $anchor"
+    if grep -qF -- "$anchor" "$f"; then
+      bad "$rel ($label) mentions $anchor only in prose — a bare mention is not an invocation"
+    else
+      bad "$rel ($label) never invokes $anchor"
+    fi
     continue
   fi
 
   found=0
   while IFS= read -r ln; do
     [[ -z "$ln" ]] && continue
-    end=$((ln + WINDOW))
-    if sed -n "${ln},${end}p" "$f" | grep -qF -- "$PUBLISH_CLAUSE"; then
+    end="$(_section_end "$f" "$ln")"
+    # NOT `sed … | grep -q`. Under `set -o pipefail`, grep -q exits on the first
+    # match and sed dies of SIGPIPE, so the PIPELINE reports failure and the
+    # clause is scored as absent. With the old 30-line window sed usually
+    # finished before grep could close the pipe and the bug stayed hidden; a
+    # section-sized range makes it fire every time. The section is materialised
+    # first, and only then searched.
+    section="$(sed -n "${ln},${end}p" "$f")"
+    if grep -qF -- "$PUBLISH_CLAUSE" <<<"$section"; then
       found=1
       break
     fi
@@ -158,7 +203,7 @@ for site in "${RENDERER_SITES[@]}"; do
   if [[ "$found" -eq 1 ]]; then
     ok "$rel ($label) publishes before presenting"
   else
-    bad "$rel ($label) invokes $anchor but carries no publish-before-present clause within ${WINDOW} lines"
+    bad "$rel ($label) invokes $anchor as code but its section carries no publish-before-present clause"
   fi
 done
 
@@ -212,20 +257,48 @@ done
 #
 # Definitions are unfenced; a fenced copy is a quoted example and is allowed.
 # communication.md is the one definer and is checked in case 1.
-case_ "no card skeleton is defined outside the contract file"
+case_ "no card skeleton of any of the four types is defined outside the contract file"
+#
+# ALL FOUR CARDS, BY THEIR FIELD SETS — not one line of one card.
+# This used to grep for the single Decision-required line `$CARD_LINE`. A
+# duplicated Finished, Blocked or Progress skeleton was therefore invisible,
+# and so was a re-defined Decision card that omitted that one line while
+# copying the other four. The contract's value is that there is ONE definition
+# of each card; a check that watches one fifth of one card does not defend it.
+#
+# A file DEFINES a skeleton when TWO OR MORE distinct field labels of the same
+# card appear unfenced. Two, not one: a single `Hotovo:` is how any surface
+# refers to the Finished card in passing, and a check that fired on that would
+# be so noisy it would be waived. Two labels of the same card in a row is
+# somebody writing the skeleton out again.
+CARD_FIELDS_FINISHED=('Hotovo:' 'Změnilo se:' 'Ověřeno:' 'Další krok:')
+CARD_FIELDS_DECISION=('Potřebuji tvoje rozhodnutí:' 'Proč teď:' 'Doporučení:' 'Alternativy:' 'Riziko / co není ověřeno:')
+CARD_FIELDS_BLOCKED=('Zastaveno:' 'Dopad:' 'Doporučené řešení:' 'Pokud chceš převzít riziko:')
+
 dupes=""
 while IFS= read -r f; do
   rel="${f#"$PLUGIN_ROOT"/}"
   [[ "$rel" == "$CONTRACT" ]] && continue
-  if fenced_stripped "$f" | grep -qF -- "$CARD_LINE"; then
-    dupes+=$'\n'"    $rel"
-  fi
+  stripped="$(fenced_stripped "$f")"
+  for card in FINISHED DECISION BLOCKED; do
+    declare -n fields="CARD_FIELDS_${card}"
+    hits=0; seen=""
+    for lbl in "${fields[@]}"; do
+      if grep -qF -- "$lbl" <<<"$stripped"; then
+        hits=$((hits + 1)); seen+="${seen:+, }${lbl}"
+      fi
+    done
+    unset -n fields
+    if (( hits >= 2 )); then
+      dupes+=$'\n'"    $rel — ${card} skeleton (${hits} of its field labels, unfenced: ${seen})"
+    fi
+  done
 done < <(find "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/agents" \
               "$PLUGIN_ROOT/defaults" "$PLUGIN_ROOT/reference" \
               -name '*.md' -type f 2>/dev/null | sort)
 
 if [[ -z "$dupes" ]]; then
-  ok "the Decision-required card is defined once, in $CONTRACT"
+  ok "each of the three field-bearing cards is defined once, in $CONTRACT"
 else
   bad "card skeleton re-defined outside $CONTRACT (unfenced):${dupes}"
 fi

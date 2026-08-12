@@ -1,0 +1,28 @@
+<h1>Brány: E-080-1_3</h1>
+<div class="tile state-critical">
+<span class="k">Výsledek</span>
+<span class="v">1/2 prošlo</span>
+<div class="tile">
+<span class="k">Trvalo</span>
+<span class="v">15 s</span>
+<div class="tile">
+<span class="k">Rozsah</span>
+<span class="v">2</span>
+<div class="tile state-warn">
+<span class="k">Neuzavřeno</span>
+<span class="v">1</span>
+<h2>Shrnutí</h2>
+<p>Brány neprošly: 1 z 2 selhalo, běh je zastavený před DONE.</p>
+<h2>Jádro</h2>
+<p>Prošlo 1, selhalo 1, přeskočeno 0, mimo profil 0, s výjimkou 0. Celkem 15 s.</p>
+<li>brána tests: selhala (exit 1)</li>
+<h2>Jak pokračovat</h2>
+<li>Zopakuj bránu: bash scripts/tests/run-all-tests.sh --tier t1</li>
+<li>Oprav příčinu a spusť brány znovu</li>
+<li>Nebo převezmi riziko: aid-fsm.sh transition GATES DONE &lt;state_file&gt; --force --reason &#39;&lt;≥20 chars — PM-authorized reason&gt;&#39;</li>
+<h2>Čeho se to týká</h2>
+<li>
+<h2>Co se čeká ode mě</h2>
+<p>Rozhodni, jestli opravíme příčinu, nebo jestli přebíráš riziko force příkazem.</p>
+<div class="golink">technický detail: <WORK>/blocked/gates/gates_report.json →</div>
+<footer>Zdroj: <WORK>/blocked/gates/gates_report.json. Vyrobil aid-gate-outcome-summary.sh. Redigováno tajemství: 0.</footer>
