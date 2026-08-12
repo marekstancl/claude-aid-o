@@ -369,6 +369,30 @@ FSM initialized: READY
 3. Generate `gates_report.json`
 4. Log results to `timeline.jsonl`
 
+**Gate-boundary message (deterministic, both manual and auto mode).** When the gate runner
+returns — at the GATES→DONE boundary and equally on the failing branch — do NOT write a gate
+summary of your own. Source `scripts/lib/aid-gate-outcome-summary.sh` and run:
+
+```bash
+aid_gate_outcome_render "<the --report-file path you passed the runner>" "<evidence_dir>" "<evidence_dir>/waivers"
+```
+
+Pass the runner's own `--report-file` path explicitly — it is the preferred wiring; the
+renderer only falls back to `<evidence_dir>/gates/gates_report.json` and then the flat
+`<evidence_dir>/gates_report.json`. It writes `<evidence_dir>/gate-outcome-artifact.html` and
+prints the card (Finished, or Blocked when `overall: fail`) with a final `Artifact: <path>` line.
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+Card shapes, the ordering rule and the language rule are defined once in `skills/communication.md`
+— do not restate or re-word them here.
+
+**If the renderer exits non-zero** (missing or invalid report): say so, and present a Blocked
+card built from BOUNDED COMPUTED FACTS only — gate names, results, exit codes, counts. Never
+skip the boundary message, and never hand-write it from raw gate output: any raw-derived text
+must first pass through `aid_gate_outcome_redact` from the same library, which applies the same
+deterministic redactor the artifact body uses. No path from gate output to the PM skips redaction.
+
 **Transition:**
 - All gates pass → DONE
 - Gate fails + retries remaining → EXECUTE (dispatch gate-fixer, retry gate)

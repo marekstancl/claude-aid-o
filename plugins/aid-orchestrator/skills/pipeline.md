@@ -1124,6 +1124,28 @@ aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
 **Enforcement:** `--state-file` ensures gates only run in GATES state. `--report-file` persists
 `gates_report.json` — required by `GATES→DONE` precondition. Without it, transition is rejected.
 
+### Gate-Boundary Message (deterministic)
+
+The gate boundary has no free-form summary. When the runner returns — on the DONE branch and on
+the failing branch alike, in manual and auto mode — source `scripts/lib/aid-gate-outcome-summary.sh`
+and run:
+
+```bash
+aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>" "<evidence_dir>/waivers"
+```
+
+It computes every number from the report (never re-derives one), writes
+`<evidence_dir>/gate-outcome-artifact.html`, and prints the Finished or Blocked card — selected
+from the envelope's `.overall`, never from a per-gate row — with a final `Artifact: <path>` line.
+A waived gate renders as PM risk acceptance, never as a pass.
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+The card shapes, the ordering rule and the language rule live in `skills/communication.md`; this
+section wires them, it does not restate them. If the renderer exits non-zero, say so and present a
+Blocked card built only from bounded computed facts, routing any raw-derived text through
+`aid_gate_outcome_redact` from the same library first.
+
 ### Gate Profiles (`--profile`, P061 E1)
 
 `aid-run-gates.sh run-all` accepts an optional `--profile <name>` flag that selects a named
@@ -2294,6 +2316,33 @@ the new **canonical machine handoff** for a release decision; the older human ar
    when the brief does not faithfully echo the decision (catches over-optimism / tampering), but
    wiring that verdict as a *merge precondition* is **explicitly deferred to E10** — see *Honest
    limitation* below.
+
+4. **Presentation layer — `scripts/lib/aid-plan-close-summary.sh`.** At the plan-final / close
+   boundary of a `plan_branch` plan the controller renders the PM's card and artifact body from
+   the handoff pair, instead of listing files:
+
+   ```bash
+   source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh"
+   aid_plan_close_render "$evidence_dir/pm-decision-brief.json" \
+                         "$evidence_dir/release-decision.json" "$plan_id" "$evidence_dir"
+   ```
+
+   Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+   The card shapes are the ones `skills/communication.md` defines — Decision-required when the plan
+   is not release-ready or `merge_mode` is not `auto`, Finished when recording a completed close.
+   The renderer reads ONLY those two files (the same `release-decision.json` the brief was generated
+   from, no sibling evidence), so the D6/D9 cycle-break holds. `aid-pm-brief.sh`, `pm-summary.md` and
+   the plan-finalize labelled-fields guard are UNTOUCHED by this layer — it adds a rendering, never a
+   second source of truth.
+
+   It fails CLOSED, exit 1, when the brief lacks any of its eight required fields or the decision
+   carries no `.release_decision.plan_summary` (every EPIC-mode decision does not) — no page is
+   written at all. If the brief is absent at the boundary, report the Blocked card
+   "plan-close brief missing — run aid-pm-brief.sh"; never improvise a plan summary from evidence
+   files, which is exactly the cycle `aid-pm-brief.sh` exists to break. Under
+   `legacy_epic_release_mode` this layer does not apply — the per-EPIC release keeps its existing
+   text and is never retroactively re-shaped.
 
 **Coexistence (D9 narrowing).** `pm-decision-brief.json` / `pm-summary.md` are the new canonical
 machine handoff. The pre-existing PM outputs remain, unchanged, alongside it: `final_report.md`
