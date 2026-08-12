@@ -595,6 +595,35 @@ EOF
     _fail "C8 — render_gate_profiles_block produced nothing; the offer path is not reachable"
     return
   fi
+  # BOTH BRANCHES ARE WALKED, and this is the point of the case.
+  #
+  # An earlier version ran only the DECLINE branch with a hardcoded `pm_answer=N`,
+  # so `append_gate_profiles_block` was never called on any executed path. CP2
+  # replaced that function with one that corrupts its target — and the case still
+  # passed. It was proving that an uncalled function changes nothing, which is true
+  # of every function ever written. A test that cannot distinguish "declining is
+  # safe" from "nothing happened" asserts the second while claiming the first.
+  #
+  # So ACCEPT runs on a COPY and must change exactly execution.yaml, and DECLINE
+  # runs on the fixture and must change nothing. The pair is what makes the claim
+  # real: the same call site, one answer apart, with opposite and both-observed
+  # outcomes.
+  local accept_dir="$TMPDIR_ROOT/c8-accept"
+  cp -a "$fx" "$accept_dir"
+  append_gate_profiles_block "$accept_dir/.aid-o/config/execution.yaml" "$block"
+  local accept_diff; accept_diff="$(diff -rq "$before_dir" "$accept_dir" || true)"
+  if [[ "$(printf '%s\n' "$accept_diff" | grep -c .)" -ne 1 ]] \
+     || [[ "$accept_diff" != *"execution.yaml"* ]]; then
+    _fail "C8 — ACCEPT branch: expected exactly execution.yaml to change, got:
+$accept_diff"
+    return
+  fi
+  if ! execution_yaml_has_gate_profiles "$accept_dir/.aid-o/config/execution.yaml"; then
+    _fail "C8 — ACCEPT branch ran but the file still has no gate_profiles; the append is a no-op"
+    return
+  fi
+
+  # DECLINE: same call site, the other answer.
   local pm_answer="N"
   if [[ "$pm_answer" == "Y" ]]; then
     append_gate_profiles_block "$target" "$block"
@@ -603,7 +632,7 @@ EOF
   local d
   d="$(diff -r "$before_dir" "$fx" || true)"
   if [[ -z "$d" ]]; then
-    _pass "C8 — declined upgrade: diff -r before/after is empty (block was rendered, never appended)"
+    _pass "C8 — accept changes exactly execution.yaml and really appends; decline changes nothing"
   else
     _fail "C8 — declined upgrade modified the tree:
 $d"
