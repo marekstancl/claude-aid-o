@@ -109,6 +109,24 @@ aid_help_enumerate_surfaces() {
   for f in "$root"/commands/*.md;      do [[ -f "$f" ]] && cmd_files+=("$f");   done
   for f in "$root"/skills/*/SKILL.md;  do [[ -f "$f" ]] && skill_files+=("$f"); done
 
+  # THE SCAN'S EXIT STATUS IS CHECKED, because it used to be thrown away. Read
+  # from `< <(_aid_help_fm_scan …)` the awk process's failure — an unreadable
+  # command file is a fatal error that kills the whole pass — reached nobody:
+  # the process substitution's status is not part of the `while` loop's, so
+  # EVERY command silently vanished from the enumeration while this function
+  # returned 0. A silent hole in the inventory is the one failure mode this
+  # file exists to make impossible, so the scan output is captured first and a
+  # failure is a hard error naming the surface set that could not be read.
+  local cmd_rows="" skill_rows=""
+  if ! cmd_rows="$(_aid_help_fm_scan "$AID_HELP_COMMAND_FM_LINES" ${cmd_files[@]+"${cmd_files[@]}"})"; then
+    printf 'aid_help_enumerate_surfaces: frontmatter scan failed over %s/commands (unreadable file?) — refusing to report a partial surface list\n' "$root" >&2
+    return 1
+  fi
+  if ! skill_rows="$(_aid_help_fm_scan "$AID_HELP_SKILL_FM_LINES" ${skill_files[@]+"${skill_files[@]}"})"; then
+    printf 'aid_help_enumerate_surfaces: frontmatter scan failed over %s/skills (unreadable file?) — refusing to report a partial surface list\n' "$root" >&2
+    return 1
+  fi
+
   local file flag name
   {
     while IFS=$'\t' read -r file flag; do
@@ -119,12 +137,15 @@ aid_help_enumerate_surfaces() {
       [[ "$flag" == "true" || "$flag" == "__late__" ]] || continue
       name="${file##*/}"; name="${name%.md}"
       printf '/%s\tcommands/%s.md\t%s\n' "$name" "$name" "$flag"
-    done < <(_aid_help_fm_scan "$AID_HELP_COMMAND_FM_LINES" "${cmd_files[@]}")
+    done <<<"$cmd_rows"
 
     while IFS=$'\t' read -r file flag; do
+      # An empty capture is one empty line through a here-string, not zero
+      # lines — without this guard a root with no skills printed `//SKILL.md`.
+      [[ -n "$file" ]] || continue
       name="${file%/SKILL.md}"; name="${name##*/}"
       printf '/%s\tskills/%s/SKILL.md\t%s\n' "$name" "$name" "$flag"
-    done < <(_aid_help_fm_scan "$AID_HELP_SKILL_FM_LINES" "${skill_files[@]}")
+    done <<<"$skill_rows"
   } | LC_ALL=C sort
 }
 

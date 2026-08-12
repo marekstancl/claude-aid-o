@@ -177,6 +177,35 @@ router_topics() {
   fi
 }
 
+@test "an unreadable command file fails the enumeration instead of vanishing from it" {
+  # The scan ran inside a process substitution, so the awk pass's fatal error on
+  # an unreadable file reached nobody: EVERY command disappeared from the
+  # enumeration and the function still returned 0. A silent hole in the
+  # inventory is precisely what this suite exists to make impossible, so the
+  # missing surface must become a hard failure with a reason.
+  if [ "$(id -u)" -eq 0 ]; then skip "running as root — chmod 000 does not deny reads"; fi
+
+  local root="$BATS_TEST_TMPDIR/plugin-root"
+  mkdir -p "$root/commands" "$root/skills/demo"
+  printf -- '---\nuser_invocable: true\n---\n' > "$root/commands/public.md"
+  printf -- '---\nuser_invocable: true\n---\n' > "$root/commands/other.md"
+  printf -- '---\nname: demo\n---\n'           > "$root/skills/demo/SKILL.md"
+
+  # Sanity: both commands enumerate while everything is readable.
+  run aid_help_enumerate_surfaces "$root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/public"* ]]
+
+  chmod 000 "$root/commands/public.md"
+  run aid_help_enumerate_surfaces "$root"
+  chmod 644 "$root/commands/public.md"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"frontmatter scan failed"* ]]
+  # And it did NOT quietly report the surviving surfaces as the whole inventory.
+  [[ "$output" != *"/other	commands/other.md"* ]]
+}
+
 @test "case 1: enumerated surfaces == PUBLIC index rows, both directions" {
   local missing extra
   missing="$(comm -23 <(enumerated_commands) <(public_index_commands))"

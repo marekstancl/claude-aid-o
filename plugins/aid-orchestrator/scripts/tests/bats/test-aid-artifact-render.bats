@@ -100,6 +100,39 @@ _pos() {
   grep -qF '<span class="k">Neuzavřeno</span>' "$f"
 }
 
+@test "prose cannot move a tile: contradicting prose leaves the tile section byte-identical" {
+  # THE PREVIOUS CASE DOES NOT PROVE ITS OWN TITLE, WHICH IS WHY THIS ONE EXISTS.
+  # Checking that one fixture's tiles equal that fixture's facts is consistent
+  # with a renderer that lets prose override the numbers — the fixture's prose
+  # simply agrees with its facts. "Computed from facts_json ONLY" is a claim
+  # about INDEPENDENCE, and independence is only visible when the other input
+  # is varied. So: same facts, two proses that shout the opposite numbers, and
+  # the rendered tile section must not move by a byte.
+  local facts loud f1 f2
+  facts="$(_full_facts)"
+  loud="$(jq -n '{
+    summary: "Brána SELHALA, výsledek je FAIL a je to katastrofa.",
+    core: "Trvalo 999 hodin, rozsah 4321 souborů, neuzavřeno 77.",
+    ask: "Výsledek: FAIL. Neuzavřeno: 77. Rozsah: 4321 souborů. Trvalo: 999 hodin."
+  }')"
+  _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/agree.html"
+  _render "$facts" "$loud"           "$TEST_TMPDIR/contradict.html"
+
+  f1="$(grep -F '<section class="tiles">' "$TEST_TMPDIR/agree.html")"
+  f2="$(grep -F '<section class="tiles">' "$TEST_TMPDIR/contradict.html")"
+  [ -n "$f1" ]
+  [ "$f1" = "$f2" ]
+
+  # And the tiles still say what the FACTS said, not what the prose shouted:
+  # byte-equality alone would also hold if both renders were equally wrong.
+  [[ "$f1" == *'<span class="k">Výsledek</span><span class="v">PASS</span>'* ]]
+  [[ "$f1" == *'<span class="k">Neuzavřeno</span><span class="v">0</span>'* ]]
+  [[ "$f1" != *"FAIL"* ]]
+  [[ "$f1" != *"4321"* ]]
+  [[ "$f1" != *"999"* ]]
+  [[ "$f1" != *"77"* ]]
+}
+
 @test "a tile with no measured value renders the em dash, never a number" {
   local facts
   facts="$(_full_facts | jq 'del(.tiles.duration)')"
@@ -301,6 +334,19 @@ _pos() {
   ! grep -qiE 'url\([[:space:]]*["'"'"']?(https?:|//)' "$f"
 }
 
+@test "a detail href whose scheme hides behind leading whitespace is not linked" {
+  # Browsers TRIM an href before resolving it, so " javascript:alert(1)" is an
+  # executable scheme; anchoring the relative-only test at the raw string let it
+  # through as a link. The label must still render, as plain text.
+  local facts
+  facts="$(_full_facts | jq '.detail = {label: "detail", href: " javascript:alert(1)"}')"
+  _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/ws.html"
+  local f="$TEST_TMPDIR/ws.html"
+  ! grep -qi 'javascript' "$f"
+  ! grep -qF '<a class="golink"' "$f"
+  grep -qF '<div class="golink">detail →</div>' "$f"
+}
+
 @test "the page is theme-aware in all three states and paints its own background" {
   _render "$(_full_facts)" "$(_full_prose)"
   local f="$TEST_TMPDIR/body.html"
@@ -313,22 +359,40 @@ _pos() {
 
 # ─── the vendored style block ───────────────────────────────────────────────
 
-@test "the vendored style block matches the sha256 recorded in the template header" {
-  local recorded actual
+@test "the vendored style block matches BOTH its template header and the digest held in the test tree" {
+  # TWO COMPARISONS, AND ONLY THE SECOND ONE IS A GUARD.
+  # The template's own `sha256:` header line and the CSS it describes live in
+  # the same file, so an edit that changes both agrees with itself and passes.
+  # That comparison is kept — a header that drifts from its own body is still
+  # worth catching — but it is not what makes this case able to fail. The
+  # fixture digest under scripts/tests/fixtures/ is authored in a different
+  # tree, so a restyle must be recorded there too, deliberately, by someone who
+  # read the failure.
+  local recorded actual expected
+  actual="$(sed -n '/^<style>$/,/^<\/style>$/p' "$TEMPLATE" | sed '1d;$d' | sha256sum | cut -d' ' -f1)"
+
   recorded="$(grep -oE 'sha256:[[:space:]]+[0-9a-f]{64}' "$TEMPLATE" | grep -oE '[0-9a-f]{64}')"
   [ -n "$recorded" ]
-  actual="$(sed -n '/^<style>$/,/^<\/style>$/p' "$TEMPLATE" | sed '1d;$d' | sha256sum | cut -d' ' -f1)"
   [ "$recorded" = "$actual" ]
+
+  expected="$(grep -oE '^[0-9a-f]{64}$' "$AID_PLUGIN_PATH/scripts/tests/fixtures/artifact-outcome-css.sha256")"
+  [ -n "$expected" ]
+  [ "$expected" = "$actual" ]
 }
 
-@test "the vendored style block is byte-identical to its recorded source" {
+@test "the vendored style block is byte-identical to its recorded source, or the run says it could not look" {
   local src
-  src="$(grep -oE 'source:[[:space:]]+[^[:space:]]+' "$TEMPLATE" | awk '{print $2}')"
+  src="${AID_ARTIFACT_CSS_SOURCE:-$(grep -oE 'source:[[:space:]]+[^[:space:]]+' "$TEMPLATE" | awk '{print $2}')}"
   [ -n "$src" ]
-  # The source lives outside the plugin; where it is unreachable the sha256
-  # test above still pins the template against silent drift.
+  # The source lives OUTSIDE the plugin and is genuinely absent in a consumer
+  # checkout, so this cannot be a hard failure. It must not be an invisible one
+  # either: bats reports a skip as a skip, and the reason names the path that
+  # was not there, so nobody reads a green line as "the upstream was checked".
+  # The standing guard while this is skipped is the fixture digest in the case
+  # above — NOT the template's self-agreeing header, which proves nothing.
+  # Set AID_ARTIFACT_CSS_SOURCE to point at the upstream on hosts that have it.
   if [ ! -f "$src" ]; then
-    skip "vendor source not reachable from this host: $src"
+    skip "upstream _CSS NOT compared — source unreachable at '$src'; the fixture digest is the only guard on this run"
   fi
   python3 - "$src" "$TEMPLATE" <<'PY'
 import re, sys, pathlib
@@ -351,6 +415,29 @@ PY
 @test "an unwritable out_path exits 3" {
   run _render "$(_full_facts)" "$(_full_prose)" "$TEST_TMPDIR/no/such/dir/body.html"
   [ "$status" -eq 3 ]
+}
+
+@test "a write that dies mid-stream leaves no truncated page at out_path" {
+  # A file-size cap makes the write fail AFTER the first bytes have landed —
+  # the shape a full disk or a quota has. Writing straight to out_path left a
+  # truncated page sitting at the published path; the write goes through a temp
+  # file and a rename, so out_path is either the whole page or untouched.
+  # SIGXFSZ kills the writing shell, hence the child process.
+  local out="$TEST_TMPDIR/capped.html"
+  printf 'PREVIOUS PAGE\n' > "$out"
+  # Deliberately TINY inputs: under the cap, every intermediate the renderer
+  # spills stays legal and the rendered page (the template is ~10 KB) is the
+  # only thing that trips it. Full-size fixtures would abort earlier and the
+  # case would pass without ever reaching the write.
+  jq -nc '{title:"T", tiles:{result:{value:"PASS"}}}' > "$TEST_TMPDIR/capped-facts.json"
+  jq -nc '{summary:"a", core:"b"}'                    > "$TEST_TMPDIR/capped-prose.json"
+
+  run bash -c "ulimit -f 1
+    source '$AID_PLUGIN_PATH/scripts/lib/aid-artifact-render.sh'
+    aid_artifact_render outcome '$TEST_TMPDIR/capped-facts.json' '$TEST_TMPDIR/capped-prose.json' '$out'"
+  [ "$status" -ne 0 ]
+  # The previous page survives intact — no half-written artifact replaced it.
+  [ "$(cat "$out")" = "PREVIOUS PAGE" ]
 }
 
 @test "an unknown template id fails rather than rendering an empty page" {

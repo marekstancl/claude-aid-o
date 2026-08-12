@@ -200,6 +200,64 @@ _blockers_two() {
   [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
 }
 
+@test "an EMPTY plan_summary object fails closed like a missing one" {
+  # Present and non-null was the whole test, so `{}` rendered a confident
+  # "Připraveno k uzavření" page whose SHAs, tag, gate verdict and EPIC counts
+  # were every default this file invents — the exact page the fail-closed
+  # contract promises never to produce.
+  _brief true auto '[]'
+  jq -n '{schema_version: "aid-2.0", artifact_type: "release_decision",
+          release_decision: {plan_summary: {}}}' > "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plan_summary is missing required field(s)"* ]]
+  [[ "$output" == *"reviewed_candidate_sha"* ]]
+  [[ "$output" != *"Připraveno k uzavření"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "a plan_summary whose epics is not an array fails closed rather than counting zero" {
+  _brief true auto '[]'
+  _decision null not_tagged
+  jq '.release_decision.plan_summary.epics = "none"' "$DECISION" > "$DECISION.tmp"
+  mv "$DECISION.tmp" "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"epics (not an array)"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "a secret in the gates report path is redacted in the CHAT CARD" {
+  # The card does not pass through the artifact renderer, so it inherits none of
+  # its redaction; `gates_report` is a verbatim passthrough of a decision field
+  # and reached the PM's chat untouched while `risk` beside it was scanned.
+  _brief true auto '[]'
+  _decision null not_tagged
+  jq '.release_decision.plan_summary.plan_final_gates.report = "ghp_ABCDEFGHIJKLMNOPQRSTUV"' \
+    "$DECISION" > "$DECISION.tmp"
+  mv "$DECISION.tmp" "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == Hotovo:* ]]
+  [[ "$output" != *"ghp_ABCDEFGHIJKLMNOPQRSTUV"* ]]
+  [[ "$output" == *"<redacted:github_token>"* ]]
+}
+
+@test "a secret in the tag status or the evidence fields is redacted in the CHAT CARD" {
+  # The same gap, in the neighbouring passthrough values: tag status and the two
+  # evidence-verification fields are printed on the same card line.
+  _brief true auto '[]'
+  _decision null "ghp_ABCDEFGHIJKLMNOPQRSTUV"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ghp_ABCDEFGHIJKLMNOPQRSTUV"* ]]
+  [[ "$output" == *"tag <redacted:github_token>"* ]]
+}
+
 @test "a malformed release-decision.json degrades visibly, not into a complete-looking page" {
   _brief true auto '[]'
   printf '{ this is not json' > "$DECISION"

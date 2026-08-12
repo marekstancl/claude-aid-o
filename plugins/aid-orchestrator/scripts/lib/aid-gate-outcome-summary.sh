@@ -157,9 +157,21 @@ aid_gate_outcome_render() {
     return 1
   fi
 
+  # `.gates` is REQUIRED and must be an object. Defaulting it to `{}` made a
+  # report carrying no gate data at all indistinguishable from a profile that
+  # legitimately ran nothing, and the difference is the whole message: the empty
+  # profile says "nothing to block", while a report missing its gates says
+  # "nobody knows what ran" — and the card would have claimed "0 z 0 prošlo"
+  # with full confidence. Malformed input fails closed; only a real, present,
+  # empty `{}` reaches the zero-gates wording below.
+  if [[ "$(jq -r 'if (.gates | type) == "object" then "ok" else "no" end' <<<"$report" 2>/dev/null)" != "ok" ]]; then
+    echo "aid_gate_outcome_render: gates report at ${report_path} carries no .gates object — refusing to render a card that would claim no gates ran" >&2
+    return 1
+  fi
+
   # ── counts, all COMPUTED from the report's .gates OBJECT (a map, not rows) ──
   local rows
-  rows="$(jq -c '[ (.gates // {}) | to_entries[] | (.value + {gate: (.value.gate // .key)}) ]' <<<"$report")"
+  rows="$(jq -c '[ .gates | to_entries[] | (.value + {gate: (.value.gate // .key)}) ]' <<<"$report")"
 
   local total n_pass n_fail n_skip n_excl n_waived total_ms
   total="$(jq -r 'length' <<<"$rows")"
@@ -319,13 +331,20 @@ aid_gate_outcome_render() {
 
   # ── the chat card (communication.md shapes 1 and 3) ────────────────────────
   # The card does NOT pass through aid_artifact_render, so it does not inherit
-  # that renderer's redaction. Two of its values are tooling-controlled text —
-  # the gate NAME (execution.yaml) and the reproduction command (the report's
-  # own _command_log) — and P080 Step 15's malicious fixture proved both reach
-  # the PM's chat verbatim. They go through the same detector table here. A
-  # command that redacts to something uninvocable is the correct outcome: a
-  # command carrying a token must not be pasted into a chat either.
+  # that renderer's redaction. EVERY card value that comes from the report goes
+  # through the same detector table here — the gate NAME (execution.yaml), the
+  # reproduction command (the report's own _command_log) and the failing gate's
+  # EXIT CODE, which is a jq passthrough of a report field and therefore a
+  # string of the report's choosing, not a number this file computed. Redacting
+  # two of the three was the same leak in a smaller hole. A command that redacts
+  # to something uninvocable is the correct outcome: a command carrying a token
+  # must not be pasted into a chat either.
+  #
+  # The remaining card values are COUNTS and durations this file computed from
+  # the report (jq `length`, an integer sum), plus the two fixed command
+  # constants — none of them can carry input text.
   first_fail="$(aid_gate_outcome_redact "$first_fail")"
+  first_fail_code="$(aid_gate_outcome_redact "$first_fail_code")"
   [[ -z "$repro" ]] || repro="$(aid_gate_outcome_redact "$repro")"
 
   if (( blocked == 1 )); then

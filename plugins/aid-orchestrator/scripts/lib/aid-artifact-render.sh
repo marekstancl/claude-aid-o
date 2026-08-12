@@ -336,7 +336,14 @@ aid_artifact_render() {
   if [[ -n "$detail_label" ]]; then
     have_detail=1
     detail_label="$(_aid_artifact_clip "$detail_label" "$_AID_ARTIFACT_CAP_SENTENCE")"
-    if [[ -n "$detail_href" && ! "$detail_href" =~ ^[A-Za-z][A-Za-z0-9+.-]*: && ! "$detail_href" =~ ^// ]]; then
+    # The scheme test runs on a WHITESPACE-STRIPPED probe, never on the raw
+    # value: browsers trim leading/trailing ASCII whitespace and strip tab/CR/LF
+    # from anywhere in an href before resolving it, so " javascript:alert(1)"
+    # and "j<TAB>avascript:…" are executable schemes wearing a space. Anchoring
+    # the regex at the raw string let both through as "relative". The probe only
+    # ever DECIDES; the attribute still carries the original, escaped value.
+    local href_probe="${detail_href//[$' \t\r\n\f\v']/}"
+    if [[ -n "$href_probe" && ! "$href_probe" =~ ^[A-Za-z][A-Za-z0-9+.-]*: && ! "$href_probe" =~ ^// ]]; then
       html_detail="<a class=\"golink\" href=\"$(_aid_artifact_escape "$detail_href")\">$(_aid_artifact_escape "$detail_label") →</a>"
     else
       html_detail="<div class=\"golink\">$(_aid_artifact_escape "$detail_label") →</div>"
@@ -424,8 +431,21 @@ aid_artifact_render() {
   done
   out+="$rest"
 
+  # The write is ATOMIC: a temp file in the TARGET directory (so the rename is
+  # same-filesystem, hence atomic), then `mv`. A direct `> "$out_path"` looks
+  # equivalent right up to the moment the write dies mid-stream — a full disk,
+  # a quota, an `ulimit -f` cap — and then it leaves a TRUNCATED page sitting at
+  # the published path while this function returns 3. A half-written artifact
+  # that still looks like a page is precisely what the fail-closed contract
+  # above exists to prevent, so out_path is never opened for writing at all.
   local out_dir; out_dir="$(dirname "$out_path")"
-  if [[ ! -d "$out_dir" ]] || ! printf '%s\n' "$out" > "$out_path" 2>/dev/null; then
+  local tmp_out=""
+  if [[ ! -d "$out_dir" ]] || ! tmp_out="$(mktemp "${out_path}.tmp.XXXXXX" 2>/dev/null)"; then
+    echo "aid_artifact_render: cannot write ${out_path}" >&2
+    return 3
+  fi
+  if ! printf '%s\n' "$out" > "$tmp_out" 2>/dev/null || ! mv -f "$tmp_out" "$out_path" 2>/dev/null; then
+    rm -f "$tmp_out" 2>/dev/null
     echo "aid_artifact_render: cannot write ${out_path}" >&2
     return 3
   fi

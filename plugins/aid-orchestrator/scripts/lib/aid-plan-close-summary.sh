@@ -94,6 +94,25 @@ _APCS_BRIEF_FIELDS=(
   delivered_summary_ref
 )
 
+# The nine plan_summary fields this renderer READS, from the producer's field
+# set (scripts/aid-release-policy.sh:1107-1136). Checking only that
+# plan_summary exists and is non-null let `{}` through — and `{}` renders a
+# complete-looking "Připraveno k uzavření" page whose SHAs, tag, gate verdict
+# and EPIC counts are all invented defaults and em dashes. That is exactly the
+# page the FAIL CLOSED note above promises never to produce, so the fields are
+# named here and checked by name, the same way the brief's are.
+_APCS_PLAN_SUMMARY_FIELDS=(
+  reviewed_candidate_sha
+  approved_target_sha
+  target_ref
+  final_merge_sha
+  release_tag_status
+  epics
+  plan_final_gates
+  specialist_review
+  remaining_backlog
+)
+
 _APCS_NO_RISK="Žádná materiální nejistota — brief nevede žádné nevyřešené blokátory."
 _APCS_ROLLBACK_NA="Vrácení zpět: není použitelné — plán zatím není mergnutý do main."
 _APCS_DEFER="nedělat nic — plán zůstává otevřený, žádný příkaz se nespouští."
@@ -151,6 +170,25 @@ aid_plan_close_render() {
   ps="$(jq -c '.release_decision.plan_summary // empty' <<<"$decision_raw" 2>/dev/null)"
   if [[ -z "$ps" || "$ps" == "null" ]]; then
     echo "aid_plan_close_render: ${decision_path} carries no .release_decision.plan_summary (EPIC-mode decisions have plan_summary: null) — refusing to render a plan-close page without plan-final facts" >&2
+    return 1
+  fi
+
+  # Present is not the same as populated: every field is checked by name, and
+  # the three structural ones by TYPE, because `epics: "none"` would count as
+  # zero EPIKŮ just as silently as a missing key.
+  local ps_missing=""
+  for f in "${_APCS_PLAN_SUMMARY_FIELDS[@]}"; do
+    if [[ "$(jq -r --arg k "$f" 'if type == "object" then (has($k)|tostring) else "false" end' <<<"$ps" 2>/dev/null)" != "true" ]]; then
+      ps_missing+="${ps_missing:+, }${f}"
+    fi
+  done
+  if [[ -z "$ps_missing" ]]; then
+    [[ "$(jq -r '.epics | type' <<<"$ps" 2>/dev/null)" == "array" ]] || ps_missing="epics (not an array)"
+    [[ "$(jq -r '.remaining_backlog | type' <<<"$ps" 2>/dev/null)" == "array" ]] || ps_missing+="${ps_missing:+, }remaining_backlog (not an array)"
+    [[ "$(jq -r '.plan_final_gates | type' <<<"$ps" 2>/dev/null)" == "object" ]] || ps_missing+="${ps_missing:+, }plan_final_gates (not an object)"
+  fi
+  if [[ -n "$ps_missing" ]]; then
+    echo "aid_plan_close_render: ${decision_path} plan_summary is missing required field(s): ${ps_missing} — refusing to render a page that would look complete with invented defaults" >&2
     return 1
   fi
 
@@ -344,14 +382,30 @@ aid_plan_close_render() {
 
   # ── the chat card (skeletons defined in skills/communication.md) ──────────
   # The card does NOT pass through aid_artifact_render and so does not inherit
-  # its redaction. `risk` is the one card value built from free text a tool or
-  # a model wrote (the brief's blocker reasons); P080 Step 15's malicious
-  # fixture proved it reaches the PM's chat verbatim. It goes through the same
-  # detector table here. The OPTION lines are deliberately left alone: they
-  # carry a 40-hex revert SHA, which the high_entropy_blob detector would blur
-  # into an uninvocable command — the same reason the page carries labels only.
-  local _risk_redactions=0
-  _aid_artifact_redact risk _risk_redactions
+  # its redaction. EVERY card value carrying free text an input wrote goes
+  # through the same detector table here — not just `risk` (the brief's blocker
+  # reasons), but the gate REPORT PATH, the gate verdict, the tag status and the
+  # two evidence-verification fields, all of them verbatim passthroughs of
+  # decision/brief strings, and `why`, which interpolates the brief's
+  # `merge_mode`. Redacting one of them was the same leak in a smaller hole.
+  # The remaining card values are counts this file computed and the plan_id it
+  # was handed.
+  #
+  # The OPTION lines are deliberately left alone: they carry a 40-hex revert
+  # SHA, which the high_entropy_blob detector would blur into an uninvocable
+  # command — the same reason the page carries labels only.
+  #
+  # This runs AFTER the artifact render on purpose: the page renders from the
+  # unredacted values and does its own redaction (and its own counting) inside
+  # aid_artifact_render.
+  local _card_redactions=0
+  _aid_artifact_redact risk         _card_redactions
+  _aid_artifact_redact gates_report _card_redactions
+  _aid_artifact_redact gates_result _card_redactions
+  _aid_artifact_redact tag_status   _card_redactions
+  _aid_artifact_redact ev_status    _card_redactions
+  _aid_artifact_redact ev_at_head   _card_redactions
+  _aid_artifact_redact why          _card_redactions
 
   if [[ "$card_kind" == "finished" ]]; then
     printf 'Hotovo: plán %s je připravený k uzavření.\n' "$plan_id"

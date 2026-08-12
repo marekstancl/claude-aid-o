@@ -310,6 +310,18 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [[ "$output" == *"invalid gates report JSON"* ]]
 }
 
+@test "a report carrying no .gates data fails closed, not as an empty profile" {
+  # `.gates` defaulted to `{}` made "no gate data in this file" read exactly
+  # like the legitimate empty profile above — a confident "0 z 0 prošlo" over a
+  # report nobody could vouch for. The two are different facts.
+  _write '{"overall":"pass","epic_id":"E1"}' "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"carries no .gates object"* ]]
+  [[ "$output" != *"0 z 0 prošlo"* ]]
+  [ ! -f "$(BODY)" ]
+}
+
 # ─── the fallback path's redactor is callable, and it redacts ───────────────
 
 @test "aid_gate_outcome_redact is the callable entry point the fallback card must use" {
@@ -317,6 +329,23 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ "$status" -eq 0 ]
   [[ "$output" != *"ghp_0123456789abcdefghij"* ]]
   [[ "$output" == *"<redacted:"* ]]
+}
+
+@test "a secret in the failing gate's exit_code is redacted in the CHAT CARD" {
+  # exit_code is a passthrough of a report field, not a number this file
+  # computed, so it is input like any other. The card redacted the gate name and
+  # the reproduction command beside it and printed this one verbatim.
+  local gates
+  gates="$(jq -nc '{tests: {gate:"tests", result:"fail", reason:"",
+                            exit_code:"ghp_ABCDEFGHIJKLMNOPQRSTUV",
+                            duration_ms:5000, output:"", attempts:1}}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == Zastaveno:* ]]
+  [[ "$output" != *"ghp_ABCDEFGHIJKLMNOPQRSTUV"* ]]
+  [[ "$output" == *"<redacted:github_token>"* ]]
 }
 
 @test "a secret reaching the renderer through a gate name is redacted and counted" {
