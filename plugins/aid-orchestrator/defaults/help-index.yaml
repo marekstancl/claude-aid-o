@@ -20,7 +20,34 @@
 #               BOTH prefixes for the same path means it creates the file and is also
 #               its only later writer. Two surfaces both claiming `creates:` for one
 #               path is a defect.
-#   final_turn  renderer:<script> | card:<type> | internal
+#   final_turn  the OUTPUT-CONTRACT INVENTORY entry: what this surface leaves the PM
+#               with at its last turn. Exactly one of three forms:
+#                 renderer:<plugin-root-relative script>
+#                       a deterministic renderer owns the final message. The script
+#                       MUST exist AND the surface's own file MUST name it (that is
+#                       the wiring; a row naming a renderer nothing sources is a
+#                       claim with no mechanism behind it). Both are asserted.
+#                 card:<type>  one of the four cards of `skills/communication.md`:
+#                       finished | decision-required | blocked | progress
+#                       (card 1 Finished, 2 Decision required, 3 Blocked or failed,
+#                       4 Progress / handoff). The vocabulary is CLOSED — a typo or
+#                       an invented fifth card fails the suite.
+#                 internal    the surface has no PM-facing final turn at all. Only
+#                       legal on an `intentionally_internal` row: a surface a user
+#                       can reach owes the user a card.
+#               A renderer row does not mean the surface never uses cards elsewhere
+#               — /aid-run renders cards at other boundaries too. The column names
+#               the LAST turn's owner, which is what `skills/communication.md`'s
+#               inventory rule is about: a path absent from this inventory cannot
+#               quietly emit a final technical dump instead of a card.
+#               WHAT IS AND IS NOT CHECKED (say it plainly rather than let a reader
+#               over-trust the column): for `renderer:` rows the value's CONTENT is
+#               checked — wrong script name, missing file or missing wiring all fail.
+#               For `card:` rows only the vocabulary and the public/internal split
+#               are mechanical; that a surface truly emits THAT card at runtime is
+#               prose evidence recorded in this file, not something a bats suite
+#               can observe. Making that mechanical needs a runtime capture harness,
+#               which this plan deliberately does not build.
 #
 # DISPOSITION SEMANTICS (exact):
 #   current                 surface is correct as shipped; REQUIRES a topic route.
@@ -84,6 +111,23 @@
 #   documents, and any `user_invocable` key on them is inert metadata. A skills
 #   directory without SKILL.md (e.g. `skills/setup/`) is likewise not a surface.
 
+# FINAL_TURN EVIDENCE (why each row carries the value it does — the prose half the
+# suite cannot observe, kept next to the claim rather than in a commit message):
+#   /aid-run     commands/aid-run.md sources aid-gate-outcome-summary.sh at the
+#                GATES→DONE boundary and on the failing branch alike; the DONE card
+#                below it is that renderer's output, not a hand-written summary.
+#   /aid-plan    commands/aid-plan.md sources aid-plan-close-summary.sh at the
+#                plan-final / close boundary — the last turn of a plan stream.
+#   /aid-audit-tests  commands/aid-audit-tests.md finalizes through
+#                lib/aid-test-audit-chat-summary.sh (via scripts/aid-audit-tests-finalize.sh).
+#   /aid-do, /aid-verify-implementation  their own files name the Finished card.
+#   /aid-verify-plan, /visual-companion  end on a PM choice (relay the verdict for
+#                a go/no-go; per-question visual decision) → decision-required.
+#   /aid-status  a read-only readout of work in flight → the progress/handoff card.
+#   /aid-audit, /aid-init, /aid-setup, /aid-stop, /aid-help  no renderer exists;
+#                each ends by reporting completed work or requested content → finished.
+#                Any of these growing a deterministic renderer must move to `renderer:`.
+
 surfaces:
   - { command: /aid-do, file: plugins/aid-orchestrator/commands/aid-do.md,
       purpose: "Fast Mode — implement small tasks with minimal overhead (<2 min)",
@@ -93,12 +137,12 @@ surfaces:
   - { command: /aid-run, file: plugins/aid-orchestrator/commands/aid-run.md,
       purpose: "Execute EPIC pipeline — 6-state FSM with optional autonomous mode",
       topic: run, audience: beginner, disposition: current,
-      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "card:finished" }
+      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "renderer:scripts/lib/aid-gate-outcome-summary.sh" }
 
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
       purpose: "Show EPIC status, queue, and pipeline overview",
       topic: status, audience: beginner, disposition: current,
-      writes: ["creates:.aid-o/config/queue.yaml", "mutates:.aid-o/config/queue.yaml"], final_turn: "card:finished" }
+      writes: ["creates:.aid-o/config/queue.yaml", "mutates:.aid-o/config/queue.yaml"], final_turn: "card:progress" }
 
   - { command: /aid-stop, file: plugins/aid-orchestrator/commands/aid-stop.md,
       purpose: "Emergency stop — disengage FIRST AID auto-mode immediately",
@@ -140,12 +184,12 @@ surfaces:
   - { command: /aid-plan, file: plugins/aid-orchestrator/commands/aid-plan.md,
       purpose: "Plan a task — brainstorm, write plan, or generate EPIC (auto-detected or forced)",
       topic: plan, audience: regular, disposition: update,
-      writes: [], final_turn: "card:finished" }
+      writes: [], final_turn: "renderer:scripts/lib/aid-plan-close-summary.sh" }
 
   - { command: /aid-verify-plan, file: plugins/aid-orchestrator/commands/aid-verify-plan.md,
       purpose: "Independent adversarial review of an implementation plan before it goes to execution",
       topic: plan-lifecycle, audience: power, disposition: current,
-      writes: [], final_turn: "card:finished" }
+      writes: [], final_turn: "card:decision-required" }
 
   - { command: /aid-verify-implementation, file: plugins/aid-orchestrator/commands/aid-verify-implementation.md,
       purpose: "Independent adversarial DONE review of an implementation before it is trusted as complete",
@@ -160,4 +204,4 @@ surfaces:
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,
       purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",
       topic: plan, audience: power, disposition: current,
-      writes: [], final_turn: "card:finished" }
+      writes: [], final_turn: "card:decision-required" }

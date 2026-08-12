@@ -24,7 +24,8 @@
 # literal name below — never as "update rows may skip routing", which would
 # reopen the hole for every future row.
 #
-# Provenance: plan P080, EPIC E-080-1_3 Step 2.
+# Provenance: plan P080, EPIC E-080-1_3 Step 2; cases 10-11 (the `final_turn`
+# output-contract inventory) added by Step 14.
 
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -375,6 +376,85 @@ router_topics() {
 
   if [ -n "$violations" ]; then
     echo "FAIL: help-index.yaml rows:$violations"
+    return 1
+  fi
+}
+
+@test "case 10: final_turn is a well-formed output-contract entry" {
+  # THE §14 D17 INVENTORY RULE, made mechanical. `skills/communication.md` says a
+  # path absent from the output-contract inventory cannot quietly emit a final
+  # technical dump — which only bites if the inventory is checked. Case 9 proves
+  # the column is merely non-empty; a value of `soon` would satisfy it. This case
+  # reads the VALUE: its form, its card vocabulary, and the public/internal split.
+  #
+  # HONEST SCOPE: for `card:` rows this is vocabulary + disposition consistency,
+  # not proof the surface emits that card at runtime — observing a real final turn
+  # needs a capture harness this plan does not build. `renderer:` rows ARE content-
+  # checked, in case 11.
+  local violations="" command final_turn disposition card
+  while IFS=$'\t' read -r command _file _topic _audience disposition final_turn _rest; do
+    if [ -z "$final_turn" ] || [ "$final_turn" = "null" ]; then
+      # Public rows especially: an unindexed final turn is exactly the "quietly
+      # emits a dump" case. Reported for every row — no surface is exempt.
+      violations+=$'\n'"    $command: no final_turn — every row states its final turn as renderer:<script>, card:<type> or internal"
+      continue
+    fi
+    case "$final_turn" in
+      renderer:?*) ;;   # content asserted by case 11
+      internal)
+        # `internal` is the one value that says "this surface never faces the PM".
+        # Legal only where the index ALSO says the surface is not user-reachable;
+        # otherwise it is the cheapest way to exempt a real command from the
+        # inventory, which is the hole the inventory exists to close.
+        [ "$disposition" = "intentionally_internal" ] || \
+          violations+=$'\n'"    $command: final_turn 'internal' but disposition is '$disposition' — a user-reachable surface owes the PM a card"
+        ;;
+      card:?*)
+        card="${final_turn#card:}"
+        case "$card" in
+          finished|decision-required|blocked|progress) ;;
+          *) violations+=$'\n'"    $command: unknown card type '$card' — skills/communication.md defines four: finished, decision-required, blocked, progress" ;;
+        esac
+        ;;
+      *)
+        violations+=$'\n'"    $command: malformed final_turn '$final_turn' — expected renderer:<script>, card:<type> or internal"
+        ;;
+    esac
+  done < <(index_rows)
+
+  if [ -n "$violations" ]; then
+    echo "FAIL: help-index.yaml final_turn column:$violations"
+    return 1
+  fi
+}
+
+@test "case 11: every final_turn renderer exists and is wired into its own surface" {
+  # The half that checks CONTENT, not shape. Two ways a `renderer:` value lies:
+  # it can name a script that does not exist (a rename, a deleted library), or it
+  # can name a real script the surface never sources — an inventory entry with no
+  # mechanism behind it, which is this plan's recurring defect wearing a filename.
+  # Both fail here. The wiring match is on the BASENAME because surfaces cite the
+  # library at whatever depth reads naturally (`lib/x.sh`, `scripts/lib/x.sh`).
+  local violations="" command file final_turn script base
+  while IFS=$'\t' read -r command file _topic _audience _disposition final_turn _rest; do
+    case "$final_turn" in renderer:?*) ;; *) continue ;; esac
+    script="${final_turn#renderer:}"
+    base="${script##*/}"
+
+    if [ ! -f "$AID_PLUGIN_PATH/$script" ]; then
+      violations+=$'\n'"    $command: final_turn names a renderer that does not exist: $script"
+      continue
+    fi
+    if [ ! -f "$REPO_ROOT/$file" ]; then
+      continue   # case 6 owns the missing-file report
+    fi
+    if ! grep -qF -- "$base" "$REPO_ROOT/$file"; then
+      violations+=$'\n'"    $command: final_turn names $script but $file never mentions $base — the row claims a renderer the surface does not wire"
+    fi
+  done < <(index_rows)
+
+  if [ -n "$violations" ]; then
+    echo "FAIL: help-index.yaml renderer wiring:$violations"
     return 1
   fi
 }
