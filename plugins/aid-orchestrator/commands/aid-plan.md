@@ -768,7 +768,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-12
 
 ## Plan mode
 
@@ -781,3 +781,32 @@ before. New plans default to `plan_branch` when the project declares a
 `plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
 creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
+
+### Plan-final / close boundary
+
+Under `plan_branch`, the plan-final boundary is the PM's decision moment — so it
+gets a card and a one-screen page, not a file listing. After `aid-pm-brief.sh`
+has produced the handoff pair, render both from it:
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh"
+aid_plan_close_render "$evidence_dir/pm-decision-brief.json" \
+                      "$evidence_dir/release-decision.json" "$plan_id" "$evidence_dir"
+```
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+Card shapes come from `skills/communication.md`: Decision-required when the plan
+is not release-ready or `merge_mode` is not `auto`, Finished when recording a
+completed close. Every number on the page is counted by the renderer from
+`release-decision.json`; state none of them yourself. The offered options are
+derived from `merge_mode`, `release_ready` and whether the plan is already
+merged — `plan-rollback` appears only once a final merge SHA exists, and
+"defer" is taking no action, never a fabricated command.
+
+The renderer exits 1 without writing a page when the brief lacks one of its
+eight required fields or the decision carries no
+`.release_decision.plan_summary`. If the brief is missing entirely, report the
+Blocked card "plan-close brief missing — run aid-pm-brief.sh" rather than
+assembling a summary from evidence files. `legacy_epic_release_mode` plans keep
+their existing per-EPIC release text unchanged.
