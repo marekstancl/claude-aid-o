@@ -2189,7 +2189,7 @@ The artifact layer itself is `lib/aid-artifact-render.sh` plus
 `defaults/templates/artifact-outcome.html`, and its full spec — the 7-block
 mapping table, the placeholder grammar, the caps and the redaction policy — is
 authored at `defaults/templates/artifact-templates-spec.md` in this repo, ready
-for the PM to publish into the ecosystem docs (see IMP-502; publication is a
+for the PM to publish into the ecosystem docs (see IMP-503; publication is a
 cross-repo act this repo has no authority to perform). In short:
 
 - **Placeholder grammar.** `{{fact:<jq.path>}}` is a scalar from `facts_json`,
