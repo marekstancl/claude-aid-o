@@ -1,0 +1,8 @@
+{
+  "_provenance": "P080 Step 15. Waiver receipt for gate-report-force-used.json. ENRICHMENT ONLY — the report already carries the waiver; this file only adds the human detail.",
+  "gate_id": "tests",
+  "authorized_by": "PM",
+  "reason": "flaky suite under investigation, risk accepted for this run",
+  "expires_at": null,
+  "consumed": { "at": "2026-08-12T10:09:00Z", "by_run": "R-080-3" }
+}

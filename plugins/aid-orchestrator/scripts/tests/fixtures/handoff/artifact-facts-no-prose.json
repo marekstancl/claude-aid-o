@@ -1,0 +1,29 @@
+{
+  "_provenance": "P080 Step 15. Facts for the GENERIC renderer, driven directly (audit renderer untouched — this is the smoke pass over aid_artifact_render itself). Six items and four next steps deliberately exceed the caps (5 and 3) so the overflow literal is exercised with a TRUE remaining count. Rendered with an EMPTY prose input: delivery case INCOMPLETE at the generic layer.",
+  "eyebrow": "Výsledek běhu",
+  "title": "Smoke: fakta bez prózy",
+  "when": "2026-08-12T10:20:00Z",
+  "tiles": {
+    "result": { "value": "5/6 hotovo", "state": "warn" },
+    "duration": { "value": "4 min 12 s" },
+    "scope": { "value": "6" },
+    "unresolved": { "value": "1", "state": "warn" }
+  },
+  "items": [
+    "krok 1 doběhl",
+    "krok 2 doběhl",
+    "krok 3 doběhl",
+    "krok 4 doběhl",
+    "krok 5 doběhl",
+    "krok 6 zůstal otevřený"
+  ],
+  "next_steps": [
+    "dokončit krok 6",
+    "spustit brány znovu",
+    "poslat plán k uzavření",
+    "uklidit worktree"
+  ],
+  "links": [".aid-o/work/evidence/P080/run.json"],
+  "detail": { "label": "Technický detail: run.json", "href": "run.json" },
+  "footer": "Vyrobil test-integration-handoff-rendering.sh z fixture artifact-facts-no-prose.json."
+}

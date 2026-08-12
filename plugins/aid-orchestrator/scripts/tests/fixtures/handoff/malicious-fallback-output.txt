@@ -1,0 +1,14 @@
+P080 Step 15 — DELIBERATELY MALICIOUS, synthetic secrets only.
+This is the raw text a controller would otherwise paste into the fallback card
+when a renderer could not run. It carries one specimen of EVERY detector in
+aid-artifact-render.sh's shipped table, so the fallback path is proven to leak
+none of them rather than merely being told not to.
+
+github_pat        github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz012345
+github_token      ghp_0123456789abcdefghijklmnopqrstuvwxyz
+openai_key        sk-0123456789abcdefghijklmnopqrstuvwxyz
+aws_access_key    AKIAIOSFODNN7EXAMPLE
+pem_private_key   -----BEGIN RSA PRIVATE KEY-----
+bearer_token      Bearer abcdefghijklmnopqrstuvwxyz012345
+assigned_secret   password=hunter2
+high_entropy_blob QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZA==

@@ -1,0 +1,23 @@
+{
+  "_provenance": "P080 Step 15. DELIBERATELY MALICIOUS, synthetic secrets only (see gate-report-malicious.json for the provenance of each pattern). The prose block carries password=hunter2 and a blocker carries token-shaped strings, so the renderer's redaction is exercised on the model-written half of the page as well as on the computed half. Allowlisted in the harness's MALICIOUS_FIXTURES.",
+  "schema_version": "aid-2.0",
+  "artifact_type": "pm_decision_brief",
+  "pm_decision_brief": {
+    "communication_status": "complete",
+    "release_ready": false,
+    "blockers": [
+      { "input_id": "leaked_env", "reason": "runner exportoval AKIAIOSFODNN7EXAMPLE do logu" }
+    ],
+    "waivers_applied": [],
+    "human_summary_path": "pm-summary.md",
+    "merge_mode": "blocked",
+    "evidence_verification_status": "fail",
+    "evidence_verified_at_head": false,
+    "reporter_status": "ok",
+    "reporter_reason": "",
+    "simplifier_status": "ok",
+    "simplifier_reason": "",
+    "summary_for_pm": "Běh spadl na autentizaci, v logu zůstalo password=hunter2 a ghp_0123456789abcdefghijklmnopqrstuvwxyz.",
+    "delivered_summary_ref": ".aid-o/work/evidence/P080/delivery.md"
+  }
+}

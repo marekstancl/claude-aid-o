@@ -343,6 +343,16 @@ aid_plan_close_render() {
   fi
 
   # ── the chat card (skeletons defined in skills/communication.md) ──────────
+  # The card does NOT pass through aid_artifact_render and so does not inherit
+  # its redaction. `risk` is the one card value built from free text a tool or
+  # a model wrote (the brief's blocker reasons); P080 Step 15's malicious
+  # fixture proved it reaches the PM's chat verbatim. It goes through the same
+  # detector table here. The OPTION lines are deliberately left alone: they
+  # carry a 40-hex revert SHA, which the high_entropy_blob detector would blur
+  # into an uninvocable command — the same reason the page carries labels only.
+  local _risk_redactions=0
+  _aid_artifact_redact risk _risk_redactions
+
   if [[ "$card_kind" == "finished" ]]; then
     printf 'Hotovo: plán %s je připravený k uzavření.\n' "$plan_id"
     printf 'Změnilo se: %s z %s EPIKŮ je v plánu, merge do main %s, tag %s.\n' \

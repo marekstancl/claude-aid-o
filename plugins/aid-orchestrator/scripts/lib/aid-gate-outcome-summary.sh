@@ -318,6 +318,16 @@ aid_gate_outcome_render() {
   fi
 
   # ── the chat card (communication.md shapes 1 and 3) ────────────────────────
+  # The card does NOT pass through aid_artifact_render, so it does not inherit
+  # that renderer's redaction. Two of its values are tooling-controlled text —
+  # the gate NAME (execution.yaml) and the reproduction command (the report's
+  # own _command_log) — and P080 Step 15's malicious fixture proved both reach
+  # the PM's chat verbatim. They go through the same detector table here. A
+  # command that redacts to something uninvocable is the correct outcome: a
+  # command carrying a token must not be pasted into a chat either.
+  first_fail="$(aid_gate_outcome_redact "$first_fail")"
+  [[ -z "$repro" ]] || repro="$(aid_gate_outcome_redact "$repro")"
+
   if (( blocked == 1 )); then
     printf 'Zastaveno: brána %s selhala (exit %s).\n' "$first_fail" "$first_fail_code"
     printf 'Dopad: běh nepokračuje na DONE; prošlo %s z %s, nic se nemerguje.\n' "$n_pass" "$total"

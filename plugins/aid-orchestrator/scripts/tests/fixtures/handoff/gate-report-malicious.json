@@ -1,0 +1,32 @@
+{
+  "_provenance": "P080 Step 15. DELIBERATELY MALICIOUS. Every secret below is SYNTHETIC: ghp_0123... is a counting sequence, AKIAIOSFODNN7EXAMPLE is AWS's own published documentation example, hunter2 is the bash.org joke. None of them authenticates against anything. Listed in the harness's MALICIOUS_FIXTURES allowlist, which is why the repo-wide secret sweep exempts this file. Secrets sit in the three places a run can actually carry attacker/tooling-controlled text into a human surface: a gate row's `output`, a gate NAME, and a _command_log command.",
+  "epic_id": "E-AKIAIOSFODNN7EXAMPLE",
+  "run_id": "R-080-4",
+  "overall": "fail",
+  "completed_at": "2026-08-12T10:15:00Z",
+  "gates": {
+    "leaky": {
+      "gate": "leak-ghp_0123456789abcdefghijklmnop",
+      "result": "fail",
+      "reason": "secrets in output",
+      "exit_code": 7,
+      "duration_ms": 2500,
+      "output": "connecting with ghp_0123456789abcdefghijklmnopqrstuvwxyz and AKIAIOSFODNN7EXAMPLE\npassword=hunter2\n",
+      "attempts": 1
+    },
+    "lint": {
+      "gate": "lint",
+      "result": "pass",
+      "reason": "",
+      "exit_code": 0,
+      "duration_ms": 500,
+      "output": "",
+      "attempts": 1
+    }
+  },
+  "waived_gates": [],
+  "excluded_gates": [],
+  "_command_log": [
+    { "name": "leak-ghp_0123456789abcdefghijklmnop", "command": "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345' https://example.invalid", "exit_code": 7, "duration_ms": 2500 }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "_provenance": "P080 Step 15. Hand-authored from the envelope aid-run-gates.sh writes (--report-file), field set cross-checked against scripts/lib/aid-run-gates-report.sh and test-aid-gate-outcome-summary.bats. Delivery case: FINISHED.",
+  "epic_id": "E-080-1_3",
+  "run_id": "R-080-1",
+  "overall": "pass",
+  "completed_at": "2026-08-12T10:00:00Z",
+  "gates": {
+    "tests": {
+      "gate": "tests",
+      "result": "pass",
+      "reason": "",
+      "exit_code": 0,
+      "duration_ms": 90000,
+      "output": "",
+      "attempts": 1
+    },
+    "lint": {
+      "gate": "lint",
+      "result": "pass",
+      "reason": "",
+      "exit_code": 0,
+      "duration_ms": 30000,
+      "output": "",
+      "attempts": 1
+    }
+  },
+  "waived_gates": [],
+  "excluded_gates": [],
+  "_command_log": [
+    { "name": "tests", "command": "bash scripts/tests/run-all-tests.sh --tier t1", "exit_code": 0, "duration_ms": 90000 },
+    { "name": "lint", "command": "bash scripts/aid-lint-skill.sh", "exit_code": 0, "duration_ms": 30000 }
+  ]
+}

@@ -1,0 +1,517 @@
+#!/usr/bin/env bash
+# aid-tier: t2
+# test-integration-handoff-rendering.sh — P080 Step 15.
+#
+# Drives the THREE renderers of the §14 delivery contract over checked-in
+# fixture JSON, end to end, for the five delivery cases:
+#
+#   finished · decision-required · blocked · force-used (waiver present) ·
+#   incomplete (canonical facts arrived, model prose did not)
+#
+#   scripts/lib/aid-artifact-render.sh       the generic body renderer (smoke —
+#                                            the audit renderer is untouched by
+#                                            this plan and is not driven here)
+#   scripts/lib/aid-gate-outcome-summary.sh  the GATES boundary
+#   scripts/lib/aid-plan-close-summary.sh    the plan-final / close boundary
+#
+# WHAT IT PROVES, AND WHAT IT DELIBERATELY DOES NOT
+#   Proves: the card comes FIRST (the first non-empty stdout line is the
+#   outcome/decision sentence — no JSON, no path, no identifier ahead of it),
+#   the artifact body carries the ecosystem standard's blocks in order, a raw
+#   technical list can never be the ONLY output, and no secret survives either
+#   the page, the card or the FALLBACK card.
+#
+#   Does NOT prove anything about publication. The renderers write files and
+#   print text; the Artifact tool call is a live controller act wired in
+#   commands/*.md and skills/pipeline.md. This harness runs anywhere, including
+#   a CI box with no Artifact tool at all.
+#
+# GOLDEN FIXTURES — REGENERATION IS A HUMAN ACT
+#   The goldens under fixtures/handoff/golden/ record the artifact BLOCK ORDER
+#   (headings and structural markers, in document order) for each rendered
+#   body. That is the only byte-golden here: everything else is asserted
+#   structurally, so a benign wording edit inside a block does not churn a
+#   fixture, while a block that moves, vanishes or appears does fail.
+#
+#   Regenerate with, and ONLY with:
+#
+#     AID_HANDOFF_GOLDEN_REGEN=1 bash plugins/aid-orchestrator/scripts/tests/test-integration-handoff-rendering.sh
+#
+#   That mode rewrites the goldens and exits 2 with the diff it applied — it
+#   NEVER runs off a mismatch and never reports a pass, because a golden test
+#   that regenerates its own expectation on failure proves nothing.
+#
+# NONDETERMINISM, NORMALISED IN THE OPEN
+#   Normalisation happens HERE, visibly, before any comparison — never inside a
+#   fixture. Sources found in these outputs:
+#     1. the harness temp dir (run_dir / out_dir, and every path derived from
+#        it: the provenance footer, the links block, the `Artifact:` line)
+#        → <WORK>
+#     2. the repo root, which the same paths can carry     → <REPO>
+#     3. aid-plan-close-summary.sh's `date -u` render stamp → <TS>
+#   Durations are NOT normalised: they are computed from the fixtures' own
+#   duration_ms, so they are deterministic and worth asserting.
+#
+# FIXTURE PROVENANCE
+#   Every fixture carries a `_provenance` string naming the producer whose
+#   field set it was hand-authored from. They are hand-authored because the
+#   repo has no PLAN-mode release-decision.json to copy (all are EPIC-mode,
+#   plan_summary: null) and because a real gates report carries a run's own
+#   absolute paths.
+#
+# THE MALICIOUS FIXTURES ARE THE POINT, NOT AN OVERSIGHT
+#   Three fixtures deliberately carry secret-shaped strings so leakage is
+#   proven IMPOSSIBLE rather than merely absent. Every specimen is synthetic
+#   (a counting sequence, AWS's published documentation example, the bash.org
+#   joke password). They are named in MALICIOUS_FIXTURES below, which is the
+#   only exemption the repo-wide secret sweep grants — an unlisted fixture with
+#   a secret shape fails the sweep.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${PLUGIN_DIR}/../.." && pwd)"
+FIX="${SCRIPT_DIR}/fixtures/handoff"
+GOLDEN="${FIX}/golden"
+
+REGEN="${AID_HANDOFF_GOLDEN_REGEN:-0}"
+
+pass=0; fail=0
+pass_msg() { echo "  PASS: $1"; pass=$((pass + 1)); }
+fail_msg() { echo "  FAIL: $1"; fail=$((fail + 1)); }
+
+command -v jq >/dev/null 2>&1 || {
+  echo "  FAIL: jq not installed"; echo "Results: 0/1 passed, 1 failed"; exit 1; }
+
+WORK="$(mktemp -d)"
+cleanup() { rm -rf "$WORK"; }
+trap cleanup EXIT
+
+# The libraries under test, sourced exactly as their callers do.
+# shellcheck source=../lib/aid-artifact-render.sh
+source "${PLUGIN_DIR}/scripts/lib/aid-artifact-render.sh"
+# shellcheck source=../lib/aid-gate-outcome-summary.sh
+source "${PLUGIN_DIR}/scripts/lib/aid-gate-outcome-summary.sh"
+# shellcheck source=../lib/aid-plan-close-summary.sh
+source "${PLUGIN_DIR}/scripts/lib/aid-plan-close-summary.sh"
+
+# Fixtures that MAY carry secret shapes, and the reason each one does.
+MALICIOUS_FIXTURES=(
+  gate-report-malicious.json
+  pm-brief-malicious.json
+  malicious-fallback-output.txt
+)
+
+# The card labels from skills/communication.md. Structural labels, not prose:
+# a fixture's Czech body text is never asserted, so another locale's prose
+# passes this harness unchanged.
+CARD_FINISHED='Hotovo:'
+CARD_DECISION='Potřebuji tvoje rozhodnutí:'
+CARD_BLOCKED='Zastaveno:'
+
+# ─── normalisation ──────────────────────────────────────────────────────────
+# Applied to renderer output before ANY comparison or dump. See the header for
+# the enumerated sources.
+_normalise() {
+  sed -e "s#${WORK}#<WORK>#g" \
+      -e "s#${REPO_ROOT}#<REPO>#g" \
+      -e 's#[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T[0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}Z#<TS>#g'
+}
+
+# _spine <html_file> — the artifact's block order: every heading and structural
+# marker, in document order, one per line.
+_spine() {
+  _normalise < "$1" \
+    | grep -oE '<header class="masthead">|<section class="tiles">|<section class="block[^"]*">|<h2>[^<]*</h2>|class="golink"|<footer>'
+}
+
+# _golden <case_name> <html_file> — compare the spine to its golden, or, in
+# the explicitly-invoked regeneration mode, rewrite it.
+_golden() {
+  # NOT one `local` statement: a name declared there is not yet visible to a
+  # later assignment in the same statement, and under `set -u` that aborts.
+  local name="$1" html="$2"
+  local g="${GOLDEN}/${name}.blocks.txt"
+  local actual="${WORK}/${name}.blocks.actual"
+  _spine "$html" > "$actual"
+  if [[ "$REGEN" == "1" ]]; then
+    if [[ -f "$g" ]] && diff -q "$g" "$actual" >/dev/null 2>&1; then
+      echo "  REGEN: ${name} unchanged"
+    else
+      [[ -f "$g" ]] && diff -u "$g" "$actual" | sed 's/^/    /'
+      cp "$actual" "$g"
+      echo "  REGEN: ${name} rewritten"
+    fi
+    return 0
+  fi
+  if [[ ! -f "$g" ]]; then
+    fail_msg "${name}: no golden at ${g} — regenerate deliberately (see this file's header)"
+    return 1
+  fi
+  if diff -q "$g" "$actual" >/dev/null 2>&1; then
+    pass_msg "${name}: artifact block order matches its golden"
+    return 0
+  fi
+  fail_msg "${name}: artifact block order differs from ${g}"
+  diff -u "$g" "$actual" | sed 's/^/    /'
+  return 1
+}
+
+# _assert_seven_blocks <case> <html> — the standard's mandatory blocks, in
+# order, by byte offset. Structural markers only; no Czech literal is asserted.
+_assert_seven_blocks() {
+  local name="$1" f="$2" v p=() m
+  for m in '<header class="masthead">' '<section class="tiles">' '<h2>Shrnutí</h2>' \
+           '<h2>Jádro</h2>' '<h2>Co se čeká ode mě</h2>' '<footer>'; do
+    v="$(grep -abo -F -e "$m" "$f" | head -1 | cut -d: -f1)"
+    if [[ -z "$v" ]]; then
+      fail_msg "${name}: rendered body is missing the mandatory block marker '${m}'"
+      return 1
+    fi
+    p+=("$v")
+  done
+  local i
+  for (( i = 1; i < ${#p[@]}; i++ )); do
+    if (( p[i] <= p[i-1] )); then
+      fail_msg "${name}: mandatory blocks are out of order (offset ${p[i]} follows ${p[i-1]})"
+      return 1
+    fi
+  done
+  pass_msg "${name}: mandatory artifact blocks present and in the standard's order"
+  return 0
+}
+
+# _assert_card_first <case> <card_file> <expected_label>
+#   The outcome sentence is the FIRST non-empty line, and nothing structural
+#   precedes it: no JSON, no path, no identifier.
+_assert_card_first() {
+  local name="$1" cf="$2" label="$3" first
+  first="$(grep -m1 -v '^[[:space:]]*$' "$cf" || true)"
+  if [[ "$first" != "$label"* ]]; then
+    fail_msg "${name}: first non-empty card line is not the '${label}' outcome sentence"
+    echo "    got: ${first}" ; return 1
+  fi
+  if [[ "$first" == *'{'* || "$first" == *'/'* || "$first" == *'.json'* ]]; then
+    fail_msg "${name}: the outcome sentence carries JSON or a path before the decision"
+    echo "    got: ${first}" ; return 1
+  fi
+  # Identifiers and the detail link are optional FINAL lines.
+  local last
+  last="$(grep -v '^[[:space:]]*$' "$cf" | tail -1)"
+  if [[ "$last" != Artifact* ]]; then
+    fail_msg "${name}: the artifact reference is not the card's last line (got: ${last})"
+    return 1
+  fi
+  pass_msg "${name}: card leads with the '${label}' outcome and ends with the artifact reference"
+  return 0
+}
+
+# _run_renderer <case> <card_out> <fn> [args...]
+#   Runs a renderer, capturing stdout and stderr separately. A nonzero exit
+#   prints the case name and the child's stderr VERBATIM — this harness never
+#   swallows a renderer's diagnostics.
+_run_renderer() {
+  local name="$1" card="$2"; shift 2
+  local err="${WORK}/${name}.stderr" rc=0
+  "$@" > "$card" 2> "$err" || rc=$?
+  if (( rc != 0 )); then
+    fail_msg "${name}: renderer exited ${rc}"
+    echo "    --- ${name} stderr (verbatim) ---"
+    sed 's/^/    /' "$err"
+    echo "    --- end ${name} stderr ---"
+    return 1
+  fi
+  if [[ -s "$err" ]]; then
+    echo "    note: ${name} wrote to stderr while succeeding:"
+    sed 's/^/    /' "$err"
+  fi
+  return 0
+}
+
+# ─── the five delivery cases ────────────────────────────────────────────────
+
+echo "== delivery cases =="
+
+# Case 1a: FINISHED — the gate boundary.
+GRUN="${WORK}/finished-gate"; mkdir -p "${GRUN}/gates"
+cp "${FIX}/gate-report-finished.json" "${GRUN}/gates/gates_report.json"
+if _run_renderer finished-gate "${WORK}/finished-gate.card" aid_gate_outcome_render "" "$GRUN"; then
+  _assert_card_first finished-gate "${WORK}/finished-gate.card" "$CARD_FINISHED"
+  _assert_seven_blocks finished-gate "${GRUN}/gate-outcome-artifact.html"
+  _golden finished-gate "${GRUN}/gate-outcome-artifact.html"
+  if grep -qF '<span class="v">2/2 prošlo</span>' "${GRUN}/gate-outcome-artifact.html"; then
+    pass_msg "finished-gate: the result tile is COUNTED from the report, not asserted"
+  else
+    fail_msg "finished-gate: expected a computed 2/2 result tile"
+  fi
+fi
+
+# Case 1b: FINISHED — the plan-final / close boundary.
+POUT="${WORK}/finished-plan"; mkdir -p "$POUT"
+if _run_renderer finished-plan "${WORK}/finished-plan.card" \
+     aid_plan_close_render "${FIX}/pm-brief-finished.json" "${FIX}/release-decision-merged.json" P080 "$POUT"; then
+  _assert_card_first finished-plan "${WORK}/finished-plan.card" "$CARD_FINISHED"
+  _assert_seven_blocks finished-plan "${POUT}/plan-close-artifact.html"
+  _golden finished-plan "${POUT}/plan-close-artifact.html"
+  if grep -qF '<span class="v">3/3 EPIKŮ</span>' "${POUT}/plan-close-artifact.html"; then
+    pass_msg "finished-plan: the EPIC tile is COUNTED from the epics array"
+  else
+    fail_msg "finished-plan: expected a computed 3/3 EPIC tile"
+  fi
+fi
+
+# Case 2: DECISION-REQUIRED — plan not release-ready.
+DOUT="${WORK}/decision"; mkdir -p "$DOUT"
+if _run_renderer decision "${WORK}/decision.card" \
+     aid_plan_close_render "${FIX}/pm-brief-decision-required.json" "${FIX}/release-decision-open.json" P080 "$DOUT"; then
+  _assert_card_first decision "${WORK}/decision.card" "$CARD_DECISION"
+  _assert_seven_blocks decision "${DOUT}/plan-close-artifact.html"
+  _golden decision "${DOUT}/plan-close-artifact.html"
+  # The offered options must be the commands this HEAD actually ships, and the
+  # rollback that has no revert commit must be declared inapplicable rather
+  # than printed as an uninvocable line.
+  if grep -qF 'aid-plan-fsm.sh plan-merge-to-main P080 --decision' "${WORK}/decision.card" \
+     && grep -qF 'aid-plan-fsm.sh plan-close P080' "${WORK}/decision.card" \
+     && ! grep -qF 'plan-rollback' "${WORK}/decision.card"; then
+    pass_msg "decision: exactly the shipped commands are offered, rollback withheld while nothing is merged"
+  else
+    fail_msg "decision: the offered option set is not the shipped command set"
+  fi
+fi
+
+# Case 3: BLOCKED — a required gate failed.
+BRUN="${WORK}/blocked"; mkdir -p "${BRUN}/gates"
+cp "${FIX}/gate-report-blocked.json" "${BRUN}/gates/gates_report.json"
+if _run_renderer blocked "${WORK}/blocked.card" aid_gate_outcome_render "" "$BRUN"; then
+  _assert_card_first blocked "${WORK}/blocked.card" "$CARD_BLOCKED"
+  _assert_seven_blocks blocked "${BRUN}/gate-outcome-artifact.html"
+  _golden blocked "${BRUN}/gate-outcome-artifact.html"
+  # The reproduction step is the gate's OWN command from _command_log — never
+  # an invented remediation.
+  if grep -qF 'bash scripts/tests/run-all-tests.sh --tier t1' "${WORK}/blocked.card" \
+     && grep -qF -- '--force --reason' "${WORK}/blocked.card"; then
+    pass_msg "blocked: the card carries the gate's own command and the exact public force command"
+  else
+    fail_msg "blocked: the card is missing the reproduction command or the force command"
+  fi
+fi
+
+# Case 4: FORCE-USED — a required gate failed and the PM waived it.
+WRUN="${WORK}/force-used"; mkdir -p "${WRUN}/gates"
+cp "${FIX}/gate-report-force-used.json" "${WRUN}/gates/gates_report.json"
+if _run_renderer force-used "${WORK}/force-used.card" \
+     aid_gate_outcome_render "" "$WRUN" "${FIX}/waivers"; then
+  _assert_card_first force-used "${WORK}/force-used.card" "$CARD_FINISHED"
+  _assert_seven_blocks force-used "${WRUN}/gate-outcome-artifact.html"
+  _golden force-used "${WRUN}/gate-outcome-artifact.html"
+  # A waiver is PM risk acceptance, never a pass — on BOTH surfaces.
+  if grep -qF 'waived' "${WRUN}/gate-outcome-artifact.html" \
+     && grep -qF 'waived' "${WORK}/force-used.card" \
+     && ! grep -qF 'passed' "${WRUN}/gate-outcome-artifact.html" \
+     && ! grep -qF 'passed' "${WORK}/force-used.card" \
+     && grep -qF '<span class="v">1/2 prošlo</span>' "${WRUN}/gate-outcome-artifact.html"; then
+    pass_msg "force-used: the waiver renders as risk acceptance on both surfaces and is counted unresolved"
+  else
+    fail_msg "force-used: the waiver was rendered as a pass, or the counts absorbed it"
+  fi
+  if grep -qF 'flaky suite under investigation' "${WRUN}/gate-outcome-artifact.html"; then
+    pass_msg "force-used: the waiver receipt enriched the line"
+  else
+    fail_msg "force-used: the waiver receipt detail did not reach the page"
+  fi
+fi
+
+# Case 5: INCOMPLETE — canonical facts arrived, the model prose did not.
+IOUT="${WORK}/incomplete"; mkdir -p "$IOUT"
+if _run_renderer incomplete "${WORK}/incomplete.card" \
+     aid_plan_close_render "${FIX}/pm-brief-incomplete.json" "${FIX}/release-decision-merged.json" P080 "$IOUT"; then
+  # A raw technical list can never be the ONLY output: the card still renders…
+  _assert_card_first incomplete "${WORK}/incomplete.card" "$CARD_FINISHED"
+  _assert_seven_blocks incomplete "${IOUT}/plan-close-artifact.html"
+  _golden incomplete "${IOUT}/plan-close-artifact.html"
+  # …and the page SAYS the summary is missing rather than quietly shrinking.
+  if grep -qF 'class="block alarm"' "${IOUT}/plan-close-artifact.html" \
+     && grep -qF "$_AID_ARTIFACT_PROSE_MISSING" "${IOUT}/plan-close-artifact.html"; then
+    pass_msg "incomplete: the page carries the missing-summary alarm with the declared literal"
+  else
+    fail_msg "incomplete: prose was missing and the page did not say so"
+  fi
+  # The tiles still hold — they were computed, not written.
+  if grep -qF '<span class="v">3/3 EPIKŮ</span>' "${IOUT}/plan-close-artifact.html"; then
+    pass_msg "incomplete: the computed tiles survive the missing prose"
+  else
+    fail_msg "incomplete: computed tiles did not survive the missing prose"
+  fi
+fi
+
+# Case 5b: the same at the GENERIC renderer — facts, no prose at all. This is
+# the smoke pass over aid_artifact_render itself (the audit renderer is
+# untouched by this plan and is not driven here).
+SOUT="${WORK}/smoke-no-prose.html"
+if _run_renderer smoke-no-prose "${WORK}/smoke-no-prose.stdout" \
+     aid_artifact_render outcome "${FIX}/artifact-facts-no-prose.json" "" "$SOUT"; then
+  _assert_seven_blocks smoke-no-prose "$SOUT"
+  _golden smoke-no-prose "$SOUT"
+  # Block 6 never disappears, and the caps are enforced with a TRUE remainder.
+  # 6 items against a cap of 5 and 4 next steps against a cap of 3 both leave a
+  # remainder of exactly 1, so the overflow line must appear TWICE.
+  if grep -qF "$_AID_ARTIFACT_ASK_NOTHING" "$SOUT" \
+     && [[ "$(grep -oF "$(_aid_artifact_overflow 1)" "$SOUT" | wc -l)" == "2" ]]; then
+    pass_msg "smoke-no-prose: the ask block survives an empty prose input and the caps report true remainders"
+  else
+    fail_msg "smoke-no-prose: the ask block or the overflow literal is missing"
+  fi
+  # The body is a BODY: the Artifact tool supplies the skeleton.
+  # The alternatives are anchored on purpose: a bare `<head` also matches the
+  # masthead's own `<header`, which is legitimate body content.
+  if ! grep -qiE '<!doctype|<html[ >]|<head>|<body[ >]|</body>' "$SOUT" \
+     && ! grep -qiE '(src|href)="(https?:)?//' "$SOUT"; then
+    pass_msg "smoke-no-prose: body-only and CSP-clean — no skeleton tags, no external origin"
+  else
+    fail_msg "smoke-no-prose: the body carries skeleton tags or an external asset"
+  fi
+fi
+
+# ─── secrets ────────────────────────────────────────────────────────────────
+
+echo "== secrets =="
+
+# AC: no fixture contains a real secret/token pattern. The sweep uses the
+# SHIPPED detector table, not a copy of it, so a new detector widens the sweep
+# automatically.
+#
+# high_entropy_blob is handled separately and precisely rather than exempted:
+# a 40-char hex git SHA matches it, and SHAs are legitimate fixture content
+# (the renderers shorten them to 12 chars before they reach a page). Any
+# high-entropy hit that is NOT a 40-hex SHA fails.
+_is_allowed_fixture() {
+  local b; b="$(basename "$1")"
+  local m; for m in "${MALICIOUS_FIXTURES[@]}"; do [[ "$b" == "$m" ]] && return 0; done
+  return 1
+}
+
+for m in "${MALICIOUS_FIXTURES[@]}"; do
+  if [[ -f "${FIX}/${m}" ]]; then
+    pass_msg "declared malicious fixture ${m} exists (the allowlist cannot rot into a blanket exemption)"
+  else
+    fail_msg "declared malicious fixture ${m} is missing — remove it from MALICIOUS_FIXTURES or restore it"
+  fi
+done
+
+sweep_bad=0
+while IFS= read -r f; do
+  _is_allowed_fixture "$f" && continue
+  for entry in "${_AID_ARTIFACT_DETECTORS[@]}"; do
+    dname="${entry%%|*}"; dre="${entry#*|}"
+    while IFS= read -r hit; do
+      [[ -n "$hit" ]] || continue
+      if [[ "$dname" == "high_entropy_blob" ]]; then
+        [[ "$hit" =~ ^[0-9a-f]{40}$ ]] && continue
+      fi
+      fail_msg "fixture $(basename "$f") carries a ${dname}-shaped string: ${hit:0:12}…"
+      sweep_bad=1
+    done < <(grep -oE -e "$dre" "$f" 2>/dev/null || true)
+  done
+done < <(find "$FIX" -type f ! -path "${GOLDEN}/*")
+(( sweep_bad == 0 )) && pass_msg "no non-allowlisted fixture carries a secret shape (swept with the shipped detector table)"
+
+# Runtime leakage through the GATE renderer: the malicious report puts secrets
+# in a gate row's `output`, in a gate NAME and in a _command_log command — the
+# three places a run can carry tooling-controlled text to a human surface.
+MRUN="${WORK}/malicious-gate"; mkdir -p "${MRUN}/gates"
+cp "${FIX}/gate-report-malicious.json" "${MRUN}/gates/gates_report.json"
+SPECIMENS=(
+  'ghp_0123456789abcdefghijklmnopqrstuvwxyz'
+  'ghp_0123456789abcdefghijklmnop'
+  'AKIAIOSFODNN7EXAMPLE'
+  'password=hunter2'
+  'Bearer abcdefghijklmnopqrstuvwxyz012345'
+)
+if _run_renderer malicious-gate "${WORK}/malicious-gate.card" aid_gate_outcome_render "" "$MRUN"; then
+  leaked=""
+  for s in "${SPECIMENS[@]}"; do
+    grep -qF -- "$s" "${MRUN}/gate-outcome-artifact.html" && leaked+=" page:${s:0:10}…"
+    grep -qF -- "$s" "${WORK}/malicious-gate.card" && leaked+=" card:${s:0:10}…"
+  done
+  if [[ -z "$leaked" ]]; then
+    pass_msg "malicious-gate: no specimen survives into the page or the chat card"
+  else
+    fail_msg "malicious-gate: leaked ->${leaked}"
+  fi
+  if grep -qE 'Redigováno tajemství: [1-9]' "${MRUN}/gate-outcome-artifact.html"; then
+    pass_msg "malicious-gate: the provenance footer reports a non-zero redaction count"
+  else
+    fail_msg "malicious-gate: redaction happened silently — the footer count is zero"
+  fi
+  _golden malicious-gate "${MRUN}/gate-outcome-artifact.html"
+fi
+
+# Runtime leakage through the PLAN-CLOSE renderer: the secret sits in the
+# model-written prose and in a blocker, i.e. on both halves of that page.
+MOUT="${WORK}/malicious-plan"; mkdir -p "$MOUT"
+if _run_renderer malicious-plan "${WORK}/malicious-plan.card" \
+     aid_plan_close_render "${FIX}/pm-brief-malicious.json" "${FIX}/release-decision-open.json" P080 "$MOUT"; then
+  leaked=""
+  for s in "${SPECIMENS[@]}"; do
+    grep -qF -- "$s" "${MOUT}/plan-close-artifact.html" && leaked+=" page:${s:0:10}…"
+    grep -qF -- "$s" "${WORK}/malicious-plan.card" && leaked+=" card:${s:0:10}…"
+  done
+  if [[ -z "$leaked" ]]; then
+    pass_msg "malicious-plan: no specimen survives into the page or the chat card"
+  else
+    fail_msg "malicious-plan: leaked ->${leaked}"
+  fi
+  if grep -qE 'Redigováno tajemství: [1-9]' "${MOUT}/plan-close-artifact.html"; then
+    pass_msg "malicious-plan: the provenance footer reports a non-zero redaction count"
+  else
+    fail_msg "malicious-plan: redaction happened silently — the footer count is zero"
+  fi
+  _golden malicious-plan "${MOUT}/plan-close-artifact.html"
+fi
+
+# The FAILURE path. When a renderer cannot run, the controller falls back to a
+# hand-built card — and that path must go through aid_gate_outcome_redact, the
+# one callable entry point onto the same detector table. A fixture carrying one
+# specimen of EVERY shipped detector proves the bypass is closed in code.
+RAW="$(cat "${FIX}/malicious-fallback-output.txt")"
+REDACTED="$(aid_gate_outcome_redact "$RAW")"
+fallback_bad=0
+for entry in "${_AID_ARTIFACT_DETECTORS[@]}"; do
+  dname="${entry%%|*}"; dre="${entry#*|}"
+  mapfile -t hits < <(grep -oE -e "$dre" "${FIX}/malicious-fallback-output.txt" 2>/dev/null || true)
+  if (( ${#hits[@]} == 0 )); then
+    fail_msg "fallback fixture carries no specimen for detector ${dname} — add one, or the fallback proof has a hole"
+    fallback_bad=1
+    continue
+  fi
+  for h in "${hits[@]}"; do
+    if [[ "$REDACTED" == *"$h"* ]]; then
+      fail_msg "fallback card leaked a ${dname} specimen: ${h:0:12}…"
+      fallback_bad=1
+    fi
+  done
+done
+if (( fallback_bad == 0 )); then
+  pass_msg "fallback card: every shipped detector has a specimen and none survives aid_gate_outcome_redact"
+fi
+if [[ "$REDACTED" == *'<redacted:'* ]]; then
+  pass_msg "fallback card: redaction is visible, not silent"
+else
+  fail_msg "fallback card: nothing was marked as redacted"
+fi
+
+# ─── result ─────────────────────────────────────────────────────────────────
+
+if [[ "$REGEN" == "1" ]]; then
+  echo
+  echo "GOLDENS REGENERATED. Review the diffs above, then re-run WITHOUT AID_HANDOFF_GOLDEN_REGEN."
+  echo "Results: 0/1 passed, 1 failed (regeneration mode never reports a pass)"
+  exit 2
+fi
+
+total=$((pass + fail))
+echo
+echo "Results: ${pass}/${total} passed, ${fail} failed"
+[[ "$fail" -eq 0 ]] || exit 1
+exit 0

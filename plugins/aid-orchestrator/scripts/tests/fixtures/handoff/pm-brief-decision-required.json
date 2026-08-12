@@ -1,0 +1,24 @@
+{
+  "_provenance": "P080 Step 15. Same 14-key payload as pm-brief-finished.json with release_ready=false and two blockers, which is what makes the renderer choose the Decision-required card. Delivery case: DECISION-REQUIRED.",
+  "schema_version": "aid-2.0",
+  "artifact_type": "pm_decision_brief",
+  "pm_decision_brief": {
+    "communication_status": "complete",
+    "release_ready": false,
+    "blockers": [
+      { "input_id": "evidence_verify", "reason": "dva kroky nemají evidenci ověřenou na HEAD" },
+      { "input_id": "specialist_review", "reason": "reviewer nechal otevřený nález o hraničním případu" }
+    ],
+    "waivers_applied": ["tests"],
+    "human_summary_path": "pm-summary.md",
+    "merge_mode": "blocked",
+    "evidence_verification_status": "fail",
+    "evidence_verified_at_head": false,
+    "reporter_status": "ok",
+    "reporter_reason": "",
+    "simplifier_status": "ok",
+    "simplifier_reason": "",
+    "summary_for_pm": "Plán není připravený k release: evidence neprošla a zůstávají dva blokátory.",
+    "delivered_summary_ref": ".aid-o/work/evidence/P080/delivery.md"
+  }
+}
