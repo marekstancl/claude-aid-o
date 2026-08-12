@@ -69,9 +69,13 @@ Or go fully autonomous:
 | `/aid-plan [topic]` | Brainstorm → architecture → plan.json (merges old brainstorm + write-plan + plan-epic) |
 | `/aid-run [id]` | Execute full pipeline: READY → EXECUTE → GATES → DONE. Use `--auto` for autonomous mode |
 | `/aid-status [id]` | Pipeline status — FSM state, steps, gates, queue (merges old epic-status + epic-queue) |
-| `/aid-init` | Initialize `.aid-o/` workspace — 10-file structure, stack auto-detection, idempotent |
+| `/aid-init` | Create or upgrade the `.aid-o/` workspace — base manifest, stack auto-detection, idempotent |
+| `/aid-setup [module]` | Configure what init created — permissions, integrations, CLAUDE.md, stack re-scan |
+| `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
+| `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |
 | `/aid-audit` | Project health audit — code, docs, tests, dependencies |
 | `/aid-audit-tests` | Test portfolio audit — inventory, safe measurement, and a plain-language recommendation |
+| `/visual-companion` | Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision |
 | `/aid-stop` | Emergency stop — save progress, restore permissions |
 | `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |
 
@@ -107,13 +111,15 @@ Or go fully autonomous:
 
 ## Configuration
 
-`/aid-init` auto-configures everything. Fine-tune in `.aid-o/config/`:
+Init creates, setup configures: `/aid-init` writes the initial config files, `/aid-setup` owns
+every change after that. Both live in `.aid-o/config/`:
 
-| File | Controls |
-|------|----------|
-| `execution.yaml` | Gate commands, retry limits, dispatch strategy |
-| `project.yaml` | Stack detection, project preferences |
-| `permissions.yaml` | Agent permission presets |
+| File | Controls | Changed by |
+|------|----------|-----------|
+| `execution.yaml` | Gate commands, retry limits, dispatch strategy | hand-edited; `/aid-init` only offers additive upgrades |
+| `project.yaml` | Stack detection, project preferences | `/aid-setup scan` |
+| `permissions.yaml` | Agent permission presets | `/aid-setup permissions` |
+| `integrations.yaml` | MCP integrations (memory, …) | `/aid-setup integrations` |
 
 ## Changelog
 

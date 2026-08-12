@@ -1,10 +1,16 @@
 ---
 name: aid-init
-description: Initialize or upgrade .aid-o/ workspace (10-file init, idempotent)
+description: Create or upgrade the .aid-o/ workspace (base manifest, idempotent)
 user_invocable: true
 ---
 
-Initialize a new `.aid-o/` workspace or upgrade existing v1.x workspace to v2.0 structure. Merges the old `/aid-setup` interactive onboarding into this command.
+Initialize a new `.aid-o/` workspace or upgrade an existing v1.x workspace to the v2.0 structure.
+
+**Ownership:** `/aid-init` **creates** the workspace and its initial files, and owns the
+migration/upgrade paths. `/aid-setup` **mutates** those files afterwards (presets, integration
+toggles, CLAUDE.md, stack re-detection). `/aid-init` re-runs never rewrite a file that already
+exists — the one narrow, PM-confirmed exception is the additive `gate_profiles` append documented
+below. `/aid-setup` never creates the workspace and never runs migrations.
 
 ## Usage
 
@@ -13,14 +19,26 @@ Initialize a new `.aid-o/` workspace or upgrade existing v1.x workspace to v2.0 
 /aid-init --upgrade         # upgrade existing v1 .aid-o/ to v2
 ```
 
-## Files Created (11 total)
+## Files Created
+
+There is exactly ONE base manifest — the set a fresh `/aid-init` always produces — plus two
+separately labelled categories that are deliberately NOT part of the base count: **git hooks**
+(consumer-repo files AID owns only within its markers) and **conditional writes** (written only
+when a condition holds).
+
+### Base manifest
 
 ```
+<project root>/
+  .gitignore              # created if missing; otherwise per-line backfill of AID entries
 .aid-o/
-  .gitignore              # ignores runtime artifacts, versions design artifacts
   config/
     project.yaml          # auto-detected: name, type, languages, test_cmd, lint_cmd, build_cmd
     permissions.yaml      # default: autonomous_mode: false
+    execution.yaml        # gate definitions, composed eagerly from detected stacks
+    plugin.yaml           # resolved plugin_path + discovered_at + dispatch_mode
+    check-severity.yaml   # compliance-check severity registry (copied from defaults)
+    test-audit.yaml       # test portfolio audit config (copied from defaults)
   work/
     active.md             # GENERATED stream index (never hand-written)
     backlog.md            # improvement backlog (categorized sections)
@@ -32,7 +50,44 @@ Initialize a new `.aid-o/` workspace or upgrade existing v1.x workspace to v2.0 
   work/evidence/          # empty directory (for run evidence)
 ```
 
-Total: 6 files + 5 empty directories = 11 items.
+**Total: 9 files under `.aid-o/` + 4 empty directories = 13 items.** This is the only count
+statement in this document; every other place that describes the fresh-init product refers back
+to it rather than restating a number.
+
+Two things in the block above are deliberately NOT in that number, and the reasons are the
+document's own rules rather than convenience:
+
+- **`.gitignore`** is a consumer-repo file that AID backfills per line — the identical category
+  as the git hooks below, which this document already excludes. Counting one and excluding the
+  other would be the same inconsistency this section exists to remove.
+- **`config/` and `work/` are not empty** — they hold the nine files. The four genuinely empty
+  directories are `plans/`, `tasks/`, `work/quick/` and `work/evidence/`. An earlier draft of
+  this line said "5 empty directories" while listing `config/` among them, which was false on
+  its face.
+
+### Git hooks (not counted above)
+
+`.git/hooks/pre-commit` and `.git/hooks/pre-push` are consumer-repo files that AID installs and
+upgrades, but owns only **within its own marker block** — see "Git Hook Installation" below. They
+are excluded from the base count because they are not `.aid-o/` workspace content and because a
+project may legitimately carry its own hook logic outside the markers.
+
+### Conditional writes (not counted above)
+
+| File | Written when |
+|------|--------------|
+| `.aid-o/config/integrations.yaml` | the Qdrant memory integration is detected as available — `/aid-init` writes only `memory.enabled: true` at creation |
+| `.github/workflows/plan-boundary-required-check.yml` | the PM answers Y to the optional plan-boundary CI prompt |
+
+### Where `.aid-o/` is created
+
+`.aid-o/` lives at the **state root** resolved per `lib/aid-roots.sh` semantics: the primary
+checkout, never a linked worktree. This is the same contract `commands/aid-status.md` documents.
+Running `/aid-init` from inside `.aid-worktrees/plan-*` therefore initializes (or refreshes) the
+**primary checkout's** `.aid-o/`, not a second workspace inside the worktree — a linked worktree
+never gets its own state directory. The git hooks installed by this command resolve the same root
+inline via `git rev-parse --git-common-dir`, so a commit made from a plan worktree is guarded by
+the primary checkout's state.
 
 ### .gitignore (copied from defaults/.gitignore)
 
@@ -131,10 +186,10 @@ If no stacks are detected, the file is still written with an empty `gates:` mapp
 
 A `notifications.telegram` block is appended (`enabled: false` by default) to wire P032 repeated-precondition-fail alerts once `svc-mcp-tg-bot` is deployed.
 
-### Existing Project — gate_profiles Upgrade (non-destructive, P061 D9)
+### Existing Project — gate_profiles Upgrade
 
-`.aid-o/config/execution.yaml` is **project configuration**, not global magic re-applied on every
-plugin update (D9). A project that already has its own `execution.yaml` — possibly hand-edited by
+Non-destructive, PM-confirmed (decision D9). `.aid-o/config/execution.yaml` is **project
+configuration**, not global magic re-applied on every plugin update (D9). A project that already has its own `execution.yaml` — possibly hand-edited by
 its PM (this repo's own `.aid-o/config/execution.yaml` is exactly this case:
 `generated_by: manual override for E-035-1_2`) — MUST NEVER have that file silently rewritten by a
 later `/aid-init` re-run, even to add a feature as small as the `gate_profile_defaults`/
@@ -237,9 +292,20 @@ Standards profile:
 
 ### Vulcan Standards — Ecosystem Docs Integration
 
-When `vulcan` standards are selected, the project CLAUDE.md must reference the authoritative ecosystem documents. These live in the global docs repo, NOT in the AID plugin — they are the single source of truth:
+When `vulcan` standards are selected, the project CLAUDE.md must reference the authoritative
+ecosystem documents. These live in the global docs repo, NOT in the AID plugin — they are the
+single source of truth.
 
-**Mandatory references added to project CLAUDE.md:**
+**Ownership — `CLAUDE.md`:** `/aid-init` does NOT write `CLAUDE.md`. It records the standards
+choice in `project.yaml → standards.active` and stops there. The sole AID writer of `CLAUDE.md` is
+`/aid-setup` (module `claude-md` / `skills/setup/claude-md.md`), which owns both the initial
+generation and every later update.
+
+**Known gap:** `skills/setup/claude-md.md` does not yet emit an ecosystem-reference block for the
+`vulcan` profile. Until it does, the block below is **reference material for that module**, not an
+instruction `/aid-init` carries out — a PM on `vulcan` standards adds it by hand or via
+`/aid-setup claude-md`.
+
 ```markdown
 ## Ecosystem pravidla (závazná)
 
@@ -257,7 +323,9 @@ Klíčová pravidla:
 - G-015: Jeden Dockerfile (prod-ready), docker-compose.override.yml pro dev
 ```
 
-**Agent MUST read these files** during standards-related work (auditor, planner, gate evaluation). The guardrails contain 19 rules (G-001 to G-019) covering architecture authority, language boundaries, integration patterns, deployment, security, and infrastructure.
+**Agent MUST read the ecosystem documents** during standards-related work (auditor, planner, gate
+evaluation). The guardrails contain 19 rules (G-001 to G-019) covering architecture authority,
+language boundaries, integration patterns, deployment, security, and infrastructure.
 
 **Additionally:** VUL-001 to VUL-022 rules from `defaults/standards/vulcan.yaml` apply for code-level standards (Pydantic I/O, tenant isolation, agent patterns). The G-rules are ecosystem/infrastructure level; VUL-rules are code level. Both apply simultaneously.
 
@@ -281,14 +349,53 @@ standards:
     severity_overrides: {}     # e.g., { "GEN-003": "low" }
 ```
 
+**Ownership — `project.yaml`:** created here from auto-detection; subsequent changes are owned by
+`/aid-setup` (module `scan` / `skills/setup/project-scan.md`) — `/aid-init` re-runs never rewrite
+it. That module has ONE delegated writer: `agents/project-scanner.md`, which writes `project.yaml`
+in Quick Scan (Mode A, triggered by `/aid-setup`) and extends it in Deep Analysis (Mode B,
+Orchestrator-triggered post-milestone). Mode B is delegated writing under the same setup ownership,
+not a third independent owner: it may only extend the profile's auto-detected sections. The
+authoritative merge rule is `skills/setup/project-scan.md` — **merge, never overwrite PM-added
+custom fields**; the scanner's own "each scan overwrites the previous" line describes replacement of
+the *auto-detected* sections only, and `skills/memory.md`'s "NEVER write to project.yaml" is a rule
+for **memory agents**, which are not the scanner in Mode A/B. Nothing else writes this file.
+
 ### permissions.yaml template
 
 ```yaml
 # AID permissions — controls autonomous behavior
+active_preset: autonomous # preset catalog: defaults/policies/permissions.yaml
 autonomous_mode: false    # set true to enable /aid-run --auto
 auto_commit: false        # set true to allow auto-commits
 auto_push: false          # set true to allow auto-push (requires auto_commit)
 ```
+
+`active_preset` is seeded because `/aid-setup`'s first menu read expects it; without the key a
+fresh workspace made setup fall back before it could show anything.
+
+**The seeded preset NAME is not the preset APPLIED, and that is deliberate.** The `autonomous`
+preset as described in `defaults/policies/permissions.yaml` and in `/aid-help` carries
+`auto_commit: true`; this template seeds `false` for all three switches. Init records which
+preset a workspace is heading for; it does not turn autonomy on behind the PM's back. The
+switches become the preset's values when the PM applies it through
+`/aid-setup permissions` — which is the same "init creates, setup configures" boundary the rest
+of this document draws, applied to values rather than files. Seeding the name without this
+sentence would have created a fresh contradiction between the template and three surfaces that
+describe the preset.
+
+**How the pair is displayed — two cases, two strings, used verbatim by `/aid-init`,
+`skills/setup/permissions.md` and `scripts/aid-config-summary.sh`. No third phrasing anywhere,
+because `active_preset: autonomous` next to `autonomous_mode: false` is contradictory on its
+face and needs one honest rendering rather than three improvised ones.**
+
+- Key present: `<preset> (preset) — autonomous_mode: <value>` — a fresh workspace therefore
+  reads `autonomous (preset) — autonomous_mode: false`.
+- Key absent (a workspace created before this key existed):
+  `autonomous (implicit — key missing, will be written on first change)`.
+
+**Ownership — `permissions.yaml`:** created here from the template; subsequent changes are owned
+by `/aid-setup` (module `permissions`) — `/aid-init` re-runs never rewrite it, including a file a
+PM hand-edited.
 
 ### active.md template
 
@@ -358,6 +465,15 @@ prompt or a manual edit changes it. (Before v2.33.0 the whole file was overwritt
 resetting a manual `inline`/`subagent` choice back to `agent_tool` on every re-init — the
 misconfiguration class behind P043/P044 provenance false-blocks.)
 
+**Ownership — `plugin.yaml` has a SECOND writer, and it is not `/aid-setup`.** `/aid-run`'s
+PRE-FLIGHT rewrites `plugin_path` when it finds the recorded path stale or missing
+(`commands/aid-run.md`, PRE-FLIGHT step 3). That is deliberate self-repair, not drift: a plugin
+update moves the path, and a run that refused to fix it would simply fail. So the rule for this
+file is narrower than "init creates, setup configures" — **`/aid-init` and `/aid-run` both write
+`plugin_path`/`discovered_at`; nobody but the fresh-init prompt or a human writes
+`dispatch_mode`.** Stated here because an undeclared second writer is exactly what this
+document is being corrected to stop hiding.
+
 ### Dispatch Mode Selection
 
 On fresh init (no existing `plugin.yaml`), ask the PM:
@@ -423,6 +539,12 @@ After plugin discovery, automatically detect and initialize agent memory:
    g. **Report:** "Memory scan complete: {N} entries stored across {M} categories"
    h. **If PM says N:** Skip scan, keep existing entries
 3. **If Qdrant unavailable:** warn "Qdrant not available — memory disabled. Configure Qdrant MCP and re-run `/aid-init` to enable."
+
+**Ownership — `integrations.yaml`:** `/aid-init` writes exactly one key at creation
+(`memory.enabled: true`, step 2a) and nothing else, ever. Every later enable/disable and every
+other integration is owned by `/aid-setup` (module `integrations`) — `/aid-init` re-runs never
+rewrite the file, so a PM who disabled memory in setup does not get it re-enabled by re-running
+init.
 
 ## Git Hook Installation
 
@@ -514,13 +636,20 @@ The same `/aid-init` re-run upgrade note as pre-commit applies.
 
 After workspace creation (and on every re-run), copy project-level config defaults from the plugin into `.aid-o/config/`. **Idempotent: existing target files are NEVER overwritten** — PM customizations are preserved across plugin upgrades.
 
-### check-severity.yaml (severity registry — P038)
+### check-severity.yaml — severity registry
 
 1. **Source template:** `{plugin_path}/defaults/check-severity.yaml`
 2. **Target:** `.aid-o/config/check-severity.yaml`
 3. **Logic:**
    - If target does NOT exist → copy template
    - If target exists → **skip** (do not overwrite; PM may have promoted/demoted checks)
+
+**Ownership — this file also has a second writer, and again it is not `/aid-setup`.**
+`aid-fsm.sh promote-check` edits it in place with `yq -i` to promote or demote a check's
+severity. That is the mechanism the "PM may have promoted/demoted checks" line above is
+already talking about, so the two are consistent — but the writer was never named. Rule:
+**`/aid-init` creates it once and never overwrites it; `aid-fsm.sh promote-check` is the
+sanctioned mutator; `/aid-setup` does not touch it at all.**
 
 ```
 Config defaults installation:
@@ -530,7 +659,7 @@ Config defaults installation:
 
 **What the registry does:** Maps each compliance check to either `severity: blocking` (cmd_done_advance refuses to advance review→release without `--force`) or `severity: advisory` (logged in `compliance.json failures[]` but does not block). See `skills/pipeline.md` §7 and `docs/plans/AID-v3-principles.md` §1 for the tiered-severity rationale.
 
-### test-audit.yaml (test portfolio audit config — P066)
+### test-audit.yaml — test portfolio audit config
 
 1. **Source template:** `{plugin_path}/defaults/config/test-audit.yaml`
 2. **Target:** `.aid-o/config/test-audit.yaml`
@@ -580,10 +709,13 @@ These files/dirs are created on first use of the feature that needs them:
 
 | File | Created by | Trigger |
 |------|-----------|---------|
-| `config/execution.yaml` | `/aid-init` (eager, P032) or `aid-fsm.sh init` (auto-recovery) | Init time or first EPIC run if missing |
 | `config/queue.yaml` | `/aid-status queue add` | First queue entry |
 | `config/orchestration.yaml` | `/aid-run` | First EPIC run with custom config |
 | `config/policies/review-checkpoints.yaml` | `/aid-run` | First review checkpoint dispatch |
+
+`config/execution.yaml` is deliberately NOT in this table — it is part of the base manifest and is
+written eagerly at init (see "execution.yaml Generation"). `aid-fsm.sh init` recreates it only as
+auto-recovery for a workspace where it went missing; that is a repair path, not lazy creation.
 
 ## Idempotency
 
@@ -602,6 +734,13 @@ Safe to run multiple times:
   block, `/aid-init` offers to *append* (never rewrite) it after explicit PM confirmation — see
   "Existing Project — gate_profiles Upgrade" above. Every existing byte, including hand-edited
   `command:` values, is preserved untouched.
+
+**Mechanical anchor:** `scripts/tests/test-init-idempotency.sh` pins the *scripted substrate* of
+this contract — the base manifest above, a byte-identical re-run, the never-overwritten existing
+`execution.yaml`, the append-only `.gitignore` backfill and the declined `gate_profiles` upgrade —
+while deliberately **not** claiming to cover the steps this document performs as prose rather than
+through a shipped library (hook installation is the concrete case at this HEAD), a boundary the
+harness states in its own header.
 
 ```
 /aid-init on existing workspace:
@@ -659,13 +798,18 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 
 - `skills/pipeline.md` — workspace structure reference
 - `commands/aid-do.md` — uses `work/quick/` (lazy-created at init)
-- `commands/aid-run.md` — uses `config/execution.yaml` (lazy-created)
+- `commands/aid-run.md` — uses `config/execution.yaml` (base manifest, written at init)
 - `commands/aid-status.md` — uses `config/queue.yaml` (lazy-created)
+- `commands/aid-setup.md` — owns every later change to the files init creates
+- `lib/aid-roots.sh` — state-root resolution (primary checkout, never a linked worktree)
 
 ## Important
 
 - **Idempotent** — safe to run repeatedly, never destroys existing data
-- **11 items** — 6 files + 5 directories created on fresh init
+- **Base manifest** — see "Files Created" above for the single authoritative count
+- **Init creates, setup mutates** — `/aid-init` writes initial content and owns upgrades;
+  `/aid-setup` owns every later change to `permissions.yaml`, `project.yaml`,
+  `integrations.yaml` and `CLAUDE.md`
 - **Lazy creation** — advanced config created on first use, not at init
 - **Auto-detect stack** — reads project root files to suggest test/lint/build commands
 - **Upgrade path** — `--upgrade` migrates v1 paths to v2 with PM confirmation
@@ -674,10 +818,8 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
   Upgrade" above
 - If `$ARGUMENTS` is empty → auto-detect mode (fresh init or upgrade)
 - **Standards** — selection stored in `project.yaml → standards.active`. Override individual rules via `standards.overrides.disabled_rules[]` or `standards.overrides.severity_overrides`
-- **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
-
-
-**Last Updated:** 2026-08-06
+- **After init** → print the configuration summary (see "Closing output" below), then suggest:
+  "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 ## Plan mode
 
@@ -690,3 +832,24 @@ before. New plans default to `plan_branch` when the project declares a
 `plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
 creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
+
+## Closing output
+
+The LAST thing `/aid-init` does — after every file, hook and config-default step above — is run
+
+```
+{plugin_path}/scripts/aid-config-summary.sh
+```
+
+and present its output **verbatim**, unedited and unsummarized, followed by the next-step
+suggestion. Do not describe the resulting configuration in your own words: the script is the one
+place that renders it, and `/aid-setup` opens with the same block, so a PM sees the same eight
+lines from both commands.
+
+The script is read-only (it never writes, and a missing workspace is a report line rather than an
+error), so it is safe to run at the end of a fresh init, an idempotent re-run, or an upgrade.
+Exit codes: `0` rendered, `2` usage, `3` state root unresolvable (not a git repository — surface
+its stderr as-is and skip the block; the rest of init's report still stands).
+
+
+**Last Updated:** 2026-08-11

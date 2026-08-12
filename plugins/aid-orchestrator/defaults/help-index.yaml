@@ -11,7 +11,15 @@
 #   audience    beginner | regular | power | internal
 #   disposition current | update | index_only | intentionally_internal
 #               | remove_or_deprecate
-#   writes      config files this surface may write; [] = read-only
+#   writes      config files this surface may write; [] = read-only.
+#               Each entry carries an ownership prefix:
+#                 creates:<path>  this surface writes the file's initial content
+#                 mutates:<path>  this surface owns changes AFTER creation
+#               A path may appear as `creates:` on one surface and `mutates:` on
+#               another; that pair IS the ownership statement. One surface carrying
+#               BOTH prefixes for the same path means it creates the file and is also
+#               its only later writer. Two surfaces both claiming `creates:` for one
+#               path is a defect.
 #   final_turn  renderer:<script> | card:<type> | internal
 #
 # DISPOSITION SEMANTICS (exact):
@@ -33,6 +41,31 @@
 #                           shipped-but-not-indexed, and the row asserts something false
 #                           about the product.
 #   remove_or_deprecate     may appear in help with a deprecation note; takes no topic route.
+#
+# AUTHORITY OF THIS FILE vs. THE HELP PROSE (decided at P080 EPIC 2 Step 5).
+#   This file is the AUTHORITY for the `writes` column. `commands/aid-help.md` restates
+#   parts of it in prose (e.g. the "Creates: …" block under `### Topic: init`). That
+#   prose is a HUMAN SUMMARY: it is NOT authoritative, and NOTHING CHECKS IT against
+#   this file — `test-help-index-coverage.bats` asserts the column's presence and TYPE,
+#   never its content against the prose. When the two disagree, THIS FILE WINS and the
+#   prose is the thing to fix.
+#   HONEST PROVENANCE: this divergence is not inherited housekeeping — Step 5 CREATED it.
+#   Before this commit the filenames in the help prose and in this column matched.
+#   The divergence is WIDER than "shape only", and the earlier wording here
+#   understated it (CP3): besides the `creates:`/`mutates:` prefixes, this column now
+#   carries TWO filenames the prose does not — the later writers found by the
+#   mutation-shaped sweep. So the follow-up is not a cosmetic realignment; the two
+#   statements differ in CONTENT as well as form. A regression this step introduced
+#   knowingly, recorded at its real size rather than filed under pre-existing drift.
+#   This is a written-down stopgap, not the intended end state. The intended end state is
+#   to delete the duplication — have the help prose point here instead of restating the
+#   list, so one copy cannot diverge from itself. That edit lands in `commands/aid-help.md`,
+#   which is outside Step 5's allowed paths; see the plan's follow-up item.
+#   Do NOT "fix" this by adding a naive prose-vs-index assertion to the bats suite: the
+#   prose lists live inside code fences and that suite's helpers strip fenced content, so
+#   such a check inspects nothing and passes green. Any real check must read fences on
+#   purpose and compare file-to-index, not file-to-topic (`queue.yaml` is documented under
+#   the `config` topic, not under `status`).
 #
 # ONE NAMED EXEMPTION: `/aid-help` carries `topic: none` though it is `update` — the
 # router cannot route to itself. Step 2 encodes this by command name, not as a general
@@ -60,12 +93,12 @@ surfaces:
   - { command: /aid-run, file: plugins/aid-orchestrator/commands/aid-run.md,
       purpose: "Execute EPIC pipeline — 6-state FSM with optional autonomous mode",
       topic: run, audience: beginner, disposition: current,
-      writes: [], final_turn: "card:finished" }
+      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "card:finished" }
 
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
       purpose: "Show EPIC status, queue, and pipeline overview",
       topic: status, audience: beginner, disposition: current,
-      writes: [".aid-o/config/queue.yaml"], final_turn: "card:finished" }
+      writes: ["creates:.aid-o/config/queue.yaml", "mutates:.aid-o/config/queue.yaml"], final_turn: "card:finished" }
 
   - { command: /aid-stop, file: plugins/aid-orchestrator/commands/aid-stop.md,
       purpose: "Emergency stop — disengage FIRST AID auto-mode immediately",
@@ -83,18 +116,25 @@ surfaces:
       writes: [], final_turn: "card:finished" }
 
   - { command: /aid-init, file: plugins/aid-orchestrator/commands/aid-init.md,
-      purpose: "Initialize or upgrade .aid-o/ workspace (10-file init, idempotent)",
+      purpose: "Create or upgrade the .aid-o/ workspace (base manifest, idempotent)",
       topic: init, audience: beginner, disposition: update,
-      writes: [".aid-o/config/project.yaml", ".aid-o/config/execution.yaml",
-               ".aid-o/config/plugin.yaml",
-               ".aid-o/config/check-severity.yaml", ".aid-o/config/test-audit.yaml"],
+      writes: ["creates:.aid-o/config/project.yaml",
+               "creates:.aid-o/config/permissions.yaml",
+               "creates:.aid-o/config/execution.yaml",
+               "creates:.aid-o/config/plugin.yaml",
+               "creates:.aid-o/config/check-severity.yaml",
+               "creates:.aid-o/config/test-audit.yaml",
+               "creates:.aid-o/config/integrations.yaml",
+               "mutates:.aid-o/config/execution.yaml"],
       final_turn: "card:finished" }
 
   - { command: /aid-setup, file: plugins/aid-orchestrator/commands/aid-setup.md,
       purpose: "Modular project configuration — permissions, integrations, CLAUDE.md, stack scan",
       topic: setup, audience: regular, disposition: update,
-      writes: [".aid-o/config/permissions.yaml", ".aid-o/config/integrations.yaml",
-               "CLAUDE.md", ".aid-o/config/project.yaml"],
+      writes: ["mutates:.aid-o/config/permissions.yaml",
+               "mutates:.aid-o/config/integrations.yaml",
+               "mutates:.aid-o/config/project.yaml",
+               "creates:CLAUDE.md", "mutates:CLAUDE.md"],
       final_turn: "card:finished" }
 
   - { command: /aid-plan, file: plugins/aid-orchestrator/commands/aid-plan.md,
