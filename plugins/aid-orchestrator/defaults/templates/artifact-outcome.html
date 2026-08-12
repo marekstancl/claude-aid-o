@@ -1,0 +1,182 @@
+<!--
+  artifact-outcome.html — the generic AID outcome artifact template.
+
+  WHAT THIS IS
+    The artifact BODY only. The Artifact tool supplies <!doctype>, <html>,
+    <head> and <body>; a CSP blocks every external asset, so all CSS is inline
+    here and no font, script or image may be fetched. Nothing in this file may
+    grow a src=, an @import, or an href to an external origin.
+
+  VENDORED STYLE BLOCK — DO NOT HAND-EDIT
+    source:   /opt/eco/services/agent-runtime/agent-report.py  (_CSS)
+    revision: 1d3ea39ed2ac68dd4d3f425e75477fc60cf81bf7  (2026-08-11)
+    sha256:   fb48aa62b99ba7db4d36326876683584873c576005b34b0aad5492587be501b6
+
+    The sha256 covers the LINES BETWEEN the <style> and </style> lines below,
+    exactly as they appear. test-aid-artifact-render.bats recomputes it, and — when the
+    source path is reachable — re-extracts _CSS from the source and compares
+    byte for byte. An upstream restyle therefore fails a test instead of
+    drifting silently past a selector grep. AID changes content slots only,
+    never layout.
+
+  BLOCK ORDER (ecosystem artifact standard, /ecosystem/specs/artifact-standard)
+    1 masthead        header ...... ALWAYS
+    2 tiles           2-4 computed numbers ...... ALWAYS
+    3 summary         human summary ...... ALWAYS
+    4 core            the content itself + "Jak pokračovat" ...... ALWAYS
+    5 links           related things BY NAME ...... only when links exist
+    6 ask             "Co se čeká ode mě" ...... ALWAYS, incl. the
+                      nothing-needed literal. A silently absent ask block
+                      reads as "nothing is required of me".
+    7 detail          the detail target ...... only when a detail target is an
+                      EXPLICIT input. Never inferred.
+    + provenance footer, carrying the redaction count.
+
+    The "summary missing" alarm sits between blocks 2 and 3 when the model
+    text did not arrive: the computed numbers still hold and the page says so.
+
+  TILE SLOTS (fixed, in order)
+    result / duration / scope / unresolved.
+    Each has .label, .value and .state (ok|warn|critical|"" — anything else is
+    dropped to ""). A tile with no value renders — , never a fabricated number.
+
+  PLACEHOLDER GRAMMAR
+    {{fact:<jq.path>}}   scalar from facts_json, HTML-escaped on insertion.
+                        Missing → the literal — (em dash). Never invented.
+    {{prose:<key>}}     bounded model-written block from prose_json,
+                        sentence-capped then block-capped, HTML-escaped.
+                        Missing → the declared standard literal.
+    {{html:<key>}}      a fragment the library builds itself (lists, the
+                        detail link): already capped, already escaped, and
+                        the ONLY grammar inserted as raw markup. Callers
+                        cannot reach it — it is not read from facts_json.
+
+    Substitution is SINGLE PASS: a value containing {{ is never re-expanded.
+
+  CONDITIONAL REGIONS
+    <!--IF:name--> ... <!--ENDIF:name--> is kept or removed whole by the
+    library. Regions: prose_missing, items, next_steps, links, detail.
+-->
+<style>
+:root{
+  --ground:#F5F8F8; --surface:#FFFFFF; --sunken:#EDF2F2;
+  --ink:#16232A; --ink-soft:#4A5F68; --muted:#6B7F87; --line:#D8E2E2;
+  --accent:#0F6E6E; --accent-soft:#E2F0EE;
+  --ok:#1E6B4F; --warn:#8A5A00; --critical:#B3261E;
+  --warn-bg:#F7EEDC; --critical-bg:#F8E6E4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F1619; --surface:#182126; --sunken:#131C20;
+    --ink:#E3EBED; --ink-soft:#B3C3C8; --muted:#8798A0; --line:#2A383E;
+    --accent:#57BDB4; --accent-soft:#16302F;
+    --ok:#6FCFA5; --warn:#E0B160; --critical:#F08A80;
+    --warn-bg:#302716; --critical-bg:#331D1B;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F1619; --surface:#182126; --sunken:#131C20;
+  --ink:#E3EBED; --ink-soft:#B3C3C8; --muted:#8798A0; --line:#2A383E;
+  --accent:#57BDB4; --accent-soft:#16302F;
+  --ok:#6FCFA5; --warn:#E0B160; --critical:#F08A80;
+  --warn-bg:#302716; --critical-bg:#331D1B;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  font-size:16px; line-height:1.6;
+}
+.wrap{max-width:46rem; margin:0 auto; padding:2.5rem 1.5rem 4rem; display:flex; flex-direction:column; gap:1.75rem}
+.wrap.detail{max-width:52rem}
+
+.masthead{display:flex; flex-direction:column; gap:.35rem; padding-bottom:1.25rem; border-bottom:2px solid var(--ink)}
+.eyebrow{font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700}
+h1{font-family:Georgia,"Iowan Old Style","Times New Roman",serif; font-size:clamp(1.6rem,4vw,2.1rem);
+   line-height:1.15; margin:0; font-weight:600; text-wrap:balance; letter-spacing:-.01em}
+.when{font-size:.88rem; color:var(--muted); font-variant-numeric:tabular-nums}
+
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(8rem,1fr)); gap:.7rem}
+.tile{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:.7rem .85rem;
+      display:flex; flex-direction:column; gap:.2rem}
+.tile .k{font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); font-weight:700}
+.tile .v{font-size:1.2rem; font-weight:650; font-variant-numeric:tabular-nums; line-height:1.2}
+.tile.state-ok{border-left:4px solid var(--ok)} .tile.state-ok .v{color:var(--ok)}
+.tile.state-warn{border-left:4px solid var(--warn)} .tile.state-warn .v{color:var(--warn)}
+.tile.state-critical{border-left:4px solid var(--critical)} .tile.state-critical .v{color:var(--critical)}
+
+section.block{display:flex; flex-direction:column; gap:.5rem}
+section.block > h2{
+  margin:0; font-family:inherit; font-size:.72rem; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--muted); font-weight:700;
+}
+section.block p{margin:0}
+section.block ul{margin:0; padding-left:1.15rem; display:flex; flex-direction:column; gap:.4rem}
+section.block table{border-collapse:collapse; width:100%; font-size:.88rem; font-variant-numeric:tabular-nums}
+section.block th,section.block td{text-align:left; padding:.35rem .6rem; border-bottom:1px solid var(--line)}
+section.block th{font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700}
+section.block td:nth-child(n+3){text-align:right}
+ol.steps{margin:0; padding-left:1.3rem; display:flex; flex-direction:column; gap:.4rem}
+.split{display:grid; grid-template-columns:1fr 1fr; gap:1.25rem}
+@media (max-width:560px){ .split{grid-template-columns:1fr} }
+.good li::marker{color:var(--ok)}
+.bad li::marker{color:var(--critical)}
+.ask{background:var(--accent-soft); border-left:4px solid var(--accent); border-radius:6px; padding:.9rem 1.1rem}
+.ask h2{color:var(--accent)}
+.alarm{background:var(--critical-bg); border-left:4px solid var(--critical); border-radius:6px; padding:.9rem 1.1rem}
+.more{font-size:.86rem; color:var(--muted); font-style:italic}
+
+ul.options{list-style:none; padding-left:0; gap:.6rem}
+li.opt{background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--line);
+       border-radius:6px; padding:.7rem .9rem}
+li.opt.rec{border-left-color:var(--accent); background:var(--accent-soft)}
+.pill{display:inline-block; margin-left:.4rem; padding:.1rem .5rem; border-radius:999px;
+      background:var(--accent); color:var(--surface); font-size:.66rem; font-weight:700;
+      letter-spacing:.08em; text-transform:uppercase; vertical-align:.1em}
+.muted{color:var(--muted); font-size:.86rem}
+p.note{font-size:.86rem; color:var(--muted); font-style:italic; margin-top:.2rem}
+
+.golink{display:inline-flex; align-items:center; gap:.5rem; align-self:flex-start;
+        border:1px solid var(--line); background:var(--surface); border-radius:6px;
+        padding:.65rem 1rem; color:var(--accent); text-decoration:none; font-weight:600}
+.golink:hover{border-color:var(--accent)}
+.golink:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+.doc{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:1.6rem 1.8rem}
+.doc>*:first-child{margin-top:0}
+.doc h1,.doc h2,.doc h3,.doc h4{font-family:Georgia,"Iowan Old Style",serif; font-weight:600; line-height:1.25; text-wrap:balance}
+.doc h1{font-size:1.55rem; margin:2rem 0 .8rem}
+.doc h2{font-size:1.25rem; margin:1.9rem 0 .7rem; padding-bottom:.3rem; border-bottom:1px solid var(--line)}
+.doc h3{font-size:1.05rem; margin:1.5rem 0 .5rem}
+.doc h4{font-size:.96rem; margin:1.2rem 0 .4rem; color:var(--ink-soft)}
+.doc p{margin:0 0 .85rem}
+.doc ul,.doc ol{margin:0 0 .85rem; padding-left:1.3rem; display:flex; flex-direction:column; gap:.3rem}
+.doc a{color:var(--accent); text-underline-offset:2px}
+.doc blockquote{margin:0 0 .85rem; padding:.55rem 1rem; border-left:3px solid var(--line); background:var(--sunken); color:var(--ink-soft)}
+.doc blockquote p:last-child{margin-bottom:0}
+.doc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em; background:var(--sunken); padding:.12em .38em; border-radius:3px}
+.doc pre{background:var(--sunken); border:1px solid var(--line); border-radius:5px; padding:.85rem 1rem; overflow-x:auto; margin:0 0 .85rem}
+.doc pre code{background:none; padding:0; font-size:.85rem; line-height:1.5}
+.doc hr{border:0; border-top:1px solid var(--line); margin:1.8rem 0}
+.tablewrap{overflow-x:auto; margin:0 0 .85rem}
+.doc table{border-collapse:collapse; width:100%; font-size:.92rem}
+.doc th,.doc td{text-align:left; padding:.45rem .7rem; border-bottom:1px solid var(--line); vertical-align:top}
+.doc th{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700}
+
+footer{font-size:.8rem; color:var(--muted); border-top:1px solid var(--line); padding-top:.9rem}
+footer code{font-family:ui-monospace,monospace}
+@media (max-width:600px){ .wrap{padding:1.5rem 1rem 3rem} .doc{padding:1.2rem 1.1rem} }
+@media (prefers-reduced-motion:reduce){ *{animation:none!important; transition:none!important} }
+</style>
+<div class="wrap">
+<header class="masthead"><span class="eyebrow">{{fact:eyebrow}}</span><h1>{{fact:title}}</h1><span class="when">{{fact:when}}</span></header>
+<section class="tiles"><div class="{{fact:computed.result_class}}"><span class="k">{{fact:tiles.result.label}}</span><span class="v">{{fact:tiles.result.value}}</span></div><div class="{{fact:computed.duration_class}}"><span class="k">{{fact:tiles.duration.label}}</span><span class="v">{{fact:tiles.duration.value}}</span></div><div class="{{fact:computed.scope_class}}"><span class="k">{{fact:tiles.scope.label}}</span><span class="v">{{fact:tiles.scope.value}}</span></div><div class="{{fact:computed.unresolved_class}}"><span class="k">{{fact:tiles.unresolved.label}}</span><span class="v">{{fact:tiles.unresolved.value}}</span></div></section>
+<!--IF:prose_missing--><section class="block alarm"><h2>Shrnutí chybí</h2><p>{{html:prose_missing_notice}}</p></section><!--ENDIF:prose_missing-->
+<section class="block"><h2>Shrnutí</h2><p>{{prose:summary}}</p></section>
+<section class="block"><h2>Jádro</h2><p>{{prose:core}}</p><!--IF:items-->{{html:items}}<!--ENDIF:items--></section>
+<!--IF:next_steps--><section class="block"><h2>Jak pokračovat</h2>{{html:next_steps}}</section><!--ENDIF:next_steps-->
+<!--IF:links--><section class="block"><h2>Čeho se to týká</h2>{{html:links}}</section><!--ENDIF:links-->
+<section class="block ask"><h2>Co se čeká ode mě</h2><p>{{prose:ask}}</p></section>
+<!--IF:detail-->{{html:detail}}<!--ENDIF:detail-->
+<footer>{{fact:footer}} Redigováno tajemství: {{fact:computed.redactions_total}}.</footer>
+</div>
