@@ -3,7 +3,8 @@
   FIXED FORM: keep every section, in this order, with this formatting.
   FREE CONTENT: the Reporter decides depth and length per section — no length cap.
   LANGUAGE: render section headings + prose in the project document_language
-  (config/language.yaml); preserve structure and order exactly. English shown here
+  (defaults/orchestration.yaml -> language.document_language, its only home —
+  there is no language.yaml); preserve structure and order exactly. English shown here
   is the canonical reference.
   The frontmatter is machine-read by fsm_eval_delivery_report_present — do not rename keys.
 -->

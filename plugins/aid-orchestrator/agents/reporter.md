@@ -82,7 +82,8 @@ plainly in §3 — a partial honest report beats a clean fabricated one.
 1. Fill `defaults/templates/delivery-report.md` — **every section, in order, with its
    formatting.** Section structure and order are fixed; depth and length are yours to decide
    (no length cap — write what the delivery warrants).
-2. Render headings + prose in the project `document_language` (config/language.yaml); preserve
+2. Render headings + prose in the project `document_language` (`defaults/orchestration.yaml` →
+   `language.document_language`, its only home — there is no `language.yaml`); preserve
    the template's structure exactly. The report is a DOCUMENT, so `document_language` governs
    it — but §1 "What was delivered" and §7 "Heads-up" are what the controller condenses into
    the PM's final card, so write them in the Finished-card vocabulary of

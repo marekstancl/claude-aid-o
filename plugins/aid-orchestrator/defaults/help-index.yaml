@@ -13,7 +13,13 @@
 #               | remove_or_deprecate
 #   writes      config files this surface may write; [] = read-only.
 #               Each entry carries an ownership prefix:
-#                 creates:<path>  this surface writes the file's initial content
+#                 creates:<path>  this surface writes the file's initial content,
+#                                 on every run
+#                 creates-if:<path>  same ownership, but the write is CONDITIONAL —
+#                                 the surface's own file states the condition, and a
+#                                 project that never meets it never gets the file.
+#                                 A conditional write recorded as `creates:` reads as
+#                                 a promise the product does not keep.
 #                 mutates:<path>  this surface owns changes AFTER creation
 #               A path may appear as `creates:` on one surface and `mutates:` on
 #               another; that pair IS the ownership statement. One surface carrying
@@ -76,18 +82,16 @@
 #   this file — `test-help-index-coverage.bats` asserts the column's presence and TYPE,
 #   never its content against the prose. When the two disagree, THIS FILE WINS and the
 #   prose is the thing to fix.
-#   HONEST PROVENANCE: this divergence is not inherited housekeeping — Step 5 CREATED it.
-#   Before this commit the filenames in the help prose and in this column matched.
-#   The divergence is WIDER than "shape only", and the earlier wording here
-#   understated it (CP3): besides the `creates:`/`mutates:` prefixes, this column now
-#   carries TWO filenames the prose does not — the later writers found by the
-#   mutation-shaped sweep. So the follow-up is not a cosmetic realignment; the two
-#   statements differ in CONTENT as well as form. A regression this step introduced
-#   knowingly, recorded at its real size rather than filed under pre-existing drift.
-#   This is a written-down stopgap, not the intended end state. The intended end state is
-#   to delete the duplication — have the help prose point here instead of restating the
-#   list, so one copy cannot diverge from itself. That edit lands in `commands/aid-help.md`,
-#   which is outside Step 5's allowed paths; see the plan's follow-up item.
+#   HONEST PROVENANCE: Step 5 created a CONTENT divergence here — this column carried
+#   two filenames (`permissions.yaml`, `integrations.yaml`) that the help prose's
+#   "Creates:" block did not, on top of the `creates:`/`mutates:` prefix difference.
+#   The follow-up closed the content half: `commands/aid-help.md`'s init topic now
+#   lists the same files, with `integrations.yaml` marked conditional to match the
+#   `creates-if:` prefix below. What REMAINS is the duplication itself — two copies of
+#   one list, in two files, with nothing checking them against each other. The intended
+#   end state is still to delete the duplication rather than keep it aligned by hand.
+#   Until then, re-verify the prose against this column whenever a row's `writes`
+#   changes; this file wins on any disagreement.
 #   Do NOT "fix" this by adding a naive prose-vs-index assertion to the bats suite: the
 #   prose lists live inside code fences and that suite's helpers strip fenced content, so
 #   such a check inspects nothing and passes green. Any real check must read fences on
@@ -113,9 +117,15 @@
 
 # FINAL_TURN EVIDENCE (why each row carries the value it does — the prose half the
 # suite cannot observe, kept next to the claim rather than in a commit message):
-#   /aid-run     commands/aid-run.md sources aid-gate-outcome-summary.sh at the
-#                GATES→DONE boundary and on the failing branch alike; the DONE card
-#                below it is that renderer's output, not a hand-written summary.
+#   /aid-run     `card:finished`, NOT the gate renderer — corrected after a review
+#                caught the row naming an intermediate boundary. aid-run.md does source
+#                aid-gate-outcome-summary.sh, but at the GATES boundary; the run then
+#                continues into DONE, whose PM Summary ("DONE REVIEW", the Finished card
+#                applied to DONE) is the LAST turn the PM sees, and it is composed by the
+#                controller, not by that renderer. Failure branches end on Blocked or
+#                Decision-required instead; this column names the normal path. The gates
+#                renderer is not left unguarded by the change: test-communication-wiring.sh
+#                asserts aid-run.md wires it with the publish clause.
 #   /aid-plan    commands/aid-plan.md sources aid-plan-close-summary.sh at the
 #                plan-final / close boundary — the last turn of a plan stream.
 #   /aid-audit-tests  commands/aid-audit-tests.md finalizes through
@@ -124,9 +134,17 @@
 #   /aid-verify-plan, /visual-companion  end on a PM choice (relay the verdict for
 #                a go/no-go; per-question visual decision) → decision-required.
 #   /aid-status  a read-only readout of work in flight → the progress/handoff card.
-#   /aid-audit, /aid-init, /aid-setup, /aid-stop, /aid-help  no renderer exists;
-#                each ends by reporting completed work or requested content → finished.
-#                Any of these growing a deterministic renderer must move to `renderer:`.
+#   /aid-init    `renderer:scripts/aid-config-summary.sh` — it GREW one, and the rule
+#                below says such a row must move. commands/aid-init.md → "Closing output"
+#                makes that script the LAST thing the command runs, presented verbatim,
+#                with only the next-step suggestion after it.
+#   /aid-setup   `card:finished`, deliberately NOT the same renderer: aid-setup.md runs
+#                aid-config-summary.sh at its OPENING, before the menu. Its last turn is
+#                the per-module result report, which commands/aid-setup.md → "Module
+#                Execution" names as the Finished card.
+#   /aid-audit, /aid-stop, /aid-help  no renderer exists; each ends by reporting
+#                completed work or requested content → finished.
+#                Any row growing a deterministic renderer must move to `renderer:`.
 
 surfaces:
   - { command: /aid-do, file: plugins/aid-orchestrator/commands/aid-do.md,
@@ -137,7 +155,7 @@ surfaces:
   - { command: /aid-run, file: plugins/aid-orchestrator/commands/aid-run.md,
       purpose: "Execute EPIC pipeline — 6-state FSM with optional autonomous mode",
       topic: run, audience: beginner, disposition: current,
-      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "renderer:scripts/lib/aid-gate-outcome-summary.sh" }
+      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "card:finished" }
 
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
       purpose: "Show EPIC status, queue, and pipeline overview",
@@ -168,9 +186,9 @@ surfaces:
                "creates:.aid-o/config/plugin.yaml",
                "creates:.aid-o/config/check-severity.yaml",
                "creates:.aid-o/config/test-audit.yaml",
-               "creates:.aid-o/config/integrations.yaml",
+               "creates-if:.aid-o/config/integrations.yaml",
                "mutates:.aid-o/config/execution.yaml"],
-      final_turn: "card:finished" }
+      final_turn: "renderer:scripts/aid-config-summary.sh" }
 
   - { command: /aid-setup, file: plugins/aid-orchestrator/commands/aid-setup.md,
       purpose: "Modular project configuration — permissions, integrations, CLAUDE.md, stack scan",

@@ -171,18 +171,25 @@ escalated_to_epic: false
 
 ### Step 8: Output
 
-The final turn is the **Finished** card of `skills/communication.md`: the
-outcome sentence first, in the PM's conversation language; the quick-log path,
-the commit hash and the counters are the closing detail line, never the opening
-one. Do not paste the diff or the gate log.
+The final turn is the **Finished** card of `skills/communication.md` — that file
+owns the card's fields and their order, and this one does not restate them. What
+`/aid-do` adds is a single closing detail line carrying the quick-task id, the
+counters, the commit and the log path:
 
 ```
-Hotovo: {plain-language outcome of the task}.
-Změnilo se: {1-3 user-relevant effects}.
-Ověřeno: {gates/tests that ran, or "neověřeno" + the reason}.
-Další krok: {one recommendation, or "nic dalšího není potřeba"}.
-
 Q-{NNN} · {file_count} files · {duration}s · commit {hash} · log .aid-o/work/quick/Q-{NNN}.md
+```
+
+It is the LAST line, under the card, never above it. Do not paste the diff or
+the gate log. A filled-in example of the whole turn:
+
+```
+Hotovo: /aid-status už neukazuje smazané plány.
+Změnilo se: přehled zobrazí jen plány, které mají živý worktree.
+Ověřeno: test-status-recipes.bats (12/12) a lint prošly.
+Další krok: nic dalšího není potřeba.
+
+Q-041 · 2 files · 74s · commit 9f3c1ab · log .aid-o/work/quick/Q-041.md
 ```
 
 If the task hit an auto-escalation trigger (below) the last line stays a

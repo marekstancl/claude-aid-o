@@ -10,8 +10,9 @@ user_invocable: false
 
 Every message AID leaves the PM with at a boundary is one of four small cards:
 outcome first, plain language, one recommended action. This file defines those
-cards, each output product's audience and the language rule; other surfaces
-reference it, never restate it.
+cards, each output product's audience and the language rule. Other surfaces name
+the card they emit and may show a filled-in example or a composite template on it
+(DONE REVIEW in `pipeline.md` / `aid-run.md`); none restates the bare skeleton.
 
 ## When to Invoke
 
@@ -72,18 +73,18 @@ specialization owned by `commands/aid-run.md`.
 
 ## Ordering, Truth and Publication
 
-- **Ordering** — identifiers and a detail link are optional **final** lines:
-  state the decision before naming a checkpoint, SHA, FSM state or file.
-- **Truth** — never claim completion from a delegated agent's assertion; a
-  renderer reads only the canonical controller verdict.
-- **Inventory** — a path absent from the output-contract inventory cannot
-  quietly emit a final technical dump: every public row of
-  `defaults/help-index.yaml` carries `final_turn` (`renderer:<script>`,
-  `card:<type>`, `internal`).
+- **Ordering** — identifiers and a detail link are optional **final** lines: state
+  the decision before naming a checkpoint, SHA, FSM state or file.
+- **Truth** — never claim completion from a delegated agent's assertion; a renderer
+  reads only the canonical controller verdict.
+- **Inventory** — a path absent from the output-contract inventory cannot quietly
+  emit a final technical dump: every public row of `defaults/help-index.yaml`
+  carries `final_turn` (`renderer:<script>`, `card:<type>`, `internal`).
 - **Publish before present** — a renderer emits the chat card on stdout and an
   artifact body file; every wiring site carries the clause below VERBATIM, one
-  literal that `scripts/tests/test-communication-wiring.sh` enforces. Live
-  publication is the controller's act; no script claims a page was published.
+  literal. `scripts/tests/test-communication-wiring.sh` asserts it at the sites it
+  indexes BY NAME — today four; `/aid-audit-tests` carries the same literal but is
+  not on that list, so it is unchecked. Publication is the controller's act.
 
 ```text
 Publish the artifact body via the Artifact tool, then present the chat card verbatim.
@@ -93,8 +94,8 @@ Publish the artifact body via the Artifact tool, then present the chat card verb
 
 1. **MUST** use one of the four cards at every boundary — no free-form dumps.
 2. **MUST** lead with the outcome, identifiers and paths last.
-3. **MUST NOT** define a card shape outside this file — quote a rendered
-   example, never re-specify the skeleton.
+3. **MUST NOT** define a card shape outside this file — a filled-in example or a
+   composite template on a named card is fine; a second placeholder skeleton is not.
 4. **MUST** render cards in the PM's conversation language; documents follow
    `document_language` in `defaults/orchestration.yaml` (`EN`), its only home.
 5. **MUST NOT** state a completion, pass or published page the canonical

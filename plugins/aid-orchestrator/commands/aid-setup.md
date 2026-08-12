@@ -98,6 +98,12 @@ For each selected module:
 3. Report result to PM
 4. If running `all` → continue to next module automatically
 
+The last of those reports is `/aid-setup`'s final turn, and it is the **Finished** card of
+`skills/communication.md` — what changed for the project first, the config paths and preset
+names last. The config-summary block belongs at the OPENING (above), not here: repeating it as
+a closing block would make the run's own effect the thing the PM has to infer. If a module could
+not complete, close on the **Blocked or failed** card instead.
+
 ## Reference Files
 
 - `skills/setup/permissions.md` — permission preset configuration
@@ -112,14 +118,19 @@ For each selected module:
 
 ## File ownership
 
-Each file below is created by `/aid-init`; subsequent changes are owned by the `/aid-setup` module
-named here. `/aid-init` re-runs never rewrite them.
+The **Created by** column below is the authority on who writes each file's initial content;
+subsequent changes are owned by the `/aid-setup` module named here, and `/aid-init` re-runs never
+rewrite them. Read that column per row — it is not "all of these come from `/aid-init`":
+`integrations.yaml` is a CONDITIONAL init write (only when the Qdrant memory integration is
+detected — see `commands/aid-init.md` → "Conditional writes"), so on a project without that
+integration there is no file for this module to find, and its step-6 write is the one that puts
+it on disk. `CLAUDE.md` is never created by `/aid-init` at all.
 
 | File | Created by | Later changes owned by | Notes |
 |------|-----------|------------------------|-------|
 | `.aid-o/config/permissions.yaml` | `/aid-init` (from template) | `/aid-setup permissions` | preset and per-setting changes |
 | `.aid-o/config/project.yaml` | `/aid-init` (auto-detection) | `/aid-setup scan` | one delegated writer: `agents/project-scanner.md` (Quick Scan Mode A, triggered by this module; Deep Analysis Mode B, Orchestrator-triggered post-milestone, extends the same auto-detected sections). Merge rule from `skills/setup/project-scan.md` governs: auto-detected sections are replaced, PM-added custom fields are never overwritten. `skills/memory.md`'s "NEVER write to project.yaml" binds memory agents, not the scanner. |
-| `.aid-o/config/integrations.yaml` | `/aid-init` (only `memory.enabled: true`) | `/aid-setup integrations` | every enable/disable after creation |
+| `.aid-o/config/integrations.yaml` | `/aid-init`, CONDITIONALLY (only when Qdrant memory is detected, and then only `memory.enabled: true`) | `/aid-setup integrations` | every enable/disable after creation |
 | `CLAUDE.md` | not created by `/aid-init` | `/aid-setup claude-md` | sole AID writer; never overwrites PM-authored content |
 
 **Not here: `gate_profiles` upgrade for an existing `execution.yaml`.** `(4) Project Scan` /
@@ -138,4 +149,4 @@ path in one command avoids two commands independently deciding what belongs in `
 - **Modular** — each module is independent, load only what's needed
 
 
-**Last Updated:** 2026-08-11
+**Last Updated:** 2026-08-12

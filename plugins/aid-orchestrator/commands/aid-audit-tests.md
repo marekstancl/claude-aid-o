@@ -215,6 +215,17 @@ parser's own project-root validation load-bearing rather than advisory.
    `test-integration-e2e-audit-pipeline.sh` (Part A) and a real fail-closed
    demonstration captured at this plan's own release (Part B).
 
+   The renderer's first line orders the artifact page published before anything
+   else is said, which is this repo's canonical publish-before-present rule —
+   carried here as the same literal every other renderer wiring site carries,
+   so the four indexed sites and this one cannot drift into two wordings:
+
+   Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+   For this command the "chat card" is the renderer's own four-part text, whose
+   shape is owned by this file (see "The four-part chat handoff"); only the card
+   VOCABULARY of the 3–5 sentence lead comes from `skills/communication.md`.
+
 ## Chat handoff (natural-language continuation)
 
 Every completed audit's final turn always contains: (1) a verdict
@@ -291,7 +302,11 @@ evidence last (P078 removed the two parallel-lane sections):
 2. What to fix, merge, split or remove
 3. Test time now, and after the proposed work
 4. What is not proved yet
-5. Technical evidence (appendix)
+
+Then `### Technical evidence`, unnumbered. It is an appendix, not a fifth part:
+the four numbered sections ARE the decision, and "four-part" names them here,
+in `lib/aid-test-audit-chat-summary.sh`'s header and in the renderer's own
+output. The appendix always renders, including when it has nothing to list.
 
 This block is this command's own output contract and stays exactly as it is —
 the renderer owns it. The 3–5 sentence lead the controller writes above it

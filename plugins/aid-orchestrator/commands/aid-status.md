@@ -1066,7 +1066,7 @@ artifact path, `aid-fsm.sh resume <epic_id>`, and the recorded action verbatim.
 When the EPIC has no entry in the map at all, render `Controller: (no active
 run entry) (mode: <mode>)` — never a value nothing recorded.
 
-**Step rendering rule.** Humans always read `Plan Step N of T is next` (or `all T steps complete`); the `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md — do not restate it here.
+**Step rendering rule.** Humans read `Plan Step N of T is next` (or `all T steps complete`) — never a bare `Plan Step N of T`, and never the raw field; the one exception is a degenerate `total_steps: 0` plan, which renders the machine values only. The `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md — do not restate it here.
 
 
 **Status when no run started:**

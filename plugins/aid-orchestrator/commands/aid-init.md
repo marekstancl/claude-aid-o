@@ -821,18 +821,6 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → print the configuration summary (see "Closing output" below), then suggest:
   "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
-## Plan mode
-
-A plan declares its release model in its committed lifecycle manifest
-(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`). Under `plan_branch` an
-EPIC merges into the plan branch and only the plan releases, once, at the
-plan-final boundary; under `legacy_epic_release_mode` each EPIC releases as
-before. New plans default to `plan_branch` when the project declares a
-`gate_profiles` table, and otherwise fall back to legacy with a logged
-`plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
-creates nor releases a plan branch. Reinstall the Git hooks after upgrading
-(`/aid-init`) so the commit-scope and pre-push guards match the new model.
-
 ## Closing output
 
 The LAST thing `/aid-init` does — after every file, hook and config-default step above — is run
@@ -851,5 +839,17 @@ error), so it is safe to run at the end of a fresh init, an idempotent re-run, o
 Exit codes: `0` rendered, `2` usage, `3` state root unresolvable (not a git repository — surface
 its stderr as-is and skip the block; the rest of init's report still stands).
 
+## Plan mode
 
-**Last Updated:** 2026-08-11
+A plan declares its release model in its committed lifecycle manifest
+(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`). Under `plan_branch` an
+EPIC merges into the plan branch and only the plan releases, once, at the
+plan-final boundary; under `legacy_epic_release_mode` each EPIC releases as
+before. New plans default to `plan_branch` when the project declares a
+`gate_profiles` table, and otherwise fall back to legacy with a logged
+`plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
+creates nor releases a plan branch. Reinstall the Git hooks after upgrading
+(`/aid-init`) so the commit-scope and pre-push guards match the new model.
+
+
+**Last Updated:** 2026-08-12

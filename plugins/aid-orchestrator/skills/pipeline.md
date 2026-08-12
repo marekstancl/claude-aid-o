@@ -2816,7 +2816,7 @@ Stale state detected: {state} at step {executing_step}/{total_steps}.
 Resume with: /aid-run --resume {run_id}
 ```
 
-**Step rendering rule.** Humans always read `Plan Step N of T is next` (or `all T steps complete`); the `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md (above) — do not restate it here.
+**Step rendering rule.** Humans read `Plan Step N of T is next` (or `all T steps complete`) — never a bare `Plan Step N of T`, and never the raw field; the one exception is a degenerate `total_steps: 0` plan, which renders the machine values only. The `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md (above) — do not restate it here.
 
 
 **Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume

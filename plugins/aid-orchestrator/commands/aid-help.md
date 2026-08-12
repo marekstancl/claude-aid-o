@@ -320,8 +320,11 @@ test-portfolio audit: for tests, `/aid-help tests` covers `/aid-audit-tests`.
 ### Topic: recovery
 
 Something is stuck, wrong, or running when it should not be. `/aid-stop`
-disengages autonomous mode immediately and hands control back to you; progress is
-already persisted by the FSM, so nothing is lost by stopping.
+disengages autonomous mode immediately and hands control back to you. The FSM has
+already written the run's position (EPIC, completed step, state) to
+`fsm-state.yaml`, so `/aid-run --resume` picks it up — `/aid-stop` itself saves
+nothing. The step that was mid-flight is not checkpointed and runs again on
+resume, so check what it had already done before you resume.
 
 ```
 Stop an autonomous run:
@@ -409,8 +412,9 @@ idempotent: run it again after every plugin update. Run it before `/aid-setup`.
 ```
 /aid-init         create or upgrade .aid-o/ (plans, tasks, config, work)
 
-Creates: config/project.yaml, config/execution.yaml, config/plugin.yaml,
-         config/check-severity.yaml, config/test-audit.yaml
+Creates: config/project.yaml, config/permissions.yaml, config/execution.yaml,
+         config/plugin.yaml, config/check-severity.yaml, config/test-audit.yaml
+         and, only when Qdrant memory is detected, config/integrations.yaml
 Upgrade: offers the gate_profiles block if execution.yaml predates it —
          declining keeps the project on per-EPIC releases (see plan-lifecycle)
 Re-installs the git hooks, so run it again after upgrading the plugin.
@@ -476,4 +480,4 @@ Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-08-11
+**Last Updated:** 2026-08-12
