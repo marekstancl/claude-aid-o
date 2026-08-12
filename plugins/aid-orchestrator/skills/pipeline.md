@@ -1319,7 +1319,7 @@ Options:
 Recommendation: {auto-generated}
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** This section is the single authoritative definition of step numbering; every other surface references it rather than restating it. `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render it with the disambiguator that says which of the two situations it is: while steps remain, `Plan Step {executing_step} of {total_steps} is next`; once every step is done (`current_step == total_steps`, state GATES/DONE) `all {total_steps} steps complete`. Never a bare `Plan Step N of T` — against a 0-based field that phrasing is unreadable, and an uncapped `+1` renders a nonsensical `T+1 of T` for a finished run. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames (`step-{N}-verify.md`, with N 0-based) stay 0-based and are frozen compatibility surfaces. `aid-fsm.sh`'s `_fsm_human_step` helper emits exactly this wording, appended AFTER the machine values so existing greps keep matching.
 
 
 In FIRST AID mode, add option D: "Continue manual".
@@ -2753,7 +2753,7 @@ Stale state detected: {state} at step {executing_step}/{total_steps}.
 Resume with: /aid-run --resume {run_id}
 ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** Humans always read `Plan Step N of T is next` (or `all T steps complete`); the `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md (above) — do not restate it here.
 
 
 **Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume
@@ -2989,7 +2989,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-12
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

@@ -399,7 +399,7 @@ FSM initialized: READY
    Recommendation: {auto-generated}
    ```
 
-**Step rendering rule.** `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render that: while executing it names the step being worked on; once every step is done (`current_step == total_steps`, state GATES/DONE) it caps at `total_steps`, so the line reads `total_steps/total_steps` rather than a nonsensical `T+1 of T`. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames stay 0-based and are frozen compatibility surfaces.
+**Step rendering rule.** Humans always read `Plan Step N of T is next` (or `all T steps complete`); the `current_step` field, the `verify-state` JSON payload and evidence filenames stay 0-BASED and frozen. Authoritative definition: the Step rendering rule in skills/pipeline.md — do not restate it here.
 
 3. In auto mode → apply auto-decision rules:
    - S-effort fix patterns → auto-fix
@@ -640,4 +640,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-12
