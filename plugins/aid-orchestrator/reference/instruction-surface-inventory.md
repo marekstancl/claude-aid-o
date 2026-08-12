@@ -50,6 +50,7 @@ that is absent from a clean checkout.
 | `skills/brainstorming.md` | `verified` | Pre-plan activity. |
 | `skills/memory.md`, `skills/memory-mcp.md` | `verified` | Memory protocol; no lifecycle instruction. |
 | `skills/skill-writing.md`, `skills/command-writing.md` | `verified` | Authoring standards; no lifecycle instruction. |
+| `skills/communication.md` | `verified` | P080. Card shapes and the publish-before-present clause; says nothing about release cadence, so neither mode changes what it instructs. |
 
 ## Agents
 

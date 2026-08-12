@@ -416,7 +416,8 @@ Creates: config/project.yaml, config/permissions.yaml, config/execution.yaml,
          config/plugin.yaml, config/check-severity.yaml, config/test-audit.yaml
          and, only when Qdrant memory is detected, config/integrations.yaml
 Upgrade: offers the gate_profiles block if execution.yaml predates it —
-         declining keeps the project on per-EPIC releases (see plan-lifecycle)
+         declining keeps the project on legacy_epic_release_mode, one
+         release per EPIC rather than one per plan (see plan-lifecycle)
 Re-installs the git hooks, so run it again after upgrading the plugin.
 ```
 

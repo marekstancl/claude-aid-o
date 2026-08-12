@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 440          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 441          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2922,3 +2922,16 @@ enforcements:
     description: "2026-08-11 — the first version of this finding was wrong and the correction is the point. AID DOES tear down the worktree it creates: `_pfsm_teardown_worktree` is careful, locked and idempotent, and deliberately deletes nothing when it cannot take the lock. What nobody owns is everything created OUTSIDE `<root>/.aid-worktrees/plan-<id>` — hand-made trees (two sat in /opt/eco/projects since 2 and 10 August, merged and clean) and the frozen CP3 copies, whose name appears in NO script and NO skill of this plugin because a controller freezes them by hand to give CP3's two reviews one commit to agree on. Not merely disk: an orphan took down the shell-suite adapter that morning, because that suite scans the real repository and refused the dotted path, killing discovery for the whole portfolio. The report CLASSIFIES and never deletes — a foreign tree may be somebody's live work and a frozen tree is review evidence; automatic removal stays with the code that created the tree and knows it is done."
     recovery: "A line in /aid-status when something is stale, naming the count; the tool prints the verbatim cleanup command per class and states which class must not be deleted yet."
     test: "scripts/tests/bats/test-worktree-report.bats"
+
+  - id: negative_assertion_soundness
+    type: 4
+    source: "scripts/tests/bats/test-helpers.bash (refute_grep)"
+    instruction: "scripts/tests/bats/test-bats-test-helpers.bats"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "2026-08-12 - bash exempts a !-inverted command from set -e and bats' ERR trap inherits the exemption, so `! grep -q needle file` reports ok with the needle present. Ninety such lines were found across 24 suites, carrying exactly the assertions whose whole value is the negative: no secret leaks, no external URL, no pass label on a waived gate. refute_grep replaces the idiom and this suite guards the replacement, because the first hardened version treated grep's exit 2 as a successful refutation - the same defect under a better name, which is why an error must fail loudly rather than read as absence. 59 occurrences remain in 21 other suites (IMP-504)."
+    recovery: "The failure prints grep's own stderr and the status it returned. Never widen refute_grep to accept a nonzero status it does not understand; add the case that explains the status instead."
+    test: "scripts/tests/bats/test-bats-test-helpers.bats"
