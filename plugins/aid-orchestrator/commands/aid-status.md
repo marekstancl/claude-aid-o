@@ -344,6 +344,27 @@ source "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/s
 ```
 
 ```bash
+# recipe: worktree-line — defines worktree_line(): pracovní kopie, které
+# nikdo neuklidí (IMP-502, 2026-08-11).
+#
+# PROČ TO PATŘÍ SEM a ne do nějakého úklidu: AID svoji kopii uklízí samo
+# (`_pfsm_teardown_worktree`) a ta část funguje. Neuklidí ale nic, co vzniklo
+# mimo kanonickou cestu — ruční kopie a zmrazené CP3 stromy, o kterých v celém
+# pluginu není ani zmínka. Ty jsou tedy ničí, a jediné, co s tím jde udělat
+# systémově, je ukázat je tam, kam se člověk dívá.
+#
+# Řádek se NEVYPISUJE, když není co uklízet — status není seznam všeho, co je
+# v pořádku.
+worktree_line() {
+  local _out _n
+  _out="$(bash "${AID_PLUGIN_PATH}/scripts/aid-worktree-report.sh" --json 2>/dev/null)" || return 0
+  _n="$(jq -r '.stale_count // 0' <<<"$_out" 2>/dev/null)" || return 0
+  [[ "${_n:-0}" -gt 0 ]] || return 0
+  printf 'Pracovní kopie: %s k uklizení — `aid-worktree-report.sh` řekne které a proč\n' "$_n"
+}
+```
+
+```bash
 # recipe: nightly-line — defines nightly_line(): the last nightly portfolio
 # result, in ONE line, where work starts (P081 Step 8).
 #

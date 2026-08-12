@@ -2757,3 +2757,15 @@ enforcements:
     description: "2026-08-11 — a gate named `bats_all` had run only T0+T1 since the tier pilot. The PM read 'gate bats_all failed', reasonably concluded an agent was running the whole portfolio in front of every merge, and lost half a day to a misdirected diagnosis. The name was true once and nobody revisited it. Four mechanical checks: a kind prefix from a fixed vocabulary so a failure line groups; no tool name (the tool gets swapped and the name starts lying); a word of totality only when the command really covers that universe — the check that would have caught `bats_all` the day tiers landed; and no outcome word, because every gate either passes or fails. Existing names are grandfathered in scripts/tests/gate-name-allowlist.txt with their proposed replacements written down, since renaming is ~575 literal occurrences across ~60 files and needs an alias period for consumers; a NEW or renamed gate must lint clean."
     recovery: "The gate fails naming the offending gate and every rule it breaks; the allowlist is fail-closed — a missing file means no exceptions, never 'allow everything'."
     test: "scripts/tests/bats/test-gate-name-lint.bats"
+
+  - id: worktree_report
+    type: 6
+    source: "scripts/aid-worktree-report.sh"
+    instruction: "commands/aid-status.md (recipe: worktree-line)"
+    severity: advisory
+    surface: pm-facing
+    status: active
+    verdict: ALIGNED
+    description: "2026-08-11 — the first version of this finding was wrong and the correction is the point. AID DOES tear down the worktree it creates: `_pfsm_teardown_worktree` is careful, locked and idempotent, and deliberately deletes nothing when it cannot take the lock. What nobody owns is everything created OUTSIDE `<root>/.aid-worktrees/plan-<id>` — hand-made trees (two sat in /opt/eco/projects since 2 and 10 August, merged and clean) and the frozen CP3 copies, whose name appears in NO script and NO skill of this plugin because a controller freezes them by hand to give CP3's two reviews one commit to agree on. Not merely disk: an orphan took down the shell-suite adapter that morning, because that suite scans the real repository and refused the dotted path, killing discovery for the whole portfolio. The report CLASSIFIES and never deletes — a foreign tree may be somebody's live work and a frozen tree is review evidence; automatic removal stays with the code that created the tree and knows it is done."
+    recovery: "A line in /aid-status when something is stale, naming the count; the tool prints the verbatim cleanup command per class and states which class must not be deleted yet."
+    test: "scripts/tests/bats/test-worktree-report.bats"
