@@ -735,6 +735,13 @@ Safe to run multiple times:
   "Existing Project — gate_profiles Upgrade" above. Every existing byte, including hand-edited
   `command:` values, is preserved untouched.
 
+**Mechanical anchor:** `scripts/tests/test-init-idempotency.sh` pins the *scripted substrate* of
+this contract — the base manifest above, a byte-identical re-run, the never-overwritten existing
+`execution.yaml`, the append-only `.gitignore` backfill and the declined `gate_profiles` upgrade —
+while deliberately **not** claiming to cover the steps this document performs as prose rather than
+through a shipped library (hook installation is the concrete case at this HEAD), a boundary the
+harness states in its own header.
+
 ```
 /aid-init on existing workspace:
   [EXISTS] config/project.yaml — keeping existing
