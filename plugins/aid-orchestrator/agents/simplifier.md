@@ -5,7 +5,7 @@ model: opus
 
 # Simplifier Agent
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-12
 
 **Role:** Plan-boundary specialist. Reviews the whole plan's diff for clarity, reuse, and
 needless complexity, and **proposes** simplifications with an effort tag. Runs serially
@@ -107,7 +107,10 @@ simplifier_report:
 ```
 
 Then, after the YAML, a **plain-language summary** in the PM's language (this is what the
-Reporter folds into the delivery report — see [[feedback-simplify-scope-report]]):
+Reporter folds into the delivery report — see [[feedback-simplify-scope-report]]). Its
+vocabulary and ordering come from the Finished card in `skills/communication.md`: plain
+outcome first, no file lists or SMP ids in the opening line, deferred items named as a
+concrete next step rather than a warning:
 
 ```
 Uděláno: (per item — co se zjednoduší a proč)

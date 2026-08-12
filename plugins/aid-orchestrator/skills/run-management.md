@@ -138,14 +138,18 @@ Loop:
 
 1. Update run file (phase = done, commit hash, changes)
 2. Record progress and decisions in the run file (active.md is a generated index — it refreshes itself)
-3. Write a summary: 2-3 sentences about what was done
+3. Write the summary as the **Finished** card of `skills/communication.md`:
+   the outcome of the phase in one plain sentence, then what changed, then what
+   is verified — run/phase IDs and file paths only on the closing detail line
 4. If the phase contains testable changes:
-   → Propose manual QA steps (specific, actionable)
+   → Propose manual QA steps (specific, actionable) under `Ověřeno` / `Další krok`
 5. If this is the last phase:
    → Testing proposal is MANDATORY
 6. Check context window — if it is large, warn PM
-7. **STOP and ask PM:**
-   "Phase X completed. [summary]. Proceed to phase Y?"
+7. **STOP and ask PM** with the **Decision-required** card of
+   `skills/communication.md` — the question first ("Proceed to phase Y?"), the
+   consequence of waiting, the recommended option and the alternatives; the
+   phase summary from item 3 sits above it, not inside the question
 8. **DO NOT CONTINUE until PM says GO**
 
 **Violating this checkpoint = AI error.**
@@ -288,7 +292,7 @@ For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
 ---
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-12
 
 ## Plan-boundary note
 

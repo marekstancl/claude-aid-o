@@ -56,8 +56,11 @@ the diff is taken where the command runs.
    Do **not** review inline — the protocol explicitly says "do not trust my
    summary or prior PASSes", which only holds with a fresh context.
 3. **Relay the verdict.** Return the subagent's structured findings to the PM.
-   The human summary is delivered in **Czech** (see protocol); severity labels
-   and verdict keep their canonical form. The subagent **audits only — it does
+   The human summary is delivered in the PM's conversation language and in the
+   card shape `skills/communication.md` defines (Finished when the verdict is
+   PASS, Blocked or failed when it is FAIL or CANNOT VERIFY, Decision required
+   when the PM must choose); severity labels and verdict keep their canonical
+   form. The subagent **audits only — it does
    not fix anything** without explicit PM approval.
 
 ## Why independent
@@ -146,8 +149,10 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
 > **Recommended fix plan:** the concrete order of fixes; what must be blocking
 > before DONE; what can go to the backlog.
 >
-> **Short human summary for the PM:** 5–10 sentences **in Czech**. No technical
-> noise. Clearly say whether the PM can trust it, and why.
+> **Short human summary for the PM:** 5–10 sentences in the PM's conversation
+> language (the card contract is `skills/communication.md` — outcome first,
+> identifiers last). No technical noise. Clearly say whether the PM can trust
+> it, and why.
 
 ## Reads / Writes
 
@@ -169,4 +174,4 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
   `/aid-verify-implementation` is the manual DONE gut-check the PM fires by hand
   on work that already claims to be complete.
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-12

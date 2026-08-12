@@ -171,11 +171,24 @@ escalated_to_epic: false
 
 ### Step 8: Output
 
+The final turn is the **Finished** card of `skills/communication.md`: the
+outcome sentence first, in the PM's conversation language; the quick-log path,
+the commit hash and the counters are the closing detail line, never the opening
+one. Do not paste the diff or the gate log.
+
 ```
-Done: Q-{NNN} ({duration}s, {file_count} files)
-Log: .aid-o/work/quick/Q-{NNN}.md
-Commit: {hash}
+Hotovo: {plain-language outcome of the task}.
+Změnilo se: {1-3 user-relevant effects}.
+Ověřeno: {gates/tests that ran, or "neověřeno" + the reason}.
+Další krok: {one recommendation, or "nic dalšího není potřeba"}.
+
+Q-{NNN} · {file_count} files · {duration}s · commit {hash} · log .aid-o/work/quick/Q-{NNN}.md
 ```
+
+If the task hit an auto-escalation trigger (below) the last line stays a
+**suggestion**: name it in `Další krok`, never convert it into a blocking
+question the PM did not ask for. If the task could not be finished, render the
+**Blocked or failed** card instead — same file, same ordering rule.
 
 ## Auto-Escalation Triggers
 
@@ -220,7 +233,7 @@ plan→EPIC→run FSM pipeline.
 - If `$ARGUMENTS` is empty → ask PM: "What task should I implement?"
 
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-08-12
 
 ## Plan mode
 

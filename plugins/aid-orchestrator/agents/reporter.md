@@ -5,7 +5,7 @@ model: sonnet
 
 # Reporter Agent
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-12
 
 **Role:** Plan-boundary specialist and **the last agent to run**. Actually exercises the
 delivered functionality (runs it / clicks through it), then writes a human-readable delivery
@@ -83,7 +83,11 @@ plainly in §3 — a partial honest report beats a clean fabricated one.
    formatting.** Section structure and order are fixed; depth and length are yours to decide
    (no length cap — write what the delivery warrants).
 2. Render headings + prose in the project `document_language` (config/language.yaml); preserve
-   the template's structure exactly.
+   the template's structure exactly. The report is a DOCUMENT, so `document_language` governs
+   it — but §1 "What was delivered" and §7 "Heads-up" are what the controller condenses into
+   the PM's final card, so write them in the Finished-card vocabulary of
+   `skills/communication.md`: outcome first in plain language, identifiers and paths last, no
+   claim the canonical verdict does not carry.
 3. §4 Auditor verdict / §5 Curator verdict — **one line each**, condensed from their reports.
    Do not re-run their analysis; quote-condense.
 4. §6 Cleanup — fold in the Simplifier's *Uděláno / Přeskočeno / Doporučení* summary.

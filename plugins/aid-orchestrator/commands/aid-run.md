@@ -462,20 +462,23 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 11. **PM Summary** (see `pipeline.md` §7 for full template):
     ```
     DONE REVIEW — {epic_id}
-    Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
-
-    Auditor Score: {overall}/100 (trend: {delta})
-      Code: {n} | Security: {n} | Docs: {n} | Process: {n}
-
-    Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
-    Auto-fixes: {count} from auditor recommendations
-    Simplifier: {applied} applied, {deferred} L-effort deferred
-    Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
+    {outcome in one plain sentence: what this EPIC now does for the PM}
+    Changed: {1-3 user-relevant effects}
+    Verified: {pass}/{total} gates pass; auditor {overall}/100 (trend: {delta})
+             {or the concrete reason something is unverified}
+    Next step: {the one recommended option below, with its one-line reason}
 
     {if blocking_findings:}
     ⛔ CRITICAL FINDINGS (block merge):
       1. [{type}] {finding} — effort: {S|M|L}
       Audit report: .aid-o/work/evidence/{id}/{run}/audit-report.md
+
+    Detail — steps {done}/{total} | gates {pass}/{total} | duration {time}
+      Auditor: Code {n} | Security {n} | Docs {n} | Process {n}
+      Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
+      Auto-fixes: {count} from auditor recommendations
+      Simplifier: {applied} applied, {deferred} L-effort deferred
+      Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
 
     Key outputs: {artifact list}
     Evidence: .aid-o/work/evidence/{id}/{run_id}/
@@ -491,6 +494,12 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
       FIX   — provide guidance, re-run review cycle
       ABORT — stop EPIC, no merge
     ```
+    This is the **Finished** card of `skills/communication.md` applied to DONE:
+    outcome sentence first, then what changed, what is verified and the one
+    recommended next step; counters, scores, report paths and evidence dirs
+    belong to the `Detail —` line and below it, never above it. If the review
+    ends in a blocker the PM must resolve, render the **Blocked or failed**
+    card instead and keep the same ordering.
     The summary above is the `legacy_epic_release_mode` shape. In `plan_branch`
     mode the Auditor/Curator/Simplifier/Reporter lines describe the PLAN-FINAL
     review, not a per-EPIC one — those roles run once per plan, at the boundary,

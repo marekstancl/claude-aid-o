@@ -30,8 +30,11 @@ plans that deliver no real value — before any code is written.
    access to the repo. Do **not** review inline — independence from the session
    that authored the plan is the entire point ("don't trust prior PASSes").
 3. **Relay the verdict.** Return the subagent's structured findings to the PM.
-   The human summary is delivered in **Czech** (see protocol); the severity
-   labels and verdict keep their canonical form.
+   The human summary is delivered in the PM's conversation language and in the
+   card shape `skills/communication.md` defines (Decision required when the PM
+   must choose whether the plan goes to implementation, Blocked or failed when
+   the plan cannot go as written); the severity labels and verdict keep their
+   canonical form.
 
 ## Why independent
 
@@ -119,8 +122,10 @@ project rule: *adversarially verify non-trivial plans before presenting as final
 > **Recommended revised approach:** the concrete order of plan fixes; what must
 > be blocking before implementation starts; what can remain a later extension.
 >
-> **Short human summary for the PM:** 5–10 sentences **in Czech**. Clearly say
-> whether to send the plan to implementation. No technical noise.
+> **Short human summary for the PM:** 5–10 sentences in the PM's conversation
+> language (the card contract is `skills/communication.md` — the recommendation
+> first, identifiers last). Clearly say whether to send the plan to
+> implementation. No technical noise.
 
 ## Reads / Writes
 
@@ -140,4 +145,4 @@ project rule: *adversarially verify non-trivial plans before presenting as final
   checkpoints (CP2–CP5) during `/aid-run`. `/aid-verify-plan` is the manual,
   pre-execution gut-check the PM fires by hand on a plan that is not yet running.
 
-**Last Updated:** 2026-06-28
+**Last Updated:** 2026-08-12

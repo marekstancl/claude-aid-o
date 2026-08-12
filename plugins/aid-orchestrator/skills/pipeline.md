@@ -1344,6 +1344,13 @@ Recommendation: {auto-generated}
 **Step rendering rule.** This section is the single authoritative definition of step numbering; every other surface references it rather than restating it. `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render it with the disambiguator that says which of the two situations it is: while steps remain, `Plan Step {executing_step} of {total_steps} is next`; once every step is done (`current_step == total_steps`, state GATES/DONE) `all {total_steps} steps complete`. Never a bare `Plan Step N of T` — against a 0-based field that phrasing is unreadable, and an uncapped `+1` renders a nonsensical `T+1 of T` for a finished run. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames (`step-{N}-verify.md`, with N 0-based) stay 0-based and are frozen compatibility surfaces. `aid-fsm.sh`'s `_fsm_human_step` helper emits exactly this wording, appended AFTER the machine values so existing greps keep matching.
 
 
+This block is the **Decision-required** card of `skills/communication.md` in its
+FSM form: present the blocker and the recommended option in plain language
+first, then the alternatives; the EPIC id, progress counter, failed state and
+attempt history are the technical context that follows the decision, never
+precedes it. The card shape, the ordering rule and the language rule are defined
+in that file only — do not restate them here.
+
 In FIRST AID mode, add option D: "Continue manual".
 
 **Per-type context blocks** (include relevant block based on trigger):
@@ -2196,27 +2203,28 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
 
 ```
 DONE REVIEW — {epic_id}
-Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
-
-Auditor Score: {overall}/100 (trend: {delta} vs previous)
-  Code: {score} | Security: {score} | Docs: {score} | Process: {score}
-
-{if audit mode was c3 — read from audit-report.json:}
-C3 Independence: {independence_level} achieved / {required_independence_level} required
-  {if status == unverifiable:} ⚠️ status: unverifiable — {reason}
-
-Curator: {applied} fixes applied (S/M/L), {deferred} deferred
-  Applied: {list of applied proposals with IDs}
-  Deferred: {list — always-defer rules (architecture, standards-L) or rejected — PM can approve in backlog}
-
-Auto-fixes: {count} applied from auditor recommendations
-  {list of fixes with file paths}
+{outcome in one plain sentence: what this EPIC now does for the PM}
+Changed: {1-3 user-relevant effects}
+Verified: {pass}/{total} gates pass; auditor {overall}/100 (trend: {delta} vs previous)
+         {or the concrete reason something is unverified}
+Next step: {the one recommended option below, with its one-line reason}
 
 {if blocking_findings:}
 ⛔ CRITICAL FINDINGS (block merge):
   1. [{audit_type}] {finding} — effort: {S|M|L}
      Recommendation: {recommendation}
   Audit report: .aid-o/work/evidence/{epic_id}/{run_id}/audit-report.md
+
+Detail — steps {done}/{total} | gates {pass}/{total} | duration {time}
+  Auditor: Code {score} | Security {score} | Docs {score} | Process {score}
+  {if audit mode was c3 — read from audit-report.json:}
+  C3 Independence: {independence_level} achieved / {required_independence_level} required
+    {if status == unverifiable:} ⚠️ status: unverifiable — {reason}
+  Curator: {applied} fixes applied (S/M/L), {deferred} deferred
+    Applied: {list of applied proposals with IDs}
+    Deferred: {list — always-defer rules (architecture, standards-L) or rejected — PM can approve in backlog}
+  Auto-fixes: {count} applied from auditor recommendations
+    {list of fixes with file paths}
 
 Key outputs: {artifact list}
 
@@ -2231,6 +2239,12 @@ Options (`plan_branch`):
   FIX   — provide guidance, re-run review cycle
   ABORT — stop EPIC, no merge (/aid-stop)
 ```
+
+This is the **Finished** card of `skills/communication.md` applied to DONE (the
+**Blocked or failed** card replaces it when the review ends in a blocker the PM
+must resolve): the outcome sentence leads, and every counter, score, report path
+and evidence dir sits on or below the `Detail —` line. `commands/aid-run.md`
+shows the same shape abridged — keep the two in step.
 
 > **PM machine handoff (D11 — E9).** Independently of this human summary, once the FSM advances
 > review→release (step 13 below), a deterministic PM brief is generated from `release-decision.json`
