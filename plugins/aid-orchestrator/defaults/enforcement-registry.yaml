@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 430          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 439          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2783,3 +2783,131 @@ enforcements:
     description: "2026-08-11 — a gate named `bats_all` had run only T0+T1 since the tier pilot. The PM read 'gate bats_all failed', reasonably concluded an agent was running the whole portfolio in front of every merge, and lost half a day to a misdirected diagnosis. The name was true once and nobody revisited it. Four mechanical checks: a kind prefix from a fixed vocabulary so a failure line groups; no tool name (the tool gets swapped and the name starts lying); a word of totality only when the command really covers that universe — the check that would have caught `bats_all` the day tiers landed; and no outcome word, because every gate either passes or fails. Existing names are grandfathered in scripts/tests/gate-name-allowlist.txt with their proposed replacements written down, since renaming is ~575 literal occurrences across ~60 files and needs an alias period for consumers; a NEW or renamed gate must lint clean."
     recovery: "The gate fails naming the offending gate and every rule it breaks; the allowlist is fail-closed — a missing file means no exceptions, never 'allow everything'."
     test: "scripts/tests/bats/test-gate-name-lint.bats"
+
+  # ── P080 Step 16: the entry-point UX layer's own enforcements ──────────────
+  # Registered here at the end of the plan, per CLAUDE.md "Register + document
+  # every enforcement". Two P080 rows landed earlier and are NOT repeated:
+  # `help_index_coverage` (Step 2/4) and `registry_cite_validation` (Step 4).
+  # A THIRD is deliberately not created: Step 8's init idempotency harness was
+  # mapped onto the EXISTING `init_idempotency` row (type 7) rather than
+  # appended as `init_workspace_idempotency`, because two rows for one check is
+  # exactly the duplication `registry_cite_validation` can never detect — the
+  # ids differ, so uniqueness stays green while a consumer reads whichever row
+  # it reaches first.
+
+  - id: communication_reference_wiring
+    type: 3
+    source: "scripts/tests/test-communication-wiring.sh (cases 1-2, 4)"
+    instruction: "skills/communication.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P080 Steps 9 + 14 — the four PM decision cards, the D16 output-product table and the language rule are DEFINED once, in skills/communication.md. A contract file nobody points at is decoration (AID principle #1), so the wiring is checked mechanically instead of trusted: every surface that talks to the PM at a boundary must name skills/communication.md literally, and no other file may DEFINE a card skeleton (counted over UNFENCED text only — a card quoted inside a fence is an example, and communication.md's own cards are fenced by design). The suite also asserts the superseded shapes are gone: the metrics-first DONE-review header in aid-run.md and the hardcoded Czech language mandate in the two verify commands. TIER: t0, so it is on the MERGE PATH (CI runs --tier t0 then --tier t1; t2 is nightly-only)."
+    recovery: "The failure names the file and the missing reference. Add the literal `skills/communication.md` reference at the boundary that talks to the PM; never re-specify a card skeleton locally to make a check pass."
+    test: "scripts/tests/test-communication-wiring.sh"
+
+  - id: artifact_publication_wiring
+    type: 3
+    source: "scripts/tests/test-communication-wiring.sh (case 3)"
+    instruction: "skills/communication.md (grep: 'Publish the artifact body via the Artifact tool')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P080 Step 9 — a WIRING-PRESENCE guard, and nothing more. It asserts that every site invoking a deterministic renderer also carries the canonical publish-before-present clause VERBATIM — one literal, defined in skills/communication.md and pasted unchanged, because a loose grep passes on a paraphrase and that is precisely how two differently-worded clauses ship and neither is enforced. The sites are FOUR, not three: skills/pipeline.md carries two distinct renderer invocations (gates phase and plan boundary), each anchored on its own renderer name, because listing the file once would let the gates path pass on the plan path's clause. WHAT THIS ROW DOES NOT CLAIM: that any page was ever published. Publication is the controller's live Artifact-tool act; the renderers write a body file and print a card, no script claims a page exists, and this check runs happily on a CI box with no Artifact tool at all. TIER: t0 (merge path)."
+    recovery: "The failure names the renderer site missing the clause. Paste the literal from skills/communication.md unchanged — do not reword it, and do not delete the renderer invocation to silence the check."
+    test: "scripts/tests/test-communication-wiring.sh"
+
+  - id: final_turn_output_contract
+    type: 3
+    source: "scripts/tests/bats/test-help-index-coverage.bats (cases 10-11)"
+    instruction: "skills/communication.md (section: 'Ordering, Truth and Publication' — the Inventory bullet)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P080 Step 14 — `final_turn` in defaults/help-index.yaml is the output-contract inventory: what each surface leaves the PM with. The rule it makes mechanical is communication.md's — a path absent from the inventory cannot quietly emit a final technical dump. Case 10 reads the VALUE, not merely its presence: the form (`renderer:<script>` / `card:<type>` / `internal`), the card vocabulary (the four cards and no fifth), and the public/internal split — `internal` is legal only where disposition is `intentionally_internal`, otherwise it is the cheapest way to exempt a real command from the inventory. Case 11 checks CONTENT for `renderer:` rows: the script must exist AND the surface's own file must mention it, so an inventory entry can never name a mechanism nothing wires. HONEST SCOPE, carried from the suite's own header: for `card:` rows this is vocabulary and disposition consistency ONLY — it is not proof the surface emits that card at runtime, which would need a live final-turn capture harness this plan does not build. `renderer:` rows are the half that is content-checked. TIER: t1 (merge path)."
+    recovery: "The failure names the command and the malformed or unwired value. Fix the row in defaults/help-index.yaml, or wire the renderer the row claims; never invent a card type to satisfy the vocabulary check."
+    test: "scripts/tests/bats/test-help-index-coverage.bats"
+
+  - id: handoff_renderer_contract
+    type: 3
+    source: "scripts/tests/test-integration-handoff-rendering.sh"
+    instruction: "skills/communication.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P080 Step 15 — the golden harness that drives all THREE renderers (lib/aid-artifact-render.sh as smoke, lib/aid-gate-outcome-summary.sh at the gates boundary, lib/aid-plan-close-summary.sh at the plan boundary) over checked-in fixture JSON, for the five delivery cases: finished, decision-required, blocked, force-used (waiver present) and incomplete (canonical facts arrived, model prose did not). It proves the card comes FIRST (the first non-empty stdout line is the outcome sentence — no JSON, path or identifier ahead of it), that the artifact body carries the ecosystem standard's blocks in document order, that a raw technical list can never be the ONLY output, and that no secret survives the page, the card or the FALLBACK card. The block-order goldens are the only byte-golden; everything else is structural, so a wording edit inside a block does not churn a fixture while a block that moves, vanishes or appears does fail. Regeneration is a HUMAN act (AID_HANDOFF_GOLDEN_REGEN=1) that exits 2 with the diff and never reports a pass — a golden test that rewrites its own expectation on failure proves nothing. DOES NOT PROVE PUBLICATION: the renderers write files and print text; the Artifact tool call is a live controller act. TIER: t2 — cross-component, therefore NIGHTLY-ONLY. It is not on the merge path and this row does not pretend otherwise."
+    recovery: "The failure prints the case and the structural expectation that broke, or the golden block-order diff. Fix the renderer; regenerate a golden only when the block order genuinely changed, and only through the documented regen mode."
+    test: "scripts/tests/test-integration-handoff-rendering.sh"
+
+  - id: artifact_template_caps
+    type: 4
+    source: "scripts/lib/aid-artifact-render.sh (grep: '_AID_ARTIFACT_CAP_ITEMS')"
+    instruction: "/ecosystem/specs/artifact-standard"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P080 Step 10 — the ecosystem artifact standard's brevity ceilings are enforced IN CODE at the renderer boundary, never asked for in prose: 5 result items, 3 'jak pokračovat' steps, 5 related links, ~220 chars per sentence, and per-block caps on the model-written prose (summary 320, core 300, ask 220). Overflow is never silent — it emits the declared overflow literal carrying the TRUE remaining count, so a truncated list reads as truncated rather than as the whole story. Blocks 1-4 and 6 always render; block 6 in particular is never omitted, because a silently absent ask block reads to a PM as 'nothing is required of me'. Blocks 5 and 7 render only when links, or an EXPLICIT detail target, are given — the library never infers a detail target. TIER: t1 (merge path)."
+    recovery: "A cap breach is not a failure mode at run time — the renderer clips and reports the remainder. The test fails when a cap is removed, changed without the standard changing, or when overflow stops being counted; restore the constant rather than raising it to fit one caller."
+    test: "scripts/tests/bats/test-aid-artifact-render.bats"
+
+  - id: artifact_secret_redaction
+    type: 4
+    source: "scripts/lib/aid-artifact-render.sh (grep: '_aid_artifact_redact')"
+    instruction: "/ecosystem/specs/artifact-standard"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P080 Step 10 — the artifact standard forbids passwords, tokens, keys and FRAGMENTS of them in any artifact, and gate `output` fields carry arbitrary command output straight out of a run, so escaping alone is not a policy. Every input the library renders — facts_json, prose_json and any command output embedded in them — is scanned BEFORE a byte is written. Matches are REDACTED (<redacted:NAME>), not failed on: failing closed at the presentation layer would swallow the very message telling the PM a run broke. The redaction is COUNTED and the count is rendered in the provenance footer, so a redaction can never be silent, and escaping is applied AFTER redaction, never instead of it. Proven rather than asserted: the handoff harness ships fixtures deliberately carrying secret-shaped strings (all synthetic — a counting sequence, AWS's published documentation example, the bash.org joke password) and checks the page, the card AND the fallback card."
+    recovery: "The failure shows the secret shape that reached the output. Add the pattern to the redaction table; never exempt a caller, and never move redaction after escaping."
+    test: "scripts/tests/bats/test-aid-artifact-render.bats"
+
+  - id: config_summary_read_only
+    type: 4
+    source: "scripts/aid-config-summary.sh (header: 'READ-ONLY CONTRACT')"
+    instruction: "commands/aid-init.md (section: 'Closing output') + commands/aid-setup.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P080 Step 7 — one script renders the effective AID configuration and BOTH /aid-init (as its closing output) and /aid-setup (before its module menu) present it verbatim, so a PM sees the same block from both commands instead of two improvised descriptions that drift. The read-only contract is the load-bearing half and it is PROVED, not declared: the suite snapshots the whole project tree around an invocation, runs the script against a write-protected tree, checks TMPDIR is left clean, and greps the source for any write operation. A missing workspace, a missing config file and an unparseable config file are REPORT LINES, not errors — a summary must be able to summarize a broken configuration rather than crash on it. No rendered value is ever empty; every absence renders as an explicit word. TIER: t0 (merge path)."
+    recovery: "The failure names the write it caught or the empty value it rendered. A summary that needs to write is a summary in the wrong place — move the write to its owning command."
+    test: "scripts/tests/bats/test-aid-config-summary.bats"
+
+  - id: step_seam_human_rendering
+    type: 3
+    source: "scripts/aid-fsm.sh (grep: '_fsm_human_step')"
+    instruction: "skills/pipeline.md (grep: 'Plan Step')"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P080 Step 13 — the rule that turns the FSM's 0-based current_step into a human 'Plan Step N of T' existed as six full prose copies across five files, and P076 had already shown them drifting. skills/pipeline.md now holds the ONLY full definition; the other five sites carry a one-line reference. The regression asserts the single-authority shape itself: exactly one file may carry the full rule, all five must carry the reference, and no seam may emit the pre-P080 wording. The human form is APPENDED after the machine values, so every machine-parsed seam is byte-unchanged — verify-state's JSON, the status=advanced stdout line the controller parses, the CP2 verdict JSON, and every step-N-verify.md binding diagnostic, which deliberately keeps speaking 0-based because that is the evidence filename an operator must create. TIER: t2 — NIGHTLY-ONLY. This row is advisory and off the merge path; it is a drift detector, not a merge blocker, and it is registered saying so."
+    recovery: "The failure names the file carrying a second full copy, or the site missing its reference. Reduce the copy to a one-line reference to skills/pipeline.md; never resolve a drift by editing the definition to match a copy."
+    test: "scripts/tests/bats/test-fsm-step-render.bats"
+
+  - id: version_registry_sync
+    type: 4
+    source: "scripts/tests/verify-version-files.sh"
+    instruction: "CLAUDE.md (section: 'Version File Registry')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    description: "P080 Step 16 — this repo's release convention is that 8 named locations carry the version and all must agree. verify-version-files.sh has existed since P079 and CP1 found it had no ceremony caller anywhere: it falls outside the test-*.sh glob that scripts/tests/run-all-tests.sh uses, aid-release.sh never calls it, and .github/workflows/version-sync.yml has the plugin check commented out ('Plugin has independent versioning'). Step 16 makes its invocation an explicit RELEASE-CEREMONY command in CLAUDE.md's pre-push check, replacing four eyeball greps. SURFACE AND SEVERITY, STATED HONESTLY: invocation-time at the release boundary — NOT a CI gate and NOT a suite member. That is a deliberate decision, not an omission: the 8 locations legitimately diverge mid-development, so a suite-wide run would fail every non-release commit. Its LOGIC is regression-tested (test-aid-release-seal.bats drives it over fixtures, including the two-CHANGELOGs-differ case); what is unenforced is that a human runs it, and this row says so rather than implying a gate. Note also what aid-release.sh itself covers in THIS repo: location 1 (root CHANGELOG.md) plus, through its no-config fallback, any other CHANGELOG.md it finds — there is no .aid-o/config/project.yaml here, so the versioning.files[] loop never runs and locations 3-8 stay MANUAL."
+    verdict: GAP
+    tier: n/a
+    recovery: "Run `bash plugins/aid-orchestrator/scripts/tests/verify-version-files.sh <new_version> --baseline <old_version>` from the repo root before pushing a release. It prints one FAIL line per location that disagrees; fix the file, never the script."
+    test: "scripts/tests/bats/test-aid-release-seal.bats"

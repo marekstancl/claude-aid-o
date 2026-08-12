@@ -1974,6 +1974,274 @@ pretended to be mechanical.
 deterministic and its false-positive shape is pinned by a test. If it needs
 judgment, write it as a rule where test authors read and say so.
 
+## The entry-point UX layer (P080)
+
+Three surfaces a person actually meets — the help, the two setup commands, and
+the last message of every run — had drifted into being maintained by hand next
+to the thing they describe. Help listed a `--mode` value the parser rejects.
+Two commands wrote the same files with no declared owner. Every boundary
+improvised its own final message. This section is the layer that replaced all
+three with one authority each, plus a mechanical check that the authority is
+still being read.
+
+### The help index, and the coverage test
+
+`defaults/help-index.yaml` is the authority on every surface the plugin ships.
+`lib/aid-help-index.sh` is the ONE reader, and `commands/aid-help.md` is
+GENERATED from the index rather than maintained beside it. Each row carries a
+command, its file, the help topic it routes to, its audience, its disposition,
+its purpose, what it writes, and its `final_turn`.
+
+`test-help-index-coverage.bats` (t1, merge path) makes three artifacts agree or
+fails: the surfaces the repo mechanically ships, the index that claims to be the
+authority on them, and the help file a user actually reads. **A newly added
+public command fails here until it is INTENTIONALLY indexed and routed —
+silence is not a pass.** Routed means the topic names the command in prose, not
+only inside a code fence: a fence is not something a reader searching for a
+command name will find.
+
+Two of its cases own the output-contract inventory, and their honest scope is
+worth carrying:
+
+- **Case 10** reads the `final_turn` VALUE, not merely its presence — the form
+  (`renderer:<script>` / `card:<type>` / `internal`), the card vocabulary (the
+  four cards defined in `skills/communication.md`, no fifth), and the
+  public/internal split, since `internal` is legal only where disposition is
+  `intentionally_internal`. For `card:` rows **this is vocabulary and
+  disposition consistency only** — it is not proof the surface emits that card
+  at run time. Observing a real final turn needs a capture harness this layer
+  does not build, and the suite says so in its own header rather than letting
+  the row read as stronger than it is.
+- **Case 11** is the half that checks CONTENT: a `renderer:` value must name a
+  script that exists AND be mentioned by the surface's own file, so an inventory
+  entry can never name a mechanism nothing wires.
+
+**Adding to this area.** A new public command gets a `help-index.yaml` row
+FIRST, then a mention in prose in its help topic, then `commands/aid-help.md`
+regenerated from the index — never edited directly. An internal surface gets
+`disposition: intentionally_internal` and `final_turn: internal`, and those two
+must agree; do not reach for `internal` to get a user-facing command out of the
+inventory, because that is the exact hole the inventory exists to close.
+
+### Registry cites have to resolve
+
+`test-enforcement-registry-cites.sh` (t0, merge path) asserts that every
+`source:`/`instruction:` cite in `defaults/enforcement-registry.yaml` names a
+file or directory that exists, and that every row id is unique.
+
+A registry row is this plugin's promise that a detector has a real enforcing
+surface. A row citing a file that was deleted, renamed or moved still LOOKS
+wired while enforcing nothing — the P026 "detector without enforcement" failure
+one level up, hiding inside the very file that exists to make enforcement
+auditable. P080 found eight such rows.
+
+Three things are deliberate:
+
+- **Line numbers are NOT asserted.** `file:123` drifts on every edit above line
+  123; asserting it would make the registry unmaintainable. File existence is
+  the invariant, the line is a navigation hint, and a prose grep anchor is the
+  better cite when the line has already drifted once.
+- **Four bases, not one.** The shipped registry legitimately writes cites
+  against the plugin root, the repo root, and `plugin + scripts/` (bare
+  `lib/…`). A fifth shape, `/ecosystem/…`, is a Docusaurus namespace path into
+  the shared ecosystem docs; it is resolved against that tree when present and
+  REPORTED AS SKIPPED when it is not, because a consumer checkout without
+  `/opt/eco/docs` is a real situation and must be visible rather than assumed
+  away.
+- **It fails closed by construction.** It materialises rows before iterating,
+  checks `jq`'s exit code, and asserts the extracted row count equals the
+  registry's own declared length. An earlier draft let one non-scalar cite field
+  abort extraction mid-pipeline and reported success having checked 0 rows.
+
+**Adding to this area.** When a cite dangles, repoint the row at the surface
+that really carries the rule, or mark it `status: dead` with the reason the
+enforcement died with what it cited. Never allowlist a path to make a row pass.
+And when you add a row, recompute the header total from the real count
+(`yq '.enforcements | length' defaults/enforcement-registry.yaml`) rather than
+adding one to the number that is there.
+
+### Who owns each file init and setup write
+
+The rule is one line: **`/aid-init` CREATES, `/aid-setup` MUTATES, and an init
+re-run never rewrites a file that exists.** What made it untrue in practice was
+not the rule but the exceptions, which existed and were undeclared.
+
+The fresh-init product is counted ONCE, in `commands/aid-init.md`'s base
+manifest, and every other mention refers back to it instead of restating a
+number — four different counts had been shipped, each true of a different draft.
+Git hooks and conditional writes are labelled separately and excluded from the
+count, and the reason is the document's own rule rather than convenience.
+
+Each row's carve-out is cited by file and section name, not line number:
+
+| File | Owner | Carve-out lives at | Test |
+|---|---|---|---|
+| `config/project.yaml` | `/aid-setup` (module `scan`) | `commands/aid-init.md` → "Ownership — `project.yaml`" | — |
+| `config/permissions.yaml` | `/aid-setup` (module `permissions`) | `commands/aid-init.md` → "Ownership — `permissions.yaml`" | `test-aid-config-summary.bats` (reads it) |
+| `config/execution.yaml` | `/aid-init` composes; PM hand-edits | `commands/aid-init.md` → "execution.yaml Generation" + "Existing Project — `gate_profiles` Upgrade" | `test-init-idempotency.sh` |
+| `config/plugin.yaml` | **two writers** — `/aid-init` and `/aid-run` PRE-FLIGHT (path self-repair); nobody but fresh init or a human writes `dispatch_mode` | `commands/aid-init.md` → "Ownership — `plugin.yaml` has a SECOND writer" | — |
+| `config/check-severity.yaml` | **two writers** — `/aid-init` creates once, `aid-fsm.sh promote-check` mutates; `/aid-setup` does not touch it | `commands/aid-init.md` → "check-severity.yaml — severity registry" | — |
+| `config/test-audit.yaml` | `/aid-init` copies once; PM customizes | `commands/aid-init.md` → "test-audit.yaml — test portfolio audit config" | — |
+| `config/integrations.yaml` (conditional) | `/aid-setup` (module `integrations`); init writes exactly one key at creation | `commands/aid-init.md` → "Ownership — `integrations.yaml`" | — |
+| `work/active.md`, `work/backlog.md`, `work/timeline.jsonl` | `/aid-init` creates; the pipeline appends | `commands/aid-init.md` → "active.md template" / "backlog.md template" | — |
+| `.gitignore` (not counted) | AID backfills per line | `commands/aid-init.md` → ".gitignore (copied from defaults/.gitignore)" | `test-init-idempotency.sh` |
+| `.git/hooks/pre-commit`, `pre-push` (not counted) | AID owns **only within its marker block** | `commands/aid-init.md` → "Git Hook Installation" | — |
+| `CLAUDE.md` | `/aid-setup` (module `claude-md`) — `/aid-init` never writes it | `commands/aid-init.md` → "Ownership — `CLAUDE.md`" | — |
+
+Two entries are honest rather than tidy on purpose. `project.yaml` has a third,
+DELEGATED writer — `agents/project-scanner.md`, triggered by `/aid-setup` — and
+it may only extend auto-detected sections; the merge rule in
+`skills/setup/project-scan.md` governs, and it is merge, never overwrite.
+`CLAUDE.md` carries a recorded KNOWN GAP: `skills/setup/claude-md.md` does not
+yet emit an ecosystem-reference block for the `vulcan` profile, so init's
+pointer would have pointed at something that does not exist. That was written
+down as a gap instead of being smoothed over.
+
+**Adding to this area.** A new init-written file gets an owner declared at its
+write site in the same "Ownership — `<file>`" form, and if it has a second
+writer, name it — an undeclared second writer is the whole defect class this
+section exists to close. Do not restate the manifest count anywhere; refer to
+it.
+
+### One read-only configuration summary
+
+`scripts/aid-config-summary.sh` renders the effective AID configuration once,
+and BOTH `/aid-init` (as its closing output) and `/aid-setup` (before its module
+menu) present its output VERBATIM. Before this, each described the result in its
+own prose from its own reads, and the two drifted — most visibly around
+`active_preset`, where a fresh workspace reads `autonomous` next to
+`autonomous_mode: false` and each surface improvised its own wording. That pair
+now has two cases and two fixed strings, used verbatim by three surfaces.
+
+The read-only contract is the load-bearing half, and it is PROVED rather than
+declared: `test-aid-config-summary.bats` (t0) snapshots the whole project tree
+around an invocation, runs the script against a write-protected tree, checks
+`TMPDIR` is left clean, and greps the source for any write operation. A missing
+workspace, a missing config file and an unparseable config file are all REPORT
+LINES, not errors — a summary must be able to summarize a broken configuration
+rather than crash on it — and no rendered value is ever empty, because an
+absence with no word for it reads as a value.
+
+`test-init-idempotency.sh` (t1) pins the re-run contract, and its scope is
+narrower than the command's: it drives the SCRIPTED substrate — the
+execution.yaml composer, the `.gitignore` backfill lib, the base manifest, a
+DECLINED `gate_profiles` upgrade. It does **not** cover the prose-executed steps
+such as hook installation, which have no shipped library to drive at this HEAD.
+That is why Step 8 mapped the harness onto the EXISTING `init_idempotency`
+registry row instead of appending a second row: two rows for one check is a
+duplication `registry_cite_validation` structurally cannot catch, because the
+ids differ and uniqueness stays green.
+
+**Adding to this area.** A new configuration value gets a line in the summary
+with an explicit word for its absence, and a case in the summary suite. If it
+needs a write, the write belongs in the command that owns the file — a summary
+that writes is a summary in the wrong place.
+
+### The communication contract, the renderer family, and the artifact layer
+
+`skills/communication.md` defines, ONCE: the four PM cards (finished,
+decision-required, blocked, progress), the D16 output-product table with each
+product's audience, the ordering rule (outcome first, identifiers and paths
+last), the language rule, and the publish-before-present clause. Other surfaces
+REFERENCE it; none may restate a card skeleton.
+
+`test-communication-wiring.sh` (t0, merge path) is what makes that a mechanism
+rather than a preference:
+
+1. **Reference** — every surface that talks to the PM at a boundary names
+   `skills/communication.md` literally.
+2. **Publication** — every site invoking a deterministic renderer carries the
+   canonical publish clause VERBATIM. One literal, defined in the contract and
+   pasted unchanged: a loose grep passes on a paraphrase, which is exactly how
+   two differently-worded clauses ship and neither is enforced. The sites are
+   FOUR, not three — `skills/pipeline.md` carries two distinct renderer
+   invocations (gates phase and plan boundary), each anchored on its own
+   renderer name, because listing the file once would let the gates path pass on
+   the plan path's clause.
+3. **Superseded fragments** — the shapes the contract replaced are gone: the
+   metrics-first DONE-review header, the hardcoded Czech language mandate in the
+   two verify commands, and any second definition of a card skeleton, counted
+   over UNFENCED text only (a card inside a fence is an example; the contract's
+   own cards are fenced by design and it is exempt, verified separately).
+
+**What none of this claims: that a page was ever published.** The renderers
+write a body file and print a card. The Artifact tool call is a live controller
+act, wired in `commands/*.md` and `skills/pipeline.md`. The wiring check runs
+happily on a CI box with no Artifact tool at all, and the registry rows are
+worded as wiring-presence guards for exactly that reason.
+
+The renderer family is three libraries with one shape:
+
+| Library | Boundary | Canonical input |
+|---|---|---|
+| `lib/aid-artifact-render.sh` | none — the generic body renderer everything else builds on | `facts_json` + `prose_json` |
+| `lib/aid-gate-outcome-summary.sh` | the gates run | the runner's gates report (`--report-file`, else nested, else flat — first hit wins, and the resolved path goes in the provenance footer) |
+| `lib/aid-plan-close-summary.sh` | plan-final / close | the PM brief AND the release decision, both required |
+
+Each is a pure function of its inputs plus the template. Numbers are COUNTED,
+never asserted — there is no EPIC total field, so `epics | length` is counted
+from the array — and both boundary renderers FAIL CLOSED when a canonical input
+is missing rather than narrating around the gap. `aid-plan-close-summary.sh`
+names the gate report path but deliberately does not open it, because that would
+reintroduce the sibling-evidence read the D6/D9 cycle-break exists to forbid.
+
+The artifact layer itself is `lib/aid-artifact-render.sh` plus
+`defaults/templates/artifact-outcome.html`, and its full spec — the 7-block
+mapping table, the placeholder grammar, the caps and the redaction policy — is
+authored at `defaults/templates/artifact-templates-spec.md` in this repo, ready
+for the PM to publish into the ecosystem docs (see IMP-502; publication is a
+cross-repo act this repo has no authority to perform). In short:
+
+- **Placeholder grammar.** `{{fact:<jq.path>}}` is a scalar from `facts_json`,
+  HTML-escaped, missing → the em dash, never invented. `{{prose:<key>}}` is a
+  bounded model-written block, sentence-capped then block-capped then escaped,
+  missing → the declared literal for that state. `{{html:<key>}}` is a fragment
+  the library builds itself and is the ONLY grammar inserted as raw markup —
+  callers cannot reach it. Substitution is SINGLE PASS, so a value containing
+  `{{` is never re-expanded.
+- **Caps in code, not in a prompt.** 5 items, 3 next steps, 5 links, ~220 chars
+  per sentence, 320/300/220 for summary/core/ask. Overflow emits the declared
+  literal carrying the TRUE remaining count, so a truncated list reads as
+  truncated.
+- **Blocks 1-4 and 6 always render**; 5 only with links, 7 only with an EXPLICIT
+  detail target, never inferred. Block 6 is never omitted even when nothing is
+  asked, because a silently absent ask block reads as "nothing is required of
+  me".
+- **Secrets are redacted, counted, and never fatal.** Every input is scanned
+  before a byte is written; matches become `<redacted:NAME>`; the count is
+  rendered in the provenance footer so a redaction is never silent; escaping is
+  applied AFTER redaction, never instead of it. Failing closed here would
+  swallow the very message telling the PM a run broke.
+
+`test-integration-handoff-rendering.sh` (t2, **nightly only**) drives all three
+renderers over checked-in fixtures for five delivery cases — finished,
+decision-required, blocked, force-used, and incomplete (facts arrived, prose did
+not). Its goldens record BLOCK ORDER only, so a wording edit inside a block does
+not churn a fixture while a block that moves, vanishes or appears does fail, and
+regeneration is a human act that exits 2 with the diff and never reports a pass.
+Its malicious fixtures carry synthetic secret-shaped strings on purpose, so
+leakage is proven impossible rather than merely absent.
+
+One more single-authority repair belongs here. The rule turning the FSM's
+0-based `current_step` into a human "Plan Step N of T" existed as six full prose
+copies across five files; `skills/pipeline.md` now holds the only definition and
+the other five carry a one-line reference. The human form is APPENDED after the
+machine values, so every machine-parsed seam is byte-unchanged — verify-state's
+JSON, the `status=advanced` stdout line the controller parses, the CP2 verdict
+JSON, and every `step-N-verify.md` binding diagnostic, which keeps speaking
+0-based because that is the evidence filename an operator must create.
+`test-fsm-step-render.bats` asserts the single-authority shape, and it is **t2,
+so nightly-only**: a drift detector, not a merge blocker, registered saying so.
+
+**Adding to this area.** A new PM-facing boundary references
+`skills/communication.md` and never re-specifies a card. A new renderer is a
+pure function of canonical inputs, writes a body, prints a card, and its wiring
+site pastes the publish clause unchanged. A new template keeps the seven blocks
+in order and adds a constant, not a sentence asking a model to be brief. And
+nothing anywhere — code, docs or a registry row — may say a page was published;
+the strongest true statement is that the body renders and the publication is
+wired.
+
 ## Test tiers (P081)
 
 AID is the ecosystem's pilot for `/ecosystem/specs/test-standard`. The whole
@@ -2100,4 +2368,4 @@ reason that is not cost or scope, the answer is no — that is the rule the whol
 standard rests on.
 
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-12
