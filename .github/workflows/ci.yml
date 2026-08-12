@@ -18,8 +18,30 @@ name: CI
 on:
   push:
     branches: [main]
+    # Plan text and review evidence change nothing this workflow can verify.
+    # Measured 2026-08-11: of 14 runs stacked in a stuck queue, most were
+    # `plan:`/`docs:` commits. `.aid-o/plans` and `.aid-o/work` are read by NO
+    # suite against the real repository — every suite that mentions them builds
+    # its own fixture under TEST_PROJECT_ROOT (checked file by file).
+    # `docs/**` is deliberately NOT ignored: test-deferred-work-registration
+    # reads the real `docs/plans/2026-06-29-BACKLOG.md` at line 35.
+    paths-ignore:
+      - '.aid-o/plans/**'
+      - '.aid-o/work/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '.aid-o/plans/**'
+      - '.aid-o/work/**'
+
+# One in-flight run per ref. Without this, a burst of pushes queues a run per
+# commit and they all verify supersededed trees — on 2026-08-11 fourteen were
+# waiting behind a dead runner, the oldest 17 hours old, testing versions of
+# main that no longer existed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bash-tests:
     runs-on: [self-hosted, eco-dev]
@@ -58,6 +80,44 @@ jobs:
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --verbose
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --verbose
         timeout-minutes: 20
+
+  # ---------------------------------------------------------------------------
+  # Shadow run of the merge path on a GitHub-hosted runner.
+  #
+  # This is a MEASUREMENT, not a gate: continue-on-error means it can never
+  # block a merge. It exists to answer one question with evidence instead of
+  # opinion — does the merge path pass off this machine?
+  #
+  # Why it might not: T0 and T1 are defined as touching no service and no
+  # network, so in principle they need nothing local. In practice a suite can
+  # quietly depend on a path, an installed tool or a shared directory that only
+  # exists on eco-dev. Such a suite passes at home and fails here, and that
+  # divergence is the finding.
+  #
+  # Free here: this repository is public, so GitHub-hosted minutes cost nothing
+  # (verified 2026-08-11). Private eco repos keep everything self-hosted.
+  #
+  # Exit criterion: once this job matches `bash-tests` on two consecutive runs,
+  # the merge path moves here for real and the self-hosted host keeps only the
+  # nightly T2 portfolio, which genuinely needs local infrastructure.
+  # See /ecosystem/specs/test-standard → "Kde která patra běží".
+  merge-path-hosted-shadow:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq + jsonschema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq bats python3-jsonschema
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - name: Merge path (T0 + T1) on a hosted runner
+        run: |
+          chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --verbose
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --verbose
+        timeout-minutes: 30
 
   plan-boundary-tests:
     runs-on: [self-hosted, eco-dev]

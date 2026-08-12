@@ -1,11 +1,19 @@
 ---
 id: P082
 type: plan
-status: draft
+status: superseded
 created: 2026-08-11
 author: PM + AI
 risk: high
 ---
+
+> **SUPERSEDED 2026-08-11 by P083.** CP1-deep returned `verdict: fail` with 15
+> accepted blockers: seven of twelve steps were grounded against code that does
+> not exist, is not the runtime path, or reverses a documented deliberate
+> decision. Cause: this plan was written from the backlog's own descriptions
+> rather than from the tree. Do NOT generate. Review evidence:
+> `.aid-o/work/evidence/P082/cp1-deep/`. Replacement: `P083-ten-verified-defects.md`,
+> written from `.aid-o/work/evidence/backlog-verify-2026-08-11/`.
 
 # Plan: Close the Live Holes the Backlog Audit Found, and Make the Backlog Tell the Truth
 
@@ -34,12 +42,14 @@ Every defect the audit proved still live is either fixed with a regression that 
 - The dogfood ref-isolation preflight (IMP-280) and closing the debug CLI path that can still mint `lineage: proven` (IMP-268).
 - The EPIC generator's silent truncation of multi-line acceptance criteria.
 - Backlog hygiene: split into a live queue and a dated archive, ensure every surviving entry has a status, and record the parked items with reasons.
+- Three leftovers from the P081 whole-diff review, added 2026-08-11 because they are the same class this plan already treats — a mechanism that promises more than it delivers: **(a)** the durations journal is written under `.aid-o/` inside the CI checkout and wiped every run, so the nightly's `--timing` pass refreshes nothing and the lint's "has this suite outgrown its tier" check is machine-local despite the workflow claiming otherwise; **(b)** 156 of 161 T2 suites were tiered by subject-resolution failure rather than by cost — 82 of them run under 2 s and all 41 shell suites are among them — so the merge path is far thinner than the pilot intended and nothing distinguishes a deliberate scope call from a naming gap; **(c)** the nightly report writes `quarantine_unreadable` and `quarantine_write_failed` that no consumer reads, so an unreadable quarantine record hides behind a green status line.
 
 **Out of scope:**
 - IMP-261 (project-scoped configuration and the versioned settings schema) — it is a plan of its own; P080 discharges only its init/setup-ownership slice, and the audit confirmed the rest is untouched. Parked with that note.
 - IMP-281 (`docs_updated` manufacturing a pass) — its own precondition, a local reproduction, is still unmet; this repo's gate is a genuine heuristic. Parked deliberately.
 - The C3 no-op when `review-profile.json` is entirely absent, and the release-decision `head_match` promotion to blocking — both are explicitly deferred to E10 by existing policy; this plan does not pre-empt that decision.
 - CP2 test-scope selection (OBS-20260711-02), cross-repo CP3 dispatch, the E6/E8 deferred blocks and the P041 Wave-2 items — no mechanism exists for any of them and none is urgent; they stay in the live queue with their reasons.
+- The two P081 leftovers already fixed in v2.83.1 (quarantine ownership; the retry that laundered a real failure into a green night) — done, not planned.
 - Anything the test-tier pilot (P081) already covers — in particular the advisory-gate wallpaper around `shell_pipeline_smoke`, which P081 removes from the merge path.
 
 ## Approach

@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.84.0] — 2026-08-11
+
+### Added
+- **Gate name lint** — `aid-gate-name-lint.sh` enforces that a gate's name says what it checks and how much: a kind prefix from a fixed vocabulary, no tool name (the tool gets swapped and the name starts lying), a word of totality only when the command really covers that universe, and no outcome word. Wired as the required `lint_gate_names` gate in every merge-path profile; existing names are grandfathered in `scripts/tests/gate-name-allowlist.txt` with their proposed replacements recorded, because renaming is ~575 literal occurrences and needs an alias period for consumers.
+
+### Changed
+- **Gate profiles per phase** — `gate_profile_defaults` was absent, so every gate ran on every phase, including the whole 13-minute T0+T1 merge path at the end of every EPIC. A step now runs `targeted` and an EPIC runs `standard`; the full sweep stays at plan-final, where a merge into main actually happens.
+- **CI concurrency and path filters** — a new push cancels the superseded run for the same ref, and commits touching only `.aid-o/plans` or `.aid-o/work` no longer trigger the test path. Verified file by file that no suite reads either from the real repository; `docs/**` is deliberately still covered because a suite reads the real backlog.
+- **Hosted shadow run of the merge path** — a non-blocking `merge-path-hosted-shadow` job measures whether T0+T1 pass off the self-hosted machine, so the eventual move is decided by evidence rather than by assumption.
+
+### Fixed
+- **Shell-suite discovery trips over a sibling worktree** — AID creates plan and frozen-CP3 worktrees INSIDE the repository it is working on, and the shell-suite adapter scanned them: their dotted paths yield ids outside the stable-id charset, and that refusal killed discovery for the whole portfolio. A second window with a plan checked out was enough to turn the merge path red on work unrelated to either session. `.aid-worktrees/` and `.git/` are now excluded, with the reason recorded in the code.
+
+## [2.83.1] — 2026-08-11
+
+### Fixed
+- **A Quarantined Test Could Never Get an Owner** — `add` is deliberately a no-op once an entry is open, so a weekly flake cannot reset its own 14-day deadline; but the nightly was the only automatic producer and always passed an empty owner, and there was no other way in. Every entry was ownerless for ever and escalated weekly with no way to acknowledge it. `aid-test-quarantine.sh assign <suite> <owner>` sets the owner on an open entry without touching its `opened` date, so taking ownership never buys extra days.
+- **A Retry Could Launder a Real Failure Into a Green Night** — the nightly re-ran a failed suite with bare `bats`, outside the runner’s working directory, delegation handling, fd discipline and exported environment; a suite that fails only under runner conditions passed standalone, was filed flaky instead of failed and dropped out of the report, so the night read green while a real regression sat in the tree. The retry now re-invokes the runner for that one suite, and with no reachable runner the suite stays failed rather than being quarantined silently.
+
+### Added
+- **`run-all-tests.sh --only <suite>`** — runs exactly one suite under the runner’s own conditions, which is what makes an honest retry possible.
+
 ## [2.83.0] — 2026-08-11
 
 > The full test portfolio is off the merge path. AID is the ecosystem's pilot

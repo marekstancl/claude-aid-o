@@ -125,6 +125,14 @@ _shell_suite_record_skip() {
 # excluding vendored trees and fixture directories (a fixture script is input
 # to a test, not a suite).
 #
+# `.aid-worktrees/` is excluded because AID itself creates worktrees INSIDE the
+# repository it is working on (plan and frozen-CP3 trees). Those are copies of
+# the same suites belonging to another session, and their dotted paths produce
+# ids outside the stable-id charset — so a concurrent session's worktree turned
+# discovery into a hard refusal for the whole portfolio. Found 2026-08-11 by a
+# red T1 during a release, where the only cause was that a second window had a
+# plan checked out.
+#
 # `-type f` deliberately excludes symlinks: a symlinked suite would otherwise
 # be discovered twice, once under each name, and the two ids would disagree
 # about which file the portfolio contains. Excluded symlinks are RECORDED by
@@ -134,6 +142,8 @@ _shell_suite_candidates() {
   find "$search_root" -type f -name 'test-*.sh' \
     -not -path '*/node_modules/*' \
     -not -path '*/fixtures/*' \
+    -not -path '*/.aid-worktrees/*' \
+    -not -path '*/.git/*' \
     -print0 | sort -z
 }
 
@@ -144,6 +154,8 @@ _shell_suite_symlink_candidates() {
   find "$search_root" -type l -name 'test-*.sh' \
     -not -path '*/node_modules/*' \
     -not -path '*/fixtures/*' \
+    -not -path '*/.aid-worktrees/*' \
+    -not -path '*/.git/*' \
     -print0 | sort -z
 }
 

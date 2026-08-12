@@ -56,6 +56,9 @@ QUARANTINE_SH="$SCRIPT_DIR/aid-test-quarantine.sh"
 ESCALATE_DAYS="${AID_QUARANTINE_ESCALATE_DAYS:-14}"
 TELEGRAM_LIB="${AID_TELEGRAM_LIB:-/opt/eco/services/scripts/lib/telegram-notify.sh}"
 
+# The retry re-invokes the RUNNER (see the retry block below). Overridable so
+# a fixture can supply a stub — the seam exists for tests, not for production.
+RUNNER="${AID_NIGHTLY_RUNNER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tests/run-all-tests.sh}"
 RUNNER_LOG=""; EXIT_CODE=0; LOG_URL=""; TESTS_DIR=""; NOTIFY=1
 NIGHTLY_DIR="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
 while [[ $# -gt 0 ]]; do
@@ -128,10 +131,26 @@ suite_path() {
 failed=(); flaky=(); quarantine_write_failed=false
 for name in ${reported_failures[@]+"${reported_failures[@]}"}; do
   path="$(suite_path "$name")" || { failed+=("$name"); continue; }
-  if [[ "$path" == *.bats ]]; then
-    bats "$path" >/dev/null 2>&1 && retry_ok=1 || retry_ok=0
+  # THE RETRY MUST USE THE RUNNER, NOT A BARE INVOCATION. Re-running `bats
+  # "$path"` directly re-runs the suite under different conditions than the
+  # run that failed: a different cwd, no `--include-delegated`, none of the
+  # runner's fd-3 discipline and none of its exported AID_* environment. A
+  # suite that fails ONLY under runner conditions therefore passes standalone,
+  # is filed as flaky instead of failed, drops out of `failed[]` entirely, and
+  # the night reports GREEN while a real regression sits in the tree. A green
+  # that is not green destroys trust in every other green, so the retry
+  # re-invokes the runner for that one suite.
+  if [[ -x "$RUNNER" ]]; then
+    "$RUNNER" --only "$name" >/dev/null 2>&1 && retry_ok=1 || retry_ok=0
+  elif [[ "$path" == *.bats ]]; then
+    # No runner reachable: a bare re-run cannot distinguish flaky from
+    # runner-conditional, so treat the suite as FAILED rather than laundering
+    # it into a silent quarantine.
+    echo "aid-nightly-report: runner not executable at '$RUNNER' — '$name' stays FAILED rather than being retried under different conditions" >&2
+    retry_ok=0
   else
-    bash "$path" >/dev/null 2>&1 && retry_ok=1 || retry_ok=0
+    echo "aid-nightly-report: runner not executable at '$RUNNER' — '$name' stays FAILED rather than being retried under different conditions" >&2
+    retry_ok=0
   fi
   if [[ "$retry_ok" -eq 1 ]]; then
     flaky+=("$name")

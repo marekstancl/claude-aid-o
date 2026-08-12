@@ -214,6 +214,22 @@ gates:
   # measurement) had no enforcement path at all. Cheap, seconds, no processes.
   # Check 3 is machine-local until the durations journal has a CI transport;
   # it reports UNVERIFIED rather than failing, which is stated in the script.
+  # Named per the very rules it enforces (test-standard "Jména bran" 6-10):
+  # kind first, no tool, no outcome word. Existing gates are grandfathered in
+  # scripts/tests/gate-name-allowlist.txt and reported as advisory; a NEW or
+  # renamed gate must lint clean, which is what makes this a control and not a
+  # comment (AID-v3 principle #1).
+  # DOČASNĚ required: false (2026-08-11 18:xx). Konfigurace se čte z HLAVNÍHO
+  # checkoutu (`aid_state_root` → git common dir), ale příkaz se pouští ve
+  # větvi plánu — takže brána přidaná do main okamžitě platí i pro běžící
+  # větve, kde její skript ještě neexistuje. Rozbilo to běh P080 (jeho větev
+  # je 15 commitů za main). Zpátky na true, až P080 mergne main.
+  lint_gate_names:
+    command: "bash plugins/aid-orchestrator/scripts/aid-gate-name-lint.sh --config .aid-o/config/execution.yaml"
+    required: false
+    timeout_seconds: 60
+    max_retries: 0
+
   tier_lint:
     command: "bash plugins/aid-orchestrator/scripts/aid-test-tier-lint.sh"
     required: true
@@ -294,6 +310,28 @@ notifications:
     chat_id: null
     alert_on_repeated_precondition_fail: true
     alert_threshold: 3
+# ─── Which profile runs when (2026-08-11) ────────────────────────────────────
+# Until today this key was absent, which means NO profile was passed and every
+# gate ran on every phase — including `bats_all`, i.e. the whole T0+T1 merge
+# path (13 min) at the end of every single EPIC.
+#
+# That was left over from before the tier pilot: when the merge path took
+# 6 h 49 m nobody would have run it per EPIC, so the question never came up;
+# after it dropped to 13 min the profiles were never revisited. The PM caught
+# it by asking why an agent was "running everything" on an eight-file change.
+#
+# The tier standard's own logic settles it: the merge path is a MERGE event.
+# An EPIC merges into the plan branch, so it gets `standard` — targeted tests
+# for what actually changed, plus the FSM suite and the plan-criteria check.
+# The full T0+T1 sweep belongs to plan-final, which `plan_final_profile_floor:
+# release` already enforces, and `release` includes `bats_all`.
+#
+# A step gets `targeted`: CP2 review covers the step's own diff, and a step is
+# not a merge into anything.
+gate_profile_defaults:
+  step: targeted
+  epic: standard
+
 gate_profiles:
   # ─── P064 plan Step 8 — the five canonical risk profiles ────────────────
   # These are the names lib/aid-gate-profile.sh's resolver can return
@@ -349,17 +387,20 @@ gate_profiles:
   quick:
     include:
       - tier_lint
+      - lint_gate_names
       - bats_fsm
       - docs_updated
   targeted:
     include:
       - tier_lint
+      - lint_gate_names
       - targeted_tests
       - bats_fsm
       - docs_updated
   standard:
     include:
       - tier_lint
+      - lint_gate_names
       - targeted_tests
       - bats_fsm
       - plan_diff
@@ -385,6 +426,7 @@ gate_profiles:
   full:
     include:
       - tier_lint
+      - lint_gate_names
       - bats_all
       - bats_fsm
       - plan_diff
@@ -392,6 +434,7 @@ gate_profiles:
   release:
     include:
       - tier_lint
+      - lint_gate_names
       - bats_all
       - bats_fsm
       - plan_diff
@@ -405,6 +448,7 @@ gate_profiles:
       audited --force reason naming bats_all_quarantine.
     include:
       - tier_lint
+      - lint_gate_names
       - bats_fsm
       - plan_diff
       - docs_updated
@@ -432,6 +476,7 @@ gate_profiles:
       targeted-substitute receipt in the report's `quarantine_substitutes[]`.
     include:
       - tier_lint
+      - lint_gate_names
       - bats_fsm
       - plan_diff
       - docs_updated

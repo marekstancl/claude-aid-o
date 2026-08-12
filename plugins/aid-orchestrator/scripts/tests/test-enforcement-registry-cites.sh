@@ -91,8 +91,25 @@ _cite_normalise_token() {
 # the repo root, and a third convention writes bare `lib/…` meaning
 # plugin + `scripts/`. A token resolving under NONE of the three is a violation.
 # `-e`, not `-f`: rows legitimately cite directories (e.g. `skills/visual-companion/`).
+#
+# A FOURTH base exists for one shape only: a cite beginning with `/ecosystem/`
+# is a Docusaurus namespace path into the shared ecosystem docs, not a path in
+# this repo — `gate_name_lint` cites the test standard that way. Waving such a
+# token through on sight would reintroduce exactly the silence this harness
+# exists to remove, so it is resolved against the ecosystem docs tree when that
+# tree is present and REPORTED as skipped (rc 2) when it is not. A consumer
+# checkout without /opt/eco/docs is a real situation; it must be visible in the
+# output rather than assumed away.
+ECO_DOCS_ROOT="${AID_ECO_DOCS_ROOT:-/opt/eco/docs/docs}"
+
 _cite_resolves() {
   local t="$1" plugin_dir="$2" repo_dir="$3"
+  if [[ "$t" == /ecosystem/* ]]; then
+    [[ -d "$ECO_DOCS_ROOT" ]] || return 2
+    [[ -e "${ECO_DOCS_ROOT}${t}.md" ]] && return 0
+    [[ -e "${ECO_DOCS_ROOT}${t}" ]] && return 0
+    return 1
+  fi
   [[ -e "${plugin_dir}/${t}" ]] && return 0
   [[ -e "${repo_dir}/${t}" ]] && return 0
   [[ -e "${plugin_dir}/scripts/${t}" ]] && return 0
@@ -250,8 +267,13 @@ _cite_violations() {
                 # segment is not a directory anywhere.
                 _cite_first_segment_is_dir "$tok" "$plugin_dir" "$repo_dir" || continue
               fi
-              _cite_resolves "$tok" "$plugin_dir" "$repo_dir" \
-                || printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok"
+              local rc=0
+              _cite_resolves "$tok" "$plugin_dir" "$repo_dir" || rc=$?
+              case "$rc" in
+                0) ;;
+                2) printf 'EXTSKIP|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok" ;;
+                *) printf 'CITE|%s|%s|%s\n' "${id:-<no-id>}" "$field" "$tok" ;;
+              esac
             done
           done <<< "$parts"
         done
@@ -311,7 +333,20 @@ fi
 
 # ─── 4. Every cite resolves ─────────────────────────────────────────────────
 echo "TEST: every source/instruction cite resolves to a real file or directory"
-violations="$(_cite_violations "$REGISTRY" "$PLUGIN_DIR" "$REPO_DIR")"
+all_lines="$(_cite_violations "$REGISTRY" "$PLUGIN_DIR" "$REPO_DIR")"
+# EXTSKIP lines are NOT failures, but they are never silent: an ecosystem-doc
+# cite that could not be checked is printed and counted, so a run on a machine
+# without the docs tree reports how much of the registry it did not verify
+# instead of reporting a clean bill of health it did not earn.
+violations="$(grep '^CITE|' <<<"$all_lines" || true)"
+extskips="$(grep '^EXTSKIP|' <<<"$all_lines" || true)"
+if [[ -n "$extskips" ]]; then
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    echo "  $line"
+  done <<< "$extskips"
+  echo "  NOTE: $(grep -c . <<<"$extskips") ecosystem-doc cite(s) NOT verified — ${ECO_DOCS_ROOT} is absent; set AID_ECO_DOCS_ROOT to check them"
+fi
 if [[ -z "$violations" ]]; then
   pass_msg "all source/instruction cites resolve"
 else

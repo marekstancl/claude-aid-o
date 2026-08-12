@@ -114,6 +114,7 @@ INCLUDE_DELEGATED=0
 DURATIONS_WARNED=0
 # P081 Step 5 — empty means every tier, which is exactly today's behaviour.
 TIER=""
+ONLY=""
 USAGE="Usage: $(basename "$0") [--verbose] [--list] [--tier t0|t1|t2] [--timing] [--include-delegated]"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -123,6 +124,9 @@ while [[ $# -gt 0 ]]; do
     --timing)
       TIMING=1
       ;;
+    --only)
+      [[ $# -ge 2 ]] || { echo "--only requires a suite basename" >&2; exit 2; }
+      ONLY="$2"; shift 2; continue ;;
     --tier)
       TIER="${2:-}"; shift
       case "$TIER" in
@@ -152,6 +156,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --verbose, -v        Show full output from each test suite"
       echo "  --list               List discovered and DELEGATED suites, run nothing"
       echo "  --tier <t0|t1|t2>    Run only suites declaring that tier (see aid-test-tier-lint.sh)"
+      echo "  --only <basename>    Run exactly one suite, under the runner's own conditions"
       echo "  --timing             Record one duration per suite into the durations journal"
       echo "  --include-delegated  Also run suites owned by a dedicated CI job (measurement runs)"
       echo "  --help, -h           Show this help message"
@@ -370,6 +375,23 @@ if [[ -n "$TIER" ]]; then
     fi
     exit 1
   fi
+fi
+
+# --only: one suite, under the runner's own conditions. Added so the nightly's
+# retry-once can re-run a failed suite the SAME way it was run the first time —
+# a bare `bats path` re-run changed cwd, environment and fd discipline, so a
+# runner-conditional failure passed standalone and was laundered into a silent
+# quarantine while the night reported green.
+if [[ -n "$ONLY" ]]; then
+  _o=()
+  for suite in ${SUITES[@]+"${SUITES[@]}"}; do
+    [[ "$(basename "$suite")" == "$ONLY" ]] && _o+=("$suite")
+  done
+  if [[ "${#_o[@]}" -eq 0 ]]; then
+    echo "ERROR: --only '$ONLY' matched no discovered suite." >&2
+    exit 1
+  fi
+  SUITES=("${_o[@]}")
 fi
 
 if [[ "$LIST_ONLY" -eq 1 ]]; then

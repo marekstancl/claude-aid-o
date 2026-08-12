@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 429          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 430          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2771,3 +2771,15 @@ enforcements:
     description: "P080 Step 4 — a registry row is this plugin's promise that a detector has a real enforcing surface, so a row citing a file that was deleted, renamed or moved still LOOKS wired while enforcing nothing: the P026 'detector without enforcement' failure one level up, hiding inside the very file that is supposed to make enforcement auditable. Every source:/instruction: cite must resolve against one of the registry's three real bases (plugin root, repo root, plugin+scripts/); row ids must be unique, because this file is edited by appending and a duplicate id silently shadows whichever row a consumer's select() reaches first. Line numbers are deliberately NOT asserted — they drift on every edit above them and asserting them would make the registry unmaintainable; file existence is the invariant. Named registry_cite_validation because that is the id plan P080 Step 16 expects; a differently-named row would have let Step 16 honestly create a SECOND row for one check, and the id-uniqueness assertion cannot catch that because the names differ. Registers itself here because a checker absent from the thing it checks is exactly the omission it exists to catch. TIER: t0, so it is on the MERGE PATH (CI runs --tier t0 then --tier t1; t2 is nightly-only). The harness fails CLOSED by construction: it materialises rows before iterating, checks jq's exit code, and asserts the extracted row count equals the registry's own length — an earlier draft let one non-scalar cite field abort extraction mid-pipeline and reported success having checked 0 of 428 rows."
     recovery: "The failure prints one CITE|<row-id>|<field>|<path> line per unresolvable cite. Repoint the row to the surface that really carries the rule, or mark it status: dead with a rationale if the enforcement died with what it cited. Never allowlist a path to make a row pass."
     test: "scripts/tests/test-enforcement-registry-cites.sh"
+
+  - id: gate_name_lint
+    type: 3
+    source: "scripts/aid-gate-name-lint.sh"
+    instruction: "/ecosystem/specs/test-standard — 'Jména bran' (rules 6-10)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2026-08-11 — a gate named `bats_all` had run only T0+T1 since the tier pilot. The PM read 'gate bats_all failed', reasonably concluded an agent was running the whole portfolio in front of every merge, and lost half a day to a misdirected diagnosis. The name was true once and nobody revisited it. Four mechanical checks: a kind prefix from a fixed vocabulary so a failure line groups; no tool name (the tool gets swapped and the name starts lying); a word of totality only when the command really covers that universe — the check that would have caught `bats_all` the day tiers landed; and no outcome word, because every gate either passes or fails. Existing names are grandfathered in scripts/tests/gate-name-allowlist.txt with their proposed replacements written down, since renaming is ~575 literal occurrences across ~60 files and needs an alias period for consumers; a NEW or renamed gate must lint clean."
+    recovery: "The gate fails naming the offending gate and every rule it breaks; the allowlist is fail-closed — a missing file means no exceptions, never 'allow everything'."
+    test: "scripts/tests/bats/test-gate-name-lint.bats"
