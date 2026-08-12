@@ -82,9 +82,9 @@ specialization owned by `commands/aid-run.md`.
   carries `final_turn` (`renderer:<script>`, `card:<type>`, `internal`).
 - **Publish before present** — a renderer emits the chat card on stdout and an
   artifact body file; every wiring site carries the clause below VERBATIM, one
-  literal. `scripts/tests/test-communication-wiring.sh` asserts it at the sites it
-  indexes BY NAME — today four; `/aid-audit-tests` carries the same literal but is
-  not on that list, so it is unchecked. Publication is the controller's act.
+  literal, and joins the five sites `scripts/tests/test-communication-wiring.sh`
+  indexes BY NAME (`/aid-audit-tests` included) in the change that wires it —
+  off that list it is unchecked. Publication is the controller's act.
 
 ```text
 Publish the artifact body via the Artifact tool, then present the chat card verbatim.

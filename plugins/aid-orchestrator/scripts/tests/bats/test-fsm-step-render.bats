@@ -154,6 +154,22 @@ teardown() {
     [ "$output" -eq 0 ]
   done
 
+  # (c2) "Restates nothing" means NOTHING, not "everything except the min()
+  # formula". The five surfaces said "do not restate it here" while carrying a
+  # full paragraph of the rule — the human wording, the exception for
+  # total_steps: 0 and the frozen-field list — so a correction to the real
+  # definition still had five copies to diverge from. These two literals are
+  # unique to that copied paragraph (the authoritative section words both
+  # differently), so they may not appear anywhere outside it, pipeline.md
+  # included.
+  for f in commands/aid-status.md commands/aid-run.md commands/aid-stop.md \
+           skills/memory.md skills/pipeline.md; do
+    run bash -c "grep -c 'Humans read' '$root/$f' || true"
+    [ "$output" -eq 0 ]
+    run bash -c "grep -c 'stay 0-BASED and frozen' '$root/$f' || true"
+    [ "$output" -eq 0 ]
+  done
+
   # (d) The authoritative section states the disambiguated wording, so the
   # prose and the _fsm_human_step helper cannot drift apart again.
   run bash -c "grep -c 'is next' '$root/skills/pipeline.md'"

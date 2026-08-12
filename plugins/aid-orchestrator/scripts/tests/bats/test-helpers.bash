@@ -242,12 +242,36 @@ aid_test_mk_runner_tree() {
 #
 # refute_grep takes the same arguments as grep and fails the case when grep
 # MATCHES, printing what matched so the failure names itself.
+#
+# IT ALSO FAILS ON A GREP ERROR. grep has THREE exit statuses, not two: 0 match,
+# 1 no match, 2 an error — a missing or unreadable file, a bad option, a broken
+# regex. Treating "nonzero" as "refuted" makes `refute_grep -q secret
+# /not/a/file` a PASS, i.e. the same inert negative assertion this helper was
+# written to replace, only harder to spot because it has a name that promises
+# otherwise. Only status 1 is a refutation; anything else is reported with
+# grep's own stderr attached.
+#
+# The capture is written as an `||` list on purpose. A BARE `out="$(grep …)"`
+# is a simple command whose nonzero status fires bats' ERR trap — so the
+# ordinary "pattern absent" case failed the caller's test from inside the
+# helper, before the status could even be classified. Shielding it is the same
+# exemption the old `if grep …` form got for free.
 refute_grep() {
-  local out
-  if out="$(grep "$@" 2>/dev/null)"; then
-    echo "refute_grep: pattern MATCHED but must not — grep $*" >&2
-    printf '%s\n' "${out:0:400}" >&2
-    return 1
-  fi
-  return 0
+  local out status=0
+  out="$(grep "$@" 2>&1)" || status=$?
+  case "$status" in
+    0)
+      echo "refute_grep: pattern MATCHED but must not — grep $*" >&2
+      printf '%s\n' "${out:0:400}" >&2
+      return 1
+      ;;
+    1)
+      return 0
+      ;;
+    *)
+      echo "refute_grep: grep ERRORED (exit ${status}) — nothing was refuted — grep $*" >&2
+      printf '%s\n' "${out:0:400}" >&2
+      return 1
+      ;;
+  esac
 }

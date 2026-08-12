@@ -168,10 +168,29 @@ aid_gate_outcome_render() {
     echo "aid_gate_outcome_render: gates report at ${report_path} carries no .gates object — refusing to render a card that would claim no gates ran" >&2
     return 1
   fi
+  # The outer type is not the shape this file depends on. Every VALUE of the map
+  # must be an object too: `{"gates":{"tests":"pass"}}` satisfied the check above
+  # and then died inside the row conversion below ("Cannot index string with
+  # string"), whose status nobody read — so the counters came out EMPTY and the
+  # card printed `Hotovo: brány doběhly,  z  prošlo.` with exit 0. A malformed
+  # row is refused here, by name, so the PM never sees a blank-counter pass.
+  local bad_rows
+  bad_rows="$(jq -r '[ .gates | to_entries[] | select((.value|type) != "object") | .key ] | join(", ")' <<<"$report" 2>/dev/null)" || bad_rows=""
+  if [[ -n "$bad_rows" ]]; then
+    echo "aid_gate_outcome_render: gates report at ${report_path} has non-object gate entries (${bad_rows}) — refusing to render a card whose counters would be blank" >&2
+    return 1
+  fi
 
   # ── counts, all COMPUTED from the report's .gates OBJECT (a map, not rows) ──
+  # The conversion's STATUS is read. An unchecked jq here is how a malformed
+  # report reached the card as empty counters instead of as a refusal.
   local rows
-  rows="$(jq -c '[ .gates | to_entries[] | (.value + {gate: (.value.gate // .key)}) ]' <<<"$report")"
+  if ! rows="$(jq -c '[ .gates | to_entries[] | (.value + {gate: (.value.gate // .key)}) ]' <<<"$report" 2>/dev/null)" \
+     || [[ -z "$rows" ]] \
+     || [[ "$(jq -r 'if type == "array" then "ok" else "no" end' <<<"$rows" 2>/dev/null)" != "ok" ]]; then
+    echo "aid_gate_outcome_render: gates report at ${report_path} could not be converted into gate rows — refusing to render a card from an unknown gate set" >&2
+    return 1
+  fi
 
   local total n_pass n_fail n_skip n_excl n_waived total_ms
   total="$(jq -r 'length' <<<"$rows")"

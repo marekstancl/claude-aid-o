@@ -417,12 +417,19 @@ PY
   [ "$status" -eq 3 ]
 }
 
-@test "a write that dies mid-stream leaves no truncated page at out_path" {
+@test "a write that dies mid-stream leaves no truncated page AND no temp debris" {
   # A file-size cap makes the write fail AFTER the first bytes have landed —
   # the shape a full disk or a quota has. Writing straight to out_path left a
   # truncated page sitting at the published path; the write goes through a temp
   # file and a rename, so out_path is either the whole page or untouched.
-  # SIGXFSZ kills the writing shell, hence the child process.
+  #
+  # `ulimit -f` delivers SIGXFSZ, which TERMINATES the writing shell by default:
+  # the renderer's cleanup branch never ran, the function never returned, and a
+  # partial `<out>.tmp.XXXXXX` was left in the output directory at exactly the
+  # cap size. The case scored that as a pass because it only looked at out_path
+  # and bats' teardown swept the debris away. The temp file is now asserted
+  # gone, and the exit status asserted to be the renderer's own 3 rather than
+  # 128+SIGXFSZ, which is what proves the signal was caught rather than fatal.
   local out="$TEST_TMPDIR/capped.html"
   printf 'PREVIOUS PAGE\n' > "$out"
   # Deliberately TINY inputs: under the cap, every intermediate the renderer
@@ -435,9 +442,45 @@ PY
   run bash -c "ulimit -f 1
     source '$AID_PLUGIN_PATH/scripts/lib/aid-artifact-render.sh'
     aid_artifact_render outcome '$TEST_TMPDIR/capped-facts.json' '$TEST_TMPDIR/capped-prose.json' '$out'"
-  [ "$status" -ne 0 ]
+  # The renderer's own fail-closed status, not a signal death (153 = 128+25).
+  [ "$status" -eq 3 ]
   # The previous page survives intact — no half-written artifact replaced it.
   [ "$(cat "$out")" = "PREVIOUS PAGE" ]
+  # And nothing was left beside it. `find`, not a glob, so the assertion reports
+  # the debris it found instead of comparing an unexpanded pattern.
+  local debris
+  debris="$(find "$TEST_TMPDIR" -maxdepth 1 -name 'capped.html.tmp.*' -print)"
+  [ -z "$debris" ] || { echo "temp debris left behind: $debris"; false; }
+}
+
+@test "re-rendering an existing artifact keeps its mode — the rename must not demote it" {
+  # The temp-file + rename write replaces the destination INODE, so the new
+  # file arrived with mktemp's private 0600 and a 0640 page that a group reader
+  # (or a web server) was serving became unreadable to it on the next render.
+  local out="$TEST_TMPDIR/moded.html"
+  run _render "$(_full_facts)" "$(_full_prose)" "$out"
+  [ "$status" -eq 0 ]
+  chmod 0640 "$out"
+  run _render "$(_full_facts)" "$(_full_prose)" "$out"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$out")" = "640" ]
+  # A more permissive mode survives just as literally — the rule is "preserve",
+  # not "clamp to something this file prefers".
+  chmod 0664 "$out"
+  run _render "$(_full_facts)" "$(_full_prose)" "$out"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$out")" = "664" ]
+}
+
+@test "a FIRST render obeys the umask, not mktemp's private default" {
+  # There is no destination mode to inherit, and 0600 is not what a plain `>`
+  # would have produced — an artifact nobody but the running user can read is a
+  # silent regression for every consumer of the page.
+  local out="$TEST_TMPDIR/fresh.html"
+  ( umask 022
+    source "$AID_PLUGIN_PATH/scripts/lib/aid-artifact-render.sh"
+    aid_artifact_render outcome "$(_full_facts)" "$(_full_prose)" "$out" )
+  [ "$(stat -c '%a' "$out")" = "644" ]
 }
 
 @test "an unknown template id fails rather than rendering an empty page" {

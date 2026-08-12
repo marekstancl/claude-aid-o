@@ -438,16 +438,58 @@ aid_artifact_render() {
   # the published path while this function returns 3. A half-written artifact
   # that still looks like a page is precisely what the fail-closed contract
   # above exists to prevent, so out_path is never opened for writing at all.
+  #
+  # THE RENAME REPLACES THE INODE, SO IT MUST CARRY THE MODE ACROSS. `mktemp`
+  # creates 0600 and `mv` puts that inode at the published path, so re-rendering
+  # an existing 0640 artifact silently demoted it to 0600 and locked out the group
+  # reader (or the web server) that was reading the previous page. When the
+  # destination exists its mode is copied onto the temp file BEFORE the rename;
+  # when it does not, the umask decides, as a plain `>` redirection would.
+  #
+  # A WRITE KILLED BY A SIGNAL CANNOT CLEAN UP AFTER ITSELF unless the signal is
+  # caught. `ulimit -f` delivers SIGXFSZ, whose default action terminates the
+  # shell mid-`printf` — the cleanup branch below never ran and a partial
+  # `.tmp.XXXXXX` was left in the output directory (fail-closed at out_path, but
+  # littering beside it). SIGXFSZ is therefore trapped for the duration of the
+  # write and restored afterwards, so the cleanup branch is reached and the temp
+  # file is removed. A SIGKILL still cannot be cleaned up by anyone; that is the
+  # honest limit of this guarantee.
   local out_dir; out_dir="$(dirname "$out_path")"
   local tmp_out=""
   if [[ ! -d "$out_dir" ]] || ! tmp_out="$(mktemp "${out_path}.tmp.XXXXXX" 2>/dev/null)"; then
     echo "aid_artifact_render: cannot write ${out_path}" >&2
     return 3
   fi
-  if ! printf '%s\n' "$out" > "$tmp_out" 2>/dev/null || ! mv -f "$tmp_out" "$out_path" 2>/dev/null; then
+  if [[ -e "$out_path" ]]; then
+    _aid_artifact_copy_mode "$out_path" "$tmp_out"
+  else
+    # A FIRST render has no destination mode to inherit, and mktemp's 0600 is
+    # not the mode a plain `>` would have produced either. The umask decides, so
+    # a newly rendered page is as readable as every other file the run writes.
+    chmod "$(printf '%04o' "$(( 0666 & ~0$(umask) ))")" "$tmp_out" 2>/dev/null || true
+  fi
+
+  local _prev_xfsz _xfsz_hit=0
+  _prev_xfsz="$(trap -p XFSZ)"
+  trap '_xfsz_hit=1' XFSZ
+  local _write_ok=1
+  printf '%s\n' "$out" > "$tmp_out" 2>/dev/null || _write_ok=0
+  if [[ -n "$_prev_xfsz" ]]; then eval "$_prev_xfsz"; else trap - XFSZ; fi
+
+  if (( _write_ok == 0 )) || (( _xfsz_hit == 1 )) || ! mv -f "$tmp_out" "$out_path" 2>/dev/null; then
     rm -f "$tmp_out" 2>/dev/null
     echo "aid_artifact_render: cannot write ${out_path}" >&2
     return 3
   fi
+  return 0
+}
+
+# _aid_artifact_copy_mode <from> <to> — best effort, never fatal under `set -e`.
+# GNU `chmod --reference` first; the stat/chmod pair is the BSD fallback.
+_aid_artifact_copy_mode() {
+  local from="$1" to="$2" mode=""
+  chmod --reference="$from" "$to" 2>/dev/null && return 0
+  mode="$(stat -c '%a' "$from" 2>/dev/null || stat -f '%Lp' "$from" 2>/dev/null || true)"
+  [[ -n "$mode" ]] && chmod "$mode" "$to" 2>/dev/null
   return 0
 }

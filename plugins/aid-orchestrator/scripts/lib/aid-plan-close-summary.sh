@@ -41,13 +41,18 @@
 #   path; it deliberately does not open that report, because doing so would
 #   re-introduce the sibling-evidence read the cycle-break forbids.
 #
-# FAIL CLOSED, BOTH SHAPES
-#   A brief missing any one of the eight named fields, or a release-decision
-#   whose `.release_decision.plan_summary` is absent/null (every EPIC-mode
-#   decision), exits 1 with the reason on stderr — mirroring plan-finalize's own
-#   labelled-fields check. A degraded second input therefore produces NO page at
-#   all rather than a page that looks complete with em dashes where the SHAs
-#   should be.
+# FAIL CLOSED, BOTH SHAPES — ON VALUES, NOT ON PRESENCE
+#   A brief missing any one of the eight named fields, or carrying it as null /
+#   the wrong type / an empty string; or a release-decision whose
+#   `.release_decision.plan_summary` is absent, null, or present with dead
+#   values — all exit 1 with the offending field NAMED on stderr. Presence
+#   checks alone are not fail-closed: `has($k)` is satisfied by `null`, and a
+#   summary of nine nulls rendered a confident, complete-looking page of
+#   invented defaults. A degraded input therefore produces NO page at all rather
+#   than a page that looks complete with em dashes where the SHAs should be.
+#   The two fields whose null IS a state — `final_merge_sha` (nothing merged
+#   yet) and `specialist_review` (did not run) — are exempt by name, plus
+#   `delivered_summary_ref` on the brief side.
 #
 # TAG VOCABULARY — `not_tagged` (the default until the release step runs) /
 #   `none` / `v<version>`. There is no `tagged` and no `pending`; the tile shows
@@ -81,37 +86,26 @@ _APCS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-artifact-render.sh
 source "${_APCS_LIB_DIR}/aid-artifact-render.sh"
 
-# The eight fields the brief MUST carry. Named once, checked once, reported by
-# name — "brief malformed" is not an actionable message.
-_APCS_BRIEF_FIELDS=(
-  release_ready
-  merge_mode
-  blockers
-  waivers_applied
-  evidence_verification_status
-  evidence_verified_at_head
-  summary_for_pm
-  delivered_summary_ref
-)
+# The eight fields the brief MUST carry, from build_brief_payload
+# (scripts/aid-pm-brief.sh:116-133):
+#
+#   release_ready  merge_mode  blockers  waivers_applied
+#   evidence_verification_status  evidence_verified_at_head
+#   summary_for_pm  delivered_summary_ref
+#
+# Validated in aid_plan_close_render by VALUE, next to the message each failure
+# produces — "brief malformed" is not an actionable message.
 
 # The nine plan_summary fields this renderer READS, from the producer's field
-# set (scripts/aid-release-policy.sh:1107-1136). Checking only that
-# plan_summary exists and is non-null let `{}` through — and `{}` renders a
-# complete-looking "Připraveno k uzavření" page whose SHAs, tag, gate verdict
-# and EPIC counts are all invented defaults and em dashes. That is exactly the
-# page the FAIL CLOSED note above promises never to produce, so the fields are
-# named here and checked by name, the same way the brief's are.
-_APCS_PLAN_SUMMARY_FIELDS=(
-  reviewed_candidate_sha
-  approved_target_sha
-  target_ref
-  final_merge_sha
-  release_tag_status
-  epics
-  plan_final_gates
-  specialist_review
-  remaining_backlog
-)
+# set (scripts/aid-release-policy.sh:1107-1136):
+#
+#   reviewed_candidate_sha  approved_target_sha  target_ref  release_tag_status
+#   final_merge_sha  epics  plan_final_gates  specialist_review
+#   remaining_backlog
+#
+# They are validated in aid_plan_close_render, by VALUE and not merely by
+# presence — the check lives next to the failure message it produces, and the
+# reasoning for each field's rule is written there.
 
 _APCS_NO_RISK="Žádná materiální nejistota — brief nevede žádné nevyřešené blokátory."
 _APCS_ROLLBACK_NA="Vrácení zpět: není použitelné — plán zatím není mergnutý do main."
@@ -149,12 +143,43 @@ aid_plan_close_render() {
   local brief
   brief="$(jq -c '.pm_decision_brief // .' <<<"$brief_raw")" || return 1
 
-  local missing="" f
-  for f in "${_APCS_BRIEF_FIELDS[@]}"; do
-    if [[ "$(jq -r --arg k "$f" 'has($k)' <<<"$brief" 2>/dev/null)" != "true" ]]; then
-      missing+="${missing:+, }${f}"
-    fi
-  done
+  # By VALUE, for the same reason the plan_summary check below is: `has($k)` is
+  # satisfied by `null`, and a null `summary_for_pm` reached the card as the
+  # literal word "null" in the PM's summary line. The producer
+  # (aid-pm-brief.sh's build_brief_payload, :116-133) defaults every one of
+  # these, so a null here means the brief was not built by it.
+  # `delivered_summary_ref` is the ONE field whose null is a real state (no
+  # delivery ref recorded); it renders as the em dash. A boolean written as the
+  # string "true"/"false" is accepted because the renderer compares the
+  # stringified value either way — what is refused is null, the wrong shape and
+  # the empty string.
+  local missing=""
+  missing="$(jq -r '
+    def bad($k; $why): "\($k) (\($why))";
+    def str_req($k): if (has($k) | not) then bad($k; "missing")
+                     elif (.[$k] == null) then bad($k; "null")
+                     elif ((.[$k] | type) != "string") then bad($k; "not a string")
+                     elif ((.[$k] | length) == 0) then bad($k; "empty")
+                     else empty end;
+    def bool_req($k): if (has($k) | not) then bad($k; "missing")
+                      elif ((.[$k] | type) == "boolean") then empty
+                      elif ((.[$k] | tostring) == "true" or (.[$k] | tostring) == "false") then empty
+                      else bad($k; "not a true/false value") end;
+    def arr_req($k): if (has($k) | not) then bad($k; "missing")
+                     elif ((.[$k] | type) != "array") then bad($k; "not an array")
+                     else empty end;
+    if type != "object" then ["brief (not an object)"]
+    else
+      [ bool_req("release_ready"),
+        str_req("merge_mode"),
+        arr_req("blockers"),
+        arr_req("waivers_applied"),
+        str_req("evidence_verification_status"),
+        bool_req("evidence_verified_at_head"),
+        str_req("summary_for_pm"),
+        (if (has("delivered_summary_ref") | not) then bad("delivered_summary_ref"; "missing")
+         else empty end) ]
+    end | join(", ")' <<<"$brief" 2>/dev/null)" || missing="brief (unreadable)"
   if [[ -n "$missing" ]]; then
     echo "aid_plan_close_render: brief at ${brief_path} is missing required field(s): ${missing} — refusing to render a page that would look complete" >&2
     return 1
@@ -173,20 +198,56 @@ aid_plan_close_render() {
     return 1
   fi
 
-  # Present is not the same as populated: every field is checked by name, and
-  # the three structural ones by TYPE, because `epics: "none"` would count as
-  # zero EPIKŮ just as silently as a missing key.
+  # Present is not the same as populated, and `has()` cannot tell them apart:
+  # all nine keys with `null` values, `epics: []` and `plan_final_gates: {}`
+  # satisfied a has()-only check and then rendered a confident "Připraveno k
+  # uzavření" page whose SHAs were em dashes, whose tag was the invented
+  # `not_tagged` and whose gate verdict was the invented `unknown`. So each
+  # field is checked against the VALUE this renderer actually depends on:
+  #
+  #   4 identity strings — non-null, non-empty. The producer always writes them
+  #     (aid-release-policy.sh:1107-1136); null means the decision was built
+  #     from an incomplete manifest, not that the plan has no identity.
+  #   final_merge_sha — null is LEGITIMATE (nothing merged yet) but a present
+  #     value must be a non-empty string, because it is interpolated into the
+  #     rollback command this card offers.
+  #   specialist_review — null is LEGITIMATE and renders as "neproběhl".
+  #   epics / remaining_backlog — arrays; `epics: "none"` counted zero EPIKŮ
+  #     just as silently as a missing key.
+  #   plan_final_gates — an object that CARRIES ITS VERDICT: `{}` is not a gate
+  #     result, it is the absence of one, and "unknown" is this file's default,
+  #     never the report's word.
   local ps_missing=""
-  for f in "${_APCS_PLAN_SUMMARY_FIELDS[@]}"; do
-    if [[ "$(jq -r --arg k "$f" 'if type == "object" then (has($k)|tostring) else "false" end' <<<"$ps" 2>/dev/null)" != "true" ]]; then
-      ps_missing+="${ps_missing:+, }${f}"
-    fi
-  done
-  if [[ -z "$ps_missing" ]]; then
-    [[ "$(jq -r '.epics | type' <<<"$ps" 2>/dev/null)" == "array" ]] || ps_missing="epics (not an array)"
-    [[ "$(jq -r '.remaining_backlog | type' <<<"$ps" 2>/dev/null)" == "array" ]] || ps_missing+="${ps_missing:+, }remaining_backlog (not an array)"
-    [[ "$(jq -r '.plan_final_gates | type' <<<"$ps" 2>/dev/null)" == "object" ]] || ps_missing+="${ps_missing:+, }plan_final_gates (not an object)"
-  fi
+  ps_missing="$(jq -r '
+    def bad($k; $why): "\($k) (\($why))";
+    def str_req($k): if (has($k) | not) then bad($k; "missing")
+                     elif (.[$k] == null) then bad($k; "null")
+                     elif ((.[$k] | type) != "string") then bad($k; "not a string")
+                     elif ((.[$k] | length) == 0) then bad($k; "empty")
+                     else empty end;
+    if type != "object" then ["plan_summary (not an object)"]
+    else
+      [ str_req("reviewed_candidate_sha"),
+        str_req("approved_target_sha"),
+        str_req("target_ref"),
+        str_req("release_tag_status"),
+        (if (has("final_merge_sha") | not) then bad("final_merge_sha"; "missing")
+         elif (.final_merge_sha != null)
+              and (((.final_merge_sha | type) != "string") or ((.final_merge_sha | length) == 0))
+         then bad("final_merge_sha"; "present but not a usable sha") else empty end),
+        (if (has("specialist_review") | not) then bad("specialist_review"; "missing") else empty end),
+        (if (has("epics") | not) then bad("epics"; "missing")
+         elif ((.epics | type) != "array") then bad("epics"; "not an array") else empty end),
+        (if (has("remaining_backlog") | not) then bad("remaining_backlog"; "missing")
+         elif ((.remaining_backlog | type) != "array") then bad("remaining_backlog"; "not an array")
+         else empty end),
+        (if (has("plan_final_gates") | not) then bad("plan_final_gates"; "missing")
+         elif ((.plan_final_gates | type) != "object") then bad("plan_final_gates"; "not an object")
+         elif ((.plan_final_gates.result // "") | tostring | length) == 0
+         then bad("plan_final_gates.result"; "no verdict — the page would invent \"unknown\"")
+         elif ((.plan_final_gates | has("report")) | not)
+         then bad("plan_final_gates.report"; "missing") else empty end) ]
+    end | join(", ")' <<<"$ps" 2>/dev/null)" || ps_missing="plan_summary (unreadable)"
   if [[ -n "$ps_missing" ]]; then
     echo "aid_plan_close_render: ${decision_path} plan_summary is missing required field(s): ${ps_missing} — refusing to render a page that would look complete with invented defaults" >&2
     return 1

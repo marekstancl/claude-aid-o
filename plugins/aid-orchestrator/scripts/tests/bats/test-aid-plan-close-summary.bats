@@ -181,6 +181,49 @@ _blockers_two() {
   [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
 }
 
+@test "a brief whose fields are PRESENT but null fails closed, card-side too" {
+  # The same has()-only hole on the BRIEF side of the pair: every key exists, so
+  # the presence check passed, and `summary_for_pm: null` reached the PM's card
+  # as the literal word "null".
+  _brief true auto '[]'
+  jq '.pm_decision_brief.summary_for_pm = null
+      | .pm_decision_brief.release_ready = null
+      | .pm_decision_brief.merge_mode = null' "$BRIEF" > "$BRIEF.tmp"
+  mv "$BRIEF.tmp" "$BRIEF"
+  _decision null not_tagged
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"summary_for_pm (null)"* ]]
+  [[ "$output" == *"release_ready"* ]]
+  [[ "$output" != *"Potřebuji tvoje rozhodnutí"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "a brief whose blockers is not an array fails closed rather than counting zero" {
+  _brief false blocked "$(_blockers_two)"
+  jq '.pm_decision_brief.blockers = "two"' "$BRIEF" > "$BRIEF.tmp"
+  mv "$BRIEF.tmp" "$BRIEF"
+  _decision null not_tagged
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"blockers (not an array)"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "delivered_summary_ref null stays a real state, not a refusal" {
+  _brief true auto '[]'
+  jq '.pm_decision_brief.delivered_summary_ref = null' "$BRIEF" > "$BRIEF.tmp"
+  mv "$BRIEF.tmp" "$BRIEF"
+  _decision null not_tagged
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == Hotovo:* ]]
+  [ -s "$OUT_DIR/plan-close-artifact.html" ]
+}
+
 @test "a release-decision without .release_decision.plan_summary exits 1" {
   _brief true auto '[]'
   _decision null not_tagged
@@ -215,6 +258,72 @@ _blockers_two() {
   [[ "$output" == *"reviewed_candidate_sha"* ]]
   [[ "$output" != *"Připraveno k uzavření"* ]]
   [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "a plan_summary whose nine keys are all PRESENT but null fails closed" {
+  # `has($k)` cannot tell present from populated. Every key here exists, so the
+  # presence check passed and the page rendered "Připraveno k uzavření" with em
+  # dashes for both SHAs, the invented `not_tagged` tag and the invented
+  # `unknown` gate verdict — the complete-looking page the fail-closed contract
+  # promises never to produce.
+  _brief true auto '[]'
+  jq -n '{schema_version:"aid-2.0", artifact_type:"release_decision",
+          release_decision:{plan_summary:{
+            reviewed_candidate_sha:null, approved_target_sha:null, target_ref:null,
+            final_merge_sha:null, release_tag_status:null, epics:[],
+            plan_final_gates:{}, specialist_review:null, remaining_backlog:[]}}}' > "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"reviewed_candidate_sha (null)"* ]]
+  [[ "$output" == *"release_tag_status (null)"* ]]
+  [[ "$output" == *"plan_final_gates.result"* ]]
+  [[ "$output" != *"Připraveno k uzavření"* ]]
+  [[ "$output" != *"not_tagged"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "an EMPTY plan_final_gates object is the absence of a verdict, not a verdict" {
+  _brief true auto '[]'
+  _decision null not_tagged
+  jq '.release_decision.plan_summary.plan_final_gates = {}' "$DECISION" > "$DECISION.tmp"
+  mv "$DECISION.tmp" "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plan_final_gates.result"* ]]
+  # `unknown` is this file's default, never the report's word — it must never
+  # reach a page as if a gate run had produced it.
+  [[ "$output" != *"plan-final brány unknown"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "an empty-string identity field fails closed the same way a null one does" {
+  _brief true auto '[]'
+  _decision null not_tagged
+  jq '.release_decision.plan_summary.target_ref = ""' "$DECISION" > "$DECISION.tmp"
+  mv "$DECISION.tmp" "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"target_ref (empty)"* ]]
+  [ ! -f "$OUT_DIR/plan-close-artifact.html" ]
+}
+
+@test "the two legitimately-null fields stay legitimate — nothing merged, no review" {
+  # final_merge_sha: null means "not merged yet" and specialist_review: null
+  # means "did not run". Tightening the value check must not turn either of
+  # those real states into a refusal.
+  _brief true manual '[]'
+  _decision null not_tagged
+  jq '.release_decision.plan_summary.specialist_review = null' "$DECISION" > "$DECISION.tmp"
+  mv "$DECISION.tmp" "$DECISION"
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Potřebuji tvoje rozhodnutí"* ]]
+  [ -s "$OUT_DIR/plan-close-artifact.html" ]
+  grep -qF 'Specialistická revize: neproběhl' "$OUT_DIR/plan-close-artifact.html"
 }
 
 @test "a plan_summary whose epics is not an array fails closed rather than counting zero" {

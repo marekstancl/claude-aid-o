@@ -348,6 +348,35 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ ! -f "$(BODY)" ]
 }
 
+@test "a gate map whose VALUE is not an object fails closed, not into blank counters" {
+  # The outer-type check let this through: `.gates` IS an object. The row
+  # conversion then died on it ("Cannot index string with string") and its
+  # status was never read, so every counter came out empty and the card printed
+  # `Hotovo: brány doběhly,  z  prošlo.` with exit 0 — a pass claimed over a
+  # gate set nobody could enumerate.
+  _write '{"overall":"pass","epic_id":"E1","gates":{"tests":"pass"}}' \
+    "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-object gate entries (tests)"* ]]
+  [[ "$output" != *"Hotovo:"* ]]
+  [[ "$output" != *" z  prošlo"* ]]
+  [ ! -f "$(BODY)" ]
+}
+
+@test "one malformed entry among good ones is refused by name, never silently dropped" {
+  local gates
+  gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 1)" '{tests:$a, lint:"pass"}')"
+  _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-object gate entries (lint)"* ]]
+  # Never "1 z 1 prošlo" — dropping the row it cannot read would have counted a
+  # one-gate pass over a two-gate report.
+  [[ "$output" != *"prošlo"* ]]
+  [ ! -f "$(BODY)" ]
+}
+
 # ─── the fallback path's redactor is callable, and it redacts ───────────────
 
 @test "aid_gate_outcome_redact is the callable entry point the fallback card must use" {

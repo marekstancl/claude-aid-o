@@ -14,10 +14,14 @@
 #      literal, defined in communication.md and pasted unchanged at each site —
 #      a loose grep would pass on a paraphrase, which is exactly how two
 #      differently-worded clauses ship and neither is enforced.
-#      The sites are FOUR, not three: `skills/pipeline.md` carries two distinct
-#      renderer invocations (gates phase and plan boundary) and each is asserted
-#      separately, anchored on its own renderer name — listing the file once
-#      would let the gates path pass on the plan path's clause.
+#      The sites are FIVE, and `skills/pipeline.md` appears twice on purpose: it
+#      carries two distinct renderer invocations (gates phase and plan boundary)
+#      and each is asserted separately, anchored on its own renderer name —
+#      listing the file once would let the gates path pass on the plan path's
+#      clause. `commands/aid-audit-tests.md` is the fifth: it is a `renderer:`
+#      final turn in defaults/help-index.yaml and carries the canonical clause,
+#      and while it was off this list the clause could be deleted there without
+#      failing anything.
 #   3. SUPERSEDED FRAGMENTS. The shapes the contract replaces are gone: the
 #      metrics-first DONE-review header in aid-run.md, the hardcoded Czech
 #      language mandate in the two verify commands, and any second definition
@@ -164,6 +168,7 @@ RENDERER_SITES=(
   'skills/pipeline.md|aid-gate-outcome-summary.sh|gates phase'
   'commands/aid-plan.md|aid-plan-close-summary.sh|plan-close boundary'
   'skills/pipeline.md|aid-plan-close-summary.sh|plan-boundary section'
+  'commands/aid-audit-tests.md|aid-test-audit-chat-summary.sh|test-audit final turn'
 )
 for site in "${RENDERER_SITES[@]}"; do
   IFS='|' read -r rel anchor label <<<"$site"
@@ -257,14 +262,22 @@ done
 #
 # Definitions are unfenced; a fenced copy is a quoted example and is allowed.
 # communication.md is the one definer and is checked in case 1.
-case_ "no card skeleton of any of the four types is defined outside the contract file"
+case_ "no skeleton of the three FIELD-BEARING cards is defined outside the contract file"
 #
-# ALL FOUR CARDS, BY THEIR FIELD SETS — not one line of one card.
+# THE THREE FIELD-BEARING CARDS, BY THEIR FIELD SETS — not one line of one card.
 # This used to grep for the single Decision-required line `$CARD_LINE`. A
-# duplicated Finished, Blocked or Progress skeleton was therefore invisible,
-# and so was a re-defined Decision card that omitted that one line while
-# copying the other four. The contract's value is that there is ONE definition
-# of each card; a check that watches one fifth of one card does not defend it.
+# duplicated Finished or Blocked skeleton was therefore invisible, and so was a
+# re-defined Decision card that omitted that one line while copying the other
+# four. The contract's value is that there is ONE definition of each card; a
+# check that watches one fifth of one card does not defend it.
+#
+# THE FOURTH CARD IS NOT COVERED, AND CANNOT BE BY THIS TECHNIQUE. Progress /
+# handoff is defined in communication.md:69-72 as "one short status line" — it
+# has NO field labels, so there is no field set to count and nothing that
+# distinguishes a duplicated definition from an ordinary sentence about
+# progress. Naming this check "all four types" while implementing three is the
+# kind of claim this suite exists to stop, so it says three and says why. A
+# check for the fourth needs the contract to give that card a shape first.
 #
 # A file DEFINES a skeleton when TWO OR MORE distinct field labels of the same
 # card appear unfenced. Two, not one: a single `Hotovo:` is how any surface
