@@ -12,7 +12,12 @@
 #   - the two canonical permission display strings, byte-identical to
 #     commands/aid-init.md and skills/setup/permissions.md
 #   - the same output from the primary checkout and from a linked worktree
-#   - broken YAML is summarized, not crashed on
+#   - broken YAML is summarized, not crashed on — INCLUDING the overriding
+#     plugin.yaml, which used to be skipped in silence
+#   - an explicit `false` is never rendered as this script's word for "absent"
+#     (active_preset, autonomous_mode, dispatch_mode, a manifest's mode)
+#   - a default is never attributed to a file that was not read: with an
+#     unusable yq every line, including the plan mode default, says "unknown"
 #   - no line ever renders an empty value
 #   - the script writes NOTHING: proven by a full before/after tree snapshot
 #     AND by running it against a write-protected tree
@@ -207,6 +212,66 @@ tree_snapshot() {
   [[ "$output" == *"permissions: custom (preset) — autonomous_mode: absent"* ]]
 }
 
+@test "active_preset: false renders the value, never the implicit-missing string" {
+  # The sibling of the `autonomous_mode: false` bug, on the same line and with the
+  # same mechanism: `.active_preset // ""` collapses a deliberate `false` to empty,
+  # and empty is the trigger for the canonical string that tells the reader NO
+  # preset was ever selected and the workspace is IMPLICITLY AUTONOMOUS. An
+  # explicit, deliberately non-permissive value wearing the permissive default's
+  # face — the exact inversion this script exists to prevent.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'active_preset: false\nautonomous_mode: false\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/permissions.yaml"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(line_for 'permissions')" == "permissions: false (preset) — autonomous_mode: false" ]]
+  [[ "$output" != *"implicit — key missing"* ]]
+}
+
+@test "an unusable yq makes the plan mode default unknown, not a policy default" {
+  # With yq missing or the wrong flavour the script reads NO policy file at all,
+  # yet it printed `legacy_epic_release_mode (policy_default)` — a default
+  # attributed to a configuration it never opened. Every other line already says
+  # `unknown (yq: …)` in this state; this one lied instead.
+  local fake="$TEST_TMPDIR/fakebin"
+  mkdir -p "$fake"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    '[[ "$1" == "--version" ]] && { echo "yq 3.4.3"; exit 0; }' \
+    'exit 1' > "$fake/yq"
+  chmod +x "$fake/yq"
+  write_configured_workspace
+  run env PATH="$fake:$PATH" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(line_for 'plan mode default')" == "plan mode default: unknown (yq: wrong flavour"* ]]
+  [[ "$output" != *"(policy_default)"* ]]
+  # the lines that already told the truth still do
+  [[ "$(line_for 'gate profiles')" == "gate profiles: unknown (yq: wrong flavour"* ]]
+  [[ "$(line_for 'permissions')" == "permissions: unknown (yq: wrong flavour"* ]]
+}
+
+@test "an unparseable plugin.yaml is reported, not silently replaced by the default" {
+  # plugin.yaml is the OVERRIDING dispatch source. A broken one was skipped in
+  # silence and the plugin default was rendered as the effective mode, so a
+  # configuration that cannot be read looked like one that agrees.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'dispatch_mode: [oops\n' > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(line_for 'dispatch mode')" == *"unparseable (.aid-o/config/plugin.yaml; yq: "* ]]
+  [[ "$(line_for 'dispatch mode')" != *"(source: plugin default orchestration.yaml)"* ]]
+}
+
+@test "a dispatch_mode of false is rendered, not swallowed into the fallback" {
+  # Same `// ""` swallowed-false mechanism, on the dispatch source: an explicit
+  # false was reported as `agent_tool (source: built-in fallback)` — a value the
+  # project set, displayed as a value nobody set.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'dispatch_mode: false\n' > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(line_for 'dispatch mode')" == "dispatch mode: false (source: .aid-o/config/plugin.yaml)" ]]
+}
+
 @test "the dispatch source is one the runtime actually reads" {
   # aid-fsm.sh:2423-2427 consults exactly two: the project's plugin.yaml and the
   # PLUGIN's defaults/orchestration.yaml. A workspace orchestration.yaml is read by
@@ -264,7 +329,21 @@ tree_snapshot() {
   printf 'plan_id: P004\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P004.yaml"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$(line_for 'plan manifests')" == "plan manifests: 4 (plan_branch: 2, legacy_epic_release_mode: 1, mode absent: 1)" ]]
+  [[ "$(line_for 'plan manifests')" == "plan manifests: 4 (plan_branch: 2, legacy_epic_release_mode: 1, mode absent: 1, other: 0)" ]]
+}
+
+@test "a manifest carrying an unrecognised mode is not counted as 'mode absent'" {
+  # `mode absent` is this script's word for a manifest written before the key
+  # existed. A manifest that DOES declare a mode — an unknown word, or a `false`
+  # that the `// ""` read collapsed to empty — was counted in that bucket, so a
+  # declared-but-wrong mode was displayed as never declared.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
+  printf 'plan_id: P001\nmode: banana\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P001.yaml"
+  printf 'plan_id: P002\nmode: false\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P002.yaml"
+  printf 'plan_id: P003\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P003.yaml"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(line_for 'plan manifests')" == "plan manifests: 3 (plan_branch: 0, legacy_epic_release_mode: 0, mode absent: 1, other: 2)" ]]
 }
 
 # ─── dispatch mode ───────────────────────────────────────────────────────

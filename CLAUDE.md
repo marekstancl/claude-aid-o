@@ -246,9 +246,13 @@ Keep the 3 most recent versions. Older versions are documented only in CHANGELOG
 The **CHANGELOG header** (`## [X.Y.Z]`) is the single source of truth for the plugin version.
 Individual skill/agent/command files do NOT contain version numbers — only `**Last Updated:**` dates.
 
-### Version File Registry — ALL files that contain a version number
+### Version File Registry — the 8 release-boundary locations
 
-Every push to main MUST ensure these 8 locations are in sync:
+Every push to main MUST ensure these 8 locations are in sync. **Seven of them
+carry the version number; location 8 does not** — it is a fixed licence line in
+the same README the release edits, and the checker asserts its PRESENCE, byte
+for byte. It rides along in this registry so one release-boundary command covers
+it; it can never "agree with" a version, because it holds none.
 
 | # | File | Field | Update Method |
 |---|------|-------|---------------|
@@ -259,11 +263,14 @@ Every push to main MUST ensure these 8 locations are in sync:
 | 5 | `plugins/aid-orchestrator/.claude-plugin/plugin.json` | `version` | JSON field |
 | 6 | `plugins/aid-orchestrator/README.md` | `- **Plugin:** X.Y.Z` | Regex |
 | 7 | `README.md` | `- **vX.Y.Z** (current)` | Regex |
-| 8 | `README.md` | `AGPL-3.0-only — see [LICENSE](LICENSE)` | Exact |
+| 8 | `README.md` | `AGPL-3.0-only — see [LICENSE](LICENSE)` (no version — presence only) | Exact line |
 
-This table is the only definition of the 8 locations. `plugins/aid-orchestrator/scripts/tests/verify-version-files.sh`
-reads it and checks all 8; there is no `defaults/policies/release-policy.yaml` (an
-earlier version of this file cited one that does not exist).
+This table is the human definition of the 8 locations;
+`plugins/aid-orchestrator/scripts/tests/verify-version-files.sh` carries its own
+hard-coded copy of the same list and does **not** parse this file, so a location
+added here must be added to the script by hand or it goes unchecked. There is no
+`defaults/policies/release-policy.yaml` (an earlier version of this file cited
+one that does not exist).
 
 **What `aid-release.sh` covers, and what stays manual.** In *this* repository the
 script bumps location 1 (root `CHANGELOG.md`) and, through its no-config fallback,
@@ -276,17 +283,28 @@ not a set of eyeball greps:
 ```bash
 bash plugins/aid-orchestrator/scripts/tests/verify-version-files.sh <new_version> --baseline <old_version>
 ```
-`<new_version>` is mandatory (without it the script exits with usage). `--baseline`
-is optional and adds the "the version actually moved" assertion. Exit 0 means all 8
-locations agree; any other exit prints one `FAIL:` line naming the location that
-disagrees.
+`<new_version>` is mandatory and `--baseline` is optional (it adds the "the
+version actually moved" assertion). Three exits, and they are not the same thing:
+
+- **0** — every check passed: the seven version-carrying locations all show
+  `<new_version>`, the licence line is present, and both CHANGELOGs carry an
+  identical entry for it.
+- **1** — checks ran and something failed. One `FAIL:` line **per failed check**
+  (not one line total), then an `OVERALL: FAIL — N check(s) failed` summary. Not
+  every FAIL names a location: the two CHANGELOG sections differing, a missing
+  CHANGELOG entry and the baseline assertion are checks about content, not about
+  a registry row.
+- **2** — usage error (no `<new_version>`, an unknown flag, an unreachable
+  `--project-root`, or `jq` missing). Prints usage or an `ERROR:` line and **no
+  `FAIL:` line at all** — nothing was checked, so nothing disagreed.
 
 This is an **invocation-time, release-boundary** check, deliberately not a CI gate
-and not a member of the test suite: the 8 locations legitimately diverge in the
-middle of development, so a suite-wide run would fail every non-release commit. Its
-logic is regression-tested in `scripts/tests/bats/test-aid-release-seal.bats`;
-what is unenforced is that a human runs it. Registered as `version_registry_sync`
-in the enforcement registry with exactly that honest surface.
+and not a member of the test suite: the version-carrying locations legitimately
+diverge in the middle of development, so a suite-wide run would fail every
+non-release commit. Its logic is regression-tested in
+`scripts/tests/bats/test-aid-release-seal.bats`; what is unenforced is that a
+human runs it. Registered as `version_registry_sync` in the enforcement registry
+with `severity: advisory`, which is what an unrun check is worth.
 
 ## Release Workflow
 

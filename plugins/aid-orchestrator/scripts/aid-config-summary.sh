@@ -30,7 +30,11 @@
 # order and the labels are part of the contract (fixture tests assert them).
 # No value is ever empty — every absence renders as an explicit word.
 #
-# **Last Updated:** 2026-08-11
+# NO VALUE IS EVER READ WITH `// ""` (see `_get_raw`): yq's alternative operator
+# fires on `false`, and every such read turned an explicit false into this
+# script's own word for "absent".
+#
+# **Last Updated:** 2026-08-12
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -134,6 +138,30 @@ _get() {
   _sanitise "$v"
 }
 
+# _get_raw <file> <path> — a scalar read that DOES NOT use `// ""`.
+#
+# WHY THIS EXISTS AND WHY NOTHING HERE MAY GO BACK TO `// ""`: yq's alternative
+# operator, like jq's, fires on `false` as well as on null. Every `<path> // ""`
+# read in this script therefore returned an empty string for a deliberate `false`,
+# and empty is this script's trigger for "the key is absent" — so an explicitly
+# set, deliberately non-permissive value was rendered as the permissive default
+# nobody chose. That inversion was found and fixed once for `autonomous_mode`, and
+# it was still live on `active_preset`, `dispatch.mode`, `dispatch_mode`,
+# `default_mode` and a manifest's `mode`. The type tag is the only reliable
+# separator: `!!null` means genuinely absent, everything else is a value.
+#
+# Returns the empty string BOTH for an absent key and for an explicitly empty
+# string; callers that must tell those apart ask for the tag themselves.
+_get_raw() {
+  local f="$1" p="$2"
+  [[ -f "$f" ]] || { printf ''; return 0; }
+  if [[ "$(_get "$f" "${p} | tag")" == "!!null" ]]; then
+    printf ''
+    return 0
+  fi
+  _get "$f" "$p"
+}
+
 # yq presence is not enough — it has to be the RIGHT yq. Two incompatible tools
 # share the name: mikefarah's Go implementation (what this repo depends on) and the
 # Python wrapper around jq. Under the Python one every expression here fails, so the
@@ -203,29 +231,44 @@ else
   fi
 fi
 
-want_mode=""
-if [[ "$have_yq" == "1" && -z "$policy_err" ]]; then
-  want_mode="$(_get "$policy_file" '.default_mode // ""')"
-fi
-[[ -z "$want_mode" ]] && want_mode="legacy_epic_release_mode"
-
-case "$want_mode" in
-  plan_branch)
-    if [[ "$gate_profiles_state" == "listed" ]]; then
-      plan_mode="plan_branch (policy_default)"
-    else
-      plan_mode="legacy_epic_release_mode (plan_branch_unavailable: no_gate_profiles)"
-    fi
-    ;;
-  legacy_epic_release_mode)
-    plan_mode="legacy_epic_release_mode (policy_default)"
-    ;;
-  *)
-    plan_mode="legacy_epic_release_mode (unknown_policy_default: ${want_mode})"
-    ;;
-esac
-if [[ "$have_yq" == "1" && -n "$policy_err" ]]; then
+# `(policy_default)` is an ATTRIBUTION: it claims a policy file was opened and
+# said this. It may therefore only be printed on the path that actually read one.
+# Without a usable yq this block read nothing at all and still printed
+# `legacy_epic_release_mode (policy_default)` — a default credited to a
+# configuration nobody opened, on the very line whose reason string exists so the
+# PM can tell a chosen mode from a fallen-back one. Every other line in this
+# report already says `unknown (yq: …)` in that state; this one is now no
+# different. A missing policy file is likewise `unknown`, not a silent default.
+if [[ "$have_yq" != "1" ]]; then
+  plan_mode="unknown (yq: ${yq_flavour})"
+elif [[ ! -f "$policy_file" ]]; then
+  if [[ "$policy_file" == "$DEFAULT_POLICY" ]]; then
+    plan_mode="unknown (no policy file: plugin default plan-boundary-policy.yaml absent)"
+  else
+    plan_mode="unknown (no policy file: $(_short "$policy_file"))"
+  fi
+elif [[ -n "$policy_err" ]]; then
   plan_mode="$(_unparseable "$policy_file" "$policy_err")"
+else
+  want_mode="$(_get_raw "$policy_file" '.default_mode')"
+  # Key absent from a file that WAS read: the policy layer's own default applies,
+  # which is what `policy_default` means here and in `_pfsm_default_mode`.
+  [[ -z "$want_mode" ]] && want_mode="legacy_epic_release_mode"
+  case "$want_mode" in
+    plan_branch)
+      if [[ "$gate_profiles_state" == "listed" ]]; then
+        plan_mode="plan_branch (policy_default)"
+      else
+        plan_mode="legacy_epic_release_mode (plan_branch_unavailable: no_gate_profiles)"
+      fi
+      ;;
+    legacy_epic_release_mode)
+      plan_mode="legacy_epic_release_mode (policy_default)"
+      ;;
+    *)
+      plan_mode="legacy_epic_release_mode (unknown_policy_default: ${want_mode})"
+      ;;
+  esac
 fi
 printf 'plan mode default: %s\n' "$plan_mode"
 
@@ -245,7 +288,14 @@ if [[ -f "$PERMISSIONS_YAML" ]]; then
   elif [[ -n "$perm_err" ]]; then
     permissions="$(_unparseable "$PERMISSIONS_YAML" "$perm_err")"
   else
-    preset="$(_get "$PERMISSIONS_YAML" '.active_preset // ""')"
+    # `.active_preset // ""` was the same swallowed-false defect as the one
+    # documented below for `autonomous_mode`, and worse in its effect: an
+    # explicit `active_preset: false` came back empty and fell into the
+    # canonical implicit string, which tells the reader NO preset was ever
+    # selected and the workspace is implicitly AUTONOMOUS. _get_raw separates
+    # absent from false; an explicitly empty string still renders the implicit
+    # string, because "nothing selected" is the same lived situation.
+    preset="$(_get_raw "$PERMISSIONS_YAML" '.active_preset')"
     # `// ""` is WRONG for a boolean. yq's alternative operator, like jq's, fires
     # on false as well as on null — so `autonomous_mode: false` came back empty and
     # was relabelled `absent`. That is a safety inversion on the one line a PM reads
@@ -258,6 +308,9 @@ if [[ -f "$PERMISSIONS_YAML" ]]; then
       auto="absent"
     else
       auto="$(_get "$PERMISSIONS_YAML" '.autonomous_mode')"
+      # An explicitly empty value is present but says nothing; it still gets a
+      # word, because the report's contract is that no value renders blank.
+      [[ -z "$auto" ]] && auto="(empty)"
     fi
     if [[ -n "$preset" ]]; then
       permissions="${preset} (preset) — autonomous_mode: ${auto}"
@@ -298,7 +351,7 @@ else
       dispatch=""; dispatch_src=""
       dispatch_line="$(_unparseable "$orch_file" "$orch_err")"
     else
-      v="$(_get "$orch_file" '.dispatch.mode // ""')"
+      v="$(_get_raw "$orch_file" '.dispatch.mode')"
       if [[ -n "$v" ]]; then
         dispatch="$v"
         # The plugin's own default file is named as such — its absolute path
@@ -314,8 +367,15 @@ else
   fi
   if [[ -f "$PLUGIN_YAML" && -z "${dispatch_line:-}" ]]; then
     plug_err="$(_yq_err "$PLUGIN_YAML")"
-    if [[ -z "$plug_err" ]]; then
-      v="$(_get "$PLUGIN_YAML" '.dispatch_mode // ""')"
+    if [[ -n "$plug_err" ]]; then
+      # plugin.yaml is the OVERRIDING source. Skipping a broken one in silence
+      # rendered the plugin default as the effective mode, so a configuration
+      # that could not be read looked like one that agrees — the same
+      # broken-config-wearing-a-valid-face defect the other sections report on.
+      dispatch=""; dispatch_src=""
+      dispatch_line="$(_unparseable "$PLUGIN_YAML" "$plug_err")"
+    else
+      v="$(_get_raw "$PLUGIN_YAML" '.dispatch_mode')"
       if [[ -n "$v" ]]; then
         dispatch="$v"
         dispatch_src="$(_short "$PLUGIN_YAML")"
@@ -332,24 +392,36 @@ fi
 # ── 7. plan lifecycle manifests ──────────────────────────────────────────
 manifests="absent"
 if [[ -d "$MANIFEST_DIR" ]]; then
-  count=0; pb=0; legacy=0; other=0
+  count=0; pb=0; legacy=0; absent=0; other=0
   for m in "$MANIFEST_DIR"/*.yaml; do
     [[ -e "$m" ]] || continue
     count=$((count + 1))
-    mode=""
-    [[ "$have_yq" == "1" ]] && mode="$(_get "$m" '.mode // ""')"
+    mode=""; mode_tag="!!null"
+    if [[ "$have_yq" == "1" ]]; then
+      mode_tag="$(_get "$m" '.mode | tag')"
+      mode="$(_get_raw "$m" '.mode')"
+    fi
     case "$mode" in
       plan_branch) pb=$((pb + 1)) ;;
       legacy_epic_release_mode) legacy=$((legacy + 1)) ;;
-      *) other=$((other + 1)) ;;
+      # A manifest that DECLARES a mode this script does not recognise — an
+      # unknown word, or the `false` the old `// ""` read collapsed to empty —
+      # is not a manifest written before the key existed. Counting both in one
+      # bucket labelled `mode absent` made a declared-but-wrong mode look
+      # undeclared, so the two states are counted apart.
+      *) if [[ "$mode_tag" == "!!null" ]]; then absent=$((absent + 1)); else other=$((other + 1)); fi ;;
     esac
   done
   if [[ "$count" -eq 0 ]]; then
     manifests="none"
+  elif [[ "$have_yq" != "1" ]]; then
+    # Without yq nothing was read, so every manifest would have landed in the
+    # `mode absent` bucket — a read failure counted as a real declaration.
+    manifests="${count} (modes unknown — yq: ${yq_flavour})"
   else
     # `mode absent` is a real state, not a read failure: manifests written
     # before the mode key existed carry no declaration at all.
-    manifests="${count} (plan_branch: ${pb}, legacy_epic_release_mode: ${legacy}, mode absent: ${other})"
+    manifests="${count} (plan_branch: ${pb}, legacy_epic_release_mode: ${legacy}, mode absent: ${absent}, other: ${other})"
   fi
 fi
 printf 'plan manifests: %s\n' "$manifests"

@@ -2027,7 +2027,18 @@ inventory, because that is the exact hole the inventory exists to close.
 
 `test-enforcement-registry-cites.sh` (t0, merge path) asserts that every
 `source:`/`instruction:` cite in `defaults/enforcement-registry.yaml` names a
-file or directory that exists, and that every row id is unique.
+file or directory that exists — **except on rows marked `status: dead` or
+`status: removed_scoped`, whose path validation is skipped** — and that every row
+id is unique.
+
+That exception is the point of those two statuses, not a hole in the check: a
+dead row records an enforcement that died together with the file it cited, so
+the cite is deliberately dangling and is kept as the paper trail for what used to
+be wired. Several shipped rows are in exactly that state. The rule to take away
+is the one that makes the exception safe: **`status: dead` is the only sanctioned
+way to keep a dangling cite, and every other row — including one with no
+`status:` key at all — is validated.** An empty status is not a skip; a row
+cannot opt out by omitting the field.
 
 A registry row is this plugin's promise that a detector has a real enforcing
 surface. A row citing a file that was deleted, renamed or moved still LOOKS
