@@ -40,11 +40,15 @@ You MAY read the repository (read-only) to check the plan against reality.
 1. Feasibility & grounding: for every resource the plan names (file, function, port, service,
    command, env var, schema/contract, test path), verify it EXISTS in the repo OR is mapped to a
    Create step in the plan. A named resource that neither exists nor is created = a finding.
-2. Scope & dependencies: take the dependency edges from each step's own `Dependencies:` block
+2. Scope & dependencies: take the ordering from each step's own `Dependencies:` block
    (`Depends on:` / `Blocks:`) — the plan's canonical, lint-enforced declaration and the only
-   dependency input this review is guaranteed to have. From those blocks: is the ordering they
-   imply acyclic, and does any step consume an output no earlier step produces? Flag
-   hidden/undeclared scope.
+   dependency input this review is guaranteed to have. Those blocks give ORDER, not content, so
+   the "output no earlier step produces" check needs both: for each step, read what it actually
+   needs (its Objective/Implementation Detail/Files — file paths, functions, artifacts,
+   contracts it consumes) and check whether an EARLIER step in the `Dependencies:` ordering is
+   the one that creates it. Two things to flag: (a) the ordering itself is not acyclic; (b) a
+   step consumes something (per its own text) that no step before it in that ordering produces.
+   Flag hidden/undeclared scope either way.
 3. Contracts: does the plan's use of each cited contract match that contract's ACTUAL shape/version?
 4. Acceptance criteria: is every AC executable and self-contained (no placeholders, no unresolved
    variables)? Does each map to a verifiable check?

@@ -117,9 +117,19 @@ EOF
   ' _ "$LIB"
   [ "$status" -eq 0 ]
 
-  # New sample folded in; percentiles recomputed over the FIFO window.
+  # New sample folded in; percentiles recomputed over the FIFO window
+  # ([100,200,300,400] -> p50=200, p90=p95=max=400) — proves the sequential
+  # jq computation itself, not just that the write didn't crash.
   run yq '.gates.legacy_gate.samples_count' "$AID_GATE_BASELINE_FILE"
   [ "$output" == "4" ]
+  run yq '.gates.legacy_gate.p50_ms' "$AID_GATE_BASELINE_FILE"
+  [ "$output" == "200" ]
+  run yq '.gates.legacy_gate.p90_ms' "$AID_GATE_BASELINE_FILE"
+  [ "$output" == "400" ]
+  run yq '.gates.legacy_gate.p95_ms' "$AID_GATE_BASELINE_FILE"
+  [ "$output" == "400" ]
+  run yq '.gates.legacy_gate.max_ms' "$AID_GATE_BASELINE_FILE"
+  [ "$output" == "400" ]
 
   # The legacy sibling keys are gone after this write (P083 Step 8: the
   # write path no longer emits them at all).

@@ -47,18 +47,26 @@ _render_with_absent_graphs() {
   [[ "$output" == *"Depends on:"* ]]
   [[ "$output" == *"Blocks:"* ]]
   # The cycle/unsatisfied-output analysis the graph would have driven is
-  # still asked for — just sourced from the per-step blocks instead.
+  # still asked for — just sourced from the per-step blocks instead. It
+  # must not merely name the blocks: it must tell the reviewer HOW to get
+  # from "ordering" (what Dependencies: blocks encode) to "output" (what
+  # they don't) — reading each step's own stated needs against that order.
   [[ "$output" == *"acyclic"* ]]
-  [[ "$output" == *"an output no earlier step produces"* ]]
+  [[ "$output" == *"output no earlier step produces"* ]]
+  [[ "$output" == *"Objective"* ]]
+  [[ "$output" == *"Files"* ]]
 }
 
 @test "the shipped prompt requires no artifact the manifest can record as absent without naming the Dependencies: substitute" {
   refute_grep -F "pre-generation authority" "$TEMPLATE"
 
-  # Check 2 (the dependency/scope check) must name the substitute explicitly.
+  # Check 2 (the dependency/scope check) must name the substitute explicitly,
+  # and must not itself lean on the graph being present — a regression that
+  # re-requires the graph under different wording would fail this.
   run bash -c "sed -n '/^2\\. Scope & dependencies/,/^3\\./p' '$TEMPLATE'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Dependencies:"* ]]
+  refute_grep -qiE 'whole.plan (source )?graph|pre-generation authority' <(echo "$output")
 }
 
 @test "a manifest recording absent_pre_generation still validates (unchanged contract)" {
