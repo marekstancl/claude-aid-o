@@ -105,6 +105,22 @@ _extract() {
   [ "${lines[0]}" = "Only criterion." ]
 }
 
+@test "an INDENTED line that looks like a new section heading terminates, not absorbed" {
+  # Error Handling: "A continuation line that itself looks like a new
+  # section heading terminates the criterion rather than being absorbed" —
+  # this applies even when the line is indented (a malformed/copy-pasted
+  # section marker), not just a flush-left one.
+  _extract \
+    "**Acceptance Criteria:**" \
+    "- First criterion" \
+    "      **Effort:** S" \
+    "- Second criterion"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[0]}" = "First criterion" ]
+  [ "${lines[1]}" = "Second criterion" ]
+}
+
 @test "fenced block indented under a criterion is treated as continuation" {
   _extract \
     "**Acceptance Criteria:**" \

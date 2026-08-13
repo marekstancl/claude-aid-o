@@ -161,3 +161,22 @@ _write_target_entry() {
   [[ "$output" != *"MISS: README.md"* ]]
   [ "$(cat README.md)" = "[Claude Code](https://example.com/foo) — v2.83.2" ]
 }
+
+@test "a file with one already-current row and one stale row still substitutes the stale one" {
+  # Edge Case: "A pattern that matches more than one line — substitutes all,
+  # unchanged behaviour, asserted." Classifying "already current" from a
+  # single grep probe over the whole file (rather than from whether sed
+  # actually changed anything) would wrongly skip the still-stale row.
+  _seed '\[Claude Code\](https://example.com/foo) — v{VERSION}'
+  _write_target_entry 2.83.2
+  cd "$TEST_PROJECT_ROOT"
+  printf '[Claude Code](https://example.com/foo) — v2.83.2\n[Claude Code](https://example.com/foo) — v2.83.1\n' > README.md
+  git add README.md && git commit -qm "one row already current, one still stale"
+
+  run bash "$RELEASE" patch
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated: README.md (regex)"* ]]
+  [[ "$output" != *"Already current: README.md (regex)"* ]]
+  [ "$(sed -n '1p' README.md)" = "[Claude Code](https://example.com/foo) — v2.83.2" ]
+  [ "$(sed -n '2p' README.md)" = "[Claude Code](https://example.com/foo) — v2.83.2" ]
+}

@@ -579,16 +579,20 @@ except:
       regex)
         # P083 Step 4: sed cannot tell "already at the new version" apart
         # from "matches neither version" — both leave the file unchanged.
-        # Probe for the new-version pattern BEFORE substituting, rather than
-        # guessing from sed's exit code (sed exits 0 on a no-op match).
+        # Substitute unconditionally (so a file with BOTH an already-current
+        # row and a still-stale row gets the stale row fixed — the "matches
+        # more than one line, substitutes all" edge case), then classify by
+        # whether the file actually changed, not by pre-guessing per file.
         SEARCH=$(echo "$FILE_PATTERN" | sed "s/{VERSION}/$CURRENT/g")
         REPLACE=$(echo "$FILE_PATTERN" | sed "s/{VERSION}/$NEW_VERSION/g")
-        if grep -q -- "$REPLACE" "$FULL_PATH" 2>/dev/null; then
+        _before_sha=$(sha256sum "$FULL_PATH" | awk '{print $1}')
+        sed -i "s|$SEARCH|$REPLACE|g" "$FULL_PATH"
+        _after_sha=$(sha256sum "$FULL_PATH" | awk '{print $1}')
+        if [[ "$_before_sha" != "$_after_sha" ]]; then
+          echo "Updated: $FILE_PATH (regex)"
+        elif grep -q -- "$REPLACE" "$FULL_PATH" 2>/dev/null; then
           echo "Already current: $FILE_PATH (regex) — already matches the new-version pattern"
           continue
-        elif grep -q -- "$SEARCH" "$FULL_PATH" 2>/dev/null; then
-          sed -i "s|$SEARCH|$REPLACE|g" "$FULL_PATH"
-          echo "Updated: $FILE_PATH (regex)"
         else
           echo "MISS: $FILE_PATH (regex) — configured pattern matched neither the current nor the new version: $FILE_PATTERN"
           continue
@@ -811,6 +815,10 @@ _release_rollback_updated() {
     echo "WARNING: not a git repository — the version-file edits from this run were left in place and must be reverted by hand before rerunning" >&2
     return 0
   }
+  if [[ "${#UPDATED[@]}" -eq 0 ]]; then
+    echo "Nothing to roll back — no version files were updated by this run." >&2
+    return 0
+  fi
   local f rel restored="" failed=""
   for f in "${UPDATED[@]:-}"; do
     [[ -n "$f" ]] || continue

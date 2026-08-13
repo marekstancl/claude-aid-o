@@ -120,3 +120,49 @@ EOF
   [[ "$output" == *"Rolled back this run's version-file edits"* ]]
   [ -z "$(git status --porcelain)" ]
 }
+
+@test "a rollback with nothing in UPDATED[] reports nothing to restore, exit 0 from the rollback itself" {
+  # Edge Case: "A rollback with an empty UPDATED[] — prints that nothing
+  # needed restoring, exit 0." Reproduced via the primary-CHANGELOG's
+  # pre-written-entry no-op branch: header already == NEW_VERSION (so
+  # update_changelog does not add it to UPDATED[]) but the body is still
+  # the placeholder, so validation still fails and triggers a rollback with
+  # an empty UPDATED[]. Uses the CONFIG path with an empty versioning.files[]
+  # so the version-source JSON file itself is never bumped (only the
+  # CHANGELOG's pre-written-entry no-op branch runs).
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config" \
+           "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin"
+  cat > "$TEST_PROJECT_ROOT/plugins/aid-orchestrator/.claude-plugin/plugin.json" <<'EOF'
+{"version": "2.0.0"}
+EOF
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/project.yaml" <<'EOF'
+versioning:
+  source: plugins/aid-orchestrator/.claude-plugin/plugin.json
+  files: []
+EOF
+  cat > "$TEST_PROJECT_ROOT/CHANGELOG.md" <<'EOF'
+# Changelog
+
+Format follows Keep a Changelog.
+
+## [2.0.1] — 2026-08-13
+
+### Fixed
+
+- _PM/agent: fill in entry content_
+
+## [2.0.0] — 2026-07-01
+
+### Added
+- The first real release.
+EOF
+  ( cd "$TEST_PROJECT_ROOT" && git init -q \
+      && git config user.email "t@example.com" && git config user.name "T" \
+      && git add -A && git commit -qm "init" )
+  cd "$TEST_PROJECT_ROOT"
+
+  run bash "$RELEASE" patch
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Nothing to roll back — no version files were updated by this run."* ]]
+  [ -z "$(git status --porcelain)" ]
+}

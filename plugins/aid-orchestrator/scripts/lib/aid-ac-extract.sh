@@ -66,10 +66,15 @@ aid_ac_extract_criteria() {
       }
 
       # Indented line: continuation of the active criterion, else ignored
-      # (an indented line with no active criterion does not resume one).
+      # (an indented line with no active criterion does not resume one) —
+      # UNLESS it itself looks like a new section heading (`**...**`), in
+      # which case it terminates the criterion rather than being absorbed
+      # (Error Handling: "the ambiguity is resolved toward under-joining,
+      # never toward swallowing the next section").
+      trimmed = line
+      sub(/^[[:space:]]+/, "", trimmed)
+      if (trimmed ~ /^\*\*/) { flush(); next }
       if (accumulating) {
-        trimmed = line
-        sub(/^[[:space:]]+/, "", trimmed)
         crit = crit " " trimmed
       }
     }
