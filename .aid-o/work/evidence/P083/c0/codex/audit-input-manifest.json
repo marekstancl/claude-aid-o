@@ -1,0 +1,97 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "audit_input_manifest",
+  "producer": "orchestrator@cp1-deep",
+  "created_at": "2026-08-13T02:37:06Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "unknown",
+    "plan_id": "P083"
+  },
+  "subject": {
+    "subject_hash": "sha256:a32961142eea6ac66c27b89b119480f33ca860b4fef577ef821b6c0cf9169c9e"
+  },
+  "revision": {
+    "head_sha": "6337aade0717e547a77844dc99861056afdc7586",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "pass",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-c0-plan-review.sh#build-manifest"
+  },
+  "audit_input_manifest": {
+    "allowlist": [
+      ".aid-o/plans/P083-ten-verified-defects.md",
+      ".aid-o/work/evidence/P083/cp1-deep/cp1-adjudicator.md",
+      ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L1-behavior.md",
+      ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L2-feasibility-rev1.md",
+      ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L2-feasibility.md",
+      ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement-rev1.md",
+      ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement.md"
+    ],
+    "input_hash": "sha256:8a4c54b9700a8fb3af5312276134c4be026436676871baad5e731a3cfc9ab950",
+    "prior_pass_summaries": "untrusted",
+    "required_independence_level": "cross_provider",
+    "c0_plan_review_input": {
+      "plan_file": ".aid-o/plans/P083-ten-verified-defects.md",
+      "reviewed_plan_hash": "sha256:bd54f1b36e2b6edddd11618a4dd43180ea20b7a7b9182fdad9130a4e9119e9cc",
+      "reviewed_head": "6337aade0717e547a77844dc99861056afdc7586",
+      "plan_id": "P083",
+      "risk_profile": "high",
+      "contracts": [],
+      "plan_graph": "absent_pre_generation",
+      "source_plan_graph": "absent_pre_generation",
+      "c0_evidence": [
+        ".aid-o/work/evidence/P083/cp1-deep/cp1-adjudicator.md",
+        ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L1-behavior.md",
+        ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L2-feasibility-rev1.md",
+        ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L2-feasibility.md",
+        ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement-rev1.md",
+        ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement.md"
+      ],
+      "files": [
+        {
+          "path": ".aid-o/plans/P083-ten-verified-defects.md",
+          "sha256": "sha256:bd54f1b36e2b6edddd11618a4dd43180ea20b7a7b9182fdad9130a4e9119e9cc",
+          "size": 56842
+        },
+        {
+          "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-adjudicator.md",
+          "sha256": "sha256:49126779b640046b91ecc3adf3617ef50862c2f207abe7d759172b74c334fb73",
+          "size": 32354
+        },
+        {
+          "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L1-behavior.md",
+          "sha256": "sha256:4e7f4d68d7a65a1958519dede5de8ec7023f2431448e5c3a0cce03fb678c1f89",
+          "size": 16244
+        },
+        {
+          "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L2-feasibility-rev1.md",
+          "sha256": "sha256:ea22f9daa2593a350240ce0ffdece26b17a3e0cce34e79eae92696081ceb7878",
+          "size": 22119
+        },
+        {
+          "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L2-feasibility.md",
+          "sha256": "sha256:72a69fb26ea7d65197042a30bcfc534bf6decc4169449a8534360ce2d6f9a40a",
+          "size": 20515
+        },
+        {
+          "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement-rev1.md",
+          "sha256": "sha256:5c2f8926a688d6f6ebf62ea564f28c44d7991fc6ff8831922acfedfc0dc1d587",
+          "size": 18423
+        },
+        {
+          "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement.md",
+          "sha256": "sha256:8b750153480fa82c302f51b853bbdbb19a8ab757ea0b8b1fc5df3e99e7a1414a",
+          "size": 13804
+        }
+      ]
+    }
+  }
+}

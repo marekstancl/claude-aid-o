@@ -1,0 +1,39 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c0_dispatch",
+  "producer": "orchestrator@cp1-deep",
+  "created_at": "2026-08-13T02:41:51Z",
+  "provenance": {
+    "dispatch_mode": "cross_provider",
+    "generated_by_tool": "aid-c0-plan-review.sh#dispatch"
+  },
+  "executor": {
+    "kind": "codex_cli",
+    "reported_model": "gpt-5.6-terra",
+    "codex_version": "codex-cli 0.146.0"
+  },
+  "subject": {
+    "project_root": "/opt/eco/projects/aid-orchestrator",
+    "reviewed_head": "6337aade0717e547a77844dc99861056afdc7586",
+    "input_manifest_hash": "sha256:0826278a094850e61657906f3559af29cccb8c81aa73778c3cf8d3879e1a5e1c"
+  },
+  "prompt": {
+    "template_id": "c0-plan-review-prompt",
+    "template_sha256": "sha256:ea800841ff7b6609fffa0181386db308ec0a4e983a856599e4286f90fc42fae3",
+    "rendered_prompt_sha256": "sha256:d7cd95260c190d89d589dcd730b0c75cfc9b47f1d47452fe48b0045bf83f2490"
+  },
+  "dispatch": {
+    "invoked": true,
+    "exit_code": 0,
+    "outcome": "dispatched",
+    "events_valid": true,
+    "codex_session_id": "019ff8fb-1c1a-77e2-9404-6a1177f0e7cc",
+    "stdout_sha256": "sha256:67b8c6d675c0ebc44aded3a5b3644982ac9733c9e833c36f8623f92bf7d8b93c",
+    "raw_response_sha256": "sha256:39d467fb149e57076d00e21db5d1f6eca867160b234873c79854bfa6a39f6696"
+  },
+  "independence": {
+    "required_independence_level": "cross_provider",
+    "probed_independence_level": "cross_provider",
+    "achieved_independence_level": "cross_provider"
+  }
+}
