@@ -2,17 +2,17 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_input_manifest",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-08-13T03:03:25Z",
+  "created_at": "2026-08-13T03:08:08Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "plan_id": "P083"
   },
   "subject": {
-    "subject_hash": "sha256:383c256e518b5726e31a47cf8660bf91e10c82fd794c1c2b080e851728bd222c"
+    "subject_hash": "sha256:8baecab176ca67105b87b3fc3f5e3b826591513525f4b82f8dfb39659deb233b"
   },
   "revision": {
-    "head_sha": "9d7788d8e32c4c70c06b6901485404d1656489fa",
+    "head_sha": "6dacd8523058ab705055d43bb3d0ef92453e32e7",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -35,13 +35,13 @@
       ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement-rev1.md",
       ".aid-o/work/evidence/P083/cp1-deep/cp1-lens-L3-enforcement.md"
     ],
-    "input_hash": "sha256:1dbc78427c067a07f03e9fec4fe9acb55c26fa22d2d396122a19486397f46286",
+    "input_hash": "sha256:9faa670b3da8274a3849af711620e0b8f80f3c9ca5a98f6d1429a7f7611f3e64",
     "prior_pass_summaries": "untrusted",
     "required_independence_level": "cross_provider",
     "c0_plan_review_input": {
       "plan_file": ".aid-o/plans/P083-ten-verified-defects.md",
-      "reviewed_plan_hash": "sha256:52a465c7ca1666952fd58d977bac0a3aa88aaa509a7a9a9234c62bec43d3d854",
-      "reviewed_head": "9d7788d8e32c4c70c06b6901485404d1656489fa",
+      "reviewed_plan_hash": "sha256:3740677449fb79ff8147b9cbca50a1a7c8e20bb0d2b4e48401a7ebb53cc2c273",
+      "reviewed_head": "6dacd8523058ab705055d43bb3d0ef92453e32e7",
       "plan_id": "P083",
       "risk_profile": "high",
       "contracts": [],
@@ -58,8 +58,8 @@
       "files": [
         {
           "path": ".aid-o/plans/P083-ten-verified-defects.md",
-          "sha256": "sha256:52a465c7ca1666952fd58d977bac0a3aa88aaa509a7a9a9234c62bec43d3d854",
-          "size": 61935
+          "sha256": "sha256:3740677449fb79ff8147b9cbca50a1a7c8e20bb0d2b4e48401a7ebb53cc2c273",
+          "size": 62787
         },
         {
           "path": ".aid-o/work/evidence/P083/cp1-deep/cp1-adjudicator.md",

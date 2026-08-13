@@ -11,7 +11,7 @@ risk: high
 
 ## Stakeholder Brief
 
-Forty-six open backlog entries were re-verified against the tree on 2026-08-11, one at a time, with file:line evidence for every verdict. Eleven turned out to be already fixed, moot or deliberate decisions. Thirty-three were real, but most were smaller than their descriptions and seven named the wrong file entirely. The PM then applied a second sieve by hand: keep only what repairs the pipeline we actually run today, only where the benefit is demonstrable, and prefer removing machinery to adding it. Ten items survived, and all three of their open questions were then decided by measurement before this plan was finalised. Four break something on the path we use every day — a gates report written where nobody reads it, acceptance criteria cut mid-sentence, a release rollback that strands one file, a README tagline whose configured pattern cannot match the line it is aimed at. Three are guards that report success while checking nothing, including one that fails open in production library code. Two are deletions of machinery that outlived its purpose. The tenth — retiring the test-portfolio audit, which the PM chose to delete outright — turned out to be entangled with a live merge-path selector and is therefore its own removal plan rather than a step here; this plan records the decision. Nothing here adds a new detector, a new event or a new ceremony.
+Forty-six open backlog entries were re-verified against the tree on 2026-08-11, one at a time, with file:line evidence for every verdict. Eleven turned out to be already fixed, moot or deliberate decisions. Thirty-three were real, but most were smaller than their descriptions and seven named the wrong file entirely. The PM then applied a second sieve by hand: keep only what repairs the pipeline we actually run today, only where the benefit is demonstrable, and prefer removing machinery to adding it. Ten items survived, and all three of their open questions were then decided by measurement before this plan was finalised. Four break something on the path we use every day — a gates report written where nobody reads it, acceptance criteria cut mid-sentence, a release rollback that strands one file. A fourth — a README version pattern that can never match the line it is aimed at — is only made VISIBLE here, not repaired: the pattern lives in an untracked file that no commit can carry, so the repair is Deferred and this plan ships the diagnostic that stops it hiding. Three are guards that report success while checking nothing, including one that fails open in production library code. Two are deletions of machinery that outlived its purpose. The tenth — retiring the test-portfolio audit, which the PM chose to delete outright — turned out to be entangled with a live merge-path selector and is therefore its own removal plan rather than a step here; this plan records the decision. Nothing here adds a new detector, a new event or a new ceremony.
 
 ## Context
 
@@ -32,7 +32,8 @@ The nine verified defects this plan owns are fixed or consciously deleted, each 
 ## Scope
 
 **In scope:**
-- Four live-path repairs: the streamlined integration-review gates-report path; the EPIC generator's acceptance-criteria line filter; the release rollback's incomplete file bookkeeping; the README tagline pattern that cannot match its own target line.
+- Three live-path repairs: the streamlined integration-review gates-report path; the EPIC generator's acceptance-criteria line filter; the release rollback's incomplete file bookkeeping.
+- One live-path defect made VISIBLE rather than repaired: a configured version pattern that matches nothing is reported instead of counted as an update. The pattern itself is untracked and its repair is Deferred — stated here because a plan that lists a defect under "fixes" and then defers the fix is the exact dishonesty this plan was written to end.
 - Three guards that pass without checking: the self-host `plan_diff` gate with no `command`; the fail-open PCRE toggle read in `aid-review-signals.sh`; the consumer profile table that cannot satisfy its own policy floor.
 - Two decided deletions: the dead parallel-concurrency vocabulary in the gate-runtime baseline, and the C0 prompt's requirement for a dependency graph that has never once reached the review it feeds.
 - Backlog reconciliation for exactly these ten entries plus the eleven the verification closed.
@@ -56,7 +57,7 @@ Alternatives rejected: (a) one "guard hardening" refactor — the verification s
 
 Three groups.
 
-1. **The live path (Steps 1-4).** `fsm_check_streamlined_integration_review` reads a flat `gates_report.json` while every writer and every other reader uses the `gates/` subdirectory, so a correct streamlined run is pushed toward a force waiver. `aid-plan-to-epic.sh` filters acceptance criteria to flush-left bullet lines in two copy-pasted awk blocks, so continuation lines vanish from both the human EPIC and the machine-read `ac[]`. `_release_update_files`' fallback path omits three files from `UPDATED[]`, and `_release_rollback_updated` restores only what that array holds. And the README tagline's configured pattern escapes literal parentheses as BRE groups, so it can never match the line it is aimed at — the line itself was repaired by hand at the v2.84.0 release, but the mechanism that froze it is untouched.
+1. **The live path (Steps 1-4).** `fsm_check_streamlined_integration_review` reads a flat `gates_report.json` while every writer and every other reader uses the `gates/` subdirectory, so a correct streamlined run is pushed toward a force waiver. `aid-plan-to-epic.sh` filters acceptance criteria to flush-left bullet lines in two copy-pasted awk blocks, so continuation lines vanish from both the human EPIC and the machine-read `ac[]`. `_release_update_files`' fallback path omits three files from `UPDATED[]`, and `_release_rollback_updated` restores only what that array holds. And the README version pattern escapes literal parentheses as BRE groups, so it can never match its target line — the line was repaired by hand at the v2.84.0 release, but the pattern is untracked, so this plan can only make the silent no-match audible; repairing it is Deferred.
 2. **Guards that pass without checking (Steps 5-7).** A gate with no `command` records `skip/no_command` and never touches `overall`; `plan_diff` sits in five profiles in exactly that state. A `grep -qP` inside an `if` returns "enabled" on any grep without PCRE. A profile table that omits `release` cannot satisfy a policy floor of `release`.
 3. **Decided by measurement (Steps 8-10).** Each carried an open question answered before generation rather than handed to the implementer: the dead parallel vocabulary is deleted outright; the C0 prompt stops requiring a dependency graph the review never receives (producing it early was measured, then rejected on review because it would have made C0 a second writer of a producer-integrity seal); and the backlog is reconciled with the verification's verdicts. The catalog-status question was answered too — retire the audit — but measuring its blast radius moved it out of this plan (see Deferred).
 
@@ -135,7 +136,7 @@ Three groups.
 **Objective:** An aborted release restores every file it touched, including the ones the fallback path forgets.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/scripts/aid-release.sh` (lines ~487-524 and ~645-681, plus the staging loop at ~:1048-1053 and :823) — the `.metadata.version` branch (:651-656, comment `# Don't double-add`), the `.plugins[0].version` branch (:657-662) and the README `Plugin: ` branch (:672-675) record their file in `UPDATED[]`, and the array is de-duplicated (`sort -u`) before the count at :681, before the staging loop, and before `_release_rollback_updated` (:775-791) — `marketplace.json` has two version fields and must appear once, not twice.
+- Modify: `plugins/aid-orchestrator/scripts/aid-release.sh` (lines ~487-529 and ~645-681, plus the staging loop at ~:1048-1053 and :823) — including the FALSE entry the C0 review found: `update_changelog` is a no-op when the header already equals the new version (the normal pre-written flow), yet `:518-529` appends `CHANGELOG.md` to `UPDATED[]` unconditionally. Deduplication alone cannot fix that; the array must record only files the run actually changed, or the count AC is unmeetable by construction — the `.metadata.version` branch (:651-656, comment `# Don't double-add`), the `.plugins[0].version` branch (:657-662) and the README `Plugin: ` branch (:672-675) record their file in `UPDATED[]`, and the array is de-duplicated (`sort -u`) before the count at :681, before the staging loop, and before `_release_rollback_updated` (:775-791) — `marketplace.json` has two version fields and must appear once, not twice.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-release-rollback.bats` — a prepare run aborted by a CHANGELOG validation failure leaves `git status --porcelain` empty for every file that was clean beforehand; the printed count equals the number of DISTINCT files the run edited; a file with two version fields is counted and restored once; a file that was already dirty before the run is left alone and named in the output (tier: t1).
 
 **Architecture Context:** Group 1. Reproduced first-hand in a clone: the run printed seven `Updated:` lines and "Updated 4 files total", then rolled back four files, leaving `.claude-plugin/marketplace.json` at 2.83.2 while everything else returned to 2.83.1.
@@ -164,7 +165,7 @@ Three groups.
 
 ### Step 4: The README tagline pattern can match the line it is aimed at
 
-**Objective:** A configured version pattern that silently matches nothing stops being reported as an update. **This step does NOT repair the broken tagline pattern** — that lives in an untracked file and moved to Deferred; what ships here makes its failure impossible to miss, which is a smaller claim and the honest one.
+**Objective:** A configured version pattern that silently matches nothing stops being reported as an update. This step DIAGNOSES; it does not repair. **This step does NOT repair the broken tagline pattern** — that lives in an untracked file and moved to Deferred; what ships here makes its failure impossible to miss, which is a smaller claim and the honest one.
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/aid-release.sh` (lines ~571-577) — the `regex` branch reports, by file and by row, a configured pattern that matched nothing, instead of printing `Updated: <file> (regex)` unconditionally. This is the shipped, tracked half: it is why a frozen version line cannot hide again in this project or in any consumer.
@@ -182,11 +183,11 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 
 **What ships instead is the only part that can:** the no-match report in `aid-release.sh`, which is tracked, reaches every consumer, and makes the whole class visible — a pattern that changes nothing may no longer print `Updated`. The broken pattern in the untracked config, and the deeper fact that the release script reads an untracked file at all, are handed to the deferred item that owns them (see Deferred), where they can be given a reproducible target and completion evidence instead of being smuggled in as an implementation file.
 
-**Error Handling:** A configured pattern that matches nothing is reported per file and per row, by name, and is not printed as `Updated`. (The `Updated N files total` counter lives at `:589`, outside this step's range; correcting the count is Step 3's business, not this step's.) Today `aid-release.sh:576` prints `Updated: $FILE_PATH (regex)` whether or not the `sed` changed a byte, which is how this survived fourteen releases.
+**Error Handling:** A configured pattern that matches nothing is reported per file and per row, by name, and is not printed as `Updated`. **Two no-match cases must be told apart, because `sed` cannot tell them apart** (the C0 review's point): a row whose target is ALREADY at the new version is an expected no-match and is reported as `already current`; a row that matches neither the old nor the new version is a MISS and is reported as one. The distinction is made by probing for the new version before substituting, not by guessing from the exit code. (The `Updated N files total` counter lives at `:589`, outside this step's range; correcting the count is Step 3's business, not this step's.) Today `aid-release.sh:576` prints `Updated: $FILE_PATH (regex)` whether or not the `sed` changed a byte, which is how this survived fourteen releases.
 
 **Edge Cases:**
 - A pattern that matches more than one line — substitutes all, unchanged behaviour, asserted.
-- A README row whose target line is already current — no-match is expected there and must not be reported as a miss.
+- A README row whose target line is already current — probed for the new version first, reported as `already current`, never as a miss; the suite covers this case explicitly.
 - A checkout without `project.yaml` (a worktree) — the fallback path runs, unchanged by this step.
 
 **Dependencies:**
@@ -212,7 +213,7 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 - Modify: `plugins/aid-orchestrator/scripts/aid-run-gates.sh` (lines ~1944-1963) — a gate that appears in a profile's `include[]` with no `command` is a loud configuration refusal, not a `skip/no_command` row, so this cannot silently recur in any project.
 - Modify: `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` — the new runner refusal is registered with its `type`/`source`/`instruction`/`severity`/`surface`, as this repository's contributor rules require of every new enforcement.
 - Modify: `CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md` — the refusal is a breaking configuration check for consumers mid-rollout, so it is named in both identical CHANGELOGs rather than left to be discovered on a first failed run.
-- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats` — a profile including a command-less gate fails the runner with a message naming the gate and the profile; a gate absent from every profile with no command is ignored; the shipped defaults pass unchanged; the refusal is present in the enforcement registry (tier: t1).
+- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats` — a profile including a command-less gate fails the runner with a message naming the gate and the profile; a gate absent from every profile with no command is ignored; the shipped defaults pass unchanged; the refusal is present in the enforcement registry; and `plan_diff`'s restored command, driven over a small FIXTURE plan, yields `ac_count > 0` with every `ac_label` non-empty — never over this plan, which would re-enter every AC including itself and never terminate (tier: t1).
 
 **Architecture Context:** Group 2. Verified: `yq '.gates.plan_diff.command'` returns null on the self-host config while the gate sits in **five** profiles — `standard`, `full`, `release`, `bats_all_quarantine`, `release_quarantine` — and `aid-run-gates.sh:1953-1963` turns a null command into `skip/no_command` with `required` defaulting to false. The history is knowable and the CP1 review corrected an earlier claim here: `.aid-o/config/execution.yaml` is force-added and tracked, with 16 commits since 2026-08-04, and `git log -S 'aid-plan-diff.sh --plan'` over that window returns nothing — so the command was **never** there. This is a first-time addition, not a restoration, and the same false "no history" claim embedded in the config file's own `plan_diff` note is corrected while the step is in there.
 
@@ -234,10 +235,11 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 
 **Dependencies:**
 - Depends on: none
-- Blocks: none
+- Blocks: none — but the step carries an ORDERING OBLIGATION that is not a step dependency and must not be mistaken for one: the config repair reaches main before the runner refusal ships, and no live worktree may still carry a command-less `plan_diff` when it does. The C0 review is right that this was stated in prose and produced by nothing; it is now an acceptance criterion with a mechanical check.
 
 **Acceptance Criteria:**
 - [ ] No profile in this repository's own `execution.yaml` includes a gate without a `command`, asserted in the checkout that runs the gate.
+- [ ] Before the refusal ships, `aid-worktree-report.sh` lists every live worktree and each one's `execution.yaml` is confirmed to define a `command` for every gate its profiles include — a refusal that lands on a tree which cannot satisfy it is the same destruction this plan already caused once (IMP-497).
 - [ ] The runner refuses, by name, a profile that includes a command-less gate, and the refusal is registered in the enforcement registry.
 - [ ] The "P038+" exemption note no longer exists in any form, and the note's replacement states the true history.
 
@@ -471,13 +473,14 @@ verification_pattern:
   cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats"
   expected_exit: 0
 ```
-- [ ] AC6: The self-host `plan_diff` gate has a command again.
+- [ ] AC6: The self-host `plan_diff` gate has a command AND that command produces a labelled, non-empty result — proven against a FIXTURE plan, never against this plan.
 ```yaml
 verification_pattern:
   type: cmd
-  cmd: "test -n \"$(yq -r '.gates.plan_diff.command // \"\"' .aid-o/config/execution.yaml)\""
+  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required.bats"
   expected_exit: 0
 ```
+  *Why a fixture and not this plan: an AC that runs `aid-plan-diff.sh` on its own plan re-enters every AC — including itself — and never terminates. Caught by running it (2-minute timeout, no result). The suite therefore drives plan-diff over a small fixture plan and asserts `ac_count > 0` with every `ac_label` non-empty; the recursion trap is pinned as its own case so nobody re-adds the self-referential form.*
 - [ ] AC7: The review-signal toggle fails closed instead of open.
 ```yaml
 verification_pattern:
