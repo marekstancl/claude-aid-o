@@ -236,11 +236,27 @@ render_gate_profiles_block() {
   local filter_active=0 dg
   local -A defined_gates=()
   if [[ -f "$target_file" ]] && command -v yq >/dev/null 2>&1; then
-    while IFS= read -r dg; do
-      [[ -n "$dg" ]] && defined_gates["$dg"]=1
-    done < <(yq -o=json '.gates // {}' "$target_file" 2>/dev/null | jq -r 'keys[]?' 2>/dev/null)
+    local gates_json yq_rc=0
+    gates_json="$(yq -o=json '.gates // {}' "$target_file" 2>/dev/null)" || yq_rc=$?
+    if (( yq_rc != 0 )); then
+      # P083 Step 7 (Codex review finding): a PARSE FAILURE is not the same
+      # as "no gates: mapping present" — the target file may define gates
+      # perfectly well elsewhere and be broken only in an unrelated section.
+      # Refusing to filter would fall back to the UNFILTERED stack-derived
+      # set and risk naming a gate the (unreadable) target does not define —
+      # exactly what this step exists to prevent. Fail toward the emptiest
+      # safe output instead: filter_active stays 1 with an EMPTY
+      # defined_gates, so every profile below ends up with no gates at all
+      # rather than a possibly-wrong unfiltered list.
+      echo "[WARN] ${target_file} did not parse as YAML — gate_profiles will be emitted with empty include[] rather than risk naming an undefined gate. Fix the file's YAML syntax and rerun." >&2
+      filter_active=1
+    else
+      while IFS= read -r dg; do
+        [[ -n "$dg" ]] && defined_gates["$dg"]=1
+      done < <(jq -r 'keys[]?' <<<"$gates_json" 2>/dev/null)
+      (( ${#defined_gates[@]} > 0 )) && filter_active=1
+    fi
   fi
-  if (( ${#defined_gates[@]} > 0 )); then filter_active=1; fi
 
   local targeted_gate_names=() full_gate_names=()
   local p_stack p_frag p_names_str p_name p_first

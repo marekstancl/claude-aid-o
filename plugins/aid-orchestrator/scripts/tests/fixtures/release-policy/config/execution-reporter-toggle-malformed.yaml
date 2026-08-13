@@ -1,0 +1,11 @@
+# Fixture execution.yaml — P083 Step 6: reporter.enabled is neither true nor
+# false. _aid_read_toggle refuses (rc=2) rather than coercing to enabled or
+# disabled; the aggregator must report toggle_unreadable AND block, not
+# silently let release_ready stay true.
+simplifier:
+  enabled: true
+  model: opus
+reporter:
+  enabled: maybe
+  model: sonnet
+  report_dir: ".aid-o/reports"

@@ -123,3 +123,29 @@ EOF
   run bash -c 'yq -e "." .aid-o/config/execution.yaml > /dev/null'
   [ "$status" -eq 0 ]
 }
+
+@test "P083 Step 7 (Codex review finding): a target file that fails to parse gets an EMPTY ladder, never the unfiltered one" {
+  # A parse failure is not the same as "no gates: mapping present" — the
+  # target might define gates perfectly well and be broken elsewhere.
+  # Falling back to unfiltered would risk naming an undefined gate; the
+  # safe failure mode is an empty include[] everywhere, loudly warned.
+  mkdir -p .aid-o/config
+  cat > .aid-o/config/execution.yaml <<'EOF'
+version: '1.0'
+gates:
+  ts_test:
+    command: npm test
+  this is not: [valid yaml
+EOF
+  touch package.json
+  source "$HELPER"
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  run render_gate_profiles_block "${stacks[@]}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[WARN]"*"did not parse as YAML"* ]]
+  # Every candidate gate is filtered out (defined_gates stays empty), which
+  # degenerates to the same "no stacks detected" fallback the zero-stacks
+  # case uses — never the unfiltered ts_test/ts_lint/ts_type_check set.
+  [[ "$output" == *"no stacks detected"* ]]
+  refute_grep -q "ts_test" <(echo "$output")
+}

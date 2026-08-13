@@ -365,6 +365,10 @@ _status_to_verdict() {
     fail) echo fail ;;
     missing) echo blocked ;;
     disabled|not_applicable) echo advisory ;;
+    # P083 Step 6: an unreadable/malformed toggle is a refusal, not an
+    # advisory annotation — it must verdict the same as "fail", or the
+    # status distinction this step added would be visible but toothless.
+    toggle_unreadable) echo fail ;;
     *) echo advisory ;;
   esac
 }
@@ -936,12 +940,14 @@ main() {
 
   add_input reporter    "$REPORTER_ARTIFACT"    "$reporter_verdict"    "$reporter_reason_final"    "$reporter_hm"
   add_input simplifier  "$SIMPLIFIER_ARTIFACT"  "$simplifier_verdict"  "$simplifier_reason_final"  "$simplifier_hm"
+  # P083 Step 6: toggle_unreadable blocks the same as missing|fail — an
+  # unreadable/malformed toggle must never let release_ready stay true.
   case "$REPORTER_STATUS" in
-    missing|fail) add_blocker reporter "blocking" "reporter ${REPORTER_STATUS}: ${REPORTER_REASON}" ;;
+    missing|fail|toggle_unreadable) add_blocker reporter "blocking" "reporter ${REPORTER_STATUS}: ${REPORTER_REASON}" ;;
     pass) [[ "$reporter_hm" == "false" ]] && add_blocker reporter "blocking" "reporter delivery report stale (head_match=false): provenance Head != HEAD" ;;
   esac
   case "$SIMPLIFIER_STATUS" in
-    missing|fail) add_blocker simplifier "blocking" "simplifier ${SIMPLIFIER_STATUS}: ${SIMPLIFIER_REASON}" ;;
+    missing|fail|toggle_unreadable) add_blocker simplifier "blocking" "simplifier ${SIMPLIFIER_STATUS}: ${SIMPLIFIER_REASON}" ;;
     pass) [[ "$simplifier_hm" == "false" ]] && add_blocker simplifier "blocking" "simplifier-report.md stale (head_match=false): provenance Head != HEAD" ;;
   esac
 

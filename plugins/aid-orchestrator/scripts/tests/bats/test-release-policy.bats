@@ -389,6 +389,17 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   ! _has_blocker reporter
 }
 
+@test "P083 Step 6: on-boundary + reporter.enabled: maybe (unreadable toggle) → toggle_unreadable, BLOCKS release" {
+  # The whole point of Step 6: a toggle the runtime cannot evaluate must
+  # never let release_ready stay true just because it also isn't "disabled".
+  _on_boundary_both_valid
+  cp "$FIX/config/execution-reporter-toggle-malformed.yaml" "$CFG/execution.yaml"
+  _run_agg
+  [ "$(_rd '.release_decision.reporter_status')" == "toggle_unreadable" ]
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker reporter
+}
+
 @test "reporter CONDITIONAL: on-boundary + enabled + valid report → pass" {
   _on_boundary_both_valid
   _run_agg
