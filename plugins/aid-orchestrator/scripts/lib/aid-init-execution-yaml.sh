@@ -218,6 +218,30 @@ render_gate_profiles_block() {
     [[ -n "$s" ]] && clean_stacks+=("$s")
   done
 
+  # P083 Step 7 (the second consumer): render_gate_profiles_block also feeds
+  # the /aid-init EXISTING-project upgrade path (commands/aid-init.md, off-
+  # limits to this step), which appends this output VERBATIM to a PM's
+  # hand-authored execution.yaml whose `gates:` mapping this stack-fragment
+  # derivation never wrote. Naming a gate the target file does not define is
+  # a hard `exit 1` in aid-run-gates.sh. Both callers pass stacks alone, so a
+  # new positional parameter would break the fixed upgrade-caller invocation
+  # and the target is discovered here instead, at the ONE conventional path.
+  # Keyed on a NON-EMPTY `gates:` mapping, never on the file merely existing:
+  # compose_execution_yaml's fresh-init path truncates this exact path to
+  # zero bytes BEFORE this function runs, so an existence-only probe would
+  # see an empty file on the compose path and emit a degenerate ladder. No
+  # such mapping (fresh init, or an upgrade target with no `gates:` yet) →
+  # no filtering, i.e. the unfiltered stack-derived set.
+  local target_file=".aid-o/config/execution.yaml"
+  local filter_active=0 dg
+  local -A defined_gates=()
+  if [[ -f "$target_file" ]] && command -v yq >/dev/null 2>&1; then
+    while IFS= read -r dg; do
+      [[ -n "$dg" ]] && defined_gates["$dg"]=1
+    done < <(yq -o=json '.gates // {}' "$target_file" 2>/dev/null | jq -r 'keys[]?' 2>/dev/null)
+  fi
+  if (( ${#defined_gates[@]} > 0 )); then filter_active=1; fi
+
   local targeted_gate_names=() full_gate_names=()
   local p_stack p_frag p_names_str p_name p_first
   for p_stack in "${clean_stacks[@]:-}"; do
@@ -228,6 +252,11 @@ render_gate_profiles_block() {
     p_first=1
     while IFS= read -r p_name; do
       [[ -z "${p_name}" ]] && continue
+      # Filtered upgrade case: a gate the target file does not define is
+      # omitted from every profile, never named-and-undefined.
+      if (( filter_active == 1 )) && [[ -z "${defined_gates[${p_name}]:-}" ]]; then
+        continue
+      fi
       full_gate_names+=("${p_name}")
       if (( p_first == 1 )); then
         targeted_gate_names+=("${p_name}")
@@ -247,8 +276,22 @@ render_gate_profiles_block() {
   # self-host execution.yaml exception: targeted_tests is a SELECTOR that
   # only ever picks a subset of what full/release already runs
   # unconditionally, so including it there would add zero new coverage).
-  targeted_gate_names+=("targeted_tests")
+  # P083 Step 7: subject to the SAME filter as every other gate — the upgrade
+  # flow does not add a targeted_tests definition to the hand-edited file's
+  # `gates:` mapping, so naming it unfiltered would be exactly the
+  # undefined-gate hazard this step closes for every other name.
+  if (( filter_active == 0 )) || [[ -n "${defined_gates[targeted_tests]:-}" ]]; then
+    targeted_gate_names+=("targeted_tests")
+  fi
 
+  # P083 Step 7: the full canonical ladder (quick < targeted < standard <
+  # full < release, per gate_profile_rank), composed from the SAME two
+  # derivations above — targeted and full are unchanged. `quick` is
+  # deliberately empty (the fastest possible check: nothing beyond whatever
+  # the caller runs unconditionally); `standard` and `release` reuse `full`'s
+  # set rather than inventing a third gate-selection heuristic this stack
+  # data cannot ground — "release includes what exists", not a fixed
+  # membership distinct from `full`.
   local targeted_csv full_csv
   targeted_csv="$(IFS=', '; echo "${targeted_gate_names[*]}")"
   full_csv="$(IFS=', '; echo "${full_gate_names[*]}")"
@@ -258,9 +301,15 @@ gate_profile_defaults:
   epic: full
 
 gate_profiles:
+  quick:
+    include: []
   targeted:
     include: [${targeted_csv}]
+  standard:
+    include: [${full_csv}]
   full:
+    include: [${full_csv}]
+  release:
     include: [${full_csv}]
 EOF
 }

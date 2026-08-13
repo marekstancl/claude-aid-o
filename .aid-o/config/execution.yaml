@@ -239,9 +239,18 @@ gates:
     max_retries: 0
 
   plan_diff:
-    note: 'required=false for AID self-host: P037 plan predates plan-level AC convention;
-      gate becomes meaningful for P038+'
+    note: 'P083 Step 5 (2026-08-13): required=false is a DELIBERATE, standing
+      choice, not a historical exemption — the "P038+" note above named a
+      false history (git log -S over 16 tracked commits since 2026-08-04
+      shows the command was never present at all; this is a first-time
+      addition). The gate evaluates the WHOLE source plan''s criteria on
+      every EPIC-level run, and this repository''s own in-flight plans do
+      not have every suite built by the time an EPIC gate runs — required:true
+      here would make a plan unable to finish itself. required:true belongs
+      at plan-final, where every suite exists.'
     description: Plan AC blocks materially satisfied in codebase HEAD
+    required: false
+    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit}"
     # timeout_seconds attribution (P071 E-071-1_1 Step 1, 2026-08-02): the
     # p064-closure profile's "34 min of wall clock" note (below) describes
     # plan_diff and shell_pipeline_smoke TOGETHER (both excluded from that

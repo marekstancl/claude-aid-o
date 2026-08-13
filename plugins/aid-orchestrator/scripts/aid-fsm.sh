@@ -2429,8 +2429,18 @@ fsm_eval_simplifier_present() {
   [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
 
   # Respect simplifier.enabled:false toggle in execution.yaml — N/A when disabled.
+  # P083 Step 6: ONLY rc=1 (explicit enabled:false) is disabled. rc=2
+  # (unreadable/malformed) falls through and is treated as enabled — fail
+  # closed: the measurement still runs rather than reporting N/A on a config
+  # this function could not evaluate. _aid_read_toggle's own stderr line
+  # names the file and section.
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
-  _aid_read_toggle "$exec_yaml" "simplifier" || { echo null; return 0; }
+  local toggle_rc=0
+  _aid_read_toggle "$exec_yaml" "simplifier" || toggle_rc=$?
+  if (( toggle_rc == 1 )); then
+    echo null
+    return 0
+  fi
 
   if [[ -f "${evidence_dir}/simplifier-report.md" ]]; then
     echo true
@@ -7994,8 +8004,16 @@ cmd_plan_close() {
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
   local simplifier_enabled=true
   local reporter_enabled=true
-  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
-  _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
+  # P083 Step 6: only rc=1 (explicit enabled:false) disables — rc=2
+  # (unreadable/malformed) fails CLOSED to enabled=true rather than being
+  # coerced to disabled, so an unreadable config cannot silently waive a
+  # plan-boundary requirement. _aid_read_toggle's own stderr line names the
+  # file and section for the unreadable case.
+  local simplifier_rc=0 reporter_rc=0
+  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_rc=$?
+  _aid_read_toggle "$exec_yaml" "reporter" || reporter_rc=$?
+  if (( simplifier_rc == 1 )); then simplifier_enabled=false; fi
+  if (( reporter_rc == 1 )); then reporter_enabled=false; fi
 
   local _pb_plan_layer_closed=0
 

@@ -1578,9 +1578,10 @@ run_all_gates() {
   # `gate_profiles` block) behave EXACTLY as before — this is the
   # backward-compatibility contract.
   #
-  # Both fail-loud cases are validated upfront, before any gate runs:
+  # All three fail-loud cases are validated upfront, before any gate runs:
   #   1. --profile <name> where <name> is not a key under gate_profiles.
   #   2. A profile's include[] lists a gate not defined under .gates.
+  #   3. A profile's include[] lists a gate defined with no `command`.
   local profile_source="null" profile_reason="null"
   local include_gates_json="[]"
   if [[ -n "$profile" ]]; then
@@ -1594,11 +1595,21 @@ run_all_gates() {
     include_gates_json=$(PROFILE="$profile" yq -o=json '.gate_profiles[strenv(PROFILE)].include // []' "$execution_yaml" | tr -d '\n ')
     local profile_defined_keys_json
     profile_defined_keys_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
-    local inc_gate
+    local inc_gate inc_cmd
     while IFS= read -r inc_gate; do
       [[ -z "$inc_gate" ]] && continue
       if ! jq -e --arg g "$inc_gate" 'any(.[]; . == $g)' <<< "$profile_defined_keys_json" >/dev/null 2>&1; then
         echo "ERROR: aid-run-gates.sh: gate profile '${profile}' includes undefined gate '${inc_gate}' (not present under execution.yaml.gates)" >&2
+        exit 1
+      fi
+      # P083 Step 5 (case 3): a gate defined but with no `command` is a
+      # configuration refusal, not the silent skip/no_command row it used to
+      # fall through to below. A gate absent from every profile is
+      # unaffected: this only runs when a profile is active, and only over
+      # ITS include[].
+      inc_cmd=$(GATE="$inc_gate" yq '.gates[strenv(GATE)].command' "$execution_yaml")
+      if [[ -z "$inc_cmd" || "$inc_cmd" == "null" ]]; then
+        echo "ERROR: aid-run-gates.sh: gate profile '${profile}' includes gate '${inc_gate}', which has no command in ${execution_yaml} — a profile-included gate with no command is a configuration error, not a silent skip." >&2
         exit 1
       fi
     done < <(jq -r '.[]' <<< "$include_gates_json")
