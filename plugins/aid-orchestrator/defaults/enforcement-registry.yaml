@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 443          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 444          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2961,3 +2961,16 @@ enforcements:
     description: "P083 Step 6 — `_aid_read_toggle` used `grep -qP` twice; on any grep without PCRE support, both calls exit 2 (error), the surrounding `if` reads that as false, and the function fell through to 'enabled' — a fail-open on production library code (aid-fsm.sh's plan-boundary checks, aid-release-policy.sh's C4 aggregator), invisible to the repository's own no-`grep -oP` guard because that guard never scanned this file. Rewritten in bash's own `[[ =~ ]]` with POSIX bracket classes only (no `\\s`/`\\b` PCRE shorthand, which bash's ERE genuinely rejects) — no external grep dependency for this check at all. The function now returns a THIRD state (rc=2, unreadable/malformed) distinct from both enabled(0) and disabled(1), and every call site was audited to make sure the distinction survives: aid-fsm.sh's two call sites fail CLOSED to enabled (rc=2 does not disable a plan-boundary check), and aid-release-policy.sh's two call sites report a distinct `toggle_unreadable` status rather than being flattened into `disabled`."
     recovery: "The refusal names the config file and the section. Fix the file's permissions (unreadable) or its `enabled:` value (malformed — must be exactly true or false)."
     test: "scripts/tests/bats/test-review-signal-toggle.bats"
+
+  - id: gate_baseline_sequential_only
+    type: 4
+    source: "scripts/lib/aid-gate-runtime-baseline.sh (gate_baseline_update)"
+    instruction: "n/a (internal guard)"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P083 Step 8 — a pure deletion, not a new capability. P078 removed the parallel-gate scheduler; both producers (aid-run-gates.sh, aid-fsm.sh) have hardcoded concurrency_context='sequential' ever since, the receipt schema is `enum: [\"sequential\"]`, and the live baseline's non-sequential sibling maps (`recent_samples_by_context`/`percentiles_by_context`) were uniformly empty or absent across every entry — there was nothing left to migrate. The acceptor now refuses any other value by name instead of silently falling through a dead branch, so a resurrection attempt (a stale caller, a copy-pasted example) fails loudly rather than writing into fields nothing reads."
+    recovery: "The refusal names the rejected value and the gate. Callers must pass 'sequential' or omit the argument (its default)."
+    test: "scripts/tests/bats/test-gate-baseline-sequential-only.bats"

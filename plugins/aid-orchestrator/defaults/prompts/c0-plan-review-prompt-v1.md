@@ -29,7 +29,8 @@ and the output schema.
 - Repo state: `reviewed_head` = `{{reviewed_head}}`
 - Input manifest: `{{input_manifest_path}}` (hash `{{input_manifest_hash}}`)
 - Per-EPIC contract graph (may be absent before generation): `{{plan_graph_path}}`
-- Whole-plan source dependency graph (the pre-generation authority): `{{source_plan_graph_path}}`
+- Whole-plan source dependency graph (usually absent — this review normally runs before it is
+  produced; check 2 does not rely on it): `{{source_plan_graph_path}}`
 - Contracts the plan cites (schemas/policies/interfaces): `{{contracts_paths}}`
 - Existing C0 evidence (deterministic contract check + lens outputs): `{{c0_evidence_paths}}`
 - Output schema you MUST conform to: `{{output_schema_path}}`
@@ -39,8 +40,11 @@ You MAY read the repository (read-only) to check the plan against reality.
 1. Feasibility & grounding: for every resource the plan names (file, function, port, service,
    command, env var, schema/contract, test path), verify it EXISTS in the repo OR is mapped to a
    Create step in the plan. A named resource that neither exists nor is created = a finding.
-2. Scope & dependencies: is the dependency graph acyclic and satisfiable? Does any step depend on an
-   output no step produces? Flag hidden/undeclared scope.
+2. Scope & dependencies: take the dependency edges from each step's own `Dependencies:` block
+   (`Depends on:` / `Blocks:`) — the plan's canonical, lint-enforced declaration and the only
+   dependency input this review is guaranteed to have. From those blocks: is the ordering they
+   imply acyclic, and does any step consume an output no earlier step produces? Flag
+   hidden/undeclared scope.
 3. Contracts: does the plan's use of each cited contract match that contract's ACTUAL shape/version?
 4. Acceptance criteria: is every AC executable and self-contained (no placeholders, no unresolved
    variables)? Does each map to a verifiable check?
