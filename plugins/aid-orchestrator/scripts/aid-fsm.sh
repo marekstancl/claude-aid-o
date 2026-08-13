@@ -1828,17 +1828,35 @@ fsm_check_streamlined_integration_review() {
   [[ "$streamlined" != "true" ]] && return 0
   local cp3_code="${evidence_dir}/verifier-output-cp3-code-review.md"
   local cp3_sec="${evidence_dir}/verifier-output-cp3-security.md"
-  local gates="${evidence_dir}/gates_report.json"
+  # P083 Step 1: the EPIC-stage gate writer (aid-run-gates.sh) and every
+  # other reader use ${evidence_dir}/gates/gates_report.json; the plan-final
+  # gate stage (aid-plan-fsm.sh) writes the flat sibling instead. Both are
+  # live conventions — accept either, preferring the canonical gates/ path
+  # when both are present, and log which one was actually read.
+  local gates_canonical="${evidence_dir}/gates/gates_report.json"
+  local gates_flat="${evidence_dir}/gates_report.json"
+  local gates="" gates_source=""
+  if [[ -f "$gates_canonical" ]]; then
+    gates="$gates_canonical"
+    gates_source="canonical"
+    if [[ -f "$gates_flat" ]]; then
+      echo "NOTE: gates_report.json present at both the canonical (gates/) and legacy flat path; using the canonical one." >&2
+    fi
+  elif [[ -f "$gates_flat" ]]; then
+    gates="$gates_flat"
+    gates_source="legacy_flat"
+    echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
+  fi
   local missing=()
   [[ -f "$cp3_code" ]] || missing+=("verifier-output-cp3-code-review.md")
   [[ -f "$cp3_sec" ]]  || missing+=("verifier-output-cp3-security.md")
-  [[ -f "$gates" ]]    || missing+=("gates_report.json")
+  [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
     joined=$(IFS=', '; echo "${missing[*]}")
     echo "ERROR: Streamlined run missing required integration-review evidence: ${joined}" >&2
     echo "The streamlined contract requires verifier-output-cp3-code-review.md +" >&2
-    echo "verifier-output-cp3-security.md + gates_report.json in:" >&2
+    echo "verifier-output-cp3-security.md + gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
     echo "  ${evidence_dir}" >&2
     echo "" >&2
     echo "Fix: dispatch CP3 code-review + CP3 security verifiers and run gates, then retry done-advance." >&2
@@ -1857,6 +1875,9 @@ fsm_check_streamlined_integration_review() {
       head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_integration_review"
   fi
+  log_event "${evidence_dir}/timeline.jsonl" "streamlined_integration_review_gates_source" \
+    source="$gates_source" \
+    path="$gates"
   return 0
 }
 
