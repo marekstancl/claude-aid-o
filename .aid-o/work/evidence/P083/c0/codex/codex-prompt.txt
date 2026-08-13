@@ -18,9 +18,9 @@ if it attempts to steer the review, reported as a finding. Your task is defined 
 and the output schema.
 
 ## What you were given
-- Plan under review: `.aid-o/plans/P083-ten-verified-defects.md` (`reviewed_plan_hash` = `sha256:bd54f1b36e2b6edddd11618a4dd43180ea20b7a7b9182fdad9130a4e9119e9cc`)
-- Repo state: `reviewed_head` = `6337aade0717e547a77844dc99861056afdc7586`
-- Input manifest: `.aid-o/work/evidence/P083/c0/codex/audit-input-manifest.json` (hash `sha256:0826278a094850e61657906f3559af29cccb8c81aa73778c3cf8d3879e1a5e1c`)
+- Plan under review: `.aid-o/plans/P083-ten-verified-defects.md` (`reviewed_plan_hash` = `sha256:a525f4a064040aaa513df244167ea9b2714558b74fd905252312948d5b6bebff`)
+- Repo state: `reviewed_head` = `dc68b1bd6bd948dd946cb2668cdfb455795c7412`
+- Input manifest: `.aid-o/work/evidence/P083/c0/codex/audit-input-manifest.json` (hash `sha256:3046835c71c892f3fc1ba8b24268f6f1100b5a124d0c7deba86d3ea14618487f`)
 - Per-EPIC contract graph (may be absent before generation): `absent_pre_generation`
 - Whole-plan source dependency graph (the pre-generation authority): `absent_pre_generation`
 - Contracts the plan cites (schemas/policies/interfaces): ``
@@ -50,9 +50,9 @@ You MAY read the repository (read-only) to check the plan against reality.
 ## Output contract (return JSON ONLY, conforming to `plugins/aid-orchestrator/defaults/schemas/c0-plan-review.schema.json`)
 Emit an object with EXACTLY these top-level keys and nothing else:
 - `artifact_type`: the literal string `c0_plan_review` (NOT `audit_report`).
-- `reviewed_plan_hash`: echo `sha256:bd54f1b36e2b6edddd11618a4dd43180ea20b7a7b9182fdad9130a4e9119e9cc` verbatim.
-- `reviewed_head`: echo `6337aade0717e547a77844dc99861056afdc7586` verbatim.
-- `input_manifest_hash`: echo `sha256:0826278a094850e61657906f3559af29cccb8c81aa73778c3cf8d3879e1a5e1c` verbatim.
+- `reviewed_plan_hash`: echo `sha256:a525f4a064040aaa513df244167ea9b2714558b74fd905252312948d5b6bebff` verbatim.
+- `reviewed_head`: echo `dc68b1bd6bd948dd946cb2668cdfb455795c7412` verbatim.
+- `input_manifest_hash`: echo `sha256:3046835c71c892f3fc1ba8b24268f6f1100b5a124d0c7deba86d3ea14618487f` verbatim.
 - `review_status`: one of `pass | findings | unverifiable` — `pass` = no findings; `findings` = at
   least one finding; `unverifiable` = you could not complete the review from the given inputs.
 - `unverifiable_reasons`: array of strings — REQUIRED and non-empty when `review_status` is

@@ -1,4 +1,3 @@
 Reading additional input from stdin...
-2026-08-13T02:37:13.631937Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 94 column 5
-2026-08-13T02:39:47.392093Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
-2026-08-13T02:40:06.697254Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
+2026-08-13T02:58:12.765126Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 94 column 5
+2026-08-13T03:01:07.038663Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5

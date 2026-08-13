@@ -69,17 +69,17 @@ Three groups.
 **Objective:** A streamlined-mode EPIC that passed its gates advances from review to release without a force waiver.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` (lines ~1817-1845) — `fsm_check_streamlined_integration_review` reads `${evidence_dir}/gates/gates_report.json`, the path every writer and every other reader already uses, and accepts the flat sibling only as an explicitly-logged legacy fallback so an in-flight run started before this change still advances.
+- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` (lines ~1817-1845) — `fsm_check_streamlined_integration_review` accepts BOTH `${evidence_dir}/gates/gates_report.json` and the flat sibling, logging which one it read. Not "canonical plus legacy": the C0 review established that the flat path is a **second live convention**, written today by the plan-final gate stage (`aid-plan-fsm.sh:4553-4575`) and read by `aid-plan-close-check.sh`. Calling it legacy would invite a later deletion of a current writer's only sink.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-streamlined-integration-review.bats` — a streamlined run whose report sits at the canonical path passes the precondition; one with no report at either location still fails with the existing named message; a report at the legacy flat path passes and logs that it took the fallback (tier: t1).
 
 **Architecture Context:** Group 1. The one outlier against seven agreeing readers and one writer default, verified at `aid-run-gates.sh:1628-1629` (writer), `aid-fsm.sh:2453,2880,2991,3286,5262` plus `aid-diagnostic.sh:57` and `aid-compliance-backfill.sh:103` (readers), and `commands/aid-run.md:211` / `skills/pipeline.md:1115,1135` (documentation).
 
 **Implementation Detail:** The precondition is called from `cmd_done_advance` at `aid-fsm.sh:6608` when `streamlined_mode: true`. The failure message at `:1834-1836` names the evidence directory, which is why the mismatch reads as "no report" rather than "wrong path" — the message must name the path it actually looked at, in both branches.
 
-**Error Handling:** A report present at both paths uses the canonical one and logs the duplicate; it never silently prefers the stale copy.
+**Error Handling:** A report present at both paths uses the `gates/` one — it is the EPIC-stage writer's path and the one seven readers already use — and logs that a flat sibling also exists. Neither path is deprecated by this step; unifying two live conventions is a separate decision with its own blast radius.
 
 **Edge Cases:**
-- Report at the flat path only (an in-flight run) — accepted, with the fallback recorded in the log line, not silently.
+- Report at the flat path only — accepted and logged, because that is what the plan-final stage writes; this is a live convention, not a leftover.
 - Report present but unparseable — the existing invalid-JSON behaviour is unchanged; this step moves a path, not a parser.
 - Non-streamlined runs — untouched; the precondition is not reached.
 
@@ -114,6 +114,8 @@ Three groups.
 **Edge Cases:**
 - A criterion whose continuation contains a code span with a leading dash — joined, not split (pinned).
 - An empty line inside a criterion — terminates it; plans use blank lines between criteria.
+- **A flush-left line that is not a bullet** — prose, a heading, a fence opener — terminates the criterion, and an indented line AFTER it does not resume the previous one. The C0 review found this case undefined, and live plans contain it: without the rule an unrelated indented line is appended to a criterion and reaches `ac[]`.
+- A fenced block indented under a criterion — treated as continuation, because that is how machine-verifiable patterns are written today; pinned so the rule cannot drift.
 - Existing single-line plans — output byte-identical, asserted against the current suites.
 
 **Dependencies:**
@@ -162,7 +164,7 @@ Three groups.
 
 ### Step 4: The README tagline pattern can match the line it is aimed at
 
-**Objective:** `README.md`'s tagline stops being frozen at a version nobody released, and cannot silently freeze again.
+**Objective:** A configured version pattern that silently matches nothing stops being reported as an update. **This step does NOT repair the broken tagline pattern** — that lives in an untracked file and moved to Deferred; what ships here makes its failure impossible to miss, which is a smaller claim and the honest one.
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/aid-release.sh` (lines ~571-577) — the `regex` branch reports, by file and by row, a configured pattern that matched nothing, instead of printing `Updated: <file> (regex)` unconditionally. This is the shipped, tracked half: it is why a frozen version line cannot hide again in this project or in any consumer.
@@ -248,6 +250,7 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/lib/aid-review-signals.sh` (lines ~20-30) — `_aid_read_toggle` replaces `grep -qP` with bash's own `[[ =~ ]]` or POSIX bracket classes (`[[:space:]]`), never a `\s`/`\b` shorthand: this machine has only GNU grep, which ACCEPTS those shorthands, so a "portable" pattern using them would pass here and fail elsewhere — exactly the irony the P082 review caught in its own portability fix. Bash's ERE genuinely rejects `\s`, so the construct self-polices. The function also distinguishes "read the toggle, it says enabled" from "could not read the toggle": the unreadable case is a named failure, not a silent `return 0`.
+- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` + `plugins/aid-orchestrator/scripts/aid-release-policy.sh` — the two callers that today collapse any nonzero return into "disabled"/null, so an unreadable toggle is observationally identical to `enabled: false` in what they report. The C0 review is right that fixing the helper alone changes nothing a caller can see: the refusal has to survive the call site or it is not a refusal.
 - Modify: `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` — the new fail-closed toggle refusal is registered with its `type`/`source`/`instruction`/`severity`/`surface`.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-review-signal-toggle.bats` — `enabled: false` disables on a grep without PCRE support (simulated by a stub grep that exits 2 on `-P`); `enabled: true` enables; an unparseable toggle fails closed with a named message rather than defaulting to enabled (tier: t1).
 
@@ -255,7 +258,7 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 
 **Implementation Detail:** The other twelve live PCRE sites and the guard's own blind spots stay out of scope by the PM's sieve; this step records the verified count (4 of 13 seen, `.bats` never scanned, one allowlist row granting three slots to a file with none) in the backlog entry so a later decision has the numbers.
 
-**Error Handling:** An unreadable or malformed toggle is a refusal naming the config key and file — never an implicit "enabled".
+**Error Handling:** An unreadable or malformed toggle is a refusal naming the config key and file — never an implicit "enabled", and never flattened into "disabled" by a caller. The test asserts the RUNTIME contract at the call sites, not just the helper's return code: what the caller reports must distinguish "read it, it says off" from "could not read it".
 
 **Edge Cases:**
 - Toggle absent entirely — the documented default applies, unchanged, and is asserted so this step cannot quietly change it.
@@ -382,7 +385,7 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 **Objective:** Every entry the 2026-08-11 verification touched carries its verdict, so no later plan is written from a stale description again.
 
 **Files:**
-- Modify: `docs/plans/2026-06-29-BACKLOG.md` — the eleven verified-closed entries (7 already fixed, 2 moot, 2 deliberate) are marked closed with the file:line evidence that closed them; the ten entries this plan fixes point at it; the 22 verified-real-but-not-scheduled entries carry `verified real 2026-08-11` plus the sieve's reason for not scheduling them; the seven wrong-address entries have their descriptions replaced by what is actually true.
+- Modify: `docs/plans/2026-06-29-BACKLOG.md` — every one of the 46 verified entries gets exactly one PRIMARY disposition, and the categories must partition all 46 with none left over: 11 verified-closed (7 already fixed, 2 moot, 2 deliberate) marked closed with the evidence that closed them; 10 owned by this plan, pointing at it; 22 verified-real-but-not-scheduled, carrying `verified real 2026-08-11` plus the sieve's reason; and the remaining 3 enumerated by id in the step's own evidence file BEFORE the edit begins. The seven wrong-address entries are a SECONDARY property — their description is rewritten to what is true — counted under whichever primary disposition they hold, never as a fourth bucket. The C0 review caught the earlier text summing to 43 of 46 for exactly that reason.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-backlog-verdicts.bats` — every entry touched by the verification carries a verdict line with a date; **at most one** verdict line per entry; no entry carries two contradictory framings; the file still parses for `test-deferred-work-registration.bats:123`'s `^#+ .*IMP-nnn` heading scan, the only consumer of this file's shape found in the tree (tier: t1).
 
 **Architecture Context:** Group 3. This is the step that makes the whole exercise durable: the P082 failure was caused by descriptions that had drifted from the code, and a verdict line with a date is what stops the next reader trusting a stale one.
@@ -404,7 +407,7 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 - Blocks: none
 
 **Acceptance Criteria:**
-- [ ] Every one of the 46 verified entries carries a dated verdict line.
+- [ ] Every one of the 46 verified entries carries a dated verdict line, and the primary dispositions sum to exactly 46 with no entry in two of them.
 - [ ] No entry contains both a retracted and a current framing.
 - [ ] The eleven closed entries name the evidence that closed them.
 
@@ -414,7 +417,7 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 ## Success Criteria
 
 1. A streamlined-mode EPIC advances review→release without a force waiver, and a multi-line acceptance criterion survives generation intact in both the human section and `ac[]`.
-2. An aborted release in a worktree leaves every previously-clean file clean, and `README.md`'s tagline shows the current version and keeps up with the next release.
+2. An aborted release in a worktree leaves every previously-clean file clean, and a configured version pattern that matches nothing is reported by name instead of counted as an update. (The tagline pattern itself is NOT repaired by this plan — see Deferred; the C0 review caught this step promising the repair while shipping only the diagnostic.)
 3. No profile in this repository's `execution.yaml` includes a gate without a `command`, the runner refuses one by name, and `plan_diff` runs and reports this plan's own criteria instead of recording a skip — advisory during the plan, blocking at plan-final.
 4. `enabled: false` is honoured on a grep without PCRE support, and a stack-detected `/aid-init` workspace yields a non-empty `release` profile.
 5. The gate-runtime baseline carries no live non-sequential branch while a legacy file still reads and still yields correct numbers, and no shipped prompt asks the C0 reviewer to analyse an artifact the manifest records as absent.
