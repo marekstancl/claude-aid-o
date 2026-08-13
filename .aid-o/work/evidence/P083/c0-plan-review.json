@@ -2,66 +2,47 @@
   "schema_version": "aid-2.0",
   "artifact_type": "c0_plan_review",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-08-13T03:01:44Z",
+  "created_at": "2026-08-13T03:06:17Z",
   "identity": {
     "plan_id": "P083"
   },
-  "reviewed_plan_hash": "sha256:a525f4a064040aaa513df244167ea9b2714558b74fd905252312948d5b6bebff",
-  "reviewed_head": "dc68b1bd6bd948dd946cb2668cdfb455795c7412",
-  "input_manifest_hash": "sha256:3046835c71c892f3fc1ba8b24268f6f1100b5a124d0c7deba86d3ea14618487f",
+  "reviewed_plan_hash": "sha256:52a465c7ca1666952fd58d977bac0a3aa88aaa509a7a9a9234c62bec43d3d854",
+  "reviewed_head": "9d7788d8e32c4c70c06b6901485404d1656489fa",
+  "input_manifest_hash": "sha256:de5b39882f3ee4abaceb99e6ea86efb4dcbbd5e7362fb48ff46ea0dda8ada67e",
   "review_status": "findings",
   "blocking_findings": true,
   "findings": [
     {
-      "fingerprint": "sha256:6ede55c06757ffc6ea3195daa59321ddec9b0ad8b48d9b73207a5a5f0477688a",
+      "fingerprint": "sha256:8806dcf9f929f8537e56998a50d3f3f354017ed1c100db982e10873d236295cb",
       "occurrence_id": "c0-P083-0",
       "severity": "high",
       "action_owner": "pm",
-      "area": "scope-and-acceptance",
-      "finding": "Step 4 explicitly leaves the only real broken tagline pattern in untracked .aid-o/config/project.yaml unchanged, yet retains the objective that the tagline cannot freeze again and the Success Criteria claim that it keeps up with the next release. Its new test proves only synthetic bare/backslash patterns; it neither exercises nor repairs the configured pattern that aid-release.sh actually reads. The shipped no-match diagnostic makes the defect visible but does not make the configured update succeed.",
-      "recommendation": "Make a scope decision: either redefine Step 4 and the plan-level success criterion as a diagnostic-only change and leave the pattern defect solely to a separately scoped remediation, or provide a tracked, authoritative versioning configuration path and test the actual configured row end to end. Do not claim the pattern defect is fixed while its sole live configuration remains deferred."
+      "area": "Step 10 acceptance criteria and backlog reconciliation",
+      "finding": "Step 10 requires four listed primary-disposition groups to partition 46 entries, but those groups total only 43 (11 + 10 + 22). The remaining three are neither identified nor assigned a primary disposition; instead, the plan refers to an unnamed “step's own evidence file” that is not an existing named input and has no Create or Modify step. An implementer cannot determine the required backlog rows or build a self-contained regression roster without making assumptions.",
+      "recommendation": "Name the three IDs and their exact primary dispositions in the plan, or add a specific tracked evidence artifact to Step 10's Files list with a Create/Modify instruction and make the test consume that explicit 46-entry roster. Update the partition AC to include every disposition category."
     },
     {
-      "fingerprint": "sha256:fb77599012b9ccaf032698d7a89a6a07695c361adb9b37b9fe5222dcc40db241",
+      "fingerprint": "sha256:adf62196f7eef37d5bd934e0e12b700d98a383cd8402615ae1a67dd7a6e31fd5",
       "occurrence_id": "c0-P083-1",
-      "severity": "medium",
+      "severity": "high",
       "action_owner": "implementer",
-      "area": "repo-grounding",
-      "finding": "Step 1 incorrectly calls the flat gates_report.json path a legacy in-flight fallback and says every writer uses gates/. The current plan-final gate stage writes <run-dir>/gates_report.json explicitly (aid-plan-fsm.sh:4553-4575), and aid-plan-close-check.sh reads that same flat path. This is a second live convention, not transient legacy data.",
-      "recommendation": "Describe the flat path as a permanent plan-final convention, state whether this EPIC-only streamlined precondition can receive plan-final evidence, and test the compatibility rationale without implying the path may be retired after in-flight runs complete."
+      "area": "Steps 5, 6, and 8 enforcement-registry contract",
+      "finding": "Each of Steps 5, 6, and 8 adds a registry row, but none requires recomputing `totals.enforcements`. The actual registry currently declares 441 rows and contains 441; adding the three planned rows leaves the declared total stale unless it is updated. Existing merge-path checks `test-control-boundary.sh` and `test-enforcement-registry-cites.sh` fail when that total differs from `.enforcements | length`.",
+      "recommendation": "For each registry change, require a complete valid row and recompute `totals.enforcements` from the resulting row count. Add an acceptance check covering the existing registry-total invariant after all three rows are present."
     },
     {
-      "fingerprint": "sha256:b161d43de20a8263fddc261578b89618d445d94ed4826ff2a7aef8d1f333129b",
+      "fingerprint": "sha256:b90afdb88cf2341eca53976d01e26705668795cad60c87453b257ea74f805348",
       "occurrence_id": "c0-P083-2",
       "severity": "medium",
-      "action_owner": "implementer",
-      "area": "behavior-contract",
-      "finding": "Step 6 promises a named refusal for malformed or unreadable toggles, but changes only _aid_read_toggle. All five current callers collapse any nonzero return into disabled or null, including aid-fsm.sh and aid-release-policy.sh, neither of which is in the Files list. Thus a malformed toggle is observationally conflated with enabled:false in the callers' reported statuses; the proposed direct-helper test does not verify the runtime contract.",
-      "recommendation": "Specify a distinct failure mechanism and its caller behavior, add the affected caller files and a caller-level regression to scope, and ensure malformed/unreadable configuration is reported as such rather than as an intentional disabled toggle."
-    },
-    {
-      "fingerprint": "sha256:6bbb3321a20b620faf90d22ee7f432b5689d9134f844277677168aba3a7e6b95",
-      "occurrence_id": "c0-P083-3",
-      "severity": "medium",
-      "action_owner": "implementer",
-      "area": "parser-contract",
-      "finding": "Step 2 does not define the outcome for a flush-left, non-bullet line inside an Acceptance Criteria section. Its extractor only specifies termination at a flush-left bullet or ** terminator, while the stated under-joining policy and existing plans allow intervening prose or fenced blocks. Without a rule, a later indented line can be appended to the preceding criterion and reach ac[].",
-      "recommendation": "Define flush-left non-bullet prose and fence boundaries explicitly, preferably as criterion termination, and add fixture cases containing prose and fenced content between criteria for both extraction call sites."
-    },
-    {
-      "fingerprint": "sha256:8f9d7013261cb4980210cdfadb24a9e72662ac622c9656f3f4de32e673704f21",
-      "occurrence_id": "c0-P083-4",
-      "severity": "medium",
-      "action_owner": "implementer",
-      "area": "acceptance-scope",
-      "finding": "Step 10 requires verdicts for 46 verified entries, but its stated primary dispositions total only 43 (11 closed + 10 owned/recorded + 22 verified-real-not-scheduled). The seven wrong-address entries are described as an orthogonal rewrite category, not a stable membership list, so the plan does not identify which remaining entries the new test must require.",
-      "recommendation": "Reconcile the counts and enumerate the 46 entry IDs, or specify a deterministic extraction rule from the seven tracked verification blocks that excludes non-entry headings. Make the test assert that exact set and its one-verdict-per-entry invariant."
+      "area": "Plan-level AC4 scope consistency",
+      "finding": "Plan-level AC4 says “The README tagline pattern matches a line containing literal parentheses,” but Step 4 explicitly defers repair of the configured tagline pattern in untracked `.aid-o/config/project.yaml`. Its proposed suite only proves behavior with a tracked fixture pattern. The stated AC can therefore pass while the actual configured pattern remains broken, contradicting the step scope and Success Criterion 2's explicit deferral.",
+      "recommendation": "Rewrite AC4 to assert the shipped no-match diagnostic and fixture-level regex behavior, or move the actual configured-pattern repair back into a separately durable, testable scope."
     }
   ],
   "codex": {
     "provider": "codex",
     "model": "gpt-5.6-terra",
-    "session_id": "019ff90e-5303-7973-9053-9b869ca856a5",
+    "session_id": "019ff913-236c-79e2-b19a-a67035d5f343",
     "achieved_independence_level": "cross_provider"
   },
   "outcome": "dispatched"

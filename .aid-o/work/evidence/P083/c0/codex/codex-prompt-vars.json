@@ -1,9 +1,9 @@
 {
   "plan_path": ".aid-o/plans/P083-ten-verified-defects.md",
-  "plan_sha256": "sha256:a525f4a064040aaa513df244167ea9b2714558b74fd905252312948d5b6bebff",
-  "reviewed_head": "dc68b1bd6bd948dd946cb2668cdfb455795c7412",
+  "plan_sha256": "sha256:52a465c7ca1666952fd58d977bac0a3aa88aaa509a7a9a9234c62bec43d3d854",
+  "reviewed_head": "9d7788d8e32c4c70c06b6901485404d1656489fa",
   "input_manifest_path": ".aid-o/work/evidence/P083/c0/codex/audit-input-manifest.json",
-  "input_manifest_hash": "sha256:3046835c71c892f3fc1ba8b24268f6f1100b5a124d0c7deba86d3ea14618487f",
+  "input_manifest_hash": "sha256:de5b39882f3ee4abaceb99e6ea86efb4dcbbd5e7362fb48ff46ea0dda8ada67e",
   "plan_graph_path": "absent_pre_generation",
   "source_plan_graph_path": "absent_pre_generation",
   "contracts_paths": "",

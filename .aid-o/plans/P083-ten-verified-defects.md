@@ -385,7 +385,18 @@ What survives re-grounding, verified at the reviewed head: the CONFIG path's pat
 **Objective:** Every entry the 2026-08-11 verification touched carries its verdict, so no later plan is written from a stale description again.
 
 **Files:**
-- Modify: `docs/plans/2026-06-29-BACKLOG.md` — every one of the 46 verified entries gets exactly one PRIMARY disposition, and the categories must partition all 46 with none left over: 11 verified-closed (7 already fixed, 2 moot, 2 deliberate) marked closed with the evidence that closed them; 10 owned by this plan, pointing at it; 22 verified-real-but-not-scheduled, carrying `verified real 2026-08-11` plus the sieve's reason; and the remaining 3 enumerated by id in the step's own evidence file BEFORE the edit begins. The seven wrong-address entries are a SECONDARY property — their description is rewritten to what is true — counted under whichever primary disposition they hold, never as a fourth bucket. The C0 review caught the earlier text summing to 43 of 46 for exactly that reason.
+- Modify: `docs/plans/2026-06-29-BACKLOG.md` — every one of the 46 verified entries gets exactly one PRIMARY disposition. The partition, **counted from the audit evidence rather than asserted** (two C0 rounds caught this arithmetic short, first at 43 and then at 43 again):
+
+  | Disposition | Počet | Které |
+  |---|---:|---|
+  | verified-closed | 11 | 7 already-fixed + 2 moot + 2 deliberate |
+  | owned by this plan | 10 | the ten steps' subjects |
+  | verified-real, not scheduled | 22 | the sieve's rejects, each with its reason |
+  | partially fixed | 2 | `OBS-20260711-02`, `OBS-20260711-05` — one half shipped, the other named |
+  | wrong address | 1 | the `gate_profiles`-in-`defaults` entry, whose description is replaced by what is actually true |
+  | **celkem** | **46** | |
+
+  The verdict counts behind this come out of `backlog-verify-2026-08-11/block-*.md`: 32 REAL, 7 ALREADY_FIXED, 2 MOOT, 2 DELIBERATE, 2 PARTIALLY_FIXED, 1 WRONG_ADDRESS. 32 real minus the 10 this plan owns leaves exactly 22.
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-backlog-verdicts.bats` — every entry touched by the verification carries a verdict line with a date; **at most one** verdict line per entry; no entry carries two contradictory framings; the file still parses for `test-deferred-work-registration.bats:123`'s `^#+ .*IMP-nnn` heading scan, the only consumer of this file's shape found in the tree (tier: t1).
 
 **Architecture Context:** Group 3. This is the step that makes the whole exercise durable: the P082 failure was caused by descriptions that had drifted from the code, and a verdict line with a date is what stops the next reader trusting a stale one.
@@ -446,7 +457,7 @@ verification_pattern:
   cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-release-rollback.bats"
   expected_exit: 0
 ```
-- [ ] AC4: The README tagline pattern matches a line containing literal parentheses.
+- [ ] AC4: A configured version pattern that matches nothing is reported by name instead of counted as an update. (NOT "the tagline pattern is fixed" — that repair is Deferred, and an AC claiming it would pass while the real pattern stayed broken.)
 ```yaml
 verification_pattern:
   type: cmd
@@ -510,6 +521,7 @@ verification_pattern:
 - **P082 is superseded**, not paused. It must not be generated; its CP1 evidence is retained as the record of why.
 - Evidence filenames (`verifier-output-step-N.md` and the CP3 sibling) are frozen; no step renames them.
 - No step adds a new detector, telemetry field or FSM precondition. Steps 5, 6 and 8 each add a refusal *inside an existing check*; those are the only new enforcement surfaces in the plan, each is named in its own step's Files list, and each is registered in `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` — the live registry — in the same commit that adds it.
+- **Every step that adds a registry row also recomputes `totals.enforcements`** (`yq '.enforcements | length'`). The declared total is asserted by two merge-path suites (`test-control-boundary.sh`, `test-enforcement-registry-cites.sh`), so three added rows without a recount turn the merge path red. The C0 review raised this, and it had already bitten silently the same day: two rows added this afternoon left the total stale until a concurrent session recomputed it.
 - Every new suite carries an `# aid-tier:` tag matching what its step declares.
 
 ## Risks
