@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.86.2] — 2026-08-14
+
+> Everything here was already broken on main and invisible for the same reason: the suites
+> that cover it are T2, and the nightly that runs them had not completed since 2026-08-11.
+> Found by simulating the nightly instead of waiting for it.
+
+### Fixed
+- **A task branch that is behind is not automatically a branch that is honest** — `epic-start`'s fast-forward (P079 Step 3) ran before the lineage check and swallowed the case that check existed for: a branch whose actual base no longer matches its recorded `epic_base_commit` was silently repaired *and* its recorded base rewritten, erasing the one record that showed the move. It now refuses, keeping the existing "lineage broken" wording and mutating nothing.
+- **`epic-start` declines a terminal EPIC** — `merged_to_plan`, `abandoned` and `superseded` have no outgoing edge, so starting one would reconcile a branch whose commits the plan already carries.
+- **A nested checkout no longer breaks or doubles suite discovery** — the 2026-08-11 fix hand-listed `.aid-worktrees/`; the next occurrence came from `.claude/worktrees/`, which that list had never heard of. Both adapters now prune every dot-directory below the search root. The bats adapter had no exclusions at all, so a nested checkout silently doubled the portfolio there instead of refusing.
+- **Two fixtures the IMP-503 sweep missed** — `test-full-pipeline.sh` (14 of 18 cases failing) and `test-regression.sh` (every structural case silently skipping, reported as "0/0") build a workspace without `.aid-o/config/execution.yaml`, which DoD-gate resolution has required since v2.85.1.
+- **The plan-close renderer's "incomplete" case asserts the shipped contract** — it drove the renderer with an empty `summary_for_pm` and expected a page with a prose-missing alarm; that fixture is invalid (`summary_for_pm` is machine-constructed here, and its `communication_status: "degraded"` is not in the schema's enum). The case now asserts the refusal; the generic alarm remains exercised at the generic renderer.
+
 ## [2.86.1] — 2026-08-14
 
 > One awk line that made a merge-path check vacuous on the machine people run it on, and
