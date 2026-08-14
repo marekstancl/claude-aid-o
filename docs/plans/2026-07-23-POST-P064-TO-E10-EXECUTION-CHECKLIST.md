@@ -10,6 +10,15 @@ blockers and then five rounds of cross-provider findings. The delivery order
 below is therefore at its **last two steps: P061 close → P062/E10
 re-grounding.**
 
+**Update 2026-08-14, later the same day: P061 IS CLOSED** (Phase 6 below, and
+the `## Uzavření` table in the plan itself). It closed with **one** named
+deferral — **IMP-506**, `/aid-do` escalating on task size instead of risk —
+accepted by the PM as risk rather than recorded as delivery. Everything else
+E1–E5 is delivered and evidenced against code at v2.86.1; E6 was always
+backlog. **The remaining step is the last one: re-ground P062/E10.** Its
+frontmatter's "all six EPICs" precondition is a P062 defect and gets corrected
+there.
+
 **Ale POZOR — před nimi stojí věci, které tenhle checklist neznal**, protože
 vznikly 11.-14. 8. Nejsou to volitelné úklidy; dvě z nich se týkají toho, jak
 tenhle projekt měří a hlídá sám sebe:
@@ -571,22 +580,45 @@ relying on plan-boundary closure for subsequent major plans:
 **GO to Phase 6:** the P066 quarantine is removed by a reviewed change, and
 plan-final evidence is durable, recoverable and required for a close.
 
-## Phase 6 — finish and close P061
+## Phase 6 — finish and close P061 — CLOSED 2026-08-14
 
 P061 determines **which** tests run. P068 determines **when** expensive
 validation runs. P066 makes the remaining run efficient.
 
-- [ ] Re-ground P061 E4/E5 against the P064/P068/P066 implementation.
-- [ ] E4: finish project/consumer distribution of gate profiles and safe
-  `/aid-init` upgrade behavior.
-- [ ] E5: finish `/aid-do` no-bypass risk escalation and the generic release
-  invocation.
-- [ ] Reconcile anything superseded by P064/P068 rather than implementing it
-  twice.
-- [ ] Resolve the denominator explicitly: current design treats E1–E5 as
-  required and E6 as backlog/out-of-scope. Record that in the durable
-  lifecycle manifest and plan closure evidence.
-- [ ] Close P061 only after every required EPIC is delivered and accepted.
+**Outcome: closed with one named deferral, by explicit PM decision.** The
+re-grounding pass found less open than this checklist assumed: E4 had been
+delivered through the `/aid-init` execution-yaml composer, and E5's D6 had been
+delivered through the OTHER of the two routes the plan permitted — plan-final
+resolves `max(plan_final_required_profile, release)` and runs that profile
+(`aid-plan-fsm.sh:4530`), so the `release` profile is not a dead YAML line. The
+one genuinely missing piece is D5. Full per-EPIC evidence table: the
+`## Uzavření` section at the top of
+`.aid-o/plans/P061-gate-profiles-test-cost-reduction.md`.
+
+- [x] Re-ground P061 E4/E5 against the P064/P068/P066 implementation. Checked
+  against code at v2.86.1, not against the plan's prose.
+- [x] E4: project/consumer distribution of gate profiles and safe `/aid-init`
+  upgrade behavior — delivered (`lib/aid-init-execution-yaml.sh`); D3 consumer
+  isolation still holds (no self-host gate name anywhere under `defaults/`).
+- [~] E5: **D6 delivered** (plan-final release invocation, above);
+  **D5 NOT delivered** — `/aid-do` escalates on task SIZE, never calling the
+  shared risk resolver, so risk enforcement is bypassable by choosing the
+  command. Filed as **IMP-506**, accepted by the PM as risk, not as delivery.
+- [x] Reconcile anything superseded by P064/P068 rather than implementing it
+  twice. D6's release invocation is exactly this case: P068's plan-final
+  boundary absorbed it, so building the `aid-release.sh` variant too would have
+  been the second implementation.
+- [x] Resolve the denominator explicitly: **E1–E5 required, E6 backlog**, which
+  is what D1 always said. P062's frontmatter claim of "all six EPICs" is a P062
+  defect and is corrected during its re-grounding — never satisfied by inflated
+  merge counts. Recorded in the plan's frontmatter (`closure_denominator`).
+  There is no durable lifecycle manifest for P061: it predates the plan-branch
+  lifecycle and has no `.aid-o/work/plan-state/P061/`, so the plan document and
+  this checklist ARE its closure evidence. Do not invent a manifest to make the
+  bookkeeping look uniform.
+- [x] Close P061 only after every required EPIC is delivered and accepted —
+  satisfied in the form the PM chose: E1–E4 delivered, E5 accepted at half with
+  its remainder named and filed.
 
 **GO to Phase 7:** P061 is durably closed and consumer projects can use the
 same risk-based profiles instead of AID self-host-only configuration.
