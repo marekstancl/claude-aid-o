@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.84.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.85.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.85.1** (current) — the front door tells the truth: `/aid-help` is generated from a machine-readable index a test keeps honest, every file `/aid-init` and `/aid-setup` write has one declared owner and one read-only summary, and every PM-facing boundary message comes from one contract and three deterministic renderers
+- **v2.85.1** (current) — ten defects a live-code re-verification of the backlog found and fixed: a streamlined review stuck on the wrong gates-report path, acceptance criteria truncated mid-sentence, a release rollback that stranded files, three guards that reported success while checking nothing, and dead parallel-scheduler code
+- **v2.85.0** — the front door tells the truth: `/aid-help` is generated from a machine-readable index a test keeps honest, every file `/aid-init` and `/aid-setup` write has one declared owner and one read-only summary, and every PM-facing boundary message comes from one contract and three deterministic renderers
 - **v2.84.0** — a gate's name has to say what it checks and how much (`bats_all` ran only T0+T1 and cost half a day of misdirected diagnosis), an EPIC stops paying for the whole merge path, and CI cancels superseded runs
-- **v2.83.0** — the full test portfolio leaves the merge path: every suite declares a measured tier, merges run T0+T1 in 13 min instead of 6 h 49 min, and the whole portfolio runs nightly with a budget on the way in and a reaper on the way out
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
