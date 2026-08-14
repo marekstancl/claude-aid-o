@@ -29,6 +29,15 @@ ROOT="${AID_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo ".
 EVIDENCE_DIR="${ROOT}/.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}"
 STATE_FILE="${EVIDENCE_DIR}/fsm-state.yaml"
 
+# The step counter this check prints is the 0-BASED `current_step`, and every
+# line below reported it raw — `step=2/3` for a run with one step left. The
+# wording that disambiguates it is defined once, in lib/aid-human-step.sh; this
+# check renders through that function rather than restating it. The machine
+# values keep their exact position and format, so greps on these lines still
+# match; the suffix is appended after them.
+# shellcheck source=../aid-human-step.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/aid-human-step.sh"
+
 echo "dg07: checking state consistency for ${AID_EPIC_ID}/${AID_RUN_ID}"
 
 # ---------------------------------------------------------------------------
@@ -68,7 +77,7 @@ current_step=$(yaml_field_local  "$STATE_FILE" current_step)
 total_steps=$(yaml_field_local   "$STATE_FILE" total_steps)
 done_phase=$(yaml_field_local    "$STATE_FILE" done_phase)
 
-echo "dg07: state=${current_state} done_phase=${done_phase:-<none>} step=${current_step:-?}/${total_steps:-?}"
+echo "dg07: state=${current_state} done_phase=${done_phase:-<none>} step=${current_step:-?}/${total_steps:-?}$(_fsm_human_step "${current_step:-}" "${total_steps:-}")"
 
 FAIL=0
 FAIL_REASONS=()
@@ -86,7 +95,7 @@ if [[ -n "${current_step}" && -n "${total_steps}" ]]; then
     if [[ "$current_step" -lt "$total_steps" ]]; then
       FAIL=1
       FAIL_REASONS+=("parent DONE/release with non-complete child step (step=${current_step} total=${total_steps})")
-      echo "dg07: FAIL — parent DONE/release with non-complete child step (step=${current_step} total=${total_steps})"
+      echo "dg07: FAIL — parent DONE/release with non-complete child step (step=${current_step} total=${total_steps})$(_fsm_human_step "$current_step" "$total_steps")"
     fi
   fi
 fi
@@ -134,7 +143,7 @@ fi
 # Result
 # ---------------------------------------------------------------------------
 if [[ "$FAIL" -eq 0 ]]; then
-  echo "dg07: pass — state consistent (step=${current_step:-?}/${total_steps:-?}, compliance=pass, no open pending dispatches)"
+  echo "dg07: pass — state consistent (step=${current_step:-?}/${total_steps:-?}$(_fsm_human_step "${current_step:-}" "${total_steps:-}"), compliance=pass, no open pending dispatches)"
   exit 0
 else
   reason_csv=$(printf '%s; ' "${FAIL_REASONS[@]}")

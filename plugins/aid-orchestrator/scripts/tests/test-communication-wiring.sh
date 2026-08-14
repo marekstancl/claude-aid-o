@@ -331,6 +331,50 @@ else
   bad "card skeleton re-defined outside $CONTRACT (unfenced):${dupes}"
 fi
 
+# ─── Case: the ESCALATION block itself is a card, not a free-form dump ──────
+#
+# The reference check above is satisfied by naming the contract ANYWHERE in the
+# file. `commands/aid-run.md` did exactly that and still carried, further down,
+# the pre-contract `ESCALATION: {reason}` banner with its own `====` rule and
+# its own option list — the surface a PM actually meets at a stopped run. The
+# file-level check passed the whole time. This case reads the BLOCK.
+#
+# Two assertions, because either alone is passable by deleting the other:
+#   a) the pre-contract banner shape is gone everywhere — a fenced or unfenced
+#      line that OPENS with `ESCALATION` and then a reason/placeholder. A
+#      transition arrow (`→ ESCALATION`) or a heading (`### State: ESCALATION`)
+#      does not open a line and is untouched;
+#   b) skills/pipeline.md §6, the one place allowed to carry the composite,
+#      carries it in card-3 vocabulary. Otherwise (a) is satisfiable by simply
+#      removing the escalation template and leaving the PM with nothing.
+case_ "the ESCALATION presentation is the contract's card, not a free-form banner"
+
+banners=""
+while IFS= read -r f; do
+  rel="${f#"$PLUGIN_ROOT"/}"
+  hit="$(grep -n -E '^[[:space:]]*ESCALATION[[:space:]]*[:—-]' "$f" 2>/dev/null | head -3)" || hit=""
+  [[ -n "$hit" ]] && banners+=$'\n'"    $rel: $(tr '\n' '; ' <<<"$hit")"
+done < <(find "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/agents" \
+              "$PLUGIN_ROOT/defaults" "$PLUGIN_ROOT/reference" \
+              -name '*.md' -type f 2>/dev/null | sort)
+
+if [[ -z "$banners" ]]; then
+  ok "no surface opens an escalation with the pre-contract banner shape"
+else
+  bad "pre-contract ESCALATION banner still present — the card was wired around it, not into it:${banners}"
+fi
+
+ESC_COMPOSITE="${PLUGIN_ROOT}/skills/pipeline.md"
+esc_missing=""
+for lbl in 'Zastaveno:' 'Dopad:' 'Doporučené řešení:'; do
+  grep -qF -- "$lbl" "$ESC_COMPOSITE" || esc_missing+="${esc_missing:+, }${lbl}"
+done
+if [[ -z "$esc_missing" ]]; then
+  ok "skills/pipeline.md §6 carries the ESCALATION composite in card-3 vocabulary"
+else
+  bad "skills/pipeline.md §6 has no card-shaped ESCALATION composite (missing: ${esc_missing}) — the banner check above would then pass over an empty surface"
+fi
+
 echo "----------------------------------------------------------------------"
 [[ "$fail" -eq 0 ]] || exit 1
 exit 0

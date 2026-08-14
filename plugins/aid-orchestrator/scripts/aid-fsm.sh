@@ -1118,33 +1118,12 @@ _fsm_require_plan_worktree() {
 
 # ─── Human step rendering (P073 Step 4) ─────────────────────────────────
 #
-# `current_step` is 0-BASED and counts COMPLETED steps, so an operator reading
-# "current_step=2" for the third step has to do the arithmetic themselves —
-# and repeatedly got it wrong. Machine surfaces (fsm-state.yaml, `verify-state`
-# JSON, evidence filenames) stay 0-based and are frozen compatibility
-# surfaces; only the human-facing MESSAGES gain a suffix, appended AFTER the
-# machine values so existing greps on those messages still match.
-#
-# _fsm_human_step <current> <total> — echoes " (human: ...)" or nothing.
-#   current >= total  -> "all T steps complete" (all done; there is no N+1)
-#   total == 0        -> nothing (degenerate plan: machine values only)
-#   non-integer input -> nothing (the caller's own malformed-state error fires)
-#
-# P080 Step 13: the wording carries the DISAMBIGUATOR ("is next" / "complete")
-# because the underlying field is 0-based and a bare "Plan Step N of T" cannot
-# be read against it. The authoritative definition of this wording lives in the
-# "Step rendering rule" section of skills/pipeline.md; every prose surface
-# references that section instead of restating it.
-_fsm_human_step() {
-  local current="${1:-}" total="${2:-}"
-  [[ "$current" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 0
-  [[ "$total" -gt 0 ]] || return 0
-  if [[ "$current" -ge "$total" ]]; then
-    printf ' (human: all %s steps complete)' "$total"
-  else
-    printf ' (human: Plan Step %s of %s is next)' "$((current + 1))" "$total"
-  fi
-}
+# The helper itself now lives in lib/aid-human-step.sh, sourced right here, so
+# surfaces outside aid-fsm.sh (the delivery checks first) render
+# a step number through the SAME function instead of a second copy of the
+# wording. Behaviour, name and this file's three call sites are unchanged.
+# shellcheck source=lib/aid-human-step.sh
+source "${SCRIPT_DIR}/lib/aid-human-step.sh"
 
 # _aid_sup_restore — EXIT trap installed while a supersede reservation is held
 # (P073 EPIC 2 review). Puts the reservation back under its original name so a

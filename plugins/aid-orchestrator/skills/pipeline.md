@@ -1322,24 +1322,26 @@ otherwise silently never run and still report pass — OBS-20260702-05).
 
 **Read:** Current state from `fsm-state.yaml`, failure details from `timeline.jsonl`.
 
-**Present to PM:**
+**Present to PM.** An escalation is a block that needs a decision, so it is
+card 3 ("Blocked or failed") carrying card 2's recommendation lines — both
+defined in `skills/communication.md`, which is the only place a card shape is
+defined. This section is the single ESCALATION composite; every other surface
+references it rather than restating it. Identifiers go LAST, per the ordering
+rule: the PM reads what stopped and what to do before reading which EPIC it was.
+
 ```
-ESCALATION — {trigger_reason}
-EPIC: {epic_id} | Progress: {executing_step}/{total_steps}
-
-State: {failed_state}
-
-{per-type context block — see below}
-
-What was tried: {attempt history}
-
-Options:
-  A) Fix — provide guidance, agent re-dispatches
-  B) Skip — proceed to next state (warnings logged)
-  C) Abort — halt EPIC, save progress (/aid-stop)
-
-Recommendation: {auto-generated}
+Zastaveno: {trigger_reason — the concrete blocker, not an internal error label}.
+Dopad: {what has not happened; what remains safe — nothing is merged or released}.
+Doporučené řešení: A — {the smallest safe action, from the per-type context block below}.
+Alternativy: B — přeskočit a pokračovat dál (zaloguje se varování); C — zastavit EPIC a uložit postup (/aid-stop).
+Riziko / co není ověřeno: {what was tried and what it did not prove}.
+EPIC {epic_id}, stav {failed_state}, {executing_step}/{total_steps}.
 ```
+
+Fill it from the canonical failure record, never from an agent's assertion.
+`Doporučené řešení` is a recommendation and is never rendered as a fact; where
+the recovery is a PM risk acceptance, name the exact public `--force --reason`
+command and say what it does and does not override.
 
 **Step rendering rule.** This section is the single authoritative definition of step numbering; every other surface references it rather than restating it. `current_step` in `fsm-state.yaml` is 0-BASED and counts COMPLETED steps, so it is never rendered to a human directly. Derive `executing_step = min(current_step + 1, total_steps)` and render it with the disambiguator that says which of the two situations it is: while steps remain, `Plan Step {executing_step} of {total_steps} is next`; once every step is done (`current_step == total_steps`, state GATES/DONE) `all {total_steps} steps complete`. Never a bare `Plan Step N of T` — against a 0-based field that phrasing is unreadable, and an uncapped `+1` renders a nonsensical `T+1 of T` for a finished run. When `total_steps` is 0 (a degenerate plan) render the machine values only. The machine field itself, the `aid-fsm.sh verify-state` JSON payload, and evidence filenames (`step-{N}-verify.md`, with N 0-based) stay 0-based and are frozen compatibility surfaces. `aid-fsm.sh`'s `_fsm_human_step` helper emits exactly this wording, appended AFTER the machine values so existing greps keep matching.
 

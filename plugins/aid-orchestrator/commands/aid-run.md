@@ -404,24 +404,12 @@ deterministic redactor the artifact body uses. No path from gate output to the P
 
 **Actions:**
 1. Build escalation context (reason, attempts, per-type details)
-2. In manual mode → present to PM:
-   ```
-   ESCALATION: {reason}
-   ====================================
-   EPIC: {epic_id} | Step: {executing_step}/{total_steps}
-
-
-   {per-type context — see pipeline.md §6 per-type context blocks}
-
-   What was tried: {attempt history}
-
-   Options:
-     (A) Fix — provide guidance, agent re-dispatches
-     (B) Skip — proceed to next state (warnings logged)
-     (C) Abort — halt EPIC, save progress (/aid-stop)
-
-   Recommendation: {auto-generated}
-   ```
+2. In manual mode → present to PM using the ESCALATION composite defined in
+   skills/pipeline.md §6, which builds it from cards 3 and 2 of
+   skills/communication.md. Read it there and follow it; this surface
+   deliberately carries the pointer and not a second skeleton, so a correction
+   to the card cannot leave a stale copy behind here. The per-type context
+   blocks that fill it are in the same section.
 
 **Step rendering rule.** How a step number is rendered to a human, and which machine fields stay frozen, are defined by the Step rendering rule in skills/pipeline.md. Read it there and follow it; this surface deliberately carries the pointer and not the rule, so a correction to the definition cannot leave a stale copy behind here.
 
