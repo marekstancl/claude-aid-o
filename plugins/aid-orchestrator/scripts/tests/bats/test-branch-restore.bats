@@ -48,6 +48,8 @@ _make_ws() {
   mkdir -p "$WS/.aid-o/plans" "$WS/.aid-o/tasks" "$WS/.aid-o/config" \
            "$WS/.aid-o/work/evidence" "$WS/.aid-o/work/runs"
   printf 'counter: 0\n' > "$WS/.aid-o/config/counter.yaml"
+  # IMP-503 (v2.85.1): DoD gate resolution refuses without a real execution.yaml.
+  printf 'gates: {}\n' > "$WS/.aid-o/config/execution.yaml"
   printf 'seed\n' > "$WS/README.md"
   (
     cd "$WS"
@@ -68,8 +70,23 @@ _make_ws() {
 # uncommitted, so all seven have been failing with "source plan is not committed
 # on main" ever since — unseen, because this suite is `aid-tier: t2` and the
 # nightly has not completed since 2026-08-11.
+# _seed_plan_unshared — the plan in, DELIBERATELY untracked.
+#
+# For the two cases whose workspace has no `main` at all (a feature branch, a
+# detached HEAD), committing the plan is the wrong fixture: the preflight then
+# correctly refuses with "source plan is tracked but the target branch 'main'
+# does not exist". Its message names the other legitimate shape — "or gitignore
+# the plan if it is deliberately unshared" — and that is what these two cases
+# are: the branch is the subject, the plan is scenery.
+_seed_plan_unshared() {
+  printf '.aid-o/\n' > "$WS/.gitignore"
+  git -C "$WS" add -- .gitignore
+  git -C "$WS" commit -q -m "the runtime area is private to this workspace"
+  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+}
+
 _seed_plan() {
-  _seed_plan
+  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
   git -C "$WS" add -- .aid-o/plans/plan.md
   git -C "$WS" commit -q -m "the source plan, committed — the generator refuses an uncommitted one"
 }
@@ -147,7 +164,7 @@ _run_pipeline() {
 
 @test "P073 Step 6: a run started on a feature branch ends on that branch with exit 0 (the FSM never switches, so no restore is needed)" {
   _make_ws "feature/x"
-  _seed_plan
+  _seed_plan_unshared
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
   [ "$status" -eq 0 ]
@@ -174,7 +191,7 @@ _run_pipeline() {
   # detached HEAD; the real behaviour is stricter and better — aid-json-to-run
   # refuses up front, so there is no window in which a restore could fail.
   _make_ws "feature/x"
-  _seed_plan
+  _seed_plan_unshared
   ( cd "$WS" && git checkout -q --detach HEAD )
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
