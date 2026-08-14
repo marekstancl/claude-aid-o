@@ -377,6 +377,42 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ ! -f "$(BODY)" ]
 }
 
+@test "a report with no .overall fails closed — a missing verdict is not a pass" {
+  # The card follows `.overall` and nothing else, so its ABSENCE decided the
+  # message: `.overall // "unknown"` is not "fail", so blocked stayed 0 and a
+  # report of two failing gates printed `Hotovo: brány doběhly`. The runner
+  # writes exactly "pass" or "fail" (aid-run-gates.sh:2454, and :2613 for the
+  # merged escalation shape); anything else is a report nobody can vouch for.
+  local gates
+  gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1)" --argjson b "$(_row lint fail 1 500 1)" \
+    '{tests:$a, lint:$b}')"
+  _write "$(jq -c 'del(.overall)' <<<"$(_report pass "$gates")")" \
+    "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no usable .overall verdict"* ]]
+  [[ "$output" != *"Hotovo:"* ]]
+  [ ! -f "$(BODY)" ]
+}
+
+@test "an unrecognised .overall value fails closed rather than defaulting to not-blocked" {
+  _write "$(jq -c '.overall = "unknown"' <<<"$(_all_pass_report)")" \
+    "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no usable .overall verdict"* ]]
+  [[ "$output" != *"Hotovo:"* ]]
+  [ ! -f "$(BODY)" ]
+}
+
+@test "a secret smuggled into .overall is redacted in the refusal it causes" {
+  _write "$(jq -c '.overall = "ghp_0123456789abcdefghij"' <<<"$(_all_pass_report)")" \
+    "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 1 ]
+  refute_grep 'ghp_0123456789abcdefghij' <<<"$output"
+}
+
 # ─── the fallback path's redactor is callable, and it redacts ───────────────
 
 @test "aid_gate_outcome_redact is the callable entry point the fallback card must use" {

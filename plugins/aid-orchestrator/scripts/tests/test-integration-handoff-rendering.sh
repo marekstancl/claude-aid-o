@@ -427,32 +427,43 @@ if _run_renderer force-used "${WORK}/force-used.card" \
   fi
 fi
 
-# Case 5: INCOMPLETE — canonical facts arrived, the model prose did not.
+# Case 5: an INVALID brief is REFUSED, and no page is written.
+#
+# This case used to drive the renderer with `pm-brief-incomplete.json` and assert
+# that a page rendered carrying the generic "prose missing" alarm. It had been
+# failing on main — unseen, because this suite is `aid-tier: t2` and the nightly
+# that runs it had not completed for days — and the resolution (cross-model
+# review, 2026-08-14) is that the FIXTURE is invalid, not the caller:
+#
+#   * `summary_for_pm` at this boundary is NOT model prose. aid-release-policy.sh
+#     constructs it, aid-pm-brief.sh echoes it deterministically, and the
+#     protocol validator requires a non-empty string.
+#   * the fixture declares `communication_status: "degraded"`, which the shipped
+#     schema (defaults/schemas/pm-decision-brief.schema.json) does not permit at
+#     all — its enum is complete | incomplete.
+#
+# The generic alarm in lib/aid-artifact-render.sh remains a real capability for a
+# DECLARED degraded state — Case 5b below exercises it — but it is not a licence
+# for the plan-close caller to render a handoff whose machine input is malformed.
+# If "the prose may be absent here" ever becomes real product intent it needs a
+# declared protocol state (producer + schema + validator + caller + fixture
+# together), not a relaxed `str_req`, and the alarm golden comes back with it.
 IOUT="${WORK}/incomplete"; mkdir -p "$IOUT"
-if _run_renderer incomplete "${WORK}/incomplete.card" \
-     aid_plan_close_render "${FIX}/pm-brief-incomplete.json" "${FIX}/release-decision-merged.json" P080 "$IOUT"; then
-  # A raw technical list can never be the ONLY output: the card still renders…
-  _assert_card_first incomplete "${WORK}/incomplete.card" "$CARD_FINISHED"
-  _assert_seven_blocks incomplete "${IOUT}/plan-close-artifact.html"
-  _golden incomplete "${IOUT}/plan-close-artifact.html"
-  # …and the page SAYS the summary is missing rather than quietly shrinking.
-  # THE LITERAL IS TYPED OUT HERE, NOT READ FROM THE LIBRARY UNDER TEST.
-  # This used to grep for "$_AID_ARTIFACT_PROSE_MISSING", sourced from the very
-  # renderer being driven — so a change that rewrote the sentence changed both
-  # sides of the comparison at once and the assertion could not notice. An
-  # expectation taken from the implementation is the implementation agreeing
-  # with itself. Editing the sentence must break this line; that is the point.
-  if grep -qF 'class="block alarm"' "${IOUT}/plan-close-artifact.html" \
-     && grep -qF 'Shrnutí chybí — čísla výše jsou dopočítaná a platí.' "${IOUT}/plan-close-artifact.html"; then
-    pass_msg "incomplete: the page carries the missing-summary alarm with the declared literal"
+ierr="${WORK}/incomplete.stderr"
+if aid_plan_close_render "${FIX}/pm-brief-incomplete.json" "${FIX}/release-decision-merged.json" \
+     P080 "$IOUT" > "${WORK}/incomplete.card" 2> "$ierr"; then
+  fail_msg "invalid-brief: the renderer ACCEPTED a brief with an empty summary_for_pm"
+else
+  pass_msg "invalid-brief: the renderer refuses rather than rendering a handoff from malformed input"
+  if grep -qF 'summary_for_pm' "$ierr"; then
+    pass_msg "invalid-brief: the refusal names the offending field"
   else
-    fail_msg "incomplete: prose was missing and the page did not say so"
+    fail_msg "invalid-brief: the refusal does not name summary_for_pm — a nameless refusal is not diagnosable"
   fi
-  # The tiles still hold — they were computed, not written.
-  if grep -qF '<span class="v">3/3 EPIKŮ</span>' "${IOUT}/plan-close-artifact.html"; then
-    pass_msg "incomplete: the computed tiles survive the missing prose"
+  if [[ ! -s "${IOUT}/plan-close-artifact.html" ]]; then
+    pass_msg "invalid-brief: no page was written"
   else
-    fail_msg "incomplete: computed tiles did not survive the missing prose"
+    fail_msg "invalid-brief: a page was written despite the refusal"
   fi
 fi
 
@@ -467,7 +478,11 @@ if _run_renderer smoke-no-prose "${WORK}/smoke-no-prose.stdout" \
   # Block 6 never disappears, and the caps are enforced with a TRUE remainder.
   # 6 items against a cap of 5 and 4 next steps against a cap of 3 both leave a
   # remainder of exactly 1, so the overflow line must appear TWICE.
-  # Both literals typed out, for the reason given at the incomplete case above:
+  # Both literals typed out HERE rather than sourced from the library under
+  # test: an expectation read from the implementation is the implementation
+  # agreeing with itself, and a change that rewrites the sentence would move
+  # both sides of the comparison at once. (This reasoning used to live at the
+  # incomplete case, which is now a refusal case and no longer states it.)
   # `$_AID_ARTIFACT_ASK_NOTHING` and `$(_aid_artifact_overflow 1)` both come
   # from the library under test, so they moved with any change to it.
   if grep -qF 'Nic — ozvu se, až bude hotovo' "$SOUT" \

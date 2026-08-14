@@ -81,6 +81,16 @@ make_workspace() {
   mkdir -p "$ws/.aid-o/work/evidence"
   mkdir -p "$ws/.aid-o/work/runs"
   printf 'counter: 0\n' > "$ws/.aid-o/config/counter.yaml"
+  # IMP-503 (v2.85.1): DoD gate resolution requires a real execution.yaml at the
+  # project's state root — fail-closed, since a missing config used to be
+  # indistinguishable from "this project deliberately chose no DoD gate". An
+  # empty `gates:` mapping is a valid outcome; the fixture only has to exist and
+  # parse. Missed by the same-day fixture sweep (80bd0fe, 32f477b) for the same
+  # reason test-full-pipeline.sh was: `aid-tier: t2`, so it never runs on the
+  # merge path, and the nightly that would have run it never finished. Every
+  # structural case in this suite had been SKIPPING since — reported as
+  # "0/0 passed", which the aggregate runner counts as a suite it could not read.
+  printf 'gates: {}\n' > "$ws/.aid-o/config/execution.yaml"
   # The pipeline's aid-json-to-run.sh Step 18 (P040 Component E, added 2026-05-31)
   # auto-inits FSM state and records the current git branch + base commit, so it
   # PRE-FLIGHT-requires a real git working tree on a named branch. A bare mktemp

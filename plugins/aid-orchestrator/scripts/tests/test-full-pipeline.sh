@@ -78,6 +78,15 @@ make_workspace() {
   mkdir -p "$ws/.aid-o/work/runs"
   # Minimal counter YAML in the expected location
   printf 'counter: 0\n' > "$ws/.aid-o/config/counter.yaml"
+  # IMP-503 (v2.85.1): DoD gate resolution requires a real execution.yaml at the
+  # project's state root — fail-closed, because a missing config used to be
+  # indistinguishable from "this project deliberately chose no DoD gate". An
+  # empty `gates:` mapping is a valid outcome; this fixture only has to exist
+  # and parse. Five fixtures were fixed the same day (80bd0fe, 32f477b) and this
+  # one was missed for the reason it exists to catch: it is `aid-tier: t2`, so
+  # it never ran on the merge path, and the nightly that would have run it never
+  # finished. 14 of its 18 cases had been failing since.
+  printf 'gates: {}\n' > "$ws/.aid-o/config/execution.yaml"
   # P040 Component E: aid-json-to-run.sh Step 18 auto-inits the FSM
   # (`aid-fsm.sh init`), which requires a git repo with a clean tree on a
   # valid branch. The real auto-pipeline always runs inside a git project, so
