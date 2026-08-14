@@ -2,7 +2,25 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — refreshed **2026-08-10**. P064, Phase 1,
+**Status:** active PM checklist — refreshed **2026-08-14**. Since the 08-10
+refresh: **P080 merged and released (v2.85.0)** and independently verified
+(13 DONE / 3 PARTIAL / 0 NOT DONE); **P083 merged and released (v2.85.1)** —
+ten backlog-verified defects, after a review chain that returned 15 CP1
+blockers and then five rounds of cross-provider findings. The delivery order
+below is therefore at its **last two steps: P061 close → P062/E10
+re-grounding.**
+
+**Ale POZOR — před nimi stojí věci, které tenhle checklist neznal**, protože
+vznikly 11.-14. 8. Nejsou to volitelné úklidy; dvě z nich se týkají toho, jak
+tenhle projekt měří a hlídá sám sebe:
+
+| | Co | Kde |
+|---|---|---|
+| **A** | Merge cesta je **81 % nad rozpočtem** (18 min proti 10) a **jedna sada je 47 % celého portfolia** (199 min). Noční běh proto tři noci nedoběhl. | `HANDOFF-2026-08-14.md`, okno A — IMP-505, IMP-501 |
+| **B** | Riziko plánu se pozná **z prózy, ne z dotčených souborů** (P080 „srovnej nápovědu" se trefil 13×, první výskyt je odkaz v hlavičce). Spadne jeden test → pouští se celá sada. Nastavení se čte z jiného stromu, než ve kterém běží kód — kouslo to dvakrát za den. | `HANDOFF-2026-08-14.md`, okno B — IMP-497/498/499 |
+| **C** | Tento checklist + entry-point dokument = podklady pro **P061 → P062/E10** | tento soubor a `2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md` |
+
+**Předchozí znění statusu (2026-08-10):** P064, Phase 1,
 P068, P066, P069, P071, P072, P073, P074, P075, **P076 (v2.80.0)**,
 **P079 (v2.81.0)** and **P078 (v2.82.0)** are implemented and released.
 **The test-acceleration campaign is CANCELLED**: the PM cancelled the entire
