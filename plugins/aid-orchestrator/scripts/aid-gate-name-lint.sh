@@ -28,8 +28,15 @@
 # GRANDFATHERING. Renaming the live gates is ~575 literal occurrences across
 # ~60 files (measured 2026-08-11) and is a plan of its own, so existing names
 # are listed in an allowlist and reported as ADVISORY. New and renamed gates
-# must lint clean. A MISSING allowlist means no exceptions — never "allow
-# everything", the same fail-closed rule the tier lint uses.
+# must lint clean.
+#
+# The rule "a missing allowlist means no exceptions" still holds — but a
+# DEFAULT allowlist now ships with the plugin, because the fail-closed rule
+# without one made adoption an instant hard failure in a consumer project that
+# had inherited perfectly ordinary legacy names (WAN, 2026-08-13, IMP-503).
+# Fail-closed was right; shipping nothing to fail closed AGAINST was the
+# mistake. A project that genuinely wants zero exceptions writes an empty file,
+# which is a decision rather than an accident.
 #
 # Usage: aid-gate-name-lint.sh [--config <execution.yaml>] [--strict]
 #   --strict  treat grandfathered names as failures (use once the rename lands)
@@ -40,7 +47,23 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG=""
 STRICT=0
-ALLOWLIST="${AID_GATE_NAME_ALLOWLIST:-${SCRIPT_DIR}/tests/gate-name-allowlist.txt}"
+# Allowlist resolution, in order: explicit flag/env, then the PROJECT's own
+# list, then the SHIPPED default. That last fallback exists because of what
+# happened on WAN 2026-08-13: a consumer adopting this lint has no allowlist of
+# its own, and "a missing allowlist means no exceptions" — correct inside AID,
+# where the list is maintained — turned every inherited gate name into an
+# instant violation. Fail-closed is right for the RULE; shipping no default was
+# a distribution mistake (IMP-503). A project that wants zero exceptions
+# creates an empty file, which is a choice rather than an accident.
+ALLOWLIST="${AID_GATE_NAME_ALLOWLIST:-}"
+if [[ -z "$ALLOWLIST" ]]; then
+  for _al in "${SCRIPT_DIR}/tests/gate-name-allowlist.txt" \
+             ".aid-o/config/gate-name-allowlist.txt" \
+             "${SCRIPT_DIR}/../defaults/gate-name-allowlist.txt"; do
+    [[ -f "$_al" ]] && ALLOWLIST="$_al" && break
+  done
+  [[ -n "$ALLOWLIST" ]] || ALLOWLIST="${SCRIPT_DIR}/tests/gate-name-allowlist.txt"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

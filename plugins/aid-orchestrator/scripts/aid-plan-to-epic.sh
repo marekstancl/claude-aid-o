@@ -1350,8 +1350,36 @@ plan_constraints="$(extract_section "$plan" "Constraints")"
 plan_constraints="$(echo "$plan_constraints" | sed '/^[[:space:]]*$/d')"
 [[ -z "$plan_constraints" ]] && plan_constraints="- <!-- No constraints specified in plan -->"
 
-# DoD Gates — use defaults
-dod_gates="- docs_updated"
+# DoD Gates — DERIVED from the project's own execution.yaml, never hardcoded.
+#
+# Until 2026-08-13 this line read `dod_gates="- docs_updated"`. That name went
+# into every generated EPIC and every plan.json regardless of whether the
+# project defined such a gate — and `aid-run-gates.sh` treats a declared gate
+# with no definition as `undefined_gate`, a hard failure. WAN deleted
+# `docs_updated` from its config, correctly (it was literally `command: true`:
+# always green, verifying nothing, IMP-427), and from that moment NO EPIC in
+# that project could pass gates. Renaming was not an escape either, because
+# `plan.json` is hash-bound to FSM state, and the shipped gate-name lint
+# forbids the legacy name while its allowlist is fail-closed. All three exits
+# were shut at once, by a default the project never chose. (IMP-503.)
+#
+# So: name only gates the project actually defines. An empty list is a valid
+# outcome — a project whose DoD is carried by review rather than by a gate is
+# not misconfigured, and inventing a gate for it is how this broke.
+_dod_candidates=("docs_updated" "check_docs_updated")
+dod_gates=""
+_exec_yaml="${_project_root}/.aid-o/config/execution.yaml"
+if [[ -f "$_exec_yaml" ]] && command -v yq >/dev/null 2>&1; then
+  for _cand in "${_dod_candidates[@]}"; do
+    if [[ "$(yq -r ".gates.\"${_cand}\" != null" "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
+      dod_gates="- ${_cand}"
+      break
+    fi
+  done
+fi
+if [[ -z "$dod_gates" ]]; then
+  dod_gates="<!-- no DoD gate declared: the project's execution.yaml defines none of ${_dod_candidates[*]} -->"
+fi
 
 # Dependencies section
 internal_deps=""
