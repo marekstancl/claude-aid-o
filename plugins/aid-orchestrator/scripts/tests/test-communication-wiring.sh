@@ -87,8 +87,23 @@ _code_cite_lines() {
 
 # _section_end <file> <from_line> — the last line of the section that begins at
 # or contains <from_line>: the line before the next markdown heading, or EOF.
+# TWO portability bugs lived in this one awk line until 2026-08-14, and they hid
+# each other — the check passed locally and failed in CI, for opposite reasons:
+#
+#   1. `{1,6}` is an ERE interval. mawk 1.3.4 (the awk on this project's own
+#      host) does not support intervals, so the heading pattern NEVER matched,
+#      every "section" ran to EOF, and the clause was found wherever it really
+#      lived further down the file. A vacuous PASS.
+#   2. Where intervals ARE supported, `exit` still runs END, so the function
+#      printed TWO numbers — the section end AND the file length. The caller
+#      interpolates that into `sed -n "<from>,<end>p"`, which then gets a
+#      malformed range, produces nothing, and every site is reported as missing
+#      the clause. A guaranteed FAIL.
+#
+# `/^#+ /` needs no intervals and means the same thing for markdown, and the END
+# branch only fires when no heading was found.
 _section_end() {
-  awk -v from="$2" 'NR > from && /^#{1,6} / { print NR - 1; exit } END { print NR }' "$1"
+  awk -v from="$2" 'NR > from && /^#+ / { print NR - 1; found = 1; exit } END { if (!found) print NR }' "$1"
 }
 
 pass=0
