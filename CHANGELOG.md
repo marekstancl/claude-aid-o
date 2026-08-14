@@ -3,14 +3,26 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [2.85.1] — 2026-08-14
+
+> Ten defects that survived a live-code re-verification of the backlog (P083), plus a
+> same-day fix for a fail-closed DoD-gate check that broke six test fixtures on the way in.
 
 ### Changed
 - **Gate profiles must define a command for every gate they include** — `aid-run-gates.sh` now refuses, by name, an active `--profile` whose `include[]` lists a gate with no `command:` in `execution.yaml`, instead of silently recording a `skip/no_command` row that never touches the run's overall result. Breaking for consumers mid-rollout of the test-tier standard: if your `execution.yaml` has a profile-included gate with no command, add one or drop the gate from the profile before upgrading.
+- **The gate-runtime baseline library is sequential-only** — the parallel-scheduler concurrency contexts P078 already removed the scheduler for are deleted from `aid-gate-runtime-baseline.sh` rather than kept as permanently-empty fields; a caller passing one now gets a named refusal instead of a silently dead branch.
+- **The C0 plan-review prompt stops asking for an artifact it doesn't have** — its dependency/scope check now reads each step's own `Dependencies:` block instead of the whole-plan source graph, which this review almost always runs before that graph is produced.
 
 ### Fixed
-- **Review-signal toggles no longer resolve to "enabled" when they cannot be read** — `_aid_read_toggle` is rewritten in bash's own `[[ =~ ]]` (no `grep -P`, which exits 2 and was read as "enabled" on any grep without PCRE support) and now reports an unreadable or malformed toggle as its own state: the FSM's plan-boundary checks fail closed to enabled, and `aid-release-policy.sh` reports `toggle_unreadable` instead of flattening it into `disabled`.
-- **`/aid-init` emits the full gate-profile ladder** — a stack-detected workspace now gets `quick`, `targeted`, `standard`, `full` and `release` instead of only `targeted` and `full`, so a fresh project can satisfy the shipped `plan_final_profile_floor: release` instead of aborting on an empty `release` profile. On the existing-project upgrade path every profile is filtered to gates the target `execution.yaml` actually defines, so the appended block can never name an undefined gate.
+- **A streamlined-mode EPIC advances past review without a force waiver** — `fsm_check_streamlined_integration_review` accepts the gates report at either the canonical `gates/` subdirectory or the legacy flat path the plan-final stage still writes, instead of only the one every other reader uses.
+- **Multi-line acceptance criteria survive EPIC generation intact** — the two copy-pasted awk blocks that only matched flush-left bullets and silently dropped every indented continuation line are replaced by one shared extractor, in both the human-readable EPIC section and the machine-read `ac[]`.
+- **A rolled-back release restores every file it touched** — `aid-release.sh`'s bookkeeping no longer records an edit `update_changelog`'s pre-written-entry branch didn't make, correctly dedupes a file with two version fields (e.g. `marketplace.json`) instead of dropping it from the rollback set entirely, and names a file it could not restore instead of reporting silent success.
+- **A configured version pattern that matches nothing is reported by name, not counted as an update** — the regex version-updater now distinguishes "changed" / "already current" / "miss" (by probing for the new version before substituting, since `sed`'s exit code cannot tell a no-op apart from a genuine miss) instead of unconditionally printing `Updated`.
+- **Review-signal toggles no longer resolve to "enabled" when they cannot be read** — `_aid_read_toggle` is rewritten in bash's own `[[ =~ ]]` (no `grep -P`, which exits 2 and was read as "enabled" on any grep without PCRE support) and now reports an unreadable or malformed toggle as its own state: the FSM's plan-boundary checks fail closed to enabled, and `aid-release-policy.sh` reports `toggle_unreadable` — and blocks release on it — instead of flattening it into `disabled`.
+- **`/aid-init` emits the full gate-profile ladder** — a stack-detected workspace now gets `quick`, `targeted`, `standard`, `full` and `release` instead of only `targeted` and `full`, so a fresh project can satisfy the shipped `plan_final_profile_floor: release` instead of aborting on an empty `release` profile. On the existing-project upgrade path every profile is filtered to gates the target `execution.yaml` actually defines, so the appended block can never name an undefined gate — including when that file fails to parse as YAML at all, and when the compose target isn't the CWD-relative default path.
+- **The self-host `plan_diff` gate has a command again** — restored (a first-time addition, not a restoration: it was never present in 16 tracked commits) with `required: false` for the duration of this plan; a profile-included gate with no command is now a runner-level refusal everywhere, not just here.
+- **`aid-plan-to-epic.sh`'s DoD-gate fail-closed check (IMP-503) no longer breaks isolated test fixtures** — six existing suites spun up a project directory without a real `execution.yaml`/state-root marker, which the new refusal correctly caught; each now carries the minimal fixture the check requires.
+- **All 46 backlog entries the 2026-08-11 live-code verification touched carry a dated verdict** in `docs/plans/2026-06-29-BACKLOG.md`, replacing stale annotations rather than stacking beside them.
 
 ## [2.85.0] — 2026-08-12
 

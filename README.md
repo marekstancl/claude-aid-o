@@ -123,7 +123,7 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.85.0** (current) — the front door tells the truth: `/aid-help` is generated from a machine-readable index a test keeps honest, every file `/aid-init` and `/aid-setup` write has one declared owner and one read-only summary, and every PM-facing boundary message comes from one contract and three deterministic renderers
+- **v2.85.1** (current) — the front door tells the truth: `/aid-help` is generated from a machine-readable index a test keeps honest, every file `/aid-init` and `/aid-setup` write has one declared owner and one read-only summary, and every PM-facing boundary message comes from one contract and three deterministic renderers
 - **v2.84.0** — a gate's name has to say what it checks and how much (`bats_all` ran only T0+T1 and cost half a day of misdirected diagnosis), an EPIC stops paying for the whole merge path, and CI cancels superseded runs
 - **v2.83.0** — the full test portfolio leaves the merge path: every suite declares a measured tier, merges run T0+T1 in 13 min instead of 6 h 49 min, and the whole portfolio runs nightly with a budget on the way in and a reaper on the way out
 
