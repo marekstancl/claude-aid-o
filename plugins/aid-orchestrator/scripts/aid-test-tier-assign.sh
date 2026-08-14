@@ -197,7 +197,7 @@ if [[ "$n_unmeasured" -gt 0 ]]; then
     echo ""
     echo "aid-test-tier-assign: $n_unmeasured of $discovered discovered suite(s) have no usable measurement:"
     while IFS=$'\t' read -r s why; do echo "  - $s — $why"; done < "$unmeasured"
-    echo "This table is PARTIAL. Measure them (run-all-tests.sh --timing --include-delegated) before tiering."
+    echo "This table is PARTIAL. Measure them (run-all-tests.sh --timing) before tiering."
   } >&2
   exit 1
 fi

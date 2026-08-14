@@ -113,6 +113,32 @@ jobs:
             --t1-seconds "${{ steps.tiers.outputs.t1_seconds }}" \
             --log-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
+      - name: Isolation — the snapshot suite in a permuted case order
+        # IMP-505 made two suites build their fixture ONCE per file and restore a
+        # copy per case. That is fast and it is also the classic way to make a
+        # suite quietly order-dependent: shared state looks green until the day
+        # it doesn't. bats 1.8.2 has no shuffle, so the order is permuted
+        # mechanically (the tool proves its output is a permutation of the input
+        # before writing it) and the suite is run again in that order.
+        #
+        # The seed is the run number: a different order every night, and the
+        # exact failing order reproducible from the log by anyone.
+        #
+        # REPORTED, never a job failure — same discipline as the honesty check
+        # below. A contamination finding is a real bug worth a message, but
+        # failing the nightly on it would bury the portfolio result underneath.
+        continue-on-error: true
+        run: |
+          set -e
+          suite=plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats
+          perm="$(plugins/aid-orchestrator/scripts/tests/aid-bats-permute.sh "$suite" "${GITHUB_RUN_NUMBER:-1}")"
+          echo "permuted order, seed ${GITHUB_RUN_NUMBER:-1}: $perm"
+          bats "$perm" || {
+            echo "::warning::the plan-final suite behaves differently in a permuted case order (seed ${GITHUB_RUN_NUMBER:-1}) — fixture isolation regression"
+            exit 1
+          }
+        timeout-minutes: 120
+
       - name: Check the selector's honesty
         # A gap is REPORTED, never a job failure: the finding is about the
         # merge-path selector, and failing this job would only teach people to

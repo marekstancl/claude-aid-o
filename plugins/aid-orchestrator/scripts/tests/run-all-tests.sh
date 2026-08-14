@@ -159,7 +159,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --tier <t0|t1|t2>    Run only suites declaring that tier (see aid-test-tier-lint.sh)"
       echo "  --only <basename>    Run exactly one suite, under the runner's own conditions"
       echo "  --timing             Record one duration per suite into the durations journal"
-      echo "  --include-delegated  Also run suites owned by a dedicated CI job (measurement runs)"
+      echo "  --include-delegated  DEPRECATED no-op (delegation removed 2026-08-14; untiered = full portfolio)"
       echo "  --help, -h           Show this help message"
       exit 0
       ;;

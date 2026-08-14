@@ -154,16 +154,25 @@ _snap_contract() {
 # building it once (through the real builder, in the live tree) on first use.
 # The builder path ends in the SAME poisoned contract as the restore path, so
 # the first case in a file is not quietly privileged over the other 260.
+# _SNAP_LAST_ACTION — "restore" or "build", set by every _snap_fixture call.
+# Without it the equivalence tests below could not tell the two paths apart: a
+# test that builds, wipes the live tree and calls the wrapper takes the BUILD
+# branch whenever no template happens to exist yet, and then compares two fresh
+# builds while appearing to compare a restore against a build. Cross-model
+# review caught exactly that.
+_SNAP_LAST_ACTION=""
 _snap_fixture() {
   local key="$1"; shift
   key="${key}.$(_snap_env_key)"
   local tpl live; tpl="$(_snap_tpl "$key")"; live="$(_snap_live)"
   if [[ -d "$tpl" ]]; then
+    _SNAP_LAST_ACTION="restore"
     cd /
     rm -rf "$live"
     cp -a "$tpl" "$live"
     _snap_env_load "${tpl}.env"
   else
+    _SNAP_LAST_ACTION="build"
     "$@"
     _snap_eligible || return 1
     mkdir -p "$(dirname "$tpl")"
@@ -200,14 +209,21 @@ _snap_mask() {
          -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/<TS>/g'
 }
 _snap_fingerprint() {
-  git -C "$TEST_PROJECT_ROOT" for-each-ref --format='ref %(refname)'
-  echo "head $(git -C "$TEST_PROJECT_ROOT" symbolic-ref -q HEAD || echo detached)"
-  git -C "$TEST_PROJECT_ROOT" status --porcelain | sed 's/^/status /'
-  git -C "$TEST_PROJECT_ROOT" worktree list --porcelain | grep '^worktree ' | sed "s|$TEST_PROJECT_ROOT|<ROOT>|"
-  local f
-  while IFS= read -r -d '' f; do
-    printf 'file %s %s\n' "$f" "$(_snap_mask < "$f" | sha256sum | cut -d' ' -f1)"
-  done < <(cd "$TEST_PROJECT_ROOT" && find . -path ./.git -prune -o -type f -print0 | sort -z)
+  # Everything goes through the mask, REF NAMES INCLUDED: this suite names an
+  # evidence ref after the commit it is bound to
+  # (refs/heads/aid-evidence/P068/<sha>/<run>), so two correct builds differ
+  # there for the same reason their commits do. The masked comparison still
+  # catches a ref that is MISSING, renamed or pointing somewhere else.
+  {
+    git -C "$TEST_PROJECT_ROOT" for-each-ref --format='ref %(refname)'
+    echo "head $(git -C "$TEST_PROJECT_ROOT" symbolic-ref -q HEAD || echo detached)"
+    git -C "$TEST_PROJECT_ROOT" status --porcelain | sed 's/^/status /'
+    git -C "$TEST_PROJECT_ROOT" worktree list --porcelain | grep '^worktree ' | sed "s|$TEST_PROJECT_ROOT|<ROOT>|"
+    local f
+    while IFS= read -r -d '' f; do
+      printf 'file %s %s\n' "$f" "$(_snap_mask < "$f" | sha256sum | cut -d' ' -f1)"
+    done < <(cd "$TEST_PROJECT_ROOT" && find . -path ./.git -prune -o -type f -print0 | sort -z)
+  } | _snap_mask
 }
 
 setup() {
@@ -6159,14 +6175,22 @@ _FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
   # Fresh build, bypassing the snapshot layer entirely (the builder is called
   # with the same env input the wrapper would have keyed on).
   export AID_TEST_SEED_LIFECYCLE=1
+  # 1. a FRESH build, bypassing the snapshot layer entirely.
   _seed_merge_project_build
   local fresh; fresh="$(_snap_fingerprint)"
 
-  # A clean live tree, then the snapshot path for the same fixture class.
+  # 2. make sure a template exists — through the wrapper, on a clean tree.
   _snap_setup_live
   export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
   _seed_merge_project
+
+  # 3. and NOW the restore path, proven to BE the restore path.
+  _snap_setup_live
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  _seed_merge_project
+  [ "$_SNAP_LAST_ACTION" = "restore" ]
   local restored; restored="$(_snap_fingerprint)"
 
   if [[ "$fresh" != "$restored" ]]; then
@@ -6178,13 +6202,22 @@ _FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
 
 @test "IMP-505: a RESTORED closable fixture has the same shape as a freshly BUILT one" {
   export AID_TEST_SEED_LIFECYCLE=1
+  # 1. a FRESH build, bypassing the snapshot layer entirely.
   _seed_closable_build
   local fresh; fresh="$(_snap_fingerprint)"
 
+  # 2. make sure a template exists — through the wrapper, on a clean tree.
   _snap_setup_live
   export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
   _seed_closable
+
+  # 3. and NOW the restore path, proven to be the restore path.
+  _snap_setup_live
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  _seed_closable
+  [ "$_SNAP_LAST_ACTION" = "restore" ]
   local restored; restored="$(_snap_fingerprint)"
 
   if [[ "$fresh" != "$restored" ]]; then

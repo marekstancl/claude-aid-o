@@ -2701,7 +2701,7 @@ enforcements:
   - id: tier_ci_topology
     type: 6
     source: "scripts/tests/test-tier-ci-topology.sh (parses .github/workflows with yq + reads run-all-tests.sh --list)"
-    instruction: "https://docs.aidlab.dev/ecosystem/specs/test-standard (T2: noční cron, nikdy na cestě k merge)"
+    instruction: "CLAUDE.md"
     severity: blocking
     surface: internal-guard
     status: active
@@ -2953,7 +2953,7 @@ enforcements:
   - id: gate_command_required
     type: 4
     source: "scripts/aid-run-gates.sh (upfront profile-validation block)"
-    instruction: "n/a (internal guard)"
+    instruction: "n/a"
     severity: blocking
     surface: internal-guard
     status: active
@@ -2966,7 +2966,7 @@ enforcements:
   - id: review_signal_toggle_fail_closed
     type: 4
     source: "scripts/lib/aid-review-signals.sh (_aid_read_toggle)"
-    instruction: "n/a (internal guard)"
+    instruction: "n/a"
     severity: blocking
     surface: internal-guard
     status: active
@@ -2979,7 +2979,7 @@ enforcements:
   - id: gate_baseline_sequential_only
     type: 4
     source: "scripts/lib/aid-gate-runtime-baseline.sh (gate_baseline_update)"
-    instruction: "n/a (internal guard)"
+    instruction: "n/a"
     severity: advisory
     surface: internal-guard
     status: active

@@ -43,7 +43,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 RUNNER="$SCRIPT_DIR/run-all-tests.sh"
-WORKFLOW_DIR="$REPO_ROOT/.github/workflows"
+# AID_TOPOLOGY_WORKFLOW_DIR is a TEST SEAM, not a production knob: it lets
+# bats/test-tier-ci-topology-guard.bats point this check at fixture workflows and
+# prove it actually catches each shape. A guard nobody has watched fail is a
+# guard nobody should trust. Production callers never set it.
+WORKFLOW_DIR="${AID_TOPOLOGY_WORKFLOW_DIR:-$REPO_ROOT/.github/workflows}"
 NIGHTLY="$WORKFLOW_DIR/nightly-tests.yml"
 
 PASS=0; FAIL=0
@@ -102,14 +106,50 @@ for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
   grep -qE '"(push|pull_request)"' <<<"$triggers" || continue
 
   # Every direct `run:` string of every job in a merge-path workflow, with
-  # SHELL COMMENTS STRIPPED: a run block that merely explains why a suite skips
-  # when a package is missing is prose, not an invocation, and counting it made
-  # this check's first run report two suites that no job runs.
-  cmds="$(yq e -r '.jobs[].steps[]?.run // ""' "$wf" 2>/dev/null | sed 's/#.*$//')"
+  # SHELL COMMENTS STRIPPED and LINE CONTINUATIONS JOINED. Comments: a run block
+  # that merely explains why a suite skips when a package is missing is prose,
+  # not an invocation, and counting it made this check's first run report two
+  # suites that no job runs. Continuations: a command whose flags sit on the
+  # next line would otherwise be judged on its first line alone, which is how
+  # `run-all-tests.sh \<newline> --tier t2` would read as untiered.
+  cmds="$(yq e -r '.jobs[].steps[]?.run // ""' "$wf" 2>/dev/null | sed 's/#.*$//' \
+          | sed -e ':a' -e '/\\$/{N;s/\\\n[[:space:]]*/ /;ba' -e '}')"
   if grep -qE '\$\{\{' <<<"$cmds"; then
     _fail "$(basename "$wf") builds a run command from an expression — this check cannot read it"
   fi
   offenders=0
+  # A merge-path job does not have to NAME a t2 suite to run one. Three shapes
+  # run the whole portfolio (or the t2 half of it) without a single basename,
+  # and a guard that only matched basenames would wave all three through —
+  # which is the same "the check looks right and sees nothing" failure that let
+  # the five dedicated jobs live for three days.
+  while IFS= read -r line; do
+    [[ -z "${line//[[:space:]]/}" ]] && continue
+    # MENTIONING the runner is not RUNNING it. `chmod +x .../run-all-tests.sh`
+    # names the script on its own line, and reading that as an untiered
+    # invocation made this check fail its own workflow twice.
+    first_tok="${line#"${line%%[![:space:]]*}"}"; first_tok="${first_tok%% *}"
+    case "$first_tok" in
+      chmod|echo|cat|printf|ls|rm|cp|mv|sed|grep|awk|git|mkdir|touch|export) continue ;;
+    esac
+    case "$line" in
+      *run-all-tests.sh*--tier[[:space:]]t2*)
+        _fail "$(basename "$wf") runs the runner with --tier t2 on push/PR — T2 never blocks a merge"
+        offenders=$((offenders+1)) ;;
+      *run-all-tests.sh*--list*|*run-all-tests.sh*--only*) ;;   # enumerates / one named suite
+      *run-all-tests.sh*)
+        grep -q -- '--tier' <<<"$line" || {
+          _fail "$(basename "$wf") runs the runner UNTIERED on push/PR — an untiered run is the full portfolio, T2 included"
+          offenders=$((offenders+1)); }
+        ;;
+    esac
+    # A raw glob over the suite directory sweeps every tier at once.
+    case "$line" in
+      *bats*tests/bats/test-\**|*bats*tests/bats/*\*.bats*)
+        _fail "$(basename "$wf") runs a bats GLOB over the suite directory on push/PR — that includes every t2 suite"
+        offenders=$((offenders+1)) ;;
+    esac
+  done <<< "$cmds"
   for bn in "${SUITES[@]}"; do
     [[ "${TIER[$bn]:-}" == "t2" ]] || continue
     if grep -qF "$bn" <<<"$cmds"; then
@@ -130,7 +170,8 @@ else
   else
     _fail "the nightly workflow has no schedule trigger — the T2 suites would run only by hand"
   fi
-  n_cmds="$(yq e -r '.jobs[].steps[]?.run // ""' "$NIGHTLY" 2>/dev/null | sed 's/#.*$//')"
+  n_cmds="$(yq e -r '.jobs[].steps[]?.run // ""' "$NIGHTLY" 2>/dev/null | sed 's/#.*$//' \
+            | sed -e ':a' -e '/\\$/{N;s/\\\n[[:space:]]*/ /;ba' -e '}')"
   runner_lines="$(grep -F 'run-all-tests.sh' <<<"$n_cmds" || true)"
   # AT LEAST ONE untiered invocation — not "no tiered invocation". The nightly
   # legitimately ALSO runs `--tier t0` and `--tier t1` separately, because the
