@@ -1,0 +1,763 @@
+---
+id: P062
+type: plan
+status: draft
+created: 2026-07-12
+author: PM + AI
+phase_of: AID Control System v2 (roadmap E10 — Kalibrace + dual-run metriky + speed + promotion decision table)
+roadmap_ref: docs/plans/AID-control-system-v2-roadmap.md
+design_ref: docs/AID-control-system-v2-unified-refactor-PLAN.md (master §10 E10 + §11-12)
+brief_ref: .aid-o/work/interim-P062.md (PM 11-bodový scope-extension brief, 2026-07-12)
+depends_on: "TVRDÉ preconditions (§Preconditions, přepsané re-groundem 2026-08-14). P061 je UZAVŘENÝ (2026-08-14, E1-E5 dodané mimo D5, které je odloženo jako IMP-506) — tím padá původní zámek. Zbývající tvrdé podmínky jsou IMP-179, IMP-201 a rozpočet merge cesty; viz §Re-grounding."
+risk: high
+write_only_until: "SPLNĚNO 2026-08-14 pro P061. Plán zůstává nespuštěný do PM revize re-groundu; zámek už ale nedrží P061, nýbrž tři podmínky vyjmenované v §Re-grounding."
+regrounded: 2026-08-14
+regrounding_method: "dva nezávislé průchody (controller + Codex nad stejným faktickým podkladem), sloučené; body, které měřil jen jeden z nich, jsou označené"
+---
+
+# Plan: E10 — Kalibrace, dual-run metriky, rychlost a datově podložená promotion rozhodnutí
+
+## Re-grounding 2026-08-14 — čti první, přebíjí vše starší
+
+Plán je z 12. 7. Od té doby přibylo třicet vydání a **zmizel celý subsystém,
+o který se opíral**. Tahle sekce je autoritativní; kde se rozchází se zbytkem
+dokumentu, platí ona. Vznikla dvěma nezávislými průchody nad stejným faktickým
+podkladem — controllerovým a Codexovým — a je jejich sloučením. U bodů, které
+našel jen jeden z nich, je to napsané.
+
+### Co bylo změřeno, ne dovozeno
+
+| | |
+|---|---|
+| Verze repozitáře | v2.86.1; plán míří na v2.56.0 |
+| Tag `v2.56.0` | **existuje** a patří dávnému nesouvisejícímu vydání |
+| Ze čtyř skriptů, které plán vytváří | neexistuje **žádný** |
+| Z pěti sad, které jmenují AC | existuje **jedna** (`test-release-policy.bats`) |
+| C4 content-verdict | v `aid-release-policy.sh` **není**, jak plán sám říká |
+| Skutečné dispatche C3 | **13** záznamů `c3-dispatch.json`, 22 `codex-last-message.json` |
+| Verdikty C3 v evidenci | **21 unverifiable, 5 fail, 2 pass** (28 celkem) |
+| Merge cesta | 72 sad, **18 min 07 s** proti rozpočtu 10 min |
+| Plný portfolio běh | 234 sad, ~7 h, patří nočnímu běhu |
+
+### A — co je dnes nepravdivé nebo projde naprázdno
+
+1. **Precondition 1 je nepravdivá už ve své formulaci.** Žádá šest mergnutých
+   EPICů P061 a `grep -c 'E-061-[1-6]_6' == 6`. D1 plánu P061 vždycky říkal
+   E1-E5 povinné, E6 backlog; P068 amendment navíc počítání EPIC-vydání zrušil.
+   **Nahradit** trvalým uzavíracím záznamem P061 + výslovnou výjimkou IMP-506.
+2. **AC11 projde naprázdno.** `grep '## [2.56.0]' CHANGELOG.md` je **dnes
+   pravda** — z historie. Ta půlka AC je splnitelná bez jediného řádku E10.
+   Druhá půlka (`plugin.json == 2.56.0`) je naopak nesplnitelná bez zpětného
+   kroku. **Nahradit** politikou: E10 dostane nově alokované vydání a AC ověří,
+   že v NĚM vznikl vlastní CHANGELOG a registry záznam.
+3. **AC12 projde naprázdno.** Měřeno: nula smazání od `v2.55.0`. Je to pravda
+   dnes, kdy z E10 neexistuje nic — takže to nedokazuje, že E10 legacy zachoval.
+   Navíc to visí na 31 vydání starém tagu. **Nahradit** kotvou na výchozí commit
+   samotného běhu E10.
+4. **AC5 a AC10 měří přítomnost řetězce ve skriptu**, ne že se něco změřilo
+   nebo rozhodlo. AC1/4/6/7/9 jsou kontroly existence artefaktu — projdou nad
+   čistým preflightem stejně jako nad špinavým *(nález Codexova průchodu)*.
+5. **AC2/3/8 dokazují jen, že nějaké testy proběhly** (`1..N` + exit 0). AC3
+   může projít, i když IMP-201 zůstane provozně nevyřešený; AC8 počítá jména
+   testů obsahující slova, ne pět skutečných stavů *(Codex)*.
+6. **D2 slibuje důkaz rychlosti risk-profilů, který je pro Fast Mode
+   nedosažitelný.** IMP-506: `/aid-do` nespouští žádný AID skript, takže
+   nevydává žádné profilové události. E10 nemůže měřit, co neexistuje.
+
+### B — vstupy, které přestaly existovat
+
+7. **D2/D9/AC5/AC9 stojí na P066/P069 scheduleru a paralelismu. P078 to
+   odstranil** (v2.82.0), PM celou linku zrušil 9. 8. po naměřeném zrychlení
+   3-6 %. **Náhradní vstupy:** testovací patra T0/T1/T2, runtime baseline z
+   P063 (`lib/aid-gate-runtime-baseline.sh`) a hranice plan-final z P068 —
+   drahé brány se platí jednou za plán, ne jednou za EPIC.
+8. **„Full-suite per EPIC" jako měřicí jednotka neplatí.** Jednotky jsou dnes
+   tři: merge cesta (T0+T1), plan-final brány, noční portfolio.
+9. **D6/AC3 citují červencový stav IMP-201.** Srpnový je horší a konkrétnější:
+   *ověřeno reálné, nenaplánované, pending*, latentní jen proto, že
+   `release-decision-policy.yaml` je `observe` — **a ožívá přesně ve chvíli,
+   kdy E10 přepne na blocking.**
+
+### C — co plán neobsahuje a obsahovat musí
+
+10. **Rozpočtová brána před promotion.** Merge cesta je **81 % nad rozpočtem**
+    dřív, než E10 přidalo cokoli. Plán, který má prokázat „nejsme pomalí",
+    nesmí tenhle výchozí stav mlčky znormalizovat. Rozhodovací tabulka
+    potřebuje šestý výsledek: `cannot-promote — runtime-budget-failed`.
+11. **Oddělit přírůstkovou cenu E10 od té výchozí** — jinak si E10 buď přičte
+    18 minut, které nezpůsobilo, nebo v nich schová svoje vlastní náklady
+    *(Codex)*.
+12. **Provenience fixtur místo jejich počtu.** Každá fixtura pojmenuje zdrojový
+    incident, třídu selhání, jestli je to positive/negative control, očekávaný
+    starý i nový výsledek — a u nedoložených případů se vyloučí s poznámkou,
+    nikdy nedomýšlí *(Codex; navazuje na D3)*.
+13. **Rozdělit rozhodovací tabulku podle IMP-179.** Kontroly stojící na výstupu
+    subagentů (Auditor/Curator/Verifier) jsou nezpůsobilé k blocking promotion,
+    dokud je IMP-179 otevřený; nezávisle podložené kontroly se posuzují zvlášť.
+14. **Vzít v úvahu, co C3 dnes reálně vydává** *(měřeno controllerem; Codex tenhle
+    údaj neměl a správně napsal, že se nedá předpokládat)*. Roadmapová podmínka
+    „nenulový `c3_hook_fired`" je **splněná** — třináct skutečných dispatchů
+    není nula. Zároveň z toho ale plyne nový problém, který plán nezná:
+    **75 % zaznamenaných verdiktů C3 je `unverifiable`** (21 z 28; k tomu 5 fail
+    a 2 pass). Kalibrační dataset pro C3 by tedy z velké části tvořilo
+    „nedalo se rozhodnout". To není důkaz, že C3 chytá vady — a promotion C3 na
+    blocking se o takový dataset nesmí opřít. E10 musí `unverifiable` sledovat
+    jako **vlastní metriku**, ne ho počítat mezi ne-fail.
+15. **D7 má reálnou práci, ne hypotetickou** *(měřeno controllerem)*: běhy
+    `R-E045-1`, `R-E049-1` a `R-E057-2` jsou ve stavu `DONE` a přitom mají kroky
+    se stavem `pending`. Přesně ten nepořádek, který D7 odmítá měřit.
+16. **Měřicí vstupy, které mezitím vznikly a plán o nich neví:** deník
+    naměřených dob (`lib/aid-test-durations.sh`), přiřazení pater
+    (`aid-test-tier-assign.sh`), noční záznamy
+    `/opt/eco/data/aid-nightly/aid-orchestrator/<datum>.json` a počítadlo tokenů
+    (`lib/aid-token-count.sh`). `aid-control-metrics.sh` je má **konzumovat**,
+    ne si měření vymýšlet znovu.
+
+### D — co přežívá beze změny (a proto se nepřepisuje)
+
+D1 (nejdřív měř, pak promuj), D3 (držet doložené incidenty a nevymýšlet
+nedoložené), D4 (pět stavů C4, waiver viditelný a neprocházející), D5 (IMP-179
+tvrdý blokér), D7 (preflight jako prerekvizita), D8 (tabulka per kontrola —
+nově se šestým výsledkem z bodu 10), D10 (E10 nemaže, maže až E11), D11
+(bez mechanického důkazu je nezávislost `unverifiable`/`context_only`).
+D6 platí **silněji** než v červenci, protože IMP-201 je mezitím potvrzený.
+
+### Co re-ground NEudělal
+
+Nepřegeneroval EPICy a nespustil nic. Nepřepisoval kroky EPIC 1-5 řádek po
+řádku — přepsaná jsou rozhodnutí, podmínky a acceptance criteria, protože to
+jsou místa, kde se plán buď spustí, nebo prohlásí za hotový. Kroky se srovnají
+až po tvojí revizi téhle sekce, aby se nesrovnávaly dvakrát.
+
+> **Scope honesty (čti první):** E10 NENÍ „zapneme blocking a hotovo". E10 je **měřicí,
+> kalibrační a rozhodovací** fáze. Nejdřív se na reálných datech PROKÁŽE, že nové C0-C4 kontroly
+> (a) chytají historické známé vady, (b) neblokují legitimní změny, (c) za jakou cenu (čas / LLM
+> dispatch / test běhy), a (d) které legacy kontroly mají nulovou unique detekci. Teprve na základě
+> těchto dat se rozhodne, co se smí stát blokující autoritou a co se ještě NESMÍ zapnout. Současně
+> E10 hlídá **rychlost** — jinak postavíme bezpečnější, ale nepoužitelně pomalý AID.
+>
+> **Původní E10 = kalibrace kvality. Tento E10 = kalibrace kvality + rychlosti + promotion
+> bezpečnosti na základě reálných incidentů** (PM brief 2026-07-12; není změna směru, je to
+> zpřesnění podle toho, co jsme mezitím zjistili v praxi).
+>
+> **⚠️ WRITE-ONLY:** tento plán se smí napsat a projít celým review procesem, ale
+> `/aid-run P062` se NESMÍ spustit, dokud P061 (gate profily) není kompletně DONE+merged — jinak
+> E10 kalibruje starý pomalý stav, který už nechceme (PM brief bod 2).
+
+## Klíčová rozhodnutí (PM-potvrzená, brief 2026-07-12)
+
+- **D1 (E10 ≠ jen promotion):** E10 nejdřív MĚŘÍ + PROKÁŽE (chytání historických vad, ne-blokování
+  legitimních změn, cena, nulová-unique-detekce legacy), teprve pak promuje. Promotion je výstup
+  dat, ne cíl sám o sobě.
+- **D2 (P061 gate-profily = vstup/precondition):** risk-based profily jsou součást cílového
+  zrychlení. E10 NESMÍ znovu zafixovat full-suite-per-EPIC jako default; MUSÍ měřit wall-clock
+  před/po profilech a potvrdit, že rizikové změny pořád eskalují na full/release profil.
+  **P061 nekompletní → plán write-only, nespuštěn** (viz frontmatter + §Preconditions).
+- **D3 (rozšířený kalibrační dataset):** původní E-047-1/4/5 + E-044 + P045 ZŮSTÁVAJÍ. + nové
+  reálné incidenty (§Context; každý s honest grounding statusem): OBS-20260711-01/IMP-201 (stale
+  evidence-pack po trailing commitu), OBS-20260711-02 (CP2 míjí e2e), OBS-20260708-04 (steps[]
+  pending), queue/active stale (OBS-20260709-06), + PM-cited-ungrounded (yq --profile bypass P061
+  E2, audit-log dirty-tree) — ty se GROUNDUJÍ při EPIC 1/3, jinak vyjmou; NEVYMÝŠLET detaily.
+- **D4 (C4 content-verdict blocking):** dnes C4 umí hlavně presence/freshness. E10 přidá
+  content-verdict: REQUIRED input present+valid-JSON, ale OBSAHOVĚ failující → NESMÍ pustit release.
+  C4 rozlišuje 5 stavů: `missing` / `stale` / `invalid` / `present-but-failing` / `waived`.
+  **Waiver NEmění fail→pass** — jen ho viditelně povolí jako waiver (blocker zůstává, release_ready
+  logika nezměněná; navazuje na P060 Krok 8 waived semantiku).
+- **D5 (IMP-179 = HARD blocker promotion):** dokud subagenti Auditor/Curator/Verifier mohou běžet
+  ze stale plugin cache / stale `agents/*.md`, E10 NESMÍ zapnout blocking založený na jejich
+  výstupech. Plán MUSÍ dodat **mechanický důkaz** aktuálnosti instrukcí: dispatch-time freshness
+  hash check NEBO povinný restart/plugin-refresh gate NEBO jiný mechanický důkaz. Textové „agent má
+  použít aktuální instrukce" NESTAČÍ.
+- **D6 (IMP-201 před C4 blocking):** D4 CP3-Freshness-Exception nemá ekvivalent pro gates/evidence
+  pack → C4 by false-blockl legitimní trailing docs/comment commit. E10 buď **zavře IMP-201**
+  (bounded rozšíření D4 freshness-exception na `aid-evidence-verify.sh`/`aid-release-policy.sh`),
+  NEBO **explicitně drží C4 v observe** pro tento typ případů (žádné tiché false-block).
+- **D7 (bookkeeping hygiene preflight = prerequisite):** E10 kalibrace nesmí měřit bordel
+  v bookkeeping vrstvě. Před promotion MUSÍ být dořešené NEBO explicitně vyjmuté: audit-log
+  dirty-tree self-block (`aid-fsm init --force`), `fsm-state.steps[].status` pending po DONE,
+  oficiální reporty untracked/stale, queue/active stale po merge. Samostatný preflight, který
+  BLOKUJE postup do promotion, pokud to není clean/excluded.
+- **D8 (rozhodovací tabulka per mechanismus):** pro každý C0-C4 check E10 vyprodukuje řádek:
+  `promote_to_blocking` / `keep_observe` / `keep_dual_run` / `defer` / `remove_or_alias_in_E11_candidate`.
+  Podloženo daty: chycené failure classes, počet false positives, cena času, unique detekční
+  hodnota vs legacy. Bez datového podkladu se rozhodnutí nezapíše.
+- **D9 (rychlost = acceptance criterion):** povinné metriky (dispatch count/EPIC, LLM/model calls,
+  test/gate wall-clock, čas full suites, úspora risk-profile selectoru, medián EPIC gate cyklu po
+  P061). **Bez těchto dat E10 NENÍ hotové** — nemáme důkaz, že v2 není jen další pomalá vrstva.
+- **D10 (E10 NEmaže legacy):** odstranění/redukce = E11. E10 jen vytvoří datové rozhodnutí, co může
+  jít v E11 pryč / na alias. Výjimka: prokazatelná dekorace ŠKODÍCÍ měření → `disabled-for-calibration`,
+  ale VÝSLOVNÉ PM rozhodnutí (ne automaticky).
+- **D11 (Codex/cross-provider independence nesmí být fingovaná):** není-li Codex CLI /
+  cross-provider dispatch mechanicky dostupný+doložený → audit report `unverifiable` nebo
+  `context_only`. „Host má codex binary" ≠ důkaz, že konkrétní audit reálně běžel přes Codex.
+- **D12 (roadmap preconditions převzaty):** roadmap E10 tvrdé preconditions (IMP-179 [=D5];
+  nenulový `c3_hook_fired` = C3 gate reálně naskočil; P060 DONE) jsou SPLNĚNÉ/pokryté nebo ověřené
+  v §Preconditions. IMP-177 „c3_hook_fired end-to-end metric" je součást EPIC 2 (per roadmap anchor
+  `2f86e3c`).
+
+## Stakeholder Brief
+
+Za posledních 9 fází jsme postavili kontrolní systém C0-C4, ale skoro všechno běží v režimu
+„pozoruj a loguj" — starý systém pořád rozhoduje. Nikdo zatím nedokázal ČÍSLY, že nový systém
+chytá vady stejně dobře jako starý + nezávislý audit, ani kolik to stojí času. E10 to má prokázat:
+vezme známá historická selhání (E-047, E-044, P045) i čerstvé reálné incidenty (stale evidence-pack,
+CP2 míjí e2e, gate-profile bypass, bookkeeping stale), pustí je proti novému systému a změří —
+kolik chytí, kolik zbytečně zablokuje, za jakou cenu. Souběžně E10 zohlední P061 gate-profily
+(vznikly kvůli brutální pomalosti testů) a měří rychlost jako tvrdé acceptance kritérium. Výstup
+E10 je **rozhodovací tabulka**: pro každý check datové rozhodnutí promote/observe/dual-run/defer/
+E11-remove-candidate. Blocking se zapne JEN tam, kde to data unesou a jen po vyřešení tvrdých
+preconditions (stale agent instrukce IMP-179, stale evidence-pack IMP-201, bookkeeping hygiene).
+E10 nic legacy nemaže — to je E11. Hodnota E10: poprvé rozhodujeme o bezpečnosti a rychlosti AID
+podle dat, ne podle víry.
+
+## Context
+
+Stav (grounded 2026-07-12; detail + honest grounding statusy v `.aid-o/work/interim-P062.md`):
+- **Roadmap E10** (docs/plans/AID-control-system-v2-roadmap.md:236-242): core = kompozitní
+  regression fixtures E-047/E-044/P045; `aid-control-metrics.sh` (false-DONE/false-positive/náklady);
+  dual-run new-vs-old; numerické budget stropy (T6); promotion observe→blocking + negative fixtures
+  + positive controls. Tvrdé preconditions: IMP-179 + cache drift; nenulový `c3_hook_fired`; P060 DONE.
+- **Verze:** v2.55.0 (P061 E1 merged, `4bcc86a`). P060 = v2.54.0 DONE. P059 = v2.53.0. E10 cílí
+  **v2.56.0** (ověřit CHANGELOG header při run-startu).
+- **C4 dnes** (`aid-release-policy.sh`, P059 + P060 Krok 8): 12 vstupů, presence/freshness/at-head
+  (head_match), missing required → blocked. **Content-verdict blocking záměrně NENÍ** (P059 D-decision,
+  „deferred to E10"). `RELEASE_DECISION_POLICY=observe` default (dual-run neblokuje). → D4.
+- **P061 gate-profily** (v2.55.0, E1/6): risk-based gate profiles substrate + plan-gate floor
+  (`plan_gate_profile_excluded`, `--profile` flag na aid-run-gates.sh, `gate_profiles` v projektu).
+  E2-E6 pending. E10 měří rychlost s/bez profilů. → D2, D9.
+- **Firmně doložené kalibrační incidenty:** OBS-20260711-01 (BACKLOG:1934) = IMP-201 (stale
+  evidence-pack po verified-cosmetic trailing commitu → C4 by false-blockl; live-caught na AID
+  E-061-1_6, positive control); OBS-20260711-02 (BACKLOG:2002, CP2 scope míjí full e2e, stale
+  assertion 1 step nedetekován); OBS-20260708-04 (BACKLOG:783, steps[].status pending po DONE);
+  OBS-20260709-06 (queue/active stale po merge, částečně P060); IMP-179 (BACKLOG:1209/1521 +
+  .aid-o/work/backlog.md, stale agent instrukce, session+cache vrstva).
+- **PM-citované, ZATÍM NEDOLOŽENÉ v committed ledgeru (honest flag — NEVYMÝŠLET):** (a) audit-log
+  dirty-tree self-block při `aid-fsm init --force` (grep BACKLOG/backlog.md = 0); (b) yq `--profile`
+  injection/selection bypass z P061 E2 (E2 nemerged, R-E061-2 evidence existuje, grep = 0). Oba se
+  GROUNDUJÍ při EPIC 1 (a) / EPIC 3 (b); nedoloží-li se konkrétní incident, VYJMOUT z datasetu
+  s poznámkou, ne fabrikovat.
+
+## Goal
+
+Na reálných datech prokázat, že C0-C4 kontroly chytají historické i čerstvé vady, neblokují
+legitimní změny a za jakou cenu (kvalita + rychlost); vyřešit tvrdé preconditions (IMP-179
+mechanicky, IMP-201, bookkeeping hygiene); přidat C4 content-verdict blocking (5 stavů, waiver
+visible-not-pass); a vyprodukovat datově podloženou **rozhodovací tabulku** per C0-C4 check
+(promote/observe/dual-run/defer/E11-remove-candidate). Promotion observe→blocking JEN pro checky,
+které kalibraci projdou a mají splněné preconditions. Žádné mazání legacy (E11). Vše write-only
+dokud P061 není DONE.
+
+## Scope
+
+**In scope:** `aid-e10-preflight.sh` (bookkeeping hygiene gate); IMP-179 mechanický freshness důkaz
+(dispatch-time hash / refresh gate); IMP-201 resolution (D4-extension) nebo observe-hold;
+`aid-control-metrics.sh` (kvalita + rychlost metriky); kompozitní regression fixtury (původní +
+grounded nové); dual-run new-vs-old harness + divergence klasifikace; C4 content-verdict blocking
+(5 stavů) v `aid-release-policy.sh`; P061 gate-profile speed kalibrace; per-control rozhodovací
+tabulka; promotion mechanismus (per-check policy flip, jen pro schválené); Codex independence
+honesty guard; registry/version/CHANGELOG; bats red-green.
+
+**Out of scope (E11 nebo mimo):** mazání/redukce legacy kontrol (E11); FC-38 Curator auto-approve
+neutralizace (E10 promotion sousedí, ale samotná neutralizace = cutover); B-008 base-side range;
+nové C2 lenses; jakákoli změna, která P061 gate-profile mechaniku přepisuje (E10 ji jen měří/používá,
+neopravuje — P061 doména); executable run před P061 DONE.
+
+## Preconditions (TVRDÉ — `/aid-run P062` NESMÍ začít, dokud vše neplatí)
+
+**Přepsáno re-groundem 2026-08-14.** Původní znění (šest mergnutých EPICů,
+cíl v2.56.0) je zachované v git historii tohoto souboru; nepřepisuje se
+zpětně, ale neplatí. Doložit ve run-start evidenci:
+
+1. **P061 uzavřený** — SPLNĚNO 2026-08-14. Ověření je uzavírací záznam plánu
+   (`.aid-o/plans/P061-*.md`, sekce `## Uzavření`, `status: closed`), **ne**
+   počet mergů: `plan_branch` mergne EPIC do větve plánu a vydává jen plán, a
+   D1 plánu P061 vždycky říkal E1-E5, ne šest ze šesti. **Výslovná výjimka:**
+   D5 nedodáno (IMP-506), takže Fast Mode nevydává profilové události a
+   **není předmětem měření E10**. Nesmí se to vydávat za změřenou nulu.
+2. **P060 DONE** — SPLNĚNO (`## [2.54.0]`, tag v2.54.0).
+3. **Bookkeeping hygiene** (D7) — `aid-e10-preflight.sh` vrací clean NEBO PM
+   položky výslovně vyjme. Dnes clean NENÍ: `R-E045-1`, `R-E049-1`, `R-E057-2`
+   jsou `DONE` s kroky ve stavu `pending` (změřeno 2026-08-14).
+4. **IMP-179 mechanický důkaz** (D5) — bez něj **žádná** blocking promotion
+   kontroly stojící na výstupu subagenta. Nezpůsobilé kontroly se v rozhodovací
+   tabulce označí, ne vynechají.
+5. **IMP-201 rozhodnut** (D6) — buď opraveno a otestováno proti doloženému
+   případu trailing commitu, nebo C4 výslovně **drží observe** pro freshness a
+   content blocking. Procházející test výjimky sám o sobě nestačí: IMP-201 je
+   ověřeně reálný a ožívá ve chvíli, kdy E10 přepne na blocking.
+6. **Rozpočet merge cesty rozhodnut** (nová podmínka) — merge cesta je
+   18 min 07 s proti rozpočtu 10 min, tedy **81 % nad**, ještě než E10 cokoli
+   přidá. Před promotion musí padnout jedno ze tří: rozpočet se zvedne cestou
+   vlastníka standardu, merge cesta se zmenší, nebo se výjimka výslovně
+   zapíše. E10 tenhle stav nesmí mlčky znormalizovat.
+7. **Checkout main, clean**; roadmap + BACKLOG čitelné z disku.
+
+---
+
+## EPIC 1 — Preflight & tvrdé preconditions (Steps 1-3)
+
+**EPIC 1: E10 preflight & hard preconditions (Steps 1-3)**
+
+### Step 1: Bookkeeping hygiene preflight (aid-e10-preflight.sh)
+
+**Objective:** Samostatný preflight, který PROKÁŽE, že bookkeeping vrstva není stale, jinak
+BLOKUJE postup do kalibrace/promotion — E10 nesmí měřit bordel (D7).
+
+**Files:**
+- Create: `plugins/aid-orchestrator/scripts/aid-e10-preflight.sh` — kontroluje 4 třídy: (a)
+  audit-log dirty-tree self-block při `aid-fsm init --force` (**GROUND FIRST:** doložit reálný
+  incident/repro z aktuálního probe; nedoloží-li se, položku vyjmout s poznámkou, ne fabrikovat);
+  (b) `fsm-state.steps[].status` pending po DONE (OBS-20260708-04); (c) oficiální reporty
+  untracked/stale (`.aid-o/reports/*`, delivery/boundary); (d) queue/active stale po merge
+  (OBS-20260709-06, `git merge-base --is-ancestor` per blocked dep). Výstup: `e10-preflight.json`
+  (per-třída clean|dirty|excluded + důvod). Exit ≠ 0 při dirty bez PM-exclude.
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-preflight.bats` — red-green:
+  dirty fixture per třída → exit ≠ 0 + dirty řádek; clean → exit 0; PM-excluded → exit 0 + excluded řádek.
+
+**Acceptance Criteria:**
+- [ ] Preflight detekuje každou ze 4 tříd na fixtuře (grounded třídy) → exit ≠ 0; clean → exit 0.
+- [ ] PM-exclude mechanismus: explicitně vyjmutá třída → exit 0 + `excluded` řádek s důvodem (ne tichý pass).
+- [ ] `e10-preflight.json` per-třída status; dirty bez exclude blokuje (promotion gate to čte).
+- [ ] Audit-log dirty-tree třída: buď doložený repro + test, NEBO explicitní `not_grounded` skip s poznámkou (žádná fabrikace).
+
+**Effort:** M
+**AID Role:** backend
+
+### Step 2: IMP-179 mechanický freshness důkaz agent instrukcí
+
+**Objective:** Mechanicky prokázat, že dispatchovaný subagent (Auditor/Curator/Verifier) dostal
+AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promotion na jejich výstupech
+(D5 hard blocker). Textové „agent má použít aktuální" nestačí.
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/scripts/lib/` (nový `aid-agent-freshness.sh`) — dispatch-time
+  freshness: spočítá hash relevantního `agents/<role>.md` (+ plugin cache controller hash, navazuje
+  na P060 cache-preflight) a zapíše `agent_instruction_hash` do dispatch eventu; při konzumaci
+  výstupu FSM porovná zapsaný hash s aktuálním repo hashem → mismatch = `agent_instructions_stale`
+  event. **Rozhodnout mechanismus** (fork pro vetting): (A) dispatch-time hash check (detekce +
+  block promotion), (B) povinný restart/plugin-refresh gate před blocking, (C) kombinace. Default
+  návrh: A (detekce + observe) + promotion-gate čte nenulový stale-count.
+- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — dispatch/konzumpce hook (kde se
+  Auditor/Curator/Verifier výstup čte) volá freshness check; stale → event, promotion-gate to počítá.
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats` — red-green:
+  dispatch se stale hashem (agents/*.md změněné po dispatchi) → `agent_instructions_stale` event;
+  fresh → žádný event; promotion-gate s nenulovým stale-count → blokuje blocking-promotion agent-checků.
+
+**Acceptance Criteria:**
+- [ ] Dispatch zapíše `agent_instruction_hash`; konzumpce s mismatch → `agent_instructions_stale` event (mechanický důkaz, ne text).
+- [ ] Fresh dispatch → žádný stale event.
+- [ ] Promotion-gate: nenulový stale-count v datech → BLOKUJE promotion agent-output kontrol (Auditor/Curator/Verifier) na blocking (D5).
+- [ ] Pokrytí je poctivé: freshness kryje agents/*.md + plugin cache; NEkryje jiné vrstvy → dokumentováno (žádné over-claim).
+
+**Effort:** L
+**AID Role:** backend
+
+### Step 3: IMP-201 resolution (D4-extension) nebo explicit C4 observe-hold
+
+**Objective:** Zavřít stale-evidence-pack false-block třídu (OBS-20260711-01): D4
+CP3-Freshness-Exception nemá ekvivalent pro gates/evidence pack → jakmile C4 enforcuje, false-blockne
+legitimní trailing docs/comment commit. E10 buď zavře IMP-201, nebo explicitně drží C4 v observe
+pro tento typ (D6). NIKDY tiché false-block.
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/scripts/aid-evidence-verify.sh` + `aid-release-policy.sh` —
+  bounded rozšíření D4 freshness-exception: verified-cosmetic trailing commit (git trailer
+  ekvivalent D4 `CP3-Freshness-Exception`, path scope tests/docs/comment) → evidence-pack NENÍ
+  flagnut stale pro tento commit; disclosure event `evidence_freshness_exception` s file-listem
+  (E10 měří zneužití, jako D4). Cokoli mimo scope → dál stale (fail-closed).
+- Modify: `plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml` — pokud se
+  IMP-201 nezavře do promotion, `evidence_pack_freshness_policy: observe` pro trailing-commit třídu
+  (explicitní observe-hold, ne tiché false-block); rozhodnutí resolve-vs-hold = PM fork.
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats` —
+  red-green: verified-cosmetic trailing commit → pack NENÍ stale (exception) + event; produkční
+  trailing commit → pack STALE (fail-closed); bez exception traileru → stale.
+
+**Acceptance Criteria:**
+- [ ] Verified-cosmetic trailing commit (D4-ekvivalent trailer + path scope) → evidence-pack NENÍ flagnut stale + `evidence_freshness_exception` event s file-listem.
+- [ ] Produkční trailing commit → pack STALE (fail-closed; exception se nesmí zneužít na produkční změnu).
+- [ ] Alternativa observe-hold: pokud PM zvolí nezavírat IMP-201, C4 pro tuto třídu je explicitně `observe` (žádné tiché false-block; dokumentováno v policy).
+- [ ] Reprodukce původního OBS-20260711-01 case (E-061-1_6 trailing `25bff3e`): před fixem C4-enforce by blokoval, po fixu ne.
+
+**Effort:** M
+**AID Role:** backend
+
+---
+
+## EPIC 2 — Měřicí instrumentace (Steps 4-5)
+
+**EPIC 2: E10 measurement instrumentation (Steps 4-5)**
+
+### Step 4: aid-control-metrics.sh — kvalitní metriky (detekce, false-DONE, false-positive)
+
+**Objective:** Nástroj, který z run-evidence spočítá KVALITU kontrol: kolik failure classes který
+C0-C4 check chytil, false-DONE (prošlo a nemělo), false-positive (blokoval zbytečně), per-control
+unique detekci vs legacy (D1, D8 podklad). + ověří nenulový `c3_hook_fired` (roadmap precondition,
+IMP-177 end-to-end).
+
+**Files:**
+- Create: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` — vstup: run-evidence dirs
+  (dataset EPIC 3) + timeline events; výstup: `control-metrics.json` (per check: caught_classes[],
+  false_done, false_positive, unique_detection_vs_legacy). Deterministické (žádný LLM).
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats` — red-green na
+  fixture evidence: check který chytil známou vadu → caught; check který pustil → false_done; +
+  `c3_hook_fired` count nenulový na fixture s live C3 runem.
+
+**Acceptance Criteria:**
+- [ ] Na fixture datasetu: `control-metrics.json` per-check caught_classes / false_done / false_positive spočítané deterministicky.
+- [ ] `c3_hook_fired` count nenulový na fixtuře s reálným C3 runem (IMP-177 end-to-end ověření, roadmap precondition 2).
+- [ ] Unique-detection vs legacy: pro každý check spočítá, kolik vad chytil, co legacy nechytil (podklad D8 tabulky).
+- [ ] Metriky reprodukovatelné (rerun = stejná čísla; žádná mutable/gitignored závislost bez pinnutí — poučení z IMP-182 input_hash).
+
+**Effort:** L
+**AID Role:** backend
+
+### Step 5: Speed metriky (dispatch/LLM/wall-clock/full-suite/profile-úspora/medián)
+
+**Objective:** Rychlost jako tvrdé acceptance kritérium (D9). Bez těchto dat E10 NENÍ hotové —
+jinak nemáme důkaz, že v2 není jen další pomalá vrstva.
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` (+ lib) — speed sekce:
+  dispatch count/EPIC, LLM/model calls (z timeline dispatch eventů), test/gate wall-clock, čas
+  full suites, úspora risk-profile selectoru (P061: full vs profile wall-clock delta), medián
+  běžného EPIC gate cyklu po P061. Zdroj: timeline event timestamps + gate report durations +
+  P061 profile eventy.
+- Modify: FSM/gate-runner instrumentace (pokud chybí timestamp granularita) — zajistit, že timeline
+  nese dispatch start/end + gate durations (navazuje na aid-run-gates.sh duration_ms).
+- Create/extend: `test-control-metrics.bats` — red-green: speed sekce spočítá dispatch count +
+  wall-clock z fixture timeline; profile-úspora = full - profile delta > 0 na fixtuře.
+
+**Acceptance Criteria:**
+- [ ] `control-metrics.json` speed sekce: dispatch_count, llm_calls, gate_wall_clock, full_suite_time, profile_savings, median_gate_cycle — všechny spočítané z reálných evidence timestampů.
+- [ ] Profile-úspora měřitelná: full-suite wall-clock vs P061-profile wall-clock delta na dataset EPICu.
+- [ ] Speed metriky jsou POVINNÉ acceptance: chybí-li kterákoli → E10 metrics report `incomplete` (D9, ne tichý pass).
+
+**Effort:** M
+**AID Role:** backend
+
+---
+
+## EPIC 3 — Kalibrační dataset + dual-run (Steps 6-7)
+
+**EPIC 3: Calibration dataset + dual-run (Steps 6-7)**
+
+### Step 6: Kompozitní regression fixtury (původní + grounded nové)
+
+**Objective:** Dataset známých vad, proti kterému se měří (D3). Každá fixtura deklaruje, KTERÁ
+vrstva ji má chytit (C1 deterministicky / C2 sémanticky / C3 audit / C4 agregace) — jinak je
+„chycení" neověřitelné.
+
+**Files:**
+- Create: `plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration/` — fixtury:
+  **původní** (E-047-1, E-047-4, E-047-5, E-044, P045 — reálná historická selhání);
+  **nové grounded** (OBS-20260711-01 stale evidence-pack; OBS-20260711-02 CP2-míjí-e2e;
+  OBS-20260708-04 steps[] pending; OBS-20260709-06 queue/active stale);
+  **PM-cited (GROUND FIRST, jinak vyjmout):** yq `--profile` bypass z P061 E2 (doložit z R-E061-2
+  audit/finding), audit-log dirty-tree (doložit z probe). Každá fixtura: `expected_catcher: <layer>`
+  + `failure_class`.
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-calibration-dataset.bats` —
+  každá fixtura projde příslušnou vrstvou a je CHYCENA očekávaným catcherem; nechycená → red.
+
+**Acceptance Criteria:**
+- [ ] Původní dataset (E-047-1/4/5, E-044, P045) jako fixtury, každá s `expected_catcher` + `failure_class`.
+- [ ] Grounded nové incidenty (OBS-20260711-01/02, OBS-20260708-04, OBS-20260709-06) jako fixtury.
+- [ ] PM-cited (yq bypass, audit-log dirty): buď doložená fixtura z reálné evidence, NEBO explicitní `not_grounded` skip s poznámkou v datasetu (žádná fabrikace).
+- [ ] Každá fixtura je chycena deklarovaným catcherem; negative control (typická regrese) MUSÍ failovat na správné vrstvě.
+
+**Effort:** L
+**AID Role:** qa
+
+### Step 7: Dual-run new-vs-old harness + divergence klasifikace
+
+**Objective:** Pustit dataset (i běžné EPICy) oběma cestami — nový C0-C4 vs starý CP/legacy — a
+klasifikovat divergence (D1). Navazuje na P059 dual-run substrát (`release_policy_dual_run`,
+`divergence_class`).
+
+**Files:**
+- Create: `plugins/aid-orchestrator/scripts/aid-dual-run.sh` — pro dataset/run porovná nový verdikt
+  (C0-C4) vs legacy verdikt; klasifikuje: `agree`, `new_stricter`, `legacy_stricter`,
+  `verification_only` (git-dirty šum, z P059), `new_unique_catch`, `legacy_unique_catch`. Výstup
+  `dual-run-report.json`. Filtruje `verification_only` ať netopí signál (P059 poučení).
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-dual-run.bats` — red-green: fixtura
+  kde nový chytí a legacy ne → `new_unique_catch`; kde legacy chytí a nový ne → `legacy_unique_catch`
+  (kritický pro D8 „nemazat legacy s unique detekcí"); shoda → `agree`.
+
+**Acceptance Criteria:**
+- [ ] Dual-run porovná nový vs legacy verdikt per fixture/run → `dual-run-report.json` s divergence třídou.
+- [ ] `legacy_unique_catch` je detekován (legacy chytil, co nový ne) — kritické: takový legacy check se v D8 NESMÍ označit E11-remove.
+- [ ] `verification_only` (git-dirty) je odfiltrován ať netopí signál (P059 poučení).
+- [ ] Dataset z EPIC 3 projde dual-runem; výstup je vstup pro control-metrics (Step 4) a decision table (Step 10).
+
+**Effort:** L
+**AID Role:** backend
+
+---
+
+## EPIC 4 — C4 content-verdict + gate-profile kalibrace (Steps 8-9)
+
+**EPIC 4: C4 content-verdict + gate-profile calibration (Steps 8-9)**
+
+### Step 8: C4 content-verdict blocking (5 stavů + waiver visible-not-pass)
+
+**Objective:** C4 dnes umí hlavně presence/freshness. E10 přidá content-verdict: REQUIRED input
+present+valid-JSON ale OBSAHOVĚ failující → NESMÍ pustit release (D4). Navazuje na P060 Krok 8
+head_match/waived semantiku.
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/scripts/aid-release-policy.sh` — per-input **5-stavová**
+  klasifikace: `missing` / `stale` / `invalid` (nevalidní JSON/schema) / `present-but-failing`
+  (present+valid, ale obsahový verdikt = fail, např. audit-report blocking_findings, gates_report
+  overall≠pass, semantic-review-final fail) / `waived`. REQUIRED s `present-but-failing` → blocked
+  → release_ready=false. **Waiver NEmění fail→pass** (blocker zůstává, jen viditelně `waived`;
+  navazuje na P060 `applies_to`).
+- Modify: `plugins/aid-orchestrator/defaults/schemas/release-decision.schema.json` — input status
+  enum rozšířit o 5 stavů (dnes má verdict enum; ověřit, jinak schema break — poučení P060 Krok 8).
+- Modify: `plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml` —
+  `content_verdict_policy: observe|blocking` (default observe do promotion; E10 promotion ho flipne
+  jen po kalibraci, D8).
+- Create/extend: `test-release-policy.bats` — red-green: REQUIRED present+valid-but-content-fails →
+  blocked (dnes by prošel = red); missing/stale/invalid rozlišené; waiver na failing input → verdikt
+  `waived`, blocker ZŮSTÁVÁ, release_ready NEpřejde na true.
+
+**Acceptance Criteria:**
+- [ ] REQUIRED input present + valid JSON + obsahový verdikt fail → `present-but-failing` → blocked → release_ready=false (dnes prochází = red-green důkaz).
+- [ ] C4 rozlišuje všech 5 stavů (missing/stale/invalid/present-but-failing/waived) — každý má test.
+- [ ] Waiver na failing input → `waived`, blocker ZŮSTÁVÁ, release_ready se NEZmění na pass (waiver = viditelné povolení, ne přepsání).
+- [ ] `content_verdict_policy` default observe; blocking se zapne jen promotion krokem (Step 11) po kalibraci; stávající release-policy suite zelená.
+
+**Effort:** L
+**AID Role:** backend
+
+### Step 9: P061 gate-profile speed kalibrace + escalation důkaz
+
+**Objective:** Potvrdit, že P061 risk-based profily reálně zrychlují A že rizikové změny pořád
+eskalují na full/release profil (D2). E10 NESMÍ znovu zafixovat full-suite-per-EPIC default.
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` — profile-kalibrační sekce:
+  wall-clock full-suite vs profile per risk level; escalation matrix (které změny → který profil).
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats` —
+  red-green: low-risk change → light profil (rychlejší, měřitelná úspora); high-risk/security change
+  → eskaluje na full/release profil (NESMÍ zůstat na light); default NENÍ full-suite-per-EPIC.
+
+**Acceptance Criteria:**
+- [ ] Profile speed delta měřená: low-risk profil vs full-suite wall-clock, úspora > 0 doložená.
+- [ ] Escalation důkaz: high-risk/security change eskaluje na full/release profil (behaviorální test, ne konfigurace).
+- [ ] Default NENÍ full-suite-per-EPIC (regrese by to znovu zafixovala = red).
+- [ ] **Precondition guard:** tento krok předpokládá P061 DONE; při write-only stavu je AC ověřitelné jen na fixtuře, ne na živém P061 — dokumentováno.
+
+**Effort:** M
+**AID Role:** backend
+
+---
+
+## EPIC 5 — Rozhodovací tabulka + promotion (Steps 10-11)
+
+**EPIC 5: Decision table + promotion (Steps 10-11)**
+
+### Step 10: Per-control rozhodovací tabulka (datově podložená)
+
+**Objective:** Pro každý C0-C4 check vyprodukovat datové rozhodnutí (D8): promote_to_blocking /
+keep_observe / keep_dual_run / defer / remove_or_alias_in_E11_candidate. Podklad: EPIC 2 metriky +
+EPIC 3 dual-run.
+
+**Files:**
+- Create: `plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh` — vstup: control-metrics.json
+  + dual-run-report.json; výstup: `e10-decision-table.json` + human `e10-decision-table.md`. Per
+  check: rozhodnutí + podklad (caught_classes, false_positives, cena_času, unique_detection). Řádek
+  bez datového podkladu se NEZAPÍŠE (nebo `defer` s důvodem „insufficient data").
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-decision-table.bats` — red-green:
+  check s nulovou unique detekcí + má legacy dvojče → `remove_or_alias_in_E11_candidate`; check
+  s unique detekcí + nízké FP → `promote_to_blocking` kandidát; nedostatek dat → `defer`.
+
+**Acceptance Criteria:**
+- [ ] `e10-decision-table.{json,md}` per C0-C4 check: 1 z 5 rozhodnutí + datový podklad (4 pole: caught_classes, false_positives, cost, unique_detection_vs_legacy).
+- [ ] Check bez datového podkladu → `defer` s důvodem (NE promote naslepo).
+- [ ] `remove_or_alias_in_E11_candidate` JEN pro check s prokázanou nulovou unique detekcí v dual-run datech (D8; legacy s unique catch se nikdy neoznačí).
+- [ ] Tabulka je vstup pro E11 (D10: E10 rozhoduje, E11 provádí).
+
+**Effort:** M
+**AID Role:** backend
+
+### Step 11: Promotion mechanismus + Codex honesty + registry/version
+
+**Objective:** Zapnout blocking JEN pro checky, které tabulka (Step 10) schválila `promote_to_blocking`
+A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex independence honesty (D11).
+
+**Files:**
+- Modify: příslušné policy soubory (`c3-audit-policy.yaml`, `release-decision-policy.yaml`,
+  `delivery-gate.yaml`, `review-profiles.yaml`, CP3 freshness policy) — per-check flip
+  observe→blocking JEN pro schválené checky; ostatní zůstávají observe/dual-run. Flip je gated na
+  §Preconditions (preflight clean + IMP-179 mechanický důkaz + IMP-201 resolved/observe-hold).
+- Modify: `plugins/aid-orchestrator/scripts/` audit dispatch (Auditor) — **Codex honesty guard
+  (D11):** není-li Codex CLI/cross-provider mechanicky dostupný+doložený → audit report
+  `unverifiable`/`context_only`; „host má codex binary" ≠ důkaz reálného Codex dispatchi.
+- Modify: `enforcement-registry.yaml` (nové řádky: e10_preflight, agent_freshness_check,
+  evidence_freshness_exception, content_verdict_5state, e10_decision_table + per-check promoted
+  flags; totals sync); 7 version míst → **v2.56.0**; CHANGELOG ×2; roadmap E10→DONE poznámka +
+  E11 vstup (decision table).
+- **D10 guard:** žádný legacy check se v E10 nemaže; `disabled-for-calibration` JEN s explicitním
+  PM rozhodnutím zapsaným v decision-table.
+
+**Acceptance Criteria:**
+- [ ] Promotion flip observe→blocking JEN pro checky se `promote_to_blocking` v decision-table A splněnými preconditions; ostatní zůstávají observe/dual-run (test: check bez schválení zůstane observe).
+- [ ] Promotion je HARD-gated na preconditions: preflight dirty NEBO nenulový agent-stale-count NEBO nevyřešený IMP-201 → promotion NEproběhne (blocking-promotion na agent-checkách blokován D5).
+- [ ] Codex honesty: bez mechanického důkazu Codex dispatchi → audit report `unverifiable`/`context_only` (ne falešné „independent").
+- [ ] Legacy netknuté (D10): git diff neukazuje mazání legacy kontrol; `disabled-for-calibration` jen s PM podpisem v decision-table.
+- [ ] Registry totals == length; 7 version míst = 2.56.0; CHANGELOG ×2 `## [2.56.0]`; roadmap E10 označen DONE + decision-table jako E11 vstup.
+
+**Effort:** L
+**AID Role:** release
+
+---
+
+## Acceptance Criteria
+
+Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací vrací absent/fail
+(artefakty vznikají až během runu), NIKDY skip.
+
+> **Re-grounding 2026-08-14 — co s tímhle blokem ještě zbývá.** AC11 a AC12
+> byly přepsané níže, protože **procházely naprázdno**: jedna půlka AC11 je
+> pravda z historie a AC12 vracelo zelenou nad prázdným repozitářem. Přibyly
+> AC13 a AC14 na rozpočet a rozhodovací tabulku.
+>
+> **AC1, AC4, AC6, AC7 a AC9 zůstávají zatím tak, jak byly, a je to vědomý
+> dluh** — jsou to kontroly existence artefaktu (soubor existuje, sada je
+> zelená, adresář má devět položek). Projdou nad špinavým preflightem stejně
+> jako nad čistým, nad nespuštěným dual-runem stejně jako nad spuštěným.
+> Stejně tak AC5 a AC10 grepují jméno v souboru místo aby cokoli změřily nebo
+> rozhodly, a AC2/3/8 dokazují jen, že *nějaké* testy proběhly. Přepsat se mají
+> na tvrzení o **výsledku v evidenci běhu**, ne o přítomnosti souboru — stejným
+> vzorem, jaký používají nová AC13/AC14. Neudělalo se to v tomhle průchodu
+> záměrně: mění to, co jednotlivé kroky musí vyrobit, a to patří do srovnání
+> kroků po PM revizi, ne před ní.
+
+- [ ] AC1: Bookkeeping preflight existuje a je spustitelný (EPIC 1 Step 1).
+  ```yaml
+  type: cmd
+  cmd: "test -f plugins/aid-orchestrator/scripts/aid-e10-preflight.sh && bash -n plugins/aid-orchestrator/scripts/aid-e10-preflight.sh"
+  expected_exit: 0
+  ```
+- [ ] AC2: IMP-179 freshness suite existuje a je zelená (EPIC 1 Step 2).
+  ```yaml
+  type: cmd
+  cmd: "test -f plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  expected_exit: 0
+  ```
+- [ ] AC3: IMP-201 evidence-freshness-exception suite zelená (EPIC 1 Step 3).
+  ```yaml
+  type: cmd
+  cmd: "rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  expected_exit: 0
+  ```
+- [ ] AC4: aid-control-metrics.sh existuje + kvalitní metriky suite zelená (EPIC 2 Step 4).
+  ```yaml
+  type: cmd
+  cmd: "test -f plugins/aid-orchestrator/scripts/aid-control-metrics.sh && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  expected_exit: 0
+  ```
+- [ ] AC5: Speed metriky přítomné ve výstupu (EPIC 2 Step 5) — control-metrics.json má speed sekci s 6 poli.
+  ```yaml
+  type: cmd
+  cmd: "grep -qE 'dispatch_count|gate_wall_clock|profile_savings|median_gate_cycle' plugins/aid-orchestrator/scripts/aid-control-metrics.sh"
+  expected_exit: 0
+  ```
+- [ ] AC6: Kalibrační dataset fixtury existují (původní + grounded nové) (EPIC 3 Step 6).
+  ```yaml
+  type: cmd
+  cmd: "test -d plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration && test $(ls plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration | wc -l) -ge 9"
+  expected_exit: 0
+  ```
+- [ ] AC7: Dual-run harness + legacy_unique_catch detekce (EPIC 3 Step 7).
+  ```yaml
+  type: cmd
+  cmd: "test -f plugins/aid-orchestrator/scripts/aid-dual-run.sh && grep -q 'legacy_unique_catch' plugins/aid-orchestrator/scripts/aid-dual-run.sh"
+  expected_exit: 0
+  ```
+- [ ] AC8: C4 content-verdict 5-stav + waiver-visible-not-pass suite zelená (EPIC 4 Step 8).
+  ```yaml
+  type: cmd
+  cmd: "rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0 && test $(grep -cE '^@test.*(present-but-failing|content_verdict|5.state|waived)' plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats) -ge 3"
+  expected_exit: 0
+  ```
+- [ ] AC9: Gate-profile speed kalibrace + escalation suite zelená (EPIC 4 Step 9).
+  ```yaml
+  type: cmd
+  cmd: "rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  expected_exit: 0
+  ```
+- [ ] AC10: Rozhodovací tabulka generátor + 5 rozhodnutí (EPIC 5 Step 10).
+  ```yaml
+  type: cmd
+  cmd: "test -f plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh && grep -qE 'promote_to_blocking' plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh && grep -qE 'remove_or_alias_in_E11_candidate' plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh"
+  expected_exit: 0
+  ```
+- [ ] AC11: Promotion gated na preconditions + Codex honesty + **vydání alokované za běhu**
+  (EPIC 5 Step 11). **Přepsáno re-groundem 2026-08-14:** původní znění pinovalo
+  `2.56.0` a jeho CHANGELOG půlka **procházela naprázdno** — `## [2.56.0]` je
+  v souboru dávno, z nesouvisejícího vydání, takže AC bylo splněné bez jediného
+  řádku E10, zatímco jeho `plugin.json` půlka byla bez zpětného kroku
+  nesplnitelná. Číslo se proto nepinuje vůbec: AC ověří, že **verze v
+  `plugin.json` je zároveň nejnovější hlavičkou CHANGELOGu** a že ta sekce
+  jmenuje E10.
+  ```yaml
+  type: cmd
+  cmd: "v=$(jq -r .version plugins/aid-orchestrator/.claude-plugin/plugin.json); top=$(grep -m1 -oE '^## \\[[0-9]+\\.[0-9]+\\.[0-9]+\\]' CHANGELOG.md | tr -d '## []'); test -n \"$v\" && test \"$v\" = \"$top\" && awk -v v=\"$v\" '$0 ~ \"^## \\\\[\"v\"\\\\]\"{f=1;next} f&&/^## \\[/{exit} f' CHANGELOG.md | grep -qiE 'E10|control-metrics|decision table|promotion'"
+  expected_exit: 0
+  ```
+- [ ] AC12: Legacy netknuté (D10) — žádné mazání legacy kontrolních skriptů **za běhu E10**.
+  **Přepsáno re-groundem 2026-08-14:** kotva `v2.55.0` je 31 vydání stará a dnes
+  vrací nula smazání i ve stavu, kdy z E10 neexistuje **nic** — dokazovala tedy
+  historii, ne chování E10. Kotvou je výchozí commit vlastního běhu.
+  ```yaml
+  type: cmd
+  cmd: "base=$(jq -r '.base_commit // empty' .aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/fsm-state.json 2>/dev/null || yq -r '.base_commit // \"\"' .aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/fsm-state.yaml); test -n \"$base\" || { echo 'no base_commit — AC12 cannot anchor'; exit 1; }; del=$(git diff --name-only --diff-filter=D \"$base\"..HEAD -- plugins/aid-orchestrator/scripts/ plugins/aid-orchestrator/agents/ | wc -l); test \"$del\" -eq 0"
+  expected_exit: 0
+  ```
+- [ ] AC13 (nové): Rozhodovací tabulka má pro každou kontrolu C0-C4 **právě jeden**
+  výsledek z šesti, a `unverifiable` verdikty C3 se sledují zvlášť, ne jako ne-fail.
+  Šestým výsledkem je `cannot_promote_runtime_budget` — merge cesta je dnes 81 %
+  nad rozpočtem ještě před E10, a tabulka na to musí mít slovo.
+  ```yaml
+  type: cmd
+  cmd: "t=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/e10-decision-table.json; test -f \"$t\" || exit 1; jq -e 'if (.controls|length) < 5 then false else ([.controls[].decision] | all(. as $d | [\"promote_to_blocking\",\"keep_observe\",\"keep_dual_run\",\"defer\",\"remove_or_alias_in_E11_candidate\",\"cannot_promote_runtime_budget\"] | index($d) != null)) end' \"$t\" >/dev/null && jq -e '.c3_verdict_mix.unverifiable != null' \"$t\" >/dev/null"
+  expected_exit: 0
+  ```
+- [ ] AC14 (nové): Rozpočtové rozhodnutí je zapsané, ne obejité — evidence běhu
+  obsahuje naměřenou dobu merge cesty a jedno ze tří rozhodnutí PM.
+  ```yaml
+  type: cmd
+  cmd: "f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/merge-path-budget.json; test -f \"$f\" && jq -e '.measured_seconds > 0 and (.decision | IN(\"budget_raised\",\"path_reduced\",\"exception_recorded\"))' \"$f\" >/dev/null"
+  expected_exit: 0
+  ```
+
+## Rizika
+
+| Riziko | P | Dopad | Mitigace |
+|---|---|---|---|
+| P061 nedokončeno → E10 kalibruje starý stav | H | H | write-only gate; §Preconditions 1; spuštění až po P061 DONE (PM brief bod 2) |
+| PM-cited incidenty (yq bypass, audit-log) se nedoloží → fabrikace | M | H | honest `not_grounded` skip, ground-first při EPIC 1/3, ne vymýšlet (D3) |
+| Promotion zapnutá dřív, než IMP-179/IMP-201 vyřešené → blocking na stale/false | M | H | HARD precondition gate (D5, D6); promotion krok čte preflight + freshness + IMP-201 status |
+| Content-verdict blocking rozbije stávající release-policy suite | M | M | default observe, flip jen promotion krokem; schema enum ověřit (P060 poučení) |
+| Speed metriky neúplné → E10 se prohlásí za hotové bez důkazu rychlosti | M | M | D9: chybějící metrika → metrics report `incomplete`, ne tichý pass |
+| Legacy check s unique detekcí omylem označen E11-remove | L | H | dual-run `legacy_unique_catch` guard (Step 7 AC); D8 řádek podložený daty |
+| Codex independence fingovaná | M | M | D11 honesty guard: bez mechanického důkazu → unverifiable/context_only |
+
+## Proces po napsání (stav)
+
+Napsáno /aid-plan write. Dále (stejný rigor jako P059/P060): per-step vetting (adversariální, 1
+agent/step + koherence) → CP1-deep (high-risk: fsm/state, policy, release) → nezávislý
+/aid-verify-plan (kompletní check-table) → fix. **EPIC-gen a `/aid-run` AŽ po P061 DONE+merged**
+(write-only, PM brief bod 2). Do té doby plán zůstává jako schválený, ale nespuštěný podklad E10.
+
+## Amendment (P068, 2026-07-26) — E10 precondition
+
+The "all 6 EPICs complete" precondition counted EPIC-level releases. Under
+`plan_branch` an EPIC merges into the plan branch and only the plan releases, so
+the precondition is the plans own close marker plus its committed lifecycle
+receipt, not six EPIC releases. P062 remains `write_only_until` its
+preconditions are met; this amendment does not make it executable and does not
+change its status.
+
+This file is gitignored, so this note is for local readers. The durable record
+is in `plugins/aid-orchestrator/defaults/enforcement-registry.yaml`.
