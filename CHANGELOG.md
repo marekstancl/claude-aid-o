@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.86.0] — 2026-08-14
+
+> The merge path stopped being a merge path: five T2 suites had dedicated jobs on every
+> push, two of them needing hours against a 35-minute limit, so CI had been red on every
+> commit for days. This release puts the tier tag back in charge, and makes the most
+> expensive suite in the portfolio 3.2x cheaper by building its fixture once instead of 198
+> times.
+
+### Added
+- **`test-tier-ci-topology.sh`** — a T0 guard that fails when a suite tagged `t2` is named by a job in a push/PR-triggered workflow, when the nightly has no untiered run, or when any discovered suite is run by nothing at all. It parses workflows with `yq` and refuses rather than guesses on indirection it cannot follow (`workflow_call`, `workflow_run`, expression-built commands).
+- **`aid-bats-permute.sh`** — writes a seeded case-order permutation of a bats suite, so "the cases still pass in a different order" is checkable on bats 1.8.2, which has no shuffle. It proves its output is a permutation (line multiset + case-name set) before writing it.
+- **Snapshot fixtures in the plan-final boundary suite** — each distinct fixture is built once per file through the same builder as before and restored as a byte copy per case, with the shell state a copy cannot carry (exported env, cwd, and bats' `run` globals) re-established explicitly. Four cases assert the layer's own guarantees, including a built-vs-restored shape comparison and a contamination sentinel.
+
+### Changed
+- **Delegation is removed; the tier tag is the only authority for where a suite runs** — the five `DELEGATED_SUITES` entries and their dedicated CI jobs are gone. `--tier t0`/`--tier t1` select the merge path, an untiered run is the whole portfolio, and the five suites (all `t2`) now run only in the nightly, as the ecosystem test standard requires. `--include-delegated` is accepted as a deprecated no-op for one release.
+- **The `dg04` delivery check runs T0+T1** — it invoked the runner with no tier filter under a 300-second timeout, which after the delegation removal would have meant the full portfolio and a false red every time.
+
+### Fixed
+- **The plan-final boundary suite runs in 62 minutes instead of 199** — measured, same 261 cases. 198 of them rebuilt an entire plan lifecycle per case (69 s of fixture per case: 42 s to build the plan, 13 s to merge it, 14 s to seal its evidence).
+- **A required gate reporting `skip` is tested against a path that exists** — the old case gave a profile-included gate a null command, which v2.85.1 made the runner refuse earlier as a configuration error, leaving the assertion unreachable. It is now two cases: the configuration refusal, and the stage refusing a report in which a required gate says `skip`.
+- **The nightly-workflow drift test says what is wrong instead of dying** — it concatenated all three of the nightly's runner invocations and asserted the blob carried no `--tier`, so it broke the day per-tier measurement was added, and it failed with `fail: command not found` (bats has no such builtin) rather than a message. It now judges the portfolio invocation, with comments stripped.
+
 ## [2.85.1] — 2026-08-14
 
 > Ten defects that survived a live-code re-verification of the backlog (P083), plus a

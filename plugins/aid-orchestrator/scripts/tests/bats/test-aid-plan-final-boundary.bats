@@ -16,14 +16,202 @@
 #   - aid-release.sh prepare-plan (version preparation, no tag, no sweep)
 #
 # Like test-aid-plan-release-boundary.bats, this suite creates a REAL Git
-# repository per test and is deliberately NOT part of the aggregate
-# `run-all-tests.sh` job — see .github/workflows/ci.yml's dedicated
-# `plan-final-tests` job and run-all-tests.sh's DELEGATED exclusion.
+# repository per test. It is `# aid-tier: t2`, so it runs in the NIGHTLY
+# portfolio and never on the merge path. It used to have a dedicated
+# push-triggered CI job (`plan-final-tests`) and a DELEGATED exclusion in
+# run-all-tests.sh; both were removed 2026-08-14 — a t2 suite blocking a merge
+# contradicted the ecosystem test standard, and by then the job could not pass
+# at all (199 min against a 35-minute limit).
 
 load test-helpers.bash
 
+# ─── IMP-505: fixtures are BUILT once per file and RESTORED per case ────────
+#
+# Measured before this change: 199 min for 261 cases (47% of the whole test
+# portfolio), 46 s/case. The cost was never the number of production commands
+# the cases run — the fast sibling suite runs twice as many — it was that 198
+# cases replayed an entire plan lifecycle in their fixture. Per case:
+# `_seed_closable` = 69 s, of which `_seed_merge_project` 42 s (`_bootstrap`
+# 4 s + `_seed_plan_final_evidence` 14 s + 24 s of real sync/freeze/transitions)
+# and `_merge` 13 s.
+#
+# So each distinct fixture is built ONCE (through the SAME builder as before —
+# the builders stay the single source of truth and are not reimplemented) and
+# every later case gets a byte copy of it.
+#
+# WHY A FIXED DIRECTORY. The built state contains ABSOLUTE paths, so a copy is
+# only valid at the path it was built at (backlog IMP-505 option 3; options 1
+# and 2 were `sed`-rewriting paths — silently breaks when a new path-bearing
+# field appears — and one shared tree for the file, which destroys the per-case
+# isolation this suite depends on). Hence a fixed live directory here instead of
+# test-helpers' per-case `mktemp -d`, which in turn means this suite MUST run
+# serially — guarded loudly in `_snap_setup_live`, never assumed.
+#
+# WHAT A COPY CANNOT CARRY (cross-model review, 2026-08-14): a filesystem
+# snapshot restores no shell state — no exported env, no cwd, and none of bats'
+# `run` globals. The seeds used to leave `$status`/`$output` set as a side
+# effect (`_seed_closable` asserted its own `_merge` result), so a restore
+# POISONS them: any case that silently leaned on the builder's leaked success
+# now fails loudly instead of passing for the wrong reason.
+_snap_root() { printf '%s' "$BATS_FILE_TMPDIR/snap"; }
+_snap_live() { printf '%s' "$(_snap_root)/live"; }
+_snap_tpl()  { printf '%s' "$(_snap_root)/tpl/$1"; }
+
+# _snap_setup_live — test-helpers' setup_test_evidence_dir at a FIXED path.
+# Deliberately a local twin rather than a change to the shared helper: every
+# other suite keeps its per-case mktemp isolation.
+_snap_setup_live() {
+  if [[ "${BATS_NUMBER_OF_PARALLEL_JOBS:-1}" -ne 1 ]]; then
+    echo "test-aid-plan-final-boundary.bats: fixed-path snapshot fixtures require serial bats (--jobs 1)." >&2
+    echo "A template built for one job slot restored into another IS the absolute-path bug in a new form." >&2
+    return 1
+  fi
+  export AID_TEST_MODE=1
+  local live; live="$(_snap_live)"
+  cd /
+  rm -rf "$live"
+  mkdir -p "$live"
+  # Physical, canonical spelling: a path-bearing state file may hold either
+  # spelling, and the template is only reusable at a byte-identical path.
+  live="$(cd "$live" && pwd -P)"
+  export TEST_TMPDIR="$live"
+  export TEST_PROJECT_ROOT="$live/project"
+  export TEST_EVIDENCE_DIR="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-test/R-test"
+  mkdir -p "$TEST_EVIDENCE_DIR"
+  cd "$TEST_PROJECT_ROOT"
+  git init -q -b main 2>/dev/null || git init -q
+  git config user.email "test@test.local"
+  git config user.name "Test"
+  echo "init" > .gitkeep
+  git add .gitkeep
+  git commit -q -m "initial"
+}
+
+# _snap_eligible — refuse to snapshot a tree carrying transient or
+# path-bearing-elsewhere git state. Nothing here is "normalized": a `git gc` /
+# `update-index --refresh` / `worktree prune` would paper over exactly the state
+# a case might be asserting on.
+_snap_eligible() {
+  local g="$TEST_PROJECT_ROOT/.git"
+  local lock
+  for lock in index.lock HEAD.lock packed-refs.lock; do
+    [[ -e "$g/$lock" ]] && { echo "_snap: refusing to snapshot, $lock present" >&2; return 1; }
+  done
+  # A linked worktree's admin files point at an EXTERNAL directory; copying only
+  # the primary tree would produce a repo whose worktree registration lies.
+  local wt_count
+  wt_count="$(git -C "$TEST_PROJECT_ROOT" worktree list --porcelain 2>/dev/null | grep -c '^worktree ' || true)"
+  [[ "$wt_count" -le 1 ]] || { echo "_snap: refusing to snapshot, $wt_count linked worktrees registered" >&2; return 1; }
+  return 0
+}
+
+# _SNAP_ENV_VARS — the env vars a builder sets or reads as a SIDE EFFECT, and
+# which therefore (a) change what the builder produces, so they belong in the
+# template key, and (b) are shell state a file copy cannot carry, so they are
+# saved beside the template and restored with it. `_bootstrap` alone branches on
+# two of them: AID_TEST_SEED_LIFECYCLE decides whether the git-tracked lifecycle
+# manifest exists at all, AID_TEST_DECLARED_PLAN_MODE whether a declared mode is
+# written. A template keyed without them would hand one fixture's tree to a case
+# asking for the other — green, and testing the wrong plan.
+_SNAP_ENV_VARS=(AID_TEST_SEED_LIFECYCLE AID_TEST_DECLARED_PLAN_MODE AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB)
+
+# _snap_env_key — the current values of the above, as a key fragment.
+_snap_env_key() {
+  local v out=""
+  for v in "${_SNAP_ENV_VARS[@]}"; do out+="${v}=${!v-<unset>};"; done
+  printf '%s' "$out" | sha256sum | cut -c1-12
+}
+
+# _snap_env_save <file> / _snap_env_load <file> — carry those vars across the
+# copy explicitly. `unset` is preserved as unset, never collapsed to empty.
+_snap_env_save() {
+  local v
+  : > "$1"
+  for v in "${_SNAP_ENV_VARS[@]}"; do
+    if [[ -v $v ]]; then printf 'export %s=%q\n' "$v" "${!v}" >> "$1"
+    else printf 'unset %s\n' "$v" >> "$1"; fi
+  done
+}
+_snap_env_load() { [[ -f "$1" ]] && . "$1"; return 0; }
+
+# _snap_contract — the shell state a copy cannot carry, re-established
+# explicitly rather than inherited from whichever builder ran last.
+_snap_contract() {
+  export AID_TEST_MODE=1
+  export TEST_TMPDIR TEST_PROJECT_ROOT TEST_EVIDENCE_DIR
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  cd "$TEST_PROJECT_ROOT"
+  # A restore ran no command. Poison, do not merely clear: an EMPTY $output can
+  # accidentally satisfy an assertion, a poisoned one cannot.
+  status=97
+  output='__SNAPSHOT_RESTORE_DID_NOT_RUN_A_COMMAND__'
+  lines=("$output")
+  BATS_RUN_COMMAND='__SNAPSHOT_RESTORE__'
+}
+
+# _snap_fixture <key> <builder> [builder args…] — restore fixture <key>,
+# building it once (through the real builder, in the live tree) on first use.
+# The builder path ends in the SAME poisoned contract as the restore path, so
+# the first case in a file is not quietly privileged over the other 260.
+_snap_fixture() {
+  local key="$1"; shift
+  key="${key}.$(_snap_env_key)"
+  local tpl live; tpl="$(_snap_tpl "$key")"; live="$(_snap_live)"
+  if [[ -d "$tpl" ]]; then
+    cd /
+    rm -rf "$live"
+    cp -a "$tpl" "$live"
+    _snap_env_load "${tpl}.env"
+  else
+    "$@"
+    _snap_eligible || return 1
+    mkdir -p "$(dirname "$tpl")"
+    cp -a "$live" "$tpl"
+    _snap_env_save "${tpl}.env"
+  fi
+  _snap_contract
+}
+
+# _snap_fingerprint — the fixture's SHAPE, for the builder-vs-restore
+# equivalence test below.
+#
+# Deliberately not a byte comparison, and this is the honest reason rather than
+# a convenience: a freshly built fixture can never be byte-identical to one
+# built a minute earlier. Commit objects carry their author/committer time, so
+# every commit SHA differs, and the manifest records a real `candidate_frozen_at`
+# instant. Comparing bytes would therefore fail for a correct restore and prove
+# nothing about a wrong one.
+#
+# So volatile values are MASKED and everything else must match exactly: which
+# refs exist (by name), where HEAD points, the porcelain status, the worktree
+# registration, and — for every file outside .git — its path and its
+# SHA-masked, timestamp-masked content. That catches what actually goes wrong
+# with a snapshot: a missing file, a state field that came out different, a
+# branch that is not checked out, a dirty tree.
+#
+# .git is covered through refs/status/worktree rather than as a file list: its
+# object names ARE the content-addressed SHAs that legitimately differ, so
+# listing them would reintroduce the noise the masking removes.
+_snap_mask() {
+  sed -E -e 's/\b[0-9a-f]{64}\b/<SHA256>/g' \
+         -e 's/\b[0-9a-f]{40}\b/<SHA1>/g' \
+         -e 's/\b[0-9a-f]{7,12}\b/<SHORTSHA>/g' \
+         -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/<TS>/g'
+}
+_snap_fingerprint() {
+  git -C "$TEST_PROJECT_ROOT" for-each-ref --format='ref %(refname)'
+  echo "head $(git -C "$TEST_PROJECT_ROOT" symbolic-ref -q HEAD || echo detached)"
+  git -C "$TEST_PROJECT_ROOT" status --porcelain | sed 's/^/status /'
+  git -C "$TEST_PROJECT_ROOT" worktree list --porcelain | grep '^worktree ' | sed "s|$TEST_PROJECT_ROOT|<ROOT>|"
+  local f
+  while IFS= read -r -d '' f; do
+    printf 'file %s %s\n' "$f" "$(_snap_mask < "$f" | sha256sum | cut -d' ' -f1)"
+  done < <(cd "$TEST_PROJECT_ROOT" && find . -path ./.git -prune -o -type f -print0 | sort -z)
+}
+
 setup() {
-  setup_test_evidence_dir
+  _snap_setup_live
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   PLAN_STATE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-plan-state.sh"
@@ -63,7 +251,11 @@ _manifest_field() {
 # the REAL library entry points (never a hand-written fixture manifest), so a
 # drift between what the library writes and what these tests assume is caught
 # by the bootstrap rather than hidden by it.
-_bootstrap() {
+# _bootstrap — snapshot-backed (IMP-505): the builder below is unchanged and
+# runs once per file; every later case restores its byte copy.
+_bootstrap() { _snap_fixture "bootstrap${1:+:$1}" _bootstrap_build "$@"; }
+
+_bootstrap_build() {
   local plan_id="${1:-$PLAN_ID}"
   # Mirror production: `.aid-o/work/` is gitignored, so branch switching never
   # deletes the plan state or the manifest out from under the CLI.
@@ -901,7 +1093,11 @@ YAML
 
 # _seed_gates_project — a plan branch whose candidate carries the plan file the
 # gates evaluate, plus a gitignored runtime area.
-_seed_gates_project() {
+# _seed_gates_project — snapshot-backed (IMP-505): the builder below is unchanged and
+# runs once per file; every later case restores its byte copy.
+_seed_gates_project() { _snap_fixture "gates_project${1:+:$1}" _seed_gates_project_build "$@"; }
+
+_seed_gates_project_build() {
   _bootstrap
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
   printf '# %s\n\n## Acceptance Criteria\n- [ ] something\n' "$PLAN_ID" \
@@ -1201,19 +1397,63 @@ EOF
 }
 
 # ─── AC2.8: a required gate reporting `skip` fails the stage ───────────────
-@test "AC2: a result:skip on a required gate fails the stage rather than counting as satisfied" {
+#
+# This USED to be one test that gave a required gate a null command and expected
+# the stage to refuse with "never satisfied by a skip". It had been red on main
+# for days, unnoticed because this suite's dedicated CI job timed out before
+# finishing and its nightly never completed either. The reason it is red is not
+# a regression: aid-run-gates.sh now refuses a profile-included gate with NO
+# command EARLIER, as a configuration error — so the null-command route can no
+# longer reach the skip assertion at all, and the old test was asserting a
+# message that its own setup made unreachable.
+#
+# Both behaviours are real and both are worth a test, so there are now two, each
+# exercising a path that exists.
+@test "AC2: a profile-included gate with no command is refused as a configuration error, before any gate runs" {
   _seed_gates_project
   _write_exec_yaml
-  # bats_fsm is required:true; give it a null command so the runner records an
-  # explicit skip row (no_command) rather than a pass.
   yq -i '.gates.bats_fsm.command = null' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   local receipt; receipt="$(_write_receipt bats_all)"
 
   _gates --substitute-receipt "bats_all=${receipt}"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"never satisfied by a skip"* ]]
+  [[ "$output" == *"has no command"* ]]
+  [[ "$output" == *"configuration error, not a silent skip"* ]]
+  # Nothing ran: no report was written, and the plan did not move.
+  [ ! -f "$(_report)" ]
   run plan_state_get "$PLAN_ID" "plan_state"
   [ "$output" = "PLAN_GATES" ]
+}
+
+@test "AC2: a report in which a required gate says skip fails the stage rather than counting as satisfied" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  # A real, passing run first — so the report this test then edits is the
+  # runner's own product and not a hand-invented shape.
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 0 ]
+  [ -f "$(_report)" ]
+  run jq -r '.gates.bats_fsm.result' "$(_report)"
+  [ "$output" = "pass" ]
+
+  # Now the one thing under test: a REQUIRED gate carrying result "skip".
+  local tmp; tmp="$(mktemp)"
+  jq '.gates.bats_fsm.result = "skip" | .gates.bats_fsm.reason = "no_command"' "$(_report)" > "$tmp"
+  mv "$tmp" "$(_report)"
+
+  # Re-enter the stage against that report. PLAN_REVIEW -> PLAN_GATES is not a
+  # transition the table allows; the way back is through PLAN_FIX and PLAN_SYNC
+  # (lib/aid-plan-state.sh). The stage then RE-READS the existing report rather
+  # than minting a second broad run — which is exactly what puts the edited row
+  # in front of the assertion under test.
+  plan_state_transition "$PLAN_ID" "PLAN_REVIEW" "PLAN_FIX"  >/dev/null
+  plan_state_transition "$PLAN_ID" "PLAN_FIX"    "PLAN_SYNC" >/dev/null
+  plan_state_transition "$PLAN_ID" "PLAN_SYNC"   "PLAN_GATES" >/dev/null
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"never satisfied by a skip"* ]]
 }
 
 # ─── the candidate binding: the stage refuses a head that is not the
@@ -1253,7 +1493,11 @@ EOF
 
 # _seed_review_project — a plan with ONE merged EPIC, gated green, in
 # PLAN_REVIEW at a frozen candidate.
-_seed_review_project() {
+# _seed_review_project — snapshot-backed (IMP-505): the builder below is unchanged and
+# runs once per file; every later case restores its byte copy.
+_seed_review_project() { _snap_fixture "review_project${1:+:$1}" _seed_review_project_build "$@"; }
+
+_seed_review_project_build() {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"
   local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
@@ -2174,7 +2418,11 @@ PY
 # frozen candidate and the PLAN-LEVEL audit/curator reports, and both are set up
 # here explicitly — so nothing this seed skips is a precondition this command
 # reads.
-_seed_merge_project() {
+# _seed_merge_project — snapshot-backed (IMP-505): the builder below is unchanged and
+# runs once per file; every later case restores its byte copy.
+_seed_merge_project() { _snap_fixture "merge_project${1:+:$1}" _seed_merge_project_build "$@"; }
+
+_seed_merge_project_build() {
   export AID_TEST_SEED_LIFECYCLE=1
   _bootstrap
   # REAL work on the plan branch. Without it the candidate IS the target head,
@@ -2222,7 +2470,11 @@ _seed_merge_project() {
 # not yet had its outputs hash-bound by a completed review — `--stage inputs`
 # correctly refuses to re-produce them once review has sealed the candidate's
 # outputs (see "already has a RECORDED plan-final review" in aid-plan-fsm.sh).
-_seed_merge_project_pre_review() {
+# _seed_merge_project_pre_review — snapshot-backed (IMP-505): the builder below is unchanged and
+# runs once per file; every later case restores its byte copy.
+_seed_merge_project_pre_review() { _snap_fixture "merge_project_pre_review${1:+:$1}" _seed_merge_project_pre_review_build "$@"; }
+
+_seed_merge_project_pre_review_build() {
   export AID_TEST_SEED_LIFECYCLE=1
   _bootstrap
   _commit_on "plan/${PLAN_ID}" epic-work.txt "feat: the EPIC's work"
@@ -3915,7 +4167,11 @@ _lc_review_status() {
 }
 
 # _seed_closable — a plan that has really merged and is therefore closable.
-_seed_closable() {
+# _seed_closable — snapshot-backed (IMP-505): the builder below is unchanged and
+# runs once per file; every later case restores its byte copy.
+_seed_closable() { _snap_fixture "closable${1:+:$1}" _seed_closable_build "$@"; }
+
+_seed_closable_build() {
   _seed_merge_project
   _seed_plan_final_evidence
   _merge
@@ -5890,4 +6146,68 @@ _FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
   _close --force --force-reason "$_FORCE_REASON"
   [ "$status" -ne 0 ]
   [ ! -f "$(_marker)" ]
+}
+
+# ─── IMP-505: the snapshot fixture layer's own guarantees ──────────────────
+#
+# These four cases exist because "the suite is still green" is NOT evidence that
+# build-once-restore-per-case is correct. A botched version of this change looks
+# green until the day two cases contaminate each other, so each property the
+# layer relies on is asserted directly.
+
+@test "IMP-505: a RESTORED merge-project fixture has the same shape as a freshly BUILT one" {
+  # Fresh build, bypassing the snapshot layer entirely (the builder is called
+  # with the same env input the wrapper would have keyed on).
+  export AID_TEST_SEED_LIFECYCLE=1
+  _seed_merge_project_build
+  local fresh; fresh="$(_snap_fingerprint)"
+
+  # A clean live tree, then the snapshot path for the same fixture class.
+  _snap_setup_live
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  _seed_merge_project
+  local restored; restored="$(_snap_fingerprint)"
+
+  if [[ "$fresh" != "$restored" ]]; then
+    echo "--- built-vs-restored shape differs ---" >&2
+    diff <(printf '%s\n' "$fresh") <(printf '%s\n' "$restored") >&2 || true
+    false
+  fi
+}
+
+@test "IMP-505: a RESTORED closable fixture has the same shape as a freshly BUILT one" {
+  export AID_TEST_SEED_LIFECYCLE=1
+  _seed_closable_build
+  local fresh; fresh="$(_snap_fingerprint)"
+
+  _snap_setup_live
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  _seed_closable
+  local restored; restored="$(_snap_fingerprint)"
+
+  if [[ "$fresh" != "$restored" ]]; then
+    echo "--- built-vs-restored shape differs ---" >&2
+    diff <(printf '%s\n' "$fresh") <(printf '%s\n' "$restored") >&2 || true
+    false
+  fi
+}
+
+@test "IMP-505: a restore leaves POISONED bats run state — no case may inherit a builder's \$status" {
+  _seed_merge_project
+  [ "$status" -eq 97 ]
+  [ "$output" = "__SNAPSHOT_RESTORE_DID_NOT_RUN_A_COMMAND__" ]
+  # The sentinel half of the isolation pair below: this case dirties its
+  # restored tree, and the NEXT case proves the dirt did not survive.
+  echo "contamination" > "$TEST_PROJECT_ROOT/CONTAMINATION-SENTINEL"
+  git -C "$TEST_PROJECT_ROOT" add -A
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "a mutation the next case must not see"
+}
+
+@test "IMP-505: the previous case's mutation is absent — every case restores its own copy" {
+  _seed_merge_project
+  [ ! -f "$TEST_PROJECT_ROOT/CONTAMINATION-SENTINEL" ]
+  run git -C "$TEST_PROJECT_ROOT" log --oneline --all
+  [[ "$output" != *"a mutation the next case must not see"* ]]
 }
