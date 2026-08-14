@@ -60,13 +60,22 @@ TELEGRAM_LIB="${AID_TELEGRAM_LIB:-/opt/eco/services/scripts/lib/telegram-notify.
 # a fixture can supply a stub — the seam exists for tests, not for production.
 RUNNER="${AID_NIGHTLY_RUNNER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tests/run-all-tests.sh}"
 RUNNER_LOG=""; EXIT_CODE=0; LOG_URL=""; TESTS_DIR=""; NOTIFY=1
+# Merge-path tier budgets, in seconds, from the ecosystem test standard.
+# Measured, never summed: a tier's budget is verified by a REAL RUN, because
+# the runner's ~2 s per-suite overhead makes a sum of suite times a lie.
+T0_SECONDS=""; T1_SECONDS=""
+T0_BUDGET_S="${AID_T0_BUDGET_S:-120}"; T1_BUDGET_S="${AID_T1_BUDGET_S:-600}"
 NIGHTLY_DIR="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --runner-log) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --runner-log needs a value" >&2; exit 2; }
                   RUNNER_LOG="$2"; shift 2 ;;
+    --t0-seconds) T0_SECONDS="${2:-}"; shift 2 ;;
+    --t1-seconds) T1_SECONDS="${2:-}"; shift 2 ;;
     --exit-code) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --exit-code needs a value" >&2; exit 2; }
                  EXIT_CODE="$2"; shift 2 ;;
+                 # NOTE: an EMPTY or non-numeric value is handled below, not
+                 # here — it is the normal shape after a portfolio TIMEOUT.
     --log-url) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --log-url needs a value" >&2; exit 2; }
                LOG_URL="$2"; shift 2 ;;
     --tests-dir) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --tests-dir needs a value" >&2; exit 2; }
@@ -111,6 +120,24 @@ mapfile -t reported_failures < <(
   sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' "$RUNNER_LOG")
 
 # A non-zero exit with nothing named is still a failure — of the runner itself.
+# An empty or non-numeric exit code is what a TIMED-OUT portfolio step leaves
+# behind: the step never reaches its `echo "exit_code=$?" >> $GITHUB_OUTPUT`,
+# and `continue-on-error: true` hides the timeout, so this script was handed an
+# empty string. It then died in jq and wrote NOTHING — three consecutive nights
+# (2026-08-12/13/14) produced 0-byte artifacts and no alert, because the very
+# thing that reports a bad night is what crashed. A reporter that cannot
+# survive its own worst input is not a reporter.
+#
+# So: an unusable exit code becomes an EXPLICIT unknown. The night is reported
+# as failed — a portfolio that did not tell us how it ended did not pass — and
+# the reason is named rather than inferred.
+EXIT_CODE_KNOWN=1
+if [[ ! "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
+  EXIT_CODE_KNOWN=0
+  echo "aid-nightly-report: exit code '${EXIT_CODE}' is not a number — treating the night as FAILED with reason 'runner did not report (timeout?)'." >&2
+  EXIT_CODE=1
+fi
+
 if [[ "$EXIT_CODE" -ne 0 && "${#reported_failures[@]}" -eq 0 ]]; then
   reported_failures=("(runner)")
 fi
@@ -221,6 +248,37 @@ if [[ -f "$LATEST" ]] \
   prev_undelivered=true
 fi
 
+# ─── Merge-path budgets ─────────────────────────────────────────────────────
+# The gap nobody was watching. Between 2026-08-11 and 08-14 the merge path grew
+# from 42 suites / 13 min to 72 / 18 min, both tiers over budget — every new
+# suite correctly tagged, every one lint-clean, and no surface anywhere looking
+# at the SUM. The standard demanded budgets; enforcement was a one-off campaign
+# nobody re-ran. This is that surface.
+#
+# It REPORTS and never fails the job: an over-budget tier is not a broken test,
+# and a gate that stops work over it gets routed around (the lesson the
+# quarantined advisory gate already taught this project).
+budget_json='null'
+_over_budget=""
+if [[ "$T0_SECONDS" =~ ^[0-9]+$ || "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
+  _t0="${T0_SECONDS:-null}"; [[ "$_t0" =~ ^[0-9]+$ ]] || _t0=null
+  _t1="${T1_SECONDS:-null}"; [[ "$_t1" =~ ^[0-9]+$ ]] || _t1=null
+  budget_json="$(jq -nc --argjson t0 "$_t0" --argjson t1 "$_t1" \
+                       --argjson t0b "$T0_BUDGET_S" --argjson t1b "$T1_BUDGET_S" \
+    '{t0_seconds:$t0, t0_budget_s:$t0b, t0_over:(($t0//0) > $t0b),
+      t1_seconds:$t1, t1_budget_s:$t1b, t1_over:(($t1//0) > $t1b),
+      merge_path_seconds:(($t0//0)+($t1//0)),
+      merge_path_budget_s:$t1b,
+      merge_path_over:((($t0//0)+($t1//0)) > $t1b)}')"
+  [[ "$_t0" != null && "$_t0" -gt "$T0_BUDGET_S" ]] && \
+    _over_budget="${_over_budget}T0 ${_t0}s (rozpočet ${T0_BUDGET_S}s); "
+  [[ "$_t1" != null && "$_t1" -gt "$T1_BUDGET_S" ]] && \
+    _over_budget="${_over_budget}T1 ${_t1}s (rozpočet ${T1_BUDGET_S}s); "
+else
+  # Not measured is NOT within budget. Say so, the way the runner watchdog does.
+  echo "aid-nightly-report: tier durations were not supplied — the merge-path budget check DID NOT RUN (this is not a pass)." >&2
+fi
+
 # ─── The artifact, written BEFORE anything is sent ──────────────────────────
 write_artifact() {
   jq -n --arg date "$TODAY" --argjson suites_run "$suites_run" \
@@ -230,7 +288,9 @@ write_artifact() {
         --argjson exit_code "$EXIT_CODE" --argjson censored "$censored" \
         --argjson notified "$1" --argjson quarantine_unreadable "$quarantine_unreadable" \
         --argjson quarantine_write_failed "$quarantine_write_failed" \
+        --argjson merge_path_budget "$budget_json" \
     '{date:$date, suites_run:$suites_run, passed:$passed, failed:$failed,
+      merge_path_budget:$merge_path_budget,
       flaky:$flaky, quarantined:$quarantined, duration_ms:$duration_ms,
       exit_code:$exit_code, censored:$censored, log_url:$log_url,
       quarantine_unreadable:$quarantine_unreadable,
@@ -242,8 +302,13 @@ write_artifact false || { echo "aid-nightly-report: could not write '$ARTIFACT'"
 
 # ─── One message, only when there is something new to say ───────────────────
 notified=false
+# An over-budget merge path is a reason to speak, alongside a new failure: it
+# is the signal that was missing while the path grew from 13 to 18 minutes
+# unnoticed. It is deduplicated with everything else — the same fingerprint
+# rules — so a budget that stays over does not become nightly noise.
 if [[ "$NOTIFY" -eq 1 ]] \
-   && { [[ "$new_failures" -gt 0 ]] || [[ "$escalating" -gt 0 ]] || [[ "$prev_undelivered" == "true" ]]; }; then
+   && { [[ "$new_failures" -gt 0 ]] || [[ "$escalating" -gt 0 ]] \
+        || [[ -n "$_over_budget" ]] || [[ "$prev_undelivered" == "true" ]]; }; then
   msg="$(printf 'AID nightly %s: %s failed, %s flaky, %s quarantined\n' \
     "$TODAY" "$(jq 'length' <<<"$failed_json")" "$(jq 'length' <<<"$flaky_json")" \
     "$(jq 'length' <<<"$quarantined_json")")"
@@ -253,6 +318,7 @@ if [[ "$NOTIFY" -eq 1 ]] \
       <<<"$escalating_json")"
   fi
   [[ "$quarantine_unreadable" == "true" ]] && msg+=$'\n'"  ! the quarantine record is unreadable"
+  [[ -n "$_over_budget" ]] && msg+=$'\n'"  ! merge cesta pres rozpocet: ${_over_budget%; }"
   [[ -n "$LOG_URL" ]] && msg+=$'\n'"$LOG_URL"
 
   if [[ -f "$TELEGRAM_LIB" ]]; then

@@ -64,7 +64,32 @@ jobs:
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh \
             --timing --include-delegated --verbose > nightly-run.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-        timeout-minutes: 300
+        # 480, not 300: the portfolio measured 7 h on 2026-08-11 and the old
+        # 300-minute cap cut it off three nights running — and because the
+        # REPORTER is what announces a bad night, the silence looked exactly
+        # like health. The cap is not the fix; the fix is the 199-minute suite
+        # (47% of the portfolio, see /aid/testing). Until that lands, a night
+        # that finishes and tells the truth beats a night that is killed.
+        timeout-minutes: 480
+
+      # The merge path, timed as TWO REAL RUNS — the standard's own rule is
+      # that a tier budget is verified by a run, never by summing suites
+      # (2 s/suite runner overhead makes a sum lie). This is what nobody was
+      # doing: between 2026-08-11 and 08-14 the merge path grew from 42 suites
+      # and 13 min to 72 and 18 min, both tiers over budget, and no surface
+      # said so. Costs ~18 min inside a 7-hour job.
+      - name: Measure each tier of the merge path
+        id: tiers
+        continue-on-error: true
+        run: |
+          set +e
+          _t0_start=$(date +%s)
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 >/dev/null 2>&1
+          echo "t0_seconds=$(( $(date +%s) - _t0_start ))" >> "$GITHUB_OUTPUT"
+          _t1_start=$(date +%s)
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 >/dev/null 2>&1
+          echo "t1_seconds=$(( $(date +%s) - _t1_start ))" >> "$GITHUB_OUTPUT"
+        timeout-minutes: 90
 
       - name: Write the result and report it
         # The artifact lands on a shared HOST path, never under `.aid-o/` —
@@ -74,6 +99,8 @@ jobs:
           bash plugins/aid-orchestrator/scripts/aid-nightly-report.sh \
             --runner-log nightly-run.log \
             --exit-code "${{ steps.portfolio.outputs.exit_code }}" \
+            --t0-seconds "${{ steps.tiers.outputs.t0_seconds }}" \
+            --t1-seconds "${{ steps.tiers.outputs.t1_seconds }}" \
             --log-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Check the selector's honesty
