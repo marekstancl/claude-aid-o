@@ -731,10 +731,12 @@ bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
 # What the merge path actually runs
 ./tests/run-all-tests.sh --tier t0 && ./tests/run-all-tests.sh --tier t1
 
-# What the nightly runs, refreshing every suite's measured duration
-./tests/run-all-tests.sh --tier t2 --timing --include-delegated
+# What the nightly runs: the WHOLE portfolio (no --tier), refreshing every
+# suite's measured duration. Hours, not minutes — this is not a local command.
+./tests/run-all-tests.sh --timing
 
-# With full output from each suite
+# With full output from each suite. NOTE: no --tier means the FULL portfolio
+# (hours). For local verification use the merge-path command above.
 ./tests/run-all-tests.sh --verbose
 ```
 
@@ -743,10 +745,10 @@ bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
 | Flag | Description |
 |------|-------------|
 | `--verbose`, `-v` | Show full output from each test suite (individual PASS/FAIL lines) |
-| `--list` | Enumerate discovered and DELEGATED suites with their tier, run nothing |
+| `--list` | Enumerate discovered suites with their tier, run nothing |
 | `--tier <t0\|t1\|t2>` | Run only suites declaring that tier; skipped-by-tier counts are printed, never silent |
 | `--timing` | Record one duration per suite into `.aid-o/work/test-durations.jsonl` (opt-in; without it the run is byte-identical to before) |
-| `--include-delegated` | Also run suites owned by a dedicated CI job — measurement runs only, so every suite has a duration |
+| `--include-delegated` | **Deprecated, accepted as a no-op.** Delegation was removed 2026-08-14 — an untiered run is already the full portfolio |
 | `--help`, `-h` | Show usage information |
 
 ### Test Runner Output

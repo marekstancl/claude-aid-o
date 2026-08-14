@@ -144,11 +144,13 @@ gates:
     # ever refresh T2 durations, so a T0 suite that grew into T1 territory
     # could never be caught by the lint that compares a tag against its newest
     # measurement. Re-running 12 minutes of T0+T1 at 02:40 costs nothing.
-    # `--include-delegated` because the nightly is the one run that owes every
+    # No --tier: an untiered run IS the whole portfolio. (It used to also pass
+    # `--include-delegated`; delegation was removed 2026-08-14.) The nightly is
+    # the one run that owes every
     # suite a measurement.
     # .github/workflows/nightly-tests.yml runs the same selection, and
     # test-tier-gate-routing.bats asserts the two do not drift apart.
-    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing --include-delegated
+    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing
     required: false
     # 1900s -> 7200s (2026-08-04). A real audit cut this gate off at 2001s with
     # 73 of 151 suites done, so it had NEVER completed inside its cap — and a

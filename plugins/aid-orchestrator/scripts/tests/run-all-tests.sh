@@ -110,7 +110,6 @@ LIST_ONLY=0
 # developer invocation keeps paying nothing for a measurement it did not ask
 # for.
 TIMING=0
-INCLUDE_DELEGATED=0
 DURATIONS_WARNED=0
 # P081 Step 5 — empty means every tier, which is exactly today's behaviour.
 TIER=""
@@ -135,10 +134,12 @@ while [[ $# -gt 0 ]]; do
       esac
       ;;
     --include-delegated)
-      # Measurement runs only: a delegated suite is skipped here because its
-      # own CI job owns it, but it still needs a duration like any other suite
-      # or it can never be tiered from a number.
-      INCLUDE_DELEGATED=1
+      # DEPRECATED, accepted as a no-op for one release (removed 2026-08-14 with
+      # delegation itself). An untiered run is already the whole portfolio, so
+      # this flag now asks for what it gets anyway. It is still ACCEPTED rather
+      # than rejected because callers this repository cannot see — a cron line,
+      # someone's shell history — would otherwise exit 2 on an unknown flag.
+      [[ "$VERBOSE" -eq 1 ]] && echo "NOTE: --include-delegated is deprecated and does nothing (delegation was removed 2026-08-14; an untiered run is the full portfolio)." >&2
       ;;
     --list)
       # P079 Step 12: enumerate WITHOUT running anything. The delegation test
@@ -154,7 +155,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --verbose, -v        Show full output from each test suite"
-      echo "  --list               List discovered and DELEGATED suites, run nothing"
+      echo "  --list               List discovered suites, run nothing"
       echo "  --tier <t0|t1|t2>    Run only suites declaring that tier (see aid-test-tier-lint.sh)"
       echo "  --only <basename>    Run exactly one suite, under the runner's own conditions"
       echo "  --timing             Record one duration per suite into the durations journal"
@@ -238,38 +239,27 @@ record_suite_duration() {
 }
 
 # ---------------------------------------------------------------------------
-# Suites delegated to a dedicated CI job (P064 E-064-1_2 Step 1)
+# Delegation is GONE (2026-08-14) — the tier tag is the only authority
 #
-# A suite listed here owns its own job in .github/workflows/ci.yml and is
-# deliberately SKIPPED by this aggregate runner — running it here too would
-# execute it in both jobs and risk blowing this job's timeout budget for no
-# benefit (the dedicated job already covers it, usually with a larger
-# budget this job doesn't have room for). Keyed by bats file basename;
-# value is the owning CI job name, purely for the DELEGATED report line
-# below — never run silently, always visible in the output.
+# Five suites used to be listed here as "owned by a dedicated CI job" and were
+# skipped by this runner for that reason. All five are `# aid-tier: t2`, and the
+# ecosystem test standard says T2 runs nightly and never on the merge path — so
+# the jobs that made them merge-blocking were the bug, and they are deleted
+# (.github/workflows/ci.yml). With them gone there is nothing left for a second
+# authority to say: `--tier t0`/`--tier t1` select the merge path, an untiered
+# run is the whole portfolio, and scripts/tests/test-tier-ci-topology.sh fails
+# if a T2 suite ever reappears on a push/PR-triggered job.
+#
+# What this runner must NOT lose in the process is the failure mode the old
+# delegation test existed for: a suite that is run by NOTHING. That is now the
+# topology test's first assertion, not a property of a map.
 # ---------------------------------------------------------------------------
-declare -A DELEGATED_SUITES=(
-  ["test-aid-plan-release-boundary.bats"]="plan-boundary-tests"
-  # P068 E-068-1_2 Step 1 — same reasoning as the line above: this suite
-  # creates a real Git repository per test and drives real merges, version
-  # bumps and freeze/invalidation cycles through the CLI, so it gets its own
-  # job with its own budget instead of eating this job's headroom.
-  ["test-aid-plan-final-boundary.bats"]="plan-final-tests"
-  # P079 Step 12 (IMP-483) — the three heaviest P076 suites, same reasoning as
-  # every entry above: each drives real processes (a bash fixture service under
-  # a supervisor, port allocation, /proc identity checks) rather than mocks, so
-  # each gets its own job with its own budget instead of eating this one's.
-  # Together they are the bulk of what the plan-final broad gate spends inline.
-  ["test-aid-service.bats"]="service-lib-tests"
-  ["test-service-lifecycle.bats"]="service-lifecycle-tests"
-  ["test-owned-jobs-integration.bats"]="owned-jobs-integration-tests"
-)
+
 
 # ---------------------------------------------------------------------------
 # Discover test suites
 # ---------------------------------------------------------------------------
 SUITES=()
-DELEGATED_LOG=()
 for f in "$SCRIPT_DIR"/test-*.sh; do
   [[ -f "$f" ]] || continue
   SUITES+=("$f")
@@ -277,20 +267,10 @@ done
 # Also discover bats suites in bats/ subdirectory (E-046-1_3 Step 6)
 for f in "$SCRIPT_DIR"/bats/test-*.bats; do
   [[ -f "$f" ]] || continue
-  bn="$(basename "$f")"
-  if [[ -n "${DELEGATED_SUITES[$bn]:-}" && "$INCLUDE_DELEGATED" -eq 0 ]]; then
-    DELEGATED_LOG+=("$bn -> ${DELEGATED_SUITES[$bn]}")
-    continue
-  fi
-  if [[ -n "${DELEGATED_SUITES[$bn]:-}" ]]; then
-    # Never silent: a delegated suite running here is a deliberate override,
-    # so the output says so rather than looking like an ordinary inline suite.
-    DELEGATED_LOG+=("$bn -> ${DELEGATED_SUITES[$bn]} (RUN HERE ANYWAY: --include-delegated)")
-  fi
   SUITES+=("$f")
 done
 
-if [[ ${#SUITES[@]} -eq 0 && ${#DELEGATED_LOG[@]} -eq 0 ]]; then
+if [[ ${#SUITES[@]} -eq 0 ]]; then
   echo "ERROR: No test-*.sh or bats/test-*.bats suites found in $SCRIPT_DIR" >&2
   exit 1
 fi
@@ -399,9 +379,6 @@ if [[ "$LIST_ONLY" -eq 1 ]]; then
   for suite in ${SUITES[@]+"${SUITES[@]}"}; do
     echo "INLINE: $(basename "$suite") [${SUITE_TIER[$(basename "$suite")]:-untagged}]"
   done
-  for entry in "${DELEGATED_LOG[@]+"${DELEGATED_LOG[@]}"}"; do
-    echo "DELEGATED: $entry [${SUITE_TIER[${entry%% *}]:-untagged}]"
-  done
   [[ "$SKIPPED_BY_TIER" -gt 0 ]] && echo "SKIPPED-BY-TIER: $SKIPPED_BY_TIER suite(s) not in $TIER"
   exit 0
 fi
@@ -428,11 +405,6 @@ echo "  AID Pipeline Tests"
 echo "========================================================================"
 echo ""
 echo "Discovered ${#SUITES[@]} test suite(s)"
-if [[ ${#DELEGATED_LOG[@]} -gt 0 ]]; then
-  for entry in "${DELEGATED_LOG[@]}"; do
-    echo "DELEGATED: $entry"
-  done
-fi
 # Never silent: a suite that does not run is exactly what this reports.
 [[ "$SKIPPED_BY_TIER" -gt 0 ]] && echo "SKIPPED-BY-TIER: $SKIPPED_BY_TIER suite(s) not in $TIER"
 echo ""

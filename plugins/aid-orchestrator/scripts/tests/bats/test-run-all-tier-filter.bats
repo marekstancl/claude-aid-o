@@ -109,11 +109,14 @@ _suite() {
   [[ "$output" == *"accepted: t0 t1 t2"* ]]
 }
 
-@test "7: --list carries the tier column, and delegation still wins over tier" {
+@test "7: --list carries the tier column, and every suite is listed exactly once" {
+  # Was "delegation still wins over tier". Delegation was removed 2026-08-14:
+  # the tier tag is the only authority, so a t2 suite is an ordinary INLINE line
+  # carrying its tier — selected out of the merge path by --tier, not by a map.
   _suite bats/test-aid-service.bats t2
   run bash "$RUNNER" --list 3>&-
   [ "$status" -eq 0 ]
   [[ "$output" == *"INLINE: test-cheap.bats [t0]"* ]]
-  [[ "$output" == *"DELEGATED: test-aid-service.bats -> service-lib-tests [t2]"* ]]
+  [[ "$output" == *"INLINE: test-aid-service.bats [t2]"* ]]
   [ "$(grep -c 'test-aid-service.bats' <<<"$output")" -eq 1 ]
 }

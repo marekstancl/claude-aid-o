@@ -104,18 +104,28 @@ _include_or_die() {
   # leaving the lint unable to catch a T0 suite that grew.
   [[ "$cmd" != *"--tier"* ]]
   [[ "$cmd" == *"--timing"* ]]
-  [[ "$cmd" == *"--include-delegated"* ]]
 }
 
 @test "5: the nightly workflow has not drifted from the nightly gate" {
   [ -f "$WORKFLOW" ]
   run grep -E 'schedule:|workflow_dispatch:' "$WORKFLOW"
   [ "$status" -eq 0 ]
-  wf="$(grep -A 3 'run-all-tests.sh' "$WORKFLOW" | tr '\n' ' ')"
-  for flag in "--timing" "--include-delegated"; do
-    [[ "$wf" == *"$flag"* ]] || fail "the nightly workflow does not pass $flag"
-  done
-  [[ "$wf" != *"--tier"* ]] || fail "the nightly workflow filters by tier; it must run the whole portfolio"
+  # The nightly invokes the runner THREE times on purpose: once untiered (the
+  # portfolio) and once per tier, to MEASURE each tier's budget against a real
+  # run. This test used to concatenate all three windows and assert the blob
+  # contained no "--tier" — so it started failing the day tier measurement was
+  # added, and it failed with status 127 rather than a message, because `fail`
+  # is not a bats builtin. Both bugs are why it says nothing useful today.
+  # So: find the PORTFOLIO invocation and judge that one. Comments are stripped
+  # first (this reads commands, not prose) and line continuations are joined.
+  local cmds portfolio
+  cmds="$(sed 's/#.*$//' "$WORKFLOW" \
+          | sed -e ':a' -e '/\\$/{N;s/\\\n[[:space:]]*/ /;ba' -e '}' \
+          | grep -F 'run-all-tests.sh' | grep -v -- '--list')"
+  [[ -n "$cmds" ]] || { echo "the nightly workflow never invokes the runner" >&2; return 1; }
+  portfolio="$(grep -v -- '--tier' <<<"$cmds")"
+  [[ -n "$portfolio" ]] || { echo "no untiered (full-portfolio) runner invocation in the nightly workflow" >&2; return 1; }
+  [[ "$portfolio" == *"--timing"* ]] || { echo "the nightly portfolio run does not pass --timing" >&2; return 1; }
 }
 
 @test "6: release_quarantine is still exactly release minus bats_all" {

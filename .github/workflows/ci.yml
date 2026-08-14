@@ -118,131 +118,25 @@ jobs:
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --verbose
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --verbose
         timeout-minutes: 30
-
-  plan-boundary-tests:
-    runs-on: [self-hosted, eco-dev]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install jq + bats + yq
-        # This suite (test-aid-plan-release-boundary.bats) creates a real Git
-        # repository per test and runs a crash/resume matrix and multi-EPIC
-        # fixtures — the last green bash-tests run spent 264s of its 300s
-        # budget elsewhere, leaving ~36s of headroom, while
-        # test-aid-fsm.bats alone measures ~106s locally. Adding this suite
-        # to that job would make unrelated suites fail on timeout, so it
-        # gets its own job with its own budget instead (P064 E-064-1_2 Step 1).
-        run: |
-          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
-            sudo apt-get install -y jq bats
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          }
-          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
-          # each skip (not fail) their assertions when python3-jsonschema is
-          # absent — install it so a lost package reads as a red build, not a
-          # silently growing skip count (P075 Step 4).
-          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
-      - name: Run plan boundary suite
-        # 2026-08-02: this suite has grown to 267 tests (the "15 min" budget
-        # above dates from a much smaller count); a real run reached test
-        # 154/267 (all passing, zero "not ok") in 15 minutes — ~5.8s/test,
-        # so the full suite needs ~26 min. 30 min gives real margin.
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats
-        timeout-minutes: 30
-
-  plan-final-tests:
-    runs-on: [self-hosted, eco-dev]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install jq + bats + yq
-        # Same shape and same reason as plan-boundary-tests above: this suite
-        # (test-aid-plan-final-boundary.bats, P068 E-068-1_2) builds a real Git
-        # repository per test and drives real merges, version-file bumps and
-        # candidate freeze/invalidation cycles through the CLIs, so it gets its
-        # own job and its own budget rather than eating the bash-tests job's
-        # remaining headroom. yq is needed because the plan-final path reads
-        # .aid-o/config/project.yaml and the lifecycle manifests.
-        run: |
-          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
-            sudo apt-get install -y jq bats
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          }
-          # test-aid-test-catalog-schema.bats/test-execution-unit-receipt-schema.bats
-          # each skip (not fail) their assertions when python3-jsonschema is
-          # absent — install it so a lost package reads as a red build, not a
-          # silently growing skip count (P075 Step 4).
-          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
-      - name: Run plan-final boundary suite
-        # 245 tests as of P066/D1-D5 (was ~15 min budget at a smaller count); the
-        # 2026-08-01 CI run measured ~5.4s/test average, i.e. ~22 min for the full
-        # suite — 15 min is no longer enough headroom. 35 min gives real margin
-        # without masking a genuine hang (bats itself has no per-test timeout).
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats
-        timeout-minutes: 35
-
-  # (isolation-experiment-tests job removed in P078 — its suite tested the
-  # deleted parallelism machinery; dead job removal, not a CI redesign.)
-
-  # ── P079 Step 12 (IMP-483): the three heaviest P076 suites ───────────────
-  # Same shape and same reason as plan-boundary-tests / plan-final-tests
-  # above. Each of these drives REAL processes — a
-  # bash fixture service under aid-job.sh's supervisor, real port allocation,
-  # /proc identity checks — so each gets its own job and its own budget rather
-  # than eating the bash-tests job's headroom. run-all-tests.sh skips them
-  # inline and names the owning job in its DELEGATED report lines; the
-  # delegation test asserts every mapped suite has exactly one job here.
-
-  service-lib-tests:
-    runs-on: [self-hosted, eco-dev]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install jq + bats + yq
-        run: |
-          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
-            sudo apt-get install -y jq bats
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          }
-          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
-      - name: Run service library suite
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-service.bats
-        timeout-minutes: 20
-
-  service-lifecycle-tests:
-    runs-on: [self-hosted, eco-dev]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install jq + bats + yq
-        run: |
-          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
-            sudo apt-get install -y jq bats
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          }
-          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
-      - name: Run service lifecycle suite
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-service-lifecycle.bats
-        timeout-minutes: 20
-
-  owned-jobs-integration-tests:
-    runs-on: [self-hosted, eco-dev]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install jq + bats + yq
-        run: |
-          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
-            sudo apt-get install -y jq bats
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          }
-          python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
-      - name: Run P076 integration suite
-        # The four-phase integration fixture: it starts real services, kills a
-        # runner mid-gate and re-attaches. Budget matched to the other
-        # real-process suites above.
-        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-owned-jobs-integration.bats
-        timeout-minutes: 30
+  # ── The five T2 suites no longer have jobs here (2026-08-14) ─────────────
+  # test-aid-plan-final-boundary, test-aid-plan-release-boundary,
+  # test-aid-service, test-service-lifecycle and test-owned-jobs-integration
+  # each had a dedicated job on every push and PR. All five are tagged
+  # `# aid-tier: t2`, and the ecosystem test standard is explicit: T2 runs in
+  # the nightly cron and NEVER on the merge path — "uzavření plánu ani merge
+  # nikdy nečeká na T2".
+  #
+  # How the contradiction happened, since it will otherwise happen again: the
+  # jobs were added 2026-07-25 (P068), when the heaviest of them took ~22 min
+  # and tiers did not exist. Tiers arrived 2026-08-11 (P081) and stamped the
+  # tags, which changed what the RUNNER selects — not what GitHub schedules.
+  # Nothing compared the two. By 2026-08-14 the suite needed ~199 min against
+  # this file's 35-minute limit, so the job could not go green at all, and had
+  # not for days: a permanently red merge path that no longer meant anything.
+  #
+  # The five suites now run in the nightly full portfolio, and
+  # scripts/tests/test-tier-ci-topology.sh fails if a T2 suite is ever named on
+  # a push/PR-triggered job again.
 
   vitest:
     runs-on: [self-hosted, eco-dev]

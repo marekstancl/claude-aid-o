@@ -80,7 +80,14 @@ profiles:
         cmd: []
         skip_reason: not_required
       dg04:
-        cmd: ["bash", "plugins/aid-orchestrator/scripts/tests/run-all-tests.sh"]
+        # T0+T1, the merge path — the same universe `bats_all` runs. Untiered
+        # used to mean "everything except the five delegated suites"; delegation
+        # was removed 2026-08-14, so untiered now means the FULL portfolio, and
+        # this command runs under a 300 s timeout (aid-fsm.sh). Left alone it
+        # would time out every time and report a false red.
+        # One command, because only `cmd` is read (lib/aid-delivery-profile.sh
+        # looks up exactly profiles.<profile>.commands.<check_id>.cmd).
+        cmd: ["bash", "-c", "plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 && plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1"]
       dg05:
         cmd: []
         skip_reason: not_required

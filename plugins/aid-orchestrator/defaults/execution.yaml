@@ -77,7 +77,7 @@ gates:
   # nightly_tests:
   #   description: "The full portfolio, once a night, blocking nobody"
   #   required: false
-  #   command: "./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing --include-delegated"
+  #   command: "./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing"
   #   timeout_seconds: 18000
   #   run_mode: background
 

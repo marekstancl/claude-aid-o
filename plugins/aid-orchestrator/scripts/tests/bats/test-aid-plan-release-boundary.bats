@@ -32,9 +32,11 @@
 #     `setup_test_evidence_dir` already provides (git init + initial commit
 #     on main).
 #
-# This suite is intentionally NOT part of the aggregate `run-all-tests.sh`
-# job — see .github/workflows/ci.yml's dedicated `plan-boundary-tests` job
-# and run-all-tests.sh's DELEGATED exclusion (both added in this same step).
+# This suite is `# aid-tier: t2`: it runs in the NIGHTLY portfolio and never on
+# the merge path. It used to have a dedicated push-triggered CI job
+# (`plan-boundary-tests`) and a DELEGATED exclusion in run-all-tests.sh; both
+# were removed 2026-08-14 (see that suite's twin note and
+# scripts/tests/test-tier-ci-topology.sh).
 
 load test-helpers.bash
 

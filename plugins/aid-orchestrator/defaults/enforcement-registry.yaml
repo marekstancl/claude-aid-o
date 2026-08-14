@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 444          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 445          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2687,15 +2687,29 @@ enforcements:
 
   - id: delegated_suite_ownership
     type: 6
-    source: "scripts/tests/test-run-all-delegation.sh (reads DELEGATED_SUITES out of run-all-tests.sh and cross-checks .github/workflows)"
-    instruction: "scripts/tests/run-all-tests.sh (DELEGATED_SUITES comment block)"
+    source: "scripts/tests/test-run-all-delegation.sh (deleted 2026-08-14)"
+    instruction: "scripts/tests/run-all-tests.sh (DELEGATED_SUITES comment block — the map is gone)"
+    severity: blocking
+    surface: internal-guard
+    status: removed_scoped
+    replacement_guard: tier_ci_topology
+    verdict: ALIGNED
+    description: "P079 Step 12 (IMP-483), RETIRED 2026-08-14 together with delegation itself. It asserted that every delegated suite had exactly one owning CI job that named it — a correct guard for the wrong world: all five delegated suites were `aid-tier: t2`, and the ecosystem test standard says T2 runs nightly and NEVER on the merge path, so this check was ENFORCING the standard's violation. By 2026-08-14 the two heaviest of those jobs could not pass at all (199 min against a 35-minute limit) and CI had been red on every push for days. The failure mode it existed for — a suite run by NOTHING — is not lost: it is the replacement guard's second assertion, now stated over the tier tag instead of over a map."
+    recovery: "n/a — retired. See tier_ci_topology."
+    test: "n/a (file deleted; replaced by scripts/tests/test-tier-ci-topology.sh)"
+
+  - id: tier_ci_topology
+    type: 6
+    source: "scripts/tests/test-tier-ci-topology.sh (parses .github/workflows with yq + reads run-all-tests.sh --list)"
+    instruction: "https://docs.aidlab.dev/ecosystem/specs/test-standard (T2: noční cron, nikdy na cestě k merge)"
     severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "P079 Step 12 (IMP-483) — delegation moves a suite OUT of the inline run, so a missing, renamed or duplicated CI job stops that suite being run by anything, and the inline run gets FASTER, which reads as success. The test asserts every mapped suite has exactly one owning job that names it, and that the inline runner really skips it and says who owns it. The map is READ from the runner rather than restated, so the two cannot drift. Explicitly not parallelism: this is placement and ownership only."
-    recovery: "Each failure names the suite and whether its job is missing or duplicated."
-    test: "scripts/tests/test-run-all-delegation.sh"
+    enforcement_mechanism: merge_path_test
+    description: "2026-08-14 — the tier tag and the CI workflows must agree. Five t2 suites had dedicated jobs on every push and PR: the jobs were added 2026-07-25 when the heaviest took ~22 min and tiers did not exist, tiers arrived 2026-08-11 and changed what the RUNNER selects rather than what GitHub schedules, and nothing compared the two. Four assertions: every discovered suite carries exactly one tier tag; every suite appears exactly once in the runner's --list (the run-by-nothing guard inherited from delegated_suite_ownership); no t2 suite is named by a job in a push/PR-triggered workflow; and the nightly is schedule-triggered with at least one untiered invocation, so t2 IS covered by something. Honest limits, stated in the file: it reads DIRECT run: commands of root workflows and REFUSES (fails) rather than guesses on workflow_call/workflow_run or a command built from an expression. Shell comments are stripped before matching — counting prose as an invocation made its own first run report two suites no job runs. It is t0, so it runs on the merge path it protects."
+    recovery: "Each failure names the suite, its tier and the workflow file; the fix is either to move the job to the nightly or to retag the suite and accept its merge-path cost."
+    test: "scripts/tests/test-tier-ci-topology.sh"
 
   - id: test_tier_declared
     wired_via: "gate:tier_lint in .aid-o/config/execution.yaml (added 2026-08-11 — the row was blocking and invoked by nothing)"

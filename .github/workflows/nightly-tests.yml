@@ -67,8 +67,11 @@ jobs:
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
           set +e
+          # No --tier: an untiered run IS the full portfolio. (It used to also
+          # pass --include-delegated; delegation was removed 2026-08-14 and the
+          # flag is now a deprecated no-op.)
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh \
-            --timing --include-delegated --verbose > nightly-run.log 2>&1
+            --timing --verbose > nightly-run.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
         # 480, not 300: the portfolio measured 7 h on 2026-08-11 and the old
         # 300-minute cap cut it off three nights running — and because the

@@ -99,14 +99,18 @@ _rec() { jq -c --arg s "$1" 'select(.suite == $s)' "$JOURNAL"; }
   [ "$(jq -r '.exit_code' <<<"$rec")" -ne 0 ]
 }
 
-@test "6: --include-delegated measures a delegated suite and says it ran here" {
-  _mk_bats "$TESTS/bats/test-aid-service.bats" delegated:true
+@test "6: an untiered run measures every suite, and --include-delegated is an accepted no-op" {
+  # Delegation was removed 2026-08-14 (the five "delegated" suites were all t2
+  # and their push-triggered CI jobs contradicted the standard). An untiered run
+  # is now the whole portfolio, so the suite that used to need the flag is
+  # measured without it — and the flag itself must still be ACCEPTED, because a
+  # caller this repo cannot see would otherwise exit 2 on an unknown option.
+  _mk_bats "$TESTS/bats/test-aid-service.bats"
   run bash "$RUNNER" --timing 3>&-
   [ "$status" -eq 0 ]
-  [ -z "$(_rec test-aid-service.bats)" ]
+  [ -n "$(_rec test-aid-service.bats)" ]
 
   run bash "$RUNNER" --timing --include-delegated 3>&-
   [ "$status" -eq 0 ]
-  [[ "$output" == *"RUN HERE ANYWAY"* ]]
   [ -n "$(_rec test-aid-service.bats)" ]
 }
