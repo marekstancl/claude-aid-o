@@ -33,10 +33,21 @@ nafouknutým počtem mergů.
 | E1 | D2 substrát + podlaha z plánu | dodáno | `lib/aid-gate-profile.sh`; registry `gate_profile_include`, `plan_gate_floor` |
 | E2 | D4 risk-upgrade jako **vynucená** podmínka | dodáno | registry `risk_upgrade` — `GATES→DONE` riziko přepočítá a odmítne slabší profil, nejen doporučí |
 | E3 | targeted selector | dodáno | `scripts/aid-select-tests.sh` |
-| E4 | D3 + D9 distribuce a bezpečný upgrade | dodáno | `lib/aid-init-execution-yaml.sh` (`render_gate_profiles_block`, `append_gate_profiles_block`); odmítnutý upgrade nemění bajty (P080 krok 8). D3 drží: `bats_all`/`bats_fsm`/`shell_pipeline_smoke` nejsou nikde v `defaults/` |
-| E5 | D6 reálné místo spuštění profilu `release` | **dodáno** | `aid-plan-fsm.sh:4530` — plan-final řeší `max(plan_final_required_profile, release)` a ten profil pustí. Plán připouštěl dvě cesty (`aid-release.sh` **nebo** pojmenovaná FSM release fáze); dodala se ta druhá |
-| E5 | D5 `/aid-do` no-bypass | **NEDODÁNO → IMP-506** | `gate_profile_resolve` má v produkci tři volající (`aid-fsm.sh` 2×, `aid-plan-fsm.sh` 1×). `/aid-do` mezi nimi není a eskaluje podle velikosti úkolu, ne rizika |
+| E4 | D3 + D9 distribuce a bezpečný upgrade | dodáno | `lib/aid-init-execution-yaml.sh` (`render_gate_profiles_block`, `append_gate_profiles_block`); odmítnutý upgrade nemění bajty (P080 krok 8). D3 drží **v tom smyslu, který D3 zakazuje**: žádný dodávaný seznam bran ani profilů neobsahuje self-host bránu — `defaults/execution.yaml` ani `defaults/execution-stacks/*` ta jména nenesou vůbec. Pod `defaults/` přežívají už jen v próze: popis v jednom schématu, jeden komentář, řádky registru a přejmenovávací seznam. Členství to není |
+| E5 | D6 reálné místo spuštění profilu `release` | **dodáno** | `aid-plan-fsm.sh:4530` vyřeší `max(plan_final_required_profile, release)` a `:4619` ten profil **skutečně pustí** — `aid-run-gates.sh run-all … --profile "$effective_profile"`, a když spadne, plán zůstane v `PLAN_GATES`. Není to jen resolve. Plán připouštěl dvě cesty (`aid-release.sh` **nebo** pojmenovaná FSM release fáze); dodala se ta druhá |
+| E5 | D5 `/aid-do` no-bypass | **NEDODÁNO → IMP-506** | Silněji než jen výčtem volajících: `/aid-do` **nespouští žádný AID skript** — v `commands/aid-do.md` není jediné volání `*.sh`. Nemůže se tedy ke sdílenému vyhodnocovači dostat ani nepřímo. Eskaluje podle velikosti úkolu, ne podle rizika |
 | E6 | C1/FSM dedup | backlog, dle D1 | — |
+
+**Jak byla ta tabulka prověřena.** Nezávislé cross-model kolo (Codex,
+2026-08-14) dostalo tvrzení i důkazy a **tři ze čtyř označilo za silnější, než
+co důkaz unese** — přesně to riziko, kvůli kterému se plány zavírají pohodlným
+čtením. Kontrola tří napadených bodů dopadla takto: D6 vyšlo **silněji**, než
+bylo napsáno (profil se nejen vyřeší, ale opravdu spustí, a jeho pád plán
+zastaví), D5 taky **silněji** (`/aid-do` nespouští žádný skript, takže nejde
+o neúplný výčet volajících), a D3 se **zúžilo na to, co doopravdy platí**:
+členství v dodávaných seznamech, ne nepřítomnost tří řetězců kdekoli pod
+`defaults/`. Znění výše je opravené na tuhle úroveň. Ta námitka byla správná
+i tam, kde výsledek nakonec vyšel v náš prospěch.
 
 **Co uzavření NEtvrdí.** Netvrdí, že Fast Mode měří riziko. Dokud platí
 IMP-506, je vynucení rizika obejitelné volbou příkazu — `/aid-do` místo
