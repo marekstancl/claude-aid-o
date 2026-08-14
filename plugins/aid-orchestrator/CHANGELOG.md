@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.86.1] — 2026-08-14
+
+> One awk line that made a merge-path check vacuous on the machine people run it on, and
+> impossible on the machine that gates the merge.
+
+### Fixed
+- **The publication-wiring check works the same in both places** — `_section_end` used the ERE interval `{1,6}`, which mawk 1.3.4 (the awk on this project's host) does not support, so every section ran to end of file and the check could not fail locally; where intervals *are* supported, `exit` still ran the `END` block, so the function printed two numbers, `sed` got a malformed range and the check could not pass in CI. Found by simulating the nightly rather than waiting for it.
+
 ## [2.86.0] — 2026-08-14
 
 > The merge path stopped being a merge path: five T2 suites had dedicated jobs on every
