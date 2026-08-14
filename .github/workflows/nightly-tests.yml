@@ -100,6 +100,7 @@ jobs:
             --runner-log nightly-run.log \
             --exit-code "${{ steps.portfolio.outputs.exit_code }}" \
             --t0-seconds "${{ steps.tiers.outputs.t0_seconds }}" \
+            --merge-path-suites "$(plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --list 2>/dev/null | sed -n 's/^[A-Z]*: \([^ ]*\).*/\1/p'; plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --list 2>/dev/null | sed -n 's/^[A-Z]*: \([^ ]*\).*/\1/p')" \
             --t1-seconds "${{ steps.tiers.outputs.t1_seconds }}" \
             --log-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
