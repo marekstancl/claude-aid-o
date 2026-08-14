@@ -132,7 +132,8 @@ _snap_env_save() {
     else printf 'unset %s\n' "$v" >> "$1"; fi
   done
 }
-_snap_env_load() { [[ -f "$1" ]] && . "$1"; return 0; }
+# Returns 1 when the sidecar is missing: the caller decides, and it refuses.
+_snap_env_load() { [[ -f "$1" ]] || return 1; . "$1"; }
 
 # _snap_contract — the shell state a copy cannot carry, re-established
 # explicitly rather than inherited from whichever builder ran last.
@@ -165,19 +166,30 @@ _snap_fixture() {
   local key="$1"; shift
   key="${key}.$(_snap_env_key)"
   local tpl live; tpl="$(_snap_tpl "$key")"; live="$(_snap_live)"
+  # A template DIRECTORY is not a template. Publication is atomic — built
+  # aside, then moved into place with its env sidecar already written — so an
+  # interrupted build can never leave a half-tree that the next case restores
+  # as if it were complete. And every step of the restore is checked: `cp -a`
+  # failing, or a missing `.env`, used to return success, poison the run state
+  # and hand the case a partial world. Fail-open in a fixture is the same
+  # disease as fail-open in a gate.
   if [[ -d "$tpl" ]]; then
     _SNAP_LAST_ACTION="restore"
     cd /
     rm -rf "$live"
-    cp -a "$tpl" "$live"
+    cp -a "$tpl" "$live" || { echo "_snap: restoring template $key failed" >&2; return 1; }
+    [[ -f "${tpl}.env" ]] || { echo "_snap: template $key has no .env sidecar — refusing a partial restore" >&2; return 1; }
     _snap_env_load "${tpl}.env"
   else
     _SNAP_LAST_ACTION="build"
     "$@"
     _snap_eligible || return 1
     mkdir -p "$(dirname "$tpl")"
-    cp -a "$live" "$tpl"
+    local staging="${tpl}.staging.$$"
+    rm -rf "$staging"
+    cp -a "$live" "$staging" || { echo "_snap: staging template $key failed" >&2; return 1; }
     _snap_env_save "${tpl}.env"
+    mv "$staging" "$tpl" || { echo "_snap: publishing template $key failed" >&2; return 1; }
   fi
   _snap_contract
 }
@@ -215,7 +227,12 @@ _snap_fingerprint() {
   # there for the same reason their commits do. The masked comparison still
   # catches a ref that is MISSING, renamed or pointing somewhere else.
   {
-    git -C "$TEST_PROJECT_ROOT" for-each-ref --format='ref %(refname)'
+    # NAME **and** TARGET. Names alone would compare equal for a restore whose
+    # evidence ref survived but points at the wrong commit — which is precisely
+    # the claim the paragraph above makes, and could not keep with names alone.
+    # The target is masked like every other sha, so two correct builds still
+    # agree while a ref pointing somewhere ELSE relative to its own tree does not.
+    git -C "$TEST_PROJECT_ROOT" for-each-ref --format='ref %(refname) -> %(objectname)'
     echo "head $(git -C "$TEST_PROJECT_ROOT" symbolic-ref -q HEAD || echo detached)"
     git -C "$TEST_PROJECT_ROOT" status --porcelain | sed 's/^/status /'
     git -C "$TEST_PROJECT_ROOT" worktree list --porcelain | grep '^worktree ' | sed "s|$TEST_PROJECT_ROOT|<ROOT>|"
@@ -6201,7 +6218,7 @@ _FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
 }
 
 @test "IMP-505: a RESTORED closable fixture has the same shape as a freshly BUILT one" {
-  export AID_TEST_SEED_LIFECYCLE=1
+  # Called exactly as an ordinary case calls it — see the twin above.
   # 1. a FRESH build, bypassing the snapshot layer entirely.
   _seed_closable_build
   local fresh; fresh="$(_snap_fingerprint)"
@@ -6231,16 +6248,27 @@ _FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
   _seed_merge_project
   [ "$status" -eq 97 ]
   [ "$output" = "__SNAPSHOT_RESTORE_DID_NOT_RUN_A_COMMAND__" ]
-  # The sentinel half of the isolation pair below: this case dirties its
-  # restored tree, and the NEXT case proves the dirt did not survive.
-  echo "contamination" > "$TEST_PROJECT_ROOT/CONTAMINATION-SENTINEL"
-  git -C "$TEST_PROJECT_ROOT" add -A
-  git -C "$TEST_PROJECT_ROOT" commit -q -m "a mutation the next case must not see"
 }
 
-@test "IMP-505: the previous case's mutation is absent — every case restores its own copy" {
+@test "IMP-505: a mutation does not survive the next restore — every case gets its own copy" {
+  # SELF-CONTAINED on purpose. This was a PAIR of cases, one dirtying the tree
+  # and the next asserting the dirt was gone — which only means anything while
+  # they stay adjacent, and the nightly now runs this file in a PERMUTED order
+  # where they need not be. An order-dependent proof of order-independence is
+  # not a proof.
   _seed_merge_project
+  echo "contamination" > "$TEST_PROJECT_ROOT/CONTAMINATION-SENTINEL"
+  git -C "$TEST_PROJECT_ROOT" add -A
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "a mutation the next restore must erase"
+  run git -C "$TEST_PROJECT_ROOT" log --oneline --all
+  [[ "$output" == *"a mutation the next restore must erase"* ]]
+
+  _snap_setup_live
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  _seed_merge_project
+  [ "$_SNAP_LAST_ACTION" = "restore" ]
   [ ! -f "$TEST_PROJECT_ROOT/CONTAMINATION-SENTINEL" ]
   run git -C "$TEST_PROJECT_ROOT" log --oneline --all
-  [[ "$output" != *"a mutation the next case must not see"* ]]
+  [[ "$output" != *"a mutation the next restore must erase"* ]]
 }
