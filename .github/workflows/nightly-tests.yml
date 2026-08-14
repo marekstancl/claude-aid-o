@@ -51,6 +51,12 @@ jobs:
           python3 -c 'import jsonschema' >/dev/null 2>&1 || sudo apt-get install -y python3-jsonschema
 
       - name: Run the whole portfolio with timing
+        # The durations journal goes to the SHARED HOST path, not under
+        # .aid-o/ — that directory is gitignored and thrown away with this
+        # checkout every run, which is why it sat three days stale while the
+        # merge path nearly doubled.
+        env:
+          AID_DURATIONS_DIR: /opt/eco/data/aid-nightly/aid-orchestrator
         id: portfolio
         # Generous, because this job blocks nobody. `--timing` refreshes the
         # durations journal every night, which is what keeps tier assignments

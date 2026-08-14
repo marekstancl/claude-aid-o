@@ -61,7 +61,29 @@ source "${_AID_TD_LIB_DIR}/aid-test-tier.sh"   # discovery, for aid_durations_by
 
 AID_DURATIONS_REL="${AID_DURATIONS_REL:-.aid-o/work/test-durations.jsonl}"
 
+# AID_DURATIONS_DIR — an ABSOLUTE directory that wins over the state root.
+#
+# Why it exists: the journal's default home is under `.aid-o/`, which is
+# gitignored, so in a CI checkout it is created fresh and thrown away with the
+# workspace every run. That is why it sat three days stale with 202 entries
+# while the merge path grew from 42 suites to 72 — the one file that could have
+# shown the growth was being deleted nightly. The nightly now points this at
+# the same shared HOST path where it already writes its result artifact.
+AID_DURATIONS_DIR="${AID_DURATIONS_DIR:-}"
+
 aid_durations_file() {
+  if [[ -n "$AID_DURATIONS_DIR" ]]; then
+    [[ "$AID_DURATIONS_DIR" == /* ]] || {
+      echo "aid-test-durations: AID_DURATIONS_DIR must be absolute (got '$AID_DURATIONS_DIR') — a relative override would follow whatever directory the runner happens to be in" >&2
+      return 2
+    }
+    mkdir -p "$AID_DURATIONS_DIR" 2>/dev/null || {
+      echo "aid-test-durations: cannot create '$AID_DURATIONS_DIR'" >&2
+      return 2
+    }
+    printf '%s\n' "${AID_DURATIONS_DIR}/test-durations.jsonl"
+    return 0
+  fi
   local root=""
   root="$(aid_state_root)" || {
     echo "aid-test-durations: cannot resolve the state root — refusing to guess where the durations journal lives" >&2
