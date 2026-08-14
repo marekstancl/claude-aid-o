@@ -187,7 +187,15 @@ _run_gate() {
 # on Step 1 and carries the objective under test.
 _write_rt_plan() {
   RTPROJ="$TEST_TMPDIR/rt-proj"
-  mkdir -p "$RTPROJ/.aid-o/work" "$RTPROJ/epics"
+  mkdir -p "$RTPROJ/.aid-o/work/plan-state" "$RTPROJ/.aid-o/config" "$RTPROJ/epics"
+  # IMP-503: DoD gate resolution requires a real execution.yaml at the
+  # project's state root (fail-closed). An empty gates: mapping is a valid
+  # outcome; this fixture just needs to exist and parse. rt-proj is not
+  # itself a git repo (a plain tmpdir); aid_canonicalize_project_root's
+  # "dogfood escape" honours an explicit root AS GIVEN when it carries
+  # .aid-o/work/plan-state, without requiring a git-common-dir lookup.
+  printf 'gates: {}\n' > "$RTPROJ/.aid-o/config/execution.yaml"
+  export AID_PROJECT_ROOT="$RTPROJ"
   cat > "$RTPROJ/plan.md" <<EOF
 ---
 id: P901

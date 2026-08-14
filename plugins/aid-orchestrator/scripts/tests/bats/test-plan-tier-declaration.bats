@@ -34,6 +34,11 @@ setup() {
   # a Test bullet may point at without declaring anything.
   printf '#!/usr/bin/env bats\n# aid-tier: t0\n' \
     > "$ROOT/scripts/tests/bats/test-existing.bats"
+  # IMP-503: DoD gate resolution requires a real execution.yaml at the
+  # project's state root (fail-closed). An empty gates: mapping is a valid
+  # outcome; this fixture just needs to exist and parse.
+  mkdir -p "$ROOT/.aid-o/config"
+  printf 'gates: {}\n' > "$ROOT/.aid-o/config/execution.yaml"
   cd "$ROOT"
 }
 

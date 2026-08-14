@@ -26,6 +26,11 @@ setup() {
   export GRAPH_LIB PLAN_TO_EPIC
   PLAN="$TEST_PROJECT_ROOT/plan.md"
   export PLAN
+  # IMP-503: DoD gate resolution requires a real execution.yaml at the
+  # project's state root (fail-closed). An empty gates: mapping is a valid
+  # outcome; this fixture just needs to exist and parse.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'gates: {}\n' > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 }
 
 teardown() {

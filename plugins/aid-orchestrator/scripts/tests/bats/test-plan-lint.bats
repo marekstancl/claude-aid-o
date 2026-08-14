@@ -131,6 +131,13 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   _plan clean.md strict '- Create: `src/a.ts` — new file' '- Modify: `src/b.ts` (lines ~1-9) — edit'
   run "$LINT" clean.md; [ "$status" -eq 0 ]                    # lint says clean
   mkdir -p out
+  # IMP-503: DoD gate resolution requires a real execution.yaml at the
+  # project's state root (fail-closed). TEST_DIR is a plain tmpdir (not a
+  # git repo); the plan-state marker lets aid_canonicalize_project_root
+  # honour it as-given without one.
+  mkdir -p .aid-o/work/plan-state .aid-o/config
+  printf 'gates: {}\n' > .aid-o/config/execution.yaml
+  export AID_PROJECT_ROOT="$TEST_DIR"
   run "$P2E" --plan clean.md --phase 1 --total 1 \
     --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
     --output-dir out --counter-yaml counter.yaml

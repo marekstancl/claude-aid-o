@@ -17,6 +17,13 @@ setup() {
   COUNTER="$TEST_TMPDIR/epic-counter.yaml"
   mkdir -p "$OUTPUT_DIR"
   printf 'counter: 0\n' > "$COUNTER"
+  # IMP-503: DoD gate resolution now requires a real execution.yaml at the
+  # project's state root (fail-closed — a missing/unreadable config is no
+  # longer indistinguishable from "this project chose no DoD gate"). An
+  # empty gates: mapping is a valid, deliberate outcome; this fixture just
+  # needs to exist and parse.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'gates: {}\n' > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 }
 
 teardown() {
