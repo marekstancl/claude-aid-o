@@ -58,6 +58,10 @@ _mk_primary() {
   mkdir -p "$d/.aid-o/plans" "$d/.aid-o/tasks" "$d/.aid-o/config" \
            "$d/.aid-o/work/evidence" "$d/.aid-o/work/runs"
   printf 'counter: 0\n' > "$d/.aid-o/config/counter.yaml"
+  # IMP-503 (v2.85.1): DoD gate resolution refuses without a real execution.yaml
+  # at the project's state root. Empty `gates:` is a valid outcome; the fixture
+  # only has to exist and parse.
+  printf 'gates: {}\n' > "$d/.aid-o/config/execution.yaml"
   printf '.aid-o/\n' > "$d/.gitignore"
   printf 'seed\n' > "$d/README.md"
   (

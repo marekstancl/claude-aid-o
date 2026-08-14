@@ -60,6 +60,20 @@ _make_ws() {
   )
 }
 
+# _seed_plan — copy the fixture plan in AND COMMIT IT on the current branch.
+#
+# P073 Step 11 (2026-08-05) added a committed-source preflight: generation
+# refuses a source plan that is not committed on the target branch, or that
+# differs from the worktree copy. Every case here copied the plan in and left it
+# uncommitted, so all seven have been failing with "source plan is not committed
+# on main" ever since — unseen, because this suite is `aid-tier: t2` and the
+# nightly has not completed since 2026-08-11.
+_seed_plan() {
+  _seed_plan
+  git -C "$WS" add -- .aid-o/plans/plan.md
+  git -C "$WS" commit -q -m "the source plan, committed — the generator refuses an uncommitted one"
+}
+
 # _break_restore <branch> — install a post-checkout hook that deletes <branch>
 # as soon as the FSM switches to its task branch, so the restore genuinely
 # cannot succeed. The hook removes itself so it fires exactly once.
@@ -90,7 +104,7 @@ _run_pipeline() {
 
 @test "P073 Step 6: a failed branch restore exits 4 with a git-checkout recovery instruction" {
   _make_ws "main"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
   _break_restore "main"
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
@@ -101,7 +115,7 @@ _run_pipeline() {
 
 @test "P073 Step 6: after a failed restore the queue phase does NOT run" {
   _make_ws "main"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
   _break_restore "main"
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
@@ -120,7 +134,7 @@ _run_pipeline() {
   # rolled back, so the operator can rerun the follow-on action after fixing
   # the checkout rather than regenerating from scratch.
   _make_ws "main"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
   _break_restore "main"
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
@@ -133,7 +147,7 @@ _run_pipeline() {
 
 @test "P073 Step 6: a run started on a feature branch ends on that branch with exit 0 (the FSM never switches, so no restore is needed)" {
   _make_ws "feature/x"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
   [ "$status" -eq 0 ]
@@ -143,7 +157,7 @@ _run_pipeline() {
 
 @test "P073 Step 6: a run started on main is restored to main, reported as a restore and never as an ERROR" {
   _make_ws "main"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
   [ "$status" -eq 0 ]
@@ -160,7 +174,7 @@ _run_pipeline() {
   # detached HEAD; the real behaviour is stricter and better — aid-json-to-run
   # refuses up front, so there is no window in which a restore could fail.
   _make_ws "feature/x"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
   ( cd "$WS" && git checkout -q --detach HEAD )
 
   run _run_pipeline "$WS/.aid-o/plans/plan.md"
@@ -177,7 +191,7 @@ _run_pipeline() {
   # failure reused it, this run would print the pipeline's "Branch restore
   # failed / git checkout" instruction for a completely unrelated fault.
   _make_ws "main"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  _seed_plan
 
   run bash -c "cd '$WS' && bash '$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh' \
       --plan-json '$FIXTURES/minimal-plan.json' \

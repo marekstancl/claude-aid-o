@@ -89,11 +89,14 @@ version: 1
 # where the document is reachable, and the test says loudly when it is not.
 supersedes:
   - document: docs/plans/2026-07-21-IMP-auto-mode-stop-taxonomy-and-recovery-policy.md
-    tracked: false
+    tracked: true
     tracked_reason: >-
-      `.gitignore` ignores `docs/`, so this document is untracked: it lives only
-      in the main working tree, cannot be diff-reviewed, does not roll back with
-      the commit, and never reaches a consumer of the plugin.
+      `.gitignore` ignores `docs/`, so this document reaches git only by an
+      explicit `git add -f` — which is what commit 8470b13 (2026-08-10) did. It
+      IS tracked now, so it diff-reviews and rolls back with the commit like any
+      other file. The claim was left at `false` in that commit and this policy's
+      own case 11 has been failing ever since, unseen: the suite is
+      `aid-tier: t2` and the nightly has not completed since 2026-08-11.
     marker_pattern: P076
     sections:
       - "## What Codex may decide without PM"
@@ -183,11 +186,11 @@ stop_classes:
     ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 1192
+        line: 1230
         anchor: gate_job_deadline_exceeded
         note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 2143
+        line: 2135
         anchor: timeout_policy_block
         note: "three censored samples at or above the current timeout — no further attempt is spent"
     allowed_actions: [rerun_targeted, collect_and_continue]
@@ -268,7 +271,7 @@ stop_classes:
     ladder_entry_status: planned
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-fsm.sh
-        line: 1537
+        line: 1647
         anchor: missing_dispatch_complete
         note: >-
           fsm_check_orphan_dispatches die site; writes fsm_orphan_dispatch_fail

@@ -97,6 +97,15 @@ gen_mk_project() {
   mkdir -p "$d/.aid-o/plans" "$d/.aid-o/tasks" "$d/.aid-o/config" \
            "$d/.aid-o/work/evidence" "$d/.aid-o/work/runs"
   printf 'counter: 0\n' > "$d/.aid-o/config/counter.yaml"
+  # IMP-503 (v2.85.1): DoD gate resolution refuses when it cannot find a real
+  # execution.yaml at the project's state root — a missing config used to be
+  # indistinguishable from "this project deliberately chose no DoD gate". An
+  # empty `gates:` mapping is a valid outcome; this fixture only has to exist
+  # and parse. The same-day sweep (80bd0fe, 32f477b) fixed the fixtures whose
+  # suites run on the merge path; every suite reaching generation through THIS
+  # helper is `aid-tier: t2`, so its failures went to a nightly that had not
+  # completed since 2026-08-11 and nobody saw them. Five suites at once.
+  printf 'gates: {}\n' > "$d/.aid-o/config/execution.yaml"
   printf '.aid-o/\n' > "$d/.gitignore"
   printf 'seed\n' > "$d/README.md"
   (

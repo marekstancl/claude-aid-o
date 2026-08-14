@@ -1018,10 +1018,19 @@ $ins"
   # under bats' `set -e` the assignment aborted the test before the message
   # below could print — in exactly the case it exists to report. The check could
   # only ever say "too many", never "none".
-  local ig_count ig_ids
-  ig_count="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" | grep -c '^    surface: internal-guard' || true)"
-  ig_ids="$(awk '/^  # ══ P076:/{p=1} p' "$REGISTRY" \
-            | awk '/^  - id: /{id=$3} /^    surface: internal-guard$/{print id}')"
+  # THE RANGE IS THE P076 SECTION, NOT "FROM P076 TO END OF FILE".
+  #
+  # The banner speaks about the rows P076 shipped, but the range read them to
+  # EOF — so every row any LATER plan appended counted too, and the check broke
+  # the first time anyone added an internal-guard row after this section. By
+  # 2026-08-14 it was reporting 27 against a banner that says 1, and had been
+  # failing unseen: this suite is `aid-tier: t2` and the nightly has not
+  # completed since 2026-08-11. Section banners are `  # ══ …` / `  # ── …`, so
+  # the next one of either ends this section.
+  local ig_count ig_ids p076_section
+  p076_section="$(awk '/^  # ══ P076:/{p=1; next} p && /^  # (══|──) /{exit} p' "$REGISTRY")"
+  ig_count="$(grep -c '^    surface: internal-guard' <<<"$p076_section" || true)"
+  ig_ids="$(awk '/^  - id: /{id=$3} /^    surface: internal-guard$/{print id}' <<<"$p076_section")"
   [ "$ig_count" = "1" ] \
     || _fail 4 "$REGISTRY" "the P076 banner states that exactly ONE row carries surface: internal-guard, but ${ig_count} do (${ig_ids//$'\n'/, }) — the banner is describing itself falsely, which is the one thing this registry pass exists to prevent"
   [ "$ig_ids" = "service_teardown_declaration_preflight" ] \

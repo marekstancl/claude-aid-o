@@ -23,6 +23,11 @@ setup() {
   EPIC_TO_JSON="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
   SCHEMA="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
   FIXTURE_STEP_SCOPING="$AID_PLUGIN_PATH/scripts/tests/fixtures/E-TEST-005-1_1-step-scoping-repro.md"
+  # IMP-503 (v2.85.1): DoD gate resolution refuses without a real execution.yaml
+  # at the project's state root. An empty `gates:` mapping is a valid outcome;
+  # this fixture only has to exist and parse.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'gates: {}\n' > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 }
 
 teardown() {
@@ -314,6 +319,14 @@ Single EPIC, two steps, no per-step Files.
 **Last Updated:** 2026-07-05
 PLANMD
 
+  # P073 Step 11 (2026-08-05): generation refuses a source plan that is not
+  # committed on the target branch. Every case in this suite wrote its plan
+  # and left it uncommitted, so they have been failing since — unseen,
+  # because this suite is `aid-tier: t2` and the nightly has not completed
+  # since 2026-08-11.
+  git -C "$TEST_PROJECT_ROOT" add -- plan-nofiles.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-nofiles.md, committed"
+
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-nofiles.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
   [ "$status" -ne 0 ]
@@ -425,6 +438,14 @@ One EPIC, two steps, each with its own Files.
 
 **Last Updated:** 2026-07-05
 PLANMD
+
+  # P073 Step 11 (2026-08-05): generation refuses a source plan that is not
+  # committed on the target branch. Every case in this suite wrote its plan
+  # and left it uncommitted, so they have been failing since — unseen,
+  # because this suite is `aid-tier: t2` and the nightly has not completed
+  # since 2026-08-11.
+  git -C "$TEST_PROJECT_ROOT" add -- plan-clean.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-clean.md, committed"
 
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-clean.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
@@ -560,6 +581,14 @@ Phase 1 clean, Phase 2 broadcast-shaped.
 
 **Last Updated:** 2026-07-05
 PLANMD
+
+  # P073 Step 11 (2026-08-05): generation refuses a source plan that is not
+  # committed on the target branch. Every case in this suite wrote its plan
+  # and left it uncommitted, so they have been failing since — unseen,
+  # because this suite is `aid-tier: t2` and the nightly has not completed
+  # since 2026-08-11.
+  git -C "$TEST_PROJECT_ROOT" add -- plan-mixed.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-mixed.md, committed"
 
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-mixed.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
