@@ -1332,9 +1332,10 @@ rule: the PM reads what stopped and what to do before reading which EPIC it was.
 ```
 Zastaveno: {trigger_reason — the concrete blocker, not an internal error label}.
 Dopad: {what has not happened; what remains safe — nothing is merged or released}.
-Doporučené řešení: A — {the smallest safe action, from the per-type context block below}.
+Co se ví: {the per-type context block below, rendered — the diagnostic itself, not a pointer to it}.
+Doporučené řešení: A — oprav a nech to zopakovat: {the smallest safe action}. Dej pokyn, agent práci znovu odešle.
 Alternativy: B — přeskočit a pokračovat dál (zaloguje se varování); C — zastavit EPIC a uložit postup (/aid-stop).
-Riziko / co není ověřeno: {what was tried and what it did not prove}.
+Riziko / co není ověřeno: {what was tried, and what those attempts did NOT prove}.
 EPIC {epic_id}, stav {failed_state}, {executing_step}/{total_steps}.
 ```
 

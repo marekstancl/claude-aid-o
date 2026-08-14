@@ -349,10 +349,17 @@ fi
 #      removing the escalation template and leaving the PM with nothing.
 case_ "the ESCALATION presentation is the contract's card, not a free-form banner"
 
+# The pattern allows the Markdown a banner can hide behind on BOTH sides — a
+# list bullet, a blockquote or bold before the word, and the closing emphasis
+# after it — and is case-insensitive, because none of that makes it less of a
+# banner (cross-model review, 2026-08-14; the first version of this pattern
+# missed `- **ESCALATION** — {reason}`, proven by probe before it was widened).
+# It still cannot fire on ordinary prose: a terminator must follow the word, so
+# "- **Escalation is advisory**" and "→ ESCALATION" are untouched.
 banners=""
 while IFS= read -r f; do
   rel="${f#"$PLUGIN_ROOT"/}"
-  hit="$(grep -n -E '^[[:space:]]*ESCALATION[[:space:]]*[:—-]' "$f" 2>/dev/null | head -3)" || hit=""
+  hit="$(grep -n -i -E '^[[:space:]>*_-]*ESCALATION[[:space:]*_]*[:—–-]' "$f" 2>/dev/null | head -3)" || hit=""
   [[ -n "$hit" ]] && banners+=$'\n'"    $rel: $(tr '\n' '; ' <<<"$hit")"
 done < <(find "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/agents" \
               "$PLUGIN_ROOT/defaults" "$PLUGIN_ROOT/reference" \
@@ -364,15 +371,30 @@ else
   bad "pre-contract ESCALATION banner still present — the card was wired around it, not into it:${banners}"
 fi
 
+# The composite assertion is scoped to §6 of pipeline.md, not to the file. Over
+# the whole file it was passable by DELETING the escalation template and
+# leaving those common labels anywhere else in the document — which, paired
+# with the absence check above, would have let "no escalation surface at all"
+# pass both assertions (cross-model review, 2026-08-14). The section is read
+# between its own heading and the next `## ` heading.
 ESC_COMPOSITE="${PLUGIN_ROOT}/skills/pipeline.md"
-esc_missing=""
-for lbl in 'Zastaveno:' 'Dopad:' 'Doporučené řešení:'; do
-  grep -qF -- "$lbl" "$ESC_COMPOSITE" || esc_missing+="${esc_missing:+, }${lbl}"
-done
-if [[ -z "$esc_missing" ]]; then
-  ok "skills/pipeline.md §6 carries the ESCALATION composite in card-3 vocabulary"
+esc_section=""
+if [[ -f "$ESC_COMPOSITE" ]]; then
+  esc_section="$(awk '/^## §6 ESCALATION State/{inside=1; next} inside && /^## /{exit} inside' \
+    "$ESC_COMPOSITE")"
+fi
+if [[ -z "$esc_section" ]]; then
+  bad "skills/pipeline.md has no readable '## §6 ESCALATION State' section — the composite cannot be located, so nothing below is proven"
 else
-  bad "skills/pipeline.md §6 has no card-shaped ESCALATION composite (missing: ${esc_missing}) — the banner check above would then pass over an empty surface"
+  esc_missing=""
+  for lbl in 'Zastaveno:' 'Dopad:' 'Co se ví:' 'Doporučené řešení:' 'Alternativy:'; do
+    grep -qF -- "$lbl" <<<"$esc_section" || esc_missing+="${esc_missing:+, }${lbl}"
+  done
+  if [[ -z "$esc_missing" ]]; then
+    ok "skills/pipeline.md §6 carries the ESCALATION composite in card-3 vocabulary"
+  else
+    bad "skills/pipeline.md §6 has no card-shaped ESCALATION composite (missing: ${esc_missing}) — the banner check above would then pass over an empty surface"
+  fi
 fi
 
 echo "----------------------------------------------------------------------"

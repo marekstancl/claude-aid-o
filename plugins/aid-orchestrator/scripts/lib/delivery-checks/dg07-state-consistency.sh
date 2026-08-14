@@ -33,8 +33,14 @@ STATE_FILE="${EVIDENCE_DIR}/fsm-state.yaml"
 # line below reported it raw — `step=2/3` for a run with one step left. The
 # wording that disambiguates it is defined once, in lib/aid-human-step.sh; this
 # check renders through that function rather than restating it. The machine
-# values keep their exact position and format, so greps on these lines still
-# match; the suffix is appended after them.
+# values keep their exact position and format and the suffix is appended after
+# them, so a SUBSTRING match still matches — but a pattern anchored to the end
+# of these lines would not, and that is the honest limit of the claim
+# (cross-model review, 2026-08-14). Checked at this HEAD: the only production
+# consumer is aid-fsm.sh's done-advance hook, which captures the whole output
+# as an opaque blob for a timeline event and decides on the EXIT CODE; no test
+# or workflow anchors these lines at all. `FAIL_REASONS` deliberately keeps the
+# bare machine values — it feeds a reason string, not a human line.
 # shellcheck source=../aid-human-step.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/aid-human-step.sh"
 
