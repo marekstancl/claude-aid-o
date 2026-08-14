@@ -476,6 +476,10 @@ _release_version_sealed() {
 
 update_changelog() {
   local file="$1"
+  # P083 Step 3: callers append $file to UPDATED[] only when this function
+  # actually edited it — a no-op run must not count toward the printed total,
+  # the rollback set, or the staging set.
+  _UPDATE_CHANGELOG_CHANGED=0
   [[ -f "$file" ]] || return 0
   # P073 Step 2: a CHANGELOG with no version ledger at all (a landing page)
   # must reach the prepend branch below, not abort the release mid-update —
@@ -492,6 +496,7 @@ update_changelog() {
     # behaviour, and the only case where a retitle is a correction).
     sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$file"
     echo "Updated: $file (header $CURRENT → $NEW_VERSION)"
+    _UPDATE_CHANGELOG_CHANGED=1
   else
     # Different state: prepend a new entry above the current top entry.
     # This handles the case where CHANGELOG has been edited but doesn't match
@@ -512,20 +517,19 @@ update_changelog() {
       tail -n +5 "$file"
     } > "$tmp" && mv "$tmp" "$file"
     echo "Updated: $file (prepended new $NEW_VERSION entry — fill in content)"
+    _UPDATE_CHANGELOG_CHANGED=1
   fi
 }
 
 case "$VERSION_SOURCE" in
-  CHANGELOG.md)
-    update_changelog "$REPO_ROOT/CHANGELOG.md"
-    UPDATED+=("$REPO_ROOT/CHANGELOG.md")
-    ;;
-  plugin.json|marketplace.json)
-    # Source is JSON — handled by versioning.files[] loop below.
-    # Still need to update CHANGELOG.md if it exists.
+  CHANGELOG.md|plugin.json|marketplace.json)
+    # A JSON source is bumped by the versioning.files[] loop below, but
+    # CHANGELOG.md still gets its entry here either way (when it exists).
     if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
       update_changelog "$REPO_ROOT/CHANGELOG.md"
-      UPDATED+=("$REPO_ROOT/CHANGELOG.md")
+      if [[ "$_UPDATE_CHANGELOG_CHANGED" -eq 1 ]]; then
+        UPDATED+=("$REPO_ROOT/CHANGELOG.md")
+      fi
     fi
     ;;
   package.json)
@@ -563,6 +567,9 @@ except:
     FULL_PATH="$REPO_ROOT/$FILE_PATH"
     [[ -f "$FULL_PATH" ]] || { echo "WARNING: $FILE_PATH not found, skipping" >&2; continue; }
 
+    # P083 Step 4: a branch that changed nothing `continue`s past the collect
+    # step below, so a no-match or a true no-op is never counted as an update.
+    # json/toml stay unconditional (out of scope for this step).
     case "$FILE_TYPE" in
       json)
         tmp=$(mktemp)
@@ -570,10 +577,26 @@ except:
         echo "Updated: $FILE_PATH (json: .$FILE_FIELD)"
         ;;
       regex)
+        # P083 Step 4: sed cannot tell "already at the new version" apart
+        # from "matches neither version" — both leave the file unchanged.
+        # Substitute unconditionally (so a file with BOTH an already-current
+        # row and a still-stale row gets the stale row fixed — the "matches
+        # more than one line, substitutes all" edge case), then classify by
+        # whether the file actually changed, not by pre-guessing per file.
         SEARCH=$(echo "$FILE_PATTERN" | sed "s/{VERSION}/$CURRENT/g")
         REPLACE=$(echo "$FILE_PATTERN" | sed "s/{VERSION}/$NEW_VERSION/g")
+        _before_sha=$(sha256sum "$FULL_PATH" | awk '{print $1}')
         sed -i "s|$SEARCH|$REPLACE|g" "$FULL_PATH"
-        echo "Updated: $FILE_PATH (regex)"
+        _after_sha=$(sha256sum "$FULL_PATH" | awk '{print $1}')
+        if [[ "$_before_sha" != "$_after_sha" ]]; then
+          echo "Updated: $FILE_PATH (regex)"
+        elif grep -q -- "$REPLACE" "$FULL_PATH" 2>/dev/null; then
+          echo "Already current: $FILE_PATH (regex) — already matches the new-version pattern"
+          continue
+        else
+          echo "MISS: $FILE_PATH (regex) — configured pattern matched neither the current nor the new version: $FILE_PATTERN"
+          continue
+        fi
         ;;
       toml)
         sed -i "s/^${FILE_FIELD} = \"$CURRENT\"/${FILE_FIELD} = \"$NEW_VERSION\"/" "$FULL_PATH"
@@ -583,9 +606,10 @@ except:
         # IMP-093 fix: use prepend-aware update_changelog helper instead of
         # blind sed-rename, to preserve pre-written entries.
         update_changelog "$FULL_PATH"
+        [[ "$_UPDATE_CHANGELOG_CHANGED" -eq 1 ]] || continue
         ;;
     esac
-    # Collect for git add (in subshell — use temp file)
+    # Collect for git add (in subshell — use temp file).
     echo "$FULL_PATH" >> /tmp/aid-release-updated-$$
   done
 
@@ -647,17 +671,22 @@ else
       UPDATED+=("$jf")
       echo "Updated: $jf (json .version)"
     fi
-    # Also check metadata.version (marketplace.json)
+    # Also check metadata.version (marketplace.json). P083 Step 3: that file
+    # has NO top-level .version, so the former "don't double-add" skip here
+    # left it edited but absent from UPDATED[] — invisible to the count, the
+    # staging loop AND the rollback. Every branch now adds; the array is
+    # deduplicated below, so a file matching several branches still counts once.
     if jq -e ".metadata.version == \"$CURRENT\"" "$jf" &>/dev/null; then
       tmp=$(mktemp)
       jq ".metadata.version = \"$NEW_VERSION\"" "$jf" > "$tmp" && mv "$tmp" "$jf"
-      # Don't double-add
+      UPDATED+=("$jf")
       echo "Updated: $jf (json .metadata.version)"
     fi
     # plugins[0].version
     if jq -e ".plugins[0].version == \"$CURRENT\"" "$jf" &>/dev/null; then
       tmp=$(mktemp)
       jq ".plugins[0].version = \"$NEW_VERSION\"" "$jf" > "$tmp" && mv "$tmp" "$jf"
+      UPDATED+=("$jf")
       echo "Updated: $jf (json .plugins[0].version)"
     fi
   done
@@ -671,9 +700,18 @@ else
     fi
     if grep -q "Plugin: $CURRENT" "$readme" 2>/dev/null; then
       sed -i "s/Plugin: $CURRENT/Plugin: $NEW_VERSION/" "$readme"
+      UPDATED+=("$readme")
       echo "Updated: $readme (Plugin: version)"
     fi
   done
+fi
+
+# P083 Step 3: de-duplicate BEFORE the count, the staging loop, and the
+# rollback — a file matched by more than one branch above (e.g.
+# marketplace.json's .metadata.version AND .plugins[0].version) must appear
+# once, not twice, in the printed total, `git add`, or the rollback set.
+if [[ "${#UPDATED[@]}" -gt 0 ]]; then
+  mapfile -t UPDATED < <(printf '%s\n' "${UPDATED[@]}" | sort -u)
 fi
 
 echo ""
@@ -777,30 +815,63 @@ _release_rollback_updated() {
     echo "WARNING: not a git repository — the version-file edits from this run were left in place and must be reverted by hand before rerunning" >&2
     return 0
   }
-  local f rel restored=""
+  if [[ "${#UPDATED[@]}" -eq 0 ]]; then
+    echo "Nothing to roll back — no version files were updated by this run." >&2
+    return 0
+  fi
+  local f rel restored="" failed=""
   for f in "${UPDATED[@]:-}"; do
     [[ -n "$f" ]] || continue
     rel="$(realpath -m --relative-to="$REPO_ROOT" -- "$f" 2>/dev/null)" || rel="$f"
-    # Already dirty before this run → not ours to revert.
-    grep -qxF -- "$rel" <<<"$_RELEASE_PREDIRTY" && continue
-    git -C "$REPO_ROOT" checkout -- "$rel" 2>/dev/null && restored+="${rel} "
+    # Already dirty before this run → not ours to revert. P083 Step 3: named
+    # in the output rather than silently skipped — "rolled back successfully"
+    # while a pre-dirty file is left untouched must not read as "nothing to
+    # report" for that file.
+    if grep -qxF -- "$rel" <<<"$_RELEASE_PREDIRTY"; then
+      echo "SKIPPED (already dirty before this run, left as-is): ${rel}" >&2
+      continue
+    fi
+    if git -C "$REPO_ROOT" checkout -- "$rel" 2>/dev/null; then
+      restored+="${rel} "
+    else
+      # P083 Step 3: a rollback that cannot restore a file must not report
+      # success — name the file and the version it is stranded at.
+      failed+="${rel} "
+    fi
   done
   if [[ -n "$restored" ]]; then
     echo "Rolled back this run's version-file edits so a rerun bumps from the same base: ${restored}" >&2
   fi
+  if [[ -n "$failed" ]]; then
+    echo "ERROR: could not roll back the following file(s), which remain stranded at ${NEW_VERSION}: ${failed}" >&2
+    return 1
+  fi
+  return 0
 }
 
 # _release_validate_updated_changelogs <version> — runs the check over every
-# CHANGELOG.md in the current UPDATED[] set. Returns 1 if ANY is incomplete.
+# CHANGELOG.md in the current UPDATED[] set, PLUS the primary
+# $REPO_ROOT/CHANGELOG.md unconditionally. Returns 1 if ANY is incomplete.
+#
+# P083 Step 3: the primary CHANGELOG must be validated regardless of whether
+# THIS run's UPDATED[] contains it — update_changelog's pre-written-entry
+# no-op branch (target header already == NEW_VERSION) correctly no longer adds
+# it to UPDATED[] (that "edit" never happened), but a placeholder written by
+# an EARLIER run still must not ship silently just because this run made no
+# further edit to it.
 _release_validate_updated_changelogs() {
   local version="$1" f rc=0
-  # Scope: the CHANGELOGs this release actually touched. A CHANGELOG.md that
-  # is not part of the version registry is deliberately NOT validated — that
-  # would be a new blocking gate on repositories the release path never wrote
-  # to, which the plan's loosening directive forbids.
+  # A secondary CHANGELOG.md outside the version registry that this run did not
+  # touch is deliberately NOT validated — that would be a new blocking gate on
+  # repositories the release path never wrote to, which the plan's loosening
+  # directive forbids.
+  if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
+    _release_validate_changelog_entry "$REPO_ROOT/CHANGELOG.md" "$version" || rc=1
+  fi
   for f in "${UPDATED[@]:-}"; do
     [[ -n "$f" ]] || continue
     [[ "$(basename "$f")" == "CHANGELOG.md" ]] || continue
+    [[ "$f" != "$REPO_ROOT/CHANGELOG.md" ]] || continue   # already checked above
     _release_validate_changelog_entry "$f" "$version" || rc=1
   done
   return "$rc"

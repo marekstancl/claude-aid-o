@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- **Gate profiles must define a command for every gate they include** — `aid-run-gates.sh` now refuses, by name, an active `--profile` whose `include[]` lists a gate with no `command:` in `execution.yaml`, instead of silently recording a `skip/no_command` row that never touches the run's overall result. Breaking for consumers mid-rollout of the test-tier standard: if your `execution.yaml` has a profile-included gate with no command, add one or drop the gate from the profile before upgrading.
+
+### Fixed
+- **Review-signal toggles no longer resolve to "enabled" when they cannot be read** — `_aid_read_toggle` is rewritten in bash's own `[[ =~ ]]` (no `grep -P`, which exits 2 and was read as "enabled" on any grep without PCRE support) and now reports an unreadable or malformed toggle as its own state: the FSM's plan-boundary checks fail closed to enabled, and `aid-release-policy.sh` reports `toggle_unreadable` instead of flattening it into `disabled`.
+- **`/aid-init` emits the full gate-profile ladder** — a stack-detected workspace now gets `quick`, `targeted`, `standard`, `full` and `release` instead of only `targeted` and `full`, so a fresh project can satisfy the shipped `plan_final_profile_floor: release` instead of aborting on an empty `release` profile. On the existing-project upgrade path every profile is filtered to gates the target `execution.yaml` actually defines, so the appended block can never name an undefined gate.
+
 ## [2.85.0] — 2026-08-12
 
 > The front door tells the truth. `/aid-help` is now generated from a machine-

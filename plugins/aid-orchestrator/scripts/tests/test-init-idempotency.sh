@@ -603,7 +603,13 @@ EOF
   cp -a "$fx" "$before_dir"
 
   local stacks=(); mapfile -t stacks < <(detect_stacks "$fx")
-  local block; block="$( export AID_PLUGIN_PATH="$PLUGIN_DIR"; render_gate_profiles_block "${stacks[@]}" )"
+  # P083 Step 7: render_gate_profiles_block discovers its filter target at
+  # the CWD-relative .aid-o/config/execution.yaml (matching real
+  # commands/aid-init.md usage, which always runs with CWD == project root)
+  # unless a caller overrides it. `cd "$fx"` here so this call matches that
+  # real convention instead of picking up whatever unrelated
+  # execution.yaml happens to sit at the test runner's own CWD.
+  local block; block="$( cd "$fx" && export AID_PLUGIN_PATH="$PLUGIN_DIR"; render_gate_profiles_block "${stacks[@]}" )"
   if [[ -z "$block" ]]; then
     _fail "C8 — render_gate_profiles_block produced nothing; the offer path is not reachable"
     return

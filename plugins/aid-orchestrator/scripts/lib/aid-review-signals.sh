@@ -6,7 +6,10 @@
 # (fsm_eval_delivery_report_present / fsm_eval_simplifier_present in aid-fsm.sh)
 # AND the C4 release aggregator (aid-release-policy.sh):
 #
-#   _aid_read_toggle <exec_yaml> <section>        — returns 0 (enabled) / 1 (disabled)
+#   _aid_read_toggle <exec_yaml> <section>        — returns 0 (enabled) / 1
+#                                                    (disabled) / 2 (could not
+#                                                    read — a named refusal,
+#                                                    never coerced to either)
 #   _aid_validate_test_evidence <report> <ev_dir> — echoes true|false
 #
 # Both were extracted VERBATIM from aid-fsm.sh so the FSM check and the C4
@@ -16,16 +19,54 @@
 # functions — it is safe to source from anywhere.
 
 # ─── Helper: read toggle status from execution.yaml ──────────────────────────
-# Returns 0 (enabled) or 1 (disabled) based on the specified section in execution.yaml.
-# Usage: _aid_read_toggle "$exec_yaml" "simplifier" && enabled=true || enabled=false
+# Returns 0 (enabled), 1 (disabled), or 2 (COULD NOT READ — a named refusal,
+# never silently treated as enabled). Usage:
+#   _aid_read_toggle "$exec_yaml" "simplifier"
+#   rc=$?
+#   case "$rc" in 0) enabled=true ;; 1) enabled=false ;; *) <refuse, name it> ;; esac
+#
+# P083 Step 6: the original implementation used `grep -qP` twice; on any grep
+# without PCRE support BOTH calls exit 2 (error), the surrounding `if` reads
+# that as false, and the function fell through to `return 0` — the exact
+# fail-open the no-`grep -oP` invariant exists to prevent, on production
+# library code read by the FSM and the C4 release aggregator. Rewritten in
+# bash's own `[[ =~ ]]` with POSIX bracket classes only (`[[:space:]]`, never
+# a `\s`/`\b` PCRE shorthand — bash's ERE genuinely rejects those, so this
+# implementation self-polices rather than merely avoiding the shorthand in
+# prose) — no external grep at all, so a grep lacking `-P` cannot make this
+# fail open again. `[[:space:]]` also covers a CR, so CRLF files need no
+# separate stripping pass.
 _aid_read_toggle() {
   local exec_yaml="$1" section_name="$2"
-  [[ ! -f "$exec_yaml" ]] && return 0  # file missing → enabled by default
-  if grep -qP "^\s{0,4}${section_name}:\s*$" "$exec_yaml" && \
-     grep -A5 "${section_name}:" "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$'; then
-    return 1
+  [[ ! -f "$exec_yaml" ]] && return 0  # file missing → enabled by default (unchanged)
+  if [[ ! -r "$exec_yaml" ]]; then
+    echo "ERROR: aid-review-signals.sh: ${exec_yaml} exists but is not readable — cannot evaluate the '${section_name}' toggle. Refusing to guess; this is NOT the same as enabled or disabled." >&2
+    return 2
   fi
-  return 0
+
+  local line in_section=0 enabled_value=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if (( in_section == 0 )); then
+      [[ "$line" =~ ^[[:space:]]{0,4}${section_name}:[[:space:]]*$ ]] && in_section=1
+      continue
+    fi
+    # A line at column 0 is the next top-level key and ends the section;
+    # anything indented is still inside it.
+    [[ "$line" =~ ^[^[:space:]] ]] && break
+    if [[ "$line" =~ ^[[:space:]]+enabled:[[:space:]]*([^[:space:]]*) ]]; then
+      enabled_value="${BASH_REMATCH[1]}"
+      break
+    fi
+  done < "$exec_yaml"
+
+  case "$enabled_value" in
+    ""|true ) return 0 ;;   # absent `enabled:` key → the documented default
+    false )   return 1 ;;
+    * )
+      echo "ERROR: aid-review-signals.sh: ${exec_yaml} has '${section_name}.enabled: ${enabled_value}' — not 'true' or 'false'. Refusing to coerce; this is NOT the same as enabled or disabled." >&2
+      return 2
+      ;;
+  esac
 }
 
 # ─── Helper: validate _test_evidence[] frontmatter references exist on disk ───
@@ -75,7 +116,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
   fn="$1"; shift
   case "$fn" in
     read_toggle)
-      if _aid_read_toggle "$@"; then echo "enabled"; exit 0; else echo "disabled"; exit 1; fi
+      rc=0
+      _aid_read_toggle "$@" || rc=$?
+      case "$rc" in
+        0) echo "enabled" ;;
+        1) echo "disabled" ;;
+        *) echo "unreadable" ;;
+      esac
+      exit "$rc"
       ;;
     validate_test_evidence)
       _aid_validate_test_evidence "$@"

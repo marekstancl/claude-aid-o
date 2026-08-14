@@ -365,6 +365,10 @@ _status_to_verdict() {
     fail) echo fail ;;
     missing) echo blocked ;;
     disabled|not_applicable) echo advisory ;;
+    # P083 Step 6: an unreadable/malformed toggle is a refusal, not an
+    # advisory annotation — it must verdict the same as "fail", or the
+    # status distinction this step added would be visible but toothless.
+    toggle_unreadable) echo fail ;;
     *) echo advisory ;;
   esac
 }
@@ -430,10 +434,15 @@ compute_reporter() {
   if [[ ! -f "$marker" ]]; then
     REPORTER_STATUS="not_applicable"; REPORTER_REASON="not_plan_boundary"; return 0
   fi
-  local enabled=true
-  _aid_read_toggle "$exec_yaml" "reporter" || enabled=false
-  if [[ "$enabled" == "false" ]]; then
+  # P083 Step 6: rc=1 (explicit enabled:false) disables; rc=2 (unreadable/
+  # malformed) is its own named status — never coerced into "disabled".
+  local _toggle_rc=0
+  _aid_read_toggle "$exec_yaml" "reporter" || _toggle_rc=$?
+  if [[ "$_toggle_rc" -eq 1 ]]; then
     REPORTER_STATUS="disabled"; REPORTER_REASON="reporter.enabled:false in execution.yaml"; return 0
+  fi
+  if [[ "$_toggle_rc" -eq 2 ]]; then
+    REPORTER_STATUS="toggle_unreadable"; REPORTER_REASON="could not read the 'reporter' toggle in ${exec_yaml} — not the same as enabled or disabled"; return 0
   fi
   if [[ ! -f "$report" ]]; then
     REPORTER_STATUS="missing"; REPORTER_REASON="delivery report missing at ${REPORTER_ARTIFACT}"; return 0
@@ -486,10 +495,15 @@ compute_simplifier() {
   if [[ ! -f "$marker" ]]; then
     SIMPLIFIER_STATUS="not_applicable"; SIMPLIFIER_REASON="not_plan_boundary"; return 0
   fi
-  local enabled=true
-  _aid_read_toggle "$exec_yaml" "simplifier" || enabled=false
-  if [[ "$enabled" == "false" ]]; then
+  # P083 Step 6: rc=1 (explicit enabled:false) disables; rc=2 (unreadable/
+  # malformed) is its own named status — never coerced into "disabled".
+  local _toggle_rc=0
+  _aid_read_toggle "$exec_yaml" "simplifier" || _toggle_rc=$?
+  if [[ "$_toggle_rc" -eq 1 ]]; then
     SIMPLIFIER_STATUS="disabled"; SIMPLIFIER_REASON="simplifier.enabled:false in execution.yaml"; return 0
+  fi
+  if [[ "$_toggle_rc" -eq 2 ]]; then
+    SIMPLIFIER_STATUS="toggle_unreadable"; SIMPLIFIER_REASON="could not read the 'simplifier' toggle in ${exec_yaml} — not the same as enabled or disabled"; return 0
   fi
   if [[ ! -f "$report" ]]; then
     SIMPLIFIER_STATUS="missing"; SIMPLIFIER_REASON="simplifier-report.md missing in evidence dir"; return 0
@@ -926,12 +940,14 @@ main() {
 
   add_input reporter    "$REPORTER_ARTIFACT"    "$reporter_verdict"    "$reporter_reason_final"    "$reporter_hm"
   add_input simplifier  "$SIMPLIFIER_ARTIFACT"  "$simplifier_verdict"  "$simplifier_reason_final"  "$simplifier_hm"
+  # P083 Step 6: toggle_unreadable blocks the same as missing|fail — an
+  # unreadable/malformed toggle must never let release_ready stay true.
   case "$REPORTER_STATUS" in
-    missing|fail) add_blocker reporter "blocking" "reporter ${REPORTER_STATUS}: ${REPORTER_REASON}" ;;
+    missing|fail|toggle_unreadable) add_blocker reporter "blocking" "reporter ${REPORTER_STATUS}: ${REPORTER_REASON}" ;;
     pass) [[ "$reporter_hm" == "false" ]] && add_blocker reporter "blocking" "reporter delivery report stale (head_match=false): provenance Head != HEAD" ;;
   esac
   case "$SIMPLIFIER_STATUS" in
-    missing|fail) add_blocker simplifier "blocking" "simplifier ${SIMPLIFIER_STATUS}: ${SIMPLIFIER_REASON}" ;;
+    missing|fail|toggle_unreadable) add_blocker simplifier "blocking" "simplifier ${SIMPLIFIER_STATUS}: ${SIMPLIFIER_REASON}" ;;
     pass) [[ "$simplifier_hm" == "false" ]] && add_blocker simplifier "blocking" "simplifier-report.md stale (head_match=false): provenance Head != HEAD" ;;
   esac
 

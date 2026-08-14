@@ -110,6 +110,15 @@ teardown() {
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test,ts_lint,ts_type_check" ]
 
+  # P083 Step 7: the full canonical ladder — quick < targeted < standard <
+  # full < release. quick is empty; standard and release reuse full's set.
+  run yq '.gate_profiles.quick.include | length' .aid-o/config/execution.yaml
+  [ "$output" == "0" ]
+  run yq '.gate_profiles.standard.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  run yq '.gate_profiles.release.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+
   # D3 consumer isolation (negative control): the composed file must never
   # contain self-host-only gate names, anywhere.
   run bash -c '! grep -qE "\bbats_fsm\b|\bbats_all\b|\bshell_pipeline_smoke\b" .aid-o/config/execution.yaml'
@@ -202,14 +211,30 @@ FIXTURE
   run yq '.gates.ts_lint.command' .aid-o/config/execution.yaml
   [ "$output" == "npm run lint:strict" ]
 
-  # The profile block was actually added, matching the fresh-init derivation
-  # for the same stack (no drift between the two code paths).
+  # The profile block was actually added — but P083 Step 7 changed WHAT it
+  # contains here: this fixture's hand-edited `gates:` mapping defines only
+  # ts_test + ts_lint (no ts_type_check, no targeted_tests), and render_gate_
+  # profiles_block now discovers that non-empty mapping and filters every
+  # profile to gates the target file actually defines — never
+  # named-and-undefined, which is the whole point of this step's "second
+  # consumer" fix. (Contrast with the fresh-init test above, which composes
+  # into a file with no pre-existing `gates:` and gets the UNFILTERED
+  # stack-derived set, including targeted_tests and ts_type_check.)
   run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
   [ "$output" == "targeted" ]
   run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test,targeted_tests" ]
+  [ "$output" == "ts_test" ]
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  [ "$output" == "ts_test,ts_lint" ]
+  run yq '.gate_profiles.standard.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test,ts_lint" ]
+  run yq '.gate_profiles.release.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test,ts_lint" ]
+  run yq '.gate_profiles.quick.include | length' .aid-o/config/execution.yaml
+  [ "$output" == "0" ]
+  # No profile names ts_type_check or targeted_tests — neither is in this
+  # fixture's gates: mapping.
+  refute_grep -qE "ts_type_check|targeted_tests" .aid-o/config/execution.yaml
 
   # File is still valid YAML after the additive write.
   run bash -c 'yq -e "." .aid-o/config/execution.yaml > /dev/null'

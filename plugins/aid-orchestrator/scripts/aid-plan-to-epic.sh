@@ -31,6 +31,8 @@ source "${SCRIPT_DIR}/lib/common.sh"
 # bullet extractor (_aid_extract_files_bullets) + path cleaner (_aid_split_path_entry).
 # shellcheck source=lib/aid-scoping.sh
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
+# shellcheck source=lib/aid-ac-extract.sh
+source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"   # aid_ac_extract_criteria
 # shellcheck source=lib/aid-test-tier.sh
 source "${SCRIPT_DIR}/lib/aid-test-tier.sh"   # AID_TEST_TIER_TAG_RE
 source "${SCRIPT_DIR}/lib/aid-roots.sh"        # aid_state_root — the SAME root the runner reads
@@ -901,53 +903,20 @@ for sn in "${phase_steps[@]}"; do
   ')"
   [[ -z "$role" ]] && role="backend"
 
-  # Extract acceptance criteria. Accept the header WITH or WITHOUT a colon, and
-  # items as either `- [ ] ...` checkboxes OR plain `- ...` bullets — plans author
-  # AC as plain bullets under `**Acceptance Criteria**`, and matching only the
-  # `**Acceptance Criteria:**` + `- [ ]` form silently dropped EVERY criterion,
-  # leaving the EPIC's AC section empty (root cause of the E-047-4_7 REOPEN and the
-  # per-step-AC pre-flight block in aid-epic-to-json.sh).
-  step_ac="$(echo "$step_content" | awk -v role="$role" '
-    BEGIN { in_ac = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Acceptance Criteria:?\*\*/) { in_ac = 1; next }
-      if (in_ac && $0 ~ /^\*\*/) { in_ac = 0 }
-      if (in_ac && $0 ~ /^-[[:space:]]/) {
-        line = $0
-        sub(/^-[[:space:]]+/, "", line)            # drop the bullet
-        sub(/^\[[ xX]\][[:space:]]*/, "", line)    # drop a checkbox if present
-        if (line ~ /^\[[^][]+\]/) {                # already carries a [role] prefix
-          printf "- [ ] %s\n", line
-        } else {
-          printf "- [ ] [%s] %s\n", role, line
-        }
-      }
-    }
-  ')"
-  if [[ -n "$step_ac" ]]; then
-    all_ac="${all_ac}${step_ac}"$'\n'
-  fi
+  # Extract acceptance criteria — one whole criterion per line, unprefixed (see
+  # aid_ac_extract_criteria for the header/bullet/continuation rules it accepts).
+  # Used twice: flattened with a `- [ ] [role] ` wrapper into all_ac right below,
+  # and RAW into the per-step scoping block's ac[] further down (D2) — the block
+  # is already step-scoped, so no role tag is forced on there.
+  step_ac_raw="$(echo "$step_content" | aid_ac_extract_criteria)"
 
-  # Raw (unprefixed) per-step AC text for the per-step scoping block below
-  # (D2). Same extraction/scope as step_ac above, but WITHOUT the
-  # "- [ ] [role] " wrapper that the flattened all_ac section needs — the
-  # scoping block is already step-scoped, so no role tag is forced on. This
-  # matches the ac[] convention frozen in the E-TEST-005 fixture (P058 Step 1).
-  step_ac_raw="$(echo "$step_content" | awk '
-    BEGIN { in_ac = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Acceptance Criteria:?\*\*/) { in_ac = 1; next }
-      if (in_ac && $0 ~ /^\*\*/) { in_ac = 0 }
-      if (in_ac && $0 ~ /^-[[:space:]]/) {
-        line = $0
-        sub(/^-[[:space:]]+/, "", line)
-        sub(/^\[[ xX]\][[:space:]]*/, "", line)
-        print line
-      }
-    }
-  ')"
+  if [[ -n "$step_ac_raw" ]]; then
+    while IFS= read -r ac_line; do
+      # A criterion that already carries its own [role] prefix keeps it.
+      [[ "$ac_line" =~ ^\[[^][]+\] ]] || ac_line="[${role}] ${ac_line}"
+      all_ac="${all_ac}- [ ] ${ac_line}"$'\n'
+    done <<< "$step_ac_raw"
+  fi
 
   # Extract artifacts (RAW Files bullets, verbatim "Create: `path` — desc" /
   # "Modify: `a` + `b` (desc)" form). This drives both:

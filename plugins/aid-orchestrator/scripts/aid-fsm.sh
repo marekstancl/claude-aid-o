@@ -1828,17 +1828,35 @@ fsm_check_streamlined_integration_review() {
   [[ "$streamlined" != "true" ]] && return 0
   local cp3_code="${evidence_dir}/verifier-output-cp3-code-review.md"
   local cp3_sec="${evidence_dir}/verifier-output-cp3-security.md"
-  local gates="${evidence_dir}/gates_report.json"
+  # P083 Step 1: the EPIC-stage gate writer (aid-run-gates.sh) and every
+  # other reader use ${evidence_dir}/gates/gates_report.json; the plan-final
+  # gate stage (aid-plan-fsm.sh) writes the flat sibling instead. Both are
+  # live conventions — accept either, preferring the canonical gates/ path
+  # when both are present, and log which one was actually read.
+  local gates_canonical="${evidence_dir}/gates/gates_report.json"
+  local gates_flat="${evidence_dir}/gates_report.json"
+  local gates="" gates_source=""
+  if [[ -f "$gates_canonical" ]]; then
+    gates="$gates_canonical"
+    gates_source="canonical"
+    if [[ -f "$gates_flat" ]]; then
+      echo "NOTE: gates_report.json present at both the canonical (gates/) and legacy flat path; using the canonical one." >&2
+    fi
+  elif [[ -f "$gates_flat" ]]; then
+    gates="$gates_flat"
+    gates_source="legacy_flat"
+    echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
+  fi
   local missing=()
   [[ -f "$cp3_code" ]] || missing+=("verifier-output-cp3-code-review.md")
   [[ -f "$cp3_sec" ]]  || missing+=("verifier-output-cp3-security.md")
-  [[ -f "$gates" ]]    || missing+=("gates_report.json")
+  [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
     joined=$(IFS=', '; echo "${missing[*]}")
     echo "ERROR: Streamlined run missing required integration-review evidence: ${joined}" >&2
     echo "The streamlined contract requires verifier-output-cp3-code-review.md +" >&2
-    echo "verifier-output-cp3-security.md + gates_report.json in:" >&2
+    echo "verifier-output-cp3-security.md + gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
     echo "  ${evidence_dir}" >&2
     echo "" >&2
     echo "Fix: dispatch CP3 code-review + CP3 security verifiers and run gates, then retry done-advance." >&2
@@ -1857,6 +1875,9 @@ fsm_check_streamlined_integration_review() {
       head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_integration_review"
   fi
+  log_event "${evidence_dir}/timeline.jsonl" "streamlined_integration_review_gates_source" \
+    source="$gates_source" \
+    path="$gates"
   return 0
 }
 
@@ -2408,8 +2429,18 @@ fsm_eval_simplifier_present() {
   [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
 
   # Respect simplifier.enabled:false toggle in execution.yaml — N/A when disabled.
+  # P083 Step 6: ONLY rc=1 (explicit enabled:false) is disabled. rc=2
+  # (unreadable/malformed) falls through and is treated as enabled — fail
+  # closed: the measurement still runs rather than reporting N/A on a config
+  # this function could not evaluate. _aid_read_toggle's own stderr line
+  # names the file and section.
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
-  _aid_read_toggle "$exec_yaml" "simplifier" || { echo null; return 0; }
+  local toggle_rc=0
+  _aid_read_toggle "$exec_yaml" "simplifier" || toggle_rc=$?
+  if (( toggle_rc == 1 )); then
+    echo null
+    return 0
+  fi
 
   if [[ -f "${evidence_dir}/simplifier-report.md" ]]; then
     echo true
@@ -7973,8 +8004,16 @@ cmd_plan_close() {
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
   local simplifier_enabled=true
   local reporter_enabled=true
-  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
-  _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
+  # P083 Step 6: only rc=1 (explicit enabled:false) disables — rc=2
+  # (unreadable/malformed) fails CLOSED to enabled=true rather than being
+  # coerced to disabled, so an unreadable config cannot silently waive a
+  # plan-boundary requirement. _aid_read_toggle's own stderr line names the
+  # file and section for the unreadable case.
+  local simplifier_rc=0 reporter_rc=0
+  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_rc=$?
+  _aid_read_toggle "$exec_yaml" "reporter" || reporter_rc=$?
+  if (( simplifier_rc == 1 )); then simplifier_enabled=false; fi
+  if (( reporter_rc == 1 )); then reporter_enabled=false; fi
 
   local _pb_plan_layer_closed=0
 

@@ -139,6 +139,9 @@ AWK
 
 # _aid_extract_files_bullets — read text on stdin, emit each top-level Files-block
 # bullet as "- <bullet>". Byte-identical to the historical inline awk it replaces.
+# Handles Files bullets ONLY — for Acceptance Criteria bullets (which need
+# continuation-line joining, not just top-level bullet extraction), see
+# aid_ac_extract_criteria in aid-ac-extract.sh.
 _aid_extract_files_bullets() { awk -v emit_lineno=0 "$_AID_FILES_BULLETS_AWK"; }
 
 # _aid_extract_files_bullets_numbered — same, but each line is "<lineno>\t- <bullet>".
