@@ -225,14 +225,24 @@ render_gate_profiles_block() {
   # derivation never wrote. Naming a gate the target file does not define is
   # a hard `exit 1` in aid-run-gates.sh. Both callers pass stacks alone, so a
   # new positional parameter would break the fixed upgrade-caller invocation
-  # and the target is discovered here instead, at the ONE conventional path.
+  # and the target is discovered here instead. The upgrade caller
+  # (commands/aid-init.md) always runs with CWD == project root and always
+  # targets the ONE conventional path, so that stays the default — but
+  # compose_execution_yaml (below, in THIS file) is parameterized by an
+  # arbitrary `output_file` that need not equal the CWD-relative default
+  # (whole-diff Codex review finding: test-init-idempotency.sh composes into
+  # an arbitrary tmpdir path while CWD is the bats runner's own directory,
+  # which would have silently filtered against the wrong file — or nothing
+  # at all). compose_execution_yaml sets _AID_GATE_PROFILES_TARGET_FILE to
+  # its own $output_file immediately before calling this function; every
+  # other caller leaves it unset and gets the CWD-relative default.
   # Keyed on a NON-EMPTY `gates:` mapping, never on the file merely existing:
   # compose_execution_yaml's fresh-init path truncates this exact path to
   # zero bytes BEFORE this function runs, so an existence-only probe would
   # see an empty file on the compose path and emit a degenerate ladder. No
   # such mapping (fresh init, or an upgrade target with no `gates:` yet) →
   # no filtering, i.e. the unfiltered stack-derived set.
-  local target_file=".aid-o/config/execution.yaml"
+  local target_file="${_AID_GATE_PROFILES_TARGET_FILE:-.aid-o/config/execution.yaml}"
   local filter_active=0 dg
   local -A defined_gates=()
   if [[ -f "$target_file" ]] && command -v yq >/dev/null 2>&1; then
@@ -457,7 +467,11 @@ EOF
     # (P061 E1 Step 6) so the fresh-init path here and the existing-project
     # upgrade path (append_gate_profiles_block callers) share one derivation.
     echo ""
-    render_gate_profiles_block "${clean_stacks[@]:-}"
+    # P083 Step 7: point the target-file discovery at THIS call's actual
+    # output_file, not the CWD-relative default — output_file need not be
+    # `.aid-o/config/execution.yaml` relative to CWD (e.g. tests composing
+    # into an arbitrary tmpdir path).
+    _AID_GATE_PROFILES_TARGET_FILE="$output_file" render_gate_profiles_block "${clean_stacks[@]:-}"
 
     cat <<'EOF'
 notifications:

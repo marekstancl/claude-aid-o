@@ -149,3 +149,39 @@ EOF
   [[ "$output" == *"no stacks detected"* ]]
   refute_grep -q "ts_test" <(echo "$output")
 }
+
+@test "P083 Step 7 (whole-diff Codex review finding): compose_execution_yaml filters against its own output_file, not CWD" {
+  # test-init-idempotency.sh's real shape: compose into an ARBITRARY path
+  # while CWD is unrelated and has its OWN, DIFFERENT .aid-o/config/
+  # execution.yaml sitting around. The pre-fix code hard-coded the
+  # CWD-relative default, so it filtered against (or fell back to
+  # unfiltered because of) the wrong file entirely.
+  mkdir -p "$TEST_TMPDIR/cwd-with-unrelated-config/.aid-o/config"
+  cat > "$TEST_TMPDIR/cwd-with-unrelated-config/.aid-o/config/execution.yaml" <<'EOF'
+gates:
+  totally_unrelated_gate:
+    command: echo hi
+EOF
+  cd "$TEST_TMPDIR/cwd-with-unrelated-config"
+
+  local fixture="$TEST_TMPDIR/fixture-project"
+  mkdir -p "$fixture"
+  touch "$fixture/package.json"
+  source "$HELPER"
+  mapfile -t stacks < <(detect_stacks "$fixture")
+  [[ " ${stacks[*]} " =~ " typescript " ]]
+
+  local out="$TEST_TMPDIR/arbitrary-output-path.yaml"
+  compose_execution_yaml "$fixture" "$out" "${stacks[@]}"
+
+  # The composed file's own profiles are unfiltered (its own gates: mapping
+  # was just truncated by the compose itself, so nothing to filter against) —
+  # the full ts_test/ts_lint/ts_type_check set, never totally_unrelated_gate.
+  run yq '.gate_profiles.full.include | join(",")' "$out"
+  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  refute_grep -q "totally_unrelated_gate" "$out"
+
+  # The unrelated CWD config is untouched.
+  run yq '.gates.totally_unrelated_gate.command' "$TEST_TMPDIR/cwd-with-unrelated-config/.aid-o/config/execution.yaml"
+  [ "$output" == "echo hi" ]
+}
