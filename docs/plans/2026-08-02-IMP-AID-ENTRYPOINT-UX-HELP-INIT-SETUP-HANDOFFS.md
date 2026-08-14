@@ -1,6 +1,13 @@
 # AID Entry-Point UX — Help, Init, Setup and Human Handoffs
 
-**Status (refreshed 2026-08-10):** requirements document, partially delivered.
+**Status (refreshed 2026-08-14):** requirements document, **core delivered**.
+§1–§9 shipped as **P080, merged and released as v2.85.0**, and independently
+verified afterwards: **13 steps DONE, 3 PARTIAL, 0 NOT DONE**, all eight
+plan-level acceptance criteria green on the shipped tree. What remains open
+from that verification, and what was always deferred, is listed under
+"Co zbývá po P080" at the end of this document.
+
+**Předchozí znění (2026-08-10):** requirements document, partially delivered.
 Its follow-up sections have shipped as their own plans — **§10–§13 → P073**
 (v2.72.0), **§16 → P076** (v2.80.0), **§16a + §17 → P074**, **§18 → CANCELLED**
 with the whole test-parallelism line. **The original core, §1–§9, is now the
@@ -1672,3 +1679,48 @@ only source); any new approval surface.
 few observed runs (both landed 2026-08-08) — the standalone runner then reuses
 a rollout pattern already proven in the gate runner. Candidate: next AID plan
 after the P075 line closes.
+
+
+---
+
+## Co zbývá po P080 (doplněno 2026-08-14)
+
+P080 je slitý a vydaný jako **v2.85.0**. Nezávislé ověření proti tomuhle
+dokumentu i proti plánu skončilo **13 hotových / 3 z půlky / 0 nehotových**.
+Zbytek je tady, ať se na něj nezapomene.
+
+### Tři nedodělky z P080, doložené ověřením
+
+1. **Eskalace zůstala ve dvou verzích.** `commands/aid-run.md:401-425` — plocha,
+   kterou PM reálně potká — pořád nese starý volný blok `ESCALATION: {reason}`
+   bez odkazu na kartu, zatímco `skills/pipeline.md:1327` si nechal plnou
+   šablonu, které se měl vzdát. Test to nechytil, protože kontroluje přítomnost
+   odkazu **v souboru**, ne v tom bloku.
+2. **Krok 13 dodal půlku.** Sjednocení šesti kopií hotové a hlídané; „doplnit
+   `_fsm_human_step` na zbylá veřejná místa" se nestalo vůbec — pořád jsou to
+   tři místa jako při CP1. Kritérium „ověř znění na každém nově pokrytém místě"
+   je tím pádem splněné naprázdno.
+3. **Vydání neneslo předepsaný tvar commitu** (`release: vX.Y.Z`), takže
+   pojistka proti dvojímu vydání ho neviděla.
+
+### Vada nalezená mimochodem, horší než ty tři
+
+**Vykreslení výsledku bran bere chybějící `.overall` jako úspěch.** Ověřeno
+smazáním toho pole ze skutečného padajícího hlášení — karta napsala „Hotovo".
+To je selhání naruby v ploše, která má PM říkat pravdu.
+
+### Vždy odložené, nezačaté
+
+- **§14 D18** — minimalizace důkazů v kartách
+- **§15** — vizuální důkaz (PM potvrdil „později", ale UI vývoj probíhá, takže
+  to jednou bude potřeba)
+- **IMP-261** — projektová konfigurace a verzované schéma nastavení; P080
+  vyřešil jen svůj init/setup výsek, zbytek je vlastní plán
+- **IMP-495** — karta rozhodnutí se má **vyrábět z dat, ne žádat prózou**;
+  P080 EPIC 3 dodal většinu, nové je jen odmítnutí finální zprávy bez karty
+
+### Kontext, který tenhle dokument nemohl znát
+
+Testovací patra (§1–§9 se jich dotýkají) jsou zavedená, ale **merge cesta je
+81 % nad rozpočtem** a jedna sada je 47 % celého portfolia — viz
+`docs/plans/HANDOFF-2026-08-14.md`, okno A.
