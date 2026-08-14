@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.85.1** (current) — ten defects a live-code re-verification of the backlog found and fixed: a streamlined review stuck on the wrong gates-report path, acceptance criteria truncated mid-sentence, a release rollback that stranded files, three guards that reported success while checking nothing, and dead parallel-scheduler code
+- **v2.86.0** (current) — the merge path stopped waiting on nightly suites: five T2 suites had dedicated jobs on every push, two of them needing hours against 35- and 30-minute limits, so CI was red on every commit; the tier tag is now the only authority, a guard fails if that ever drifts again, and the most expensive suite in the portfolio dropped from 199 to 62 minutes by building its fixture once instead of 198 times
+- **v2.85.1** — ten defects a live-code re-verification of the backlog found and fixed: a streamlined review stuck on the wrong gates-report path, acceptance criteria truncated mid-sentence, a release rollback that stranded files, three guards that reported success while checking nothing, and dead parallel-scheduler code
 - **v2.85.0** — the front door tells the truth: `/aid-help` is generated from a machine-readable index a test keeps honest, every file `/aid-init` and `/aid-setup` write has one declared owner and one read-only summary, and every PM-facing boundary message comes from one contract and three deterministic renderers
-- **v2.84.0** — a gate's name has to say what it checks and how much (`bats_all` ran only T0+T1 and cost half a day of misdirected diagnosis), an EPIC stops paying for the whole merge path, and CI cancels superseded runs
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
