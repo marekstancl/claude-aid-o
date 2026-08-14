@@ -55,14 +55,26 @@ STRICT=0
 # instant violation. Fail-closed is right for the RULE; shipping no default was
 # a distribution mistake (IMP-503). A project that wants zero exceptions
 # creates an empty file, which is a choice rather than an accident.
-ALLOWLIST="${AID_GATE_NAME_ALLOWLIST:-}"
-if [[ -z "$ALLOWLIST" ]]; then
-  for _al in "${SCRIPT_DIR}/tests/gate-name-allowlist.txt" \
-             ".aid-o/config/gate-name-allowlist.txt" \
-             "${SCRIPT_DIR}/../defaults/gate-name-allowlist.txt"; do
+# Order matters and the first version of this had it BACKWARDS: it tested the
+# plugin's own `scripts/tests/` list before the project's. That file exists in
+# every full plugin installation, so a consumer's own allowlist was silently
+# ignored and it could neither tighten nor extend its exceptions — a policy
+# leak from AID into every project, which is the class of defect this whole
+# change exists to remove. Caught by the cross-provider review.
+#
+# Correct order: the project's own list wins, then the shipped default, and
+# AID's self-host list is LAST so it applies only when this repository is the
+# project. Explicitly setting the variable to empty means "no exceptions" —
+# a deliberate choice, distinguishable from leaving it unset.
+if [[ -n "${AID_GATE_NAME_ALLOWLIST+x}" ]]; then
+  ALLOWLIST="$AID_GATE_NAME_ALLOWLIST"        # set, possibly empty = no exceptions
+else
+  ALLOWLIST=""
+  for _al in ".aid-o/config/gate-name-allowlist.txt" \
+             "${SCRIPT_DIR}/../defaults/gate-name-allowlist.txt" \
+             "${SCRIPT_DIR}/tests/gate-name-allowlist.txt"; do
     [[ -f "$_al" ]] && ALLOWLIST="$_al" && break
   done
-  [[ -n "$ALLOWLIST" ]] || ALLOWLIST="${SCRIPT_DIR}/tests/gate-name-allowlist.txt"
 fi
 
 while [[ $# -gt 0 ]]; do

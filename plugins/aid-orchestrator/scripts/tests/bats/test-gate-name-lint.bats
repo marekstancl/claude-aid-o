@@ -103,3 +103,22 @@ _run_lint() {
   run bash "$LINT" --config "$root/plugins/aid-orchestrator/defaults/execution.yaml"
   [ "$status" -eq 0 ]
 }
+
+@test "a project's own allowlist wins over the shipped default" {
+  # The first version of the resolution order tested the plugin's own
+  # scripts/tests list FIRST, so a consumer could never override it — a policy
+  # leak from AID into every project (cross-provider review, 2026-08-13).
+  cfg="$(_cfg bats_all 'run-all-tests.sh --tier t0')"
+  mkdir -p "$TMP/proj/.aid-o/config"
+  echo "bats_all" > "$TMP/proj/.aid-o/config/gate-name-allowlist.txt"
+  run env -u AID_GATE_NAME_ALLOWLIST bash -c "cd '$TMP/proj' && bash '$LINT' --config '$cfg'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ADVISORY"* ]]
+}
+
+@test "an explicitly empty env variable means no exceptions, not 'use default'" {
+  cfg="$(_cfg bats_all 'run-all-tests.sh --tier t0')"
+  run env AID_GATE_NAME_ALLOWLIST= bash "$LINT" --config "$cfg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VIOLATION"* ]]
+}

@@ -33,6 +33,7 @@ source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-test-tier.sh
 source "${SCRIPT_DIR}/lib/aid-test-tier.sh"   # AID_TEST_TIER_TAG_RE
+source "${SCRIPT_DIR}/lib/aid-roots.sh"        # aid_state_root — the SAME root the runner reads
 check_prerequisites
 
 # ---------------------------------------------------------------------------
@@ -1366,19 +1367,50 @@ plan_constraints="$(echo "$plan_constraints" | sed '/^[[:space:]]*$/d')"
 # So: name only gates the project actually defines. An empty list is a valid
 # outcome — a project whose DoD is carried by review rather than by a gate is
 # not misconfigured, and inventing a gate for it is how this broke.
+# The config is resolved through `aid_state_root`, NOT through this script's
+# own `_project_root`. The cross-provider review of the first version of this
+# fix caught the difference: the runner reads
+# `$(aid_state_root)/.aid-o/config/execution.yaml`, which canonicalises a
+# worktree to its state root, while `_project_root` is an uncanonicalised
+# flag, the nearest ancestor with a `.aid-o`, or the plan file's directory. A
+# plan generated inside a worktree would therefore have picked a gate from one
+# config while the runner reconciled against another — the same undefined_gate
+# outage, now nondeterministic. Reading the same root the runner reads is the
+# whole point (and the exact trap recorded as IMP-497 the day before).
 _dod_candidates=("docs_updated" "check_docs_updated")
 dod_gates=""
-_exec_yaml="${_project_root}/.aid-o/config/execution.yaml"
-if [[ -f "$_exec_yaml" ]] && command -v yq >/dev/null 2>&1; then
-  for _cand in "${_dod_candidates[@]}"; do
-    if [[ "$(yq -r ".gates.\"${_cand}\" != null" "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
-      dod_gates="- ${_cand}"
-      break
-    fi
-  done
+_exec_yaml=""
+if _dod_root="$(aid_state_root 2>/dev/null)" && [[ -n "$_dod_root" ]]; then
+  _exec_yaml="${_dod_root}/.aid-o/config/execution.yaml"
 fi
+
+# "Could not determine" is NOT "the project chose no gate". Conflating them is
+# the fail-open this whole change exists to stop: a missing yq, unreadable or
+# malformed YAML would have produced an apparently deliberate empty gate list,
+# hash-bound into plan.json, while the runner — which requires yq — fails later
+# for a reason nobody can trace back here.
+if [[ -z "$_exec_yaml" || ! -f "$_exec_yaml" ]]; then
+  error_exit "DoD gates: cannot resolve the project's execution.yaml (looked for '${_exec_yaml:-<no state root>}'). Generation refuses rather than emitting an empty gate list that would look like a deliberate choice." 3
+fi
+command -v yq >/dev/null 2>&1 || \
+  error_exit "DoD gates: yq is required to read ${_exec_yaml} — the gate runner requires it too, so a missing yq is a broken environment, not a project without gates." 2
+if ! yq -e '.' "$_exec_yaml" >/dev/null 2>&1; then
+  error_exit "DoD gates: ${_exec_yaml} is not parseable YAML. Refusing to infer 'no gates' from a file that could not be read." 1
+fi
+if [[ "$(yq -r 'has("gates")' "$_exec_yaml" 2>/dev/null)" != "true" ]]; then
+  error_exit "DoD gates: ${_exec_yaml} has no 'gates:' key at all. The runner reads '.gates | keys'; an absent map is a malformed config, not an empty one." 1
+fi
+
+for _cand in "${_dod_candidates[@]}"; do
+  if [[ "$(yq -r ".gates.\"${_cand}\" != null" "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
+    dod_gates="- ${_cand}"
+    break
+  fi
+done
 if [[ -z "$dod_gates" ]]; then
-  dod_gates="<!-- no DoD gate declared: the project's execution.yaml defines none of ${_dod_candidates[*]} -->"
+  # Reached only when the config WAS read and genuinely defines none of them —
+  # a valid state for a project whose DoD rides on review rather than a gate.
+  dod_gates="<!-- no DoD gate declared: ${_exec_yaml} defines none of ${_dod_candidates[*]} -->"
 fi
 
 # Dependencies section
