@@ -634,22 +634,55 @@ The current P062 document is stale and must not be executed as written:
 - it predates the P064/P068 cadence, P066 scheduler and current C3 evidence
   contract.
 
-Required work:
+Required work — **re-grounded 2026-08-14** by two independent passes
+(controller + Codex over one factual bundle), merged into the plan's
+`## Re-grounding` section, which is authoritative over everything older in it:
 
-- [ ] Re-read every P062 citation, path, command and schema against current
-  main.
-- [ ] Resolve and document the P061 denominator mismatch; never satisfy it by
-  fake merge counts.
-- [ ] Replace stale version numbers with a release-time version policy.
-- [ ] Make speed calibration consume P061 profile events, P063 baselines,
-  P066 scheduling context and P068 plan-boundary cadence.
-- [ ] Verify non-zero real C3 hook evidence from P065-era runs.
-- [ ] Resolve IMP-179 instruction/cache freshness prerequisite.
-- [ ] Resolve IMP-201 or explicitly keep the affected C4 control in observe.
-- [ ] Run bookkeeping hygiene preflight without mutating unrelated plans.
+- [x] Re-read every P062 citation, path, command and schema against current
+  main. Result: the four scripts it creates do not exist, one of the five
+  suites its ACs name exists, and **two ACs passed vacuously** — AC11's
+  CHANGELOG half is true from history, AC12 returned zero deletions over a
+  repository containing none of E10's work. Both rewritten.
+- [x] Resolve and document the P061 denominator mismatch; never satisfy it by
+  fake merge counts. Precondition 1 now reads P061's durable closure record,
+  with IMP-506 named as an explicit exception rather than measured as a zero.
+- [x] Replace stale version numbers with a release-time version policy. `2.56.0`
+  is unpinned; AC11 asserts plugin.json's version IS the newest CHANGELOG
+  heading and that the section names E10.
+- [x] Make speed calibration consume P061 profile events, P063 baselines,
+  ~~P066 scheduling context~~ and P068 plan-boundary cadence. **P066/P069
+  scheduling no longer exists** — P078 removed it — so the replacement inputs
+  are the T0/T1/T2 tiers, P063's runtime baselines, the durations journal and
+  the nightly records. Fast Mode profile events are NOT an input: IMP-506.
+- [x] Verify non-zero real C3 hook evidence from P065-era runs. **Satisfied —
+  13 real dispatch records.** The same sweep found what the plan did not know:
+  **21 of 28 recorded C3 verdicts are `unverifiable`** (5 fail, 2 pass), so C3's
+  calibration dataset is mostly "could not tell". Recorded as its own metric.
+- [~] Resolve IMP-179 instruction/cache freshness prerequisite. **Still open**
+  and still a hard blocker; what the re-ground added is the decision table's
+  IMP-179 partition, so subagent-dependent controls are marked ineligible
+  rather than quietly evaluated.
+- [~] Resolve IMP-201 or explicitly keep the affected C4 control in observe.
+  **Still open and now confirmed real** (backlog verification 2026-08-11);
+  promoted to a numbered precondition, with the explicit note that a passing
+  exception test is not a resolution.
+- [~] Run bookkeeping hygiene preflight without mutating unrelated plans. The
+  preflight does not exist yet, but its work is now measured rather than
+  assumed: `R-E045-1`, `R-E049-1` and `R-E057-2` are `DONE` with steps still
+  `pending`.
 - [ ] Re-run lint, CP1/C0 and independent plan verification with a bounded
-  review budget.
-- [ ] Regenerate P062 EPICs from the final reviewed plan.
+  review budget. **Next step — it needs the PM's read of the re-grounding
+  section first.**
+
+**New, from the re-grounding — the plan did not have this and now must:** the
+merge path costs 18m07s against a 10-minute budget, **81% over, before E10 adds
+anything**. A plan whose promise is "prove the control system is not slow"
+cannot silently normalise that. It gains a sixth decision outcome
+(`cannot_promote_runtime_budget`), a numbered precondition forcing one of three
+explicit choices, and AC13/AC14.
+- [ ] Regenerate P062 EPICs from the final reviewed plan. Deliberately not done
+  in the re-grounding pass: the EPIC steps were left unaligned so they are not
+  aligned twice, once now and once after review.
 
 **GO to Phase 8:** every E10 hard precondition is executable and true on
 current main; no prerequisite depends on stale prose or obsolete bookkeeping.
