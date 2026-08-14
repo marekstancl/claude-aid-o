@@ -82,13 +82,25 @@ bats_adapter_discover() {
 #   The executable bit is deliberately NOT consulted: 6 of the 7 such files in
 #   this repository are non-executable and one is, so the bit correlates with
 #   nothing.
+# Dot-directories are PRUNED, for the reason spelled out in the shell-suite
+# adapter's `_shell_suite_candidates`: a nested checkout inside the repository
+# (`.aid-worktrees/plan-<id>` from AID itself, `.claude/worktrees/<name>` from
+# the Claude Code harness) holds another session's COPIES of these very suites.
+# This adapter had no exclusions at all, so such a copy did not refuse the way
+# the shell adapter did — it silently DOUBLED the portfolio, which reads as a
+# growing test estate rather than as one directory being counted twice.
+# `-mindepth 1` keeps a dotted search_root from pruning itself.
 _bats_adapter_discover_files() {
   local search_root="$1"
   {
-    find "$search_root" -type f -name '*.bats' -print0
+    find "$search_root" -mindepth 1 \
+      \( -type d -name '.*' -prune \) -o \
+      \( -type f -name '*.bats' -print0 \)
     while IFS= read -r -d '' f; do
       [[ "$(adapter_shebang_runner "$f")" == "bats" ]] && printf '%s\0' "$f"
-    done < <(find "$search_root" -type f -name 'test-*.sh' -print0)
+    done < <(find "$search_root" -mindepth 1 \
+               \( -type d -name '.*' -prune \) -o \
+               \( -type f -name 'test-*.sh' -print0 \))
   } | sort -z
 }
 

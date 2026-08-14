@@ -139,12 +139,23 @@ _shell_suite_record_skip() {
 # the caller loop below rather than dropped in silence.
 _shell_suite_candidates() {
   local search_root="$1"
-  find "$search_root" -type f -name 'test-*.sh' \
-    -not -path '*/node_modules/*' \
-    -not -path '*/fixtures/*' \
-    -not -path '*/.aid-worktrees/*' \
-    -not -path '*/.git/*' \
-    -print0 | sort -z
+  # EVERY dot-directory below the root is pruned, not a hand-listed few. The
+  # 2026-08-11 fix named `.aid-worktrees/` — the path AID's own plan worktrees
+  # use — and the very next occurrence came from `.claude/worktrees/plan-P083`,
+  # which the Claude Code harness creates and which this list had never heard
+  # of. Same failure, different dotted parent: a nested checkout's copies of
+  # these suites produce ids outside the stable-id charset, and discovery
+  # refuses for the whole portfolio.
+  #
+  # `-mindepth 1` matters: without it a search_root whose OWN basename starts
+  # with a dot (running the audit from inside `.aid-worktrees/plan-P0xx`, which
+  # is a supported thing to do) would prune itself and discover nothing.
+  find "$search_root" -mindepth 1 \
+    \( -type d -name '.*' -prune \) -o \
+    \( -type f -name 'test-*.sh' \
+       -not -path '*/node_modules/*' \
+       -not -path '*/fixtures/*' \
+       -print0 \) | sort -z
 }
 
 # _shell_suite_symlink_candidates <search_root> — symlinked `test-*.sh` files,

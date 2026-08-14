@@ -954,6 +954,36 @@ _pfsm_reconcile_task_branch_locked() {
       return 1
     fi
 
+    # A branch that is BEHIND is not automatically a branch that is HONEST.
+    # (2026-08-14, cross-model adjudication.) P079 Step 3 added the
+    # fast-forward and, by running before the lineage check, swallowed the case
+    # the older guard existed for: a task branch whose ACTUAL base no longer
+    # matches its RECORDED epic_base_commit. Forced onto an earlier commit, such
+    # a branch is "strictly behind" like any other, so it was silently repaired
+    # AND its recorded base rewritten to match — the one record that could have
+    # revealed the move. The regression sat on main from 2026-08-10 with its own
+    # test failing (AC4 in test-aid-plan-release-boundary.bats) and nobody saw
+    # it: that suite is `aid-tier: t2` and the nightly has not completed since.
+    #
+    # In this arm the branch is an ancestor of the plan head, so its merge-base
+    # with the plan IS its head — and "the recorded lineage still describes this
+    # branch" reduces to head == recorded_base. Weaker predicates were tried and
+    # refuted: "recorded_base is an ancestor of head" admits a move onto a
+    # DIFFERENT descendant of that base (B..C is the task's real tip, B..D is
+    # someone else's, both reach the plan head through a merge).
+    #
+    # An EPIC whose work already merged is NOT the case this refuses — that
+    # entry is `merged_to_plan`, a terminal status, and cmd_epic_start declines
+    # it before reconciliation ever runs.
+    #
+    # The refusal says "lineage broken" deliberately: that is the vocabulary the
+    # older lineage check downstream already uses, and one operator-facing name
+    # per condition is worth more than a fresh phrasing per site.
+    if [[ "$branch_head" != "$recorded_base" ]]; then
+      echo "PRECONDITION FAIL: lineage broken — ${task_branch} (${branch_head}) is behind ${plan_branch}, but its recorded epic_base_commit for ${epic_id} is ${recorded_base}, so the branch is not where the manifest says it was cut. Refusing to fast-forward it to ${plan_head}: that would repair the branch AND rewrite the one record that shows it moved. Restore the branch to ${recorded_base}, or re-cut it and let epic-start record the new base." >&2
+      return 1
+    fi
+
     local wt; wt="$(_pfsm_task_branch_worktree "$root" "$task_branch")"
     [[ -n "$wt" ]] && wt="$(_pfsm_phys "$wt")"
     local ff_err="" ff_rc=0
@@ -2421,6 +2451,25 @@ cmd_epic_start() {
   local branch_exists=1
   if git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
     branch_exists=0
+  fi
+
+  # A TERMINAL entry is not a thing to start. `merged_to_plan` (and the
+  # abandoned/superseded pair) have no outgoing edge, so re-entering epic-start
+  # would reconcile and re-cut a branch whose work is already in the plan — and
+  # it is the shape that pushed the lineage check below toward a weaker
+  # predicate before this refusal existed (2026-08-14). Named, not silent: the
+  # PM's next move differs per status.
+  if [[ -n "$entry_json" ]]; then
+    local _entry_status
+    _entry_status="$(jq -r '.status // empty' <<<"$entry_json" 2>/dev/null)" || _entry_status=""
+    case "$_entry_status" in
+      merged_to_plan)
+        echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan for ${plan_id} — a terminal status with no outgoing edge. Its work is on ${plan_branch:-plan/$plan_id}; starting it again would reconcile a branch whose commits the plan already carries. Open a new EPIC if there is more to do." >&2
+        exit 1 ;;
+      abandoned|superseded)
+        echo "PRECONDITION FAIL: ${epic_id} is ${_entry_status} for ${plan_id} — a terminal status. Re-scope it in the git-tracked lifecycle manifest (plan-reconcile) before starting anything under this id." >&2
+        exit 1 ;;
+    esac
   fi
 
   if [[ "$branch_exists" -eq 0 ]]; then
