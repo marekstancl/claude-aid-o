@@ -207,8 +207,24 @@ aid_gate_outcome_render() {
     ((.waived_gates // []) + [$rows[] | select(.result == "waived") | .gate]) | unique' <<<"$report")"
   n_waived="$(jq -r 'length' <<<"$waived_json")"
 
+  # `.overall` is REQUIRED and must be one of the two verdicts the runner
+  # actually writes. `// "unknown"` made an ABSENT verdict decide the card: it
+  # is not "fail", so `blocked` stayed 0 and a report of nothing but failing
+  # gates printed `Hotovo: brány doběhly`. Verified by deleting the field from a
+  # real failing report. Since the card follows `.overall` and nothing else (see
+  # the header), a report without a usable one is a report whose verdict nobody
+  # knows — the same class as the malformed inputs refused above, and refused
+  # the same way. The runner emits exactly "pass"/"fail" (aid-run-gates.sh:2454,
+  # and :2613 for the merged escalation shape), so no legitimate producer loses
+  # a card here.
   local overall
-  overall="$(jq -r '.overall // "unknown"' <<<"$report")"
+  overall="$(jq -r '.overall // ""' <<<"$report")"
+  if [[ "$overall" != "pass" && "$overall" != "fail" ]]; then
+    # The value is report-supplied text on its way to a human surface, so it
+    # goes through the same detector table as everything else this file prints.
+    echo "aid_gate_outcome_render: gates report at ${report_path} carries no usable .overall verdict ('$(aid_gate_outcome_redact "${overall:-<none>}")') — refusing to render a card that would read as a pass" >&2
+    return 1
+  fi
   local blocked=0
   [[ "$overall" == "fail" ]] && blocked=1
 
