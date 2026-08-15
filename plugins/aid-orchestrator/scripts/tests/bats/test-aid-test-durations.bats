@@ -25,6 +25,14 @@ setup() {
   TEST_TMPDIR="$(mktemp -d)"
   ROOT="$TEST_TMPDIR/project"
   export TEST_TMPDIR ROOT
+  # AID_DURATIONS_DIR is an ABSOLUTE override that wins over the state root, and
+  # the nightly workflow exports it (it points the journal at a shared host path
+  # so a CI checkout stops throwing the measurements away every run). bats
+  # inherits the environment, so without this line these cases assert the
+  # state-root behaviour while the library is writing somewhere else entirely —
+  # green on a developer's machine, red every night. Same reason the line below
+  # unsets AID_PROJECT_ROOT.
+  unset AID_DURATIONS_DIR
   unset AID_PROJECT_ROOT
   aid_test_mk_repo "$ROOT" "$ROOT/.aid-o/work"
   cd "$ROOT"

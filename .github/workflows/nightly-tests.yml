@@ -37,9 +37,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # The selector honesty check replays the last merge's changed paths,
-          # so it needs more than the single commit a default checkout fetches.
-          fetch-depth: 50
+          # FULL history, not a window. Two things here read the past: the
+          # selector honesty check replays the last merge's changed paths (which
+          # a depth of 50 covered), and test-watchdog-stall pins a behaviour to
+          # `git show f007069:…` — 203 commits back, so it failed every night
+          # with "invalid object name" while passing on any developer's full
+          # clone. A depth chosen for one reader silently breaks the next one;
+          # 0 has no such edge.
+          fetch-depth: 0
 
       - name: Install jq + bats + yq
         run: |
@@ -113,6 +118,44 @@ jobs:
             --t1-seconds "${{ steps.tiers.outputs.t1_seconds }}" \
             --log-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
+      - name: Check the selector's honesty
+        # A gap is REPORTED, never a job failure: the finding is about the
+        # merge-path selector, and failing this job would only teach people to
+        # ignore it.
+        continue-on-error: true
+        run: bash plugins/aid-orchestrator/scripts/aid-selector-honesty-check.sh --repo .
+
+      - name: Attach the night's artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-result
+          path: |
+            nightly-run.log
+            /opt/eco/data/aid-nightly/aid-orchestrator/*.json
+          if-no-files-found: warn
+
+  # ── Its own job, and this is why ──────────────────────────────────────────
+  # The isolation run started life as a step of nightly-portfolio and cancelled
+  # the whole job on its first night (2026-08-15): portfolio 285 min + tiers
+  # 21 + report 2 + isolation 50 = 358, and GitHub cancels a job at 360. The
+  # step's own `timeout-minutes: 120` was never reached — the JOB ran out of
+  # time, which reads as "cancelled", not as "this check is too slow".
+  #
+  # A separate job has its own six hours and does not depend on the portfolio's
+  # result: it re-runs ONE suite in a permuted case order, so the only thing it
+  # needs is a checkout.
+  isolation-permuted-order:
+    runs-on: [self-hosted, eco-dev]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        run: |
+          command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
+            sudo apt-get install -y jq bats
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
       - name: Isolation — the snapshot suite in a permuted case order
         # IMP-505 made two suites build their fixture ONCE per file and restore a
         # copy per case. That is fast and it is also the classic way to make a
@@ -138,20 +181,3 @@ jobs:
             exit 1
           }
         timeout-minutes: 120
-
-      - name: Check the selector's honesty
-        # A gap is REPORTED, never a job failure: the finding is about the
-        # merge-path selector, and failing this job would only teach people to
-        # ignore it.
-        continue-on-error: true
-        run: bash plugins/aid-orchestrator/scripts/aid-selector-honesty-check.sh --repo .
-
-      - name: Attach the night's artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-result
-          path: |
-            nightly-run.log
-            /opt/eco/data/aid-nightly/aid-orchestrator/*.json
-          if-no-files-found: warn
