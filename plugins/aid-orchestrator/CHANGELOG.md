@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.86.3] — 2026-08-15
+
+> The first nightly to run to the end reported 17 failed suites. Eleven were fixes that had
+> not been pushed; the rest were the night's own environment — and one was a job budget this
+> plugin's own new step had blown.
+
+### Fixed
+- **An env var the nightly exports no longer decides what five suites assert** — `AID_DURATIONS_DIR` overrides the state root, and bats inherits it, so the durations, reaper, tier-assign, tier-lint and run-all-timing suites asserted state-root behaviour while the library wrote to the shared host path: green locally, red every night. Each already unset `AID_PROJECT_ROOT` for the same reason.
+- **The nightly checks out full history** — `fetch-depth: 50` was chosen for the selector honesty check; `test-watchdog-stall` pins a behaviour to a commit 203 back and failed with "invalid object name" every night. A depth picked for one reader silently breaks the next.
+- **The isolation run has its own job** — as a step it pushed the portfolio job to 358 minutes against GitHub's 360-minute ceiling, so the night ended `cancelled` with its own `timeout-minutes: 120` never reached.
+
 ## [2.86.2] — 2026-08-14
 
 > Everything here was already broken on main and invisible for the same reason: the suites
