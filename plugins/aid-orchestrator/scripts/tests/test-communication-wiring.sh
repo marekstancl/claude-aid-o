@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# aid-tier: t0
+# aid-tier: t1
+#
+# MEASURED 4.4 s for its single case (nightly journal, 2026-08-15); T0 is under
+# 2 s. It reads every PM-facing surface in the plugin and parses their sections.
 # test-communication-wiring.sh — the communication contract is actually wired.
 #
 # `skills/communication.md` defines the four PM decision cards, the D16 output

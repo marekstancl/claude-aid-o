@@ -1,5 +1,13 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
+#
+# MEASURED, not guessed: 143 s over 10 cases = 14.3 s per case (nightly journal,
+# 2026-08-15). T0 means under 2 s per case and under 2 minutes for the whole
+# tier — this suite alone was 2.4 min of a 2-minute budget. Each case runs the
+# guard, which enumerates every suite in the repository through
+# `run-all-tests.sh --list`; that is inherently not pulse-priced. It was tagged
+# t0 on the day it was written, before it had ever been measured, which is the
+# one thing the standard says a tier must never be.
 # test-tier-ci-topology-guard.bats — the topology guard's own regression tests.
 #
 # test-tier-ci-topology.sh asserts that no t2 suite runs on the merge path. This

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# aid-tier: t0
+# aid-tier: t1
+#
+# MEASURED: 17 s (nightly journal, 2026-08-15) for a single case — T0 is under
+# 2 s. It enumerates every suite in the repository through
+# `run-all-tests.sh --list` and parses every workflow with yq. It stays on the
+# merge path, where it belongs; it is simply not a pulse-priced check.
 # =============================================================================
 # test-tier-ci-topology.sh — the tier tag and the CI workflows must agree
 #

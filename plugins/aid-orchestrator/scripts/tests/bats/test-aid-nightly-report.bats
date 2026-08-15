@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
+#
+# MEASURED 61 s over 12 cases = 5 s per case (nightly journal, 2026-08-15); T0
+# is under 2 s per case. Each case drives the real reporter over a real runner
+# log.
 # test-aid-nightly-report.bats — P081 Step 7: the nightly result is durable
 # and the message is rare.
 #
