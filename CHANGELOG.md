@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.86.4] — 2026-08-15
+
+> The first measured merge path, and the two things that follow from measuring it.
+
+### Fixed
+- **Four suites declared a tier their own measurement forbids** — including the worst offender, `test-tier-ci-topology-guard.bats`, tagged `t0` on the day it was written and measuring 143 s over 10 cases against a tier budget of two minutes. Tier follows measured cost; the tags move, not the rule. T0 drops from 6.1 min to 2.3.
+
+### Changed
+- **The merge-path CI job gets 30 minutes, declared as a debt rather than a budget** — the measured merge path is 20.3 min against a 20-minute ceiling, so the job cancelled and CI went red. Raising the ceiling unblocks work and changes nothing about affordability: T1 alone is 18 min against a 10-minute budget, and the standard's answer is that something leaves the merge path.
+
 ## [2.86.3] — 2026-08-15
 
 > The first nightly to run to the end reported 17 failed suites. Eleven were fixes that had
