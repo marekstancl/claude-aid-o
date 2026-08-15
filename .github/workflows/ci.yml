@@ -79,7 +79,18 @@ jobs:
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 --verbose
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1 --verbose
-        timeout-minutes: 20
+        # 30, AND A DECLARED DEBT. The nightly's first real portfolio measurement
+        # (2026-08-15) puts the merge path at 20.3 min — T0 2.3 (budget 2) and
+        # T1 18.0 (budget 10) — so a 20-minute ceiling cancelled the job and CI
+        # went red for a cost nobody had chosen. Raising it unblocks work; it
+        # does NOT make the merge path affordable, and this comment exists so
+        # the number is not mistaken for a budget later.
+        #
+        # The standard's answer is that something leaves the merge path: the six
+        # most expensive T1 suites are 9.6 of those 18 minutes, and moving them
+        # to the nightly puts the path back near 10. That is a coverage
+        # decision, taken deliberately, not under a red build (PM, 2026-08-15).
+        timeout-minutes: 30
 
   # ---------------------------------------------------------------------------
   # Shadow run of the merge path on a GitHub-hosted runner.
