@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.86.5] — 2026-08-16
+
+### Fixed
+- **The EPIC templates no longer hand a project gate names it may not define** — `defaults/templates/epic.md` shipped a fixed DoD-gate list (`tests_pass`, `lint_pass`, `security_scan_pass`, `docs_updated`); the generator stopped hardcoding those names in v2.85.1 (IMP-503), but anyone writing an EPIC from the template re-introduced the same `undefined_gate` outage by hand. The template now carries the derivation rule and the `yq` command to read the project's real gates instead of a list, and `epic-example.md` says in-line that its five names are the shipped defaults and are not to be copied by a project that renamed them. The command reads the config at the project state root (the file the runner reads), not the nearest `.aid-o` to the author's shell, which in a worktree is a second way into the same outage (IMP-497).
+
 ## [2.86.4] — 2026-08-15
 
 > The first measured merge path, and the two things that follow from measuring it.

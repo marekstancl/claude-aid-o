@@ -84,10 +84,19 @@ runs_completed: 0      # incremented at each run DONE
 
 ## DoD Gates
 
-- tests_pass
-- lint_pass
-- security_scan_pass
-- docs_updated
+<!-- Name ONLY gates this project defines in .aid-o/config/execution.yaml.
+     aid-run-gates.sh treats a declared gate with no definition as
+     `undefined_gate` — a hard failure — so a name copied from a template
+     closes every EPIC in the project until it is removed (WAN, 2026-08-13,
+     IMP-503). aid-plan-to-epic.sh derives this list from that config; an
+     empty list is a valid outcome for a project whose DoD rides on review.
+     Read the gates from the config at the PROJECT STATE ROOT — the same file
+     the runner reads, not whichever .aid-o is nearest your shell. A worktree
+     canonicalises to its state root, so a relative path can list gates from
+     the wrong config and reproduce this failure (IMP-497):
+       source "$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh"
+       yq -r '.gates | keys' "$(aid_state_root)/.aid-o/config/execution.yaml"
+     Then list them here as bullets, e.g. "- tests_merge_path". -->
 
 ## Acceptance Criteria
 

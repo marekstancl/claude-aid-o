@@ -70,6 +70,10 @@ operations produce structured audit logs and OpenTelemetry traces.
 
 ## DoD Gates
 
+<!-- These five are the names shipped in defaults/execution.yaml. A project
+     that renamed or deleted any of them must NOT copy this list verbatim:
+     aid-run-gates.sh fails an EPIC (undefined_gate) for every declared gate
+     with no definition in .aid-o/config/execution.yaml (IMP-503). -->
 - tests_pass
 - lint_pass
 - security_scan_pass
