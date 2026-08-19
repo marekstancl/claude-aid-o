@@ -70,6 +70,16 @@ setup() {
   export REPO_PLUGIN FIXTURES TEST_TMPDIR
   ROOT="$TEST_TMPDIR/project"
   export ROOT
+  # The render reads the nightly artifact from a shared HOST path by default, so
+  # a red night prepends a "Nightly: RED …" banner to every render. These cases
+  # assert on CONTENT rather than byte-equality, so the banner does not break
+  # them today — which is precisely why it is worth pinning: the sibling suite
+  # test-status-two-streams DID compare byte-for-byte and was reported four
+  # nights running by a loop it could not see (red night → banner → failing
+  # test → red night). An empty directory renders no banner.
+  AID_NIGHTLY_DIR="$TEST_TMPDIR/no-nightly"
+  mkdir -p "$AID_NIGHTLY_DIR"
+  export AID_NIGHTLY_DIR
   unset AID_PROJECT_ROOT AID_WT_REDIRECTED AID_QUEUE_FILE AID_QUEUE_WRITE_PROJECT_ROOT
   unset AID_TEST_KILL_EPIC_TO_JSON AID_TEST_KILL_QUEUE_ADD AID_TEST_KILL_FINALIZE_REWRITE
   export AID_PLAN_STATE_PROJECT_ROOT="$ROOT" AID_PLAN_MANIFEST_PROJECT_ROOT="$ROOT"

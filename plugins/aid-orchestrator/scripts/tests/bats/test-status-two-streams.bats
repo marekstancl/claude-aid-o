@@ -51,6 +51,31 @@ setup() {
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
   unset AID_PROJECT_ROOT AID_QUEUE_FILE AID_QUEUE_WRITE_PROJECT_ROOT
+
+  # THE NIGHTLY'S RESULT IS AN INPUT TO THIS RENDER, AND IT MUST BE THIS TEST'S
+  # INPUT — not the machine's.
+  #
+  # `nightly_line` reads AID_NIGHTLY_DIR, defaulting to the SHARED HOST PATH
+  # /opt/eco/data/aid-nightly/aid-orchestrator, and prepends "Nightly: RED …"
+  # when the last night failed. These two cases compare the render against the
+  # example published in aid-status.md, which has no such line — so on any red
+  # night the render grew a line the doc never promised and the comparison
+  # failed.
+  #
+  # That closed a LOOP, and it is why this suite was reported four nights
+  # running: the nightly goes red for any reason at all → its artifact says RED
+  # → this render gains the banner → this test fails → the nightly is red. The
+  # first cause is then irrelevant; the loop feeds itself and nothing on the
+  # merge path can see it, because the merge path has no nightly artifact.
+  #
+  # An EMPTY directory is the honest fixture: `nightly_line` renders nothing
+  # when no artifact exists ("a project without a nightly is not in a red
+  # state"), which is exactly the state the published example documents. The
+  # banner itself is covered where it belongs, on its own fixtures, in
+  # test-nightly-reminder.bats.
+  AID_NIGHTLY_DIR="$TEST_TMPDIR/no-nightly"
+  mkdir -p "$AID_NIGHTLY_DIR"
+  export AID_NIGHTLY_DIR
 }
 
 teardown() {
