@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.86.4** (current) — the first measured merge path: four suites retagged to the tier their cost actually supports, and a CI ceiling raised as a declared debt rather than mistaken for a budget
+- **v2.86.5** (current) — the nightly's own red result was an input to a test the nightly runs, so the failure kept itself alive for four nights
+- **v2.86.4** — the first measured merge path: four suites retagged to the tier their cost actually supports, and a CI ceiling raised as a declared debt rather than mistaken for a budget
 - **v2.86.3** — the first nightly that ran to the end, and the six failures that were its own environment rather than the code: an exported override deciding what five suites assert, a shallow checkout that cannot read the past, and an isolation step that blew the job ceiling
-- **v2.86.2** — five defects that were live on main and unseen, because every suite covering them is T2 and the nightly had not finished for three days: a lineage guard a fast-forward had swallowed, a terminal EPIC that could be restarted, a nested checkout that broke one test adapter and doubled the other, and three stale test fixtures
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
