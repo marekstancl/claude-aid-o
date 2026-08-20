@@ -415,9 +415,9 @@ ZAKÁZÁNO používat přímo (ops tools — jen na explicitní žádost uživat
 Tento projekt je součástí VULCAN ekosystému. Následující dokumenty jsou závazné:
 
 - **Guardrails:** `/opt/eco/docs/docs/ecosystem/guardrails.md`
-- **Architektonicka rozhodnuti:** `/opt/eco/docs/docs/ecosystem/decisions.md`
-- **Infrastruktura:** `/opt/eco/docs/docs/ecosystem/infrastructure.md`
-- **MCP Servery:** `/opt/eco/docs/docs/ecosystem/mcp-servers.md`
+- **Architektonicka rozhodnuti:** `/opt/eco/docs/docs/ecosystem/decisions/`
+- **Infrastruktura:** `/opt/eco/docs/docs/ecosystem/infrastructure/`
+- **MCP Servery:** `/opt/eco/docs/docs/ecosystem/infrastructure/mcp-servers.md`
 - **Ecosystem overview:** `/opt/eco/docs/docs/ecosystem/index.md`
 
 Klíčová pravidla:
