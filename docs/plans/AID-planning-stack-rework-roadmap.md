@@ -305,6 +305,19 @@ Rozsah:
    znovupoužitelnosti** — musí jít přidat řádkem do `hook-registry.yaml`
    bez zásahu do `aid-hook.sh`.
 
+9. **Ekosystémová dokumentace hooků** — `/ecosystem/specs/agent-hooks/`:
+   jak se hooky používají v Claude Code **i v Codexu** (oba čtou
+   `hooks/hooks.json`; i-have-adhd plugin je precedens sdílené deklarace přes
+   `.claude-plugin/` a `.codex-plugin/`). **Každé tvrzení na té stránce musí
+   mít u sebe zkoušku, která ho prokázala** — ne citaci dokumentace, ale
+   výsledek pokusu v tomto repu (co hook dostal na stdin, co udělal exit 2,
+   zda `SubagentStart` stdout skutečně dorazí k roli). Nezodpovězené otázky
+   se zapisují jako otevřené, ne domýšlejí. Vstupem je ověřovací krok
+   z IMP-515 a zkušenost z implementace bodů 6–8.
+   Umístění podle `/ecosystem/specs/documentation-placement`: je to
+   ekosystémový standard, ne AID stránka — hooky budou používat i ostatní
+   projekty.
+
 **Ověřeno 2026-08-16** (dokumentace Claude Code): `Stop` hook umí zabránit
 ukončení turnu a vrátit modelu důvod (exit 2 nebo `decision: block` +
 `reason`); `SessionStart`/`UserPromptSubmit` vkládají stdout do kontextu;
