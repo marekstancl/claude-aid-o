@@ -263,6 +263,26 @@ Rozsah:
    (controller / subagent / obojí — plugin hooky běží I v subagentech),
    escape hatch `AID_HOOKS_OFF=1` s auditem, zápis do enforcement registry
    (V9), pravidlo testovatelné z fixtures bez živé session.
+
+   **ZÁVAZNÝ POŽADAVEK — znovupoužitelnost (V2, V11).** Vrstva se navrhuje
+   jako mechanismus pro celý AID, ne jako obsluha karty rozhodnutí. Přidání
+   dalšího chování NESMÍ znamenat nový skript ani nový záznam v
+   `hooks/hooks.json` — znamená **řádek v `hook-registry.yaml` plus fixture**.
+   *Zkouška (ověřuje se na druhém a třetím spotřebiteli, ne na prvním):*
+   body 7 a 8 níže se implementují BEZ jediné změny v `aid-hook.sh`; kdyby si
+   kterýkoli z nich vynutil zásah do vstupního bodu, je vrstva navržená špatně
+   a přepracuje se, ne obchází. Druhá zkouška: pravidlo pro událost, kterou
+   AID dnes nepoužívá (např. `PostToolUse`), se dá přidat jen zápisem do
+   registru a doplněním deklarace události.
+
+   **Vstup pro návrh:** analýza sedmi tříd použití napříč AIDem
+   (`docs/plans/2026-06-29-BACKLOG.md`, sekce „Analýza: kde jinde v AID mají
+   hooky přidanou hodnotu") — doručení protokolu subagentovi, kontrola výstupu
+   agenta, zákaz akce v daném stavu, kontinuita kontextu, konec turnu,
+   životní cyklus prostředí, telemetrie. Vrstva musí unést všech sedm, i když
+   se v P3 postaví jen tři. **Součástí implementace je revize 92 aktivních
+   vnitřních strážců:** které z nich jsou po zavedení hooku redundantní (V11 —
+   cílem je i úbytek kontrol, nejen přírůstek).
 7. **Kontinuita přes kompakci** (IMP-510): `PreCompact` uloží kapsli
    (komunikační kontrakt, FSM stav, další povolený krok, cesty k artefaktům),
    `SessionStart` s matcherem `compact|resume|fork` ji vloží zpět. Stav se
