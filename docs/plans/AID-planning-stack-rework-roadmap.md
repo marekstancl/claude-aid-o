@@ -296,6 +296,15 @@ Rozsah:
    skillu: stav („krok N z M") každý turn, konkrétní časový odhad, strop
    5 položek v chatu.
 
+   **Druhé pravidlo téže vrstvy — artefakt jako povinnost, ne prosba:**
+   `Stop` hook odmítne uzavřít turn, který napsal nebo změnil plán, aniž by
+   k němu existoval vyrenderovaný artefakt shrnutí (renderer a volající
+   dodává P084 Krok 5; tam je to instrukce v `commands/aid-plan.md`, tady
+   se z toho stává vynucení). Totéž pro brainstorming z bodu 3.
+   **Zároveň je to třetí spotřebitel vrstvy, tedy její zkouška
+   znovupoužitelnosti** — musí jít přidat řádkem do `hook-registry.yaml`
+   bez zásahu do `aid-hook.sh`.
+
 **Ověřeno 2026-08-16** (dokumentace Claude Code): `Stop` hook umí zabránit
 ukončení turnu a vrátit modelu důvod (exit 2 nebo `decision: block` +
 `reason`); `SessionStart`/`UserPromptSubmit` vkládají stdout do kontextu;
