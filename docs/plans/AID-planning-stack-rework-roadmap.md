@@ -255,6 +255,33 @@ Rozsah:
 5. **Pracovní kopie pro brainstorming a generování** (V10): dnes má worktree
    jen implementace; rozšířit na generování a brainstorm. Souvisí IMP-497
    (nastavení bran z hlavního stromu vs. kód z větve) — vyřešit spolu.
+6. **Hooková vrstva AID** (IMP-509) — PRVNÍ položka P3, jinak vznikne deset
+   různých skriptů. Jeden vstupní bod `scripts/aid-hook.sh <event>`
+   deklarovaný v `hooks/hooks.json`; kontext z JSON na stdin (`cwd`,
+   `agent_type`, `session_id`); pravidla v `defaults/hook-registry.yaml`.
+   Povinné: fail-open default, časový rozpočet, deklarované vlastnictví
+   (controller / subagent / obojí — plugin hooky běží I v subagentech),
+   escape hatch `AID_HOOKS_OFF=1` s auditem, zápis do enforcement registry
+   (V9), pravidlo testovatelné z fixtures bez živé session.
+7. **Kontinuita přes kompakci** (IMP-510): `PreCompact` uloží kapsli
+   (komunikační kontrakt, FSM stav, další povolený krok, cesty k artefaktům),
+   `SessionStart` s matcherem `compact|resume|fork` ji vloží zpět. Stav se
+   čte relativně k worktree, ne z hlavního stromu.
+8. **Vynucení karty rozhodnutí** (IMP-511, vynucovací polovina IMP-495):
+   `Stop` hook odmítne turn, který žádá rozhodnutí bez možností / doporučení /
+   důvodu — exit 2 + konkrétní důvod. **Podmínka pořadí:** až PO rendereru
+   karty z bodu 4; hook validuje strojově čitelný artefakt, NIKDY volnou prózu
+   transcriptu (jinak falešná zamítnutí a smyčka). Fail-closed → escape hatch
+   povinný. Do stejného pravidla patří i tři pravidla převzatá z i-have-adhd
+   skillu: stav („krok N z M") každý turn, konkrétní časový odhad, strop
+   5 položek v chatu.
+
+**Ověřeno 2026-08-16** (dokumentace Claude Code): `Stop` hook umí zabránit
+ukončení turnu a vrátit modelu důvod (exit 2 nebo `decision: block` +
+`reason`); `SessionStart`/`UserPromptSubmit` vkládají stdout do kontextu;
+plugin deklaruje hooky v `hooks/hooks.json` a **hooky pluginu běží i uvnitř
+subagentů**. Zbytek hookových příležitostí mimo tuto roadmapu je v backlogu
+jako IMP-509..516.
 
 ## 6. Session prompty
 
