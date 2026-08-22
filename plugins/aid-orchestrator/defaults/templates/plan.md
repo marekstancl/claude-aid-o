@@ -56,21 +56,19 @@ step, only Objective / Files / Acceptance Criteria / Dependencies / Effort /
 AID Role. Full table:
 `skills/plan-writing.md` §"Obligations by ceremony band".
 
-## Context
+**Every `##` section in this template is universal** — the band changes only
+the per-step fields and the `verification_pattern` blocks under Acceptance
+Criteria, both of which say so where they appear.
 
-*(universal)*
+## Context
 
 {Why does this plan exist? What problem does it solve? What triggered it?}
 
 ## Goal
 
-*(universal)*
-
 {One-sentence description of the desired outcome}
 
 ## Scope
-
-*(universal)*
 
 **In scope:**
 - {What this plan covers}
@@ -79,8 +77,6 @@ AID Role. Full table:
 - {What this plan does NOT cover}
 
 ## Approach
-
-*(universal)*
 
 ### Option A: {Name} (Recommended)
 {Description of approach}
@@ -113,8 +109,6 @@ AID Role. Full table:
 | 2 | {Step name} | {What needs to happen} | {S/M/L} |
 
 ## Constraints
-
-*(universal)*
 
 - {Technical constraint}
 - {Business constraint}
@@ -196,21 +190,15 @@ band-scoped: required for `full` and `medium`, not asked of a `light` plan)*
 
 ## Risks
 
-*(universal)*
-
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | {Risk 1} | low/medium/high | low/medium/high | {How to mitigate} |
 
 ## Success Criteria
 
-*(universal)*
-
 - {How do we know this plan succeeded?}
 
 ## Next Steps
-
-*(universal)*
 
 - [ ] Create Epic(s) from this plan
 - [ ] {Additional preparation steps}

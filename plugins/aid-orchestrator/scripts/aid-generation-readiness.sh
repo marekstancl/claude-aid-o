@@ -40,7 +40,9 @@ fi
 # A PASSING lint still has things to say: legacy advisories are non-blocking BY
 # DESIGN, and swallowing them here made "a loud advisory" silent everywhere the
 # lint is reached through generation — which is everywhere it actually runs.
-[[ -n "$lint_out" ]] && printf '%s\n' "$lint_out" >&2
+# `if`, not `[[ … ]] && …`: a bare AND-list is the script's last command status
+# under `set -e`, so an empty lint_out would abort a PASSING readiness check.
+if [[ -n "$lint_out" ]]; then printf '%s\n' "$lint_out" >&2; fi
 if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   # P084 Step 7 — the lint logs its own verdict; this is the OTHER stop this
   # script owns, so the two reasons a plan never reaches generation are both

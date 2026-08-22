@@ -290,19 +290,22 @@ _AID_HUMAN_SECTIONS=(
   "## Shrnutí pro PM"
 )
 
-for _human in "${_AID_HUMAN_SECTIONS[@]}"; do
-  while IFS=: read -r _hline _; do
-    [[ -n "${_hline:-}" ]] || continue
-    strict_hits=$((strict_hits+1))
-    if [[ "$QUIET" -eq 0 ]]; then
-      if [[ "$mode" == "strict" ]]; then
-        echo "${PLAN}:${_hline}: STRICT '${_human}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section." >&2
-      else
-        echo "${PLAN}:${_hline}: [WARN legacy] '${_human}' is written for a human; the PM page is now rendered from the plan (lib/aid-plan-summary.sh)." >&2
-      fi
+# ONE grep over the plan for the whole closed list (`-F -x` with an -e per
+# heading), not one pass per heading: the matched line comes back with its
+# number, so the message needs nothing the loop variable was carrying.
+_human_grep_args=()
+for _human in "${_AID_HUMAN_SECTIONS[@]}"; do _human_grep_args+=(-e "$_human"); done
+while IFS=: read -r _hline _hsection; do
+  [[ -n "${_hline:-}" ]] || continue
+  strict_hits=$((strict_hits+1))
+  if [[ "$QUIET" -eq 0 ]]; then
+    if [[ "$mode" == "strict" ]]; then
+      echo "${PLAN}:${_hline}: STRICT '${_hsection}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section." >&2
+    else
+      echo "${PLAN}:${_hline}: [WARN legacy] '${_hsection}' is written for a human; the PM page is now rendered from the plan (lib/aid-plan-summary.sh)." >&2
     fi
-  done < <(grep -n -x -F "$_human" "$PLAN" 2>/dev/null || true)
-done
+  fi
+done < <(grep -n -x -F "${_human_grep_args[@]}" "$PLAN" 2>/dev/null || true)
 
 band="$(_plan_band)"
 if [[ "$band" != "light" ]]; then

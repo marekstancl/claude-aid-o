@@ -161,13 +161,13 @@ EOF
 # ===========================================================================
 
 # _c0_read_frontmatter <plan_file>
-#   Sets globals _C0_FM_ID and _C0_FM_RISK from the plan's YAML frontmatter
-#   (first '---' to the closing '---'). Fails closed (_fail) if the block is
-#   never closed.
+#   Sets global _C0_FM_ID from the plan's YAML frontmatter (first '---' to the
+#   closing '---'). Fails closed (_fail) if the block is never closed.
+#   It no longer reads `risk:`: since P084 the only consumer of that field is
+#   the shared classifier (lib/aid-plan-band.sh), which _c0_risk_of now asks.
 _c0_read_frontmatter() {
   local plan_file="$1"
   _C0_FM_ID=""
-  _C0_FM_RISK=""
   local in_fm=0 fm_done=0 line
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line//$'\r'/}"
@@ -181,9 +181,6 @@ _c0_read_frontmatter() {
     fi
     if [[ "$line" =~ ^id:[[:space:]]*(.+)$ ]]; then
       _C0_FM_ID="$(printf '%s' "${BASH_REMATCH[1]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    fi
-    if [[ "$line" =~ ^risk:[[:space:]]*(.+)$ ]]; then
-      _C0_FM_RISK="$(printf '%s' "${BASH_REMATCH[1]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     fi
   done < "$plan_file"
   [[ "$fm_done" -eq 1 ]] || _fail "plan file missing closing '---' for frontmatter block: $plan_file"

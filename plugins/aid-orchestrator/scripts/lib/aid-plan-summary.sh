@@ -87,17 +87,20 @@ _aps_first_sentence() {
     | sed 's/[[:space:]]*$//'
 }
 
-# _aps_count <command...> — a count that is ONE number even when nothing
-# matched. `grep -c` prints 0 and exits 1 on no match, so the obvious
+# _aps_norm <text> — a count that is ONE number, whatever the producer did.
+# `grep -c` prints 0 and exits 1 on no match, so the obvious
 # `grep -c … || printf 0` emits "0\n0" and every later [[ -gt ]] on it is a
-# syntax error, not a zero.
-_aps_count() {
-  local n
-  n="$("$@" 2>/dev/null)" || true
-  n="${n%%$'\n'*}"
+# syntax error, not a zero. Every counter below normalises through here, so
+# the defence has one definition instead of one per counter.
+_aps_norm() {
+  local n="${1%%$'\n'*}"
   [[ "$n" =~ ^[0-9]+$ ]] || n=0
   printf '%s' "$n"
 }
+
+# _aps_count <command...> — _aps_norm over a command's output. Counters that
+# need a PIPE (not a single command) call _aps_norm directly.
+_aps_count() { _aps_norm "$("$@" 2>/dev/null || true)"; }
 
 # _aps_count_steps <plan> — `### Step N:` headings.
 _aps_count_steps() { _aps_count grep -cE '^### Step [0-9]+:' "$1"; }
@@ -109,21 +112,17 @@ _aps_count_epics() { _aps_count grep -cE '^\*\*EPIC [0-9]+' "$1"; }
 # _aps_declared_paths <plan> — the same declared paths the band is classified
 # from, de-duplicated. One authority for "what does this plan touch".
 _aps_declared_paths() {
-  local n
-  n="$(_aid_band_declared_paths "$1" | sort -u | grep -c .)" || n=0
-  printf '%s' "${n:-0}"
+  _aps_norm "$(_aid_band_declared_paths "$1" | sort -u | grep -c . || true)"
 }
 
 # _aps_count_risks <plan> — data rows of the `## Risks` table (the header and
-# its separator are not risks).
-# The `|| true` is load-bearing under `set -o pipefail` (this library is sourced
-# under the caller's strict shell): `grep -c` exits 1 when it counts zero, which
-# would abort a caller rendering a plan that names no risks — a legitimate plan.
+# its separator are not risks). The `|| true` is load-bearing under
+# `set -o pipefail` (this library is sourced under the caller's strict shell):
+# `grep -c` exits 1 when it counts zero, which would abort a caller rendering a
+# plan that names no risks — a legitimate plan.
 _aps_count_risks() {
   local rows
-  rows="$(_aps_section "$1" "Risks" | { grep -cE '^\|' || true; })"
-  rows="${rows%%$'\n'*}"
-  [[ "$rows" =~ ^[0-9]+$ ]] || rows=0
+  rows="$(_aps_norm "$(_aps_section "$1" "Risks" | { grep -cE '^\|' || true; })")"
   # Minus the header row and its separator, which are not risks.
   (( rows > 2 )) && printf '%s' "$(( rows - 2 ))" || printf '0'
 }
