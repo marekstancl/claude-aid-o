@@ -57,11 +57,13 @@ source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-plan-band.sh"
 # _aps_section <plan> <heading> — the body of one `## <heading>` section, with
 # blank lines and sub-headings dropped. Empty when the section is absent.
 _aps_section() {
-  awk -v want="## $2" '
-    $0 == want { inside = 1; next }
-    /^#+[[:space:]]/ { inside = 0; next }
-    inside && $0 ~ /[^[:space:]]/ { print }
-  ' "$1"
+  # The heading rule lives in lib/aid-scoping.sh, once, for every reader of the
+  # plan format; what is local here is that the PAGE wants prose — sub-headings
+  # and blank lines are not sentences to render.
+  # Stops at ANY heading, not just the next `## `: a `###` subsection is a
+  # different topic, and its prose rendered as part of the parent section is how
+  # a page starts saying something the plan did not.
+  _aid_plan_section "$1" "$2" | awk '/^#/ { exit } /[^[:space:]]/'
 }
 
 # _aps_first_sentence <text> — the first sentence, trimmed of markdown emphasis
@@ -136,6 +138,37 @@ _aps_roles() {
     | { grep . || true; } | sort -u | paste -sd, - | sed 's/,/, /g'
 }
 
+# _aps_standards <plan> — the standards the plan NAMES in its `## Standards`
+# section, as a comma list of ids. Read out of the plan, not derived from the
+# map: this file counts what the plan says, and "which standards SHOULD have
+# been named" is the lint's judgement, not the PM page's (P085 Step 8).
+# Empty when the section is absent — a project without a standards map has no
+# such section, and an empty line on the page would read as a missing answer.
+_aps_standards() {
+  # Every stage that can legitimately match NOTHING is neutralised: this
+  # library is sourced under the caller's `set -o pipefail`, where a `grep`
+  # exiting 1 on zero matches aborts the render of a perfectly good plan —
+  # the same trap _aps_count_risks and _aps_roles document above.
+  _aps_section "$1" "Standards" \
+    | { grep -oE '/ecosystem/specs/[A-Za-z0-9_-]+' || true; } \
+    | sed 's#.*/##' | { grep . || true; } | sort -u | paste -sd, - | sed 's/,/, /g'
+}
+
+# _aps_reuse <plan> — "<evidenced>/<founding>": of the STEPS that found
+# something new, how many carry a **Reuse check:** field. Per step, not per
+# bullet: a step with three `Create:` bullets owes one field, and counting
+# bullets against fields produced a ratio that could exceed 1.
+# Rendered only when the plan founds anything at all.
+_aps_reuse() {
+  local plan="$1" founding=0 evidenced=0 s e _head
+  while IFS=$'\t' read -r s e _head; do
+    [[ -n "${s:-}" ]] || continue
+    founding=$((founding+1))
+    _aid_plan_step_field "$plan" "$s" "$e" "Reuse check" >/dev/null && evidenced=$((evidenced+1))
+  done < <(_aid_plan_founding_steps "$plan")
+  printf '%s/%s' "$evidenced" "$founding"
+}
+
 aid_plan_summary_render() {
   local plan="${1-}" out_path="${2-}"
   if [[ -z "$plan" || -z "$out_path" ]]; then
@@ -161,13 +194,15 @@ aid_plan_summary_render() {
   band="${band_line%%$'\t'*}"; band="${band:-full}"
   band_reason="${band_line#*$'\t'}"
 
-  local steps epics files risks roles context
+  local steps epics files risks roles context standards reuse
   steps="$(_aps_count_steps "$plan")"
   epics="$(_aps_count_epics "$plan")"
   files="$(_aps_declared_paths "$plan")"
   risks="$(_aps_count_risks "$plan")"
   roles="$(_aps_roles "$plan")"; roles="${roles:-—}"
   context="$(_aps_section "$plan" "Context")"
+  standards="$(_aps_standards "$plan")" || standards=""
+  reuse="$(_aps_reuse "$plan")" || reuse="0/0"
 
   # Band decides the ceremony, so it is the headline fact, not a footnote.
   local band_value band_state
@@ -180,13 +215,28 @@ aid_plan_summary_render() {
   local scope_label items_json next_json links_json facts_json prose_json
   scope_label="$( [[ "$epics" -gt 0 ]] && printf '%s kroků / %s EPIKŮ' "$steps" "$epics" || printf '%s kroků' "$steps" )"
 
+  # The two P085 rows are CONDITIONAL: a project with no standards map has no
+  # `## Standards` section, and a plan that founds nothing has no reuse search.
+  # An empty row would read as an unanswered question rather than an absent one.
+  # ORDER IS THE BUDGET. The renderer caps the list at five items and says how
+  # many it dropped; appending the two P085 rows at the END would have meant a
+  # plan that names standards never showing them. They go above `roles` and
+  # `status`, which are the two a PM can reconstruct from the plan in seconds.
+  # Raising the cap was the alternative and is not ours to take — it is the
+  # artifact standard's ceiling, and a page nobody finishes reading is the
+  # thing it exists to prevent.
   items_json="$(jq -n \
     --arg band "$band" --arg reason "$band_reason" \
     --arg steps "$steps" --arg files "$files" \
-    --arg risks "$risks" --arg roles "$roles" --arg status "$status" '[
+    --arg risks "$risks" --arg roles "$roles" --arg status "$status" \
+    --arg standards "$standards" --arg reuse "$reuse" '[
       "Pásmo ceremonie: " + $band + " (" + $reason + ")",
       "Rozsah: " + $steps + " kroků, " + $files + " deklarovaných souborů",
-      "Rizika pojmenovaná v plánu: " + $risks,
+      "Rizika pojmenovaná v plánu: " + $risks
+    ]
+    + (if $standards == "" then [] else ["Standardy, na které se plán odvolává: " + $standards] end)
+    + (if ($reuse | endswith("/0")) then [] else ["Kroky, které něco zakládají, s doloženým hledáním: " + $reuse] end)
+    + [
       "Role, kterým se bude zadávat: " + $roles,
       "Stav plánu: " + $status
     ]')" || return 1

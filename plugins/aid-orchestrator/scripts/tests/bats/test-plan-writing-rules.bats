@@ -256,3 +256,107 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" != *"Step 99"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# The documentation / help obligation (P085 Step 6)
+#
+# A plan that changes behaviour a user meets must name the help file and the
+# docs page it changes — a path in a Files bullet, like any other work. What
+# the project HAS is read from project.yaml, recorded once by /aid-init or
+# /aid-setup, so the obligation activates only where there is somewhere to
+# write.
+# ---------------------------------------------------------------------------
+_doc_setup() {   # <project.yaml documentation block, or "">
+  DOCDIR="$(mktemp -d)"
+  mkdir -p "$DOCDIR/.aid-o/plans" "$DOCDIR/.aid-o/config"
+  { printf 'project_name: "fixture"\n'; [[ -n "${1:-}" ]] && printf '%s\n' "$1"; } \
+    > "$DOCDIR/.aid-o/config/project.yaml"
+  DOCPLAN="$DOCDIR/.aid-o/plans/P903-fixture.md"
+}
+
+_doc_plan() {   # <type> <files-bullets…>
+  local ptype="$1"; shift
+  { printf -- '---\nid: P903\ntype: %s\nrisk: high\nlifecycle_strict: true\n---\n' "$ptype"
+    printf '# Plan: P903\n\n## Testing Strategy\n\nNo new verification — this fixture is about the documentation obligation.\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
+    printf -- '- %s\n' "$@"
+    printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\n- none\n'
+  } > "$DOCPLAN"
+}
+
+@test "P085: a behaviour-changing plan with no path into help or docs is refused" {
+  _doc_setup 'documentation:
+  in_app_help: src/help
+  docusaurus: docs/docs'
+  _doc_plan regular 'Modify: `src/feature.ts` — new behaviour'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changes behaviour a user meets"* ]]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: naming EVERY surface satisfies it" {
+  _doc_setup 'documentation:
+  in_app_help: src/help
+  docusaurus: docs/docs'
+  _doc_plan regular 'Modify: `src/feature.ts` — new behaviour' \
+    'Modify: `src/help/features.md` — the section describing it' \
+    'Modify: `docs/docs/features.md` — the page describing it'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -eq 0 ]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: naming only ONE of two surfaces is not enough" {
+  # Half the users are left on the old behaviour, and the finding names which
+  # half (codex review of EPIC 2, finding 1).
+  _doc_setup 'documentation:
+  in_app_help: src/help
+  docusaurus: docs/docs'
+  _doc_plan regular 'Modify: `src/feature.ts` — new behaviour' \
+    'Modify: `src/help/features.md` — the section describing it'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docs/docs"* ]]
+  [[ "$output" != *"'src/help'"* ]]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: a project with only one surface owes only that half" {
+  _doc_setup 'documentation:
+  docusaurus: docs/docs'
+  _doc_plan regular 'Modify: `src/feature.ts` — new behaviour' \
+    'Modify: `docs/docs/features.md` — the page'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -eq 0 ]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: a refactor is exempt by definition" {
+  _doc_setup 'documentation:
+  in_app_help: src/help'
+  _doc_plan refactor 'Modify: `src/feature.ts` — same behaviour, different shape'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -eq 0 ]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: a project with no help and no docs owes nothing, and the lint records it" {
+  _doc_setup ''
+  _doc_plan regular 'Modify: `src/feature.ts` — new behaviour'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"records no in-app help and no documentation site"* ]]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: a light-band plan is not asked" {
+  _doc_setup 'documentation:
+  in_app_help: src/help'
+  { printf -- '---\nid: P903\ntype: regular\nrisk: low\nlifecycle_strict: true\n---\n'
+    printf '# Plan: P903\n\n## Testing Strategy\n\nnone\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly.\n\n**Files:**\n- Modify: `src/feature.ts` — new behaviour\n'
+  } > "$DOCPLAN"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"changes behaviour a user meets"* ]]
+  rm -rf "$DOCDIR"
+}

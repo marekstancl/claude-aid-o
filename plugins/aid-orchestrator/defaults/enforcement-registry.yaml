@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 450          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 455          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3014,6 +3014,79 @@ enforcements:
     description: "P084 Step 3 — the per-step fields a plan owes now follow its band. `full` and `medium` owe **Architecture Context**, **Error Handling** and **Edge Cases** per step; `light` owes none of them, and a light plan that omits all three is complete. The rule is enforced where the plan is checked (aid-plan-lint.sh, reached by generation through aid-generation-readiness.sh), on the SAME classification the gate uses — the lint sources lib/aid-plan-band.sh rather than shelling out to the gate, because 'the CP1 gate is consulted exactly once per plan' is an invariant the generation suites assert by counting gate invocations. A bare `**Field:**` label with nothing after it does not satisfy the obligation. STRICT tier: blocking for a lifecycle_strict plan, a loud advisory for a legacy one."
     recovery: "The finding names the step's line, its heading and which fields are missing. Add the fields, or lower the band by changing what the plan declares it touches."
     test: "scripts/tests/bats/test-plan-writing-rules.bats"
+
+  - id: plan_reuse_evidence
+    type: 4
+    source: "scripts/aid-plan-lint.sh (Reuse evidence pass) + scripts/lib/aid-reuse-verdict.sh"
+    instruction: "skills/plan-writing.md (Reuse-check grammar)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P085 Steps 1-2 — a step that founds something new (any `Create:` bullet in its Files block) owes a **Reuse check:** field: the read-only search it ran and which of four results it got (none / one match / several matching / several conflicting). The field is REPLAYED, not read — the lint re-runs the declared command from the project root and compares the hit count with the claim, so `none` over a command that finds something today is a blocking finding, and a command that no longer runs is refused as stale evidence. Only grep/rg/ls/find/git grep run, and nothing that pipes, redirects or chains: the replay is the one place a plan's own text becomes something the lint executes. The obligation holds in EVERY band including `light`, because founding a duplicate component is exactly what a small plan does and the price is one command, not a dispatch. STRICT tier: blocking for a lifecycle_strict plan, a loud advisory for a legacy one."
+    limits: "The replay proves the declared result matches what the command returns — NOT that the search was wide enough. A narrowly aimed grep with an honest `none` passes here; width is judged by the `reuse_evidence` C0 lens, and only in the `full` band. A result other than `none` additionally owes a stated reason why what exists does not suffice (the machine grades SUBSTANCE, not the connective: demanding the word `because` would grade grammar rather than reasoning), and whether that reason is a good one is again the lens's call. The four results are not turned into hard verdicts on the step's verb — `one match` alongside a `Create:` is the normal shape of reusing a helper INSIDE a new file, and refusing it would fire on correct input."
+    runtime_check: "Post-generation: none needed — the obligation is about the PLAN text, which is frozen once generation reads it. Development runtime: the lint runs again inside aid-generation-readiness.sh, so a plan edited after CP1 is re-checked before EPICs are cut."
+    recovery: "The finding names the step's line and heading. Run the search again, write the command and the result it actually returns, and say why what exists does not suffice."
+    test: "scripts/tests/bats/test-plan-reuse-check.bats"
+
+  - id: plan_standards_named
+    type: 4
+    source: "scripts/aid-plan-lint.sh (Standards named against the map) + scripts/lib/aid-standards-map.sh"
+    instruction: "skills/plan-writing.md (Obligations by ceremony band) + commands/aid-init.md (Where the standards map lives)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P085 Step 4 — a `full` or `medium` plan names the ecosystem standards binding the areas its declared paths reach, or says where it departs from one and why. The binding is derived from the LIVE map (/ecosystem/specs/standards-map, path in project.yaml -> standards.map_path), never from a copy in this repo. PER TAG, not per standard: the map's tags are areas and one area carries several standards, so the plan names at least one standard from each area it reaches. Three states, deliberately: no map configured = the project has no standards and owes nothing (recorded by the lint, so the silence does not read as an omission); a map configured but unreadable, unparseable, or with no yq = a broken environment, reported loudly and blocking for a strict plan; a map that binds nothing to these paths = no section owed. A tag missing from the map's own vocabulary is a defect OF THE MAP: reported, never blocking."
+    limits: "The area->tag table (scripts/lib/aid-standards-map.sh, _AID_STANDARDS_PATH_TAGS) is deliberately small: a tag that cannot be told from a path (governance, produkt, llm-naklady) is not guessed at, so a plan touching only those areas is not asked. A wrong obligation costs more than a missing one. THE TABLE IS ALSO ECOSYSTEM-SHAPED: it encodes this ecosystem's tag vocabulary (`testy`, `dokumentace`, `napoveda`, …) and repository layout, so in a project whose map uses different tag names no path derives a tag, aid_standards_derive returns nothing, and this row is registered blocking while being unable to fire — the decoration shape AID-v3-principles.md §1 is about. Moving the path patterns into the map itself (a `path_patterns:` per tag), with a project.yaml override, is the fix and is not done."
+    runtime_check: "Post-generation: none — the obligation is about plan text, frozen once generation reads it. Development runtime: `aid-standards-map.sh --self-test` re-checks that the derivation still agrees with the live map for three control paths, because the map is edited by people who never run AID. It has a caller: test-standards-map.bats runs it and SKIPS when no map is reachable, so an unreachable foreign document never fails a contributor's suite while a real derivation drift does."
+    recovery: "The finding names the area and lists the standards carrying it. Name the one you checked in the `## Standards` section, or state the deviation WITH its reason."
+    test: "scripts/tests/bats/test-standards-map.bats"
+
+  - id: plan_parallel_group_disjoint
+    type: 4
+    source: "scripts/aid-plan-parallel-check.sh (called by scripts/aid-generation-readiness.sh)"
+    instruction: "skills/plan-writing.md (Declaring what can run at the same time)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P085 Step 7 — each step declares a **Parallel group** (a wave name, or `---` for a step that runs alone), and two steps in the SAME wave must not name the same file. `Parallel Group` has existed in the EPIC table since P039 and aid-epic-to-json.sh writes it into plan.json, but nothing ever produced a value and nothing ever checked one; this is the producer's other half. Required in `full` and `medium`, where concurrency is declared deliberately; in `light` an absent field defaults to `---`. Two severities, the same two-stage model the Files grammar has: advisory while writing (--advisory), blocking inside aid-generation-readiness.sh, which is the last point before the plan becomes EPICs."
+    limits: "With max_parallel: 1 nothing runs concurrently today, so this blocks a risk that cannot currently materialise. That is the point: it is the evidence of safety for the moment the brake comes off, and evidence gathered after the fact is evidence nobody trusts. The check VERIFIES a schedule and does not produce one — the plan computes its waves by hand."
+    runtime_check: "Post-generation: the disjointness is a property of the SOURCE plan, and the generated plan.json inherits the groups verbatim (aid-epic-to-json.sh), so re-deriving it per EPIC would be a second authority over one fact. Development runtime: none needed while max_parallel is 1 — nothing dispatches concurrently, so there is no runtime moment for the property to be violated in. When concurrency is switched on, the dispatcher becomes the runtime consumer and this row is where that gets recorded."
+    recovery: "The finding names both steps and every shared path. Move one step to another wave, or mark it `---`."
+    test: "scripts/tests/bats/test-plan-parallel-check.bats"
+
+  - id: plan_documentation_step_required
+    type: 4
+    source: "scripts/aid-plan-lint.sh (Documentation and help)"
+    instruction: "skills/plan-writing.md (Documentation, help and screenshots) + commands/aid-init.md (What the project has to document with) + skills/setup/project-scan.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P085 Step 6 — a `full` or `medium` plan that changes behaviour a user meets must declare a path under the project's in-app help or documentation site, in a Files bullet like any other work: the file and the section, not the sentence 'update the documentation'. What the project HAS is recorded once by /aid-init or /aid-setup in project.yaml -> documentation.{in_app_help,docusaurus,screenshot_tool}; the plan reads the answer rather than rediscovering it. A project with neither surface owes nothing and the lint records that it asked nothing; a project with one owes only that half."
+    limits: "The check grades the PATH, not the prose: a step declaring `docs/foo.md` satisfies it even if the sentence about what changes there is thin. Naming the file is the half a machine can hold; whether the section text is right is a review question. 'Changes behaviour a user meets' is read from the plan's own frontmatter `type:` — refactor and docs are exempt by definition. A proxy, deliberately: the alternative is a regex guessing at intent. A plan that changes behaviour and writes `type: refactor` defeats the check, and does so in a field a reviewer can see. The screenshot tool is documented, never enforced: blocking a plan for a missing tool would block acquiring it."
+    runtime_check: "Post-generation: none — the obligation is about plan text. Development runtime: none. Whether the documentation the plan PROMISED was actually written is a DONE-boundary question about the diff, not a plan-time one, and it has no owner yet; recorded here so the gap is visible rather than assumed covered."
+    recovery: "The finding lists the surfaces this project has. Add a step naming the file and section, or state honestly that the plan changes nothing user-visible by setting `type: refactor`."
+    test: "scripts/tests/bats/test-plan-writing-rules.bats"
+
+  - id: plan_summary_reuse_and_standards
+    type: 11
+    source: "scripts/lib/aid-plan-summary.sh (_aps_standards + _aps_reuse)"
+    instruction: "commands/aid-plan.md (Mode: Write Plan)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P085 Step 8 — the PM page rendered from a new plan carries two more counted facts: the standards the plan NAMES, and how many of its founding steps carry a reuse search (evidenced/founding, per step). Both are read out of the plan, never asserted, and both rows are ABSENT rather than empty when there is nothing to say. They sit above `roles` and `status` because the renderer caps the list at five items and an appended row would never be shown."
+    runtime_check: "Post-generation: none — the page is a plan-time artifact. Development runtime: none. It is advisory because publishing the page is an instruction to the session (see plan_summary_page_rendered), and a row on a page nobody is forced to render inherits that strength."
+    test: "scripts/tests/bats/test-aid-plan-summary.bats"
 
   - id: plan_testing_strategy_required
     type: 4

@@ -523,7 +523,7 @@ band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" \
 
 | Band | What the plan declares it touches | What runs |
 |---|---|---|
-| `full` | decision machinery: state machines, gate runner, generation chain, release boundary, `skills/plan-writing.md`, auth, migrations, dependency manifests | CP1-light + CP1-deep (3 lenses + 5 C0 lenses + adjudicator) + the C0 cross-provider loop |
+| `full` | decision machinery: state machines, gate runner, generation chain, release boundary, `skills/plan-writing.md`, auth, migrations, dependency manifests | CP1-light + CP1-deep (3 lenses + 6 C0 lenses + adjudicator) + the C0 cross-provider loop |
 | `medium` | the DATA those decisions read: policies, schemas, templates, machine-read config, CI | CP1-light + CP1-deep (3 lenses + adjudicator); **no C0 lenses, no cross-provider loop** |
 | `light` | everything else — documentation, help, commands, skills, tests, ordinary feature code | CP1-light only — **dispatch no lens at all** |
 
@@ -552,10 +552,12 @@ whole of CP1.
 
 ### CP1-deep (bands `full` and `medium`)
 
-Extends CP1-light with parallel review lenses and an adjudicator: 8 lenses for
-`full` (L1/L2/L3 blocking + 5 C0 observe), the 3 L1/L2/L3 lenses for `medium`.
+Extends CP1-light with parallel review lenses and an adjudicator: 9 lenses for
+`full` (L1/L2/L3 blocking + 6 C0 observe), the 3 L1/L2/L3 lenses for `medium`.
 The 4 L1/L2/L3+adjudicator evidence files must exist before EPIC generation is
-allowed; the 5 C0 lens files are observe-only (E4).
+allowed; the C0 lens FINDINGS are observe-only (E4). One C0 lens file is
+nevertheless required to exist in `full` — `c0-lens-reuse_evidence.md` (P085):
+what it reports stays advisory, that it ran does not.
 
 **Flow:**
 
@@ -570,19 +572,27 @@ CP1-light:
 CP1-deep:
   → run plan-writing.md checklist (same as light)
   → classify the band from the plan's declared Files (aid-cp1-gate.sh --classify-only)
-  → dispatch the lenses the band owes, in parallel (full: all 8; medium: L1/L2/L3 only;
+  → dispatch the lenses the band owes, in parallel (full: all 9; medium: L1/L2/L3 only;
     light: none — see review-checkpoint-contracts.md §CP1-deep and §C0 Semantic Lenses):
       L1 behavior:                  request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
       L2 feasibility:               touched files, output contracts, parser/producer ordering, implementation feasibility
       L3 enforcement:               gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
       C0 reuse_compat:              incompatible component reuse — output to c0-lens-reuse_compat.md
+      C0 reuse_evidence:            was each founding step's reuse search WIDE enough (the half the lint's replay cannot reach) — output to c0-lens-reuse_evidence.md
       C0 planned_call_feasibility:  calls to outputs/APIs that the plan doesn't clearly produce — output to c0-lens-planned_call_feasibility.md
       C0 dep_api_grounding:         dependency API mismatch against actual version/interface — output to c0-lens-dep_api_grounding.md
       C0 idempotency_matrix:        non-idempotent mutations against at-most-once AC — output to c0-lens-idempotency_matrix.md
       C0 authority_runtime_matrix:  mutations crossing ownership/tenant boundary — output to c0-lens-authority_runtime_matrix.md
   → L1/L2/L3 each produce: stop_rule_blockers[] (required field), findings[], confidence: high|medium|low
   → C0 lenses each produce: stop_rule_blockers[] (advisory/observe in E4), findings[], confidence: high|medium|low
-  → adjudicator reviews all 8 lenses: accepts blocker only if it has command/artifact + file:line evidence (L1/L2/L3 blocking; C0 advisory — see review-checkpoint-contracts.md §C0 Adjudicator Addendum)
+  → the reuse_evidence dispatch is given two inputs the other lenses do not need, both quoted VERBATIM:
+      (a) every founding step's **Reuse check:** field, exactly as written — the lens judges the search, so a paraphrase is not the artifact
+      (b) the standards this plan's paths bind — RUN the derivation and paste its output, do not describe it:
+          bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --derive "$PLAN_FILE"
+          Exit 1 = the project has no standards map, so this input legitimately does not exist.
+          Exit 2 = a map is configured but unreadable; pass that fact to the lens rather than an empty list.
+      If either input is unavailable, the lens still runs and RECORDS that the input was missing — it never guesses one.
+  → adjudicator reviews all 9 lenses: accepts blocker only if it has command/artifact + file:line evidence (L1/L2/L3 blocking; C0 advisory — see review-checkpoint-contracts.md §C0 Adjudicator Addendum)
   → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
   → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
   → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
@@ -764,6 +774,7 @@ that specific failure.
 | `cp1-lens-L3-enforcement.md` | L3 enforcement lens agent | `stop_rule_blockers:` at line-start | blocking |
 | `cp1-adjudicator.md` | adjudicator agent | `verdict:` at line-start | blocking |
 | `c0-lens-reuse_compat.md` | C0 reuse_compat lens | `stop_rule_blockers:` at line-start | observe (E4) |
+| `c0-lens-reuse_evidence.md` | C0 reuse_evidence lens | `stop_rule_blockers:` at line-start | findings observe (E4); the FILE is required by the gate in band `full` |
 | `c0-lens-planned_call_feasibility.md` | C0 planned_call_feasibility lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-dep_api_grounding.md` | C0 dep_api_grounding lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-idempotency_matrix.md` | C0 idempotency_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |

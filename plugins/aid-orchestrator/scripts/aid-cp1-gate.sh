@@ -204,13 +204,17 @@ fi
 # rather than describing it. Every uncertainty resolves to `true`: no table, no
 # yq, an unknown band, a value that is not true/false. A band is lowered only by
 # what the plan declares it will touch, never by a gap in configuration.
+# How many flags the band table carries. One number, so the reader, the
+# fail-closed default and the padding below cannot disagree.
+CP1_BAND_FLAG_COUNT=4
+
 _cp1_band_flags() {
   local band="$1" root="$2" file="" cand raw
   for cand in "${root}/.aid-o/config/policies/review-checkpoints.yaml" "$CP1_CHECKPOINTS_DEFAULT"; do
     [[ -f "$cand" ]] && { file="$cand"; break; }
   done
   if [[ -z "$file" ]] || ! command -v yq >/dev/null 2>&1; then
-    printf 'true\ntrue\ntrue\n'; return 0
+    printf 'true\ntrue\ntrue\ntrue\n'; return 0
   fi
   # ONE read of the band's node, not one fork per key. NOT `// "true"`: yq's
   # alternative operator treats an explicit `false` as falsy, which would
@@ -222,21 +226,28 @@ _cp1_band_flags() {
   # for every key after the first — and null reads as fail-closed `true`, which
   # is the shape that makes a `medium` plan demand the full ceremony.
   raw="$(yq -r ".review_checkpoints.ceremony_bands.${band} |
-                (.cp1_deep_lenses, .c0_cross_provider, .cp1_ledger)" "$file" 2>/dev/null)" || raw=""
-  # Read the three lines back in the shell rather than forking `sed -n Np`
-  # three times to index a string this loop is already walking.
-  local val
+                (.cp1_deep_lenses, .c0_cross_provider, .cp1_ledger, .c0_reuse_lens)" "$file" 2>/dev/null)" || raw=""
+  # Read the lines back in the shell rather than forking `sed -n Np` once per
+  # key to index a string this loop is already walking. The count is padded to
+  # CP1_BAND_FLAG_COUNT: a yq that errors returns nothing, and a caller reading
+  # four values off fewer lines would leave the tail EMPTY — which reads as
+  # "not required" everywhere below, i.e. fail-open, the one direction this
+  # table must never fail in.
+  local val emitted=0
   while IFS= read -r val || [[ -n "$val" ]]; do
     case "$val" in
       true|false) printf '%s\n' "$val" ;;
       *)          printf 'true\n' ;;
     esac
+    emitted=$((emitted+1))
   done <<< "$raw"
+  while [[ "$emitted" -lt "$CP1_BAND_FLAG_COUNT" ]]; do printf 'true\n'; emitted=$((emitted+1)); done
 }
 
 { IFS= read -r cp1_need_lenses
   IFS= read -r cp1_need_c0
   IFS= read -r cp1_need_ledger
+  IFS= read -r cp1_need_reuse_lens
 } < <(_cp1_band_flags "$AID_PLAN_RISK_BAND" "$project_root")
 
 # ---------------------------------------------------------------------------
@@ -312,6 +323,28 @@ if ! grep -q "^verdict:" "$adjudicator_file" 2>/dev/null; then
 fi
 
 echo "CP1-gate: all 4 evidence files present and structurally valid in ${evidence_dir}/" >&2
+
+# ---------------------------------------------------------------------------
+# Step 4b: the `reuse_evidence` C0 lens (P085 Step 5)
+# ---------------------------------------------------------------------------
+# The lens judges what the plan lint's replay cannot reach; the division of
+# labour between them is stated once in skills/review-checkpoint-contracts.md
+# §"Lens: reuse_evidence". Required in `full` only: it costs a dispatch, and on
+# a smaller plan the replay alone is the trade.
+#
+# C0 lenses live one level ABOVE cp1-deep/, the same place c0-plan-review.json
+# does. Required here rather than "produced by the dispatch and hopefully
+# present": a lens whose absence stops nothing is a lens nobody has to run.
+if [[ "$cp1_need_reuse_lens" == "true" ]]; then
+  reuse_lens_file="$(dirname "$evidence_dir")/c0/c0-lens-reuse_evidence.md"
+  if [[ ! -s "$reuse_lens_file" ]]; then
+    error_exit "A ${AID_PLAN_RISK_BAND}-band plan requires the reuse_evidence C0 lens: ${reuse_lens_file} is missing or empty. It judges whether each founding step's reuse search was wide enough — see skills/review-checkpoint-contracts.md §'Lens: reuse_evidence'." 1
+  fi
+  if ! grep -q "^stop_rule_blockers:" "$reuse_lens_file" 2>/dev/null; then
+    error_exit "reuse_evidence C0 lens output is missing the required 'stop_rule_blockers:' field: ${reuse_lens_file}" 1
+  fi
+  echo "CP1-gate: reuse_evidence C0 lens present and structurally valid." >&2
+fi
 
 # ---------------------------------------------------------------------------
 # _cp1_override_file <plan_evidence_root>

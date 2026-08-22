@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.87.0** (current) — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
+- **v2.88.0** (current) — a plan now shows where it looked before founding anything, which ecosystem standards bind the paths it declares, and which of its steps may run at the same time
+- **v2.87.0** — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
 - **v2.86.5** — the nightly's own red result was an input to a test the nightly runs, so the failure kept itself alive for four nights
-- **v2.86.4** — the first measured merge path: four suites retagged to the tier their cost actually supports, and a CI ceiling raised as a declared debt rather than mistaken for a budget
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

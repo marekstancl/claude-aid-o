@@ -53,7 +53,11 @@ machine-read config, CI) owes everything except the C0 cross-provider round;
 `light` (everything else, including documentation, help, commands, skills,
 TESTS and ordinary feature code) owes only the universal sections and, per
 step, only Objective / Files / Acceptance Criteria / Dependencies / Effort /
-AID Role. Full table:
+AID Role — plus, on a step that founds something new (a `Create:` bullet),
+**Reuse check**, which every band owes because founding a duplicate is exactly
+what a small plan does. A `light` step also carries **Parallel group**, but it
+does not have to write it: an absent field defaults to `---`, "runs alone".
+Full table:
 `skills/plan-writing.md` §"Obligations by ceremony band".
 
 **Every `##` section in this template is universal** — the band changes only

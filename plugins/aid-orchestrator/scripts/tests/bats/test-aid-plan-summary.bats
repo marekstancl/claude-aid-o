@@ -167,3 +167,41 @@ EOF
   aid_plan_summary_render "$plan" "$OUT"
   grep -q '2 kroků' "$OUT"
 }
+
+@test "P085: the page names the standards the plan named, and the reuse-search count" {
+  plan="$(write_plan P957 'plugins/aid-orchestrator/commands/aid-help.md')"
+  # A Standards section with an annotated heading — `## Standards (V3)` is how
+  # a real plan writes it, and exact heading equality used to skip it entirely.
+  cat >> "$plan" <<'EOF'
+
+## Standards (V3)
+
+| Standard | Why it binds | Deviation |
+|---|---|---|
+| `/ecosystem/specs/test-standard` | the plan changes a suite | none |
+
+### Step 9: found something
+
+**Files:**
+- Create: `src/brand-new.ts` — a new thing
+
+**Reuse check:** searched: `grep -rn brandNew src/` → none — nothing like it exists
+EOF
+  run bash -c "set -euo pipefail
+    source '$PLUGIN_ROOT/scripts/lib/aid-plan-summary.sh'
+    aid_plan_summary_render '$plan' '$OUT'"
+  [ "$status" -eq 0 ]
+  grep -q 'test-standard' "$OUT"
+  grep -q 'doloženým hledáním: 1/1' "$OUT"
+}
+
+@test "P085: a plan naming no standards and founding nothing renders neither row" {
+  plan="$(write_plan P958 'plugins/aid-orchestrator/commands/aid-help.md')"
+  run bash -c "set -euo pipefail
+    source '$PLUGIN_ROOT/scripts/lib/aid-plan-summary.sh'
+    aid_plan_summary_render '$plan' '$OUT'"
+  [ "$status" -eq 0 ]
+  # Absent, not empty: an empty row reads as an unanswered question.
+  ! grep -q 'Standardy, na které' "$OUT"
+  ! grep -q 'doloženým hledáním' "$OUT"
+}

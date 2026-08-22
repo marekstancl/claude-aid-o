@@ -200,6 +200,148 @@ _aid_files_bullet_body() {
   return 1
 }
 
+# _aid_files_bullet_verb <bullet> — the bullet's verb label (Create/Modify/Test/
+# Rewrite), or nothing plus return 1 when it carries none. Same vocabulary, same
+# regex as _aid_files_bullet_body; callers that need to know WHAT a bullet
+# declares (P085: "does this step found anything?") ask here instead of
+# re-matching the label themselves.
+_aid_files_bullet_verb() {
+  local b="${1#- }"
+  [[ "$b" =~ $_AID_FILES_VERB_RE ]] || return 1
+  printf '%s' "${BASH_REMATCH[1]}"
+}
+
+# _aid_plan_section <plan> <heading-name> — the body of one `## <name>` section:
+# every line after the heading up to the next `## `, verbatim.
+#
+# A heading MATCHES when it starts with `## <name>` and what follows the name is
+# not a word character — so `## Standards (V3)` IS the Standards section (real
+# plans annotate their headings) and `## Goals for later` is NOT `## Goal`.
+# Three private awks answered this one question about the plan format before
+# this existed, and two of them already disagreed about annotated headings.
+_aid_plan_section() {
+  _aid_blank_fenced < "$1" | awk -v want="## $2" '
+    index($0, want) == 1 && substr($0, length(want) + 1, 1) !~ /[A-Za-z0-9]/ { inside = 1; next }
+    /^## / { inside = 0 }
+    inside
+  '
+}
+
+# _aid_project_yaml <project-root> <yq-expression> — one scalar (or one block)
+# out of `.aid-o/config/project.yaml`. THREE answers, and the third is the whole
+# reason this is shared:
+#   0  the value, printed
+#   1  there is no project.yaml, or the expression yields nothing — a project
+#      that simply does not have this setting
+#   2  there IS a project.yaml and it could not be read (no yq, unparseable) —
+#      a BROKEN ENVIRONMENT, which callers must never round down to "has none"
+#
+# Rounding 2 down to 1 is how an obligation silently stops applying on a machine
+# with no yq, and it is a mistake this codebase has now made twice.
+_aid_project_yaml() {
+  local cfg="$1/.aid-o/config/project.yaml" out
+  [[ -f "$cfg" ]] || return 1
+  command -v yq >/dev/null 2>&1 || return 2
+  out="$(yq -r "$2" "$cfg" 2>/dev/null)" || return 2
+  [[ -n "$out" && "$out" != "null" ]] || return 1
+  printf '%s' "$out"
+}
+
+# _aid_backtick_paths <text> — every `backtick`-wrapped token in <text> that
+# looks like a real repo file: at least one directory segment, a file
+# extension, no placeholder brackets, no trailing slash. Directories
+# (`<evidence_dir>/jobs/`), command fragments and prose punctuation are not
+# file references and must not come back.
+#
+# Pure bash, deliberately: a grep with PCRE would make this quietly stop
+# working on a machine whose grep has none. Two readers share it — the plan
+# lint's description-path advisory and the reuse verdict's list of conflicting
+# sites — and they must agree on what counts as naming a file.
+_aid_backtick_paths() {
+  local rest="$1" tok
+  while [[ "$rest" == *'`'*'`'* ]]; do
+    rest="${rest#*\`}"
+    tok="${rest%%\`*}"
+    rest="${rest#*\`}"
+    [[ "$tok" =~ ^[A-Za-z0-9._/-]+/[A-Za-z0-9._-]+\.[A-Za-z0-9]+$ ]] || continue
+    _aid_path_shape_ok "$tok" || continue
+    printf '%s\n' "$tok"
+  done
+}
+
+# _aid_plan_step_bounds <plan> — one line per `### Step` section:
+#   "<first-line>\t<last-line>\t<heading>"
+# Fence-blanked first, so a plan that QUOTES `### Step 1:` in an example (AID's
+# own plans about AID do) is not read as having that step. A section ends at the
+# next `### Step` heading, the next `## ` section, or EOF.
+#
+# This is the join key every per-step obligation needs: the existing
+# _aid_extract_files_bullets_numbered already emits "<lineno>\t- <bullet>", so a
+# caller buckets bullets into steps by line number instead of re-parsing the
+# plan. One reader of the plan's step structure, several consumers (P085).
+_aid_plan_step_bounds() {
+  _aid_blank_fenced < "$1" | awk '
+    function flush() { if (head != "") print start "\t" (NR - 1) "\t" head; head = "" }
+    { gsub(/\r$/, "") }
+    /^### Step / { flush(); head = $0; start = NR; next }
+    /^## /       { flush(); next }
+    END { if (head != "") print start "\t" NR "\t" head }
+  '
+}
+
+# _aid_plan_founding_steps <plan> — the steps that FOUND something: one
+# "<first-line>\t<last-line>\t<heading>" per step whose Files block carries a
+# `Create:` bullet.
+#
+# The join between _aid_plan_step_bounds and the numbered bullet stream lives
+# here rather than in each caller: three programs needed "which steps found
+# something" (the plan lint, the PM page, and any future obligation about
+# founding), and three copies of the array-plus-range idiom had already started
+# to differ on whether to stop at the first `Create:`.
+_aid_plan_founding_steps() {
+  local plan="$1" lns=() txts=() ln bullet s e head i verb
+  while IFS=$'\t' read -r ln bullet; do
+    [[ -z "${bullet:-}" ]] && continue
+    lns+=("$ln"); txts+=("$bullet")
+  done < <(_aid_extract_files_bullets_numbered < "$plan")
+  while IFS=$'\t' read -r s e head; do
+    [[ -n "${s:-}" ]] || continue
+    for i in "${!lns[@]}"; do
+      (( lns[i] >= s && lns[i] <= e )) || continue
+      verb="$(_aid_files_bullet_verb "${txts[$i]}")" || continue
+      [[ "$verb" == "Create" ]] || continue
+      printf '%s\t%s\t%s\n' "$s" "$e" "$head"
+      break
+    done
+  done < <(_aid_plan_step_bounds "$plan")
+}
+
+# _aid_plan_step_field <plan> <first-line> <last-line> <label> — the value of one
+# `**<label>:**` field inside a step's line range, with its continuation lines
+# folded into a single space-separated line (empty output + return 1 when the
+# field is absent or carries nothing).
+#
+# "Carries nothing" is the same rule the band-scoped field check applies: a bare
+# label satisfies nothing. The value ends at the next `**Field:**` label, so a
+# multi-line answer — which a real Reuse check is — arrives whole.
+_aid_plan_step_field() {
+  local out
+  out="$(_aid_blank_fenced < "$1" | awk -v a="$2" -v b="$3" -v label="$4" '
+    NR < a || NR > b { next }
+    { gsub(/\r$/, "") }
+    $0 ~ "^\\*\\*" label ":\\*\\*" {
+      line = $0
+      sub("^\\*\\*" label ":\\*\\*[[:space:]]*", "", line)
+      val = line; inside = 1; next
+    }
+    inside && /^\*\*[A-Z][^*]*:\*\*/ { inside = 0 }
+    inside { val = val " " $0 }
+    END { gsub(/[[:space:]]+/, " ", val); sub(/^ /, "", val); sub(/ $/, "", val); print val }
+  ')"
+  [[ -n "$out" ]] || return 1
+  printf '%s' "$out"
+}
+
 _aid_classify_files_bullet() {
   local bullet="${1#- }"
   # P079 Step 5: the two shapes GENERATION refuses outright (aid-plan-to-epic.sh

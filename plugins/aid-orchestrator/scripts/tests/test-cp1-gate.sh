@@ -155,6 +155,20 @@ rejected_blockers: []
 verdict: pass
 revision_count: 0
 EOF
+  # P085 Step 5: a `full`-band plan also owes the reuse_evidence C0 lens. It
+  # lives one level ABOVE cp1-deep/, with the other C0 artifacts.
+  write_reuse_lens "$(plan_evidence_root_of "$ev_dir")"
+}
+
+# write_reuse_lens <plan_evidence_root> — the reuse_evidence C0 lens output.
+write_reuse_lens() {
+  local root="$1"
+  mkdir -p "${root}/c0"
+  cat > "${root}/c0/c0-lens-reuse_evidence.md" <<'EOF'
+findings: []
+stop_rule_blockers: []
+confidence: high
+EOF
 }
 
 # Write a plan file with given id, risk field (optional), and body
@@ -1240,6 +1254,100 @@ if [[ "$consumed_count27" -eq 1 ]]; then
   pass "exactly one .consumed-* archive exists (claimed once, not twice)"
 else
   fail "exactly one .consumed-* archive exists (claimed once, not twice)" "found $consumed_count27 archive(s)"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 28-30: the reuse_evidence C0 lens (P085 Step 5)
+#
+# The lens judges what the plan lint deliberately cannot — whether a founding
+# step's reuse search was WIDE enough. Its FINDINGS stay observe-only; its
+# EXISTENCE is a gate precondition in `full`, because a lens whose absence
+# stops nothing is a lens nobody has to run.
+# ---------------------------------------------------------------------------
+run_test "reuse_evidence C0 lens is required in band full"
+
+proj28="$(make_project_root "t28")"
+plan28="$TMPDIR_ROOT/t28-plan.md"
+write_plan "$plan28" "P028" "risk: high" "**Files:**
+- Modify: \`scripts/aid-fsm.sh\` — the state machine"
+ev28="$(make_evidence_dir "$proj28" "P028")"
+write_passing_evidence "$ev28"
+proot28="$(plan_evidence_root_of "$ev28")"
+write_passing_c0_review "$proot28"
+init_ledger_available "$proj28" "P028"
+
+# Remove exactly the lens, leaving every other piece of evidence in place.
+rm -f "${proot28}/c0/c0-lens-reuse_evidence.md"
+stub_c0_verify "$TMPDIR_ROOT/t28-stub" ok
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan28" --project-root "$proj28" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "full-band plan without the reuse_evidence lens fails the gate"
+else
+  fail "full-band plan without the reuse_evidence lens fails the gate" "got exit=0, output: $gate_out"
+fi
+if echo "$gate_out" | grep -q "reuse_evidence"; then
+  pass "the refusal names the lens it is missing"
+else
+  fail "the refusal names the lens it is missing" "output: $gate_out"
+fi
+
+# Restored, the same plan passes — proving the lens was the only thing missing.
+write_reuse_lens "$proot28"
+stub_c0_verify "$TMPDIR_ROOT/t28-stub" ok
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan28" --project-root "$proj28" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "the same plan passes once the lens is present"
+else
+  fail "the same plan passes once the lens is present" "got exit=$gate_exit, output: $gate_out"
+fi
+
+run_test "a present-but-empty reuse_evidence lens is refused"
+
+: > "${proot28}/c0/c0-lens-reuse_evidence.md"
+stub_c0_verify "$TMPDIR_ROOT/t28-stub" ok
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan28" --project-root "$proj28" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "an empty lens file does not satisfy the requirement"
+else
+  fail "an empty lens file does not satisfy the requirement" "got exit=0, output: $gate_out"
+fi
+
+# A file with content but no stop_rule_blockers: is not a lens output either.
+printf 'I looked and it seemed fine.\n' > "${proot28}/c0/c0-lens-reuse_evidence.md"
+stub_c0_verify "$TMPDIR_ROOT/t28-stub" ok
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan28" --project-root "$proj28" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "prose without stop_rule_blockers: does not satisfy the requirement"
+else
+  fail "prose without stop_rule_blockers: does not satisfy the requirement" "got exit=0, output: $gate_out"
+fi
+
+run_test "reuse_evidence C0 lens is NOT required in band medium"
+
+proj29="$(make_project_root "t29")"
+plan29="$TMPDIR_ROOT/t29-plan.md"
+# A policy file is `medium`: the DATA a decision reads, not the decision.
+write_plan "$plan29" "P029" "" "**Files:**
+- Modify: \`defaults/policies/review-checkpoints.yaml\` — a flag"
+ev29="$(make_evidence_dir "$proj29" "P029")"
+write_passing_evidence "$ev29"
+rm -f "$(plan_evidence_root_of "$ev29")/c0/c0-lens-reuse_evidence.md"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan29" --project-root "$proj29" 2>&1)" || gate_exit=$?
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "medium-band plan passes without the reuse_evidence lens"
+else
+  fail "medium-band plan passes without the reuse_evidence lens" "got exit=$gate_exit, output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------

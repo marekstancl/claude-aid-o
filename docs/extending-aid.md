@@ -74,6 +74,11 @@ document" is definition-of-done, not later cleanup:
    - explicit PM confirmation gate with logged justification.
 5. **Add a regression test** (a `test-*.sh` / bats case) so the check can't
    silently rot, and record it in the registry's `test:` field.
+6. **Say who checks it AFTER generation, and who checks it at development
+   runtime** — the `runtime_check:` field (P085). Where a runtime check is not
+   needed, write down WHY. "Nobody, and here is the reason" is an answer;
+   an empty field is how a plan-time check silently becomes the only check
+   anything ever had.
 
 **What an instruction (cedule) must contain** — the 4-part minimal contract from
 governance Component 2:
@@ -85,6 +90,46 @@ governance Component 2:
 3. **The failure mode** — the exact reason string the user will see.
 4. **The fix** — the copy-paste remediation (most `die()` messages already embed
    this).
+
+---
+
+## Three obligations a plan carries about its own grounding (P085)
+
+These three are worth knowing before you add anything near plan authoring,
+because each one already owns a question a new check would otherwise re-open.
+
+**`plan_reuse_evidence` — did the step look for what already exists?**
+A step whose `Files:` carry a `Create:` bullet owes a `**Reuse check:**` field:
+the read-only search it ran (`grep`/`rg`/`ls`/`find`/`git grep`, nothing that
+pipes or chains) and which of four results it got. `aid-plan-lint.sh` REPLAYS
+the command and compares the file count with the claim — the difference between
+evidence and a formality. What replay cannot show is whether the search was
+WIDE enough; that is the `reuse_evidence` C0 lens, band `full` only. When you
+add a check about duplication, decide which of those two halves it belongs to
+and extend that one; a third place to ask the same question is the very shape
+`plan_reuse_evidence` exists to prevent (see its `N+1 rule`).
+
+**`plan_standards_named` — which ecosystem standards bind these paths?**
+`scripts/lib/aid-standards-map.sh` is the ONLY file in AID that reads a foreign
+live document, and it exports nothing but a list of standard ids, so the map's
+format can age without touching anything else. Do not copy the map into the
+repo — a copy is a second map that disagrees with the first. Its three states
+are load-bearing: not configured (owes nothing), configured-but-unreadable
+(broken environment, blocking), configured-and-binds-nothing (owes nothing, and
+that is correct).
+
+**`plan_parallel_group_disjoint` — what may run at the same time?**
+Each step declares a wave; `aid-plan-parallel-check.sh` proves two steps in one
+wave do not name the same file. It is enforced from
+`aid-generation-readiness.sh` rather than from the lint, because disjointness
+is a property of the step graph. It currently blocks a risk that cannot
+materialise (`max_parallel: 1`) — deliberately: it is the safety evidence for
+the moment the brake comes off.
+
+All three run through band-scoped obligations rather than as new checkers.
+Before adding a *fourth* plan-time authority, check whether what you want is a
+row in the band table (`skills/plan-writing.md` §"Obligations by ceremony band")
+plus a branch in the lint.
 
 ---
 
