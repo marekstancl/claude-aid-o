@@ -124,18 +124,30 @@ aid_reuse_parse() {
   printf '%s\t%s' "$key" "$cmd"
 }
 
-# aid_reuse_replay <command> <cwd> — run one parsed search command and echo how
-# many non-empty lines it produced. Returns 0 on a clean run, 3 when the command
-# itself failed (a broken or stale search is the author's finding, not the
-# lint's), 4 on timeout, 5 when there is no `timeout` binary to bound it with.
+# aid_reuse_replay <command> <cwd> — run one parsed search command and set
+# AID_REUSE_HITS to how many FILES it found. Returns 0 on a clean run, 3 when
+# the command itself failed (a broken or stale search is the author's finding,
+# not the lint's), 4 on timeout, 5 when there is no `timeout` binary to bound
+# it with.
+#
+# It SETS a variable rather than echoing one, and that is the whole reason the
+# cache below works: a caller writing `$(aid_reuse_replay …)` runs it in a
+# subshell, where every cache write and the `timeout` probe are discarded the
+# moment it returns. A memoisation that the caller silently undoes is worse
+# than none, because the comment claims a bound the code does not have.
 #
 # 20 s, because a search that takes longer than that is not evidence anyone can
 # re-run; and bounded at all, because this is the one place a plan's own text
 # becomes something the lint executes.
-declare -A _AID_REUSE_REPLAY_CACHE 2>/dev/null || true
+# bash 4+ is a prerequisite of this plugin (lib/common.sh check_prerequisites),
+# so an associative array needs no fallback — and a `|| true` around `declare`
+# would only hide a failure the subscripts below could not survive anyway.
+declare -A _AID_REUSE_REPLAY_CACHE
 
+AID_REUSE_HITS=0
 aid_reuse_replay() {
   local cmd="$1" cwd="$2" out rc key
+  AID_REUSE_HITS=0
   # Probed once per process, not once per founding step.
   if [[ -z "${_AID_REUSE_HAVE_TIMEOUT:-}" ]]; then
     command -v timeout >/dev/null 2>&1 && _AID_REUSE_HAVE_TIMEOUT=1 || _AID_REUSE_HAVE_TIMEOUT=0
@@ -147,7 +159,7 @@ aid_reuse_replay() {
   if [[ -n "${_AID_REUSE_REPLAY_CACHE[$key]+set}" ]]; then
     out="${_AID_REUSE_REPLAY_CACHE[$key]}"
     [[ "$out" == rc:* ]] && return "${out#rc:}"
-    printf '%s' "$out"; return 0
+    AID_REUSE_HITS="$out"; return 0
   fi
   out="$(cd "$cwd" 2>/dev/null && timeout 20 bash -c "$cmd" 2>/dev/null)"; rc=$?
   # 1 is "found nothing" for every tool in the vocabulary; 2+ is a real failure.
@@ -159,10 +171,8 @@ aid_reuse_replay() {
   # colon-separates it (`grep -rn`, `grep -c`), or prints the path alone
   # (`ls`, `find`, `grep -l`), so the field before the first colon is the file
   # in all four cases.
-  local n
-  n="$(printf '%s' "$out" | awk 'NF { sub(/:.*/, ""); if (!seen[$0]++) c++ } END { print c + 0 }')"
-  _AID_REUSE_REPLAY_CACHE[$key]="$n"
-  printf '%s' "$n"
+  AID_REUSE_HITS="$(printf '%s' "$out" | awk 'NF { sub(/:.*/, ""); if (!seen[$0]++) c++ } END { print c + 0 }')"
+  _AID_REUSE_REPLAY_CACHE[$key]="$AID_REUSE_HITS"
 }
 
 # aid_reuse_result_matches <result-key> <file-count> — does the replay agree

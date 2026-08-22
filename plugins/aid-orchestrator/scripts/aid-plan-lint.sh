@@ -372,18 +372,20 @@ _project_root="$(_aid_band_project_root "$PLAN")" || _project_root=""
 # Two forks per bullet, so it is computed at most ONCE and only when something
 # actually asks: a plan that founds nothing and has no documentation surface
 # never needs the list at all.
+# It SETS _AID_DECLARED_PATHS instead of echoing it, for the same reason the
+# replay sets AID_REUSE_HITS: `$(_plan_declared_paths)` would build the list in
+# a subshell and throw the memo away with it, so the "computed at most once"
+# above would be a comment describing something that never happened.
 _AID_DECLARED_PATHS=""
 _AID_DECLARED_PATHS_DONE=0
 _plan_declared_paths() {
   local i body
-  if [[ "$_AID_DECLARED_PATHS_DONE" -eq 0 ]]; then
-    for i in "${!_bullet_txts[@]}"; do
-      body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
-      _AID_DECLARED_PATHS+="$(_aid_split_path_entry "$body" 2>/dev/null || true)"$'\n'
-    done
-    _AID_DECLARED_PATHS_DONE=1
-  fi
-  printf '%s' "$_AID_DECLARED_PATHS"
+  [[ "$_AID_DECLARED_PATHS_DONE" -eq 1 ]] && return 0
+  for i in "${!_bullet_txts[@]}"; do
+    body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
+    _AID_DECLARED_PATHS+="$(_aid_split_path_entry "$body" 2>/dev/null || true)"$'\n'
+  done
+  _AID_DECLARED_PATHS_DONE=1
 }
 
 while _band_owes reuse_check && IFS=$'\t' read -r _rs _re _rhead; do
@@ -412,7 +414,8 @@ while _band_owes reuse_check && IFS=$'\t' read -r _rs _re _rhead; do
     if ! aid_reuse_deliberate "$_reuse_value"; then
       _strict_finding ":${_rs}" "**Reuse check:** declares 'several conflicting' and the step still founds another file of the same kind — use one of them, unify them, or write 'deliberately founding a variant' with the reason: ${_rhead}"
     fi
-    _reuse_verdict="$(aid_reuse_verdict "$_reuse_value" "$_reuse_cmd" "$(_plan_declared_paths)")"
+    _plan_declared_paths
+    _reuse_verdict="$(aid_reuse_verdict "$_reuse_value" "$_reuse_cmd" "$_AID_DECLARED_PATHS")"
     case "$_reuse_verdict" in
       unify)   _reuse_msg="every conflicting site is already inside this plan's declared paths — unify them here, unless doing so pushes the step past its declared Effort (that half is yours to judge, not the lint's)." ;;
       backlog) _reuse_msg="the field names no conflicting site, so the verdict is out of reach: file a backlog item — but name the paths in it, or nobody can act on it." ;;
@@ -424,7 +427,10 @@ while _band_owes reuse_check && IFS=$'\t' read -r _rs _re _rhead; do
   # replay is skipped rather than run somewhere it would answer a different
   # question. The presence + shape checks above still stand.
   [[ -n "$_project_root" ]] || continue
-  if _reuse_hits="$(aid_reuse_replay "$_reuse_cmd" "$_project_root")"; then
+  # Called directly, NOT in a command substitution: the replay memoises identical
+  # searches across steps, and a subshell would throw that away every time.
+  if aid_reuse_replay "$_reuse_cmd" "$_project_root"; then
+    _reuse_hits="$AID_REUSE_HITS"
     aid_reuse_result_matches "$_reuse_key" "$_reuse_hits"
     case "$?" in
       1) _strict_finding ":${_rs}" "**Reuse check:** declares '${_reuse_key}' but replaying \`${_reuse_cmd}\` finds ${_reuse_hits} file(s) — the evidence and the claim disagree: ${_rhead}" ;;
@@ -529,7 +535,11 @@ fi
 # AID_LINT_SKIP_PARALLEL is set by aid-generation-readiness.sh, which runs the
 # same program itself in its BLOCKING mode: without it the plan would be parsed
 # for waves twice on every readiness run, and the findings printed twice.
-if [[ -x "${SCRIPT_DIR}/aid-plan-parallel-check.sh" && "$QUIET" -eq 0 && -z "${AID_LINT_SKIP_PARALLEL:-}" ]]; then
+# Not gated on --quiet: that flag suppresses OUTPUT, and skipping the run would
+# make a quiet lint report fewer advisories than a loud one on the same plan —
+# a counter that depends on whether anyone was listening. `_advisory` already
+# owns the quiet check.
+if [[ -x "${SCRIPT_DIR}/aid-plan-parallel-check.sh" && -z "${AID_LINT_SKIP_PARALLEL:-}" ]]; then
   # The exit code carries "there were findings"; the count comes from the lines
   # themselves. Nothing here parses the other program's summary sentence —
   # rewording user-facing prose must not silently zero a count.
@@ -591,10 +601,11 @@ _doc_surfaces() {
 # "what does this plan touch" must have one answer, not one per question.
 _plan_touches() {
   local prefix="$1" p
+  _plan_declared_paths
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
     [[ "$p" == "${prefix%/}/"* || "$p" == "$prefix" ]] && return 0
-  done <<< "$(_plan_declared_paths)"
+  done <<< "$_AID_DECLARED_PATHS"
   return 1
 }
 

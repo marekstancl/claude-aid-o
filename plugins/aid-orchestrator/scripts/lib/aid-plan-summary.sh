@@ -60,7 +60,10 @@ _aps_section() {
   # The heading rule lives in lib/aid-scoping.sh, once, for every reader of the
   # plan format; what is local here is that the PAGE wants prose — sub-headings
   # and blank lines are not sentences to render.
-  _aid_plan_section "$1" "$2" | awk '!/^#/ && /[^[:space:]]/'
+  # Stops at ANY heading, not just the next `## `: a `###` subsection is a
+  # different topic, and its prose rendered as part of the parent section is how
+  # a page starts saying something the plan did not.
+  _aid_plan_section "$1" "$2" | awk '/^#/ { exit } /[^[:space:]]/'
 }
 
 # _aps_first_sentence <text> — the first sentence, trimmed of markdown emphasis
