@@ -107,7 +107,7 @@ advisories=0
 # Echoes one path per line: backticked, path-shaped tokens found AFTER the
 # em dash that are not among the bullet's declared paths.
 _prose_paths() {
-  local bullet="${1#- }" body prose declared rest tok
+  local bullet="${1#- }" body prose declared tok
   body="$(_aid_files_bullet_body "$bullet")" || true
   # Nothing after the em dash (or "--") means no description to mine — that
   # early return, and the backtick-pair loop condition below, are the whole
@@ -120,24 +120,16 @@ _prose_paths() {
     *)                 return 0 ;;
   esac
   declared="$(_aid_split_path_entry "$body" 2>/dev/null)" || declared=""
-  # Backtick spans, read the way the shared cleaner reads them: pure bash, so
-  # the advisory does not quietly disappear on a grep without PCRE support.
-  rest="$prose"
-  while [[ "$rest" == *'`'*'`'* ]]; do
-    rest="${rest#*\`}"
-    tok="${rest%%\`*}"
-    rest="${rest#*\`}"
-    # A real repo file, deliberately narrow: at least one directory segment and
-    # a file extension, no placeholder brackets, no trailing slash. Directories
-    # (`<evidence_dir>/jobs/`), command fragments and prose punctuation are not
-    # scope declarations and must not generate noise.
-    [[ "$tok" =~ ^[A-Za-z0-9._/-]+/[A-Za-z0-9._-]+\.[A-Za-z0-9]+$ ]] || continue
-    _aid_path_shape_ok "$tok" || continue
+  # What NAMES a file is the shared reader's question (lib/aid-scoping.sh);
+  # what makes such a name an advisory is this function's: it is in the prose
+  # and not among the bullet's declared paths.
+  while IFS= read -r tok; do
+    [[ -n "$tok" ]] || continue
     # Already declared? Pure-bash membership — one fork per token adds up on a
     # sixty-bullet plan that prints nothing.
     [[ $'\n'"$declared"$'\n' == *$'\n'"$tok"$'\n'* ]] && continue
     printf '%s\n' "$tok"
-  done
+  done < <(_aid_backtick_paths "$prose")
 }
 
 # Reason -> human message.
@@ -153,6 +145,7 @@ _reason_msg() {
     no-command)           echo "the **Reuse check:** field names no search command — a sentence is not evidence; put the command you ran in \`backticks\`";;
     command-not-allowed)  echo "the **Reuse check:** command is not one of grep/rg/ls/find/git grep — the lint replays it, so it runs read-only searches and nothing else";;
     command-unsafe)       echo "the **Reuse check:** command pipes, redirects or chains — the lint replays it, so it accepts a single read-only search";;
+    command-flag-refused) echo "the **Reuse check:** command carries a flag that runs another program (-exec, --pre, --config and friends) — the lint replays it, so a search must stay a search";;
     no-result)            echo "the **Reuse check:** field states no result — write one of: none / one match / several matching / several conflicting";;
     *)                  echo "$1";;
   esac
@@ -331,6 +324,19 @@ fi
 # lens, in the `full` band only.
 _reuse_root="$(_aid_band_project_root "$PLAN")" || _reuse_root=""
 
+# Every path this plan declares anywhere, once: the N+1 verdict asks whether a
+# conflicting site already lies inside the plan's reach, and that question is
+# about the WHOLE plan, not one step — unifying inside a file another step
+# already opens costs no new reach.
+_plan_declared_paths() {
+  local i body
+  for i in "${!_bullet_txts[@]}"; do
+    body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
+    _aid_split_path_entry "$body" 2>/dev/null || true
+  done
+}
+_reuse_declared="$(_plan_declared_paths)"
+
 # _step_founds <first-line> <last-line> — does this step's Files block declare a
 # `Create:`? Reads the bullets extracted ONCE at the top of this program.
 _step_founds() {
@@ -356,6 +362,24 @@ while IFS=$'\t' read -r _rs _re _rhead; do
   fi
   _reuse_key="${_reuse_parsed%%$'\t'*}"
   _reuse_cmd="${_reuse_parsed#*$'\t'}"
+  # The N+1 rule (P085 Step 3). This step founds a file — every step that gets
+  # here does — and it declared that what exists is in conflict. Adding one more
+  # variant on top of that is allowed exactly once it is ARGUED; what is refused
+  # is doing it silently.
+  if [[ "$_reuse_key" == "several_conflicting" ]]; then
+    if ! aid_reuse_deliberate "$_reuse_value"; then
+      _strict_finding ":${_rs}" "**Reuse check:** declares 'several conflicting' and the step still founds another file of the same kind — use one of them, unify them, or write 'deliberately founding a variant' with the reason: ${_rhead}"
+    fi
+    _reuse_verdict="$(aid_reuse_verdict "$_reuse_value" "$_reuse_cmd" "$_reuse_declared")"
+    advisories=$((advisories+1))
+    if [[ "$_reuse_verdict" == "unify" ]]; then
+      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] every conflicting site is already inside this plan's declared paths — unify them here, unless doing so pushes the step past its declared Effort (that half is yours to judge, not the lint's)." >&2
+    elif [[ "$_reuse_verdict" == "backlog" ]]; then
+      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] the field names no conflicting site, so the verdict is out of reach: file a backlog item — but name the paths in it, or nobody can act on it." >&2
+    else
+      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] conflicting site(s) outside this plan's declared paths: ${_reuse_verdict#*$'\t'} — file a backlog item that LISTS them, never 'unify the components'." >&2
+    fi
+  fi
   # No project root means no directory the command was meant to run in, so the
   # replay is skipped rather than run somewhere it would answer a different
   # question. The presence + shape checks above still stand.

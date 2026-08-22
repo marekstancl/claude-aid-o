@@ -211,6 +211,28 @@ _aid_files_bullet_verb() {
   printf '%s' "${BASH_REMATCH[1]}"
 }
 
+# _aid_backtick_paths <text> — every `backtick`-wrapped token in <text> that
+# looks like a real repo file: at least one directory segment, a file
+# extension, no placeholder brackets, no trailing slash. Directories
+# (`<evidence_dir>/jobs/`), command fragments and prose punctuation are not
+# file references and must not come back.
+#
+# Pure bash, deliberately: a grep with PCRE would make this quietly stop
+# working on a machine whose grep has none. Two readers share it — the plan
+# lint's description-path advisory and the reuse verdict's list of conflicting
+# sites — and they must agree on what counts as naming a file.
+_aid_backtick_paths() {
+  local rest="$1" tok
+  while [[ "$rest" == *'`'*'`'* ]]; do
+    rest="${rest#*\`}"
+    tok="${rest%%\`*}"
+    rest="${rest#*\`}"
+    [[ "$tok" =~ ^[A-Za-z0-9._/-]+/[A-Za-z0-9._-]+\.[A-Za-z0-9]+$ ]] || continue
+    _aid_path_shape_ok "$tok" || continue
+    printf '%s\n' "$tok"
+  done
+}
+
 # _aid_plan_step_bounds <plan> — one line per `### Step` section:
 #   "<first-line>\t<last-line>\t<heading>"
 # Fence-blanked first, so a plan that QUOTES `### Step 1:` in an example (AID's

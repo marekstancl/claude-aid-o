@@ -66,6 +66,15 @@ _plan() {
   [[ "$output" == *"names no search command"* ]]
 }
 
+@test "reuse: a flag that runs another program is refused by name" {
+  # The tool allowlist is not the boundary on its own — `find -exec`,
+  # `rg --pre` and `--config` are the ways out of it.
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `rg --pre ./anything isoNow src/` → none — nothing'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runs another program"* ]]
+}
+
 @test "reuse: a field stating no result is refused" {
   _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rn isoNow src/` — did not really conclude'
   run "$LINT" "$PLAN"

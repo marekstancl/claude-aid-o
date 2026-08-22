@@ -335,8 +335,12 @@ filing the work: unify inside this plan when every conflicting site already
 lies inside the paths the plan declares AND the unification does not push the
 step past its declared `Effort`; otherwise file a backlog item that LISTS the
 sites (never "unify the components"). A borderline case goes to the PM. A plan
-that deliberately founds a second variant must say so in the field — the rule
-is not switched off by silence, only by an argument.
+that deliberately founds a second variant must say so in the field, in those
+words — **`deliberately founding a variant`** (Czech: `vědomě zakládám
+variantu`) followed by the reason. A fixed phrase, because the question the
+lint asks is "did the author make an argument", and only a phrase the author
+had to type answers that mechanically. The rule is not switched off by
+silence, only by an argument.
 
 **Architecture Context:**
 {How this step fits into the overall architecture. Which components it touches,
