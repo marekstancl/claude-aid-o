@@ -51,6 +51,12 @@ review_checkpoints:
   #                       an adjudicator without lenses adjudicates nothing).
   #   c0_cross_provider — a verified c0-plan-review.json must exist.
   #   cp1_ledger        — the CP1 revision-limit ledger must have budget.
+  #   c0_reuse_lens     — the `reuse_evidence` C0 lens output must exist and be
+  #                       substantive (P085 Step 5). It judges the QUALITY of a
+  #                       step's reuse search — was it wide enough — which the
+  #                       lint's replay deliberately cannot: `full` only,
+  #                       because a judgement costs a dispatch and a small plan
+  #                       is not where that spend belongs.
   #
   # Fail-closed everywhere: a band missing from this table, a missing table, a
   # missing yq or a value that is not true/false all read as `true`, i.e. the
@@ -65,14 +71,17 @@ review_checkpoints:
       cp1_deep_lenses: true
       c0_cross_provider: true
       cp1_ledger: true
+      c0_reuse_lens: true
     medium:
       cp1_deep_lenses: true
       c0_cross_provider: false
       cp1_ledger: false
+      c0_reuse_lens: false
     light:
       cp1_deep_lenses: false
       c0_cross_provider: false
       cp1_ledger: false
+      c0_reuse_lens: false
 
   # Trivial skip — skip CP2/CP6 for small changes
   skip_trivial: true

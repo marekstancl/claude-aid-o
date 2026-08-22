@@ -327,7 +327,7 @@ becomes required.
 
 ### C0 Observe Lenses — Adjudicator Addendum (append-only, E4)
 
-When 5 C0 lens files (`c0-lens-{name}.md`) are present in `.aid-o/work/evidence/{plan_id}/c0/`:
+When the C0 lens files (`c0-lens-{name}.md`) are present in `.aid-o/work/evidence/{plan_id}/c0/`:
 - Record their `stop_rule_blockers` and `findings` in the adjudicator verdict as **advisory** observations
 - Do NOT include C0 lens blockers in `accepted_blockers` — they are observe-only in E4
 - Do NOT change the pass/fail verdict based on C0 lens findings
@@ -337,7 +337,9 @@ The 3 existing lenses (L1/L2/L3) and their blocking behavior are UNCHANGED.
 
 ## C0 Semantic Lenses (Observe, E4)
 
-Dispatched by the orchestrator in the CP1-deep flow alongside L1/L2/L3. All 5 lenses are **observe-only in E4** — their `stop_rule_blockers` are advisory, not blocking. Blocking promotion: E10.
+Dispatched by the orchestrator in the CP1-deep flow alongside L1/L2/L3. All 6 lenses are **observe-only in E4** — their `stop_rule_blockers` are advisory, not blocking. Blocking promotion: E10.
+
+**Observe-only is about the FINDINGS, not the file.** `reuse_evidence` (P085) is required to EXIST by `aid-cp1-gate.sh` in the `full` band: what it reports is advisory, that it ran is not. The two are different questions, and only the second one a gate can answer.
 
 Each lens writes to `.aid-o/work/evidence/{plan_id}/c0/c0-lens-{name}.md` and MUST contain:
 - `stop_rule_blockers:` at line-start (list; advisory in E4 — recorded in adjudicator verdict as observe, NOT counted in `accepted_blockers`)
@@ -356,6 +358,27 @@ Each lens writes to `.aid-o/work/evidence/{plan_id}/c0/c0-lens-{name}.md` and MU
 **Output file:** `c0-lens-reuse_compat.md`
 **Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
 **Observe semantics:** findings are advisory in E4; `stop_rule_blockers` recorded in adjudicator verdict as advisory only, NOT counted in `accepted_blockers`
+
+### Lens: reuse_evidence
+
+**Focus:** Judge the QUALITY of a founding step's reuse search — the half `aid-plan-lint.sh` deliberately cannot reach.
+
+**The division of labour, and why it exists.** The lint replays each `**Reuse check:**` command and compares the hits with the declared result, so it proves the evidence is not stale or invented. It cannot prove the search was WIDE enough: a narrowly aimed `grep` with an honest `none` passes it. That is what this lens is for. Do not re-derive what the lint already established — assume the declared result matches the command, and ask whether the command was the right one.
+
+**Not to be confused with `reuse_compat`,** which asks a different question: whether planned reuse breaks the reused component's contract. This one asks whether something reusable exists at all. Both run; neither replaces the other.
+
+**What to look for:**
+- The search term is the step's own new name (`aid-plan-parallel-check`) rather than what the thing DOES (`disjoint`, `parallel_group`) — a search that could only ever return `none`
+- The search is scoped to one directory when the pattern would plausibly live in several
+- A found pattern is dismissed as "does not suffice" for a reason the plan does not support, or for no reason at all
+- A `Create:` step whose Reuse check searched for the file NAME instead of the behaviour
+- Several conflicting patterns reported, and the step founds another one anyway with an argument that only restates the situation
+
+**Input the dispatch provides:** every founding step's `**Reuse check:**` field verbatim, plus the standards derived from the plan's paths (`scripts/lib/aid-standards-map.sh`). Record it when either input is missing rather than guessing.
+
+**Output file:** `c0-lens-reuse_evidence.md`
+**Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
+**Observe semantics:** findings advisory in E4; the FILE is required by the gate in band `full` (defaults/policies/review-checkpoints.yaml → `ceremony_bands.full.c0_reuse_lens`)
 
 ### Lens: planned_call_feasibility
 

@@ -307,3 +307,17 @@ YAML
   [ "$(band_of "$plan")" = "full" ]
   [[ "$(reason_of "$plan")" == *"unparseable_files_entry"* ]]
 }
+
+# ── What the band OWES, as opposed to which band a plan is in ────────────────
+# The evidence FLOW for the reuse_evidence lens (P085 Step 5) is asserted in
+# scripts/tests/test-cp1-gate.sh, which has the evidence and ledger fixtures and
+# is t2 for that reason. What belongs HERE, on the merge path, is the one thing
+# that is purely about the band: that the shipped table still says which bands
+# owe the lens. Silently losing that row is how an enforcement becomes a
+# decoration, and it is a one-line regression a t0 case can catch.
+@test "the shipped band table still asks band full — and only full — for the reuse_evidence lens" {
+  policy="$PLUGIN_ROOT/defaults/policies/review-checkpoints.yaml"
+  [ "$(yq -r '.review_checkpoints.ceremony_bands.full.c0_reuse_lens' "$policy")" = "true" ]
+  [ "$(yq -r '.review_checkpoints.ceremony_bands.medium.c0_reuse_lens' "$policy")" = "false" ]
+  [ "$(yq -r '.review_checkpoints.ceremony_bands.light.c0_reuse_lens' "$policy")" = "false" ]
+}
