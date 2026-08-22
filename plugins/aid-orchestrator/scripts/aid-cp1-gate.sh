@@ -6,11 +6,14 @@
 #   ./aid-cp1-gate.sh --plan <path> [--project-root <path>]
 #
 # For a `light` plan: exits 0 immediately (no evidence required).
-# For a `full` or `medium` plan: verifies that all 4 CP1-deep evidence files exist,
+# For a `full` plan: verifies that all 4 CP1-deep evidence files exist,
 # that the adjudicator verdict has no unresolved accepted blockers, that a
 # verified C0 cross-provider Codex plan review exists with no surviving
 # blocking findings, and that the CP1 revision-limit ledger has budget left
 # (P065 E-065-7_7 Step 20 — see "C0 review + CP1 ledger gate" below).
+# For a `medium` plan: the CP1-deep lens files and the adjudicator verdict only
+# — the shipped bands table gives it neither the C0 review nor the ledger,
+# because the loop that would create the ledger never runs for it.
 #
 # Ceremony band (P084) — full | medium | light
 #

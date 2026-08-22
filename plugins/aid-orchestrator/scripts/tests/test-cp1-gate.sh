@@ -484,7 +484,8 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 6: Plan with high-risk pattern in body (no frontmatter tag) is high-risk
+# TEST 6: A plan that declares no Files at all is full-band, tag or no tag
+# (P084: the body's prose is no longer read — `no_files_declared` is the reason)
 # ---------------------------------------------------------------------------
 run_test "Plan with no declared Files is full-band (fail-closed), tag or no tag"
 
@@ -523,8 +524,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 7: risk: low in frontmatter does NOT exempt plan when body has high-risk patterns
-# Pattern match wins — risk: low only exempts when no patterns are found.
+# TEST 7: `risk: low` does not lower a band — this plan is full because it
+# declares no path (P084), not because of anything in its prose
+# Frontmatter never lowers a band — risk: low only exempts when no patterns are found.
 # ---------------------------------------------------------------------------
 run_test "risk: low does not lower a band — an unclassifiable plan still owes CP1-deep"
 
@@ -538,9 +540,9 @@ gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan7" --project-root "$proj7" 2>&1)" || gate_exit=$?
 
 if [[ "$gate_exit" -ne 0 ]]; then
-  pass "risk: low plan with high-risk patterns still fails gate (evidence missing)"
+  pass "risk: low does not exempt an unclassifiable plan from the evidence requirement"
 else
-  fail "risk: low plan with high-risk patterns should fail gate (pattern wins over risk:low)" "got exit=0, output: $gate_out"
+  fail "risk: low does not exempt an unclassifiable plan from the evidence requirement" "got exit=0, output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------

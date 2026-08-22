@@ -137,7 +137,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
     log_event|log_info|log_warn|log_error|aid_plan_timeline|aid_plan_log) "$fn" "$@" ;;
     *)
       echo "ERROR: unknown function: $fn" >&2
-      echo "Available: log_event (timeline write), log_info/log_warn/log_error (stderr only)" >&2
+      echo "Available: log_event, aid_plan_log (timeline writes), aid_plan_timeline (path only), log_info/log_warn/log_error (stderr only)" >&2
       echo "Library mode: source $0 && <fn> <args>" >&2
       exit 1
       ;;

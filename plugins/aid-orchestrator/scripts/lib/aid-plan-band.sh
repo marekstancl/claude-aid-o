@@ -43,12 +43,34 @@ AID_BAND_RISK_PATHS_DEFAULT="${AID_PLUGIN_PATH:-${_AID_BAND_LIB_DIR}/../..}/defa
 # cleaner rejects are SKIPPED, not fatal: refusing a malformed Files entry is
 # aid-plan-lint.sh's job, and a gate that died here would block on a defect it
 # is not the authority for.
+# A bullet the shared cleaner REJECTS is not silently dropped — dropping it was
+# a fail-open: a plan whose `aid-fsm.sh` bullet was malformed and whose other
+# bullets were documentation classified `light`, and the very path that made the
+# plan risky never reached the map.
+#
+# Two different failures, two different answers:
+#   * the entry is non-canonical but its PATH is still readable (a legacy
+#     `- Modify: \`x.md\` (lines 3-9 — prose that runs on…)` — very common in
+#     this repo's older plans): classify from that path. Refusing the grammar is
+#     aid-plan-lint.sh's job at STRICT tier, not the gate's.
+#   * nothing path-shaped can be read at all: emit `\x01unparseable`, and the
+#     classifier fails closed on it. The gate declines to classify from what
+#     remains when it knows it could not read everything.
 _aid_band_declared_paths() {
-  local bullet body
+  local bullet body first
   while IFS= read -r bullet; do
     [[ -n "$bullet" ]] || continue
     body="$(_aid_files_bullet_body "$bullet")" || continue
-    _aid_split_path_entry "$body" 2>/dev/null || true
+    if _aid_split_path_entry "$body" 2>/dev/null; then
+      continue
+    fi
+    # Salvage the first backticked span, and only if it is shaped like a path.
+    first="${body#*\`}"; first="${first%%\`*}"
+    if [[ "$body" == *\`*\`* && -n "$first" ]] && _aid_path_shape_ok "$first"; then
+      printf '%s\n' "$first"
+    else
+      printf '\x01unparseable\n'
+    fi
   done < <(_aid_extract_files_bullets < "$1")
 }
 
@@ -65,10 +87,15 @@ _aid_band_map_eres() {
          ([.excluded_paths[]?] | join("|"))' "$1" 2>/dev/null
 }
 
+# Returns 0 on a match, 1 on a clean non-match, and 2 when the PATTERN itself is
+# unusable — bash's `=~` exits 2 on a malformed regex, and reading that as "did
+# not match" is a fail-open: a project override with one bad ERE would quietly
+# stop matching the paths it names. Callers must distinguish the two.
 _aid_band_re_match() {
-  local path="$1" ere="$2"
+  local path="$1" ere="$2" rc=0
   [[ -n "$ere" ]] || return 1
-  [[ "$path" =~ $ere ]]
+  [[ "$path" =~ $ere ]] 2>/dev/null || rc=$?
+  return "$rc"
 }
 
 # _aid_band_project_root <plan> — the project whose policy override applies to
@@ -163,17 +190,38 @@ aid_plan_band() {
     return 0
   fi
 
-  local band="light" reason="no_mapped_path" declared=0 considered=0 path
+  # A map that PARSES but names no full path is not a map that found nothing —
+  # it is a map that cannot answer, and answering `light` from it would demote
+  # every plan in the project at once.
+  if [[ -z "$full_ere" ]]; then
+    printf 'full\tempty_risk_map'
+    return 0
+  fi
+
+  local band="light" reason="no_mapped_path" declared=0 considered=0 path rc
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
+    # A Files bullet the shared cleaner could not read (see
+    # _aid_band_declared_paths): the plan declares SOMETHING this classifier
+    # cannot see, so it must not be classified from what remains.
+    if [[ "$path" == $'\x01unparseable' ]]; then
+      printf 'full\tunparseable_files_entry'
+      return 0
+    fi
     declared=$(( declared + 1 ))
-    _aid_band_re_match "$path" "$excluded_ere" && continue
+    rc=0; _aid_band_re_match "$path" "$excluded_ere" || rc=$?
+    [[ "$rc" -eq 0 ]] && continue
+    [[ "$rc" -ge 2 ]] && { printf 'full\tbad_regex_in_risk_map:excluded_paths'; return 0; }
     considered=$(( considered + 1 ))
-    if _aid_band_re_match "$path" "$full_ere"; then
+    rc=0; _aid_band_re_match "$path" "$full_ere" || rc=$?
+    [[ "$rc" -ge 2 ]] && { printf 'full\tbad_regex_in_risk_map:full_paths'; return 0; }
+    if [[ "$rc" -eq 0 ]]; then
       printf 'full\tfull_path:%s' "$path"
       return 0
     fi
-    if [[ "$band" != "medium" ]] && _aid_band_re_match "$path" "$medium_ere"; then
+    rc=0; _aid_band_re_match "$path" "$medium_ere" || rc=$?
+    [[ "$rc" -ge 2 ]] && { printf 'full\tbad_regex_in_risk_map:medium_paths'; return 0; }
+    if [[ "$rc" -eq 0 && "$band" != "medium" ]]; then
       band="medium"
       reason="medium_path:${path}"
     fi

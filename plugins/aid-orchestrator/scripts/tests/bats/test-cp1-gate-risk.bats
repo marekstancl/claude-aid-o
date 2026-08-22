@@ -265,3 +265,45 @@ YAML
                printf '%s %s' \"\$(_c0_risk_of '$full_plan')\" \"\$(_c0_risk_of '$light_plan')\""
   [ "$output" = "high low" ]
 }
+
+# ─── fail-closed: the ways a classification can be WRONG rather than absent ──
+#
+# Each of these was a live fail-open found by the final cross-provider review:
+# the map answers, but from information it knows is incomplete.
+
+@test "a map that parses but names no full path is not an answer — full" {
+  mkdir -p "$TMP/.aid-o/config/policies"
+  printf 'full_paths: []\nmedium_paths: []\nexcluded_paths: []\n' \
+    > "$TMP/.aid-o/config/policies/risk-paths.yaml"
+  plan="$(write_plan P919 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
+  [ "$(band_of "$plan")" = "full" ]
+  [[ "$(reason_of "$plan")" == *"empty_risk_map"* ]]
+}
+
+@test "a malformed regex in a project override is a map failure, not a non-match" {
+  mkdir -p "$TMP/.aid-o/config/policies"
+  printf 'full_paths:\n  - "scripts/[unclosed"\nmedium_paths: []\nexcluded_paths: []\n' \
+    > "$TMP/.aid-o/config/policies/risk-paths.yaml"
+  plan="$(write_plan P920 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
+  [ "$(band_of "$plan")" = "full" ]
+  [[ "$(reason_of "$plan")" == *"bad_regex_in_risk_map"* ]]
+}
+
+@test "a non-canonical bullet still classifies from the path it does declare" {
+  # `\`a\`, \`b\`` is a grammar error the LINT refuses; the gate must not answer
+  # `light` just because the cleaner rejected the entry that named aid-fsm.sh.
+  plan="$(write_plan P921 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh`, `docs/x.md` — comma list')"
+  [ "$(band_of "$plan")" = "full" ]
+  [[ "$(reason_of "$plan")" == *"full_path:plugins/aid-orchestrator/scripts/aid-fsm.sh"* ]]
+}
+
+@test "a bullet with no readable path at all fails the whole classification closed" {
+  plan="$(write_plan P922 "risk: medium" \
+    '- Modify: `path with spaces` — nothing usable
+- Modify: `docs/x.md` — a real one')"
+  [ "$(band_of "$plan")" = "full" ]
+  [[ "$(reason_of "$plan")" == *"unparseable_files_entry"* ]]
+}
