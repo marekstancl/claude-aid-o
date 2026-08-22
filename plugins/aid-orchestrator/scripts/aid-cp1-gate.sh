@@ -12,19 +12,33 @@
 # blocking findings, and that the CP1 revision-limit ledger has budget left
 # (P065 E-065-7_7 Step 20 — see "C0 review + CP1 ledger gate" below).
 #
-# Risk is determined by:
-#   1. Plan frontmatter field `risk: low|medium|high`
-#   2. High-risk pattern grep across plan body (overrides `risk: medium` or absent)
+# Ceremony band (P084 Step 1) — full | medium | light
 #
-# High-risk patterns (from skills/review-checkpoint-contracts.md):
-#   - Auth handlers / routes
-#   - Auth logic (authenticate, authorize, verify_token, ...)
-#   - Schema / validation (Schema, Validator, pydantic, BaseModel, ...)
-#   - Migrations (migrate, alembic, revision, upgrade, downgrade)
-#   - FSM / state (fsm-state, cmd_transition, aid-fsm.sh, ...)
-#   - Security sinks (exec(, subprocess, eval(, pickle, yaml.load)
-#   - Payment (stripe, payment, charge, billing, invoice)
-#   - Dependency manifests (requirements.txt, pyproject.toml, package.json, Gemfile)
+# The band is classified from the paths the plan's steps DECLARE in their
+# **Files:** blocks, read with the SAME parser the generator and the plan lint
+# use (lib/aid-scoping.sh), matched against the curated path map
+# defaults/policies/risk-paths.yaml. It is NOT a grep over the document: the
+# earlier whole-file pattern scan matched Context, Architecture and prose, so
+# every plan came out high-risk (measured 2026-08-16: 5-33 hits on each of six
+# live plans) and the ceremony was never proportional to anything.
+#
+#   full   — the plan touches decision machinery (state machines, gate runner,
+#            generation chain, release boundary, plan contract, auth, migrations,
+#            dependency manifests). Today's behaviour, unchanged.
+#   medium — bounded behaviour: other scripts, tests, policies, schemas, CI.
+#   light  — documentation, help, commands, skills: no evidence required.
+#
+# Two rules decide correctness, both deliberate:
+#   1. Release/ceremony files (CHANGELOG.md, README.md, marketplace.json,
+#      plugin.json) are EXCLUDED before matching — every plan ends in a release,
+#      so counting them as reach would reproduce the very defect above.
+#   2. Frontmatter `risk: high` raises the band to `full`, and nothing lowers a
+#      band except changing the declared paths.
+#
+# Fail-closed cases, all landing on `full`: a plan that declares no path at all
+# (`no_files_declared`), a missing/unreadable path map, or no yq — the last two
+# fall back to the legacy whole-document pattern scan kept in
+# _cp1_legacy_pattern_band for projects that ship no map.
 #
 # Evidence dir: <project_root>/.aid-o/work/evidence/<plan_id>/cp1-deep/
 # Required files (all 4 must exist, be non-empty, and contain required fields):
@@ -84,6 +98,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=lib/aid-scoping.sh
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"
+
+# The path map is DATA for the classifier, so a project may carry its own copy
+# the same way it carries its own policies; the shipped default is the fallback.
+CP1_RISK_PATHS_DEFAULT="${AID_PLUGIN_PATH:-${SCRIPT_DIR}/..}/defaults/policies/risk-paths.yaml"
 
 CP1_GATE_C0_REVIEW_BIN="${AID_CP1_GATE_C0_REVIEW_BIN:-${SCRIPT_DIR}/lib/aid-c0-plan-review.sh}"
 CP1_GATE_LEDGER_BIN="${AID_CP1_GATE_LEDGER_BIN:-${SCRIPT_DIR}/lib/aid-cp1-ledger.sh}"
@@ -93,17 +113,21 @@ CP1_GATE_LEDGER_BIN="${AID_CP1_GATE_LEDGER_BIN:-${SCRIPT_DIR}/lib/aid-cp1-ledger
 # ---------------------------------------------------------------------------
 plan=""
 project_root=""
+classify_only=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)         plan="$2";         shift 2 ;;
-    --project-root) project_root="$2"; shift 2 ;;
+    --plan)          plan="$2";         shift 2 ;;
+    --project-root)  project_root="$2"; shift 2 ;;
+    --classify-only) classify_only=1;   shift ;;
     --help|-h)
-      echo "Usage: $(basename "$0") --plan <path> [--project-root <path>]"
+      echo "Usage: $(basename "$0") --plan <path> [--project-root <path>] [--classify-only]"
       echo ""
       echo "Options:"
       echo "  --plan <path>          Path to the plan .md file (required)"
       echo "  --project-root <path>  Project root containing .aid-o/ (default: cwd)"
+      echo "  --classify-only        Print the ceremony band (full|medium|light) on"
+      echo "                         stdout and exit 0 without running the gate"
       echo "  --help                 Show this help"
       exit 0
       ;;
@@ -157,50 +181,149 @@ done < "$plan"
 [[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]] || error_exit "Plan id '$plan_id' contains invalid characters (path traversal guard)" 1
 
 # ---------------------------------------------------------------------------
-# Step 2: Determine if the plan is high-risk
+# Step 2: Classify the plan's ceremony band from its declared Files: paths
 # ---------------------------------------------------------------------------
-# High-risk patterns (grep -E extended regex, applied to plan body).
-# Each pattern matches one risk category from review-checkpoint-contracts.md.
-HIGH_RISK_PATTERNS=(
-  # routes / auth handlers
-  '@app\.(get|post|put|patch|delete|head|options)\(|@router\.(get|post|put|patch|delete|head|options)\(|add_route\(|def [a-zA-Z_]+\(.*request|async def [a-zA-Z_]+\(.*request'
-  # auth logic
-  'authenticate|authorize|verify_token|check_permission|require_auth'
-  # schema / validation
-  'Schema|Validator|validate\(|marshmallow|pydantic|BaseModel'
-  # migrations
-  'migrate|alembic|revision|upgrade|downgrade'
-  # fsm / state
-  'fsm-state|state_machine|cmd_transition|aid-fsm\.sh'
-  # security sinks
-  'exec\(|subprocess|eval\(|pickle|yaml\.load'
-  # payment
-  'stripe|payment|charge|billing|invoice'
-  # dependency manifests
-  'requirements\.txt|pyproject\.toml|package\.json|Gemfile'
-)
 
-is_high_risk=0
+# _cp1_declared_paths <plan> — every cleaned path the plan's **Files:** blocks
+# declare, one per line. Uses the shared extractor + cleaner, so the set is
+# byte-identical to the one the generator turns into allowed_paths. Bullets the
+# cleaner rejects are SKIPPED, not fatal: refusing a malformed Files entry is
+# aid-plan-lint.sh's job, and a gate that died here would block on a defect it
+# is not the authority for.
+_cp1_declared_paths() {
+  local bullet body
+  while IFS= read -r bullet; do
+    [[ -n "$bullet" ]] || continue
+    body="$(_aid_files_bullet_body "$bullet")" || continue
+    _aid_split_path_entry "$body" 2>/dev/null || true
+  done < <(_aid_extract_files_bullets < "$1")
+}
 
-# Always scan body for high-risk patterns — risk: low only exempts when patterns are absent.
-# Contract: high-risk when (pattern match) OR (risk: high). risk: low cannot override a pattern match.
-for pattern in "${HIGH_RISK_PATTERNS[@]}"; do
-  if grep -qE "$pattern" "$plan" 2>/dev/null; then
-    is_high_risk=1
-    break
+# _cp1_map_ere <map_file> <key> — the map's list under <key> joined into ONE
+# ERE. An absent key or an empty list yields an empty ERE, which _cp1_re_match
+# treats as "matches nothing" rather than as a match-everything empty pattern.
+# Returns 1 when yq itself failed (unparseable map): the caller must fall back,
+# never read a read-failure as "this map lists nothing".
+_cp1_map_ere() {
+  local out
+  out="$(yq -r ".${2}[]?" "$1" 2>/dev/null)" || return 1
+  printf '%s' "$out" | paste -sd '|' -
+}
+
+_cp1_re_match() {
+  local path="$1" ere="$2"
+  [[ -n "$ere" ]] || return 1
+  [[ "$path" =~ $ere ]]
+}
+
+# _cp1_legacy_pattern_band <plan> — the pre-P084 whole-document pattern scan,
+# kept for projects that ship no path map (or hosts without yq). Yields only
+# `full` or `light`: it never had the resolution for a middle band.
+_cp1_legacy_pattern_band() {
+  local plan="$1" pattern
+  local patterns=(
+    # routes / auth handlers
+    '@app\.(get|post|put|patch|delete|head|options)\(|@router\.(get|post|put|patch|delete|head|options)\(|add_route\(|def [a-zA-Z_]+\(.*request|async def [a-zA-Z_]+\(.*request'
+    # auth logic
+    'authenticate|authorize|verify_token|check_permission|require_auth'
+    # schema / validation
+    'Schema|Validator|validate\(|marshmallow|pydantic|BaseModel'
+    # migrations
+    'migrate|alembic|revision|upgrade|downgrade'
+    # fsm / state
+    'fsm-state|state_machine|cmd_transition|aid-fsm\.sh'
+    # security sinks
+    'exec\(|subprocess|eval\(|pickle|yaml\.load'
+    # payment
+    'stripe|payment|charge|billing|invoice'
+    # dependency manifests
+    'requirements\.txt|pyproject\.toml|package\.json|Gemfile'
+  )
+  for pattern in "${patterns[@]}"; do
+    if grep -qE "$pattern" "$plan" 2>/dev/null; then
+      printf 'full\tlegacy_pattern_scan'
+      return 0
+    fi
+  done
+  printf 'light\tlegacy_pattern_scan'
+}
+
+# _cp1_classify_band <plan> <project_root> — echoes "<band>\t<reason>".
+# The reason names WHY, so telemetry and PM both get more than a verdict.
+_cp1_classify_band() {
+  local plan="$1" project_root="$2"
+  local map="" cand
+  for cand in "${project_root}/.aid-o/config/policies/risk-paths.yaml" "$CP1_RISK_PATHS_DEFAULT"; do
+    [[ -f "$cand" ]] && { map="$cand"; break; }
+  done
+  if [[ -z "$map" ]] || ! command -v yq >/dev/null 2>&1; then
+    _cp1_legacy_pattern_band "$plan"
+    return 0
   fi
-done
 
-# Frontmatter `risk: high` always triggers CP1-deep (belt-and-suspenders)
-if [[ "$risk_fm" == "high" ]]; then
-  is_high_risk=1
+  local full_ere medium_ere excluded_ere
+  if ! full_ere="$(_cp1_map_ere "$map" full_paths)" \
+    || ! medium_ere="$(_cp1_map_ere "$map" medium_paths)" \
+    || ! excluded_ere="$(_cp1_map_ere "$map" excluded_paths)"; then
+    echo "CP1-gate: risk path map unreadable (${map}) — falling back to the legacy pattern scan." >&2
+    _cp1_legacy_pattern_band "$plan"
+    return 0
+  fi
+
+  local band="light" reason="no_mapped_path" declared=0 considered=0 path
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    declared=$(( declared + 1 ))
+    _cp1_re_match "$path" "$excluded_ere" && continue
+    considered=$(( considered + 1 ))
+    if _cp1_re_match "$path" "$full_ere"; then
+      printf 'full\tfull_path:%s' "$path"
+      return 0
+    fi
+    if [[ "$band" != "medium" ]] && _cp1_re_match "$path" "$medium_ere"; then
+      band="medium"
+      reason="medium_path:${path}"
+    fi
+  done < <(_cp1_declared_paths "$plan")
+
+  # No declared path at all: nothing to classify FROM, so the gate must not
+  # guess low. aid-plan-lint.sh already refuses such a plan, and this is the
+  # gate refusing to depend on someone else's check.
+  if [[ "$declared" -eq 0 ]]; then
+    printf 'full\tno_files_declared'
+    return 0
+  fi
+  # Every declared path was a release/ceremony file: that is a real `light`
+  # (AC4), not an absence of information.
+  if [[ "$considered" -eq 0 ]]; then
+    printf 'light\tonly_excluded_paths'
+    return 0
+  fi
+  printf '%s\t%s' "$band" "$reason"
+}
+
+_cp1_band_line="$(_cp1_classify_band "$plan" "$project_root")"
+AID_PLAN_RISK_BAND="${_cp1_band_line%%$'\t'*}"
+AID_PLAN_RISK_REASON="${_cp1_band_line#*$'\t'}"
+
+# Frontmatter `risk: high` raises the band; it never lowers one. Lowering is
+# only ever the consequence of what the plan declares it will touch.
+if [[ "$risk_fm" == "high" && "$AID_PLAN_RISK_BAND" != "full" ]]; then
+  AID_PLAN_RISK_BAND="full"
+  AID_PLAN_RISK_REASON="frontmatter_risk_high"
+fi
+
+if [[ "$classify_only" -eq 1 ]]; then
+  echo "$AID_PLAN_RISK_BAND"
+  echo "CP1-gate: plan ${plan_id} band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON})" >&2
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# Step 3: If not high-risk, exit immediately — gate is not applicable
+# Step 3: A `light` plan requires no evidence — gate is not applicable
 # ---------------------------------------------------------------------------
-if [[ "$is_high_risk" -eq 0 ]]; then
-  echo "CP1-gate: plan $plan_id is low-risk — CP1-deep not required. Proceeding." >&2
+if [[ "$AID_PLAN_RISK_BAND" == "light" ]]; then
+  echo "CP1-gate: plan $plan_id is band=light (${AID_PLAN_RISK_REASON}) — CP1-deep not required. Proceeding." >&2
   exit 0
 fi
 
@@ -215,7 +338,7 @@ if [[ ! -d "${project_root}/.aid-o" ]]; then
   exit 0
 fi
 
-echo "CP1-gate: plan $plan_id is high-risk — checking CP1-deep evidence." >&2
+echo "CP1-gate: plan $plan_id is band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON}) — checking CP1-deep evidence." >&2
 
 # ---------------------------------------------------------------------------
 # Step 4: Check for evidence dir and required files (existence + content)

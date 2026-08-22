@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# =============================================================================
+# check-classification-reference.sh — the hand-labelled reference set and the
+# ceremony-band classifier still agree (P084 Step 1, SC1).
+#
+# The reference set (docs/plans/P084-classification-reference.md) is a table of
+# real plans of this repository, each labelled BY HAND before the classifier
+# ever ran over it. This script re-runs `aid-cp1-gate.sh --classify-only` over
+# the fixture that reproduces each plan's Files declarations and compares.
+#
+# Two kinds of disagreement, and they are not equally bad:
+#   FALSE NEGATIVE — hand label `full`, classifier says lower. Ceremony
+#                    disappears where it was wanted. Reported separately,
+#                    always fails.
+#   over-classified — hand label lower, classifier says `full`. Expensive, not
+#                    dangerous. Also fails, because a map nobody keeps honest
+#                    stops being a map.
+#
+# Orphan fixtures (a file in fixtures/plan-risk/ that no table row names) fail
+# too: a reference set that silently ignores half its own fixtures proves
+# nothing.
+#
+# NOT a discovered suite (the name does not match `test-*.sh`) — it is invoked
+# by name from test-cp1-gate-risk.bats, so it runs on the merge path, and by
+# SC1 of the plan.
+#
+# Usage: check-classification-reference.sh [reference.md]
+# Exit:  0 = every row agrees   1 = disagreement   2 = usage / missing input
+# =============================================================================
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+GATE="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-cp1-gate.sh"
+FIXTURE_DIR="$SCRIPT_DIR/fixtures/plan-risk"
+
+REFERENCE="${1:-$REPO_ROOT/docs/plans/P084-classification-reference.md}"
+[[ $# -le 1 ]] || { echo "Usage: $(basename "$0") [reference.md]" >&2; exit 2; }
+[[ -f "$REFERENCE" ]] || { echo "check-classification-reference: reference not found: $REFERENCE" >&2; exit 2; }
+[[ -d "$FIXTURE_DIR" ]] || { echo "check-classification-reference: fixture dir not found: $FIXTURE_DIR" >&2; exit 2; }
+
+declare -A seen=()
+rows=0 agreed=0 false_negatives=0 over=0 missing=0
+declare -A dist=([full]=0 [medium]=0 [light]=0)
+
+# Table rows only: "| ref-<id> | <source plan> | <band> | <why> |". The header
+# and the separator row are skipped by the ref- prefix requirement.
+while IFS='|' read -r _ fixture source band _rest; do
+  fixture="$(echo "$fixture" | xargs)"
+  band="$(echo "$band" | xargs)"
+  source="$(echo "$source" | xargs)"
+  [[ "$fixture" == ref-* ]] || continue
+  rows=$(( rows + 1 ))
+  seen["$fixture"]=1
+
+  case "$band" in
+    full|medium|light) dist[$band]=$(( dist[$band] + 1 )) ;;
+    *) echo "FAIL ${fixture}: '${band}' is not a band (full|medium|light)" >&2
+       false_negatives=$(( false_negatives + 1 )); continue ;;
+  esac
+
+  local_fixture="$FIXTURE_DIR/${fixture}.md"
+  if [[ ! -f "$local_fixture" ]]; then
+    echo "FAIL ${fixture}: reference row has no fixture at ${local_fixture}" >&2
+    missing=$(( missing + 1 )); continue
+  fi
+
+  actual="$(bash "$GATE" --plan "$local_fixture" --classify-only 2>/dev/null)"
+  if [[ "$actual" == "$band" ]]; then
+    agreed=$(( agreed + 1 ))
+    continue
+  fi
+  if [[ "$band" == "full" ]]; then
+    echo "FAIL ${fixture} (${source}): FALSE NEGATIVE — hand label full, classifier says ${actual}" >&2
+    false_negatives=$(( false_negatives + 1 ))
+  else
+    echo "FAIL ${fixture} (${source}): hand label ${band}, classifier says ${actual}" >&2
+    over=$(( over + 1 ))
+  fi
+done < "$REFERENCE"
+
+orphans=0
+for f in "$FIXTURE_DIR"/ref-*.md; do
+  [[ -e "$f" ]] || continue
+  name="$(basename "$f" .md)"
+  [[ -n "${seen[$name]:-}" ]] && continue
+  echo "FAIL ${name}: fixture exists but no row in ${REFERENCE} labels it" >&2
+  orphans=$(( orphans + 1 ))
+done
+
+if [[ "$rows" -eq 0 ]]; then
+  echo "check-classification-reference: no reference rows parsed from ${REFERENCE}" >&2
+  exit 1
+fi
+
+echo "check-classification-reference: ${agreed}/${rows} rows agree (full=${dist[full]} medium=${dist[medium]} light=${dist[light]})."
+failures=$(( false_negatives + over + missing + orphans ))
+if [[ "$failures" -gt 0 ]]; then
+  echo "check-classification-reference: FAIL — ${false_negatives} false negative(s), ${over} over-classified, ${missing} missing fixture(s), ${orphans} orphan fixture(s)." >&2
+  exit 1
+fi
+echo "check-classification-reference: PASS — the map and the hand labels agree."
+exit 0

@@ -10,7 +10,7 @@
 #      (adjudicator gate catches non-empty accepted_blockers)
 #   4. after 2 auto-revisions, a surviving stop-rule blocker causes gate to fail
 #      (simulated via adjudicator file with accepted_blockers present)
-#   5. trivial low-risk fixture still passes gate unchanged
+#   5. a light-band fixture (documentation-only Files) passes gate unchanged
 #   6. plan with high-risk pattern in body is treated as high-risk even without frontmatter tag
 #   7. plan with risk: low but high-risk patterns matched still requires evidence (pattern wins)
 #   8. missing plan file returns non-zero
@@ -448,28 +448,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 5: Low-risk (risk: low) plan passes gate without evidence
+# TEST 5: a `light` plan passes the gate without evidence
+#
+# P084 Step 1 moved the band from a whole-document grep to the paths the plan
+# DECLARES, so this fixture now declares them: a documentation-only step. The
+# `risk: low` frontmatter is kept to prove what it is worth — nothing on its
+# own, since a band is only ever lowered by what the plan touches. The band
+# taxonomy itself lives in bats/test-cp1-gate-risk.bats (t0); this case only
+# asserts the gate's behaviour once the band is light.
 # ---------------------------------------------------------------------------
-run_test "Low-risk plan (risk: low) passes gate without any evidence files"
+run_test "Light-band plan (documentation-only Files) passes gate without any evidence files"
 
 proj5="$(make_project_root "t5")"
 plan5="$TMPDIR_ROOT/t5-plan.md"
-# Low-risk: update docs, no patterns match
-write_plan "$plan5" "P005" "risk: low" "Update the README file and add documentation."
+write_plan "$plan5" "P005" "risk: low" "Update the README file and add documentation.
+
+**Files:**
+- Modify: \`plugins/aid-orchestrator/commands/aid-help.md\` — documentation only"
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan5" --project-root "$proj5" 2>&1)" || gate_exit=$?
 
 if [[ "$gate_exit" -eq 0 ]]; then
-  pass "low-risk plan passes gate without evidence (exit=0)"
+  pass "light-band plan passes gate without evidence (exit=0)"
 else
-  fail "low-risk plan passes gate without evidence" "got exit=$gate_exit, output: $gate_out"
+  fail "light-band plan passes gate without evidence" "got exit=$gate_exit, output: $gate_out"
 fi
 
-if echo "$gate_out" | grep -qi "not required\|low-risk"; then
-  pass "output confirms CP1-deep not required for low-risk plan"
+if echo "$gate_out" | grep -qi "not required\|band=light"; then
+  pass "output confirms CP1-deep not required for a light-band plan"
 else
-  fail "output confirms CP1-deep not required for low-risk plan" "output: $gate_out"
+  fail "output confirms CP1-deep not required for a light-band plan" "output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------

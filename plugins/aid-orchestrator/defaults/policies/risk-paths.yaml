@@ -1,0 +1,62 @@
+# Risk path map — the DATA the plan ceremony-band classifier reads (P084 Step 1).
+#
+# aid-cp1-gate.sh classifies a plan by the paths its steps DECLARE in their
+# **Files:** blocks, not by prose anywhere in the document. Every entry below is
+# an extended regular expression (ERE) matched against one declared, cleaned
+# path (the same paths lib/aid-scoping.sh hands the generator and the lint).
+#
+# Order of evaluation, and why it is that order:
+#   1. excluded_paths — dropped before anything else. Every plan ends in a
+#      release, so these files appear in almost every plan; treating them as
+#      reach would make every plan `full`, which is the defect this map exists
+#      to remove.
+#   2. full_paths     — one hit is enough. These files decide what the pipeline
+#      DOES: the state machines, the gate runner, the generation chain, the
+#      release boundary and the contract a plan is written against.
+#   3. medium_paths   — behaviour that is real but bounded: other scripts,
+#      tests, policies, schemas, CI.
+#   4. anything else  — `light` (documentation, help, commands, skills, prose).
+#
+# A frontmatter `risk: high` raises the band to `full`; nothing lowers a band
+# except changing the declared paths. A plan that declares no path at all is
+# `full` (fail-closed) — see aid-cp1-gate.sh.
+#
+# Projects may override this file at .aid-o/config/policies/risk-paths.yaml.
+
+full_paths:
+  # state machines + gate runner + gates
+  - '(^|/)scripts/aid-fsm\.sh$'
+  - '(^|/)scripts/aid-plan-fsm\.sh$'
+  - '(^|/)scripts/aid-run-gates\.sh$'
+  - '(^|/)scripts/gates/'
+  # generation chain: plan -> EPIC -> plan.json -> run
+  - '(^|/)scripts/aid-(auto-pipeline|plan-to-epic|epic-to-json|json-to-run)\.sh$'
+  - '(^|/)scripts/aid-(generation-readiness|generation-finalize)\.sh$'
+  # plan-boundary decision machinery: the classifier itself, C0/CP1, release
+  - '(^|/)scripts/aid-(cp1-gate|c0-contract|release|release-policy)\.sh$'
+  - '(^|/)scripts/lib/aid-(scoping|cp1-ledger|c0-plan-review)\.sh$'
+  # the contract a plan is written against
+  - '(^|/)skills/plan-writing\.md$'
+  # auth / security / migrations / dependency manifests (consumer projects)
+  - '(^|/)(auth|authn|authz|security)/'
+  - '(^|/)[^/]*(auth|login|credential|secret|token)[^/]*\.(py|ts|js|tsx|jsx|go|rb|rs|java|sh)$'
+  - '(^|/)(migrations?|alembic)/'
+  - '(^|/)(package\.json|package-lock\.json|requirements\.txt|pyproject\.toml|Gemfile|go\.mod|Cargo\.toml)$'
+
+medium_paths:
+  # every other executable script — real behaviour, bounded reach
+  - '(^|/)scripts/[^/]+\.(sh|py|js|ts)$'
+  - '(^|/)scripts/lib/[^/]+\.(sh|py|js|ts)$'
+  # tests, policies, schemas, templates, machine-read config, CI
+  - '(^|/)scripts/tests/'
+  - '(^|/)defaults/(policies|schemas|templates|prompts)/'
+  - '(^|/)defaults/[^/]+\.ya?ml$'
+  - '(^|/)\.aid-o/config/'
+  - '(^|/)\.github/workflows/'
+
+excluded_paths:
+  # release ceremony — present in nearly every plan, therefore no signal at all
+  - '(^|/)CHANGELOG\.md$'
+  - '(^|/)README\.md$'
+  - '(^|/)\.claude-plugin/marketplace\.json$'
+  - '(^|/)\.claude-plugin/plugin\.json$'
