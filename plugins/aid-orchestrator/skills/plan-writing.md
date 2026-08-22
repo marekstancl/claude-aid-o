@@ -126,7 +126,7 @@ The plan MUST contain these sections in this order:
 | `## Data Model` | Entities, fields, types, relationships, invariants | Brainstorming data model section |
 | `## API Design` | Endpoints, contracts, request/response schemas, errors | Brainstorming API section |
 | `## Implementation Steps` | Detailed per-step breakdown (see format below) | Brainstorming implementation plan |
-| `## Testing Strategy` | Test types, coverage targets, test plan | Brainstorming testing section |
+| `## Testing Strategy` | Which behaviour this plan verifies, why that behaviour, and where the verification goes. **Required, with content** — `aid-plan-lint.sh` refuses a plan without it. | Brainstorming testing section |
 | `## Constraints` | Technical, business, timeline constraints | PM answers |
 | `## Risks` | Risk table with probability, impact, mitigation | Brainstorming risks |
 | `## Success Criteria` | Testable success criteria | PM answers |
@@ -261,6 +261,7 @@ The `## Implementation Steps` section replaces the old `## High-Level Steps` tab
 - Create: `exact/path/to/new-file.ts` — {what this file contains and why}
 - Modify: `exact/path/to/existing-file.ts` (lines ~{start}-{end}) — {what changes and why}
 - Test: `tests/exact/path/to/test-file.spec.ts` (tier: t1) — {what behavior this tests}
+        *(a `Test:` bullet is OPTIONAL — see "Tests are designed, not counted" below)*
 
 **Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
 hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
@@ -458,7 +459,76 @@ per subfáze that can be copy-pasted into a new Claude Code window:
 **Quality rule:** Each session prompt must be SELF-CONTAINED — a developer opening a new CC window
 with zero context must be able to execute it. No "see previous phase" references without specifics.
 
+### Tests are designed, not counted
+
+A step does NOT need a `Test:` bullet. Generation has never required one, and
+the habit of adding one per step produced a portfolio that grew with the step
+count rather than with the behaviour at risk — measured across six live plans,
+test items to steps ran at roughly 1:1 whatever the plan actually changed
+(P073 21/19, P074 20/19, P076 18/17, P079 14/14, P083 10/10).
+
+What the plan owes instead is one `## Testing Strategy` section answering three
+questions in plain sentences:
+
+1. **Which behaviour does this plan verify?** Name it. "The classifier returns
+   `light` for a plan that only touches command texts" is a behaviour; "unit
+   tests for step 3" is a count.
+2. **Why that behaviour and not another?** Usually because the plan CHANGES a
+   decision something else depends on. A plan that changes no behaviour says
+   so — "no new verification, reason: …" is a complete and valid answer.
+3. **Where does it go?** A case in an EXISTING suite is the preferred and
+   cheapest move, and the plan should say so explicitly. A NEW suite is a
+   decision that costs a tier declaration and a name, so it is stated as a
+   decision, not slipped in.
+
+Unchanged, deliberately: a `Test:` bullet naming a suite that does not exist yet
+MUST declare its tier (`aid-plan-to-epic.sh` refuses without it). Making tests
+optional per step and letting untiered suites in are two different things, and
+only the first is intended here.
+
+### Obligations by ceremony band
+
+A plan's obligations are proportional to what it declares it will touch. The
+**band** is classified from the plan's own `Files:` paths — ask the gate, never
+re-derive it:
+
+```bash
+band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN_FILE" \
+        --project-root "$PROJECT_ROOT" --classify-only)"   # full | medium | light
+```
+
+Run this FIRST, before revising the plan against anything below. `aid-plan-lint.sh`
+asks the same command and enforces the same split, so the band you write against
+and the band the lint checks are one classification, never two.
+
+| Obligation | `full` | `medium` | `light` |
+|---|---|---|---|
+| `Files:` in the canonical grammar | required | required | required |
+| **Objective** | required | required | required |
+| **Acceptance Criteria** | required | required | required |
+| **Dependencies** | required | required | required |
+| **Effort**, **AID Role** | required | required | required |
+| Tier on a `Test:` bullet naming a NEW suite | required | required | required |
+| `## Testing Strategy` with content | required | required | required |
+| **Architecture Context** | required | required | — |
+| **Error Handling** | required | required | — |
+| **Edge Cases** | required | required | **not required at all** |
+| **Implementation Detail** | a paragraph or a code snippet | a paragraph or a code snippet | one sentence is enough |
+| `verification_pattern` on plan-level AC | required | required | — |
+| C0 cross-provider review round | required | — | — |
+
+The three fields marked "—" for `light` are not "nice to have there" — they are
+**not asked for**, and a light plan that omits them is complete. That is the
+whole point of the band: a plan that changes a help text was answering questions
+about failure modes it does not have.
+
+Nothing here lowers a band. A plan that wants the full ceremony says so with
+`risk: high` in its frontmatter; a plan that wants less says so by touching less.
+
 ### Mandatory Fields Per Step
+
+Per the table above, "every step" below means every step of a `full` or `medium`
+plan. A `light` plan owes the universal rows only.
 
 Every step MUST have ALL of these fields populated:
 
@@ -575,6 +645,11 @@ AFTER assembling plan content, BEFORE writing:
 ## Completeness Gate
 
 Before the plan document is written to disk, the AI MUST pass this gate. This is a **hard gate** — the file MUST NOT be written until all checks pass.
+
+**First move: classify the band** (`aid-cp1-gate.sh --classify-only`, see
+"Obligations by ceremony band" above). Eight of the checks below are band-scoped
+and a `light` plan does not owe them; the verdict per check is tabulated after
+the gate.
 
 ```
 COMPLETENESS GATE — evaluate each check:
@@ -852,6 +927,8 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
 
 EVALUATION:
   COUNT checks passed out of 28 (24 existing + 20a + 20b + 20c + 21).
+  Band-scoped checks (4, 6, 7, 8, 12, 20a, 20b, 20c) are N/A for a `light`
+  plan and count as PASS — see "Which checks apply to which band" below.
   IF all 28 pass → write plan to disk
   Note: Check #19 activates only for `type: bug-fix` plans or via pre-screening
   heuristic above. For non-applicable plans, mark #19 as N/A (counts as PASS).
@@ -861,6 +938,37 @@ EVALUATION:
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
 ```
+
+### Which checks apply to which band
+
+Every one of the 28 checks carries a verdict. A check is **universal** (it runs
+whatever the plan touches) or **band-scoped** (it runs for `full` and `medium`,
+and is not asked of a `light` plan). No check is silently "universal by default":
+a check with no verdict here is a defect in this document, not a permission.
+
+| Check | Verdict | Why |
+|---|---|---|
+| 1, 2, 3 — section completeness | universal | an empty or missing section is a hole at any size |
+| 4 — mandatory fields per step | band-scoped | the field SET itself differs by band (table above) |
+| 5 — concrete file paths | universal | the paths are what the band is classified FROM |
+| 6 — ≥3 AC for M/L steps | band-scoped | |
+| 7 — ≥3 edge cases for M/L steps | band-scoped | `light` owes no edge cases at all |
+| 8 — line ranges on Modify entries | band-scoped | *cancellation candidate — see below* |
+| 9 — no forbidden phrases | universal | |
+| 10, 11 — API and data-model completeness | universal | both already activate only when the section exists |
+| 12 — concrete implementation detail | band-scoped | `light` may answer in one sentence |
+| 13, 14, 15 — structural quality | universal | generation reads these; a broken graph breaks at any size |
+| 16 — traceability report | universal | |
+| 17, 17a, 17b, 17c, 17d, 17e — codebase grounding | universal | a plan that names something that does not exist is wrong at any size; this is the anti-fabrication core |
+| 18 — concrete step outputs | universal | |
+| 19 — design-defeat detection | universal | already conditional (`type: bug-fix` or its own pre-screen) |
+| 20a, 20b, 20c — executable plan-level AC | band-scoped | |
+| 21 — critical-path branch coverage | universal | already conditional (handler pre-screen), and advisory |
+
+**Cancellation candidates — PM decides, per item, never the plan author.**
+Check **8** (line ranges on `Modify` entries) has never been mechanically
+enforced and a stale range is worse than none. It is proposed for cancellation
+and stays in force until the PM says otherwise.
 
 ### Gate Failure Recovery
 
@@ -1159,7 +1267,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-22
 
 ## Plan-boundary note
 

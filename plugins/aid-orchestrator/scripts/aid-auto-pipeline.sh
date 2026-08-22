@@ -1556,6 +1556,20 @@ if [[ "$_gen_authority_valid" != true ]]; then
     _gen_cp1_json='{"verdict":"pass","force_unused":true}'
   fi
 
+  # The band the gate classified this plan into, recorded on the sealed decision
+  # so a later reader can see WHICH ceremony was owed, not only that it passed.
+  # Read out of the gate's OWN output, never by asking again: "the CP1 gate is
+  # consulted exactly once per plan" is an invariant this pipeline's own suites
+  # assert by COUNTING gate invocations (bats/generation-fixture.bash
+  # gen_cp1_calls), so a second call for a convenience field would be a
+  # regression. A gate that printed no band (an older gate, or the not-an-AID-
+  # project skip) simply leaves the field off — it is optional in the schema.
+  _gen_cp1_band="$(printf '%s\n' "$_gen_cp1_out" | sed -n 's/.*band=\([a-z]*\).*/\1/p' | head -1)"
+  case "$_gen_cp1_band" in
+    full|medium|light)
+      _gen_cp1_json="$(jq -c --arg b "$_gen_cp1_band" '.band = $b' <<< "$_gen_cp1_json")" ;;
+  esac
+
   _gen_auth_draft="$(jq -n \
     --arg schema "aid-generation-authority/v1" \
     --arg plan_id "$plan_id" --arg plan_path "$plan" --arg plan_sha256 "$_gen_plan_sha256" \

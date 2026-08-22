@@ -102,11 +102,16 @@ reason_of() {
   [[ "$output" == *"PASS"* ]]
 }
 
-@test "a plan touching tests/policies but no decision machinery is medium" {
+@test "a plan changing what a decision READS is medium; a test-only plan is light" {
   plan="$(write_plan P905 "risk: medium" \
-    '- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-thing.bats` (tier: t0) — the thing
-- Modify: `plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml` — a toggle')"
+    '- Modify: `plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml` — a toggle')"
   [ "$(band_of "$plan")" = "medium" ]
+  # A test asserts a decision, it does not make one — and growing coverage is
+  # meant to stay cheap (P081), so a test-only plan owes the checklist, not a
+  # lens panel.
+  tests_only="$(write_plan P905b "risk: medium" \
+    '- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-thing.bats` (tier: t0) — the thing')"
+  [ "$(band_of "$tests_only")" = "light" ]
 }
 
 @test "regression: prose about the state machine does not make a text plan full" {
@@ -123,7 +128,11 @@ reason_of() {
   [[ "$(reason_of "$plan")" == *"no_files_declared"* ]]
 }
 
-@test "without a path map the gate falls back to the legacy document scan" {
+@test "without a path map the plan is full — never guessed from its prose" {
+  # The replaced whole-document scan would have called this plan LOW risk (its
+  # prose mentions the state machine but matches no pattern) while it declares
+  # only a text file. A fallback that can answer `light` for a plan nobody could
+  # classify is the one direction this gate must never take.
   plan="$(write_plan P908 "risk: medium" \
     '- Modify: `plugins/aid-orchestrator/commands/aid-status.md` — describe the states' \
     'The state machine lives in aid-fsm.sh.')"
@@ -132,7 +141,31 @@ reason_of() {
       --plan "$plan" --project-root "$TMP" --classify-only
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "full" ]]
-  [[ "$output" == *"legacy_pattern_scan"* ]]
+  [[ "$output" == *"no_risk_map"* ]]
+}
+
+@test "the classifier itself and the plan lint are full-band paths" {
+  # A plan that rewrites the code deciding the ceremony must not be able to
+  # classify its own change as cheap (codex review of EPIC 1, finding 2).
+  plan="$(write_plan P914 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/scripts/lib/aid-plan-band.sh` — the classifier
+- Modify: `plugins/aid-orchestrator/scripts/aid-plan-lint.sh` — the contract checker')"
+  [ "$(band_of "$plan")" = "full" ]
+}
+
+@test "money and credential CODE is full-band; a document about it is not" {
+  plan="$(write_plan P915 "risk: medium" \
+    '- Modify: `src/billing/charge.py` — money
+- Modify: `src/lib/auth_token.py` — credentials')"
+  [ "$(band_of "$plan")" = "full" ]
+  docs="$(write_plan P916 "risk: medium" \
+    '- Create: `docs/security/review-2026-02.md` — the write-up')"
+  [ "$(band_of "$docs")" = "light" ]
+  # An ordinary request handler is NOT full: it is code, and code is reviewed
+  # per step against a real diff.
+  handler="$(write_plan P917 "risk: medium" \
+    '- Create: `src/api/routes.py` — the endpoints')"
+  [ "$(band_of "$handler")" = "light" ]
 }
 
 @test "a project may override the shipped path map" {
@@ -146,4 +179,71 @@ medium_paths: []
 excluded_paths: []
 YAML
   [ "$(band_of "$plan")" = "full" ]
+}
+
+# ─── what a band OWES (the requirement table, P084 Step 2) ──────────────────
+#
+# The cases below run the whole gate, not just the classifier, so they need an
+# .aid-o/ workspace — still no git, no dispatch, no network. The C0/ledger
+# behaviour of a `full` plan is covered in depth by scripts/tests/test-cp1-gate.sh
+# (t2); here only the band-driven difference is asserted.
+
+write_clean_cp1_evidence() {
+  local plan_id="$1"
+  local dir="$TMP/.aid-o/work/evidence/${plan_id}/cp1-deep"
+  mkdir -p "$dir"
+  local f
+  for f in cp1-lens-L1-behavior.md cp1-lens-L2-feasibility.md cp1-lens-L3-enforcement.md; do
+    printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "${dir}/${f}"
+  done
+  printf 'accepted_blockers: []\nrejected_blockers: []\nverdict: pass\n' > "${dir}/cp1-adjudicator.md"
+}
+
+@test "AC6/AC7: a light plan passes the gate with no evidence on disk at all" {
+  mkdir -p "$TMP/.aid-o"
+  plan="$(write_plan P910 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CP1-deep not required"* ]]
+  [ ! -d "$TMP/.aid-o/work/evidence/P910" ]
+}
+
+@test "a medium plan passes on CP1-deep evidence alone — no C0 review, no ledger" {
+  mkdir -p "$TMP/.aid-o"
+  plan="$(write_plan P911 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/defaults/schemas/thing.schema.json` — what the decision reads')"
+  write_clean_cp1_evidence P911
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"owes no C0 cross-provider review"* ]]
+  [ ! -f "$TMP/.aid-o/work/evidence/P911/c0-plan-review.json" ]
+}
+
+@test "the same evidence in band full is NOT enough — the C0 review is still owed" {
+  mkdir -p "$TMP/.aid-o"
+  plan="$(write_plan P912 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — the state machine')"
+  write_clean_cp1_evidence P912
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"c0-plan-review.json missing"* ]]
+}
+
+@test "a band missing from the requirements table falls back to the full ceremony" {
+  mkdir -p "$TMP/.aid-o/config/policies"
+  cat > "$TMP/.aid-o/config/policies/review-checkpoints.yaml" <<'YAML'
+review_checkpoints:
+  ceremony_bands:
+    full:
+      cp1_deep_lenses: true
+      c0_cross_provider: true
+      cp1_ledger: true
+YAML
+  plan="$(write_plan P913 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/defaults/schemas/thing.schema.json` — what the decision reads')"
+  write_clean_cp1_evidence P913
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"c0-plan-review.json missing"* ]]
 }

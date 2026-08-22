@@ -35,10 +35,19 @@
 #   2. Frontmatter `risk: high` raises the band to `full`, and nothing lowers a
 #      band except changing the declared paths.
 #
+# What each band REQUIRES is not decided here: aid-cp1-gate.sh reads it from
+# defaults/policies/review-checkpoints.yaml -> review_checkpoints.ceremony_bands
+# (cp1_deep_lenses / c0_cross_provider / cp1_ledger). `full` requires all three
+# and is today's behaviour unchanged; `medium` keeps the CP1-deep lenses and
+# adjudicator but owes no cross-provider C0 review and no ledger; `light` owes
+# nothing and the gate exits at once.
+#
 # Fail-closed cases, all landing on `full`: a plan that declares no path at all
-# (`no_files_declared`), a missing/unreadable path map, or no yq — the last two
-# fall back to the legacy whole-document pattern scan kept in
-# _cp1_legacy_pattern_band for projects that ship no map.
+# (`no_files_declared`), a missing path map (`no_risk_map`), an unparseable one
+# (`unreadable_risk_map`) and a host without yq (`no_yq`). There is deliberately
+# NO "guess from the prose" fallback: the whole-document scan this replaced
+# returns `light` for a plan that declares aid-run-gates.sh but says nothing
+# alarming in prose, which is the one direction that must never happen.
 #
 # Evidence dir: <project_root>/.aid-o/work/evidence/<plan_id>/cp1-deep/
 # Required files (all 4 must exist, be non-empty, and contain required fields):
@@ -98,12 +107,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
-# shellcheck source=lib/aid-scoping.sh
-source "${SCRIPT_DIR}/lib/aid-scoping.sh"
+# shellcheck source=lib/aid-plan-band.sh
+source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 
-# The path map is DATA for the classifier, so a project may carry its own copy
-# the same way it carries its own policies; the shipped default is the fallback.
-CP1_RISK_PATHS_DEFAULT="${AID_PLUGIN_PATH:-${SCRIPT_DIR}/..}/defaults/policies/risk-paths.yaml"
+CP1_CHECKPOINTS_DEFAULT="${AID_PLUGIN_PATH:-${SCRIPT_DIR}/..}/defaults/policies/review-checkpoints.yaml"
 
 CP1_GATE_C0_REVIEW_BIN="${AID_CP1_GATE_C0_REVIEW_BIN:-${SCRIPT_DIR}/lib/aid-c0-plan-review.sh}"
 CP1_GATE_LEDGER_BIN="${AID_CP1_GATE_LEDGER_BIN:-${SCRIPT_DIR}/lib/aid-cp1-ledger.sh}"
@@ -147,7 +154,6 @@ done
 # Step 1: Extract plan ID from frontmatter
 # ---------------------------------------------------------------------------
 plan_id=""
-risk_fm=""  # risk value from frontmatter (low|medium|high or empty)
 
 # State machine: only read inside the YAML frontmatter block (first --- to closing ---).
 # Plans without a closing --- are treated as having no frontmatter (body is not parsed as FM).
@@ -168,10 +174,6 @@ while IFS= read -r line; do
     plan_id="${BASH_REMATCH[1]}"
     plan_id="$(echo "$plan_id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   fi
-  if [[ "$line" =~ ^risk:[[:space:]]*(.+)$ ]]; then
-    risk_fm="${BASH_REMATCH[1]}"
-    risk_fm="$(echo "$risk_fm" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  fi
 done < "$plan"
 
 # Require a properly closed frontmatter block.
@@ -183,135 +185,9 @@ done < "$plan"
 # ---------------------------------------------------------------------------
 # Step 2: Classify the plan's ceremony band from its declared Files: paths
 # ---------------------------------------------------------------------------
-
-# _cp1_declared_paths <plan> — every cleaned path the plan's **Files:** blocks
-# declare, one per line. Uses the shared extractor + cleaner, so the set is
-# byte-identical to the one the generator turns into allowed_paths. Bullets the
-# cleaner rejects are SKIPPED, not fatal: refusing a malformed Files entry is
-# aid-plan-lint.sh's job, and a gate that died here would block on a defect it
-# is not the authority for.
-_cp1_declared_paths() {
-  local bullet body
-  while IFS= read -r bullet; do
-    [[ -n "$bullet" ]] || continue
-    body="$(_aid_files_bullet_body "$bullet")" || continue
-    _aid_split_path_entry "$body" 2>/dev/null || true
-  done < <(_aid_extract_files_bullets < "$1")
-}
-
-# _cp1_map_ere <map_file> <key> — the map's list under <key> joined into ONE
-# ERE. An absent key or an empty list yields an empty ERE, which _cp1_re_match
-# treats as "matches nothing" rather than as a match-everything empty pattern.
-# Returns 1 when yq itself failed (unparseable map): the caller must fall back,
-# never read a read-failure as "this map lists nothing".
-_cp1_map_ere() {
-  local out
-  out="$(yq -r ".${2}[]?" "$1" 2>/dev/null)" || return 1
-  printf '%s' "$out" | paste -sd '|' -
-}
-
-_cp1_re_match() {
-  local path="$1" ere="$2"
-  [[ -n "$ere" ]] || return 1
-  [[ "$path" =~ $ere ]]
-}
-
-# _cp1_legacy_pattern_band <plan> — the pre-P084 whole-document pattern scan,
-# kept for projects that ship no path map (or hosts without yq). Yields only
-# `full` or `light`: it never had the resolution for a middle band.
-_cp1_legacy_pattern_band() {
-  local plan="$1" pattern
-  local patterns=(
-    # routes / auth handlers
-    '@app\.(get|post|put|patch|delete|head|options)\(|@router\.(get|post|put|patch|delete|head|options)\(|add_route\(|def [a-zA-Z_]+\(.*request|async def [a-zA-Z_]+\(.*request'
-    # auth logic
-    'authenticate|authorize|verify_token|check_permission|require_auth'
-    # schema / validation
-    'Schema|Validator|validate\(|marshmallow|pydantic|BaseModel'
-    # migrations
-    'migrate|alembic|revision|upgrade|downgrade'
-    # fsm / state
-    'fsm-state|state_machine|cmd_transition|aid-fsm\.sh'
-    # security sinks
-    'exec\(|subprocess|eval\(|pickle|yaml\.load'
-    # payment
-    'stripe|payment|charge|billing|invoice'
-    # dependency manifests
-    'requirements\.txt|pyproject\.toml|package\.json|Gemfile'
-  )
-  for pattern in "${patterns[@]}"; do
-    if grep -qE "$pattern" "$plan" 2>/dev/null; then
-      printf 'full\tlegacy_pattern_scan'
-      return 0
-    fi
-  done
-  printf 'light\tlegacy_pattern_scan'
-}
-
-# _cp1_classify_band <plan> <project_root> — echoes "<band>\t<reason>".
-# The reason names WHY, so telemetry and PM both get more than a verdict.
-_cp1_classify_band() {
-  local plan="$1" project_root="$2"
-  local map="" cand
-  for cand in "${project_root}/.aid-o/config/policies/risk-paths.yaml" "$CP1_RISK_PATHS_DEFAULT"; do
-    [[ -f "$cand" ]] && { map="$cand"; break; }
-  done
-  if [[ -z "$map" ]] || ! command -v yq >/dev/null 2>&1; then
-    _cp1_legacy_pattern_band "$plan"
-    return 0
-  fi
-
-  local full_ere medium_ere excluded_ere
-  if ! full_ere="$(_cp1_map_ere "$map" full_paths)" \
-    || ! medium_ere="$(_cp1_map_ere "$map" medium_paths)" \
-    || ! excluded_ere="$(_cp1_map_ere "$map" excluded_paths)"; then
-    echo "CP1-gate: risk path map unreadable (${map}) — falling back to the legacy pattern scan." >&2
-    _cp1_legacy_pattern_band "$plan"
-    return 0
-  fi
-
-  local band="light" reason="no_mapped_path" declared=0 considered=0 path
-  while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
-    declared=$(( declared + 1 ))
-    _cp1_re_match "$path" "$excluded_ere" && continue
-    considered=$(( considered + 1 ))
-    if _cp1_re_match "$path" "$full_ere"; then
-      printf 'full\tfull_path:%s' "$path"
-      return 0
-    fi
-    if [[ "$band" != "medium" ]] && _cp1_re_match "$path" "$medium_ere"; then
-      band="medium"
-      reason="medium_path:${path}"
-    fi
-  done < <(_cp1_declared_paths "$plan")
-
-  # No declared path at all: nothing to classify FROM, so the gate must not
-  # guess low. aid-plan-lint.sh already refuses such a plan, and this is the
-  # gate refusing to depend on someone else's check.
-  if [[ "$declared" -eq 0 ]]; then
-    printf 'full\tno_files_declared'
-    return 0
-  fi
-  # Every declared path was a release/ceremony file: that is a real `light`
-  # (AC4), not an absence of information.
-  if [[ "$considered" -eq 0 ]]; then
-    printf 'light\tonly_excluded_paths'
-    return 0
-  fi
-  printf '%s\t%s' "$band" "$reason"
-}
-
-_cp1_band_line="$(_cp1_classify_band "$plan" "$project_root")"
+_cp1_band_line="$(aid_plan_band "$plan" "$project_root")"
 AID_PLAN_RISK_BAND="${_cp1_band_line%%$'\t'*}"
 AID_PLAN_RISK_REASON="${_cp1_band_line#*$'\t'}"
-
-# Frontmatter `risk: high` raises the band; it never lowers one. Lowering is
-# only ever the consequence of what the plan declares it will touch.
-if [[ "$risk_fm" == "high" && "$AID_PLAN_RISK_BAND" != "full" ]]; then
-  AID_PLAN_RISK_BAND="full"
-  AID_PLAN_RISK_REASON="frontmatter_risk_high"
-fi
 
 if [[ "$classify_only" -eq 1 ]]; then
   echo "$AID_PLAN_RISK_BAND"
@@ -320,10 +196,41 @@ if [[ "$classify_only" -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 3: A `light` plan requires no evidence — gate is not applicable
+# Step 2b: What this band actually requires
 # ---------------------------------------------------------------------------
-if [[ "$AID_PLAN_RISK_BAND" == "light" ]]; then
-  echo "CP1-gate: plan $plan_id is band=light (${AID_PLAN_RISK_REASON}) — CP1-deep not required. Proceeding." >&2
+# The band alone decides nothing — defaults/policies/review-checkpoints.yaml
+# maps it to the three requirement flags below, and this gate READS that table
+# rather than describing it. Every uncertainty resolves to `true`: no table, no
+# yq, an unknown band, a value that is not true/false. A band is lowered only by
+# what the plan declares it will touch, never by a gap in configuration.
+_cp1_band_requires() {
+  local band="$1" key="$2" root="$3" file="" cand val
+  for cand in "${root}/.aid-o/config/policies/review-checkpoints.yaml" "$CP1_CHECKPOINTS_DEFAULT"; do
+    [[ -f "$cand" ]] && { file="$cand"; break; }
+  done
+  if [[ -z "$file" ]] || ! command -v yq >/dev/null 2>&1; then
+    echo "true"; return 0
+  fi
+  # NOT `... // "true"`: yq's alternative operator treats an explicit `false`
+  # as falsy, which would silently turn every switched-OFF requirement back on.
+  # Absent reads as `null` here and lands in the fail-closed default below,
+  # while `false` reaches the case arm that honours it.
+  val="$(yq -r ".review_checkpoints.ceremony_bands.${band}.${key}" "$file" 2>/dev/null)" || val=""
+  case "$val" in
+    true|false) echo "$val" ;;
+    *)          echo "true" ;;
+  esac
+}
+
+cp1_need_lenses="$(_cp1_band_requires "$AID_PLAN_RISK_BAND" cp1_deep_lenses "$project_root")"
+cp1_need_c0="$(_cp1_band_requires "$AID_PLAN_RISK_BAND" c0_cross_provider "$project_root")"
+cp1_need_ledger="$(_cp1_band_requires "$AID_PLAN_RISK_BAND" cp1_ledger "$project_root")"
+
+# ---------------------------------------------------------------------------
+# Step 3: A band that owes no CP1-deep evidence exits here
+# ---------------------------------------------------------------------------
+if [[ "$cp1_need_lenses" != "true" ]]; then
+  echo "CP1-gate: plan $plan_id is band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON}) — CP1-deep not required. Proceeding." >&2
   exit 0
 fi
 
@@ -495,6 +402,14 @@ _cp1_c0_and_ledger_gate() {
   local plan_evidence_root="${project_root}/.aid-o/work/evidence/${plan_id}"
   local c0_review_file="${plan_evidence_root}/c0-plan-review.json"
 
+  # A band that owes neither check is finished the moment its CP1-deep evidence
+  # passed. Both flags come from the bands table (Step 2b); `medium` is the band
+  # that lands here.
+  if [[ "$cp1_need_c0" != "true" && "$cp1_need_ledger" != "true" ]]; then
+    echo "CP1-gate: band=${AID_PLAN_RISK_BAND} owes no C0 cross-provider review and no ledger budget. PASS." >&2
+    exit 0
+  fi
+
   # Read-only override peek — used ONLY to decide whether either check below
   # is allowed to proceed on a failure; does NOT consume anything. Genuine
   # consumption happens later, exactly once, and only if actually needed —
@@ -508,7 +423,9 @@ _cp1_c0_and_ledger_gate() {
 
   # --- 1. C0 cross-provider plan review ------------------------------------
   local c0_ok=1 c0_reason=""
-  if [[ ! -f "$c0_review_file" ]]; then
+  if [[ "$cp1_need_c0" != "true" ]]; then
+    c0_ok=1
+  elif [[ ! -f "$c0_review_file" ]]; then
     c0_ok=0
     c0_reason="c0-plan-review.json missing at ${c0_review_file}"
   else
@@ -582,14 +499,16 @@ ERRMSG
 
   # --- 2. CP1 revision-limit ledger budget ----------------------------------
   local ledger_ok=1 ledger_reason="" ledger_out="" ledger_rc=0
-  if ledger_out="$(bash "$CP1_GATE_LEDGER_BIN" check-budget --project-root "$project_root" "$plan_id" 2>&1)"; then
-    ledger_rc=0
-  else
-    ledger_rc=$?
-  fi
-  if [[ "$ledger_rc" -ne 0 ]]; then
-    ledger_ok=0
-    ledger_reason="aid-cp1-ledger.sh check-budget rc=${ledger_rc}: ${ledger_out}"
+  if [[ "$cp1_need_ledger" == "true" ]]; then
+    if ledger_out="$(bash "$CP1_GATE_LEDGER_BIN" check-budget --project-root "$project_root" "$plan_id" 2>&1)"; then
+      ledger_rc=0
+    else
+      ledger_rc=$?
+    fi
+    if [[ "$ledger_rc" -ne 0 ]]; then
+      ledger_ok=0
+      ledger_reason="aid-cp1-ledger.sh check-budget rc=${ledger_rc}: ${ledger_out}"
+    fi
   fi
 
   if [[ "$ledger_ok" -ne 1 ]]; then
@@ -616,7 +535,7 @@ ERRMSG
   # above genuinely needs it, never eagerly on a clean pass. A single claim
   # covers both checks if both failed in the same run.
 
-  echo "CP1-gate: C0 plan review + ledger budget checks passed for ${plan_id}." >&2
+  echo "CP1-gate: band=${AID_PLAN_RISK_BAND} — required C0 plan review / ledger budget checks passed for ${plan_id}." >&2
   exit 0
 }
 

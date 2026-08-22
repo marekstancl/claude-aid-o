@@ -13,9 +13,21 @@
 #   2. full_paths     — one hit is enough. These files decide what the pipeline
 #      DOES: the state machines, the gate runner, the generation chain, the
 #      release boundary and the contract a plan is written against.
-#   3. medium_paths   — behaviour that is real but bounded: other scripts,
-#      tests, policies, schemas, CI.
-#   4. anything else  — `light` (documentation, help, commands, skills, prose).
+#   3. medium_paths   — the DATA those decisions read: policies, schemas,
+#      templates, machine-read config, CI.
+#   4. anything else  — `light`: documentation, help, commands, skills, TESTS,
+#      and ordinary feature code.
+#
+# WHY ORDINARY CODE AND TESTS ARE `light`, WHICH SURPRISES PEOPLE
+#   The band measures whose DECISIONS a plan changes, not whether it changes
+#   code. Ordinary code is reviewed where reviewing code works — per step, at
+#   CP2/CP3, against a real diff — and the gates run over it. A plan-time deep
+#   review (three lens agents plus an adjudicator, before a line exists) earns
+#   its cost on the machinery that decides what the pipeline DOES, because that
+#   is what no later checkpoint gets a second chance at. Tests are assertions
+#   about a decision, not the decision, and growing coverage is meant to stay
+#   cheap (P081) — so a test-only plan owes the completeness checklist, not a
+#   lens panel.
 #
 # A frontmatter `risk: high` raises the band to `full`; nothing lowers a band
 # except changing the declared paths. A plan that declares no path at all is
@@ -34,21 +46,38 @@ full_paths:
   - '(^|/)scripts/aid-(generation-readiness|generation-finalize)\.sh$'
   # plan-boundary decision machinery: the classifier itself, C0/CP1, release
   - '(^|/)scripts/aid-(cp1-gate|c0-contract|release|release-policy)\.sh$'
-  - '(^|/)scripts/lib/aid-(scoping|cp1-ledger|c0-plan-review)\.sh$'
+  - '(^|/)scripts/lib/aid-(scoping|plan-band|cp1-ledger|c0-plan-review)\.sh$'
+  # the plan-time contract checker: it decides what a plan is allowed to omit
+  - '(^|/)scripts/aid-plan-lint\.sh$'
   # the contract a plan is written against
   - '(^|/)skills/plan-writing\.md$'
-  # auth / security / migrations / dependency manifests (consumer projects)
-  - '(^|/)(auth|authn|authz|security)/'
+  # Money, credentials, migrations, dependency manifests — the consumer-project
+  # categories where a plan-time mistake is expensive and hard to walk back.
+  #
+  # Deliberately NOT here: ordinary request handlers, controllers and feature
+  # code. The replaced content scan caught those by keyword, and catching them
+  # again would put every application plan straight back into `full`. They are
+  # reviewed where reviewing code works — per step at CP2/CP3, against a real
+  # diff. For the same reason a security SINK (`exec(`, `pickle`, `yaml.load`)
+  # is absent: it lives in code, not in a path, and no path map can see it.
+  #
+  # Each rule needs a CODE extension, not just a directory name: a page at
+  # docs/security/review.md is writing ABOUT security, and a map that cannot
+  # tell the two apart sends documentation plans into the full ceremony — the
+  # exact defect the whole-document scan had. (Found by running this map over
+  # the shared generation fixture, whose `docs/security/review-2026-02.md`
+  # came out `full`.)
+  - '(^|/)(auth|authn|authz|security)/[^/]*\.(py|ts|js|tsx|jsx|go|rb|rs|java|php|sh)$'
+  - '(^|/)(payments?|billing|checkout)/[^/]*\.(py|ts|js|tsx|jsx|go|rb|rs|java|php)$'
+  - '(^|/)[^/]*(payment|billing|charge|invoice|checkout)[^/]*\.(py|ts|js|tsx|jsx|go|rb|rs|java)$'
   - '(^|/)[^/]*(auth|login|credential|secret|token)[^/]*\.(py|ts|js|tsx|jsx|go|rb|rs|java|sh)$'
-  - '(^|/)(migrations?|alembic)/'
+  - '(^|/)(migrations?|alembic)/[^/]*\.(py|ts|js|sql|rb|go)$'
   - '(^|/)(package\.json|package-lock\.json|requirements\.txt|pyproject\.toml|Gemfile|go\.mod|Cargo\.toml)$'
 
 medium_paths:
-  # every other executable script — real behaviour, bounded reach
-  - '(^|/)scripts/[^/]+\.(sh|py|js|ts)$'
-  - '(^|/)scripts/lib/[^/]+\.(sh|py|js|ts)$'
-  # tests, policies, schemas, templates, machine-read config, CI
-  - '(^|/)scripts/tests/'
+  # The DATA the decisions above read: policies, schemas, templates, prompts,
+  # machine-read config, CI. Changing what a decision reads is a smaller act
+  # than changing how it decides, and a larger one than changing prose.
   - '(^|/)defaults/(policies|schemas|templates|prompts)/'
   - '(^|/)defaults/[^/]+\.ya?ml$'
   - '(^|/)\.aid-o/config/'

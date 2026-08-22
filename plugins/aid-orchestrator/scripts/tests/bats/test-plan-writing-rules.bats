@@ -123,3 +123,115 @@ EOF
   run check_handler_patterns "${TMPDIR_TEST}/def_request_plan.md"
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Band-scoped obligations (P084 Step 3)
+#
+# The band split is written in plan-writing.md and ENFORCED by aid-plan-lint.sh,
+# which asks aid-cp1-gate.sh for the band. These cases assert the two halves
+# agree: what the document promises a light plan is not asked for, the lint does
+# not ask for either.
+# ---------------------------------------------------------------------------
+
+PLUGIN_ROOT_OF() { cd "$BATS_TEST_DIRNAME/../../.." && pwd; }
+
+# write_step_plan <path> <declared file> — a strict-cohort plan with exactly one
+# step that carries the UNIVERSAL fields and none of the band-scoped ones.
+write_step_plan() {
+  cat > "$1" <<EOF
+---
+id: P998
+type: plan
+lifecycle_strict: true
+---
+
+## Implementation Steps
+
+### Step 1: the step
+
+**Objective:** do the thing.
+
+**Files:**
+- Modify: \`$2\` — the thing
+
+**Implementation Detail:** one sentence is enough here.
+
+**Dependencies:**
+- Depends on: none
+
+**Acceptance Criteria:**
+- [ ] AC1 — the thing is done
+
+**Effort:** S
+**AID Role:** docs
+EOF
+}
+
+@test "AC10: a light plan passes the lint with no Architecture Context and no Edge Cases" {
+  write_step_plan "${TMPDIR_TEST}/light.md" "plugins/aid-orchestrator/commands/aid-help.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/light.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC11: the same step in a full plan does not pass — the band-scoped fields are owed" {
+  write_step_plan "${TMPDIR_TEST}/full.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/full.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"band=full step is missing Architecture Context,Error Handling,Edge Cases"* ]]
+}
+
+@test "a legacy plan gets the same finding as an advisory, never a block" {
+  write_step_plan "${TMPDIR_TEST}/legacy.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+  sed -i '/^lifecycle_strict:/d' "${TMPDIR_TEST}/legacy.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/legacy.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[WARN legacy] band=full step is missing"* ]]
+}
+
+@test "AC9: every one of the 28 completeness checks carries a band verdict" {
+  skill="$(PLUGIN_ROOT_OF)/skills/plan-writing.md"
+  # The verdict table is the answer to "does this check apply to my band" — a
+  # check absent from it would silently read as universal, which is exactly the
+  # ambiguity the table exists to remove.
+  table="$(sed -n '/^### Which checks apply to which band/,/^### Gate Failure Recovery/p' "$skill")"
+  [ -n "$table" ]
+  for check in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 17a 17b 17c 17d 17e 18 19 20a 20b 20c 21; do
+    echo "$table" | grep -qE "^\| [^|]*\b${check}\b" || {
+      echo "check ${check} has no verdict row" >&2
+      return 1
+    }
+  done
+  # And the verdict column uses exactly the two sanctioned words — a third one
+  # ("mostly", "n/a", "see below") would be a verdict nobody can act on.
+  verdicts="$(printf '%s\n' "$table" | grep -oE '\| (universal|band-scoped) \|' | sort -u | wc -l)"
+  [ "$verdicts" -eq 2 ]
+}
+
+@test "an EMPTY band-scoped field label does not satisfy the obligation" {
+  # Three bare labels used to pass all three checks while saying nothing
+  # (codex review of EPIC 1, finding 6).
+  write_step_plan "${TMPDIR_TEST}/empty.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+  printf '\n**Architecture Context:**\n\n**Error Handling:**\n\n**Edge Cases:**\n' \
+    >> "${TMPDIR_TEST}/empty.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/empty.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing Architecture Context,Error Handling,Edge Cases"* ]]
+}
+
+@test "a Testing Strategy section that is only a sub-heading is not a strategy" {
+  write_step_plan "${TMPDIR_TEST}/heading.md" "plugins/aid-orchestrator/commands/aid-help.md"
+  printf '\n## Testing Strategy\n\n### Tests\n' >> "${TMPDIR_TEST}/heading.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/heading.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Testing Strategy"* ]]
+}
+
+@test "a risk: high plan is checked as full even when it declares only texts" {
+  # The escalation lives in the classifier, so the lint cannot forget it
+  # (codex review of EPIC 1, finding 4).
+  write_step_plan "${TMPDIR_TEST}/high.md" "plugins/aid-orchestrator/commands/aid-help.md"
+  sed -i 's/^type: plan$/type: plan\nrisk: high/' "${TMPDIR_TEST}/high.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/high.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"band=full step is missing"* ]]
+}

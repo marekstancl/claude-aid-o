@@ -38,6 +38,39 @@ review_checkpoints:
                                     # consumer reads this key. Editing it here changes
                                     # nothing (P073 Step 1).
 
+  # Ceremony bands (P084 Step 2) — what each band of plan actually runs.
+  #
+  # The band comes from aid-cp1-gate.sh's classification of the paths the plan
+  # DECLARES (defaults/policies/risk-paths.yaml). This table is READ by that
+  # gate — it is the requirement list, not a description of one:
+  #   cp1_deep_lenses   — the L1/L2/L3 lens files AND the adjudicator verdict
+  #                       must exist and be clean (they are one evidence set;
+  #                       an adjudicator without lenses adjudicates nothing).
+  #   c0_cross_provider — a verified c0-plan-review.json must exist.
+  #   cp1_ledger        — the CP1 revision-limit ledger must have budget.
+  #
+  # Fail-closed everywhere: a band missing from this table, a missing table, a
+  # missing yq or a value that is not true/false all read as `true`, i.e. the
+  # full ceremony. A band is only ever LOWERED by what the plan declares.
+  #
+  # `medium` drops the C0 loop and with it the ledger, deliberately and
+  # together: the ledger counts C0 revision attempts and is initialised by the
+  # C0 loop itself (commands/aid-plan.md §C0), so requiring it where that loop
+  # never runs would block every medium plan on a file nothing creates.
+  ceremony_bands:
+    full:
+      cp1_deep_lenses: true
+      c0_cross_provider: true
+      cp1_ledger: true
+    medium:
+      cp1_deep_lenses: true
+      c0_cross_provider: false
+      cp1_ledger: false
+    light:
+      cp1_deep_lenses: false
+      c0_cross_provider: false
+      cp1_ledger: false
+
   # Trivial skip — skip CP2/CP6 for small changes
   skip_trivial: true
   trivial_threshold:
