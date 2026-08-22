@@ -89,6 +89,46 @@ errors=0
 strict_hits=0
 advisories=0
 
+# WHICH BANDS OWE WHICH OF THIS PROGRAM'S OBLIGATIONS — one table, read by the
+# four checks below. It used to be four separate `[[ "$band" != "light" ]]`
+# tests scattered through the file, which is four places to edit for the next
+# obligation and four places for them to disagree.
+#
+# The CP1 gate reads its half of the ceremony from
+# defaults/policies/review-checkpoints.yaml; this half is not yet in that file,
+# and moving it there is a real improvement that needs its own schema, reader
+# and tests. Recorded rather than half-done: what is fixed here is that the
+# matrix has ONE authority inside this program.
+_AID_LINT_BAND_OBLIGATIONS=(
+  "step_fields:full medium"          # Architecture Context / Error Handling / Edge Cases
+  "reuse_check:full medium light"    # every band — founding a duplicate is what small plans do
+  "standards:full medium"
+  "documentation:full medium"
+)
+
+# _band_owes <obligation> — does this plan's band owe it?
+_band_owes() {
+  local entry
+  for entry in "${_AID_LINT_BAND_OBLIGATIONS[@]}"; do
+    [[ "${entry%%:*}" == "$1" ]] || continue
+    [[ " ${entry#*:} " == *" ${band} "* ]] && return 0
+    return 1
+  done
+  # An obligation absent from the table is owed by everyone: the fail-closed
+  # direction, matching the gate's own treatment of an unknown band.
+  return 0
+}
+
+# _advisory <location-suffix> <message> — the advisory twin of _strict_finding.
+# One owner of the counter and the --quiet check, so a new advisory cannot
+# half-implement either. `location-suffix` is ":<lineno>" or "".
+_advisory() {
+  advisories=$((advisories+1))
+  [[ "$QUIET" -eq 0 ]] || return 0
+  echo "${PLAN}${1}: [ADVISORY] ${2}" >&2
+  return 0
+}
+
 # _prose_paths <bullet> — P079 Step 5 (IMP-480), the drop shape the live P076
 # run actually hit. Its Files bullet was CANONICAL and parsed fine:
 #
@@ -181,8 +221,7 @@ for _bi in "${!_bullet_lns[@]}"; do
   lineno="${_bullet_lns[$_bi]}"; bullet="${_bullet_txts[$_bi]}"
   while IFS= read -r prose_path; do
     [[ -n "$prose_path" ]] || continue
-    advisories=$((advisories+1))
-    [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: [ADVISORY] \`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}" >&2
+    _advisory ":${lineno}" "\`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}"
   done < <(_prose_paths "$bullet")
   verdict="$(_aid_classify_files_bullet "$bullet")"
   sev="${verdict%%:*}"; reason="${verdict#*:}"
@@ -303,7 +342,7 @@ while IFS=: read -r _hline _hsection; do
 done < <(grep -n -x -F "${_human_grep_args[@]}" "$PLAN" 2>/dev/null || true)
 
 band="$(aid_plan_band_name "$PLAN")"
-if [[ "$band" != "light" ]]; then
+if _band_owes step_fields; then
   while IFS=$'\t' read -r lineno missing head; do
     [[ -n "${missing:-}" ]] || continue
     _strict_finding ":${lineno}" "band=${band} step is missing ${missing}: ${head}"
@@ -321,40 +360,34 @@ fi
 #
 # The field is REPLAYED, not read: lib/aid-reuse-verdict.sh runs the declared
 # command again and compares the number of hits with the declared result, so a
-# claim of `none` over a command that finds something today is a finding. What
-# the replay cannot show is whether the search was WIDE enough — a narrow grep
-# with an honest `none` passes here and is judged by the `reuse_evidence` C0
-# lens, in the `full` band only.
+# claim of `none` over a command that finds something today is a finding. Where
+# the replay's reach ends, and who picks up there, is stated once in
+# skills/review-checkpoint-contracts.md §"Lens: reuse_evidence".
 _project_root="$(_aid_band_project_root "$PLAN")" || _project_root=""
 
 # Every path this plan declares anywhere, once: the N+1 verdict asks whether a
 # conflicting site already lies inside the plan's reach, and that question is
 # about the WHOLE plan, not one step — unifying inside a file another step
 # already opens costs no new reach.
+# Two forks per bullet, so it is computed at most ONCE and only when something
+# actually asks: a plan that founds nothing and has no documentation surface
+# never needs the list at all.
+_AID_DECLARED_PATHS=""
+_AID_DECLARED_PATHS_DONE=0
 _plan_declared_paths() {
   local i body
-  for i in "${!_bullet_txts[@]}"; do
-    body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
-    _aid_split_path_entry "$body" 2>/dev/null || true
-  done
-}
-_reuse_declared="$(_plan_declared_paths)"
-
-# _step_founds <first-line> <last-line> — does this step's Files block declare a
-# `Create:`? Reads the bullets extracted ONCE at the top of this program.
-_step_founds() {
-  local i verb
-  for i in "${!_bullet_lns[@]}"; do
-    (( _bullet_lns[i] >= $1 && _bullet_lns[i] <= $2 )) || continue
-    verb="$(_aid_files_bullet_verb "${_bullet_txts[$i]}")" || continue
-    [[ "$verb" == "Create" ]] && return 0
-  done
-  return 1
+  if [[ "$_AID_DECLARED_PATHS_DONE" -eq 0 ]]; then
+    for i in "${!_bullet_txts[@]}"; do
+      body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
+      _AID_DECLARED_PATHS+="$(_aid_split_path_entry "$body" 2>/dev/null || true)"$'\n'
+    done
+    _AID_DECLARED_PATHS_DONE=1
+  fi
+  printf '%s' "$_AID_DECLARED_PATHS"
 }
 
-while IFS=$'\t' read -r _rs _re _rhead; do
+while _band_owes reuse_check && IFS=$'\t' read -r _rs _re _rhead; do
   [[ -n "${_rs:-}" ]] || continue
-  _step_founds "$_rs" "$_re" || continue
   if ! _reuse_value="$(_aid_plan_step_field "$PLAN" "$_rs" "$_re" "Reuse check")"; then
     _strict_finding ":${_rs}" "step founds a new file (a \`Create:\` bullet) with no **Reuse check:** field — say what you searched for and what it returned: ${_rhead}"
     continue
@@ -364,9 +397,9 @@ while IFS=$'\t' read -r _rs _re _rhead; do
     # refusal can name what it refused instead of describing a category.
     _reuse_reason="${_reuse_parsed#error:}"; _reuse_named="${_reuse_reason#*:}"
     _reuse_reason="${_reuse_reason%%:*}"
-    [[ "$_reuse_reason" == "command-not-allowed" ]] \
-      && _strict_finding ":${_rs}" "$(_reason_msg "$_reuse_reason") — refused: \`${_reuse_named}\`: ${_rhead}" \
-      || _strict_finding ":${_rs}" "$(_reason_msg "$_reuse_reason"): ${_rhead}"
+    _reuse_suffix=""
+    [[ "$_reuse_reason" == "command-not-allowed" ]] && _reuse_suffix=" — refused: \`${_reuse_named}\`"
+    _strict_finding ":${_rs}" "$(_reason_msg "$_reuse_reason")${_reuse_suffix}: ${_rhead}"
     continue
   fi
   _reuse_key="${_reuse_parsed%%$'\t'*}"
@@ -379,15 +412,13 @@ while IFS=$'\t' read -r _rs _re _rhead; do
     if ! aid_reuse_deliberate "$_reuse_value"; then
       _strict_finding ":${_rs}" "**Reuse check:** declares 'several conflicting' and the step still founds another file of the same kind — use one of them, unify them, or write 'deliberately founding a variant' with the reason: ${_rhead}"
     fi
-    _reuse_verdict="$(aid_reuse_verdict "$_reuse_value" "$_reuse_cmd" "$_reuse_declared")"
-    advisories=$((advisories+1))
-    if [[ "$_reuse_verdict" == "unify" ]]; then
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] every conflicting site is already inside this plan's declared paths — unify them here, unless doing so pushes the step past its declared Effort (that half is yours to judge, not the lint's)." >&2
-    elif [[ "$_reuse_verdict" == "backlog" ]]; then
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] the field names no conflicting site, so the verdict is out of reach: file a backlog item — but name the paths in it, or nobody can act on it." >&2
-    else
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] conflicting site(s) outside this plan's declared paths: ${_reuse_verdict#*$'\t'} — file a backlog item that LISTS them, never 'unify the components'." >&2
-    fi
+    _reuse_verdict="$(aid_reuse_verdict "$_reuse_value" "$_reuse_cmd" "$(_plan_declared_paths)")"
+    case "$_reuse_verdict" in
+      unify)   _reuse_msg="every conflicting site is already inside this plan's declared paths — unify them here, unless doing so pushes the step past its declared Effort (that half is yours to judge, not the lint's)." ;;
+      backlog) _reuse_msg="the field names no conflicting site, so the verdict is out of reach: file a backlog item — but name the paths in it, or nobody can act on it." ;;
+      *)       _reuse_msg="conflicting site(s) outside this plan's declared paths: ${_reuse_verdict#*$'\t'} — file a backlog item that LISTS them, never 'unify the components'." ;;
+    esac
+    _advisory ":${_rs}" "$_reuse_msg"
   fi
   # No project root means no directory the command was meant to run in, so the
   # replay is skipped rather than run somewhere it would answer a different
@@ -400,8 +431,7 @@ while IFS=$'\t' read -r _rs _re _rhead; do
       # Right direction, wrong degree. Said out loud, not blocked on: the file
       # count is read out of tool output, and a tool can be asked to print in a
       # shape that reading gets wrong.
-      2) advisories=$((advisories+1))
-         [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] **Reuse check:** declares '${_reuse_key}' and the replay finds ${_reuse_hits} file(s) — same direction, different count; check which of the four results this really is." >&2 ;;
+      2) _advisory ":${_rs}" "**Reuse check:** declares '${_reuse_key}' and the replay finds ${_reuse_hits} file(s) — same direction, different count; check which of the four results this really is." ;;
     esac
   else
     case "$?" in
@@ -409,11 +439,10 @@ while IFS=$'\t' read -r _rs _re _rhead; do
       4) _strict_finding ":${_rs}" "**Reuse check:** command \`${_reuse_cmd}\` timed out (20 s) — a search nobody can afford to repeat is not evidence: ${_rhead}" ;;
       # No `timeout` binary is this machine's problem, not the plan's, and an
       # unbounded replay is not a trade this lint makes. Advisory, and loud.
-      5) advisories=$((advisories+1))
-         [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] **Reuse check:** not replayed — no \`timeout\` binary on this machine to bound the search with." >&2 ;;
+      5) _advisory ":${_rs}" "**Reuse check:** not replayed — no \`timeout\` binary on this machine to bound the search with." ;;
     esac
   fi
-done < <(_aid_plan_step_bounds "$PLAN")
+done < <(_aid_plan_founding_steps "$PLAN")
 
 # ---------------------------------------------------------------------------
 # Standards named against the map (P085 Step 4)
@@ -434,15 +463,6 @@ done < <(_aid_plan_step_bounds "$PLAN")
 # not where standards compliance is decided, and the band exists precisely so
 # that small plans are not asked questions they do not have.
 
-# _standards_section — the `## Standards` section's content lines.
-_standards_section() {
-  _aid_blank_fenced < "$PLAN" | awk '
-    /^##[[:space:]]+Standards/ { inside = 1; next }
-    /^##[[:space:]]/           { inside = 0 }
-    inside                      { print }
-  '
-}
-
 # _deviation_cell <table-row> — the last non-empty cell of a markdown table row.
 _deviation_cell() {
   printf '%s' "$1" | awk -F'|' '{
@@ -453,13 +473,13 @@ _deviation_cell() {
   }'
 }
 
-if [[ "$band" != "light" ]]; then
+if _band_owes standards; then
   _std_derived="$(aid_standards_derive "$PLAN" "${_project_root:-}")"; _std_rc=$?
   case "$_std_rc" in
     1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] no standards map configured for this project (project.yaml -> standards.map_path), so no '## Standards' section is owed." >&2 ;;
     2) _strict_finding "" "standards.map_path IS configured but the map cannot be read (missing file, or no yq) — that is a broken environment, not a project without standards; fix the path or unset it." ;;
     0)
-      _std_section="$(_standards_section)"
+      _std_section="$(_aid_plan_section "$PLAN" "Standards")"
       while IFS=$'\t' read -r _std_tag _std_ids; do
         [[ -n "${_std_tag:-}" ]] || continue
         _std_named=""
@@ -490,8 +510,7 @@ if [[ "$band" != "light" ]]; then
       # is not responsible for the map's bookkeeping.
       while IFS= read -r _std_defect; do
         [[ -n "${_std_defect:-}" ]] || continue
-        advisories=$((advisories+1))
-        [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [ADVISORY] the standards map uses tag '${_std_defect}', which is missing from its own tag vocabulary — a defect of the map, reported here, not a reason to stop this plan." >&2
+        _advisory "" "the standards map uses tag '${_std_defect}', which is missing from its own tag vocabulary — a defect of the map, reported here, not a reason to stop this plan."
       done < <(aid_standards_map_defects "$PLAN" "${_project_root:-}" 2>/dev/null || true)
       ;;
   esac
@@ -507,12 +526,20 @@ fi
 #
 # Two callers of one program, never two implementations: this passes the output
 # through and adds nothing of its own.
-if [[ -x "${SCRIPT_DIR}/aid-plan-parallel-check.sh" ]]; then
-  _par_out="$("${SCRIPT_DIR}/aid-plan-parallel-check.sh" "$PLAN" --advisory 2>&1)" || true
-  _par_n="$(printf '%s' "$_par_out" | sed -n 's/^aid-plan-parallel-check: \([0-9]\{1,\}\) finding(s).*/\1/p')"
-  if [[ -n "$_par_n" && "$_par_n" -gt 0 ]]; then
-    advisories=$((advisories + _par_n))
-    [[ "$QUIET" -eq 0 ]] && printf '%s\n' "$_par_out" >&2
+# AID_LINT_SKIP_PARALLEL is set by aid-generation-readiness.sh, which runs the
+# same program itself in its BLOCKING mode: without it the plan would be parsed
+# for waves twice on every readiness run, and the findings printed twice.
+if [[ -x "${SCRIPT_DIR}/aid-plan-parallel-check.sh" && "$QUIET" -eq 0 && -z "${AID_LINT_SKIP_PARALLEL:-}" ]]; then
+  # The exit code carries "there were findings"; the count comes from the lines
+  # themselves. Nothing here parses the other program's summary sentence —
+  # rewording user-facing prose must not silently zero a count.
+  if ! _par_out="$("${SCRIPT_DIR}/aid-plan-parallel-check.sh" "$PLAN" 2>&1)"; then
+    while IFS= read -r _par_line; do
+      case "$_par_line" in
+        "aid-plan-parallel-check: "*|*"[NOTE]"*) continue ;;
+      esac
+      [[ -n "$_par_line" ]] && _advisory "" "$_par_line"
+    done <<< "$_par_out"
   fi
 fi
 
@@ -543,36 +570,38 @@ fi
 #   1  the configuration is readable and records none — a legitimate state
 #   2  there IS a project.yaml but it cannot be read (no yq) — a broken
 #      environment, and the caller says so out loud
+# THE key under `documentation:` that is NOT a surface. Everything else there
+# is one, so a project with a wiki, a man tree or a second help route can make
+# the obligation see it without patching this file.
+_AID_DOC_NON_SURFACE='screenshot_tool'
+
 _doc_surfaces() {
-  local cfg="$1/.aid-o/config/project.yaml" k v found=1
-  [[ -f "$cfg" ]] || return 1
-  command -v yq >/dev/null 2>&1 || return 2
-  for k in in_app_help docusaurus; do
-    v="$(yq -r ".documentation.${k} // \"\"" "$cfg" 2>/dev/null)" || return 2
-    [[ -n "$v" && "$v" != "null" ]] || continue
-    printf '%s=%s\n' "$k" "$v"; found=0
-  done
-  return "$found"
+  local raw rc
+  # ONE yq over project.yaml, not one per key: the same pattern _cp1_band_flags
+  # and _aid_band_map_eres already use, and the reason this reader is shared.
+  raw="$(_aid_project_yaml "$1" ".documentation // {} | to_entries[] | .key + \"=\" + (.value // \"\")")"; rc=$?
+  [[ "$rc" -eq 0 ]] || return "$rc"
+  printf '%s\n' "$raw" | awk -F= -v skip="$_AID_DOC_NON_SURFACE" '
+    NF > 1 && $1 != skip && $2 != "" { print }
+  ' | grep . || return 1
 }
 
-# _plan_touches <path-prefix> — does any Files bullet in the plan declare a path
-# at or under <path-prefix>?
+# _plan_touches <path-prefix> — does the plan declare a path at or under it?
+# Over the memoised list, not a fresh walk: the paths were already parsed, and
+# "what does this plan touch" must have one answer, not one per question.
 _plan_touches() {
-  local prefix="$1" i body p
-  for i in "${!_bullet_txts[@]}"; do
-    body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
-    while IFS= read -r p; do
-      [[ -n "$p" ]] || continue
-      [[ "$p" == "${prefix%/}/"* || "$p" == "$prefix" ]] && return 0
-    done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
-  done
+  local prefix="$1" p
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    [[ "$p" == "${prefix%/}/"* || "$p" == "$prefix" ]] && return 0
+  done <<< "$(_plan_declared_paths)"
   return 1
 }
 
 # No resolvable project root means no project.yaml to read the surfaces from —
 # and "this project records no help" would be a claim about a project this run
 # never found. Silence is the honest answer there.
-if [[ "$band" != "light" && -n "${_project_root:-}" ]]; then
+if _band_owes documentation && [[ -n "${_project_root:-}" ]]; then
   _doc_type="$(_aid_fm_get "$PLAN" type)"
   case "$_doc_type" in
     refactor|docs) : ;;   # by definition not a change a user meets
@@ -620,7 +649,7 @@ fi
 # no answer today because nothing was ever counted. Never blocking: without a
 # resolvable plan id or workspace, the helper returns 1 and nothing is written.
 if _lint_plan_id="$(_aid_plan_id_of "$PLAN")"; then
-  _lint_root="$(_aid_band_project_root "$PLAN")" || _lint_root=""
+  _lint_root="${_project_root:-}"
   if [[ -n "$_lint_root" ]] && _lint_tl="$(aid_plan_timeline "$_lint_root" "$_lint_plan_id")"; then
     # `|| true`: the promise above is that telemetry never blocks, and a bare
     # call would make any future non-zero from the logger this lint's verdict.

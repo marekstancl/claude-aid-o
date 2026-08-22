@@ -211,6 +211,42 @@ _aid_files_bullet_verb() {
   printf '%s' "${BASH_REMATCH[1]}"
 }
 
+# _aid_plan_section <plan> <heading-name> — the body of one `## <name>` section:
+# every line after the heading up to the next `## `, verbatim.
+#
+# A heading MATCHES when it starts with `## <name>` and what follows the name is
+# not a word character — so `## Standards (V3)` IS the Standards section (real
+# plans annotate their headings) and `## Goals for later` is NOT `## Goal`.
+# Three private awks answered this one question about the plan format before
+# this existed, and two of them already disagreed about annotated headings.
+_aid_plan_section() {
+  _aid_blank_fenced < "$1" | awk -v want="## $2" '
+    index($0, want) == 1 && substr($0, length(want) + 1, 1) !~ /[A-Za-z0-9]/ { inside = 1; next }
+    /^## / { inside = 0 }
+    inside
+  '
+}
+
+# _aid_project_yaml <project-root> <yq-expression> — one scalar (or one block)
+# out of `.aid-o/config/project.yaml`. THREE answers, and the third is the whole
+# reason this is shared:
+#   0  the value, printed
+#   1  there is no project.yaml, or the expression yields nothing — a project
+#      that simply does not have this setting
+#   2  there IS a project.yaml and it could not be read (no yq, unparseable) —
+#      a BROKEN ENVIRONMENT, which callers must never round down to "has none"
+#
+# Rounding 2 down to 1 is how an obligation silently stops applying on a machine
+# with no yq, and it is a mistake this codebase has now made twice.
+_aid_project_yaml() {
+  local cfg="$1/.aid-o/config/project.yaml" out
+  [[ -f "$cfg" ]] || return 1
+  command -v yq >/dev/null 2>&1 || return 2
+  out="$(yq -r "$2" "$cfg" 2>/dev/null)" || return 2
+  [[ -n "$out" && "$out" != "null" ]] || return 1
+  printf '%s' "$out"
+}
+
 # _aid_backtick_paths <text> — every `backtick`-wrapped token in <text> that
 # looks like a real repo file: at least one directory segment, a file
 # extension, no placeholder brackets, no trailing slash. Directories
@@ -251,6 +287,33 @@ _aid_plan_step_bounds() {
     /^## /       { flush(); next }
     END { if (head != "") print start "\t" NR "\t" head }
   '
+}
+
+# _aid_plan_founding_steps <plan> — the steps that FOUND something: one
+# "<first-line>\t<last-line>\t<heading>" per step whose Files block carries a
+# `Create:` bullet.
+#
+# The join between _aid_plan_step_bounds and the numbered bullet stream lives
+# here rather than in each caller: three programs needed "which steps found
+# something" (the plan lint, the PM page, and any future obligation about
+# founding), and three copies of the array-plus-range idiom had already started
+# to differ on whether to stop at the first `Create:`.
+_aid_plan_founding_steps() {
+  local plan="$1" lns=() txts=() ln bullet s e head i verb
+  while IFS=$'\t' read -r ln bullet; do
+    [[ -z "${bullet:-}" ]] && continue
+    lns+=("$ln"); txts+=("$bullet")
+  done < <(_aid_extract_files_bullets_numbered < "$plan")
+  while IFS=$'\t' read -r s e head; do
+    [[ -n "${s:-}" ]] || continue
+    for i in "${!lns[@]}"; do
+      (( lns[i] >= s && lns[i] <= e )) || continue
+      verb="$(_aid_files_bullet_verb "${txts[$i]}")" || continue
+      [[ "$verb" == "Create" ]] || continue
+      printf '%s\t%s\t%s\n' "$s" "$e" "$head"
+      break
+    done
+  done < <(_aid_plan_step_bounds "$plan")
 }
 
 # _aid_plan_step_field <plan> <first-line> <last-line> <label> — the value of one

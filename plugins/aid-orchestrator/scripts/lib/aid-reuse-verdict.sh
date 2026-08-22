@@ -132,20 +132,37 @@ aid_reuse_parse() {
 # 20 s, because a search that takes longer than that is not evidence anyone can
 # re-run; and bounded at all, because this is the one place a plan's own text
 # becomes something the lint executes.
+declare -A _AID_REUSE_REPLAY_CACHE 2>/dev/null || true
+
 aid_reuse_replay() {
-  local cmd="$1" cwd="$2" out rc
-  command -v timeout >/dev/null 2>&1 || return 5
+  local cmd="$1" cwd="$2" out rc key
+  # Probed once per process, not once per founding step.
+  if [[ -z "${_AID_REUSE_HAVE_TIMEOUT:-}" ]]; then
+    command -v timeout >/dev/null 2>&1 && _AID_REUSE_HAVE_TIMEOUT=1 || _AID_REUSE_HAVE_TIMEOUT=0
+  fi
+  [[ "$_AID_REUSE_HAVE_TIMEOUT" -eq 1 ]] || return 5
+  # Plans repeat one search across several founding steps; replaying it once is
+  # the difference between a 20 s bound per PLAN and per STEP for that command.
+  key="${cwd}"$'\x1f'"${cmd}"
+  if [[ -n "${_AID_REUSE_REPLAY_CACHE[$key]+set}" ]]; then
+    out="${_AID_REUSE_REPLAY_CACHE[$key]}"
+    [[ "$out" == rc:* ]] && return "${out#rc:}"
+    printf '%s' "$out"; return 0
+  fi
   out="$(cd "$cwd" 2>/dev/null && timeout 20 bash -c "$cmd" 2>/dev/null)"; rc=$?
   # 1 is "found nothing" for every tool in the vocabulary; 2+ is a real failure.
-  [[ "$rc" -eq 124 ]] && return 4
-  [[ "$rc" -ge 2 ]] && return 3
+  [[ "$rc" -eq 124 ]] && { _AID_REUSE_REPLAY_CACHE[$key]="rc:4"; return 4; }
+  [[ "$rc" -ge 2 ]] && { _AID_REUSE_REPLAY_CACHE[$key]="rc:3"; return 3; }
   # How many FILES the search found, not how many lines it printed: `grep -rn`
   # prints three lines for one file with three hits, and "one match" is a claim
   # about the file. Every tool in the vocabulary puts the path first and
   # colon-separates it (`grep -rn`, `grep -c`), or prints the path alone
   # (`ls`, `find`, `grep -l`), so the field before the first colon is the file
   # in all four cases.
-  printf '%s' "$(printf '%s' "$out" | awk 'NF { sub(/:.*/, ""); print }' | sort -u | grep -c '[^[:space:]]' || true)"
+  local n
+  n="$(printf '%s' "$out" | awk 'NF { sub(/:.*/, ""); if (!seen[$0]++) c++ } END { print c + 0 }')"
+  _AID_REUSE_REPLAY_CACHE[$key]="$n"
+  printf '%s' "$n"
 }
 
 # aid_reuse_result_matches <result-key> <file-count> — does the replay agree

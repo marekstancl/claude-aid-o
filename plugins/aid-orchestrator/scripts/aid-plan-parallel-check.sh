@@ -15,11 +15,13 @@
 # readiness check already builds and grades (dependencies, cycles).
 #
 # Two severities, the same two-stage model the Files grammar has: ADVISORY while
-# a plan is being written (--advisory), BLOCKING before generation (default).
+# a plan is being written (--advisory, how aid-plan-lint.sh calls it), BLOCKING
+# before generation (default, how aid-generation-readiness.sh calls it).
 #
-# With max_parallel: 1 nothing actually runs concurrently today. That does not
-# make this decoration: it is the evidence of safety for the moment the brake
-# comes off, and evidence gathered after the fact is evidence nobody trusts.
+# The field's grammar, the wave-planning rules and why this is worth checking
+# while max_parallel is still 1 are stated for the plan author in
+# skills/plan-writing.md §"Declaring what can run at the same time" — one copy,
+# on the surface the author actually reads.
 #
 # Usage: aid-plan-parallel-check.sh <plan.md> [--advisory] [--quiet]
 # Exit:  0 = no blocking finding   1 = collision(s)   2 = usage/IO
@@ -44,22 +46,21 @@ done
 [[ -n "$PLAN" ]] || { echo "Usage: aid-plan-parallel-check.sh <plan.md> [--advisory] [--quiet]" >&2; exit 2; }
 [[ -f "$PLAN" ]] || { echo "aid-plan-parallel-check: file not found: $PLAN" >&2; exit 2; }
 
-# THE group vocabulary: a wave name, or the standalone marker. `---` is the same
-# "nothing here" marker the dependency grammar already uses, so a plan has one
-# spelling for it, not two.
+# THE group vocabulary: a wave name, or the standalone marker (`---`, the same
+# marker the dependency grammar uses — see the skill for why).
 _AID_PARALLEL_STANDALONE='---'
 _AID_PARALLEL_GROUP_RE='^[A-Za-z0-9_-]+$'
 
 band="$(aid_plan_band_name "$PLAN")"
 findings=0
-notes=0
 
 # _report <severity> <message> — one emitter, so the advisory/blocking split
-# cannot be half-implemented per finding.
+# cannot be half-implemented per finding. Notes are emitted, never counted:
+# nothing decides anything from how many there were.
 _report() {
   case "$1" in
     finding) findings=$((findings+1)); [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: ${2}" >&2 ;;
-    note)    notes=$((notes+1));       [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] ${2}" >&2 ;;
+    note)    [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] ${2}" >&2 ;;
   esac
   return 0
 }
@@ -123,10 +124,17 @@ done
 
 # A group of one is valid and does nothing. Worth saying, never worth failing:
 # it is usually the residue of moving a step out, not a mistake in itself.
-for g in $(printf '%s\n' "${step_groups[@]+"${step_groups[@]}"}" | grep -v -x -F -- "$_AID_PARALLEL_STANDALONE" | sort -u); do
-  n=0
-  for i in "${!step_groups[@]}"; do [[ "${step_groups[$i]}" == "$g" ]] && n=$((n+1)); done
-  [[ "$n" -eq 1 ]] && _report note "group '${g}' has one step — valid, but it is the same as \`${_AID_PARALLEL_STANDALONE}\`."
+# Counted in ONE pass with an associative array — the earlier shape forked
+# grep+sort and then re-walked every step per group, and re-stated the "skip
+# `---`" rule a second way while doing it.
+declare -A _group_size=()
+for i in "${!step_groups[@]}"; do
+  g="${step_groups[$i]}"
+  [[ "$g" == "$_AID_PARALLEL_STANDALONE" ]] && continue
+  _group_size["$g"]=$(( ${_group_size["$g"]:-0} + 1 ))
+done
+for g in "${!_group_size[@]}"; do
+  [[ "${_group_size[$g]}" -eq 1 ]] && _report note "group '${g}' has one step — valid, but it is the same as \`${_AID_PARALLEL_STANDALONE}\`."
 done
 
 if [[ "$QUIET" -eq 0 ]]; then

@@ -50,11 +50,9 @@ _AID_STANDARDS_PATH_TAGS=(
 # `yq` is missing: a broken environment, which is a different answer from "no
 # standards" and must never be silently rounded down to it.
 aid_standards_map_file() {
-  local root="$1" cfg="$1/.aid-o/config/project.yaml" p
-  [[ -f "$cfg" ]] || return 1
-  command -v yq >/dev/null 2>&1 || return 2
-  p="$(yq -r '.standards.map_path // ""' "$cfg" 2>/dev/null)" || return 2
-  [[ -n "$p" && "$p" != "null" ]] || return 1
+  local root="$1" p rc
+  p="$(_aid_project_yaml "$root" '.standards.map_path // ""')"; rc=$?
+  [[ "$rc" -eq 0 ]] || return "$rc"
   [[ "$p" == /* ]] || p="${root}/${p}"
   [[ -r "$p" ]] || return 2
   printf '%s' "$p"
@@ -106,18 +104,28 @@ aid_standards_unknown_tags() {
 # obligation nobody could satisfy honestly, so what the plan owes is to name at
 # least one standard from each area it reaches — which is exactly what the map
 # is for ("I touched this area; here is where I looked").
-aid_standards_derive() {
-  local plan="$1" root="$2" map block_file tag ids bullet body p
-  map="$(aid_standards_map_file "$root")" || return $?
+# _aid_sm_block_file <project-root> — the map's machine block in a temp file,
+# validated. ONE preamble for both public entry points: the earlier two copies
+# had already drifted, so a broken block read as "unreadable" from one of them
+# and as "no defects" from the other.
+#
+# Present is not the same as readable: a block that does not parse, or that
+# carries no `standards:` list, would otherwise derive an EMPTY obligation, and
+# "this project has no standards" is the one answer a broken map must not give.
+_aid_sm_block_file() {
+  local map block_file
+  map="$(aid_standards_map_file "$1")" || return $?
   block_file="$(mktemp)" || return 2
   aid_standards_block "$map" > "$block_file"
-  # Present is not the same as readable. A block that does not parse, or that
-  # carries no `standards:` list, would otherwise derive an empty obligation —
-  # a broken map would silently mean "this project has no standards", which is
-  # the one answer it must never produce.
   if [[ ! -s "$block_file" ]] || ! yq -e '.standards | length > 0' "$block_file" >/dev/null 2>&1; then
     rm -f "$block_file"; return 2
   fi
+  printf '%s' "$block_file"
+}
+
+aid_standards_derive() {
+  local plan="$1" root="$2" block_file tag bullet body p
+  block_file="$(_aid_sm_block_file "$root")" || return $?
   # Every declared path -> its tags, de-duplicated.
   local tags_file; tags_file="$(mktemp)"
   while IFS=$'\t' read -r _ bullet; do
@@ -127,26 +135,30 @@ aid_standards_derive() {
       aid_standards_tags_for_path "$p"
     done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
   done < <(_aid_extract_files_bullets_numbered < "$plan") | sort -u > "$tags_file"
-  while IFS= read -r tag; do
-    [[ -n "$tag" ]] || continue
-    # The tag goes in through the environment and strenv(), never spliced into
-    # the expression: a tag comes from a document nobody here controls.
-    ids="$(AID_SM_TAG="$tag" yq -r '
-      [ .standards[]? | select((.status // "active") == "active") | select(.tags[]? == strenv(AID_SM_TAG)) | .id ] | join(",")
-    ' "$block_file" 2>/dev/null)"
-    [[ -n "$ids" && "$ids" != "null" ]] && printf '%s\t%s\n' "$tag" "$ids"
-  done < "$tags_file"
-  rm -f "$block_file" "$tags_file"
+  # ONE yq over the block for every (tag, id) pair, joined against the derived
+  # tags in awk. The earlier shape forked yq once per derived tag — four to six
+  # process starts and as many re-parses of the same document, on a program that
+  # runs at every plan write and again in generation pre-flight.
+  local pairs_file; pairs_file="$(mktemp)"
+  yq -r '.standards[]? | select((.status // "active") == "active")
+         | . as $s | .tags[]? | . + "\t" + $s.id' "$block_file" 2>/dev/null > "$pairs_file"
+  awk -F'\t' '
+    NR == FNR { want[$0] = 1; next }
+    # A separate `seen` counter, not `($1 in ids) ? …`: awk creates the array
+    # element when it evaluates the assignment target, so the ternary saw its
+    # own empty slot and every list came back with a leading comma.
+    $1 in want { ids[$1] = seen[$1]++ ? ids[$1] "," $2 : $2 }
+    END { for (t in ids) print t "\t" ids[t] }
+  ' "$tags_file" "$pairs_file" | sort
+  rm -f "$block_file" "$tags_file" "$pairs_file"
   return 0
 }
 
 # aid_standards_map_defects <plan> <project-root> — unknown-tag defects of the
 # configured map, for reporting. Same return codes as aid_standards_derive.
 aid_standards_map_defects() {
-  local map block_file
-  map="$(aid_standards_map_file "$2")" || return $?
-  block_file="$(mktemp)" || return 2
-  aid_standards_block "$map" > "$block_file"
+  local block_file
+  block_file="$(_aid_sm_block_file "$2")" || return $?
   aid_standards_unknown_tags "$block_file"
   rm -f "$block_file"
 }
@@ -160,7 +172,10 @@ aid_standards_map_defects() {
 # Runnable, because "the tool and the map still say the same thing" is a claim
 # that decays silently — the map is edited by people who do not run AID.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  root="$(cd "${_AID_SM_DIR}/../../../.." && pwd)"
+  # The checkout this file lives in — asked for, not counted out in `..`s that
+  # break silently the day the library moves a directory.
+  root="$(git -C "$_AID_SM_DIR" rev-parse --show-toplevel 2>/dev/null)" \
+    || root="$(cd "${_AID_SM_DIR}/../../../.." && pwd)"
   if [[ "${1:-}" == "--derive" ]]; then
     [[ -n "${2:-}" && -f "$2" ]] || { echo "Usage: aid-standards-map.sh --derive <plan.md>" >&2; exit 2; }
     # The plan's own workspace decides which map applies, not this file's repo:

@@ -337,7 +337,8 @@ the command returns — not that the search was wide enough. A narrowly aimed
 `grep` with an honest `none` passes. Width is judged by the `reuse_evidence`
 C0 lens, and only in the `full` band; `medium` and `light` keep the replay
 alone. That is a deliberate boundary: a review costs a dispatch, and on a small
-plan it is not worth one.
+plan it is not worth one. (The lens's side of that boundary:
+`skills/review-checkpoint-contracts.md` §"Lens: reuse_evidence".)
 
 **The N+1 rule.** The field is about the thing the step FOUNDS — that is what
 "of the same kind" means below, and it is why the rule can be checked at all: a
@@ -637,15 +638,10 @@ section**, declared in a `Files:` bullet like any other work. Not "update the
 documentation" — that sentence has never once caused documentation to be
 updated.
 
-What the project HAS is not rediscovered every time a plan is written.
-`/aid-init` and `/aid-setup` record it once in `project.yaml`:
-
-```yaml
-documentation:
-  in_app_help: src/app/napoveda          # the in-app help surface, if any
-  docusaurus: docs/docs/myproject        # the documentation site, if any
-  screenshot_tool: "node lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
-```
+What the project HAS is not rediscovered every time a plan is written:
+`/aid-init` and `/aid-setup` record it once under `documentation:` in
+`project.yaml` (the keys and their detection are defined in
+`skills/setup/project-scan.md`), and the plan reads the answer.
 
 - **A project with neither owes nothing here**, and `aid-plan-lint.sh` records
   that it asked nothing — so the silence does not read as an omission.

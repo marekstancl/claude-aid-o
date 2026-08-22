@@ -56,16 +56,11 @@ source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-plan-band.sh"
 
 # _aps_section <plan> <heading> — the body of one `## <heading>` section, with
 # blank lines and sub-headings dropped. Empty when the section is absent.
-# A heading MATCHES when it starts with `## <name>` and what follows the name
-# is not a word character — so `## Standards (V3)` is the Standards section and
-# `## Goals for later` is not `## Goal`. Exact equality was the earlier rule and
-# it silently skipped every section whose author annotated the heading.
 _aps_section() {
-  awk -v want="## $2" '
-    index($0, want) == 1 && substr($0, length(want) + 1, 1) !~ /[A-Za-z0-9]/ { inside = 1; next }
-    /^#+[[:space:]]/ { inside = 0; next }
-    inside && $0 ~ /[^[:space:]]/ { print }
-  ' "$1"
+  # The heading rule lives in lib/aid-scoping.sh, once, for every reader of the
+  # plan format; what is local here is that the PAGE wants prose — sub-headings
+  # and blank lines are not sentences to render.
+  _aid_plan_section "$1" "$2" | awk '!/^#/ && /[^[:space:]]/'
 }
 
 # _aps_first_sentence <text> — the first sentence, trimmed of markdown emphasis
@@ -162,22 +157,12 @@ _aps_standards() {
 # bullets against fields produced a ratio that could exceed 1.
 # Rendered only when the plan founds anything at all.
 _aps_reuse() {
-  local plan="$1" founding=0 evidenced=0 lns=() txts=() ln bullet verb i
-  while IFS=$'\t' read -r ln bullet; do
-    [[ -z "${bullet:-}" ]] && continue
-    lns+=("$ln"); txts+=("$bullet")
-  done < <(_aid_extract_files_bullets_numbered < "$plan")
+  local plan="$1" founding=0 evidenced=0 s e _head
   while IFS=$'\t' read -r s e _head; do
     [[ -n "${s:-}" ]] || continue
-    for i in "${!lns[@]}"; do
-      (( lns[i] >= s && lns[i] <= e )) || continue
-      verb="$(_aid_files_bullet_verb "${txts[$i]}")" || continue
-      [[ "$verb" == "Create" ]] || continue
-      founding=$((founding+1))
-      _aid_plan_step_field "$plan" "$s" "$e" "Reuse check" >/dev/null && evidenced=$((evidenced+1))
-      break
-    done
-  done < <(_aid_plan_step_bounds "$plan")
+    founding=$((founding+1))
+    _aid_plan_step_field "$plan" "$s" "$e" "Reuse check" >/dev/null && evidenced=$((evidenced+1))
+  done < <(_aid_plan_founding_steps "$plan")
   printf '%s/%s' "$evidenced" "$founding"
 }
 

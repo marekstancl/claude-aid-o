@@ -327,11 +327,10 @@ echo "CP1-gate: all 4 evidence files present and structurally valid in ${evidenc
 # ---------------------------------------------------------------------------
 # Step 4b: the `reuse_evidence` C0 lens (P085 Step 5)
 # ---------------------------------------------------------------------------
-# The lint REPLAYS each step's reuse search and can prove the declared result
-# matches what the command returns. What it cannot prove is that the search was
-# WIDE enough — a narrowly aimed grep with an honest `none` passes it. That
-# judgement is this lens, and it is required in `full` only: it costs a
-# dispatch, and on a smaller plan the replay alone is the trade.
+# The lens judges what the plan lint's replay cannot reach; the division of
+# labour between them is stated once in skills/review-checkpoint-contracts.md
+# §"Lens: reuse_evidence". Required in `full` only: it costs a dispatch, and on
+# a smaller plan the replay alone is the trade.
 #
 # C0 lenses live one level ABOVE cp1-deep/, the same place c0-plan-review.json
 # does. Required here rather than "produced by the dispatch and hopefully

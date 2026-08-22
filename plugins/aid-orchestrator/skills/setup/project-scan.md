@@ -32,13 +32,27 @@ Called by `/aid-setup` router or `/aid-setup scan`.
 | a help route/page (`help`, `napoveda`) | In-app help | `documentation.in_app_help` — its path |
 | `lib/ui-fidelity/ui-capture.mjs` (or the project's own) | Screenshot tool | `documentation.screenshot_tool` — the command that runs it |
 
-**The three `documentation.*` facts (P085)** exist so a plan does not rediscover
-them every time it is written: a plan that changes behaviour a user meets must
-name the help file and the docs page it changes, and `aid-plan-lint.sh` checks
-that against these values. **Omit a key the project does not have** — absent
-means the obligation does not apply, while an empty string looks like a path
-that failed to match. Confirm a detected help path with the PM rather than
-guessing one into the file.
+**The three `documentation.*` facts are defined here, once** — `/aid-init` and
+`skills/plan-writing.md` point at this section rather than restating it:
+
+```yaml
+documentation:
+  in_app_help: src/app/napoveda     # dir/file of the in-app help, omit if none
+  docusaurus: docs/docs/myproject   # the docs site's content root, omit if none
+  screenshot_tool: "node lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
+```
+
+They exist so a plan does not rediscover them every time it is written: a plan
+that changes behaviour a user meets must name the help file and the docs page
+it changes, and `aid-plan-lint.sh` checks that against these values — **every**
+surface listed here, not just one of them.
+
+**Omit a key the project does not have** — absent means the obligation does not
+apply, while an empty string looks like a path that failed to match. Any key
+under `documentation:` other than `screenshot_tool` counts as a surface, so a
+project with a wiki or a second help route adds one line rather than patching
+the plugin. Confirm a detected help path with the PM rather than guessing one
+into the file.
 
 3. Compare detected values with existing project.yaml
 4. Show diff to PM:

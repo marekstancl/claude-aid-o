@@ -36,7 +36,10 @@ done
 [[ -n "$plan" && -f "$plan" ]] || { echo "ERROR: plan file not found" >&2; exit 2; }
 [[ -z "$total" || "$total" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --total must be a positive integer" >&2; exit 2; }
 
-if ! lint_out="$("${SCRIPT_DIR}/aid-plan-lint.sh" "$plan" 2>&1)"; then
+# The lint runs the wave check in its advisory mode; here it is run BLOCKING a
+# few lines below, so the lint is told to skip it rather than parse the plan for
+# waves twice and print the same findings twice.
+if ! lint_out="$(AID_LINT_SKIP_PARALLEL=1 "${SCRIPT_DIR}/aid-plan-lint.sh" "$plan" 2>&1)"; then
   printf '%s\n' "$lint_out" >&2
   echo "READINESS: FAIL — repair the lint findings; full grammar: skills/plan-writing.md" >&2
   exit 1
@@ -58,9 +61,7 @@ if ! par_out="$("${SCRIPT_DIR}/aid-plan-parallel-check.sh" "$plan" 2>&1)"; then
   echo "READINESS: FAIL — steps declared in one wave must not name the same file; full grammar: skills/plan-writing.md" >&2
   exit 1
 fi
-# Deliberately NOT printed on success: aid-plan-lint.sh above already ran the
-# same check in its advisory mode and passed its findings through. Printing the
-# passing run again would show every plan the same notes twice.
+if [[ -n "$par_out" ]]; then printf '%s\n' "$par_out" >&2; fi
 if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   # P084 Step 7 — the lint logs its own verdict; this is the OTHER stop this
   # script owns, so the two reasons a plan never reaches generation are both
