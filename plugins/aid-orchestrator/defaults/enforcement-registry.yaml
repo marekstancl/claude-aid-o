@@ -3055,4 +3055,5 @@ enforcements:
     deferred_reason: "The renderer and its caller instruction ship in P084; the MECHANISM that makes skipping it hard is the hook layer of Plan 3 (a Stop hook refusing to close a turn that wrote a plan without rendering its page). Recorded here at its honest strength — an instruction — rather than being described as enforcement it does not have."
     description: "P084 Step 5 — after writing a plan, /aid-plan renders the PM page (lib/aid-plan-summary.sh) and publishes it with the Artifact tool. Nothing fails if a session skips this: it is an instruction, the weakest form there is. It is registered so the gap is visible and so the hook layer has a row to promote rather than a new one to invent."
     recovery: "Run the render by hand: source scripts/lib/aid-plan-summary.sh && aid_plan_summary_render <plan> <out.html>, then publish the body."
+    test_covers: "the RENDERER only. Whether a session actually renders and publishes is a session-level act no suite can observe — that is precisely the gap this row records."
     test: "scripts/tests/bats/test-aid-plan-summary.bats"

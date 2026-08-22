@@ -206,44 +206,8 @@ When adding a new detection capability, register it in `defaults/enforcement-reg
 - `test_anchor`: path to the bats/sh test that proves it works
 - `deadline`: ISO date after which the TTL guard flags it if not tested
 
-### Plan ceremony bands (P084)
-
-How much review a plan owes is derived from the paths its steps declare in
-their `**Files:**` blocks — never from prose anywhere in the document. Two
-files and one library carry it:
-
-| Piece | Role |
-|---|---|
-| `defaults/policies/risk-paths.yaml` | the curated map: `full_paths`, `medium_paths`, `excluded_paths`, as EREs matched against one declared path |
-| `defaults/policies/review-checkpoints.yaml` → `review_checkpoints.ceremony_bands` | what each band OWES: `cp1_deep_lenses`, `c0_cross_provider`, `cp1_ledger` |
-| `scripts/lib/aid-plan-band.sh` | `aid_plan_band <plan> [project_root]` → `<band>\t<reason>`; the ONE classifier, sourced by `aid-cp1-gate.sh` and `aid-plan-lint.sh` |
-
-Three bands: `full` (decision machinery — state machines, gate runner,
-generation chain, release boundary, `skills/plan-writing.md`, auth, migrations,
-dependency manifests), `medium` (the data those decisions read — policies,
-schemas, templates, machine-read config, CI), `light` (everything else,
-including documentation, tests and ordinary feature code, which is reviewed per
-step at CP2/CP3 against a real diff).
-
-**When you extend it:**
-
-- Adding a path pattern is one edit in `risk-paths.yaml` — plus one row in
-  `docs/plans/P084-classification-reference.md`, because
-  `scripts/tests/check-classification-reference.sh` re-runs the classifier over
-  fixtures reproducing 23 hand-labelled real plans (`.aid-o/` is gitignored, so
-  the plans themselves are not in the repo) and fails on any disagreement,
-  naming the direction — under-classification is the one that matters. A false NEGATIVE
-  (hand label `full`, classifier lower) is reported separately: it is the only
-  direction that removes review from where it was wanted.
-- Never call `aid-cp1-gate.sh --classify-only` from anything inside generation.
-  "The CP1 gate is consulted exactly once per plan" is an invariant the
-  generation suites assert by COUNTING gate invocations
-  (`scripts/tests/bats/generation-fixture.bash`, `gen_cp1_calls`). Source the
-  library instead; `--classify-only` is for session-level callers such as
-  `commands/aid-plan.md`.
-- Everything uncertain resolves to `full`: no declared path, no map, an
-  unparseable map, no `yq`, an unknown band in the table. There is deliberately
-  no "guess it from the prose" fallback.
+See also **Plan ceremony bands (P084)** at the end of this file for how much
+review a plan owes and how to extend that map.
 
 ### Plan Boundary Enforcement
 

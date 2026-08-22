@@ -251,3 +251,30 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"c0-plan-review.json missing"* ]]
 }
+
+@test "the gate always prints band=<b> — the sealed authority scrapes that line" {
+  # aid-auto-pipeline.sh records the band on generation-authority.json by
+  # reading the gate's own stderr (never a second gate call). That makes the
+  # WORDING a contract: if this line loses its `band=` token, the receipt
+  # silently stops carrying a band and nothing else notices.
+  mkdir -p "$TMP/.aid-o"
+  plan="$(write_plan P916 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ band=(full|medium|light) ]]
+}
+
+@test "the C0 review asks the SAME classifier as the gate" {
+  # Both used to scan the plan's prose with their own copy of the same eight
+  # patterns, and they could disagree: a full-band plan whose prose matched
+  # nothing had its cross-provider review skipped, and then the gate blocked on
+  # the report that skip never produced.
+  full_plan="$(write_plan P917 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — the state machine')"
+  light_plan="$(write_plan P918 "risk: medium" \
+    '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
+  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-c0-plan-review.sh' 2>/dev/null
+               printf '%s %s' \"\$(_c0_risk_of '$full_plan')\" \"\$(_c0_risk_of '$light_plan')\""
+  [ "$output" = "high low" ]
+}

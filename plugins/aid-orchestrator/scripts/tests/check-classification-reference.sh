@@ -84,7 +84,10 @@ while IFS='|' read -r _ fixture source band _rest; do
     missing=$(( missing + 1 )); continue
   fi
 
-  actual="$(bash "$GATE" --plan "$local_fixture" --classify-only 2>/dev/null)"
+  # --project-root is explicit: without it the gate defaults to $(pwd), and the
+  # 23 reference rows would be checked against whatever policy override the
+  # caller happens to be standing in rather than against the shipped map.
+  actual="$(bash "$GATE" --plan "$local_fixture" --project-root "$REPO_ROOT" --classify-only 2>/dev/null)"
   if [[ "$actual" == "$band" ]]; then
     agreed=$(( agreed + 1 ))
     continue

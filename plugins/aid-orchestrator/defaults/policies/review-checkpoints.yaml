@@ -29,8 +29,17 @@ review_checkpoints:
   # in P065 E-065-7_7 Step 20 — see skills/review-checkpoint-contracts.md
   # "C0 Cross-Provider Plan Review" for the full contract.
   cp1_codex_review:
-    enabled_for: [high]            # risk profiles that require this review; low/docs/medium
-                                    # (no high-risk pattern match) never trigger it
+    enabled_for: [high]            # DOCUMENTATION ONLY — nobody reads this key
+                                    # (`grep -rn enabled_for` over scripts/ and
+                                    # skills/ finds no consumer). The operative
+                                    # authority is `ceremony_bands` above: band
+                                    # `full` owes this review, `medium` and
+                                    # `light` do not. The phrase it used to
+                                    # carry — "no high-risk pattern match" —
+                                    # described the whole-document scan P084
+                                    # deleted; it is kept as a name only so an
+                                    # older consumer reading it still sees the
+                                    # strictest value.
     max_rechecks: 4                # initial review + up to 4 rechecks = 5 Codex runs max.
                                     # DOCUMENTATION of the shipped budget, not a consumed
                                     # override: the CP1/C0 loop's mechanical authority is

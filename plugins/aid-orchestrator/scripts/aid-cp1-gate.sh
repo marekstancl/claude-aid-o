@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-cp1-gate.sh — CP1-deep evidence gate for high-risk plans
+# aid-cp1-gate.sh — CP1-deep evidence gate, scaled by a plan's ceremony band
 #
 # Usage:
 #   ./aid-cp1-gate.sh --plan <path> [--project-root <path>]
 #
-# For low-risk plans: exits 0 immediately (no evidence required).
-# For high-risk plans: verifies that all 4 CP1-deep evidence files exist,
+# For a `light` plan: exits 0 immediately (no evidence required).
+# For a `full` or `medium` plan: verifies that all 4 CP1-deep evidence files exist,
 # that the adjudicator verdict has no unresolved accepted blockers, that a
 # verified C0 cross-provider Codex plan review exists with no surviving
 # blocking findings, and that the CP1 revision-limit ledger has budget left
@@ -28,7 +28,9 @@
 #   medium — the DATA those decisions read: policies, schemas, templates,
 #            machine-read config, CI. NOT tests and not ordinary code: those
 #            are `light` and are reviewed per step, against a real diff.
-#   light  — documentation, help, commands, skills: no evidence required.
+#   light  — everything else, INCLUDING tests and ordinary feature code, which
+#            is reviewed per step at CP2/CP3 against a real diff: no plan-time
+#            evidence required.
 #
 # Two rules decide correctness, both deliberate:
 #   1. Release/ceremony files (CHANGELOG.md, README.md, marketplace.json,
@@ -304,7 +306,7 @@ done
 if [[ "${#missing_files[@]}" -gt 0 ]]; then
   missing_list="$(printf '  - %s\n' "${missing_files[@]}")"
   cat >&2 <<ERRMSG
-ERROR: High-risk plan requires CP1-deep evidence.
+ERROR: A ${AID_PLAN_RISK_BAND}-band plan requires CP1-deep evidence.
 Missing files in ${evidence_dir}/:
 ${missing_list}
 Run /aid-plan --deep to generate CP1-deep evidence before EPIC generation.
@@ -521,7 +523,7 @@ _cp1_c0_and_ledger_gate() {
       echo "CP1-gate: WARNING — proceeding past C0 plan-review requirement (${c0_reason}) via PM-escalation override: ${override_reason}" >&2
     else
       cat >&2 <<ERRMSG
-ERROR: High-risk plan requires a verified C0 cross-provider plan review before EPIC generation.
+ERROR: A ${AID_PLAN_RISK_BAND}-band plan requires a verified C0 cross-provider plan review before EPIC generation.
 Reason: ${c0_reason}
 Fix: run the C0 review loop (aid-c0-plan-review.sh build-manifest / dispatch / verify) until it is
 clean, or obtain a PM-escalation override artifact at:

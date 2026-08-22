@@ -318,7 +318,7 @@ Edge cases:
     "+N more matches".
 
 This is in addition to (not replacing) the standard plan-writing.md
-Forbidden Phrase + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19) verification.
+Forbidden Phrase + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21) verification.
 
 Output:
 ```
@@ -356,7 +356,7 @@ Write an exhaustive implementation plan from specification or topic.
 4. **Codebase analysis** — identify affected areas, read key files, note patterns
 5. **Clarification** — max 5 questions if spec has gaps (skip if clear)
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
-7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
+7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21; eight are band-scoped — see `skills/plan-writing.md`)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
 8p. **PM page (required, right after the write)** — render the plan's summary
     and show the PM that page, not the plan:

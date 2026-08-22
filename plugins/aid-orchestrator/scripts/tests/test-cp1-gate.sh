@@ -11,8 +11,10 @@
 #   4. after 2 auto-revisions, a surviving stop-rule blocker causes gate to fail
 #      (simulated via adjudicator file with accepted_blockers present)
 #   5. a light-band fixture (documentation-only Files) passes gate unchanged
-#   6. plan with high-risk pattern in body is treated as high-risk even without frontmatter tag
-#   7. plan with risk: low but high-risk patterns matched still requires evidence (pattern wins)
+#   6. plan that declares NO Files block is full-band (fail-closed) even without
+#      a frontmatter risk tag — P084 replaced the prose-pattern scan these two
+#      cases were originally written for
+#   7. the same, with `risk: low` present: a frontmatter value never lowers a band
 #   8. missing plan file returns non-zero
 #   9. missing --plan argument returns exit 2
 #  10. only partial evidence present — gate fails with missing file list
@@ -484,11 +486,12 @@ fi
 # ---------------------------------------------------------------------------
 # TEST 6: Plan with high-risk pattern in body (no frontmatter tag) is high-risk
 # ---------------------------------------------------------------------------
-run_test "Plan with authenticate in body is treated as high-risk"
+run_test "Plan with no declared Files is full-band (fail-closed), tag or no tag"
 
 proj6="$(make_project_root "t6")"
 plan6="$TMPDIR_ROOT/t6-plan.md"
 # No risk: field, but body contains auth pattern
+# No **Files:** block at all -> `no_files_declared` -> full, fail-closed.
 write_plan "$plan6" "P006" "" "Call verify_token to authenticate the user before processing."
 
 gate_exit=0
@@ -523,10 +526,12 @@ fi
 # TEST 7: risk: low in frontmatter does NOT exempt plan when body has high-risk patterns
 # Pattern match wins — risk: low only exempts when no patterns are found.
 # ---------------------------------------------------------------------------
-run_test "Plan with risk: low still requires CP1-deep when body contains high-risk patterns"
+run_test "risk: low does not lower a band — an unclassifiable plan still owes CP1-deep"
 
 proj7="$(make_project_root "t7")"
 plan7="$TMPDIR_ROOT/t7-plan.md"
+# `risk: high` raises a band; no frontmatter value lowers one. This plan
+# declares nothing, so it is full regardless of the `risk: low` tag.
 write_plan "$plan7" "P007" "risk: low" "Handler authenticate() and verify_token() added to auth flow."
 
 gate_exit=0
