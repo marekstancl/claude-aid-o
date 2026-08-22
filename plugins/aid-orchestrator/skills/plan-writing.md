@@ -264,6 +264,10 @@ The `## Implementation Steps` section replaces the old `## High-Level Steps` tab
 - Test: `tests/exact/path/to/test-file.spec.ts` (tier: t1) — {what behavior this tests}
         *(a `Test:` bullet is OPTIONAL — see "Tests are designed, not counted" below)*
 
+**Reuse check:** searched: `<read-only search command>` → <none | one match `path` |
+several matching `paths` | several conflicting `paths`> — {why what exists does not suffice}
+        *(REQUIRED for a step whose Files carry a `Create:` bullet — see "Reuse check" below)*
+
 **Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
 hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
 line).** Each Files bullet MUST be exactly:
@@ -291,6 +295,48 @@ NEVER (these are why plans used to blow up mid-generation):
 - ❌ a prose-only entry with no backtick path: `- Modify: the remaining version files`
 - ❌ a word before the first backtick: `- Test: extend \`x\` (or …)`
 - ❌ split the verb and its path across two lines (the path is silently dropped)
+
+**Reuse-check grammar (enforced — `aid-plan-lint.sh`).** A step that founds
+something new (any `Create:` bullet in its `Files:`) MUST carry a
+`**Reuse check:**` field, in this shape:
+
+```
+**Reuse check:** searched: `<command>` → <result> — <why what exists does not suffice>
+```
+
+- The **command** is backticked and comes from the read-only search vocabulary:
+  `grep`, `rg`, `ls`, `find`, `git grep`. Nothing else runs, and nothing that
+  pipes, redirects or chains is accepted — the lint REPLAYS the command and
+  compares the number of hits with the declared result, so a claim of `none`
+  over a command that finds something today is a blocking finding. That replay
+  is the whole difference between evidence and a formality.
+- The **result** is one of four, and each has a consequence:
+  `none` (proceed), `one match` (use it — the bullet becomes `Modify:`),
+  `several matching` (pick the canonical one and say why: newest, most used,
+  best tested, the one that holds the standard), `several conflicting`
+  (the N+1 rule below decides). Czech spellings `nic`, `jeden vzor`,
+  `více shodných`, `více rozporných` are equally accepted.
+- An empty search result is written as `none`. The field is never omitted
+  instead.
+- Aim the search at the code, not at the repository root: a `grep` over `.`
+  finds the plan's own sentence and reports a match that is not one.
+
+**What the replay does NOT prove.** It proves the declared result matches what
+the command returns — not that the search was wide enough. A narrowly aimed
+`grep` with an honest `none` passes. Width is judged by the `reuse_evidence`
+C0 lens, and only in the `full` band; `medium` and `light` keep the replay
+alone. That is a deliberate boundary: a review costs a dispatch, and on a small
+plan it is not worth one.
+
+**The N+1 rule.** A plan never adds one more variant of something that already
+exists. It uses one of them, or it unifies them. Where the found patterns
+CONFLICT, `scripts/lib/aid-reuse-verdict.sh` decides between unifying now and
+filing the work: unify inside this plan when every conflicting site already
+lies inside the paths the plan declares AND the unification does not push the
+step past its declared `Effort`; otherwise file a backlog item that LISTS the
+sites (never "unify the components"). A borderline case goes to the PM. A plan
+that deliberately founds a second variant must say so in the field — the rule
+is not switched off by silence, only by an argument.
 
 **Architecture Context:**
 {How this step fits into the overall architecture. Which components it touches,
@@ -513,6 +559,7 @@ the band the lint checks are one classification, never two.
 | **Effort**, **AID Role** | required | required | required |
 | Tier on a `Test:` bullet naming a NEW suite | required | required | required |
 | `## Testing Strategy` with content | required | required | required |
+| **Reuse check** on a step with a `Create:` bullet | required | required | **required** |
 | **Architecture Context** | required | required | — |
 | **Error Handling** | required | required | — |
 | **Edge Cases** | required | required | **not required at all** |
@@ -540,6 +587,7 @@ Every step MUST have ALL of these fields populated:
 | **Objective** | One clear sentence, no ambiguity |
 | **Files** | At least 1 concrete file path (no placeholders like `src/...`) |
 | **Tier** (`Test:` bullets naming a NEW suite) | `(tier: t0\|t1\|t2)` — chosen from cost and scope, never from importance: **t0** under 2 s per case (the whole tier under 2 min), **t1** under 30 s per case (the whole tier under 10 min, and this is what blocks a merge), **t2** everything else AND anything cross-component. Into **t2 only with a stated reason** in the prose — t2 runs nightly, so a suite parked there is one nobody is waiting on. |
+| **Reuse check** (steps with a `Create:` bullet) | A replayable read-only search command, one of the four results, and why what exists does not suffice. Required in EVERY band — founding a duplicate is exactly what small plans do. |
 | **Architecture Context** | At least 2 sentences referencing the Architecture section |
 | **Implementation Detail** | At least 1 paragraph with concrete logic OR 1 code snippet |
 | **Error Handling** | At least 1 failure mode with recovery strategy |

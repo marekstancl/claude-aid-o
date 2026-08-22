@@ -200,6 +200,63 @@ _aid_files_bullet_body() {
   return 1
 }
 
+# _aid_files_bullet_verb <bullet> — the bullet's verb label (Create/Modify/Test/
+# Rewrite), or nothing plus return 1 when it carries none. Same vocabulary, same
+# regex as _aid_files_bullet_body; callers that need to know WHAT a bullet
+# declares (P085: "does this step found anything?") ask here instead of
+# re-matching the label themselves.
+_aid_files_bullet_verb() {
+  local b="${1#- }"
+  [[ "$b" =~ $_AID_FILES_VERB_RE ]] || return 1
+  printf '%s' "${BASH_REMATCH[1]}"
+}
+
+# _aid_plan_step_bounds <plan> — one line per `### Step` section:
+#   "<first-line>\t<last-line>\t<heading>"
+# Fence-blanked first, so a plan that QUOTES `### Step 1:` in an example (AID's
+# own plans about AID do) is not read as having that step. A section ends at the
+# next `### Step` heading, the next `## ` section, or EOF.
+#
+# This is the join key every per-step obligation needs: the existing
+# _aid_extract_files_bullets_numbered already emits "<lineno>\t- <bullet>", so a
+# caller buckets bullets into steps by line number instead of re-parsing the
+# plan. One reader of the plan's step structure, several consumers (P085).
+_aid_plan_step_bounds() {
+  _aid_blank_fenced < "$1" | awk '
+    function flush() { if (head != "") print start "\t" (NR - 1) "\t" head; head = "" }
+    { gsub(/\r$/, "") }
+    /^### Step / { flush(); head = $0; start = NR; next }
+    /^## /       { flush(); next }
+    END { if (head != "") print start "\t" NR "\t" head }
+  '
+}
+
+# _aid_plan_step_field <plan> <first-line> <last-line> <label> — the value of one
+# `**<label>:**` field inside a step's line range, with its continuation lines
+# folded into a single space-separated line (empty output + return 1 when the
+# field is absent or carries nothing).
+#
+# "Carries nothing" is the same rule the band-scoped field check applies: a bare
+# label satisfies nothing. The value ends at the next `**Field:**` label, so a
+# multi-line answer — which a real Reuse check is — arrives whole.
+_aid_plan_step_field() {
+  local out
+  out="$(_aid_blank_fenced < "$1" | awk -v a="$2" -v b="$3" -v label="$4" '
+    NR < a || NR > b { next }
+    { gsub(/\r$/, "") }
+    $0 ~ "^\\*\\*" label ":\\*\\*" {
+      line = $0
+      sub("^\\*\\*" label ":\\*\\*[[:space:]]*", "", line)
+      val = line; inside = 1; next
+    }
+    inside && /^\*\*[A-Z][^*]*:\*\*/ { inside = 0 }
+    inside { val = val " " $0 }
+    END { gsub(/[[:space:]]+/, " ", val); sub(/^ /, "", val); sub(/ $/, "", val); print val }
+  ')"
+  [[ -n "$out" ]] || return 1
+  printf '%s' "$out"
+}
+
 _aid_classify_files_bullet() {
   local bullet="${1#- }"
   # P079 Step 5: the two shapes GENERATION refuses outright (aid-plan-to-epic.sh

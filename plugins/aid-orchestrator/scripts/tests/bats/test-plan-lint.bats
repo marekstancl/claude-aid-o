@@ -28,6 +28,10 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     # testing the FILES grammar and nothing else.
     printf '# Plan: P900\n\n## Testing Strategy\n\nNo new verification — this fixture exercises the Files grammar only.\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
     printf '%s\n' "$@"
+    # P085: a step with a `Create:` bullet owes a **Reuse check:**. These
+    # fixtures are about the FILES grammar, so the field is present, valid and
+    # boring — a search that finds nothing in an empty tmpdir.
+    printf '\n**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing exists yet\n'
     printf '\n**Architecture Context:**\nn/a\n'
   } > "$f"
 }

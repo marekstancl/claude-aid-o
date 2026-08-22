@@ -3015,6 +3015,21 @@ enforcements:
     recovery: "The finding names the step's line, its heading and which fields are missing. Add the fields, or lower the band by changing what the plan declares it touches."
     test: "scripts/tests/bats/test-plan-writing-rules.bats"
 
+  - id: plan_reuse_evidence
+    type: 4
+    source: "scripts/aid-plan-lint.sh (Reuse evidence pass) + scripts/lib/aid-reuse-verdict.sh"
+    instruction: "skills/plan-writing.md (Reuse-check grammar)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P085 Steps 1-2 — a step that founds something new (any `Create:` bullet in its Files block) owes a **Reuse check:** field: the read-only search it ran and which of four results it got (none / one match / several matching / several conflicting). The field is REPLAYED, not read — the lint re-runs the declared command from the project root and compares the hit count with the claim, so `none` over a command that finds something today is a blocking finding, and a command that no longer runs is refused as stale evidence. Only grep/rg/ls/find/git grep run, and nothing that pipes, redirects or chains: the replay is the one place a plan's own text becomes something the lint executes. The obligation holds in EVERY band including `light`, because founding a duplicate component is exactly what a small plan does and the price is one command, not a dispatch. STRICT tier: blocking for a lifecycle_strict plan, a loud advisory for a legacy one."
+    limits: "The replay proves the declared result matches what the command returns — NOT that the search was wide enough. A narrowly aimed grep with an honest `none` passes here; width is judged by the `reuse_evidence` C0 lens, and only in the `full` band."
+    runtime_check: "Post-generation: none needed — the obligation is about the PLAN text, which is frozen once generation reads it. Development runtime: the lint runs again inside aid-generation-readiness.sh, so a plan edited after CP1 is re-checked before EPICs are cut."
+    recovery: "The finding names the step's line and heading. Run the search again, write the command and the result it actually returns, and say why what exists does not suffice."
+    test: "scripts/tests/bats/test-plan-reuse-check.bats"
+
   - id: plan_testing_strategy_required
     type: 4
     source: "scripts/aid-plan-lint.sh (_has_testing_strategy)"

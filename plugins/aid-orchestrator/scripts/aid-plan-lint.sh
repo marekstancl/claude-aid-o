@@ -57,6 +57,8 @@ source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
+# shellcheck source=lib/aid-reuse-verdict.sh
+source "${SCRIPT_DIR}/lib/aid-reuse-verdict.sh"
 
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
@@ -148,6 +150,10 @@ _reason_msg() {
     ambiguous-entry)    echo "unparsed text after a path — use \`a\` + \`b\` for multiple paths and put prose after '—'";;
     no-verb-label)      echo "no Create:/Modify:/Test:/Rewrite: label — generation cannot tell what this bullet declares, and the path never reaches allowed_paths";;
     verb-no-path)       echo "a verb label with no path after it";;
+    no-command)           echo "the **Reuse check:** field names no search command — a sentence is not evidence; put the command you ran in \`backticks\`";;
+    command-not-allowed)  echo "the **Reuse check:** command is not one of grep/rg/ls/find/git grep — the lint replays it, so it runs read-only searches and nothing else";;
+    command-unsafe)       echo "the **Reuse check:** command pipes, redirects or chains — the lint replays it, so it accepts a single read-only search";;
+    no-result)            echo "the **Reuse check:** field states no result — write one of: none / one match / several matching / several conflicting";;
     *)                  echo "$1";;
   esac
 }
@@ -166,8 +172,17 @@ _strict_finding() {
   fi
 }
 
-while IFS=$'\t' read -r lineno bullet; do
-  [[ -z "${bullet:-}" ]] && continue
+# Every Files bullet, once: the grammar pass below walks it, and so does the
+# per-step Reuse-check pass (P085), which needs to know WHICH step a bullet
+# belongs to. Extracting twice would mean two readers of the same text.
+_bullet_lns=(); _bullet_txts=()
+while IFS=$'\t' read -r _bl_lineno _bl_bullet; do
+  [[ -z "${_bl_bullet:-}" ]] && continue
+  _bullet_lns+=("$_bl_lineno"); _bullet_txts+=("$_bl_bullet")
+done < <(_aid_extract_files_bullets_numbered < "$PLAN")
+
+for _bi in "${!_bullet_lns[@]}"; do
+  lineno="${_bullet_lns[$_bi]}"; bullet="${_bullet_txts[$_bi]}"
   while IFS= read -r prose_path; do
     [[ -n "$prose_path" ]] || continue
     advisories=$((advisories+1))
@@ -183,7 +198,7 @@ while IFS=$'\t' read -r lineno bullet; do
   else  # strict
     _strict_finding ":${lineno}" "${msg}: ${bullet}"
   fi
-done < <(_aid_extract_files_bullets_numbered < "$PLAN")
+done
 
 # ---------------------------------------------------------------------------
 # Band-scoped per-step obligations
@@ -298,6 +313,68 @@ if [[ "$band" != "light" ]]; then
     _strict_finding ":${lineno}" "band=${band} step is missing ${missing}: ${head}"
   done < <(_missing_step_fields)
 fi
+
+# ---------------------------------------------------------------------------
+# Reuse evidence on steps that found something (P085 Step 2)
+# ---------------------------------------------------------------------------
+# A step whose Files carry a `Create:` bullet owes a `**Reuse check:**` field:
+# the read-only search it ran, and what that search found. The obligation holds
+# in EVERY band, including `light` — founding a duplicate component is exactly
+# what a small plan does, and the price here is one command and its output, not
+# a dispatch.
+#
+# The field is REPLAYED, not read: lib/aid-reuse-verdict.sh runs the declared
+# command again and compares the number of hits with the declared result, so a
+# claim of `none` over a command that finds something today is a finding. What
+# the replay cannot show is whether the search was WIDE enough — a narrow grep
+# with an honest `none` passes here and is judged by the `reuse_evidence` C0
+# lens, in the `full` band only.
+_reuse_root="$(_aid_band_project_root "$PLAN")" || _reuse_root=""
+
+# _step_founds <first-line> <last-line> — does this step's Files block declare a
+# `Create:`? Reads the bullets extracted ONCE at the top of this program.
+_step_founds() {
+  local i verb
+  for i in "${!_bullet_lns[@]}"; do
+    (( _bullet_lns[i] >= $1 && _bullet_lns[i] <= $2 )) || continue
+    verb="$(_aid_files_bullet_verb "${_bullet_txts[$i]}")" || continue
+    [[ "$verb" == "Create" ]] && return 0
+  done
+  return 1
+}
+
+while IFS=$'\t' read -r _rs _re _rhead; do
+  [[ -n "${_rs:-}" ]] || continue
+  _step_founds "$_rs" "$_re" || continue
+  if ! _reuse_value="$(_aid_plan_step_field "$PLAN" "$_rs" "$_re" "Reuse check")"; then
+    _strict_finding ":${_rs}" "step founds a new file (a \`Create:\` bullet) with no **Reuse check:** field — say what you searched for and what it returned: ${_rhead}"
+    continue
+  fi
+  if ! _reuse_parsed="$(aid_reuse_parse "$_reuse_value")"; then
+    _strict_finding ":${_rs}" "$(_reason_msg "${_reuse_parsed#error:}"): ${_rhead}"
+    continue
+  fi
+  _reuse_key="${_reuse_parsed%%$'\t'*}"
+  _reuse_cmd="${_reuse_parsed#*$'\t'}"
+  # No project root means no directory the command was meant to run in, so the
+  # replay is skipped rather than run somewhere it would answer a different
+  # question. The presence + shape checks above still stand.
+  [[ -n "$_reuse_root" ]] || continue
+  if _reuse_hits="$(aid_reuse_replay "$_reuse_cmd" "$_reuse_root")"; then
+    if ! aid_reuse_result_matches "$_reuse_key" "$_reuse_hits"; then
+      _strict_finding ":${_rs}" "**Reuse check:** declares '${_reuse_key}' but replaying \`${_reuse_cmd}\` finds ${_reuse_hits} hit(s) — the evidence and the claim disagree: ${_rhead}"
+    fi
+  else
+    case "$?" in
+      3) _strict_finding ":${_rs}" "**Reuse check:** command \`${_reuse_cmd}\` does not run here — evidence that cannot be re-run is not evidence: ${_rhead}" ;;
+      4) _strict_finding ":${_rs}" "**Reuse check:** command \`${_reuse_cmd}\` timed out (20 s) — a search nobody can afford to repeat is not evidence: ${_rhead}" ;;
+      # No `timeout` binary is this machine's problem, not the plan's, and an
+      # unbounded replay is not a trade this lint makes. Advisory, and loud.
+      5) advisories=$((advisories+1))
+         [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] **Reuse check:** not replayed — no \`timeout\` binary on this machine to bound the search with." >&2 ;;
+    esac
+  fi
+done < <(_aid_plan_step_bounds "$PLAN")
 
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 blocking=$errors
