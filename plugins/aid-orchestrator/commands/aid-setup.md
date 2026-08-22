@@ -83,7 +83,7 @@ AID Setup — Project Configuration
   (1) Permissions     — choose autonomy level (current: {preset_display})
   (2) Integrations    — enable MCP servers ({enabled_count} enabled)
   (3) CLAUDE.md       — generate project context file ({exists|missing})
-  (4) Project Scan    — re-detect tech stack
+  (4) Project Scan    — re-detect tech stack + docs/help surfaces
   (A) All             — run everything (recommended for first setup)
   (0) Exit
 
@@ -149,4 +149,4 @@ path in one command avoids two commands independently deciding what belongs in `
 - **Modular** — each module is independent, load only what's needed
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-22

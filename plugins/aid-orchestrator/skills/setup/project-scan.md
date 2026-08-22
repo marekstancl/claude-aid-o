@@ -28,6 +28,17 @@ Called by `/aid-setup` router or `/aid-setup scan`.
 | `docker-compose.yml` | Docker | note in project.yaml |
 | `.github/workflows/` | CI/CD | note in project.yaml |
 | `Makefile` | Make | detect targets for test/lint/build |
+| `docusaurus.config.*` | Documentation site | `documentation.docusaurus` — the content root |
+| a help route/page (`help`, `napoveda`) | In-app help | `documentation.in_app_help` — its path |
+| `scripts/lib/ui-fidelity/ui-capture.mjs` (or the project's own) | Screenshot tool | `documentation.screenshot_tool` — the command that runs it |
+
+**The three `documentation.*` facts (P085)** exist so a plan does not rediscover
+them every time it is written: a plan that changes behaviour a user meets must
+name the help file and the docs page it changes, and `aid-plan-lint.sh` checks
+that against these values. **Omit a key the project does not have** — absent
+means the obligation does not apply, while an empty string looks like a path
+that failed to match. Confirm a detected help path with the PM rather than
+guessing one into the file.
 
 3. Compare detected values with existing project.yaml
 4. Show diff to PM:
@@ -58,4 +69,4 @@ Written to: .aid-o/config/project.yaml
 ```
 
 
-**Last Updated:** 2026-03-04
+**Last Updated:** 2026-08-22

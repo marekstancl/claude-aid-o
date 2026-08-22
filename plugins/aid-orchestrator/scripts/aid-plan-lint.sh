@@ -496,6 +496,70 @@ if [[ "$band" != "light" ]]; then
   esac
 fi
 
+# ---------------------------------------------------------------------------
+# Documentation and help (P085 Step 6)
+# ---------------------------------------------------------------------------
+# A plan that changes what a user experiences owes a CONCRETE way in: the file
+# and section of the in-app help, the page in the docs site. Not "update the
+# documentation" — a path, in a Files bullet, like any other work.
+#
+# What the project HAS is not re-discovered at every plan write. /aid-init and
+# /aid-setup record it once in project.yaml (`documentation.in_app_help`,
+# `documentation.docusaurus`, `documentation.screenshot_tool`) and the plan
+# reads the answer — the same relationship the band has to the classifier.
+# A project with neither a help surface nor a docs site owes NOTHING here, and
+# the lint says so, so the silence does not read as an omission.
+#
+# "Changes what a user experiences" is read from the plan's own `type:`:
+# `refactor` and `docs` are exempt by definition, `regular` and `bug-fix` are
+# not. A proxy, deliberately — the alternative is a regex guessing at intent,
+# and the plan already declares this about itself.
+
+# _doc_surfaces <project-root> — the documentation surfaces this project has,
+# one "<key>=<path>" per line. Nothing (and return 1) when it has none, or when
+# there is no project.yaml or no yq to read it with.
+_doc_surfaces() {
+  local cfg="$1/.aid-o/config/project.yaml" k v found=1
+  [[ -f "$cfg" ]] || return 1
+  command -v yq >/dev/null 2>&1 || return 1
+  for k in in_app_help docusaurus; do
+    v="$(yq -r ".documentation.${k} // \"\"" "$cfg" 2>/dev/null)"
+    [[ -n "$v" && "$v" != "null" ]] || continue
+    printf '%s=%s\n' "$k" "$v"; found=0
+  done
+  return "$found"
+}
+
+# No resolvable project root means no project.yaml to read the surfaces from —
+# and "this project records no help" would be a claim about a project this run
+# never found. Silence is the honest answer there.
+if [[ "$band" != "light" && -n "${_project_root:-}" ]]; then
+  _doc_type="$(_aid_fm_get "$PLAN" type)"
+  case "$_doc_type" in
+    refactor|docs) : ;;   # by definition not a change a user meets
+    *)
+      if _doc_list="$(_doc_surfaces "${_project_root:-}")"; then
+        _doc_hit=""
+        while IFS='=' read -r _doc_key _doc_path; do
+          [[ -n "${_doc_path:-}" ]] || continue
+          for _bi in "${!_bullet_txts[@]}"; do
+            _doc_body="$(_aid_files_bullet_body "${_bullet_txts[$_bi]}")" || continue
+            while IFS= read -r _doc_p; do
+              [[ -n "$_doc_p" ]] || continue
+              [[ "$_doc_p" == "${_doc_path%/}/"* || "$_doc_p" == "$_doc_path" ]] && { _doc_hit="$_doc_key"; break 3; }
+            done < <(_aid_split_path_entry "$_doc_body" 2>/dev/null || true)
+          done
+        done <<< "$_doc_list"
+        if [[ -z "$_doc_hit" ]]; then
+          _strict_finding "" "this plan changes behaviour a user meets (type: ${_doc_type:-regular}) but no step declares a path under $(printf '%s' "$_doc_list" | cut -d= -f2- | tr '\n' ' ')— name the file and section that has to change, the way any other work is named. A plan that genuinely changes nothing user-visible says so with type: refactor."
+        fi
+      else
+        [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] this project records no in-app help and no documentation site (project.yaml -> documentation), so no documentation step is owed." >&2
+      fi
+      ;;
+  esac
+fi
+
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 blocking=$errors
 [[ "$mode" == "strict" ]] && blocking=$((blocking + strict_hits))

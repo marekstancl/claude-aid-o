@@ -570,6 +570,7 @@ the band the lint checks are one classification, never two.
 | Tier on a `Test:` bullet naming a NEW suite | required | required | required |
 | `## Testing Strategy` with content | required | required | required |
 | **Reuse check** on a step with a `Create:` bullet | required | required | **required** |
+| A step naming the help/docs path a behaviour change needs | required | required | — |
 | **Architecture Context** | required | required | — |
 | **Error Handling** | required | required | — |
 | **Edge Cases** | required | required | **not required at all** |
@@ -584,6 +585,41 @@ about failure modes it does not have.
 
 Nothing here lowers a band. A plan that wants the full ceremony says so with
 `risk: high` in its frontmatter; a plan that wants less says so by touching less.
+
+### Documentation, help and screenshots
+
+A plan that changes what a user meets owes the way in: **the file and the
+section**, declared in a `Files:` bullet like any other work. Not "update the
+documentation" — that sentence has never once caused documentation to be
+updated.
+
+What the project HAS is not rediscovered every time a plan is written.
+`/aid-init` and `/aid-setup` record it once in `project.yaml`:
+
+```yaml
+documentation:
+  in_app_help: src/app/napoveda          # the in-app help surface, if any
+  docusaurus: docs/docs/myproject        # the documentation site, if any
+  screenshot_tool: "node scripts/lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
+```
+
+- **A project with neither owes nothing here**, and `aid-plan-lint.sh` records
+  that it asked nothing — so the silence does not read as an omission.
+- **A project with one of the two owes only that half.**
+- **`type: refactor` and `type: docs` are exempt by definition.** That is the
+  machine-readable form of "this plan changes nothing a user meets", and it is
+  read from the frontmatter the plan already carries rather than guessed at
+  from its prose. A plan that changes behaviour and claims `refactor` to dodge
+  the obligation is lying in a field a reviewer can see.
+- **Where a screenshot is needed, name the command that takes it** — the one in
+  `documentation.screenshot_tool`. A missing tool is not a reason to block the
+  plan: the plan states how to install it and that is enough, since blocking on
+  a missing tool would also block acquiring it.
+- **Never a screenshot of production data.** Where a shot would capture
+  anything real, the plan says so and uses a fixture.
+
+The tooling for screenshots is not written per plan: `scripts/lib/ui-fidelity/`
+already carries `ui-capture.mjs`, `screeng-capture.mjs` and `ui-compare.mjs`.
 
 ### Mandatory Fields Per Step
 

@@ -312,6 +312,32 @@ Rules:
 - Verify the derivation still agrees with the map:
   `bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --self-test`
 
+### What the project has to document with (P085)
+
+Detection writes three facts into `project.yaml`, next to the rest of what
+auto-detection found. They exist so a plan does not have to rediscover them
+every time it is written — it reads the answer, the same way it reads its band:
+
+```yaml
+documentation:
+  in_app_help: src/app/napoveda     # dir/file of the in-app help, omit if none
+  docusaurus: docs/docs/myproject   # the docs site's content root, omit if none
+  screenshot_tool: "node scripts/lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
+```
+
+How to fill each:
+- **`in_app_help`** — look for a help route or page (`help`, `napoveda`,
+  `docs` inside the app's own routes). Ask the PM to confirm the path; do not
+  guess one into the file.
+- **`docusaurus`** — a `docusaurus.config.*` in the repo (or a sibling docs
+  repo the PM names) gives the content root.
+- **`screenshot_tool`** — the plugin ships `scripts/lib/ui-fidelity/ui-capture.mjs`;
+  record the command that runs it here, or the project's own tool if it has one.
+
+**Omit a key the project does not have.** An absent key means the obligation
+does not apply, and `aid-plan-lint.sh` records that it asked nothing — an empty
+string would instead look like a path that failed to match.
+
 ### Vulcan Standards — Ecosystem Docs Integration
 
 When `vulcan` standards are selected, the project CLAUDE.md must reference the authoritative
