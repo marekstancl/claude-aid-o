@@ -294,14 +294,30 @@ _doc_plan() {   # <type> <files-bullets…>
   rm -rf "$DOCDIR"
 }
 
-@test "P085: naming the help path satisfies it" {
+@test "P085: naming EVERY surface satisfies it" {
+  _doc_setup 'documentation:
+  in_app_help: src/help
+  docusaurus: docs/docs'
+  _doc_plan regular 'Modify: `src/feature.ts` — new behaviour' \
+    'Modify: `src/help/features.md` — the section describing it' \
+    'Modify: `docs/docs/features.md` — the page describing it'
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
+  [ "$status" -eq 0 ]
+  rm -rf "$DOCDIR"
+}
+
+@test "P085: naming only ONE of two surfaces is not enough" {
+  # Half the users are left on the old behaviour, and the finding names which
+  # half (codex review of EPIC 2, finding 1).
   _doc_setup 'documentation:
   in_app_help: src/help
   docusaurus: docs/docs'
   _doc_plan regular 'Modify: `src/feature.ts` — new behaviour' \
     'Modify: `src/help/features.md` — the section describing it'
   run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docs/docs"* ]]
+  [[ "$output" != *"'src/help'"* ]]
   rm -rf "$DOCDIR"
 }
 

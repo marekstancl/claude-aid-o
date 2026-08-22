@@ -587,9 +587,10 @@ CP1-deep:
   → C0 lenses each produce: stop_rule_blockers[] (advisory/observe in E4), findings[], confidence: high|medium|low
   → the reuse_evidence dispatch is given two inputs the other lenses do not need, both quoted VERBATIM:
       (a) every founding step's **Reuse check:** field, exactly as written — the lens judges the search, so a paraphrase is not the artifact
-      (b) the standards derived from the plan's declared paths:
-          bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --self-test   # confirms the derivation still matches the live map
-          (the derivation itself comes from aid_standards_derive, which aid-plan-lint.sh already ran over this plan)
+      (b) the standards this plan's paths bind — RUN the derivation and paste its output, do not describe it:
+          bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --derive "$PLAN_FILE"
+          Exit 1 = the project has no standards map, so this input legitimately does not exist.
+          Exit 2 = a map is configured but unreadable; pass that fact to the lens rather than an empty list.
       If either input is unavailable, the lens still runs and RECORDS that the input was missing — it never guesses one.
   → adjudicator reviews all 9 lenses: accepts blocker only if it has command/artifact + file:line evidence (L1/L2/L3 blocking; C0 advisory — see review-checkpoint-contracts.md §C0 Adjudicator Addendum)
   → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]

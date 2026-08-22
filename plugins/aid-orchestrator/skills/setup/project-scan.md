@@ -30,7 +30,7 @@ Called by `/aid-setup` router or `/aid-setup scan`.
 | `Makefile` | Make | detect targets for test/lint/build |
 | `docusaurus.config.*` | Documentation site | `documentation.docusaurus` — the content root |
 | a help route/page (`help`, `napoveda`) | In-app help | `documentation.in_app_help` — its path |
-| `scripts/lib/ui-fidelity/ui-capture.mjs` (or the project's own) | Screenshot tool | `documentation.screenshot_tool` — the command that runs it |
+| `lib/ui-fidelity/ui-capture.mjs` (or the project's own) | Screenshot tool | `documentation.screenshot_tool` — the command that runs it |
 
 **The three `documentation.*` facts (P085)** exist so a plan does not rediscover
 them every time it is written: a plan that changes behaviour a user meets must

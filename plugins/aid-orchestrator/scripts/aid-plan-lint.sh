@@ -497,6 +497,25 @@ if [[ "$band" != "light" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Declared concurrency (P085 Step 7) — the writing-time half
+# ---------------------------------------------------------------------------
+# aid-plan-parallel-check.sh owns the rule; the lint is where a plan author
+# hears about it while the plan is still being written. ADVISORY here, BLOCKING
+# in aid-generation-readiness.sh — the same two-stage model the Files grammar
+# has, and the reason the check has an --advisory mode at all.
+#
+# Two callers of one program, never two implementations: this passes the output
+# through and adds nothing of its own.
+if [[ -x "${SCRIPT_DIR}/aid-plan-parallel-check.sh" ]]; then
+  _par_out="$("${SCRIPT_DIR}/aid-plan-parallel-check.sh" "$PLAN" --advisory 2>&1)" || true
+  _par_n="$(printf '%s' "$_par_out" | sed -n 's/^aid-plan-parallel-check: \([0-9]\{1,\}\) finding(s).*/\1/p')"
+  if [[ -n "$_par_n" && "$_par_n" -gt 0 ]]; then
+    advisories=$((advisories + _par_n))
+    [[ "$QUIET" -eq 0 ]] && printf '%s\n' "$_par_out" >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Documentation and help (P085 Step 6)
 # ---------------------------------------------------------------------------
 # A plan that changes what a user experiences owes a CONCRETE way in: the file
@@ -516,18 +535,37 @@ fi
 # and the plan already declares this about itself.
 
 # _doc_surfaces <project-root> — the documentation surfaces this project has,
-# one "<key>=<path>" per line. Nothing (and return 1) when it has none, or when
-# there is no project.yaml or no yq to read it with.
+# one "<key>=<path>" per line. THREE answers, the same three the standards map
+# has, and for the same reason: "cannot read the configuration" must never be
+# rounded down to "this project has no documentation".
+#   0  at least one surface, printed
+#   1  the configuration is readable and records none — a legitimate state
+#   2  there IS a project.yaml but it cannot be read (no yq) — a broken
+#      environment, and the caller says so out loud
 _doc_surfaces() {
   local cfg="$1/.aid-o/config/project.yaml" k v found=1
   [[ -f "$cfg" ]] || return 1
-  command -v yq >/dev/null 2>&1 || return 1
+  command -v yq >/dev/null 2>&1 || return 2
   for k in in_app_help docusaurus; do
-    v="$(yq -r ".documentation.${k} // \"\"" "$cfg" 2>/dev/null)"
+    v="$(yq -r ".documentation.${k} // \"\"" "$cfg" 2>/dev/null)" || return 2
     [[ -n "$v" && "$v" != "null" ]] || continue
     printf '%s=%s\n' "$k" "$v"; found=0
   done
   return "$found"
+}
+
+# _plan_touches <path-prefix> — does any Files bullet in the plan declare a path
+# at or under <path-prefix>?
+_plan_touches() {
+  local prefix="$1" i body p
+  for i in "${!_bullet_txts[@]}"; do
+    body="$(_aid_files_bullet_body "${_bullet_txts[$i]}")" || continue
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      [[ "$p" == "${prefix%/}/"* || "$p" == "$prefix" ]] && return 0
+    done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
+  done
+  return 1
 }
 
 # No resolvable project root means no project.yaml to read the surfaces from —
@@ -538,24 +576,21 @@ if [[ "$band" != "light" && -n "${_project_root:-}" ]]; then
   case "$_doc_type" in
     refactor|docs) : ;;   # by definition not a change a user meets
     *)
-      if _doc_list="$(_doc_surfaces "${_project_root:-}")"; then
-        _doc_hit=""
-        while IFS='=' read -r _doc_key _doc_path; do
-          [[ -n "${_doc_path:-}" ]] || continue
-          for _bi in "${!_bullet_txts[@]}"; do
-            _doc_body="$(_aid_files_bullet_body "${_bullet_txts[$_bi]}")" || continue
-            while IFS= read -r _doc_p; do
-              [[ -n "$_doc_p" ]] || continue
-              [[ "$_doc_p" == "${_doc_path%/}/"* || "$_doc_p" == "$_doc_path" ]] && { _doc_hit="$_doc_key"; break 3; }
-            done < <(_aid_split_path_entry "$_doc_body" 2>/dev/null || true)
-          done
-        done <<< "$_doc_list"
-        if [[ -z "$_doc_hit" ]]; then
-          _strict_finding "" "this plan changes behaviour a user meets (type: ${_doc_type:-regular}) but no step declares a path under $(printf '%s' "$_doc_list" | cut -d= -f2- | tr '\n' ' ')— name the file and section that has to change, the way any other work is named. A plan that genuinely changes nothing user-visible says so with type: refactor."
-        fi
-      else
-        [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] this project records no in-app help and no documentation site (project.yaml -> documentation), so no documentation step is owed." >&2
-      fi
+      _doc_list="$(_doc_surfaces "${_project_root:-}")"; _doc_rc=$?
+      case "$_doc_rc" in
+        2) _strict_finding "" "this project has a .aid-o/config/project.yaml but it cannot be read (no yq) — that is a broken environment, not a project without documentation; the documentation obligation could not be evaluated." ;;
+        1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] this project records no in-app help and no documentation site (project.yaml -> documentation), so no documentation step is owed." >&2 ;;
+        0)
+          # EVERY surface the project has, not the first one found: a plan that
+          # updates the docs site and forgets the in-app help has still left
+          # half its users on the old behaviour.
+          while IFS='=' read -r _doc_key _doc_path; do
+            [[ -n "${_doc_path:-}" ]] || continue
+            _plan_touches "$_doc_path" && continue
+            _strict_finding "" "this plan changes behaviour a user meets (type: ${_doc_type:-regular}) but no step declares a path under '${_doc_path}' (project.yaml -> documentation.${_doc_key}) — name the file and section that has to change, the way any other work is named. A plan that genuinely changes nothing user-visible says so with type: refactor."
+          done <<< "$_doc_list"
+          ;;
+      esac
       ;;
   esac
 fi
@@ -572,7 +607,11 @@ if [[ "$QUIET" -eq 0 ]]; then
   else
     echo "aid-plan-lint: PASS — all Files entries are canonical." >&2
   fi
-  [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} description-only path advisory/-ies (never blocking — declare them as their own bullets if the step edits them)." >&2
+  # ONE counter, so the closing line must not name ONE of the things it counts:
+  # since P085 it also carries reuse-degree, standards-map and wave advisories,
+  # and calling all of them "description-only path" advisories was a count that
+  # contradicted the lines printed right above it.
+  [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} advisory finding(s) above — never blocking, in either mode." >&2
 fi
 
 # Telemetry (P084 Step 7): how often this lint STOPS a plan, and on what. The

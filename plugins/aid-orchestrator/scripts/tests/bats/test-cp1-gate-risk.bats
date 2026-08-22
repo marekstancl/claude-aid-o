@@ -197,6 +197,13 @@ write_clean_cp1_evidence() {
     printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "${dir}/${f}"
   done
   printf 'accepted_blockers: []\nrejected_blockers: []\nverdict: pass\n' > "${dir}/cp1-adjudicator.md"
+  # P085: a `full` plan also owes the reuse_evidence C0 lens, one level above
+  # cp1-deep/. Written here so the cases below keep testing what they are named
+  # after — the C0 cross-provider requirement — rather than tripping on the
+  # lens check that now runs first.
+  mkdir -p "$TMP/.aid-o/work/evidence/${plan_id}/c0"
+  printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' \
+    > "$TMP/.aid-o/work/evidence/${plan_id}/c0/c0-lens-reuse_evidence.md"
 }
 
 @test "AC6/AC7: a light plan passes the gate with no evidence on disk at all" {

@@ -322,7 +322,7 @@ every time it is written — it reads the answer, the same way it reads its band
 documentation:
   in_app_help: src/app/napoveda     # dir/file of the in-app help, omit if none
   docusaurus: docs/docs/myproject   # the docs site's content root, omit if none
-  screenshot_tool: "node scripts/lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
+  screenshot_tool: "node lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
 ```
 
 How to fill each:
@@ -331,7 +331,7 @@ How to fill each:
   guess one into the file.
 - **`docusaurus`** — a `docusaurus.config.*` in the repo (or a sibling docs
   repo the PM names) gives the content root.
-- **`screenshot_tool`** — the plugin ships `scripts/lib/ui-fidelity/ui-capture.mjs`;
+- **`screenshot_tool`** — the plugin ships `lib/ui-fidelity/ui-capture.mjs`;
   record the command that runs it here, or the project's own tool if it has one.
 
 **Omit a key the project does not have.** An absent key means the obligation

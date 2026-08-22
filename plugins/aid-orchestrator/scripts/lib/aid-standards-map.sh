@@ -151,12 +151,32 @@ aid_standards_map_defects() {
   rm -f "$block_file"
 }
 
+# --derive <plan>: the standards this plan's declared paths bind, one
+# "<area-tag>\t<id>,<id>" per line. The CLI exists because the C0 dispatch has
+# to PASTE this list into a lens prompt (commands/aid-plan.md), and a sourced
+# shell function is not something a prompt can quote.
+#
 # --self-test: the derivation agrees with the live map for three control paths.
 # Runnable, because "the tool and the map still say the same thing" is a claim
 # that decays silently — the map is edited by people who do not run AID.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  [[ "${1:-}" == "--self-test" ]] || { echo "Usage: aid-standards-map.sh --self-test" >&2; exit 2; }
   root="$(cd "${_AID_SM_DIR}/../../../.." && pwd)"
+  if [[ "${1:-}" == "--derive" ]]; then
+    [[ -n "${2:-}" && -f "$2" ]] || { echo "Usage: aid-standards-map.sh --derive <plan.md>" >&2; exit 2; }
+    # The plan's own workspace decides which map applies, not this file's repo:
+    # the same resolution aid-plan-lint.sh uses, so the dispatch and the lint
+    # cannot read two different maps for one plan.
+    # shellcheck source=aid-plan-band.sh
+    source "${_AID_SM_DIR}/aid-plan-band.sh"
+    derive_root="$(_aid_band_project_root "$2")" || derive_root="$root"
+    aid_standards_derive "$2" "$derive_root"; derive_rc=$?
+    case "$derive_rc" in
+      1) echo "aid-standards-map: no standards map configured for ${derive_root} — this project owes no '## Standards' section." >&2 ;;
+      2) echo "aid-standards-map: a map IS configured for ${derive_root} but it cannot be read (missing file, unparseable machine block, or no yq)." >&2 ;;
+    esac
+    exit "$derive_rc"
+  fi
+  [[ "${1:-}" == "--self-test" ]] || { echo "Usage: aid-standards-map.sh --self-test | --derive <plan.md>" >&2; exit 2; }
   plan="$(mktemp)"; trap 'rm -f "$plan"' EXIT
   {
     printf -- '---\nid: P999\n---\n\n### Step 1: control\n\n**Files:**\n'

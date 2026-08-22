@@ -638,7 +638,7 @@ What the project HAS is not rediscovered every time a plan is written.
 documentation:
   in_app_help: src/app/napoveda          # the in-app help surface, if any
   docusaurus: docs/docs/myproject        # the documentation site, if any
-  screenshot_tool: "node scripts/lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
+  screenshot_tool: "node lib/ui-fidelity/ui-capture.mjs <url> <out.png>"
 ```
 
 - **A project with neither owes nothing here**, and `aid-plan-lint.sh` records
@@ -656,7 +656,7 @@ documentation:
 - **Never a screenshot of production data.** Where a shot would capture
   anything real, the plan says so and uses a fixture.
 
-The tooling for screenshots is not written per plan: `scripts/lib/ui-fidelity/`
+The tooling for screenshots is not written per plan: `lib/ui-fidelity/`
 already carries `ui-capture.mjs`, `screeng-capture.mjs` and `ui-compare.mjs`.
 
 ### Mandatory Fields Per Step

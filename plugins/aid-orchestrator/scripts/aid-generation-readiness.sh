@@ -58,7 +58,9 @@ if ! par_out="$("${SCRIPT_DIR}/aid-plan-parallel-check.sh" "$plan" 2>&1)"; then
   echo "READINESS: FAIL — steps declared in one wave must not name the same file; full grammar: skills/plan-writing.md" >&2
   exit 1
 fi
-if [[ -n "$par_out" ]]; then printf '%s\n' "$par_out" >&2; fi
+# Deliberately NOT printed on success: aid-plan-lint.sh above already ran the
+# same check in its advisory mode and passed its findings through. Printing the
+# passing run again would show every plan the same notes twice.
 if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   # P084 Step 7 — the lint logs its own verdict; this is the OTHER stop this
   # script owns, so the two reasons a plan never reaches generation are both
