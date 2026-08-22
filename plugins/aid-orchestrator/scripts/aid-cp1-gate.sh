@@ -25,7 +25,9 @@
 #   full   — the plan touches decision machinery (state machines, gate runner,
 #            generation chain, release boundary, plan contract, auth, migrations,
 #            dependency manifests). Today's behaviour, unchanged.
-#   medium — bounded behaviour: other scripts, tests, policies, schemas, CI.
+#   medium — the DATA those decisions read: policies, schemas, templates,
+#            machine-read config, CI. NOT tests and not ordinary code: those
+#            are `light` and are reviewed per step, against a real diff.
 #   light  — documentation, help, commands, skills: no evidence required.
 #
 # Two rules decide correctness, both deliberate:

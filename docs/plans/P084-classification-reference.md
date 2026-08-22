@@ -24,10 +24,11 @@ bash plugins/aid-orchestrator/scripts/tests/check-classification-reference.sh \
      docs/plans/P084-classification-reference.md
 ```
 
-Skript hlásí zvlášť **false negatives** — plán ručně označený `full`, který
-klasifikátor pošle níž. To je jediná chyba, která škodí: ceremonie vypadne tam,
-kde je potřeba. Opačný směr (ruční `light`, strojové `full`) je jen drahý, ne
-nebezpečný, ale i ten se hlásí.
+Skript hlásí zvlášť **podcenění** — klasifikátor skončil NÍŽ než ruční štítek.
+To je jediná chyba, která škodí: ceremonie vypadne tam, kde je potřeba. Opačný
+směr (klasifikátor výš než štítek) je jen drahý, ne nebezpečný, ale i ten se
+hlásí. Směr rozhoduje pořadí pásem, ne to, jaký štítek řádek nese — `medium`
+ručně a `light` strojově je podcenění stejně jako `full` → `light`.
 
 ## Sada
 
@@ -88,5 +89,5 @@ ne nástroj) by rozložení vypadalo jinak; tenhle dokument o něm nic netvrdí.
 ## Údržba
 
 Přibude-li do mapy `defaults/policies/risk-paths.yaml` řádek, patří sem řádek
-i sem — a naopak. Kontrolní skript volá `test-cp1-gate-risk.bats`, takže běží na merge cestě —
-rozchod mapy a štítků spadne, ne se prosadí.
+i sem — a naopak. Kontrolní skript volá sada `test-cp1-gate-risk.bats` (patro t0), takže běží na
+merge cestě — rozchod mapy a štítků spadne, ne se prosadí.

@@ -128,7 +128,9 @@ EOF
 # Band-scoped obligations (P084 Step 3)
 #
 # The band split is written in plan-writing.md and ENFORCED by aid-plan-lint.sh,
-# which asks aid-cp1-gate.sh for the band. These cases assert the two halves
+# which reads the band from the shared classifier lib/aid-plan-band.sh (NOT by
+# calling the gate — the gate is consulted once per plan and the lint runs
+# inside generation's pre-flight). These cases assert the two halves
 # agree: what the document promises a light plan is not asked for, the lint does
 # not ask for either.
 # ---------------------------------------------------------------------------

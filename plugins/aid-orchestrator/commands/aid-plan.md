@@ -358,7 +358,7 @@ Write an exhaustive implementation plan from specification or topic.
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
-8p. **PM page (automatic, right after the write)** — render the plan's summary
+8p. **PM page (required, right after the write)** — render the plan's summary
     and show the PM that page, not the plan:
     ```bash
     source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh"

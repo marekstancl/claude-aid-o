@@ -6,26 +6,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [2.87.0] — 2026-08-22
 
 ### Added
-- **Plan ceremony bands** — how much review a plan owes is now classified from the paths its steps DECLARE in their `**Files:**` blocks, against a curated map (`defaults/policies/risk-paths.yaml`), instead of a regex scan of the whole plan document that matched Context, Architecture and prose alike (measured: 5–33 hits on each of six live plans, so effectively every plan was high-risk). Three bands — `full` (decision machinery), `medium` (the data those decisions read), `light` (everything else) — and what each one owes is a table the gate READS (`review-checkpoints.yaml` → `ceremony_bands`), not prose describing one.
-- **`aid-cp1-gate.sh --classify-only`** — prints a plan's band without running the gate, for session-level callers such as `/aid-plan`.
-- **`lib/aid-plan-band.sh`** — the one classifier, sourced by both the gate and the plan lint so the band a plan is written against and the band the gate checks can never be two different things.
-- **`lib/aid-plan-summary.sh`** — the PM's page about a newly written plan, rendered from the plan's own facts through the shared artifact renderer. Every figure on it is counted from the plan, not asserted.
-- **Plan-scoped telemetry** — band, gate result and lint verdict are written to `evidence/<plan_id>/timeline.jsonl`. The workspace-root `timeline.jsonl` had 0 lines not because the logger was broken but because plan-time events had no home; they have one now.
-- **A hand-labelled classification reference** — 23 real plans labelled before the classifier first ran over them, re-checked by `scripts/tests/check-classification-reference.sh`, which reports a false negative (hand label `full`, classifier lower) separately from over-classification.
-
-### Changed
-- **Plan obligations follow the band** — `full` and `medium` steps owe Architecture Context, Error Handling and Edge Cases; a `light` plan owes none of them and is complete without them. Every one of the 28 Completeness Gate checks now carries a verdict (universal or band-scoped), and `aid-plan-lint.sh` enforces the split (blocking for `lifecycle_strict` plans, a loud advisory for legacy ones). A bare `**Field:**` label with nothing after it no longer satisfies an obligation.
-- **Tests are designed, not counted** — the habit of one `Test:` bullet per step is retired in favour of one `## Testing Strategy` section with content, saying which behaviour the plan verifies, why that one, and where it goes. A `Test:` bullet naming a suite that does not exist yet still MUST declare its tier.
-- **The plan no longer carries a summary written for a human** — `## Stakeholder Brief` and its three siblings are reported by the lint; the PM page is rendered instead.
-- **A passing plan lint is no longer silent through generation** — `aid-generation-readiness.sh` swallowed the lint's output on success, which made every legacy advisory invisible exactly where the lint actually runs.
-
-### Fixed
-- **The band classifier can no longer fail open** — a missing or unparseable path map, a host without `yq`, a plan that declares no file, or an unknown band in the requirements table all resolve to `full`. The prose-scan fallback was removed outright: it answered `light` for a plan that declares `aid-run-gates.sh` but says nothing alarming.
-- **`docs/security/*.md` is no longer mistaken for security code** — the consumer-project categories (auth, request surface, payments, migrations) require a code extension, so a documentation plan is not pushed into the full ceremony by a directory name.
-
-## [2.87.0] — 2026-08-22
-
-### Added
 - **Plan ceremony bands** — the CP1 gate classifies a plan as `full`, `medium` or `light` from the paths its steps declare in their `Files:` blocks, read with the shared scoping parser against the new curated map `defaults/policies/risk-paths.yaml`, instead of grepping the whole plan document for eight content patterns (measured on six live plans: 5 to 33 hits each, so every plan was high-risk and the ceremony was proportional to nothing). Release files are excluded before matching, `risk: high` still raises a band, nothing lowers one but the declared paths, and every uncertainty — no declared path, no map, an unparseable map, no `yq` — resolves to `full`.
 - **A requirements table the gate actually reads** — `defaults/policies/review-checkpoints.yaml` gained `review_checkpoints.ceremony_bands`, mapping each band to the CP1-deep lenses, the C0 cross-provider round and the CP1 ledger; `aid-cp1-gate.sh` reads it, so the band a session dispatches for and the band the gate checks can never be two different things.
 - **`scripts/lib/aid-plan-band.sh`** — one classifier with two consumers, the gate and the plan lint. The lint sources it rather than shelling out to the gate, because "the CP1 gate is consulted exactly once per plan" is an invariant the generation suites assert by counting gate invocations.
@@ -41,6 +21,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **The band table could not be switched off** — reading a `false` requirement through yq's `//` alternative operator turned every disabled requirement back on, the same falsy-alternative trap the gate already documents for `jq`.
+- **The band classifier could fail open** — a missing or unparseable path map, a host without `yq`, a plan that declares no file, or an unknown band in the requirements table now all resolve to `full`. The prose-scan fallback was removed outright rather than kept as a safety net: it answered `light` for a plan that declares `aid-run-gates.sh` but says nothing alarming in prose.
+- **A second, hidden plan classifier could deadlock a `full` plan** — `lib/aid-c0-plan-review.sh` carried a verbatim copy of the deleted whole-document scan and used it to decide whether to dispatch the Codex review at all. A `full`-band plan whose prose matched none of the eight patterns (one in five of the hand-labelled reference plans) had its review skipped, its skipped report refused by `verify`, and the gate blocking on the report nothing would produce. It now asks the same classifier the gate does.
+- **`docs/security/*.md` was mistaken for security code** — the consumer-project categories (auth, request surface, payments, migrations) require a code extension, so a documentation plan is no longer pushed into the full ceremony by a directory name.
 - **`## Testing Strategy` was checked with a regex mawk does not support** — the `{1,6}` interval was read literally, so the check silently found "content" in every plan.
 
 ## [2.86.5] — 2026-08-16

@@ -230,7 +230,9 @@ step at CP2/CP3 against a real diff).
 - Adding a path pattern is one edit in `risk-paths.yaml` — plus one row in
   `docs/plans/P084-classification-reference.md`, because
   `scripts/tests/check-classification-reference.sh` re-runs the classifier over
-  23 hand-labelled real plans and fails on any disagreement. A false NEGATIVE
+  fixtures reproducing 23 hand-labelled real plans (`.aid-o/` is gitignored, so
+  the plans themselves are not in the repo) and fails on any disagreement,
+  naming the direction — under-classification is the one that matters. A false NEGATIVE
   (hand label `full`, classifier lower) is reported separately: it is the only
   direction that removes review from where it was wanted.
 - Never call `aid-cp1-gate.sh --classify-only` from anything inside generation.
@@ -2446,11 +2448,18 @@ suites assert by COUNTING gate invocations
 runs inside generation's own pre-flight.
 
 **Adding a path to the map** is the common change and needs no code: add the
-regex to `full_paths` or `medium_paths`, add a row to
+regex to `full_paths` or `medium_paths`, add a fixture under
+`scripts/tests/fixtures/plan-risk/`, add its row to
 `docs/plans/P084-classification-reference.md`, and
 `scripts/tests/check-classification-reference.sh` (called from
-`test-cp1-gate-risk.bats`) keeps the two honest. Adding to one without the other
+`test-cp1-gate-risk.bats`) keeps the three honest. Adding one without the others
 fails the suite on purpose.
+
+**How the plan-review shape was chosen** — `docs/plans/P084-q7-experiment.md`
+records the live measurement behind it: three ways of putting a plan in front of
+a reviewer, six runs, scored against the defects the implementation actually
+hit. Reviewing the whole plan twice beat splitting it into parts, which was the
+only variant that produced false findings.
 
 **What the bands mean.** `full` is the machinery that decides what the pipeline
 DOES — state machines, gate runner, generation chain, release boundary,

@@ -47,11 +47,13 @@ here — it is classified from the paths this plan's steps declare:
 bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan <this plan> --classify-only
 ```
 
-`full` (decision machinery) owes everything; `medium` (other scripts, tests,
-policies, schemas, CI) owes everything except the C0 cross-provider round;
-`light` (documentation, help, commands, skills) owes only the universal
-sections and, per step, only Objective / Files / Acceptance Criteria /
-Dependencies / Effort / AID Role. Full table:
+`full` (the machinery that decides what the pipeline does) owes everything;
+`medium` (the DATA those decisions read — policies, schemas, templates,
+machine-read config, CI) owes everything except the C0 cross-provider round;
+`light` (everything else, including documentation, help, commands, skills,
+TESTS and ordinary feature code) owes only the universal sections and, per
+step, only Objective / Files / Acceptance Criteria / Dependencies / Effort /
+AID Role. Full table:
 `skills/plan-writing.md` §"Obligations by ceremony band".
 
 ## Context

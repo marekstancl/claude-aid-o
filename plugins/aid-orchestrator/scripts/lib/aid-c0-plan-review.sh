@@ -93,6 +93,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The plan's ceremony band — the ONE classifier (P084). See _c0_risk_of below
+# for why this file no longer carries its own copy of a plan risk scan.
+# shellcheck source=aid-plan-band.sh
+source "${SCRIPT_DIR}/aid-plan-band.sh"
+
 # ---------------------------------------------------------------------------
 # Reuse the shared transport + primitives from aid-c3-dispatch.sh. The guard
 # at the bottom of that file (`if [[ "${BASH_SOURCE[0]}" == "${0}" ]]`) means
@@ -184,35 +189,33 @@ _c0_read_frontmatter() {
   [[ "$fm_done" -eq 1 ]] || _fail "plan file missing closing '---' for frontmatter block: $plan_file"
 }
 
-# High-risk patterns — VERBATIM copy of aid-cp1-gate.sh's HIGH_RISK_PATTERNS
-# (that script is outside this step's allowed_paths; see comment above).
-_C0_HIGH_RISK_PATTERNS=(
-  '@app\.(get|post|put|patch|delete|head|options)\(|@router\.(get|post|put|patch|delete|head|options)\(|add_route\(|def [a-zA-Z_]+\(.*request|async def [a-zA-Z_]+\(.*request'
-  'authenticate|authorize|verify_token|check_permission|require_auth'
-  'Schema|Validator|validate\(|marshmallow|pydantic|BaseModel'
-  'migrate|alembic|revision|upgrade|downgrade'
-  'fsm-state|state_machine|cmd_transition|aid-fsm\.sh'
-  'exec\(|subprocess|eval\(|pickle|yaml\.load'
-  'stripe|payment|charge|billing|invoice'
-  'requirements\.txt|pyproject\.toml|package\.json|Gemfile'
-)
-
-# _c0_risk_of <plan_file>  — echoes "high" or "low" (docs/medium collapse to
-# "low" here; only "high" auto-runs Codex per the plan's gate contract).
+# _c0_risk_of <plan_file> — echoes "high" or "low": whether this plan owes a
+# cross-provider Codex review at all.
+#
+# ONE CLASSIFIER, NOT TWO (P084). This used to hold a VERBATIM copy of
+# aid-cp1-gate.sh's whole-document HIGH_RISK_PATTERNS scan, and that copy
+# outlived the original: the gate now classifies a ceremony BAND from the paths
+# a plan declares, and it REQUIRES a verified c0-plan-review.json for band
+# `full`. With two classifiers the two could disagree in the blocking
+# direction, and one of the five hand-labelled `full` plans in
+# docs/plans/P084-classification-reference.md did exactly that (ref-P081:
+# band=full, prose scan=low). The consequence was a deadlock, not a warning —
+# dispatch skipped the review, verify refused to bless a skipped report, and
+# the gate blocked on the report that was never produced.
+#
+# So the answer comes from the SAME library the gate uses: band `full` owes the
+# review, anything else does not. Frontmatter `risk: high` still raises a band
+# to `full` inside that classifier, so the old belt-and-suspenders survives.
 _c0_risk_of() {
-  local plan_file="$1" pattern
-  _c0_read_frontmatter "$plan_file"
-  if [[ "$_C0_FM_RISK" == "high" ]]; then
-    echo "high"
-    return 0
-  fi
-  for pattern in "${_C0_HIGH_RISK_PATTERNS[@]}"; do
-    if grep -qE "$pattern" "$plan_file" 2>/dev/null; then
-      echo "high"
-      return 0
-    fi
-  done
-  echo "low"
+  local plan_file="$1" band_line band
+  band_line="$(aid_plan_band "$plan_file")" || band_line=""
+  band="${band_line%%$'\t'*}"
+  case "$band" in
+    full) echo "high" ;;
+    medium|light) echo "low" ;;
+    # A classification that did not happen is not evidence of low risk.
+    *)    echo "high" ;;
+  esac
 }
 
 # _c0_plan_id_of <plan_file>  — the plan's frontmatter `id:` field. Fails

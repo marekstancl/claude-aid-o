@@ -498,9 +498,11 @@ band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN_FILE" \
         --project-root "$PROJECT_ROOT" --classify-only)"   # full | medium | light
 ```
 
-Run this FIRST, before revising the plan against anything below. `aid-plan-lint.sh`
-asks the same command and enforces the same split, so the band you write against
-and the band the lint checks are one classification, never two.
+Run this FIRST, before revising the plan against anything below.
+`aid-plan-lint.sh` enforces the same split from the SAME classifier — it sources
+`lib/aid-plan-band.sh` directly rather than shelling out to the gate, because
+the gate is consulted exactly once per plan — so the band you write against and
+the band the lint checks are one classification, never two.
 
 | Obligation | `full` | `medium` | `light` |
 |---|---|---|---|
