@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.86.5** (current) — the nightly's own red result was an input to a test the nightly runs, so the failure kept itself alive for four nights
+- **v2.87.0** (current) — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
+- **v2.86.5** — the nightly's own red result was an input to a test the nightly runs, so the failure kept itself alive for four nights
 - **v2.86.4** — the first measured merge path: four suites retagged to the tier their cost actually supports, and a CI ceiling raised as a declared debt rather than mistaken for a budget
-- **v2.86.3** — the first nightly that ran to the end, and the six failures that were its own environment rather than the code: an exported override deciding what five suites assert, a shallow checkout that cannot read the past, and an isolation step that blew the job ceiling
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

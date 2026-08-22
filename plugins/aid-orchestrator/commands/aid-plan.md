@@ -318,7 +318,7 @@ Edge cases:
     "+N more matches".
 
 This is in addition to (not replacing) the standard plan-writing.md
-Forbidden Phrase + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19) verification.
+Forbidden Phrase + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21) verification.
 
 Output:
 ```
@@ -356,8 +356,27 @@ Write an exhaustive implementation plan from specification or topic.
 4. **Codebase analysis** — identify affected areas, read key files, note patterns
 5. **Clarification** — max 5 questions if spec has gaps (skip if clear)
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
-7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
+7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21; eight are band-scoped — see `skills/plan-writing.md`)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
+8p. **PM page (required, right after the write)** — render the plan's summary
+    and show the PM that page, not the plan:
+    ```bash
+    source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh"
+    aid_plan_summary_render ".aid-o/plans/P{NNN}-{topic}.md" \
+      ".aid-o/work/evidence/P{NNN}/plan-summary-artifact.html"
+    ```
+    Publish the rendered body with the Artifact tool (the renderer never
+    publishes — same boundary as `lib/aid-plan-close-summary.sh`). Every figure
+    on the page is counted from the plan, so do NOT restate it in prose and do
+    NOT write a summary section into the plan itself — `plan-writing.md` MUST
+    rule 17 forbids it and `aid-plan-lint.sh` reports it.
+
+    **Enforcement, stated honestly:** this is an INSTRUCTION, the weakest form
+    there is — nothing fails if a session skips it. The mechanism that will
+    make it hard is the hook layer of Plan 3 (a `Stop` hook refusing to close a
+    turn that wrote a plan without rendering its page). Until then it is a
+    deliberately accepted risk, registered as `plan_artifact_rendered` with
+    `severity: advisory` in the enforcement registry.
 8a. **Files-shape lint (automatic, before CP1)** — run
     `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"`.
     On a non-zero exit, fix the exact Files entries it names (per the grammar in
@@ -491,24 +510,57 @@ command accountable, so an unrecordable archive is not performed.
 
 Risk classification runs automatically during CP1 before EPIC generation. It applies to any plan processed by `/aid-plan`.
 
-### Risk Detection
+### Band classification
 
-A plan is **high-risk** if it matches ANY pattern from `skills/review-checkpoint-contracts.md` (auth, routes, schema/validation, migrations, fsm/state, security sinks, payment, dep manifests) OR has `risk: high` in frontmatter.
+The plan's **ceremony band** is classified from the paths its steps DECLARE in
+their `**Files:**` blocks — never from prose anywhere in the document. Ask the
+gate; do not re-derive it:
 
-A plan is **low-risk** if it matches none of those patterns AND either has `risk: low` in frontmatter or is tagged `risk: medium` with no pattern match.
+```bash
+band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" \
+        --plan "$PLAN_FILE" --project-root "$PROJECT_ROOT" --classify-only)"
+```
 
-### CP1-light (default for low-risk plans)
+| Band | What the plan declares it touches | What runs |
+|---|---|---|
+| `full` | decision machinery: state machines, gate runner, generation chain, release boundary, `skills/plan-writing.md`, auth, migrations, dependency manifests | CP1-light + CP1-deep (3 lenses + 5 C0 lenses + adjudicator) + the C0 cross-provider loop |
+| `medium` | the DATA those decisions read: policies, schemas, templates, machine-read config, CI | CP1-light + CP1-deep (3 lenses + adjudicator); **no C0 lenses, no cross-provider loop** |
+| `light` | everything else — documentation, help, commands, skills, tests, ordinary feature code | CP1-light only — **dispatch no lens at all** |
 
-Runs the standard `plan-writing.md` completeness checklist (28 checks). If no `REVISE_REQUIRED` findings, proceed to EPIC generation.
+Ordinary code being `light` surprises people, so it is worth saying plainly:
+the band measures whose DECISIONS a plan changes, not whether it changes code.
+Code is reviewed where reviewing code works — per step at CP2/CP3, against a
+real diff. A plan-time lens panel earns its cost on the machinery no later
+checkpoint gets a second chance at.
 
-### CP1-deep (for high-risk plans)
+Frontmatter `risk: high` raises a band to `full`. Nothing lowers a band except
+changing what the plan declares it will touch. A plan that declares no file, a
+missing or unparseable path map (`defaults/policies/risk-paths.yaml`) and a host
+without `yq` all classify as `full` — fail-closed, with no prose-guessing
+fallback.
 
-Extends CP1-light with 8 parallel review lenses (L1/L2/L3 blocking + 5 C0 observe) and an adjudicator. The 4 L1/L2/L3+adjudicator evidence files must exist before EPIC generation is allowed; 5 C0 lens files are observe-only (E4).
+What each band REQUIRES as evidence is a table, not prose:
+`defaults/policies/review-checkpoints.yaml` → `review_checkpoints.ceremony_bands`.
+`aid-cp1-gate.sh` reads that same table, so a band you dispatch for and a band
+the gate checks for can never be two different things.
+
+### CP1-light (every band)
+
+Runs the standard `plan-writing.md` completeness checklist. If no
+`REVISE_REQUIRED` findings, proceed to EPIC generation. For `light` this is the
+whole of CP1.
+
+### CP1-deep (bands `full` and `medium`)
+
+Extends CP1-light with parallel review lenses and an adjudicator: 8 lenses for
+`full` (L1/L2/L3 blocking + 5 C0 observe), the 3 L1/L2/L3 lenses for `medium`.
+The 4 L1/L2/L3+adjudicator evidence files must exist before EPIC generation is
+allowed; the 5 C0 lens files are observe-only (E4).
 
 **Flow:**
 
 ```
-Plan input → detect high-risk patterns → CP1-light OR CP1-deep
+Plan input → classify band (--classify-only) → CP1-light OR CP1-deep
 
 CP1-light:
   → run plan-writing.md checklist
@@ -517,8 +569,9 @@ CP1-light:
 
 CP1-deep:
   → run plan-writing.md checklist (same as light)
-  → detect high-risk patterns (automatic via review-checkpoint-contracts.md heuristic)
-  → dispatch 8 lenses in parallel (per plan taxonomy — see review-checkpoint-contracts.md §CP1-deep and §C0 Semantic Lenses):
+  → classify the band from the plan's declared Files (aid-cp1-gate.sh --classify-only)
+  → dispatch the lenses the band owes, in parallel (full: all 8; medium: L1/L2/L3 only;
+    light: none — see review-checkpoint-contracts.md §CP1-deep and §C0 Semantic Lenses):
       L1 behavior:                  request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
       L2 feasibility:               touched files, output contracts, parser/producer ordering, implementation feasibility
       L3 enforcement:               gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
@@ -533,23 +586,23 @@ CP1-deep:
   → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
   → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
   → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
-  → if risk is high AND verdict=pass: run the C0 cross-provider Codex review loop (below) —
+  → if band=full AND verdict=pass: run the C0 cross-provider Codex review loop (below) —
     MUST complete before EPIC generation, independent of the L1/L2/L3 adjudicator loop above
-  → if verdict=pass AND accepted_blockers=[] AND (risk is not high OR the C0 review loop exited clean): generate EPIC
+  → if verdict=pass AND accepted_blockers=[] AND (band is not full OR the C0 review loop exited clean): generate EPIC
 ```
 
-### C0 Cross-Provider Review Loop (high-risk plans only)
+### C0 Cross-Provider Review Loop (band `full` only)
 
-After the L1/L2/L3 adjudicator produces `verdict: pass` for a high-risk plan, a
+After the L1/L2/L3 adjudicator produces `verdict: pass` for a `full`-band plan, a
 SEPARATE, mandatory cross-provider (Codex) pass over the FINAL plan runs before
 EPIC generation is allowed — see `review-checkpoint-contracts.md` §"C0
 Cross-Provider Plan Review — Adjudicator MUST-Consume Contract" for the full
 contract this loop implements, and `pipeline.md` §6a for the DONE-phase C3
 fix→reverify loop this one mirrors at plan level (same bounded-loop shape,
 same "not a loop iteration" carve-out, same fingerprint-survives vs.
-conflicting-findings escalation split). Low/docs/medium (no pattern match)
-plans skip this loop entirely; a PM promoting a low plan to `risk: high`
-brings it into scope from that point on.
+conflicting-findings escalation split). `medium` and `light` plans skip this
+loop entirely, and with it the ledger the loop initialises; a PM marking a plan
+`risk: high` brings it into scope from that point on.
 
 **First pass:**
 ```bash
@@ -593,7 +646,7 @@ indefinitely with the ledger never actually advancing.
 **Not a loop iteration.** `dispatch` returning `unavailable`/`rate_limited`/
 `timeout`/`invalid_output` (Codex never genuinely dispatched a well-formed,
 raw-bound response) yields `review_status: unverifiable`. This blocks
-EPIC generation for the high-risk plan pending a PM decision, but it is NOT a
+EPIC generation for the `full`-band plan pending a PM decision, but it is NOT a
 loop iteration — do NOT call `aid-cp1-ledger.sh increment` for it, and do not
 treat it as consuming one of the 4 rechecks. Retry it freely (transient
 Codex unavailability), exactly like C3's own carve-out.
@@ -715,18 +768,18 @@ that specific failure.
 | `c0-lens-dep_api_grounding.md` | C0 dep_api_grounding lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-idempotency_matrix.md` | C0 idempotency_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-authority_runtime_matrix.md` | C0 authority_runtime_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-plan-review.json` | C0 cross-provider (Codex) plan review (`lib/aid-c0-plan-review.sh`) | `review_status`/`blocking_findings` fields + a passing `verify` | **blocking (high-risk only)** |
+| `c0-plan-review.json` | C0 cross-provider (Codex) plan review (`lib/aid-c0-plan-review.sh`) | `review_status`/`blocking_findings` fields + a passing `verify` | **blocking (band `full` only)** |
 
 Evidence location for L1/L2/L3/adjudicator: `.aid-o/work/evidence/<plan_id>/cp1-deep/`
 Evidence location for C0 lenses: `.aid-o/work/evidence/<plan_id>/c0/`
 Evidence location for the C0 cross-provider plan review: `.aid-o/work/evidence/<plan_id>/c0-plan-review.json` (the canonical, latest-attempt review result, stored at the plan evidence ROOT — one level above `cp1-deep/`). Note: raw Codex evidence (dispatch.json, codex-events.jsonl, codex-last-message.json) is not retained per-attempt; only the final canonical review survives.
-Ledger location (high-risk only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`lib/aid-cp1-ledger.sh`).
+Ledger location (band `full` only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`lib/aid-cp1-ledger.sh`).
 
 EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L1/L2/L3/adjudicator files, unresolved accepted blockers, a missing/unverifiable/still-blocking C0 review, or an exhausted CP1 ledger budget each cause a non-zero exit — see "C0 Cross-Provider Review Loop" above for the full contract.
 
 **Adjudicator acceptance rule:** A `stop_rule_blocker` is accepted ONLY if it has a command/artifact reference (function name, file path, SQL query, config key) AND file:line evidence or an explicit quote from the plan. Vague or hypothetical blockers are rejected with a `rejection_reason`.
 
-**PM escalation:** After 2 auto-revisions with surviving accepted blockers, execution halts and the PM must resolve or waive the blockers before EPIC generation can proceed. For a high-risk plan, the SAME halt-and-resolve rule applies independently to the C0 cross-provider review loop (see above) once its own budget is exhausted or it hits a mechanically-detected non-convergence.
+**PM escalation:** After 2 auto-revisions with surviving accepted blockers, execution halts and the PM must resolve or waive the blockers before EPIC generation can proceed. For a `full`-band plan, the SAME halt-and-resolve rule applies independently to the C0 cross-provider review loop (see above) once its own budget is exhausted or it hits a mechanically-detected non-convergence.
 
 ## Plan-final / close boundary
 
@@ -762,12 +815,14 @@ their existing per-EPIC release text unchanged.
 - `skills/brainstorming.md` — brainstorm process rules, principles, and context persistence (interim doc) protocol
 - `skills/plan-writing.md` — plan writing quality gates and format
 - `skills/planner.md` — dependency graph and parallel groups
-- `skills/review-checkpoint-contracts.md` — high-risk pattern definitions and CP1-deep contract
+- `skills/review-checkpoint-contracts.md` — CP1-deep contract
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
 - `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-c0-plan-review.sh` — C0 cross-provider (Codex) plan review bridge (build-manifest/dispatch/verify)
 - `{plugin_path}/scripts/lib/aid-cp1-ledger.sh` — CP1 revision-limit ledger (init/increment/read/check-budget)
-- `defaults/policies/review-checkpoints.yaml` — `cp1_codex_review` bounded-loop policy (`max_rechecks`)
+- `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a freshly written plan (step 8p)
+- `defaults/policies/review-checkpoints.yaml` — `ceremony_bands` (what each band requires) + `cp1_codex_review` bounded-loop policy (`max_rechecks`)
+- `defaults/policies/risk-paths.yaml` — the curated path map the band is classified from
 - `defaults/templates/plan.md` — base plan template
 
 ## Important
@@ -801,7 +856,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-22
 
 ## Plan mode
 

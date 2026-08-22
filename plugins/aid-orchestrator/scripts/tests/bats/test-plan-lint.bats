@@ -23,7 +23,10 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   local f="$1" strict="$2"; shift 2
   local sflag=""; [[ "$strict" == "strict" ]] && sflag=$'\nlifecycle_strict: true'
   { printf -- '---\nid: P900\ntype: regular\nrisk: low%s\n---\n' "$sflag"
-    printf '# Plan: P900\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
+    # The Testing Strategy section is what a plan owes since P084 Step 4 (a
+    # `Test:` bullet per step no longer is). It is here so these fixtures keep
+    # testing the FILES grammar and nothing else.
+    printf '# Plan: P900\n\n## Testing Strategy\n\nNo new verification — this fixture exercises the Files grammar only.\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
     printf '%s\n' "$@"
     printf '\n**Architecture Context:**\nn/a\n'
   } > "$f"
@@ -205,4 +208,31 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     --output-dir out --counter-yaml counter.yaml
   [ "$status" -ne 0 ]
   [ -z "$(ls out/ 2>/dev/null)" ]                             # NO EPIC file silently written with narrowed scope
+}
+
+# ── human-audience sections (P084 Step 5) ───────────────────────────────────
+# The PM's page is rendered from the plan (lib/aid-plan-summary.sh), so a
+# hand-written summary section inside the plan is a second copy nothing checks.
+
+@test "AC17: all four human-audience headings are reported, each on its own line" {
+  {
+    printf -- '---\nid: P900\ntype: regular\nlifecycle_strict: true\n---\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nNothing new.\n\n'
+    printf '## Stakeholder Brief\n\nx\n\n## Human Review Summary\n\nx\n\n'
+    printf '## Executive Summary\n\nx\n\n## Shrnutí pro PM\n\nx\n\n'
+    printf '### Step 1: work\n\n**Objective:** do it.\n\n**Files:**\n- Modify: `src/a.ts` — edit\n'
+  } > human.md
+  run "$LINT" human.md
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'## Stakeholder Brief'"* ]]
+  [[ "$output" == *"'## Human Review Summary'"* ]]
+  [[ "$output" == *"'## Executive Summary'"* ]]
+  [[ "$output" == *"'## Shrnutí pro PM'"* ]]
+}
+
+@test "AC17: a plan without them is not reported" {
+  _plan clean.md strict '- Modify: `src/a.ts` — edit'
+  run "$LINT" clean.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"written for a human"* ]]
 }

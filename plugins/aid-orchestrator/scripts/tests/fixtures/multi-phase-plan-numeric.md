@@ -154,6 +154,12 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 - [ ] Auth flow reviewed for token lifecycle issues
 - [ ] CHANGELOG entry added
 
+## Testing Strategy
+
+The behaviour under test is the generated package itself — EPIC, plan.json and
+receipt — so the verification lives in the generation suites that consume this
+fixture, not in new suites of its own. No new suite is created by this plan.
+
 ## Constraints
 
 - Backward compatible with existing v1 API clients

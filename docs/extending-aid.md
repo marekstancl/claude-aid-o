@@ -206,6 +206,9 @@ When adding a new detection capability, register it in `defaults/enforcement-reg
 - `test_anchor`: path to the bats/sh test that proves it works
 - `deadline`: ISO date after which the TTL guard flags it if not tested
 
+See also **Plan ceremony bands (P084)** at the end of this file for how much
+review a plan owes and how to extend that map.
+
 ### Plan Boundary Enforcement
 
 - **plan-close gate**: `aid-fsm.sh:cmd_plan_close()` — enforces all 4 required reports (curator-report, audit-report, simplifier-report, delivery-report) before `ca-review-complete` marker. Bypass: toggle-skip pattern with PM rationale.
@@ -2379,4 +2382,89 @@ reason that is not cost or scope, the answer is no — that is the rule the whol
 standard rests on.
 
 
-**Last Updated:** 2026-08-12
+## Plan ceremony bands (P084)
+
+Before P084 the CP1 gate decided how much review a plan owed by grepping the
+WHOLE plan document for eight content patterns. Prose matched: measured on six
+live plans (2026-08-16) the hit counts were 33, 31, 30, 13, 9 and 5, so every
+plan was high-risk and the ceremony was proportional to nothing.
+
+It now classifies a **band** from the paths the plan's steps DECLARE:
+
+```bash
+bash plugins/aid-orchestrator/scripts/aid-cp1-gate.sh \
+     --plan .aid-o/plans/P0NN-topic.md --classify-only     # full | medium | light
+```
+
+Three pieces, and it matters which one you are changing:
+
+| Piece | File | What it owns |
+|---|---|---|
+| the classifier | `scripts/lib/aid-plan-band.sh` | how a band is derived from declared paths |
+| the map | `defaults/policies/risk-paths.yaml` | WHICH paths mean what (data, not code) |
+| the requirements | `defaults/policies/review-checkpoints.yaml` → `ceremony_bands` | what each band OWES |
+
+`aid-cp1-gate.sh` reads all three; `aid-plan-lint.sh` sources the classifier
+directly. The lint does NOT shell out to the gate, and that is load-bearing:
+"the CP1 gate is consulted exactly once per plan" is an invariant the generation
+suites assert by COUNTING gate invocations
+(`scripts/tests/bats/generation-fixture.bash`, `gen_cp1_calls`), and the lint
+runs inside generation's own pre-flight.
+
+**Adding a path to the map** is the common change and needs no code: add the
+regex to `full_paths` or `medium_paths`, add a fixture under
+`scripts/tests/fixtures/plan-risk/`, add its row to
+`docs/plans/P084-classification-reference.md`, and
+`scripts/tests/check-classification-reference.sh` (called from
+`test-cp1-gate-risk.bats`) keeps the three honest. Adding one without the others
+fails the suite on purpose.
+
+**How the plan-review shape was chosen** — `docs/plans/P084-q7-experiment.md`
+records the live measurement behind it: three ways of putting a plan in front of
+a reviewer, six runs, scored against the defects the implementation actually
+hit. Reviewing the whole plan twice beat splitting it into parts, which was the
+only variant that produced false findings.
+
+**What the bands mean.** `full` is the machinery that decides what the pipeline
+DOES — state machines, gate runner, generation chain, release boundary,
+`skills/plan-writing.md`, plus money/credentials/migrations/dependency manifests
+in a consumer project. `medium` is the DATA those decisions read: policies,
+schemas, templates, machine-read config, CI. `light` is everything else, and
+that deliberately includes tests and ordinary feature code — the band measures
+whose DECISIONS a plan changes, not whether it changes code. Code is reviewed
+where reviewing code works: per step at CP2/CP3, against a real diff. A plan-time
+lens panel (three agents plus an adjudicator, before a line exists) earns its
+cost only on what no later checkpoint gets a second chance at.
+
+**Every uncertainty is `full`**: no declared path, no map, an unparseable map, no
+`yq`, an unknown band in the requirements table. There is no prose-guessing
+fallback — the scan this replaced answers `light` for a plan that declares
+`aid-run-gates.sh` but says nothing alarming, and that is the one direction that
+must never happen. `risk: high` in the frontmatter raises a band; nothing lowers
+one except changing what the plan declares it will touch.
+
+### Obligations follow the band
+
+`skills/plan-writing.md` splits a plan's obligations into universal and
+band-scoped, and tabulates a verdict for every one of the 28 Completeness Gate
+checks. `aid-plan-lint.sh` enforces the split — `full`/`medium` owe
+**Architecture Context**, **Error Handling** and **Edge Cases** per step;
+`light` owes none of them, and a bare `**Field:**` label with nothing after it
+does not satisfy the obligation. Findings are STRICT tier: blocking for a
+`lifecycle_strict` plan, a loud advisory for a legacy one.
+
+Two related rules landed with it. A step needs no `Test:` bullet — the plan owes
+a `## Testing Strategy` section with content instead (which behaviour, why that
+one, where it goes), because a bullet per step measured coverage by counting. And
+a plan may not carry a summary section written for a human (`## Stakeholder
+Brief` and three siblings): that page is RENDERED from the plan's own facts by
+`scripts/lib/aid-plan-summary.sh` and published by `/aid-plan`, so a hand-written
+one is a second copy nothing checks.
+
+The renderer being an instruction rather than a gate is recorded honestly:
+`plan_artifact_rendered` sits in the enforcement registry with
+`severity: advisory` and `status: planned`, waiting for the hook layer that can
+refuse to close a turn which wrote a plan without rendering its page.
+
+
+**Last Updated:** 2026-08-22

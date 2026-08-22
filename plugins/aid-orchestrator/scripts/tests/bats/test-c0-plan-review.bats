@@ -43,6 +43,10 @@ setup() {
   # genuine dispatch, so tests that dispatch must have a ledger ready.
   bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test" >/dev/null 2>&1 || true
 
+  # Both fixtures DECLARE files, because since P084 the risk a C0 review is owed
+  # for comes from the plan's declared paths (lib/aid-plan-band.sh), and a plan
+  # that declares nothing is fail-closed to the full ceremony — a prose-only
+  # fixture would be "high-risk" no matter what its frontmatter said.
   PLAN_FILE="$TEST_PROJECT_ROOT/plan-low.md"
   cat > "$PLAN_FILE" <<'EOF'
 ---
@@ -54,6 +58,15 @@ risk: low
 
 This plan touches only documentation. See `defaults/schemas/example-contract.schema.json`
 for the contract it cites.
+
+## Implementation Steps
+
+### Step 1: reword a help page
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — wording only
+
+**Effort:** S
 EOF
 
   PLAN_FILE_HIGH="$TEST_PROJECT_ROOT/plan-high.md"
@@ -66,6 +79,15 @@ risk: high
 # Plan
 
 This plan adds an authenticate() handler.
+
+## Implementation Steps
+
+### Step 1: the handler
+
+**Files:**
+- Modify: `src/auth/session.py` — the authenticate() handler
+
+**Effort:** M
 EOF
 
   git add plan-low.md plan-high.md .aid-o/config/project.yaml defaults/schemas/example-contract.schema.json

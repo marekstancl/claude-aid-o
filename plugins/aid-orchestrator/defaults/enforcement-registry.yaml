@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 445          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 450          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -2988,3 +2988,72 @@ enforcements:
     description: "P083 Step 8 — a pure deletion, not a new capability. P078 removed the parallel-gate scheduler; both producers (aid-run-gates.sh, aid-fsm.sh) have hardcoded concurrency_context='sequential' ever since, the receipt schema is `enum: [\"sequential\"]`, and the live baseline's non-sequential sibling maps (`recent_samples_by_context`/`percentiles_by_context`) were uniformly empty or absent across every entry — there was nothing left to migrate. The acceptor now refuses any other value by name instead of silently falling through a dead branch, so a resurrection attempt (a stale caller, a copy-pasted example) fails loudly rather than writing into fields nothing reads."
     recovery: "The refusal names the rejected value and the gate. Callers must pass 'sequential' or omit the argument (its default)."
     test: "scripts/tests/bats/test-gate-baseline-sequential-only.bats"
+
+  - id: plan_ceremony_band
+    type: 4
+    source: "scripts/lib/aid-plan-band.sh (aid_plan_band) + scripts/aid-cp1-gate.sh (Step 2/2b)"
+    instruction: "commands/aid-plan.md (CP1 Mode Selection — Band classification)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P084 Step 1-2 — the CP1 gate no longer decides ceremony by grepping the whole plan document (measured 2026-08-16: 5-33 pattern hits on each of six live plans, so every plan was high-risk and the ceremony was proportional to nothing). It classifies a BAND (full|medium|light) from the paths the plan's steps declare in their **Files:** blocks, read with the shared parser (lib/aid-scoping.sh) against the curated map defaults/policies/risk-paths.yaml, and reads what that band OWES from defaults/policies/review-checkpoints.yaml -> review_checkpoints.ceremony_bands. Release/ceremony files (CHANGELOG.md, README.md, marketplace.json, plugin.json) are excluded before matching, because a file present in every plan is not a signal of reach. Frontmatter `risk: high` raises a band and nothing lowers one except changing the declared paths. Every uncertainty resolves to `full`: no declared path (no_files_declared), no map (no_risk_map), an unparseable map (unreadable_risk_map), no yq (no_yq), an unknown band in the table. There is deliberately NO prose-guessing fallback — the scan this replaced answers `light` for a plan that declares aid-run-gates.sh but says nothing alarming, which is the one direction that must never happen."
+    recovery: "The gate names the band and the reason on stderr (band=<b> (<reason>)). To raise a band, set `risk: high` in the plan frontmatter; to lower one, change what the plan declares it will touch. A project may ship its own map at .aid-o/config/policies/risk-paths.yaml."
+    test: "scripts/tests/bats/test-cp1-gate-risk.bats"
+
+  - id: plan_band_obligations
+    type: 4
+    source: "scripts/aid-plan-lint.sh (_plan_band + _missing_step_fields)"
+    instruction: "skills/plan-writing.md (Obligations by ceremony band)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P084 Step 3 — the per-step fields a plan owes now follow its band. `full` and `medium` owe **Architecture Context**, **Error Handling** and **Edge Cases** per step; `light` owes none of them, and a light plan that omits all three is complete. The rule is enforced where the plan is checked (aid-plan-lint.sh, reached by generation through aid-generation-readiness.sh), on the SAME classification the gate uses — the lint sources lib/aid-plan-band.sh rather than shelling out to the gate, because 'the CP1 gate is consulted exactly once per plan' is an invariant the generation suites assert by counting gate invocations. A bare `**Field:**` label with nothing after it does not satisfy the obligation. STRICT tier: blocking for a lifecycle_strict plan, a loud advisory for a legacy one."
+    recovery: "The finding names the step's line, its heading and which fields are missing. Add the fields, or lower the band by changing what the plan declares it touches."
+    test: "scripts/tests/bats/test-plan-writing-rules.bats"
+
+  - id: plan_testing_strategy_required
+    type: 4
+    source: "scripts/aid-plan-lint.sh (_has_testing_strategy)"
+    instruction: "skills/plan-writing.md (Tests are designed, not counted)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P084 Step 4 — the obligation 'a Test: bullet in every step' is retired and replaced by one `## Testing Strategy` section with content, answering which behaviour the plan verifies, why that one, and where the verification goes. Counting test items measured coverage by step count rather than by behaviour at risk (six live plans ran at ~1:1 whatever they changed). A heading alone is not a strategy: a section whose only content is a sub-heading is refused. Unchanged, deliberately: a Test: bullet naming a suite that does not exist yet still MUST declare its tier (aid-plan-to-epic.sh), because making tests optional and letting untiered suites in are two different things."
+    recovery: "The finding names the plan. Add a `## Testing Strategy` section with at least one content line; 'no new verification, reason: ...' is a valid answer for a plan that changes no behaviour."
+    test: "scripts/tests/bats/test-plan-tier-declaration.bats"
+
+  - id: plan_human_sections_reported
+    type: 4
+    source: "scripts/aid-plan-lint.sh (_AID_HUMAN_SECTIONS)"
+    instruction: "skills/plan-writing.md (MUST rule 17)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P084 Step 5 — a plan is written for the agent that executes it; the PM's page is RENDERED from the plan's own facts (lib/aid-plan-summary.sh) instead of being hand-written inside it. The four hand-written summary headings (## Stakeholder Brief, ## Human Review Summary, ## Executive Summary, ## Shrnuti pro PM) are reported by the lint. The list is CLOSED on purpose: a heuristic like 'a section with no machine-readable content' would report Context and Goal, which must stay — the price is that a newly invented human section is not caught until someone adds it here, and that is the cheaper mistake."
+    recovery: "The finding names the heading and its line. Delete the section; the same content is rendered by aid_plan_summary_render and published by /aid-plan."
+    test: "scripts/tests/bats/test-plan-lint.bats"
+
+  - id: plan_artifact_rendered
+    type: 12
+    source: "commands/aid-plan.md (Mode: Write Plan, step 8p)"
+    instruction: "commands/aid-plan.md (Mode: Write Plan, step 8p)"
+    severity: advisory
+    surface: llm-facing
+    status: planned
+    verdict: GAP
+    tier: n/a
+    deadline: "2026-12-31"
+    deferred_by: "P084 Step 5"
+    deferred_reason: "The renderer and its caller instruction ship in P084; the MECHANISM that makes skipping it hard is the hook layer of Plan 3 (a Stop hook refusing to close a turn that wrote a plan without rendering its page). Recorded here at its honest strength — an instruction — rather than being described as enforcement it does not have."
+    description: "P084 Step 5 — after writing a plan, /aid-plan renders the PM page (lib/aid-plan-summary.sh) and publishes it with the Artifact tool. Nothing fails if a session skips this: it is an instruction, the weakest form there is. It is registered so the gap is visible and so the hook layer has a row to promote rather than a new one to invent."
+    recovery: "Run the render by hand: source scripts/lib/aid-plan-summary.sh && aid_plan_summary_render <plan> <out.html>, then publish the body."
+    test_covers: "the RENDERER only. Whether a session actually renders and publishes is a session-level act no suite can observe — that is precisely the gap this row records."
+    test: "scripts/tests/bats/test-aid-plan-summary.bats"

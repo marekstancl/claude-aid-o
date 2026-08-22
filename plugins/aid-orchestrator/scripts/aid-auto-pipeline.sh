@@ -280,6 +280,10 @@ _gen_plan_recorded_mode() {
 # drift between plugin versions at verify time instead of at queue time.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
+# The plan's ceremony band, for the sealed authority receipt. A LIBRARY call —
+# not aid-cp1-gate.sh, whose invocations this pipeline's suites count.
+# shellcheck source=lib/aid-plan-band.sh
+source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 
 _gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 # Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent
@@ -1555,6 +1559,17 @@ if [[ "$_gen_authority_valid" != true ]]; then
     # nothing was bypassed, so no waiver is written (P073 Step 8 semantics).
     _gen_cp1_json='{"verdict":"pass","force_unused":true}'
   fi
+
+  # The band this plan was classified into, recorded on the sealed decision so a
+  # later reader can see WHICH ceremony was owed, not only that it passed. Asked
+  # of the CLASSIFIER LIBRARY, which is not the gate: "the CP1 gate is consulted
+  # exactly once per plan" is an invariant this pipeline's own suites assert by
+  # COUNTING gate invocations (bats/generation-fixture.bash gen_cp1_calls), and
+  # a pure library call spawns no gate. The earlier version scraped `band=` out
+  # of the gate's human-readable stderr, which quietly made the wording of a
+  # status line a contract.
+  _gen_cp1_json="$(jq -c --arg b "$(aid_plan_band_name "$plan" "$_aid_pipeline_state_root")" \
+    '.band = $b' <<< "$_gen_cp1_json")"
 
   _gen_auth_draft="$(jq -n \
     --arg schema "aid-generation-authority/v1" \

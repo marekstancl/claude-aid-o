@@ -327,6 +327,23 @@ PLANMD
   git -C "$TEST_PROJECT_ROOT" add -- plan-nofiles.md
   git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-nofiles.md, committed"
 
+  # P084: a plan that declares NO path at all cannot be classified from its
+  # paths, so the CP1 gate fail-closes it to band `full` (`no_files_declared`)
+  # — which is exactly this fixture's shape, and would stop the run before
+  # generation ever reached D5. This test is about the D5 contract gate, so CP1
+  # is satisfied deliberately and visibly: real lens evidence plus ONE PM
+  # escalation override, which the gate consumes to cover both the C0 review and
+  # the ledger. Nothing here weakens D5; it only gets the run to it.
+  local cp1_dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P900/cp1-deep"
+  mkdir -p "$cp1_dir"
+  local lens
+  for lens in cp1-lens-L1-behavior cp1-lens-L2-feasibility cp1-lens-L3-enforcement; do
+    printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "$cp1_dir/$lens.md"
+  done
+  printf 'accepted_blockers: []\nrejected_blockers: []\nverdict: pass\n' > "$cp1_dir/cp1-adjudicator.md"
+  printf '{"pm_ref":"P084 fixture: CP1 satisfied so the D5 gate can be exercised"}\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P900/cp1-pm-escalation-override.json"
+
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-nofiles.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
   [ "$status" -ne 0 ]

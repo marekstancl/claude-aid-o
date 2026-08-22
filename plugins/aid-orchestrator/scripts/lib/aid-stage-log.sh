@@ -62,6 +62,51 @@ log_event() {
   return 0
 }
 
+# aid_plan_timeline <project_root> <plan_id> — the PLAN-scoped timeline file,
+# created if needed. Echoes the path, or returns 1 when it cannot be made.
+#
+# WHY THIS EXISTS (P084 Step 7, and the finding that motivated it)
+#   `.aid-o/work/timeline.jsonl` — the file /aid-init creates at the workspace
+#   root — had 0 lines in this repository. The writer was never broken: every
+#   caller of log_event passes a per-RUN path (`evidence/<epic>/<run>/timeline.jsonl`,
+#   81 of them here, all non-empty), and NOTHING ever writes to the root file.
+#   So the gap was not a logger bug but a missing home for PLAN-scoped events —
+#   band classification, a lint that stopped a plan — which happen before any
+#   run exists. They now land next to the plan's other evidence, under
+#   `evidence/<plan_id>/`, which is the same root CP1/C0 already use.
+aid_plan_timeline() {
+  # ${1-}/${2-}, not $1/$2: a caller running under `set -u` would abort on the
+  # expansion before this function could honour its own "returns 1" contract.
+  local root="${1-}" plan_id="${2-}" dir
+  [[ -n "$root" && -n "$plan_id" ]] || return 1
+  dir="${root}/.aid-o/work/evidence/${plan_id}"
+  [[ -d "${root}/.aid-o" ]] || return 1
+  mkdir -p "$dir" 2>/dev/null || return 1
+  printf '%s/timeline.jsonl' "$dir"
+}
+
+# aid_plan_log <plan_file> <event> [key=value ...] — the plan-scoped verb.
+#
+# Resolves the plan's id and its workspace THE SAME WAY for every caller and
+# writes one event. Never fails, never blocks: an unreadable id, a plan outside
+# a workspace, an unwritable evidence dir and a logger error all end as a quiet
+# `return 0`. Three call sites (the CP1 gate, the plan lint, the readiness
+# check) each hand-rolled this four-step ritual and two of them had already
+# drifted on which root they resolved.
+#
+# Requires lib/aid-plan-band.sh (for `_aid_plan_id_of` / `_aid_band_project_root`);
+# callers that log plan events source it anyway to classify the band.
+aid_plan_log() {
+  local plan="${1-}" id root tl
+  shift || return 0
+  [[ -n "$plan" && $# -gt 0 ]] || return 0
+  declare -F _aid_plan_id_of >/dev/null || return 0
+  id="$(_aid_plan_id_of "$plan")" || return 0
+  root="$(_aid_band_project_root "$plan")" || return 0
+  tl="$(aid_plan_timeline "$root" "$id")" || return 0
+  log_event "$tl" "$@" || true
+}
+
 # Severity-prefixed stderr loggers (P032 Step 1).
 # Use these instead of bare `echo "..." >&2` so logs are greppable.
 log_info() {
@@ -77,7 +122,7 @@ log_error() {
 }
 
 # Export for use in subshells
-export -f log_event log_info log_warn log_error
+export -f log_event log_info log_warn log_error aid_plan_timeline aid_plan_log
 
 # CLI dispatcher (P037 Phase 1) — allow `bash aid-stage-log.sh <fn> <args>` from
 # LLM-rendered docs in pipeline.md / aid-plan.md without requiring a source step.
@@ -89,7 +134,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
     # log_event writes to the timeline file. log_info/log_warn/log_error are
     # stderr-only severity-prefixed echoes — useful for shell pipelines but
     # invisible to compliance check + downstream evidence consumers.
-    log_event|log_info|log_warn|log_error) "$fn" "$@" ;;
+    log_event|log_info|log_warn|log_error|aid_plan_timeline|aid_plan_log) "$fn" "$@" ;;
     *)
       echo "ERROR: unknown function: $fn" >&2
       echo "Available: log_event (timeline write), log_info/log_warn/log_error (stderr only)" >&2

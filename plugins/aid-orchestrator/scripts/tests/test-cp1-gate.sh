@@ -10,9 +10,11 @@
 #      (adjudicator gate catches non-empty accepted_blockers)
 #   4. after 2 auto-revisions, a surviving stop-rule blocker causes gate to fail
 #      (simulated via adjudicator file with accepted_blockers present)
-#   5. trivial low-risk fixture still passes gate unchanged
-#   6. plan with high-risk pattern in body is treated as high-risk even without frontmatter tag
-#   7. plan with risk: low but high-risk patterns matched still requires evidence (pattern wins)
+#   5. a light-band fixture (documentation-only Files) passes gate unchanged
+#   6. plan that declares NO Files block is full-band (fail-closed) even without
+#      a frontmatter risk tag — P084 replaced the prose-pattern scan these two
+#      cases were originally written for
+#   7. the same, with `risk: low` present: a frontmatter value never lowers a band
 #   8. missing plan file returns non-zero
 #   9. missing --plan argument returns exit 2
 #  10. only partial evidence present — gate fails with missing file list
@@ -448,38 +450,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 5: Low-risk (risk: low) plan passes gate without evidence
+# TEST 5: a `light` plan passes the gate without evidence
+#
+# P084 Step 1 moved the band from a whole-document grep to the paths the plan
+# DECLARES, so this fixture now declares them: a documentation-only step. The
+# `risk: low` frontmatter is kept to prove what it is worth — nothing on its
+# own, since a band is only ever lowered by what the plan touches. The band
+# taxonomy itself lives in bats/test-cp1-gate-risk.bats (t0); this case only
+# asserts the gate's behaviour once the band is light.
 # ---------------------------------------------------------------------------
-run_test "Low-risk plan (risk: low) passes gate without any evidence files"
+run_test "Light-band plan (documentation-only Files) passes gate without any evidence files"
 
 proj5="$(make_project_root "t5")"
 plan5="$TMPDIR_ROOT/t5-plan.md"
-# Low-risk: update docs, no patterns match
-write_plan "$plan5" "P005" "risk: low" "Update the README file and add documentation."
+write_plan "$plan5" "P005" "risk: low" "Update the README file and add documentation.
+
+**Files:**
+- Modify: \`plugins/aid-orchestrator/commands/aid-help.md\` — documentation only"
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan5" --project-root "$proj5" 2>&1)" || gate_exit=$?
 
 if [[ "$gate_exit" -eq 0 ]]; then
-  pass "low-risk plan passes gate without evidence (exit=0)"
+  pass "light-band plan passes gate without evidence (exit=0)"
 else
-  fail "low-risk plan passes gate without evidence" "got exit=$gate_exit, output: $gate_out"
+  fail "light-band plan passes gate without evidence" "got exit=$gate_exit, output: $gate_out"
 fi
 
-if echo "$gate_out" | grep -qi "not required\|low-risk"; then
-  pass "output confirms CP1-deep not required for low-risk plan"
+if echo "$gate_out" | grep -qi "not required\|band=light"; then
+  pass "output confirms CP1-deep not required for a light-band plan"
 else
-  fail "output confirms CP1-deep not required for low-risk plan" "output: $gate_out"
+  fail "output confirms CP1-deep not required for a light-band plan" "output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------
 # TEST 6: Plan with high-risk pattern in body (no frontmatter tag) is high-risk
 # ---------------------------------------------------------------------------
-run_test "Plan with authenticate in body is treated as high-risk"
+run_test "Plan with no declared Files is full-band (fail-closed), tag or no tag"
 
 proj6="$(make_project_root "t6")"
 plan6="$TMPDIR_ROOT/t6-plan.md"
 # No risk: field, but body contains auth pattern
+# No **Files:** block at all -> `no_files_declared` -> full, fail-closed.
 write_plan "$plan6" "P006" "" "Call verify_token to authenticate the user before processing."
 
 gate_exit=0
@@ -514,10 +526,12 @@ fi
 # TEST 7: risk: low in frontmatter does NOT exempt plan when body has high-risk patterns
 # Pattern match wins — risk: low only exempts when no patterns are found.
 # ---------------------------------------------------------------------------
-run_test "Plan with risk: low still requires CP1-deep when body contains high-risk patterns"
+run_test "risk: low does not lower a band — an unclassifiable plan still owes CP1-deep"
 
 proj7="$(make_project_root "t7")"
 plan7="$TMPDIR_ROOT/t7-plan.md"
+# `risk: high` raises a band; no frontmatter value lowers one. This plan
+# declares nothing, so it is full regardless of the `risk: low` tag.
 write_plan "$plan7" "P007" "risk: low" "Handler authenticate() and verify_token() added to auth flow."
 
 gate_exit=0

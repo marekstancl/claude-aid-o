@@ -117,3 +117,48 @@ _generate() {
   _generate "$(_plan 'Test: `scripts/tests/bats/test-brand-new.bats` — what it proves')"
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# P084 Step 4 — the Test: bullet is optional, the Testing Strategy is not.
+#
+# The two rules pull in opposite directions on purpose: a step owes no test
+# item, but a plan owes a stated strategy, and a NEW suite still owes its tier.
+# ---------------------------------------------------------------------------
+
+# _plan_no_test — the same minimal plan, with no `Test:` bullet at all.
+_plan_no_test() {
+  local f="$ROOT/plan.md"
+  printf -- '---\nid: P900\ntype: plan\nstatus: approved\n---\n\n' > "$f"
+  printf '# Plan: fixture\n\n## Testing Strategy\n\n' >> "$f"
+  printf 'One case in the existing t0 suite — the behaviour is the parser, not the wiring.\n\n' >> "$f"
+  printf '## Implementation Steps\n\n' >> "$f"
+  printf '### Step 1: Do a thing\n\n' >> "$f"
+  printf '**Objective:** Prove a step needs no Test bullet.\n\n' >> "$f"
+  printf '**Files:**\n- Modify: `scripts/thing.sh` — the subject\n\n' >> "$f"
+  printf '**Effort:** S\n\n**AID Role:** backend\n' >> "$f"
+  printf '%s\n' "$f"
+}
+
+@test "7: a step with NO Test bullet generates" {
+  _generate "$(_plan_no_test)"
+  [ "$status" -eq 0 ]
+}
+
+@test "8: a strict plan with no Testing Strategy stops generation" {
+  plan="$(_plan_no_test)"
+  # Strict cohort: the lifecycle model these plans opt into is where the
+  # requirement bites. Legacy plans get the same finding as an advisory.
+  sed -i 's/^status: approved$/status: approved\nlifecycle_strict: true/' "$plan"
+  sed -i '/^## Testing Strategy$/,+2d' "$plan"
+  _generate "$plan"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Testing Strategy"* ]]
+}
+
+@test "9: a legacy plan with no Testing Strategy still generates, loudly" {
+  plan="$(_plan_no_test)"
+  sed -i '/^## Testing Strategy$/,+2d' "$plan"
+  _generate "$plan"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Testing Strategy"* ]]
+}

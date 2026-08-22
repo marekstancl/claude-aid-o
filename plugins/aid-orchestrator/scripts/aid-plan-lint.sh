@@ -22,6 +22,29 @@
 #            a description path is as often a reference as a forgotten scope
 #            entry, and only the author can tell them apart.
 #
+# HUMAN-AUDIENCE SECTIONS (P084 Step 5)
+# A plan carrying `## Stakeholder Brief` (or one of three siblings) is carrying
+# a hand-written copy of a page that is now rendered from the plan's own facts.
+# Same STRICT tier.
+#
+# TESTING STRATEGY (P084 Step 4)
+# The plan must carry a `## Testing Strategy` section with content. It replaces
+# the per-step `Test:` bullet as the thing generation cares about: a bullet per
+# step measured coverage by counting, which is how a portfolio grows tests
+# nobody asked for. Same STRICT tier as below.
+#
+# BAND-SCOPED STEP OBLIGATIONS (P084 Step 3)
+# The lint also checks the per-step fields the plan's ceremony BAND asks for.
+# The band comes from lib/aid-plan-band.sh — the same single classification
+# aid-cp1-gate.sh enforces on and the plan author writes against (skills/plan-writing.md
+# §"Obligations by ceremony band"), never a second derivation here. `full` and
+# `medium` owe **Architecture Context**, **Error Handling** and **Edge Cases**
+# per step; `light` owes none of them and is checked for none. A band that
+# cannot be classified reads as `full`, matching the gate's own fail-closed.
+# These findings are STRICT tier: blocking for a lifecycle_strict plan, a loud
+# advisory for a legacy one — the same two-tier treatment the Files grammar
+# gets, and for the same reason.
+#
 # Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet]
 # Exit:  0 = no blocking violations   1 = blocking violation(s)   2 = usage/IO
 # =============================================================================
@@ -30,6 +53,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-scoping.sh
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
+# shellcheck source=lib/aid-plan-band.sh
+source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
+# shellcheck source=lib/aid-stage-log.sh
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
@@ -125,6 +152,20 @@ _reason_msg() {
   esac
 }
 
+# _strict_finding <location-suffix> <message> — the STRICT/legacy emitter every
+# obligation below shares. `location-suffix` is ":<lineno>", or "" for a
+# whole-file finding. One place owns the counter, the --quiet check and the two
+# tiers, so a new obligation cannot half-implement any of the three.
+_strict_finding() {
+  strict_hits=$((strict_hits+1))
+  [[ "$QUIET" -eq 0 ]] || return 0
+  if [[ "$mode" == "strict" ]]; then
+    echo "${PLAN}${1}: STRICT ${2}" >&2
+  else
+    echo "${PLAN}${1}: [WARN legacy] ${2}" >&2
+  fi
+}
+
 while IFS=$'\t' read -r lineno bullet; do
   [[ -z "${bullet:-}" ]] && continue
   while IFS= read -r prose_path; do
@@ -140,14 +181,123 @@ while IFS=$'\t' read -r lineno bullet; do
     errors=$((errors+1))
     [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: ERROR ${msg}: ${bullet}" >&2
   else  # strict
-    strict_hits=$((strict_hits+1))
-    if [[ "$mode" == "strict" ]]; then
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: STRICT ${msg}: ${bullet}" >&2
-    else
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: [WARN legacy] ${msg}: ${bullet}" >&2
-    fi
+    _strict_finding ":${lineno}" "${msg}: ${bullet}"
   fi
 done < <(_aid_extract_files_bullets_numbered < "$PLAN")
+
+# ---------------------------------------------------------------------------
+# Band-scoped per-step obligations
+# ---------------------------------------------------------------------------
+# The band comes from the LIB (`aid_plan_band_name`, which already defaults an
+# unknown answer to `full`), never from `aid-cp1-gate.sh --classify-only`: this
+# lint runs inside generation's pre-flight, where "the CP1 gate is consulted
+# exactly once per plan" is an invariant the generation suites assert by
+# COUNTING gate invocations. The lib resolves the project root FROM THE PLAN, so
+# a lint run from another directory still reads the policy override that plan's
+# own workspace carries.
+
+# _missing_step_fields — one line per step that is missing band-scoped fields:
+# "<lineno>\t<missing,fields>\t<step heading>". A step's region runs from its
+# own `### Step` heading to the next one or to the next `##` section, which is
+# how the plan format already separates steps.
+_missing_step_fields() {
+  # Fenced blocks are blanked first: a plan that QUOTES `### Step 1:` in an
+  # example (this repo's own plans about AID do) would otherwise be told its
+  # example is missing Error Handling.
+  #
+  # The field list is ONE string. It used to be three literals repeated in three
+  # places inside this program (detection, marking, reporting), so adding a
+  # band-scoped field meant four coordinated edits in one awk.
+  awk -v fields='Architecture Context|Error Handling|Edge Cases' '
+    BEGIN { n = split(fields, want, "|") }
+    function report(   i, miss) {
+      miss = ""
+      for (i = 1; i <= n; i++) if (!have[i]) miss = miss (miss ? "," : "") want[i]
+      if (miss != "") print ln "\t" miss "\t" head
+      head = ""
+    }
+    function reset(   i) { for (i = 1; i <= n; i++) have[i] = 0; pending = 0 }
+    { gsub(/\r$/, "") }
+    /^### Step / { if (head != "") report(); head = $0; ln = NR; reset(); next }
+    /^## /       { if (head != "") report(); next }
+    # A field counts as present only once something FOLLOWS its label — on the
+    # label line itself ("**Error Handling:** none, this is a text edit") or on a
+    # later line before the next label. Three empty labels used to satisfy all
+    # three obligations while saying nothing.
+    head != "" {
+      if ($0 ~ /^\*\*[A-Z][^*]*:\*\*/) {
+        rest = $0
+        sub(/^\*\*[A-Z][^*]*:\*\*[[:space:]]*/, "", rest)
+        pending = 0
+        for (i = 1; i <= n; i++) if ($0 ~ "^\\*\\*" want[i] ":\\*\\*") pending = i
+        if (pending && rest ~ /[^[:space:]]/) { have[pending] = 1; pending = 0 }
+        next
+      }
+      if (pending && $0 ~ /[^[:space:]]/) { have[pending] = 1; pending = 0 }
+    }
+    END { if (head != "") report() }
+  ' < <(_aid_blank_fenced < "$PLAN")
+}
+
+# _has_testing_strategy — a `## Testing Strategy` heading with at least one
+# non-empty, non-heading line under it (P084 Step 4). The plan states which
+# behaviour it verifies and why, instead of scattering one `Test:` bullet per
+# step to satisfy a count: measured across six live plans, the Test-items-to-
+# steps ratio sat at ~1:1 whatever the plan actually changed.
+#
+# A heading alone is not a strategy, so the content line is required; judging
+# the QUALITY of that answer is the reviewer's job, not a regex's.
+_has_testing_strategy() {
+  awk '
+    /^##[[:space:]]+Testing Strategy[[:space:]]*$/ { inside = 1; next }
+    # No {n,m} intervals: mawk (the default awk on Debian) reads them
+    # literally, and the check silently found "content" in every later line.
+    /^#+[[:space:]]/                               { if ($0 !~ /^###/) inside = 0; next }
+    inside && $0 ~ /[^[:space:]]/                  { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$PLAN"
+}
+
+if ! _has_testing_strategy; then
+  _strict_finding "" "no '## Testing Strategy' section with content — say which behaviour this plan verifies, why that one, and where it goes (new suite / case in an existing suite). A Test: bullet per step is NOT required."
+fi
+
+# ---------------------------------------------------------------------------
+# Human-audience sections (P084 Step 5)
+# ---------------------------------------------------------------------------
+# The PM's page is RENDERED from the plan's own facts
+# (lib/aid-plan-summary.sh), so a hand-written summary section inside the plan
+# is now a second, unverifiable copy of it. Reported here so it does not
+# silently survive.
+#
+# A CLOSED list, deliberately: a heuristic like "a section with no machine-
+# readable content" would report Context and Goal, which must stay. The price
+# is that a newly-invented human section is not caught until someone adds it
+# to this list, and that is the cheaper mistake.
+_AID_HUMAN_SECTIONS=(
+  "## Stakeholder Brief"
+  "## Human Review Summary"
+  "## Executive Summary"
+  "## Shrnutí pro PM"
+)
+
+# ONE grep over the plan for the whole closed list (`-F -x` with an -e per
+# heading), not one pass per heading: the matched line comes back with its
+# number, so the message needs nothing the loop variable was carrying.
+_human_grep_args=()
+for _human in "${_AID_HUMAN_SECTIONS[@]}"; do _human_grep_args+=(-e "$_human"); done
+while IFS=: read -r _hline _hsection; do
+  [[ -n "${_hline:-}" ]] || continue
+  _strict_finding ":${_hline}" "'${_hsection}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section."
+done < <(grep -n -x -F "${_human_grep_args[@]}" "$PLAN" 2>/dev/null || true)
+
+band="$(aid_plan_band_name "$PLAN")"
+if [[ "$band" != "light" ]]; then
+  while IFS=$'\t' read -r lineno missing head; do
+    [[ -n "${missing:-}" ]] || continue
+    _strict_finding ":${lineno}" "band=${band} step is missing ${missing}: ${head}"
+  done < <(_missing_step_fields)
+fi
 
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 blocking=$errors
@@ -155,13 +305,28 @@ blocking=$errors
 
 if [[ "$QUIET" -eq 0 ]]; then
   if [[ "$blocking" -gt 0 ]]; then
-    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the Files entries above. Canonical form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'." >&2
+    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; band-scoped step fields: skills/plan-writing.md §\"Obligations by ceremony band\"." >&2
   elif [[ "$strict_hits" -gt 0 ]]; then
     echo "aid-plan-lint: PASS with ${strict_hits} legacy advisory warning(s) (non-blocking for this legacy plan; would block a lifecycle_strict plan)." >&2
   else
     echo "aid-plan-lint: PASS — all Files entries are canonical." >&2
   fi
   [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} description-only path advisory/-ies (never blocking — declare them as their own bullets if the step edits them)." >&2
+fi
+
+# Telemetry (P084 Step 7): how often this lint STOPS a plan, and on what. The
+# question it exists to answer — is a given obligation catching anything — has
+# no answer today because nothing was ever counted. Never blocking: without a
+# resolvable plan id or workspace, the helper returns 1 and nothing is written.
+if _lint_plan_id="$(_aid_plan_id_of "$PLAN")"; then
+  _lint_root="$(_aid_band_project_root "$PLAN")" || _lint_root=""
+  if [[ -n "$_lint_root" ]] && _lint_tl="$(aid_plan_timeline "$_lint_root" "$_lint_plan_id")"; then
+    # `|| true`: the promise above is that telemetry never blocks, and a bare
+    # call would make any future non-zero from the logger this lint's verdict.
+    log_event "$_lint_tl" "plan_lint_result" \
+      band="$band" mode="$mode" errors="$errors" strict="$strict_hits" \
+      advisories="$advisories" blocked="$( [[ "$blocking" -gt 0 ]] && echo true || echo false )" || true
+  fi
 fi
 
 [[ "$blocking" -gt 0 ]] && exit 1

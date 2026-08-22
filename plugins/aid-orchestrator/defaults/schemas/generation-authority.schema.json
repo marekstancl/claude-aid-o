@@ -46,6 +46,11 @@
       "description": "Either a clean verdict, or the bypassed conditions with their evidence references. A low-risk plan (gate exits 0 fast) carries a verdict, so the transaction contract is uniform across risk levels.",
       "properties": {
         "verdict": { "type": "string" },
+        "band": {
+          "type": "string",
+          "enum": ["full", "medium", "light"],
+          "description": "Ceremony band aid-cp1-gate.sh classified the plan into from its declared Files paths (P084). Recorded so an auditor can see which ceremony was owed, not just that the gate passed."
+        },
         "force_unused": { "type": "boolean" },
         "gate_exit": { "type": "integer" },
         "bypassed_conditions": { "type": "array", "items": { "type": "string" } },

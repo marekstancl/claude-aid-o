@@ -8,6 +8,12 @@ author: PM + AI
 
 # Plan: Dependencies Test Plan
 
+<!-- The file names here are deliberately neutral. This fixture exists to
+     exercise cross-plan dependency extraction, and a path that looks like auth,
+     a route or a payment classifies the plan into the `full` ceremony band
+     (defaults/policies/risk-paths.yaml), which would make this test about CP1
+     evidence instead. -->
+
 ## Context
 
 This test plan exercises cross-plan dependency handling in the pipeline script
@@ -105,7 +111,7 @@ Phase 2 wires the integration and validates end-to-end.
 
 **Files:**
 - Create: `src/integrations/router.py`
-- Create: `src/integrations/auth_delegate.py`
+- Create: `src/integrations/delegate.py`
 - Modify: `src/integrations/__init__.py`
 
 **Dependencies:**

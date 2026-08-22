@@ -137,6 +137,22 @@ BEGIN { in_files = 0 }
 }
 AWK
 
+# _aid_blank_fenced — read a plan on stdin, emit it with every line inside a
+# ``` fenced block replaced by an EMPTY line.
+#
+# Blanked, not deleted, so line numbers survive: every reader downstream reports
+# `file:lineno` and a stripped stream would name the wrong line. Readers that
+# scan for `### Step N:` or `**EPIC N:**` need this — AID's own plans and skills
+# quote that syntax inside fences, and a meta-plan then counts steps it does not
+# have. aid-plan-to-epic.sh:445 has carried the same in_fence toggle since P039
+# for exactly this reason; this is that rule as something other files can call.
+_aid_blank_fenced() {
+  awk '
+    /^[[:space:]]*```/ { in_fence = !in_fence; print ""; next }
+    { if (in_fence) print ""; else print }
+  '
+}
+
 # _aid_extract_files_bullets — read text on stdin, emit each top-level Files-block
 # bullet as "- <bullet>". Byte-identical to the historical inline awk it replaces.
 # Handles Files bullets ONLY — for Acceptance Criteria bullets (which need
