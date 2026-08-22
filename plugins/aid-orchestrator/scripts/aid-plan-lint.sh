@@ -146,6 +146,7 @@ _reason_msg() {
     verb-no-path)       echo "a verb label with no path after it";;
     no-command)           echo "the **Reuse check:** field names no search command — a sentence is not evidence; put the command you ran in \`backticks\`";;
     command-not-allowed)  echo "the **Reuse check:** command is not one of grep/rg/ls/find/git grep — the lint replays it, so it runs read-only searches and nothing else";;
+    no-reason)            echo "the **Reuse check:** says something already exists but not why it does not suffice — a step that founds a new file over an existing pattern owes that sentence; write it after the result, behind an em dash";;
     no-result)            echo "the **Reuse check:** field states no result after a '→' — write: searched: \`<command>\` → <none | one match | several matching | several conflicting> — <why what exists does not suffice>";;
     command-unsafe)       echo "the **Reuse check:** command pipes, redirects or chains — the lint replays it, so it accepts a single read-only search";;
     command-flag-refused) echo "the **Reuse check:** command carries a flag that runs another program (-exec, --pre, --config and friends) — the lint replays it, so a search must stay a search";;

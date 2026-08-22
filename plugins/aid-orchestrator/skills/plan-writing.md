@@ -321,6 +321,12 @@ something new (any `Create:` bullet in its `Files:`) MUST carry a
   best tested, the one that holds the standard), `several conflicting`
   (the N+1 rule below decides). Czech spellings `nic`, `jeden vzor`,
   `více shodných`, `více rozporných` are equally accepted.
+- **A result other than `none` owes the third part**: why what already exists
+  does not remove the need to create. `one match` and `several matching` are
+  the N+1 rule one result further along — the step founds something over
+  something that exists, and that sentence is the whole difference between
+  reuse and duplication. The lint refuses a founding step without it. `none`
+  owes no reason: nothing was found to explain away.
 - An empty search result is written as `none`. The field is never omitted
   instead.
 - Aim the search at the code, not at the repository root: a `grep` over `.`

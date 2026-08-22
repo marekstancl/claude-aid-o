@@ -152,6 +152,23 @@ _plan() {
   [ "$status" -eq 0 ]
 }
 
+@test "reuse: a found pattern with no reason why it does not suffice is refused" {
+  # `one match` and `several matching` are the N+1 rule one result-key further
+  # along: the step founds a new file over something that exists, and the
+  # sentence saying why is the whole difference between reuse and duplication
+  # (codex whole-plan review, finding 1).
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rln isoNow src/` → one match `src/known.ts`'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not why it does not suffice"* ]]
+}
+
+@test "reuse: 'none' owes no reason — nothing was found to explain away" {
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rln relativeCzech src/` → none'
+  run "$LINT" "$PLAN"
+  [ "$status" -eq 0 ]
+}
+
 @test "reuse: result 'several matching' passes and keeps the canonical choice" {
   _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rn isoNow src/` → several matching `src/known.ts` — canonical is the newest, this one'
   run "$LINT" "$PLAN"

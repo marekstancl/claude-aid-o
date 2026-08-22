@@ -312,7 +312,7 @@ Rules:
 - Verify the derivation still agrees with the map:
   `bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --self-test`
 
-### What the project has to document with (P085)
+### What the project has to document with
 
 Detection writes three facts into `project.yaml`, next to the rest of what
 auto-detection found. They exist so a plan does not have to rediscover them

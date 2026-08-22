@@ -52,7 +52,7 @@ _AID_REUSE_REFUSED_FLAGS=(
 # _aid_classify_files_bullet):
 #   no-command | command-not-allowed | command-unsafe | no-result
 aid_reuse_parse() {
-  local value="$1" rest tok cmd="" head="" key="" alt spell clean result named=""
+  local value="$1" rest tok cmd="" head="" key="" alt spell clean result named="" why
   local -a words
   # The command is the first backticked span that opens with an allowed tool.
   # Scanning for the tool rather than taking span #1 lets the sentence start
@@ -110,6 +110,17 @@ aid_reuse_parse() {
     if [[ "$result" == *"$spell"* ]]; then key="${alt#*:}"; break; fi
   done
   [[ -n "$key" ]] || { echo "error:no-result"; return 1; }
+  # A result that says something EXISTS owes the third part of the shape: why
+  # what exists does not suffice. Without it a step can declare `one match` and
+  # still found a new file in silence — which is the N+1 rule's whole subject,
+  # only one result-key further along than `several conflicting`.
+  #
+  # NOT enforced for `none`: nothing was found, so there is nothing to explain.
+  if [[ "$key" != "none" ]]; then
+    why="${result#*"$spell"}"
+    why="${why//[[:space:],:;—–-]/}"
+    [[ "${#why}" -ge 15 ]] || { echo "error:no-reason"; return 1; }
+  fi
   printf '%s\t%s' "$key" "$cmd"
 }
 
@@ -189,8 +200,12 @@ aid_reuse_deliberate() {
   local alt tail
   for alt in "${_AID_REUSE_DELIBERATE_ALTS[@]}"; do
     [[ "$1" == *"$alt"* ]] || continue
-    # AC10 asks for the sentence "… because …", not for the phrase. A phrase on
-    # its own is a password; what makes it an argument is what follows it.
+    # AC10 asks for a SENTENCE, not for the phrase: a phrase on its own is a
+    # password, and what makes it an argument is what follows it. Substance is
+    # the test, deliberately, not the connective — "deliberately founding a
+    # variant, because X" and "…: X is load-bearing and unifying is a separate
+    # plan" are the same argument, and demanding the word `because` would grade
+    # grammar rather than reasoning.
     tail="${1#*"$alt"}"
     tail="${tail//[[:space:],:;—-]/}"
     [[ "${#tail}" -ge 15 ]] && return 0

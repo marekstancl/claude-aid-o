@@ -173,3 +173,19 @@ _plan() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"touches the 'testy' area"* ]]
 }
+
+# ── the drift check gets a caller ───────────────────────────────────────────
+# `--self-test` asks whether the derivation still agrees with the LIVE map —
+# a document edited by people who never run AID. Without a caller it could only
+# fire when someone remembered it, which is what an unenforced check is worth.
+# It SKIPS rather than fails when the map is unreachable: a foreign live
+# document must never fail a contributor's suite for being offline, while a
+# real derivation drift must.
+@test "standards: the live-map drift check runs, and skips cleanly when there is no map" {
+  run bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --self-test
+  if [[ "$output" == *"self-test SKIP"* || "$output" == *"unreachable"* ]]; then
+    skip "no standards map reachable from this checkout"
+  fi
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"self-test PASS"* ]]
+}
