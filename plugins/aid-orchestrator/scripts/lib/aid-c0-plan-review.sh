@@ -160,32 +160,6 @@ EOF
 # sync if either changes).
 # ===========================================================================
 
-# _c0_read_frontmatter <plan_file>
-#   Sets global _C0_FM_ID from the plan's YAML frontmatter (first '---' to the
-#   closing '---'). Fails closed (_fail) if the block is never closed.
-#   It no longer reads `risk:`: since P084 the only consumer of that field is
-#   the shared classifier (lib/aid-plan-band.sh), which _c0_risk_of now asks.
-_c0_read_frontmatter() {
-  local plan_file="$1"
-  _C0_FM_ID=""
-  local in_fm=0 fm_done=0 line
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line//$'\r'/}"
-    if [[ "$in_fm" -eq 0 ]]; then
-      [[ "$line" == "---" ]] && in_fm=1
-      continue
-    fi
-    if [[ "$line" == "---" ]]; then
-      fm_done=1
-      break
-    fi
-    if [[ "$line" =~ ^id:[[:space:]]*(.+)$ ]]; then
-      _C0_FM_ID="$(printf '%s' "${BASH_REMATCH[1]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    fi
-  done < "$plan_file"
-  [[ "$fm_done" -eq 1 ]] || _fail "plan file missing closing '---' for frontmatter block: $plan_file"
-}
-
 # _c0_risk_of <plan_file> — echoes "high" or "low": whether this plan owes a
 # cross-provider Codex review at all.
 #
@@ -215,14 +189,16 @@ _c0_risk_of() {
   esac
 }
 
-# _c0_plan_id_of <plan_file>  — the plan's frontmatter `id:` field. Fails
-# closed (no plan_id → no stable occurrence_id namespace).
+# _c0_plan_id_of <plan_file>  — the plan's frontmatter `id:`. Fails closed
+# (no plan_id → no stable occurrence_id namespace). The reading and the
+# traversal guard both live in lib/aid-plan-band.sh, which this file already
+# sources for the band: the copy that used to live here was written when that
+# library did not exist.
 _c0_plan_id_of() {
-  local plan_file="$1"
-  _c0_read_frontmatter "$plan_file"
-  [[ -n "$_C0_FM_ID" ]] || _fail "plan file missing 'id' field in frontmatter: $plan_file"
-  [[ "$_C0_FM_ID" =~ ^[A-Za-z0-9_-]+$ ]] || _fail "plan id '$_C0_FM_ID' contains invalid characters (path traversal guard)"
-  echo "$_C0_FM_ID"
+  local plan_file="$1" id
+  id="$(_aid_plan_id_of "$plan_file")" \
+    || _fail "plan file missing a usable 'id' in frontmatter (letters/digits/-/_ only): $plan_file"
+  echo "$id"
 }
 
 # _c0_project_id <repo_root>  — same convention as aid-c3-dispatch.sh's

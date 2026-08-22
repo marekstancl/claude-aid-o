@@ -152,6 +152,20 @@ _reason_msg() {
   esac
 }
 
+# _strict_finding <location-suffix> <message> — the STRICT/legacy emitter every
+# obligation below shares. `location-suffix` is ":<lineno>", or "" for a
+# whole-file finding. One place owns the counter, the --quiet check and the two
+# tiers, so a new obligation cannot half-implement any of the three.
+_strict_finding() {
+  strict_hits=$((strict_hits+1))
+  [[ "$QUIET" -eq 0 ]] || return 0
+  if [[ "$mode" == "strict" ]]; then
+    echo "${PLAN}${1}: STRICT ${2}" >&2
+  else
+    echo "${PLAN}${1}: [WARN legacy] ${2}" >&2
+  fi
+}
+
 while IFS=$'\t' read -r lineno bullet; do
   [[ -z "${bullet:-}" ]] && continue
   while IFS= read -r prose_path; do
@@ -167,78 +181,62 @@ while IFS=$'\t' read -r lineno bullet; do
     errors=$((errors+1))
     [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: ERROR ${msg}: ${bullet}" >&2
   else  # strict
-    strict_hits=$((strict_hits+1))
-    if [[ "$mode" == "strict" ]]; then
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: STRICT ${msg}: ${bullet}" >&2
-    else
-      [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: [WARN legacy] ${msg}: ${bullet}" >&2
-    fi
+    _strict_finding ":${lineno}" "${msg}: ${bullet}"
   fi
 done < <(_aid_extract_files_bullets_numbered < "$PLAN")
 
 # ---------------------------------------------------------------------------
 # Band-scoped per-step obligations
 # ---------------------------------------------------------------------------
-# _plan_band — the plan's ceremony band from the one classifier
-# (lib/aid-plan-band.sh, shared with aid-cp1-gate.sh). Anything unexpected
-# reads as `full`: the lint must never be the reason a plan is checked for less.
-# Deliberately the LIB and not `aid-cp1-gate.sh --classify-only`: this lint runs
-# inside generation's pre-flight, where "the CP1 gate is consulted exactly once
-# per plan" is an invariant asserted by counting gate invocations. The project
-# root is resolved by the lib FROM THE PLAN, never from this process's cwd — a
-# lint run from elsewhere must still read the same policy override the gate
-# reads for that plan.
-_plan_band() {
-  local line band
-  line="$(aid_plan_band "$PLAN")" || line=""
-  band="${line%%$'\t'*}"
-  case "$band" in
-    full|medium|light) printf '%s' "$band" ;;
-    *)                 printf 'full' ;;
-  esac
-}
+# The band comes from the LIB (`aid_plan_band_name`, which already defaults an
+# unknown answer to `full`), never from `aid-cp1-gate.sh --classify-only`: this
+# lint runs inside generation's pre-flight, where "the CP1 gate is consulted
+# exactly once per plan" is an invariant the generation suites assert by
+# COUNTING gate invocations. The lib resolves the project root FROM THE PLAN, so
+# a lint run from another directory still reads the policy override that plan's
+# own workspace carries.
 
 # _missing_step_fields — one line per step that is missing band-scoped fields:
 # "<lineno>\t<missing,fields>\t<step heading>". A step's region runs from its
 # own `### Step` heading to the next one or to the next `##` section, which is
 # how the plan format already separates steps.
 _missing_step_fields() {
-  awk '
-    function mark(which) {
-      if (which == "arch") arch = 1
-      else if (which == "err") err = 1
-      else if (which == "edge") edge = 1
-    }
-    function report(   miss) {
+  # Fenced blocks are blanked first: a plan that QUOTES `### Step 1:` in an
+  # example (this repo's own plans about AID do) would otherwise be told its
+  # example is missing Error Handling.
+  #
+  # The field list is ONE string. It used to be three literals repeated in three
+  # places inside this program (detection, marking, reporting), so adding a
+  # band-scoped field meant four coordinated edits in one awk.
+  awk -v fields='Architecture Context|Error Handling|Edge Cases' '
+    BEGIN { n = split(fields, want, "|") }
+    function report(   i, miss) {
       miss = ""
-      if (!arch) miss = miss (miss ? "," : "") "Architecture Context"
-      if (!err)  miss = miss (miss ? "," : "") "Error Handling"
-      if (!edge) miss = miss (miss ? "," : "") "Edge Cases"
+      for (i = 1; i <= n; i++) if (!have[i]) miss = miss (miss ? "," : "") want[i]
       if (miss != "") print ln "\t" miss "\t" head
       head = ""
     }
+    function reset(   i) { for (i = 1; i <= n; i++) have[i] = 0; pending = 0 }
     { gsub(/\r$/, "") }
-    /^### Step / { if (head != "") report(); head = $0; ln = NR; arch = 0; err = 0; edge = 0; pending = ""; next }
+    /^### Step / { if (head != "") report(); head = $0; ln = NR; reset(); next }
     /^## /       { if (head != "") report(); next }
-    # A field counts as present only once something FOLLOWS its label — either
-    # on the label line itself ("**Error Handling:** none, this is a text edit")
-    # or on a later line before the next label. Three empty labels used to
-    # satisfy all three obligations while saying nothing.
+    # A field counts as present only once something FOLLOWS its label — on the
+    # label line itself ("**Error Handling:** none, this is a text edit") or on a
+    # later line before the next label. Three empty labels used to satisfy all
+    # three obligations while saying nothing.
     head != "" {
       if ($0 ~ /^\*\*[A-Z][^*]*:\*\*/) {
         rest = $0
         sub(/^\*\*[A-Z][^*]*:\*\*[[:space:]]*/, "", rest)
-        pending = ""
-        if ($0 ~ /^\*\*Architecture Context:\*\*/) pending = "arch"
-        if ($0 ~ /^\*\*Error Handling:\*\*/)       pending = "err"
-        if ($0 ~ /^\*\*Edge Cases:\*\*/)           pending = "edge"
-        if (pending != "" && rest ~ /[^[:space:]]/) { mark(pending); pending = "" }
+        pending = 0
+        for (i = 1; i <= n; i++) if ($0 ~ "^\\*\\*" want[i] ":\\*\\*") pending = i
+        if (pending && rest ~ /[^[:space:]]/) { have[pending] = 1; pending = 0 }
         next
       }
-      if (pending != "" && $0 ~ /[^[:space:]]/) { mark(pending); pending = "" }
+      if (pending && $0 ~ /[^[:space:]]/) { have[pending] = 1; pending = 0 }
     }
     END { if (head != "") report() }
-  ' "$PLAN"
+  ' < <(_aid_blank_fenced < "$PLAN")
 }
 
 # _has_testing_strategy — a `## Testing Strategy` heading with at least one
@@ -261,14 +259,7 @@ _has_testing_strategy() {
 }
 
 if ! _has_testing_strategy; then
-  strict_hits=$((strict_hits+1))
-  if [[ "$QUIET" -eq 0 ]]; then
-    if [[ "$mode" == "strict" ]]; then
-      echo "${PLAN}: STRICT no '## Testing Strategy' section with content — say which behaviour this plan verifies, why that one, and where it goes (new suite / case in an existing suite). A Test: bullet per step is NOT required." >&2
-    else
-      echo "${PLAN}: [WARN legacy] no '## Testing Strategy' section with content — a Test: bullet per step does not replace saying what is verified and why." >&2
-    fi
-  fi
+  _strict_finding "" "no '## Testing Strategy' section with content — say which behaviour this plan verifies, why that one, and where it goes (new suite / case in an existing suite). A Test: bullet per step is NOT required."
 fi
 
 # ---------------------------------------------------------------------------
@@ -297,28 +288,14 @@ _human_grep_args=()
 for _human in "${_AID_HUMAN_SECTIONS[@]}"; do _human_grep_args+=(-e "$_human"); done
 while IFS=: read -r _hline _hsection; do
   [[ -n "${_hline:-}" ]] || continue
-  strict_hits=$((strict_hits+1))
-  if [[ "$QUIET" -eq 0 ]]; then
-    if [[ "$mode" == "strict" ]]; then
-      echo "${PLAN}:${_hline}: STRICT '${_hsection}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section." >&2
-    else
-      echo "${PLAN}:${_hline}: [WARN legacy] '${_hsection}' is written for a human; the PM page is now rendered from the plan (lib/aid-plan-summary.sh)." >&2
-    fi
-  fi
+  _strict_finding ":${_hline}" "'${_hsection}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section."
 done < <(grep -n -x -F "${_human_grep_args[@]}" "$PLAN" 2>/dev/null || true)
 
-band="$(_plan_band)"
+band="$(aid_plan_band_name "$PLAN")"
 if [[ "$band" != "light" ]]; then
   while IFS=$'\t' read -r lineno missing head; do
     [[ -n "${missing:-}" ]] || continue
-    strict_hits=$((strict_hits+1))
-    if [[ "$QUIET" -eq 0 ]]; then
-      if [[ "$mode" == "strict" ]]; then
-        echo "${PLAN}:${lineno}: STRICT band=${band} step is missing ${missing}: ${head}" >&2
-      else
-        echo "${PLAN}:${lineno}: [WARN legacy] band=${band} step is missing ${missing}: ${head}" >&2
-      fi
-    fi
+    _strict_finding ":${lineno}" "band=${band} step is missing ${missing}: ${head}"
   done < <(_missing_step_fields)
 fi
 

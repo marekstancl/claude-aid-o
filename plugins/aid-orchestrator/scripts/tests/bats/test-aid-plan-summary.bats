@@ -148,3 +148,22 @@ EOF
   grep -q 'Rizika pojmenovaná v plánu: 0' "$OUT"
   grep -q 'Role, kterým se bude zadávat: —' "$OUT"
 }
+
+@test "a step quoted inside a fenced block is not counted as a step" {
+  # AID's own plans quote `### Step N:` in examples. Counting those inflates a
+  # number the page presents as counted from the plan.
+  plan="$(write_plan P956 'plugins/aid-orchestrator/commands/aid-help.md')"
+  cat >> "$plan" <<'EOF'
+
+## Appendix
+
+```markdown
+### Step 99: an example step, not a real one
+
+**Files:**
+- Modify: `nowhere.md` — illustration
+```
+EOF
+  aid_plan_summary_render "$plan" "$OUT"
+  grep -q '2 kroků' "$OUT"
+}

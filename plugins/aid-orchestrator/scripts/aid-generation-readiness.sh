@@ -17,6 +17,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
 source "${SCRIPT_DIR}/lib/aid-source-plan-graph.sh"
+# shellcheck source=lib/aid-plan-band.sh
+source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
+# shellcheck source=lib/aid-stage-log.sh
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 check_prerequisites
 
 plan="" total="" json=0 out=""
@@ -47,16 +51,7 @@ if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   # P084 Step 7 — the lint logs its own verdict; this is the OTHER stop this
   # script owns, so the two reasons a plan never reaches generation are both
   # countable instead of one being invisible.
-  # shellcheck source=lib/aid-stage-log.sh
-  source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-  # shellcheck source=lib/aid-plan-band.sh
-  source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
-  if _rd_id="$(_aid_plan_id_of "$plan")"; then
-    _rd_root="$(_aid_band_project_root "$plan")" || _rd_root=""
-    if [[ -n "$_rd_root" ]] && _rd_tl="$(aid_plan_timeline "$_rd_root" "$_rd_id")"; then
-      log_event "$_rd_tl" "plan_readiness_blocked" reason="dependency_grammar" || true
-    fi
-  fi
+  aid_plan_log "$plan" "plan_readiness_blocked" reason="dependency_grammar"
   printf '%s\n' "${_aid_spg_error:-dependency grammar is invalid}" >&2
   echo "READINESS: FAIL — canonical dependencies are 'Depends on: Step N[, Steps X-Y]', or one of the two no-dependency markers 'none' (authoring form) and '---' (generated-canonical form); an optional ' — annotation' after the references is ignored." >&2
   exit 1

@@ -54,18 +54,6 @@ source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-artifact-render.sh"
 # shellcheck source=aid-plan-band.sh
 source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-plan-band.sh"
 
-# _aps_frontmatter <plan> <key> — a scalar from the plan's frontmatter block.
-_aps_frontmatter() {
-  awk -v key="$2" '
-    NR == 1 && $0 != "---" { exit }
-    NR == 1 { inside = 1; next }
-    inside && $0 == "---" { exit }
-    inside && index($0, key ":") == 1 {
-      sub(/^[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit
-    }
-  ' "$1"
-}
-
 # _aps_section <plan> <heading> — the body of one `## <heading>` section, with
 # blank lines and sub-headings dropped. Empty when the section is absent.
 _aps_section() {
@@ -102,12 +90,25 @@ _aps_norm() {
 # need a PIPE (not a single command) call _aps_norm directly.
 _aps_count() { _aps_norm "$("$@" 2>/dev/null || true)"; }
 
-# _aps_count_steps <plan> — `### Step N:` headings.
-_aps_count_steps() { _aps_count grep -cE '^### Step [0-9]+:' "$1"; }
+# The two counts below read the plan with fenced blocks blanked
+# (`_aid_blank_fenced`), and accept the same step-header spellings generation
+# accepts: a quoted example must not inflate a number on the PM page.
+_aps_count_steps() {
+  _aps_count_stdin '^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+' "$1"
+}
 
 # _aps_count_epics <plan> — `**EPIC N: …**` markers (0 is legitimate: a
 # single-EPIC plan states no marker).
-_aps_count_epics() { _aps_count grep -cE '^\*\*EPIC [0-9]+' "$1"; }
+_aps_count_epics() {
+  _aps_count_stdin '^\*\*EPIC[[:space:]]+[0-9]+' "$1"
+}
+
+# _aps_count_stdin <ere> <plan> — matches in the plan with fenced blocks blanked.
+_aps_count_stdin() {
+  local n
+  n="$(_aid_blank_fenced < "$2" | grep -cE "$1")" || n=0
+  printf '%s' "${n:-0}"
+}
 
 # _aps_declared_paths <plan> — the same declared paths the band is classified
 # from, de-duplicated. One authority for "what does this plan touch".
@@ -154,8 +155,8 @@ aid_plan_summary_render() {
   fi
 
   local plan_id status band_line band band_reason
-  plan_id="$(_aps_frontmatter "$plan" id)"; plan_id="${plan_id:-?}"
-  status="$(_aps_frontmatter "$plan" status)"; status="${status:-draft}"
+  plan_id="$(_aid_fm_get "$plan" id)"; plan_id="${plan_id:-?}"
+  status="$(_aid_fm_get "$plan" status)"; status="${status:-draft}"
   band_line="$(aid_plan_band "$plan")" || band_line=""
   band="${band_line%%$'\t'*}"; band="${band:-full}"
   band_reason="${band_line#*$'\t'}"

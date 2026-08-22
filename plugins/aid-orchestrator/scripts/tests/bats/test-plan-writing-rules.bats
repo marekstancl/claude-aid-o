@@ -13,6 +13,7 @@
 setup() {
   TMPDIR_TEST="$(mktemp -d)"
   mkdir -p "$TMPDIR_TEST"
+  PLUGIN_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
 }
 
 teardown() {
@@ -135,8 +136,6 @@ EOF
 # not ask for either.
 # ---------------------------------------------------------------------------
 
-PLUGIN_ROOT_OF() { cd "$BATS_TEST_DIRNAME/../../.." && pwd; }
-
 # write_step_plan <path> <declared file> — a strict-cohort plan with exactly one
 # step that carries the UNIVERSAL fields and none of the band-scoped ones.
 write_step_plan() {
@@ -175,13 +174,13 @@ EOF
 
 @test "AC10: a light plan passes the lint with no Architecture Context and no Edge Cases" {
   write_step_plan "${TMPDIR_TEST}/light.md" "plugins/aid-orchestrator/commands/aid-help.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/light.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/light.md"
   [ "$status" -eq 0 ]
 }
 
 @test "AC11: the same step in a full plan does not pass — the band-scoped fields are owed" {
   write_step_plan "${TMPDIR_TEST}/full.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/full.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/full.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"band=full step is missing Architecture Context,Error Handling,Edge Cases"* ]]
 }
@@ -189,13 +188,13 @@ EOF
 @test "a legacy plan gets the same finding as an advisory, never a block" {
   write_step_plan "${TMPDIR_TEST}/legacy.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
   sed -i '/^lifecycle_strict:/d' "${TMPDIR_TEST}/legacy.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/legacy.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/legacy.md"
   [ "$status" -eq 0 ]
   [[ "$output" == *"[WARN legacy] band=full step is missing"* ]]
 }
 
 @test "AC9: every one of the 28 completeness checks carries a band verdict" {
-  skill="$(PLUGIN_ROOT_OF)/skills/plan-writing.md"
+  skill="$PLUGIN_ROOT/skills/plan-writing.md"
   # The verdict table is the answer to "does this check apply to my band" — a
   # check absent from it would silently read as universal, which is exactly the
   # ambiguity the table exists to remove.
@@ -219,7 +218,7 @@ EOF
   write_step_plan "${TMPDIR_TEST}/empty.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
   printf '\n**Architecture Context:**\n\n**Error Handling:**\n\n**Edge Cases:**\n' \
     >> "${TMPDIR_TEST}/empty.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/empty.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/empty.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing Architecture Context,Error Handling,Edge Cases"* ]]
 }
@@ -229,7 +228,7 @@ EOF
   # Replace the fixture's real strategy with one that is only a sub-heading.
   sed -i '/^No new verification/d' "${TMPDIR_TEST}/heading.md"
   sed -i 's/^## Testing Strategy$/## Testing Strategy\n\n### Tests/' "${TMPDIR_TEST}/heading.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/heading.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/heading.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Testing Strategy"* ]]
 }
@@ -239,26 +238,21 @@ EOF
   # (codex review of EPIC 1, finding 4).
   write_step_plan "${TMPDIR_TEST}/high.md" "plugins/aid-orchestrator/commands/aid-help.md"
   sed -i 's/^type: plan$/type: plan\nrisk: high/' "${TMPDIR_TEST}/high.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/high.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/high.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"band=full step is missing"* ]]
 }
 
-@test "AC17: each of the four hand-written summary headings is reported separately" {
-  write_step_plan "${TMPDIR_TEST}/human.md" "plugins/aid-orchestrator/commands/aid-help.md"
-  printf '\n## Stakeholder Brief\n\nx\n\n## Human Review Summary\n\nx\n\n## Executive Summary\n\nx\n\n## Shrnutí pro PM\n\nx\n' \
-    >> "${TMPDIR_TEST}/human.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/human.md"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"## Stakeholder Brief"* ]]
-  [[ "$output" == *"## Human Review Summary"* ]]
-  [[ "$output" == *"## Executive Summary"* ]]
-  [[ "$output" == *"## Shrnutí pro PM"* ]]
-}
 
-@test "AC17: a plan without those headings is not reported" {
-  write_step_plan "${TMPDIR_TEST}/clean.md" "plugins/aid-orchestrator/commands/aid-help.md"
-  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/clean.md"
+@test "a step quoted inside a fenced block is not linted as a step" {
+  write_step_plan "${TMPDIR_TEST}/fenced.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+  # Give the real step what its band owes, then quote an example step that has
+  # none of it. Only the quoted one is missing fields, and it must not be seen.
+  printf '\n**Architecture Context:**\nIt sits in the gate.\n\n**Error Handling:** fail closed.\n\n**Edge Cases:**\n- one\n' \
+    >> "${TMPDIR_TEST}/fenced.md"
+  printf '\n## Appendix\n\n```markdown\n### Step 99: quoted example\n\n**Objective:** nothing real.\n```\n' \
+    >> "${TMPDIR_TEST}/fenced.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/fenced.md"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"written for a human"* ]]
+  [[ "$output" != *"Step 99"* ]]
 }

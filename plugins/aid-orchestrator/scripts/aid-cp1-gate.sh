@@ -148,34 +148,10 @@ fi
 # ---------------------------------------------------------------------------
 # Step 1: Extract plan ID from frontmatter
 # ---------------------------------------------------------------------------
-plan_id=""
-
-# State machine: only read inside the YAML frontmatter block (first --- to closing ---).
-# Plans without a closing --- are treated as having no frontmatter (body is not parsed as FM).
-in_frontmatter=0
-frontmatter_done=0
-while IFS= read -r line; do
-  line="${line//$'\r'/}"
-  if [[ "$in_frontmatter" -eq 0 ]]; then
-    [[ "$line" == "---" ]] && in_frontmatter=1
-    continue
-  fi
-  # Inside frontmatter: stop at closing ---
-  if [[ "$line" == "---" ]]; then
-    frontmatter_done=1
-    break
-  fi
-  if [[ "$line" =~ ^id:[[:space:]]*(.+)$ ]]; then
-    plan_id="${BASH_REMATCH[1]}"
-    plan_id="$(echo "$plan_id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  fi
-done < "$plan"
-
-# Require a properly closed frontmatter block.
-[[ "$frontmatter_done" -eq 0 ]] && error_exit "Plan file missing closing '---' for frontmatter block." 1
-
-[[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
-[[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]] || error_exit "Plan id '$plan_id' contains invalid characters (path traversal guard)" 1
+# One reader (lib/aid-plan-band.sh), which also carries the `^[A-Za-z0-9_-]+$`
+# guard this file used to repeat — the id becomes a directory name below.
+plan_id="$(_aid_plan_id_of "$plan")" \
+  || error_exit "Plan file missing a usable 'id' in its frontmatter (expected: id: P{NNN}, letters/digits/-/_ only)." 1
 
 # ---------------------------------------------------------------------------
 # Step 2: Classify the plan's ceremony band from its declared Files: paths
@@ -188,12 +164,10 @@ AID_PLAN_RISK_REASON="${_cp1_band_line#*$'\t'}"
 # this policy argues from numbers instead of impressions. Never blocking:
 # log_event is a no-op when the target cannot be resolved, and a plan must not
 # fail to be classified because a directory was unwritable.
-_cp1_log() {
-  local tl
-  tl="$(aid_plan_timeline "$project_root" "$plan_id")" || return 0
-  # `|| true`: telemetry never decides this gate's verdict.
-  log_event "$tl" "$@" || true
-}
+# The gate logs through the shared verb so its events land in the same place
+# the lint's and the readiness check's do — resolved from the PLAN, never from
+# this process's cwd, which is what made the three resolvers drift before.
+_cp1_log() { aid_plan_log "$plan" "$@"; }
 _cp1_log cp1_band_classified band="$AID_PLAN_RISK_BAND" reason="$AID_PLAN_RISK_REASON" \
   classify_only="$( [[ "$classify_only" -eq 1 ]] && echo true || echo false )"
 
@@ -246,14 +220,15 @@ _cp1_band_flags() {
   # is the shape that makes a `medium` plan demand the full ceremony.
   raw="$(yq -r ".review_checkpoints.ceremony_bands.${band} |
                 (.cp1_deep_lenses, .c0_cross_provider, .cp1_ledger)" "$file" 2>/dev/null)" || raw=""
-  local i val
-  for i in 1 2 3; do
-    val="$(printf '%s\n' "$raw" | sed -n "${i}p")"
+  # Read the three lines back in the shell rather than forking `sed -n Np`
+  # three times to index a string this loop is already walking.
+  local val
+  while IFS= read -r val || [[ -n "$val" ]]; do
     case "$val" in
       true|false) printf '%s\n' "$val" ;;
       *)          printf 'true\n' ;;
     esac
-  done
+  done <<< "$raw"
 }
 
 { IFS= read -r cp1_need_lenses
@@ -450,9 +425,12 @@ _cp1_c0_and_ledger_gate() {
   fi
 
   # --- 1. C0 cross-provider plan review ------------------------------------
+  # Positive shape, matching the ledger check below: the band either owes this
+  # review or the block is skipped. (The earlier `!= "true"` arm re-assigned
+  # c0_ok the value it was just initialised to — a branch that did nothing.)
   local c0_ok=1 c0_reason=""
   if [[ "$cp1_need_c0" != "true" ]]; then
-    c0_ok=1
+    :
   elif [[ ! -f "$c0_review_file" ]]; then
     c0_ok=0
     c0_reason="c0-plan-review.json missing at ${c0_review_file}"

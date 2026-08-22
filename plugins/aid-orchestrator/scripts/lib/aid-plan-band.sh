@@ -119,6 +119,20 @@ _aid_plan_id_of() {
 
 # aid_plan_band <plan> [project_root] — echoes "<band>\t<reason>".
 # The reason names WHY, so telemetry and PM both get more than a verdict.
+# aid_plan_band_name <plan> [project_root] — the band alone, always one of
+# full|medium|light. Every consumer wanted this and each wrote its own two
+# lines to get it (split the tab, then default the unknown to `full`); the
+# default belongs here, once, next to the classifier that produces the value.
+aid_plan_band_name() {
+  local b
+  b="$(aid_plan_band "$@")"
+  b="${b%%$'\t'*}"
+  case "$b" in
+    full|medium|light) printf '%s' "$b" ;;
+    *)                 printf 'full' ;;
+  esac
+}
+
 aid_plan_band() {
   local plan="$1" project_root="${2:-}"
   local map="" cand
