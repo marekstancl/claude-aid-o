@@ -268,6 +268,8 @@ The `## Implementation Steps` section replaces the old `## High-Level Steps` tab
 several matching `paths` | several conflicting `paths`> — {why what exists does not suffice}
         *(REQUIRED for a step whose Files carry a `Create:` bullet — see "Reuse check" below)*
 
+**Parallel group:** {wave name, e.g. `wave-1`} | `---` *(a step that runs alone)*
+
 **Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
 hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
 line).** Each Files bullet MUST be exactly:
@@ -571,6 +573,7 @@ the band the lint checks are one classification, never two.
 | `## Testing Strategy` with content | required | required | required |
 | **Reuse check** on a step with a `Create:` bullet | required | required | **required** |
 | A step naming the help/docs path a behaviour change needs | required | required | — |
+| **Parallel group** per step | required | required | defaults to `---` |
 | **Architecture Context** | required | required | — |
 | **Error Handling** | required | required | — |
 | **Edge Cases** | required | required | **not required at all** |
@@ -585,6 +588,41 @@ about failure modes it does not have.
 
 Nothing here lowers a band. A plan that wants the full ceremony says so with
 `risk: high` in its frontmatter; a plan that wants less says so by touching less.
+
+### Declaring what can run at the same time
+
+Each step says which **wave** it belongs to:
+
+```
+**Parallel group:** wave-2
+**Parallel group:** ---        # this step runs alone
+```
+
+A wave name is one word (`[A-Za-z0-9_-]`); `---` is the same "nothing here"
+marker the dependency grammar uses, so a plan has one spelling for it, not two.
+An explanation may follow the name — only the first word is graded.
+
+`aid-plan-parallel-check.sh` proves the declaration safe by the one mechanical
+measure there is: **two steps in the same wave must not name the same file.**
+The check is advisory while the plan is being written (`--advisory`) and
+BLOCKING inside `aid-generation-readiness.sh`, which is the last point before
+the plan becomes EPICs — the same two-stage model the `Files:` grammar has.
+
+Compute the waves by hand from the declared `Files:` and `Depends on:` — the
+check VERIFIES a schedule, it does not produce one, and verification is not a
+substitute for having thought about it. Then put the result in a table:
+
+| Wave | Steps | Waits for | Why |
+|---|---|---|---|
+| 1 | 1, 4 | — | no path in common |
+
+**`max_parallel: 1` does not make this ceremony.** Nothing runs concurrently
+today; the table is the evidence of safety for the moment the brake comes off,
+and evidence gathered after the fact is evidence nobody trusts.
+
+Two steps touching the same file in DIFFERENT waves are fine — that is what
+waves are for. A wave with one step is valid and does nothing; the check says
+so and does not fail.
 
 ### Documentation, help and screenshots
 

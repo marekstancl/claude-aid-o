@@ -47,6 +47,18 @@ fi
 # `if`, not `[[ … ]] && …`: a bare AND-list is the script's last command status
 # under `set -e`, so an empty lint_out would abort a PASSING readiness check.
 if [[ -n "$lint_out" ]]; then printf '%s\n' "$lint_out" >&2; fi
+# Disjointness of the declared waves (P085 Step 7). Here rather than in the
+# lint because it is a property of the step GRAPH, which is what this script
+# already grades; and BLOCKING here because this is the last point before the
+# plan becomes EPICs, which is where a wave that shares a file stops being a
+# note and starts being two agents in one file.
+if ! par_out="$("${SCRIPT_DIR}/aid-plan-parallel-check.sh" "$plan" 2>&1)"; then
+  printf '%s\n' "$par_out" >&2
+  aid_plan_log "$plan" "plan_readiness_blocked" reason="parallel_group_collision"
+  echo "READINESS: FAIL — steps declared in one wave must not name the same file; full grammar: skills/plan-writing.md" >&2
+  exit 1
+fi
+if [[ -n "$par_out" ]]; then printf '%s\n' "$par_out" >&2; fi
 if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   # P084 Step 7 — the lint logs its own verdict; this is the OTHER stop this
   # script owns, so the two reasons a plan never reaches generation are both
@@ -64,7 +76,7 @@ if (( json )); then
   jq -n --arg plan "$(realpath "$plan")" --arg instructions "plugins/aid-orchestrator/skills/plan-writing.md" --argjson graph "$graph" '{status:"ready",plan:$plan,instructions:$instructions,provisional_graph:$graph}'
 else
   echo "READINESS: PASS — source plan is safe to generate."
-  echo "  Files grammar: canonical; dependencies: canonical; graph: acyclic."
+  echo "  Files grammar: canonical; dependencies: canonical; graph: acyclic; declared waves: disjoint."
   echo "  Full authoring contract: plugins/aid-orchestrator/skills/plan-writing.md"
   echo "  Generation contract: plugins/aid-orchestrator/skills/planner.md"
   [[ -n "$out" ]] && echo "  Provisional graph: $out"

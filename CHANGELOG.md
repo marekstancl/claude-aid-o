@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.88.0] — 2026-08-22
+
+### Added
+- **Reuse check per founding step** — a step whose `Files:` carry a `Create:` bullet owes a `**Reuse check:**` field naming the read-only search it ran and which of four results it got, and `aid-plan-lint.sh` REPLAYS that command and compares the file count with the claim, so `none` over a search that finds something today is a blocking finding and a command that no longer runs is refused as stale evidence. Required in every band, `light` included, because founding a duplicate component is exactly what a small plan does.
+- **`scripts/lib/aid-reuse-verdict.sh`** — the grammar, the replay and the N+1 rule in one place: a plan never adds one more variant of something that exists, and a step that declared conflicting patterns and founds another anyway must argue for it in writing. The verdict decides between unifying now (every conflicting site already lies inside the plan's declared paths) and filing a backlog item that LISTS the sites.
+- **`reuse_evidence` C0 lens** — judges what the replay deliberately cannot: whether the search was wide enough. Its findings stay observe-only, but `aid-cp1-gate.sh` requires the file to exist in band `full`, because a lens whose absence stops nothing is a lens nobody has to run. It is a sibling of `reuse_compat`, which answers a different question and is unchanged.
+- **`scripts/lib/aid-standards-map.sh`** — derives the ecosystem standards binding a plan's declared paths from the LIVE standards map (path in `project.yaml → standards.map_path`), and `aid-plan-lint.sh` compares them with what the plan's `## Standards` section names. The map is read, never copied; a project without one owes nothing and the lint records that it asked nothing; a map configured but unreadable is reported as the broken environment it is, not rounded down to "no standards". `--self-test` re-checks the derivation against the live map for three control paths.
+- **`scripts/aid-plan-parallel-check.sh`** — each step declares a `**Parallel group**`, and two steps in one wave must not name the same file. `Parallel Group` has been written into `plan.json` since P039 with nothing ever producing or checking a value; this is the other half. Advisory while writing, blocking inside `aid-generation-readiness.sh`.
+- **A documentation step where there is somewhere to write** — a plan that changes behaviour a user meets must declare a path under the project's in-app help or documentation site, recorded once by `/aid-init` and `/aid-setup` in `project.yaml → documentation`. A project with neither surface owes nothing, and the lint says so.
+
+### Changed
+- **The PM page carries two more counted facts** — the standards the plan names and how many of its founding steps carry a reuse search, both read out of the plan and both absent rather than empty when there is nothing to say.
+- **One reader for a plan's step structure** — `lib/aid-scoping.sh` gained `_aid_plan_step_bounds`, `_aid_plan_step_field`, `_aid_files_bullet_verb` and `_aid_backtick_paths`, which the plan lint, the reuse verdict and the parallel check all share instead of each parsing the plan again.
+
+### Fixed
+- **The band requirements table could fail open** — when `yq` errored, `_cp1_band_flags` returned fewer values than the gate reads, leaving the tail empty, and an empty flag reads as "not required" everywhere below. The count is now padded to the fail-closed default.
+- **`aid_plan_summary_render` skipped annotated headings** — sections were matched by exact equality, so a real plan's `## Standards (V3)` was invisible to the page rendered from it.
+
 ## [2.87.0] — 2026-08-22
 
 ### Added

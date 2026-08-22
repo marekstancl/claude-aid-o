@@ -65,6 +65,8 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 - Create: `docs/adr/ADR-001-api-design.md`
 - Create: `src/api/contracts.py`
 
+**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing like this exists in the tree yet
+
 **Acceptance Criteria:**
 - [ ] ADR approved by tech lead
 - [ ] Contracts validated against OpenAPI 3.1 schema
@@ -79,6 +81,8 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 **Files:**
 - Create: `src/domain/models.py`
 - Create: `src/domain/rules.py`
+
+**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing like this exists in the tree yet
 
 **Acceptance Criteria:**
 - [ ] All domain invariants enforced
@@ -98,6 +102,8 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 - Create: `src/api/handlers.py`
 - Modify: `src/api/__init__.py`
 
+**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing like this exists in the tree yet
+
 **Acceptance Criteria:**
 - [ ] All contract endpoints implemented
 - [ ] Request validation rejects malformed input
@@ -114,6 +120,8 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 - Create: `src/frontend/components/FeatureView.tsx`
 - Create: `src/frontend/components/FeatureForm.tsx`
 - Modify: `src/frontend/App.tsx`
+
+**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing like this exists in the tree yet
 
 **Acceptance Criteria:**
 - [ ] Components render correctly in Storybook
@@ -133,6 +141,8 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 - Create: `tests/integration/test_endpoints.py`
 - Create: `tests/e2e/test_workflows.py`
 
+**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing like this exists in the tree yet
+
 **Acceptance Criteria:**
 - [ ] Unit test coverage exceeds 85 percent for new code
 - [ ] Integration tests cover all happy paths and error paths
@@ -148,6 +158,8 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 - Create: `docs/security/review-2026-02.md`
 - Modify: `CHANGELOG.md`
 - Modify: `docs/api-reference.md`
+
+**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing like this exists in the tree yet
 
 **Acceptance Criteria:**
 - [ ] No high or critical SAST findings
