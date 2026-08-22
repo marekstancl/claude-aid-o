@@ -55,10 +55,18 @@ teardown() { cd /; rm -rf "$TEST_DIR"; }
   [ "$output" = "backlog" ]
 }
 
-@test "verdict: the search targets inside the command are not conflicting sites" {
+@test "verdict: a path named only inside the command is not a conflicting site" {
   # `src/known.ts` here is what the search LOOKED AT, not what it found.
   run aid_reuse_verdict "searched: \`grep -rn isoNow src/known.ts\` → several conflicting \`src/a.ts\`" "grep -rn isoNow src/known.ts" "src/a.ts"
   [ "$output" = "unify" ]
+}
+
+@test "verdict: a path that is BOTH the search target and a found site survives" {
+  # Cutting the command's text out (rather than filtering its paths by name)
+  # is what keeps this site in the list the backlog item has to carry.
+  run aid_reuse_verdict "searched: \`grep -rn isoNow src/a.ts\` → several conflicting \`src/a.ts\` and \`other/z.ts\`" "grep -rn isoNow src/a.ts" "other/z.ts"
+  [[ "$output" == backlog* ]]
+  [[ "$output" == *"src/a.ts"* ]]
 }
 
 # ── the machine-decidable half of the N+1 rule (AC10) ───────────────────────
@@ -83,6 +91,13 @@ _plan_conflicting() {   # <strict|legacy> <reuse-check-value>
   _plan_conflicting strict "searched: \`$CMD\` → several conflicting \`src/a.ts\` and \`src/b.ts\` — deliberately founding a variant, because both are load-bearing and unifying them is a separate plan"
   run "$LINT" "$PLAN"
   [ "$status" -eq 0 ]
+}
+
+@test "N+1: the phrase alone is not an argument — a reason has to follow it" {
+  _plan_conflicting strict "searched: \`$CMD\` → several conflicting \`src/a.ts\` and \`src/b.ts\` — deliberately founding a variant"
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"still founds another file of the same kind"* ]]
 }
 
 @test "N+1: the Czech spelling of the argument is accepted too" {

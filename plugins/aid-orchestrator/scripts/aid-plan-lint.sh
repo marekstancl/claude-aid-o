@@ -146,9 +146,9 @@ _reason_msg() {
     verb-no-path)       echo "a verb label with no path after it";;
     no-command)           echo "the **Reuse check:** field names no search command — a sentence is not evidence; put the command you ran in \`backticks\`";;
     command-not-allowed)  echo "the **Reuse check:** command is not one of grep/rg/ls/find/git grep — the lint replays it, so it runs read-only searches and nothing else";;
+    no-result)            echo "the **Reuse check:** field states no result after a '→' — write: searched: \`<command>\` → <none | one match | several matching | several conflicting> — <why what exists does not suffice>";;
     command-unsafe)       echo "the **Reuse check:** command pipes, redirects or chains — the lint replays it, so it accepts a single read-only search";;
     command-flag-refused) echo "the **Reuse check:** command carries a flag that runs another program (-exec, --pre, --config and friends) — the lint replays it, so a search must stay a search";;
-    no-result)            echo "the **Reuse check:** field states no result — write one of: none / one match / several matching / several conflicting";;
     *)                  echo "$1";;
   esac
 }
@@ -359,7 +359,13 @@ while IFS=$'\t' read -r _rs _re _rhead; do
     continue
   fi
   if ! _reuse_parsed="$(aid_reuse_parse "$_reuse_value")"; then
-    _strict_finding ":${_rs}" "$(_reason_msg "${_reuse_parsed#error:}"): ${_rhead}"
+    # `command-not-allowed:<name>` carries the offending command with it, so the
+    # refusal can name what it refused instead of describing a category.
+    _reuse_reason="${_reuse_parsed#error:}"; _reuse_named="${_reuse_reason#*:}"
+    _reuse_reason="${_reuse_reason%%:*}"
+    [[ "$_reuse_reason" == "command-not-allowed" ]] \
+      && _strict_finding ":${_rs}" "$(_reason_msg "$_reuse_reason") — refused: \`${_reuse_named}\`: ${_rhead}" \
+      || _strict_finding ":${_rs}" "$(_reason_msg "$_reuse_reason"): ${_rhead}"
     continue
   fi
   _reuse_key="${_reuse_parsed%%$'\t'*}"
@@ -387,9 +393,15 @@ while IFS=$'\t' read -r _rs _re _rhead; do
   # question. The presence + shape checks above still stand.
   [[ -n "$_project_root" ]] || continue
   if _reuse_hits="$(aid_reuse_replay "$_reuse_cmd" "$_project_root")"; then
-    if ! aid_reuse_result_matches "$_reuse_key" "$_reuse_hits"; then
-      _strict_finding ":${_rs}" "**Reuse check:** declares '${_reuse_key}' but replaying \`${_reuse_cmd}\` finds ${_reuse_hits} hit(s) — the evidence and the claim disagree: ${_rhead}"
-    fi
+    aid_reuse_result_matches "$_reuse_key" "$_reuse_hits"
+    case "$?" in
+      1) _strict_finding ":${_rs}" "**Reuse check:** declares '${_reuse_key}' but replaying \`${_reuse_cmd}\` finds ${_reuse_hits} file(s) — the evidence and the claim disagree: ${_rhead}" ;;
+      # Right direction, wrong degree. Said out loud, not blocked on: the file
+      # count is read out of tool output, and a tool can be asked to print in a
+      # shape that reading gets wrong.
+      2) advisories=$((advisories+1))
+         [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rs}: [ADVISORY] **Reuse check:** declares '${_reuse_key}' and the replay finds ${_reuse_hits} file(s) — same direction, different count; check which of the four results this really is." >&2 ;;
+    esac
   else
     case "$?" in
       3) _strict_finding ":${_rs}" "**Reuse check:** command \`${_reuse_cmd}\` does not run here — evidence that cannot be re-run is not evidence: ${_rhead}" ;;

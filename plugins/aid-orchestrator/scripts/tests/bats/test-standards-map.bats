@@ -125,6 +125,14 @@ _plan() {
   [[ "$output" == *"cannot be read"* ]]
 }
 
+@test "standards: a map whose machine block does not parse is the broken case, not the absent one" {
+  printf '# Map\n\n```yaml\nstandards: [ this is not: valid yaml\n```\n' > "$MAP"
+  _plan 'Modify: `scripts/tests/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be read"* ]]
+}
+
 # ── AC14: a defect of the map is reported, and stops nothing ────────────────
 @test "standards: a tag missing from the map's own vocabulary is reported, not blocking" {
   _plan 'Modify: `scripts/tests/x.bats` — edit' \

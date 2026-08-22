@@ -310,6 +310,9 @@ something new (any `Create:` bullet in its `Files:`) MUST carry a
   compares the number of hits with the declared result, so a claim of `none`
   over a command that finds something today is a blocking finding. That replay
   is the whole difference between evidence and a formality.
+- The **result** is read from AFTER the `→` (or `->`), and the arrow is
+  required: without it the lint would have to guess whether a word in the
+  sentence is a verdict or part of the search.
 - The **result** is one of four, and each has a consequence:
   `none` (proceed), `one match` (use it — the bullet becomes `Modify:`),
   `several matching` (pick the canonical one and say why: newest, most used,
@@ -328,8 +331,11 @@ C0 lens, and only in the `full` band; `medium` and `light` keep the replay
 alone. That is a deliberate boundary: a review costs a dispatch, and on a small
 plan it is not worth one.
 
-**The N+1 rule.** A plan never adds one more variant of something that already
-exists. It uses one of them, or it unifies them. Where the found patterns
+**The N+1 rule.** The field is about the thing the step FOUNDS — that is what
+"of the same kind" means below, and it is why the rule can be checked at all: a
+step that searched for what it is creating has already told the lint which
+existing things are in the running. A plan never adds one more variant of
+something that already exists. It uses one of them, or it unifies them. Where the found patterns
 CONFLICT, `scripts/lib/aid-reuse-verdict.sh` decides between unifying now and
 filing the work: unify inside this plan when every conflicting site already
 lies inside the paths the plan declares AND the unification does not push the

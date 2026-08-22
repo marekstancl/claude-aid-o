@@ -111,7 +111,13 @@ aid_standards_derive() {
   map="$(aid_standards_map_file "$root")" || return $?
   block_file="$(mktemp)" || return 2
   aid_standards_block "$map" > "$block_file"
-  if [[ ! -s "$block_file" ]]; then rm -f "$block_file"; return 2; fi
+  # Present is not the same as readable. A block that does not parse, or that
+  # carries no `standards:` list, would otherwise derive an empty obligation —
+  # a broken map would silently mean "this project has no standards", which is
+  # the one answer it must never produce.
+  if [[ ! -s "$block_file" ]] || ! yq -e '.standards | length > 0' "$block_file" >/dev/null 2>&1; then
+    rm -f "$block_file"; return 2
+  fi
   # Every declared path -> its tags, de-duplicated.
   local tags_file; tags_file="$(mktemp)"
   while IFS=$'\t' read -r _ bullet; do

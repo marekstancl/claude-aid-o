@@ -59,11 +59,61 @@ _plan() {
   [[ "$output" == *"pipes, redirects or chains"* ]]
 }
 
-@test "reuse: a command outside the read-only search vocabulary is not run" {
+@test "reuse: a command outside the read-only search vocabulary is refused BY NAME" {
   _plan strict '- Create: `src/new.ts` — new' 'searched: `cat src/known.ts` → none — nothing'
   run "$LINT" "$PLAN"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"names no search command"* ]]
+  [[ "$output" == *"is not one of grep/rg/ls/find/git grep"* ]]
+  [[ "$output" == *"refused: \`cat\`"* ]]
+}
+
+@test "reuse: a quoted exec-capable flag is refused too (quotes come off first)" {
+  # `bash -c` strips the quotes before the tool sees the word, so a denylist
+  # that read them would pass this straight through.
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `rg "--pre=./anything" isoNow src/` → none — nothing'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runs another program"* ]]
+}
+
+@test "reuse: git grep is accepted (its two-word form is the tool)" {
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `git grep -l relativeCzech` → none — nothing like it exists'
+  run "$LINT" "$PLAN"
+  # No git repo here, so the command cannot run — what matters is that the
+  # grammar ACCEPTED it, rather than reporting that no command was written.
+  [[ "$output" != *"names no search command"* ]]
+  [[ "$output" != *"is not one of"* ]]
+}
+
+@test "reuse: a result written without the arrow is refused" {
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rn relativeCzech src/` none of it exists'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"states no result after a"* ]]
+}
+
+@test "reuse: the result is read after the arrow, not from the search pattern" {
+  # The pattern searched for is the word `none`; the declared result is not.
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rn none src/` → one match `src/known.ts` — close but different'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the evidence and the claim disagree"* ]]
+}
+
+@test "reuse: the right direction with the wrong count is an advisory, not a refusal" {
+  echo 'export function isoNow() { return 1 }' > src/second.ts
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rln isoNow src/` → one match `src/known.ts` — it formats, this parses'
+  run "$LINT" "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"same direction, different count"* ]]
+}
+
+@test "reuse: one file with several matching lines is still one match" {
+  printf 'isoNow()\nisoNow()\nisoNow()\n' >> src/known.ts
+  _plan strict '- Create: `src/new.ts` — new' 'searched: `grep -rn isoNow src/` → one match `src/known.ts` — it formats, this parses'
+  run "$LINT" "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"different count"* ]]
 }
 
 @test "reuse: a flag that runs another program is refused by name" {

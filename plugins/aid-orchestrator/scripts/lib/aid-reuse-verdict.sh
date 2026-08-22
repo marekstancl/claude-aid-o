@@ -52,7 +52,8 @@ _AID_REUSE_REFUSED_FLAGS=(
 # _aid_classify_files_bullet):
 #   no-command | command-not-allowed | command-unsafe | no-result
 aid_reuse_parse() {
-  local value="$1" rest tok cmd="" first second key="" alt spell
+  local value="$1" rest tok cmd="" head="" key="" alt spell clean result named=""
+  local -a words
   # The command is the first backticked span that opens with an allowed tool.
   # Scanning for the tool rather than taking span #1 lets the sentence start
   # with a backticked path ("`lib/x.sh` exists, verified `grep …`") without
@@ -60,13 +61,23 @@ aid_reuse_parse() {
   rest="$value"
   while [[ "$rest" == *'`'*'`'* ]]; do
     rest="${rest#*\`}"; tok="${rest%%\`*}"; rest="${rest#*\`}"
-    read -r first second <<<"$tok"
-    [[ "$first" == "git" ]] && first="git $second"
+    read -r -a words <<<"$tok"
+    head="${words[0]-}"
+    # `git grep` is two words, and only its two-word form is a search: `git`
+    # alone is not in the vocabulary.
+    [[ "$head" == "git" ]] && head="git ${words[1]-}"
     for alt in "${_AID_REUSE_TOOLS[@]}" "git grep"; do
-      [[ "$first" == "$alt" ]] && { cmd="$tok"; break 2; }
+      [[ "$head" == "$alt" ]] && { cmd="$tok"; break 2; }
     done
+    # Not a search — but it IS a command someone typed. Remembered so the
+    # refusal can name it, which is a different message from "you wrote no
+    # command at all".
+    [[ -z "$named" && "$head" =~ ^[a-z][a-z0-9_.-]*$ ]] && named="$head"
   done
-  [[ -n "$cmd" ]] || { echo "error:no-command"; return 1; }
+  if [[ -z "$cmd" ]]; then
+    [[ -n "$named" ]] && { echo "error:command-not-allowed:${named}"; return 1; }
+    echo "error:no-command"; return 1
+  fi
   # A replayed command must be a SEARCH, not a program: no pipes, redirects,
   # chaining, substitution or newlines. Refused by name rather than sanitised —
   # a command this file cannot vouch for is not run at all.
@@ -78,13 +89,25 @@ aid_reuse_parse() {
   # is word splitting, quote removal and globbing — nothing that starts a
   # second program. These flags are the remaining way to start one.
   for tok in $cmd; do
+    # Quotes and backslashes come OFF first. `bash -c` removes them before the
+    # tool ever sees the word, so a denylist that reads them would pass
+    # `rg "--pre=./evil"` straight through — the hole this loop exists to close.
+    clean="${tok//[\"\'\\]/}"
     for alt in "${_AID_REUSE_REFUSED_FLAGS[@]}"; do
-      [[ "$tok" == "$alt" || "$tok" == "$alt="* ]] && { echo "error:command-flag-refused"; return 1; }
+      [[ "$clean" == "$alt" || "$clean" == "$alt="* ]] && { echo "error:command-flag-refused"; return 1; }
     done
   done
+  # The result is read from AFTER the arrow, never from the whole sentence: a
+  # search whose PATTERN is the word "none", or a reason that uses it in
+  # passing, would otherwise declare a result nobody wrote.
+  case "$value" in
+    *"→"*)  result="${value#*→}" ;;
+    *"->"*) result="${value#*->}" ;;
+    *)      echo "error:no-result"; return 1 ;;
+  esac
   for alt in "${_AID_REUSE_RESULT_ALTS[@]}"; do
     spell="${alt%%:*}"
-    if [[ "$value" == *"$spell"* ]]; then key="${alt#*:}"; break; fi
+    if [[ "$result" == *"$spell"* ]]; then key="${alt#*:}"; break; fi
   done
   [[ -n "$key" ]] || { echo "error:no-result"; return 1; }
   printf '%s\t%s' "$key" "$cmd"
@@ -105,14 +128,32 @@ aid_reuse_replay() {
   # 1 is "found nothing" for every tool in the vocabulary; 2+ is a real failure.
   [[ "$rc" -eq 124 ]] && return 4
   [[ "$rc" -ge 2 ]] && return 3
-  printf '%s' "$(printf '%s' "$out" | grep -c '[^[:space:]]' || true)"
+  # How many FILES the search found, not how many lines it printed: `grep -rn`
+  # prints three lines for one file with three hits, and "one match" is a claim
+  # about the file. Every tool in the vocabulary puts the path first and
+  # colon-separates it (`grep -rn`, `grep -c`), or prints the path alone
+  # (`ls`, `find`, `grep -l`), so the field before the first colon is the file
+  # in all four cases.
+  printf '%s' "$(printf '%s' "$out" | awk 'NF { sub(/:.*/, ""); print }' | sort -u | grep -c '[^[:space:]]' || true)"
 }
 
-# aid_reuse_result_matches <result-key> <hit-count> — does the replay agree with
-# what the step declared? `none` must find nothing; every other result claims at
-# least one existing pattern and must find one.
+# aid_reuse_result_matches <result-key> <file-count> — does the replay agree
+# with what the step declared? Three answers, because two would either miss the
+# `one match`/`several` distinction or block on it:
+#   0  agrees
+#   1  CONTRADICTS — `none` over a search that finds something, or a claim of
+#      existing patterns over a search that finds nothing. This is the shape the
+#      plan named as blocking, and it does not depend on how output is counted.
+#   2  the same direction, wrong degree — "one match" over four files, "several"
+#      over one. Worth saying out loud, not worth blocking on: the file count is
+#      read from tool output, and a tool can be asked to print in a shape this
+#      reading gets wrong.
 aid_reuse_result_matches() {
-  if [[ "$1" == "none" ]]; then [[ "$2" -eq 0 ]]; else [[ "$2" -gt 0 ]]; fi
+  case "$1" in
+    none) [[ "$2" -eq 0 ]] && return 0; return 1 ;;
+    one)  [[ "$2" -eq 0 ]] && return 1; [[ "$2" -eq 1 ]] && return 0; return 2 ;;
+    *)    [[ "$2" -eq 0 ]] && return 1; [[ "$2" -eq 1 ]] && return 2; return 0 ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -145,9 +186,14 @@ _AID_REUSE_DELIBERATE_ALTS=(
 # aid_reuse_deliberate <field-value> — did the step argue for the second
 # variant? Returns 0 when one of the spellings above appears.
 aid_reuse_deliberate() {
-  local alt
+  local alt tail
   for alt in "${_AID_REUSE_DELIBERATE_ALTS[@]}"; do
-    [[ "$1" == *"$alt"* ]] && return 0
+    [[ "$1" == *"$alt"* ]] || continue
+    # AC10 asks for the sentence "… because …", not for the phrase. A phrase on
+    # its own is a password; what makes it an argument is what follows it.
+    tail="${1#*"$alt"}"
+    tail="${tail//[[:space:],:;—-]/}"
+    [[ "${#tail}" -ge 15 ]] && return 0
   done
   return 1
 }
@@ -156,12 +202,12 @@ aid_reuse_deliberate() {
 # names: every backticked path in it except the ones inside the command itself
 # (`grep -rn x src/known.ts` names a file, but as a search target, not a find).
 aid_reuse_sites() {
-  local value="$1" cmd="$2" p
-  while IFS= read -r p; do
-    [[ -n "$p" ]] || continue
-    [[ "$cmd" == *"$p"* ]] && continue
-    printf '%s\n' "$p"
-  done < <(_aid_backtick_paths "$value")
+  local value="$1" cmd="$2"
+  # The COMMAND's text is cut out of the sentence, rather than each of its paths
+  # being filtered from the result: a path can be both what the search looked at
+  # and one of the conflicting sites it found, and dropping it by name would
+  # silently shorten the very list the backlog item is supposed to carry.
+  _aid_backtick_paths "${value//"$cmd"/ }"
 }
 
 # aid_reuse_verdict <field-value> <command> <declared-paths> — what to do about
