@@ -72,7 +72,15 @@ aid_reuse_parse() {
     # Not a search — but it IS a command someone typed. Remembered so the
     # refusal can name it, which is a different message from "you wrote no
     # command at all".
-    [[ -z "$named" && "$head" =~ ^[a-z][a-z0-9_.-]*$ ]] && named="$head"
+    #
+    # A SPACE is required: plans backtick single words constantly (config
+    # values, field names, `general`/`vulcan`/`none`), and calling one of those
+    # a refused command tells the author about a mistake they did not make.
+    # A command someone actually ran has an argument.
+    # …and the first word has to look like a command NAME: no dot, no slash.
+    # `project.yaml → standards.active` is a backticked phrase with a space in
+    # it, and it is not a program anybody ran.
+    [[ -z "$named" && "$tok" == *" "* && "$head" =~ ^[a-z][a-z0-9_-]*$ ]] && named="$head"
   done
   if [[ -z "$cmd" ]]; then
     [[ -n "$named" ]] && { echo "error:command-not-allowed:${named}"; return 1; }

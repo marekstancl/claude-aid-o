@@ -223,3 +223,15 @@ _plan() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"no **Reuse check:** field"* ]]
 }
+
+@test "reuse: a backticked config value is not reported as a refused command" {
+  # Plans backtick single words and phrases constantly (`general`, `vulcan`,
+  # `project.yaml → standards.active`). Telling the author their config value
+  # is a refused command is a finding about a mistake they did not make; what
+  # they get is the honest one — no search command here at all.
+  _plan strict '- Create: `src/new.ts` — new' 'the profile is stored as `general` in `project.yaml → standards.active` → none — nothing like it'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"names no search command"* ]]
+  [[ "$output" != *"refused:"* ]]
+}
