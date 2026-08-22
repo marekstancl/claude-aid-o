@@ -59,6 +59,8 @@ source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # shellcheck source=lib/aid-reuse-verdict.sh
 source "${SCRIPT_DIR}/lib/aid-reuse-verdict.sh"
+# shellcheck source=lib/aid-standards-map.sh
+source "${SCRIPT_DIR}/lib/aid-standards-map.sh"
 
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
@@ -322,7 +324,7 @@ fi
 # the replay cannot show is whether the search was WIDE enough — a narrow grep
 # with an honest `none` passes here and is judged by the `reuse_evidence` C0
 # lens, in the `full` band only.
-_reuse_root="$(_aid_band_project_root "$PLAN")" || _reuse_root=""
+_project_root="$(_aid_band_project_root "$PLAN")" || _project_root=""
 
 # Every path this plan declares anywhere, once: the N+1 verdict asks whether a
 # conflicting site already lies inside the plan's reach, and that question is
@@ -383,8 +385,8 @@ while IFS=$'\t' read -r _rs _re _rhead; do
   # No project root means no directory the command was meant to run in, so the
   # replay is skipped rather than run somewhere it would answer a different
   # question. The presence + shape checks above still stand.
-  [[ -n "$_reuse_root" ]] || continue
-  if _reuse_hits="$(aid_reuse_replay "$_reuse_cmd" "$_reuse_root")"; then
+  [[ -n "$_project_root" ]] || continue
+  if _reuse_hits="$(aid_reuse_replay "$_reuse_cmd" "$_project_root")"; then
     if ! aid_reuse_result_matches "$_reuse_key" "$_reuse_hits"; then
       _strict_finding ":${_rs}" "**Reuse check:** declares '${_reuse_key}' but replaying \`${_reuse_cmd}\` finds ${_reuse_hits} hit(s) — the evidence and the claim disagree: ${_rhead}"
     fi
@@ -399,6 +401,88 @@ while IFS=$'\t' read -r _rs _re _rhead; do
     esac
   fi
 done < <(_aid_plan_step_bounds "$PLAN")
+
+# ---------------------------------------------------------------------------
+# Standards named against the map (P085 Step 4)
+# ---------------------------------------------------------------------------
+# The plan names the ecosystem standards that bind the areas its paths reach,
+# or says where it departs from one and why. Which standards those are is
+# derived from the LIVE map (lib/aid-standards-map.sh) — never from a copy in
+# this repository, which would be a second map that disagrees with the first.
+#
+# THREE states, not two, because two would quietly turn the obligation into a
+# decoration: no map configured = the project has no standards and owes nothing
+# (recorded, so it does not read as an omission); a map configured but
+# unreachable = a broken environment, reported loudly and blocking for a strict
+# plan; a map that binds nothing to these paths = the section is not owed, and
+# that is a correct answer.
+#
+# `light` is exempt: a plan that changes a help text or ordinary feature code is
+# not where standards compliance is decided, and the band exists precisely so
+# that small plans are not asked questions they do not have.
+
+# _standards_section — the `## Standards` section's content lines.
+_standards_section() {
+  _aid_blank_fenced < "$PLAN" | awk '
+    /^##[[:space:]]+Standards/ { inside = 1; next }
+    /^##[[:space:]]/           { inside = 0 }
+    inside                      { print }
+  '
+}
+
+# _deviation_cell <table-row> — the last non-empty cell of a markdown table row.
+_deviation_cell() {
+  printf '%s' "$1" | awk -F'|' '{
+    for (i = NF; i >= 1; i--) {
+      cell = $i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", cell)
+      if (cell != "") { print cell; exit }
+    }
+  }'
+}
+
+if [[ "$band" != "light" ]]; then
+  _std_derived="$(aid_standards_derive "$PLAN" "${_project_root:-}")"; _std_rc=$?
+  case "$_std_rc" in
+    1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] no standards map configured for this project (project.yaml -> standards.map_path), so no '## Standards' section is owed." >&2 ;;
+    2) _strict_finding "" "standards.map_path IS configured but the map cannot be read (missing file, or no yq) — that is a broken environment, not a project without standards; fix the path or unset it." ;;
+    0)
+      _std_section="$(_standards_section)"
+      while IFS=$'\t' read -r _std_tag _std_ids; do
+        [[ -n "${_std_tag:-}" ]] || continue
+        _std_named=""
+        IFS=',' read -r -a _std_arr <<< "$_std_ids"
+        for _std_id in "${_std_arr[@]}"; do
+          [[ "$_std_section" == *"$_std_id"* ]] && { _std_named="$_std_id"; break; }
+        done
+        if [[ -z "$_std_named" ]]; then
+          _strict_finding "" "this plan touches the '${_std_tag}' area but its '## Standards' section names none of: ${_std_ids} — name the one you checked, or say which you depart from and why."
+          continue
+        fi
+        # A named standard whose deviation cell is a bare marker states a
+        # deviation without stating a reason, which is the one shape the
+        # section must not have.
+        while IFS= read -r _std_row; do
+          [[ "$_std_row" == \|* ]] || continue
+          [[ "$_std_row" == *"$_std_named"* ]] || continue
+          [[ "$_std_row" == *---* ]] && continue
+          _std_dev="$(_deviation_cell "$_std_row")"
+          case "$_std_dev" in
+            ""|none|None|"n/a"|-|—|žádná|žádný|zadna|zadny) continue ;;
+          esac
+          # The cell IS the reason when there is one; a word is not a reason.
+          [[ "${#_std_dev}" -ge 12 ]] || _strict_finding "" "'${_std_named}' is marked as a deviation ('${_std_dev}') with no reason — a deviation is reported so it can be fixed in the standard or in the map, and neither is possible without the why."
+        done <<< "$_std_section"
+      done <<< "$_std_derived"
+      # A defect of the MAP, reported so it gets fixed. Never blocking: a plan
+      # is not responsible for the map's bookkeeping.
+      while IFS= read -r _std_defect; do
+        [[ -n "${_std_defect:-}" ]] || continue
+        advisories=$((advisories+1))
+        [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [ADVISORY] the standards map uses tag '${_std_defect}', which is missing from its own tag vocabulary — a defect of the map, reported here, not a reason to stop this plan." >&2
+      done < <(aid_standards_map_defects "$PLAN" "${_project_root:-}" 2>/dev/null || true)
+      ;;
+  esac
+fi
 
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 blocking=$errors

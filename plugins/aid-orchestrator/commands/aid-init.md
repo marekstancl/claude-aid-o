@@ -290,6 +290,28 @@ Standards profile:
 - Selection is stored in `project.yaml` under the `standards` key
 - On re-run (`/aid-init` on existing workspace): if `standards` key already exists in `project.yaml`, show current selection and ask "Keep current ({current})? (Y/N)" — only re-prompt if PM says N
 
+**Where the standards map lives (P085).** The same answer carries a second
+field, `standards.map_path` — the path to the ecosystem standards map, the page
+that says which standard binds which area. Ask for it once, in the same breath
+as the profile, and write it next to `standards.active`:
+
+```yaml
+standards:
+  active: vulcan
+  map_path: /opt/eco/docs/docs/ecosystem/specs/standards-map.md
+```
+
+Rules:
+- Only asked when the profile is NOT `none`; a project with no standards has no map.
+- The map is read LIVE and never copied into the project — it changes, and a copy
+  is a second map that disagrees with the first.
+- Leave the field out when the project has no map. `aid-plan-lint.sh` then asks
+  for no `## Standards` section and records that it did not, so the silence
+  does not read as an omission. A path that IS set but unreadable is the
+  opposite case: a broken environment, and the lint says so loudly.
+- Verify the derivation still agrees with the map:
+  `bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --self-test`
+
 ### Vulcan Standards — Ecosystem Docs Integration
 
 When `vulcan` standards are selected, the project CLAUDE.md must reference the authoritative
@@ -852,4 +874,4 @@ creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-22
