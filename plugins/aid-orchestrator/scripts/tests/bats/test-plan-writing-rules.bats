@@ -145,6 +145,10 @@ type: plan
 lifecycle_strict: true
 ---
 
+## Testing Strategy
+
+No new verification — these fixtures exercise the band-scoped step obligations.
+
 ## Implementation Steps
 
 ### Step 1: the step
@@ -220,7 +224,9 @@ EOF
 
 @test "a Testing Strategy section that is only a sub-heading is not a strategy" {
   write_step_plan "${TMPDIR_TEST}/heading.md" "plugins/aid-orchestrator/commands/aid-help.md"
-  printf '\n## Testing Strategy\n\n### Tests\n' >> "${TMPDIR_TEST}/heading.md"
+  # Replace the fixture's real strategy with one that is only a sub-heading.
+  sed -i '/^No new verification/d' "${TMPDIR_TEST}/heading.md"
+  sed -i 's/^## Testing Strategy$/## Testing Strategy\n\n### Tests/' "${TMPDIR_TEST}/heading.md"
   run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/heading.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Testing Strategy"* ]]
@@ -234,4 +240,23 @@ EOF
   run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/high.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"band=full step is missing"* ]]
+}
+
+@test "AC17: each of the four hand-written summary headings is reported separately" {
+  write_step_plan "${TMPDIR_TEST}/human.md" "plugins/aid-orchestrator/commands/aid-help.md"
+  printf '\n## Stakeholder Brief\n\nx\n\n## Human Review Summary\n\nx\n\n## Executive Summary\n\nx\n\n## Shrnutí pro PM\n\nx\n' \
+    >> "${TMPDIR_TEST}/human.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/human.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"## Stakeholder Brief"* ]]
+  [[ "$output" == *"## Human Review Summary"* ]]
+  [[ "$output" == *"## Executive Summary"* ]]
+  [[ "$output" == *"## Shrnutí pro PM"* ]]
+}
+
+@test "AC17: a plan without those headings is not reported" {
+  write_step_plan "${TMPDIR_TEST}/clean.md" "plugins/aid-orchestrator/commands/aid-help.md"
+  run bash "$(PLUGIN_ROOT_OF)/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/clean.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"written for a human"* ]]
 }

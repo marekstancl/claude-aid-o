@@ -62,6 +62,27 @@ log_event() {
   return 0
 }
 
+# aid_plan_timeline <project_root> <plan_id> — the PLAN-scoped timeline file,
+# created if needed. Echoes the path, or returns 1 when it cannot be made.
+#
+# WHY THIS EXISTS (P084 Step 7, and the finding that motivated it)
+#   `.aid-o/work/timeline.jsonl` — the file /aid-init creates at the workspace
+#   root — had 0 lines in this repository. The writer was never broken: every
+#   caller of log_event passes a per-RUN path (`evidence/<epic>/<run>/timeline.jsonl`,
+#   81 of them here, all non-empty), and NOTHING ever writes to the root file.
+#   So the gap was not a logger bug but a missing home for PLAN-scoped events —
+#   band classification, a lint that stopped a plan — which happen before any
+#   run exists. They now land next to the plan's other evidence, under
+#   `evidence/<plan_id>/`, which is the same root CP1/C0 already use.
+aid_plan_timeline() {
+  local root="$1" plan_id="$2" dir
+  [[ -n "$root" && -n "$plan_id" ]] || return 1
+  dir="${root}/.aid-o/work/evidence/${plan_id}"
+  [[ -d "${root}/.aid-o" ]] || return 1
+  mkdir -p "$dir" 2>/dev/null || return 1
+  printf '%s/timeline.jsonl' "$dir"
+}
+
 # Severity-prefixed stderr loggers (P032 Step 1).
 # Use these instead of bare `echo "..." >&2` so logs are greppable.
 log_info() {
@@ -77,7 +98,7 @@ log_error() {
 }
 
 # Export for use in subshells
-export -f log_event log_info log_warn log_error
+export -f log_event log_info log_warn log_error aid_plan_timeline
 
 # CLI dispatcher (P037 Phase 1) — allow `bash aid-stage-log.sh <fn> <args>` from
 # LLM-rendered docs in pipeline.md / aid-plan.md without requiring a source step.
@@ -89,7 +110,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
     # log_event writes to the timeline file. log_info/log_warn/log_error are
     # stderr-only severity-prefixed echoes — useful for shell pipelines but
     # invisible to compliance check + downstream evidence consumers.
-    log_event|log_info|log_warn|log_error) "$fn" "$@" ;;
+    log_event|log_info|log_warn|log_error|aid_plan_timeline) "$fn" "$@" ;;
     *)
       echo "ERROR: unknown function: $fn" >&2
       echo "Available: log_event (timeline write), log_info/log_warn/log_error (stderr only)" >&2

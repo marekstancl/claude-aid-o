@@ -209,3 +209,30 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   [ "$status" -ne 0 ]
   [ -z "$(ls out/ 2>/dev/null)" ]                             # NO EPIC file silently written with narrowed scope
 }
+
+# ── human-audience sections (P084 Step 5) ───────────────────────────────────
+# The PM's page is rendered from the plan (lib/aid-plan-summary.sh), so a
+# hand-written summary section inside the plan is a second copy nothing checks.
+
+@test "AC17: all four human-audience headings are reported, each on its own line" {
+  {
+    printf -- '---\nid: P900\ntype: regular\nlifecycle_strict: true\n---\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nNothing new.\n\n'
+    printf '## Stakeholder Brief\n\nx\n\n## Human Review Summary\n\nx\n\n'
+    printf '## Executive Summary\n\nx\n\n## Shrnutí pro PM\n\nx\n\n'
+    printf '### Step 1: work\n\n**Objective:** do it.\n\n**Files:**\n- Modify: `src/a.ts` — edit\n'
+  } > human.md
+  run "$LINT" human.md
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'## Stakeholder Brief'"* ]]
+  [[ "$output" == *"'## Human Review Summary'"* ]]
+  [[ "$output" == *"'## Executive Summary'"* ]]
+  [[ "$output" == *"'## Shrnutí pro PM'"* ]]
+}
+
+@test "AC17: a plan without them is not reported" {
+  _plan clean.md strict '- Modify: `src/a.ts` — edit'
+  run "$LINT" clean.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"written for a human"* ]]
+}

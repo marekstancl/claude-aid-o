@@ -1,6 +1,6 @@
 ---
 name: review-checkpoint-contracts
-description: Per-checkpoint contracts for AID review agents — high-risk patterns, diff scopes, behavior_trace gate, CP1-deep 3-lens adjudicator
+description: Per-checkpoint contracts for AID review agents — plan ceremony bands, diff scopes, behavior_trace gate, CP1-deep 3-lens adjudicator
 user_invocable: false
 ---
 
@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-22
 
 ## False-Green Guardrails
 
@@ -130,10 +130,29 @@ Required fields: standard verifier fields + `checkpoint: cp6`
 High-risk gate: NOT enforced (advisory only)
 Note: CP6 is never promoted to blocking — it is intentionally light.
 
-## CP1-deep Contract (High-Risk Plans)
+## CP1-deep Contract (bands `full` and `medium`)
 
-Triggered when: plan matches any high-risk pattern OR plan frontmatter has `risk: high`.
-Skip when: plan matches no high-risk patterns AND `risk: low` (or `risk: medium` — default skips CP1-deep unless pattern match).
+**Triggered by the plan's ceremony BAND, not by a pattern match** (P084). The
+band is classified from the paths the plan's steps DECLARE in their `Files:`
+blocks — `bash scripts/aid-cp1-gate.sh --plan <plan> --classify-only` — against
+`defaults/policies/risk-paths.yaml`. What each band owes is a table the gate
+itself reads: `defaults/policies/review-checkpoints.yaml` →
+`review_checkpoints.ceremony_bands`.
+
+| Band | CP1-deep lenses | C0 cross-provider round + ledger |
+|---|---|---|
+| `full` | 3 lenses (L1/L2/L3) + adjudicator + the 5 observe-only C0 lenses | required |
+| `medium` | 3 lenses (L1/L2/L3) + adjudicator | **not required** |
+| `light` | none — dispatch no lens at all | not required |
+
+Frontmatter `risk: high` raises a band to `full`; nothing lowers one except
+changing what the plan declares it touches. Every uncertainty (no declared
+path, no map, no `yq`, an unknown band) resolves to `full`.
+
+Why the old trigger went: it grepped the WHOLE plan document for eight content
+patterns, so Context and Architecture prose matched — measured 2026-08-16, six
+live plans scored 5 to 33 hits each and every one came out high-risk. A
+ceremony that fires on everything is proportional to nothing.
 
 ### 3 Lenses (dispatched in parallel, per plan taxonomy)
 
@@ -172,7 +191,7 @@ Produces (required fields — gate rejects empty files or files without `verdict
 
 ### Evidence Requirements
 
-Before EPIC generation for a high-risk plan, all 4 files must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`:
+Before EPIC generation for a `full`- or `medium`-band plan, all 4 files must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`:
 - `cp1-lens-L1-behavior.md` — must contain `stop_rule_blockers:` at line-start
 - `cp1-lens-L2-feasibility.md` — must contain `stop_rule_blockers:` at line-start
 - `cp1-lens-L3-enforcement.md` — must contain `stop_rule_blockers:` at line-start
@@ -196,11 +215,13 @@ see `pipeline.md` §6a for the DONE-phase sibling this loop mirrors. The 5
 further below are a DIFFERENT, Claude-dispatched, still observe-only system;
 do not conflate the two.
 
-**Applies when:** the plan is high-risk (same trigger as CP1-deep itself —
-pattern match OR `risk: high`). A low/docs/medium (no pattern match) plan
-never requires this review, the gate check below, or the ledger — even if
-CP1-deep evidence happens to exist for it. If a PM promotes a low-risk plan
-to high mid-flow, the requirement applies from that point on.
+**Applies when:** the plan's band is `full`. A `medium` or `light` plan never
+requires this review, the gate check below, or the ledger — even if CP1-deep
+evidence happens to exist for it. `medium` drops the C0 round and the ledger
+TOGETHER, deliberately: the ledger counts C0 revision attempts and is
+initialised by the C0 loop itself, so requiring it where that loop never runs
+would block every medium plan on a file nothing creates. If a PM marks a plan
+`risk: high` mid-flow, the requirement applies from that point on.
 
 **Adjudicator MUST-consume rule:** when `c0-plan-review.json` is present for
 the plan under review, the CP1-deep adjudicator MUST read it and treat its
@@ -210,14 +231,14 @@ contents as gate inputs, not merely observe them:
   `pass`) — the adjudicator does not get to independently judge the C0
   review's findings away; it records them.
 - `review_status: unverifiable` MUST also prevent a `verdict: pass` while
-  the plan remains high-risk and no PM-escalation override is on record.
+  the plan remains `full`-band and no PM-escalation override is on record.
 - This is a documentation/LLM-prose requirement (the adjudicator agent
   reads and acts on it). The MECHANICAL, code-level backstop — which does
   not depend on the adjudicator having correctly followed this prose — is
   `aid-cp1-gate.sh`, described next.
 
 **Gate enforcement (the mechanical backstop):** `scripts/aid-cp1-gate.sh`
-refuses EPIC generation for a high-risk plan unless ALL of the following
+refuses EPIC generation for a `full`-band plan unless ALL of the following
 hold, checked AFTER the existing 4-file/adjudicator check:
 1. `c0-plan-review.json` exists at the plan's evidence root
    (`.aid-o/work/evidence/<plan_id>/`, one level above `cp1-deep/`).
@@ -248,7 +269,7 @@ artifact — see "Bounded Loop" below.
   invalid_output (`aid-c0-plan-review.sh dispatch` exit 2 without a
   genuinely dispatched raw response) is `review_status: unverifiable` and
   does NOT call `increment` — exactly like C3's own "not a loop iteration"
-  carve-out. It blocks high-risk EPIC generation pending a PM decision, but
+  carve-out. It blocks `full`-band EPIC generation pending a PM decision, but
   never silently burns the revision budget and never becomes a blind retry.
 - **Exit conditions:**
   - Clean (`review_status: pass`, `blocking_findings: false`, verified) →

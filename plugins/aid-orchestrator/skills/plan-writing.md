@@ -113,11 +113,12 @@ author: PM + AI
 
 ### Sections
 
-The plan MUST contain these sections in this order:
+The plan MUST contain these sections in this order. All of them are written
+for the AGENT that will execute the plan. The document for the PM is a separate,
+rendered artifact — see MUST rule 17.
 
 | Section | Content | Source |
 |---------|---------|--------|
-| `## Stakeholder Brief` | Non-technical summary: what, why, what it delivers, risks. Written for PM/stakeholders who won't read the full plan. 5-10 sentences. | Synthesized from all sections |
 | `## Context` | Why this plan exists, what triggered it | Brainstorming context / spec |
 | `## Goal` | One-sentence desired outcome | Brainstorming goal / spec |
 | `## Scope` | In-scope and out-of-scope items | Brainstorming scope |
@@ -1173,7 +1174,7 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 14. **ALWAYS generate proper plan IDs** — per `skills/run-management.md` → ID System (pre-allocated at brainstorming Step 1)
 15. **ALWAYS delete the interim document after successful plan write** — remove `.aid-o/work/interim-P{NNN}.md` if it exists (cleanup from brainstorming context persistence)
 16. **ALWAYS include a documentation update step** — if the plan changes API, models, architecture, or workflow, the LAST implementation step (before E2E) MUST update shared documentation (Docusaurus, README, API docs). For vulcan ecosystem projects, this means updating `/opt/eco/docs/docs/` or project-level docs. No exceptions — undocumented changes are incomplete changes.
-17. **ALWAYS include a Stakeholder Brief** — first section after frontmatter. Non-technical summary for PM/stakeholders. Must answer: what, why, what it delivers, key risks. 5-10 sentences.
+17. **NEVER write a summary section for a human into the plan** — no `Stakeholder Brief`, `Executive Summary`, `Human Review Summary` or `Shrnutí pro PM`. The PM's page is RENDERED from the plan's own facts (`lib/aid-plan-summary.sh`, published by `/aid-plan`), so a hand-written one is a second copy that nothing checks and that is free to flatter the plan. `aid-plan-lint.sh` reports all four headings.
 
 ---
 

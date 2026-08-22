@@ -358,6 +358,25 @@ Write an exhaustive implementation plan from specification or topic.
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
+8p. **PM page (automatic, right after the write)** — render the plan's summary
+    and show the PM that page, not the plan:
+    ```bash
+    source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh"
+    aid_plan_summary_render ".aid-o/plans/P{NNN}-{topic}.md" \
+      ".aid-o/work/evidence/P{NNN}/plan-summary-artifact.html"
+    ```
+    Publish the rendered body with the Artifact tool (the renderer never
+    publishes — same boundary as `lib/aid-plan-close-summary.sh`). Every figure
+    on the page is counted from the plan, so do NOT restate it in prose and do
+    NOT write a summary section into the plan itself — `plan-writing.md` MUST
+    rule 17 forbids it and `aid-plan-lint.sh` reports it.
+
+    **Enforcement, stated honestly:** this is an INSTRUCTION, the weakest form
+    there is — nothing fails if a session skips it. The mechanism that will
+    make it hard is the hook layer of Plan 3 (a `Stop` hook refusing to close a
+    turn that wrote a plan without rendering its page). Until then it is a
+    deliberately accepted risk, registered as `plan_artifact_rendered` with
+    `severity: advisory` in the enforcement registry.
 8a. **Files-shape lint (automatic, before CP1)** — run
     `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"`.
     On a non-zero exit, fix the exact Files entries it names (per the grammar in
@@ -801,6 +820,7 @@ their existing per-EPIC release text unchanged.
 - `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-c0-plan-review.sh` — C0 cross-provider (Codex) plan review bridge (build-manifest/dispatch/verify)
 - `{plugin_path}/scripts/lib/aid-cp1-ledger.sh` — CP1 revision-limit ledger (init/increment/read/check-budget)
+- `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a freshly written plan (step 8p)
 - `defaults/policies/review-checkpoints.yaml` — `ceremony_bands` (what each band requires) + `cp1_codex_review` bounded-loop policy (`max_rechecks`)
 - `defaults/policies/risk-paths.yaml` — the curated path map the band is classified from
 - `defaults/templates/plan.md` — base plan template

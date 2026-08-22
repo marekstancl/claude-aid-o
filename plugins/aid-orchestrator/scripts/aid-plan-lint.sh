@@ -22,6 +22,11 @@
 #            a description path is as often a reference as a forgotten scope
 #            entry, and only the author can tell them apart.
 #
+# HUMAN-AUDIENCE SECTIONS (P084 Step 5)
+# A plan carrying `## Stakeholder Brief` (or one of three siblings) is carrying
+# a hand-written copy of a page that is now rendered from the plan's own facts.
+# Same STRICT tier.
+#
 # TESTING STRATEGY (P084 Step 4)
 # The plan must carry a `## Testing Strategy` section with content. It replaces
 # the per-step `Test:` bullet as the thing generation cares about: a bullet per
@@ -50,6 +55,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-plan-band.sh
 source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
+# shellcheck source=lib/aid-stage-log.sh
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
@@ -264,6 +271,39 @@ if ! _has_testing_strategy; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Human-audience sections (P084 Step 5)
+# ---------------------------------------------------------------------------
+# The PM's page is RENDERED from the plan's own facts
+# (lib/aid-plan-summary.sh), so a hand-written summary section inside the plan
+# is now a second, unverifiable copy of it. Reported here so it does not
+# silently survive.
+#
+# A CLOSED list, deliberately: a heuristic like "a section with no machine-
+# readable content" would report Context and Goal, which must stay. The price
+# is that a newly-invented human section is not caught until someone adds it
+# to this list, and that is the cheaper mistake.
+_AID_HUMAN_SECTIONS=(
+  "## Stakeholder Brief"
+  "## Human Review Summary"
+  "## Executive Summary"
+  "## Shrnutí pro PM"
+)
+
+for _human in "${_AID_HUMAN_SECTIONS[@]}"; do
+  while IFS=: read -r _hline _; do
+    [[ -n "${_hline:-}" ]] || continue
+    strict_hits=$((strict_hits+1))
+    if [[ "$QUIET" -eq 0 ]]; then
+      if [[ "$mode" == "strict" ]]; then
+        echo "${PLAN}:${_hline}: STRICT '${_human}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section." >&2
+      else
+        echo "${PLAN}:${_hline}: [WARN legacy] '${_human}' is written for a human; the PM page is now rendered from the plan (lib/aid-plan-summary.sh)." >&2
+      fi
+    fi
+  done < <(grep -n -x -F "$_human" "$PLAN" 2>/dev/null || true)
+done
+
 band="$(_plan_band)"
 if [[ "$band" != "light" ]]; then
   while IFS=$'\t' read -r lineno missing head; do
@@ -292,6 +332,20 @@ if [[ "$QUIET" -eq 0 ]]; then
     echo "aid-plan-lint: PASS — all Files entries are canonical." >&2
   fi
   [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} description-only path advisory/-ies (never blocking — declare them as their own bullets if the step edits them)." >&2
+fi
+
+# Telemetry (P084 Step 7): how often this lint STOPS a plan, and on what. The
+# question it exists to answer — is a given obligation catching anything — has
+# no answer today because nothing was ever counted. Never blocking: without a
+# resolvable plan id or workspace, the helper returns 1 and nothing is written.
+_lint_plan_id="$(awk 'NR==1 && $0!="---"{exit} NR==1{i=1;next} i&&$0=="---"{exit} i&&/^id:/{sub(/^id:[[:space:]]*/,"");sub(/[[:space:]]*$/,"");print;exit}' "$PLAN")"
+if [[ -n "${_lint_plan_id:-}" ]]; then
+  _lint_root="$(_aid_band_project_root "$PLAN")" || _lint_root=""
+  if [[ -n "$_lint_root" ]] && _lint_tl="$(aid_plan_timeline "$_lint_root" "$_lint_plan_id")"; then
+    log_event "$_lint_tl" "plan_lint_result" \
+      band="$band" mode="$mode" errors="$errors" strict="$strict_hits" \
+      advisories="$advisories" blocked="$( [[ "$blocking" -gt 0 ]] && echo true || echo false )"
+  fi
 fi
 
 [[ "$blocking" -gt 0 ]] && exit 1
