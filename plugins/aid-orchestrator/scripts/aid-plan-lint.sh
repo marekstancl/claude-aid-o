@@ -338,13 +338,14 @@ fi
 # question it exists to answer — is a given obligation catching anything — has
 # no answer today because nothing was ever counted. Never blocking: without a
 # resolvable plan id or workspace, the helper returns 1 and nothing is written.
-_lint_plan_id="$(awk 'NR==1 && $0!="---"{exit} NR==1{i=1;next} i&&$0=="---"{exit} i&&/^id:/{sub(/^id:[[:space:]]*/,"");sub(/[[:space:]]*$/,"");print;exit}' "$PLAN")"
-if [[ -n "${_lint_plan_id:-}" ]]; then
+if _lint_plan_id="$(_aid_plan_id_of "$PLAN")"; then
   _lint_root="$(_aid_band_project_root "$PLAN")" || _lint_root=""
   if [[ -n "$_lint_root" ]] && _lint_tl="$(aid_plan_timeline "$_lint_root" "$_lint_plan_id")"; then
+    # `|| true`: the promise above is that telemetry never blocks, and a bare
+    # call would make any future non-zero from the logger this lint's verdict.
     log_event "$_lint_tl" "plan_lint_result" \
       band="$band" mode="$mode" errors="$errors" strict="$strict_hits" \
-      advisories="$advisories" blocked="$( [[ "$blocking" -gt 0 ]] && echo true || echo false )"
+      advisories="$advisories" blocked="$( [[ "$blocking" -gt 0 ]] && echo true || echo false )" || true
   fi
 fi
 

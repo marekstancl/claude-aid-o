@@ -198,10 +198,27 @@ AID_PLAN_RISK_REASON="${_cp1_band_line#*$'\t'}"
 _cp1_log() {
   local tl
   tl="$(aid_plan_timeline "$project_root" "$plan_id")" || return 0
-  log_event "$tl" "$@"
+  # `|| true`: telemetry never decides this gate's verdict.
+  log_event "$tl" "$@" || true
 }
 _cp1_log cp1_band_classified band="$AID_PLAN_RISK_BAND" reason="$AID_PLAN_RISK_REASON" \
   classify_only="$( [[ "$classify_only" -eq 1 ]] && echo true || echo false )"
+
+# The OUTCOME is logged from an EXIT trap, not from each success path. The gate
+# leaves through a dozen different `exit 1`s (missing evidence, an empty lens,
+# an adjudicator verdict, C0, the ledger) and a telemetry line written only on
+# the two happy paths would count exactly the runs nobody needs counted.
+# `_cp1_result` is set where an outcome is KNOWN; anything else is a failure.
+_cp1_result="fail"
+_cp1_on_exit() {
+  local rc=$?
+  [[ "$classify_only" -eq 1 ]] && return 0   # a classification is not a gate run
+  _cp1_log cp1_gate_result band="$AID_PLAN_RISK_BAND" \
+    result="$( [[ "$rc" -eq 0 ]] && printf '%s' "$_cp1_result" || printf 'fail' )" \
+    exit_code="$rc"
+  return 0
+}
+trap _cp1_on_exit EXIT
 
 if [[ "$classify_only" -eq 1 ]]; then
   echo "$AID_PLAN_RISK_BAND"
@@ -245,7 +262,7 @@ cp1_need_ledger="$(_cp1_band_requires "$AID_PLAN_RISK_BAND" cp1_ledger "$project
 # ---------------------------------------------------------------------------
 if [[ "$cp1_need_lenses" != "true" ]]; then
   echo "CP1-gate: plan $plan_id is band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON}) — CP1-deep not required. Proceeding." >&2
-  _cp1_log cp1_gate_result band="$AID_PLAN_RISK_BAND" result="not_applicable"
+  _cp1_result="not_applicable"
   exit 0
 fi
 
@@ -422,8 +439,7 @@ _cp1_c0_and_ledger_gate() {
   # that lands here.
   if [[ "$cp1_need_c0" != "true" && "$cp1_need_ledger" != "true" ]]; then
     echo "CP1-gate: band=${AID_PLAN_RISK_BAND} owes no C0 cross-provider review and no ledger budget. PASS." >&2
-    _cp1_log cp1_gate_result band="$AID_PLAN_RISK_BAND" result="pass" \
-      c0_required="false" ledger_required="false"
+    _cp1_result="pass"
     exit 0
   fi
 
@@ -553,8 +569,7 @@ ERRMSG
   # covers both checks if both failed in the same run.
 
   echo "CP1-gate: band=${AID_PLAN_RISK_BAND} — required C0 plan review / ledger budget checks passed for ${plan_id}." >&2
-  _cp1_log cp1_gate_result band="$AID_PLAN_RISK_BAND" result="pass" \
-    c0_required="$cp1_need_c0" ledger_required="$cp1_need_ledger"
+  _cp1_result="pass"
   exit 0
 }
 

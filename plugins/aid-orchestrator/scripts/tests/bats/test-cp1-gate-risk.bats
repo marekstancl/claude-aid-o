@@ -206,7 +206,11 @@ write_clean_cp1_evidence() {
   run bash "$GATE" --plan "$plan" --project-root "$TMP"
   [ "$status" -eq 0 ]
   [[ "$output" == *"CP1-deep not required"* ]]
-  [ ! -d "$TMP/.aid-o/work/evidence/P910" ]
+  # No lens evidence was demanded and none was invented. The plan's evidence
+  # dir itself DOES appear — the gate writes its band there (P084 Step 7) — so
+  # the claim under test is the absence of cp1-deep/, not of the directory.
+  [ ! -d "$TMP/.aid-o/work/evidence/P910/cp1-deep" ]
+  [ -s "$TMP/.aid-o/work/evidence/P910/timeline.jsonl" ]
 }
 
 @test "a medium plan passes on CP1-deep evidence alone — no C0 review, no ledger" {

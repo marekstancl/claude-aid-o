@@ -133,3 +133,18 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"usage"* ]]
 }
+
+@test "a plan with no Risks table and no AID Role still renders under a strict shell" {
+  # Both counts used to run a pipeline whose `grep` exits 1 on zero matches;
+  # under `set -o pipefail` that aborted the CALLER instead of rendering a
+  # zero (codex review of EPIC 2, findings 1 and 2).
+  plan="$(write_plan P955 'plugins/aid-orchestrator/commands/aid-help.md')"
+  sed -i '/^## Risks$/,/^## Next Steps$/d' "$plan"
+  sed -i '/^\*\*AID Role:\*\*/d' "$plan"
+  run bash -c "set -euo pipefail
+    source '$PLUGIN_ROOT/scripts/lib/aid-plan-summary.sh'
+    aid_plan_summary_render '$plan' '$OUT'"
+  [ "$status" -eq 0 ]
+  grep -q 'Rizika pojmenovaná v plánu: 0' "$OUT"
+  grep -q 'Role, kterým se bude zadávat: —' "$OUT"
+}

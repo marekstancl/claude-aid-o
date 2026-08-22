@@ -75,7 +75,9 @@ log_event() {
 #   run exists. They now land next to the plan's other evidence, under
 #   `evidence/<plan_id>/`, which is the same root CP1/C0 already use.
 aid_plan_timeline() {
-  local root="$1" plan_id="$2" dir
+  # ${1-}/${2-}, not $1/$2: a caller running under `set -u` would abort on the
+  # expansion before this function could honour its own "returns 1" contract.
+  local root="${1-}" plan_id="${2-}" dir
   [[ -n "$root" && -n "$plan_id" ]] || return 1
   dir="${root}/.aid-o/work/evidence/${plan_id}"
   [[ -d "${root}/.aid-o" ]] || return 1

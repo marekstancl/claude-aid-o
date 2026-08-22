@@ -84,6 +84,26 @@ _aid_band_project_root() {
   return 1
 }
 
+# _aid_plan_id_of <plan> — the plan's frontmatter id, or nothing plus return 1.
+# Surrounding quotes are stripped (`id: "P966"` is valid YAML) and the result
+# must match ^[A-Za-z0-9_-]+$, because callers turn it into a DIRECTORY name:
+# an unvalidated id is both a wrong path and a traversal shape.
+_aid_plan_id_of() {
+  local id
+  id="$(awk '
+    NR == 1 && $0 != "---" { exit }
+    NR == 1 { inside = 1; next }
+    inside && $0 == "---" { exit }
+    inside && index($0, "id:") == 1 {
+      sub(/^id:[[:space:]]*/, ""); sub(/[[:space:]]*$/, "")
+      gsub(/^["\x27]|["\x27]$/, "")
+      print; exit
+    }
+  ' "$1" 2>/dev/null)" || return 1
+  [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  printf '%s' "$id"
+}
+
 # _aid_band_frontmatter_risk <plan> — the `risk:` value from the plan's own
 # frontmatter block, or nothing. Read HERE, not in each caller: the escalation
 # below is part of the classification, and a caller that forgot it would check

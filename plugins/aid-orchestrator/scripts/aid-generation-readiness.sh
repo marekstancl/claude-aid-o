@@ -49,11 +49,10 @@ if ! graph="$(aid_source_plan_graph "$plan" "$total")"; then
   source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
   # shellcheck source=lib/aid-plan-band.sh
   source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
-  _rd_id="$(awk 'NR==1 && $0!="---"{exit} NR==1{i=1;next} i&&$0=="---"{exit} i&&/^id:/{sub(/^id:[[:space:]]*/,"");sub(/[[:space:]]*$/,"");print;exit}' "$plan")"
-  if [[ -n "${_rd_id:-}" ]]; then
+  if _rd_id="$(_aid_plan_id_of "$plan")"; then
     _rd_root="$(_aid_band_project_root "$plan")" || _rd_root=""
     if [[ -n "$_rd_root" ]] && _rd_tl="$(aid_plan_timeline "$_rd_root" "$_rd_id")"; then
-      log_event "$_rd_tl" "plan_readiness_blocked" reason="dependency_grammar"
+      log_event "$_rd_tl" "plan_readiness_blocked" reason="dependency_grammar" || true
     fi
   fi
   printf '%s\n' "${_aid_spg_error:-dependency grammar is invalid}" >&2

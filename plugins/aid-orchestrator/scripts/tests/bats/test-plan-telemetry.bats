@@ -122,3 +122,32 @@ timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; 
   [ ! -e "$outside/.aid-o" ]
   rm -rf "$outside"
 }
+
+@test "AC21: a gate that REFUSES records the outcome, not only the band" {
+  # The outcome comes from an EXIT trap: a line written only on the two happy
+  # paths would count exactly the runs nobody needs counted (codex review of
+  # EPIC 2, finding 3).
+  plan="$(write_plan P966 'plugins/aid-orchestrator/scripts/aid-fsm.sh')"
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 1 ]
+  run jq -r 'select(.event == "cp1_gate_result") | "\(.result) \(.exit_code)"' "$(timeline_of P966)"
+  [ "$output" = "fail 1" ]
+}
+
+@test "a quoted frontmatter id writes to the plan's real evidence dir" {
+  # `id: "P967"` is valid YAML; the path must not contain the quotes (codex
+  # review of EPIC 2, finding 5).
+  plan="$(write_plan P967 'plugins/aid-orchestrator/commands/aid-help.md')"
+  sed -i 's/^id: P967$/id: "P967"/' "$plan"
+  run bash "$LINT" "$plan"
+  [ "$status" -eq 0 ]
+  [ -s "$(timeline_of P967)" ]
+}
+
+@test "an id that is not a plain identifier writes no telemetry at all" {
+  plan="$(write_plan P968 'plugins/aid-orchestrator/commands/aid-help.md')"
+  sed -i 's|^id: P968$|id: ../escaped|' "$plan"
+  run bash "$LINT" "$plan"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/.aid-o/work/evidence/../escaped" ]
+}

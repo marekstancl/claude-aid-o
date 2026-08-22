@@ -17,9 +17,17 @@
 #   It does not publish. `aid_artifact_render` writes a BODY and the Artifact
 #   tool is a session-level act owned by the controller (commands/aid-plan.md
 #   Mode: Write Plan) — the same boundary lib/aid-plan-close-summary.sh draws.
-#   It is also not a summariser: every number below is COUNTED from the plan,
-#   and the three prose blocks are lifted verbatim from sections the plan
-#   already has. Nothing here invents a sentence.
+#
+#   It is also not a summariser, and here is the exact boundary, because "it
+#   invents nothing" would be too strong a claim to make:
+#     - every NUMBER is counted from the plan (steps, declared paths, risks,
+#       roles) — none is asserted, and none comes from prose;
+#     - the summary and core blocks are the plan's own `## Goal` and
+#       `## Context`, cut at their first sentence and stripped of markdown
+#       emphasis. No sentence is rewritten;
+#     - the ask and the three next steps are FIXED LITERALS of this caller,
+#       identical on every page it renders. They are the one thing here that
+#       the plan did not say.
 #
 # WHY A THIRD CALLER AND NOT AN EXTENSION OF aid-plan-close-summary.sh
 #   That one renders the plan's CLOSE from `release-decision.json` and refuses
@@ -108,16 +116,24 @@ _aps_declared_paths() {
 
 # _aps_count_risks <plan> — data rows of the `## Risks` table (the header and
 # its separator are not risks).
+# The `|| true` is load-bearing under `set -o pipefail` (this library is sourced
+# under the caller's strict shell): `grep -c` exits 1 when it counts zero, which
+# would abort a caller rendering a plan that names no risks — a legitimate plan.
 _aps_count_risks() {
-  _aps_section "$1" "Risks" \
-    | grep -cE '^\|' \
-    | awk '{ n = $1 - 2; print (n > 0 ? n : 0) }'
+  local rows
+  rows="$(_aps_section "$1" "Risks" | { grep -cE '^\|' || true; })"
+  rows="${rows%%$'\n'*}"
+  [[ "$rows" =~ ^[0-9]+$ ]] || rows=0
+  # Minus the header row and its separator, which are not risks.
+  (( rows > 2 )) && printf '%s' "$(( rows - 2 ))" || printf '0'
 }
 
 # _aps_roles <plan> — the distinct AID roles the plan dispatches to.
+# Same pipefail care as above: a plan with no **AID Role:** line is renderable,
+# and `grep .` finding nothing must not become the caller's exit status.
 _aps_roles() {
   sed -n 's/^\*\*AID Role:\*\*[[:space:]]*\([a-z-]*\).*/\1/p' "$1" 2>/dev/null \
-    | grep . | sort -u | paste -sd, - | sed 's/,/, /g'
+    | { grep . || true; } | sort -u | paste -sd, - | sed 's/,/, /g'
 }
 
 aid_plan_summary_render() {
