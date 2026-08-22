@@ -65,3 +65,10 @@ bez měření — běhová ceremonie chytá přesně to, co plánová vidět nem
 ---
 
 **Vyrobeno:** 2026-08-22, P084 Krok 6.
+
+## Související
+
+- `docs/plans/P084-q7-experiment.md` — zadání experimentu Q7 (čím zlevnit
+  kontrolu plánu). Dvě čísla, která tenhle dokument jmenuje jako nedostupná —
+  escape rate a pády povinných testů na skutečné regresi — jsou tam zapsaná
+  jako otevřená, protože vznikají právě v běhových kontrolních bodech výše.
