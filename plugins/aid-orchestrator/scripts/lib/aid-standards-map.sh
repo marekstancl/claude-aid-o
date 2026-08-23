@@ -22,27 +22,21 @@ _AID_SM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-scoping.sh
 [[ -n "${_AID_FILES_VERB_RE:-}" ]] || source "${_AID_SM_DIR}/aid-scoping.sh"
 
-# THE area→tag table: which repository paths belong to which area of the map's
-# tag vocabulary. Deliberately SMALL and deliberately incomplete — a tag that
-# cannot be told from a path (`governance`, `produkt`, `llm-naklady`) is not
-# guessed at here, because a wrong obligation costs more than a missing one and
-# the map is an index, not a rulebook. A path matching nothing owes nothing,
-# and that is a correct answer, not a hole.
+# THE PATH PATTERNS LIVE IN THE MAP, NOT HERE. This file used to carry its own
+# area→tag table, which encoded THIS ecosystem's tag names and THIS repository's
+# layout — so in a project with its own map nothing matched, nothing was
+# derived, and `plan_standards_named` sat in the enforcement registry as
+# `blocking` while being unable to fire. A check that cannot fire is the
+# decoration AID-v3-principles.md §1 is about.
 #
-# Format: "<extended regex>:<tag>", matched against each declared path.
-_AID_STANDARDS_PATH_TAGS=(
-  '\.bats$|(^|/)tests?/|(^|/)test-[^/]+$:testy'
-  '^\.github/|(^|/)CHANGELOG\.md$|(^|/)marketplace\.json$|(^|/)plugin\.json$:ci-versioning'
-  '(^|/)docs/|(^|/)README\.md$|(^|/)CLAUDE\.md$:dokumentace'
-  '(^|/)help|napoved:napoveda'
-  'artifact|artefakt:artefakty'
-  '(^|/)Dockerfile|docker-compose:docker-dev'
-  'llm|prompt:llm-integrace'
-  'seo:seo'
-  'notification|notifikac:notifikace'
-  'client-?ip|trusted-ip:bezpecnost-ip'
-  'design-system|(^|/)components/|\.css$:design-system'
-)
+# There is deliberately NO built-in fallback. A map configured without
+# `tag_paths` is a BROKEN CONFIGURATION, not a project without standards, and
+# the reader says so out loud: guessing a foreign repository's layout from ours
+# would replace one silent hole with a louder wrong answer.
+#
+# Pattern semantics are defined on the map page (§"Slovník tagů") and honoured
+# here: whole declared path, `*` crosses `/` (bash pattern matching, so no `**`
+# is needed), case sensitive, no negation, and ALL matching tags apply.
 
 # aid_standards_map_file <project-root> — the configured map, or nothing.
 # Return 1 = the project has no map configured (it owes no standards, and that
@@ -71,13 +65,56 @@ aid_standards_block() {
   ' "$1"
 }
 
-# aid_standards_tags_for_path <path> — the tags one declared path belongs to.
-aid_standards_tags_for_path() {
-  local entry re tag
-  for entry in "${_AID_STANDARDS_PATH_TAGS[@]}"; do
-    re="${entry%:*}"; tag="${entry##*:}"
-    [[ "$1" =~ $re ]] && printf '%s\n' "$tag"
+# aid_standards_tags_for_path <path> <patterns-file> — the tags one declared
+# path belongs to. <patterns-file> holds "<tag>\t<glob>" lines, read from the
+# map by aid_standards_derive.
+#
+# The glob is used UNQUOTED on the right of `==`, which is what makes it a
+# pattern rather than a literal — and is safe: bash pattern matching only ever
+# matches, it never expands a command. `*` crossing `/` is bash's own rule and
+# is exactly what the map documents.
+# _aid_sm_normalise <path> — the repo-relative form the map's patterns are
+# written against. Pure text, no forks: strip repeated `./`, collapse `//`,
+# resolve `x/../`, drop a leading `/`.
+#
+# Without it a declaration of `././docs/x.bats` matches no pattern and the
+# obligation quietly disappears — a bypass by spelling. The Files grammar
+# tolerates these shapes (its shape predicate only refuses whitespace and
+# parentheses), so the normalisation belongs here rather than in a change to
+# the shared predicate that the whole generation chain depends on.
+_aid_sm_normalise() {
+  local p="$1"
+  while [[ "$p" == ./* ]]; do p="${p#./}"; done
+  while [[ "$p" == *//* ]]; do p="${p//\/\//\/}"; done
+  while [[ "$p" == */../* ]]; do
+    local head="${p%%/../*}" tail="${p#*/../}"
+    # `${head%/*}` leaves a single segment untouched, so a one-level `a/../x`
+    # came out as `a/x`. One segment means the parent IS the root.
+    if [[ "$head" == */* ]]; then head="${head%/*}"; else head=""; fi
+    p="${head:+$head/}${tail}"
   done
+  p="${p#/}"
+  printf '%s' "$p"
+}
+
+aid_standards_tags_for_path() {
+  local path tag glob
+  path="$(_aid_sm_normalise "$1")"
+  while IFS=$'\t' read -r tag glob; do
+    [[ -n "${glob:-}" ]] || continue
+    # shellcheck disable=SC2053
+    [[ "$path" == $glob ]] && printf '%s\n' "$tag"
+  done < "$2"
+}
+
+# aid_standards_double_star <block-file> — patterns written with `**`. Bash
+# reads `**` as `*` (which already crosses `/`), so such a pattern still works
+# — but whoever wrote it expected a different language, and the next one they
+# write on that assumption will not. A defect OF THE MAP, reported like the
+# unknown tags below, never blocking.
+aid_standards_double_star() {
+  yq -r '.tag_paths // {} | to_entries[] | . as $e | $e.value[]? | select(test("\\*\\*")) | $e.key + ": " + .' \
+    "$1" 2>/dev/null
 }
 
 # aid_standards_unknown_tags <block-file> — tags used by a standard but absent
@@ -88,8 +125,13 @@ aid_standards_unknown_tags() {
   # Two flat lists and `comm`, rather than one clever expression: yq dialects
   # differ on set operations, and this file has to keep working on whichever
   # one a project has installed.
+  #
+  # BOTH users of a tag are checked: a standard may cite one, and `tag_paths`
+  # may carry patterns for one. A pattern under an unknown tag can never yield
+  # a standard, so it is the same defect wearing a different hat.
   comm -23 \
-    <(yq -r '[ .standards[]?.tags[]? ] | .[]' "$1" 2>/dev/null | sort -u) \
+    <({ yq -r '[ .standards[]?.tags[]? ] | .[]' "$1" 2>/dev/null
+        yq -r '.tag_paths // {} | keys | .[]' "$1" 2>/dev/null; } | sort -u) \
     <(yq -r '(.tags // {}) | keys | .[]' "$1" 2>/dev/null | sort -u)
 }
 
@@ -112,27 +154,50 @@ aid_standards_unknown_tags() {
 # Present is not the same as readable: a block that does not parse, or that
 # carries no `standards:` list, would otherwise derive an EMPTY obligation, and
 # "this project has no standards" is the one answer a broken map must not give.
+# THE schema version this reader understands. A map that declares another one
+# is refused rather than read hopefully: the block's shape is the contract, and
+# a reader that guesses at version 2 is a reader that reports whatever it
+# happened to find.
+_AID_SM_SCHEMA=1
+
 _aid_sm_block_file() {
-  local map block_file
+  local map block_file ver
   map="$(aid_standards_map_file "$1")" || return $?
   block_file="$(mktemp)" || return 2
   aid_standards_block "$map" > "$block_file"
   if [[ ! -s "$block_file" ]] || ! yq -e '.standards | length > 0' "$block_file" >/dev/null 2>&1; then
     rm -f "$block_file"; return 2
   fi
+  ver="$(yq -r '.schema_version // ""' "$block_file" 2>/dev/null)"
+  if [[ "$ver" != "$_AID_SM_SCHEMA" ]]; then
+    rm -f "$block_file"; return 2
+  fi
+  # The patterns are the half this reader cannot supply itself — and its SHAPE
+  # is checked, not just its size. `tag_paths: "oops"` has a non-zero length and
+  # would have passed a length test, then produced no patterns and therefore no
+  # obligations: a broken map answering "nothing applies", which is the single
+  # answer this whole reader exists to prevent.
+  if ! yq -e '.tag_paths | type == "!!map"' "$block_file" >/dev/null 2>&1 \
+     || ! yq -e '[.tag_paths[] | select(type != "!!seq" or length == 0)] | length == 0' "$block_file" >/dev/null 2>&1; then
+    rm -f "$block_file"; return 2
+  fi
   printf '%s' "$block_file"
 }
 
 aid_standards_derive() {
-  local plan="$1" root="$2" block_file tag bullet body p
+  local plan="$1" root="$2" block_file bullet body p
   block_file="$(_aid_sm_block_file "$root")" || return $?
+  # The patterns, once: "<tag>\t<glob>" per line, straight from the map.
+  local pat_file; pat_file="$(mktemp)"
+  yq -r '.tag_paths // {} | to_entries[] | . as $e | $e.value[]? | $e.key + "\t" + .' \
+    "$block_file" 2>/dev/null > "$pat_file"
   # Every declared path -> its tags, de-duplicated.
   local tags_file; tags_file="$(mktemp)"
   while IFS=$'\t' read -r _ bullet; do
     body="$(_aid_files_bullet_body "$bullet")" || continue
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
-      aid_standards_tags_for_path "$p"
+      aid_standards_tags_for_path "$p" "$pat_file"
     done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
   done < <(_aid_extract_files_bullets_numbered < "$plan") | sort -u > "$tags_file"
   # ONE yq over the block for every (tag, id) pair, joined against the derived
@@ -150,7 +215,7 @@ aid_standards_derive() {
     $1 in want { ids[$1] = seen[$1]++ ? ids[$1] "," $2 : $2 }
     END { for (t in ids) print t "\t" ids[t] }
   ' "$tags_file" "$pairs_file" | sort
-  rm -f "$block_file" "$tags_file" "$pairs_file"
+  rm -f "$block_file" "$tags_file" "$pairs_file" "$pat_file"
   return 0
 }
 
@@ -160,6 +225,7 @@ aid_standards_map_defects() {
   local block_file
   block_file="$(_aid_sm_block_file "$2")" || return $?
   aid_standards_unknown_tags "$block_file"
+  aid_standards_double_star "$block_file" | sed 's/^/pattern uses `**`: /'
   rm -f "$block_file"
 }
 
