@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.88.1** (current) — the standards map carries its own path patterns, so a project is judged by its own layout instead of this repository's
+- **v2.88.2** (current) — two obligations that could switch themselves off in silence, and a band table that disagreed with itself
+- **v2.88.1** — the standards map carries its own path patterns, so a project is judged by its own layout instead of this repository's
 - **v2.88.0** — a plan now shows where it looked before founding anything, which ecosystem standards bind the paths it declares, and which of its steps may run at the same time
 - **v2.87.0** — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
 

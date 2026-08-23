@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.88.2] — 2026-08-23
+
+### Fixed
+- **Two obligations could switch themselves off in silence** — an unresolvable project root skipped the reuse-evidence replay and the documentation-surface check without a word, which is the fail-open direction the whole band model exists to avoid; both now say what they could not verify, blocking for a `lifecycle_strict` plan.
+- **The band matrix authors read was missing a row the lint enforces** — `## Standards` was graded by `aid-plan-lint.sh` but absent from the obligations table in `skills/plan-writing.md`, so an author obeying the table would never write it. The new `test-band-table-agreement.bats` fails when the two tables drift again.
+
 ## [2.88.1] — 2026-08-23
 
 ### Changed
