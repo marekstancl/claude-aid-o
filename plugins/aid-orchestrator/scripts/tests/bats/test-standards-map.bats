@@ -33,6 +33,9 @@ schema_version: 1
 tags:
   testy: "founding, changing and retiring tests"
   dokumentace: "where documentation lives"
+tag_paths:
+  testy: ["*.bats", "*tests/*"]
+  dokumentace: ["docs/*", "*/docs/*"]
 standards:
   - id: test-standard
     path: /ecosystem/specs/test-standard
@@ -188,4 +191,79 @@ _plan() {
   fi
   [ "$status" -eq 0 ]
   [[ "$output" == *"self-test PASS"* ]]
+}
+
+# ── the patterns live in the MAP, and there is no fallback ──────────────────
+# The reader used to carry its own path→tag table, which encoded this
+# ecosystem's tag names and this repository's layout: in a project with its own
+# map nothing matched, nothing derived, and the obligation sat registered as
+# blocking while being unable to fire. These cases hold that door shut.
+
+@test "standards: a map with no tag_paths is a broken configuration, not a project without standards" {
+  python3 - "$MAP" <<'PY'
+import io,sys
+p=sys.argv[1]; s=io.open(p,encoding='utf-8').read()
+i=s.index('tag_paths:'); j=s.index('standards:')
+io.open(p,'w',encoding='utf-8').write(s[:i]+s[j:])
+PY
+  _plan 'Modify: `scripts/tests/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be read"* ]]
+}
+
+@test "standards: a map declaring an unknown schema_version is refused, not read hopefully" {
+  sed -i 's/^schema_version: 1$/schema_version: 2/' "$MAP"
+  _plan 'Modify: `scripts/tests/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be read"* ]]
+}
+
+@test "standards: patterns come from the map — renaming a tag there changes what is derived" {
+  # The proof that nothing is hardcoded: this tag exists in no AID source file.
+  sed -i 's/^  testy: "founding/  zkousky: "founding/' "$MAP"
+  sed -i 's/^  testy: \["\*\.bats"/  zkousky: ["*.bats"/' "$MAP"
+  sed -i 's/^    tags: \[testy\]$/    tags: [zkousky]/' "$MAP"
+  _plan 'Modify: `scripts/tests/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"touches the 'zkousky' area"* ]]
+}
+
+@test "standards: a glob crosses directory separators, the way the map says it does" {
+  # `*tests/*` must reach a suite nested five levels down; if `*` stopped at a
+  # slash, every real repository layout would silently derive nothing.
+  _plan 'Modify: `plugins/aid-orchestrator/scripts/tests/bats/x.bats` — edit' \
+    '| Standard | Why it binds | Deviation |' '|---|---|---|' \
+    '| `/ecosystem/specs/test-standard` | the plan changes a suite | none |'
+  run "$LINT" "$PLAN"
+  [ "$status" -eq 0 ]
+}
+
+@test "standards: one path in two areas owes a standard from each — all matches apply" {
+  # `docs/x.bats` is both a test and documentation by the fixture's patterns.
+  _plan 'Modify: `docs/x.bats` — edit' \
+    '| Standard | Why it binds | Deviation |' '|---|---|---|' \
+    '| `/ecosystem/specs/test-standard` | it is a suite | none |'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"'dokumentace' area"* ]]
+  [[ "$output" != *"'testy' area"* ]]
+}
+
+@test "standards: a tag_paths key missing from the vocabulary is a map defect, not a block" {
+  python3 - "$MAP" <<'PY'
+import io,sys
+p=sys.argv[1]; s=io.open(p,encoding='utf-8').read()
+s=s.replace('tag_paths:\n', 'tag_paths:\n  neznamy-tag: ["*.zzz"]\n',1)
+io.open(p,'w',encoding='utf-8').write(s)
+PY
+  _plan 'Modify: `scripts/tests/x.bats` — edit' \
+    '| Standard | Why it binds | Deviation |' '|---|---|---|' \
+    '| `/ecosystem/specs/test-standard` | the plan changes a suite | none |'
+  run "$LINT" "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"neznamy-tag"* ]]
+  [[ "$output" == *"defect of the map"* ]]
 }

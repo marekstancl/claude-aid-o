@@ -305,6 +305,10 @@ Rules:
 - Only asked when the profile is NOT `none`; a project with no standards has no map.
 - The map is read LIVE and never copied into the project — it changes, and a copy
   is a second map that disagrees with the first.
+- The map must carry a `tag_paths` block: the path patterns that say which area
+  a file belongs to. AID has no built-in table of its own, so a map without them
+  is a broken configuration, not a project without standards, and the lint says
+  so. A project keeping its own map copies that block's shape.
 - Leave the field out when the project has no map. `aid-plan-lint.sh` then asks
   for no `## Standards` section and records that it did not, so the silence
   does not read as an omission. A path that IS set but unreadable is the

@@ -113,10 +113,13 @@ and extend that one; a third place to ask the same question is the very shape
 `scripts/lib/aid-standards-map.sh` is the ONLY file in AID that reads a foreign
 live document, and it exports nothing but a list of standard ids, so the map's
 format can age without touching anything else. Do not copy the map into the
-repo — a copy is a second map that disagrees with the first. Its three states
-are load-bearing: not configured (owes nothing), configured-but-unreadable
-(broken environment, blocking), configured-and-binds-nothing (owes nothing, and
-that is correct).
+repo — a copy is a second map that disagrees with the first, and do not put
+path patterns in the reader: they live in the map's own `tag_paths` block, so a
+project with its own map is judged by its own layout rather than by this
+repository's. Its three states are load-bearing: not configured (owes nothing),
+configured-but-unreadable — which now includes a map with no `tag_paths` and a
+map declaring an unknown `schema_version` — (broken environment, blocking), and
+configured-and-binds-nothing (owes nothing, and that is correct).
 
 **`plan_parallel_group_disjoint` — what may run at the same time?**
 Each step declares a wave; `aid-plan-parallel-check.sh` proves two steps in one

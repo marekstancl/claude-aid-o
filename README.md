@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.88.0** (current) — a plan now shows where it looked before founding anything, which ecosystem standards bind the paths it declares, and which of its steps may run at the same time
+- **v2.88.1** (current) — the standards map carries its own path patterns, so a project is judged by its own layout instead of this repository's
+- **v2.88.0** — a plan now shows where it looked before founding anything, which ecosystem standards bind the paths it declares, and which of its steps may run at the same time
 - **v2.87.0** — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
-- **v2.86.5** — the nightly's own red result was an input to a test the nightly runs, so the failure kept itself alive for four nights
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

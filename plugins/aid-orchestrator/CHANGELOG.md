@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.88.1] — 2026-08-23
+
+### Changed
+- **Standards path patterns moved into the map** — `scripts/lib/aid-standards-map.sh` carried its own area→tag table, which encoded this ecosystem's tag names and this repository's layout: in a project with its own map nothing matched, nothing was derived, and `plan_standards_named` sat in the enforcement registry as `blocking` while being unable to fire. The patterns now live in the map's own `tag_paths` block and the reader has no table at all, so a project is judged by its own layout.
+- **A map without `tag_paths` is a broken configuration** — deliberately not a silent fallback to a built-in table, which would map this repository's paths onto a foreign project's tags. Same treatment for a map declaring a `schema_version` this reader does not know: refused loudly, blocking for a `lifecycle_strict` plan, rather than read hopefully.
+
+### Fixed
+- **A `tag_paths` key missing from the map's tag vocabulary is reported** — patterns under an unknown tag can never yield a standard, so it is the same map defect the unknown-tag check already reported for `standards[]`, wearing a different hat.
+
 ## [2.88.0] — 2026-08-22
 
 ### Added
