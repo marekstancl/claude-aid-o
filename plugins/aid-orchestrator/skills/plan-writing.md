@@ -579,6 +579,7 @@ the band the lint checks are one classification, never two.
 | Tier on a `Test:` bullet naming a NEW suite | required | required | required |
 | `## Testing Strategy` with content | required | required | required |
 | **Reuse check** on a step with a `Create:` bullet | required | required | **required** |
+| `## Standards` naming what the live map binds to these paths | required | required | — |
 | A step naming the help/docs path a behaviour change needs | required | required | — |
 | **Parallel group** per step | required | required | defaults to `---` |
 | **Architecture Context** | required | required | — |

@@ -424,9 +424,14 @@ while _band_owes reuse_check && IFS=$'\t' read -r _rs _re _rhead; do
     _advisory ":${_rs}" "$_reuse_msg"
   fi
   # No project root means no directory the command was meant to run in, so the
-  # replay is skipped rather than run somewhere it would answer a different
-  # question. The presence + shape checks above still stand.
-  [[ -n "$_project_root" ]] || continue
+  # replay cannot run — but SILENCE there is the fail-open this obligation must
+  # never have: an unresolvable root would switch the strongest half of the
+  # check off without saying so (Codex wiring review, 2026-08-23). Say it, and
+  # let the strict tier decide whether it blocks.
+  if [[ -z "$_project_root" ]]; then
+    _strict_finding ":${_rs}" "**Reuse check:** not replayed — no project root resolved from the plan's path, so the claim stands unverified: ${_rhead}"
+    continue
+  fi
   # Called directly, NOT in a command substitution: the replay memoises identical
   # searches across steps, and a subshell would throw that away every time.
   if aid_reuse_replay "$_reuse_cmd" "$_project_root"; then
@@ -609,9 +614,13 @@ _plan_touches() {
   return 1
 }
 
-# No resolvable project root means no project.yaml to read the surfaces from —
-# and "this project records no help" would be a claim about a project this run
-# never found. Silence is the honest answer there.
+# No resolvable project root means no project.yaml to read the surfaces from.
+# Saying nothing there would read as "no documentation is owed", which is the
+# fail-open direction; the run says what it could not determine instead
+# (Codex wiring review, 2026-08-23).
+if _band_owes documentation && [[ -z "${_project_root:-}" ]]; then
+  _advisory "" "documentation surfaces not checked — no project root resolved from the plan's path, so project.yaml could not be read."
+fi
 if _band_owes documentation && [[ -n "${_project_root:-}" ]]; then
   _doc_type="$(_aid_fm_get "$PLAN" type)"
   case "$_doc_type" in
