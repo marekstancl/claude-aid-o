@@ -73,13 +73,48 @@ aid_standards_block() {
 # pattern rather than a literal — and is safe: bash pattern matching only ever
 # matches, it never expands a command. `*` crossing `/` is bash's own rule and
 # is exactly what the map documents.
+# _aid_sm_normalise <path> — the repo-relative form the map's patterns are
+# written against. Pure text, no forks: strip repeated `./`, collapse `//`,
+# resolve `x/../`, drop a leading `/`.
+#
+# Without it a declaration of `././docs/x.bats` matches no pattern and the
+# obligation quietly disappears — a bypass by spelling. The Files grammar
+# tolerates these shapes (its shape predicate only refuses whitespace and
+# parentheses), so the normalisation belongs here rather than in a change to
+# the shared predicate that the whole generation chain depends on.
+_aid_sm_normalise() {
+  local p="$1"
+  while [[ "$p" == ./* ]]; do p="${p#./}"; done
+  while [[ "$p" == *//* ]]; do p="${p//\/\//\/}"; done
+  while [[ "$p" == */../* ]]; do
+    local head="${p%%/../*}" tail="${p#*/../}"
+    # `${head%/*}` leaves a single segment untouched, so a one-level `a/../x`
+    # came out as `a/x`. One segment means the parent IS the root.
+    if [[ "$head" == */* ]]; then head="${head%/*}"; else head=""; fi
+    p="${head:+$head/}${tail}"
+  done
+  p="${p#/}"
+  printf '%s' "$p"
+}
+
 aid_standards_tags_for_path() {
-  local path="${1#./}" tag glob
+  local path tag glob
+  path="$(_aid_sm_normalise "$1")"
   while IFS=$'\t' read -r tag glob; do
     [[ -n "${glob:-}" ]] || continue
     # shellcheck disable=SC2053
     [[ "$path" == $glob ]] && printf '%s\n' "$tag"
   done < "$2"
+}
+
+# aid_standards_double_star <block-file> — patterns written with `**`. Bash
+# reads `**` as `*` (which already crosses `/`), so such a pattern still works
+# — but whoever wrote it expected a different language, and the next one they
+# write on that assumption will not. A defect OF THE MAP, reported like the
+# unknown tags below, never blocking.
+aid_standards_double_star() {
+  yq -r '.tag_paths // {} | to_entries[] | . as $e | $e.value[]? | select(test("\\*\\*")) | $e.key + ": " + .' \
+    "$1" 2>/dev/null
 }
 
 # aid_standards_unknown_tags <block-file> — tags used by a standard but absent
@@ -137,8 +172,13 @@ _aid_sm_block_file() {
   if [[ "$ver" != "$_AID_SM_SCHEMA" ]]; then
     rm -f "$block_file"; return 2
   fi
-  # The patterns are the half this reader cannot supply itself.
-  if ! yq -e '.tag_paths | length > 0' "$block_file" >/dev/null 2>&1; then
+  # The patterns are the half this reader cannot supply itself — and its SHAPE
+  # is checked, not just its size. `tag_paths: "oops"` has a non-zero length and
+  # would have passed a length test, then produced no patterns and therefore no
+  # obligations: a broken map answering "nothing applies", which is the single
+  # answer this whole reader exists to prevent.
+  if ! yq -e '.tag_paths | type == "!!map"' "$block_file" >/dev/null 2>&1 \
+     || ! yq -e '[.tag_paths[] | select(type != "!!seq" or length == 0)] | length == 0' "$block_file" >/dev/null 2>&1; then
     rm -f "$block_file"; return 2
   fi
   printf '%s' "$block_file"
@@ -185,6 +225,7 @@ aid_standards_map_defects() {
   local block_file
   block_file="$(_aid_sm_block_file "$2")" || return $?
   aid_standards_unknown_tags "$block_file"
+  aid_standards_double_star "$block_file" | sed 's/^/pattern uses `**`: /'
   rm -f "$block_file"
 }
 

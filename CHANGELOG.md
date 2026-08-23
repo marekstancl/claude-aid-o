@@ -10,7 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **A map without `tag_paths` is a broken configuration** — deliberately not a silent fallback to a built-in table, which would map this repository's paths onto a foreign project's tags. Same treatment for a map declaring a `schema_version` this reader does not know: refused loudly, blocking for a `lifecycle_strict` plan, rather than read hopefully.
 
 ### Fixed
-- **A `tag_paths` key missing from the map's tag vocabulary is reported** — patterns under an unknown tag can never yield a standard, so it is the same map defect the unknown-tag check already reported for `standards[]`, wearing a different hat.
+- **A path cannot dodge its standard by spelling** — `././docs/x.md` and `a/../docs/x.md` are normalised before matching, because the Files-shape predicate tolerates those forms and an unmatched pattern is an obligation that quietly disappears.
+- **`tag_paths` is validated by shape, not by size** — `tag_paths: "oops"` has a non-zero length and would have passed a length test, produced no patterns, and answered "nothing applies"; it is now refused as the broken configuration it is, as is a tag whose pattern list is empty.
+- **A `tag_paths` key missing from the map's tag vocabulary is reported** — patterns under an unknown tag can never yield a standard, so it is the same map defect the unknown-tag check already reported for `standards[]`, wearing a different hat. A pattern written with `**` is reported the same way: bash already crosses `/` with a single `*`, so it works, but whoever wrote it expected a different language.
 
 ## [2.88.0] — 2026-08-22
 

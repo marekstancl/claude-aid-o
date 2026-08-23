@@ -267,3 +267,56 @@ PY
   [[ "$output" == *"neznamy-tag"* ]]
   [[ "$output" == *"defect of the map"* ]]
 }
+
+@test "standards: a path spelled with ./ or .. still matches — the pattern cannot be dodged by spelling" {
+  # `_aid_path_shape_ok` tolerates these shapes (it refuses whitespace and
+  # parentheses only), so without normalisation `././docs/x.bats` would match
+  # no pattern and the obligation would quietly disappear.
+  _plan 'Modify: `././plugins/a/../docs/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"'dokumentace' area"* ]]
+}
+
+@test "standards: tag_paths that is not a map of lists is a broken configuration" {
+  # `tag_paths: "oops"` has a non-zero length: a length test would have passed
+  # it, produced no patterns, and answered "nothing applies".
+  python3 - "$MAP" <<'PY'
+import io,sys,re
+p=sys.argv[1]; s=io.open(p,encoding='utf-8').read()
+i=s.index('tag_paths:'); j=s.index('standards:')
+io.open(p,'w',encoding='utf-8').write(s[:i]+'tag_paths: "oops"\n'+s[j:])
+PY
+  _plan 'Modify: `scripts/tests/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be read"* ]]
+}
+
+@test "standards: a tag whose patterns are an empty list is a broken configuration too" {
+  python3 - "$MAP" <<'PY'
+import io,sys
+p=sys.argv[1]; s=io.open(p,encoding='utf-8').read()
+s=s.replace('  testy: ["*.bats", "*tests/*"]','  testy: []',1)
+io.open(p,'w',encoding='utf-8').write(s)
+PY
+  _plan 'Modify: `scripts/tests/x.bats` — edit'
+  run "$LINT" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be read"* ]]
+}
+
+@test "standards: a pattern written with ** is reported as a map defect, not a block" {
+  python3 - "$MAP" <<'PY'
+import io,sys
+p=sys.argv[1]; s=io.open(p,encoding='utf-8').read()
+s=s.replace('  dokumentace: ["docs/*", "*/docs/*"]','  dokumentace: ["docs/**"]',1)
+io.open(p,'w',encoding='utf-8').write(s)
+PY
+  _plan 'Modify: `scripts/tests/x.bats` — edit' \
+    '| Standard | Why it binds | Deviation |' '|---|---|---|' \
+    '| `/ecosystem/specs/test-standard` | the plan changes a suite | none |'
+  run "$LINT" "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'uses `**`'* ]]
+}
