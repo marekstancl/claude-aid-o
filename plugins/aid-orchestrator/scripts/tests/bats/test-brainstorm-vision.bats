@@ -124,6 +124,30 @@ GOOD_VISION='## Vision
   [[ "$output" == *"no vision step"* ]]
 }
 
+@test "AC4: work a user will notice needs the vision, even as one plan" {
+  # The original rule tied the vision to plan COUNT, which is a proxy for what
+  # actually matters: whether the two of you can afford to have meant different
+  # things. A single plan that changes what a user sees cannot.
+  bash "$BS" init P903 --scope user_visible --no-worktree
+  run bash "$BS" gate P903 --phase opponent
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not approved"* ]]
+}
+
+@test "AC5: only work nobody outside the code notices skips it, and says why" {
+  run bash "$BS" init P904 --scope single_plan --no-worktree
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no vision step"* ]]
+  run bash "$BS" show P904
+  [[ "$output" == *"no user will notice"* ]]
+}
+
+@test "an unknown scope is a usage error, not the cheapest category" {
+  run bash "$BS" init P905 --scope whatever --no-worktree
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"user_visible"* ]]
+}
+
 @test "work split across plans needs the vision, same as a roadmap" {
   bash "$BS" init P902 --scope multi_plan --no-worktree
   run bash "$BS" gate P902 --phase design

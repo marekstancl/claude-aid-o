@@ -21,9 +21,12 @@
 #   - Two models agreeing on something WRONG is not caught here. Nothing in
 #     this file looks for that; it is a known boundary of the design, not a
 #     defect in it.
-#   - An opponent that cannot be reached does not become agreement. The run
-#     continues as a monologue and SAYS SO — the same refusal
-#     lib/aid-audit-independence.sh makes for audits.
+#   - An opponent that cannot be reached does not become agreement, and since
+#     P088 it does not silently become a monologue either: the caller PRESENTS
+#     it to the PM as a decision (skills/brainstorming.md) while `ask_pm` is
+#     true. Three attempts per run, checked BEFORE the attempt — without a cap,
+#     a provider having a bad afternoon turns into a loop of interruptions,
+#     which is worse than the monologue it was trying to avoid.
 #   - An answer that is not in the required shape is treated as UNREACHED, for
 #     the same reason: prose that could not be parsed is not consent.
 #   - "They agreed" is the OPPONENT'S OWN CLAIM about the brief, not a
@@ -60,6 +63,14 @@ source "${_AID_BO_LIB_DIR}/aid-roots.sh"
 # The most disagreements a PM is asked to decide in one sitting. The rest stay
 # in the artifact: a list of twenty is not a decision, it is a document.
 _AID_BO_MAX_TO_PM=5
+
+# How many attempts one run may spend on an unreachable opponent. THE THIRD
+# FAILURE IS THE LAST: `ask_pm` is false from then on and the run carries on as
+# a recorded monologue. Three means three — an earlier version wrote
+# `ask_pm: (n <= cap)`, which let a FOURTH attempt through and made the promise
+# in the CHANGELOG false. Measured motivation: Codex returned 529 three times in
+# a row on 2026-08-24.
+_AID_BO_MAX_ATTEMPTS=3
 
 # _aid_bo_prompt <brief_file> — the whole instruction, including the shape the
 # answer must have. The shape is enforced by this file's own validator and not
@@ -104,13 +115,24 @@ _aid_bo_valid() {
      "$1" >/dev/null 2>&1
 }
 
-# _aid_bo_write_unreached <out> <reason>
+# _aid_bo_attempts <out> — how many unreachable attempts this run has recorded.
+_aid_bo_attempts() {
+  local f="$1"
+  [[ -r "$f" ]] || { printf '0'; return 0; }
+  local n; n="$(jq -r '.attempts // 0' "$f" 2>/dev/null)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
+# _aid_bo_write_unreached <out> <plan_id> <reason> <attempts>
 #   Returns 1 when it could not write. "The artifact records that the opponent
 #   was not reached" has to be a fact about a file, not about an intention: a
 #   full disk would otherwise leave the run claiming a record it does not have.
 _aid_bo_write_unreached() {
-  jq -n --arg r "$2" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{opponent: "unreached", reason: $r, created_at: $at,
+  jq -n --arg p "$2" --arg r "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson n "${4:-1}" --argjson cap "$_AID_BO_MAX_ATTEMPTS" \
+    '{opponent: "unreached", plan_id: $p, reason: $r, created_at: $at,
+      attempts: $n, attempts_cap: $cap, ask_pm: ($n < $cap),
       agree: [], disagree: [], missing: []}' > "$1" 2>/dev/null || {
     echo "opponent: could not write ${1} — the run has no record of what happened" >&2
     return 1
@@ -143,10 +165,28 @@ aid_brainstorm_opponent_run() {
     return 1
   fi
 
+  # THE CAP IS CHECKED BEFORE THE ATTEMPT, not after it. An earlier version only
+  # stopped ASKING once the cap was spent, so a fourth call still ran detection
+  # and dispatch and recorded `attempts: 4` — "capped at three attempts per run"
+  # was a sentence the code did not keep (found in review, twice: first the
+  # off-by-one, then this). A cap that does not prevent the attempt is a counter.
+  local prior; prior="$(_aid_bo_attempts "$dispute")"
+  # The number this call would record if it fails — every unreached path
+  # writes the same one, so it is worked out once.
+  local attempt=$(( prior + 1 ))
+  if (( prior >= _AID_BO_MAX_ATTEMPTS )); then
+    echo "opponent: ${prior} attempts already spent on this run (cap ${_AID_BO_MAX_ATTEMPTS}) — not trying again; this brainstorm is a recorded monologue. To spend more, remove ${dispute} deliberately." >&2
+    return 3
+  fi
+
   local avail rc=0
   avail="$(bash "${_AID_BO_LIB_DIR}/aid-audit-independence.sh" detect --required cross_provider 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    _aid_bo_write_unreached "$dispute" "$avail" || return 1
+    _aid_bo_write_unreached "$dispute" "$plan_id" "$avail" "$attempt" || return 1
+    if (( attempt >= _AID_BO_MAX_ATTEMPTS )); then
+      echo "opponent not reached ${_AID_BO_MAX_ATTEMPTS}+ times — no longer asking; this brainstorm continues as a recorded monologue: ${avail}" >&2
+      return 3
+    fi
     echo "opponent not reached — this brainstorm is a monologue and the artifact says so: ${avail}" >&2
     return 3
   fi
@@ -160,7 +200,7 @@ aid_brainstorm_opponent_run() {
     "${tmp}/events.jsonl" "${tmp}/stderr.txt" "${tmp}/answer.txt" || drc=$?
 
   if [[ "$drc" -ne 0 || ! -s "${tmp}/answer.txt" ]]; then
-    _aid_bo_write_unreached "$dispute" "the opponent did not answer (exit ${drc})" || { rm -rf "$tmp"; return 1; }
+    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent did not answer (exit ${drc})" "$attempt" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent not reached (exit ${drc}) — continuing as a monologue" >&2
     return 3
@@ -169,7 +209,7 @@ aid_brainstorm_opponent_run() {
   # A fenced answer is still an answer; anything that is not one object is not.
   sed -e 's/^```json$//' -e 's/^```$//' "${tmp}/answer.txt" > "${tmp}/answer.json"
   if ! _aid_bo_valid "${tmp}/answer.json"; then
-    _aid_bo_write_unreached "$dispute" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" || { rm -rf "$tmp"; return 1; }
+    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" "$attempt" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent answered outside the required shape — treated as not reached" >&2
     return 3
@@ -177,7 +217,7 @@ aid_brainstorm_opponent_run() {
 
   jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg p "$plan_id" \
      --arg m "${CODEX_MODEL:-unknown}" --argjson cap "$_AID_BO_MAX_TO_PM" \
-     '{opponent: "answered", plan_id: $p, model: $m, created_at: $at,
+     '{opponent: "answered", plan_id: $p, model: $m, provider: "codex", created_at: $at,
        agree: (.agree // []), disagree: (.disagree // []), missing: (.missing // []),
        to_pm: ((.disagree // [])[:$cap]),
        held_back: (((.disagree // []) | length) - $cap | if . < 0 then 0 else . end)}' \

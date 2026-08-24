@@ -6,6 +6,13 @@
 #   aid_decision_card_render   <data.json|-> [out_file]
 #   aid_decision_card_validate <card_file>
 #
+# A BATCH is the same card, N times, under one opening line. It exists because
+# the single planned stop (P088) asks everything at once: the one-question card
+# had nothing to open a batch with, so the Stop rule looked at a page of real
+# decisions and said "this turn does not ask for a decision". Data with a
+# `questions` array renders a batch; anything else renders one card, so a batch
+# of one is just a card.
+#
 # WHY THIS EXISTS
 #   Card 2 in skills/communication.md has been a skeleton to imitate: a turn
 #   that asked the PM for a decision with no options and no recommendation
@@ -66,6 +73,74 @@ _aid_dc_label() {
   yq -r ".languages.\"$1\".\"$2\" // \"\"" "$(_aid_dc_labels_file)" 2>/dev/null
 }
 
+# _aid_dc_lang_of <file> <label_key> — the first language whose <label_key>
+# line appears in <file>; nothing (exit 1) when no language's does. A plain card
+# and a batch are both recognised this way, only by a different label.
+_aid_dc_lang_of() {
+  local file="$1" key="$2" candidate label
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    label="$(_aid_dc_label "$candidate" "$key")"
+    [[ -n "$label" ]] || continue
+    if grep -qF "${label}:" "$file"; then printf '%s' "$candidate"; return 0; fi
+  done <<< "$(yq -r '.languages | keys | .[]' "$(_aid_dc_labels_file)" 2>/dev/null)"
+  return 1
+}
+
+# _aid_dc_emit <text> <out_file|""> — the card on stdout, and into <out_file>
+# when one was asked for. Both render paths end here, so what is printed and
+# what is written can never drift apart.
+_aid_dc_emit() {
+  local text="$1" out="$2"
+  printf '%s\n' "$text"
+  [[ -n "$out" ]] || return 0
+  printf '%s\n' "$text" > "$out" || { echo "decision card: cannot write ${out}" >&2; return 1; }
+  return 0
+}
+
+# _aid_dc_render_batch <data> <out> — one opening line, then each question
+# rendered by the single-card path. A batch of one is a card: the new shape is
+# never forced where it adds nothing.
+_aid_dc_render_batch() {
+  local data="$1" out="$2"
+  local lang count
+  lang="$(printf '%s' "$data" | jq -r '.lang // ""')"
+  count="$(printf '%s' "$data" | jq -r '(.questions // []) | length')"
+
+  [[ -n "$lang" ]] || { echo "decision card: no 'lang' — the batch renders in the PM's language and the renderer will not guess it" >&2; return 1; }
+  local l_batch; l_batch="$(_aid_dc_label "$lang" batch)"
+  [[ -n "$l_batch" ]] || { echo "decision card: language '${lang}' has no labels in $(_aid_dc_labels_file)" >&2; return 1; }
+  if (( count < 1 )); then
+    echo "decision card: 'questions' is empty — a batch with nothing to decide is an announcement, not a batch" >&2
+    return 1
+  fi
+
+  # A batch of one IS a card. The header would otherwise be a new shape bought
+  # for nothing, and the registry row says the opposite of what the code does.
+  if (( count == 1 )); then
+    local only; only="$(printf '%s' "$data" | jq -c --arg l "$lang" '.questions[0] + {lang: $l}')"
+    printf '%s' "$only" | aid_decision_card_render - "$out"
+    return $?
+  fi
+
+  local shown=$(( count > _AID_DC_MAX_OPTIONS ? _AID_DC_MAX_OPTIONS : count ))
+  local dropped=$(( count - shown ))
+
+  local body="" item card i
+  for (( i = 0; i < shown; i++ )); do
+    item="$(printf '%s' "$data" | jq -c --argjson i "$i" --arg l "$lang" '.questions[$i] + {lang: $l}')"
+    card="$(printf '%s' "$item" | aid_decision_card_render - 2>&1)" || {
+      echo "decision card: question $((i+1)) of ${count} — ${card}" >&2
+      return 1
+    }
+    body+="${card}"$'\n\n'
+  done
+
+  local head="${l_batch}: ${count}"
+  (( dropped > 0 )) && head+=" (+${dropped})"
+  _aid_dc_emit "${head}"$'\n\n'"${body%$'\n\n'}" "$out"
+}
+
 # aid_decision_card_render <data.json|-> [out_file]
 #
 # Prints the card on stdout, and writes it to <out_file> as well when given —
@@ -79,6 +154,14 @@ aid_decision_card_render() {
   fi
   if ! printf '%s' "$data" | jq -e . >/dev/null 2>&1; then
     echo "decision card: the data is not valid JSON" >&2; return 1
+  fi
+
+  # A batch is N cards under one opening line. Each item owes exactly what a
+  # single card owes, and a failing item is named BY ITS POSITION — "the third
+  # question has no reason" can be fixed; "the batch is incomplete" cannot.
+  if printf '%s' "$data" | jq -e 'has("questions")' >/dev/null 2>&1; then
+    _aid_dc_render_batch "$data" "$out"
+    return $?
   fi
 
   local lang question why_now risk
@@ -130,11 +213,7 @@ aid_decision_card_render() {
   (( dropped > 0 )) && card+="$(printf ' (+%d)' "$dropped")"
   [[ -n "$risk" ]] && card+="$(printf '\n%s: %s' "$(_aid_dc_label "$lang" risk)" "$risk")"
 
-  printf '%s\n' "$card"
-  if [[ -n "$out" ]]; then
-    printf '%s\n' "$card" > "$out" || { echo "decision card: cannot write ${out}" >&2; return 1; }
-  fi
-  return 0
+  _aid_dc_emit "$card" "$out"
 }
 
 # aid_decision_card_validate <card_file>
@@ -145,19 +224,46 @@ aid_decision_card_validate() {
   local file="${1:?aid_decision_card_validate: card file required}"
   [[ -r "$file" ]] || { echo "decision card: cannot read ${file}" >&2; return 1; }
 
-  local langs lang="" l_question=""
-  langs="$(yq -r '.languages | keys | .[]' "$(_aid_dc_labels_file)" 2>/dev/null)"
-  local candidate
-  while IFS= read -r candidate; do
-    [[ -n "$candidate" ]] || continue
-    l_question="$(_aid_dc_label "$candidate" question)"
-    [[ -n "$l_question" ]] || continue
-    if grep -qF "${l_question}:" "$file"; then lang="$candidate"; break; fi
-  done <<< "$langs"
-
+  # A plain card is recognised by its question line. A batch that carries no
+  # question line at all still opens with its own — without the second lookup
+  # the Stop rule would look at a page of real decisions and call it "not a
+  # decision card".
+  local lang=""
+  lang="$(_aid_dc_lang_of "$file" question)" || lang="$(_aid_dc_lang_of "$file" batch)" || lang=""
   if [[ -z "$lang" ]]; then
     echo "not a decision card: no language's opening line appears in ${file}" >&2
     return 3
+  fi
+
+  # In a batch every question owes what ONE card owes — and it is checked PER
+  # ITEM. Counting `Otázka:` against `Důvod:` across the whole file passes a
+  # batch whose second question has no reason as long as some other line
+  # anywhere supplies one, which is a check that can be satisfied by accident.
+  local l_batch; l_batch="$(_aid_dc_label "$lang" batch)"
+  if [[ -n "$l_batch" ]] && grep -qF "${l_batch}:" "$file"; then
+    local l_q l_r; l_q="$(_aid_dc_label "$lang" question)"; l_r="$(_aid_dc_label "$lang" reason)"
+    # `n` counts questions seen so far, so while a question is open it is also
+    # that question's 1-based number — which is what a complaint has to name.
+    local n=0 seen_reason=1 bad="" line
+    while IFS= read -r line; do
+      if [[ "$line" == "${l_q}:"* ]]; then
+        (( n > 0 && seen_reason == 0 )) && bad+="${n} "
+        n=$(( n + 1 )); seen_reason=0
+      elif [[ "$line" == "${l_r}:"* ]]; then
+        seen_reason=1
+      fi
+    done < "$file"
+    (( n > 0 && seen_reason == 0 )) && bad+="${n} "
+    if [[ -n "$bad" ]]; then
+      printf 'decision card batch %s is incomplete — question(s) %swithout a reason (of %s)\n' \
+        "$file" "$bad" "$n" >&2
+      return 1
+    fi
+    if (( n == 0 )); then
+      printf 'decision card batch %s opens a batch but carries no question\n' "$file" >&2
+      return 1
+    fi
+    return 0
   fi
 
   local missing=() key

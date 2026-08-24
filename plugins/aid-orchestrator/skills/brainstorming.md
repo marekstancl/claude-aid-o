@@ -38,12 +38,12 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 
 ## MUST Rules
 
-1. **One question at a time** — never batch multiple questions in one message
+1. **One stop, one batch** — every question the PM owes an answer to is asked TOGETHER, in the single planned stop, as a decision batch (`skills/communication.md` card 2). Never one at a time across ten turns: the old rule cost the PM five interruptions per brainstorm and bought nothing the batch does not.
 2. **Prefer multiple choice** — open-ended only when options cannot be predicted
 3. **Detailed output by default** — PM should never ask for more detail
-4. **2-3 approaches always** — never present a single option
-5. **Section-by-section approval** — never skip incremental validation; each non-trivial section is validated by the `section-review` critic and ground-truth re-verified by the author before PM approval (see Design Validation Protocol)
-6. **Write files only after explicit PM approval** — Step 7 must be approved
+4. **2-3 approaches always** — never present a single option. Which approach WINS is settled between the models; the PM sees it only when they disagree, or when the choice is one of the five in rule 15.
+5. **Section-by-section validation, not approval** — each non-trivial section is still validated by the `section-review` critic and ground-truth re-verified by the author. What is gone is the PM sign-off per section: validation is the models' work, approval is the PM's, and only the scope list (rule 16) and the final plan need theirs.
+6. **Write files only after explicit PM approval** — of the SCOPE LIST (rule 16). That is the moment the PM says "yes, that is the work"; the plan is written after it, never before.
 7. **Follow the language split** — conversation in PM language, documents in configured language
 8. **YAGNI** — do not add complexity the requirements do not demand
 9. **Cross-reference** — plan references the topic and brainstorming decisions
@@ -51,7 +51,10 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 11. **Initial analysis before first question** — see Initial Analysis Phase
 12. **Delegate plan writing to plan-writing skill** — brainstorming collects and validates; plan-writing writes the document with quality gates
 13. **Recommend Docker Compose when design reveals 2+ services** — PM can decline; if declined, record as constraint and do not raise again
-14. **Agree the vision before designing** — on a roadmap or work split across several plans, do not start designing until the PM has approved a vision whose every point carries a test. For the OPPONENT this is a closed door in code; for the design phase it is this rule plus `gate --phase design`, which you must call (see Vision Step)
+14. **Agree the vision before designing** — on a roadmap, on work split across several plans, and on **anything that changes behaviour a user meets** (`--scope user_visible`), do not start designing until the PM has approved a vision whose every point carries a test. For the OPPONENT this is a closed door in code; for the design phase it is this rule plus `gate --phase design`, which you must call (see Vision Step)
+15. **Only five things reach the PM** — what it is for, who it is for, how much risk they accept, whether backwards compatibility may break, and anything that cannot be taken back. Everything else the two models settle. A sixth kind is not "being careful", it is the old interrogation coming back one question at a time.
+16. **Never write the plan before the scope list is accepted** — the PM sees, in plain language, what the plan will deliver AND what it deliberately leaves out, and says yes. The second half matters more: scope is checked at its edges, not by a list of contents.
+17. **An unanswered question is not an assumption** — if the PM leaves part of the batch unanswered, ask again, shortened, for those parts only. Turning silence into an assumption is how the autonomous half decides exactly what the PM was supposed to.
 
 ---
 
@@ -68,6 +71,50 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
    - Accept brief answers and infer reasonable defaults.
 
 ---
+
+## The Single Planned Stop
+
+Brainstorming interrupts the PM at **one planned place**, not five. Everything
+between that stop and the result is the two models' work.
+
+### What the stop carries
+
+Three things in one message, in this order:
+
+1. **How the brief was understood**, in two sections and no third:
+   - **Ověřeno** — each claim with WHERE it was checked (file and place, or the
+     supplied material). Grounding is in the evidence that EXISTS: a change to
+     working code is grounded in the repository, a product idea in the brief and
+     its attachments, and the gaps are named.
+   - **Předpokládám** — everything else.
+
+   This does **not** guarantee the first section is true. Nobody compares those
+   claims against their source. What it does is force every claim into one of
+   two piles with its origin attached, so an unsupported one is at least
+   visible. Say it that way; do not promise more.
+
+2. **The vision**, as thesis + test, when the run owes one (MUST 14).
+
+3. **The questions**, all of them, as ONE decision batch — and only the five
+   kinds in MUST 15. If a question is not one of those five, the models answer
+   it themselves.
+
+### What happens after it
+
+Steps 3–7 run without the PM: approaches, design, section validation, the
+opponent. Agreements go into the interim without asking (`RULE 2` of Context
+Persistence). Disagreements are collected for the result.
+
+### The two exceptions, named so they cannot multiply
+
+The PM is interrupted again ONLY here:
+
+| Exception | When | Why it is not the old interrogation |
+|---|---|---|
+| **Opponent unreachable** | the second model did not answer AND `dispute.json` says `ask_pm: true` | the PM chose to be asked rather than get a silent monologue. Three attempts per run, and the cap stops the ATTEMPT, not only the asking: once spent, a further call does not reach the opponent at all and says so. A provider having a bad afternoon must not become a loop of interruptions |
+| **A fundamental unknown** | something surfaced that no assumption can safely cover | say it IS an exception and why; a design resting on an invisible assumption is worse than one more question |
+
+Anything else is a rule 15 violation wearing a disguise.
 
 ## Vision Step
 
@@ -138,9 +185,9 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
 | Outcome | What to do |
 |---|---|
 | `agree` entries | Record them and move on. Do **not** ask the PM to confirm something both models already hold. |
-| `disagree` entries | Each is a PM decision — present it as card 2 (`skills/communication.md`) with both positions and what it costs to get wrong. At most five reach the PM; the rest stay in `dispute.json` and the summary says how many. |
+| `disagree` entries | **Filtered by MUST 15, not forwarded wholesale.** A disagreement that IS one of the five kinds goes to the PM as part of the batch, with both positions and what it costs to get wrong (at most five; the rest stay in `dispute.json` and the summary says how many). A disagreement that is NOT — a method, a shape, an implementation choice — the models settle between themselves, and the artifact records the choice AND the loser's objection. Forwarding every disagreement was the old interrogation with a new name: two models can disagree about anything, and "the opponent disagreed" is not by itself a reason to spend the PM's attention. |
 | `missing` entries | Gaps neither position covered. Fold them into the questions. |
-| `opponent: unreached` | Say in one line that the design is a monologue and why. **Never** present it as agreement — an opponent that did not answer has not agreed. |
+| `opponent: unreached` | Read `ask_pm`. While it is `true`, present it to the PM as a decision — carry on as a monologue, try again, or stop. Once it is `false` (three attempts spent), say in one line that the design is a monologue and why, and carry on. **Never** present it as agreement: an opponent that did not answer has not agreed. |
 
 The gate refuses to dispatch on a vision the PM has not approved, so the vision
 step is a real precondition here, not an order of presentation.

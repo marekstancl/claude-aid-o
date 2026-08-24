@@ -3,8 +3,8 @@
 # aid-brainstorm-state.sh — the state a brainstorming run actually has
 # (P086 Step 7)
 #
-#   aid-brainstorm-state.sh init <plan_id> --scope roadmap|multi_plan|single_plan
-#                                          [--topic <text>]
+#   aid-brainstorm-state.sh init <plan_id>
+#         --scope roadmap|multi_plan|user_visible|single_plan [--topic <text>]
 #   aid-brainstorm-state.sh vision-propose <plan_id> --file <vision.md>
 #   aid-brainstorm-state.sh vision-approve <plan_id>
 #   aid-brainstorm-state.sh vision-reject  <plan_id> --reason <text>
@@ -35,10 +35,15 @@
 #   language the document is written in.
 #
 # WHERE THE VISION IS REQUIRED
-#   A roadmap, or work split across several plans — the cases where a wrong
-#   shared assumption costs more than the ceremony. A single short plan skips
-#   the step, and the skip is RECORDED with its reason rather than being
-#   silently absent.
+#   A roadmap, work split across several plans, and anything that CHANGES
+#   BEHAVIOUR A USER MEETS (`user_visible`). Only work nobody outside the code
+#   will notice — a refactor, a tidy-up — skips it, and the skip is RECORDED
+#   with its reason rather than being silently absent.
+#
+#   `user_visible` was added because the original rule tied the vision to plan
+#   COUNT, which is a proxy for the thing that actually matters: whether the
+#   two of you can afford to have meant different things. A single plan that
+#   changes what a user sees can afford that no better than a roadmap can.
 #
 # STATE LIVES WITH THE REST OF THE WORKSPACE (`.aid-o/work/brainstorm/<plan_id>/`)
 #   — this is a command the controller runs, not a hook, so the rule against
@@ -119,8 +124,8 @@ cmd_init() {
     esac
   done
   case "$scope" in
-    roadmap|multi_plan|single_plan) ;;
-    *) echo "ERROR: --scope must be roadmap, multi_plan or single_plan (got '${scope}')" >&2; return 2 ;;
+    roadmap|multi_plan|user_visible|single_plan) ;;
+    *) echo "ERROR: --scope must be roadmap, multi_plan, user_visible or single_plan (got '${scope}')" >&2; return 2 ;;
   esac
 
   local dir; dir="$(state_dir "$plan_id")" || return 1
@@ -129,7 +134,7 @@ cmd_init() {
   local required=true skip=""
   if [[ "$scope" == "single_plan" ]]; then
     required=false
-    skip="one short plan — a shared assumption here costs less than the ceremony of agreeing one (V1)"
+    skip="work no user will notice — a refactor or a tidy-up, where a shared assumption costs less than the ceremony of agreeing one"
   fi
   cat > "$(state_file "$plan_id")" <<Y
 plan_id: "${plan_id}"
@@ -289,12 +294,38 @@ cmd_approve() {
     echo "REFUSED: ${plan_id} has no rendered page in ${dir} — there is nothing the acceptance could be based on. Render it first: source scripts/lib/aid-brainstorm-summary.sh && aid_brainstorm_summary_render ${plan_id} ${dir}/brainstorm-summary-artifact.html" >&2
     return 1
   fi
-  # The opponent is optional by design (it may be unavailable), so its absence
-  # is said out loud rather than refused — an accepted monologue is a real
-  # outcome, an accepted monologue nobody noticed is not.
-  if [[ ! -r "${dir}/dispute.json" ]]; then
-    echo "NOTE: no opponent ran for ${plan_id} — this design was a monologue." >&2
+
+  # THE OPPONENT LEAVES A RECORD OR THE RUN DOES NOT CLOSE (P088 Step 5).
+  # A MONOLOGUE IS A LEGITIMATE OUTCOME — `unreached` closes the run fine. What
+  # cannot happen is closing with no record at all, because then "two models
+  # went over this" is a sentence nobody can check.
+  #
+  # WHAT THIS DOES NOT PROVE, and the row in the enforcement registry says the
+  # same: that a second platform was really called, that it answered, or that it
+  # is independent of the first. A file check cannot show any of that. What it
+  # does is make pretending DELIBERATE — the record has to be written on purpose
+  # — which is worth having and is not the same as proof.
+  local dispute="${dir}/dispute.json"
+  if [[ ! -r "$dispute" ]]; then
+    echo "REFUSED: ${plan_id} has no record of the opponent (${dispute}). A monologue is a fine outcome, but it has to be written down: run scripts/lib/aid-brainstorm-opponent.sh, which records 'unreached' when the second model cannot be had." >&2
+    return 1
   fi
+  local opp; opp="$(jq -r '.opponent // ""' "$dispute" 2>/dev/null)" || opp=""
+  case "$opp" in
+    answered|unreached) ;;
+    *)
+      echo "REFUSED: ${dispute} is unreadable or carries opponent='${opp:-<none>}' — a damaged record is not a record. Expected 'answered' or 'unreached'." >&2
+      return 1 ;;
+  esac
+  # The record must be THIS run's. Without the check a file dropped into the
+  # directory — or copied from another run — closes the run just as well, and
+  # the whole point of requiring a record is that it is about this work.
+  local rec_plan; rec_plan="$(jq -r '.plan_id // ""' "$dispute" 2>/dev/null)" || rec_plan=""
+  if [[ "$rec_plan" != "$plan_id" ]]; then
+    echo "REFUSED: ${dispute} records plan_id='${rec_plan:-<none>}', not ${plan_id} — a record from another run (or none) does not close this one." >&2
+    return 1
+  fi
+  [[ "$opp" == "unreached" ]] && echo "NOTE: the opponent was never reached for ${plan_id} — this design was a monologue, and the page says so." >&2
   vision="$(get "$sf" vision_file)"
   if [[ -n "$vision" && -r "$vision" ]]; then
     mkdir -p "${root}/.aid-o/plans" || { echo "ERROR: cannot create ${root}/.aid-o/plans" >&2; return 1; }
