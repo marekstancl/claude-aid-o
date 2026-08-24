@@ -96,6 +96,35 @@ a vision for now": everything after this point would be built on the version
 they did not agree to. A later disagreement with the vision goes to the PM as a
 decision, it is not quietly absorbed.
 
+## Opponent (optional profile, on by default where a second provider is available)
+
+The design is drafted against a second model rather than alone. It runs **during**
+the design, not after it — the C0 plan review already argues with a finished
+plan, which is the expensive place to discover a wrong premise.
+
+Write the draft positions to a brief (one line per position), then:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
+  P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN}
+```
+
+**Read the result the way it is meant:**
+
+| Outcome | What to do |
+|---|---|
+| `agree` entries | Record them and move on. Do **not** ask the PM to confirm something both models already hold. |
+| `disagree` entries | Each is a PM decision — present it as card 2 (`skills/communication.md`) with both positions and what it costs to get wrong. At most five reach the PM; the rest stay in `dispute.json` and the summary says how many. |
+| `missing` entries | Gaps neither position covered. Fold them into the questions. |
+| `opponent: unreached` | Say in one line that the design is a monologue and why. **Never** present it as agreement — an opponent that did not answer has not agreed. |
+
+The gate refuses to dispatch on a vision the PM has not approved, so the vision
+step is a real precondition here, not an order of presentation.
+
+**Two known limits, so they are not rediscovered as surprises:** two models
+agreeing on something wrong is not caught by any of this, and which model plays
+the opponent is configuration (`AID_C3_CODEX_MODEL`), not architecture.
+
 ## Initial Analysis Phase
 
 Activates after reading PM's topic and all context, before questioning begins. Mandatory for every run. Presents a brief structured analysis to surface misinterpretations early.
