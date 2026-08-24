@@ -355,6 +355,48 @@ This project uses AID v2.0 for multi-agent orchestration.
 - Work: `.aid-o/work/`
 <!-- AID-O END -->
 
+## The testbed — `/opt/eco/projects/aid-testbed`
+
+A separate, permanent project whose only reason to exist is to ask: **does AID
+still do what it promised, on a repository it was NOT written against?**
+
+Run it after any change that touches planning, gates or hooks:
+
+```bash
+/opt/eco/projects/aid-testbed/bin/verify.sh                    # deterministic, no API
+/opt/eco/projects/aid-testbed/bin/verify.sh --live             # also what needs a real session
+/opt/eco/projects/aid-testbed/bin/verify.sh --plugin <dir>     # a working tree instead of the install
+```
+
+**Why it is not more tests inside this repo.** The plugin's own suites are green
+and all stop at the same boundary: none of them can watch a real project being
+planned. The testbed is a real project with its own layout, its **own standards
+map** and its own documentation surface (`prirucka/`, not `docs/`) — so anything
+this repository's shape is baked into fails there and nowhere else. That is not
+hypothetical: v2.88.1 existed because `aid-standards-map.sh` carried this
+repository's path table, and v2.89.2 because `/aid-init` never created
+`counter.yaml`, which only a project that had never had a plan could show.
+
+**Half of its checks expect a REFUSAL.** `fixtures/plan-sabotaged.md` carries one
+deliberate defect per mechanism, because a gate that never refuses anything is
+indistinguishable from a gate that is not wired at all.
+
+**It verifies the INSTALLED plugin by default**, not a working tree. What a user
+runs is what is installed, and the two came apart once already: v2.89.0 was
+pushed, tagged and released while the ACTIVE installed version was still 2.77.3,
+so none of its hooks existed. The canary caught it; nothing else would have.
+
+**`expected/fingerprint.yaml` is written BEFORE a run.** A verification that
+decides afterwards what counts as success proves nothing. The same file carries
+`known_findings` — defects the harness knows about and deliberately does not
+fail on, because they are waiting for a decision and a harness that cries wolf
+every run stops being read.
+
+**What it cannot measure is printed on every run**, so absence is never mistaken
+for a pass: a continuity capsule across a real compaction (a compaction cannot
+be triggered on demand) and the subagent protocol notice reaching a real role
+agent (the mechanism is measured, that delivery is not).
+
 ## Conventions
 
 ### Test tiers (P081 — AID is the ecosystem pilot)
