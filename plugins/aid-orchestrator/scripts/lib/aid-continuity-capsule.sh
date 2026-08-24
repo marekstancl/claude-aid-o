@@ -15,11 +15,13 @@
 # IT IS A DELIVERY, NOT A GUARANTEE — DEGREE 3, AND THAT IS THE WHOLE POINT
 #   `SessionStart` injection puts text in front of a model. It does not make
 #   the model use it, and in Codex an unapproved hook is skipped in silence, so
-#   it may not even be delivered. That is why this does NOT replace the gate
-#   that inserts the contract on the normal path: the gate keeps inserting, and
-#   the capsule is cover for the runs that did not go through it. Anything that
-#   treats the capsule as the contract's home has moved an obligation onto a
-#   mechanism that cannot carry it.
+#   it may not even be delivered.
+#
+#   So the capsule is NOT where the communication contract lives. Its home is
+#   skills/communication.md, loaded by the commands that cite it, and what
+#   CHECKS it is scripts/aid-turn-gate.sh on the written card. The capsule
+#   carries a POINTER to that contract, no more — moving the obligation onto a
+#   degree-3 mechanism would be putting it somewhere that cannot hold it.
 #
 # WHERE IT LIVES, AND WHY NOT IN THE WORKSPACE
 #   The session store (lib/aid-session-store.sh), never `.aid-o/`. A hook does

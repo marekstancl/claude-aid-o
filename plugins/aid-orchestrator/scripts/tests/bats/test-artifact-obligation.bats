@@ -78,6 +78,41 @@ render_page() {
   [ "$status" -eq 0 ]
 }
 
+@test "AC11: EPIC generation refuses a plan whose page was never rendered — the gate has a caller" {
+  # The finding this test exists for: a gate nobody invokes is decoration. The
+  # caller is aid-plan-to-epic.sh, at the point where a plan stops being a
+  # document and becomes work.
+  cat >> "$PLAN" <<'P'
+
+## Implementation Steps
+
+### Step 1: do the thing
+**AID Role:** backend
+P
+  mkdir -p "$TMP/out"
+  printf 'plan: 900\nepic: 0\n' > "$TMP/counter.yaml"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-to-epic.sh" --plan "$PLAN" --phase 1 --total 1 --epic-template "$PLUGIN_ROOT/defaults/templates/epic.md" --output-dir "$TMP/out" --counter-yaml "$TMP/counter.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no current PM page"* ]]
+}
+
+@test "the same generation proceeds past that check once the page is there" {
+  cat >> "$PLAN" <<'P'
+
+## Implementation Steps
+
+### Step 1: do the thing
+**AID Role:** backend
+P
+  render_page
+  mkdir -p "$TMP/out"
+  printf 'plan: 900\nepic: 0\n' > "$TMP/counter.yaml"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-to-epic.sh" --plan "$PLAN" --phase 1 --total 1 --epic-template "$PLUGIN_ROOT/defaults/templates/epic.md" --output-dir "$TMP/out" --counter-yaml "$TMP/counter.yaml"
+  # It may still fail further down for reasons this fixture does not satisfy —
+  # what must not appear is the page refusal.
+  [[ "$output" != *"no current PM page"* ]]
+}
+
 # ── The Stop rule: the same check, one turn earlier ────────────────────────
 transcript() { # transcript <iso_timestamp>
   printf '{"type":"user","timestamp":"%s","message":{"content":"go"}}\n' "$1" > "$TMP/transcript.jsonl"

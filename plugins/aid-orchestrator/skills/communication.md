@@ -59,10 +59,11 @@ Riziko / co není ověřeno: <only material uncertainty>.
 
 This card is **built, not imitated**: `scripts/lib/aid-decision-card.sh` assembles
 it from data and refuses data with fewer than two options, no recommendation or
-a recommendation without a reason, so an incomplete one cannot be produced.
-`scripts/aid-turn-gate.sh` re-checks the written card after the CLI returns, and
-a `Stop` hook rule catches the same defect a turn earlier where that event
-exists. Labels are per-language data in `defaults/decision-card-labels.yaml` —
+a recommendation without a reason — so the renderer cannot emit an incomplete
+card. It cannot stop anyone from typing an ad-hoc question by hand instead;
+what catches that is `scripts/aid-turn-gate.sh` on a written card and a `Stop`
+hook rule on the turn's last message, and both recognise the card by its
+opening label, so a question in no card shape at all is not detected. Labels are per-language data in `defaults/decision-card-labels.yaml` —
 the card still renders in the PM's language (rule 4).
 
 **3. Blocked or failed.**

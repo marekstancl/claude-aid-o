@@ -66,9 +66,20 @@ defaults:
   timeout_s: 5
 
 budget:
-  # Whole-dispatch wall clock. Rules still pending when it is spent are
+  # Whole-dispatch wall clock, and it is KEPT rather than printed: a rule's own
+  # clock is capped to what is left of this, so one long row cannot spend an
+  # hour of a fifteen-second budget. Rules still pending when it is spent are
   # skipped and audited — a hook sits in the hot path of every turn.
   total_s: 15
+
+# How long a canary verdict stays good for. The honest reason there is a
+# window at all: the dispatcher cannot tell WHICH harness is calling it, so it
+# cannot check that the tool and version the verdict names are still the ones
+# running. KNOWN RESIDUAL GAP: inside the window, a tool upgrade or a switch
+# between harnesses is covered by a measurement that no longer applies.
+# Closing it needs a harness marker in the event payload that neither Claude
+# Code 2.1.226 nor Codex 0.146.0 sends today.
+trust_ttl_days: 7
 
 # The versions the ecosystem MEASURED its hook sheets on
 # (/ecosystem/specs/agent-hooks/). A canary run on any other version still
@@ -98,7 +109,7 @@ rules:
     timeout_s: 5
     lib: scripts/lib/aid-decision-card.sh
     handler: aid_hook_rule_decision_card
-    description: refuses to close a turn that asks the PM for a decision without options, a recommendation and its reason
+    description: refuses to close a turn whose card asks the PM for a decision without options, a recommendation and its reason — it recognises a card by its opening label, so a bare question in no card shape is not detected
 
   - id: plan_artifact_rendered
     event: Stop

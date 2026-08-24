@@ -83,7 +83,7 @@ _hook_audit() {
   fi
   printf '{"ts":"%s","event":"%s","session_id":"%s","context":"%s","rule":"%s","outcome":"%s","reason":"%s"}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(_hook_esc "$event")" \
-    "$(_hook_esc "${HOOK_SESSION_ID:-}")" "${HOOK_CONTEXT:-unknown}" \
+    "$(_hook_esc "${HOOK_SESSION_ID:-}")" "${HOOK_CONTEXT:-unknown}/${HOOK_CONTEXT_SOURCE:-unknown}" \
     "$(_hook_esc "$rule")" "$outcome" "$(_hook_esc "$reason")" \
     >> "$file" 2>/dev/null || true
 }
@@ -92,6 +92,15 @@ _hook_audit() {
 # Trust: has the canary shown that hooks actually run here? (Step 2 writes
 # the file; this only reads it, so Step 1 is complete on its own.)
 # --------------------------------------------------------------------------
+# A verdict is good for a bounded time, and here is the honest reason: this
+# process cannot tell WHICH harness is calling it, so it cannot check that the
+# tool and version in the verdict are still the ones running. What it can do is
+# refuse to trust an old measurement indefinitely — a tool upgrade or a switch
+# between harnesses stops being covered within the window rather than never.
+# The residual gap is recorded in defaults/hook-registry.yaml; closing it needs
+# a harness marker in the event payload that neither tool sends today.
+_AID_HOOK_TRUST_TTL_DAYS_DEFAULT=7
+
 _hook_trust_ok() {
   local file="${AID_HOOK_TRUST_FILE:-}"
   if [[ -z "$file" ]]; then
@@ -99,25 +108,79 @@ _hook_trust_ok() {
     file="${dir}/trust.json"
   fi
   [[ -f "$file" ]] || return 1
-  [[ "$(jq -r '.verified // false' "$file" 2>/dev/null)" == "true" ]]
+  [[ "$(jq -r '.verified // false' "$file" 2>/dev/null)" == "true" ]] || return 1
+
+  local ttl checked_at w now
+  ttl="$(yq -r ".trust_ttl_days // ${_AID_HOOK_TRUST_TTL_DAYS_DEFAULT}" "$REGISTRY" 2>/dev/null)"
+  [[ "$ttl" =~ ^[0-9]+$ ]] || ttl="$_AID_HOOK_TRUST_TTL_DAYS_DEFAULT"
+  checked_at="$(jq -r '.checked_at // ""' "$file" 2>/dev/null)"
+  [[ -n "$checked_at" ]] || return 1
+  w="$(date -u -d "$checked_at" +%s 2>/dev/null)" || return 1
+  now="$(date -u +%s)"
+  (( now - w <= ttl * 86400 ))
 }
 
 # --------------------------------------------------------------------------
 # Context
 # --------------------------------------------------------------------------
+# Prints "<context>\t<how it was decided>". The second half is audited, so a
+# context that was ASSUMED rather than read is visible in the trail instead of
+# looking like a measurement.
 _hook_detect_context() {
   local event="$1" input="$2" agent_type=""
   case "${AID_HOOK_CONTEXT:-}" in
-    agent|controller) printf '%s' "$AID_HOOK_CONTEXT"; return 0 ;;
+    agent|controller) printf '%s\tenv' "$AID_HOOK_CONTEXT"; return 0 ;;
   esac
-  [[ "$event" == Subagent* ]] && { printf 'agent'; return 0; }
-  agent_type="$(printf '%s' "$input" | jq -r '.agent_type // ""' 2>/dev/null)"
-  [[ -n "$agent_type" ]] && { printf 'agent'; return 0; }
-  printf 'controller'
+  [[ "$event" == Subagent* ]] && { printf 'agent\tevent'; return 0; }
+  agent_type="$(printf '%s' "$input" | jq -r '.agent_type // .subagent_type // ""' 2>/dev/null)"
+  [[ -n "$agent_type" ]] && { printf 'agent\tagent_type'; return 0; }
+  printf 'controller\tassumed'
 }
 
-# Stand-in for timeout(1): swallows the seconds argument and runs the command.
-_hook_no_timeout() { shift; "$@"; }
+# --------------------------------------------------------------------------
+# _hook_run_deadline <seconds> <out_file> <err_file> <cmd...>
+#
+# Runs one rule with a real clock and returns 124 when it overran, the rule's
+# own exit code otherwise. Deliberately NOT `timeout(1)`:
+#
+#   - it is coreutils, and a host without it (stock macOS) would otherwise run
+#     rules with no clock at all — a hot-path dispatcher cannot have that as a
+#     supported mode;
+#   - `timeout 0` DISABLES the timeout, so a malformed row would buy a rule
+#     unlimited time (the seconds are validated by the caller, and this is the
+#     second line of that defence);
+#   - it kills the process it started, not the process group, so a handler that
+#     leaves a background child holding the pipe hangs the reader for as long
+#     as that child lives. Output goes to FILES here for exactly that reason:
+#     a leaked child holding a file descriptor cannot keep the dispatcher
+#     waiting for EOF.
+#
+# The child is killed with TERM and then, after a second's grace, with KILL.
+# --------------------------------------------------------------------------
+_hook_run_deadline() {
+  local secs="$1" out="$2" err="$3"; shift 3
+  "$@" > "$out" 2> "$err" &
+  local pid=$!
+  local waited=0
+  # Tenth-of-a-second polling: a rule's budget is whole seconds, and a hook in
+  # the hot path must not add a second of latency to a rule that returns at
+  # once.
+  while (( waited < secs * 10 )); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+    waited=$(( waited + 1 ))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null
+    sleep 1
+    kill -KILL "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    return 124
+  fi
+  local rc=0
+  wait "$pid" || rc=$?
+  return "$rc"
+}
 
 _hook_owner_matches() {
   local owner="$1"
@@ -140,9 +203,24 @@ run_rule() {
     return 1
   fi
   if [[ -n "$lib" ]]; then
-    # Registry paths are plugin-root relative; an absolute one is honoured as
-    # given so a test fixture can point at a rule outside the plugin.
-    [[ "$lib" == /* ]] || lib="${PLUGIN_ROOT}/${lib}"
+    # A `lib` is SOURCED, so the registry is executable code and its paths are
+    # treated as such. Traversal is refused outright, and the SHIPPED registry
+    # may only name paths inside the plugin — an absolute path is honoured only
+    # from an explicitly overridden registry, which is a deliberate act by
+    # whoever set AID_HOOK_REGISTRY (and per /ecosystem/specs/agent-hooks/
+    # rule 3, anyone who can do that can already run code).
+    if [[ "$lib" == *".."* ]]; then
+      echo "rule '${rule_id}': lib path '${lib}' traverses upward — refused" >&2
+      return 1
+    fi
+    if [[ "$lib" == /* ]]; then
+      if [[ "$REGISTRY" == "${PLUGIN_ROOT}/defaults/hook-registry.yaml" ]]; then
+        echo "rule '${rule_id}': the shipped registry may only name paths inside the plugin, not '${lib}'" >&2
+        return 1
+      fi
+    else
+      lib="${PLUGIN_ROOT}/${lib}"
+    fi
     # shellcheck disable=SC1090
     source "$lib" || { echo "rule '${rule_id}': cannot source ${lib}" >&2; return 1; }
   fi
@@ -159,7 +237,9 @@ run_rule() {
 dispatch() {
   local event="$1" input="" ; input="$(cat)"
   HOOK_SESSION_ID="$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null)"
-  HOOK_CONTEXT="$(_hook_detect_context "$event" "$input")"
+  local _ctx; _ctx="$(_hook_detect_context "$event" "$input")"
+  HOOK_CONTEXT="${_ctx%%$'\t'*}"
+  HOOK_CONTEXT_SOURCE="${_ctx##*$'\t'}"
 
   if [[ "${AID_HOOKS_OFF:-}" == "1" ]]; then
     _hook_audit "$event" "*" hooks_off "AID_HOOKS_OFF=1"
@@ -183,18 +263,6 @@ dispatch() {
   budget_total="$(yq -r '.budget.total_s // 15' "$REGISTRY")"
 
   local trust_ok=0; _hook_trust_ok && trust_ok=1
-  # `timeout` is coreutils and not everywhere (macOS ships it as gtimeout, and
-  # some hosts have neither). Without it rules still run — the per-rule clock
-  # is what is lost, and that is recorded once rather than pretended.
-  local HOOK_TIMEOUT_CMD="timeout"
-  if ! command -v timeout >/dev/null 2>&1; then
-    if command -v gtimeout >/dev/null 2>&1; then
-      HOOK_TIMEOUT_CMD="gtimeout"
-    else
-      HOOK_TIMEOUT_CMD="_hook_no_timeout"
-      _hook_audit "$event" "*" error "no timeout(1) — per-rule clocks not enforced"
-    fi
-  fi
   local injections="" denials="" denied=0
   local started=$SECONDS
 
@@ -211,6 +279,14 @@ dispatch() {
     owner="$(yq -r ".rules[] | select(.id == \"${id}\") | .owner // \"\"" "$REGISTRY")"
     failure="$(yq -r ".rules[] | select(.id == \"${id}\") | .failure // \"open\"" "$REGISTRY")"
     timeout_s="$(yq -r ".rules[] | select(.id == \"${id}\") | .timeout_s // ${default_timeout}" "$REGISTRY")"
+    # A row's clock is data, so it is checked like data. Non-numeric or zero
+    # would buy the rule unlimited time; and no rule may outlive what is left
+    # of the whole dispatch, or the total budget would be a number the code
+    # prints rather than one it keeps.
+    [[ "$timeout_s" =~ ^[0-9]+$ ]] && (( timeout_s >= 1 )) || timeout_s=1
+    local remaining=$(( budget_total - (SECONDS - started) ))
+    (( remaining < 1 )) && remaining=1
+    (( timeout_s > remaining )) && timeout_s="$remaining"
     disabled="$(yq -r ".rules[] | select(.id == \"${id}\") | .disabled // false" "$REGISTRY")"
 
     if [[ "$disabled" == "true" ]]; then
@@ -239,11 +315,15 @@ dispatch() {
       fi
     fi
 
-    local out="" err="" rc=0
-    err="$(mktemp)" || err=/dev/null
-    out="$(printf '%s' "$input" | $HOOK_TIMEOUT_CMD "$timeout_s" bash "${BASH_SOURCE[0]}" --run-rule "$id" "$event" 2>"$err")" || rc=$?
-    local reason=""; [[ -s "$err" ]] && reason="$(tr '\n' ' ' < "$err")"
-    [[ "$err" != /dev/null ]] && rm -f "$err"
+    local tmpd="" out_f="" err_f="" out="" reason="" rc=0
+    tmpd="$(mktemp -d)" || { _hook_audit "$event" "$id" error "no temp dir for the rule run"; continue; }
+    out_f="${tmpd}/out"; err_f="${tmpd}/err"
+    printf '%s' "$input" > "${tmpd}/in"
+    _hook_run_deadline "$timeout_s" "$out_f" "$err_f" \
+      bash "${BASH_SOURCE[0]}" --run-rule "$id" "$event" < "${tmpd}/in" || rc=$?
+    [[ -s "$out_f" ]] && out="$(cat "$out_f")"
+    [[ -s "$err_f" ]] && reason="$(tr '\n' ' ' < "$err_f")"
+    rm -rf "$tmpd"
 
     case "$rc" in
       0)

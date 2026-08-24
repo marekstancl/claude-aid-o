@@ -98,6 +98,22 @@ detect_tool() {
   printf 'none'
 }
 
+# _canary_hits <audit_file> — how many times AID's canary rule ran AND
+# SUCCEEDED. The distinction matters more than it looks: the dispatcher writes
+# an audit line for a canary that CRASHED too, so counting lines would let a
+# broken hook layer certify itself. The canary's contract is exit 3, which the
+# dispatcher records as `skip`; anything else (error, timeout, disabled) is
+# a canary that did not do its job.
+_canary_hits() {
+  local file="$1"
+  [[ -r "$file" ]] || { printf '0'; return 0; }
+  local n
+  n="$(jq -rs --arg r "$CANARY_RULE" \
+        '[.[] | select(.rule == $r and .outcome == "skip")] | length' "$file" 2>/dev/null)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
 # --------------------------------------------------------------------------
 # Claude Code. Two independent pieces of evidence, because either alone lies:
 # the event stream says a hook ran and did not error, and AID's own audit line
@@ -125,8 +141,7 @@ canary_claude_code() {
   local ran_ok errored ours events
   ran_ok="$(jq -rs '[.[] | select(.subtype=="hook_response" and .outcome=="success")] | length' "$stream" 2>/dev/null || echo 0)"
   errored="$(jq -rs '[.[] | select(.subtype=="hook_response" and .outcome!="success") | .hook_name] | unique | join(", ")' "$stream" 2>/dev/null || echo "")"
-  ours="$(grep -c "\"rule\":\"${CANARY_RULE}\"" "$audit" 2>/dev/null || true)"
-  ours="${ours:-0}"
+  ours="$(_canary_hits "$audit")"
   events="$(jq -rs '[.[] | select(.subtype=="hook_response") | .hook_name] | unique' "$stream" 2>/dev/null || echo '[]')"
   [[ -n "$events" ]] || events='[]'
 
@@ -210,8 +225,7 @@ canary_codex() {
   AID_HOOK_AUDIT="$audit" timeout "$timeout_s" \
     codex exec "Reply with the single word: ok" > "${tmp}/out" 2>"${tmp}/err" || erc=$?
 
-  local ours; ours="$(grep -c "\"rule\":\"${CANARY_RULE}\"" "$audit" 2>/dev/null || true)"
-  ours="${ours:-0}"
+  local ours; ours="$(_canary_hits "$audit")"
   if (( ours == 0 )); then
     write_verdict false codex "$version" not_covered \
       "every declared hook is trusted, but no AID rule left a record in this run (exit ${erc}) — AID's hooks are not among the ones this installation loads"

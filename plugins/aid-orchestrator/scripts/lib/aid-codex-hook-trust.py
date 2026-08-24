@@ -99,8 +99,10 @@ def load_state(path):
     with open(path, encoding="utf-8") as handle:
         for line in handle:
             text = line.strip()
-            if text.startswith('[hooks.state."') and text.endswith('"]'):
-                key = text[len('[hooks.state."'):-2]
+            # Both quote forms: TOML allows either, and reading only one would
+            # silently drop an approval that strip_state correctly removes.
+            if text.startswith("[hooks.state.") and text.endswith("]"):
+                key = text[len("[hooks.state."):-1].strip().strip("'\"")
             elif key and text.startswith("trusted_hash"):
                 state[key] = text.split("=", 1)[1].strip().strip('"')
                 key = None
@@ -110,16 +112,21 @@ def load_state(path):
 
 
 def strip_state(path):
-    """config.toml without its [hooks.state.*] tables — the merge's base."""
+    """config.toml without its [hooks.state.*] tables — the merge's base.
+
+    A table is dropped from its header to the NEXT table header, whatever it
+    contains. The narrower rule this replaces ("skip until a line that is not
+    trusted_hash") left comments and extra fields behind, and only recognised
+    the double-quoted header form — so a `[hooks.state.'a key']` table survived
+    the strip, was written again by the merge, and produced the duplicate key
+    that stops Codex from starting.
+    """
     out, skipping = [], False
     with open(path, encoding="utf-8") as handle:
         for line in handle:
             text = line.strip()
-            if text.startswith('[hooks.state."'):
-                skipping = True
-                continue
-            if skipping and (text.startswith("[") or (text and not text.startswith("trusted_hash"))):
-                skipping = False
+            if text.startswith("[") and not text.startswith("[["):
+                skipping = text.startswith("[hooks.state.")
             if skipping:
                 continue
             out.append(line)
@@ -150,8 +157,18 @@ def cmd_seed(home, cwd):
     blocks = "".join(f'\n[hooks.state."{k}"]\ntrusted_hash = "{v}"\n'
                      for k, v in sorted(state.items()))
     os.makedirs(home, exist_ok=True)
-    with open(config, "w", encoding="utf-8") as handle:
+    # Written beside the target and moved into place: a kill or a full disk
+    # partway through a direct rewrite leaves a truncated config.toml, and a
+    # truncated config.toml is a Codex that will not start — strictly worse
+    # than the unapproved hook this command exists to fix. NOT a lock:
+    # two concurrent seeds still race, and the loser's approvals are simply
+    # re-seeded by the next run.
+    tmp = config + ".aid-tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
         handle.write(body + blocks)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, config)
     print(f"{added} newly approved, {len(state)} record(s) in total", file=sys.stderr)
     return 0
 

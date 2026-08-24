@@ -37,7 +37,10 @@ teardown() {
   return 0
 }
 
-# fake_claude <version> <hook_outcome> <leaves_audit_line>
+# fake_claude <version> <hook_outcome> <leaves_audit_line> [audit_outcome]
+#   <leaves_audit_line> "yes" writes the line AID's dispatcher would write for
+#   its canary rule; [audit_outcome] overrides what that line records, so a
+#   canary that RAN AND CRASHED can be told apart from one that did its job.
 fake_claude() {
   cat > "$BIN/claude" <<EOF
 #!/usr/bin/env bash
@@ -45,7 +48,7 @@ fake_claude() {
 echo '{"type":"system","subtype":"hook_started","hook_name":"SessionStart"}'
 echo '{"type":"system","subtype":"hook_response","hook_name":"SessionStart","exit_code":0,"outcome":"$2"}'
 if [[ "$3" == "yes" && -n "\${AID_HOOK_AUDIT:-}" ]]; then
-  printf '{"ts":"now","event":"SessionStart","rule":"hook_canary","outcome":"skip"}\n' >> "\$AID_HOOK_AUDIT"
+  printf '{"ts":"now","event":"SessionStart","rule":"hook_canary","outcome":"${4:-skip}"}\n' >> "\$AID_HOOK_AUDIT"
 fi
 exit 0
 EOF
@@ -64,7 +67,7 @@ case "\$1" in
   app-server) exec python3 "$TMP/app-server.py" ;;
   exec)
     if [[ "$3" == "yes" && -n "\${AID_HOOK_AUDIT:-}" ]]; then
-      printf '{"ts":"now","event":"SessionStart","rule":"hook_canary","outcome":"skip"}\n' >> "\$AID_HOOK_AUDIT"
+      printf '{"ts":"now","event":"SessionStart","rule":"hook_canary","outcome":"${4:-skip}"}\n' >> "\$AID_HOOK_AUDIT"
     fi
     echo ok; exit 0 ;;
 esac
@@ -109,6 +112,15 @@ EOF
 
 @test "a hook that ran and errored is not counted as a successful one" {
   fake_claude 2.1.226 error no
+  run bash "$VERIFY" --canary --timeout 10
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .state "$TRUST")" = "not_covered" ]
+}
+
+@test "AC5: a canary rule that RAN AND CRASHED is not a pass — the line alone proves nothing" {
+  # The dispatcher audits a broken rule too. Counting audit lines rather than
+  # successful ones would let a broken hook layer certify itself.
+  fake_claude 2.1.226 success yes error
   run bash "$VERIFY" --canary --timeout 10
   [ "$status" -eq 1 ]
   [ "$(jq -r .state "$TRUST")" = "not_covered" ]

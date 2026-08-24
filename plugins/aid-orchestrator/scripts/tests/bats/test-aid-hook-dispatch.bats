@@ -112,7 +112,7 @@ run_hook() { # run_hook <event> [json]
 
 @test "a fail-closed rule denies with the reason on stderr — once the canary allows it" {
   mkdir -p "$TMP/state/hooks"
-  echo '{"verified":true,"tool":"bats","version":"fixture"}' > "$TMP/state/hooks/trust.json"
+  echo "{\"verified\":true,\"tool\":\"bats\",\"version\":\"fixture\",\"checked_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$TMP/state/hooks/trust.json"
   write_registry "$(row card Stop any rule_deny closed)"
   run_hook Stop
   [ "$status" -eq 2 ]
@@ -128,7 +128,7 @@ run_hook() { # run_hook <event> [json]
 
 @test "a fail-open rule may not refuse a turn — the refusal is recorded and ignored" {
   mkdir -p "$TMP/state/hooks"
-  echo '{"verified":true,"tool":"bats","version":"fixture"}' > "$TMP/state/hooks/trust.json"
+  echo "{\"verified\":true,\"tool\":\"bats\",\"version\":\"fixture\",\"checked_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$TMP/state/hooks/trust.json"
   write_registry "$(row card Stop any rule_deny open)"
   run_hook Stop
   [ "$status" -eq 0 ]
@@ -140,6 +140,19 @@ run_hook() { # run_hook <event> [json]
   run_hook Stop
   [ "$status" -eq 0 ]
   grep -q '"outcome":"deny_suppressed"' "$AUDIT"
+}
+
+@test "a canary verdict that has gone stale stops unlocking fail-closed rules" {
+  # The dispatcher cannot tell which harness is calling it, so it cannot check
+  # that the tool and version in the verdict are still the ones running. What
+  # it can refuse to do is trust a measurement forever.
+  mkdir -p "$TMP/state/hooks"
+  echo '{"verified":true,"tool":"bats","version":"fixture","checked_at":"2020-01-01T00:00:00Z"}' \
+    > "$TMP/state/hooks/trust.json"
+  write_registry "$(row card Stop any rule_deny closed)"
+  run_hook Stop
+  [ "$status" -eq 0 ]
+  grep -q '"outcome":"degraded"' "$AUDIT"
 }
 
 @test "AC3: a controller-owned rule does not run inside a subagent" {
