@@ -71,40 +71,69 @@ aid_continuity_capsule_path() {
 # transition table in a hook is a second authority, and the one that drifts is
 # always the copy. A run whose state cannot be read keeps its state and loses
 # only the transitions.
+#
+# ONE jq BUILDS THE ARRAY. The obvious loop — `out="$(… jq '. + [row]')"` per
+# run — re-parses and re-copies a growing array once per element, so a
+# PreCompact hook grew superlinearly with how much work was open. Rows are
+# collected as delimited text and converted in a single pass.
 _aid_cc_runs() {
   local runs="${1}/.aid-o/work/active-runs.json"
   [[ -r "$runs" ]] || { printf '[]'; return 0; }
   local fsm="${_AID_CC_LIB_DIR}/../aid-fsm.sh"
-  local out="[]" epic state_file state rid
+  local rows="" epic state_file state rid
+  # The allowed transitions are a function of the STATE, and `aid-fsm.sh` is a
+  # ten-thousand-line script that costs a fifth of a second to start. Asking it
+  # once per distinct state instead of once per run is the difference between a
+  # capsule that scales with open work and one that does not — and it is still
+  # the FSM's own answer, which is the part that must not be re-derived here.
+  local -A allowed_by_state=()
   while IFS=$'\t' read -r epic rid state state_file; do
     [[ -n "$epic" ]] || continue
     local allowed="[]"
-    if [[ -x "$fsm" || -f "$fsm" ]] && [[ -f "$state_file" ]]; then
-      allowed="$(timeout 10 bash "$fsm" verify-state "$state_file" 2>/dev/null \
+    if [[ -n "${allowed_by_state[$state]:-}" ]]; then
+      allowed="${allowed_by_state[$state]}"
+    elif [[ -f "$fsm" && -f "$state_file" ]]; then
+      allowed="$(bash "$fsm" verify-state "$state_file" 2>/dev/null \
                  | jq -c '.allowed_transitions // []' 2>/dev/null)" || allowed="[]"
       [[ -n "$allowed" ]] || allowed="[]"
+      [[ -n "$state" ]] && allowed_by_state[$state]="$allowed"
     fi
-    out="$(printf '%s' "$out" | jq -c --arg e "$epic" --arg r "$rid" --arg s "$state" \
-            --arg f "$state_file" --argjson a "$allowed" \
-            '. + [{epic_id:$e, run_id:$r, state:$s, state_file:$f, allowed_transitions:$a}]')"
+    rows+="${epic}"$'\x1f'"${rid}"$'\x1f'"${state}"$'\x1f'"${state_file}"$'\x1f'"${allowed}"$'\n'
   done < <(jq -r 'to_entries[] | [.key, (.value.run_id // ""), (.value.state // ""), (.value.state_file // "")] | @tsv' "$runs" 2>/dev/null)
-  printf '%s' "$out"
+
+  [[ -n "$rows" ]] || { printf '[]'; return 0; }
+  printf '%s' "$rows" | jq -Rsc 'split("\n") | map(select(length > 0) | split("\u001f")
+    | {epic_id: .[0], run_id: .[1], state: .[2], state_file: .[3],
+       allowed_transitions: (.[4] // "[]" | try fromjson catch [])})'
 }
 
 # _aid_cc_plans <state_root> — each open plan's phase and its worktree.
+# One `yq` over every state file at once and one `jq` to shape the array: the
+# per-file version cost three yq plus one jq for every plan that was open.
 _aid_cc_plans() {
-  local root="$1" out="[]" f
+  local root="$1"
+  local -a files=()
+  local f
   for f in "${root}"/.aid-o/work/plan-state/*/plan-state.yaml; do
-    [[ -r "$f" ]] || continue
-    local id ps wt
-    id="$(yq -r '.plan_id // ""' "$f" 2>/dev/null)"
-    ps="$(yq -r '.plan_state // ""' "$f" 2>/dev/null)"
-    wt="$(yq -r '.worktree_path // ""' "$f" 2>/dev/null)"
-    [[ -n "$id" && "$ps" != "CLOSED" && "$ps" != "ABORTED" ]] || continue
-    out="$(printf '%s' "$out" | jq -c --arg i "$id" --arg s "$ps" --arg w "$wt" \
-            '. + [{plan_id:$i, plan_state:$s, worktree_path:$w}]')"
+    [[ -r "$f" ]] && files+=("$f")
   done
-  printf '%s' "$out"
+  [[ ${#files[@]} -gt 0 ]] || { printf '[]'; return 0; }
+
+  # yq emits ONE JSON object per file (`-o=json -I=0`) and jq slurps them in one
+  # pass. No separator is involved on purpose: a delimiter written in a yq
+  # expression is a literal there — `join("\u001f")` joins with those six
+  # characters, not with the control character jq would split on — and that
+  # mismatch is silent.
+  local rows
+  rows="$(yq -o=json -I=0 '{"plan_id": (.plan_id // ""),
+                            "plan_state": (.plan_state // ""),
+                            "worktree_path": (.worktree_path // "")}' \
+          "${files[@]}" 2>/dev/null)" || { printf '[]'; return 0; }
+  [[ -n "$rows" ]] || { printf '[]'; return 0; }
+
+  printf '%s\n' "$rows" | jq -sc 'map(select(.plan_id != ""
+      and .plan_state != "CLOSED" and .plan_state != "ABORTED"))' 2>/dev/null \
+    || printf '[]'
 }
 
 # ---------------------------------------------------------------------------

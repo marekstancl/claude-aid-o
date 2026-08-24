@@ -4,10 +4,10 @@
 #
 #   aid-hook.sh <event>              run every rule registered for <event>
 #                                    (event JSON on stdin)
-#   aid-hook.sh --run-rule <id> <event>
-#                                    run ONE rule; the form the dispatcher
-#                                    itself uses so `timeout` can wrap a rule
-#                                    that is otherwise just a bash function
+#   aid-hook.sh --run-rule <id> <event> <lib> <handler>
+#                                    run ONE rule; the INTERNAL form the
+#                                    dispatcher uses, so a real clock can wrap
+#                                    a rule that is otherwise a bash function
 #   aid-hook.sh --self-test          dispatch a built-in fixture end to end
 #
 # WHY THIS EXISTS
@@ -68,6 +68,10 @@ PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PLUGIN_ROOT}/scripts/lib/aid-session-store.sh"
 
 REGISTRY="${AID_HOOK_REGISTRY:-${PLUGIN_ROOT}/defaults/hook-registry.yaml}"
+
+# The field separator for the one registry read below. A control character
+# rather than a tab, for the reason spelled out at that read.
+_AID_HOOK_FS=$'\x1f'
 
 # --------------------------------------------------------------------------
 # Audit. Append-only JSONL in the session store. Best effort by definition:
@@ -161,30 +165,44 @@ _hook_detect_context() {
 #     a leaked child holding a file descriptor cannot keep the dispatcher
 #     waiting for EOF.
 #
-# The child is killed with TERM and then, after a second's grace, with KILL.
+# A WATCHDOG, NOT A POLL. An earlier version checked every 100ms, which cost a
+# `sleep` process and up to 100ms of added latency for EVERY rule — including
+# the ones that return in five milliseconds — and about fifty processes for one
+# rule that actually overran. This waits on the child directly and lets a single
+# background watchdog do the killing, so a fast rule adds no latency at all. The
+# watchdog leaves a marker before it kills, which is how an overrun is told
+# apart from a rule that chose to exit on a signal.
 # --------------------------------------------------------------------------
 _hook_run_deadline() {
   local secs="$1" out="$2" err="$3"; shift 3
+  local marker="${out}.overran"
+
   "$@" > "$out" 2> "$err" &
   local pid=$!
-  local waited=0
-  # Tenth-of-a-second polling: a rule's budget is whole seconds, and a hook in
-  # the hot path must not add a second of latency to a rule that returns at
-  # once.
-  while (( waited < secs * 10 )); do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.1
-    waited=$(( waited + 1 ))
-  done
-  if kill -0 "$pid" 2>/dev/null; then
+
+  # The watchdog's OWN descriptors are closed. It is a background child of this
+  # shell, so it inherits stdout — and a caller reading this dispatch through a
+  # pipe then waits for EOF until the watchdog's `sleep` finishes, adding the
+  # full timeout to every single rule. Measured here as five seconds per rule
+  # before the redirection: exactly the leaked-descriptor failure this function
+  # exists to defend against, reintroduced by its own guard.
+  ( sleep "$secs"
+    kill -0 "$pid" 2>/dev/null || exit 0
+    : > "$marker"
     kill -TERM "$pid" 2>/dev/null
     sleep 1
-    kill -KILL "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null
-    return 124
-  fi
+    kill -KILL "$pid" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+  local watchdog=$!
+
   local rc=0
   wait "$pid" || rc=$?
+  kill "$watchdog" 2>/dev/null
+  wait "$watchdog" 2>/dev/null || true
+
+  if [[ -e "$marker" ]]; then
+    rm -f "$marker"
+    return 124
+  fi
   return "$rc"
 }
 
@@ -198,12 +216,12 @@ _hook_owner_matches() {
 # Exit: 0 pass/inject, 2 deny, 3 not applicable, 1 broken.
 # --------------------------------------------------------------------------
 run_rule() {
-  local rule_id="$1" event="$2" input=""
+  local rule_id="$1" event="$2" lib="${3:-}" handler="${4:-}" input=""
   input="$(cat)"
 
-  local lib handler
-  lib="$(yq -r ".rules[] | select(.id == \"${rule_id}\") | .lib // \"\"" "$REGISTRY" 2>/dev/null)"
-  handler="$(yq -r ".rules[] | select(.id == \"${rule_id}\") | .handler // \"\"" "$REGISTRY" 2>/dev/null)"
+  # `lib` and `handler` are PASSED IN from the dispatcher's single registry
+  # read: the child re-reading the registry was two more full scans per rule,
+  # in the hot path, for values the parent already had.
   if [[ -z "$handler" ]]; then
     echo "rule '${rule_id}' declares no handler" >&2
     return 1
@@ -242,11 +260,11 @@ run_rule() {
 # --------------------------------------------------------------------------
 dispatch() {
   local event="$1" input="" ; input="$(cat)"
-  HOOK_SESSION_ID="$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null)"
-  local _ctx; _ctx="$(_hook_detect_context "$event" "$input")"
-  HOOK_CONTEXT="${_ctx%%$'\t'*}"
-  HOOK_CONTEXT_SOURCE="${_ctx##*$'\t'}"
 
+  # THE CHEAP REFUSALS COME FIRST. A dispatch that cannot run a rule — hooks
+  # switched off, a missing dependency, an unreadable registry, an event nobody
+  # registered for — must not pay to parse the event payload. This runs in the
+  # hot path of every turn, and by far the commonest case is "no rule matches".
   if [[ "${AID_HOOKS_OFF:-}" == "1" ]]; then
     _hook_audit "$event" "*" hooks_off "AID_HOOKS_OFF=1"
     return 0
@@ -255,25 +273,50 @@ dispatch() {
     _hook_audit "$event" "*" error "yq or jq missing — no rule ran"
     return 0
   fi
-  if [[ ! -r "$REGISTRY" ]] || ! yq -e '.rules' "$REGISTRY" >/dev/null 2>&1; then
+  if [[ ! -r "$REGISTRY" ]]; then
     _hook_audit "$event" "*" error "registry unreadable at ${REGISTRY} — no rule ran"
     return 0
   fi
 
-  local ids
-  ids="$(yq -r ".rules[] | select(.event == \"${event}\") | .id" "$REGISTRY" 2>/dev/null)"
-  [[ -n "$ids" ]] || return 0
+  # ONE registry read for the whole dispatch, which doubles as the "is this file
+  # readable YAML" check. Six full `yq` scans per rule — four here and two more
+  # in the child — was most of what a dispatch cost.
+  local rows="" rrc=0
+  # Fields joined with US (0x1f), NOT tabs: a tab is IFS whitespace, so `read`
+  # COLLAPSES consecutive tabs and a row with an empty `owner` would shift every
+  # later field one place left — the row that must be refused loudest would
+  # instead be read as some other rule.
+  rows="$(yq -r '(.defaults.timeout_s // 5) as $dt
+                 | (.rules[] | select(.event == "'"$event"'")
+                 | [.id, .owner // "", .failure // "open",
+                    (.timeout_s // $dt | tostring), (.disabled // false | tostring),
+                    .lib // "", .handler // ""]
+                 | join("'"$_AID_HOOK_FS"'"))' "$REGISTRY" 2>/dev/null)" || rrc=$?
+  if [[ "$rrc" -ne 0 ]]; then
+    _hook_audit "$event" "*" error "registry unreadable at ${REGISTRY} — no rule ran"
+    return 0
+  fi
+  [[ -n "$rows" ]] || return 0
 
-  local default_timeout budget_total
-  default_timeout="$(yq -r '.defaults.timeout_s // 5' "$REGISTRY")"
+  # Only now is the payload worth parsing.
+  HOOK_SESSION_ID="$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null)"
+  local _ctx; _ctx="$(_hook_detect_context "$event" "$input")"
+  HOOK_CONTEXT="${_ctx%%$'\t'*}"
+  HOOK_CONTEXT_SOURCE="${_ctx##*$'\t'}"
+
+  local budget_total
   budget_total="$(yq -r '.budget.total_s // 15' "$REGISTRY")"
 
-  local trust_ok=0; _hook_trust_ok && trust_ok=1
+  # The trust file is read once, and only when a matching rule could block.
+  local trust_ok=0
+  if [[ "$rows" == *"${_AID_HOOK_FS}closed${_AID_HOOK_FS}"* ]]; then
+    _hook_trust_ok && trust_ok=1
+  fi
   local injections="" denials="" denied=0
   local started=$SECONDS
 
-  local id
-  while IFS= read -r id; do
+  local id owner failure timeout_s disabled lib handler
+  while IFS="$_AID_HOOK_FS" read -r id owner failure timeout_s disabled lib handler; do
     [[ -n "$id" ]] || continue
 
     if (( SECONDS - started >= budget_total )); then
@@ -281,10 +324,6 @@ dispatch() {
       continue
     fi
 
-    local owner failure timeout_s disabled
-    owner="$(yq -r ".rules[] | select(.id == \"${id}\") | .owner // \"\"" "$REGISTRY")"
-    failure="$(yq -r ".rules[] | select(.id == \"${id}\") | .failure // \"open\"" "$REGISTRY")"
-    timeout_s="$(yq -r ".rules[] | select(.id == \"${id}\") | .timeout_s // ${default_timeout}" "$REGISTRY")"
     # A row's clock is data, so it is checked like data. Non-numeric or zero
     # would buy the rule unlimited time; and no rule may outlive what is left
     # of the whole dispatch, or the total budget would be a number the code
@@ -293,7 +332,6 @@ dispatch() {
     local remaining=$(( budget_total - (SECONDS - started) ))
     (( remaining < 1 )) && remaining=1
     (( timeout_s > remaining )) && timeout_s="$remaining"
-    disabled="$(yq -r ".rules[] | select(.id == \"${id}\") | .disabled // false" "$REGISTRY")"
 
     if [[ "$disabled" == "true" ]]; then
       _hook_audit "$event" "$id" disabled "disabled: true in registry"; continue
@@ -326,7 +364,7 @@ dispatch() {
     out_f="${tmpd}/out"; err_f="${tmpd}/err"
     printf '%s' "$input" > "${tmpd}/in"
     _hook_run_deadline "$timeout_s" "$out_f" "$err_f" \
-      bash "${BASH_SOURCE[0]}" --run-rule "$id" "$event" < "${tmpd}/in" || rc=$?
+      bash "${BASH_SOURCE[0]}" --run-rule "$id" "$event" "$lib" "$handler" < "${tmpd}/in" || rc=$?
     [[ -s "$out_f" ]] && out="$(cat "$out_f")"
     [[ -s "$err_f" ]] && reason="$(tr '\n' ' ' < "$err_f")"
     rm -rf "$tmpd"
@@ -369,7 +407,7 @@ dispatch() {
         fi
         ;;
     esac
-  done <<< "$ids"
+  done <<< "$rows"
 
   if (( denied )); then
     printf '%s' "$denials" >&2
@@ -439,7 +477,7 @@ main() {
   case "${1:-}" in
     "")           echo "Usage: aid-hook.sh <event> | --run-rule <id> <event> | --self-test" >&2; exit 1 ;;
     --self-test)  self_test ;;
-    --run-rule)   shift; run_rule "${1:?rule id required}" "${2:?event required}" ;;
+    --run-rule)   shift; run_rule "${1:?rule id required}" "${2:?event required}" "${3:-}" "${4:-}" ;;
     *)            dispatch "$1" ;;
   esac
 }

@@ -50,25 +50,11 @@ source "${_AID_BS_LIB_DIR}/aid-artifact-render.sh"
 # shellcheck source=aid-roots.sh
 source "${_AID_BS_LIB_DIR}/aid-roots.sh"
 
-# _abs_first_sentence <text> — where to stop, nothing more. The renderer caps
-# the length. Same shape as lib/aid-plan-summary.sh's, deliberately: two pages
-# that cut a sentence differently would look like two products.
-_abs_first_sentence() {
-  printf '%s' "$1" \
-    | tr '\n' ' ' \
-    | sed 's/[*_`]//g; s/^[[:space:]]*//' \
-    | sed 's/\([.!?]\)[[:space:]].*/\1/' \
-    | sed 's/[[:space:]]*$//'
-}
-
-# _abs_num <maybe-number> — one number whatever the producer did. `grep -c`
-# prints 0 and exits 1 on no match, so an unguarded counter emits "0\n0" and
-# every later arithmetic test on it is a syntax error rather than a zero.
-_abs_num() {
-  local n="${1%%$'\n'*}"
-  [[ "$n" =~ ^[0-9]+$ ]] || n=0
-  printf '%s' "$n"
-}
+# Both helpers below are the renderer's, not this caller's: two copies of
+# "where does a sentence end" is how two PM pages start cutting text
+# differently. See lib/aid-artifact-render.sh.
+_abs_first_sentence() { aid_artifact_first_sentence "${1-}"; }
+_abs_num() { aid_artifact_number "${1-}"; }
 
 aid_brainstorm_summary_render() {
   local plan_id="${1-}" out_path="${2-}"
