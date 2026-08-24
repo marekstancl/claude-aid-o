@@ -66,27 +66,15 @@ _aps_section() {
   _aid_plan_section "$1" "$2" | awk '/^#/ { exit } /[^[:space:]]/'
 }
 
-# _aps_first_sentence <text> — the first sentence, trimmed of markdown emphasis
-# so a bolded lead does not reach the page as asterisks. The renderer caps the
-# length; this only decides where to stop.
-_aps_first_sentence() {
-  printf '%s' "$1" \
-    | tr '\n' ' ' \
-    | sed 's/[*_`]//g; s/^[[:space:]]*//' \
-    | sed 's/\([.!?]\)[[:space:]].*/\1/' \
-    | sed 's/[[:space:]]*$//'
-}
+# _aps_first_sentence / _aps_norm — thin names over the renderer's shared
+# helpers (lib/aid-artifact-render.sh). The definitions moved there when a
+# second summary caller needed the same two, because two copies of "where does
+# a sentence end" is how two PM pages start cutting text differently.
+_aps_first_sentence() { aid_artifact_first_sentence "$1"; }
 
-# _aps_norm <text> — a count that is ONE number, whatever the producer did.
-# `grep -c` prints 0 and exits 1 on no match, so the obvious
-# `grep -c … || printf 0` emits "0\n0" and every later [[ -gt ]] on it is a
-# syntax error, not a zero. Every counter below normalises through here, so
-# the defence has one definition instead of one per counter.
-_aps_norm() {
-  local n="${1%%$'\n'*}"
-  [[ "$n" =~ ^[0-9]+$ ]] || n=0
-  printf '%s' "$n"
-}
+# Every counter below normalises through _aps_norm, so the defence has one
+# definition instead of one per counter.
+_aps_norm() { aid_artifact_number "$1"; }
 
 # _aps_count <command...> — _aps_norm over a command's output. Counters that
 # need a PIPE (not a single command) call _aps_norm directly.

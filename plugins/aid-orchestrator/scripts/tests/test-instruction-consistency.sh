@@ -244,12 +244,19 @@ echo "=== 8. Old Command Names ==="
 
 OLD_COMMANDS="/aid-brainstorm /aid-write-plan /aid-plan-epic /aid-run-epic /aid-first-aid /aid-epic-status /aid-epic-queue"
 
+# The boundary is deliberately NOT `\b`: `-` counts as a word boundary to grep,
+# so `/aid-brainstorm` matched the path `scripts/aid-brainstorm-state.sh` and
+# reported a live script as a retired command (P086). A retired command name is
+# followed by whitespace, punctuation or end of line — never by `-` or another
+# name character.
+OLD_CMD_BOUNDARY='([^A-Za-z0-9_-]|$)'
+
 for cmd in $OLD_COMMANDS; do
-  HITS=$(grep -rl "\\${cmd}\b" "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" "$PLUGIN_DIR/agents/" "$PLUGIN_DIR/defaults/" 2>/dev/null | grep -v CHANGELOG || true)
+  HITS=$(grep -rlE "${cmd}${OLD_CMD_BOUNDARY}" "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" "$PLUGIN_DIR/agents/" "$PLUGIN_DIR/defaults/" 2>/dev/null | grep -v CHANGELOG || true)
   if [[ -n "$HITS" ]]; then
     for hit in $HITS; do
       # Skip "replaces" / "old" / "No v1" context
-      ACTIVE_REFS=$(grep "\\${cmd}" "$hit" 2>/dev/null | grep -vcE "replaces|Replaces|old |No v1|no |→" 2>/dev/null || true)
+      ACTIVE_REFS=$(grep -E "${cmd}${OLD_CMD_BOUNDARY}" "$hit" 2>/dev/null | grep -vcE "replaces|Replaces|old |No v1|no |→" 2>/dev/null || true)
       ACTIVE_REFS="${ACTIVE_REFS:-0}"
       [[ "$ACTIVE_REFS" -gt 0 ]] && fail "Old command '${cmd}' referenced in $(basename $hit)"
     done

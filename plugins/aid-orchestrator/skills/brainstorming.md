@@ -6,6 +6,8 @@ user_invocable: false
 
 # Brainstorming — Interactive Design and Planning Skill
 
+**Last Updated:** 2026-08-24
+
 **Skill:** brainstorming
 **Dependencies:** run-management, planner, plan-writing
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
@@ -36,6 +38,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 11. **Initial analysis before first question** — see Initial Analysis Phase
 12. **Delegate plan writing to plan-writing skill** — brainstorming collects and validates; plan-writing writes the document with quality gates
 13. **Recommend Docker Compose when design reveals 2+ services** — PM can decline; if declined, record as constraint and do not raise again
+14. **Agree the vision before designing** — on a roadmap or work split across several plans, do not start designing until the PM has approved a vision whose every point carries a test. For the OPPONENT this is a closed door in code; for the design phase it is this rule plus `gate --phase design`, which you must call (see Vision Step)
 
 ---
 
@@ -52,6 +55,113 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
    - Accept brief answers and infer reasonable defaults.
 
 ---
+
+## Vision Step
+
+Required for a **roadmap** and for work **split across several plans**; skipped
+for a single short plan, where a wrong shared assumption costs less than the
+ceremony of agreeing one. The skip is recorded with its reason — it is a
+decision, not an absence.
+
+It is not the Initial Analysis Phase. That one establishes what the PM MEANT;
+this one establishes the **boundaries the later plans are built inside**, and
+the PM approves it even when the models agree.
+
+**How far the door actually closes, stated plainly.** `gate --phase opponent` is
+called by code (`lib/aid-brainstorm-opponent.sh`), so the opponent genuinely
+cannot run on an unapproved vision. `gate --phase design` is called by *you*,
+following this rule — a checkable instruction, not a closed door. Both are worth
+having; only one of them stops anything by itself, and pretending otherwise is
+the kind of claim this plan exists to remove.
+
+**Form: thesis + test.** A point with nothing that could show it false is a
+slogan, and a slogan cannot be disagreed with later:
+
+```markdown
+## Vision
+
+- V1: Every rule AID enforces has a mechanism, not a sentence.
+  - test: each row of the enforcement registry names a degree and a source.
+```
+
+**The run holds this, not the conversation** — `scripts/aid-brainstorm-state.sh`
+records whether the vision is approved, and the later phases ask it:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" init P{NNN} --scope roadmap|multi_plan|single_plan
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" vision-propose P{NNN} --file <vision.md>
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" gate P{NNN} --phase design
+```
+
+`vision-propose` refuses a file with a point that has no test, naming each one.
+`gate` refuses a phase whose vision is not approved. `init` also creates the
+run's own working copy and prints it as `workdir:` — work there.
+
+If the PM does not approve, go **back to the inputs**. Never continue "without
+a vision for now": everything after this point would be built on the version
+they did not agree to. A later disagreement with the vision goes to the PM as a
+decision, it is not quietly absorbed.
+
+## Opponent (optional profile, on by default where a second provider is available)
+
+The design is drafted against a second model rather than alone. It runs **during**
+the design, not after it — the C0 plan review already argues with a finished
+plan, which is the expensive place to discover a wrong premise.
+
+Write the draft positions to a brief (one line per position), then:
+
+```bash
+rc=0
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
+  P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN} || rc=$?
+# rc=0 answered · rc=3 not reached, CARRY ON · rc=1 the vision gate refused, or
+# nothing could be recorded — stop and fix that. Absorb rc=3 explicitly: under
+# `set -e` an unavailable opponent would otherwise end the run it is meant to
+# let continue.
+```
+
+**Read the result the way it is meant:**
+
+| Outcome | What to do |
+|---|---|
+| `agree` entries | Record them and move on. Do **not** ask the PM to confirm something both models already hold. |
+| `disagree` entries | Each is a PM decision — present it as card 2 (`skills/communication.md`) with both positions and what it costs to get wrong. At most five reach the PM; the rest stay in `dispute.json` and the summary says how many. |
+| `missing` entries | Gaps neither position covered. Fold them into the questions. |
+| `opponent: unreached` | Say in one line that the design is a monologue and why. **Never** present it as agreement — an opponent that did not answer has not agreed. |
+
+The gate refuses to dispatch on a vision the PM has not approved, so the vision
+step is a real precondition here, not an order of presentation.
+
+**Two known limits, so they are not rediscovered as surprises:** two models
+agreeing on something wrong is not caught by any of this, and which model plays
+the opponent is configuration (`AID_C3_CODEX_MODEL`), not architecture.
+
+## The Output Is a Page
+
+A brainstorm ends in a **page the PM reads**, not prose in a document. Same
+division of labour as a plan's page: the numbers are counted from the run's own
+files, the two prose blocks are the topic and the vision's first thesis, and the
+renderer holds the ceilings.
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-summary.sh"
+aid_brainstorm_summary_render P{NNN} \
+  ".aid-o/work/brainstorm/P{NNN}/brainstorm-summary-artifact.html"
+```
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+**Working artifacts stay working until the PM accepts the run.** Everything
+lives in `.aid-o/work/brainstorm/P{NNN}/` while it is being made; `approve`
+promotes the vision next to the plans. A run the PM never accepted must not have
+left a vision document sitting there as though it had been agreed:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" approve P{NNN}
+```
+
+Until then the page says `Nedokončeno` — which is the honest state, and a page
+that looks finished when it is not is the failure this ordering prevents.
 
 ## Initial Analysis Phase
 
@@ -510,4 +620,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-24

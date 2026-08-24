@@ -33,6 +33,37 @@
 #   always has a detail target states and tests that for itself.
 #
 # BREVITY IS ENFORCED HERE, IN CODE, NOT ASKED FOR IN PROSE
+# ---------------------------------------------------------------------------
+# Shared by every caller that renders a page from a document (P086 Step 9).
+# They lived twice — once in lib/aid-plan-summary.sh, once in
+# lib/aid-brainstorm-summary.sh — and two copies of "where does a sentence end"
+# is how two PM pages start cutting text differently after one of them is
+# adjusted. Their home is here because this is the file all those callers
+# already source.
+#
+# aid_artifact_first_sentence <text>
+#   The first sentence, stripped of markdown emphasis so a bolded lead does not
+#   reach a page as asterisks. Length is capped by the renderer; this only
+#   decides where to stop.
+aid_artifact_first_sentence() {
+  printf '%s' "${1-}" \
+    | tr '\n' ' ' \
+    | sed 's/[*_`]//g; s/^[[:space:]]*//' \
+    | sed 's/\([.!?]\)[[:space:]].*/\1/' \
+    | sed 's/[[:space:]]*$//'
+}
+
+# aid_artifact_number <maybe-number>
+#   ONE number whatever the producer did. `grep -c` prints 0 and exits 1 on no
+#   match, so the obvious `grep -c … || printf 0` emits "0\n0" and every later
+#   arithmetic test on it is a syntax error rather than a zero.
+aid_artifact_number() {
+  local n="${1-}"
+  n="${n%%$'\n'*}"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
 #   _AID_ARTIFACT_CAP_ITEMS      5   result items
 #   _AID_ARTIFACT_CAP_NEXT       3   "jak pokračovat" steps
 #   _AID_ARTIFACT_CAP_LINKS      5   related links

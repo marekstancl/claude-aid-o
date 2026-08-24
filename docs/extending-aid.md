@@ -35,7 +35,8 @@ instruction goes:
 | 5 | Pre-filter-regex | `defaults/pre-filter-rules.yaml` (self) + `pipeline.md` §13 |
 | 6 | Schema-validator (plan) | `skills/plan-writing.md` + `skills/planner.md` |
 | 7 | Command-orchestration-rule | `commands/<cmd>.md` |
-| 8 | Hook-enforcement | `defaults/hooks/*` + `agent-protocol.md` git discipline |
+| 8 | Hook-enforcement (git) | `defaults/hooks/*` + `agent-protocol.md` git discipline |
+| 8h | Hook-enforcement (harness) | `defaults/hook-registry.yaml` (self) + the surface the rule is about — see "Adding a harness hook rule" |
 | 9 | YAML-policy-driven | the policy YAML (self) + `pipeline.md` if FSM-consumed |
 | 10 | Template-shaped | the template (self) + consumer skill |
 | 11 | Audit-log invariant | `agent-protocol.md` "P040 audit events" table |
@@ -47,6 +48,87 @@ instruction goes:
 `surface` (separate from type) splits drift risk: `llm-facing` enforcements
 **require** an instruction in their home; `internal-guard` mechanisms (nonces,
 flocks, source-only helpers) may set `instruction: n/a`.
+
+---
+
+## Adding a harness hook rule (P086)
+
+A harness hook is our code that an agentic CLI runs in its own lifecycle —
+before a tool call, on a session start, at the end of a turn. AID has **one**
+entry point (`plugins/aid-orchestrator/scripts/aid-hook.sh`) and **one**
+registry (`plugins/aid-orchestrator/defaults/hook-registry.yaml`). Adding
+behaviour is a row plus a handler; it is never an edit to the entry point, and
+if it turns out to need one, the layer is wrong rather than the rule.
+
+**Four steps.**
+
+1. **Write the handler.** A bash function in a lib under `scripts/lib/`. It
+   reads the event JSON on stdin and exits `0` (pass, stdout is injected into
+   the prompt), `2` (refuse, reason on stderr) or `3` (not applicable, reason on
+   stderr). Anything else is a broken rule. It must be callable from a fixture
+   with no live session — that is what makes it testable.
+
+2. **Add the row.** `id`, `event`, `owner`, `degree`, `failure`, `timeout_s`,
+   `lib`, `handler`, `description`. Every field is load-bearing; the two that
+   are most often got wrong:
+
+   - `owner` (`controller` / `agent` / `any`) is **mandatory**. Plugin hooks run
+     inside subagents too, so a default of "any" silently widens every rule.
+   - `failure: closed` is the ONLY declaration that may stop a turn, and only
+     while the canary has verified this installation. A `failure: open` row that
+     exits 2 is a misdeclaration: the refusal is recorded and ignored.
+
+3. **Declare the event** in `plugins/aid-orchestrator/hooks/hooks.json` if it is
+   not already there. Both Claude Code and Codex read a plugin-root
+   `hooks/hooks.json` in the same shape. Prefer NO matcher and let the handler
+   decide from the payload — which start sources a rule cares about is a
+   registry decision, and a matcher whose values you have not measured silently
+   never fires.
+
+4. **Register the enforcement**, with `enforcement_degree` and
+   `not_guaranteed`. The degree is the ecosystem scale
+   (`/ecosystem/specs/agent-hooks/`): **1** code decides and the model has no
+   vote; **2** code checks the answer and refuses it; **3** code delivers data
+   into the prompt — a delivery, *not* a guarantee; **4** prose. A row without a
+   degree has not said whether it enforces or merely delivers, and
+   `not_guaranteed` is where the honest remainder goes. Write it before you are
+   asked; every P086 row has one.
+
+**Two things a hook may never be.** It may not write into a repository
+(`/ecosystem/specs/agent-hooks/` rule 6) — hook-side state goes to the session
+store via `scripts/lib/aid-session-store.sh`, outside every working tree. And it
+may not be the *only* layer: `Stop` does not exist in Codex's review modes and
+never arrives from a killed session, so anything that matters gets a file check
+after the CLI returns (`scripts/aid-turn-gate.sh`) with the hook as the earlier
+catch. A rule that lives only in `Stop` has holes exactly where it is needed.
+
+**Nothing claims hooks are in force except the canary.**
+`scripts/aid-hook-verify.sh --canary` runs a real session and requires AID's own
+canary rule to have left a *successful* record. Until it has, every fail-closed
+row degrades to fail-open and the degradation is audited. Cite the canary; never
+assert enforcement on the strength of a file being in place.
+
+### Phase working copies
+
+`aid-plan-fsm.sh plan-scratch <plan_id> --phase brainstorm|generation` gives a
+planning phase its own linked worktree and prints the directory to work in — or
+the primary checkout, with a warning, when git will not hand out a second tree.
+It never blocks: a stream that cannot be parallel is better than a stream that
+cannot start.
+
+What it isolates is the **tree**. State does not fork and is not meant to:
+`.aid-o/` is gitignored, so it is never checked out into a linked worktree, and
+`scripts/lib/aid-roots.sh` resolves every state read to the primary checkout
+from whichever tree the command runs in. One plan-id counter, one run history,
+one evidence tree.
+
+**What is NOT built:** reading gate configuration from the branch while state
+comes from the primary checkout. It is recorded as `gate_config_from_branch`
+(`status: planned`) in the enforcement registry with the two measured facts that
+block it — `.aid-o/` never reaching a worktree, and hook/gate configuration read
+out of a working tree making a downloaded repository able to run code. The drift
+it was aiming at (controller code from the installed plugin cache while the
+branch's code is under test) is owned by `scripts/lib/aid-cache-preflight.sh`.
 
 ---
 

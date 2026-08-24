@@ -104,6 +104,25 @@ done <<< "$frontmatter"
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
 
 # ---------------------------------------------------------------------------
+# Step 1-pre: the PM's page is a precondition of generation (P086 Step 4).
+#
+# WHY HERE AND NOT IN THE CP1 GATE: the obligation is band-independent — every
+# plan owes its PM a readable page — while the CP1 gate is band-scoped, and a
+# `light` plan would slip past it. This is the point where a plan stops being a
+# document and becomes work, so it is the last honest moment to insist.
+#
+# It is a HARD precondition, not a warning, and the difference is the whole
+# reason the row `plan_artifact_rendered` sat in the enforcement registry as
+# `planned` for two months. The refusal carries the exact command that fixes it.
+# ---------------------------------------------------------------------------
+TURN_GATE_SCRIPT="${SCRIPT_DIR}/aid-turn-gate.sh"
+if [[ -f "$TURN_GATE_SCRIPT" ]]; then
+  if ! bash "$TURN_GATE_SCRIPT" --plan "$plan"; then
+    error_exit "EPIC generation refused: ${plan_id} has no current PM page. See the line above for the render command; the page is what the PM reads instead of the plan." 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Step 1a: generation readiness — the canonical pre-generation contract.
 # It runs Files lint plus the shared SOURCE-plan dependency parser/whole-plan
 # graph before any EPIC exists.  This removes the former circular requirement

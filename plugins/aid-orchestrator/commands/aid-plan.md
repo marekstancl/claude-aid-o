@@ -61,6 +61,14 @@ its own git worktree under `.aid-worktrees/plan-<id>`, so an active plan does
 not hold the PM's checkout, and the PM's own uncommitted work does not block
 plan creation. Say so plainly rather than asking the PM to stash or wait.
 
+Brainstorming and generation get their own copies the same way —
+`.aid-worktrees/brainstorm-<id>` and `.aid-worktrees/generation-<id>`, both
+from `plan-scratch` (below). They are scratch checkouts: created before any
+plan-state exists, recorded nowhere, released by whoever asked for them. What
+they isolate is the TREE. State does not fork and is not meant to: `.aid-o/`
+resolves to the primary checkout from every tree, so two streams share one
+plan-id counter, one run history and one evidence tree.
+
 **Orient before Step 1.** Four reads, all cheap:
 
 ```bash
@@ -119,12 +127,46 @@ Interactive 9-step brainstorming flow — collaborate with PM to explore an idea
    (locked; prints the new P{NNN} — never hand-edit counter.yaml) and write
    `.aid-o/work/interim-P{NNN}.md` with topic, project context, and PM's initial input.
    This doc persists full conversation detail across context window boundaries.
+6. **Take this brainstorm's own working copy** — with the ID in hand:
+
+   ```bash
+   bash {plugin_path}/scripts/aid-plan-fsm.sh plan-scratch P{NNN} --phase brainstorm
+   ```
+
+   It prints the directory this brainstorm runs in; `cd` there and read code
+   from it for the rest of the flow. It prints the primary checkout instead
+   (with a warning saying why) when git cannot hand out a second tree — that
+   is a working outcome, not a blocker, so never stop on it. State is not
+   affected either way: `.aid-o/` always resolves to the primary checkout, so
+   the interim document, the counter and every later run stay where they were.
+   Release it when the plan is written: same command with `--release`.
 
 Present: `=== Step 1/9: Context ===` with project summary.
 
 ### Step 2: Analysis
 Present structured analysis (understanding, dimensions, challenges, clarification areas).
 Ask PM to confirm understanding. Output: `=== Step 2/9: Analysis ===`
+
+### Step 2a: Vision (roadmap and multi-plan work only)
+Register the run and its scope — this also creates the brainstorm's own working
+copy and prints it as `workdir:`:
+
+```bash
+bash {plugin_path}/scripts/aid-brainstorm-state.sh init P{NNN} --scope roadmap|multi_plan|single_plan
+```
+
+For `single_plan` the step is skipped and the skip is recorded; say so in one
+line and go to Step 3. Otherwise draft the vision as thesis + test (see
+`skills/brainstorming.md` → Vision Step), propose it, and ask the PM to approve:
+
+```bash
+bash {plugin_path}/scripts/aid-brainstorm-state.sh vision-propose P{NNN} --file <vision.md>
+bash {plugin_path}/scripts/aid-brainstorm-state.sh vision-approve P{NNN}   # after the PM says yes
+```
+
+`vision-propose` refuses a point with no test and names it — fix those before
+asking the PM. If the PM declines, go back to Step 2; never continue without a
+vision. Output: `=== Step 2a/9: Vision ===`
 
 ### Step 3: Questions
 Ask 3-7 clarifying questions ONE at a time (multiple choice preferred).
@@ -435,6 +477,19 @@ Parse a Plan file, generate every EPIC and plan.json first, verify one complete
 generation receipt, then create run files/FSM state and queue entries.
 All deterministic operations are bash pipeline scripts — LLM handles only dialog and validation.
 
+0. **Take this generation's own working copy** — generation COMMITS (the plan,
+   the lifecycle manifest, whatever EPIC files the project tracks), so two
+   generations in one checkout collide on one index and one HEAD:
+
+   ```bash
+   bash {plugin_path}/scripts/aid-plan-fsm.sh plan-scratch <plan_id> --phase generation
+   ```
+
+   `cd` to what it prints and run the pipeline from there. A warning plus the
+   primary checkout is a valid answer — generation proceeds, only a second
+   concurrent stream is unsafe until the copy exists. Release it after the
+   transaction completes (`--release`); a copy holding uncommitted work is
+   refused rather than discarded.
 1. **Validate** — confirm input is a Plan file (`type: plan` or `# Plan:` header)
 2. **Analyze** — count phases, extract plan ID and title
 3. **Queue mode** — ask PM: chain (A), separate (B), or custom (C) dependencies

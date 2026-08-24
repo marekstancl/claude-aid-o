@@ -1,0 +1,34 @@
+# =============================================================================
+# AID Orchestrator — Decision card labels (P086 Step 3)
+# =============================================================================
+# The card renders in the PM's conversation language (skills/communication.md
+# MUST rule 4), so the labels cannot live in the code. One block per language,
+# five keys each, and every key is MANDATORY — a card missing a label line is a
+# card a reader cannot scan, which is the whole reason the card exists.
+#
+# Adding a language is a block here and nothing else. The renderer refuses a
+# language it does not find rather than falling back to another one: a Czech PM
+# handed an English card is a defect, not a degradation.
+#
+# The shapes are the card-2 skeleton in skills/communication.md, which stays
+# the authority for the card's structure. This file only names its lines.
+#
+# **Last Updated:** 2026-08-24
+# =============================================================================
+version: 1
+
+languages:
+  cs:
+    question: "Potřebuji tvoje rozhodnutí"
+    why_now: "Proč teď"
+    recommendation: "Doporučení"
+    reason: "Důvod"
+    alternatives: "Alternativy"
+    risk: "Riziko / co není ověřeno"
+  en:
+    question: "I need your decision"
+    why_now: "Why now"
+    recommendation: "Recommendation"
+    reason: "Because"
+    alternatives: "Alternatives"
+    risk: "Risk / what is unverified"

@@ -1,0 +1,153 @@
+# =============================================================================
+# AID Orchestrator — Hook Registry (P086 Step 1)
+# =============================================================================
+# Every harness hook rule AID runs is one row here. `scripts/aid-hook.sh` is
+# the only entry point the harness calls; adding behaviour for a new event is
+# a row in this file, never an edit to that script.
+#
+# THIS IS NOT THE ENFORCEMENT REGISTRY. `defaults/enforcement-registry.yaml`
+# records what AID enforces and how strongly; this file records what the
+# harness runs and with which failure mode. A hook rule appears in both: here
+# as a runnable row, there as an enforcement with its degree and its
+# "what this does not guarantee" line.
+#
+# Row schema
+#   id          snake_case, unique. Also the handle for AID_HOOKS_OFF_RULES.
+#   event       harness event name, exactly as the harness spells it
+#               (SessionStart, PreCompact, Stop, …). Declared for the harness
+#               in `hooks/hooks.json`; the two must agree or the rule never
+#               runs.
+#   owner       controller | agent | any — which side of the dispatch may run
+#               it. MANDATORY: plugin hooks run inside subagents too, so a
+#               default of "any" would silently widen every rule.
+#   degree      1–4 on the ecosystem scale (/ecosystem/specs/agent-hooks/):
+#               1 = code decides, 2 = code checks the answer and refuses it,
+#               3 = code delivers data into the prompt (delivery, NOT a
+#               guarantee), 4 = prose. A row without a degree is a row whose
+#               author has not said whether it enforces or merely delivers.
+#   failure     open | closed — and it decides more than what happens to a
+#               BROKEN rule. `closed` is the only declaration that may stop a
+#               turn: a rule that exits 2 blocks only if its row says `closed`
+#               AND the canary has verified this installation. A `failure: open`
+#               row that exits 2 is a misdeclaration; the refusal is recorded
+#               and ignored, because a rule able to stop work must say so where
+#               a reader can find it. `open` also means a broken or overrunning
+#               rule is logged and the run continues; `closed` means it denies.
+#   timeout_s   per-rule wall clock. Falls back to defaults.timeout_s.
+#   lib         path (plugin-root relative) of the file holding the handler.
+#   handler     bash function name. Contract: reads the event JSON on stdin,
+#               prints injection text on stdout, exits 0 (pass/inject),
+#               2 (deny, reason on stderr) or 3 (not applicable, reason on
+#               stderr). Any other exit is a broken rule.
+#   disabled    true switches the row off permanently. Audited like the
+#               environment switches.
+#   description one line, present tense.
+#
+# THE CANARY BINDING IS HARD
+#   No fail-closed row takes effect until `scripts/aid-hook-verify.sh` has
+#   recorded a successful canary run for this tool and version. Until then
+#   every `failure: closed` row degrades to `open` and the degradation is
+#   audited. Blocking work with a mechanism nobody has shown to run is worse
+#   than not blocking at all.
+#
+# ESCAPE HATCHES (all three audited, all three readable from outside the
+# blocked flow)
+#   AID_HOOKS_OFF=1               every rule off — the emergency brake
+#   AID_HOOKS_OFF_RULES=a[,b]     named rows off, the rest keep running
+#   disabled: true                permanent, in this file
+#
+# An unreadable registry runs NO rules. It never runs all of them.
+#
+# **Last Updated:** 2026-08-24
+# =============================================================================
+version: 1
+
+defaults:
+  timeout_s: 5
+
+budget:
+  # Whole-dispatch wall clock, and it is KEPT rather than printed: a rule's own
+  # clock is capped to what is left of this, so one long row cannot spend an
+  # hour of a fifteen-second budget. Rules still pending when it is spent are
+  # skipped and audited — a hook sits in the hot path of every turn.
+  total_s: 15
+
+# How long a canary verdict stays good for. The honest reason there is a
+# window at all: the dispatcher cannot tell WHICH harness is calling it, so it
+# cannot check that the tool and version the verdict names are still the ones
+# running. KNOWN RESIDUAL GAP: inside the window, a tool upgrade or a switch
+# between harnesses is covered by a measurement that no longer applies.
+# Closing it needs a harness marker in the event payload that neither Claude
+# Code 2.1.226 nor Codex 0.146.0 sends today.
+trust_ttl_days: 7
+
+# The versions the ecosystem MEASURED its hook sheets on
+# (/ecosystem/specs/agent-hooks/). A canary run on any other version still
+# proves what it observed; what it cannot borrow from the sheet is the rest of
+# the matrix (which run modes send which events), so the verdict records the
+# version and says the matrix is unverified for it.
+measured_versions:
+  claude-code: "2.1.226"
+  codex: "0.146.0"
+
+rules:
+  - id: hook_canary
+    event: SessionStart
+    owner: any
+    degree: 4
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-hook-canary.sh
+    handler: aid_hook_canary
+    description: leaves one audit line per session start so the canary can prove a harness really calls AID
+
+  - id: decision_card_complete
+    event: Stop
+    owner: controller
+    degree: 2
+    failure: closed
+    timeout_s: 5
+    lib: scripts/lib/aid-decision-card.sh
+    handler: aid_hook_rule_decision_card
+    description: refuses to close a turn whose card asks the PM for a decision without options, a recommendation and its reason — it recognises a card by its opening label, so a bare question in no card shape is not detected
+
+  - id: plan_artifact_rendered
+    event: Stop
+    owner: controller
+    degree: 2
+    failure: closed
+    timeout_s: 5
+    lib: scripts/lib/aid-artifact-obligation.sh
+    handler: aid_hook_rule_plan_artifact
+    description: refuses to close a turn that wrote a plan without rendering the PM's page for it
+
+  - id: continuity_capture
+    event: PreCompact
+    owner: controller
+    degree: 3
+    failure: open
+    timeout_s: 15
+    lib: scripts/lib/aid-continuity-capsule.sh
+    handler: aid_hook_rule_continuity_capture
+    description: writes the session's plan, run and contract state to the session store before the context is cut
+
+  - id: continuity_restore
+    event: SessionStart
+    owner: controller
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-continuity-capsule.sh
+    handler: aid_hook_rule_continuity_restore
+    description: injects the capsule back on a compact/resume/fork start — a delivery, never a guarantee, so the gate keeps inserting the contract as well
+
+  - id: subagent_protocol_notice
+    event: SubagentStart
+    owner: agent
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-subagent-protocol.sh
+    handler: aid_hook_rule_subagent_protocol
+    description: tells a role agent when its installed protocol differs from the checkout's copy (IMP-179) — a pointer, never the file, so a checkout cannot write an agent's instructions
+
