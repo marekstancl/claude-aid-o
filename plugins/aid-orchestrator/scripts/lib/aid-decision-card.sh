@@ -49,6 +49,8 @@
 _AID_DECISION_CARD_SH_LOADED=1
 
 _AID_DC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# One home, no override: a new language is a block in that file (which says so
+# itself), so an environment knob here would be surface with no caller.
 _AID_DC_LABELS_DEFAULT="${_AID_DC_LIB_DIR}/../../defaults/decision-card-labels.yaml"
 
 # The most options a card may show. Beyond this the PM is not choosing, they
@@ -56,7 +58,7 @@ _AID_DC_LABELS_DEFAULT="${_AID_DC_LIB_DIR}/../../defaults/decision-card-labels.y
 _AID_DC_MAX_OPTIONS=5
 
 _aid_dc_labels_file() {
-  printf '%s' "${AID_DECISION_CARD_LABELS:-$_AID_DC_LABELS_DEFAULT}"
+  printf '%s' "$_AID_DC_LABELS_DEFAULT"
 }
 
 # _aid_dc_label <lang> <key> — one label, or empty when the language is absent.

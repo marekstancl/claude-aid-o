@@ -190,6 +190,39 @@ EOF
   [[ "$(jq -r .detail "$TRUST")" == *"no fail-closed rule is in force"* ]]
 }
 
+@test "--seed-trust writes the approval in its own table, and does it idempotently" {
+  # The two measured traps of the ecosystem sheet, both of which stop Codex from
+  # starting: trusted_hash written INSIDE the hook's group grants nothing, and
+  # appending on a changed hook produces a duplicate key.
+  fake_codex 0.146.0 untrusted yes
+  printf 'model = "gpt"\n' > "$CODEX_HOME/config.toml"
+  run bash "$VERIFY" --seed-trust
+  [ "$status" -eq 0 ]
+  grep -q '^\[hooks.state\.' "$CODEX_HOME/config.toml"
+  grep -q '^trusted_hash = "sha256:abc"' "$CODEX_HOME/config.toml"
+  [ "$(grep -c '^\[hooks.state\.' "$CODEX_HOME/config.toml")" = "1" ]
+  grep -q '^model = "gpt"' "$CODEX_HOME/config.toml"
+
+  # Twice must not double the table — that duplicate key is what breaks Codex.
+  run bash "$VERIFY" --seed-trust
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^\[hooks.state\.' "$CODEX_HOME/config.toml")" = "1" ]
+  [ "$(grep -c '^model = "gpt"' "$CODEX_HOME/config.toml")" = "1" ]
+}
+
+@test "--seed-trust leaves config.toml intact when Codex cannot be asked" {
+  printf 'model = "gpt"\n' > "$CODEX_HOME/config.toml"
+  cat > "$BIN/codex" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$BIN/codex"
+  export PATH="$BIN:$PATH_BEFORE"
+  run bash "$VERIFY" --seed-trust
+  [ "$status" -ne 0 ]
+  [ "$(cat "$CODEX_HOME/config.toml")" = 'model = "gpt"' ]
+}
+
 @test "--status with no verdict at all says so and exits non-zero" {
   run bash "$VERIFY" --status
   [ "$status" -eq 1 ]

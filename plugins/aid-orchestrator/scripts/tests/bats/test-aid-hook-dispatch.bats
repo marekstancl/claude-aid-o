@@ -166,6 +166,25 @@ run_hook() { # run_hook <event> [json]
   grep -q '"outcome":"skip"' "$AUDIT"
 }
 
+@test "AID_HOOK_CONTEXT narrows the context a harness did not declare" {
+  # The mitigation the registry cites for the measured ownership limit: an event
+  # carrying neither agent_type nor a Subagent* name is read as controller, and
+  # this is the way a dispatcher of subagents says otherwise.
+  write_registry "$(row controller_only Stop controller rule_context)"
+  AID_HOOK_CONTEXT=agent run_hook Stop
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CONTROLLER-ONLY"* ]]
+  grep -q '"context":"agent/env"' "$AUDIT"
+}
+
+@test "the audit says whether the context was read or assumed" {
+  write_registry "$(row any_one Stop any rule_ok)"
+  run_hook Stop
+  grep -q '"context":"controller/assumed"' "$AUDIT"
+  run_hook Stop '{"session_id":"s1","agent_type":"aid-orchestrator:implementer"}'
+  grep -q '"context":"agent/agent_type"' "$AUDIT"
+}
+
 @test "a rule that overruns its clock is stopped and audited" {
   write_registry "$(row slow Stop any rule_slow open 1)"
   run_hook Stop
