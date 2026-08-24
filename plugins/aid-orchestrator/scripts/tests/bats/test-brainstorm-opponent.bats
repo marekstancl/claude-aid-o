@@ -195,6 +195,8 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [ "$(jq -r .opponent "$d")" = "unreached" ]
   [ "$(jq -r .attempts "$d")" = "1" ]
   [ "$(jq -r .ask_pm "$d")" = "true" ]
+  # Bound to THIS run, so a record from another one cannot close it.
+  [ "$(jq -r .plan_id "$d")" = "P900" ]
   [[ "$(jq -r .reason "$d")" == *"codex"* ]]
 }
 
@@ -205,13 +207,15 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   approve_vision
   export PATH="/usr/bin:/bin"
   run_opponent; [ "$status" -eq 3 ]
-  run_opponent; [ "$status" -eq 3 ]
+  [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "true" ]
   run_opponent; [ "$status" -eq 3 ]
   [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "true" ]
 
+  # THE THIRD failure is the last. An earlier version wrote ask_pm: (n <= cap),
+  # which let a fourth attempt through while the text promised three.
   run_opponent
   [ "$status" -eq 3 ]
-  [ "$(jq -r .attempts "$TMP/out/dispute.json")" = "4" ]
+  [ "$(jq -r .attempts "$TMP/out/dispute.json")" = "3" ]
   [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "false" ]
   [[ "$output" == *"no longer asking"* ]]
 }

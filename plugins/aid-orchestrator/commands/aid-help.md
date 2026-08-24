@@ -500,8 +500,11 @@ zastavením a výsledkem pracují dva modely.
 
 **Ptá se tě jen na pět věcí:** k čemu to je, pro koho, jaké riziko bereš, smí se
 rozbít zpětná kompatibilita, a co nejde vzít zpátky. Cokoli jiného si modely
-vyřeší mezi sebou. Šestý druh otázky není opatrnost, je to starý výslech, který
-se vrací po jedné.
+vyřeší mezi sebou - **včetně toho, na čem se neshodnou**: jejich spor o metodu
+nebo tvar rozhodnou samy a do artefaktu zapíšou volbu i námitku poražené strany.
+K tobě jde spor jen tehdy, když je z těch pěti druhů. „Oponent nesouhlasil" sám
+o sobě není důvod utrácet tvoji pozornost, a šestý druh otázky není opatrnost,
+je to starý výslech, který se vrací po jedné.
 
 **Vyruší tě znovu jen dvakrát:** když druhý model nejede (a to nejvýš třikrát za
 běh, pak už pokračuje sám a zapíše to), a když narazí na něco zásadního, co

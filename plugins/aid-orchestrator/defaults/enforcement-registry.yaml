@@ -3309,7 +3309,7 @@ enforcements:
     tier: t1
     enforcement_degree: 2
     not_guaranteed: "That a second platform was really called, that it answered, or that it is independent of the first — a file check cannot show any of that. What it does is make pretending DELIBERATE: the record has to be written on purpose. The artifact carries the model and provider so two instances of ONE model agreeing can be told apart afterwards from two models agreeing; nothing checks that at close time."
-    description: "P088 Step 5 — a run does not close without a record of the opponent. A MONOLOGUE CLOSES FINE (`unreached`); what cannot happen is closing with no record at all, because then 'two models went over this' is a sentence nobody can check. A damaged record is treated as none."
+    description: "P088 Step 5 — a run does not close without a record of the opponent, and the record must name THIS run (`plan_id`). A MONOLOGUE CLOSES FINE (`unreached`); what cannot happen is closing with no record at all, because then 'two models went over this' is a sentence nobody can check. A damaged record, or one belonging to another run, is treated as none."
     recovery: "Run scripts/lib/aid-brainstorm-opponent.sh; it records `unreached` when the second model cannot be had."
     test: "scripts/tests/bats/test-brainstorm-summary.bats"
 

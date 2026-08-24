@@ -185,7 +185,7 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
 | Outcome | What to do |
 |---|---|
 | `agree` entries | Record them and move on. Do **not** ask the PM to confirm something both models already hold. |
-| `disagree` entries | Each is a PM decision — present it as card 2 (`skills/communication.md`) with both positions and what it costs to get wrong. At most five reach the PM; the rest stay in `dispute.json` and the summary says how many. |
+| `disagree` entries | **Filtered by MUST 15, not forwarded wholesale.** A disagreement that IS one of the five kinds goes to the PM as part of the batch, with both positions and what it costs to get wrong (at most five; the rest stay in `dispute.json` and the summary says how many). A disagreement that is NOT — a method, a shape, an implementation choice — the models settle between themselves, and the artifact records the choice AND the loser's objection. Forwarding every disagreement was the old interrogation with a new name: two models can disagree about anything, and "the opponent disagreed" is not by itself a reason to spend the PM's attention. |
 | `missing` entries | Gaps neither position covered. Fold them into the questions. |
 | `opponent: unreached` | Read `ask_pm`. While it is `true`, present it to the PM as a decision — carry on as a monologue, try again, or stop. Once it is `false` (three attempts spent), say in one line that the design is a monologue and why, and carry on. **Never** present it as agreement: an opponent that did not answer has not agreed. |
 

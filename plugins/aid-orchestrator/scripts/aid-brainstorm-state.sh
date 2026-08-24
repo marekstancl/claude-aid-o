@@ -317,6 +317,14 @@ cmd_approve() {
       echo "REFUSED: ${dispute} is unreadable or carries opponent='${opp:-<none>}' — a damaged record is not a record. Expected 'answered' or 'unreached'." >&2
       return 1 ;;
   esac
+  # The record must be THIS run's. Without the check a file dropped into the
+  # directory — or copied from another run — closes the run just as well, and
+  # the whole point of requiring a record is that it is about this work.
+  local rec_plan; rec_plan="$(jq -r '.plan_id // ""' "$dispute" 2>/dev/null)" || rec_plan=""
+  if [[ "$rec_plan" != "$plan_id" ]]; then
+    echo "REFUSED: ${dispute} records plan_id='${rec_plan:-<none>}', not ${plan_id} — a record from another run (or none) does not close this one." >&2
+    return 1
+  fi
   [[ "$opp" == "unreached" ]] && echo "NOTE: the opponent was never reached for ${plan_id} — this design was a monologue, and the page says so." >&2
   vision="$(get "$sf" vision_file)"
   if [[ -n "$vision" && -r "$vision" ]]; then

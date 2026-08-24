@@ -90,6 +90,14 @@ _aid_dc_render_batch() {
     return 1
   fi
 
+  # A batch of one IS a card. The header would otherwise be a new shape bought
+  # for nothing, and the registry row says the opposite of what the code does.
+  if (( count == 1 )); then
+    local only; only="$(printf '%s' "$data" | jq -c --arg l "$lang" '.questions[0] + {lang: $l}')"
+    printf '%s' "$only" | aid_decision_card_render - "$out"
+    return $?
+  fi
+
   local shown=$(( count > _AID_DC_MAX_OPTIONS ? _AID_DC_MAX_OPTIONS : count ))
   local dropped=$(( count - shown ))
 
@@ -229,19 +237,35 @@ aid_decision_card_validate() {
     return 3
   fi
 
-  # In a batch every question owes what one card owes, so the counts must match:
-  # three questions and two reasons is one question short of a decision.
+  # In a batch every question owes what ONE card owes — and it is checked PER
+  # ITEM. Counting `Otázka:` against `Důvod:` across the whole file passes a
+  # batch whose second question has no reason as long as some other line
+  # anywhere supplies one, which is a check that can be satisfied by accident.
   local l_batch2; l_batch2="$(_aid_dc_label "$lang" batch)"
   if [[ -n "$l_batch2" ]] && grep -qF "${l_batch2}:" "$file"; then
-    local n_q n_r
-    n_q="$(grep -cF "$(_aid_dc_label "$lang" question):" "$file" || true)"
-    n_r="$(grep -cF "$(_aid_dc_label "$lang" reason):" "$file" || true)"
-    n_q="${n_q%%$'\n'*}"; n_r="${n_r%%$'\n'*}"
-    if [[ "$n_q" =~ ^[0-9]+$ ]] && [[ "$n_r" =~ ^[0-9]+$ ]] && (( n_r < n_q )); then
-      printf 'decision card batch %s is incomplete — %s question(s) but only %s reason(s)\n' \
-        "$file" "$n_q" "$n_r" >&2
+    local l_q l_r; l_q="$(_aid_dc_label "$lang" question)"; l_r="$(_aid_dc_label "$lang" reason)"
+    local n=0 idx=0 seen_reason=1 bad=""
+    local line
+    while IFS= read -r line; do
+      if [[ "$line" == "${l_q}:"* ]]; then
+        (( idx > 0 && seen_reason == 0 )) && bad+="${idx} "
+        idx=$(( idx + 1 )); seen_reason=0
+      elif [[ "$line" == "${l_r}:"* ]]; then
+        seen_reason=1
+      fi
+    done < "$file"
+    (( idx > 0 && seen_reason == 0 )) && bad+="${idx} "
+    n="$idx"
+    if [[ -n "$bad" ]]; then
+      printf 'decision card batch %s is incomplete — question(s) %swithout a reason (of %s)\n' \
+        "$file" "$bad" "$n" >&2
       return 1
     fi
+    if (( n == 0 )); then
+      printf 'decision card batch %s opens a batch but carries no question\n' "$file" >&2
+      return 1
+    fi
+    return 0
   fi
 
   local missing=() key

@@ -64,9 +64,12 @@ source "${_AID_BO_LIB_DIR}/aid-roots.sh"
 # in the artifact: a list of twenty is not a decision, it is a document.
 _AID_BO_MAX_TO_PM=5
 
-# How many times one run may ask the PM about an unreachable opponent before it
-# stops asking and carries on as a recorded monologue. Measured motivation:
-# Codex returned 529 three times in a row on 2026-08-24.
+# How many attempts one run may spend on an unreachable opponent. THE THIRD
+# FAILURE IS THE LAST: `ask_pm` is false from then on and the run carries on as
+# a recorded monologue. Three means three — an earlier version wrote
+# `ask_pm: (n <= cap)`, which let a FOURTH attempt through and made the promise
+# in the CHANGELOG false. Measured motivation: Codex returned 529 three times in
+# a row on 2026-08-24.
 _AID_BO_MAX_ATTEMPTS=3
 
 # _aid_bo_prompt <brief_file> — the whole instruction, including the shape the
@@ -121,15 +124,15 @@ _aid_bo_attempts() {
   printf '%s' "$n"
 }
 
-# _aid_bo_write_unreached <out> <reason> <attempts>
+# _aid_bo_write_unreached <out> <plan_id> <reason> <attempts>
 #   Returns 1 when it could not write. "The artifact records that the opponent
 #   was not reached" has to be a fact about a file, not about an intention: a
 #   full disk would otherwise leave the run claiming a record it does not have.
 _aid_bo_write_unreached() {
-  jq -n --arg r "$2" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson n "${3:-1}" --argjson cap "$_AID_BO_MAX_ATTEMPTS" \
-    '{opponent: "unreached", reason: $r, created_at: $at,
-      attempts: $n, attempts_cap: $cap, ask_pm: ($n <= $cap),
+  jq -n --arg p "$2" --arg r "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson n "${4:-1}" --argjson cap "$_AID_BO_MAX_ATTEMPTS" \
+    '{opponent: "unreached", plan_id: $p, reason: $r, created_at: $at,
+      attempts: $n, attempts_cap: $cap, ask_pm: ($n < $cap),
       agree: [], disagree: [], missing: []}' > "$1" 2>/dev/null || {
     echo "opponent: could not write ${1} — the run has no record of what happened" >&2
     return 1
@@ -166,8 +169,8 @@ aid_brainstorm_opponent_run() {
   local avail rc=0
   avail="$(bash "${_AID_BO_LIB_DIR}/aid-audit-independence.sh" detect --required cross_provider 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    _aid_bo_write_unreached "$dispute" "$avail" "$(( prior + 1 ))" || return 1
-    if (( prior + 1 > _AID_BO_MAX_ATTEMPTS )); then
+    _aid_bo_write_unreached "$dispute" "$plan_id" "$avail" "$(( prior + 1 ))" || return 1
+    if (( prior + 1 >= _AID_BO_MAX_ATTEMPTS )); then
       echo "opponent not reached ${_AID_BO_MAX_ATTEMPTS}+ times — no longer asking; this brainstorm continues as a recorded monologue: ${avail}" >&2
       return 3
     fi
@@ -184,7 +187,7 @@ aid_brainstorm_opponent_run() {
     "${tmp}/events.jsonl" "${tmp}/stderr.txt" "${tmp}/answer.txt" || drc=$?
 
   if [[ "$drc" -ne 0 || ! -s "${tmp}/answer.txt" ]]; then
-    _aid_bo_write_unreached "$dispute" "the opponent did not answer (exit ${drc})" "$(( prior + 1 ))" || { rm -rf "$tmp"; return 1; }
+    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent did not answer (exit ${drc})" "$(( prior + 1 ))" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent not reached (exit ${drc}) — continuing as a monologue" >&2
     return 3
@@ -193,7 +196,7 @@ aid_brainstorm_opponent_run() {
   # A fenced answer is still an answer; anything that is not one object is not.
   sed -e 's/^```json$//' -e 's/^```$//' "${tmp}/answer.txt" > "${tmp}/answer.json"
   if ! _aid_bo_valid "${tmp}/answer.json"; then
-    _aid_bo_write_unreached "$dispute" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" "$(( prior + 1 ))" || { rm -rf "$tmp"; return 1; }
+    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" "$(( prior + 1 ))" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent answered outside the required shape — treated as not reached" >&2
     return 3

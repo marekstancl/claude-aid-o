@@ -116,8 +116,10 @@ COMPLETE='{"lang":"cs","question":"Pustit fail-closed hned?","why_now":"Jinak vr
   run aid_decision_card_render "$(data '{"lang":"cs","questions":[
     {"question":"jediná?","options":[{"key":"A","text":"a","recommended":true,"reason":"protože"},{"key":"B","text":"b"}]}]}')"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Potřebuji od tebe pár rozhodnutí: 1"* ]]
-  [[ "$output" == *"jediná?"* ]]
+  # No batch header: the new shape is not bought where it adds nothing, and the
+  # registry row says exactly this.
+  [[ "$output" != *"Potřebuji od tebe pár rozhodnutí"* ]]
+  [[ "$output" == *"Potřebuji tvoje rozhodnutí: jediná?"* ]]
 }
 
 @test "AC7: the Stop rule sees a batch, and sees when one of its questions is short" {
@@ -127,10 +129,22 @@ COMPLETE='{"lang":"cs","question":"Pustit fail-closed hned?","why_now":"Jinak vr
   run aid_decision_card_validate "$TMP/batch.md"
   [ "$status" -eq 0 ]
 
+  # Per ITEM, not by counting: a reason belonging to another question must not
+  # cover for a missing one.
   grep -v '^Důvod: protože c' "$TMP/batch.md" > "$TMP/short.md"
   run aid_decision_card_validate "$TMP/short.md"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"2 question(s) but only 1 reason(s)"* ]]
+  [[ "$output" == *"question(s) 2 without a reason"* ]]
+
+  # And a second reason inside the FIRST question does not rescue the second:
+  # under the old global count it would have, because the totals matched.
+  awk '/^Důvod: protože a/ { print; print "Důvod: a ještě jeden"; next } { print }' \
+    "$TMP/short.md" > "$TMP/rescued.md"
+  [ "$(grep -c '^Důvod:' "$TMP/rescued.md")" = "2" ]
+  [ "$(grep -c '^Potřebuji tvoje rozhodnutí:' "$TMP/rescued.md")" = "2" ]
+  run aid_decision_card_validate "$TMP/rescued.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"question(s) 2 without a reason"* ]]
 }
 
 @test "AC9: the gate refuses an incomplete written card, with no Stop event anywhere in sight" {
