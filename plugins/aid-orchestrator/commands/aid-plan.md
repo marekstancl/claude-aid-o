@@ -147,6 +147,27 @@ Present: `=== Step 1/9: Context ===` with project summary.
 Present structured analysis (understanding, dimensions, challenges, clarification areas).
 Ask PM to confirm understanding. Output: `=== Step 2/9: Analysis ===`
 
+### Step 2a: Vision (roadmap and multi-plan work only)
+Register the run and its scope — this also creates the brainstorm's own working
+copy and prints it as `workdir:`:
+
+```bash
+bash {plugin_path}/scripts/aid-brainstorm-state.sh init P{NNN} --scope roadmap|multi_plan|single_plan
+```
+
+For `single_plan` the step is skipped and the skip is recorded; say so in one
+line and go to Step 3. Otherwise draft the vision as thesis + test (see
+`skills/brainstorming.md` → Vision Step), propose it, and ask the PM to approve:
+
+```bash
+bash {plugin_path}/scripts/aid-brainstorm-state.sh vision-propose P{NNN} --file <vision.md>
+bash {plugin_path}/scripts/aid-brainstorm-state.sh vision-approve P{NNN}   # after the PM says yes
+```
+
+`vision-propose` refuses a point with no test and names it — fix those before
+asking the PM. If the PM declines, go back to Step 2; never continue without a
+vision. Output: `=== Step 2a/9: Vision ===`
+
 ### Step 3: Questions
 Ask 3-7 clarifying questions ONE at a time (multiple choice preferred).
 Cover: scope, users, constraints, patterns, success criteria. Output: `=== Step 3/9: Questions ===`

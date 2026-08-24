@@ -105,12 +105,13 @@ validate_vision() {
 }
 
 cmd_init() {
-  local plan_id="${1:?}" scope="" topic=""
+  local plan_id="${1:?}" scope="" topic="" want_worktree=1
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scope) scope="${2:-}"; shift 2 ;;
       --topic) topic="${2:-}"; shift 2 ;;
+      --no-worktree) want_worktree=0; shift ;;
       *) echo "ERROR: init: unknown flag '$1'" >&2; return 2 ;;
     esac
   done
@@ -138,11 +139,28 @@ skip_reason: "${skip}"
 created_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 updated_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 Y
+  # The run's own working copy, from the same command that starts the run.
+  # Left to a separate instruction it was a suggestion the flow could skip;
+  # here it is simply what starting a brainstorm does, and the path is printed
+  # for the controller to work in.
+  local root workdir=""
+  root="$(aid_state_root)" || return 1
+  if [[ "$want_worktree" -eq 1 ]]; then
+    # --project-root is passed EXPLICITLY: aid-plan-fsm.sh resolves its root
+    # with its own resolver, and letting it infer one from this process's cwd
+    # is how a run started from somewhere else creates a worktree in whichever
+    # repository the shell happened to be standing in.
+    workdir="$(bash "${PLUGIN_ROOT}/scripts/aid-plan-fsm.sh" plan-scratch "$plan_id" \
+                 --phase brainstorm --project-root "$root" 2>/dev/null)" || workdir=""
+  fi
+  [[ -n "$workdir" ]] || workdir="$root"
+
   if [[ "$required" == "true" ]]; then
     echo "Brainstorming run ${plan_id} (${scope}) — a vision is required before the design phase."
   else
     echo "Brainstorming run ${plan_id} (${scope}) — no vision step: ${skip}"
   fi
+  echo "workdir: ${workdir}"
 }
 
 cmd_vision_propose() {

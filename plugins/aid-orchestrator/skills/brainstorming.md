@@ -6,6 +6,8 @@ user_invocable: false
 
 # Brainstorming — Interactive Design and Planning Skill
 
+**Last Updated:** 2026-08-24
+
 **Skill:** brainstorming
 **Dependencies:** run-management, planner, plan-writing
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
@@ -36,6 +38,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 11. **Initial analysis before first question** — see Initial Analysis Phase
 12. **Delegate plan writing to plan-writing skill** — brainstorming collects and validates; plan-writing writes the document with quality gates
 13. **Recommend Docker Compose when design reveals 2+ services** — PM can decline; if declined, record as constraint and do not raise again
+14. **Agree the vision before designing** — on a roadmap or work split across several plans, no design phase starts until the PM has approved a vision whose every point carries a test (see Vision Step)
 
 ---
 
@@ -52,6 +55,46 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
    - Accept brief answers and infer reasonable defaults.
 
 ---
+
+## Vision Step
+
+Required for a **roadmap** and for work **split across several plans**; skipped
+for a single short plan, where a wrong shared assumption costs less than the
+ceremony of agreeing one. The skip is recorded with its reason — it is a
+decision, not an absence.
+
+It is not the Initial Analysis Phase. That one establishes what the PM MEANT;
+this one establishes the **boundaries the later plans are built inside**, and
+the PM approves it even when the models agree — the one place a brainstorm
+stops and waits.
+
+**Form: thesis + test.** A point with nothing that could show it false is a
+slogan, and a slogan cannot be disagreed with later:
+
+```markdown
+## Vision
+
+- V1: Every rule AID enforces has a mechanism, not a sentence.
+  - test: each row of the enforcement registry names a degree and a source.
+```
+
+**The run holds this, not the conversation** — `scripts/aid-brainstorm-state.sh`
+records whether the vision is approved, and the later phases ask it:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" init P{NNN} --scope roadmap|multi_plan|single_plan
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" vision-propose P{NNN} --file <vision.md>
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" gate P{NNN} --phase design
+```
+
+`vision-propose` refuses a file with a point that has no test, naming each one.
+`gate` refuses a phase whose vision is not approved. `init` also creates the
+run's own working copy and prints it as `workdir:` — work there.
+
+If the PM does not approve, go **back to the inputs**. Never continue "without
+a vision for now": everything after this point would be built on the version
+they did not agree to. A later disagreement with the vision goes to the PM as a
+decision, it is not quietly absorbed.
 
 ## Initial Analysis Phase
 
@@ -510,4 +553,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-24
