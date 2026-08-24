@@ -6,8 +6,23 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
+**Last Updated:** 2026-08-24
+
 **Skill:** plan-writing
 **Dependencies:** brainstorming
+
+> **Resolve `$AID_PLUGIN_PATH` before running anything below.** Nothing sets it
+> for you — not the plugin, not the workspace, not your shell. Every command
+> here would otherwise fail with "file not found", and the reader is left to
+> work the path out (which is how this survived unnoticed: a model usually
+> does). The workspace records it, and this is the same source
+> `commands/aid-run.md` §PRE-FLIGHT already uses:
+>
+> ```bash
+> AID_PLUGIN_PATH="$(yq -r '.plugin_path' "$(git rev-parse --show-toplevel)/.aid-o/config/plugin.yaml")"
+> test -f "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" || echo "stale plugin_path — run /aid-init to refresh"
+> ```
+
 
 ---
 
@@ -1405,7 +1420,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-24
 
 ## Plan-boundary note
 

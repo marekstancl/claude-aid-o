@@ -8,6 +8,19 @@ Show pipeline status, EPIC details, and queue management — unified view of eve
 
 ## Usage
 
+> **Resolve `$AID_PLUGIN_PATH` before running anything below.** Nothing sets it
+> for you — not the plugin, not the workspace, not your shell. Every command
+> here would otherwise fail with "file not found", and the reader is left to
+> work the path out (which is how this survived unnoticed: a model usually
+> does). The workspace records it, and this is the same source
+> `commands/aid-run.md` §PRE-FLIGHT already uses:
+>
+> ```bash
+> AID_PLUGIN_PATH="$(yq -r '.plugin_path' "$(git rev-parse --show-toplevel)/.aid-o/config/plugin.yaml")"
+> test -f "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" || echo "stale plugin_path — run /aid-init to refresh"
+> ```
+
+
 ```
 /aid-status                                  # overview: active EPICs + queue summary
 /aid-status <epic-id>                        # detailed EPIC status (reads fsm-state.yaml)

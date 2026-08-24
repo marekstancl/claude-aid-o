@@ -32,11 +32,9 @@ LINT="${PLUGIN_DIR}/scripts/aid-lint-skill.sh"
 # these until they are substantively revised (>25%). Universal findings still block.
 GRANDFATHERED=$(cat <<'EOF'
 skills/agent-protocol.md
-skills/brainstorming.md
 skills/memory-mcp.md
 skills/memory.md
 skills/pipeline.md
-skills/plan-writing.md
 skills/planner.md
 skills/role-cards.md
 skills/run-management.md

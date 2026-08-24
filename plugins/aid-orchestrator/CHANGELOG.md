@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.89.3] — 2026-08-24
+
+> Commands that could not be run as written.
+
+### Fixed
+- **Every command in nine instruction files referenced a variable nothing sets** — 84 runnable commands across `commands/aid-help.md`, `aid-status.md`, `aid-init.md`, `aid-plan.md`, `aid-stop.md`, `skills/plan-writing.md`, `brainstorming.md`, `pipeline.md` and `agents/auditor.md` are written as `$AID_PLUGIN_PATH/scripts/…`, and nothing anywhere exports it — not the plugin, not the workspace, not the settings of the repository AID is developed in. Copied and run as written, every one of them fails with "file not found". It survived because a model reading the instruction usually works the path out for itself, so the instruction looks like it works. Each file now resolves it once, from the workspace record, using the same source `commands/aid-run.md` §PRE-FLIGHT already used — the convention existed and these nine files simply did not follow it. Found by the first real `/aid-plan` run in a project that had never had one.
+- **`skills/plan-writing.md` and `skills/brainstorming.md` are no longer grandfathered** — both now lint clean against `skills/skill-writing.md` and are removed from the exception list in `scripts/tests/test-skill-lint.sh`, so the standard is enforced on them from here.
+
 ## [2.89.2] — 2026-08-24
 
 > A brand-new project could not be given its first plan id.

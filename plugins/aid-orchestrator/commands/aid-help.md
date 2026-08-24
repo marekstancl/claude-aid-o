@@ -8,6 +8,19 @@ Show AID documentation with progressive disclosure — a new user sees the four 
 
 ## Usage
 
+> **Resolve `$AID_PLUGIN_PATH` before running anything below.** Nothing sets it
+> for you — not the plugin, not the workspace, not your shell. Every command
+> here would otherwise fail with "file not found", and the reader is left to
+> work the path out (which is how this survived unnoticed: a model usually
+> does). The workspace records it, and this is the same source
+> `commands/aid-run.md` §PRE-FLIGHT already uses:
+>
+> ```bash
+> AID_PLUGIN_PATH="$(yq -r '.plugin_path' "$(git rev-parse --show-toplevel)/.aid-o/config/plugin.yaml")"
+> test -f "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" || echo "stale plugin_path — run /aid-init to refresh"
+> ```
+
+
 ```
 /aid-help           # show your level (auto-detected from usage history)
 /aid-help <topic>   # jump to one topic (full list under "Help Topics" below)
