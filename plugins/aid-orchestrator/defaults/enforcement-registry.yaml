@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 455          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 464          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3125,8 +3125,160 @@ enforcements:
     tier: n/a
     enforcement_degree: 2
     not_guaranteed: "That the PM read the page, or that it says anything useful. The check is that the file exists and is newer than the plan it describes — presence and currency, never quality."
-    test: "scripts/tests/bats/test-artifact-obligation.bats"
     description: "P086 Step 4 — a written plan owes the PM a rendered page. scripts/aid-turn-gate.sh checks the file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and a Stop hook rule catches the same defect one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
     recovery: "Run the render by hand: source scripts/lib/aid-plan-summary.sh && aid_plan_summary_render <plan> <out.html>, then publish the body."
-    test_covers: "the RENDERER only. Whether a session actually renders and publishes is a session-level act no suite can observe — that is precisely the gap this row records."
-    test: "scripts/tests/bats/test-aid-plan-summary.bats"
+    test_covers: "the CHECK and its caller. What no suite can observe is a session choosing to publish the rendered body with the Artifact tool — that act stays a session-level one, and this row no longer claims otherwise about the rest."
+    test: "scripts/tests/bats/test-artifact-obligation.bats"
+
+  # ── P086: the harness hook layer ─────────────────────────────────────────
+  # Every row below carries `enforcement_degree` on the ecosystem scale
+  # (/ecosystem/specs/agent-hooks/): 1 = code decides and the model has no
+  # vote; 2 = code checks the answer and refuses it; 3 = code DELIVERS data
+  # into the prompt, which is a delivery and NOT a guarantee; 4 = prose.
+  # A row without a degree is a row whose author has not said whether it
+  # enforces or merely delivers, and `not_guaranteed` is where the honest
+  # remainder goes.
+
+  - id: hook_layer_dispatch
+    type: 1
+    source: "scripts/aid-hook.sh:dispatch + defaults/hook-registry.yaml"
+    instruction: n/a
+    severity: n/a
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 1
+    not_guaranteed: "That a harness calls it at all. That is what the canary (hook_canary_verdict) answers, and until it does, no fail-closed rule in this registry is in force."
+    description: "P086 Step 1 — the single entry point every AID harness hook goes through. A rule is a row in defaults/hook-registry.yaml: an event, an owner, a degree and a failure mode. Only `failure: closed` may stop a turn; a `failure: open` row that exits 2 is a misdeclaration, recorded and ignored. Per-rule clocks are capped to what is left of the whole-dispatch budget, an unreadable registry runs NO rule (never all of them), and the three escape hatches (AID_HOOKS_OFF, AID_HOOKS_OFF_RULES, disabled: true) are all audited."
+    recovery: "AID_HOOKS_OFF_RULES=<id> switches one rule off; AID_HOOKS_OFF=1 is the emergency brake. Both are written to the audit trail in the session store with their reason."
+    test: "scripts/tests/bats/test-aid-hook-dispatch.bats"
+
+  - id: hook_canary_verdict
+    type: 1
+    source: "scripts/aid-hook-verify.sh + scripts/lib/aid-hook-canary.sh"
+    instruction: n/a
+    severity: n/a
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 1
+    not_guaranteed: "That the tool and version the verdict names are still the ones running. The dispatcher cannot tell WHICH harness is calling it — neither Claude Code 2.1.226 nor Codex 0.146.0 puts a harness marker in the event payload — so the binding is a freshness window (trust_ttl_days), not an identity check. Inside that window, a tool upgrade is covered by a measurement that no longer applies."
+    description: "P086 Step 2 — the only thing in AID allowed to say hooks run here. It runs a real short session and requires AID's own canary rule to have left a SUCCESSFUL record: the dispatcher audits a crashed rule too, so counting audit lines would let a broken layer certify itself. Codex trust states `untrusted` AND `modified` are both refused (checking only the first lets an edited hook through) and the bypass flag is never used. The verdict is mechanical: without it every fail-closed rule degrades to fail-open and the degradation is audited."
+    recovery: "aid-hook-verify.sh --status says what is recorded and why; --canary re-measures; --seed-trust approves Codex hooks idempotently."
+    test: "scripts/tests/bats/test-aid-hook-verify.bats"
+
+  - id: decision_card_complete
+    type: 12
+    source: "scripts/lib/aid-decision-card.sh:aid_decision_card_render (refuses the data) + aid_decision_card_validate, called by scripts/aid-turn-gate.sh and the Stop hook rule"
+    instruction: "skills/communication.md (The Four Cards, card 2)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "Two things, both real. The renderer cannot stop a turn typing an ad-hoc question by hand instead of rendering a card — and the checks recognise a card by its opening label, so a bare question in no card shape at all is NOT detected. And nothing here judges the options: two restatements of one option pass."
+    description: "P086 Step 3 — card 2 of skills/communication.md is assembled from data rather than imitated. Data with fewer than two options, no recommended option, or a recommendation without a reason is refused by name. More than five options is capped and the card says how many it dropped. Labels are per-language data (defaults/decision-card-labels.yaml) so the card still renders in the PM's language."
+    recovery: "The refusal names the missing field. Supply it in the data; the renderer is deterministic from there."
+    test: "scripts/tests/bats/test-decision-card.bats"
+
+  - id: continuity_capsule
+    type: 12
+    source: "scripts/lib/aid-continuity-capsule.sh + defaults/hook-registry.yaml (continuity_capture, continuity_restore)"
+    instruction: n/a
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 3
+    not_guaranteed: "Anything at all about the model's behaviour. Degree 3 is a DELIVERY: the text is put in front of the model, which may ignore it, and in Codex an unapproved hook is skipped in silence so it may never arrive. The communication contract's home stays skills/communication.md and what CHECKS it is aid-turn-gate.sh; the capsule carries a pointer. A fork that gets a new session id gets no capsule — a known gap, preferred over handing it another session's state."
+    description: "P086 Step 5 — PreCompact writes the session's plan phase, live runs (with the transitions the FSM itself reports, never a second copy of the table), working tree and a pointer to the communication contract into the session store, OUTSIDE every working tree; SessionStart injects it back on a compact/resume/fork start, always with its age on the face of it. An unwritable capsule declines and never holds up a compaction."
+    recovery: "Nothing to recover: the capsule is ephemeral and per session. A missing one costs the session its bearings, not its work."
+    test: "scripts/tests/bats/test-continuity-capsule.bats"
+
+  - id: brainstorm_vision_gate
+    type: 4
+    source: "scripts/aid-brainstorm-state.sh:cmd_gate (called by scripts/lib/aid-brainstorm-opponent.sh)"
+    instruction: "skills/brainstorming.md (Vision Step, MUST rule 14)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "The degree is 1 for the OPPONENT phase only, because code calls the gate there. `gate --phase design` is called by the controller following the skill, so for the design phase this is a checkable instruction and not a closed door — stated here rather than letting one number cover both. And nothing checks that a vision is any good: a point with a test that proves nothing passes."
+    description: "P086 Step 7 — a roadmap's (or multi-plan work's) vision must be approved by the PM before later phases start, and the run state holds whether it was. A vision point with no test is refused by name: a point with nothing that could show it false is a slogan, and a slogan cannot be disagreed with later. A single short plan has no vision step and the skip is recorded with its reason."
+    recovery: "vision-propose names each point that has no test. vision-reject --reason returns the run to its inputs."
+    test: "scripts/tests/bats/test-brainstorm-vision.bats"
+
+  - id: brainstorm_opponent_recorded
+    type: 1
+    source: "scripts/lib/aid-brainstorm-opponent.sh:aid_brainstorm_opponent_run"
+    instruction: "skills/brainstorming.md (Opponent)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That the opponent is right, or that AID is. Above all: two models agreeing on something WRONG is not caught by any of this — a stated boundary of the design, not a defect in it. Nor does anything force the controller to dispatch an opponent at all; what is enforced is that a dispatch which did not happen cannot be reported as agreement."
+    description: "P086 Step 8 — an opponent that cannot be reached, fails, or answers outside the required shape is recorded as `unreached` and the brainstorm continues as a monologue that says so. Prose that could not be parsed is never counted as consent — the same refusal lib/aid-audit-independence.sh makes for audits. What both models hold is written without troubling the PM; disputes go to the PM as decisions, at most five, with the remainder counted in the artifact."
+    recovery: "dispute.json carries the reason the opponent was not reached. Fix that (usually codex auth) and re-run; nothing else in the run is invalidated."
+    test: "scripts/tests/bats/test-brainstorm-opponent.bats"
+
+  - id: brainstorm_artifact_promotion
+    type: 1
+    source: "scripts/aid-brainstorm-state.sh:cmd_approve"
+    instruction: "skills/brainstorming.md (The Output Is a Page)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 1
+    not_guaranteed: "That the PM read the page before accepting the run. `approve` is the PM's act as recorded by whoever runs the command; nothing here can tell an informed acceptance from a hurried one."
+    description: "P086 Step 9 — a brainstorm's artifacts stay in .aid-o/work/brainstorm/<plan_id>/ until the PM accepts the run, and only then is the vision promoted next to the plans. A run whose vision was never agreed cannot be accepted at all. The page reads `Nedokončeno` until then: a half-finished brainstorm that looks finished is worse than one that is visibly unfinished."
+    recovery: "approve names why it refused (an unagreed vision). Agree the vision or reject it; both are recorded."
+    test: "scripts/tests/bats/test-brainstorm-summary.bats"
+
+  # ── P086 AC19: recorded as NOT DELIVERED, with the reason ────────────────
+  # This is not an enforcement; it is the durable record of one the plan asked
+  # for and this implementation did not build. It lives here because
+  # `.aid-o/plans/` and `docs/plans/` are gitignored, so an amendment written
+  # only there is a note to whoever holds that working tree — the same reason
+  # the plan amendments at the top of this file live here.
+  - id: gate_config_from_branch
+    type: 12
+    source: n/a
+    instruction: "docs/extending-aid.md (Phase working copies)"
+    severity: advisory
+    surface: internal-guard
+    status: planned
+    verdict: GAP
+    tier: n/a
+    enforcement_degree: 4
+    deadline: "2027-06-30"
+    deferred_by: "P086 Step 6"
+    deferred_reason: "AC19 asked for gate configuration to be read from the branch while state comes from the primary checkout. Two measured facts block it as written. (1) `.aid-o/` is gitignored, so a project's execution.yaml is NEVER checked out into a linked worktree and cannot come from a branch at all — reading it from the primary checkout is the CORRECT behaviour and was itself the fix for IMP-497. (2) Auto-reading hook or gate configuration out of a working tree would make a downloaded repository able to run code, which /ecosystem/specs/agent-hooks/ rule 3 explicitly forbids defending against by any means other than not doing it. The real drift AC19 was aiming at — controller code from the installed plugin cache while the branch's code is under test — already has an owner in lib/aid-cache-preflight.sh. Recorded as not delivered rather than described as delivered by the phase worktrees, which do not do it."
+    not_guaranteed: "Nothing — there is no mechanism here to guarantee anything with. That is the point of the row."
+    description: "P086 Step 6 AC19 — NOT DELIVERED. Phase working copies (aid-plan-fsm.sh plan-scratch) isolate the TREE for brainstorming and generation; state deliberately stays shared and single-authority. The config-from-the-branch half is unbuilt and the reason is above."
+    test: n/a
+
+  - id: subagent_protocol_notice
+    type: 12
+    source: "scripts/lib/aid-subagent-protocol.sh + defaults/hook-registry.yaml (rule subagent_protocol_notice)"
+    instruction: "skills/agent-protocol.md (dispatch: a role's protocol comes from the installed plugin)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 3
+    not_guaranteed: "That the subagent reads the repository's copy, or prefers it. Degree 3 is a DELIVERY — measured to arrive (Claude Code 2.1.238, in hookSpecificOutput.additionalContext; bare stdout arrives nowhere) and nothing more. Pasting the protocol verbatim into the dispatch prompt is still the stronger move where it genuinely matters. Re-measure after any Claude Code upgrade: the version is part of the claim."
+    description: "P086 Step 10 — IMP-179 three times over: a subagent's system prompt comes from the INSTALLED plugin, not the checkout it works in, so an Auditor and a Curator both acted on a protocol the repository had already changed. This tells the role agent the two DIFFER and gives both paths. It delivers a POINTER, never the file: injecting a working tree's file into an agent's instructions would let a checkout write them. Identical copies inject nothing, which is the common case. Wired only because the probe measured delivery — see docs/plans/P086-subagent-protocol-probe.md."
+    recovery: "Nothing to recover; the notice is advisory. If it is wrong, the two files are named and can be diffed."
+    test: "scripts/tests/bats/test-subagent-protocol-notice.bats"
+

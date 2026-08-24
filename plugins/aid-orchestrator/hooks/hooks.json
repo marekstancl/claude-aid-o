@@ -1,5 +1,5 @@
 {
-  "description": "AID orchestrator harness hooks — one entry point (scripts/aid-hook.sh), one registry (defaults/hook-registry.yaml). Both Claude Code and Codex read a plugin-root hooks/hooks.json in this shape, so the two tools are declared once. SessionStart carries NO matcher on purpose: which start sources a rule cares about is a registry decision (the handler reads .source), and the canary has to see every start or it cannot prove the layer runs.",
+  "description": "AID orchestrator harness hooks — one entry point (scripts/aid-hook.sh), one registry (defaults/hook-registry.yaml). Both Claude Code and Codex read a plugin-root hooks/hooks.json in this shape, so the two tools are declared once. SessionStart carries NO matcher on purpose: which start sources a rule cares about is a registry decision (the handler reads .source), and the canary has to see every start or it cannot prove the layer runs. SubagentStart is declared because P086 Step 10 MEASURED that its injection arrives when wrapped in hookSpecificOutput.additionalContext (Claude Code 2.1.238) and does not when printed bare.",
   "hooks": {
     "SessionStart": [
       {
@@ -29,6 +29,17 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/aid-hook.sh\" Stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/aid-hook.sh\" SubagentStart",
             "timeout": 20
           }
         ]

@@ -140,3 +140,14 @@ rules:
     lib: scripts/lib/aid-continuity-capsule.sh
     handler: aid_hook_rule_continuity_restore
     description: injects the capsule back on a compact/resume/fork start — a delivery, never a guarantee, so the gate keeps inserting the contract as well
+
+  - id: subagent_protocol_notice
+    event: SubagentStart
+    owner: agent
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-subagent-protocol.sh
+    handler: aid_hook_rule_subagent_protocol
+    description: tells a role agent when its installed protocol differs from the checkout's copy (IMP-179) — a pointer, never the file, so a checkout cannot write an agent's instructions
+

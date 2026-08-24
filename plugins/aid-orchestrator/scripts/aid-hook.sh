@@ -369,7 +369,21 @@ dispatch() {
     printf '%s' "$denials" >&2
     return 2
   fi
-  [[ -n "$injections" ]] && printf '%s' "$injections"
+  if [[ -n "$injections" ]]; then
+    # THE ENVELOPE IS MEASURED, NOT ASSUMED (P086 Step 10, Claude Code 2.1.238).
+    # A SubagentStart hook printing its text on BARE STDOUT ran, succeeded, and
+    # delivered nothing — the subagent asked about the injected marker answered
+    # NO-MARKER. The same run's SessionStart hook delivered its text through
+    # `hookSpecificOutput.additionalContext`, and repeating the probe with that
+    # envelope returned the marker. So every injection this dispatcher emits is
+    # wrapped, once, here — not by each handler, because two handlers each
+    # emitting their own JSON object would concatenate into nothing valid.
+    #
+    # An event that does not read `additionalContext` will show the JSON as
+    # text: degraded, visible, and never a silent loss.
+    jq -n --arg e "$event" --arg c "$injections" \
+      '{hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
+  fi
   return 0
 }
 

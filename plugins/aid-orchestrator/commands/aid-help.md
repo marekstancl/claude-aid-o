@@ -113,6 +113,7 @@ Ask for any of these with `/aid-help <topic>`:
 /aid-help init            → /aid-init workspace creation and upgrade
 /aid-help setup           → /aid-setup deep dive (modules, presets, integrations)
 /aid-help fsm             → 6-state FSM diagram, valid transitions, fsm-state.yaml format
+/aid-help hooks           → harness hooks: what AID enforces mechanically, and the switches
 ```
 
 ### Topic: do
@@ -468,6 +469,48 @@ Valid transitions:
 State file: .aid-o/work/evidence/{id}/{run_id}/fsm-state.yaml
 Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
 ```
+
+### Topic: hooks
+
+AID runs its own code inside the harness's lifecycle — on a session start,
+before a compaction, at the end of a turn, when a subagent starts. One entry
+point, one registry:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-hook-verify.sh" --status   # is any of it in force here?
+bash "$AID_PLUGIN_PATH/scripts/aid-hook-verify.sh" --canary   # measure it now
+```
+
+**Nothing claims hooks are running except the canary.** Both harnesses fail
+silently and in opposite directions — Codex skips an unapproved hook without a
+word, Claude Code runs a crashed one and carries on — so a hook file being in
+place is never evidence. Until `--canary` passes, every rule that could stop a
+turn is degraded to fail-open, and the degradation is written to the audit trail.
+
+**What is wired, and how strongly** (the ecosystem scale: 1 code decides,
+2 code checks the answer, 3 code delivers data into the prompt, 4 prose):
+
+| Rule | Event | Degree | What it does |
+|---|---|---|---|
+| `hook_canary` | SessionStart | 4 | leaves one audit line per start, so the canary can prove a harness reached AID |
+| `decision_card_complete` | Stop | 2 | refuses a turn whose card asks you to decide with no options, recommendation or reason |
+| `plan_artifact_rendered` | Stop | 2 | refuses a turn that wrote a plan without rendering your page for it |
+| `continuity_capture` / `continuity_restore` | PreCompact / SessionStart | 3 | saves the run's bearings before a compaction and puts them back after |
+| `subagent_protocol_notice` | SubagentStart | 3 | tells a role agent when its installed protocol differs from this checkout's |
+
+**Three switches, all audited**, in order of how much they turn off:
+
+```bash
+AID_HOOKS_OFF_RULES=decision_card_complete   # one rule off, the rest keep running
+AID_HOOKS_OFF=1                              # everything off — the emergency brake
+# disabled: true on a row in defaults/hook-registry.yaml — permanent
+```
+
+A hook never writes into the repository: its audit trail and the canary verdict
+live in `${XDG_STATE_HOME:-~/.local/state}/aid/hooks/`.
+
+Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
+`docs/extending-aid.md` → "Adding a harness hook rule".
 
 ## Important
 
