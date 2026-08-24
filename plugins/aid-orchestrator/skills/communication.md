@@ -52,9 +52,18 @@ Další krok: <one concrete recommendation, or "nic dalšího není potřeba">.
 Potřebuji tvoje rozhodnutí: <one question>.
 Proč teď: <plain consequence of waiting/choosing>.
 Doporučení: A — <recommended action and consequence>.
+Důvod: <why that one, in terms the PM can check>.
 Alternativy: B — <meaningful alternative>; C — <stop/defer when relevant>.
 Riziko / co není ověřeno: <only material uncertainty>.
 ```
+
+This card is **built, not imitated**: `scripts/lib/aid-decision-card.sh` assembles
+it from data and refuses data with fewer than two options, no recommendation or
+a recommendation without a reason, so an incomplete one cannot be produced.
+`scripts/aid-turn-gate.sh` re-checks the written card after the CLI returns, and
+a `Stop` hook rule catches the same defect a turn earlier where that event
+exists. Labels are per-language data in `defaults/decision-card-labels.yaml` —
+the card still renders in the PM's language (rule 4).
 
 **3. Blocked or failed.**
 

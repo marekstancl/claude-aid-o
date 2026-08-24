@@ -90,3 +90,22 @@ rules:
     handler: aid_hook_canary
     description: leaves one audit line per session start so the canary can prove a harness really calls AID
 
+  - id: decision_card_complete
+    event: Stop
+    owner: controller
+    degree: 2
+    failure: closed
+    timeout_s: 5
+    lib: scripts/lib/aid-decision-card.sh
+    handler: aid_hook_rule_decision_card
+    description: refuses to close a turn that asks the PM for a decision without options, a recommendation and its reason
+
+  - id: plan_artifact_rendered
+    event: Stop
+    owner: controller
+    degree: 2
+    failure: closed
+    timeout_s: 5
+    lib: scripts/lib/aid-artifact-obligation.sh
+    handler: aid_hook_rule_plan_artifact
+    description: refuses to close a turn that wrote a plan without rendering the PM's page for it

@@ -84,6 +84,17 @@ run_hook() { # run_hook <event> [json]
   [ "$output" = "0" ]
 }
 
+@test "AC12: the third shipped rule arrived as a registry row, with the entry point untouched" {
+  # The layer's reuse test, and the reason Step 4 exists where it does. If a
+  # new rule had needed aid-hook.sh edited, the dispatcher would have been
+  # built for its first consumer rather than for rules in general.
+  unset AID_HOOK_REGISTRY
+  run yq -r '.rules[] | select(.id == "plan_artifact_rendered") | .lib' "$PLUGIN_ROOT/defaults/hook-registry.yaml"
+  [ "$output" = "scripts/lib/aid-artifact-obligation.sh" ]
+  run grep -c "plan_artifact_rendered\|aid-artifact-obligation" "$HOOK"
+  [ "$output" = "0" ]
+}
+
 @test "a rule registered for another event does not run" {
   write_registry "$(row only_stop Stop any rule_ok)"
   run_hook SessionStart
