@@ -247,11 +247,14 @@ dispatch() {
 
     case "$rc" in
       0)
+        # A rule that succeeded may still have something to record — a capsule
+        # it wrote, a path it chose. Its stderr is the audit reason, which is
+        # why it is read on the success path too and not only on refusals.
         if [[ -n "$out" ]]; then
           injections+="${out}"$'\n'
-          _hook_audit "$event" "$id" inject ""
+          _hook_audit "$event" "$id" inject "$reason"
         else
-          _hook_audit "$event" "$id" pass ""
+          _hook_audit "$event" "$id" pass "$reason"
         fi
         ;;
       2)

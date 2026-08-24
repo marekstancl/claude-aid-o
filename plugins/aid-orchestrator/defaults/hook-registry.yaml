@@ -109,3 +109,23 @@ rules:
     lib: scripts/lib/aid-artifact-obligation.sh
     handler: aid_hook_rule_plan_artifact
     description: refuses to close a turn that wrote a plan without rendering the PM's page for it
+
+  - id: continuity_capture
+    event: PreCompact
+    owner: controller
+    degree: 3
+    failure: open
+    timeout_s: 15
+    lib: scripts/lib/aid-continuity-capsule.sh
+    handler: aid_hook_rule_continuity_capture
+    description: writes the session's plan, run and contract state to the session store before the context is cut
+
+  - id: continuity_restore
+    event: SessionStart
+    owner: controller
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-continuity-capsule.sh
+    handler: aid_hook_rule_continuity_restore
+    description: injects the capsule back on a compact/resume/fork start — a delivery, never a guarantee, so the gate keeps inserting the contract as well
