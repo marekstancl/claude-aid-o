@@ -104,7 +104,7 @@ def load_state(path):
             if text.startswith("[hooks.state.") and text.endswith("]"):
                 key = text[len("[hooks.state."):-1].strip().strip("'\"")
             elif key and text.startswith("trusted_hash"):
-                state[key] = text.split("=", 1)[1].strip().strip('"')
+                state[key] = text.split("=", 1)[1].strip().strip("\"'")
                 key = None
             elif text.startswith("["):
                 key = None

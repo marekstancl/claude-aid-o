@@ -72,7 +72,7 @@ aid_continuity_capsule_path() {
 # always the copy. A run whose state cannot be read keeps its state and loses
 # only the transitions.
 _aid_cc_runs() {
-  local root="$1" runs="${1}/.aid-o/work/active-runs.json"
+  local runs="${1}/.aid-o/work/active-runs.json"
   [[ -r "$runs" ]] || { printf '[]'; return 0; }
   local fsm="${_AID_CC_LIB_DIR}/../aid-fsm.sh"
   local out="[]" epic state_file state rid

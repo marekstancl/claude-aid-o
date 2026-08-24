@@ -45,10 +45,16 @@
 #   subagent is a redundant check — and fail-closed rules need the canary on
 #   top.
 #
-# THE CANARY BINDING (Step 2)
+# THE CANARY BINDING (Step 2), AND EXACTLY HOW STRONG IT IS
 #   `failure: closed` rows take effect only while the trust file records a
-#   successful canary for this tool and version. Otherwise they degrade to
-#   fail-open and the degradation is audited. See defaults/hook-registry.yaml.
+#   SUCCESSFUL and RECENT canary. Otherwise they degrade to fail-open and the
+#   degradation is audited.
+#
+#   "Recent" and not "for this tool and version", deliberately: this process
+#   cannot tell which harness is calling it — neither tool puts a marker in the
+#   event payload — so the verdict's tool and version are RECORDED and read by
+#   an operator, never compared here. The binding is a freshness window
+#   (`trust_ttl_days`). See defaults/hook-registry.yaml for the residual gap.
 #
 # DEPENDENCIES: yq (registry), jq (event JSON). Either missing means no rule
 # runs — never that all of them do.

@@ -100,8 +100,10 @@ validate_vision() {
       next
     }
     point != "" && tolower($0) ~ /(^|[^a-z])test[[:space:]]*:/ { has_test = 1 }
-    END { flush(); if (points_seen == 0 && point == "") exit 2; exit (bad > 0) }
-    { if ($0 ~ /^[[:space:]]*-[[:space:]]*V[0-9]+[[:space:]]*:/) points_seen++ }
+    # `point` empty at the end means no `- Vn:` line was ever seen — the file
+    # carries no vision at all, which is a different refusal from "a point has
+    # no test".
+    END { flush(); if (point == "") exit 2; exit (bad > 0) }
   ' "$file"
 }
 
@@ -251,14 +253,20 @@ cmd_gate() {
 }
 
 # ---------------------------------------------------------------------------
-# approve — the PM accepts the brainstorm as a whole, and ONLY THEN do its
-# artifacts leave the working directory.
+# approve — the PM accepts the brainstorm as a whole, and ONLY THEN does its
+# VISION leave the working directory.
 #
-# WHY PROMOTION IS A SEPARATE ACT: everything a brainstorm produces lives in
-# `.aid-o/work/brainstorm/<plan_id>/` while it is being made. A run that the PM
-# never accepted must not have left a vision document sitting next to the plans
-# as though it had been agreed — a half-finished brainstorm that looks finished
-# is worse than one that is visibly unfinished.
+# WHAT MOVES AND WHAT DOES NOT: the vision is copied next to the plans, because
+# that is the document later plans are built inside. Everything else — the
+# dispute artifact, the rendered page, the state file — deliberately STAYS in
+# `.aid-o/work/brainstorm/<plan_id>/`, and the command says so. The page's own
+# boundary is enforced by lib/aid-brainstorm-summary.sh, which refuses to write
+# an unaccepted run's page outside that directory.
+#
+# WHY PROMOTION IS A SEPARATE ACT: a run the PM never accepted must not have
+# left a vision document sitting next to the plans as though it had been agreed
+# — a half-finished brainstorm that looks finished is worse than one that is
+# visibly unfinished.
 # ---------------------------------------------------------------------------
 cmd_approve() {
   local plan_id="${1:?}"

@@ -24,10 +24,12 @@
 #   pretended otherwise would be refusing turns on taste.
 #
 # EXIT CODES
-#   0  every check it had an input for passed — including "there was nothing
-#      to check", which is not a failure
+#   0  every check passed — including an input that is not the kind of thing
+#      this gate checks (a report that is no decision card, a file that is no
+#      numbered plan), which is never a failure
 #   1  at least one check failed; every finding is named on stderr
-#   2  usage error
+#   2  usage error, which includes being called with NO input at all: a gate
+#      invoked with nothing to look at is a mis-invocation, not a pass
 #
 # **Last Updated:** 2026-08-24
 # =============================================================================
