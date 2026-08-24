@@ -9,6 +9,7 @@
 #   aid-brainstorm-state.sh vision-approve <plan_id>
 #   aid-brainstorm-state.sh vision-reject  <plan_id> --reason <text>
 #   aid-brainstorm-state.sh gate <plan_id> --phase design|opponent|summary
+#   aid-brainstorm-state.sh approve <plan_id>
 #   aid-brainstorm-state.sh show <plan_id>
 #
 # WHY A STATE FILE AND NOT A SENTENCE IN THE SKILL
@@ -135,6 +136,7 @@ scope: "${scope}"
 vision_required: ${required}
 vision_state: "none"
 vision_file: ""
+run_state: "open"
 skip_reason: "${skip}"
 created_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 updated_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -248,6 +250,43 @@ cmd_gate() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# approve — the PM accepts the brainstorm as a whole, and ONLY THEN do its
+# artifacts leave the working directory.
+#
+# WHY PROMOTION IS A SEPARATE ACT: everything a brainstorm produces lives in
+# `.aid-o/work/brainstorm/<plan_id>/` while it is being made. A run that the PM
+# never accepted must not have left a vision document sitting next to the plans
+# as though it had been agreed — a half-finished brainstorm that looks finished
+# is worse than one that is visibly unfinished.
+# ---------------------------------------------------------------------------
+cmd_approve() {
+  local plan_id="${1:?}"
+  local sf; sf="$(require_state "$plan_id")" || return 1
+
+  local required state; required="$(get "$sf" vision_required)"; state="$(get "$sf" vision_state)"
+  if [[ "$required" == "true" && "$state" != "approved" ]]; then
+    echo "REFUSED: ${plan_id}'s vision is '${state}' — a run whose vision was never agreed is not a run to accept." >&2
+    return 1
+  fi
+
+  local root dir vision promoted=""
+  root="$(aid_state_root)" || return 1
+  dir="$(state_dir "$plan_id")" || return 1
+  vision="$(get "$sf" vision_file)"
+  if [[ -n "$vision" && -r "$vision" ]]; then
+    mkdir -p "${root}/.aid-o/plans" || { echo "ERROR: cannot create ${root}/.aid-o/plans" >&2; return 1; }
+    cp "$vision" "${root}/.aid-o/plans/${plan_id}-vision.md" || {
+      echo "ERROR: could not promote the vision to ${root}/.aid-o/plans/${plan_id}-vision.md" >&2; return 1; }
+    promoted="${root}/.aid-o/plans/${plan_id}-vision.md"
+  fi
+
+  set_field "$sf" run_state approved
+  echo "Brainstorming run ${plan_id} accepted."
+  [[ -n "$promoted" ]] && echo "promoted: ${promoted}"
+  echo "working artifacts remain in ${dir}"
+}
+
 cmd_show() {
   local sf; sf="$(require_state "${1:?}")" || return 1
   cat "$sf"
@@ -262,6 +301,7 @@ main() {
     vision-approve)  cmd_vision_approve "$@" ;;
     vision-reject)   cmd_vision_reject "$@" ;;
     gate)            cmd_gate "$@" ;;
+    approve)         cmd_approve "$@" ;;
     show)            cmd_show "$@" ;;
     *)
       cat >&2 <<'EOF'
@@ -272,6 +312,7 @@ Usage: aid-brainstorm-state.sh <command> <plan_id> [flags]
   vision-approve <plan_id>
   vision-reject <plan_id> --reason <text>
   gate <plan_id> --phase design|opponent|summary
+  approve <plan_id>
   show <plan_id>
 EOF
       return 2 ;;

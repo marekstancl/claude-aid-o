@@ -1,5 +1,8 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
+#   MEASURED, not wished: one case waits out a real per-rule clock (a rule that
+#   overruns must actually overrun), which puts this suite's slowest case above
+#   the t0 ceiling. It stays on the merge path either way.
 # test-aid-hook-dispatch.bats — the harness hook layer (P086 Step 1).
 #
 # TESTABILITY BOUNDARY, STATED EXPLICITLY

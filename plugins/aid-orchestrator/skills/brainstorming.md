@@ -125,6 +125,33 @@ step is a real precondition here, not an order of presentation.
 agreeing on something wrong is not caught by any of this, and which model plays
 the opponent is configuration (`AID_C3_CODEX_MODEL`), not architecture.
 
+## The Output Is a Page
+
+A brainstorm ends in a **page the PM reads**, not prose in a document. Same
+division of labour as a plan's page: the numbers are counted from the run's own
+files, the two prose blocks are the topic and the vision's first thesis, and the
+renderer holds the ceilings.
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-summary.sh"
+aid_brainstorm_summary_render P{NNN} \
+  ".aid-o/work/brainstorm/P{NNN}/brainstorm-summary-artifact.html"
+```
+
+Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+
+**Working artifacts stay working until the PM accepts the run.** Everything
+lives in `.aid-o/work/brainstorm/P{NNN}/` while it is being made; `approve`
+promotes the vision next to the plans. A run the PM never accepted must not have
+left a vision document sitting there as though it had been agreed:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" approve P{NNN}
+```
+
+Until then the page says `Nedokončeno` — which is the honest state, and a page
+that looks finished when it is not is the failure this ordering prevents.
+
 ## Initial Analysis Phase
 
 Activates after reading PM's topic and all context, before questioning begins. Mandatory for every run. Presents a brief structured analysis to surface misinterpretations early.
