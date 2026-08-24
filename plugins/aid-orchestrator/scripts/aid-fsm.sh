@@ -8698,8 +8698,38 @@ cmd_alloc() {
   root="$(aid_state_root)" || exit 2
   local counter="${root}/.aid-o/config/counter.yaml"
   if [[ ! -f "$counter" ]]; then
-    echo "ERROR: alloc ${kind}: ${counter} not found — run /aid-init first" >&2
-    exit 1
+    # A FRESHLY INITIALISED WORKSPACE SEEDS ITS OWN COUNTER (found 2026-08-24 by
+    # the first real /aid-plan run in a brand-new project). `/aid-init` never
+    # created this file — it is absent from the command's own product list — so
+    # the first allocation refused with "run /aid-init first", which is the
+    # command that had just run. A fresh project could not be given its first
+    # plan id at all.
+    #
+    # The refusal above it stays, and so does its reason: an INVENTED counter
+    # restarts at 0 and collides with every existing id. That reason does not
+    # apply when there is demonstrably nothing to collide with — no plan and no
+    # task in the workspace — and that is the only case seeded here. A workspace
+    # that HAS ids and lost its counter is still refused, because there the
+    # danger is real.
+    local _plans="${root}/.aid-o/plans" _tasks="${root}/.aid-o/tasks"
+    local _existing=0
+    compgen -G "${_plans}/P*.md"   > /dev/null 2>&1 && _existing=1
+    compgen -G "${_tasks}/E-*.md"  > /dev/null 2>&1 && _existing=1
+    if [[ ! -d "${root}/.aid-o/config" || "$_existing" -eq 1 ]]; then
+      echo "ERROR: alloc ${kind}: ${counter} not found, and this workspace already holds plans or tasks — refusing to invent a counter that would restart at 0 and collide with them. Restore the file with the highest id already in use, e.g.:" >&2
+      echo "  printf 'plan: <highest P number>\nepic: <highest ad-hoc E number>\n' > '${counter}'" >&2
+      exit 1
+    fi
+    printf '# Sequential id counters. Seeded by the first allocation in a fresh
+# workspace; annotations after the value are preserved verbatim by the
+# allocator, which changes the number and never the note.
+plan: 0
+epic: 0
+' > "$counter" || {
+      echo "ERROR: alloc ${kind}: could not create ${counter}" >&2
+      exit 1
+    }
+    echo "NOTE: seeded ${counter} at 0 — this workspace had no plans or tasks yet." >&2
   fi
 
   local lock_path="${counter}.lock"

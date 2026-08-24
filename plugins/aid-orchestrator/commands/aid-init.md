@@ -39,6 +39,7 @@ when a condition holds).
     plugin.yaml           # resolved plugin_path + discovered_at + dispatch_mode
     check-severity.yaml   # compliance-check severity registry (copied from defaults)
     test-audit.yaml       # test portfolio audit config (copied from defaults)
+    counter.yaml          # sequential id counters, seeded at 0
   work/
     active.md             # GENERATED stream index (never hand-written)
     backlog.md            # improvement backlog (categorized sections)
@@ -50,7 +51,7 @@ when a condition holds).
   work/evidence/          # empty directory (for run evidence)
 ```
 
-**Total: 9 files under `.aid-o/` + 4 empty directories = 13 items.** This is the only count
+**Total: 10 files under `.aid-o/` + 4 empty directories = 14 items.** This is the only count
 statement in this document; every other place that describes the fresh-init product refers back
 to it rather than restating a number.
 
@@ -60,7 +61,7 @@ document's own rules rather than convenience:
 - **`.gitignore`** is a consumer-repo file that AID backfills per line — the identical category
   as the git hooks below, which this document already excludes. Counting one and excluding the
   other would be the same inconsistency this section exists to remove.
-- **`config/` and `work/` are not empty** — they hold the nine files. The four genuinely empty
+- **`config/` and `work/` are not empty** — they hold the ten files. The four genuinely empty
   directories are `plans/`, `tasks/`, `work/quick/` and `work/evidence/`. An earlier draft of
   this line said "5 empty directories" while listing `config/` among them, which was false on
   its face.

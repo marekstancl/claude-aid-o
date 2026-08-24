@@ -144,12 +144,32 @@ _norm_counter() {
   [[ "$output" != *"P075"* ]]
 }
 
-@test "missing counter.yaml: refuses with 'run /aid-init first' and never invents a counter file" {
+@test "a FRESH workspace with no counter seeds one and allocates its first id" {
+  # Found 2026-08-24 by the first real /aid-plan run in a brand-new project:
+  # /aid-init never created counter.yaml (it is absent from that command's own
+  # product list), so the first allocation refused with "run /aid-init first" —
+  # the command that had just run. A new project could not be given its first
+  # plan id at all.
   _mk_repo "$TEST_TMPDIR/repo"
   rm "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
   run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc plan-id" 3>&-
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"P001"* ]]
+  [ -f "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml" ]
+}
+
+@test "a workspace that ALREADY holds ids still refuses — that is what the rule protects" {
+  # The reason for the refusal is unchanged: an invented counter restarts at 0
+  # and collides with every existing id. Seeding is only safe where there is
+  # demonstrably nothing to collide with.
+  _mk_repo "$TEST_TMPDIR/repo"
+  rm "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+  mkdir -p "$TEST_TMPDIR/repo/.aid-o/plans"
+  printf -- '---\nid: P042\n---\n' > "$TEST_TMPDIR/repo/.aid-o/plans/P042-existing.md"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc plan-id" 3>&-
   [ "$status" -ne 0 ]
-  [[ "$output" == *"run /aid-init first"* ]]
+  [[ "$output" == *"already holds plans or tasks"* ]]
+  [[ "$output" == *"collide"* ]]
   [ ! -f "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml" ]
 }
 

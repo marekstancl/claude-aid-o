@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.89.2] — 2026-08-24
+
+> A brand-new project could not be given its first plan id.
+
+### Fixed
+- **A fresh workspace could not allocate its first plan id** — `/aid-init` never created `.aid-o/config/counter.yaml` (it is absent from that command's own product list, which said nine files), and `aid-fsm.sh alloc` refuses without it with "run /aid-init first" — the command that had just run. Every new project hit a circle on its very first plan. Found by the first REAL `/aid-plan` run in a brand-new project, which is the only place it can appear: every workspace that has ever had a plan already has the file. The allocator now seeds the counter at 0 when the workspace demonstrably holds no plans and no tasks, and `/aid-init` lists the file among its product (ten files, fourteen items). The refusal itself is unchanged where it protects something: a workspace that HAS ids and lost its counter is still refused, because an invented counter would restart at 0 and collide with them — and the message now says how to restore it instead of pointing back at `/aid-init`.
+
 ## [2.89.1] — 2026-08-24
 
 > A refusing Stop rule that never let the session end.
