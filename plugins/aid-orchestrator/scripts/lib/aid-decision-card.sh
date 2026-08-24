@@ -73,6 +73,31 @@ _aid_dc_label() {
   yq -r ".languages.\"$1\".\"$2\" // \"\"" "$(_aid_dc_labels_file)" 2>/dev/null
 }
 
+# _aid_dc_lang_of <file> <label_key> — the first language whose <label_key>
+# line appears in <file>; nothing (exit 1) when no language's does. A plain card
+# and a batch are both recognised this way, only by a different label.
+_aid_dc_lang_of() {
+  local file="$1" key="$2" candidate label
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    label="$(_aid_dc_label "$candidate" "$key")"
+    [[ -n "$label" ]] || continue
+    if grep -qF "${label}:" "$file"; then printf '%s' "$candidate"; return 0; fi
+  done <<< "$(yq -r '.languages | keys | .[]' "$(_aid_dc_labels_file)" 2>/dev/null)"
+  return 1
+}
+
+# _aid_dc_emit <text> <out_file|""> — the card on stdout, and into <out_file>
+# when one was asked for. Both render paths end here, so what is printed and
+# what is written can never drift apart.
+_aid_dc_emit() {
+  local text="$1" out="$2"
+  printf '%s\n' "$text"
+  [[ -n "$out" ]] || return 0
+  printf '%s\n' "$text" > "$out" || { echo "decision card: cannot write ${out}" >&2; return 1; }
+  return 0
+}
+
 # _aid_dc_render_batch <data> <out> — one opening line, then each question
 # rendered by the single-card path. A batch of one is a card: the new shape is
 # never forced where it adds nothing.
@@ -101,27 +126,19 @@ _aid_dc_render_batch() {
   local shown=$(( count > _AID_DC_MAX_OPTIONS ? _AID_DC_MAX_OPTIONS : count ))
   local dropped=$(( count - shown ))
 
-  local body="" i=0
-  while (( i < shown )); do
-    local item card=""
+  local body="" item card i
+  for (( i = 0; i < shown; i++ )); do
     item="$(printf '%s' "$data" | jq -c --argjson i "$i" --arg l "$lang" '.questions[$i] + {lang: $l}')"
     card="$(printf '%s' "$item" | aid_decision_card_render - 2>&1)" || {
       echo "decision card: question $((i+1)) of ${count} — ${card}" >&2
       return 1
     }
     body+="${card}"$'\n\n'
-    i=$(( i + 1 ))
   done
 
-  local head; head="$(printf '%s: %s' "$l_batch" "$count")"
-  (( dropped > 0 )) && head+="$(printf ' (+%d)' "$dropped")"
-  local all; all="${head}"$'\n\n'"${body%$'\n\n'}"
-
-  printf '%s\n' "$all"
-  if [[ -n "$out" ]]; then
-    printf '%s\n' "$all" > "$out" || { echo "decision card: cannot write ${out}" >&2; return 1; }
-  fi
-  return 0
+  local head="${l_batch}: ${count}"
+  (( dropped > 0 )) && head+=" (+${dropped})"
+  _aid_dc_emit "${head}"$'\n\n'"${body%$'\n\n'}" "$out"
 }
 
 # aid_decision_card_render <data.json|-> [out_file]
@@ -196,11 +213,7 @@ aid_decision_card_render() {
   (( dropped > 0 )) && card+="$(printf ' (+%d)' "$dropped")"
   [[ -n "$risk" ]] && card+="$(printf '\n%s: %s' "$(_aid_dc_label "$lang" risk)" "$risk")"
 
-  printf '%s\n' "$card"
-  if [[ -n "$out" ]]; then
-    printf '%s\n' "$card" > "$out" || { echo "decision card: cannot write ${out}" >&2; return 1; }
-  fi
-  return 0
+  _aid_dc_emit "$card" "$out"
 }
 
 # aid_decision_card_validate <card_file>
@@ -211,27 +224,12 @@ aid_decision_card_validate() {
   local file="${1:?aid_decision_card_validate: card file required}"
   [[ -r "$file" ]] || { echo "decision card: cannot read ${file}" >&2; return 1; }
 
-  local langs lang="" l_question=""
-  langs="$(yq -r '.languages | keys | .[]' "$(_aid_dc_labels_file)" 2>/dev/null)"
-  local candidate
-  while IFS= read -r candidate; do
-    [[ -n "$candidate" ]] || continue
-    l_question="$(_aid_dc_label "$candidate" question)"
-    [[ -n "$l_question" ]] || continue
-    if grep -qF "${l_question}:" "$file"; then lang="$candidate"; break; fi
-  done <<< "$langs"
-
-  if [[ -z "$lang" ]]; then
-    # A batch opens with its own line; without this the Stop rule would look at
-    # a page of real decisions and call it "not a decision card".
-    local candidate2 l_batch=""
-    while IFS= read -r candidate2; do
-      [[ -n "$candidate2" ]] || continue
-      l_batch="$(_aid_dc_label "$candidate2" batch)"
-      [[ -n "$l_batch" ]] || continue
-      if grep -qF "${l_batch}:" "$file"; then lang="$candidate2"; break; fi
-    done <<< "$langs"
-  fi
+  # A plain card is recognised by its question line. A batch that carries no
+  # question line at all still opens with its own — without the second lookup
+  # the Stop rule would look at a page of real decisions and call it "not a
+  # decision card".
+  local lang=""
+  lang="$(_aid_dc_lang_of "$file" question)" || lang="$(_aid_dc_lang_of "$file" batch)" || lang=""
   if [[ -z "$lang" ]]; then
     echo "not a decision card: no language's opening line appears in ${file}" >&2
     return 3
@@ -241,21 +239,21 @@ aid_decision_card_validate() {
   # ITEM. Counting `Otázka:` against `Důvod:` across the whole file passes a
   # batch whose second question has no reason as long as some other line
   # anywhere supplies one, which is a check that can be satisfied by accident.
-  local l_batch2; l_batch2="$(_aid_dc_label "$lang" batch)"
-  if [[ -n "$l_batch2" ]] && grep -qF "${l_batch2}:" "$file"; then
+  local l_batch; l_batch="$(_aid_dc_label "$lang" batch)"
+  if [[ -n "$l_batch" ]] && grep -qF "${l_batch}:" "$file"; then
     local l_q l_r; l_q="$(_aid_dc_label "$lang" question)"; l_r="$(_aid_dc_label "$lang" reason)"
-    local n=0 idx=0 seen_reason=1 bad=""
-    local line
+    # `n` counts questions seen so far, so while a question is open it is also
+    # that question's 1-based number — which is what a complaint has to name.
+    local n=0 seen_reason=1 bad="" line
     while IFS= read -r line; do
       if [[ "$line" == "${l_q}:"* ]]; then
-        (( idx > 0 && seen_reason == 0 )) && bad+="${idx} "
-        idx=$(( idx + 1 )); seen_reason=0
+        (( n > 0 && seen_reason == 0 )) && bad+="${n} "
+        n=$(( n + 1 )); seen_reason=0
       elif [[ "$line" == "${l_r}:"* ]]; then
         seen_reason=1
       fi
     done < "$file"
-    (( idx > 0 && seen_reason == 0 )) && bad+="${idx} "
-    n="$idx"
+    (( n > 0 && seen_reason == 0 )) && bad+="${n} "
     if [[ -n "$bad" ]]; then
       printf 'decision card batch %s is incomplete — question(s) %swithout a reason (of %s)\n' \
         "$file" "$bad" "$n" >&2

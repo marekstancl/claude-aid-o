@@ -171,6 +171,9 @@ aid_brainstorm_opponent_run() {
   # was a sentence the code did not keep (found in review, twice: first the
   # off-by-one, then this). A cap that does not prevent the attempt is a counter.
   local prior; prior="$(_aid_bo_attempts "$dispute")"
+  # The number this call would record if it fails — every unreached path
+  # writes the same one, so it is worked out once.
+  local attempt=$(( prior + 1 ))
   if (( prior >= _AID_BO_MAX_ATTEMPTS )); then
     echo "opponent: ${prior} attempts already spent on this run (cap ${_AID_BO_MAX_ATTEMPTS}) — not trying again; this brainstorm is a recorded monologue. To spend more, remove ${dispute} deliberately." >&2
     return 3
@@ -179,8 +182,8 @@ aid_brainstorm_opponent_run() {
   local avail rc=0
   avail="$(bash "${_AID_BO_LIB_DIR}/aid-audit-independence.sh" detect --required cross_provider 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    _aid_bo_write_unreached "$dispute" "$plan_id" "$avail" "$(( prior + 1 ))" || return 1
-    if (( prior + 1 >= _AID_BO_MAX_ATTEMPTS )); then
+    _aid_bo_write_unreached "$dispute" "$plan_id" "$avail" "$attempt" || return 1
+    if (( attempt >= _AID_BO_MAX_ATTEMPTS )); then
       echo "opponent not reached ${_AID_BO_MAX_ATTEMPTS}+ times — no longer asking; this brainstorm continues as a recorded monologue: ${avail}" >&2
       return 3
     fi
@@ -197,7 +200,7 @@ aid_brainstorm_opponent_run() {
     "${tmp}/events.jsonl" "${tmp}/stderr.txt" "${tmp}/answer.txt" || drc=$?
 
   if [[ "$drc" -ne 0 || ! -s "${tmp}/answer.txt" ]]; then
-    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent did not answer (exit ${drc})" "$(( prior + 1 ))" || { rm -rf "$tmp"; return 1; }
+    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent did not answer (exit ${drc})" "$attempt" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent not reached (exit ${drc}) — continuing as a monologue" >&2
     return 3
@@ -206,7 +209,7 @@ aid_brainstorm_opponent_run() {
   # A fenced answer is still an answer; anything that is not one object is not.
   sed -e 's/^```json$//' -e 's/^```$//' "${tmp}/answer.txt" > "${tmp}/answer.json"
   if ! _aid_bo_valid "${tmp}/answer.json"; then
-    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" "$(( prior + 1 ))" || { rm -rf "$tmp"; return 1; }
+    _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" "$attempt" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent answered outside the required shape — treated as not reached" >&2
     return 3

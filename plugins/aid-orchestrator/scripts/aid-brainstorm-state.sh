@@ -305,12 +305,12 @@ cmd_approve() {
   # is independent of the first. A file check cannot show any of that. What it
   # does is make pretending DELIBERATE — the record has to be written on purpose
   # — which is worth having and is not the same as proof.
-  local dispute="${dir}/dispute.json" opp=""
+  local dispute="${dir}/dispute.json"
   if [[ ! -r "$dispute" ]]; then
     echo "REFUSED: ${plan_id} has no record of the opponent (${dispute}). A monologue is a fine outcome, but it has to be written down: run scripts/lib/aid-brainstorm-opponent.sh, which records 'unreached' when the second model cannot be had." >&2
     return 1
   fi
-  opp="$(jq -r '.opponent // ""' "$dispute" 2>/dev/null)" || opp=""
+  local opp; opp="$(jq -r '.opponent // ""' "$dispute" 2>/dev/null)" || opp=""
   case "$opp" in
     answered|unreached) ;;
     *)
