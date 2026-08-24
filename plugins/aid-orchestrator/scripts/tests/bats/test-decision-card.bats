@@ -83,6 +83,56 @@ COMPLETE='{"lang":"cs","question":"Pustit fail-closed hned?","why_now":"Jinak vr
   [[ "$output" != *"seven"* ]]
 }
 
+# ── batches: the single planned stop asks everything at once (P088) ─────────
+
+@test "a batch renders every question under one opening line" {
+  run aid_decision_card_render "$(data '{"lang":"cs","questions":[
+    {"question":"první?","options":[{"key":"A","text":"a","recommended":true,"reason":"protože a"},{"key":"B","text":"b"}]},
+    {"question":"druhá?","options":[{"key":"A","text":"c","recommended":true,"reason":"protože c"},{"key":"B","text":"d"}]}]}')"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Potřebuji od tebe pár rozhodnutí: 2"* ]]
+  [[ "$output" == *"první?"* ]]
+  [[ "$output" == *"druhá?"* ]]
+}
+
+@test "AC6: a batch item with no reason is refused BY ITS POSITION" {
+  # "the third question has no reason" is fixable; "the batch is incomplete" is
+  # not, and that difference is the whole value of naming the position.
+  run aid_decision_card_render "$(data '{"lang":"cs","questions":[
+    {"question":"první?","options":[{"key":"A","text":"a","recommended":true,"reason":"protože"},{"key":"B","text":"b"}]},
+    {"question":"druhá?","options":[{"key":"A","text":"c","recommended":true},{"key":"B","text":"d"}]}]}')"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"question 2 of 2"* ]]
+  [[ "$output" == *"has no 'reason'"* ]]
+}
+
+@test "an empty batch is an announcement, not a batch" {
+  run aid_decision_card_render "$(data '{"lang":"cs","questions":[]}')"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing to decide"* ]]
+}
+
+@test "a batch of one is just a card — the new shape is not forced where it adds nothing" {
+  run aid_decision_card_render "$(data '{"lang":"cs","questions":[
+    {"question":"jediná?","options":[{"key":"A","text":"a","recommended":true,"reason":"protože"},{"key":"B","text":"b"}]}]}')"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Potřebuji od tebe pár rozhodnutí: 1"* ]]
+  [[ "$output" == *"jediná?"* ]]
+}
+
+@test "AC7: the Stop rule sees a batch, and sees when one of its questions is short" {
+  aid_decision_card_render "$(data '{"lang":"cs","questions":[
+    {"question":"první?","options":[{"key":"A","text":"a","recommended":true,"reason":"protože a"},{"key":"B","text":"b"}]},
+    {"question":"druhá?","options":[{"key":"A","text":"c","recommended":true,"reason":"protože c"},{"key":"B","text":"d"}]}]}')" "$TMP/batch.md"
+  run aid_decision_card_validate "$TMP/batch.md"
+  [ "$status" -eq 0 ]
+
+  grep -v '^Důvod: protože c' "$TMP/batch.md" > "$TMP/short.md"
+  run aid_decision_card_validate "$TMP/short.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"2 question(s) but only 1 reason(s)"* ]]
+}
+
 @test "AC9: the gate refuses an incomplete written card, with no Stop event anywhere in sight" {
   aid_decision_card_render "$(data "$COMPLETE")" "$TMP/card.md"
   # A turn that edited the card down to a bare question — the defect the gate

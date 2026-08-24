@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 464          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 468          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3281,4 +3281,67 @@ enforcements:
     description: "P086 Step 10 — IMP-179 three times over: a subagent's system prompt comes from the INSTALLED plugin, not the checkout it works in, so an Auditor and a Curator both acted on a protocol the repository had already changed. This tells the role agent the two DIFFER and gives both paths. It delivers a POINTER, never the file: injecting a working tree's file into an agent's instructions would let a checkout write them. Identical copies inject nothing, which is the common case. Wired only because the probe measured delivery — see docs/plans/P086-subagent-protocol-probe.md."
     recovery: "Nothing to recover; the notice is advisory. If it is wrong, the two files are named and can be diffed."
     test: "scripts/tests/bats/test-subagent-protocol-notice.bats"
+
+  # ── P088: the single planned stop ────────────────────────────────────────
+  - id: decision_batch_complete
+    type: 12
+    source: "scripts/lib/aid-decision-card.sh:_aid_dc_render_batch + aid_decision_card_validate"
+    instruction: "skills/communication.md (The Four Cards, card 2) + skills/brainstorming.md MUST 1"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That any answer is a good one. The batch is checked for SHAPE — every question carries options, a recommendation and a reason — never for whether the reason is a reason. And a question asked outside the card shape entirely is still invisible to it, which is the same limit the single card has."
+    description: "P088 Step 3 — the single planned stop asks everything at once, so the one-question card had nothing to open a batch with and the Stop rule looked at a page of real decisions and called it 'not a decision card'. A batch renders each question through the single-card path (so an incomplete item is refused BY ITS POSITION — fixable, unlike 'the batch is incomplete') and validation refuses a batch with fewer reasons than questions. A batch of one is just a card."
+    recovery: "The refusal names the question's position and the missing field."
+    test: "scripts/tests/bats/test-decision-card.bats"
+
+  - id: brainstorm_opponent_recorded_before_close
+    type: 1
+    source: "scripts/aid-brainstorm-state.sh:cmd_approve"
+    instruction: "skills/brainstorming.md (Opponent)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That a second platform was really called, that it answered, or that it is independent of the first — a file check cannot show any of that. What it does is make pretending DELIBERATE: the record has to be written on purpose. The artifact carries the model and provider so two instances of ONE model agreeing can be told apart afterwards from two models agreeing; nothing checks that at close time."
+    description: "P088 Step 5 — a run does not close without a record of the opponent. A MONOLOGUE CLOSES FINE (`unreached`); what cannot happen is closing with no record at all, because then 'two models went over this' is a sentence nobody can check. A damaged record is treated as none."
+    recovery: "Run scripts/lib/aid-brainstorm-opponent.sh; it records `unreached` when the second model cannot be had."
+    test: "scripts/tests/bats/test-brainstorm-summary.bats"
+
+  - id: brainstorm_vision_user_visible
+    type: 4
+    source: "scripts/aid-brainstorm-state.sh:cmd_init + cmd_gate"
+    instruction: "skills/brainstorming.md MUST 14"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "Degree 1 for the OPPONENT phase only, where code calls the gate. For the design phase it stays a checkable instruction — one number for both would lie. Nor does anything judge the vision: a point with a test that proves nothing passes."
+    description: "P088 Step 2 — the vision is owed by anything that changes behaviour a user meets (`--scope user_visible`), not only by a roadmap or multi-plan work. The original rule tied it to plan COUNT, which is a proxy for what matters: whether the two sides can afford to have meant different things. Only work nobody outside the code notices skips it, and the skip is recorded with its reason."
+    recovery: "vision-propose names each point that has no test; vision-reject --reason returns the run to its inputs."
+    test: "scripts/tests/bats/test-brainstorm-vision.bats"
+
+  - id: brainstorm_scope_list_before_plan
+    type: 7
+    source: n/a
+    instruction: "commands/aid-plan.md (Step 7a) + skills/brainstorming.md MUST 16"
+    severity: advisory
+    surface: llm-facing
+    status: planned
+    verdict: GAP
+    tier: n/a
+    enforcement_degree: 4
+    deadline: "2027-06-30"
+    deferred_by: "P088 Step 6"
+    deferred_reason: "The scope list is a chat checkpoint the PM answers on the spot; there is no file to check afterwards, so the mechanisms this plugin has (a rendered artifact, a state transition) do not fit it without inventing a receipt whose only purpose is to be checked. Registered at its honest strength — an instruction — rather than described as more, which is the failure mode P086 spent eleven steps removing."
+    not_guaranteed: "Everything. Nothing fails if a session writes the plan without showing the list first."
+    description: "P088 Step 6 — after the interim and BEFORE the plan is written, the PM sees in plain language what the plan will deliver and what it deliberately leaves out. The second half is the load-bearing one: scope is checked at its edges."
+    test: n/a
 

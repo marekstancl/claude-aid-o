@@ -6,6 +6,13 @@
 #   aid_decision_card_render   <data.json|-> [out_file]
 #   aid_decision_card_validate <card_file>
 #
+# A BATCH is the same card, N times, under one opening line. It exists because
+# the single planned stop (P088) asks everything at once: the one-question card
+# had nothing to open a batch with, so the Stop rule looked at a page of real
+# decisions and said "this turn does not ask for a decision". Data with a
+# `questions` array renders a batch; anything else renders one card, so a batch
+# of one is just a card.
+#
 # WHY THIS EXISTS
 #   Card 2 in skills/communication.md has been a skeleton to imitate: a turn
 #   that asked the PM for a decision with no options and no recommendation
@@ -66,6 +73,49 @@ _aid_dc_label() {
   yq -r ".languages.\"$1\".\"$2\" // \"\"" "$(_aid_dc_labels_file)" 2>/dev/null
 }
 
+# _aid_dc_render_batch <data> <out> — one opening line, then each question
+# rendered by the single-card path. A batch of one is a card: the new shape is
+# never forced where it adds nothing.
+_aid_dc_render_batch() {
+  local data="$1" out="$2"
+  local lang count
+  lang="$(printf '%s' "$data" | jq -r '.lang // ""')"
+  count="$(printf '%s' "$data" | jq -r '(.questions // []) | length')"
+
+  [[ -n "$lang" ]] || { echo "decision card: no 'lang' — the batch renders in the PM's language and the renderer will not guess it" >&2; return 1; }
+  local l_batch; l_batch="$(_aid_dc_label "$lang" batch)"
+  [[ -n "$l_batch" ]] || { echo "decision card: language '${lang}' has no labels in $(_aid_dc_labels_file)" >&2; return 1; }
+  if (( count < 1 )); then
+    echo "decision card: 'questions' is empty — a batch with nothing to decide is an announcement, not a batch" >&2
+    return 1
+  fi
+
+  local shown=$(( count > _AID_DC_MAX_OPTIONS ? _AID_DC_MAX_OPTIONS : count ))
+  local dropped=$(( count - shown ))
+
+  local body="" i=0
+  while (( i < shown )); do
+    local item card=""
+    item="$(printf '%s' "$data" | jq -c --argjson i "$i" --arg l "$lang" '.questions[$i] + {lang: $l}')"
+    card="$(printf '%s' "$item" | aid_decision_card_render - 2>&1)" || {
+      echo "decision card: question $((i+1)) of ${count} — ${card}" >&2
+      return 1
+    }
+    body+="${card}"$'\n\n'
+    i=$(( i + 1 ))
+  done
+
+  local head; head="$(printf '%s: %s' "$l_batch" "$count")"
+  (( dropped > 0 )) && head+="$(printf ' (+%d)' "$dropped")"
+  local all; all="${head}"$'\n\n'"${body%$'\n\n'}"
+
+  printf '%s\n' "$all"
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$all" > "$out" || { echo "decision card: cannot write ${out}" >&2; return 1; }
+  fi
+  return 0
+}
+
 # aid_decision_card_render <data.json|-> [out_file]
 #
 # Prints the card on stdout, and writes it to <out_file> as well when given —
@@ -79,6 +129,14 @@ aid_decision_card_render() {
   fi
   if ! printf '%s' "$data" | jq -e . >/dev/null 2>&1; then
     echo "decision card: the data is not valid JSON" >&2; return 1
+  fi
+
+  # A batch is N cards under one opening line. Each item owes exactly what a
+  # single card owes, and a failing item is named BY ITS POSITION — "the third
+  # question has no reason" can be fixed; "the batch is incomplete" cannot.
+  if printf '%s' "$data" | jq -e 'has("questions")' >/dev/null 2>&1; then
+    _aid_dc_render_batch "$data" "$out"
+    return $?
   fi
 
   local lang question why_now risk
@@ -156,8 +214,34 @@ aid_decision_card_validate() {
   done <<< "$langs"
 
   if [[ -z "$lang" ]]; then
+    # A batch opens with its own line; without this the Stop rule would look at
+    # a page of real decisions and call it "not a decision card".
+    local candidate2 l_batch=""
+    while IFS= read -r candidate2; do
+      [[ -n "$candidate2" ]] || continue
+      l_batch="$(_aid_dc_label "$candidate2" batch)"
+      [[ -n "$l_batch" ]] || continue
+      if grep -qF "${l_batch}:" "$file"; then lang="$candidate2"; break; fi
+    done <<< "$langs"
+  fi
+  if [[ -z "$lang" ]]; then
     echo "not a decision card: no language's opening line appears in ${file}" >&2
     return 3
+  fi
+
+  # In a batch every question owes what one card owes, so the counts must match:
+  # three questions and two reasons is one question short of a decision.
+  local l_batch2; l_batch2="$(_aid_dc_label "$lang" batch)"
+  if [[ -n "$l_batch2" ]] && grep -qF "${l_batch2}:" "$file"; then
+    local n_q n_r
+    n_q="$(grep -cF "$(_aid_dc_label "$lang" question):" "$file" || true)"
+    n_r="$(grep -cF "$(_aid_dc_label "$lang" reason):" "$file" || true)"
+    n_q="${n_q%%$'\n'*}"; n_r="${n_r%%$'\n'*}"
+    if [[ "$n_q" =~ ^[0-9]+$ ]] && [[ "$n_r" =~ ^[0-9]+$ ]] && (( n_r < n_q )); then
+      printf 'decision card batch %s is incomplete — %s question(s) but only %s reason(s)\n' \
+        "$file" "$n_q" "$n_r" >&2
+      return 1
+    fi
   fi
 
   local missing=() key

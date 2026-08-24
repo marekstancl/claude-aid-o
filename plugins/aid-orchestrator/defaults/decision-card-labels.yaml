@@ -13,6 +13,10 @@
 # The shapes are the card-2 skeleton in skills/communication.md, which stays
 # the authority for the card's structure. This file only names its lines.
 #
+# `batch` opens a BATCH of cards — the single planned stop asks everything at
+# once, so the one-question card had nothing to open it with and the Stop rule
+# could not see it (P088).
+#
 # **Last Updated:** 2026-08-24
 # =============================================================================
 version: 1
@@ -25,6 +29,7 @@ languages:
     reason: "Důvod"
     alternatives: "Alternativy"
     risk: "Riziko / co není ověřeno"
+    batch: "Potřebuji od tebe pár rozhodnutí"
   en:
     question: "I need your decision"
     why_now: "Why now"
@@ -32,3 +37,4 @@ languages:
     reason: "Because"
     alternatives: "Alternatives"
     risk: "Risk / what is unverified"
+    batch: "I need a few decisions from you"

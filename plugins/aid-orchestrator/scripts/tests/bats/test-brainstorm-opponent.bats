@@ -186,6 +186,48 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [[ "$output" == *"no record of what happened"* ]]
 }
 
+@test "AC8/AC9: an unreachable opponent is recorded with its attempt count, for the PM to decide on" {
+  approve_vision
+  export PATH="/usr/bin:/bin"
+  run_opponent
+  [ "$status" -eq 3 ]
+  local d="$TMP/out/dispute.json"
+  [ "$(jq -r .opponent "$d")" = "unreached" ]
+  [ "$(jq -r .attempts "$d")" = "1" ]
+  [ "$(jq -r .ask_pm "$d")" = "true" ]
+  [[ "$(jq -r .reason "$d")" == *"codex"* ]]
+}
+
+@test "after three unreachable attempts it stops asking and says so" {
+  # Without a cap, a provider having a bad afternoon becomes a loop of
+  # interruptions — worse than the monologue it was avoiding. Codex returned
+  # 529 three times in a row on the day this was written.
+  approve_vision
+  export PATH="/usr/bin:/bin"
+  run_opponent; [ "$status" -eq 3 ]
+  run_opponent; [ "$status" -eq 3 ]
+  run_opponent; [ "$status" -eq 3 ]
+  [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "true" ]
+
+  run_opponent
+  [ "$status" -eq 3 ]
+  [ "$(jq -r .attempts "$TMP/out/dispute.json")" = "4" ]
+  [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "false" ]
+  [[ "$output" == *"no longer asking"* ]]
+}
+
+@test "an answer records WHICH model and provider gave it" {
+  # So two instances of one model agreeing can be told from two models
+  # agreeing — the plan cannot prove independence, but it can make its absence
+  # visible afterwards.
+  approve_vision
+  fake_codex '{"agree":[{"point":"x","why":"y"}],"disagree":[],"missing":[]}'
+  run_opponent
+  [ "$status" -eq 0 ]
+  [ -n "$(jq -r .model "$TMP/out/dispute.json")" ]
+  [ "$(jq -r .provider "$TMP/out/dispute.json")" = "codex" ]
+}
+
 @test "the vision gate really stops the dispatch — no opponent runs on an unapproved vision" {
   fake_codex '{"agree":[{"point":"x","why":"y"}],"disagree":[],"missing":[]}'
   run_opponent

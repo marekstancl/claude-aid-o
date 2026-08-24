@@ -181,30 +181,71 @@ bash {plugin_path}/scripts/aid-brainstorm-state.sh vision-approve P{NNN}   # aft
 asking the PM. If the PM declines, go back to Step 2; never continue without a
 vision. Output: `=== Step 2a/9: Vision ===`
 
-### Step 3: Questions
-Ask 3-7 clarifying questions ONE at a time (multiple choice preferred).
-Cover: scope, users, constraints, patterns, success criteria. Output: `=== Step 3/9: Questions ===`
+### Step 3: The single planned stop
+This is the ONE place the flow waits for the PM. Present three things in one
+message (see `skills/brainstorming.md` → "The Single Planned Stop"):
 
-### Step 4: Approaches
-Propose 2-3 approaches with pros/cons/effort/risk. State recommendation.
-Ask PM to choose. Output: `=== Step 4/9: Approaches ===`
+1. **How you understood the brief** — two sections, `Ověřeno` (each claim with
+   the file and place it was checked in) and `Předpokládám`. No third section.
+2. **The vision** as thesis + test, when this run owes one:
+   ```bash
+   bash {plugin_path}/scripts/aid-brainstorm-state.sh show P{NNN}   # vision_required?
+   ```
+3. **Every question at once**, as a decision batch. Only the five kinds in
+   `skills/brainstorming.md` MUST 15 — what it is for, who for, risk accepted,
+   backwards compatibility, anything irreversible. Anything else you answer
+   yourself.
 
-### Step 5: Design
-Expand chosen approach: architecture, data model, API, implementation, testing, risks.
-Output: `=== Step 5/9: Design ===`
+If the PM leaves part of it unanswered, ask again for those parts only.
+**Never turn silence into an assumption** (MUST 17).
+Output: `=== Step 3/9: Zastavení ===`
 
-### Step 6: Sections
-Walk through design section by section, getting approval for each.
-Track: `[x] approved`, `[ ] pending`. Output: `=== Step 6/9: Sections ===`
+### Steps 4–7: The autonomous part
+No PM here. Approaches, design, section validation and the opponent run without
+stopping; agreements go straight into the interim, disagreements are collected
+for the result.
 
-### Step 7: Approval
-Run the cross-section-review cycle first (see `skills/brainstorming.md` → "Cross-Section Validation
-(Step 7)"): dispatch the verifier with focus=cross-section-review over the assembled approved
-sections, ground-truth-verify its claims, and present the consolidated cross-section verdict
-(drift / decision-propagation / completeness / dependency / effort). If the verdict has open
-findings, apply targeted fixes to the affected sections first. Then present the complete design
-summary and ask PM for final approval (Y/N/X).
-Output: `=== Step 7/9: Approval ===`
+```bash
+rc=0
+bash {plugin_path}/scripts/lib/aid-brainstorm-opponent.sh \
+  P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN} || rc=$?
+# rc=0 answered · rc=3 not reached → PRESENT IT AS A DECISION (exception 1),
+# capped at three attempts per run · rc=1 the vision gate refused, or nothing
+# could be recorded — stop and fix that.
+```
+
+The opponent gets **the brief**, not your conclusions: handing it your positions
+anchors it, and an opponent that agrees because it was told what to think is a
+second opinion in name only.
+
+Section validation stays (`section-review` critic + ground-truth re-verification
+by the author, MUST 5); what is gone is asking the PM to sign off each one.
+
+**The only other interruption** is a fundamental unknown no assumption can
+safely cover. Say that it IS an exception and why.
+Output: `=== Steps 4-7/9: Autonomně ===`
+
+### Step 7a: Scope list — the PM sees the work before it is written
+After the interim is written and BEFORE the plan is:
+
+- **What the plan will deliver** — bullets, plain language, no jargon. If it
+  runs past ten, that is a signal the plan is too big; say so.
+- **What it deliberately leaves out** — this half matters more. Scope is checked
+  at its EDGES; a list of contents alone reads as complete whatever is missing
+  from it.
+
+Goes in the chat, not on a page: it is a checkpoint answered on the spot, and
+the artifact belongs to the finished plan (step 8p).
+
+The PM accepts it, corrects it, or refuses it. **Refused → back to the stop in
+Step 3; the plan is not written.** Something added → it goes back through the
+autonomous part, it is not glued on.
+Output: `=== Step 7a/9: Rozsah ===`
+
+**Enforcement, stated honestly:** this is an INSTRUCTION. Nothing fails if a
+session writes the plan without showing the list first — the same weakest form
+`plan_artifact_rendered` had before the hook layer gave it a mechanism, and it
+is registered at that strength rather than described as more.
 
 ### Step 8: Document
 Delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).

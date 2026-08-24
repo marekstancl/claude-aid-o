@@ -127,6 +127,7 @@ Ask for any of these with `/aid-help <topic>`:
 /aid-help setup           → /aid-setup deep dive (modules, presets, integrations)
 /aid-help fsm             → 6-state FSM diagram, valid transitions, fsm-state.yaml format
 /aid-help hooks           → harness hooks: what AID enforces mechanically, and the switches
+/aid-help brainstorm      → jak brainstorming ptaní dávkuje a co řeší dva modely mezi sebou
 ```
 
 ### Topic: do
@@ -482,6 +483,38 @@ Valid transitions:
 State file: .aid-o/work/evidence/{id}/{run_id}/fsm-state.yaml
 Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
 ```
+
+### Topic: brainstorm
+
+Brainstorming se tě ptá na **jednom plánovaném místě**, ne na pěti. Mezi tím
+zastavením a výsledkem pracují dva modely.
+
+**To zastavení nese tři věci najednou:**
+
+1. **jak jsem zadání pochopil** — ve dvou sekcích, `Ověřeno` (u každého tvrzení,
+   kde se to ověřilo) a `Předpokládám`. Třetí sekce není. *Nezaručuje to, že v
+   první sekci je pravda — nikdo ta tvrzení se zdrojem neporovnává. Nutí to
+   ale každé tvrzení zařadit a uvést původ, takže nepodložené je vidět.*
+2. **vizi** (teze + jak se pozná, že platí), když ji běh dluží;
+3. **všechny otázky najednou**, jako dávku.
+
+**Ptá se tě jen na pět věcí:** k čemu to je, pro koho, jaké riziko bereš, smí se
+rozbít zpětná kompatibilita, a co nejde vzít zpátky. Cokoli jiného si modely
+vyřeší mezi sebou. Šestý druh otázky není opatrnost, je to starý výslech, který
+se vrací po jedné.
+
+**Vyruší tě znovu jen dvakrát:** když druhý model nejede (a to nejvýš třikrát za
+běh, pak už pokračuje sám a zapíše to), a když narazí na něco zásadního, co
+nejde bezpečně odhadnout — a řekne, že je to výjimka a proč.
+
+**Než se napíše plán** uvidíš, co dodá a co vědomě nedodá. Ta druhá půlka je
+důležitější: rozsah se kontroluje na hranicích.
+
+**Nezodpovězená otázka se nestává předpokladem.** Zeptá se znovu, jen na to,
+co zbylo — jinak by autonomní část rozhodla zrovna to, co jsi měl rozhodnout ty.
+
+**Co si nekupuješ:** když se oba modely shodnou na chybě, nedozvíš se to. Proto
+vize zůstává na tvém schválení.
 
 ### Topic: hooks
 

@@ -61,6 +61,10 @@ V
 
 dispute() { mkdir -p "$RUN_DIR"; printf '%s' "$1" > "$RUN_DIR/dispute.json"; }
 
+# The record a legitimate run always has by the time it closes: either the
+# opponent answered, or it could not be reached and that is written down.
+opponent_ran() { dispute '{"opponent":"answered","agree":[],"disagree":[],"missing":[],"to_pm":[],"held_back":0}'; }
+
 @test "AC27: every number on the page is counted from the run, not asserted" {
   start_run
   approve_vision
@@ -124,6 +128,7 @@ dispute() { mkdir -p "$RUN_DIR"; printf '%s' "$1" > "$RUN_DIR/dispute.json"; }
   run aid_brainstorm_summary_render P900 "$OUT"
   grep -q "Nedokončeno" "$OUT"
 
+  opponent_ran
   bash "$BS" approve P900 >/dev/null
   run aid_brainstorm_summary_render P900 "$OUT"
   grep -q "Odsouhlaseno" "$OUT"
@@ -145,6 +150,7 @@ dispute() { mkdir -p "$RUN_DIR"; printf '%s' "$1" > "$RUN_DIR/dispute.json"; }
   start_run
   approve_vision
   aid_brainstorm_summary_render P900 "$OUT"
+  opponent_ran
   bash "$BS" approve P900 >/dev/null
   run aid_brainstorm_summary_render P900 "$TMP/anywhere.html"
   [ "$status" -eq 0 ]
@@ -155,6 +161,7 @@ dispute() { mkdir -p "$RUN_DIR"; printf '%s' "$1" > "$RUN_DIR/dispute.json"; }
   start_run
   approve_vision
   aid_brainstorm_summary_render P900 "$OUT"
+  opponent_ran
   [ ! -f "$ROOT/.aid-o/plans/P900-vision.md" ]
   run bash "$BS" approve P900
   [ "$status" -eq 0 ]
@@ -171,13 +178,36 @@ dispute() { mkdir -p "$RUN_DIR"; printf '%s' "$1" > "$RUN_DIR/dispute.json"; }
   [ ! -f "$ROOT/.aid-o/plans/P900-vision.md" ]
 }
 
-@test "accepting a run that no opponent argued with says so out loud" {
+@test "AC11: a run the opponent could not be reached for still closes, and says so" {
+  start_run
+  approve_vision
+  aid_brainstorm_summary_render P900 "$OUT"
+  dispute '{"opponent":"unreached","reason":"codex not on PATH","agree":[],"disagree":[],"missing":[]}'
+  run bash "$BS" approve P900
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"monologue"* ]]
+}
+
+@test "AC10: a run with NO record of the opponent does not close at all" {
+  # A monologue is a fine outcome; an unrecorded one is not, because then
+  # "two models went over this" is a sentence nobody can check.
   start_run
   approve_vision
   aid_brainstorm_summary_render P900 "$OUT"
   run bash "$BS" approve P900
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"monologue"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no record of the opponent"* ]]
+  [ ! -f "$ROOT/.aid-o/plans/P900-vision.md" ]
+}
+
+@test "a damaged opponent record is not a record" {
+  start_run
+  approve_vision
+  aid_brainstorm_summary_render P900 "$OUT"
+  dispute '{"opponent":'
+  run bash "$BS" approve P900
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"damaged record"* ]]
 }
 
 @test "AC28: a run whose vision was never agreed cannot be accepted" {
