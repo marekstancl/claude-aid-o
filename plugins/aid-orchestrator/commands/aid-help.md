@@ -506,8 +506,8 @@ K tobě jde spor jen tehdy, když je z těch pěti druhů. „Oponent nesouhlasi
 o sobě není důvod utrácet tvoji pozornost, a šestý druh otázky není opatrnost,
 je to starý výslech, který se vrací po jedné.
 
-**Vyruší tě znovu jen dvakrát:** když druhý model nejede (a to nejvýš třikrát za
-běh, pak už pokračuje sám a zapíše to), a když narazí na něco zásadního, co
+**Vyruší tě znovu jen dvakrát:** když druhý model nejede - a to nejvýš třikrát za
+běh, pak už to ani nezkusí a pokračuje sám se zápisem, a když narazí na něco zásadního, co
 nejde bezpečně odhadnout — a řekne, že je to výjimka a proč.
 
 **Než se napíše plán** uvidíš, co dodá a co vědomě nedodá. Ta druhá půlka je

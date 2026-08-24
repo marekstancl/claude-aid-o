@@ -218,6 +218,15 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [ "$(jq -r .attempts "$TMP/out/dispute.json")" = "3" ]
   [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "false" ]
   [[ "$output" == *"no longer asking"* ]]
+
+  # And the cap stops the ATTEMPT, not just the asking: a fourth call must not
+  # reach the opponent at all, or "capped at three attempts" is a counter
+  # wearing the word cap.
+  run_opponent
+  [ "$status" -eq 3 ]
+  [ "$(jq -r .attempts "$TMP/out/dispute.json")" = "3" ]
+  [[ "$output" == *"attempts already spent"* ]]
+  [[ "$output" == *"remove"* ]]
 }
 
 @test "an answer records WHICH model and provider gave it" {

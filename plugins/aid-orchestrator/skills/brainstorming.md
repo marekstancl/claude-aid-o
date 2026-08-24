@@ -111,7 +111,7 @@ The PM is interrupted again ONLY here:
 
 | Exception | When | Why it is not the old interrogation |
 |---|---|---|
-| **Opponent unreachable** | the second model did not answer AND `dispute.json` says `ask_pm: true` | the PM chose to be asked rather than get a silent monologue. After three attempts `ask_pm` turns false and the run carries on as a recorded monologue — a provider having a bad afternoon must not become a loop of interruptions |
+| **Opponent unreachable** | the second model did not answer AND `dispute.json` says `ask_pm: true` | the PM chose to be asked rather than get a silent monologue. Three attempts per run, and the cap stops the ATTEMPT, not only the asking: once spent, a further call does not reach the opponent at all and says so. A provider having a bad afternoon must not become a loop of interruptions |
 | **A fundamental unknown** | something surfaced that no assumption can safely cover | say it IS an exception and why; a design resting on an invisible assumption is worse than one more question |
 
 Anything else is a rule 15 violation wearing a disguise.

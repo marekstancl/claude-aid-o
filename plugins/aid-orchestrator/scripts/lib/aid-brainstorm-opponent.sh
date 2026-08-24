@@ -23,10 +23,10 @@
 #     defect in it.
 #   - An opponent that cannot be reached does not become agreement, and since
 #     P088 it does not silently become a monologue either: the caller PRESENTS
-#     it to the PM as a decision (skills/brainstorming.md). Capped at three
-#     attempts per run — without a cap, a provider having a bad afternoon turns
-#     into a loop of interruptions, which is worse than the monologue it was
-#     trying to avoid.
+#     it to the PM as a decision (skills/brainstorming.md) while `ask_pm` is
+#     true. Three attempts per run, checked BEFORE the attempt — without a cap,
+#     a provider having a bad afternoon turns into a loop of interruptions,
+#     which is worse than the monologue it was trying to avoid.
 #   - An answer that is not in the required shape is treated as UNREACHED, for
 #     the same reason: prose that could not be parsed is not consent.
 #   - "They agreed" is the OPPONENT'S OWN CLAIM about the brief, not a
@@ -165,7 +165,17 @@ aid_brainstorm_opponent_run() {
     return 1
   fi
 
+  # THE CAP IS CHECKED BEFORE THE ATTEMPT, not after it. An earlier version only
+  # stopped ASKING once the cap was spent, so a fourth call still ran detection
+  # and dispatch and recorded `attempts: 4` — "capped at three attempts per run"
+  # was a sentence the code did not keep (found in review, twice: first the
+  # off-by-one, then this). A cap that does not prevent the attempt is a counter.
   local prior; prior="$(_aid_bo_attempts "$dispute")"
+  if (( prior >= _AID_BO_MAX_ATTEMPTS )); then
+    echo "opponent: ${prior} attempts already spent on this run (cap ${_AID_BO_MAX_ATTEMPTS}) — not trying again; this brainstorm is a recorded monologue. To spend more, remove ${dispute} deliberately." >&2
+    return 3
+  fi
+
   local avail rc=0
   avail="$(bash "${_AID_BO_LIB_DIR}/aid-audit-independence.sh" detect --required cross_provider 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
