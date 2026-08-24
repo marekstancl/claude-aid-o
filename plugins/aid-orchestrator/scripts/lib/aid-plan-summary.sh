@@ -157,6 +157,23 @@ _aps_reuse() {
   printf '%s/%s' "$evidenced" "$founding"
 }
 
+# aid_plan_summary_renderable <plan> — 0 when this plan CAN have a page, 1 when
+# it cannot. Exposed because a second caller needs the same answer: the Stop
+# rule that demands a page (lib/aid-artifact-obligation.sh) must not demand one
+# for a plan this renderer refuses.
+#
+# Found live 2026-08-24: the hook demanded a page for a plan with no `## Goal`,
+# the renderer refused to produce it, and the two mechanisms left a finding
+# nobody could act on. An enforcement must not require the impossible — and the
+# way to avoid it is to ASK the authority, not to keep a second copy of its
+# rule in the rule that depends on it.
+aid_plan_summary_renderable() {
+  local plan="${1-}"
+  [[ -f "$plan" ]] || return 1
+  local goal; goal="$(_aps_section "$plan" "Goal")"
+  [[ -n "${goal//[[:space:]]/}" ]]
+}
+
 aid_plan_summary_render() {
   local plan="${1-}" out_path="${2-}"
   if [[ -z "$plan" || -z "$out_path" ]]; then
@@ -168,12 +185,11 @@ aid_plan_summary_render() {
     return 1
   fi
 
-  local goal
-  goal="$(_aps_section "$plan" "Goal")"
-  if [[ -z "${goal//[[:space:]]/}" ]]; then
+  if ! aid_plan_summary_renderable "$plan"; then
     echo "aid_plan_summary_render: the plan has no '## Goal' with content — refusing to render a page whose core block would be empty (${plan})" >&2
     return 1
   fi
+  local goal; goal="$(_aps_section "$plan" "Goal")"
 
   local plan_id status band_line band band_reason
   plan_id="$(_aid_fm_get "$plan" id)"; plan_id="${plan_id:-?}"

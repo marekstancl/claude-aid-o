@@ -13,8 +13,16 @@ model: sonnet
 > `commands/aid-run.md` §PRE-FLIGHT already uses:
 >
 > ```bash
+> _aid_installed="$(jq -r '.plugins["aid-orchestrator@claude-aid-o"][0].version' \
+>                   ~/.claude/plugins/installed_plugins.json 2>/dev/null)"
 > AID_PLUGIN_PATH="$(yq -r '.plugin_path' "$(git rev-parse --show-toplevel)/.aid-o/config/plugin.yaml")"
-> test -f "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" || echo "stale plugin_path — run /aid-init to refresh"
+> # The workspace PINS a version and old copies stay on disk, so "the file is
+> # there" is not "the file is current": on 2026-08-24 a session ran its first
+> # commands against 2.89.1 while 2.90.0 was the installed one. Compare, do not
+> # assume.
+> [[ -n "$_aid_installed" && "$AID_PLUGIN_PATH" != *"/$_aid_installed" ]] \
+>   && AID_PLUGIN_PATH="$HOME/.claude/plugins/cache/claude-aid-o/aid-orchestrator/$_aid_installed"
+> test -f "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" || echo "no plugin at $AID_PLUGIN_PATH — run /aid-init"
 > ```
 
 

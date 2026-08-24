@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.90.0** (current) — brainstorming se ptá dvakrát místo pěti; spor o metodu si dva modely rozhodnou samy
+- **v2.90.1** (current) — co první reálná plánovací session našla o vydání před ní
+- **v2.90.0** — brainstorming se ptá dvakrát místo pěti; spor o metodu si dva modely rozhodnou samy
 - **v2.89.3** — 84 commands in nine instruction files could not be run as written
-- **v2.89.2** — a brand-new project could not be given its first plan id, found by the first real /aid-plan run in one
 - **v2.87.0** — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.

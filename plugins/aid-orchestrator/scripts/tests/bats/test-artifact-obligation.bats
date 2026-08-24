@@ -31,7 +31,9 @@ setup() {
   export AID_PROJECT_ROOT="$ROOT"
   PLAN="$ROOT/.aid-o/plans/P900-hooks.md"
   PAGE="$ROOT/.aid-o/work/evidence/P900/plan-summary-artifact.html"
-  printf -- '---\nid: P900\ntype: plan\n---\n\n# Plan: fixture\n' > "$PLAN"
+  # A plan that OWES a page is one that can have one: since the rule asks the
+  # renderer, a plan the renderer refuses owes nothing (see the case below).
+  printf -- '---\nid: P900\ntype: plan\n---\n\n# Plan: fixture\n\n## Goal\n\nThe fixture has a goal, so it can be rendered.\n' > "$PLAN"
 }
 
 teardown() {
@@ -63,6 +65,17 @@ render_page() {
   run bash "$GATE" --plan "$PLAN"
   [ "$status" -eq 1 ]
   [[ "$output" == *"OLDER than the plan"* ]]
+}
+
+@test "a plan the RENDERER refuses owes no page — enforcement must not require the impossible" {
+  # Found live 2026-08-24: this rule demanded a page for a plan with no
+  # `## Goal`, aid_plan_summary_render refused to produce one, and the session
+  # was left with a finding nobody could act on.
+  local nogoal="$ROOT/.aid-o/plans/P905-nogoal.md"
+  printf -- '---\nid: P905\ntype: plan\n---\n\n# Plan: no goal\n\n## Context\n\nNothing.\n' > "$nogoal"
+  run bash "$GATE" --plan "$nogoal"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cannot be rendered into a page"* ]]
 }
 
 @test "a file that is not a numbered plan owes nothing" {

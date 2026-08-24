@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.90.1] — 2026-08-24
+
+> What the first real planning session found about the release before it.
+
+### Fixed
+- **An enforcement demanded something the renderer refuses to produce** — the `Stop` rule wanted a rendered PM page for every plan written in a session, and `aid_plan_summary_render` refuses a plan with no `## Goal` because a page whose core block is empty is worse than none. For such a plan the two mechanisms contradicted each other and left the session with a finding nobody could act on. The rule now ASKS the renderer (`aid_plan_summary_renderable`, one authority, two callers) instead of keeping a second copy of its rule: a plan that cannot be rendered owes no page, and the reason is recorded.
+- **`user_visible` was unreachable from the flow it was written for** — v2.90.0 widened the vision to anything a user notices and taught `aid-brainstorm-state.sh` the new scope, but `commands/aid-plan.md` still offered the old three. Observed live: the flow filed a new CLI flag as `single_plan`, which is how the vision quietly stops being owed.
+- **The workspace pins a plugin version and old copies stay on disk** — so "the file is there" was never "the file is current". A session on 2026-08-24 ran its first commands against 2.89.1 while 2.90.0 was installed, and the v2.89.3 resolution block checked only existence. It now compares the pinned path against the version `installed_plugins.json` actually records and prefers the installed one.
+
+### Changed
+- **The testbed no longer makes the enforcement it verifies cry wolf** — `bin/verify.sh` re-seeds its fixture plans on every run, so their pages were older than the plans by construction and the next real session was met with findings about them. It renders their pages after seeding, and clears the scratch brainstorm runs its own checks create.
+
 ## [2.90.0] — 2026-08-24
 
 > Brainstorming stopped interrogating and started arguing with itself.

@@ -42,6 +42,8 @@ _AID_ARTIFACT_OBLIGATION_SH_LOADED=1
 _AID_AO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-roots.sh
 source "${_AID_AO_LIB_DIR}/aid-roots.sh"
+# shellcheck source=aid-plan-summary.sh
+source "${_AID_AO_LIB_DIR}/aid-plan-summary.sh"
 
 # The page commands/aid-plan.md step 8p renders, in the one place that spells
 # it, so the instruction and the check cannot drift apart.
@@ -68,6 +70,16 @@ aid_artifact_obligation_check() {
     return 3
   }
   plan_id="${BASH_REMATCH[1]}"
+
+  # A plan the renderer REFUSES has no page to owe. Found live 2026-08-24: this
+  # rule demanded one for a plan with no `## Goal`, the renderer refused to
+  # produce it, and the session was left with a finding nobody could act on. An
+  # enforcement must not require the impossible, and the renderer is the
+  # authority on what it can render — so it is asked, not second-guessed.
+  if ! aid_plan_summary_renderable "$plan"; then
+    echo "${base} cannot be rendered into a page (lib/aid-plan-summary.sh refuses it), so it owes none" >&2
+    return 3
+  fi
 
   local page; page="$(aid_artifact_obligation_page "$plan_id")" || {
     echo "cannot resolve the state root — the page location is unknown" >&2
