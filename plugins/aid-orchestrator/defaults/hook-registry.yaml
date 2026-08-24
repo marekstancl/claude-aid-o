@@ -25,9 +25,14 @@
 #               3 = code delivers data into the prompt (delivery, NOT a
 #               guarantee), 4 = prose. A row without a degree is a row whose
 #               author has not said whether it enforces or merely delivers.
-#   failure     open | closed. `open` = a broken rule is logged and the run
-#               continues; `closed` = a broken rule denies. Fail-closed rows
-#               additionally require the canary (see below).
+#   failure     open | closed — and it decides more than what happens to a
+#               BROKEN rule. `closed` is the only declaration that may stop a
+#               turn: a rule that exits 2 blocks only if its row says `closed`
+#               AND the canary has verified this installation. A `failure: open`
+#               row that exits 2 is a misdeclaration; the refusal is recorded
+#               and ignored, because a rule able to stop work must say so where
+#               a reader can find it. `open` also means a broken or overrunning
+#               rule is logged and the run continues; `closed` means it denies.
 #   timeout_s   per-rule wall clock. Falls back to defaults.timeout_s.
 #   lib         path (plugin-root relative) of the file holding the handler.
 #   handler     bash function name. Contract: reads the event JSON on stdin,
@@ -65,4 +70,23 @@ budget:
   # skipped and audited — a hook sits in the hot path of every turn.
   total_s: 15
 
-rules: []
+# The versions the ecosystem MEASURED its hook sheets on
+# (/ecosystem/specs/agent-hooks/). A canary run on any other version still
+# proves what it observed; what it cannot borrow from the sheet is the rest of
+# the matrix (which run modes send which events), so the verdict records the
+# version and says the matrix is unverified for it.
+measured_versions:
+  claude-code: "2.1.226"
+  codex: "0.146.0"
+
+rules:
+  - id: hook_canary
+    event: SessionStart
+    owner: any
+    degree: 4
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-hook-canary.sh
+    handler: aid_hook_canary
+    description: leaves one audit line per session start so the canary can prove a harness really calls AID
+

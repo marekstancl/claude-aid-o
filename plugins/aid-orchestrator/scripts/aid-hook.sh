@@ -225,9 +225,18 @@ dispatch() {
     if ! _hook_owner_matches "$owner"; then
       _hook_audit "$event" "$id" skip "owner=${owner}, context=${HOOK_CONTEXT}"; continue
     fi
-    if [[ "$failure" == "closed" && "$trust_ok" -eq 0 ]]; then
-      failure="open"
-      _hook_audit "$event" "$id" degraded "fail-closed rule degraded to fail-open — no canary verdict"
+    # WHO MAY STOP A TURN, decided once per rule. `failure: closed` is the
+    # ONLY declaration that can block, and only while the canary says hooks
+    # demonstrably run here. A `failure: open` rule that exits 2 is a
+    # misdeclaration, not a veto — it is recorded and ignored, because a rule
+    # that can stop work has to say so in the registry where it can be read.
+    local may_block=0
+    if [[ "$failure" == "closed" ]]; then
+      if (( trust_ok )); then
+        may_block=1
+      else
+        _hook_audit "$event" "$id" degraded "fail-closed rule degraded to fail-open — no canary verdict"
+      fi
     fi
 
     local out="" err="" rc=0
@@ -246,21 +255,27 @@ dispatch() {
         fi
         ;;
       2)
-        denied=1; denials+="${reason}"$'\n'
-        _hook_audit "$event" "$id" deny "$reason"
+        if (( may_block )); then
+          denied=1; denials+="${reason}"$'\n'
+          _hook_audit "$event" "$id" deny "$reason"
+        elif [[ "$failure" == "closed" ]]; then
+          _hook_audit "$event" "$id" deny_suppressed "no canary verdict — would have refused: ${reason}"
+        else
+          _hook_audit "$event" "$id" deny_ignored "rule is declared failure: open and may not refuse a turn — would have refused: ${reason}"
+        fi
         ;;
       3)
         _hook_audit "$event" "$id" skip "$reason"
         ;;
       124)
         _hook_audit "$event" "$id" timeout "exceeded ${timeout_s}s"
-        if [[ "$failure" == "closed" ]]; then
+        if (( may_block )); then
           denied=1; denials+="rule ${id} exceeded its ${timeout_s}s budget and is fail-closed"$'\n'
         fi
         ;;
       *)
         _hook_audit "$event" "$id" error "$reason"
-        if [[ "$failure" == "closed" ]]; then
+        if (( may_block )); then
           denied=1; denials+="rule ${id} failed (${reason}) and is fail-closed"$'\n'
         fi
         ;;

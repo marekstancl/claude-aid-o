@@ -115,6 +115,22 @@ run_hook() { # run_hook <event> [json]
   grep -q '"outcome":"degraded"' "$AUDIT"
 }
 
+@test "a fail-open rule may not refuse a turn — the refusal is recorded and ignored" {
+  mkdir -p "$TMP/state/hooks"
+  echo '{"verified":true,"tool":"bats","version":"fixture"}' > "$TMP/state/hooks/trust.json"
+  write_registry "$(row card Stop any rule_deny open)"
+  run_hook Stop
+  [ "$status" -eq 0 ]
+  grep -q '"outcome":"deny_ignored"' "$AUDIT"
+}
+
+@test "a degraded fail-closed rule records the refusal it would have made" {
+  write_registry "$(row card Stop any rule_deny closed)"
+  run_hook Stop
+  [ "$status" -eq 0 ]
+  grep -q '"outcome":"deny_suppressed"' "$AUDIT"
+}
+
 @test "AC3: a controller-owned rule does not run inside a subagent" {
   write_registry "$(row controller_only Stop controller rule_context)"
   run_hook Stop '{"session_id":"s1","agent_type":"aid-orchestrator:implementer"}'
