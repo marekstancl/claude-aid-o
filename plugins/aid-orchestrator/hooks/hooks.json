@@ -1,0 +1,39 @@
+{
+  "description": "AID orchestrator harness hooks — one entry point (scripts/aid-hook.sh), one registry (defaults/hook-registry.yaml). Both Claude Code and Codex read a plugin-root hooks/hooks.json in this shape, so the two tools are declared once.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact|resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/aid-hook.sh\" SessionStart",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/aid-hook.sh\" PreCompact",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/aid-hook.sh\" Stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

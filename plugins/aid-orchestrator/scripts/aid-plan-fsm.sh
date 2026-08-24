@@ -1352,9 +1352,23 @@ _pfsm_warn_stale_hooks() {
 #     with its exact recovery. This command never deletes a directory it did
 #     not create.
 # ---------------------------------------------------------------------------
-_pfsm_create_plan_worktree() {
-  local root="$1" plan_id="$2" plan_branch="$3"
-  local wt; wt="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+# ---------------------------------------------------------------------------
+# _pfsm_worktree_add <root> <path> <branch> <recovery_hint> [base_ref]
+#
+# The MECHANICAL half of "give this branch its own tree" — no plan-state, no
+# ledger, no compensation. Extracted (P086 Step 6) so the plan's execution
+# worktree and the two PHASE worktrees (brainstorm, generation) share one
+# creation sequence instead of growing a second one; the only thing the two
+# callers disagree about is how a stuck directory is recovered, which is what
+# <recovery_hint> carries.
+#
+# With <base_ref>, <branch> is CREATED at that ref when it does not exist yet;
+# without it, <branch> must already exist. Prints the path on stdout.
+# Returns 0 created-or-already-there, 1 git refused, 4 a foreign directory sits
+# at the path (never deleted here).
+# ---------------------------------------------------------------------------
+_pfsm_worktree_add() {
+  local root="$1" wt="$2" branch="$3" hint="$4" base="${5:-}"
 
   # Hand-deleted directories leave the registration behind; pruning first makes
   # that harmless (Edge Case) and is a no-op otherwise.
@@ -1371,29 +1385,46 @@ _pfsm_create_plan_worktree() {
   fi
 
   if [[ -e "$wt" ]]; then
-    echo "PRECONDITION FAIL: ${wt} already exists but is NOT a registered worktree (a crash plus a manual prune leaves exactly this). plan-start never deletes a directory it did not create. Recover with: git worktree prune  (then re-run), or 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"' once you have removed or moved ${wt}." >&2
+    echo "PRECONDITION FAIL: ${wt} already exists but is NOT a registered worktree (a crash plus a manual prune leaves exactly this). ${hint}" >&2
     return 4
   fi
 
   mkdir -p "$(dirname "$wt")" 2>/dev/null || true
 
   local add_err="" arc=0
-  add_err="$(git -C "$root" worktree add "$wt" "$plan_branch" 2>&1)" || arc=$?
+  if [[ -n "$base" ]] && ! git -C "$root" show-ref --verify --quiet "refs/heads/${branch}"; then
+    add_err="$(git -C "$root" worktree add -b "$branch" "$wt" "$base" 2>&1)" || arc=$?
+  else
+    add_err="$(git -C "$root" worktree add "$wt" "$branch" 2>&1)" || arc=$?
+  fi
   if [[ "$arc" -ne 0 ]]; then
     # Disk-space / network-mount failures can leave a partial admin entry
     # behind; clear it so the compensating branch delete is not blocked and a
     # retry starts clean.
     git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
     git -C "$root" worktree prune >/dev/null 2>&1 || true
-    echo "PRECONDITION FAIL: git worktree add '${wt}' ${plan_branch} failed (rc=${arc}). git said:" >&2
+    echo "PRECONDITION FAIL: git worktree add '${wt}' ${branch} failed (rc=${arc}). git said:" >&2
     printf '%s\n' "$add_err" >&2
-    echo "Existing worktrees (a duplicate checkout of ${plan_branch} is the usual cause):" >&2
+    echo "Existing worktrees (a duplicate checkout of ${branch} is the usual cause):" >&2
     git -C "$root" worktree list >&2 2>/dev/null || true
     return 1
   fi
 
-  _pfsm_warn_stale_hooks "$root"
   printf '%s' "$wt"
+  return 0
+}
+
+_pfsm_create_plan_worktree() {
+  local root="$1" plan_id="$2" plan_branch="$3"
+  local wt; wt="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
+
+  local out="" rc=0
+  out="$(_pfsm_worktree_add "$root" "$wt" "$plan_branch" \
+    "plan-start never deletes a directory it did not create. Recover with: git worktree prune  (then re-run), or 'aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"' once you have removed or moved ${wt}.")" || rc=$?
+  [[ "$rc" -ne 0 ]] && return "$rc"
+
+  _pfsm_warn_stale_hooks "$root"
+  printf '%s' "$out"
   return 0
 }
 
@@ -10551,6 +10582,118 @@ cmd_plan_rollback() {
   return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE WORKTREES — brainstorming and generation (P086 Step 6)
+#
+# WHY: until now only IMPLEMENTATION had a tree of its own. Brainstorming and
+# EPIC generation ran in the PM's checkout, so two planning streams shared one
+# index and one HEAD — and generation's commits (the plan, the lifecycle
+# manifest, whatever EPIC files a project tracks) are exactly what two streams
+# collide on.
+#
+# WHAT A PHASE COPY ISOLATES, AND WHAT IT DELIBERATELY DOES NOT. The TREE is
+# separate; the STATE is not, and is not meant to be. `.aid-o/` is gitignored,
+# so it is never checked out into a linked worktree, and lib/aid-roots.sh
+# resolves every state read and write to the primary checkout whichever tree
+# the command runs in. Runs, evidence and the plan-id counter therefore stay
+# shared and single-authority — which is the point: two brainstorms must not
+# fork the counter.
+#
+# NOT PLAN-STATE'S WORKTREE. A phase copy exists before a plan-state does, is
+# recorded nowhere, and is torn down by whoever asked for it. It is a scratch
+# checkout, not a tracked resource — which is why it uses _pfsm_worktree_add
+# directly and none of plan-start's compensation machinery.
+#
+# IT NEVER BLOCKS. Every failure below degrades to "work in the primary
+# checkout, and here is why concurrency is not safe right now": a planning
+# stream that cannot start because git would not hand out a second tree is a
+# worse outcome than a planning stream that is merely not parallel.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _pfsm_phase_worktree_path <root> <phase> <plan_id> — pure string derivation,
+# so a consumer can find the tree from the phase and the id alone.
+_pfsm_phase_worktree_path() {
+  printf '%s/.aid-worktrees/%s-%s' "$1" "$2" "$3"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_plan_scratch <plan_id> --phase brainstorm|generation [--release]
+#                            [--project-root <path>]
+#
+# Prints, on stdout, THE DIRECTORY THIS PHASE SHOULD RUN IN — the phase copy
+# when there is one, the primary checkout when there is not. Callers `cd` to
+# whatever it prints and never branch on the exit code for that decision.
+#
+# Exit 0 always, except a usage error (2): a mistyped phase is a bug in the
+# caller and must not degrade quietly into "ran in the wrong tree".
+# ---------------------------------------------------------------------------
+cmd_plan_scratch() {
+  local plan_id="" phase="" release=0 root_arg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --phase)        phase="${2:-}"; shift 2 ;;
+      --release)      release=1; shift ;;
+      --project-root) root_arg="${2:-}"; shift 2 ;;
+      -*) echo "ERROR: plan-scratch: unknown flag '$1'" >&2; return 2 ;;
+      *)  [[ -z "$plan_id" ]] && plan_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" || -z "$phase" ]]; then
+    echo "Usage: aid-plan-fsm.sh plan-scratch <plan_id> --phase brainstorm|generation [--release] [--project-root <path>]" >&2
+    return 2
+  fi
+  case "$phase" in
+    brainstorm|generation) ;;
+    *) echo "ERROR: plan-scratch: --phase must be 'brainstorm' or 'generation' (got '${phase}')." >&2; return 2 ;;
+  esac
+
+  local root; root="$(_pfsm_resolve_project_root "$root_arg")" || return 2
+
+  # A roadmap or an ad-hoc topic has no plan number, so there is nothing to
+  # name a tree after and nothing that two streams can collide over yet.
+  if [[ ! "$plan_id" =~ ^P[0-9]+$ ]]; then
+    echo "NOTE: '${plan_id}' is not a numbered plan — no working copy is created for it; ${phase} runs in the primary checkout." >&2
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  local wt branch
+  wt="$(_pfsm_phase_worktree_path "$root" "$phase" "$plan_id")"
+  branch="${phase}/${plan_id}"
+
+  if [[ "$release" -eq 1 ]]; then
+    git -C "$root" worktree prune >/dev/null 2>&1 || true
+    if _pfsm_worktree_registered "$root" "$wt"; then
+      # No --force: a copy with uncommitted work is not something to discard
+      # on a caller's behalf.
+      if ! git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
+        echo "WARNING: the ${phase} copy ${wt} was not removed — it most likely holds uncommitted work. Inspect it, then: git -C '${root}' worktree remove '${wt}'  (add --force to discard). The branch ${branch} is left alone either way." >&2
+      fi
+    elif [[ -e "$wt" ]]; then
+      echo "WARNING: ${wt} exists but git does not know it as a worktree (a crash plus a manual prune leaves exactly this). Nothing was deleted — AID never removes a directory it did not create. Clean it up with: git -C '${root}' worktree prune  (then remove or move ${wt} yourself)." >&2
+    fi
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  local base out="" rc=0
+  base="$(aid_target_branch)"
+  out="$(_pfsm_worktree_add "$root" "$wt" "$branch" \
+    "AID never deletes a directory it did not create. Recover with: git -C '${root}' worktree prune  (then re-run), or remove/move ${wt} yourself." \
+    "$base")" || rc=$?
+
+  if [[ "$rc" -ne 0 ]]; then
+    echo "WARNING: no separate working copy for ${phase} of ${plan_id} (see the failure above) — it runs in the primary checkout ${root} instead. That works; what is not safe while it lasts is running a second planning stream at the same time." >&2
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  _pfsm_warn_stale_hooks "$root"
+  printf '%s\n' "$out"
+  return 0
+}
+
 _aid_plan_fsm_usage() {
   cat <<'EOF'
 Usage: aid-plan-fsm.sh <subcommand> [args...]
@@ -10564,6 +10707,7 @@ Subcommands:
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
+  plan-scratch <plan_id> --phase brainstorm|generation [--release] [--project-root <path>]
   inventory [--apply] [--plan <id>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--recreate-worktree --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
@@ -10582,6 +10726,7 @@ main() {
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
+    plan-scratch) cmd_plan_scratch "$@" ;;
     inventory) cmd_inventory "$@" ;;
     # Internal: the resolved default mode for NEW plans, as "<mode>\t<reason>".
     # Deliberately undocumented in the usage text — it is a resolver other

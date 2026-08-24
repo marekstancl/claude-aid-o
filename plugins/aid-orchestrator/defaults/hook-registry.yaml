@@ -1,0 +1,68 @@
+# =============================================================================
+# AID Orchestrator — Hook Registry (P086 Step 1)
+# =============================================================================
+# Every harness hook rule AID runs is one row here. `scripts/aid-hook.sh` is
+# the only entry point the harness calls; adding behaviour for a new event is
+# a row in this file, never an edit to that script.
+#
+# THIS IS NOT THE ENFORCEMENT REGISTRY. `defaults/enforcement-registry.yaml`
+# records what AID enforces and how strongly; this file records what the
+# harness runs and with which failure mode. A hook rule appears in both: here
+# as a runnable row, there as an enforcement with its degree and its
+# "what this does not guarantee" line.
+#
+# Row schema
+#   id          snake_case, unique. Also the handle for AID_HOOKS_OFF_RULES.
+#   event       harness event name, exactly as the harness spells it
+#               (SessionStart, PreCompact, Stop, …). Declared for the harness
+#               in `hooks/hooks.json`; the two must agree or the rule never
+#               runs.
+#   owner       controller | agent | any — which side of the dispatch may run
+#               it. MANDATORY: plugin hooks run inside subagents too, so a
+#               default of "any" would silently widen every rule.
+#   degree      1–4 on the ecosystem scale (/ecosystem/specs/agent-hooks/):
+#               1 = code decides, 2 = code checks the answer and refuses it,
+#               3 = code delivers data into the prompt (delivery, NOT a
+#               guarantee), 4 = prose. A row without a degree is a row whose
+#               author has not said whether it enforces or merely delivers.
+#   failure     open | closed. `open` = a broken rule is logged and the run
+#               continues; `closed` = a broken rule denies. Fail-closed rows
+#               additionally require the canary (see below).
+#   timeout_s   per-rule wall clock. Falls back to defaults.timeout_s.
+#   lib         path (plugin-root relative) of the file holding the handler.
+#   handler     bash function name. Contract: reads the event JSON on stdin,
+#               prints injection text on stdout, exits 0 (pass/inject),
+#               2 (deny, reason on stderr) or 3 (not applicable, reason on
+#               stderr). Any other exit is a broken rule.
+#   disabled    true switches the row off permanently. Audited like the
+#               environment switches.
+#   description one line, present tense.
+#
+# THE CANARY BINDING IS HARD
+#   No fail-closed row takes effect until `scripts/aid-hook-verify.sh` has
+#   recorded a successful canary run for this tool and version. Until then
+#   every `failure: closed` row degrades to `open` and the degradation is
+#   audited. Blocking work with a mechanism nobody has shown to run is worse
+#   than not blocking at all.
+#
+# ESCAPE HATCHES (all three audited, all three readable from outside the
+# blocked flow)
+#   AID_HOOKS_OFF=1               every rule off — the emergency brake
+#   AID_HOOKS_OFF_RULES=a[,b]     named rows off, the rest keep running
+#   disabled: true                permanent, in this file
+#
+# An unreadable registry runs NO rules. It never runs all of them.
+#
+# **Last Updated:** 2026-08-24
+# =============================================================================
+version: 1
+
+defaults:
+  timeout_s: 5
+
+budget:
+  # Whole-dispatch wall clock. Rules still pending when it is spent are
+  # skipped and audited — a hook sits in the hot path of every turn.
+  total_s: 15
+
+rules: []
