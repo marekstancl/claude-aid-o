@@ -3224,7 +3224,7 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     enforcement_degree: 1
-    not_guaranteed: "That the opponent is right, or that AID is. Above all: two models agreeing on something WRONG is not caught by any of this — a stated boundary of the design, not a defect in it. Nor does anything force the controller to dispatch an opponent at all; what is enforced is that a dispatch which did not happen cannot be reported as agreement."
+    not_guaranteed: "Three things. Two models agreeing on something WRONG is not caught by any of this — a stated boundary of the design, not a defect in it. Nothing forces the controller to dispatch an opponent at all; what IS enforced is that a dispatch which did not happen cannot be reported as agreement. And an `agree` entry is the OPPONENT'S OWN CLAIM about the brief — the shape is validated, the correspondence to a position the brief actually held is not, so an opponent agreeing with something nobody said is written down unchallenged."
     description: "P086 Step 8 — an opponent that cannot be reached, fails, or answers outside the required shape is recorded as `unreached` and the brainstorm continues as a monologue that says so. Prose that could not be parsed is never counted as consent — the same refusal lib/aid-audit-independence.sh makes for audits. What both models hold is written without troubling the PM; disputes go to the PM as decisions, at most five, with the remainder counted in the artifact."
     recovery: "dispute.json carries the reason the opponent was not reached. Fix that (usually codex auth) and re-run; nothing else in the run is invalidated."
     test: "scripts/tests/bats/test-brainstorm-opponent.bats"
@@ -3239,8 +3239,8 @@ enforcements:
     verdict: ALIGNED
     tier: t1
     enforcement_degree: 1
-    not_guaranteed: "That the PM read the page before accepting the run. `approve` is the PM's act as recorded by whoever runs the command; nothing here can tell an informed acceptance from a hurried one."
-    description: "P086 Step 9 — a brainstorm's artifacts stay in .aid-o/work/brainstorm/<plan_id>/ until the PM accepts the run, and only then is the vision promoted next to the plans. A run whose vision was never agreed cannot be accepted at all. The page reads `Nedokončeno` until then: a half-finished brainstorm that looks finished is worse than one that is visibly unfinished."
+    not_guaranteed: "That the PM read the page before accepting the run. `approve` is the PM's act as recorded by whoever runs the command; nothing here can tell an informed acceptance from a hurried one — only that a page existed for them to read."
+    description: "P086 Step 9 — a brainstorm's artifacts stay in .aid-o/work/brainstorm/<plan_id>/ until the PM accepts the run, and only then is the vision promoted next to the plans. Enforced from BOTH ends, because one end was walkable: `approve` refuses a run whose vision was never agreed AND a run with no rendered page for the acceptance to rest on, and the renderer itself refuses to write an unaccepted run's page outside the working directory (without that, the promotion rule was a sentence a caller could walk past by passing another path). The page reads `Nedokončeno` until then: a half-finished brainstorm that looks finished is worse than one that is visibly unfinished."
     recovery: "approve names why it refused (an unagreed vision). Agree the vision or reject it; both are recorded."
     test: "scripts/tests/bats/test-brainstorm-summary.bats"
 
@@ -3277,7 +3277,7 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     enforcement_degree: 3
-    not_guaranteed: "That the subagent reads the repository's copy, or prefers it. Degree 3 is a DELIVERY — measured to arrive (Claude Code 2.1.238, in hookSpecificOutput.additionalContext; bare stdout arrives nowhere) and nothing more. Pasting the protocol verbatim into the dispatch prompt is still the stronger move where it genuinely matters. Re-measure after any Claude Code upgrade: the version is part of the claim."
+    not_guaranteed: "That the subagent does anything at all. The notice deliberately does NOT tell it to follow the checkout's copy: a pointer that says 'read this and follow it' hands whoever controls the checkout the same channel as injecting the file would, one step removed (found in review of this very step). It reports the divergence and names both paths. Degree 3 is a DELIVERY — measured to arrive (Claude Code 2.1.238, in hookSpecificOutput.additionalContext; bare stdout arrives nowhere) and nothing more. Pasting the protocol verbatim into the dispatch prompt is still the stronger move where it genuinely matters. Re-measure after any Claude Code upgrade: the version is part of the claim."
     description: "P086 Step 10 — IMP-179 three times over: a subagent's system prompt comes from the INSTALLED plugin, not the checkout it works in, so an Auditor and a Curator both acted on a protocol the repository had already changed. This tells the role agent the two DIFFER and gives both paths. It delivers a POINTER, never the file: injecting a working tree's file into an agent's instructions would let a checkout write them. Identical copies inject nothing, which is the common case. Wired only because the probe measured delivery — see docs/plans/P086-subagent-protocol-probe.md."
     recovery: "Nothing to recover; the notice is advisory. If it is wrong, the two files are named and can be diffed."
     test: "scripts/tests/bats/test-subagent-protocol-notice.bats"

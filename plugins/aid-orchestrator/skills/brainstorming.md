@@ -38,7 +38,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 11. **Initial analysis before first question** — see Initial Analysis Phase
 12. **Delegate plan writing to plan-writing skill** — brainstorming collects and validates; plan-writing writes the document with quality gates
 13. **Recommend Docker Compose when design reveals 2+ services** — PM can decline; if declined, record as constraint and do not raise again
-14. **Agree the vision before designing** — on a roadmap or work split across several plans, no design phase starts until the PM has approved a vision whose every point carries a test (see Vision Step)
+14. **Agree the vision before designing** — on a roadmap or work split across several plans, do not start designing until the PM has approved a vision whose every point carries a test. For the OPPONENT this is a closed door in code; for the design phase it is this rule plus `gate --phase design`, which you must call (see Vision Step)
 
 ---
 
@@ -65,8 +65,14 @@ decision, not an absence.
 
 It is not the Initial Analysis Phase. That one establishes what the PM MEANT;
 this one establishes the **boundaries the later plans are built inside**, and
-the PM approves it even when the models agree — the one place a brainstorm
-stops and waits.
+the PM approves it even when the models agree.
+
+**How far the door actually closes, stated plainly.** `gate --phase opponent` is
+called by code (`lib/aid-brainstorm-opponent.sh`), so the opponent genuinely
+cannot run on an unapproved vision. `gate --phase design` is called by *you*,
+following this rule — a checkable instruction, not a closed door. Both are worth
+having; only one of them stops anything by itself, and pretending otherwise is
+the kind of claim this plan exists to remove.
 
 **Form: thesis + test.** A point with nothing that could show it false is a
 slogan, and a slogan cannot be disagreed with later:
@@ -105,8 +111,13 @@ plan, which is the expensive place to discover a wrong premise.
 Write the draft positions to a brief (one line per position), then:
 
 ```bash
+rc=0
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
-  P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN}
+  P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN} || rc=$?
+# rc=0 answered · rc=3 not reached, CARRY ON · rc=1 the vision gate refused, or
+# nothing could be recorded — stop and fix that. Absorb rc=3 explicitly: under
+# `set -e` an unavailable opponent would otherwise end the run it is meant to
+# let continue.
 ```
 
 **Read the result the way it is meant:**

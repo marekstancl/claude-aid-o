@@ -273,6 +273,20 @@ cmd_approve() {
   local root dir vision promoted=""
   root="$(aid_state_root)" || return 1
   dir="$(state_dir "$plan_id")" || return 1
+
+  # A run cannot be accepted before the PM has been given something to read.
+  # Without this, "accepted" could mean a state field was set while the page the
+  # decision rests on was never rendered.
+  if ! compgen -G "${dir}/*.html" > /dev/null; then
+    echo "REFUSED: ${plan_id} has no rendered page in ${dir} — there is nothing the acceptance could be based on. Render it first: source scripts/lib/aid-brainstorm-summary.sh && aid_brainstorm_summary_render ${plan_id} ${dir}/brainstorm-summary-artifact.html" >&2
+    return 1
+  fi
+  # The opponent is optional by design (it may be unavailable), so its absence
+  # is said out loud rather than refused — an accepted monologue is a real
+  # outcome, an accepted monologue nobody noticed is not.
+  if [[ ! -r "${dir}/dispute.json" ]]; then
+    echo "NOTE: no opponent ran for ${plan_id} — this design was a monologue." >&2
+  fi
   vision="$(get "$sf" vision_file)"
   if [[ -n "$vision" && -r "$vision" ]]; then
     mkdir -p "${root}/.aid-o/plans" || { echo "ERROR: cannot create ${root}/.aid-o/plans" >&2; return 1; }

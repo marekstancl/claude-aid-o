@@ -166,6 +166,26 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "unreached" ]
 }
 
+@test "an agree entry that is not an object is not a shape this code accepts" {
+  approve_vision
+  fake_codex '{"agree":["delete production"],"disagree":[],"missing":[]}'
+  run_opponent
+  [ "$status" -eq 3 ]
+  [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "unreached" ]
+}
+
+@test "a dispute artifact that cannot be written is a failure, not a recorded monologue" {
+  # "The artifact says so" has to be a fact about a file. A run that could not
+  # write its record must not report one.
+  approve_vision
+  export PATH="/usr/bin:/bin"        # opponent unavailable -> the unreached path
+  chmod 500 "$TMP/out"
+  run_opponent
+  chmod 700 "$TMP/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no record of what happened"* ]]
+}
+
 @test "the vision gate really stops the dispatch — no opponent runs on an unapproved vision" {
   fake_codex '{"agree":[{"point":"x","why":"y"}],"disagree":[],"missing":[]}'
   run_opponent

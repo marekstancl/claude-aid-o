@@ -28,6 +28,15 @@
 # IT DOES NOT PUBLISH — the Artifact tool is a session-level act owned by the
 # controller, the same boundary every other caller of this renderer draws.
 #
+# WHERE IT WILL WRITE, AND WHY THAT IS PART OF THE MECHANISM
+#   Before the PM accepts the run, the page may only be written INSIDE the run's
+#   own working directory. Without that, "artifacts leave the working directory
+#   only once the PM accepts" was a sentence in scripts/aid-brainstorm-state.sh
+#   that this renderer could walk straight past by being handed
+#   `docs/brainstorm.html` — a page of an unaccepted run sitting in versioned
+#   documentation, which is exactly what consensus K3 forbids. After acceptance
+#   the caller may write it anywhere.
+#
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
 # **Last Updated:** 2026-08-24
@@ -179,6 +188,18 @@ aid_brainstorm_summary_render() {
         && printf 'Rozhodni spory níž. Bez nich brainstorming neuzavřu.' \
         || printf 'Přečti stránku a řekni, jestli to takhle uzavřít.' )" \
     '{summary: $s, core: $c, ask: $a}')"
+
+  # The promotion rule, enforced where the writing happens.
+  if [[ "$run_state" != "approved" ]]; then
+    local out_abs dir_abs
+    out_abs="$(cd "$(dirname "$out_path")" 2>/dev/null && pwd -P)/$(basename "$out_path")" \
+      || out_abs="$out_path"
+    dir_abs="$(cd "$dir" 2>/dev/null && pwd -P)" || dir_abs="$dir"
+    if [[ "$out_abs" != "${dir_abs}/"* ]]; then
+      echo "aid_brainstorm_summary_render: ${plan_id} has not been accepted by the PM (run_state=${run_state}), so its page may only be written inside ${dir} — refusing ${out_path}. An unaccepted run's page outside the working directory reads as an agreed outcome." >&2
+      return 1
+    fi
+  fi
 
   mkdir -p "$(dirname "$out_path")" 2>/dev/null
   aid_artifact_render outcome "$facts_json" "$prose_json" "$out_path"

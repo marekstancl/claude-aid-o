@@ -46,12 +46,24 @@ rule() { run bash -c "printf '%s' '$1' | bash -c 'source \"$PLUGIN_ROOT/scripts/
   live_role "# Auditor — this checkout's version, which differs"
   rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"DIFFER from this repository's copy"* ]]
+  [[ "$output" == *"DIFFER from this checkout's copy"* ]]
   [[ "$output" == *"$PLUGIN_ROOT/agents/auditor.md"* ]]
   [[ "$output" == *"$ROOT/plugins/aid-orchestrator/agents/auditor.md"* ]]
 }
 
-@test "the notice is a POINTER — the role file's contents are never injected" {
+@test "the notice never instructs the agent to follow the checkout's copy" {
+  # A pointer that says "read this and follow it" hands a repository the same
+  # channel as injecting the file would, with one extra step. The notice reports
+  # the divergence and asks for nothing.
+  live_role "# Auditor — this checkout's version"
+  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NEITHER copy is automatically authoritative"* ]]
+  [[ "$output" != *"follow it"* ]]
+  [[ "$output" != *"authoritative here"* ]]
+}
+
+@test "the role file's contents are never injected" {
   # Not a style preference: injecting a working tree's file into an agent's
   # instructions would let a checkout write them.
   live_role "# Auditor
@@ -109,5 +121,5 @@ SECRET-SENTINEL-DO-NOT-INJECT: this line must never reach a prompt."
   run bash -c "AID_HOOK_AUDIT='$TMP/a.jsonl' bash '$PLUGIN_ROOT/scripts/aid-hook.sh' SubagentStart < '$TMP/event.json' > '$TMP/out.json'"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.hookSpecificOutput.hookEventName' "$TMP/out.json")" = "SubagentStart" ]
-  [[ "$(jq -r '.hookSpecificOutput.additionalContext' "$TMP/out.json")" == *"DIFFER from this repository"* ]]
+  [[ "$(jq -r '.hookSpecificOutput.additionalContext' "$TMP/out.json")" == *"DIFFER from this checkout"* ]]
 }

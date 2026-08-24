@@ -31,8 +31,10 @@ setup() {
   )
   export AID_PROJECT_ROOT="$ROOT"
   export AID_PLUGIN_PATH="$PLUGIN_ROOT"
-  OUT="$TMP/brainstorm-artifact.html"
   RUN_DIR="$ROOT/.aid-o/work/brainstorm/P900"
+  # Inside the run directory, because that is the only place an UNACCEPTED
+  # run's page may be written — see the promotion boundary below.
+  OUT="$RUN_DIR/brainstorm-summary-artifact.html"
   # shellcheck disable=SC1090
   source "$PLUGIN_ROOT/scripts/lib/aid-brainstorm-summary.sh"
 }
@@ -128,14 +130,54 @@ dispute() { mkdir -p "$RUN_DIR"; printf '%s' "$1" > "$RUN_DIR/dispute.json"; }
   ! grep -q "Nedokončeno" "$OUT"
 }
 
+@test "AC28: an unaccepted run's page may not be written outside its working directory" {
+  # Otherwise "artifacts leave the working directory only once the PM accepts"
+  # is a sentence the renderer walks past by being handed another path.
+  start_run
+  approve_vision
+  run aid_brainstorm_summary_render P900 "$TMP/anywhere.html"
+  [ "$status" -eq 1 ]
+  [ ! -f "$TMP/anywhere.html" ]
+  [[ "$output" == *"has not been accepted by the PM"* ]]
+}
+
+@test "AC28: once accepted, the page may be written anywhere" {
+  start_run
+  approve_vision
+  aid_brainstorm_summary_render P900 "$OUT"
+  bash "$BS" approve P900 >/dev/null
+  run aid_brainstorm_summary_render P900 "$TMP/anywhere.html"
+  [ "$status" -eq 0 ]
+  [ -f "$TMP/anywhere.html" ]
+}
+
 @test "AC28: the vision reaches the plans directory only once the PM accepts the run" {
   start_run
   approve_vision
+  aid_brainstorm_summary_render P900 "$OUT"
   [ ! -f "$ROOT/.aid-o/plans/P900-vision.md" ]
   run bash "$BS" approve P900
   [ "$status" -eq 0 ]
   [[ "$output" == *"promoted:"* ]]
   [ -f "$ROOT/.aid-o/plans/P900-vision.md" ]
+}
+
+@test "a run with no page for the PM to read cannot be accepted" {
+  start_run
+  approve_vision
+  run bash "$BS" approve P900
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no rendered page"* ]]
+  [ ! -f "$ROOT/.aid-o/plans/P900-vision.md" ]
+}
+
+@test "accepting a run that no opponent argued with says so out loud" {
+  start_run
+  approve_vision
+  aid_brainstorm_summary_render P900 "$OUT"
+  run bash "$BS" approve P900
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"monologue"* ]]
 }
 
 @test "AC28: a run whose vision was never agreed cannot be accepted" {

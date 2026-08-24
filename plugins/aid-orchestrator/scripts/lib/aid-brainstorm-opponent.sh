@@ -26,6 +26,11 @@
 #     lib/aid-audit-independence.sh makes for audits.
 #   - An answer that is not in the required shape is treated as UNREACHED, for
 #     the same reason: prose that could not be parsed is not consent.
+#   - "They agreed" is the OPPONENT'S OWN CLAIM about the brief, not a
+#     comparison this code performs. Nothing here checks that an `agree` entry
+#     corresponds to a position the brief actually held, so an opponent that
+#     agrees with something nobody said writes it down unchallenged. The shape
+#     is validated; the correspondence is not.
 #
 # WHAT IS REUSED, AND WHAT IS NOT
 #   The Codex transport is `_run_codex_isolated` from lib/aid-c3-dispatch.sh —
@@ -92,15 +97,24 @@ _aid_bo_valid() {
   jq -e 'type == "object"
          and (.agree | type == "array")
          and (.disagree | type == "array")
-         and all(.disagree[]; has("point") and has("aid_position") and has("opponent_position"))' \
+         and ((.missing // []) | type == "array")
+         and all(.agree[]; type == "object" and has("point"))
+         and all(.disagree[]; type == "object"
+                 and has("point") and has("aid_position") and has("opponent_position"))' \
      "$1" >/dev/null 2>&1
 }
 
 # _aid_bo_write_unreached <out> <reason>
+#   Returns 1 when it could not write. "The artifact records that the opponent
+#   was not reached" has to be a fact about a file, not about an intention: a
+#   full disk would otherwise leave the run claiming a record it does not have.
 _aid_bo_write_unreached() {
   jq -n --arg r "$2" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{opponent: "unreached", reason: $r, created_at: $at,
-      agree: [], disagree: [], missing: []}' > "$1"
+      agree: [], disagree: [], missing: []}' > "$1" 2>/dev/null || {
+    echo "opponent: could not write ${1} — the run has no record of what happened" >&2
+    return 1
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -132,7 +146,7 @@ aid_brainstorm_opponent_run() {
   local avail rc=0
   avail="$(bash "${_AID_BO_LIB_DIR}/aid-audit-independence.sh" detect --required cross_provider 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    _aid_bo_write_unreached "$dispute" "$avail"
+    _aid_bo_write_unreached "$dispute" "$avail" || return 1
     echo "opponent not reached — this brainstorm is a monologue and the artifact says so: ${avail}" >&2
     return 3
   fi
@@ -146,7 +160,7 @@ aid_brainstorm_opponent_run() {
     "${tmp}/events.jsonl" "${tmp}/stderr.txt" "${tmp}/answer.txt" || drc=$?
 
   if [[ "$drc" -ne 0 || ! -s "${tmp}/answer.txt" ]]; then
-    _aid_bo_write_unreached "$dispute" "the opponent did not answer (exit ${drc})"
+    _aid_bo_write_unreached "$dispute" "the opponent did not answer (exit ${drc})" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent not reached (exit ${drc}) — continuing as a monologue" >&2
     return 3
@@ -155,7 +169,7 @@ aid_brainstorm_opponent_run() {
   # A fenced answer is still an answer; anything that is not one object is not.
   sed -e 's/^```json$//' -e 's/^```$//' "${tmp}/answer.txt" > "${tmp}/answer.json"
   if ! _aid_bo_valid "${tmp}/answer.json"; then
-    _aid_bo_write_unreached "$dispute" "the opponent answered outside the required shape — an answer that cannot be read is not agreement"
+    _aid_bo_write_unreached "$dispute" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     echo "opponent answered outside the required shape — treated as not reached" >&2
     return 3
@@ -167,7 +181,11 @@ aid_brainstorm_opponent_run() {
        agree: (.agree // []), disagree: (.disagree // []), missing: (.missing // []),
        to_pm: ((.disagree // [])[:$cap]),
        held_back: (((.disagree // []) | length) - $cap | if . < 0 then 0 else . end)}' \
-     "${tmp}/answer.json" > "$dispute"
+     "${tmp}/answer.json" > "$dispute" 2>/dev/null || {
+    rm -rf "$tmp"
+    echo "opponent: the answer could not be written to ${dispute} — nothing is recorded, so nothing is claimed" >&2
+    return 1
+  }
   rm -rf "$tmp"
 
   local agreed disputed held
