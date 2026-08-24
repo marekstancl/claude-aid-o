@@ -15,6 +15,13 @@ setup() {
   E2J="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
   GATE="$AID_PLUGIN_PATH/scripts/gates/aid-contract-validate.sh"
   TEST_DIR="$(mktemp -d)"; cd "$TEST_DIR"
+  # A plan always lives inside a project. Since v2.88.2 an unresolvable project
+  # root is no longer a silently skipped reuse-evidence replay but a STRICT
+  # violation ("the claim stands unverified"), so a fixture in a bare tmpdir
+  # fails on its environment rather than on the grammar it is testing. The
+  # plan-state marker is the documented escape in lib/aid-roots.sh: a directory
+  # carrying it is honoured as a project root as-given, without a git repo.
+  mkdir -p .aid-o/work/plan-state
 }
 teardown() { rm -rf "$TEST_DIR"; }
 
