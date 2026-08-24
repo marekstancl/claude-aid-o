@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.89.0** (current) — AID stops asking the model to obey and starts running its own code in the harness's lifecycle, and a brainstorm argues with a second model instead of talking to itself
+- **v2.89.1** (current) — a Stop rule that could refuse the same turn forever, found by the first live run of v2.89.0
+- **v2.89.0** — AID stops asking the model to obey and starts running its own code in the harness's lifecycle, and a brainstorm argues with a second model instead of talking to itself
 - **v2.88.2** — two obligations that could switch themselves off in silence, and a band table that disagreed with itself
-- **v2.88.1** — the standards map carries its own path patterns, so a project is judged by its own layout instead of this repository's
 - **v2.87.0** — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.

@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.89.1] — 2026-08-24
+
+> A refusing Stop rule that never let the session end.
+
+### Fixed
+- **A `Stop` rule could refuse the same turn forever** — a refusal sends the model back to work, and when it does not satisfy the rule the next `Stop` refuses again. Measured, not theorised: the first live run of v2.89.0 against a real Claude Code session wrote a plan without its page and was refused **ten times** before the session was killed by hand. The harness marks that state with `stop_hook_active` (false on the first `Stop`, true on every one after a hook sent the model back — captured from Claude Code 2.1.238), and no rule may refuse a turn carrying it. Honoured in the dispatcher rather than in each handler: it is a property of the event, not of any rule, and a rule author who forgot it would ship the loop again.
+- **The plan-lint suite has been red since v2.88.2** — that release deliberately turned "the reuse-evidence replay could not resolve a project root" from a silent skip into a blocking violation, and two cases write their fixture plan into a bare tmpdir, so they have failed on their environment rather than on the Files grammar they test. The fixture was what was stale: `setup()` now creates the plan-state marker `lib/aid-roots.sh` documents for exactly this. The suite is `aid-tier: t2`, so this was red in the nightly portfolio and never on the merge path.
+
 ## [2.89.0] — 2026-08-24
 
 > The layer that turns asking into enforcing, and a brainstorm that argues with itself.

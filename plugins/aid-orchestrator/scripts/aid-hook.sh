@@ -47,8 +47,10 @@
 #
 # THE CANARY BINDING (Step 2), AND EXACTLY HOW STRONG IT IS
 #   `failure: closed` rows take effect only while the trust file records a
-#   SUCCESSFUL and RECENT canary. Otherwise they degrade to fail-open and the
-#   degradation is audited.
+#   SUCCESSFUL and RECENT canary, and never on a turn the harness says is
+#   ALREADY being continued by a hook (`stop_hook_active`) — that is how a
+#   refusing Stop rule would otherwise never let a session end. Both
+#   degradations are audited.
 #
 #   "Recent" and not "for this tool and version", deliberately: this process
 #   cannot tell which harness is calling it — neither tool puts a marker in the
@@ -304,6 +306,18 @@ dispatch() {
   HOOK_CONTEXT="${_ctx%%$'\t'*}"
   HOOK_CONTEXT_SOURCE="${_ctx##*$'\t'}"
 
+  # NO RULE MAY BLOCK A TURN THAT IS ALREADY BEING CONTINUED BY A HOOK.
+  # A refusal on `Stop` sends the model back to work; if it cannot satisfy the
+  # rule, the next `Stop` refuses again and the session never ends. The harness
+  # marks that state with `stop_hook_active`, and honouring it belongs HERE
+  # rather than in each handler: it is a property of the event, not of any rule,
+  # and a rule author who forgot it would ship the loop.
+  local no_block=0
+  if [[ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" == "true" ]]; then
+    no_block=1
+    _hook_audit "$event" "*" degraded "stop_hook_active — the turn is already being continued by a hook, so no rule may refuse it again"
+  fi
+
   local budget_total
   budget_total="$(yq -r '.budget.total_s // 15' "$REGISTRY")"
 
@@ -351,7 +365,7 @@ dispatch() {
     # misdeclaration, not a veto — it is recorded and ignored, because a rule
     # that can stop work has to say so in the registry where it can be read.
     local may_block=0
-    if [[ "$failure" == "closed" ]]; then
+    if [[ "$failure" == "closed" && "$no_block" -eq 0 ]]; then
       if (( trust_ok )); then
         may_block=1
       else
@@ -386,7 +400,9 @@ dispatch() {
           denied=1; denials+="${reason}"$'\n'
           _hook_audit "$event" "$id" deny "$reason"
         elif [[ "$failure" == "closed" ]]; then
-          _hook_audit "$event" "$id" deny_suppressed "no canary verdict — would have refused: ${reason}"
+          local why="no canary verdict"
+          (( no_block )) && why="the turn is already being continued by a hook"
+          _hook_audit "$event" "$id" deny_suppressed "${why} — would have refused: ${reason}"
         else
           _hook_audit "$event" "$id" deny_ignored "rule is declared failure: open and may not refuse a turn — would have refused: ${reason}"
         fi

@@ -160,6 +160,25 @@ run_hook() { # run_hook <event> [json]
   grep -q '"outcome":"degraded"' "$AUDIT"
 }
 
+@test "no rule may refuse a turn the harness is already continuing because of a hook" {
+  # Without this the layer ships a loop, and v2.89.0 DID: a live session that
+  # wrote a plan without its page was refused TEN times before it was killed by
+  # hand. MEASURED on Claude Code 2.1.238 — the Stop payload carries
+  # `stop_hook_active`, false on the first Stop and true on every one after a
+  # hook sent the model back to work. The guard was verified against those
+  # captured payloads, not against this fixture alone.
+  mkdir -p "$TMP/state/hooks"
+  echo "{\"verified\":true,\"tool\":\"bats\",\"version\":\"fixture\",\"checked_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$TMP/state/hooks/trust.json"
+  write_registry "$(row card Stop any rule_deny closed)"
+
+  run_hook Stop '{"session_id":"s1"}'
+  [ "$status" -eq 2 ]
+
+  run_hook Stop '{"session_id":"s1","stop_hook_active":true}'
+  [ "$status" -eq 0 ]
+  grep -q 'already being continued by a hook' "$AUDIT"
+}
+
 @test "AC3: a controller-owned rule does not run inside a subagent" {
   write_registry "$(row controller_only Stop controller rule_context)"
   run_hook Stop '{"session_id":"s1","agent_type":"aid-orchestrator:implementer"}'
