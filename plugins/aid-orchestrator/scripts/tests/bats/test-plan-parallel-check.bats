@@ -19,18 +19,20 @@ setup() {
 }
 teardown() { cd /; rm -rf "$TEST_DIR"; }
 
-# _plan <risk> <step-spec>...   step-spec = "<group>|<bullet>[;<bullet>]"
+# _plan <risk> <step-spec>...   step-spec = "<group>[@<iface>[,<iface>]]|<bullet>[;<bullet>]"
 _plan() {
   local risk="$1"; shift
-  local n=0 spec group bullets b
+  local n=0 spec group ifaces bullets b
   { printf -- '---\nid: P904\ntype: regular\nrisk: %s\nlifecycle_strict: true\n---\n' "$risk"
     printf '# Plan: P904\n\n## Implementation Steps\n\n'
     for spec in "$@"; do
       n=$((n+1))
       group="${spec%%|*}"; bullets="${spec#*|}"
+      ifaces=""; [[ "$group" == *@* ]] && { ifaces="${group#*@}"; group="${group%%@*}"; }
       printf '### Step %d: work %d\n\n**Objective:** do the thing.\n\n**Files:**\n' "$n" "$n"
       while IFS= read -r b; do [[ -n "$b" ]] && printf -- '- %s\n' "$b"; done < <(printf '%s\n' "${bullets//;/$'\n'}")
       [[ "$group" != "NONE" ]] && printf '\n**Parallel group:** %s\n' "$group"
+      [[ -n "$ifaces" ]] && printf '\n**Shared interfaces:** %s\n' "$ifaces"
       printf '\n'
     done
   } > "$PLAN"
@@ -133,4 +135,21 @@ _plan() {
 @test "parallel: a missing plan file is a usage error, not a pass" {
   run "$CHECK" /nonexistent/plan.md
   [ "$status" -eq 2 ]
+}
+
+# ── the second dimension: interfaces (P087 Step 3) ──────────────────────────
+@test "parallel: AC7 — two steps in one wave naming the same interface collide, however different their files" {
+  _plan low 'wave-1@/api/orders|Modify: `src/a.ts` — a' 'wave-1@api/orders/|Modify: `src/b.ts` — b'
+  run "$CHECK" "$PLAN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shares an interface"* ]]
+  [[ "$output" == *"api/orders"* ]]
+  [[ "$output" == *"Step 1"* && "$output" == *"Step 2"* ]]
+}
+
+@test "parallel: different interfaces in one wave pass, and the field is optional (AC9)" {
+  _plan low 'wave-1@/api/orders, orders.schema|Modify: `src/a.ts` — a' 'wave-1@/api/users|Modify: `src/b.ts` — b' 'wave-1|Modify: `src/c.ts` — c'
+  run "$CHECK" "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS"* ]]
 }

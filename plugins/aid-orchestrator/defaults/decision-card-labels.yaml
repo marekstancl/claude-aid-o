@@ -17,7 +17,11 @@
 # once, so the one-question card had nothing to open it with and the Stop rule
 # could not see it (P088).
 #
-# **Last Updated:** 2026-08-24
+# `blocked` opens card 3 (Blocked or failed). It is here so the Stop rule that
+# refuses to end a turn on a half-done step (P087) can recognise an explicit
+# hand-over in the PM's language instead of hard-coding one.
+#
+# **Last Updated:** 2026-08-25
 # =============================================================================
 version: 1
 
@@ -30,6 +34,7 @@ languages:
     alternatives: "Alternativy"
     risk: "Riziko / co není ověřeno"
     batch: "Potřebuji od tebe pár rozhodnutí"
+    blocked: "Zastaveno"
   en:
     question: "I need your decision"
     why_now: "Why now"
@@ -38,3 +43,4 @@ languages:
     alternatives: "Alternatives"
     risk: "Risk / what is unverified"
     batch: "I need a few decisions from you"
+    blocked: "Stopped"

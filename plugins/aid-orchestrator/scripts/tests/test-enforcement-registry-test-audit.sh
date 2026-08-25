@@ -134,6 +134,13 @@ declare -A DECLARED_AMENDMENTS=(
   # repointed from records (plans, archived docs) to the shipped instruction
   # surfaces that actually carry the rule. None was deleted, and no path was
   # allowlisted to make a row pass.
+  # P087 lifted the sequential brake and re-examined the branch-config row:
+  # max_parallel_one is retired (removed_scoped) with its replacement guards
+  # named; plan_parallel_group_disjoint gained the interface dimension and a
+  # runtime consumer; gate_config_from_branch records the narrowed delivery.
+  ["max_parallel_one"]="P087 Step 4 — brake retired; replacement guards named"
+  ["plan_parallel_group_disjoint"]="P087 Step 3 — interface dimension + dispatch-time consumer recorded"
+  ["gate_config_from_branch"]="P087 Step 6 — narrowed delivery recorded (gate_script_in_tree)"
   ["research_quality_gates"]="P080 Step 4 — cite dangled at removed commands/aid-research.md; row marked status: dead"
   ["research_idempotency"]="P080 Step 4 — same removal; no re-fetch left to suppress; status: dead"
   ["knowledge_base_write_protect"]="P080 Step 4 — defaults/templates/knowledge-base.yaml was deleted with the knowledge layer; status: dead"

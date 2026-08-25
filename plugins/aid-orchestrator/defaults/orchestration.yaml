@@ -18,9 +18,17 @@ language:
 
 # ─── Dispatch ────────────────────────────────────────────────────────────
 dispatch:
-  strategy: sequential          # TEMPORARY: force sequential until Agent SDK migration
-  max_parallel: 1               # ONE agent at a time — prevents mega-commits and placeholder verify
-  worktree_base: .claude/worktrees
+  # Steps of one wave run at the same time, each in its own linked worktree
+  # (`.aid-worktrees/step-<step_id>` on `step/<step_id>`), when the wave passes
+  # `aid-plan-parallel-check.sh` at dispatch time. `max_parallel` is the ceiling
+  # on agents in flight; 1 is the brake and makes every wave sequential. The
+  # decision is made by lib/aid-parallel-dispatch.sh (`aid_parallel_decide`)
+  # and it only ever degrades to sequential — see pipeline.md §4 "Parallel
+  # groups". Set the brake, do not delete the key: an unreadable value is
+  # treated as 1.
+  strategy: worktrees
+  max_parallel: 3
+  worktree_base: .aid-worktrees
   # Verifier dispatch / provenance configuration (P037 v2.20.1, P043 v2.29.1).
   # Single source of truth for the FSM default — aid-fsm.sh resolution order:
   #   1. project `.aid-o/config/plugin.yaml` key `dispatch_mode:` (per-project override)

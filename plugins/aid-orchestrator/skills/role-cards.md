@@ -24,11 +24,13 @@ for one step; controller agents auditor/curator/gate-fixer/verifier carry model 
 agent-file frontmatter). See `pipeline.md` §4.
 
 **Max Parallel note.** `**Max Parallel:**` documents the *intended* concurrency ceiling per role.
-It is currently capped globally at 1 by `orchestration.yaml → dispatch.max_parallel: 1` (sequential
-execution enforced until the Agent SDK migration), so the per-role values are aspirational today.
+The global ceiling is `orchestration.yaml → dispatch.max_parallel` (3 by default since P087; 1 is
+the brake), and a wave runs concurrently only when `aid_parallel_decide` says so — see
+`pipeline.md §4` "Parallel groups". The per-role value is documentation for the controller —
+nothing computes it; the global ceiling is the one the decision returns.
 
 What the cap governs, precisely: **how many worker agents one controller session dispatches at a
-time**. It is 1, and P074 does not change it — parallel dispatch inside a run stays out of scope.
+time**. P074 does not change it — that plan isolates trees, not dispatch.
 P074 gives each plan its own git worktree and its own state files; that isolates the plans' TREES
 and bookkeeping, which is not the same thing as authorizing concurrent agent dispatch.
 
@@ -587,7 +589,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-25
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

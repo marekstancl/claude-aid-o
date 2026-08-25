@@ -176,8 +176,8 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 12. **Visual verification** — after any UI step: Playwright screenshot + compare with mockup. "Compiles" ≠ "looks right".
 13. **Plan-level DONE gate** — `aid-fsm.sh init` blocks new cross-plan run if previous plan has unreviewed C+A findings (no `ca-review-complete` marker)
 14. **Per-plan C+A review** — after last EPIC in a plan, ALL C+A findings (S+M+L) must be addressed before starting next plan
-15. **Sequential dispatch** — `orchestration.yaml → max_parallel: 1`. Dispatch ONE agent at a time. After each agent returns: validate output, commit, write step-verify, increment-step. NEVER dispatch multiple agents in parallel.
-16. **Per-step commit** — MUST `git commit` after each step completes, BEFORE calling `increment-step`. One commit per step, not bulk commits at the end.
+15. **Wave dispatch is decided by code** — before a wave, `aid_parallel_decide` (`lib/aid-parallel-dispatch.sh`) says `concurrent` or `serial: <reason>`; only `concurrent` may dispatch several agents at once, each in its own step worktree, and never more than `orchestration.yaml → dispatch.max_parallel`. Returns are still taken ONE at a time: validate the contract return, commit, write step-verify, merge, increment-step (`pipeline.md §4` "Parallel groups").
+16. **Per-step commit** — the controller commits each accepted return (`aid_dispatch_contract_commit`) BEFORE calling `increment-step`. One commit per step, never a bulk commit at the end — also when steps ran concurrently.
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
@@ -331,11 +331,12 @@ FSM initialized: READY
 **Actions:**
 1. Read `fsm-state.yaml` → find `current_step`
 2. Check dependency graph → pick the next step with all deps satisfied
-3. Dispatch the step (one agent at a time — `max_parallel: 1`, see rule 15):
-   - Work happens on the single EPIC branch `task/{epic_id}/main` (created by `aid-fsm.sh init`); there is no per-step branch.
-   - Build agent prompt (per `pipeline.md §4`)
+3. Dispatch the step — or the wave, when `aid_parallel_decide` says `concurrent` (rule 15):
+   - Serial: work happens on the EPIC branch `task/{epic_id}/main` (created by `aid-fsm.sh init`).
+     Concurrent: each step in `.aid-worktrees/step-<step_id>` on `step/<step_id>`, merged back one at a time.
+   - Build the dispatch contract + agent prompt (per `pipeline.md §4`)
    - Dispatch agent via Task tool
-   - Collect output → save to `work/evidence/{epic_id}/{run_id}/steps/`
+   - Collect output → save to `work/evidence/{epic_id}/{run_id}/steps/{step_id}/`; validate the `aid-return` block
 4. Verify outputs: present? scope respected? acceptance criteria met?
 5. **Review Checkpoint CP2** — dispatch verifier (`code-review` focus) with step output + branch diff
    - If verifier PASS → continue
@@ -661,4 +662,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-25

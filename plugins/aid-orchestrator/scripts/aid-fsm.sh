@@ -11,6 +11,7 @@
 #   aid-fsm.sh verify-state <state_file>
 #   aid-fsm.sh increment-step <state_file> [--force]
 #   aid-fsm.sh get-field <field> <state_file>
+#   aid-fsm.sh step-evidence-dir <state_file> <step_index>   # the step's OWN evidence subdirectory (P087 Step 2)
 #   aid-fsm.sh set-field <field> <value> <state_file>
 #   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
 #   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
@@ -5686,6 +5687,36 @@ cmd_increment_step() {
       fi
     fi
 
+    # P087 Step 1: a step dispatched under a contract advances only on an
+    # ACCEPTED return. The packet is in the step's evidence dir; the return
+    # the agent gave and the tree it worked in are judged again here, by the
+    # same validator, so the precondition cannot be satisfied by prose.
+    if [[ -f "$_plan_json" ]] && command -v jq >/dev/null 2>&1; then
+      local _c_sid; _c_sid="$(jq -r --argjson i "$step" '.steps[$i].id // ""' "$_plan_json" 2>/dev/null)"
+      local _c_dir="${evidence_dir}/steps/${_c_sid}"
+      if [[ -n "$_c_sid" && -f "${_c_dir}/contract.json" ]]; then
+        [[ -f "${_c_dir}/return.json" ]] || _increment_fail contract_return_missing \
+          "PRECONDITION FAIL: step ${step} was dispatched under a contract but no return was recorded." \
+          "Expected: ${_c_dir}/return.json (aid_dispatch_contract_extract over the agent's output.md)" \
+          "Extract the agent's aid-return block, validate it, then advance."
+        # shellcheck source=lib/aid-dispatch-contract.sh
+        source "${SCRIPT_DIR}/lib/aid-dispatch-contract.sh"
+        local _c_tree; _c_tree="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+        local _c_report
+        _c_report="$(aid_dispatch_contract_validate "${_c_dir}/contract.json" "${_c_dir}/return.json" "$_c_tree" 2>/dev/null)" \
+          || _increment_fail contract_return_rejected \
+            "PRECONDITION FAIL: step ${step}'s return is not accepted against its contract." \
+            "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)" \
+            "Re-dispatch the step with the current packet; never advance on a rejected return."
+        # An ACCEPTED return is a well-formed one; ADVANCING needs a finished one:
+        # status done and no gate the agent itself reported as failed.
+        jq -e '.step_status == "done" and all(.gates[]?; .result != "fail")' "${_c_dir}/return.json" >/dev/null 2>&1 \
+          || _increment_fail contract_return_not_done \
+            "PRECONDITION FAIL: step ${step}'s return is accepted but not finished — status $(jq -r .step_status "${_c_dir}/return.json" 2>/dev/null), failed gates: $(jq -r '[.gates[]? | select(.result == "fail") | .name] | join(", ")' "${_c_dir}/return.json" 2>/dev/null)." \
+            "A blocked step, or one with a failing gate, does not advance: resume the agent or hand over with a Blocked card."
+      fi
+    fi
+
     # E7B: existing_ui EXECUTE guard (step-local, D6 — not a delivery gate)
     # Reads step.ui_change_mode from plan.json. If existing_ui: checks for
     # steps/{step_id}/ui/verdict.json with result=pass. Missing or non-pass → _increment_fail.
@@ -6095,6 +6126,32 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   # stable key=value line; the controller parses `status=`, never bare stdout.
   # Exit code stays 0 here; preconditions exit non-zero via _increment_fail/die.
   echo "status=advanced advanced_from=${step} advanced_to=$((step + 1))"
+}
+
+# ─── step-evidence-dir <state_file> <step_index> (P087 Step 2) ─────────────
+# Prints (and creates) the one directory a dispatched step may write its
+# evidence into: `<evidence_dir>/steps/<step_id>/`, the step id read from the
+# run's plan.json. It resolves under the STATE root like the rest of the
+# evidence chain, so two steps running at once in two worktrees still land in
+# two subdirectories of one run — the evidence half of "no mega-commit". The
+# other half (a return that wrote into another step's directory is refused)
+# is lib/aid-dispatch-contract.sh's job, against the dir this prints.
+cmd_step_evidence_dir() {
+  local state_file="${1:-}" idx="${2:-}"
+  [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
+  [[ "$idx" =~ ^[0-9]+$ ]] || { echo "ERROR: step index must be a number, got '${idx}'" >&2; exit 1; }
+  local epic_id run_id evidence_dir plan_json step_id
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
+  plan_json="${evidence_dir}/plan.json"
+  [[ -f "$plan_json" ]] || { echo "ERROR: ${plan_json} not found — a step has no evidence directory before PRE-FLIGHT wrote the plan" >&2; exit 1; }
+  step_id=$(jq -r --argjson i "$idx" '.steps[$i].id // ""' "$plan_json" 2>/dev/null)
+  [[ -n "$step_id" ]] || { echo "ERROR: ${plan_json} has no step at index ${idx}" >&2; exit 1; }
+  local dir="${evidence_dir}/steps/${step_id}"
+  mkdir -p "$dir" || { echo "ERROR: cannot create ${dir}" >&2; exit 1; }
+  printf '%s\n' "$dir"
 }
 
 cmd_get_field() {
@@ -8800,6 +8857,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     verify-state)      shift; cmd_verify_state "$@" ;;
     increment-step)    shift; cmd_increment_step "$@" ;;
     get-field)         shift; cmd_get_field "$@" ;;
+    step-evidence-dir) shift; cmd_step_evidence_dir "$@" ;;
     set-field)         shift; cmd_set_field "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
@@ -8823,7 +8881,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|step-evidence-dir|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
       exit 1 ;;
   esac
 fi

@@ -557,14 +557,28 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 ### Step dispatch
 
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
-2. Load step definition from `plan.json` → `steps[current_step]`
+2. Load step definition from `plan.json` → `steps[current_step]` (`step_id` = its `id`)
 3. Load role card from `skills/role-cards.md` for the step's `role`
-4. Assemble dispatch prompt (see Context Assembly below)
-5. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
+4. Build the step's **dispatch contract** (P087) and its evidence directory:
+   ```bash
+   step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
+   source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
+   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json" "$evidence_dir"   # exit 3 = no paths, no contract owed
+   ```
+   The packet is built by code from `plan.json` — objective, allowed paths, dependencies,
+   expected artifacts, acceptance criteria, UI contract, the step's own evidence dir — and
+   carries a **version** (a hash of all of it). Memory is an item of the packet's context
+   (item 10 below), not something the agent is trusted to remember.
+5. Assemble dispatch prompt (see Context Assembly below); when a contract exists, paste
+   `aid_dispatch_contract_prompt "$step_dir/contract.json"` verbatim after the task block —
+   it tells the agent the version it must quote back and the `aid-return` block it owes.
+6. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
    field in `skills/role-cards.md` (single source of truth); an optional `step.model`
    in `plan.json` overrides it for that one step (default: `opus` if neither is set)
-6. Save output to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
-7. Verify output (see Output Verification below)
+7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
+   Every step, concurrent or not, has its own subdirectory; nothing is written into another
+   step's.
+8. Verify output (see Output Verification below)
 
 ### Context assembly
 
@@ -696,9 +710,45 @@ For steps with `role: backend` or `role: frontend`:
 
 After agent completes:
 - `output.md` written? → If missing, go to ESCALATION (E5)
+- **Contract return (when `contract.json` exists):**
+  ```bash
+  aid_dispatch_contract_extract "$step_dir/output.md" > "$step_dir/return.json" \
+    && aid_dispatch_contract_validate "$step_dir/contract.json" "$step_dir/return.json" "$tree_root"
+  ```
+  The validator judges the return against the packet and the disk, never against the
+  agent's word: no `aid-return` block, a version other than the dispatched one, a status or
+  gate result outside `done|blocked` / `pass|fail|skipped`, an expected artifact missing on
+  disk, a file git sees changed but the return leaves out, a file changed outside the allowed
+  paths, or evidence written into another step's directory → **reject** (report on stdout
+  names every item). A rejected return is re-dispatched with the current packet — never
+  accepted against stale instructions. Extra declared files inside scope are recorded
+  (`extra_artifacts`), not refused. **`increment-step` re-runs this validation** for any
+  step that has a `contract.json` and refuses to advance without an accepted `return.json`
+  (`contract_return_missing` / `contract_return_rejected`) — the contract is an FSM
+  precondition, not a request.
 - Outputs match `step.outputs`? → If not, re-dispatch once with feedback
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
+
+**The turn may not end here.** While a contracted step is open — a `contract.json` written
+this session and `current_step` not advanced past it — the `Stop` hook rule `turn_step_open`
+(`defaults/hook-registry.yaml`, fail-closed once the canary has verified the installation)
+refuses to close the turn and names the transition: validate the return, commit, write the
+verify file, `increment-step` — or hand over explicitly with a Decision card or a Blocked card
+(`skills/communication.md`). A `Write`/`Edit` outside every open step's paths is named by
+`turn_write_scope` as context before it lands; it does not block, the validation above does.
+
+**Per-step commit (controller, after an accepted return):**
+```bash
+aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/return.json" \
+  "step {N}: {step title}"     # validates first (a rejected return is not committed), stages only
+                               # the return's changed_files; prints the SHA or "nothing to commit"
+```
+The controller is the only committer and it takes returns **one at a time**, in the order
+they arrive — that is the protocol that keeps three agents returning at once from becoming
+one commit. What the FSM guarantees is narrower and mechanical: a contracted step does not
+advance on an unvalidated, unfinished or rejected return (`increment-step`). An agent that
+changed nothing produces no commit and the fact is recorded.
 
 **Step verification evidence (mandatory):**
 After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:
@@ -1112,17 +1162,55 @@ if `current_step < total_steps`. `EXECUTE→EXECUTE` is rejected if `current_ste
 
 ### Parallel groups
 
-**TEMPORARY: Sequential execution enforced.** `orchestration.yaml → dispatch.max_parallel: 1`.
-All steps execute one at a time regardless of wave grouping. This prevents:
-- Mega-commits (controller must commit per step)
-- Placeholder verify files (controller validates after each agent returns)
-- Memory bypass (controller injects memory per dispatch)
+Steps that share a `Parallel Group` (a **wave**, from the plan's `**Parallel group:**`
+field) may run at the same time. Whether they DO is decided by code before every wave,
+never assumed from the plan:
 
-When parallel is re-enabled (post Agent SDK migration):
-- Dispatch all agents in the group simultaneously (single message, multiple Agent calls)
-- Each agent writes to its own `steps/step_{N}_{role}/` subdirectory
-- After all complete: check for merge conflicts before advancing
-- Conflict → ESCALATION; clean → merge branches, advance
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-parallel-dispatch.sh"
+plan_path="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" get-field plan_path "$state_file")"   # plan.md, recorded by init ("null" in Fast Mode → serial)
+orchestration_yaml="$(aid_state_path .aid-o/config/orchestration.yaml)"                     # state root, never the worktree
+tree_root="$(git rev-parse --show-toplevel)"                                                 # the tree the run executes in
+worktree_base="$(yq -r '.dispatch.worktree_base // ".aid-worktrees"' "$orchestration_yaml")"
+# the wave: the current step's group in plan.json → parallel_groups[] (each entry lists the step ids of one wave)
+wave_steps="$(jq -c --arg id "$step_id" '.parallel_groups[] | select(index($id))' "$evidence_dir/plan.json")"
+wave_name="$(jq -r --arg id "$step_id" '.steps[] | select(.id == $id) | .parallel_group // "---"' "$evidence_dir/plan.json")"
+wave_size="$(jq -r 'length' <<< "${wave_steps:-[]}")"
+decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_name" "$wave_size" "$tree_root")"
+# concurrent slots=<max_parallel> | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
+```
+
+`serial` is returned — with the reason — for a wave of one, for `dispatch.max_parallel: 1`
+(the brake, `defaults/orchestration.yaml`), for a `dispatch.strategy` other than `worktrees`,
+when git cannot hand out worktrees, when `aid-plan-parallel-check.sh --group <wave>` finds two
+steps of THIS wave sharing a file or a declared interface, and when that check cannot run at
+all. **The check never refuses a run; it degrades it.** A wave that cannot be proved safe
+runs in order.
+
+**Concurrent path** (decision `concurrent slots=N`: N is the ceiling the controller keeps —
+the library does not count agents in flight — a wave larger than N runs in batches, the next
+step dispatched as a slot frees):
+
+1. For each step: `aid_parallel_step_worktree "$tree_root" "$step_id" HEAD "$worktree_base"`
+   → its own tree on `step/<step_id>` at the current base (`dispatch.worktree_base`, default
+   `.aid-worktrees`; a branch left by an earlier run is reset, never reused). Build its
+   contract (§4 step 4) and dispatch it there — one message, several `Agent()` calls.
+2. As each agent returns — **one at a time, in arrival order** — validate the return
+   (§4 Output verification), commit it in the step's worktree (`aid_dispatch_contract_commit`),
+   write its `step-{N}-verify.md`, then `aid_parallel_merge "$tree_root" "step/<step_id>" "$worktree_base"`.
+3. A clean merge prints the SHA; the step's tree is removed when git agrees it is clean
+   (a dirty one is kept and named — never deleted). **A conflict is aborted, the tree is
+   untouched (`exit 1`, files named), the step's tree is put back on the base that moved —
+   `aid_parallel_step_reset "$tree_root" "$step_id" HEAD "$worktree_base"` — and the step is
+   dispatched again.** The same step failing twice is handled by
+   `defaults/policies/auto-recovery.yaml`, not by a human queue.
+4. An agent that dies leaves its tree and branch for inspection; the other steps continue.
+5. `increment-step` once per merged step, in merge order.
+
+What isolation guarantees, and what it does not: a collision surfaces as a merge conflict —
+a state that is recognised and repeatable — never as a corrupted tree. Disjoint files and
+disjoint declared interfaces do **not** guarantee disjoint effect; that boundary is recorded
+in `defaults/enforcement-registry.yaml` (`parallel_dispatch_wave_check`).
 
 ---
 
@@ -2791,24 +2879,20 @@ is the authoritative source — the YAML config files do not duplicate it.
 
 ## §10 Multi-Agent Dispatch
 
-**Parallel groups:** Steps in `plan.json` with the same `wave` number execute concurrently.
+**Parallel groups:** the wave decision, the per-step worktrees, the serial merge point and
+the conflict-means-retry rule are specified once, in §4 "Parallel groups". `plan.json →
+parallel_groups[]` is the machine form of the plan's waves.
 
-**Isolation strategy** (from `dispatch-strategy.yaml → dispatch.strategy`):
-- `worktrees` → `git worktree add .aid-o/worktrees/{step_id}` (preferred)
-- `branches` → per-step branches from `epic/{epic_id}/main`
-- `sequential` → no parallelism
-
-**Dispatch limit:** `dispatch.worktrees.max_parallel` (default: 3). Excess steps queued.
-
-**After parallel group completes:**
-1. Dry-run merge check for shared files
-2. Conflict → ESCALATION (E6)
-3. Clean → merge one-by-one (by step number), delete worktrees/branches
+**Isolation strategy** (`orchestration.yaml → dispatch.strategy`): `worktrees` — each step
+in `<dispatch.worktree_base>/step-<step_id>` (default `.aid-worktrees`) on `step/<step_id>`
+(`aid_parallel_step_worktree`);
+`sequential` — no parallelism. `dispatch.max_parallel` caps agents in flight; excess steps
+of a wave wait for a slot.
 
 **Analysis groups** (read-only agents, no branches):
 - Triggered after target step passes output verification
 - Defined in `plan.json → analysis_groups[]`
-- Results in `evidence/.../steps/step_{N}_{role}/analysis_{purpose}_report.yaml`
+- Results in `evidence/.../steps/{step_id}/analysis_{purpose}_report.yaml`
 - Critical findings → ESCALATION; high → log to PM (non-blocking)
 
 ---
@@ -3076,7 +3160,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-25
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

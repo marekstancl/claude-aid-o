@@ -58,7 +58,7 @@
 #
 # An unreadable registry runs NO rules. It never runs all of them.
 #
-# **Last Updated:** 2026-08-24
+# **Last Updated:** 2026-08-25
 # =============================================================================
 version: 1
 
@@ -151,3 +151,32 @@ rules:
     handler: aid_hook_rule_subagent_protocol
     description: tells a role agent when its installed protocol differs from the checkout's copy (IMP-179) — a pointer, never the file, so a checkout cannot write an agent's instructions
 
+  - id: turn_step_open
+    event: Stop
+    owner: controller
+    degree: 2
+    failure: closed
+    timeout_s: 5
+    lib: scripts/lib/aid-hook-rules-turn.sh
+    handler: aid_hook_rule_turn_step_open
+    description: refuses to close a turn while a step this session dispatched under a contract has not been advanced — unless the last message hands over with a Decision or Blocked card
+
+  - id: turn_write_scope
+    event: PreToolUse
+    owner: any
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-hook-rules-turn.sh
+    handler: aid_hook_rule_turn_write_scope
+    description: names a Write/Edit that lands outside the open step's allowed paths, before it lands — feedback, not a guard; a shell redirection is not seen, and the contract validation at return time is what refuses
+
+  - id: worktree_registry_notice
+    event: SessionStart
+    owner: controller
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-worktree-registry.sh
+    handler: aid_hook_rule_worktree_registry
+    description: reports plan worktree records that need a decision — a recorded tree that is gone, a closed plan's tree still on disk — with the audited command for each; nothing is ever removed by it

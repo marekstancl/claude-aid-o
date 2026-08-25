@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-25
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -451,7 +451,7 @@ writing and repair its exact diagnostics before CP1/C0.
 **AID Role:** {architect / domain / backend / frontend / qa / e2e / security / observability / docs-writer / release}
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 **UI Change Mode:** `existing_ui` | `new_ui` *(frontend steps that modify existing UI — omit for new UI/greenfield)*
-**UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json)*
+**UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0 | viewports: desktop, mobile` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json. `viewports` names every viewport the baseline and the verification cover: desktop AND mobile when `project.yaml → ui.responsive` is true or absent — P087 — desktop alone when it is `false`. The generators carry `path | sha256 | schema_version` into plan.json; `viewports` is read by the controller from this field in the plan text, and the proposal check (`aid_ui_proposal_check`) is what refuses a missing viewport.)*
 ```
 
 > **Rule:** Every step with `AID Role: frontend` and `UI Change Mode: existing_ui` MUST include a `UI Change Contract` field. Plans missing this field emit `ui_change_contract: null` in plan.json. Without a contract the companion has no reference to compare against, so the verdict.json will be absent or unverifiable — and the FSM guard in `aid-fsm.sh cmd_increment_step` will then block the step with `frontend_visual_fidelity_block`. (The guard triggers on verdict result, not on null contract directly.)
@@ -647,13 +647,35 @@ substitute for having thought about it. Then put the result in a table:
 |---|---|---|---|
 | 1 | 1, 4 | — | no path in common |
 
-**`max_parallel: 1` does not make this ceremony.** Nothing runs concurrently
-today; the table is the evidence of safety for the moment the brake comes off,
-and evidence gathered after the fact is evidence nobody trusts.
+**The table is not ceremony.** Since P087 a wave that passes the check IS
+dispatched concurrently when the dispatch decision allows it — the brake, the
+strategy and the availability of worktrees can still serialise it (`pipeline.md
+§4` "Parallel groups"); the table is the
+evidence of safety the dispatch decision re-verifies, and evidence gathered
+after the fact is evidence nobody trusts.
 
 Two steps touching the same file in DIFFERENT waves are fine — that is what
 waves are for. A wave with one step is valid and does nothing; the check says
 so and does not fail.
+
+**The second dimension — `Shared interfaces`.** Two steps can name different
+files and still change the same thing: an endpoint, a schema, a configuration
+key, a registered name. Git raises no conflict and the result does not work.
+A step that changes such an interface says so:
+
+```
+**Shared interfaces:** /api/orders, orders.schema, config.retry_policy
+```
+
+The field is optional. **Absent means "none"**, not "unknown" — and it is the
+honest answer for most steps. Names are compared after normalisation (case,
+surrounding slashes, whitespace), so `/api/x` and `api/x/` are one interface.
+Two steps in one wave naming the same interface are a collision exactly like a
+shared path; the check reports it and the schedule moves one of them.
+
+Before a wave is dispatched the same check runs again over the plan as it is
+then (pipeline §4 "Parallel groups"): it never refuses a run — a wave that
+fails it is executed in sequence with the reason recorded.
 
 ### Documentation, help and screenshots
 
@@ -1428,7 +1450,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-25
 
 ## Plan-boundary note
 

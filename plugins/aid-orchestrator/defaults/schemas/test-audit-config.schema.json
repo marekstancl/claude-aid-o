@@ -18,7 +18,7 @@
     "max_read_only_audit_agents": {
       "type": "integer",
       "minimum": 1,
-      "description": "Wholly distinct from dispatch.max_parallel (defaults/orchestration.yaml) and dispatch.worktrees.max_parallel (.aid-o/config/policies/dispatch-strategy.yaml) — neither existing key is read or written by this schema/loader."
+      "description": "Wholly distinct from dispatch.max_parallel (defaults/orchestration.yaml, the agent-dispatch ceiling) — that key is neither read nor written by this schema/loader."
     },
     "allowed_runners": {
       "type": "array",
