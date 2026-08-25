@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-25
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -654,6 +654,25 @@ and evidence gathered after the fact is evidence nobody trusts.
 Two steps touching the same file in DIFFERENT waves are fine — that is what
 waves are for. A wave with one step is valid and does nothing; the check says
 so and does not fail.
+
+**The second dimension — `Shared interfaces`.** Two steps can name different
+files and still change the same thing: an endpoint, a schema, a configuration
+key, a registered name. Git raises no conflict and the result does not work.
+A step that changes such an interface says so:
+
+```
+**Shared interfaces:** /api/orders, orders.schema, config.retry_policy
+```
+
+The field is optional. **Absent means "none"**, not "unknown" — and it is the
+honest answer for most steps. Names are compared after normalisation (case,
+surrounding slashes, whitespace), so `/api/x` and `api/x/` are one interface.
+Two steps in one wave naming the same interface are a collision exactly like a
+shared path; the check reports it and the schedule moves one of them.
+
+Before a wave is dispatched the same check runs again over the plan as it is
+then (pipeline §4 "Parallel groups"): it never refuses a run — a wave that
+fails it is executed in sequence with the reason recorded.
 
 ### Documentation, help and screenshots
 
@@ -1428,7 +1447,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-25
 
 ## Plan-boundary note
 

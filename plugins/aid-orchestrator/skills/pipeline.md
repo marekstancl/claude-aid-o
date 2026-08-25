@@ -559,12 +559,26 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
 2. Load step definition from `plan.json` → `steps[current_step]`
 3. Load role card from `skills/role-cards.md` for the step's `role`
-4. Assemble dispatch prompt (see Context Assembly below)
-5. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
+4. Build the step's **dispatch contract** (P087) and its evidence directory:
+   ```bash
+   step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
+   source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
+   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json"   # exit 3 = no paths, no contract owed
+   ```
+   The packet is built by code from `plan.json` — objective, allowed paths, dependencies,
+   expected artifacts, acceptance criteria, UI contract, the step's own evidence dir — and
+   carries a **version** (a hash of all of it). Memory is an item of the packet's context
+   (item 10 below), not something the agent is trusted to remember.
+5. Assemble dispatch prompt (see Context Assembly below); when a contract exists, paste
+   `aid_dispatch_contract_prompt "$step_dir/contract.json"` verbatim after the task block —
+   it tells the agent the version it must quote back and the `aid-return` block it owes.
+6. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
    field in `skills/role-cards.md` (single source of truth); an optional `step.model`
    in `plan.json` overrides it for that one step (default: `opus` if neither is set)
-6. Save output to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
-7. Verify output (see Output Verification below)
+7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
+   Every step, concurrent or not, has its own subdirectory; nothing is written into another
+   step's.
+8. Verify output (see Output Verification below)
 
 ### Context assembly
 
@@ -696,9 +710,29 @@ For steps with `role: backend` or `role: frontend`:
 
 After agent completes:
 - `output.md` written? → If missing, go to ESCALATION (E5)
+- **Contract return (when `contract.json` exists):**
+  ```bash
+  aid_dispatch_contract_extract "$step_dir/output.md" > "$step_dir/return.json" \
+    && aid_dispatch_contract_validate "$step_dir/contract.json" "$step_dir/return.json" "$tree_root"
+  ```
+  The validator judges the return against the packet and the disk, never against the
+  agent's word: no `aid-return` block, a version other than the dispatched one, an expected
+  artifact missing on disk, a file changed outside the allowed paths, or evidence written
+  into another step's directory → **reject** (report on stdout names every item). A rejected
+  return is re-dispatched with the current packet — never accepted against stale instructions.
+  Extra files inside scope are recorded (`extra_artifacts`), not refused.
 - Outputs match `step.outputs`? → If not, re-dispatch once with feedback
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
+
+**Per-step commit (controller, after an accepted return):**
+```bash
+aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/return.json" \
+  "step {N}: {step title}"     # stages only the return's changed_files; prints the SHA or "nothing to commit"
+```
+The controller is the only committer and it takes returns **one at a time**, in the order
+they arrive — that is what makes a mega-commit impossible even when three agents return
+at once. An agent that changed nothing produces no commit and the fact is recorded.
 
 **Step verification evidence (mandatory):**
 After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:

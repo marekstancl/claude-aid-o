@@ -18,12 +18,22 @@
 # a plan is being written (--advisory, how aid-plan-lint.sh calls it), BLOCKING
 # before generation (default, how aid-generation-readiness.sh calls it).
 #
+# THE SECOND DIMENSION (P087 Step 3): two steps can have disjoint files and
+# still change the SAME INTERFACE — an endpoint, a schema, a config key, a
+# registered name. Git raises no conflict and the result does not work. A step
+# may therefore declare `**Shared interfaces:** a, b` and two steps of one wave
+# naming the same interface (after normalisation: case, surrounding slashes,
+# whitespace) are a collision exactly like a shared path. An absent field means
+# "none", which is the honest answer for most steps.
+#
 # The field's grammar, the wave-planning rules and why this is worth checking
-# while max_parallel is still 1 are stated for the plan author in
-# skills/plan-writing.md §"Declaring what can run at the same time" — one copy,
-# on the surface the author actually reads.
+# are stated for the plan author in skills/plan-writing.md §"Declaring what can
+# run at the same time" — one copy, on the surface the author actually reads.
 #
 # Usage: aid-plan-parallel-check.sh <plan.md> [--advisory] [--quiet]
+#
+# **Last Updated:** 2026-08-25
+#
 # Exit:  0 = no blocking finding   1 = collision(s)   2 = usage/IO
 # =============================================================================
 set -uo pipefail
@@ -73,7 +83,17 @@ while IFS=$'\t' read -r _ln _bullet; do
   _lns+=("$_ln"); _txts+=("$_bullet")
 done < <(_aid_extract_files_bullets_numbered < "$PLAN")
 
-step_names=(); step_groups=(); step_paths=()
+# _aid_parallel_norm_iface <text> — one interface name, normalised so that
+# `/api/x`, `api/x/` and `API/X` are the same declaration.
+_aid_parallel_norm_iface() {
+  local v="$1"
+  v="${v,,}"; v="${v//\`/}"
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  v="${v#/}"; v="${v%/}"
+  printf '%s' "$v"
+}
+
+step_names=(); step_groups=(); step_paths=(); step_ifaces=()
 while IFS=$'\t' read -r s e head; do
   [[ -n "${s:-}" ]] || continue
   group="$(_aid_plan_step_field "$PLAN" "$s" "$e" "Parallel group")" || group=""
@@ -103,7 +123,17 @@ while IFS=$'\t' read -r s e head; do
       paths="${paths:+$paths }${p}"
     done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
   done
-  step_names+=("$head"); step_groups+=("$group"); step_paths+=("$paths")
+  # The step's declared interfaces, normalised, space-separated. Commas split
+  # them; an interface name with a space in it is not one name.
+  ifaces=""
+  if raw="$(_aid_plan_step_field "$PLAN" "$s" "$e" "Shared interfaces")"; then
+    while IFS= read -r one; do
+      one="$(_aid_parallel_norm_iface "$one")"
+      [[ -n "$one" ]] || continue
+      ifaces="${ifaces:+$ifaces }${one// /_}"
+    done < <(printf '%s\n' "${raw//,/$'\n'}")
+  fi
+  step_names+=("$head"); step_groups+=("$group"); step_paths+=("$paths"); step_ifaces+=("$ifaces")
 done < <(_aid_plan_step_bounds "$PLAN")
 
 [[ "${#step_names[@]}" -gt 0 ]] || _report note "no \`### Step\` sections found — nothing to check."
@@ -119,6 +149,11 @@ for i in "${!step_names[@]}"; do
       [[ " ${step_paths[$j]} " == *" $p "* ]] && shared="${shared:+$shared, }${p}"
     done
     [[ -n "$shared" ]] && _report finding "group '${g}' is not disjoint: '${step_names[$i]}' and '${step_names[$j]}' both declare ${shared}. Steps in one wave run at the same time; move one to another wave."
+    shared=""
+    for p in ${step_ifaces[$i]}; do
+      [[ " ${step_ifaces[$j]} " == *" $p "* ]] && shared="${shared:+$shared, }${p}"
+    done
+    [[ -n "$shared" ]] && _report finding "group '${g}' shares an interface: '${step_names[$i]}' and '${step_names[$j]}' both name ${shared} under **Shared interfaces:**. Disjoint files do not make disjoint work — run them in sequence."
   done
 done
 
@@ -141,9 +176,9 @@ if [[ "$QUIET" -eq 0 ]]; then
   if [[ "$findings" -gt 0 && "$ADVISORY" -eq 1 ]]; then
     echo "aid-plan-parallel-check: ${findings} finding(s) — advisory while writing; the same findings BLOCK before EPIC generation." >&2
   elif [[ "$findings" -gt 0 ]]; then
-    echo "aid-plan-parallel-check: FAIL (${findings} finding(s)) — a wave whose steps share a file is not a wave." >&2
+    echo "aid-plan-parallel-check: FAIL (${findings} finding(s)) — a wave whose steps share a file or an interface is not a wave." >&2
   else
-    echo "aid-plan-parallel-check: PASS — every declared wave is disjoint." >&2
+    echo "aid-plan-parallel-check: PASS — every declared wave is disjoint in files and interfaces." >&2
   fi
 fi
 
