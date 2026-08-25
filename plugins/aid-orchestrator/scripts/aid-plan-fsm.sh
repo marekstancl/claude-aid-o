@@ -28,6 +28,7 @@
 #   aid-plan-fsm.sh plan-state <plan_id>
 #   aid-plan-fsm.sh plan-state <plan_id> --repair
 #   aid-plan-fsm.sh plan-state <plan_id> --attest-source-ref <ref> --reason <text> --epic <epic_id>
+#   aid-plan-fsm.sh worktrees [--project-root <path>]      # P087 Step 7: the registry, judged, read-only
 #
 # P064 EPIC E-064-2_2 (Step 1 = the parent plan's Step 6) adds the merge half:
 #   aid-plan-fsm.sh epic-complete <plan_id> <epic_id> [--abandon --reason <text>]
@@ -154,7 +155,7 @@
 # pipefail` (no `-e`) still guards against unset variables and swallowed
 # pipeline failures wherever a pipeline's exit code IS checked below.
 #
-# **Last Updated:** 2026-08-06
+# **Last Updated:** 2026-08-25
 # =============================================================================
 
 set -uo pipefail
@@ -8277,6 +8278,38 @@ cmd_plan_close() {
 #                [--attest-source-ref <ref> --reason <text> --epic <epic_id>]
 #                [--project-root ...]
 # =============================================================================
+# ---------------------------------------------------------------------------
+# worktrees [--project-root <path>]   (P087 Step 7)
+#
+# The controller's view of the worktree registry: every plan-state record of
+# an execution tree with its verdict (live / missing / leftover) and the
+# audited command that repairs or finishes it. Read-only — the same scan the
+# SessionStart notice injects (lib/aid-worktree-registry.sh); this is the
+# form a session can ask for at any time.
+# ---------------------------------------------------------------------------
+cmd_worktrees() {
+  local root_opt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root) root_opt="${2:-}"; shift 2 ;;
+      *) echo "Usage: aid-plan-fsm.sh worktrees [--project-root <path>]" >&2; return 2 ;;
+    esac
+  done
+  local root
+  root="$(_pfsm_resolve_project_root "$root_opt")" || return 2
+  # shellcheck source=lib/aid-worktree-registry.sh
+  source "${SCRIPT_DIR}/lib/aid-worktree-registry.sh"
+  local plan state wt verdict hint n=0
+  while IFS=$'\t' read -r plan state wt verdict hint; do
+    [[ -n "$plan" ]] || continue
+    n=$((n+1))
+    printf '%s\t%s\t%s\t%s\n' "$plan" "$state" "$verdict" "$wt"
+    [[ -n "$hint" ]] && printf '  %s\n' "$hint"
+  done < <(aid_worktree_registry_scan "$root")
+  (( n == 0 )) && echo "no plan records an execution worktree"
+  return 0
+}
+
 cmd_plan_state() {
   local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0
   while [[ $# -gt 0 ]]; do
@@ -10726,6 +10759,7 @@ main() {
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
+    worktrees)  cmd_worktrees "$@" ;;
     plan-scratch) cmd_plan_scratch "$@" ;;
     inventory) cmd_inventory "$@" ;;
     # Internal: the resolved default mode for NEW plans, as "<mode>\t<reason>".

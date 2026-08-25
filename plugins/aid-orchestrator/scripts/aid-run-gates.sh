@@ -283,6 +283,25 @@ AID_GATE_POLL_INTERVAL_SEC="${AID_GATE_POLL_INTERVAL_SEC:-5}"
 AID_GATE_HEARTBEAT_SEC="${AID_GATE_HEARTBEAT_SEC:-60}"
 AID_GATE_DEADLINE_GRACE_SEC="${AID_GATE_DEADLINE_GRACE_SEC:-30}"
 
+# _gate_scripts_missing_in_tree <resolved_cmd> <tree>  (P087 Step 6)
+#
+# Every repo-relative script a gate command names must exist in the tree the
+# gate runs in — the candidate branch. Prints the missing ones, one per line;
+# prints nothing when all are there. Absolute paths and {plugin_path}-resolved
+# ones are the installed plugin's business, not the branch's, and are not
+# judged. There is deliberately NO fallback to the state root's copy: a gate
+# that ran the primary checkout's script would certify a branch that does not
+# carry it, which is the drift IMP-497 was about.
+_gate_scripts_missing_in_tree() {
+  local cmd="$1" tree="$2" w
+  for w in $cmd; do
+    w="${w#\'}"; w="${w%\'}"; w="${w#\"}"; w="${w%\"}"
+    [[ "$w" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*\.(sh|bash|bats|py|mjs|js|ts)$ ]] || continue
+    [[ "$w" == /* ]] && continue
+    [[ -e "${tree}/${w}" ]] || printf '%s\n' "$w"
+  done
+}
+
 # resolve_run_mode <execution_yaml> <gate_name>
 #   Step 1's field, read here for the first time. Absent/null → "foreground",
 #   which is what makes every pre-P076 consumer config behave identically.
@@ -2024,6 +2043,23 @@ run_all_gates() {
       first=false
       gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0}"
       processed=$((processed+1))
+      continue
+    fi
+
+    # P087 Step 6 — the branch under test carries every script its gates name.
+    local _missing_scripts
+    _missing_scripts="$(_gate_scripts_missing_in_tree "$resolved_cmd" "$_plugin_project_root")"
+    if [[ -n "$_missing_scripts" ]]; then
+      local _ms_list; _ms_list="$(printf '%s' "$_missing_scripts" | tr '\n' ' ')"
+      echo "ERROR: aid-run-gates.sh: gate '${gate_name}' names ${_ms_list}— not in the tree ${_plugin_project_root}. The branch under test must carry every script its gates name; there is no fallback to the primary checkout." >&2
+      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="gate_script_missing_in_tree" scripts="$_ms_list"
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_ms_list" --arg t "$_plugin_project_root" \
+        '{gate:$g, result:"fail", reason:"gate_script_missing_in_tree", exit_code:1, duration_ms:0,
+          output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0}')"
+      processed=$((processed+1))
+      if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
       continue
     fi
 
