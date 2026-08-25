@@ -5687,6 +5687,30 @@ cmd_increment_step() {
       fi
     fi
 
+    # P087 Step 1: a step dispatched under a contract advances only on an
+    # ACCEPTED return. The packet is in the step's evidence dir; the return
+    # the agent gave and the tree it worked in are judged again here, by the
+    # same validator, so the precondition cannot be satisfied by prose.
+    if [[ -f "$_plan_json" ]] && command -v jq >/dev/null 2>&1; then
+      local _c_sid; _c_sid="$(jq -r --argjson i "$step" '.steps[$i].id // ""' "$_plan_json" 2>/dev/null)"
+      local _c_dir="${evidence_dir}/steps/${_c_sid}"
+      if [[ -n "$_c_sid" && -f "${_c_dir}/contract.json" ]]; then
+        [[ -f "${_c_dir}/return.json" ]] || _increment_fail contract_return_missing \
+          "PRECONDITION FAIL: step ${step} was dispatched under a contract but no return was recorded." \
+          "Expected: ${_c_dir}/return.json (aid_dispatch_contract_extract over the agent's output.md)" \
+          "Extract the agent's aid-return block, validate it, then advance."
+        # shellcheck source=lib/aid-dispatch-contract.sh
+        source "${SCRIPT_DIR}/lib/aid-dispatch-contract.sh"
+        local _c_tree; _c_tree="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+        local _c_report
+        _c_report="$(aid_dispatch_contract_validate "${_c_dir}/contract.json" "${_c_dir}/return.json" "$_c_tree" 2>/dev/null)" \
+          || _increment_fail contract_return_rejected \
+            "PRECONDITION FAIL: step ${step}'s return is not accepted against its contract." \
+            "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)" \
+            "Re-dispatch the step with the current packet; never advance on a rejected return."
+      fi
+    fi
+
     # E7B: existing_ui EXECUTE guard (step-local, D6 — not a delivery gate)
     # Reads step.ui_change_mode from plan.json. If existing_ui: checks for
     # steps/{step_id}/ui/verdict.json with result=pass. Missing or non-pass → _increment_fail.

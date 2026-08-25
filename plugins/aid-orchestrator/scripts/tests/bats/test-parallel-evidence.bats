@@ -28,12 +28,16 @@ JSON
 }
 teardown() { teardown_test_evidence_dir; }
 
-# _agent <idx> <file> — "the agent" leaves its artifact and its return
+# _agent <idx> <file> — "the agent" leaves its artifact and its return, in
+# the step's own evidence directory (inside .aid-o, which the disk check
+# excludes — evidence is state, not a change to the tree).
 _agent() {
-  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" "$1" "c$1.json"
+  local dir; dir="$(bash "$FSM" step-evidence-dir "$STATE" "$1")"
+  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" "$1" "$dir/contract.json" "$TEST_EVIDENCE_DIR"
   printf 'content %s\n' "$1" > "$2"
-  jq -n --arg v "$(jq -r .version "c$1.json")" --arg f "$2" \
-    '{contract_version: $v, changed_files: [$f], gates: [], step_status: "done"}' > "r$1.json"
+  jq -n --arg v "$(jq -r .version "$dir/contract.json")" --arg f "$2" \
+    '{contract_version: $v, changed_files: [$f], gates: [], step_status: "done"}' > "$dir/return.json"
+  printf '%s' "$dir"
 }
 
 @test "evidence: AC5 — each step gets its own subdirectory under the run, named by step id" {
@@ -55,35 +59,55 @@ _agent() {
   [ ! -d "$TEST_EVIDENCE_DIR/steps" ]
 }
 
-@test "evidence: AC4 — two returns handled one after the other make two commits, each holding only its own files" {
-  _agent 0 a.txt; _agent 1 b.txt
+@test "evidence: AC4 — the whole serial point, twice: own directory, contract, return, validation, commit — two commits, each holding only its own files" {
   before="$(git rev-list --count HEAD)"
-  aid_dispatch_contract_validate c0.json r0.json . >/dev/null
-  sha0="$(aid_dispatch_contract_commit . c0.json r0.json "step 1: a")"
-  aid_dispatch_contract_validate c1.json r1.json . >/dev/null
-  sha1="$(aid_dispatch_contract_commit . c1.json r1.json "step 2: b")"
+  d0="$(_agent 0 a.txt)"
+  [[ "$d0" == *"/steps/step_1_backend" ]]
+  sha0="$(aid_dispatch_contract_commit . "$d0/contract.json" "$d0/return.json" "step 1: a")"
+  d1="$(_agent 1 b.txt)"
+  [[ "$d1" == *"/steps/step_2_frontend" ]]
+  sha1="$(aid_dispatch_contract_commit . "$d1/contract.json" "$d1/return.json" "step 2: b")"
   [ "$(git rev-list --count HEAD)" -eq $((before + 2)) ]
   [ "$(git show --name-only --format= "$sha0")" = "a.txt" ]
   [ "$(git show --name-only --format= "$sha1")" = "b.txt" ]
+  [ -z "$(git status --porcelain --untracked-files=no)" ]
 }
 
 @test "evidence: a step that changed nothing makes no commit, and says so" {
-  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" 0 c0.json
-  jq -n --arg v "$(jq -r .version c0.json)" '{contract_version: $v, changed_files: [], gates: [], step_status: "done"}' > r0.json
+  : > a.txt; git add a.txt; git commit -q -m "a.txt already there"   # the promised artifact exists
+  d0="$(bash "$FSM" step-evidence-dir "$STATE" 0)"
+  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" 0 "$d0/contract.json"
+  jq -n --arg v "$(jq -r .version "$d0/contract.json")" '{contract_version: $v, changed_files: [], gates: [], step_status: "done"}' > "$d0/return.json"
   before="$(git rev-list --count HEAD)"
-  run aid_dispatch_contract_commit . c0.json r0.json "step 1: nothing"
+  run aid_dispatch_contract_commit . "$d0/contract.json" "$d0/return.json" "step 1: nothing"
   [ "$status" -eq 0 ]
   [ "$output" = "nothing to commit" ]
   [ "$(git rev-list --count HEAD)" -eq "$before" ]
 }
 
 @test "evidence: AC6 — a return that wrote into another step's directory is refused" {
-  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" 0 c0.json
-  jq -n --arg v "$(jq -r .version c0.json)" \
-    '{contract_version: $v, changed_files: ["a.txt", ".aid-o/work/evidence/E-par/R-par/steps/step_2_frontend/output.md"], gates: [], step_status: "done"}' > r0.json
+  d0="$(bash "$FSM" step-evidence-dir "$STATE" 0)"
+  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" 0 "$d0/contract.json"
+  jq -n --arg v "$(jq -r .version "$d0/contract.json")" \
+    '{contract_version: $v, changed_files: ["a.txt", ".aid-o/work/evidence/E-par/R-par/steps/step_2_frontend/output.md"], gates: [], step_status: "done"}' > "$d0/return.json"
   : > a.txt
-  run aid_dispatch_contract_validate c0.json r0.json .
+  run aid_dispatch_contract_validate "$d0/contract.json" "$d0/return.json" .
   [ "$status" -eq 1 ]
   [[ "$output" == *"another step's directory"* ]]
   [[ "$output" == *"steps/step_2_frontend/output.md"* ]]
+}
+
+@test "evidence: increment-step refuses a contracted step without an accepted return" {
+  d0="$(bash "$FSM" step-evidence-dir "$STATE" 0)"
+  aid_dispatch_contract_build "$TEST_EVIDENCE_DIR/plan.json" 0 "$d0/contract.json" "$TEST_EVIDENCE_DIR"
+  # a verify file that satisfies every older precondition
+  printf '# Step 0\n- [x] AC1 — PASS\n%s\n## Memory Used\nN/A\n## Memory Written\nN/A\n## Result: PASS\n' "$(git rev-parse HEAD)" > "$TEST_EVIDENCE_DIR/step-0-verify.md"
+  run bash "$FSM" increment-step "$STATE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no return was recorded"* ]]
+  jq -n '{contract_version: "stale0000000", changed_files: [], gates: [], step_status: "done"}' > "$d0/return.json"
+  run bash "$FSM" increment-step "$STATE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not accepted against its contract"* ]]
+  [ "$(bash "$FSM" get-field current_step "$STATE")" = "0" ]
 }

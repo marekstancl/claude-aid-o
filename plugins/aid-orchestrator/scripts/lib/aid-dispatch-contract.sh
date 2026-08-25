@@ -3,7 +3,7 @@
 # lib/aid-dispatch-contract.sh — what an agent is handed, and what it must
 # hand back (P087 Step 1)
 #
-#   aid_dispatch_contract_build    <plan.json> <step_index> <out_file>
+#   aid_dispatch_contract_build    <plan.json> <step_index> <out_file> [evidence_root]
 #   aid_dispatch_contract_prompt   <contract.json>
 #   aid_dispatch_contract_extract  <output.md>
 #   aid_dispatch_contract_validate <contract.json> <return.json> [tree_root]
@@ -29,8 +29,10 @@
 #   `aid-return`. It names the version it worked against, the files it changed,
 #   the gates it ran and the step's status. Validation checks the return
 #   against the PACKET and the DISK — an expected artifact has to exist, not be
-#   declared — and lists every file changed outside the allowed paths, which is
-#   what makes a scope violation visible instead of a surprise at merge time.
+#   declared; every file git sees changed in the tree has to be in the list,
+#   so an edit the agent left out is a rejection, not a secret — and it names
+#   every file changed outside the allowed paths, which is what makes a scope
+#   violation visible instead of a surprise at merge time.
 #
 # WHAT IT DOES NOT DO
 #   It does not run the agent and it does not decide the FSM. A step with no
@@ -59,17 +61,23 @@ _aid_dc_version() {
 }
 
 # ---------------------------------------------------------------------------
-# aid_dispatch_contract_build <plan.json> <step_index> <out_file>
+# aid_dispatch_contract_build <plan.json> <step_index> <out_file> [evidence_root]
 #   0  written
 #   1  plan unreadable or the step does not exist
-#   3  the step declares no paths — no contract is owed
+#   3  the step declares no paths — no contract is owed (a plan decision: a
+#      pure-analysis step is not made to fake artifacts; its output.md is
+#      still verified by the step-verify file like any other)
+#
+# <evidence_root> is the run's evidence directory; with it the packet carries
+# the step's ABSOLUTE evidence path, which is what an agent in a per-step
+# worktree needs — a relative one would point into its own tree.
 #
 # Expected artifacts are the Create/Test/Rewrite bullets of `outputs`: paths
 # the step promises to leave behind. A Modify bullet promises nothing new, so
 # it is not an artifact; it stays an allowed path.
 # ---------------------------------------------------------------------------
 aid_dispatch_contract_build() {
-  local plan="${1:?contract: plan.json required}" idx="${2:?contract: step index required}" out="${3:?contract: output file required}"
+  local plan="${1:?contract: plan.json required}" idx="${2:?contract: step index required}" out="${3:?contract: output file required}" evroot="${4:-}"
   [[ -r "$plan" ]] || { echo "contract: cannot read ${plan}" >&2; return 1; }
   [[ "$idx" =~ ^[0-9]+$ ]] || { echo "contract: step index must be a number, got '${idx}'" >&2; return 1; }
 
@@ -101,7 +109,7 @@ aid_dispatch_contract_build() {
   body_json="$(jq -c \
     --argjson i "$idx" \
     --argjson artifacts "$artifacts" \
-    --arg evidence "steps/${step_id}" \
+    --arg evidence "${evroot:+${evroot%/}/}steps/${step_id}" \
     --slurpfile plan "$plan" \
     --arg id "$step_id" \
     '{
@@ -146,8 +154,9 @@ $(jq 'del(.return_shape)' "$c")
 \`\`\`
 
 Write evidence only under \`$(jq -r '.evidence_dir' "$c")\`. Change files only
-under the allowed paths. When you finish, end your output with exactly one
-fenced block tagged \`${_AID_DC_RETURN_FENCE}\` holding this object:
+under the allowed paths. When you finish, end your output with a fenced block
+tagged \`${_AID_DC_RETURN_FENCE}\` holding this object (the LAST such block is
+the one read):
 
 \`\`\`${_AID_DC_RETURN_FENCE}
 $(jq '.return_shape | .contract_version = "'"$version"'"' "$c")
@@ -178,9 +187,9 @@ aid_dispatch_contract_extract() {
     || { echo "contract: the ${_AID_DC_RETURN_FENCE} block in ${out} is not one JSON object" >&2; return 1; }
 }
 
-# _aid_dc_path_allowed <path> <allowed-json> <evidence_dir> — bash glob match,
-# the same way scripts/gates/scope-check.sh decides. A step's own evidence
-# directory is always allowed: that is where its output is meant to go.
+# _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
+# match, the same way scripts/gates/scope-check.sh decides. A step's own
+# evidence directory is always allowed: that is where its output is meant to go.
 _aid_dc_path_allowed() {
   local path="$1" allowed="$2" evidence="$3" pattern
   [[ "$path" == *"${evidence}"* ]] && return 0
@@ -199,14 +208,16 @@ _aid_dc_path_allowed() {
 #   Prints ONE JSON report:
 #     {verdict: "accept"|"reject", reasons: [...],
 #      missing_artifacts: [...], out_of_scope: [...], foreign_evidence: [...],
-#      extra_artifacts: [...]}
+#      undeclared_changes: [...], extra_artifacts: [...]}
 #   0 accept · 1 reject · 2 cannot judge (unreadable input)
 #
-#   Artifacts are checked ON DISK under <tree_root> (default: cwd). The
-#   agent's list of changed files is what makes a scope violation VISIBLE; the
-#   artifact check is what makes a placeholder return impossible to accept.
-#   `extra_artifacts` — changed files inside scope that were not promised — is
-#   recorded, never refused.
+#   Everything is checked against <tree_root> (default: cwd). Artifacts must
+#   exist on disk; when the root is a git tree, every path git reports as
+#   changed (tracked or untracked, `.aid-o/` excluded) must appear in the
+#   return's `changed_files` — the list is the agent's DECLARATION, the disk is
+#   the fact, and a change left out of the declaration is refused. Scope is
+#   judged over the union of the two. `extra_artifacts` — declared, in scope,
+#   not promised — is recorded, never refused.
 # ---------------------------------------------------------------------------
 aid_dispatch_contract_validate() {
   local c="${1:?contract: contract file required}" r="${2:?contract: return file required}" root="${3:-.}"
@@ -232,9 +243,10 @@ aid_dispatch_contract_validate() {
     _add reasons "the return confirms contract version ${got}, the dispatched packet is ${want} — the agent worked against stale instructions"
   fi
 
-  jq -e '.changed_files | type == "array"' "$r" >/dev/null 2>&1 || _add reasons "the return lists no changed_files array"
-  jq -e '.gates | type == "array"' "$r" >/dev/null 2>&1 || _add reasons "the return lists no gates array"
-  jq -e '.step_status | type == "string" and length > 0' "$r" >/dev/null 2>&1 || _add reasons "the return states no step_status"
+  jq -e '.changed_files | type == "array" and all(.[]; type == "string")' "$r" >/dev/null 2>&1 || _add reasons "the return lists no changed_files array of paths"
+  jq -e '.gates | type == "array" and all(.[]; type == "object" and (.name | type == "string") and (.result | IN("pass","fail","skipped")))' "$r" >/dev/null 2>&1 \
+    || _add reasons "the return's gates are not a list of {name, result: pass|fail|skipped}"
+  jq -e '.step_status | IN("done","blocked")' "$r" >/dev/null 2>&1 || _add reasons "the return's step_status is not done|blocked"
 
   # Artifacts: on the disk, not in the declaration.
   local a
@@ -244,10 +256,25 @@ aid_dispatch_contract_validate() {
   done < <(jq -r '.expected_artifacts[]? // empty' "$c")
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
 
-  # Scope: every changed file outside the allowed paths is named.
+  # The disk's own list of changes, when there is a git tree to ask. A file
+  # changed but not declared is refused: the declaration is what the commit
+  # stages, so an omission would leave an edit behind unstaged and unseen.
+  local undeclared="[]" changed_on_disk="" g
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    changed_on_disk="$(git -C "$root" status --porcelain --untracked-files=all 2>/dev/null \
+      | cut -c4- | sed 's/^.* -> //' | grep -v '^\.aid-o/' || true)"
+    while IFS= read -r g; do
+      [[ -n "$g" ]] || continue
+      jq -e --arg f "$g" '.changed_files | index($f)' "$r" >/dev/null 2>&1 || _add undeclared "$g"
+    done <<< "$changed_on_disk"
+    [[ "$undeclared" != "[]" ]] && _add reasons "files changed on disk but not declared in the return: $(jq -r 'join(", ")' <<< "$undeclared")"
+  fi
+
+  # Scope, over the declared list AND the disk's: every file outside the
+  # allowed paths is named.
   local allowed evidence f
   allowed="$(jq -c '.allowed_paths // []' "$c")"
-  evidence="$(jq -r '.evidence_dir // ""' "$c")"
+  evidence="steps/$(jq -r '.step_id // ""' "$c")"
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     if [[ "$f" == *"/steps/step_"* && "$f" != *"${evidence}"* ]]; then
@@ -257,25 +284,27 @@ aid_dispatch_contract_validate() {
     elif [[ "$f" != *"${evidence}"* ]] && ! jq -e --arg f "$f" '.expected_artifacts | index($f)' "$c" >/dev/null 2>&1; then
       _add extra "$f"
     fi
-  done < <(jq -r '.changed_files[]? // empty' "$r")
+  done < <( { jq -r '.changed_files[]? // empty' "$r"; printf '%s\n' "$changed_on_disk"; } | awk 'NF && !seen[$0]++')
   [[ "$foreign" != "[]" ]] && _add reasons "evidence written into another step's directory: $(jq -r 'join(", ")' <<< "$foreign")"
   [[ "$out_of_scope" != "[]" ]] && _add reasons "files changed outside the allowed paths: $(jq -r 'join(", ")' <<< "$out_of_scope")"
 
   local verdict="accept"
   [[ "$reasons" != "[]" ]] && verdict="reject"
   jq -n --arg v "$verdict" --argjson reasons "$reasons" --argjson missing "$missing" \
-        --argjson oos "$out_of_scope" --argjson foreign "$foreign" --argjson extra "$extra" \
+        --argjson oos "$out_of_scope" --argjson foreign "$foreign" --argjson undeclared "$undeclared" --argjson extra "$extra" \
         '{verdict: $v, reasons: $reasons, missing_artifacts: $missing, out_of_scope: $oos,
-          foreign_evidence: $foreign, extra_artifacts: $extra}'
+          foreign_evidence: $foreign, undeclared_changes: $undeclared, extra_artifacts: $extra}'
   [[ "$verdict" == "accept" ]]
 }
 
 # ---------------------------------------------------------------------------
 # aid_dispatch_contract_commit <tree_root> <contract.json> <return.json> <message>
-#   The controller's per-step commit: stages ONLY the files the accepted
-#   return names, commits them in <tree_root>, prints the commit SHA. An agent
-#   that changed nothing produces no commit — "nothing to commit" on stdout,
-#   exit 0 — never an empty one. Exit 1 when git refuses.
+#   The controller's per-step commit: VALIDATES the return against the
+#   contract first (a rejected return is not committed — exit 1 with the
+#   report), then stages ONLY the files the return names, commits them in
+#   <tree_root> and prints the commit SHA. An agent that changed nothing
+#   produces no commit — "nothing to commit" on stdout, exit 0 — never an
+#   empty one. Exit 1 when git refuses.
 #
 #   One step, one commit, made by the controller after validation: that is
 #   what makes a mega-commit impossible even when three agents return at once,
@@ -283,6 +312,11 @@ aid_dispatch_contract_validate() {
 # ---------------------------------------------------------------------------
 aid_dispatch_contract_commit() {
   local root="${1:?contract: tree root required}" c="${2:?contract: contract file required}" r="${3:?contract: return file required}" msg="${4:?contract: commit message required}"
+  local report
+  if ! report="$(aid_dispatch_contract_validate "$c" "$r" "$root")"; then
+    echo "contract: the return is not accepted, nothing is committed — $(jq -r '.reasons | join("; ")' <<< "$report" 2>/dev/null)" >&2
+    return 1
+  fi
   local -a files=()
   local f
   while IFS= read -r f; do

@@ -30,7 +30,9 @@
 # are stated for the plan author in skills/plan-writing.md §"Declaring what can
 # run at the same time" — one copy, on the surface the author actually reads.
 #
-# Usage: aid-plan-parallel-check.sh <plan.md> [--advisory] [--quiet]
+# Usage: aid-plan-parallel-check.sh <plan.md> [--advisory] [--quiet] [--group <wave>]
+#   --group  judge ONE wave only — how the dispatch decision asks, so a
+#            collision elsewhere in the plan cannot serialise a safe wave
 #
 # **Last Updated:** 2026-08-25
 #
@@ -44,11 +46,12 @@ source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-plan-band.sh
 source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 
-PLAN=""; ADVISORY=0; QUIET=0
+PLAN=""; ADVISORY=0; QUIET=0; ONLY_GROUP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --advisory) ADVISORY=1; shift ;;
     --quiet)    QUIET=1; shift ;;
+    --group)    ONLY_GROUP="${2:-}"; [[ -n "$ONLY_GROUP" ]] || { echo "aid-plan-parallel-check: --group needs a wave name" >&2; exit 2; }; shift 2 ;;
     -*) echo "aid-plan-parallel-check: unknown option: $1" >&2; exit 2 ;;
     *)  PLAN="$1"; shift ;;
   esac
@@ -142,6 +145,7 @@ done < <(_aid_plan_step_bounds "$PLAN")
 for i in "${!step_names[@]}"; do
   g="${step_groups[$i]}"
   [[ "$g" == "$_AID_PARALLEL_STANDALONE" ]] && continue
+  [[ -n "$ONLY_GROUP" && "$g" != "$ONLY_GROUP" ]] && continue
   for (( j=i+1; j<${#step_names[@]}; j++ )); do
     [[ "${step_groups[$j]}" == "$g" ]] || continue
     shared=""

@@ -563,7 +563,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    ```bash
    step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
    source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
-   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json"   # exit 3 = no paths, no contract owed
+   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json" "$evidence_dir"   # exit 3 = no paths, no contract owed
    ```
    The packet is built by code from `plan.json` — objective, allowed paths, dependencies,
    expected artifacts, acceptance criteria, UI contract, the step's own evidence dir — and
@@ -716,11 +716,16 @@ After agent completes:
     && aid_dispatch_contract_validate "$step_dir/contract.json" "$step_dir/return.json" "$tree_root"
   ```
   The validator judges the return against the packet and the disk, never against the
-  agent's word: no `aid-return` block, a version other than the dispatched one, an expected
-  artifact missing on disk, a file changed outside the allowed paths, or evidence written
-  into another step's directory → **reject** (report on stdout names every item). A rejected
-  return is re-dispatched with the current packet — never accepted against stale instructions.
-  Extra files inside scope are recorded (`extra_artifacts`), not refused.
+  agent's word: no `aid-return` block, a version other than the dispatched one, a status or
+  gate result outside `done|blocked` / `pass|fail|skipped`, an expected artifact missing on
+  disk, a file git sees changed but the return leaves out, a file changed outside the allowed
+  paths, or evidence written into another step's directory → **reject** (report on stdout
+  names every item). A rejected return is re-dispatched with the current packet — never
+  accepted against stale instructions. Extra declared files inside scope are recorded
+  (`extra_artifacts`), not refused. **`increment-step` re-runs this validation** for any
+  step that has a `contract.json` and refuses to advance without an accepted `return.json`
+  (`contract_return_missing` / `contract_return_rejected`) — the contract is an FSM
+  precondition, not a request.
 - Outputs match `step.outputs`? → If not, re-dispatch once with feedback
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
@@ -728,7 +733,8 @@ After agent completes:
 **Per-step commit (controller, after an accepted return):**
 ```bash
 aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/return.json" \
-  "step {N}: {step title}"     # stages only the return's changed_files; prints the SHA or "nothing to commit"
+  "step {N}: {step title}"     # validates first (a rejected return is not committed), stages only
+                               # the return's changed_files; prints the SHA or "nothing to commit"
 ```
 The controller is the only committer and it takes returns **one at a time**, in the order
 they arrive — that is what makes a mega-commit impossible even when three agents return
@@ -1152,29 +1158,33 @@ never assumed from the plan:
 
 ```bash
 source "$AID_PLUGIN_PATH/scripts/lib/aid-parallel-dispatch.sh"
-decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_size" "$tree_root")"
-# concurrent | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
+decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_name" "$wave_size" "$tree_root")"
+# concurrent slots=<max_parallel> | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
 ```
 
 `serial` is returned — with the reason — for a wave of one, for `dispatch.max_parallel: 1`
-(the brake, `defaults/orchestration.yaml`), when git cannot hand out worktrees, when
-`aid-plan-parallel-check.sh` finds two steps of the wave sharing a file or a declared
-interface, and when that check cannot run at all. **The check never refuses a run; it
-degrades it.** A wave that cannot be proved safe runs in order.
+(the brake, `defaults/orchestration.yaml`), for a `dispatch.strategy` other than `worktrees`,
+when git cannot hand out worktrees, when `aid-plan-parallel-check.sh --group <wave>` finds two
+steps of THIS wave sharing a file or a declared interface, and when that check cannot run at
+all. **The check never refuses a run; it degrades it.** A wave that cannot be proved safe
+runs in order.
 
-**Concurrent path** (decision `concurrent`, at most `max_parallel` agents in flight):
+**Concurrent path** (decision `concurrent slots=N`: at most N agents in flight — a wave
+larger than N runs in batches, the next step dispatched as a slot frees):
 
-1. For each step: `aid_parallel_step_worktree "$tree_root" "$step_id" HEAD` → its own tree on
-   `step/<step_id>`. Build its contract (§4 step 4) and dispatch it there — one message,
-   several `Agent()` calls.
+1. For each step: `aid_parallel_step_worktree "$tree_root" "$step_id" HEAD "$worktree_base"`
+   → its own tree on `step/<step_id>` at the current base (`dispatch.worktree_base`, default
+   `.aid-worktrees`; a branch left by an earlier run is reset, never reused). Build its
+   contract (§4 step 4) and dispatch it there — one message, several `Agent()` calls.
 2. As each agent returns — **one at a time, in arrival order** — validate the return
    (§4 Output verification), commit it in the step's worktree (`aid_dispatch_contract_commit`),
    write its `step-{N}-verify.md`, then `aid_parallel_merge "$tree_root" "step/<step_id>"`.
 3. A clean merge prints the SHA; the step's tree is removed when git agrees it is clean
    (a dirty one is kept and named — never deleted). **A conflict is aborted, the tree is
-   untouched, and the step is repeated against the new base** (`exit 1`, files named). The
-   same step failing twice is handled by `defaults/policies/auto-recovery.yaml`, not by a
-   human queue.
+   untouched (`exit 1`, files named), the step's tree is put back on the base that moved —
+   `aid_parallel_step_reset "$tree_root" "$step_id" HEAD "$worktree_base"` — and the step is
+   dispatched again.** The same step failing twice is handled by
+   `defaults/policies/auto-recovery.yaml`, not by a human queue.
 4. An agent that dies leaves its tree and branch for inspection; the other steps continue.
 5. `increment-step` once per merged step, in merge order.
 
