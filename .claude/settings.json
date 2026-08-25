@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(schedule)",
+      "Skill(schedule:*)",
+      "Read(//home/marekstancl/.claude/**)",
+      "Skill(fewer-permission-prompts)",
+      "Skill(fewer-permission-prompts:*)",
+      "Skill(loop)",
+      "Skill(loop:*)",
+      "Read(//dev/**)",
+      "Bash(bash /tmp/claude-plan-close-fix/docs_regex_loophole.sh)",
+      "Bash(bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check.bats)",
+      "Bash(bats -t plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check.bats --filter \"7a\")",
+      "Bash(bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-close-check.bats --filter \"7a\")",
+      "Bash(bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats)",
+      "Bash(cat)",
+      "Read(//tmp/claude-plan-close-fix/**)",
+      "Bash(cat > *)",
+      "Bash(bats test-aid-plan-close-check.bats)",
+      "Bash(bats test-aid-fsm.bats)",
+      "Bash(bash -n plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh)",
+      "Bash(cp plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh /home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'fix\\(pipeline\\): the tracked-plan preflight called a function that was not sourced yet *)",
+      "Bash(bash /home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh *)",
+      "Bash(bash plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh *)",
+      "Bash(bash /home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh *)",
+      "Bash(bash plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh *)",
+      "Bash(bash plugins/aid-orchestrator/scripts/aid-cp1-gate.sh *)",
+      "Bash(bash plugins/aid-orchestrator/scripts/aid-plan-lint.sh *)",
+      "Bash(bash plugins/aid-orchestrator/scripts/aid-plan-parallel-check.sh *)",
+      "Bash(bash /home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/scripts/aid-generation-readiness.sh *)",
+      "Bash(bash /home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/scripts/aid-fsm.sh alloc *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(sudo rm *)",
+      "Bash(mkfs *)",
+      "Bash(dd if=*)",
+      "Bash(> /dev/sda*)",
+      "Bash(chmod -R 777 /)",
+      "Bash(git push --force origin main)",
+      "Bash(git push --force origin master)"
+    ],
+    "additionalDirectories": [
+      "/home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/scripts/lib",
+      "/home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator/skills",
+      "/tmp/claude-plan-close-fix"
+    ]
+  }
+}

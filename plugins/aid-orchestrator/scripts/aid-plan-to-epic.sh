@@ -406,7 +406,12 @@ title="$(awk '
     exit
   }
   /^# P[0-9]/ {
-    sub(/^# P[0-9A-Za-z-]+[[:space:]]*[—–-][[:space:]]*/, "")
+    # Alternation, never a bracket expression: awk bracket sets are BYTE sets,
+    # so [—–-] matched only the FIRST byte of a multibyte dash and left the
+    # remaining two in the title — which then reached the filename (P087,
+    # 2026-08-25: `E-087-1_2-\200\224-paraleln-...md`, whose recorded path no
+    # longer matched the file on disk and failed the generation receipt).
+    sub(/^# P[0-9A-Za-z-]+[[:space:]]*(—|–|-)[[:space:]]*/, "")
     print
     exit
   }

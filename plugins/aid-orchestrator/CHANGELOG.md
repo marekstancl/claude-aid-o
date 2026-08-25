@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.90.2] — 2026-08-25
+
+### Fixed
+- **A plan title with a dash or diacritics produced an EPIC filename nothing could reproduce** — the title extractor matched the dash with an awk bracket expression, and awk bracket sets are BYTE sets: `[—–-]` consumed the first byte of a three-byte em dash and left the other two in the title, which reached the filename. P087 generated `E-087-1_2-\200\224-paraleln-….md`, whose recorded `epic_path` then differed byte for byte from the file on disk, and the generation receipt failed as "missing EPIC evidence" — naming the wrong thing entirely. The extractor now alternates (`(—|–|-)`), and `slugify` runs under `LC_ALL=C` end to end so a slug is ASCII by construction whatever a caller hands it, filename and JSON value agreeing byte for byte. Regression suite `test-slug-nonascii.bats`.
+
 ## [2.90.1] — 2026-08-24
 
 > What the first real planning session found about the release before it.

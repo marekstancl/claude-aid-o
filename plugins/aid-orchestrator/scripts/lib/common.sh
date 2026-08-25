@@ -112,12 +112,19 @@ slugify() {
     read -r text
   fi
 
-  echo "$text" \
-    | tr '[:upper:]' '[:lower:]' \
-    | sed 's/[^a-z0-9]/-/g' \
-    | sed 's/--*/-/g' \
-    | sed 's/^-//;s/-$//' \
-    | cut -c1-40
+  # LC_ALL=C throughout, deliberately: the slug becomes a FILENAME and a JSON
+  # value, and those two must agree byte for byte. Under a UTF-8 locale a
+  # multibyte character survives `[^a-z0-9]` as itself and `cut -c` may split
+  # it, so a title carrying one could produce a name no consumer could
+  # reproduce. In the C locale every byte outside [a-z0-9] becomes `-`, so the
+  # slug is ASCII by construction whatever the caller hands in.
+  printf '%s' "$text" \
+    | LC_ALL=C tr '[:upper:]' '[:lower:]' \
+    | LC_ALL=C sed 's/[^a-z0-9]/-/g' \
+    | LC_ALL=C sed 's/--*/-/g' \
+    | LC_ALL=C sed 's/^-//;s/-$//' \
+    | LC_ALL=C cut -c1-40 \
+    | LC_ALL=C sed 's/-$//'
 }
 
 # ---------------------------------------------------------------------------

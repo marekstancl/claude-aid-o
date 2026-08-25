@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.90.1** (current) — co první reálná plánovací session našla o vydání před ní
+- **v2.90.2** (current) — a plan title with a dash or diacritics no longer produces an EPIC filename nothing can reproduce
+- **v2.90.1** — co první reálná plánovací session našla o vydání před ní
 - **v2.90.0** — brainstorming se ptá dvakrát místo pěti; spor o metodu si dva modely rozhodnou samy
 - **v2.89.3** — 84 commands in nine instruction files could not be run as written
 - **v2.87.0** — plan ceremony bands classified from declared paths, obligations graduated to match, and tests designed rather than counted
