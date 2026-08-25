@@ -328,8 +328,11 @@ aid_dispatch_contract_commit() {
   fi
   local -a files=()
   local f
+  # Present on disk, or tracked and deleted — a declared deletion is a
+  # change like any other and is staged as one.
   while IFS= read -r f; do
-    [[ -n "$f" && -e "${root}/${f}" ]] && files+=("$f")
+    [[ -n "$f" ]] || continue
+    if [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]? // empty' "$r")
   if [[ "${#files[@]}" -eq 0 ]]; then
     echo "nothing to commit"

@@ -110,4 +110,10 @@ _agent() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"not accepted against its contract"* ]]
   [ "$(bash "$FSM" get-field current_step "$STATE")" = "0" ]
+  # accepted but blocked, or with a failed gate: still no advance
+  : > a.txt
+  jq -n --arg v "$(jq -r .version "$d0/contract.json")" '{contract_version: $v, changed_files: ["a.txt"], gates: [{name: "lint", result: "fail"}], step_status: "done"}' > "$d0/return.json"
+  run bash "$FSM" increment-step "$STATE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not finished"* && "$output" == *"lint"* ]]
 }

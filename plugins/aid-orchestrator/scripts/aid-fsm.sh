@@ -5708,6 +5708,12 @@ cmd_increment_step() {
             "PRECONDITION FAIL: step ${step}'s return is not accepted against its contract." \
             "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)" \
             "Re-dispatch the step with the current packet; never advance on a rejected return."
+        # An ACCEPTED return is a well-formed one; ADVANCING needs a finished one:
+        # status done and no gate the agent itself reported as failed.
+        jq -e '.step_status == "done" and all(.gates[]?; .result != "fail")' "${_c_dir}/return.json" >/dev/null 2>&1 \
+          || _increment_fail contract_return_not_done \
+            "PRECONDITION FAIL: step ${step}'s return is accepted but not finished — status $(jq -r .step_status "${_c_dir}/return.json" 2>/dev/null), failed gates: $(jq -r '[.gates[]? | select(.result == "fail") | .name] | join(", ")' "${_c_dir}/return.json" 2>/dev/null)." \
+            "A blocked step, or one with a failing gate, does not advance: resume the agent or hand over with a Blocked card."
       fi
     fi
 

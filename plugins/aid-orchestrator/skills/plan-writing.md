@@ -648,7 +648,9 @@ substitute for having thought about it. Then put the result in a table:
 | 1 | 1, 4 | — | no path in common |
 
 **The table is not ceremony.** Since P087 a wave that passes the check IS
-dispatched concurrently (`pipeline.md §4` "Parallel groups"); the table is the
+dispatched concurrently when the dispatch decision allows it — the brake, the
+strategy and the availability of worktrees can still serialise it (`pipeline.md
+§4` "Parallel groups"); the table is the
 evidence of safety the dispatch decision re-verifies, and evidence gathered
 after the fact is evidence nobody trusts.
 

@@ -94,6 +94,17 @@ teardown() { rm -rf "$TMP"; }
   jq '.basis = "memory"' "$OUT/ok.json" > "$OUT/bad.json"
   run aid_ui_proposal_check "$OUT/bad.json" "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"neither"* ]]
+  jq '.viewports[1].width = 320' "$OUT/ok.json" > "$OUT/dim.json"
+  run aid_ui_proposal_check "$OUT/dim.json" "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"320x844"* && "$output" == *"owes 390x844"* ]]
+}
+
+@test "proposal: a live-screen proposal cannot dodge its baselines by flipping live_baseline" {
+  aid_ui_proposal_build "$APP" "$OUT" --screen http://localhost:1/page --fixture-data "$TMP/mocks.json"
+  printf 'x' > "$OUT/p.png"
+  jq --arg p "$OUT/p.png" '.live_baseline = false | .viewports[].proposed = $p | .viewports[0].baseline = null' "$OUT/proposal.json" > "$OUT/t.json"
+  run aid_ui_proposal_check "$OUT/t.json" "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no baseline capture"* ]]
 }
 
 @test "proposal: AC26 — ui.responsive: false owes the desktop viewport only" {

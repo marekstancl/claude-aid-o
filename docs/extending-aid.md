@@ -2599,7 +2599,7 @@ refuse to close a turn which wrote a plan without rendering its page.
 
 ---
 
-## Concurrent agents, the four missing hook rules, credible UI proposals (P087)
+## Concurrent agents, three hook rules and a gate check, credible UI proposals (P087)
 
 ### Adding a step to a concurrent wave
 
@@ -2614,8 +2614,8 @@ they may run at the same time. To put a step into one:
    check compares (normalised: case, surrounding slashes, whitespace). Absent
    means "none", and that is the honest answer for most steps.
 3. Know what the isolation buys and what it does not. Each step runs in its own
-   worktree (`.aid-worktrees/step-<step_id>`, `step/<step_id>`, base
-   `dispatch.worktree_base`); a collision surfaces as a **merge conflict**, the
+   worktree (`<dispatch.worktree_base>/step-<step_id>`, default `.aid-worktrees`,
+   on `step/<step_id>`); a collision surfaces as a **merge conflict**, the
    merge is aborted, the tree left untouched, the step's tree reset onto the new
    base (`aid_parallel_step_reset`) and the step repeated. What it does NOT buy is
    caught nowhere here: two steps changing the same behaviour through different
@@ -2641,7 +2641,8 @@ directory is refused. `aid-fsm.sh increment-step` re-runs the validation for a
 contracted step and refuses to advance without an accepted return — that is the
 enforcement; the library is the mechanism. The controller commits each accepted
 return itself (`aid_dispatch_contract_commit`, which validates first), one at a
-time, which is what makes a mega-commit impossible even under concurrency.
+time — the protocol against a mega-commit; what the FSM guarantees is that a
+contracted step never advances on an unvalidated, unfinished or rejected return.
 
 ### The three hook rules, and the one that is deliberately not a guard
 

@@ -157,6 +157,18 @@ _return() {
   [ "$(git rev-list --count HEAD)" -eq 1 ]
 }
 
+@test "contract: a declared deletion is committed, not reported as nothing to commit" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed
+  rm README.md
+  _return '{changed_files: ["README.md"]}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1: drop readme"
+  [ "$status" -eq 0 ]
+  [ "$output" != "nothing to commit" ]
+  [ "$(git show --name-only --format= HEAD)" = "README.md" ]
+}
+
 @test "contract: with an evidence root the packet carries the step's absolute evidence directory" {
   aid_dispatch_contract_build plan.json 0 c-abs.json "$TEST_DIR/.aid-o/work/evidence/E/R"
   [ "$(jq -r .evidence_dir c-abs.json)" = "$TEST_DIR/.aid-o/work/evidence/E/R/steps/step_1_backend" ]

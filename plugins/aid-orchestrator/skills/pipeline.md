@@ -745,8 +745,10 @@ aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/r
                                # the return's changed_files; prints the SHA or "nothing to commit"
 ```
 The controller is the only committer and it takes returns **one at a time**, in the order
-they arrive — that is what makes a mega-commit impossible even when three agents return
-at once. An agent that changed nothing produces no commit and the fact is recorded.
+they arrive — that is the protocol that keeps three agents returning at once from becoming
+one commit. What the FSM guarantees is narrower and mechanical: a contracted step does not
+advance on an unvalidated, unfinished or rejected return (`increment-step`). An agent that
+changed nothing produces no commit and the fact is recorded.
 
 **Step verification evidence (mandatory):**
 After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:
@@ -1185,8 +1187,9 @@ steps of THIS wave sharing a file or a declared interface, and when that check c
 all. **The check never refuses a run; it degrades it.** A wave that cannot be proved safe
 runs in order.
 
-**Concurrent path** (decision `concurrent slots=N`: at most N agents in flight — a wave
-larger than N runs in batches, the next step dispatched as a slot frees):
+**Concurrent path** (decision `concurrent slots=N`: N is the ceiling the controller keeps —
+the library does not count agents in flight — a wave larger than N runs in batches, the next
+step dispatched as a slot frees):
 
 1. For each step: `aid_parallel_step_worktree "$tree_root" "$step_id" HEAD "$worktree_base"`
    → its own tree on `step/<step_id>` at the current base (`dispatch.worktree_base`, default
@@ -2881,7 +2884,8 @@ the conflict-means-retry rule are specified once, in §4 "Parallel groups". `pla
 parallel_groups[]` is the machine form of the plan's waves.
 
 **Isolation strategy** (`orchestration.yaml → dispatch.strategy`): `worktrees` — each step
-in `.aid-worktrees/step-<step_id>` on `step/<step_id>` (`aid_parallel_step_worktree`);
+in `<dispatch.worktree_base>/step-<step_id>` (default `.aid-worktrees`) on `step/<step_id>`
+(`aid_parallel_step_worktree`);
 `sequential` — no parallelism. `dispatch.max_parallel` caps agents in flight; excess steps
 of a wave wait for a slot.
 

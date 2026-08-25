@@ -202,8 +202,13 @@ aid_ui_proposal_check() {
     # baseline would collapse and `proposed` would be read as the baseline.
     row="$(jq -r --arg n "$name" '.viewports[] | select(.name == $n) | [.name, (.width|tostring), (.height|tostring), (.baseline // ""), (.proposed // "")] | join("\u001f")' "$f" | head -1)"
     [[ -n "$row" ]] || { echo "check: the ${name} viewport (${w}x${h}) is owed by this project and is not in the proposal at all" >&2; return 1; }
+    local ow="$w" oh="$h"
     IFS=$'\x1f' read -r name w h baseline proposed <<< "$row"
-    if [[ "$live" == "true" && ( -z "$baseline" || ! -s "$baseline" ) ]]; then
+    if [[ "$w" != "$ow" || "$h" != "$oh" ]]; then
+      echo "check: the ${name} viewport is ${w}x${h} in the proposal but the project owes ${ow}x${oh}" >&2
+      return 1
+    fi
+    if [[ "$basis" == "live-screen" && ( -z "$baseline" || ! -s "$baseline" ) ]]; then
       echo "check: the ${name} viewport (${w}x${h}) has no baseline capture — the proposal claims a live basis it does not have for this viewport" >&2
       return 1
     fi

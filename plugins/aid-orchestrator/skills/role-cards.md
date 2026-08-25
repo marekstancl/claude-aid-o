@@ -26,7 +26,8 @@ agent-file frontmatter). See `pipeline.md` §4.
 **Max Parallel note.** `**Max Parallel:**` documents the *intended* concurrency ceiling per role.
 The global ceiling is `orchestration.yaml → dispatch.max_parallel` (3 by default since P087; 1 is
 the brake), and a wave runs concurrently only when `aid_parallel_decide` says so — see
-`pipeline.md §4` "Parallel groups". The per-role value is the lower of the two.
+`pipeline.md §4` "Parallel groups". The per-role value is documentation for the controller —
+nothing computes it; the global ceiling is the one the decision returns.
 
 What the cap governs, precisely: **how many worker agents one controller session dispatches at a
 time**. P074 does not change it — that plan isolates trees, not dispatch.

@@ -307,6 +307,9 @@ _gate_scripts_missing_in_tree() {
         printf '%s\n' "$w"
       fi
     fi
+    # An interpreter's own flag (`bash -e script.sh`) keeps the interpreter
+    # as the previous word, so the script after it is still judged.
+    if [[ "$w" == -* ]] && [[ "$prev" =~ ^(bash|sh|zsh|node|python|python3|bats|source)$ ]]; then runs=0; continue; fi
     runs=0; prev="$w"
   done
 }
