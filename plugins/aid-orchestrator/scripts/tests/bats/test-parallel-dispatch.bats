@@ -47,6 +47,13 @@ _plan() {
   [[ "$output" == "serial: wave wave-2 has a collision"* ]]
 }
 
+@test "dispatch: a wave name the plan does not declare is never concurrent" {
+  _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
+  run aid_parallel_decide plan.md orch.yaml wave-typo 2 .
+  [ "$status" -eq 0 ]
+  [[ "$output" == "serial: the wave check could not run"* ]]
+}
+
 @test "dispatch: a strategy other than worktrees is serial, whatever max_parallel says" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
   printf 'dispatch:\n  strategy: sequential\n  max_parallel: 3\n' > seq.yaml

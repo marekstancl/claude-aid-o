@@ -46,13 +46,13 @@
 [[ -n "${_AID_DISPATCH_CONTRACT_SH_LOADED:-}" ]] && return 0
 _AID_DISPATCH_CONTRACT_SH_LOADED=1
 
-_AID_DC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_AID_DCT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-scoping.sh
-source "${_AID_DC_LIB_DIR}/aid-scoping.sh"
+source "${_AID_DCT_LIB_DIR}/aid-scoping.sh"
 
 # The tag on the fenced block the agent returns. One spelling, used by the
 # prompt that asks for it and the reader that finds it.
-_AID_DC_RETURN_FENCE='aid-return'
+_AID_DCT_RETURN_FENCE='aid-return'
 
 # _aid_dc_version <contract_body_json> — twelve hex digits of the canonical
 # body. Long enough that a stale packet never collides, short enough to quote.
@@ -155,10 +155,10 @@ $(jq 'del(.return_shape)' "$c")
 
 Write evidence only under \`$(jq -r '.evidence_dir' "$c")\`. Change files only
 under the allowed paths. When you finish, end your output with a fenced block
-tagged \`${_AID_DC_RETURN_FENCE}\` holding this object (the LAST such block is
+tagged \`${_AID_DCT_RETURN_FENCE}\` holding this object (the LAST such block is
 the one read):
 
-\`\`\`${_AID_DC_RETURN_FENCE}
+\`\`\`${_AID_DCT_RETURN_FENCE}
 $(jq '.return_shape | .contract_version = "'"$version"'"' "$c")
 \`\`\`
 
@@ -177,14 +177,14 @@ aid_dispatch_contract_extract() {
   local out="${1:?contract: output file required}"
   [[ -r "$out" ]] || { echo "contract: cannot read ${out}" >&2; return 1; }
   local block
-  block="$(awk -v tag="$_AID_DC_RETURN_FENCE" '
+  block="$(awk -v tag="$_AID_DCT_RETURN_FENCE" '
     $0 ~ "^```" tag "[[:space:]]*$" { inside=1; buf=""; next }
     inside && /^```[[:space:]]*$/   { inside=0; last=buf; next }
     inside                          { buf = buf $0 "\n" }
     END { printf "%s", last }' "$out")"
-  [[ -n "$block" ]] || { echo "contract: ${out} carries no \`${_AID_DC_RETURN_FENCE}\` block" >&2; return 1; }
+  [[ -n "$block" ]] || { echo "contract: ${out} carries no \`${_AID_DCT_RETURN_FENCE}\` block" >&2; return 1; }
   jq -c 'if type == "object" then . else error("not an object") end' <<< "$block" 2>/dev/null \
-    || { echo "contract: the ${_AID_DC_RETURN_FENCE} block in ${out} is not one JSON object" >&2; return 1; }
+    || { echo "contract: the ${_AID_DCT_RETURN_FENCE} block in ${out} is not one JSON object" >&2; return 1; }
 }
 
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
@@ -192,7 +192,9 @@ aid_dispatch_contract_extract() {
 # evidence directory is always allowed: that is where its output is meant to go.
 _aid_dc_path_allowed() {
   local path="$1" allowed="$2" evidence="$3" pattern
-  [[ "$path" == *"${evidence}"* ]] && return 0
+  # The evidence dir matches as a whole path segment, never as a substring:
+  # `steps/step_1` must not cover `steps/step_1_extra`.
+  case "$path" in "$evidence"|"$evidence"/*|*/"$evidence"|*/"$evidence"/*) return 0 ;; esac
   while IFS= read -r pattern; do
     [[ -n "$pattern" ]] || continue
     # shellcheck disable=SC2254
@@ -267,7 +269,7 @@ aid_dispatch_contract_validate() {
       [[ -n "$g" ]] || continue
       jq -e --arg f "$g" '.changed_files | index($f)' "$r" >/dev/null 2>&1 || _add undeclared "$g"
     done <<< "$changed_on_disk"
-    [[ "$undeclared" != "[]" ]] && _add reasons "files changed on disk but not declared in the return: $(jq -r 'join(", ")' <<< "$undeclared")"
+    [[ "$undeclared" != "[]" ]] && _add reasons "files changed on disk but not declared in the return (the agent left them out, or the tree was already dirty before dispatch — a step is dispatched from a clean tree): $(jq -r 'join(", ")' <<< "$undeclared")"
   fi
 
   # Scope, over the declared list AND the disk's: every file outside the
@@ -277,7 +279,7 @@ aid_dispatch_contract_validate() {
   evidence="steps/$(jq -r '.step_id // ""' "$c")"
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    if [[ "$f" == *"/steps/step_"* && "$f" != *"${evidence}"* ]]; then
+    if [[ "$f" == *"/steps/step_"* ]] && ! _aid_dc_path_allowed "$f" '[]' "$evidence"; then
       _add foreign "$f"
     elif ! _aid_dc_path_allowed "$f" "$allowed" "$evidence"; then
       _add out_of_scope "$f"

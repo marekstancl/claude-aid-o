@@ -3,7 +3,7 @@
 # lib/aid-hook-rules-turn.sh — two rules about the course of a turn
 # (P087 Step 5)
 #
-#   aid_turn_open_step <state_root> [since_epoch]   (shared probe, read-only)
+#   aid_turn_open_steps <state_root> [since_epoch]  (shared probe, read-only)
 #   aid_hook_rule_turn_step_open                     (Stop-event handler)
 #   aid_hook_rule_turn_write_scope                   (PreToolUse-event handler)
 #
@@ -48,39 +48,45 @@ source "${_AID_HRT_LIB_DIR}/aid-decision-card.sh"
 source "${_AID_HRT_LIB_DIR}/aid-dispatch-contract.sh"
 
 # ---------------------------------------------------------------------------
-# aid_turn_open_step <state_root> [since_epoch]
-#   Prints ONE tab-separated line for the first open step found:
+# aid_turn_open_steps <state_root> [since_epoch]
+#   Prints ONE tab-separated line per open step, current step first:
 #     <epic_id> <run_id> <step_index> <step_id> <contract_path>
 #   and returns 0; returns 1 when no step is open. With <since_epoch>, a
 #   contract older than that instant is not this session's and is skipped.
 #
-#   "Active" is read from the runs' own state files, not from a registry: a
-#   run in EXECUTE whose current step has a contract is open by definition,
-#   and a stale one is filtered by the session window, not by bookkeeping.
+#   A step is open when it has a contract and the run has not advanced past
+#   it (index >= current_step). In a concurrent wave that is SEVERAL steps at
+#   once, which is why this prints all of them — a rule that only knew the
+#   current index would judge every other agent of the wave by the wrong
+#   packet. "Active" is read from the runs' own state files, not from a
+#   registry; a stale run is filtered by the session window, not bookkeeping.
 # ---------------------------------------------------------------------------
-aid_turn_open_step() {
-  local root="${1:?open-step: state root required}" since="${2:-0}"
-  local sf state epic run idx plan sid contract mtime
+aid_turn_open_steps() {
+  local root="${1:?open-steps: state root required}" since="${2:-0}"
+  local sf state epic run cur n i plan sid contract mtime found=0
   while IFS= read -r sf; do
     [[ -n "$sf" ]] || continue
     state="$(grep -m1 '^state:' "$sf" 2>/dev/null | awk '{print $2}')"
     [[ "$state" == "EXECUTE" ]] || continue
-    idx="$(grep -m1 '^current_step:' "$sf" 2>/dev/null | awk '{print $2}')"
-    [[ "$idx" =~ ^[0-9]+$ ]] || continue
+    cur="$(grep -m1 '^current_step:' "$sf" 2>/dev/null | awk '{print $2}')"
+    [[ "$cur" =~ ^[0-9]+$ ]] || continue
     plan="$(dirname "$sf")/plan.json"
     [[ -f "$plan" ]] || continue
-    sid="$(jq -r --argjson i "$idx" '.steps[$i].id // ""' "$plan" 2>/dev/null)"
-    [[ -n "$sid" ]] || continue
-    contract="$(dirname "$sf")/steps/${sid}/contract.json"
-    [[ -f "$contract" ]] || continue
-    mtime="$(stat -c %Y "$contract" 2>/dev/null || echo 0)"
-    (( mtime >= since )) || continue
+    n="$(jq -r '.steps | length' "$plan" 2>/dev/null)"; [[ "$n" =~ ^[0-9]+$ ]] || continue
     epic="$(grep -m1 '^epic_id:' "$sf" | awk '{print $2}')"
     run="$(grep -m1 '^run_id:' "$sf" | awk '{print $2}')"
-    printf '%s\t%s\t%s\t%s\t%s\n' "$epic" "$run" "$idx" "$sid" "$contract"
-    return 0
+    for (( i=cur; i<n; i++ )); do
+      sid="$(jq -r --argjson i "$i" '.steps[$i].id // ""' "$plan" 2>/dev/null)"
+      [[ -n "$sid" ]] || continue
+      contract="$(dirname "$sf")/steps/${sid}/contract.json"
+      [[ -f "$contract" ]] || continue
+      mtime="$(stat -c %Y "$contract" 2>/dev/null || echo 0)"
+      (( mtime >= since )) || continue
+      printf '%s\t%s\t%s\t%s\t%s\n' "$epic" "$run" "$i" "$sid" "$contract"
+      found=1
+    done
   done < <(find "${root}/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -name fsm-state.yaml 2>/dev/null | sort)
-  return 1
+  (( found ))
 }
 
 # _aid_hrt_session_start <transcript> — the session's first timestamp as an
@@ -130,7 +136,8 @@ aid_hook_rule_turn_step_open() {
   fi
 
   local line
-  line="$(aid_turn_open_step "$root" "$since")" || { echo "no step of this session is open" >&2; return 0; }
+  line="$(aid_turn_open_steps "$root" "$since" | head -1)"
+  [[ -n "$line" ]] || { echo "no step of this session is open" >&2; return 0; }
   local epic run idx sid
   IFS=$'\t' read -r epic run idx sid _ <<< "$line"
 
@@ -187,19 +194,21 @@ aid_hook_rule_turn_write_scope() {
   local since=0 transcript
   transcript="$(printf '%s' "$input" | jq -r '.transcript_path // ""' 2>/dev/null)"
   [[ -n "$transcript" && -r "$transcript" ]] && since="$(_aid_hrt_session_start "$transcript")"
-  local line
-  line="$(aid_turn_open_step "$root" "$since")" || { echo "no step is open — nothing declares paths" >&2; return 3; }
-  local sid contract
-  IFS=$'\t' read -r _ _ _ sid contract <<< "$line"
-
-  local rel allowed
+  # The hook cannot tell WHICH agent of a wave is writing, so a path inside
+  # ANY open step's paths is inside scope; the notice lists every open step
+  # with its paths, and the return validation of the right step settles it.
+  local lines
+  lines="$(aid_turn_open_steps "$root" "$since")" || { echo "no step is open — nothing declares paths" >&2; return 3; }
+  local rel sid contract allowed summary=""
   rel="$(_aid_hrt_relative "$path" "$cwd")"
-  allowed="$(jq -c '.allowed_paths // []' "$contract")"
-  if _aid_dc_path_allowed "$rel" "$allowed" "steps/${sid}"; then
-    return 0
-  fi
-  printf 'AID: this write lands OUTSIDE the open step'"'"'s allowed paths — %s. Step %s may change: %s. An edit outside them will be named in the contract validation and the step refused; stop and re-check the packet before continuing.\n' \
-    "$rel" "$sid" "$(jq -r 'join(", ")' <<< "$allowed")"
+  while IFS=$'\t' read -r _ _ _ sid contract; do
+    [[ -n "$sid" ]] || continue
+    allowed="$(jq -c '.allowed_paths // []' "$contract")"
+    _aid_dc_path_allowed "$rel" "$allowed" "steps/${sid}" && return 0
+    summary="${summary:+$summary; }${sid}: $(jq -r 'join(", ")' <<< "$allowed")"
+  done <<< "$lines"
+  printf 'AID: this write lands OUTSIDE the open step'"'"'s allowed paths — %s. Open steps may change: %s. An edit outside them will be named in the contract validation and the step refused; stop and re-check the packet before continuing.\n' \
+    "$rel" "$summary"
   echo "write outside allowed paths: ${rel}" >&2
   return 0
 }

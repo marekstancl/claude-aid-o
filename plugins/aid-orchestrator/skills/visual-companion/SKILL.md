@@ -55,7 +55,7 @@ Render baseline from source code — read the component, extract data shapes, re
 **EXECUTE phase — existing_ui change (step has `ui_change_mode: existing_ui`):**
 Capture the real running UI as baseline instead of rendering from code:
 1. Confirm dev server is running (or start it per project.yaml `dev_cmd`)
-2. Run capture: `node {plugin_path}/lib/ui-fidelity/ui-capture.mjs --url <page_url> --out <evidence_dir>/baseline.png`
+2. Run capture: `node {plugin_path}/lib/ui-fidelity/ui-capture.mjs --url <page_url> --selector <css> --target-id baseline --output-dir <evidence_dir>` (writes `<evidence_dir>/baseline.png`)
    — once per viewport the contract names (`viewports` in the UI Change Contract; see
    `skills/plan-writing.md`), with `--viewport-width/--viewport-height`
 3. The capture path is stored as `baseline_path` in the `gestalt_approval` object

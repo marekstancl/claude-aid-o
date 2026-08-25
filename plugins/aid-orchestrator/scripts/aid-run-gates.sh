@@ -298,7 +298,7 @@ AID_GATE_DEADLINE_GRACE_SEC="${AID_GATE_DEADLINE_GRACE_SEC:-30}"
 _gate_scripts_missing_in_tree() {
   local cmd="$1" tree="$2" w prev="" runs=1
   for w in $cmd; do
-    w="${w#\'}"; w="${w%\'}"; w="${w#\"}"; w="${w%\"}"
+    w="${w#\'}"; w="${w%\'}"; w="${w#\"}"; w="${w%\"}"; w="${w#./}"
     case "$w" in
       ';'|'&&'|'||'|'|'|'('|'{') runs=1; prev=""; continue ;;
     esac

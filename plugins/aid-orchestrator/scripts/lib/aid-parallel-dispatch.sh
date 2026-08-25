@@ -46,8 +46,9 @@ _AID_PARALLEL_DISPATCH_SH_LOADED=1
 _AID_PD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Where a step's worktree lives: `<worktree_base>/step-<step_id>`, the base
-# from `dispatch.worktree_base` (default `.aid-worktrees`, gitignored by the
-# `/aid-init` template). Derivable from the step id alone.
+# from `dispatch.worktree_base` (default `.aid-worktrees`, the one path the
+# `/aid-init` template gitignores — a project that configures another base
+# ignores it itself). Derivable from the step id alone.
 _AID_PD_DEFAULT_BASE='.aid-worktrees'
 _aid_pd_step_worktree_path() { printf '%s/%s/step-%s' "$1" "${3:-$_AID_PD_DEFAULT_BASE}" "$2"; }
 _aid_pd_step_branch()        { printf 'step/%s' "$1"; }

@@ -86,6 +86,10 @@ _run() { bash -c "cd '$1' && exec bash '$RUNNER' run-all '$PRIMARY/.aid-o/config
   run _run "$WT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"scripts/probe.sh"* ]]
+  _config "./scripts/probe.sh"
+  run _run "$WT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"scripts/probe.sh"* ]]
 }
 
 @test "gate-branch: a run from the primary checkout behaves as before, and an absolute or {plugin_path} script is not the branch's business" {

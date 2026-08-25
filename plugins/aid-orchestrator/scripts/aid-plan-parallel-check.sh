@@ -140,6 +140,14 @@ while IFS=$'\t' read -r s e head; do
 done < <(_aid_plan_step_bounds "$PLAN")
 
 [[ "${#step_names[@]}" -gt 0 ]] || _report note "no \`### Step\` sections found — nothing to check."
+if [[ -n "$ONLY_GROUP" ]]; then
+  _seen=0
+  for g in "${step_groups[@]}"; do [[ "$g" == "$ONLY_GROUP" ]] && _seen=1; done
+  if (( ! _seen )); then
+    echo "aid-plan-parallel-check: no step declares **Parallel group:** ${ONLY_GROUP} — a wave that is not in the plan cannot be judged" >&2
+    exit 2
+  fi
+fi
 
 # Every pair inside a group. O(n²) over steps, which is a plan-sized number.
 for i in "${!step_names[@]}"; do

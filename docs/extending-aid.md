@@ -207,9 +207,9 @@ configured-and-binds-nothing (owes nothing, and that is correct).
 Each step declares a wave; `aid-plan-parallel-check.sh` proves two steps in one
 wave do not name the same file. It is enforced from
 `aid-generation-readiness.sh` rather than from the lint, because disjointness
-is a property of the step graph. It currently blocks a risk that cannot
-materialise (`max_parallel: 1`) — deliberately: it is the safety evidence for
-the moment the brake comes off.
+is a property of the step graph. Since P087 the brake is off: the same check,
+scoped to one wave (`--group`), is what the dispatch decision asks before a wave
+runs concurrently, and it judges declared interfaces as well as files.
 
 All three run through band-scoped obligations rather than as new checkers.
 Before adding a *fourth* plan-time authority, check whether what you want is a

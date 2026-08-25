@@ -557,7 +557,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 ### Step dispatch
 
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
-2. Load step definition from `plan.json` → `steps[current_step]`
+2. Load step definition from `plan.json` → `steps[current_step]` (`step_id` = its `id`)
 3. Load role card from `skills/role-cards.md` for the step's `role`
 4. Build the step's **dispatch contract** (P087) and its evidence directory:
    ```bash
@@ -729,6 +729,14 @@ After agent completes:
 - Outputs match `step.outputs`? → If not, re-dispatch once with feedback
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
+
+**The turn may not end here.** While a contracted step is open — a `contract.json` written
+this session and `current_step` not advanced past it — the `Stop` hook rule `turn_step_open`
+(`defaults/hook-registry.yaml`, fail-closed once the canary has verified the installation)
+refuses to close the turn and names the transition: validate the return, commit, write the
+verify file, `increment-step` — or hand over explicitly with a Decision card or a Blocked card
+(`skills/communication.md`). A `Write`/`Edit` outside every open step's paths is named by
+`turn_write_scope` as context before it lands; it does not block, the validation above does.
 
 **Per-step commit (controller, after an accepted return):**
 ```bash
@@ -1158,6 +1166,14 @@ never assumed from the plan:
 
 ```bash
 source "$AID_PLUGIN_PATH/scripts/lib/aid-parallel-dispatch.sh"
+plan_path="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" get-field plan_path "$state_file")"   # plan.md, recorded by init ("null" in Fast Mode → serial)
+orchestration_yaml="$(aid_state_path .aid-o/config/orchestration.yaml)"                     # state root, never the worktree
+tree_root="$(git rev-parse --show-toplevel)"                                                 # the tree the run executes in
+worktree_base="$(yq -r '.dispatch.worktree_base // ".aid-worktrees"' "$orchestration_yaml")"
+# the wave: the current step's group in plan.json → parallel_groups[] (each entry lists the step ids of one wave)
+wave_steps="$(jq -c --arg id "$step_id" '.parallel_groups[] | select(index($id))' "$evidence_dir/plan.json")"
+wave_name="$(jq -r --arg id "$step_id" '.steps[] | select(.id == $id) | .parallel_group // "---"' "$evidence_dir/plan.json")"
+wave_size="$(jq -r 'length' <<< "${wave_steps:-[]}")"
 decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_name" "$wave_size" "$tree_root")"
 # concurrent slots=<max_parallel> | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
 ```
@@ -1178,7 +1194,7 @@ larger than N runs in batches, the next step dispatched as a slot frees):
    contract (§4 step 4) and dispatch it there — one message, several `Agent()` calls.
 2. As each agent returns — **one at a time, in arrival order** — validate the return
    (§4 Output verification), commit it in the step's worktree (`aid_dispatch_contract_commit`),
-   write its `step-{N}-verify.md`, then `aid_parallel_merge "$tree_root" "step/<step_id>"`.
+   write its `step-{N}-verify.md`, then `aid_parallel_merge "$tree_root" "step/<step_id>" "$worktree_base"`.
 3. A clean merge prints the SHA; the step's tree is removed when git agrees it is clean
    (a dirty one is kept and named — never deleted). **A conflict is aborted, the tree is
    untouched (`exit 1`, files named), the step's tree is put back on the base that moved —

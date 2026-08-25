@@ -3379,7 +3379,7 @@ enforcements:
     tier: t0
     enforcement_degree: 2
     description: "P087 Step 1 — every dispatched step gets a PACKET built by code from plan.json (objective, allowed paths, dependencies, expected artifacts, acceptance criteria, UI contract, its own evidence dir) with a VERSION; the agent returns an `aid-return` block. The return is judged against the packet AND the disk: the version must match, every promised artifact must exist, every file git sees changed must be declared, every file outside the allowed paths is named, evidence in another step's directory is refused. increment-step re-runs the validation and will not advance a contracted step without an accepted return."
-    not_guaranteed: "That the agent did the RIGHT thing inside the allowed paths — the contract proves receipt, scope and artifacts, not correctness; CP2 and the gates own that. A step that declares no paths owes no contract (a plan decision), so a pure-analysis step is verified by its step-verify file alone."
+    not_guaranteed: "That the agent did the RIGHT thing inside the allowed paths — the contract proves receipt, scope and artifacts, not correctness; CP2 and the gates own that. The disk check has no baseline: a tree that was already dirty before dispatch is a rejection naming those files, not a pass — a step is dispatched from a clean tree (the FSM's dirty-tree guards, the per-step worktrees), and the reason says so. A step that declares no paths owes no contract (a plan decision), so a pure-analysis step is verified by its step-verify file alone."
     recovery: "Re-dispatch the step with the current packet; the report names every missing artifact, undeclared change and out-of-scope path."
     test: "scripts/tests/bats/test-dispatch-contract.bats + scripts/tests/bats/test-parallel-evidence.bats"
 
@@ -3409,14 +3409,14 @@ enforcements:
     tier: t0
     enforcement_degree: 2
     description: "P087 Steps 3-4 — the brake is lifted. Before a wave the controller asks code: `concurrent slots=N` only when max_parallel > 1, strategy is worktrees, git hands out worktrees and the wave (this wave, --group) is disjoint in files and declared interfaces; anything else is `serial: <reason>`, never a refusal. Each step runs in its own worktree on step/<step_id> at the current base (a leftover branch is reset, never reused); returns are merged one at a time; a conflict is aborted, the tree left untouched, the step's tree reset onto the new base and the step repeated."
-    not_guaranteed: "KNOWN BOUNDARY: disjoint paths and disjoint declared interfaces do NOT guarantee disjoint effect — two steps can change the same behaviour through different files and undeclared interfaces, and git will merge them cleanly. Isolation turns a collision into a merge conflict, never into a corrupted tree; it does not turn an undeclared semantic collision into anything at all. That residue belongs to CP3 and the gates. Also not guaranteed: slot enforcement — `slots=N` is a number the controller is told, the library does not count agents in flight."
+    not_guaranteed: "KNOWN BOUNDARY: disjoint paths and disjoint declared interfaces do NOT guarantee disjoint effect — two steps can change the same behaviour through different files and undeclared interfaces, and git will merge them cleanly. Isolation turns a collision into a merge conflict, never into a corrupted tree; it does not turn an undeclared semantic collision into anything at all. That residue belongs to CP3 and the gates. Also not guaranteed: slot enforcement — `slots=N` is a number the controller is told, the library does not count agents in flight. And the CALL itself: no FSM precondition forces the controller to ask `aid_parallel_decide` before a wave — the decision is by code once asked, the asking is an instruction (pipeline.md §4), and a controller that dispatches a wave without asking is not detected here; what it gets is the same merge-conflict-and-retry path, because the isolation does not depend on the decision."
     recovery: "A conflict names the files; reset the step (aid_parallel_step_reset) and dispatch it again. Two failures of the same step go to defaults/policies/auto-recovery.yaml. A dirty step tree is kept and named, never removed."
     test: "scripts/tests/bats/test-parallel-dispatch.bats + scripts/tests/bats/test-plan-parallel-check.bats"
 
   - id: turn_step_open
     type: 12
     source: "scripts/lib/aid-hook-rules-turn.sh (aid_hook_rule_turn_step_open) + defaults/hook-registry.yaml (rule turn_step_open)"
-    instruction: "skills/pipeline.md (§4 Output verification) + commands/aid-run.md (rule 16)"
+    instruction: "skills/pipeline.md (§4 The turn may not end here)"
     severity: blocking
     surface: llm-facing
     status: active
@@ -3439,7 +3439,7 @@ enforcements:
     tier: t0
     enforcement_degree: 3
     not_guaranteed: "Anything. This is DELIVERY, not a guard, and the plan's re-grounding says why: the catch sees Write/Edit and never a shell redirection (measured by the ecosystem sheet and by P086), so a rule that blocked here would be sold as protection with a hole the size of `bash`. It names the path and the allowed list before the edit lands, as context; what refuses is the contract validation at return time (dispatch_contract_return), which reads the disk."
-    description: "P087 Step 5 — a Write/Edit that lands outside the open step's allowed paths is named before it lands, with the path and the list, as injected context under PreToolUse (owner any, so it reaches a role agent too)."
+    description: "P087 Step 5 — a Write/Edit that lands outside EVERY open step's allowed paths is named before it lands, with the path and each open step's list, as injected context under PreToolUse (owner any, so it reaches a role agent too). In a concurrent wave several steps are open at once and the hook cannot tell which agent is writing, so it judges against the union and the return validation of the right step settles it."
     recovery: "Nothing to recover; the notice is feedback. The return validation is the enforcement."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
 
@@ -3498,7 +3498,7 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     enforcement_degree: 2
-    not_guaranteed: "Coverage of anything beyond the two minimum viewports (desktop 1280×720, mobile 390×844); tablets are the plan's to add. That `ui.responsive` is TRUE of the product — it is a declared fact, default true, and a project that sets false to dodge the mobile shot has lied in a field a reviewer can read. The EXECUTE-phase visual check reads the viewports from the UI Change Contract and is instructed, not gated, to capture each."
+    not_guaranteed: "Coverage of anything beyond the two minimum viewports (desktop 1280×720, mobile 390×844); tablets are the plan's to add. That `ui.responsive` is TRUE of the product — it is a declared fact, default true, and a project that sets false to dodge the mobile shot has lied in a field a reviewer can read. The `viewports` token of the UI Change Contract is NOT carried into plan.json by the generators (they keep path | sha256 | schema_version) — the controller reads it from the plan text, and the EXECUTE-phase capture per viewport is instructed, not gated; the gate is aid_ui_proposal_check on the proposal."
     description: "P087 Step 9 — responsiveness is a fact of the project (`ui.responsive`, default true), read once: a responsive project owes desktop AND mobile in every UI proposal and check, `false` owes desktop alone, a project without UI is not asked. A missing viewport stops the build or fails the check naming that viewport."
     recovery: "Capture the named viewport, or set ui.responsive: false deliberately for a desktop-only product."
     test: "scripts/tests/bats/test-ui-proposal.bats"

@@ -18,6 +18,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **UI proposals built from the application** — `lib/aid-ui-proposal.sh` starts from the real screen captured per viewport on fixture data (no fixture, no capture) or from the design system inventoried from the tree, marked as having no live baseline; `ui.responsive` in `project.yaml` (default true) makes desktop and mobile owed and a missing viewport stops the build naming it; both models get the same brief.
 
 ### Changed
+- **`defaults/orchestration.yaml`** — `dispatch.strategy: worktrees`, `dispatch.max_parallel: 3`, `dispatch.worktree_base: .aid-worktrees`; an already-initialised project keeps its own copy (`strategy: sequential`, `max_parallel: 1`, i.e. the brake) until `/aid-init` upgrades it — nothing runs concurrently there until it does.
 - **Every surface that described the brake** — `pipeline.md` §4/§10, `aid-run.md`, `aid-plan.md`, `role-cards.md` and `plan-writing.md` describe the wave decision instead of "TEMPORARY: sequential".
 - **Decision-card labels** — `blocked` joins the per-language labels so the Stop rule recognises a Blocked card in the PM's language.
 - **Enforcement registry** — `max_parallel_one` is retired with its replacement guards named; `plan_parallel_group_disjoint` records the interface dimension and the runtime consumer; nine new rows carry a degree and a "what this does not guarantee" line, including the known boundary that disjoint paths and interfaces do not guarantee disjoint effect.

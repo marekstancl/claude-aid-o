@@ -94,6 +94,11 @@ _return() {
   _return '{changed_files: [".aid-o/work/evidence/E/R/steps/step_1_backend/output.md"]}'
   run aid_dispatch_contract_validate contract.json .aid-o/return.json "$TEST_DIR"
   [ "$status" -eq 0 ]
+  # a directory that merely STARTS with the step id is another step's
+  _return '{changed_files: [".aid-o/work/evidence/E/R/steps/step_1_backend_extra/output.md"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]
+  [ "$(jq -c .foreign_evidence <<< "$output")" = '[".aid-o/work/evidence/E/R/steps/step_1_backend_extra/output.md"]' ]
 }
 
 @test "contract: the return is read from the last aid-return block of the agent's output, and a missing block is not a return" {

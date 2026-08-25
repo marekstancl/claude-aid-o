@@ -98,7 +98,7 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
 @test "turn: AC14 — a Write outside the open step's allowed paths is named, with the path and the list, and is not blocked" {
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/lib/other.sh")"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"OUTSIDE"* && "$output" == *"lib/other.sh"* && "$output" == *"src/, docs/readme.md"* ]]
+  [[ "$output" == *"OUTSIDE"* && "$output" == *"lib/other.sh"* && "$output" == *"step_1_backend: src/, docs/readme.md"* ]]
 }
 
 @test "turn: a write inside the allowed paths, or into the step's own evidence, says nothing" {
@@ -108,6 +108,18 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [ "$status" -eq 0 ]; [ -z "$output" ]
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$EV/steps/step_1_backend/output.md")"
   [ "$status" -eq 0 ]; [ -z "$output" ]
+}
+
+@test "turn: in a concurrent wave every open step's paths count — a second agent's write is judged by ITS packet" {
+  printf '{"steps":[{"id":"step_1_backend","role":"backend","objective":"x","outputs":[],"allowed_paths":["src/"]},{"id":"step_2_frontend","role":"frontend","objective":"y","outputs":[],"allowed_paths":["web/"]}],"dependencies":[]}' > "$EV/plan.json"
+  mkdir -p "$EV/steps/step_2_frontend"
+  printf '{"version":"def","step_id":"step_2_frontend","allowed_paths":["web/"]}' > "$EV/steps/step_2_frontend/contract.json"
+  run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/web/app.tsx")"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+  run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/lib/x.sh")"
+  [[ "$output" == *"step_1_backend: src/"* && "$output" == *"step_2_frontend: web/"* ]]
+  run aid_turn_open_steps "$ROOT"
+  [ "${#lines[@]}" -eq 2 ]
 }
 
 @test "turn: with a transcript, the write rule also ignores another session's older step" {
