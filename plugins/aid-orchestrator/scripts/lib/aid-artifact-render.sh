@@ -357,6 +357,45 @@ aid_artifact_render() {
   html_next="$(_aid_artifact_list "$next_arr" "$_AID_ARTIFACT_CAP_NEXT" 1)"
   html_links="$(_aid_artifact_list "$links_arr" "$_AID_ARTIFACT_CAP_LINKS" 0)"
 
+  # Block 4b — "Co plán dodá": one line per step, grouped by EPIC.
+  #
+  # A DELIBERATE DEVIATION from the artifact standard's "one A4, detail
+  # separately", taken on the PM's instruction of 2026-08-25 and recorded here
+  # rather than left as a silent stretch: the short page told him a plan's
+  # ceremony band and its risk count but never what the plan would DO, which is
+  # the one thing he opens it to judge. Every step is listed — a collapsed tail
+  # hides exactly the part being judged. The per-line clip still applies, so the
+  # page grows by lines, never by paragraphs. EVERY STEP gets a line; the line
+  # itself is still clipped at the sentence cap, so a step whose Objective runs
+  # long is shortened — never dropped, and never silently: the clip is the same
+  # one every other block on this page uses.
+  local html_deliv="" have_deliv=0 _d_epic _d_rows _d_i _d_j _d_n _d_t _d_a
+  if [[ "$(jq -r 'has("deliverables") and (.deliverables | type == "array") and (.deliverables | length > 0)' <<<"$facts_raw")" == "true" ]]; then
+    have_deliv=1
+    html_deliv=""
+    for _d_i in $(jq -r 'keys_unsorted[]' <<<"$(jq -c '.deliverables' <<<"$facts_raw")"); do
+      _d_epic="$(jq -r --argjson i "$_d_i" '.deliverables[$i].epic // ""' <<<"$facts_raw")"
+      html_deliv+="<h3 class=\"deliv-epic\">$(_aid_artifact_escape "$(_aid_artifact_clip "$_d_epic" "$_AID_ARTIFACT_CAP_SENTENCE")")</h3><ul class=\"deliv\">"
+      _d_rows="$(jq -r --argjson i "$_d_i" '.deliverables[$i].steps | length' <<<"$facts_raw")"
+      for (( _d_j = 0; _d_j < _d_rows; _d_j++ )); do
+        _d_n="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].n // ""' <<<"$facts_raw")"
+        _d_t="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].text // ""' <<<"$facts_raw")"
+        _d_a="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].acs // "0"' <<<"$facts_raw")"
+        html_deliv+="<li><b>Krok $(_aid_artifact_escape "$_d_n"):</b> $(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
+        # Czech declension, because "3 kritérií" is what a machine writes and a
+        # reader notices: 1 kritérium, 2-4 kritéria, 5+ kritérií.
+        if [[ -n "$_d_a" && "$_d_a" != "0" ]]; then
+          local _d_w="kritérií"
+          [[ "$_d_a" == "1" ]] && _d_w="kritérium"
+          [[ "$_d_a" =~ ^[234]$ ]] && _d_w="kritéria"
+          html_deliv+=" <span class=\"acs\">· $(_aid_artifact_escape "$_d_a") ${_d_w}</span>"
+        fi
+        html_deliv+="</li>"
+      done
+      html_deliv+="</ul>"
+    done
+  fi
+
   # Block 7 — EXPLICIT input only. No detail label, no block. An href is
   # honoured only when it is same-document/relative: the artifact CSP contract
   # forbids an external target, so an absolute one degrades to the target
@@ -377,7 +416,10 @@ aid_artifact_render() {
     if [[ -n "$href_probe" && ! "$href_probe" =~ ^[A-Za-z][A-Za-z0-9+.-]*: && ! "$href_probe" =~ ^// ]]; then
       html_detail="<a class=\"golink\" href=\"$(_aid_artifact_escape "$detail_href")\">$(_aid_artifact_escape "$detail_label") →</a>"
     else
-      html_detail="<div class=\"golink\">$(_aid_artifact_escape "$detail_label") →</div>"
+      # No href, no arrow: "→" promises navigation, and a promise a click
+      # cannot keep is worse than plain text (PM, 2026-08-25 — the first real
+      # page carried a path with an arrow that went nowhere).
+      html_detail="<div class=\"golink golink-flat\">$(_aid_artifact_escape "$detail_label")</div>"
     fi
   fi
 
@@ -418,6 +460,7 @@ aid_artifact_render() {
   _aid_artifact_region tpl items         "$([[ -n "$html_items" ]] && echo 1 || echo 0)"
   _aid_artifact_region tpl next_steps    "$([[ -n "$html_next" ]] && echo 1 || echo 0)"
   _aid_artifact_region tpl links         "$([[ -n "$html_links" ]] && echo 1 || echo 0)"
+  _aid_artifact_region tpl deliverables  "$have_deliv"
   _aid_artifact_region tpl detail        "$have_detail"
 
   local out="" rest="$tpl" match kind key value
@@ -450,6 +493,7 @@ aid_artifact_render() {
           items)                 value="$html_items" ;;
           next_steps)            value="$html_next" ;;
           links)                 value="$html_links" ;;
+          deliverables)          value="$html_deliv" ;;
           detail)                value="$html_detail" ;;
           prose_missing_notice)  value="$(_aid_artifact_escape "$_AID_ARTIFACT_PROSE_MISSING")" ;;
           *)                     value="" ;;

@@ -121,6 +121,10 @@ ol.steps{margin:0; padding-left:1.3rem; display:flex; flex-direction:column; gap
 @media (max-width:560px){ .split{grid-template-columns:1fr} }
 .good li::marker{color:var(--ok)}
 .bad li::marker{color:var(--critical)}
+.deliv-epic{margin:.9rem 0 .3rem; font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); font-weight:700}
+ul.deliv{margin:0; padding-left:1.15rem; display:flex; flex-direction:column; gap:.35rem}
+ul.deliv .acs{color:var(--muted); font-size:.85em}
+.golink-flat{color:var(--muted)}
 .ask{background:var(--accent-soft); border-left:4px solid var(--accent); border-radius:6px; padding:.9rem 1.1rem}
 .ask h2{color:var(--accent)}
 .alarm{background:var(--critical-bg); border-left:4px solid var(--critical); border-radius:6px; padding:.9rem 1.1rem}
@@ -177,6 +181,7 @@ footer code{font-family:ui-monospace,monospace}
 <!--IF:next_steps--><section class="block"><h2>Jak pokračovat</h2>{{html:next_steps}}</section><!--ENDIF:next_steps-->
 <!--IF:links--><section class="block"><h2>Čeho se to týká</h2>{{html:links}}</section><!--ENDIF:links-->
 <section class="block ask"><h2>Co se čeká ode mě</h2><p>{{prose:ask}}</p></section>
+<!--IF:deliverables--><section class="block"><h2>Co plán dodá</h2>{{html:deliverables}}</section><!--ENDIF:deliverables-->
 <!--IF:detail-->{{html:detail}}<!--ENDIF:detail-->
 <footer>{{fact:footer}} Redigováno tajemství: {{fact:computed.redactions_total}}.</footer>
 </div>

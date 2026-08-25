@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.91.0] — 2026-08-25
+
+### Added
+- **A plan's page says what the plan delivers** — the new "Co plán dodá" block lists every step, grouped by its EPIC, in the step's own `**Objective:**` sentence (the plan contract defines that field as "what this step produces or changes"), with its acceptance-criteria count beside it. No cap and no collapsed tail: on a ten-step plan the hidden part is exactly the part the reader opened the page to judge. A deliberate, recorded deviation from the artifact standard's "one A4, detail separately", taken because the short page named a plan's ceremony band and its risk count and never what the plan would do.
+- **An invalid AID role is named on the page as a defect, with its cost** — a step declaring a role outside the valid set now reads "VADA: role … v AID neexistuje — generace EPIKŮ ji odmítne", instead of being listed as if it were a role. P087 spent a full generation run discovering that `docs` is not `docs-writer`.
+
+### Fixed
+- **A detail arrow that promised navigation nowhere** — the renderer appended " →" even with no href, and the plan caller passed a filesystem path as the label. A published page cannot link to a local file, so the honest form is no block at all; the path survives in the provenance footer, which already names the source.
+- **Blocks 5 and 7 carried paths where the standard demands names** — the link now reads "Plán P087 — …", the plan's own title.
+- **Two of four tiles carried the same number** — "Kroků 10" beside "Rozsah 10 kroků"; the tiles are now four distinct figures, and the one that reported the ceremony band no longer calls itself "Výsledek", because a band is process, not outcome.
+
 ## [2.90.2] — 2026-08-25
 
 ### Fixed

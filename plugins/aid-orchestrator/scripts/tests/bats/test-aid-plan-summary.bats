@@ -205,3 +205,119 @@ EOF
   ! grep -q 'Standardy, na které' "$OUT"
   ! grep -q 'doloženým hledáním' "$OUT"
 }
+
+# ── "Co plán dodá" (PM, 2026-08-25) ─────────────────────────────────────────
+# The first real page told the PM a plan's band and risk count and never what
+# the plan would DO. These cases pin the block that answers that, and the two
+# defects the same page carried: a path where the standard demands a name, and
+# an arrow that promised navigation nowhere.
+
+@test "deliverables: every step is listed, grouped by its EPIC" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  cat > "$p" <<'PLAN'
+---
+id: P900
+type: plan
+status: draft
+---
+# P900 — Zkušební plán
+
+## Goal
+Ověřit blok dodávek.
+
+**EPIC 1: Steps 1-2 — První část**
+
+### Step 1: Něco založit
+
+**Objective:** vznikne nová knihovna a její test.
+
+**Acceptance Criteria:**
+- [ ] AC1 — a
+- [ ] AC2 — b
+
+### Step 2: Něco změnit
+
+**Objective:** existující skript začne číst novou konfiguraci.
+
+**Acceptance Criteria:**
+- [ ] AC3 — c
+
+**EPIC 2: Steps 3-3 — Druhá část**
+
+### Step 3: Dokumentace
+
+**Objective:** změna je popsaná v nápovědě.
+PLAN
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  grep -q "Co plán dodá" "$o"
+  grep -q "EPIC 1 — První část" "$o"
+  grep -q "EPIC 2 — Druhá část" "$o"
+  grep -q "vznikne nová knihovna" "$o"
+  grep -q "existující skript začne číst" "$o"
+  grep -q "změna je popsaná v nápovědě" "$o"
+}
+
+@test "deliverables: the EPIC title never carries the step range" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P901\ntype: plan\n---\n# P901 — X\n\n## Goal\nG.\n\n**EPIC 1: Steps 1-4 — Souběžný běh**\n\n### Step 1: A\n\n**Objective:** cosi.\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  grep -q "EPIC 1 — Souběžný běh" "$o"
+  ! grep -q "EPIC 1 — 4" "$o"
+}
+
+@test "deliverables: acceptance criteria are counted and declined in Czech" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P902\ntype: plan\n---\n# P902 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n- [ ] AC1 — a\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  grep -q "1 kritérium" "$o"
+}
+
+@test "links carry the plan's NAME, never its path" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P903\ntype: plan\n---\n# P903 — Jmenovaný plán\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  grep -q "P903 — Jmenovaný plán" "$o"
+  # the path may appear ONLY in the provenance footer
+  [ "$(grep -c "$p" "$o")" -eq 1 ]
+}
+
+@test "no dead detail arrow: the page renders no detail block without an href" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P904\ntype: plan\n---\n# P904 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  ! grep -q "Technický detail" "$o"
+  # `golink` also names a CSS class in the template's <style>; what must not
+  # exist is a RENDERED element carrying it.
+  ! grep -q 'class="golink' "$o"
+}
+
+@test "tiles carry four distinct numbers, not one number twice" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P905\ntype: plan\n---\n# P905 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**Files:**\n- Create: `a/b.sh` — x\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  grep -q "Souborů" "$o"
+  ! grep -q ">Rozsah<" "$o"
+}
+
+@test "an AID Role outside the valid set is named as a defect, with its consequence" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P906\ntype: plan\n---\n# P906 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** docs\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  grep -q "VADA" "$o"
+  grep -q "generace EPIKŮ ji odmítne" "$o"
+}
+
+@test "a valid role set produces no defect line" {
+  local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
+  printf -- '---\nid: P907\ntype: plan\n---\n# P907 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** docs-writer\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  ! grep -q "VADA" "$o"
+}

@@ -3344,4 +3344,25 @@ enforcements:
     not_guaranteed: "Everything. Nothing fails if a session writes the plan without showing the list first."
     description: "P088 Step 6 — after the interim and BEFORE the plan is written, the PM sees in plain language what the plan will deliver and what it deliberately leaves out. The second half is the load-bearing one: scope is checked at its edges."
     test: n/a
-
+  - id: plan_page_deliverables
+    type: 4
+    source: "scripts/lib/aid-plan-summary.sh (_aps_deliverables) + defaults/templates/artifact-outcome.html (region deliverables)"
+    instruction: "skills/communication.md (Output Products — decision handoff) + /ecosystem/specs/artifact-standard"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    enforcement_degree: 1
+    does_not_guarantee: "that the Objective sentences are themselves accurate — the page reproduces what the plan's author wrote, it does not judge it"
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-aid-plan-summary.bats"
+  - id: plan_page_invalid_role
+    type: 4
+    source: "scripts/lib/aid-plan-summary.sh (bad_roles)"
+    instruction: "skills/plan-writing.md (AID Role field)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    enforcement_degree: 3
+    does_not_guarantee: "that the plan is fixed — it names the defect and its cost; generation is what refuses"
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-aid-plan-summary.bats"

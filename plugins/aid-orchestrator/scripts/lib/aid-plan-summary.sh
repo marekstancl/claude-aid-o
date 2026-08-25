@@ -174,6 +174,85 @@ aid_plan_summary_renderable() {
   [[ -n "${goal//[[:space:]]/}" ]]
 }
 
+# _aps_deliverables <plan> — one line per step, grouped by EPIC, as JSON.
+#
+# THIS IS THE BLOCK THE PM ASKED FOR (2026-08-25): "it mainly has to list, in
+# human language, in bullets, in detail, what the plan delivers — per EPIC, per
+# step." The page before this carried a fact list and a truncated paragraph of
+# the plan's Context; nothing on it said what the plan would actually do.
+#
+# The line per step is its **Objective**, verbatim-ish. That is not a paraphrase
+# of intent: `skills/plan-writing.md:282` defines the field as "What this step
+# produces or changes — one sentence", so it is the deliverable, written by the
+# author, in the author's words. A cross-provider review read it as mere intent;
+# the contract says otherwise, and the alternative — deriving a deliverable from
+# the Files list — would put paths on a page whose whole point is plain language.
+#
+# Every step is listed. NO cap and no "and N more": a 10-step plan whose tail is
+# collapsed hides exactly the part the PM opened the page to judge. The count of
+# acceptance criteria rides along on each line, because "what it delivers" and
+# "how I will know it is done" are one question asked twice.
+_aps_deliverables() {
+  local plan="${1-}" line epic_title="" out="[]" n obj acs
+  [[ -f "$plan" ]] || { printf '[]'; return 0; }
+  # One pass: EPIC markers open a group, step headers add a row to it.
+  local cur_epic=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\*\*EPIC[[:space:]]+([0-9]+)(.*)\*\*[[:space:]]*$ ]]; then
+      # The marker is `**EPIC N: Steps A-B — Title**`; the step range is a
+      # generation detail and never reaches the page. Stripping it with a
+      # bracket set would eat the "1-4" hyphen and leave "4 — Title" behind,
+      # which is what the first render did.
+      epic_title="${BASH_REMATCH[2]}"
+      epic_title="${epic_title#:}"
+      epic_title="$(printf '%s' "$epic_title" | sed -E 's/^[[:space:]]*Steps[[:space:]]+[0-9]+-[0-9]+[[:space:]]*//; s/^[[:space:]]*(—|–|-)[[:space:]]*//; s/[[:space:]]*$//')"
+      cur_epic="EPIC ${BASH_REMATCH[1]}"
+      [[ -n "$epic_title" ]] && cur_epic="$cur_epic — $epic_title"
+      out="$(jq -c --arg e "$cur_epic" '. + [{epic: $e, steps: []}]' <<<"$out")"
+    elif [[ "$line" =~ ^###[[:space:]]+Step[[:space:]]+([0-9]+):[[:space:]]*(.*)$ ]]; then
+      n="${BASH_REMATCH[1]}"
+      obj="$(_aps_step_objective "$plan" "$n")"
+      acs="$(_aps_step_acs "$plan" "$n")"
+      [[ -n "$obj" ]] || obj="${BASH_REMATCH[2]}"
+      # A plan with no EPIC markers still lists its steps: open an implicit group.
+      if [[ "$out" == "[]" ]]; then
+        out="$(jq -c '. + [{epic: "Kroky", steps: []}]' <<<"$out")"
+      fi
+      out="$(jq -c --arg n "$n" --arg o "$obj" --arg a "$acs" \
+        '(.[-1].steps) += [{n: $n, text: $o, acs: $a}]' <<<"$out")"
+    fi
+  done < "$plan"
+  printf '%s' "$out"
+}
+
+# _aps_step_objective <plan> <n> — the Objective line of step <n>, unmarked.
+_aps_step_objective() {
+  awk -v want="$2" '
+    $0 ~ "^### Step " want ":" { inside = 1; next }
+    inside && /^### Step /     { exit }
+    inside && /^\*\*Objective:\*\*/ {
+      sub(/^\*\*Objective:\*\*[[:space:]]*/, ""); print; exit
+    }
+  ' "$1" 2>/dev/null | head -1
+}
+
+# _aps_step_acs <plan> <n> — how many acceptance criteria step <n> declares.
+_aps_step_acs() {
+  awk -v want="$2" '
+    $0 ~ "^### Step " want ":" { inside = 1; next }
+    inside && /^### Step /     { exit }
+    inside && /^- \[ \] /     { c++ }
+    END { print c + 0 }
+  ' "$1" 2>/dev/null
+}
+
+# _aps_plan_name <plan> <plan_id> — the plan's own title, for use as a NAME.
+_aps_plan_name() {
+  local t
+  t="$(awk '/^# /{ sub(/^# /, ""); print; exit }' "$1" 2>/dev/null)"
+  printf '%s' "${t:-$2}"
+}
+
 aid_plan_summary_render() {
   local plan="${1-}" out_path="${2-}"
   if [[ -z "$plan" || -z "$out_path" ]]; then
@@ -204,6 +283,14 @@ aid_plan_summary_render() {
   files="$(_aps_declared_paths "$plan")"
   risks="$(_aps_count_risks "$plan")"
   roles="$(_aps_roles "$plan")"; roles="${roles:-—}"
+  # An AID Role outside the valid set is not a role, it is a defect that stops
+  # EPIC generation later (P087, 2026-08-25: `docs` instead of `docs-writer`
+  # refused generation after both EPICs had been built). The page said the role
+  # as if it were fine; it now says what it is and what it will cost.
+  local bad_roles=""
+  bad_roles="$(printf '%s' "$roles" | tr ',' '\n' | sed 's/^ *//;s/ *$//' \
+    | grep -vxE 'architect|domain|backend|frontend|qa|security|observability|docs-writer|release|e2e|—' \
+    | paste -sd', ' - 2>/dev/null || true)"
   context="$(_aps_section "$plan" "Context")"
   standards="$(_aps_standards "$plan")" || standards=""
   reuse="$(_aps_reuse "$plan")" || reuse="0/0"
@@ -233,13 +320,14 @@ aid_plan_summary_render() {
     --arg band "$band" --arg reason "$band_reason" \
     --arg steps "$steps" --arg files "$files" \
     --arg risks "$risks" --arg roles "$roles" --arg status "$status" \
-    --arg standards "$standards" --arg reuse "$reuse" '[
+    --arg standards "$standards" --arg reuse "$reuse" --arg bad "$bad_roles" '[
       "Pásmo ceremonie: " + $band + " (" + $reason + ")",
       "Rozsah: " + $steps + " kroků, " + $files + " deklarovaných souborů",
       "Rizika pojmenovaná v plánu: " + $risks
     ]
     + (if $standards == "" then [] else ["Standardy, na které se plán odvolává: " + $standards] end)
     + (if ($reuse | endswith("/0")) then [] else ["Kroky, které něco zakládají, s doloženým hledáním: " + $reuse] end)
+    + (if $bad == "" then [] else ["VADA: role \"" + $bad + "\" v AID neexistuje — generace EPIKŮ ji odmítne, dokud se neopraví"] end)
     + [
       "Role, kterým se bude zadávat: " + $roles,
       "Stav plánu: " + $status
@@ -251,13 +339,19 @@ aid_plan_summary_render() {
       "Pustit generaci EPIKŮ"
     ]')"
 
-  links_json="$(jq -n --arg p "$plan" '["Plán: " + $p]')"
+  # NAMES, never paths — the ecosystem standard says so for blocks 5 and 7, and
+  # a path is not something a reader of a published page can act on. The path
+  # itself survives in the provenance footer, which already names the source.
+  local plan_name
+  plan_name="$(_aps_plan_name "$plan" "$plan_id")"
+  links_json="$(jq -n --arg n "$plan_name" '["Plán " + $n]')"
 
   facts_json="$(jq -n \
     --arg plan_id "$plan_id" \
     --arg when "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
     --arg bv "$band_value" --arg bs "$band_state" \
-    --arg steps "$steps" --arg scope "$scope_label" \
+    --arg steps "$steps" --arg scope "$scope_label" --arg files "$files" \
+    --argjson deliverables "$(_aps_deliverables "$plan")" \
     --arg risks "$risks" \
     --arg rs "$( [[ "$risks" -gt 0 ]] && echo warn || echo ok )" \
     --argjson items "$items_json" \
@@ -268,15 +362,15 @@ aid_plan_summary_render() {
       title: ("Plán " + $plan_id),
       when: $when,
       tiles: {
-        result:     {value: $bv, state: $bs},
+        result:     {value: $bv, state: $bs, label: "Pásmo"},
         duration:   {label: "Kroků", value: $steps},
-        scope:      {label: "Rozsah", value: $scope, state: "ok"},
+        scope:      {label: "Souborů", value: $files, state: "ok"},
         unresolved: {label: "Rizik", value: $risks, state: $rs}
       },
       items: $items,
+      deliverables: $deliverables,
       next_steps: $next,
       links: $links,
-      detail: {label: ("Technický detail: " + $p)},
       footer: ("Vyrobil aid-plan-summary.sh z " + $p + ". Čísla jsou spočítaná z plánu, ne opsaná.")
     }')" || {
     echo "aid_plan_summary_render: failed to build facts" >&2

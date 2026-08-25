@@ -6,7 +6,7 @@ user_invocable: false
 
 # Communication — Decision Cards and Output Products
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-25
 
 Every message AID leaves the PM with at a boundary is one of four small cards:
 outcome first, plain language, one recommended action. This file defines those
@@ -126,4 +126,4 @@ Publish the artifact body via the Artifact tool, then present the chat card verb
 - `scripts/lib/aid-artifact-render.sh` — artifact body skeleton.
 - `scripts/tests/test-communication-wiring.sh` — wiring guard for this file.
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-25
