@@ -647,9 +647,10 @@ substitute for having thought about it. Then put the result in a table:
 |---|---|---|---|
 | 1 | 1, 4 | — | no path in common |
 
-**`max_parallel: 1` does not make this ceremony.** Nothing runs concurrently
-today; the table is the evidence of safety for the moment the brake comes off,
-and evidence gathered after the fact is evidence nobody trusts.
+**The table is not ceremony.** Since P087 a wave that passes the check IS
+dispatched concurrently (`pipeline.md §4` "Parallel groups"); the table is the
+evidence of safety the dispatch decision re-verifies, and evidence gathered
+after the fact is evidence nobody trusts.
 
 Two steps touching the same file in DIFFERENT waves are fine — that is what
 waves are for. A wave with one step is valid and does nothing; the check says

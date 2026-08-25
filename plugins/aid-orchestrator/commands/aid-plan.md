@@ -125,9 +125,9 @@ shape `/aid-status` renders) and carry on. No artifact at all: say nothing.
 registered (`epic-start`) and initialised inside that plan's own worktree, so a
 second stream can be taken all the way to a queued, READY EPIC while the first
 one implements — with the PM's checkout dirty and its HEAD unmoved throughout.
-What still serializes is agent DISPATCH, not the streams: `dispatch.max_parallel`
-is 1 per controller session, so two streams progress by alternating or from two
-sessions, never by one session dispatching into both at once.
+What still serializes is the CONTROLLER, not the streams: one session drives one
+run at a time, so two streams progress by alternating or from two sessions —
+inside a run, a wave may dispatch several agents at once (`pipeline.md §4`).
 
 ## Mode: Brainstorm
 
@@ -990,7 +990,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-25
 
 ## Plan mode
 
