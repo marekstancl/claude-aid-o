@@ -1146,17 +1146,42 @@ if `current_step < total_steps`. `EXECUTE→EXECUTE` is rejected if `current_ste
 
 ### Parallel groups
 
-**TEMPORARY: Sequential execution enforced.** `orchestration.yaml → dispatch.max_parallel: 1`.
-All steps execute one at a time regardless of wave grouping. This prevents:
-- Mega-commits (controller must commit per step)
-- Placeholder verify files (controller validates after each agent returns)
-- Memory bypass (controller injects memory per dispatch)
+Steps that share a `Parallel Group` (a **wave**, from the plan's `**Parallel group:**`
+field) may run at the same time. Whether they DO is decided by code before every wave,
+never assumed from the plan:
 
-When parallel is re-enabled (post Agent SDK migration):
-- Dispatch all agents in the group simultaneously (single message, multiple Agent calls)
-- Each agent writes to its own `steps/step_{N}_{role}/` subdirectory
-- After all complete: check for merge conflicts before advancing
-- Conflict → ESCALATION; clean → merge branches, advance
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-parallel-dispatch.sh"
+decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_size" "$tree_root")"
+# concurrent | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
+```
+
+`serial` is returned — with the reason — for a wave of one, for `dispatch.max_parallel: 1`
+(the brake, `defaults/orchestration.yaml`), when git cannot hand out worktrees, when
+`aid-plan-parallel-check.sh` finds two steps of the wave sharing a file or a declared
+interface, and when that check cannot run at all. **The check never refuses a run; it
+degrades it.** A wave that cannot be proved safe runs in order.
+
+**Concurrent path** (decision `concurrent`, at most `max_parallel` agents in flight):
+
+1. For each step: `aid_parallel_step_worktree "$tree_root" "$step_id" HEAD` → its own tree on
+   `step/<step_id>`. Build its contract (§4 step 4) and dispatch it there — one message,
+   several `Agent()` calls.
+2. As each agent returns — **one at a time, in arrival order** — validate the return
+   (§4 Output verification), commit it in the step's worktree (`aid_dispatch_contract_commit`),
+   write its `step-{N}-verify.md`, then `aid_parallel_merge "$tree_root" "step/<step_id>"`.
+3. A clean merge prints the SHA; the step's tree is removed when git agrees it is clean
+   (a dirty one is kept and named — never deleted). **A conflict is aborted, the tree is
+   untouched, and the step is repeated against the new base** (`exit 1`, files named). The
+   same step failing twice is handled by `defaults/policies/auto-recovery.yaml`, not by a
+   human queue.
+4. An agent that dies leaves its tree and branch for inspection; the other steps continue.
+5. `increment-step` once per merged step, in merge order.
+
+What isolation guarantees, and what it does not: a collision surfaces as a merge conflict —
+a state that is recognised and repeatable — never as a corrupted tree. Disjoint files and
+disjoint declared interfaces do **not** guarantee disjoint effect; that boundary is recorded
+in `defaults/enforcement-registry.yaml` (`parallel_dispatch_wave_check`).
 
 ---
 
@@ -2825,24 +2850,19 @@ is the authoritative source — the YAML config files do not duplicate it.
 
 ## §10 Multi-Agent Dispatch
 
-**Parallel groups:** Steps in `plan.json` with the same `wave` number execute concurrently.
+**Parallel groups:** the wave decision, the per-step worktrees, the serial merge point and
+the conflict-means-retry rule are specified once, in §4 "Parallel groups". `plan.json →
+parallel_groups[]` is the machine form of the plan's waves.
 
-**Isolation strategy** (from `dispatch-strategy.yaml → dispatch.strategy`):
-- `worktrees` → `git worktree add .aid-o/worktrees/{step_id}` (preferred)
-- `branches` → per-step branches from `epic/{epic_id}/main`
-- `sequential` → no parallelism
-
-**Dispatch limit:** `dispatch.worktrees.max_parallel` (default: 3). Excess steps queued.
-
-**After parallel group completes:**
-1. Dry-run merge check for shared files
-2. Conflict → ESCALATION (E6)
-3. Clean → merge one-by-one (by step number), delete worktrees/branches
+**Isolation strategy** (`orchestration.yaml → dispatch.strategy`): `worktrees` — each step
+in `.aid-worktrees/step-<step_id>` on `step/<step_id>` (`aid_parallel_step_worktree`);
+`sequential` — no parallelism. `dispatch.max_parallel` caps agents in flight; excess steps
+of a wave wait for a slot.
 
 **Analysis groups** (read-only agents, no branches):
 - Triggered after target step passes output verification
 - Defined in `plan.json → analysis_groups[]`
-- Results in `evidence/.../steps/step_{N}_{role}/analysis_{purpose}_report.yaml`
+- Results in `evidence/.../steps/{step_id}/analysis_{purpose}_report.yaml`
 - Critical findings → ESCALATION; high → log to PM (non-blocking)
 
 ---
@@ -3110,7 +3130,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-25
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
