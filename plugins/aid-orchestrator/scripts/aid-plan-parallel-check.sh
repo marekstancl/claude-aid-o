@@ -86,6 +86,16 @@ while IFS=$'\t' read -r _ln _bullet; do
   _lns+=("$_ln"); _txts+=("$_bullet")
 done < <(_aid_extract_files_bullets_numbered < "$PLAN")
 
+# _aid_parallel_shared <list_a> <list_b> — the space-separated entries in
+# both, comma-joined for a finding; empty when they are disjoint.
+_aid_parallel_shared() {
+  local p out=""
+  for p in $1; do
+    [[ " $2 " == *" $p "* ]] && out="${out:+$out, }${p}"
+  done
+  printf '%s' "$out"
+}
+
 # _aid_parallel_norm_iface <text> — one interface name, normalised so that
 # `/api/x`, `api/x/` and `API/X` are the same declaration.
 _aid_parallel_norm_iface() {
@@ -156,15 +166,9 @@ for i in "${!step_names[@]}"; do
   [[ -n "$ONLY_GROUP" && "$g" != "$ONLY_GROUP" ]] && continue
   for (( j=i+1; j<${#step_names[@]}; j++ )); do
     [[ "${step_groups[$j]}" == "$g" ]] || continue
-    shared=""
-    for p in ${step_paths[$i]}; do
-      [[ " ${step_paths[$j]} " == *" $p "* ]] && shared="${shared:+$shared, }${p}"
-    done
+    shared="$(_aid_parallel_shared "${step_paths[$i]}" "${step_paths[$j]}")"
     [[ -n "$shared" ]] && _report finding "group '${g}' is not disjoint: '${step_names[$i]}' and '${step_names[$j]}' both declare ${shared}. Steps in one wave run at the same time; move one to another wave."
-    shared=""
-    for p in ${step_ifaces[$i]}; do
-      [[ " ${step_ifaces[$j]} " == *" $p "* ]] && shared="${shared:+$shared, }${p}"
-    done
+    shared="$(_aid_parallel_shared "${step_ifaces[$i]}" "${step_ifaces[$j]}")"
     [[ -n "$shared" ]] && _report finding "group '${g}' shares an interface: '${step_names[$i]}' and '${step_names[$j]}' both name ${shared} under **Shared interfaces:**. Disjoint files do not make disjoint work — run them in sequence."
   done
 done

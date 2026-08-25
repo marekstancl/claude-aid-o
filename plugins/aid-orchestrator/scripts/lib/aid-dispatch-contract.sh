@@ -93,15 +93,20 @@ aid_dispatch_contract_build() {
   # Artifacts: the paths behind Create/Test/Rewrite bullets, in declaration
   # order, each once. Read with the same splitter the scoping lint uses, so a
   # bullet the lint accepts is a bullet this reads.
-  local artifacts="[]" bullet body p
+  local -a artifact_paths=()
+  local bullet body p
   while IFS= read -r bullet; do
     [[ "$bullet" =~ ^(Create|Test|Rewrite):[[:space:]]* ]] || continue
     body="${bullet#*:}"; body="${body#"${body%%[![:space:]]*}"}"
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
-      artifacts="$(jq -c --arg p "$p" 'if index($p) then . else . + [$p] end' <<< "$artifacts")"
+      artifact_paths+=("$p")
     done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
   done < <(jq -r '.outputs[]? // empty' <<< "$step")
+  local artifacts='[]'
+  if (( ${#artifact_paths[@]} > 0 )); then
+    artifacts="$(printf '%s\n' "${artifact_paths[@]}" | awk '!seen[$0]++' | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  fi
 
   local step_id; step_id="$(jq -r '.id // ""' <<< "$step")"
 
@@ -251,11 +256,13 @@ aid_dispatch_contract_validate() {
   jq -e '.step_status | IN("done","blocked")' "$r" >/dev/null 2>&1 || _add reasons "the return's step_status is not done|blocked"
 
   # Artifacts: on the disk, not in the declaration.
-  local a
+  local expected declared a
+  expected="$(jq -r '.expected_artifacts[]? // empty' "$c")"
+  declared="$(jq -r '.changed_files[]? // empty' "$r")"
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue
     [[ -e "${root}/${a}" ]] || _add missing "$a"
-  done < <(jq -r '.expected_artifacts[]? // empty' "$c")
+  done <<< "$expected"
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
 
   # The disk's own list of changes, when there is a git tree to ask. A file
@@ -267,7 +274,7 @@ aid_dispatch_contract_validate() {
       | cut -c4- | sed 's/^.* -> //' | grep -v '^\.aid-o/' || true)"
     while IFS= read -r g; do
       [[ -n "$g" ]] || continue
-      jq -e --arg f "$g" '.changed_files | index($f)' "$r" >/dev/null 2>&1 || _add undeclared "$g"
+      grep -qxF -- "$g" <<< "$declared" || _add undeclared "$g"
     done <<< "$changed_on_disk"
     [[ "$undeclared" != "[]" ]] && _add reasons "files changed on disk but not declared in the return (the agent left them out, or the tree was already dirty before dispatch — a step is dispatched from a clean tree): $(jq -r 'join(", ")' <<< "$undeclared")"
   fi
@@ -283,10 +290,10 @@ aid_dispatch_contract_validate() {
       _add foreign "$f"
     elif ! _aid_dc_path_allowed "$f" "$allowed" "$evidence"; then
       _add out_of_scope "$f"
-    elif [[ "$f" != *"${evidence}"* ]] && ! jq -e --arg f "$f" '.expected_artifacts | index($f)' "$c" >/dev/null 2>&1; then
+    elif [[ "$f" != *"${evidence}"* ]] && ! grep -qxF -- "$f" <<< "$expected"; then
       _add extra "$f"
     fi
-  done < <( { jq -r '.changed_files[]? // empty' "$r"; printf '%s\n' "$changed_on_disk"; } | awk 'NF && !seen[$0]++')
+  done < <(printf '%s\n%s\n' "$declared" "$changed_on_disk" | awk 'NF && !seen[$0]++')
   [[ "$foreign" != "[]" ]] && _add reasons "evidence written into another step's directory: $(jq -r 'join(", ")' <<< "$foreign")"
   [[ "$out_of_scope" != "[]" ]] && _add reasons "files changed outside the allowed paths: $(jq -r 'join(", ")' <<< "$out_of_scope")"
 

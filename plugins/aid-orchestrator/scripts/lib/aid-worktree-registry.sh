@@ -61,9 +61,13 @@ aid_worktree_registry_scan() {
   for sf in "$root"/.aid-o/work/plan-state/*/plan-state.yaml; do
     [[ -f "$sf" ]] || continue
     plan_id="$(basename "$(dirname "$sf")")"
-    wt="$(grep -m1 '^worktree_path:' "$sf" 2>/dev/null | sed 's/^worktree_path:[[:space:]]*//; s/^"//; s/"$//')"
+    # Both fields in one pass, joined with US (0x1f): a tab is IFS whitespace,
+    # so a record without a state would collapse into one field.
+    IFS=$'\x1f' read -r wt state < <(awk '
+      /^worktree_path:/ && w == "" { w = $0; sub(/^worktree_path:[[:space:]]*/, "", w); gsub(/^"|"$/, "", w) }
+      /^plan_state:/    && s == "" { s = $2 }
+      END { printf "%s\037%s\n", w, s }' "$sf" 2>/dev/null)
     [[ -n "$wt" && "$wt" != "null" ]] || continue
-    state="$(grep -m1 '^plan_state:' "$sf" 2>/dev/null | awk '{print $2}')"
     [[ "$wt" == /* ]] || wt="${root}/${wt}"
     if [[ ! -d "$wt" ]] || ! _aid_wr_registered "$root" "$wt"; then
       verdict="missing"

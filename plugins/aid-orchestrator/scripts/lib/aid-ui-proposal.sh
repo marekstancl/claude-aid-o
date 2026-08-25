@@ -130,10 +130,10 @@ aid_ui_proposal_build() {
   fi
   [[ "$basis" == "design-system" ]] && marked="NO LIVE BASELINE — this proposal is built from the application's design system, not from a screenshot of the running application. ${reason}"
 
-  local viewports="[]" name w h dir rc=0
+  local viewports="[]" name w h dir baseline
   while read -r name w h; do
     [[ -n "$name" ]] || continue
-    local baseline="null"
+    baseline="null"
     if [[ "$basis" == "live-screen" ]]; then
       dir="${out}/${name}"; mkdir -p "$dir"
       if ! $(_aid_up_capture_cmd) --url "$screen" --selector "$selector" --target-id "baseline" \
@@ -177,8 +177,12 @@ aid_ui_proposal_check() {
   local f="${1:?check: proposal file required}" root="${2:-}"
   jq -e 'type == "object" and (.viewports | type == "array")' "$f" >/dev/null 2>&1 \
     || { echo "check: ${f} is not a proposal" >&2; return 2; }
-  local basis live marked
-  basis="$(jq -r '.basis // ""' "$f")"; live="$(jq -r '.live_baseline' "$f")"; marked="$(jq -r '.marked // ""' "$f")"
+  # One read of the header fields, joined with US (0x1f) for the same reason
+  # the viewport rows below are: a tab is IFS whitespace and an empty field
+  # between two present ones would collapse.
+  local basis live responsive marked
+  IFS=$'\x1f' read -r basis live responsive marked < <(jq -r \
+    '[.basis // "", (.live_baseline | tostring), (.responsive | tostring), .marked // ""] | join("\u001f")' "$f")
   case "$basis" in
     live-screen) ;;
     design-system)
@@ -188,7 +192,7 @@ aid_ui_proposal_check() {
 
   local owed
   if [[ -n "$root" ]]; then owed="$(aid_ui_proposal_viewports "$root")"
-  elif [[ "$(jq -r '.responsive' "$f")" == "false" ]]; then owed="$_AID_UP_DESKTOP"
+  elif [[ "$responsive" == "false" ]]; then owed="$_AID_UP_DESKTOP"
   else owed="$(printf '%s\n%s' "$_AID_UP_DESKTOP" "$_AID_UP_MOBILE")"; fi
 
   local name w h baseline proposed row

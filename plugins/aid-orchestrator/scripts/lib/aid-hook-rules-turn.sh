@@ -66,15 +66,21 @@ aid_turn_open_steps() {
   local sf state epic run cur n i plan sid contract mtime found=0
   while IFS= read -r sf; do
     [[ -n "$sf" ]] || continue
-    state="$(grep -m1 '^state:' "$sf" 2>/dev/null | awk '{print $2}')"
+    # The four fields of the run in one pass over its state file; each is the
+    # FIRST line that declares it, as `grep -m1` would take it. Joined with US
+    # (0x1f), never a tab: a tab is IFS whitespace, so an absent field would
+    # collapse and the next one would be read in its place.
+    IFS=$'\x1f' read -r state cur epic run < <(awk '
+      /^state:/        && s == "" { s = $2 }
+      /^current_step:/ && c == "" { c = $2 }
+      /^epic_id:/      && e == "" { e = $2 }
+      /^run_id:/       && r == "" { r = $2 }
+      END { printf "%s\037%s\037%s\037%s\n", s, c, e, r }' "$sf" 2>/dev/null)
     [[ "$state" == "EXECUTE" ]] || continue
-    cur="$(grep -m1 '^current_step:' "$sf" 2>/dev/null | awk '{print $2}')"
     [[ "$cur" =~ ^[0-9]+$ ]] || continue
     plan="$(dirname "$sf")/plan.json"
     [[ -f "$plan" ]] || continue
     n="$(jq -r '.steps | length' "$plan" 2>/dev/null)"; [[ "$n" =~ ^[0-9]+$ ]] || continue
-    epic="$(grep -m1 '^epic_id:' "$sf" | awk '{print $2}')"
-    run="$(grep -m1 '^run_id:' "$sf" | awk '{print $2}')"
     for (( i=cur; i<n; i++ )); do
       sid="$(jq -r --argjson i "$i" '.steps[$i].id // ""' "$plan" 2>/dev/null)"
       [[ -n "$sid" ]] || continue
@@ -102,15 +108,14 @@ _aid_hrt_session_start() {
 # Decision card (validated by the card library) or a Blocked card (its label
 # in any configured language)? 0 yes, 1 no.
 _aid_hrt_hands_over() {
-  local f="$1" rc=0
-  aid_decision_card_validate "$f" >/dev/null 2>&1 || rc=$?
-  [[ "$rc" -eq 0 ]] && return 0
+  local f="$1"
+  aid_decision_card_validate "$f" >/dev/null 2>&1 && return 0
   local lang label
   while IFS= read -r lang; do
     [[ -n "$lang" ]] || continue
     label="$(_aid_dc_label "$lang" blocked)"
     [[ -n "$label" ]] && grep -q "^${label}:" "$f" 2>/dev/null && return 0
-  done <<< "$(yq -r '.languages | keys | .[]' "$(_aid_dc_labels_file)" 2>/dev/null)"
+  done < <(yq -r '.languages | keys | .[]' "$(_aid_dc_labels_file)" 2>/dev/null)
   return 1
 }
 
@@ -121,19 +126,13 @@ _aid_hrt_hands_over() {
 aid_hook_rule_turn_step_open() {
   local input; input="$(cat)"
   local cwd transcript
-  cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null)"
-  transcript="$(printf '%s' "$input" | jq -r '.transcript_path // ""' 2>/dev/null)"
+  IFS=$'\x1f' read -r cwd transcript < <(jq -r '[.cwd // "", .transcript_path // ""] | join("\u001f")' <<< "$input" 2>/dev/null)
   [[ -n "$cwd" && -d "$cwd" ]] || { echo "no usable cwd in the event" >&2; return 3; }
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
-
-  local since=0
-  if [[ -n "$transcript" && -r "$transcript" ]]; then
-    since="$(_aid_hrt_session_start "$transcript")"
-  else
-    echo "no readable transcript — the session window is unknown, so no step can be attributed to this turn" >&2
-    return 3
-  fi
+  [[ -n "$transcript" && -r "$transcript" ]] \
+    || { echo "no readable transcript — the session window is unknown, so no step can be attributed to this turn" >&2; return 3; }
+  local since; since="$(_aid_hrt_session_start "$transcript")"
 
   local line
   line="$(aid_turn_open_steps "$root" "$since" | head -1)"
@@ -148,12 +147,12 @@ aid_hook_rule_turn_step_open() {
   if [[ -n "$last" && "$last" != "null" ]]; then
     tmp="$(mktemp)" || { echo "no temp file for the card check" >&2; return 3; }
     printf '%s\n' "$last" > "$tmp"
-    if _aid_hrt_hands_over "$tmp"; then
-      rm -f "$tmp"
+    local hands=1; _aid_hrt_hands_over "$tmp" || hands=0
+    rm -f "$tmp"
+    if (( hands )); then
       echo "step ${idx} (${sid}) of ${epic} is open, but the turn hands over explicitly with a card" >&2
       return 3
     fi
-    rm -f "$tmp"
   fi
 
   echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: extract and validate the agent's aid-return (lib/aid-dispatch-contract.sh), commit the accepted return, write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card." >&2
@@ -178,12 +177,13 @@ _aid_hrt_relative() {
 # ---------------------------------------------------------------------------
 aid_hook_rule_turn_write_scope() {
   local input; input="$(cat)"
-  local tool path cwd
-  tool="$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null)"
+  local tool path cwd transcript
+  # Joined with US (0x1f), never a tab — see aid_turn_open_steps: an absent
+  # field between two present ones would otherwise collapse.
+  IFS=$'\x1f' read -r tool cwd transcript path < <(jq -r '[.tool_name // "", .cwd // "", .transcript_path // "",
+    (.tool_input.file_path // .tool_input.notebook_path // "")] | join("\u001f")' <<< "$input" 2>/dev/null)
   case "$tool" in Write|Edit|MultiEdit|NotebookEdit) ;; *) echo "not a file write (${tool:-no tool})" >&2; return 3 ;; esac
-  path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // ""' 2>/dev/null)"
   [[ -n "$path" ]] || { echo "the write names no path" >&2; return 3; }
-  cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null)"
   [[ -n "$cwd" && -d "$cwd" ]] || { echo "no usable cwd in the event" >&2; return 3; }
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
@@ -191,8 +191,7 @@ aid_hook_rule_turn_write_scope() {
   # The same session window as the Stop rule, when the payload names a
   # transcript; without one, any open step's contract is the best available
   # answer and the notice says which step it is.
-  local since=0 transcript
-  transcript="$(printf '%s' "$input" | jq -r '.transcript_path // ""' 2>/dev/null)"
+  local since=0
   [[ -n "$transcript" && -r "$transcript" ]] && since="$(_aid_hrt_session_start "$transcript")"
   # The hook cannot tell WHICH agent of a wave is writing, so a path inside
   # ANY open step's paths is inside scope; the notice lists every open step

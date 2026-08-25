@@ -22,18 +22,17 @@
 #   `decide` prints `concurrent slots=<n>` or `serial: <why>` and exits 0
 #   either way. Every failure mode — the wave has a collision, the check
 #   cannot run, the brake is on, the strategy is not worktrees, git cannot
-#   hand out worktrees, a wave of one — degrades
-#   to the sequential path that has always worked. A wave that cannot be
-#   proved safe is not run blind; it is run in order, and the reason is on
-#   stdout for the timeline.
+#   hand out worktrees, a wave of one — degrades to the sequential path that
+#   has always worked. A wave that cannot be proved safe is not run blind; it
+#   is run in order, and the reason is on stdout for the timeline.
 #
 # A CONFLICT IS A RETRY, NOT A STOP
 #   `merge` brings one step's branch into the tree. A clean merge prints the
 #   SHA. A conflict is aborted, the tree is left exactly as before, and exit 1
 #   tells the controller to reset THAT step's tree onto the new base and
-#   repeat it — isolation
-#   turned a corrupted tree into a repeatable event, which is the whole
-#   premise. Two failures of the same step are the recovery policy's business
+#   repeat it — isolation turned a corrupted tree into a repeatable event,
+#   which is the whole premise. Two failures of the same step are the
+#   recovery policy's business
 #   (defaults/policies/auto-recovery.yaml), not this file's.
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
@@ -71,15 +70,14 @@ aid_parallel_decide() {
     return 0
   fi
 
-  local max=1 strategy=""
-  if command -v yq >/dev/null 2>&1 && [[ -r "$cfg" ]]; then
-    max="$(yq -r '.dispatch.max_parallel // 1' "$cfg" 2>/dev/null)"
-    [[ "$max" =~ ^[0-9]+$ ]] || max=1
-    strategy="$(yq -r '.dispatch.strategy // "worktrees"' "$cfg" 2>/dev/null)"
-  else
+  if ! command -v yq >/dev/null 2>&1 || [[ ! -r "$cfg" ]]; then
     echo "serial: ${cfg} is unreadable or yq is missing — the brake setting cannot be read, so it is treated as on"
     return 0
   fi
+  local max strategy
+  max="$(yq -r '.dispatch.max_parallel // 1' "$cfg" 2>/dev/null)"
+  [[ "$max" =~ ^[0-9]+$ ]] || max=1
+  strategy="$(yq -r '.dispatch.strategy // "worktrees"' "$cfg" 2>/dev/null)"
   if [[ "$strategy" != "worktrees" ]]; then
     echo "serial: dispatch.strategy is ${strategy} — only worktrees isolate a step"
     return 0
@@ -101,7 +99,7 @@ aid_parallel_decide() {
   out="$(bash "${_AID_PD_LIB_DIR}/../aid-plan-parallel-check.sh" "$plan" --group "$wave" 2>&1)" || rc=$?
   case "$rc" in
     0) echo "concurrent slots=${max}"; return 0 ;;
-    1) echo "serial: wave ${wave} has a collision — $(printf '%s' "$out" | grep -m1 -E 'not disjoint|shares an interface' || echo 'see aid-plan-parallel-check.sh')"; return 0 ;;
+    1) echo "serial: wave ${wave} has a collision — $(grep -m1 -E 'not disjoint|shares an interface' <<< "$out" || echo 'see aid-plan-parallel-check.sh')"; return 0 ;;
     *) echo "serial: the wave check could not run (exit ${rc}) — never concurrent blind"; return 0 ;;
   esac
 }

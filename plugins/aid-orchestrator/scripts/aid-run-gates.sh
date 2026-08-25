@@ -292,9 +292,9 @@ AID_GATE_DEADLINE_GRACE_SEC="${AID_GATE_DEADLINE_GRACE_SEC:-30}"
 # file and runs nothing, so it is not judged. Prints the missing ones, one per
 # line; prints nothing when all are there. Absolute paths and
 # {plugin_path}-resolved ones are the installed plugin's business, not the
-# branch's, and are not judged. There is deliberately NO fallback to the state root's copy: a gate
-# that ran the primary checkout's script would certify a branch that does not
-# carry it, which is the drift IMP-497 was about.
+# branch's, and are not judged. There is deliberately NO fallback to the state
+# root's copy: a gate that ran the primary checkout's script would certify a
+# branch that does not carry it, which is the drift IMP-497 was about.
 _gate_scripts_missing_in_tree() {
   local cmd="$1" tree="$2" w prev="" runs=1
   for w in $cmd; do
@@ -2059,7 +2059,7 @@ run_all_gates() {
     local _missing_scripts
     _missing_scripts="$(_gate_scripts_missing_in_tree "$resolved_cmd" "$_plugin_project_root")"
     if [[ -n "$_missing_scripts" ]]; then
-      local _ms_list; _ms_list="$(printf '%s' "$_missing_scripts" | tr '\n' ' ')"
+      local _ms_list="${_missing_scripts//$'\n'/ }"
       echo "ERROR: aid-run-gates.sh: gate '${gate_name}' names ${_ms_list}— not in the tree ${_plugin_project_root}. The branch under test must carry every script its gates name; there is no fallback to the primary checkout." >&2
       log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="gate_script_missing_in_tree" scripts="$_ms_list"
       $first || gates_json+=","
