@@ -31,6 +31,7 @@ Called by `/aid-setup` router or `/aid-setup scan`.
 | `docusaurus.config.*` | Documentation site | `documentation.docusaurus` — the content root |
 | a help route/page (`help`, `napoveda`) | In-app help | `documentation.in_app_help` — its path |
 | `lib/ui-fidelity/ui-capture.mjs` (or the project's own) | Screenshot tool | `documentation.screenshot_tool` — the command that runs it |
+| a UI (component dirs, a frontend framework, CSS) | Responsive UI | `ui.responsive` — `true` unless the PM says the app is desktop-only (P087) |
 
 **The three `documentation.*` facts are defined here, once** — `/aid-init` and
 `skills/plan-writing.md` point at this section rather than restating it:
@@ -46,6 +47,16 @@ They exist so a plan does not rediscover them every time it is written: a plan
 that changes behaviour a user meets must name the help file and the docs page
 it changes, and `aid-plan-lint.sh` checks that against these values — **every**
 surface listed here, not just one of them.
+
+```yaml
+ui:
+  responsive: true                  # default; false only for a deliberately desktop-only app
+```
+
+`ui.responsive` is read by `scripts/lib/aid-ui-proposal.sh`: `true` (or absent) means every
+UI proposal and every UI check covers desktop AND mobile; `false` means desktop alone. It is
+asked only of a project that has a UI; confirm a `false` with the PM — it is a decision about
+the product, not a detection.
 
 **Omit a key the project does not have** — absent means the obligation does not
 apply, while an empty string looks like a path that failed to match. Any key
@@ -83,4 +94,4 @@ Written to: .aid-o/config/project.yaml
 ```
 
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-25

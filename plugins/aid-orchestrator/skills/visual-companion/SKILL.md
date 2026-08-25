@@ -56,6 +56,8 @@ Render baseline from source code — read the component, extract data shapes, re
 Capture the real running UI as baseline instead of rendering from code:
 1. Confirm dev server is running (or start it per project.yaml `dev_cmd`)
 2. Run capture: `node {plugin_path}/lib/ui-fidelity/ui-capture.mjs --url <page_url> --out <evidence_dir>/baseline.png`
+   — once per viewport the contract names (`viewports` in the UI Change Contract; see
+   `skills/plan-writing.md`), with `--viewport-width/--viewport-height`
 3. The capture path is stored as `baseline_path` in the `gestalt_approval` object
 4. Run `node {plugin_path}/lib/ui-fidelity/ui-compare.mjs --before <baseline.png> --after <implementation_screenshot.png>` to get the gestalt comparison
 5. Write `gestalt_approval` to the dispatch payload:
@@ -71,6 +73,42 @@ Capture the real running UI as baseline instead of rendering from code:
 6. If compare verdict is `unverifiable` (capture absent or comparison unavailable) → set `gestalt_approval.compare_verdict = "unverifiable"` → implementer receives this and MUST NOT proceed with visual-fidelity claim
 
 The `gestalt_approval` field is required in all existing_ui steps. Missing → verdict unverifiable (hard-wired, not advisory).
+
+## A Proposal Is Built From the Application (P087)
+
+A proposal the PM can judge starts from what the application IS, and the basis
+is built by code, not drawn from memory:
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh"
+aid_ui_proposal_build "$project_root" "$out_dir" \
+  --screen "<url of the real screen>" --fixture-data "<mocks.json>" --brief "<brief.md>"
+# → $out_dir/proposal.json  (+ $out_dir/<viewport>/baseline.png on the live-screen basis)
+```
+
+Two bases, and `proposal.json` says which:
+
+- **`live-screen`** — the real screen, captured with `lib/ui-fidelity/ui-capture.mjs` on
+  **fixture data** (`--fixture-data` is what makes the capture happen; without it nothing is
+  photographed — production data is never used, and a screen that needs a login gets a fixture
+  state). One capture per viewport the project owes.
+- **`design-system`** — no screen exists (wholly new UI) or the app cannot be started: the
+  proposal is drawn from the application's own styles, theme config and component directories
+  (`design_system` in the file) and is **marked** (`marked: "NO LIVE BASELINE — …"`). Say so to
+  the PM in the same words; never present it as a screenshot.
+
+**Viewports** come from `ui.responsive` in `project.yaml` (`/aid-init` records it; default
+true): desktop 1280×720 **and** mobile 390×844, or desktop alone when `false`. Draw the
+proposal at every viewport and record each rendering in `viewports[].proposed`;
+`aid_ui_proposal_check proposal.json` refuses a proposal missing one, naming the viewport. A
+viewport that cannot be captured stops the build with its name — do not fake it.
+
+**Two models, one brief.** Hand the SAME brief to the opponent —
+`aid_brainstorm_opponent_run "$plan_id" "$brief" "$out_dir/opponent"`
+(`lib/aid-brainstorm-opponent.sh`) — not your own draft for comment; P088 measured that an
+opponent given conclusions anchors on them. Render both proposals over the same basis (the
+`.split` layout: current → proposal A → proposal B), and the PM decides. Brainstorming does not
+authorise implementation.
 
 ## Refactoring or Redesigning Existing UI — Read the Code First
 
@@ -405,4 +443,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-08-25

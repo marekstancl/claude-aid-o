@@ -8,6 +8,7 @@
 # the reader — the scan and the SessionStart notice — and its one promise:
 # no tree is ever deleted by anything here.
 
+bats_require_minimum_version 1.5.0
 load test-helpers.bash
 
 setup() {

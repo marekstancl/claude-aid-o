@@ -338,6 +338,16 @@ Rules:
 - Verify the derivation still agrees with the map:
   `bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --self-test`
 
+### Whether the UI is responsive
+
+One fact, `ui.responsive`, written into `project.yaml` at init and read by every UI proposal
+and UI check afterwards (`scripts/lib/aid-ui-proposal.sh`): **default `true`** — the PM builds
+responsive applications, so a proposal and its verification cover desktop and mobile. A
+deliberately desktop-only application sets it to `false` and the mobile obligation lapses. A
+project with no UI at all is not asked: no UI steps, no obligation, and the key may be left out
+(absent reads as the default). Detection and the omit rule are in
+`skills/setup/project-scan.md` §"Project Scan", next to the `documentation.*` facts.
+
 ### What the project has to document with
 
 Detection writes three `documentation.*` facts into `project.yaml` so a plan
@@ -398,6 +408,9 @@ test_cmd: "{detected or null}"
 lint_cmd: "{detected or null}"
 build_cmd: "{detected or null}"
 initialized_at: "{ISO 8601}"
+
+ui:
+  responsive: true             # P087 — desktop AND mobile are owed by every UI proposal/check; false = desktop only
 
 # Standards profile — selected during /aid-init
 standards:
@@ -911,4 +924,4 @@ creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
 
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-25
