@@ -7,7 +7,7 @@
 #   aid_ui_proposal_build     <project_root> <out_dir> [--screen <url>]
 #                             [--fixture-data <mocks.json>] [--selector <css>]
 #                             [--brief <file>]
-#   aid_ui_proposal_check     <proposal.json>
+#   aid_ui_proposal_check     <proposal.json> [project_root]
 #
 # WHY THIS EXISTS
 #   The PM's words: what the agents hand over is unusable for judging a UI
@@ -163,23 +163,42 @@ aid_ui_proposal_build() {
 }
 
 # ---------------------------------------------------------------------------
-# aid_ui_proposal_check <proposal.json>
-#   The step's gate on a finished proposal: every viewport the project owes
-#   has a PROPOSED rendering on disk (`proposed` set and present), and on the
-#   live-screen basis its baseline too. Exit 1 names the first viewport that
-#   is missing; 2 when the file cannot be read.
+# aid_ui_proposal_check <proposal.json> [project_root]
+#   The step's gate on a finished proposal. The viewports OWED are read from
+#   the project (`ui.responsive`, via <project_root>) — never from the
+#   proposal, which could simply leave one out — and each of them must be in
+#   the file with a PROPOSED rendering on disk; on the live-screen basis with
+#   its baseline too. A design-system proposal must carry its NO LIVE BASELINE
+#   mark, and the basis must be one of the two. Without <project_root> the
+#   proposal's own `responsive` field decides (the fixture case). Exit 1 names
+#   the first failure; 2 when the file cannot be read.
 # ---------------------------------------------------------------------------
 aid_ui_proposal_check() {
-  local f="${1:?check: proposal file required}"
+  local f="${1:?check: proposal file required}" root="${2:-}"
   jq -e 'type == "object" and (.viewports | type == "array")' "$f" >/dev/null 2>&1 \
     || { echo "check: ${f} is not a proposal" >&2; return 2; }
-  local n name w h baseline proposed live
-  live="$(jq -r '.live_baseline' "$f")"
-  n="$(jq -r '.viewports | length' "$f")"
-  local i
-  for (( i=0; i<n; i++ )); do
-    IFS=$'\t' read -r name w h baseline proposed < <(jq -r --argjson i "$i" \
-      '.viewports[$i] | [.name, (.width|tostring), (.height|tostring), (.baseline // ""), (.proposed // "")] | @tsv' "$f")
+  local basis live marked
+  basis="$(jq -r '.basis // ""' "$f")"; live="$(jq -r '.live_baseline' "$f")"; marked="$(jq -r '.marked // ""' "$f")"
+  case "$basis" in
+    live-screen) ;;
+    design-system)
+      [[ "$marked" == "NO LIVE BASELINE"* ]] || { echo "check: a design-system proposal must be marked NO LIVE BASELINE — this one is not, so it could pass as a screenshot" >&2; return 1; } ;;
+    *) echo "check: basis '${basis}' is neither live-screen nor design-system" >&2; return 1 ;;
+  esac
+
+  local owed
+  if [[ -n "$root" ]]; then owed="$(aid_ui_proposal_viewports "$root")"
+  elif [[ "$(jq -r '.responsive' "$f")" == "false" ]]; then owed="$_AID_UP_DESKTOP"
+  else owed="$(printf '%s\n%s' "$_AID_UP_DESKTOP" "$_AID_UP_MOBILE")"; fi
+
+  local name w h baseline proposed row
+  while read -r name w h; do
+    [[ -n "$name" ]] || continue
+    # Joined with US (0x1f), not tabs: a tab is IFS whitespace, so an empty
+    # baseline would collapse and `proposed` would be read as the baseline.
+    row="$(jq -r --arg n "$name" '.viewports[] | select(.name == $n) | [.name, (.width|tostring), (.height|tostring), (.baseline // ""), (.proposed // "")] | join("\u001f")' "$f" | head -1)"
+    [[ -n "$row" ]] || { echo "check: the ${name} viewport (${w}x${h}) is owed by this project and is not in the proposal at all" >&2; return 1; }
+    IFS=$'\x1f' read -r name w h baseline proposed <<< "$row"
     if [[ "$live" == "true" && ( -z "$baseline" || ! -s "$baseline" ) ]]; then
       echo "check: the ${name} viewport (${w}x${h}) has no baseline capture — the proposal claims a live basis it does not have for this viewport" >&2
       return 1
@@ -188,6 +207,6 @@ aid_ui_proposal_check() {
       echo "check: the ${name} viewport (${w}x${h}) has no proposed rendering — a proposal for this project covers every viewport it owes" >&2
       return 1
     fi
-  done
+  done <<< "$owed"
   return 0
 }

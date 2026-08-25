@@ -285,20 +285,29 @@ AID_GATE_DEADLINE_GRACE_SEC="${AID_GATE_DEADLINE_GRACE_SEC:-30}"
 
 # _gate_scripts_missing_in_tree <resolved_cmd> <tree>  (P087 Step 6)
 #
-# Every repo-relative script a gate command names must exist in the tree the
-# gate runs in — the candidate branch. Prints the missing ones, one per line;
-# prints nothing when all are there. Absolute paths and {plugin_path}-resolved
-# ones are the installed plugin's business, not the branch's, and are not
-# judged. There is deliberately NO fallback to the state root's copy: a gate
+# Every repo-relative script a gate command RUNS must exist in the tree the
+# gate runs in — the candidate branch. A script is "run" when it is the first
+# word of a command segment (after ;, &&, ||, |) or the argument of an
+# interpreter (bash, sh, node, python, bats…); `echo scripts/x.sh` names a
+# file and runs nothing, so it is not judged. Prints the missing ones, one per
+# line; prints nothing when all are there. Absolute paths and
+# {plugin_path}-resolved ones are the installed plugin's business, not the
+# branch's, and are not judged. There is deliberately NO fallback to the state root's copy: a gate
 # that ran the primary checkout's script would certify a branch that does not
 # carry it, which is the drift IMP-497 was about.
 _gate_scripts_missing_in_tree() {
-  local cmd="$1" tree="$2" w
+  local cmd="$1" tree="$2" w prev="" runs=1
   for w in $cmd; do
     w="${w#\'}"; w="${w%\'}"; w="${w#\"}"; w="${w%\"}"
-    [[ "$w" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*\.(sh|bash|bats|py|mjs|js|ts)$ ]] || continue
-    [[ "$w" == /* ]] && continue
-    [[ -e "${tree}/${w}" ]] || printf '%s\n' "$w"
+    case "$w" in
+      ';'|'&&'|'||'|'|'|'('|'{') runs=1; prev=""; continue ;;
+    esac
+    if (( runs )) || [[ "$prev" =~ ^(bash|sh|zsh|node|python|python3|bats|source|\.)$ ]]; then
+      if [[ "$w" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*\.(sh|bash|bats|py|mjs|js|ts)$ && "$w" != /* && ! -e "${tree}/${w}" ]]; then
+        printf '%s\n' "$w"
+      fi
+    fi
+    runs=0; prev="$w"
   done
 }
 

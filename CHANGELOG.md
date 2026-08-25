@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.92.0] — 2026-08-25
 
-> Agents run at the same time where the plan allows it, four hook rules that P086 left out, and a UI proposal the PM can judge.
+> Agents run at the same time where the plan allows it, three hook rules and a gate check that P086 left out, and a UI proposal the PM can judge.
 
 ### Added
 - **Dispatch contract** — every dispatched step gets a versioned packet built by code from `plan.json` (objective, allowed paths, dependencies, expected artifacts, acceptance criteria, UI contract, its own evidence directory) and must return an `aid-return` block; the return is judged against the packet and the disk (version, promised artifacts present, every changed file declared, out-of-scope files named, no evidence in another step's directory), and `increment-step` refuses to advance a contracted step without an accepted return.
@@ -20,7 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Every surface that described the brake** — `pipeline.md` §4/§10, `aid-run.md`, `aid-plan.md`, `role-cards.md` and `plan-writing.md` describe the wave decision instead of "TEMPORARY: sequential".
 - **Decision-card labels** — `blocked` joins the per-language labels so the Stop rule recognises a Blocked card in the PM's language.
-- **Enforcement registry** — `max_parallel_one` is retired with its replacement guards named; `plan_parallel_group_disjoint` records the interface dimension and the runtime consumer; eight new rows carry a degree and a "what this does not guarantee" line, including the known boundary that disjoint paths and interfaces do not guarantee disjoint effect.
+- **Enforcement registry** — `max_parallel_one` is retired with its replacement guards named; `plan_parallel_group_disjoint` records the interface dimension and the runtime consumer; nine new rows carry a degree and a "what this does not guarantee" line, including the known boundary that disjoint paths and interfaces do not guarantee disjoint effect.
 
 ## [2.91.0] — 2026-08-25
 

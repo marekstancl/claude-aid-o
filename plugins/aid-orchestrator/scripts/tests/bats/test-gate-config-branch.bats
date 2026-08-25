@@ -77,6 +77,17 @@ _run() { bash -c "cd '$1' && exec bash '$RUNNER' run-all '$PRIMARY/.aid-o/config
   [ ! -e "$PRIMARY/ran.txt" ]
 }
 
+@test "gate-branch: a script that is only NAMED, not run, is not the branch's business — and one run after && is" {
+  git -C "$WT" rm -q scripts/probe.sh; git -C "$WT" commit -q -m "branch dropped the probe"
+  _config "echo scripts/probe.sh scripts/other.py"
+  run _run "$WT"
+  [ "$status" -eq 0 ]
+  _config "true && scripts/probe.sh"
+  run _run "$WT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"scripts/probe.sh"* ]]
+}
+
 @test "gate-branch: a run from the primary checkout behaves as before, and an absolute or {plugin_path} script is not the branch's business" {
   _config "bash scripts/probe.sh | grep -q primary-copy"
   run _run "$PRIMARY"

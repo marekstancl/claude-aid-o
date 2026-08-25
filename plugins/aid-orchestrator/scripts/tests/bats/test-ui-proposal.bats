@@ -73,6 +73,27 @@ teardown() { rm -rf "$TMP"; }
   jq --arg p "$OUT/mobile/proposed.png" '.viewports[1].proposed = $p' "$OUT/p2.json" > "$OUT/p3.json"
   run aid_ui_proposal_check "$OUT/p3.json"
   [ "$status" -eq 0 ]
+  # a proposal that simply LEAVES the mobile viewport out is judged against the project, not itself
+  jq 'del(.viewports[1])' "$OUT/p3.json" > "$OUT/p4.json"
+  run aid_ui_proposal_check "$OUT/p4.json" "$APP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mobile viewport (390x844) is owed by this project and is not in the proposal"* ]]
+  run aid_ui_proposal_check "$OUT/p4.json"
+  [ "$status" -eq 1 ]
+}
+
+@test "proposal: the check refuses a design-system proposal that dropped its NO LIVE BASELINE mark, and an unknown basis" {
+  aid_ui_proposal_build "$APP" "$OUT"
+  printf 'x' > "$OUT/d.png"; printf 'x' > "$OUT/m.png"
+  jq --arg d "$OUT/d.png" --arg m "$OUT/m.png" '.viewports[0].proposed = $d | .viewports[1].proposed = $m' "$OUT/proposal.json" > "$OUT/ok.json"
+  run aid_ui_proposal_check "$OUT/ok.json" "$APP"
+  [ "$status" -eq 0 ]
+  jq '.marked = null' "$OUT/ok.json" > "$OUT/unmarked.json"
+  run aid_ui_proposal_check "$OUT/unmarked.json" "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"NO LIVE BASELINE"* ]]
+  jq '.basis = "memory"' "$OUT/ok.json" > "$OUT/bad.json"
+  run aid_ui_proposal_check "$OUT/bad.json" "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"neither"* ]]
 }
 
 @test "proposal: AC26 — ui.responsive: false owes the desktop viewport only" {

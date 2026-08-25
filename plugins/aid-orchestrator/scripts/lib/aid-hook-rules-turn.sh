@@ -181,8 +181,14 @@ aid_hook_rule_turn_write_scope() {
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
 
+  # The same session window as the Stop rule, when the payload names a
+  # transcript; without one, any open step's contract is the best available
+  # answer and the notice says which step it is.
+  local since=0 transcript
+  transcript="$(printf '%s' "$input" | jq -r '.transcript_path // ""' 2>/dev/null)"
+  [[ -n "$transcript" && -r "$transcript" ]] && since="$(_aid_hrt_session_start "$transcript")"
   local line
-  line="$(aid_turn_open_step "$root")" || { echo "no step is open — nothing declares paths" >&2; return 3; }
+  line="$(aid_turn_open_step "$root" "$since")" || { echo "no step is open — nothing declares paths" >&2; return 3; }
   local sid contract
   IFS=$'\t' read -r _ _ _ sid contract <<< "$line"
 

@@ -100,7 +100,8 @@ Two bases, and `proposal.json` says which:
 **Viewports** come from `ui.responsive` in `project.yaml` (`/aid-init` records it; default
 true): desktop 1280×720 **and** mobile 390×844, or desktop alone when `false`. Draw the
 proposal at every viewport and record each rendering in `viewports[].proposed`;
-`aid_ui_proposal_check proposal.json` refuses a proposal missing one, naming the viewport. A
+`aid_ui_proposal_check proposal.json "$project_root"` refuses a proposal missing one, naming the
+viewport — it reads what is owed from the project, not from the proposal. A
 viewport that cannot be captured stops the build with its name — do not fake it.
 
 **Two models, one brief.** Hand the SAME brief to the opponent —

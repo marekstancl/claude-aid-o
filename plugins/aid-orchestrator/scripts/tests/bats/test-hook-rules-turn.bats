@@ -110,6 +110,12 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [ "$status" -eq 0 ]; [ -z "$output" ]
 }
 
+@test "turn: with a transcript, the write rule also ignores another session's older step" {
+  touch -d '-2 hours' "$EV/steps/step_1_backend/contract.json"
+  run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/lib/other.sh" | jq --arg t "$TRANSCRIPT" '.transcript_path = $t')"
+  [ "$status" -eq 3 ]
+}
+
 @test "turn: a tool that is not a file write, or a step without a contract, is not applicable" {
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/lib/other.sh" Bash)"
   [ "$status" -eq 3 ]

@@ -341,7 +341,8 @@ Rules:
 ### Whether the UI is responsive
 
 One fact, `ui.responsive`, written into `project.yaml` at init and read by every UI proposal
-and UI check afterwards (`scripts/lib/aid-ui-proposal.sh`): **default `true`** — the PM builds
+and, given the project root, by the proposal check (`scripts/lib/aid-ui-proposal.sh`,
+`aid_ui_proposal_build` / `aid_ui_proposal_check <proposal.json> <project_root>`): **default `true`** — the PM builds
 responsive applications, so a proposal and its verification cover desktop and mobile. A
 deliberately desktop-only application sets it to `false` and the mobile obligation lapses. A
 project with no UI at all is not asked: no UI steps, no obligation, and the key may be left out
