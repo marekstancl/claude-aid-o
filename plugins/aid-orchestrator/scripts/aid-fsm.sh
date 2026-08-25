@@ -11,6 +11,7 @@
 #   aid-fsm.sh verify-state <state_file>
 #   aid-fsm.sh increment-step <state_file> [--force]
 #   aid-fsm.sh get-field <field> <state_file>
+#   aid-fsm.sh step-evidence-dir <state_file> <step_index>   # the step's OWN evidence subdirectory (P087 Step 2)
 #   aid-fsm.sh set-field <field> <value> <state_file>
 #   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
 #   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
@@ -6097,6 +6098,32 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   echo "status=advanced advanced_from=${step} advanced_to=$((step + 1))"
 }
 
+# ─── step-evidence-dir <state_file> <step_index> (P087 Step 2) ─────────────
+# Prints (and creates) the one directory a dispatched step may write its
+# evidence into: `<evidence_dir>/steps/<step_id>/`, the step id read from the
+# run's plan.json. It resolves under the STATE root like the rest of the
+# evidence chain, so two steps running at once in two worktrees still land in
+# two subdirectories of one run — the evidence half of "no mega-commit". The
+# other half (a return that wrote into another step's directory is refused)
+# is lib/aid-dispatch-contract.sh's job, against the dir this prints.
+cmd_step_evidence_dir() {
+  local state_file="${1:-}" idx="${2:-}"
+  [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
+  [[ "$idx" =~ ^[0-9]+$ ]] || { echo "ERROR: step index must be a number, got '${idx}'" >&2; exit 1; }
+  local epic_id run_id evidence_dir plan_json step_id
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
+  evidence_dir="$(aid_state_path ".aid-o/work/evidence/${epic_id}/${run_id}" 2>/dev/null \
+    || printf '%s' ".aid-o/work/evidence/${epic_id}/${run_id}")"
+  plan_json="${evidence_dir}/plan.json"
+  [[ -f "$plan_json" ]] || { echo "ERROR: ${plan_json} not found — a step has no evidence directory before PRE-FLIGHT wrote the plan" >&2; exit 1; }
+  step_id=$(jq -r --argjson i "$idx" '.steps[$i].id // ""' "$plan_json" 2>/dev/null)
+  [[ -n "$step_id" ]] || { echo "ERROR: ${plan_json} has no step at index ${idx}" >&2; exit 1; }
+  local dir="${evidence_dir}/steps/${step_id}"
+  mkdir -p "$dir" || { echo "ERROR: cannot create ${dir}" >&2; exit 1; }
+  printf '%s\n' "$dir"
+}
+
 cmd_get_field() {
   local field="$1" state_file="$2"
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
@@ -8800,6 +8827,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     verify-state)      shift; cmd_verify_state "$@" ;;
     increment-step)    shift; cmd_increment_step "$@" ;;
     get-field)         shift; cmd_get_field "$@" ;;
+    step-evidence-dir) shift; cmd_step_evidence_dir "$@" ;;
     set-field)         shift; cmd_set_field "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
@@ -8823,7 +8851,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|step-evidence-dir|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
       exit 1 ;;
   esac
 fi
