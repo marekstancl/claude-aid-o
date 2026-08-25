@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.92.0] — 2026-08-25
+
+> Agents run at the same time where the plan allows it, four hook rules that P086 left out, and a UI proposal the PM can judge.
+
+### Added
+- **Dispatch contract** — every dispatched step gets a versioned packet built by code from `plan.json` (objective, allowed paths, dependencies, expected artifacts, acceptance criteria, UI contract, its own evidence directory) and must return an `aid-return` block; the return is judged against the packet and the disk (version, promised artifacts present, every changed file declared, out-of-scope files named, no evidence in another step's directory), and `increment-step` refuses to advance a contracted step without an accepted return.
+- **Per-step evidence and commit under concurrency** — `aid-fsm.sh step-evidence-dir` gives each step its own `steps/<step_id>/` at the state root and the controller commits each accepted return itself, one at a time, so three agents returning at once cannot produce one commit.
+- **Shared interfaces as a second disjointness dimension** — a step may declare `**Shared interfaces:**` and `aid-plan-parallel-check.sh` treats two steps of one wave naming the same interface (normalised) as a collision; `--group` judges one wave, which is how the dispatch decision asks.
+- **The brake is lifted** — `orchestration.yaml` `dispatch.max_parallel` is a real ceiling (default 3, `strategy: worktrees`); `lib/aid-parallel-dispatch.sh` decides `concurrent slots=N` or `serial: <reason>` and never refuses a run, gives each step a worktree on `step/<step_id>` at the current base, merges returns one at a time, and turns a conflict into an aborted merge, an untouched tree, a reset and a repeated step.
+- **Two turn rules** — `turn_step_open` (Stop, fail-closed) refuses to end a turn on a step this session dispatched and did not advance unless the last message is a Decision or Blocked card; `turn_write_scope` (PreToolUse, fail-open) names a Write/Edit outside the open step's paths before it lands, as feedback, because the catch cannot see a shell redirection and must not be sold as a guard.
+- **Gate scripts from the branch** — a gate whose command names a repo-relative script the candidate tree lacks fails by name with no fallback to the primary checkout; configuration stays at the state root, and the registry records why that half is deliberately not built.
+- **Worktree registry read back** — `aid-plan-fsm.sh worktrees` and a SessionStart notice report recorded trees that are gone or left behind by a closed plan, each with its audited command; nothing removes a tree.
+- **UI proposals built from the application** — `lib/aid-ui-proposal.sh` starts from the real screen captured per viewport on fixture data (no fixture, no capture) or from the design system inventoried from the tree, marked as having no live baseline; `ui.responsive` in `project.yaml` (default true) makes desktop and mobile owed and a missing viewport stops the build naming it; both models get the same brief.
+
+### Changed
+- **Every surface that described the brake** — `pipeline.md` §4/§10, `aid-run.md`, `aid-plan.md`, `role-cards.md` and `plan-writing.md` describe the wave decision instead of "TEMPORARY: sequential".
+- **Decision-card labels** — `blocked` joins the per-language labels so the Stop rule recognises a Blocked card in the PM's language.
+- **Enforcement registry** — `max_parallel_one` is retired with its replacement guards named; `plan_parallel_group_disjoint` records the interface dimension and the runtime consumer; eight new rows carry a degree and a "what this does not guarantee" line, including the known boundary that disjoint paths and interfaces do not guarantee disjoint effect.
+
 ## [2.91.0] — 2026-08-25
 
 ### Added

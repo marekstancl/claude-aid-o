@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 468          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 479          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -268,7 +268,7 @@ enforcements:
   - {id: promote_governance,           type: 9, source: "scripts/aid-promote-checks.sh:9", instruction: "skills/pipeline.md:849", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "advisory→blocking promotion (>=5 EPICs, override_rate<0.05)", test: "scripts/tests/bats/test-tiered-severity.bats:284"}
   - {id: reflect_systematic,           type: 9, source: "scripts/aid-compliance-report.sh:185", instruction: "skills/pipeline.md:93", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "--reflect SYSTEMATIC STOP on force-override pattern", test: "scripts/tests/bats/test-aid-compliance.bats:90"}
   - {id: autonomous_denylist,          type: 9, source: "defaults/policies/permissions.yaml:116", instruction: "defaults/policies/permissions.yaml:116", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "autonomous preset claude_code_deny denylist (rm -rf, force push, DROP)"}
-  - {id: max_parallel_one,             type: 9, source: "defaults/orchestration.yaml:22", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "dispatch sequential, max_parallel:1 (one agent at a time)"}
+  - {id: max_parallel_one,             type: 9, source: "defaults/orchestration.yaml", instruction: "skills/pipeline.md (§4 Parallel groups)", severity: blocking, surface: llm-facing, status: removed_scoped, verdict: ALIGNED, replacement_guard: "parallel_dispatch_wave_check + dispatch_contract_return + parallel_step_commit", description: "RETIRED by P087 Step 4. The TEMPORARY brake (max_parallel: 1, strategy: sequential) existed for three named reasons — mega-commits, placeholder verify files, memory bypass — and each now has an owner: the per-step commit by the controller, the contract validated against the disk, the packet that carries memory. max_parallel is a real ceiling (default 3) and a wave runs concurrently only when aid_parallel_decide says so; 1 is still the brake and still honoured."}
   - {id: escalation_max_session,       type: 9, source: "defaults/orchestration.yaml:37", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "escalation.max_per_session:3 hard-stop counter"}
   - {id: release_skip_when,            type: 9, source: "defaults/orchestration.yaml:101", instruction: "skills/pipeline.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "refuse bump/tag when no new CHANGELOG version"}
   - {id: skill_conflicts_deny,         type: 9, source: "defaults/orchestration.yaml:108", instruction: "commands/aid-setup.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "skill_conflicts deny list (superpowers brainstorming/writing-plans)"}
@@ -3055,8 +3055,8 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     description: "P085 Step 7 — each step declares a **Parallel group** (a wave name, or `---` for a step that runs alone), and two steps in the SAME wave must not name the same file. `Parallel Group` has existed in the EPIC table since P039 and aid-epic-to-json.sh writes it into plan.json, but nothing ever produced a value and nothing ever checked one; this is the producer's other half. Required in `full` and `medium`, where concurrency is declared deliberately; in `light` an absent field defaults to `---`. Two severities, the same two-stage model the Files grammar has: advisory while writing (--advisory), blocking inside aid-generation-readiness.sh, which is the last point before the plan becomes EPICs."
-    limits: "With max_parallel: 1 nothing runs concurrently today, so this blocks a risk that cannot currently materialise. That is the point: it is the evidence of safety for the moment the brake comes off, and evidence gathered after the fact is evidence nobody trusts. The check VERIFIES a schedule and does not produce one — the plan computes its waves by hand."
-    runtime_check: "Post-generation: the disjointness is a property of the SOURCE plan, and the generated plan.json inherits the groups verbatim (aid-epic-to-json.sh), so re-deriving it per EPIC would be a second authority over one fact. Development runtime: none needed while max_parallel is 1 — nothing dispatches concurrently, so there is no runtime moment for the property to be violated in. When concurrency is switched on, the dispatcher becomes the runtime consumer and this row is where that gets recorded."
+    limits: "The check VERIFIES a schedule and does not produce one — the plan computes its waves by hand. Since P087 Step 3 it judges two dimensions: shared files AND shared declared interfaces (`**Shared interfaces:**`, optional, absent = none). What it cannot see is a shared EFFECT nobody declared: disjoint files and disjoint declared interfaces do not guarantee disjoint impact. That residue is what the merge conflict and the step retry (parallel_dispatch_wave_check) exist for."
+    runtime_check: "Post-generation: the disjointness is a property of the SOURCE plan, and the generated plan.json inherits the groups verbatim (aid-epic-to-json.sh). Development runtime (P087 Step 4): the dispatcher IS the runtime consumer — aid_parallel_decide runs this check with --group over the plan as it is at dispatch time, and a wave that fails it runs in sequence with the reason recorded (row parallel_dispatch_wave_check)."
     recovery: "The finding names both steps and every shared path. Move one step to another wave, or mark it `---`."
     test: "scripts/tests/bats/test-plan-parallel-check.bats"
 
@@ -3262,7 +3262,7 @@ enforcements:
     enforcement_degree: 4
     deadline: "2027-06-30"
     deferred_by: "P086 Step 6"
-    deferred_reason: "AC19 asked for gate configuration to be read from the branch while state comes from the primary checkout. Two measured facts block it as written. (1) `.aid-o/` is gitignored, so a project's execution.yaml is NEVER checked out into a linked worktree and cannot come from a branch at all — reading it from the primary checkout is the CORRECT behaviour and was itself the fix for IMP-497. (2) Auto-reading hook or gate configuration out of a working tree would make a downloaded repository able to run code, which /ecosystem/specs/agent-hooks/ rule 3 explicitly forbids defending against by any means other than not doing it. The real drift AC19 was aiming at — controller code from the installed plugin cache while the branch's code is under test — already has an owner in lib/aid-cache-preflight.sh. Recorded as not delivered rather than described as delivered by the phase worktrees, which do not do it."
+    deferred_reason: "Re-examined by P087 Step 6 (PM proxy decision 2026-08-25, option B): the CONFIGURATION half stays undelivered for the two facts below, and the deliverable half — the branch under test must carry every script its gates name, refused by name with no fallback to the primary checkout — landed as row gate_script_in_tree. Original reasoning: AC19 asked for gate configuration to be read from the branch while state comes from the primary checkout. Two measured facts block it as written. (1) `.aid-o/` is gitignored, so a project's execution.yaml is NEVER checked out into a linked worktree and cannot come from a branch at all — reading it from the primary checkout is the CORRECT behaviour and was itself the fix for IMP-497. (2) Auto-reading hook or gate configuration out of a working tree would make a downloaded repository able to run code, which /ecosystem/specs/agent-hooks/ rule 3 explicitly forbids defending against by any means other than not doing it. The real drift AC19 was aiming at — controller code from the installed plugin cache while the branch's code is under test — already has an owner in lib/aid-cache-preflight.sh. Recorded as not delivered rather than described as delivered by the phase worktrees, which do not do it."
     not_guaranteed: "Nothing — there is no mechanism here to guarantee anything with. That is the point of the row."
     description: "P086 Step 6 AC19 — NOT DELIVERED. Phase working copies (aid-plan-fsm.sh plan-scratch) isolate the TREE for brainstorming and generation; state deliberately stays shared and single-authority. The config-from-the-branch half is unbuilt and the reason is above."
     test: n/a
@@ -3366,3 +3366,139 @@ enforcements:
     does_not_guarantee: "that the plan is fixed — it names the defect and its cost; generation is what refuses"
     verdict: ALIGNED
     test: "scripts/tests/bats/test-aid-plan-summary.bats"
+
+  # ── P087 — concurrent agents, the four missing hook rules, credible UI proposals ──
+  - id: dispatch_contract_return
+    type: 1
+    source: "scripts/lib/aid-dispatch-contract.sh (aid_dispatch_contract_validate) + scripts/aid-fsm.sh (cmd_increment_step, contract_return_missing / contract_return_rejected)"
+    instruction: "skills/pipeline.md (§4 Step dispatch + Output verification)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    description: "P087 Step 1 — every dispatched step gets a PACKET built by code from plan.json (objective, allowed paths, dependencies, expected artifacts, acceptance criteria, UI contract, its own evidence dir) with a VERSION; the agent returns an `aid-return` block. The return is judged against the packet AND the disk: the version must match, every promised artifact must exist, every file git sees changed must be declared, every file outside the allowed paths is named, evidence in another step's directory is refused. increment-step re-runs the validation and will not advance a contracted step without an accepted return."
+    not_guaranteed: "That the agent did the RIGHT thing inside the allowed paths — the contract proves receipt, scope and artifacts, not correctness; CP2 and the gates own that. A step that declares no paths owes no contract (a plan decision), so a pure-analysis step is verified by its step-verify file alone."
+    recovery: "Re-dispatch the step with the current packet; the report names every missing artifact, undeclared change and out-of-scope path."
+    test: "scripts/tests/bats/test-dispatch-contract.bats + scripts/tests/bats/test-parallel-evidence.bats"
+
+  - id: parallel_step_commit
+    type: 1
+    source: "scripts/lib/aid-dispatch-contract.sh (aid_dispatch_contract_commit) + scripts/aid-fsm.sh (cmd_step_evidence_dir)"
+    instruction: "skills/pipeline.md (§4 Per-step commit + Parallel groups) + commands/aid-run.md (rules 15-16)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    description: "P087 Step 2 — one step, one evidence subdirectory (`steps/<step_id>/`, resolved at the state root), one commit made by the controller after the return is accepted, returns taken one at a time in arrival order. The commit function validates first and refuses a rejected return; an agent that changed nothing produces no commit."
+    not_guaranteed: "That the controller CALLS the function: it is a library the pipeline instructs the controller to use, and the FSM precondition (dispatch_contract_return) is what makes skipping it visible — a step cannot advance on an unvalidated return, but a validated return committed by hand in one big commit is not detected here."
+    recovery: "Nothing to recover; a refused commit names the reasons. A mega-commit made by hand is a review finding."
+    test: "scripts/tests/bats/test-parallel-evidence.bats"
+
+  - id: parallel_dispatch_wave_check
+    type: 9
+    source: "scripts/lib/aid-parallel-dispatch.sh (aid_parallel_decide, aid_parallel_step_worktree, aid_parallel_step_reset, aid_parallel_merge) + scripts/aid-plan-parallel-check.sh (--group) + defaults/orchestration.yaml (dispatch.max_parallel, dispatch.strategy, dispatch.worktree_base)"
+    instruction: "skills/pipeline.md (§4 Parallel groups, §10)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    description: "P087 Steps 3-4 — the brake is lifted. Before a wave the controller asks code: `concurrent slots=N` only when max_parallel > 1, strategy is worktrees, git hands out worktrees and the wave (this wave, --group) is disjoint in files and declared interfaces; anything else is `serial: <reason>`, never a refusal. Each step runs in its own worktree on step/<step_id> at the current base (a leftover branch is reset, never reused); returns are merged one at a time; a conflict is aborted, the tree left untouched, the step's tree reset onto the new base and the step repeated."
+    not_guaranteed: "KNOWN BOUNDARY: disjoint paths and disjoint declared interfaces do NOT guarantee disjoint effect — two steps can change the same behaviour through different files and undeclared interfaces, and git will merge them cleanly. Isolation turns a collision into a merge conflict, never into a corrupted tree; it does not turn an undeclared semantic collision into anything at all. That residue belongs to CP3 and the gates. Also not guaranteed: slot enforcement — `slots=N` is a number the controller is told, the library does not count agents in flight."
+    recovery: "A conflict names the files; reset the step (aid_parallel_step_reset) and dispatch it again. Two failures of the same step go to defaults/policies/auto-recovery.yaml. A dirty step tree is kept and named, never removed."
+    test: "scripts/tests/bats/test-parallel-dispatch.bats + scripts/tests/bats/test-plan-parallel-check.bats"
+
+  - id: turn_step_open
+    type: 12
+    source: "scripts/lib/aid-hook-rules-turn.sh (aid_hook_rule_turn_step_open) + defaults/hook-registry.yaml (rule turn_step_open)"
+    instruction: "skills/pipeline.md (§4 Output verification) + commands/aid-run.md (rule 16)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "Only while the canary has verified this installation (fail-closed rows degrade to open without it) and never on a turn already continued by a hook (stop_hook_active). Only steps THIS session dispatched (contract newer than the transcript's first timestamp). A hand-over is recognised by the Decision and Blocked card labels; a turn that ends on prose in no card shape while a step is open is refused, which is the intent, but a turn that FAKES a Blocked card passes — the label is a shape, not a truth. Stop does not exist in Codex review modes and never arrives from a killed session; the FSM precondition (dispatch_contract_return) is the later catch."
+    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card)."
+    recovery: "Finish the step or hand over with a card; AID_HOOKS_OFF_RULES=turn_step_open is the audited escape."
+    test: "scripts/tests/bats/test-hook-rules-turn.bats"
+
+  - id: turn_write_scope
+    type: 12
+    source: "scripts/lib/aid-hook-rules-turn.sh (aid_hook_rule_turn_write_scope) + defaults/hook-registry.yaml (rule turn_write_scope) + hooks/hooks.json (PreToolUse)"
+    instruction: "skills/pipeline.md (§4 Output verification)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 3
+    not_guaranteed: "Anything. This is DELIVERY, not a guard, and the plan's re-grounding says why: the catch sees Write/Edit and never a shell redirection (measured by the ecosystem sheet and by P086), so a rule that blocked here would be sold as protection with a hole the size of `bash`. It names the path and the allowed list before the edit lands, as context; what refuses is the contract validation at return time (dispatch_contract_return), which reads the disk."
+    description: "P087 Step 5 — a Write/Edit that lands outside the open step's allowed paths is named before it lands, with the path and the list, as injected context under PreToolUse (owner any, so it reaches a role agent too)."
+    recovery: "Nothing to recover; the notice is feedback. The return validation is the enforcement."
+    test: "scripts/tests/bats/test-hook-rules-turn.bats"
+
+  - id: gate_script_in_tree
+    type: 1
+    source: "scripts/aid-run-gates.sh (_gate_scripts_missing_in_tree, reason gate_script_missing_in_tree)"
+    instruction: "n/a"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "Configuration from the branch — deliberately, see gate_config_from_branch: execution.yaml stays at the state root because `.aid-o/` never reaches a worktree and configuration read out of a working tree would let a downloaded repository run code (agent-hooks rule 3). Also not judged: absolute paths and {plugin_path} scripts (the installed plugin's business), and a script named indirectly (through another script, a Makefile target, an env variable)."
+    description: "P087 Step 6 (narrowed, PM proxy decision 2026-08-25) — every repo-relative script a gate command names must exist in the tree the gate runs in, the candidate branch. A missing one fails the gate BY NAME, with the tree, and there is no fallback to the primary checkout's copy: a gate that ran main's script would certify a branch that does not carry it (IMP-497's drift, one level down)."
+    recovery: "Add the script to the branch, or change the gate command. Nothing is skipped silently."
+    test: "scripts/tests/bats/test-gate-config-branch.bats"
+
+  - id: worktree_registry_notice
+    type: 12
+    source: "scripts/lib/aid-worktree-registry.sh (aid_worktree_registry_scan, aid_hook_rule_worktree_registry) + scripts/aid-plan-fsm.sh (cmd_worktrees) + defaults/hook-registry.yaml (rule worktree_registry_notice)"
+    instruction: "docs/extending-aid.md (P087 — The three hook rules)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 3
+    not_guaranteed: "That anyone acts on the notice. The registration itself is P074's (plan-state worktree_path, written by plan-start, cleared by plan-close/plan-rollback); this row is the READER: at every session start, and on `aid-plan-fsm.sh worktrees`, a recorded tree that is gone is reported with `--recreate-worktree`, and a terminal plan's tree still on disk with `plan-close`. NOTHING here ever removes a tree — a tree may hold work nobody has looked at — and the suite asserts the library contains no removal at all."
+    description: "P087 Step 7 — the worktree registry read back and judged: live / missing / leftover, each with the audited command. The orchestrator owns the lifecycle; the hook only reports."
+    recovery: "The named command, run by a person or the controller — never by the hook."
+    test: "scripts/tests/bats/test-worktree-registry.bats"
+
+  - id: ui_proposal_basis
+    type: 1
+    source: "scripts/lib/aid-ui-proposal.sh (aid_ui_proposal_build, aid_ui_proposal_check)"
+    instruction: "skills/visual-companion/SKILL.md (A Proposal Is Built From the Application)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the proposal drawn ON the basis is good, or that the two models' proposals differ usefully — the basis is built by code, the drawing is still a model's. That the skill is followed: a session can draw from memory and never call the library; what catches that is the PM seeing no proposal.json and no `marked` line, which is exactly the situation this exists to make visible. That fixture data is REALISTIC — only that it is a fixture."
+    description: "P087 Step 8 — a UI proposal's basis is either the application's real screen (captured with the regression tool, per viewport, on FIXTURE data — a capture without a fixture file never happens, so production data is never photographed) or the application's own design system inventoried from the tree, and the proposal is MARKED as such; it never claims a screenshot it does not have. Both models get the same brief (lib/aid-brainstorm-opponent.sh), the PM decides."
+    recovery: "A failed capture names the viewport; a marked proposal says why it has no live basis."
+    test: "scripts/tests/bats/test-ui-proposal.bats"
+
+  - id: ui_responsive_viewports
+    type: 1
+    source: "scripts/lib/aid-ui-proposal.sh (aid_ui_proposal_viewports, aid_ui_proposal_check)"
+    instruction: "commands/aid-init.md (Whether the UI is responsive) + skills/setup/project-scan.md + skills/plan-writing.md (UI Change Contract, viewports)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "Coverage of anything beyond the two minimum viewports (desktop 1280×720, mobile 390×844); tablets are the plan's to add. That `ui.responsive` is TRUE of the product — it is a declared fact, default true, and a project that sets false to dodge the mobile shot has lied in a field a reviewer can read. The EXECUTE-phase visual check reads the viewports from the UI Change Contract and is instructed, not gated, to capture each."
+    description: "P087 Step 9 — responsiveness is a fact of the project (`ui.responsive`, default true), read once: a responsive project owes desktop AND mobile in every UI proposal and check, `false` owes desktop alone, a project without UI is not asked. A missing viewport stops the build or fails the check naming that viewport."
+    recovery: "Capture the named viewport, or set ui.responsive: false deliberately for a desktop-only product."
+    test: "scripts/tests/bats/test-ui-proposal.bats"

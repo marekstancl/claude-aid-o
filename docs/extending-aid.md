@@ -1330,7 +1330,7 @@ clone and the eco-dev↔eco-prod mirror.
 
 ---
 
-**Last Updated:** 2026-07-27
+**Last Updated:** 2026-08-25
 
 ## The plan-boundary layer (P064 + P068)
 
@@ -2597,4 +2597,92 @@ The renderer being an instruction rather than a gate is recorded honestly:
 refuse to close a turn which wrote a plan without rendering its page.
 
 
-**Last Updated:** 2026-08-22
+---
+
+## Concurrent agents, the four missing hook rules, credible UI proposals (P087)
+
+### Adding a step to a concurrent wave
+
+A wave is the plan's `**Parallel group:**` value; two steps share a wave when
+they may run at the same time. To put a step into one:
+
+1. Declare its `Files:` honestly — the wave check
+   (`scripts/aid-plan-parallel-check.sh`) proves two steps of one wave name no
+   common path.
+2. Declare `**Shared interfaces:**` when the step changes an endpoint, a
+   schema, a configuration key or a registered name — the second dimension the
+   check compares (normalised: case, surrounding slashes, whitespace). Absent
+   means "none", and that is the honest answer for most steps.
+3. Know what the isolation buys and what it does not. Each step runs in its own
+   worktree (`.aid-worktrees/step-<step_id>`, `step/<step_id>`, base
+   `dispatch.worktree_base`); a collision surfaces as a **merge conflict**, the
+   merge is aborted, the tree left untouched, the step's tree reset onto the new
+   base (`aid_parallel_step_reset`) and the step repeated. What it does NOT buy is
+   caught nowhere here: two steps changing the same behaviour through different
+   files and an interface nobody declared merge cleanly. That boundary is written
+   into the registry (`parallel_dispatch_wave_check`, `not_guaranteed`).
+
+The decision is `aid_parallel_decide` (`scripts/lib/aid-parallel-dispatch.sh`):
+`concurrent slots=N` or `serial: <reason>`, exit 0 either way — the brake
+(`dispatch.max_parallel: 1`), a strategy other than `worktrees`, a repository
+that cannot hand out worktrees, a wave of one, a collision in THIS wave, a check
+that cannot run: every one degrades to the sequential path. `pipeline.md §4`
+"Parallel groups" is the controller's instruction.
+
+### The dispatch contract
+
+`scripts/lib/aid-dispatch-contract.sh` builds a PACKET from `plan.json`
+(objective, allowed paths, dependencies, expected artifacts, acceptance
+criteria, UI contract, the step's own evidence directory) with a version, and
+judges the agent's `aid-return` block against the packet and the DISK: the
+version must match, promised artifacts must exist, every file git sees changed
+must be declared, out-of-scope files are named, another step's evidence
+directory is refused. `aid-fsm.sh increment-step` re-runs the validation for a
+contracted step and refuses to advance without an accepted return — that is the
+enforcement; the library is the mechanism. The controller commits each accepted
+return itself (`aid_dispatch_contract_commit`, which validates first), one at a
+time, which is what makes a mega-commit impossible even under concurrency.
+
+### The three hook rules, and the one that is deliberately not a guard
+
+Rows in `defaults/hook-registry.yaml`, handlers in
+`scripts/lib/aid-hook-rules-turn.sh` and `scripts/lib/aid-worktree-registry.sh`,
+following the four steps of "Adding a harness hook rule" above:
+
+- `turn_step_open` (`Stop`, controller, degree 2, fail-closed) refuses to end
+  a turn while a step this session dispatched has not been advanced, unless the
+  last message is a Decision card or a Blocked card (`blocked` is now a label in
+  `defaults/decision-card-labels.yaml`).
+- `turn_write_scope` (`PreToolUse`, any, degree 3, fail-open) names a Write/Edit
+  outside the open step's allowed paths BEFORE it lands, as context. It does
+  not block, on purpose: the catch sees Write and Edit and never a shell
+  redirection, so blocking here would be protection with a hole the size of
+  `bash`. The contract validation at return time is what refuses.
+- `worktree_registry_notice` (`SessionStart`, controller, degree 3) reports
+  plan worktree records that need a decision — a recorded tree that is gone,
+  a closed plan's tree still on disk — each with its audited command.
+  `aid-plan-fsm.sh worktrees` is the same scan on demand. Nothing removes a
+  tree; the suite asserts the library contains no removal.
+
+### Gate scripts come from the branch; gate configuration does not
+
+`aid-run-gates.sh` fails a gate BY NAME when a repo-relative script its
+command names is not in the tree the gate runs in, with no fallback to the
+primary checkout (`gate_script_in_tree`). Configuration (`execution.yaml`) stays
+at the state root, and `gate_config_from_branch` records why that half is not
+built: `.aid-o/` never reaches a worktree, and configuration read out of a
+working tree would let a downloaded repository run code.
+
+### UI proposals
+
+`scripts/lib/aid-ui-proposal.sh` builds a proposal's basis from the application:
+the real screen captured per viewport on fixture data (no fixture, no capture —
+production data is never photographed), or the design system inventoried from
+the tree, MARKED as having no live baseline. `ui.responsive` in `project.yaml`
+(default true) decides the viewports — desktop and mobile, or desktop alone —
+and `aid_ui_proposal_check` refuses a proposal missing one, naming it. Two
+models get the same brief through `lib/aid-brainstorm-opponent.sh`; the PM
+decides.
+
+
+**Last Updated:** 2026-08-25
