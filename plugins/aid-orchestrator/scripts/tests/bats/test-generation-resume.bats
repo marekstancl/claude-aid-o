@@ -259,6 +259,11 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   # cleanup the refusal in the next test points the PM at).
   printf 'paused: false\nlast_modified: "x"\n\nqueue:\n' > "$QUEUE"
   printf '\nA plan edit after a completed generation.\n' >> "$PLAN"
+  # Editing the plan makes its PM page STALE, and generation refuses a page
+  # older than the plan it summarises — in a fixture exactly as in production.
+  # Re-seeding through the shared helper is how a caller that edits stays
+  # generation-ready (scripts/tests/lib/aid-test-plan-fixture.sh).
+  aid_fixture_seed_plan "$PROJ" "$PLAN" P099-multi.md >/dev/null
 
   run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
   [ "$status" -eq 0 ]

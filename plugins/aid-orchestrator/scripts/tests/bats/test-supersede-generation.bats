@@ -128,6 +128,11 @@ _incomplete() {
   run bash -c "cd '$PROJ' && bash '$PIPELINE' supersede-generation --plan '$PLAN' --reason '$REASON'" 3>&-
   [ "$status" -eq 0 ]
   printf '\nThe plan edit that motivated the supersede.\n' >> "$PLAN"
+  # An edited plan leaves its PM page stale, and generation refuses that BEFORE
+  # it reaches the queue-ownership refusal this case is about. Re-seeding keeps
+  # the page current while the plan identity still changes — which is the whole
+  # point of the edit here.
+  aid_fixture_seed_plan "$PROJ" "$PLAN" P099-multi.md >/dev/null
 
   # Supersede deletes nothing, so the abandoned generation's queue entries are
   # still there. They belong to the OLD identity, and a new transaction must

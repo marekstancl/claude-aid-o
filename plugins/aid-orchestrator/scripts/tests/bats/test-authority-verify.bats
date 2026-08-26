@@ -64,8 +64,10 @@ _seal() {
 
 _setup_sealed() {
   gen_mk_project "$TEST_TMPDIR/p"
-  PLAN="$TEST_TMPDIR/p/.aid-o/plans/P099-multi.md"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$PLAN"
+  # THE shared seeder — it satisfies every generation precondition at once, so
+  # the fourth one is an edit there rather than in every fixture that generates
+  # (scripts/tests/lib/aid-test-plan-fixture.sh).
+  PLAN="$(aid_fixture_seed_plan "$TEST_TMPDIR/p" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md)"
   GEN="$(_seal "$TEST_TMPDIR/p" "$PLAN")"
   export PLAN GEN
 }
@@ -128,6 +130,13 @@ _setup_sealed() {
 @test "a plan EDITED after sealing dies on plan_sha256" {
   _setup_sealed
   printf '\nAn edit made after the authority was sealed.\n' >> "$PLAN"
+  # Re-seed so the PM page follows the edited plan. Without this the run dies on
+  # the STALE PAGE before it ever reaches the sha256 binding — a different, also
+  # correct refusal, and not the one this case is about. Re-seeding refreshes
+  # the page and leaves the sealed authority untouched, which is exactly the
+  # state the subject needs: a current page over a plan the authority no longer
+  # matches.
+  aid_fixture_seed_plan "$TEST_TMPDIR/p" "$PLAN" P099-multi.md >/dev/null
   run bash -c "cd '$TEST_TMPDIR/p' && bash '$P2E' --plan '$PLAN' --phase 1 --total 3 \
     --epic-template '$REPO_PLUGIN/defaults/templates/epic.md' \
     --output-dir '$TEST_TMPDIR/p/.aid-o/tasks' --counter-yaml '$TEST_TMPDIR/p/.aid-o/config/counter.yaml' \
