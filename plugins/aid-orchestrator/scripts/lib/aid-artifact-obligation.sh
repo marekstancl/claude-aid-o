@@ -154,16 +154,20 @@ aid_artifact_obligation_epic_check() {
   # THE MILESTONE IS THE REVIEW, NOT THE LAST STEP. `done_phase: release` is
   # the one line that says the review is over — a run still in `review`, or a
   # finished STEP, owes nothing.
-  grep -q '^done_phase:[[:space:]]*release' "$state" 2>/dev/null || {
+  grep -qE '^done_phase:[[:space:]]*"?release"?[[:space:]]*$' "$state" 2>/dev/null || {
     echo "$(basename "$(dirname "$state")") has not finished its review — no page is owed yet" >&2
     return 3
   }
 
   local epic_id page
   epic_id="$(grep -m1 '^epic_id:' "$state" 2>/dev/null | sed 's/^epic_id:[[:space:]]*//; s/^"//; s/"$//')" || epic_id=""
+  # A FINISHED REVIEW WHOSE ID CANNOT BE READ IS A FINDING, NOT AN EXEMPTION.
+  # Returning "not applicable" here would mean a corrupt or truncated run
+  # record silently buys its way out of the obligation — the one input a
+  # milestone cannot be trusted to supply about itself.
   page="$(aid_epic_summary_page_path "$root" "$epic_id")" || {
-    echo "'${epic_id:-<none>}' is not an EPIC id that names a plan — no page is owed" >&2
-    return 3
+    echo "a run at ${state} says its review is finished but names no usable EPIC id ('${epic_id:-<none>}'), so its page cannot even be located — fix the run record, then render the page." >&2
+    return 1
   }
 
   if [[ ! -f "$page" ]]; then
@@ -208,13 +212,18 @@ aid_artifact_obligation_close_check() {
   local root="${1:?aid_artifact_obligation_close_check: root required}"
   local state="${2:?aid_artifact_obligation_close_check: plan state file required}"
   [[ -r "$state" ]] || { echo "no readable plan state at ${state}" >&2; return 3; }
-  grep -q '^plan_state:[[:space:]]*CLOSED' "$state" 2>/dev/null || {
+  grep -qE '^plan_state:[[:space:]]*"?CLOSED"?[[:space:]]*$' "$state" 2>/dev/null || {
     echo "$(basename "$(dirname "$state")") is not closed — no closing page is owed yet" >&2
     return 3
   }
   local plan_id
   plan_id="$(grep -m1 '^plan_id:' "$state" 2>/dev/null | sed 's/^plan_id:[[:space:]]*//; s/^"//; s/"$//')" || plan_id=""
-  [[ -n "$plan_id" ]] || { echo "the plan state at ${state} names no plan" >&2; return 3; }
+  # Same as the EPIC case: a CLOSED record that names no plan is corrupt, and
+  # corruption must not be the way past an obligation.
+  [[ -n "$plan_id" ]] || {
+    echo "the plan state at ${state} says CLOSED but names no plan, so its closing page cannot be located — fix the record, then render the page." >&2
+    return 1
+  }
 
   local page
   if ! page="$(aid_artifact_obligation_close_page "$root" "$plan_id")"; then

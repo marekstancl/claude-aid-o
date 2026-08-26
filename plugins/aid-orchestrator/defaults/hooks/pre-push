@@ -142,14 +142,21 @@ _aid_rs_paths() {
   done | sed '/^$/d' | sort -u
 }
 
-# aid_release_scope_start <root>
-#   The last version tag — a verifiable statement about what was released — or
-#   the root of history when the repository has never been tagged.
+# aid_release_scope_start <root> [rev]
+#   The last version tag REACHABLE FROM <rev> — a verifiable statement about
+#   what was released at that point. Nothing (exit 1) when the repository has
+#   never been tagged.
+#
+#   `[rev]` is not decoration. `git describe` with no revision answers about
+#   HEAD, and a pre-push hook judging `git push origin B:main` asks about B.
+#   With a later tag on HEAD, HEAD's tag is not an ancestor of B, so `tag..B`
+#   came out EMPTY and the push passed — the range has to be measured from the
+#   commit actually being pushed.
 aid_release_scope_start() {
-  local root="$1" tag
-  tag="$(git -C "$root" describe --tags --abbrev=0 2>/dev/null)" || tag=""
-  if [[ -n "$tag" ]]; then printf '%s' "$tag"; return 0; fi
-  git -C "$root" rev-list --max-parents=0 HEAD 2>/dev/null | tail -1
+  local root="$1" rev="${2:-HEAD}" tag
+  tag="$(git -C "$root" describe --tags --abbrev=0 "$rev" 2>/dev/null)" || tag=""
+  [[ -n "$tag" ]] || return 1
+  printf '%s' "$tag"
 }
 
 # aid_release_scope_evaluate <root> <start> <end>
@@ -161,6 +168,18 @@ aid_release_scope_start() {
 aid_release_scope_evaluate() {
   local root="$1" start="$2" end="$3"
   _AID_RS_VERDICT=""; _AID_RS_CULPRITS=""; _AID_RS_WARNINGS=""
+
+  # NEVER RELEASED IS ITS OWN ANSWER. An empty `start` used to mean the root of
+  # history, and `root..HEAD` EXCLUDES the root commit — so a repository whose
+  # single commit was the whole application reported "no commits" and passed.
+  # An untagged repository is waved through (the inherited direction, and a
+  # first push should not demand a release), but it is now waved through
+  # EXPLICITLY, with a verdict a caller can print.
+  if [[ -z "$start" ]]; then
+    _AID_RS_VERDICT="no_tag"
+    _AID_RS_WARNINGS="this repository has no version tag, so there is no released state to compare against; the release guard passes and will start deciding after the first tag."
+    return 0
+  fi
 
   local exempt app
   if ! exempt="$(_aid_rs_cfg "$root" release_exempt_paths)"; then
@@ -263,13 +282,14 @@ _aid_prepush_state_root() {
   printf '%s' "$_root"
 }
 _AID_REPO_ROOT="$(_aid_prepush_state_root)"
-_AID_START="$(aid_release_scope_start "$_AID_REPO_ROOT")"
 
 _aid_prepush_label_fallback() {
   # NO CONFIG: exactly the check this hook made before P089, kept whole. A
   # project must not start failing because it has not been configured yet.
   local _commits _has=false _line _msg
-  _commits="$(git -C "$_AID_REPO_ROOT" log "${_AID_START}..${1}" --oneline --no-merges 2>/dev/null || true)"
+  local _start="${2:-}"
+  [ -n "$_start" ] || return 0
+  _commits="$(git -C "$_AID_REPO_ROOT" log "${_start}..${1}" --oneline --no-merges 2>/dev/null || true)"
   [ -n "$_commits" ] || return 0
   while IFS= read -r _line; do
     _msg="${_line#* }"
@@ -282,7 +302,7 @@ $_commits
 EOF
   [ "$_has" = "true" ] || return 0
   echo "" >&2
-  echo "AID HOOK: Push blocked — commits since ${_AID_START} without a version bump." >&2
+  echo "AID HOOK: Push blocked — commits since ${_start} without a version bump." >&2
   echo "  Run: bash plugins/aid-orchestrator/scripts/aid-release.sh auto" >&2
   echo "  Or push without bump: git push --no-verify" >&2
   echo "" >&2
@@ -299,6 +319,10 @@ while IFS= read -r _entry; do
     refs/heads/plan/*|refs/heads/task/*|plan/*|task/*) continue ;;
   esac
 
+  # THE START IS MEASURED FROM THE SHA BEING PUSHED, not from HEAD: with a
+  # later tag on HEAD, HEAD's tag is not an ancestor of an older pushed commit
+  # and the range came out empty, so the push passed unjudged.
+  _AID_START="$(aid_release_scope_start "$_AID_REPO_ROOT" "$_AID_SHA")" || _AID_START=""
   aid_release_scope_evaluate "$_AID_REPO_ROOT" "$_AID_START" "$_AID_SHA"
 
   # Warnings go out whatever the verdict, and never block on their own.
@@ -311,9 +335,9 @@ EOF
 
   case "$_AID_RS_VERDICT" in
     no_config)
-      _aid_prepush_label_fallback "$_AID_SHA" || _AID_BLOCKED=1
+      _aid_prepush_label_fallback "$_AID_SHA" "$_AID_START" || _AID_BLOCKED=1
       ;;
-    no_commits|exempt) ;;
+    no_tag|no_commits|exempt) ;;
     release_required)
       echo "" >&2
       echo "AID HOOK: Push of ${_AID_REF} blocked — it changes code outside the release-exempt paths and no version was released." >&2

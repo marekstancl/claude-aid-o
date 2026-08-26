@@ -190,3 +190,21 @@ MD
   grep -qF 'EPIC E-901-1_1' "$page"
   grep -qF 'CHYBÍ report auditu' "$page"
 }
+
+@test "an audit report whose verdict cannot be read is named, not read as clean (Codex, P089)" {
+  _state
+  # The .yaml form with findings but no `blocking_findings:` line — a report
+  # this page cannot vouch for.
+  cat > "$EV/audit-report.yaml" <<'YAML'
+audit_report:
+  findings:
+    - severity: high
+      title: Production regression
+YAML
+  _curator '[]'
+  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
+  [ "$status" -eq 0 ]
+  grep -qF 'CHYBÍ čitelný verdikt auditu' "$OUT"
+  grep -qF 'Revize neúplná' "$OUT"
+  refute_grep -qF 'Audit doběhl a blokující nálezy nehlásí' "$OUT"
+}

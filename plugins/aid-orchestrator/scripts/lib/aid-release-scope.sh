@@ -32,8 +32,11 @@
 #   accepts, and what the tests pin:
 #     - a REVERT is an ordinary commit and adds its paths, so a change and its
 #       undo still require a release (the conservative direction);
-#     - a MERGE is judged along its FIRST PARENT, so paths that entered the
-#       range from elsewhere are not counted;
+#     - a MERGE COMMIT contributes only its OWN diff along its first parent,
+#       which for an ordinary merge is nothing. The commits it brought in are
+#       in the range on their own and DO count — deliberately: work merged into
+#       the target branch is work being released, and judging the range with
+#       `--first-parent` would let an entire feature branch through;
 #     - where an exempt and a non-exempt commit touch the same path, the path
 #       is in the set, so the non-exempt one wins.
 #
@@ -130,14 +133,21 @@ _aid_rs_paths() {
   done | sed '/^$/d' | sort -u
 }
 
-# aid_release_scope_start <root>
-#   The last version tag — a verifiable statement about what was released — or
-#   the root of history when the repository has never been tagged.
+# aid_release_scope_start <root> [rev]
+#   The last version tag REACHABLE FROM <rev> — a verifiable statement about
+#   what was released at that point. Nothing (exit 1) when the repository has
+#   never been tagged.
+#
+#   `[rev]` is not decoration. `git describe` with no revision answers about
+#   HEAD, and a pre-push hook judging `git push origin B:main` asks about B.
+#   With a later tag on HEAD, HEAD's tag is not an ancestor of B, so `tag..B`
+#   came out EMPTY and the push passed — the range has to be measured from the
+#   commit actually being pushed.
 aid_release_scope_start() {
-  local root="$1" tag
-  tag="$(git -C "$root" describe --tags --abbrev=0 2>/dev/null)" || tag=""
-  if [[ -n "$tag" ]]; then printf '%s' "$tag"; return 0; fi
-  git -C "$root" rev-list --max-parents=0 HEAD 2>/dev/null | tail -1
+  local root="$1" rev="${2:-HEAD}" tag
+  tag="$(git -C "$root" describe --tags --abbrev=0 "$rev" 2>/dev/null)" || tag=""
+  [[ -n "$tag" ]] || return 1
+  printf '%s' "$tag"
 }
 
 # aid_release_scope_evaluate <root> <start> <end>
@@ -149,6 +159,18 @@ aid_release_scope_start() {
 aid_release_scope_evaluate() {
   local root="$1" start="$2" end="$3"
   _AID_RS_VERDICT=""; _AID_RS_CULPRITS=""; _AID_RS_WARNINGS=""
+
+  # NEVER RELEASED IS ITS OWN ANSWER. An empty `start` used to mean the root of
+  # history, and `root..HEAD` EXCLUDES the root commit — so a repository whose
+  # single commit was the whole application reported "no commits" and passed.
+  # An untagged repository is waved through (the inherited direction, and a
+  # first push should not demand a release), but it is now waved through
+  # EXPLICITLY, with a verdict a caller can print.
+  if [[ -z "$start" ]]; then
+    _AID_RS_VERDICT="no_tag"
+    _AID_RS_WARNINGS="this repository has no version tag, so there is no released state to compare against; the release guard passes and will start deciding after the first tag."
+    return 0
+  fi
 
   local exempt app
   if ! exempt="$(_aid_rs_cfg "$root" release_exempt_paths)"; then

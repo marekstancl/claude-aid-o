@@ -37,10 +37,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$ROOT" ]] || ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-[[ -n "$START" ]] || START="$(aid_release_scope_start "$ROOT")"
+[[ -n "$START" ]] || START="$(aid_release_scope_start "$ROOT" "$END")" || START=""
 
 echo "── AID release scope ─────────────────────────────────────────────────"
-echo "range: ${START}..${END}"
+echo "range: ${START:-<no tag yet>}..${END}"
 aid_release_scope_report "$ROOT" "$START" "$END"
 
 case "${_AID_RS_VERDICT:-}" in
@@ -52,6 +52,9 @@ case "${_AID_RS_VERDICT:-}" in
     ;;
   no_commits)
     echo "note: nothing in this range asks for a release."
+    ;;
+  no_tag)
+    echo "note: this repository has no version tag yet, so there is no released state to compare against. The guard starts deciding after the first tag."
     ;;
   no_config)
     echo "note: this project has no versioning.release_exempt_paths, so the guard is still deciding by commit label. Run '/aid-setup scan' to set the lists."

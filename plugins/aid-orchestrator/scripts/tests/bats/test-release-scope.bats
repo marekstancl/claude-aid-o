@@ -70,7 +70,7 @@ _commit() {
     fi )
 }
 
-_verdict() { aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R")" HEAD; }
+_verdict() { aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R" HEAD || true)" HEAD; }
 
 # ─── the two directions of the grounded failure ─────────────────────────────
 
@@ -197,15 +197,44 @@ _verdict() { aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R")" HE
   [[ "$output" == *"/aid-setup"* ]]
 }
 
-@test "an untagged repository takes the root of history as the start, exclusive" {
+@test "an untagged repository says NEVER RELEASED, explicitly (Codex, P089)" {
   _config
   ( cd "$R" && git tag -d v1.0.0 >/dev/null )
-  _commit "fix(tests): only tests" tests/t.txt
+  _commit "feat: application work" src/app.txt
+  run aid_release_scope_report "$R" "$(aid_release_scope_start "$R" HEAD || true)" HEAD
+  # It PASSES — a first push must not demand a release — but it now says which
+  # answer it gave. The earlier shape started at the root of history, and
+  # `root..HEAD` excludes the root commit, so a repository whose single commit
+  # WAS the whole application reported "no commits" and passed by accident.
+  [[ "$output" == *"verdict: no_tag"* ]]
+  [[ "$output" == *"no version tag"* ]]
+}
+
+@test "the start is measured from the sha being judged, not from HEAD (Codex, P089)" {
+  _config
+  _commit "feat: application work" src/app.txt
+  local b; b="$(git -C "$R" rev-parse HEAD)"
+  # A LATER tag on HEAD is not an ancestor of B, so asking about HEAD's tag
+  # made the range B..B — empty — and the push passed unjudged.
+  _commit "chore: later" docs/d.txt
+  ( cd "$R" && git tag v2.0.0 )
+  run aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R" "$b")" "$b"
+  [ "$output" = "release_required" ]
+}
+
+@test "a merged feature branch is in the range and counts (Codex, P089)" {
+  _config
+  ( cd "$R"
+    git checkout -q -b feature
+    printf 'work\n' >> src/app.txt
+    git add -A && git commit -q -m "feat: side work"
+    git checkout -q main
+    git merge -q --no-ff -m "merge: feature" feature )
+  # Judging the RANGE with --first-parent would let the whole branch through.
+  # The merge commit itself contributes nothing; its commits contribute their
+  # own paths, which is the conservative and correct direction.
   run _verdict
-  # `root..HEAD` EXCLUDES the root commit, so the seed's own src/ change is not
-  # in the range. That is the inherited direction: before this library an
-  # untagged repository was waved through unconditionally.
-  [ "$output" = "exempt" ]
+  [ "$output" = "release_required" ]
 }
 
 # ─── the hook carries a COPY, and the copy is the same code ─────────────────

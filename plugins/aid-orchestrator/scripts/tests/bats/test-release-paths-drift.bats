@@ -121,3 +121,36 @@ _dockerfile() { printf '%s\n' "$@" > "$R/Dockerfile"; }
   run bash "$GATE" --root "$R"
   [ "$status" -eq 0 ]
 }
+
+# ─── two shapes a shell split gets wrong (Codex, P089) ──────────────────────
+
+@test "a glob source is not expanded against the caller's working directory" {
+  _config
+  _dockerfile 'FROM node:20' 'COPY package*.json /app/'
+  # A file the glob WOULD match if it were expanded here, in a directory that
+  # is not the build context.
+  local here; here="$(mktemp -d)"
+  : > "$here/package-lock.json"
+  run bash -c "cd '$here' && bash '$GATE' --root '$R'"
+  rm -rf "$here"
+  # The source judged is the literal 'package*.json', which app_paths does not
+  # cover — never 'package-lock.json' picked up from wherever the gate ran.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"package*.json"* ]]
+  [[ "$output" != *"package-lock.json"* ]]
+}
+
+@test "the JSON-array COPY form is parsed as sources, not as shell words" {
+  _config
+  _dockerfile 'FROM node:20' 'COPY ["src", "/app/"]'
+  run bash "$GATE" --root "$R"
+  [ "$status" -eq 0 ]
+}
+
+@test "the JSON-array form still catches a genuinely exempt source" {
+  _config
+  _dockerfile 'FROM node:20' 'COPY ["tests", "/app/tests"]'
+  run bash "$GATE" --root "$R"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages 'tests'"* ]]
+}

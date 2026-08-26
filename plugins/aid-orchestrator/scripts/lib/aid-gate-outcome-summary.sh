@@ -256,10 +256,29 @@ aid_gate_outcome_render() {
 
   # Waivers: the report is PRIMARY. The union of top-level waived_gates[] and
   # any row already stamped result:"waived" — either alone is enough.
+  #
+  # A REJECTED waiver is REMOVED from that union, wherever it was named. The
+  # runner leaves such a row `fail` with `waiver_rejected`, but nothing stops
+  # the same gate from still appearing in top-level `waived_gates[]` — and then
+  # the page counted it as a failure AND as a waiver, over one gate.
   local waived_json
   waived_json="$(jq -c --argjson rows "$rows" '
-    ((.waived_gates // []) + [$rows[] | select(.result == "waived") | .gate]) | unique' <<<"$report")"
+    (((.waived_gates // []) + [$rows[] | select(.result == "waived") | .gate]) | unique) as $w
+    | [ $rows[] | select(has("waiver_rejected")) | .gate ] as $rejected
+    | [ $w[] | select(. as $g | $rejected | index($g) | not) ]' <<<"$report")"
   n_waived="$(jq -r 'length' <<<"$waived_json")"
+
+  # A `fail` ROW THAT `waived_gates` NAMES IS A WAIVER, NOT ALSO A FAILURE.
+  # The runner normally rewrites such a row to result:"waived", but the union
+  # above exists precisely because either source alone is enough — and without
+  # this the same gate was counted once as failed and once as waived, so the
+  # result tile stayed critical over a run the FSM had already cleared.
+  # Rejected waivers are already out of `waived_json`, so this needs no second
+  # rule for them.
+  local n_fail_waived
+  n_fail_waived="$(jq -r --argjson w "$waived_json" \
+    '[.[] | select(.result == "fail") | select(.gate as $g | $w | index($g))] | length' <<<"$rows")"
+
 
   # `.overall` is REQUIRED and must be one of the two verdicts the runner
   # actually writes. `// "unknown"` made an ABSENT verdict decide the card: it
@@ -303,6 +322,12 @@ aid_gate_outcome_render() {
       fail)
         if human="$(_aid_gos_not_run_reason "$reason")"; then
           it_not_run+=("brána ${gate} neběžela: ${human}")
+          continue
+        fi
+        # Still in the waiver set → it is the waiver's line to render, below,
+        # and not a failure line here as well. (A rejected waiver is no longer
+        # in that set, so it falls through and stays a failure.)
+        if [[ "$(jq -r --arg g "$gate" 'index($g) | if . == null then "0" else "1" end' <<<"$waived_json")" == "1" ]]; then
           continue
         fi
         detail="$(jq -r --arg g "$gate" '
@@ -354,7 +379,7 @@ aid_gate_outcome_render() {
 
   # The four closed categories the page counts in. `n_failed` is what the code
   # owns; `n_not_run` is everything the harness never let run.
-  local n_failed=$(( n_fail - n_fail_not_run ))
+  local n_failed=$(( n_fail - n_fail_not_run - n_fail_waived ))
   local n_not_run=$(( n_skip + n_excl + n_fail_not_run ))
 
   # ── the first failing gate and its reproduction command ───────────────────

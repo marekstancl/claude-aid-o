@@ -133,11 +133,17 @@ aid_epic_summary_page_render() {
     fi
   elif [[ -n "$audit_md" ]]; then
     audit_seen=1
+    # The .md/.yaml form of the report carries ONE machine-readable line, the
+    # `blocking_findings:` flag the FSM already reads. Its ABSENCE is a third
+    # state and must not be rounded down to "clean": a report whose verdict
+    # cannot be read is a review this page cannot vouch for.
     if grep -qiE '^blocking_findings:[[:space:]]*true' "$audit_md"; then
       n_blocking=1
       findings+=("Audit hlásí blokující nálezy — v ${epic_id} je co opravit před mergem")
-    else
+    elif grep -qiE '^blocking_findings:[[:space:]]*false' "$audit_md"; then
       findings+=("Audit doběhl a blokující nálezy nehlásí")
+    else
+      missing+=("čitelný verdikt auditu (report je tu, ale nenese řádek blocking_findings:)")
     fi
   else
     missing+=("report auditu")

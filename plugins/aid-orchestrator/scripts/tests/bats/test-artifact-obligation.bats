@@ -291,3 +291,35 @@ _close_page() {
   run_rule "{\"cwd\":\"$TMP\",\"transcript_path\":\"$t\"}"
   [ "$status" -eq 3 ]
 }
+
+# ── corruption is not a way past an obligation (Codex, P089) ───────────────
+
+@test "a finished review that names no usable EPIC id is a finding, not an exemption" {
+  mkdir -p "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A"
+  printf 'run_id: R-A\nstate: DONE\ndone_phase: release\n' \
+    > "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
+  run aid_artifact_obligation_epic_check "$ROOT" "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"names no usable EPIC id"* ]]
+}
+
+@test "a CLOSED plan record that names no plan is a finding, not an exemption" {
+  mkdir -p "$ROOT/.aid-o/work/plan-state/P900"
+  printf 'plan_state: CLOSED\n' > "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
+  run aid_artifact_obligation_close_check "$ROOT" "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"names no plan"* ]]
+}
+
+@test "a state value that merely STARTS with the milestone word does not activate the rule" {
+  mkdir -p "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A" "$ROOT/.aid-o/work/plan-state/P900"
+  printf 'epic_id: E-900-1_1\ndone_phase: release_pending\n' \
+    > "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
+  run aid_artifact_obligation_epic_check "$ROOT" "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
+  [ "$status" -eq 3 ]
+
+  printf 'plan_id: P900\nplan_state: CLOSED_PENDING\n' \
+    > "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
+  run aid_artifact_obligation_close_check "$ROOT" "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
+  [ "$status" -eq 3 ]
+}

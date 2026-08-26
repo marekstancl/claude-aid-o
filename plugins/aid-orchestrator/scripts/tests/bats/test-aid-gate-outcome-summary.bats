@@ -530,3 +530,30 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   # Once — in the footer. It used to be on this page three times.
   [ "$(grep -oF "$RUN_DIR/gates/gates_report.json" "$(BODY)" | wc -l)" -eq 1 ]
 }
+
+@test "a fail row that waived_gates names is a waiver, not also a failure (Codex, P089)" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" --argjson b "$(_row tests pass 0 1000 1)" \
+    '{lint:$a, tests:$b}')"
+  extra='{"waived_gates":["lint"]}'
+  _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, 1 prominuta</span>' "$(BODY)"
+  grep -qF 'brána lint: prominuta — PM převzal riziko' "$(BODY)"
+  refute_grep -qF 'brána lint: selhala' "$(BODY)"
+}
+
+@test "a REJECTED waiver stays a failure even when waived_gates names the gate" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" \
+    '{lint:($a + {waiver_rejected:"expired"})}')"
+  extra='{"waived_gates":["lint"]}'
+  _write "$(_report fail "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+  grep -qF 'brána lint: selhala (exit 1), výjimka zamítnuta — expired' "$(BODY)"
+}

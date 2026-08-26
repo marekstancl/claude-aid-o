@@ -84,8 +84,24 @@ for df in "${DOCKERFILES[@]}"; do
     esac
     [[ "$line" == *--from=* ]] && continue
     # Drop the instruction word and any remaining flags, then the destination.
-    local_args="${line#* }"
-    set -- $local_args
+    instr_args="${line#* }"
+    # DOCKER'S JSON-ARRAY FORM. `COPY ["src", "/app/"]` is valid and would come
+    # out of a shell split as `["src",` — a source that matches nothing and
+    # therefore a false refusal. The brackets, quotes and commas are stripped
+    # before the split rather than after.
+    if [[ "$instr_args" == \[* ]]; then
+      instr_args="${instr_args#[}"
+      instr_args="${instr_args%]}"
+      instr_args="${instr_args//,/ }"
+      instr_args="${instr_args//\"/}"
+    fi
+    # GLOBBING OFF FOR THE SPLIT. `COPY package*.json /app/` would otherwise be
+    # expanded against the CALLER'S working directory, so the gate would judge
+    # a different source list from the one docker build sees.
+    set -f
+    # shellcheck disable=SC2086
+    set -- $instr_args
+    set +f
     (( $# >= 2 )) || continue
     args=("$@")
     unset 'args[${#args[@]}-1]'
