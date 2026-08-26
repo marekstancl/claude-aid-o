@@ -234,3 +234,27 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   [[ "$output" == *"no brainstorming run"* ]]
   [ ! -f "$OUT" ]
 }
+
+# ─── the page declares its type, and blocks 5 and 7 name things (P089 Step 5) ─
+
+@test "the page declares artifact_type brainstorming, so the profile applies to it" {
+  start_run
+  approve_vision
+  opponent_ran
+  run aid_brainstorm_summary_render P900 "$OUT"
+  [ "$status" -eq 0 ]
+  # The renderer says so out loud when a caller is still on the typeless path.
+  [[ "$output" != *"declares no artifact_type"* ]]
+}
+
+@test "neither block 5 nor block 7 carries the working directory any more" {
+  start_run
+  approve_vision
+  opponent_ran
+  run aid_brainstorm_summary_render P900 "$OUT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Pracovní artefakty brainstormingu' "$OUT"
+  grep -qF '<div class="golink golink-flat">Technický detail brainstormingu</div>' "$OUT"
+  # The path survives where it belongs: the provenance footer, once.
+  [ "$(grep -oF "$RUN_DIR" "$OUT" | wc -l)" -eq 1 ]
+}

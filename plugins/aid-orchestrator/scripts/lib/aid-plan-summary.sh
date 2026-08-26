@@ -358,6 +358,7 @@ aid_plan_summary_render() {
     --argjson next "$next_json" \
     --argjson links "$links_json" \
     --arg p "$plan" '{
+      artifact_type: "plan",
       eyebrow: "Nový plán",
       title: ("Plán " + $plan_id),
       when: $when,

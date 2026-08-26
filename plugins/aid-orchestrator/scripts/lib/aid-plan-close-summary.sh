@@ -382,15 +382,23 @@ aid_plan_close_render() {
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl
     ]')"
 
+  # NOTHING EXPECTED MEANS AN EMPTY LIST (P089 Step 5). The finished card asks
+  # for no decision, and block 6 then renders "nothing is expected" — a single
+  # step listed beneath it is the contradiction the renderer now refuses, and
+  # the exact shape the PM objected to. The one remaining action is still in
+  # the chat card, with its exact command, where it can be acted on.
   if [[ "$card_kind" == "finished" ]]; then
-    next_json="$(jq -n --arg a "$lab_a" '[$a]')"
+    next_json='[]'
   else
     next_json="$(jq -n --arg a "$lab_a" --arg b "$lab_b" --arg c "$lab_c" '[$a, $b, $c]')"
   fi
 
+  # NAMES, never paths — the standard says so for blocks 5 and 7. Both refs
+  # survive in the provenance footer and in the core list, which is where a
+  # path can still be useful.
   links_json="$(jq -n --arg g "$gates_report" --arg d "$delivered_ref" '
-    [ (if ($g | length) > 0 then "Report plan-final bran: " + $g else empty end),
-      (if $d != "—" and ($d | length) > 0 then "Dodané shrnutí: " + $d else empty end) ]')"
+    [ (if ($g | length) > 0 then "Report plan-final bran" else empty end),
+      (if $d != "—" and ($d | length) > 0 then "Dodané shrnutí plánu" else empty end) ]')"
 
   local facts_json
   facts_json="$(jq -n \
@@ -405,6 +413,7 @@ aid_plan_close_render() {
     --argjson next "$next_json" \
     --argjson links "$links_json" \
     --arg brief "$brief_path" --arg dec "$decision_path" '{
+      artifact_type: "plan_done",
       eyebrow: "Uzávěrka plánu",
       title: ("Plán " + $plan + " — plan-final boundary"),
       when: $when,
@@ -417,7 +426,7 @@ aid_plan_close_render() {
       items: $items,
       next_steps: $next,
       links: $links,
-      detail: {label: ("Technický detail: " + $brief + " + " + $dec)},
+      detail: {label: "Technický detail uzávěrky plánu"},
       footer: ("Vyrobil aid-plan-close-summary.sh z " + $brief + " a " + $dec + ".")
     }')" || {
     echo "aid_plan_close_render: failed to build facts" >&2

@@ -108,8 +108,11 @@ Bloky 1, 3, 5 a 7 se řídí obecnou kostrou a per-typ povinnosti nemají.
 
 ### `brainstorming`
 
-- **Dlaždice:** počet zvažovaných variant · počet shod · počet sporů · počet
-  otevřených neznámých
+- **Dlaždice:** stav běhu (vize, oponent) · počet shod · téma · počet sporů
+
+Původní znění tohohle odstavce žádalo „počet zvažovaných variant". Brainstorming
+takové číslo nepočítá a vymýšlet ho jen proto, aby dlaždice byla plná, je přesně
+ta vada, kterou standard zakazuje. Profil se srovnal s tím, co běh opravdu ví.
 - **Jádro:** problém, který se řešil · kritéria, podle kterých se vybíralo ·
   varianty a **důvod volby** té jedné · spory, pokud nějaké zbyly
 - **Co se čeká:** rozhodnutí o zvolené variantě, nebo výslovné „rozhodovat není
@@ -147,8 +150,10 @@ není znám - přiznaná nejistota je lepší než tichý přesun mezi kategorie
 
 ### `epic_done`
 
-- **Dlaždice:** doba · počet kroků · nálezy auditu podle závažnosti · počet nově
-  vzniklých backlog položek
+- **Dlaždice:** verdikt · doba · počet kroků · počet blokujících nálezů
+
+Backlog položky nejsou dlaždice, ale **jádro**: u dlaždice by z nich zbylo číslo,
+kdežto to, co PM potřebuje, je jejich seznam s důvodem.
 - **Jádro:** co EPIC dodal lidsky · kde byly problémy a **proč** se staly · co
   našel audit · **seznam backlog položek s důvodem vzniku**
 - **Co se čeká:** mergnout / vrátit / mergnout s výhradami - s doporučením a důvodem
@@ -159,8 +164,8 @@ nerenderují, když jsou prázdné.
 
 ### `plan_done`
 
-- **Dlaždice:** vydaná verze · počet EPIKŮ · doba od začátku plánu · počet
-  otevřených položek
+- **Dlaždice:** výsledek uzávěrky · stav tagu · kolik EPIKŮ se mergnulo z kolika ·
+  počet blokátorů
 - **Jádro:** co je venku · co se odložilo a **kam** · co plán nesplnil
 - **Co se čeká:** rozhodnutí o odložených položkách, nebo „nic se nečeká"
 

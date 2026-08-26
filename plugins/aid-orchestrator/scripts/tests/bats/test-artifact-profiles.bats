@@ -189,3 +189,62 @@ _prose() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"nothing is expected while 1 next step"* ]]
 }
+
+# ─── the whole caller set, not one caller at a time ─────────────────────────
+#
+# WHY THESE ARE HERE AND NOT IN EACH CALLER'S OWN SUITE. Both claims below are
+# about the SET: "no production caller is left on the typeless path" and "the
+# caps are the renderer's, not each caller's". A per-caller suite can only ever
+# say something about its own caller, and a fifth caller added tomorrow would
+# arrive with its own green suite and no one noticing.
+
+@test "every production caller of aid_artifact_render declares an artifact_type" {
+  local lib="$AID_PLUGIN_PATH/scripts/lib"
+  local callers=() f
+  while IFS= read -r f; do
+    # The renderer itself defines the function; it does not call it.
+    [[ "$(basename "$f")" == "aid-artifact-render.sh" ]] && continue
+    callers+=("$f")
+  done < <(grep -rl 'aid_artifact_render ' "$lib" --include='*.sh')
+
+  # Five today: plan, gates, plan close, brainstorming, finished EPIC.
+  [ "${#callers[@]}" -eq 5 ]
+  for f in "${callers[@]}"; do
+    grep -q 'artifact_type' "$f" || {
+      echo "no artifact_type in $(basename "$f") — it is still on the transitional typeless path" >&2
+      return 1
+    }
+  done
+}
+
+@test "the caps are the renderer's numbers, and no caller builds its own list markup" {
+  [ "$_AID_ARTIFACT_CAP_ITEMS" -eq 5 ]
+  [ "$_AID_ARTIFACT_CAP_NEXT" -eq 3 ]
+  [ "$_AID_ARTIFACT_CAP_LINKS" -eq 5 ]
+  [ "$_AID_ARTIFACT_CAP_SENTENCE" -eq 220 ]
+  [ "$_AID_ARTIFACT_CAP_SUMMARY" -eq 320 ]
+
+  # A caller that emitted its own <li> would route around every cap above.
+  # This is what per-caller repetition of an over-limit fixture would actually
+  # be probing for, said once and over the whole set.
+  local lib="$AID_PLUGIN_PATH/scripts/lib" f
+  while IFS= read -r f; do
+    [[ "$(basename "$f")" == "aid-artifact-render.sh" ]] && continue
+    refute_grep -qE '<(li|ul|ol)[ >]' "$f"
+  done < <(grep -rl 'aid_artifact_render ' "$lib" --include='*.sh')
+}
+
+@test "an over-limit page is cut and says how much it dropped" {
+  local facts
+  facts="$(_plan_facts | jq '
+    .items = ["a","b","c","d","e","f","g","h","i"]
+    | .links = ["Plán A","Plán B","Plán C","Plán D","Plán E","Plán F","Plán G"]')"
+  run aid_artifact_render outcome "$facts" "$(_prose)" "$OUT"
+  [ "$status" -eq 0 ]
+  # 5 items + 5 links + the one deliverable step, which is a DELIBERATE
+  # exception to the item cap: block 4b lists every step, because a collapsed
+  # tail hides exactly the part a PM opens the page to judge (see the renderer).
+  [ "$(grep -oF '<li>' "$OUT" | wc -l)" -eq 11 ]
+  grep -qF 'a dalších 4 v technickém detailu' "$OUT"
+  grep -qF 'a dalších 2 v technickém detailu' "$OUT"
+}
