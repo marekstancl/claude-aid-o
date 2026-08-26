@@ -1,6 +1,11 @@
 # Návrh změny: profily artefaktů podle typu
 
-**Stav:** návrh, nepublikovaný.
+**Stav:** ✅ **PUBLIKOVÁNO 2026-08-26.** Znění je v ekosystémovém standardu
+(`/ecosystem/specs/artifact-standard`, sekce *Profily podle typu*, *Formulace se
+odvozuje ze stavu*, *Odkaz je jméno, ne cesta* a rozhodovací blok D); docs
+nasazeny z commitu `7baaaa3`. Tenhle soubor zůstává jako **záznam o tom, proč
+změna vznikla** - k čemu se vrátit, ne co číst jako platné pravidlo. Platné
+znění je ve standardu; kde se ty dva rozejdou, platí standard.
 **Cíl:** sekce, která se doplní do ekosystémového standardu
 [Artefakty - standard pro sdílené stránky](/opt/eco/docs/docs/ecosystem/specs/artifact-standard.md).
 **Vznikl:** P089 Krok 1, 2026-08-26.
@@ -184,22 +189,14 @@ kontextu.
 
 ## Next Steps
 
-**Publikace je ruční krok a je vědomě mimo tenhle soubor.** Znění vzniká
-v repozitáři AID; do
-`/opt/eco/docs/docs/ecosystem/specs/artifact-standard.md` ho přenese PM nebo
-samostatný běh **v repozitáři `docs`**.
+**Hotovo.** PM rozhodl 2026-08-26 publikaci provést; znění je ve standardu
+a docs jsou nasazené a ověřené (`/healthz` ok, `build-info.json` sedí na
+commit, stránka nese *Profily podle typu*, `epic_done` i `plan_done`).
 
-Důvod je mechanický, ne organizační: kontrakt kroku (P087) ověřuje očekávané
-artefakty jako `${root}/${cesta}` a změny sbírá `git -C "$root" status` - obojí
-nad repozitářem plánu (`aid-dispatch-contract.sh:264,273`). Krok, který deklaruje
-soubor v **jiném** git repozitáři, skončí `verdict: reject` s odůvodněním
-„expected artifacts are missing on disk", i když ten soubor na disku je a agent
-práci udělal správně. Podpora druhého kořene v kontraktu je zapsaná jako
-**IMP-519**.
+Při přenosu se znění upravilo na ekosystémový slovník: „brána" → „kontrola",
+„EPIC" → „celek práce", protože standard platí pro celý ekosystém a ne každý
+projekt má AID slovník. Obsah pravidel se nezměnil.
 
-Dokud publikace neproběhne, platí kontrakt **uvnitř AID** a mimo něj nikoho
-neváže. EPIC 1 nesmí tvrdit, že standard je venku.
-
----
-
-**Last Updated:** 2026-08-26
+Co zůstává otevřené: **IMP-519** - kontrakt kroku umí ověřit jen repozitář
+plánu, takže krok, který deklaruje soubor v jiném git repozitáři, skončí
+`reject`, i když ten soubor na disku je. Proto byla tahle publikace ruční.

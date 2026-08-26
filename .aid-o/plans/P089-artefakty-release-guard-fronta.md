@@ -798,10 +798,11 @@ Implementace po EPICech; každý jde vydat samostatně. **Pokračování fronty
 v autonomním režimu řeší P090**, oddělené 2026-08-26 poté, co CP1-deep ukázalo,
 že mechanismus, na kterém tady stálo, nedrží.
 
-**Ruční krok po EPICu 1 - publikace standardu.** Znění z Kroku 1 vzniká
-v repozitáři AID (`docs/proposals/artifact-standard-profiles.md`). Do
-`/opt/eco/docs/docs/ecosystem/specs/artifact-standard.md` ho přenese PM nebo
-samostatný běh **v repozitáři docs**, protože kontrakt kroku umí ověřit jen
-repozitář plánu (doloženo v Kroku 1). Dokud se to nestane, platí kontrakt uvnitř
-AID a mimo něj nikoho neváže - a EPIC 1 nesmí tvrdit, že standard je publikovaný.
+**Ruční krok po EPICu 1 - publikace standardu: ✅ HOTOVO 2026-08-26.** Znění
+z Kroku 1 vzniklo v repozitáři AID (`docs/proposals/artifact-standard-profiles.md`)
+a PM ho na svoje rozhodnutí nechal přenést do
+`/opt/eco/docs/docs/ecosystem/specs/artifact-standard.md`; docs nasazeny
+z commitu `7baaaa3` a stránka ověřena. Kontrakt tím platí pro celý ekosystém,
+ne jen uvnitř AID. Ruční to bylo proto, že kontrakt kroku umí ověřit jen
+repozitář plánu (doloženo v Kroku 1) - zůstává jako **IMP-519**.
 Podpora druhého kořene: **IMP-519**. Kontrola vln proti závislostem: **IMP-520**.

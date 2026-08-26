@@ -3523,7 +3523,7 @@ enforcements:
   - id: artifact_type_profile
     type: 1
     source: "scripts/lib/aid-artifact-render.sh (_aid_artifact_apply_profile, _aid_artifact_outcome_tiles, _aid_artifact_check_consistency) + defaults/artifact-profiles.yaml"
-    instruction: "docs/proposals/artifact-standard-profiles.md"
+    instruction: "docs/proposals/artifact-standard-profiles.md (the record of why; the BINDING text is the published ecosystem standard /ecosystem/specs/artifact-standard, section Profily podle typu, live since 2026-08-26)"
     severity: blocking
     surface: internal-guard
     status: active
