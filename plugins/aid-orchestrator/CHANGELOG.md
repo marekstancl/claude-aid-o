@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.92.1] — 2026-08-26
+
+> AID had two alert senders and neither obeyed the ecosystem alert standard, so a reader had
+> to ask whether a message was about the plan they had running or about last night's tests.
+
+### Added
+- **`lib/aid-alert.sh` — the one way AID speaks to a human** — it composes nothing itself and delegates to the ecosystem's shared `send_alert()`, spending the standard's `state` field on the reader's actual question: `BĚŽÍCÍ PLÁN` (scope `aid-beh`, the EPIC named first in `Co`) or `NOČNÍ TESTY` (scope `aid-testy`). Every `Akce` carries a deadline, because at a project the action is a decision rather than a command.
+- **`/aid/alerty`** — the catalogue of all seven messages AID can send: when each arrives, how urgent it is and whether you must react, with the standard's "what an alert is NOT" table at the top (where the worktree hook notice belongs).
+
+### Changed
+- **The nightly separates "the result is bad" from "nothing was measured"** — `nightly-red` and `nightly-neuplny`, two IDs at two severities. A run cut short is no longer announced as a result, and becoming incomplete is itself a reason to speak.
+
+### Removed
+- **`aid-fsm.sh`'s own transport** — it POSTed free text straight to the MCP bot on `localhost:8817`, a second transport as well as a second format. All six call sites go through the shared sender; a loud shim remains so an unconverted caller is visible rather than silent.
+
+### Fixed
+- **An undelivered alert is no longer recorded as sent** — the first cut always returned 0, which disabled the very mechanism that re-sends a failed message the next night. Delivery status is reported now, and the FSM discards it explicitly so a transition never fails over telemetry.
+- **A fixture can no longer reach the real Telegram** — the `AID_ALERT_FORCE` hatch is gone; test mode refuses the production library instead, so a suite that forgot to stub reaches nothing at all.
+
 ## [2.92.0] — 2026-08-25
 
 > Agents run at the same time where the plan allows it, three hook rules and a gate check that P086 left out, and a UI proposal the PM can judge.
