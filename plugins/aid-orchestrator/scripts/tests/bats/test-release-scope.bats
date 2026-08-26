@@ -207,3 +207,98 @@ _verdict() { aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R")" HE
   # untagged repository was waved through unconditionally.
   [ "$output" = "exempt" ]
 }
+
+# ─── the hook carries a COPY, and the copy is the same code ─────────────────
+#
+# The hook runs inside the consumer's repository, where the plugin cache is not
+# on any path it knows, so it cannot source the library — the functions live in
+# it as a copy. Two copies of a decision are how two answers start, so this is
+# written as a byte comparison and not as a promise.
+
+_region() { # _region <file>
+  sed -n '/^# AID-RELEASE-SCOPE-PORTABLE-START$/,/^# AID-RELEASE-SCOPE-PORTABLE-END$/p' "$1"
+}
+
+@test "AC22: the copy in the pre-push hook is byte-identical to the library" {
+  local lib="$AID_PLUGIN_PATH/scripts/lib/aid-release-scope.sh"
+  local hook="$AID_PLUGIN_PATH/defaults/hooks/pre-push"
+  local a b
+  a="$(_region "$lib")"
+  b="$(_region "$hook")"
+  [ -n "$a" ]
+  [ "$a" = "$b" ]
+}
+
+# _push <ref> <sha> — drive the hook exactly as git does.
+_push() {
+  ( cd "$R" && printf '%s %s %s %s\n' "$1" "$2" "$1" "0000000" \
+      | bash "$AID_PLUGIN_PATH/defaults/hooks/pre-push" origin git@example:repo.git )
+}
+
+@test "the hook refuses a push whose range leaves the exempt paths, and names the commits" {
+  _config
+  _commit "feat: real work" src/app.txt
+  run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"changes code outside the release-exempt paths"* ]]
+  [[ "$output" == *"feat: real work"* ]]
+  [[ "$output" == *"No-Release:"* ]]
+}
+
+@test "the hook lets through a push whose range is entirely exempt" {
+  _config
+  _commit "fix(tests): flaky case" tests/t.txt
+  run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC23: plan/* and task/* stay exempt" {
+  _config
+  _commit "feat: real work" src/app.txt
+  run _push refs/heads/plan/P900 "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 0 ]
+}
+
+@test "an older sha is what the range ends at, not HEAD" {
+  _config
+  _commit "fix(tests): exempt" tests/t.txt
+  local old; old="$(git -C "$R" rev-parse HEAD)"
+  _commit "feat: real work, not being pushed" src/app.txt
+  run _push refs/heads/main "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"real work"* ]]
+}
+
+@test "each pushed ref is judged on its own" {
+  _config
+  _commit "feat: real work" src/app.txt
+  local head; head="$(git -C "$R" rev-parse HEAD)"
+  run bash -c "cd '$R' && printf 'refs/heads/plan/P900 %s refs/heads/plan/P900 0000000\nrefs/heads/main %s refs/heads/main 0000000\n' '$head' '$head' \
+      | bash '$AID_PLUGIN_PATH/defaults/hooks/pre-push' origin git@example:repo.git"
+  # The plan ref alone would have passed; main in the same push still blocks.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refs/heads/main"* ]]
+}
+
+@test "AC21 in the COPY: a project with no config meets the old label behaviour inside the hook" {
+  # The fail-open branch is measured HERE and not only in the library, because
+  # inside the hook is where almost every consumer meets it.
+  _commit "fix: a real fix" src/app.txt
+  run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"without a version bump"* ]]
+  [[ "$output" == *"release_exempt_paths is not set"* ]]
+}
+
+@test "AC21 in the COPY: with no config a chore-only range still passes, as it did before" {
+  _commit "chore: tidy" src/app.txt
+  run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 0 ]
+}
+
+@test "a deleted ref is skipped" {
+  _config
+  _commit "feat: real work" src/app.txt
+  run _push refs/heads/main "0000000000000000000000000000000000000000"
+  [ "$status" -eq 0 ]
+}

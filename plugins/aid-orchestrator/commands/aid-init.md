@@ -707,11 +707,33 @@ especially before using worktree-based execution.
 2. **Target:** `.git/hooks/pre-push`
 3. **Logic:** Same copy/append/upgrade flow as pre-commit, but matched on pre-push's OWN marker `AID-ORCHESTRATOR-PREPUSH-START` (NOT the pre-commit `AID-ORCHESTRATOR-HOOK-START`) — idempotency depends on using the correct marker.
 
-**What the hook does:** Blocks push if `feat:` or `fix:` commits exist since last git tag without a corresponding `release:` commit. Suggests running `aid-release.sh auto`. Bypass: `git push --no-verify`.
+**What the hook does (P089):** it blocks a push whose range touches anything
+outside `versioning.release_exempt_paths` without a release, and it decides that
+from the FILES the commits changed — not from the labels on their subjects. Both
+directions of the old behaviour are gone: `fix(tests):` over test files alone no
+longer blocks, and `chore:` over application code no longer passes. The refusal
+names the commits that caused it. Three ways past it: release
+(`aid-release.sh auto`), exempt one commit deliberately with a
+`No-Release: <reason>` footer that stays in the history, or `git push --no-verify`.
+`plan/*` and `task/*` refs stay exempt (P068), and every pushed ref is judged
+on its own.
 
-**Worktree note (P074):** this hook reads no `.aid-o` paths (it works purely from git refs/tags/log,
-worktree-safe by construction), so it needed no resolver wiring — the template only carries the
-inline state-root resolver as a commented, ready-to-use helper for any future `.aid-o` read.
+The decision lives in `scripts/lib/aid-release-scope.sh`; the hook carries a
+**verbatim copy** of it between `AID-RELEASE-SCOPE-PORTABLE-START/END`, because
+a hook running in the consumer's repository cannot source the plugin cache. The
+copy is byte-compared against the library by
+`scripts/tests/bats/test-release-scope.bats` — two copies of a decision are how
+two answers start.
+
+**A project with no `versioning.release_exempt_paths` keeps the old label
+behaviour** and gets one hint line. Fill the lists in with `/aid-setup scan`.
+
+**Worktree note (P074, revised by P089):** the hook now DOES read one `.aid-o`
+path — `config/project.yaml` — so it resolves the state root first, with the
+same tiny copy of the resolver `pre-commit` carries. `--show-toplevel` alone
+would find no config from a linked worktree and the guard would quietly drop to
+the old label branch there; the object store is shared, so judging the pushed
+sha against the primary root is correct.
 The same `/aid-init` re-run upgrade note as pre-commit applies.
 
 ## Config Defaults Installation
