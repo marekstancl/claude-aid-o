@@ -9,7 +9,7 @@ source_interim: .aid-o/work/interim-ARTEFAKTY-PIPELINE.md
 source_handoff: docs/plans/handoff-release-scope-guard.md
 ---
 
-# P089 - artefakty podle fáze, release guard podle souborů a fronta, která nezastaví
+# P089 - artefakty podle fáze a release guard podle souborů
 
 > Shrnutí pro PM se renderuje (`aid_plan_summary_render`), nepíše se sem (V6).
 
@@ -34,28 +34,27 @@ vydání. Ověřeno v kódu: `defaults/hooks/pre-push:86-91` testuje `^feat`, `^
 `^release:` - bez dvojtečky, takže `fixup!` matchne taky. Táž logika je
 zduplikovaná v `aid-release.sh:122-147`.
 
-**3. Fronta.** V autonomním režimu AID nepokračuje sám na další EPIC. Příčina je
-doložená a není to chybějící mechanismus: `pipeline.md` u kroku 16b sám přiznává,
-že `queue_claim_next` **nemá produkčního volajícího** a controller ho má zavolat
-ručně podle návodu - *„do fronty se pokládat jako automatické nesmí"*. Tedy
-pravidlo, které se prosí. PM: „auto režim - očekávám, že přijdu k PC a je hotovo."
+**3. Fronta - vyjmuta do P090.** Pokračování v autonomním režimu bylo součástí
+tohohle plánu, dokud CP1-deep neukázalo, že mechanismus, na kterém stálo,
+nefunguje: dispatcher druhé odmítnutí `Stop` propustí a `queue_claim_next` si
+položku přepne na `running`, takže pojistka by vzápětí neměla co najít. To se
+neopraví větou v plánu, chce to vlastní návrh - **P090** (PM 2026-08-26).
 
 ## Goal
 
-Stránka nese to, co její fáze dluží, a nemůže si odporovat; vydání se odvozuje
-z dotčených souborů, ne ze slibu v commit zprávě; a plán v autonomním režimu
-doběhne, aniž by si na to musel někdo vzpomenout.
+Stránka nese to, co její fáze dluží, a nemůže si odporovat; a vydání se odvozuje
+z dotčených souborů, ne ze slibu v commit zprávě.
 
 ## Scope
 
 **In:** kontrakt artefaktů per typ + úprava ekosystémového standardu; oprava
 zbylých tří rendererů; stránka dokončeného EPICu; release guard podle souborů
-se sdílenou knihovnou a CI fasádou; pokračování fronty hookem i zapojením do FSM;
-IMP-517.
+se sdílenou knihovnou a CI fasádou; IMP-517.
 
-**Out:** stránka pro selhaný krok (PM: „NECHCI ARTIFACT v tomto případě vůbec");
-replan a incident jako typy stránky (nastávají zřídka, obsah neznámý); paralelní
-běh agentů (P087); zapnutí `versioning.source` u WANu (IMP-595, cizí plán).
+**Out:** pokračování fronty v autonomním režimu (**P090**); stránka pro selhaný
+krok (PM: „NECHCI ARTIFACT v tomto případě vůbec"); replan a incident jako typy
+stránky (nastávají zřídka, obsah neznámý); paralelní běh agentů (P087); zapnutí
+`versioning.source` u WANu (IMP-595, cizí plán).
 
 ## Standards (V3)
 
@@ -63,7 +62,7 @@ běh agentů (P087); zapnutí `versioning.source` u WANu (IMP-595, cizí plán).
 |---|---|---|
 | `/ecosystem/specs/artifact-standard` | EPIC 1 ho mění | **plánovaná odchylka je sám předmět práce**: dnešní kostra neumí per-typ povinnosti a PM ji označil za „trochu mimo"; změna se navrhuje do standardu, ne obchází |
 | `/ecosystem/specs/ci-versioning-standard` | EPIC 2 mění, kdy se vydává | žádná |
-| `/ecosystem/specs/agent-hooks/` | EPIC 3 přidává hookové pravidlo | žádná |
+| `/ecosystem/specs/agent-hooks/` | EPIC 1 rozšiřuje hookové pravidlo (Krok 6) | žádná |
 | `/ecosystem/specs/test-standard` | nové sady a jejich patra | žádná |
 | `/ecosystem/specs/documentation-placement` | EPIC 1 píše do Docusaurusu | žádná |
 
@@ -75,7 +74,6 @@ běh agentů (P087); zapnutí `versioning.source` u WANu (IMP-595, cizí plán).
 | forma „co která věc dluží" | `/ecosystem/ai-agents/definition-of-done.md` - obecné pravidlo + per typ odškrtnutelné položky | převzít formu |
 | renderer stránek a jeho stropy | `lib/aid-artifact-render.sh` | rozšířit o profily, nezakládat druhý |
 | hooková vrstva a registr pravidel | `scripts/aid-hook.sh` + `defaults/hook-registry.yaml` (v2.89.0) | přidat řádek |
-| práce s frontou | `lib/aid-queue-write.sh` (`queue_claim_next`, `queue_set_status`) | **zapojit**, existuje bez volajícího |
 | shoda cesty se seznamem | `_aid_in_scope` v `defaults/hooks/pre-commit` | převzít tvar |
 
 ## Implementation Steps
@@ -673,127 +671,9 @@ fixture Dockerfilem.
 **Effort:** M
 **AID Role:** backend
 
-**EPIC 3: Steps 11-13 - Fronta, která nezastaví**
+**EPIC 3: Step 11 - Dohledatelnost**
 
-### Step 11: Zapojit frontu do FSM
-
-**Objective:** další EPIC plánu se nárokuje kódem, ne návodem.
-
-**Files:**
-- Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — `epic-merge-to-plan` volá zápis stavu a nárokování dalšího
-- Modify: `plugins/aid-orchestrator/skills/pipeline.md` — popsat u kroků 16a/16b skutečné chování místo ručního postupu
-- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-queue-pickup.bats` (tier: t0) — nárokování, blokovaná závislost, poslední EPIC
-
-**Reuse check:** searched: `grep -rln 'queue_claim_next' plugins/aid-orchestrator/scripts` → several matching `plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh` `plugins/aid-orchestrator/skills/pipeline.md` — funkce existuje jako knihovna **bez produkčního volajícího** (pipeline.md to sám přiznává); tenhle krok ji zapojuje, nepíše novou.
-
-**Architecture Context:**
-`pipeline.md` u kroku 16b říká doslova, že se pokládání do fronty **nesmí
-popisovat jako automatické**, protože volající neexistuje. Tenhle krok tu větu
-ruší tím, že volajícího dodá - jinak zůstane pravidlo, které se prosí.
-
-**Parallel group:** vlna-1
-
-**Implementation Detail:**
-`epic-merge-to-plan` po úspěšném merge zapíše stav položky a nárokuje další
-EPIC téhož plánu. Výsledek (`<epic_id>` / `blocked:…` / `none`) se zapisuje do
-timeline, takže je zpětně vidět, proč se pokračovalo nebo ne. `none` po
-posledním EPICu je normální konec plánu, ne chyba.
-
-**Error Handling:** zámek fronty nedostupný → nikdy se nepokračuje „jako by to
-prošlo"; hlásí se a opakuje.
-
-**Edge Cases:**
-- Závislost není mergnutá → `blocked:` s důvodem, ne tichý konec.
-- Dva plány naráz → nárokuje se jen v rámci vlastního plánu.
-- Ruční zásah do fronty → stav je odvozený pohled, ne důkaz; rozhoduje git.
-
-**Dependencies:**
-- Depends on: none
-- Blocks: Step 12
-
-**Tests:** nová sada `test-queue-pickup.bats` (t0) — tři případy: nárokování
-dalšího, blokovaná závislost, poslední EPIC vrací `none`.
-
-**Acceptance Criteria:**
-- [ ] AC31 — po merge EPICu se další nárokuje bez zásahu controlleru
-- [ ] AC32 — výsledek nárokování je v timeline
-- [ ] AC33 — `pipeline.md` už netvrdí, že volající neexistuje
-
-**Effort:** L
-**AID Role:** backend
-
-### Step 12: Hook, který nepustí turn domů s frontou v běhu
-
-**Objective:** turn v autonomním režimu neskončí, dokud má plán připravený další EPIC.
-
-**Files:**
-- Modify: `plugins/aid-orchestrator/defaults/hook-registry.yaml` — pravidlo pro `Stop`
-- Create: `plugins/aid-orchestrator/scripts/lib/aid-queue-continuation.sh` — obsluha pravidla
-- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-queue-continuation.bats` (tier: t0) — připravený EPIC, prázdná fronta, manuální režim
-
-**Reuse check:** searched: `grep -rln 'aid_hook_rule' plugins/aid-orchestrator/scripts/lib` → several matching `plugins/aid-orchestrator/scripts/lib/aid-decision-card.sh` `plugins/aid-orchestrator/scripts/lib/aid-artifact-obligation.sh` `plugins/aid-orchestrator/scripts/lib/aid-continuity-capsule.sh` — tvar obsluhy pravidla je ustálený a přebírá se.
-
-**Architecture Context:**
-Krok 11 je mechanismus, tenhle je pojistka: chytí i případ, kdy controller
-skončí z jiného důvodu než dokončeného EPICu - ztráta kontextu, timeout,
-rozhodnutí modelu. Bez ní zůstane cesta „skončím dřív, než se ke kódu dostanu".
-
-**Parallel group:** vlna-2
-
-**Implementation Detail:**
-Pravidlo je `event: Stop`, `owner: controller`, `degree: 2`, `failure: closed`,
-a **aktivuje se jen v autonomním režimu** - v manuálním je konec turnu legitimní.
-**Zdroj pravdy je jmenovaný** (nález Codexu i vlastní čočky): pole `auto_controller`
-v záznamu běhu (`aid-fsm.sh:345` `AID_ACTIVE_RUN_FIELDS`, uzavřený slovník
-`active manual blocked_for_pm` na `aid-fsm.sh:346`). Hook ho **čte ze souboru**,
-ne z prostředí - proměnná `AID_AUTO_MODE` žije v procesu controlleru a v procesu
-hooku být nemusí. `permissions.yaml` zdrojem pravdy **není**: říká, co je
-povolené, ne co právě běží. Chybějící nebo nečitelný záznam → pravidlo
-neblokuje (Error Handling níže).
-
-**Který běh se posuzuje** (nález Codexu, kolo 3 - handler dostane jen `cwd`
-a `transcript_path`, kdežto záznamy jsou vedené po EPICech a plánů může běžet
-víc): pravidlo si z `cwd` odvodí workspace a projde **všechny** aktivní záznamy
-v něm. Blokuje, právě když existuje **aspoň jeden** se `auto_controller: active`,
-jehož plán má nárokovatelný další EPIC; ve zprávě jmenuje **plán i EPIC**, aby
-bylo vidět, čí turn to drží. Záznamy `manual` a `blocked_for_pm` se ignorují,
-takže manuální práce v projektu, kde zároveň běží autonomní plán, se posuzuje
-podle svého vlastního záznamu. Víc autonomních plánů naráz → vypíšou se všechny
-a turn se odmítne jednou. Test na izolaci (autonomní plán A + manuální plán B
-současně) je součástí sady.
-
-**Pořadí dvou `Stop` pravidel je určené** (vlastní čočka L1): pravidlo povinné
-stránky z Kroku 6 se vyhodnocuje **první**, tohle druhé. Milník tedy nikdy
-nenárokuje další EPIC dřív, než po sobě zanechá stránku - obrácené pořadí by
-vyrobilo turn, který nejde ukončit ani dokončit.
-Když `claim-next` vrátí konkrétní EPIC, turn se odmítne s větou, který EPIC
-čeká. `blocked:` a `none` turn nezastaví.
-
-**Error Handling:** frontu nelze přečíst → pravidlo neblokuje a zapíše to;
-blokovat turn kvůli nečitelné frontě by zastavilo práci na nejistotě.
-
-**Edge Cases:**
-- Manuální režim → pravidlo se neaktivuje.
-- PM turn přerušil sám → vypínač pravidla existuje z vrstvy P086.
-- Fronta blokovaná nemergnutou závislostí → turn skončí, ale řekne proč.
-
-**Dependencies:**
-- Depends on: Step 11
-- Blocks: none
-
-**Tests:** nová sada `test-queue-continuation.bats` (t0) — tři případy.
-
-**Acceptance Criteria:**
-- [ ] AC34 — turn s připraveným EPICem v autonomním režimu neskončí
-- [ ] AC35 — v manuálním režimu (`auto_controller: manual`) pravidlo neblokuje
-- [ ] AC35b — aktivují-li se v jednom turnu obě `Stop` pravidla, stránka se vyžádá dřív než nárokování dalšího EPICu
-- [ ] AC36 — nečitelná fronta turn nezastaví
-- [ ] AC36b — manuální turn v projektu, kde souběžně běží autonomní plán, se neblokuje kvůli cizímu záznamu
-
-**Effort:** M
-**AID Role:** backend
-
-### Step 13: Dokumentace, registr a IMP-517
+### Step 11: Dokumentace, registr a IMP-517
 
 **Objective:** nová pravidla jsou dohledatelná a nová testová sada nemůže vzniknout bez patra.
 
@@ -831,7 +711,7 @@ kontrola úplnosti registru.
 - Projekt bez pater → IMP-517 se neaktivuje.
 
 **Dependencies:**
-- Depends on: Steps 1-12
+- Depends on: Steps 1-10
 - Blocks: none
 
 **Tests:** rozšíření existující sady lintu o dva případy k IMP-517; registr
@@ -852,11 +732,11 @@ Rozvrh spočítaný z deklarovaných `Files:` a `Depends on:`, ověřený
 
 | Vlna | Kroky |
 |---|---|
-| 1 | 1, 7, 11 |
-| 2 | 2, 8, 9, 10, 12 |
+| 1 | 1, 7 |
+| 2 | 2, 8, 9, 10 |
 | 3 | 3, 4, 5 |
 | 4 | 6 (sám, `---`) |
-| 5 | 13 (sám, `---`) |
+| 5 | 11 (sám, `---`) |
 
 **Opraveno po CP1-deep (čočka L2).** Původní rozvrh měl ve vlně 3 kroky
 3, 4, 5, 6 a 13 - tedy Krok 6, který podle vlastní deklarace závisí na Krocích
@@ -866,26 +746,25 @@ vlastnost, totiž že dva kroky ve vlně nesdílejí soubor ani deklarované roz
 (`aid-plan-parallel-check.sh:170`). Deklaraci `Depends on:` nečte vůbec, takže
 tuhle třídu chyby vidět nemůže - zapsáno jako **IMP-520**.
 
-Tři EPICy jsou na sobě nezávislé - proto je v každé vlně kus z každého.
-Uvnitř EPICu drží pořadí závislosti: standard → renderer → volající → vynucení;
-knihovna → hook → fasáda; zapojení → pojistka.
+EPIC 1 a EPIC 2 jsou na sobě nezávislé - proto je v prvních vlnách kus z obou.
+Uvnitř EPICu drží pořadí závislosti: znění → renderer → volající → vynucení;
+knihovna → hook → fasáda. Krok 11 uzavírá oba.
 
 ## Testing Strategy
 
 **Co se ověřuje a proč:** profily artefaktů (nový kontrakt, který bude platit
 pro všechny stránky), stránka bran a stránka EPICu (dva referenční případy, na
 kterých se pozná, jestli profil stačí), rozsah vydání (rozhodovací logika, kde
-se dnes chybuje třikrát denně), anti-drift brána, nárokování dalšího EPICu
-a jeho pojistka.
+se dnes chybuje třikrát denně) a anti-drift brána.
 
-**Co se neověřuje novými testy:** ekosystémový standard (Krok 1 je dokument,
-soulad kódu s ním hlídá Krok 2), registr a dokumentace (Krok 13 — kryjí
-existující kontroly úplnosti).
+**Co se neověřuje novými testy:** znění standardu (Krok 1 je dokument, soulad
+kódu s ním hlídá Krok 2), registr a dokumentace (Krok 11 — kryjí existující
+kontroly úplnosti).
 
 **Patra:** všechny nové sady `t0` kromě `test-release-scope.bats`, která
 zakládá dočasné git repozitáře s commity a tagy — ta je **`t1`** a je to jediná
 sada tohoto plánu, která se na merge cestě projeví časem.
-**Nové sady: 6**, **rozšířené: 5**. Třináct kroků, jedenáct testových zásahů.
+**Nové sady: 4**, **rozšířené: 5**. Jedenáct kroků, devět testových zásahů.
 
 ## Risks
 
@@ -893,8 +772,8 @@ sada tohoto plánu, která se na merge cestě projeví časem.
 |---|---|---|---|
 | Profil vynutí pole, které volající neumí naplnit, a zablokuje stránku | **V** | střední | Kroky 3-5 jsou referenční případy; co v nich chybí, patří zpět do profilu, ne do výjimky |
 | Kopie funkcí v hooku se rozejde s knihovnou | S | vysoký | test „kopie == knihovna" se píše jako první, ne poslední |
-| Zapojení fronty rozbije běžící plány | S | vysoký | `none` a `blocked:` zůstávají platnými konci; změna se týká jen kroku po merge |
-| Tři EPICy v jednom plánu | **V** | střední | jsou nezávislé a každý jde vydat zvlášť; řez po EPICech je připravený |
+| Krok 1 zůstane nepublikovaný a kontrakt bude platit jen uvnitř AID | **V** | nízký | je to vědomý mezistav; publikace je jmenovaný krok v `## Next Steps` a EPIC 1 nesmí tvrdit, že standard je venku |
+| Dva EPICy v jednom plánu | S | nízký | jsou nezávislé a každý jde vydat zvlášť |
 
 ## Success Criteria
 
@@ -912,17 +791,12 @@ verification_pattern:
   cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-release-scope.bats"
   expected_exit: 0
 ```
-- [ ] SC3 — po merge EPICu se další nárokuje bez zásahu controlleru
-```yaml
-verification_pattern:
-  type: cmd
-  cmd: "bats plugins/aid-orchestrator/scripts/tests/bats/test-queue-pickup.bats"
-  expected_exit: 0
-```
 
 ## Next Steps
 
-Implementace po EPICech; každý jde vydat samostatně.
+Implementace po EPICech; každý jde vydat samostatně. **Pokračování fronty
+v autonomním režimu řeší P090**, oddělené 2026-08-26 poté, co CP1-deep ukázalo,
+že mechanismus, na kterém tady stálo, nedrží.
 
 **Ruční krok po EPICu 1 - publikace standardu.** Znění z Kroku 1 vzniká
 v repozitáři AID (`docs/proposals/artifact-standard-profiles.md`). Do
