@@ -240,6 +240,22 @@ gates:
     timeout_seconds: 120
     max_retries: 0
 
+  check_release_paths:
+    note: 'P089 Step 10, wired by PM decision 2026-08-26. required=false is
+      DELIBERATE and standing. The gate compares two claims about what reaches
+      a user — versioning.release_exempt_paths / app_paths in project.yaml, and
+      the COPY/ADD sources of the Dockerfile — and this repository ships TWO
+      products down two channels: the image carries packages/ (the cockpit app)
+      while the plugin travels through the git marketplace and never enters the
+      image at all. A disagreement here is a question about that split, not a
+      defect the running EPIC introduced, so it is reported and does not block.
+      It also matches LITERALLY: a glob in the Dockerfile (COPY package*.json)
+      needs the same glob in app_paths, which is why that entry carries one.'
+    command: "bash plugins/aid-orchestrator/scripts/gates/release-paths-drift.sh"
+    required: false
+    timeout_seconds: 60
+    max_retries: 0
+
   plan_diff:
     note: 'P083 Step 5 (2026-08-13): required=false is a DELIBERATE, standing
       choice, not a historical exemption — the "P038+" note above named a
@@ -436,6 +452,9 @@ gate_profiles:
   #     with everything else.
   # Neither gate was deleted, and neither stops running: they run at 02:40 UTC
   # instead of in front of a merge.
+  # `check_release_paths` is in the two HEAVY profiles only. It asks what
+  # reaches a user, which is a plan-final question — on a per-step run it would
+  # re-answer it unchanged every time and add nothing but a line.
   full:
     include:
       - tier_lint
@@ -444,6 +463,7 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
+      - check_release_paths
   release:
     include:
       - tier_lint
@@ -452,6 +472,7 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
+      - check_release_paths
   bats_all_quarantine:
     reason: >-
       Temporary PM-authorized AID self-host profile while P066 audits and

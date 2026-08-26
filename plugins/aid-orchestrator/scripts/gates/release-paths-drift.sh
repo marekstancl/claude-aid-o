@@ -18,11 +18,22 @@
 #        packaged, it is application.
 #
 # WIRING, STATED PLAINLY
-#   In THIS repository the gate is attached to NO runner. Its presence is
-#   therefore NOT coverage, and the enforcement registry says so in the same
-#   words. Attaching it is the consumer's decision, because what belongs in
-#   their image is theirs; a detector that blocks by default in every project
-#   it was never designed against is how a gate gets disabled wholesale.
+#   In THIS repository it is wired as `check_release_paths`, `required: false`,
+#   in the `full` and `release` gate profiles only — a plan-final question,
+#   asked once where it matters rather than on every step. A disagreement is
+#   REPORTED and the run continues, because AID ships two products down two
+#   channels (the image carries `packages/`; the plugin travels through the git
+#   marketplace and never enters the image), and which of the two claims is
+#   wrong is a question for a person.
+#
+#   In a CONSUMER project it is attached to nothing until they wire it: what
+#   belongs in their image is theirs, and a detector that blocks by default in
+#   every project it was never designed against is how a gate gets disabled
+#   wholesale.
+#
+#   IT MATCHES LITERALLY. `COPY package*.json` is the source `package*.json`,
+#   so `app_paths` needs that same glob — the gate never expands one against a
+#   working directory that may not be the build context.
 #
 # EXIT
 #   0  the two claims agree, or there is nothing to compare (no Dockerfile, no

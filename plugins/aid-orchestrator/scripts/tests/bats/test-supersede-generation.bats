@@ -33,8 +33,11 @@ setup() {
   gen_cp1_counting_stub
   PROJ="$TEST_TMPDIR/p"
   gen_mk_project "$PROJ"
-  PLAN="$PROJ/.aid-o/plans/P099-multi.md"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$PLAN"
+  # THE shared seeder — scripts/tests/lib/aid-test-plan-fixture.sh. It satisfies
+  # every generation precondition at once (execution.yaml, the plan committed
+  # where the workspace tracks it, the PM page rendered and current), so the
+  # fourth such precondition is one edit there rather than fifteen here.
+  PLAN="$(aid_fixture_seed_plan "$PROJ" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md)"
   GEN="$PROJ/.aid-o/work/evidence/P099/generation"
   TX="$GEN/transaction.json"
   AUTH="$GEN/generation-authority.json"

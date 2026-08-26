@@ -1,0 +1,77 @@
+# Auto-detected by /aid-init — edit freely
+project_name: "ai-orchestrator"
+languages: ["bash", "typescript", "markdown"]
+test_cmd: "npm test"
+lint_cmd: null
+build_cmd: null
+initialized_at: "2026-03-04T00:00:00Z"
+
+# Version management — single source + target files
+versioning:
+  source: CHANGELOG.md
+
+  # ── P089: what a release is required BY ────────────────────────────────
+  # The pre-push guard decides from the FILES a commit range changed, not from
+  # the label on a commit subject. Measured over the last 15 release ranges of
+  # this repository, the old label rule let FIVE through as "no bump needed"
+  # while application code had changed.
+  #
+  # A change confined to release_exempt_paths never needs a release. Anything
+  # else does — INCLUDING a path in neither list, because "not proven exempt"
+  # is the conservative reading. `services/` and `scripts/` at the root are
+  # deliberately in neither: they are not shipped in the image and not part of
+  # the plugin, but nobody has decided that they change nothing a user meets.
+  #
+  # app_paths is NOT what blocks. It is what the housekeeping warning and the
+  # anti-drift gate over the Dockerfile are measured against.
+  release_exempt_paths:
+    - plugins/aid-orchestrator/scripts/tests
+    - docs
+    - .github
+    - .aid-o
+    - .claude
+    - CHANGELOG.md
+    - README.md
+    - CLAUDE.md
+    - plugins/aid-orchestrator/CHANGELOG.md
+    - plugins/aid-orchestrator/README.md
+  app_paths:
+    - plugins
+    - packages
+    - package.json
+    - package-lock.json*
+    - tsconfig.base.json
+    - Dockerfile
+
+  files:
+    - path: plugins/aid-orchestrator/CHANGELOG.md
+      type: changelog
+    - path: .claude-plugin/marketplace.json
+      type: json
+      field: metadata.version
+    - path: .claude-plugin/marketplace.json
+      type: json
+      field: plugins[0].version
+    - path: plugins/aid-orchestrator/.claude-plugin/plugin.json
+      type: json
+      field: version
+    - path: plugins/aid-orchestrator/README.md
+      type: regex
+      pattern: "\\*\\*Plugin:\\*\\* {VERSION}"
+    - path: README.md
+      type: regex
+      pattern: "\\*\\*v{VERSION}\\*\\* (current)"
+    - path: README.md
+      type: regex
+      pattern: "\\*\\*Multi-agent orchestration plugin for \\[Claude Code\\]\\(https://claude.com/claude-code\\)\\.\\*\\* v{VERSION}"
+
+# Standards profile — selected during /aid-init
+standards:
+  active: general
+  # P085: the ecosystem standards map, read live (never copied). Absent = the
+  # project has no standards map and owes no `## Standards` section.
+  map_path: /opt/eco/docs/docs/ecosystem/specs/standards-map.md
+  selected_at: "2026-03-16T12:00:00Z"
+  overrides:
+    disabled_rules: []
+    severity_overrides: {}

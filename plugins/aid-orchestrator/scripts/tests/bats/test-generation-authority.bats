@@ -44,9 +44,15 @@ teardown() { gen_teardown; }
 
 _seed_plan() {   # <project> [risk]
   local d="$1" risk="${2:-}"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$d/.aid-o/plans/P099-multi.md"
+  # THE shared seeder (scripts/tests/aid-fixture-plan.sh): it satisfies every
+  # generation precondition at once — execution.yaml, the plan committed, the PM
+  # page rendered — so the next precondition is one edit there and not fifteen
+  # here. A `risk:` variant re-seeds afterwards, because editing the plan makes
+  # its page STALE and the obligation refuses a page older than its plan.
+  aid_fixture_seed_plan "$d" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md >/dev/null
   if [[ -n "$risk" ]]; then
     sed -i "0,/^author: /s//risk: ${risk}\nauthor: /" "$d/.aid-o/plans/P099-multi.md"
+    aid_fixture_seed_plan "$d" "$d/.aid-o/plans/P099-multi.md" P099-multi.md >/dev/null
   fi
   printf '%s\n' "$d/.aid-o/plans/P099-multi.md"
 }

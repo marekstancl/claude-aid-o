@@ -2798,6 +2798,11 @@ tag → `no_tag`, and it passes: a first push must not demand a release.
 
 **`scripts/gates/release-paths-drift.sh`** compares those two lists against a
 Dockerfile's `COPY`/`ADD` sources, because the config and the image are two
-claims about the same thing. In THIS repository it is attached to no runner, so
-its presence is not coverage — wiring it is the consumer's decision, and its
-registry row says so in as many words.
+claims about the same thing. In THIS repository it is wired as
+`check_release_paths` with `required: false` in the `full` and `release`
+profiles: a disagreement is reported and the run continues, because the split
+between AID's two products — the image carries `packages/`, the plugin travels
+through the git marketplace and never enters the image — is a question for a
+person, not a defect the running EPIC introduced. It matches LITERALLY, so a
+glob in the Dockerfile (`COPY package*.json`) needs the same glob in
+`app_paths`. A consumer project has it attached to nothing until they wire it.

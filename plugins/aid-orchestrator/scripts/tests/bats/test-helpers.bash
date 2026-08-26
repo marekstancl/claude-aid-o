@@ -183,6 +183,14 @@ EOF
 # different `_phys` bodies. New suites use these; the older copies migrate when
 # those files are next touched.
 
+# THE one place a fixture seeds a plan (2026-08-26). Sourced rather than
+# duplicated so the flat scripts/tests/*.sh harnesses and the bats suites share
+# one idea of "a plan is now ready to generate from" — see that file's header
+# for the three preconditions it satisfies and why fifteen fixtures used to
+# carry fifteen private versions of the answer.
+# shellcheck source=../lib/aid-test-plan-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/aid-test-plan-fixture.sh"
+
 # aid_test_phys <dir> — physical path, matching what git and `pwd -P` report.
 aid_test_phys() { (cd "$1" && pwd -P); }
 

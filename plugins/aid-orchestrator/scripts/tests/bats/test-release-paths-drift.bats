@@ -3,10 +3,11 @@
 # test-release-paths-drift.bats — the declared release paths versus what the
 # image actually packages (P089 Step 10).
 #
-# WIRING, SO NOBODY MISREADS A GREEN RUN: in THIS repository the gate is
-# attached to no runner. These cases prove it DECIDES correctly; they do not
-# claim anything runs it. That distinction is also written into its enforcement
-# registry row.
+# WIRING, SO NOBODY MISREADS A GREEN RUN: these cases prove the gate DECIDES
+# correctly. They say nothing about whether it BLOCKS: in this repository it is
+# wired as `check_release_paths` with `required: false`, so a disagreement is
+# reported and the run continues, and in a consumer project it is wired to
+# nothing until that project asks for it.
 
 load test-helpers.bash
 

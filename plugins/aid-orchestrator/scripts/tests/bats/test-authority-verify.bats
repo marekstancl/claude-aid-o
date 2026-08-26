@@ -86,7 +86,11 @@ _setup_sealed() {
 
 @test "the pipeline path verifies ONE authority across 3 phases — the gate is called once, for the seal only" {
   gen_mk_project "$TEST_TMPDIR/p"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/p/.aid-o/plans/P099-multi.md"
+  # THE shared seeder — scripts/tests/lib/aid-test-plan-fixture.sh. It satisfies
+  # every generation precondition at once (execution.yaml, the plan committed
+  # where the workspace tracks it, the PM page rendered and current), so the
+  # fourth such precondition is one edit there rather than fifteen here.
+  aid_fixture_seed_plan "$TEST_TMPDIR/p" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md >/dev/null
   run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$TEST_TMPDIR/p/.aid-o/plans/P099-multi.md' --queue-mode chain" 3>&-
   [ "$status" -eq 0 ]
   # Counted on disk: `run` merges stderr into $output, so the stdout manifest
