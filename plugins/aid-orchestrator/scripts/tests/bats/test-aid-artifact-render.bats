@@ -80,7 +80,7 @@ _pos() {
   p4="$(_pos "$f" '<h2>Jádro</h2>')"
   p5="$(_pos "$f" '<h2>Čeho se to týká</h2>')"
   p6="$(_pos "$f" '<h2>Co se čeká ode mě</h2>')"
-  p7="$(_pos "$f" 'class="golink"')"
+  p7="$(_pos "$f" 'class="golink')"
 
   for v in "$p1" "$p2" "$p3" "$p4" "$p5" "$p6" "$p7"; do [ -n "$v" ]; done
   [ "$p1" -lt "$p2" ]
@@ -204,7 +204,7 @@ _pos() {
   _render "$facts" "$(_full_prose)"
   # `class="golink"`, not `golink`: the vendored stylesheet defines .golink
   # whether or not the block renders.
-  refute_grep -q 'class="golink"' "$TEST_TMPDIR/body.html"
+  refute_grep -q 'class="golink' "$TEST_TMPDIR/body.html"
 }
 
 @test "an explicit relative detail href becomes a link; an external one is named, not linked" {
@@ -216,7 +216,7 @@ _pos() {
   facts="$(_full_facts | jq '.detail.href = "https://example.com/detail"')"
   _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/abs.html"
   refute_grep -q 'example.com' "$TEST_TMPDIR/abs.html"
-  grep -qF '<div class="golink">' "$TEST_TMPDIR/abs.html"
+  grep -qF '<div class="golink golink-flat">' "$TEST_TMPDIR/abs.html"
 }
 
 # ─── caps, enforced in code ─────────────────────────────────────────────────
@@ -344,7 +344,7 @@ _pos() {
   local f="$TEST_TMPDIR/ws.html"
   refute_grep -qi 'javascript' "$f"
   refute_grep -qF '<a class="golink"' "$f"
-  grep -qF '<div class="golink">detail →</div>' "$f"
+  grep -qF '<div class="golink golink-flat">detail</div>' "$f"
 }
 
 @test "the page is theme-aware in all three states and paints its own background" {
