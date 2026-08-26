@@ -3352,7 +3352,7 @@ enforcements:
     surface: llm-facing
     status: active
     enforcement_degree: 1
-    does_not_guarantee: "that the Objective sentences are themselves accurate — the page reproduces what the plan's author wrote, it does not judge it"
+    not_guaranteed: "that the Objective sentences are themselves accurate — the page reproduces what the plan's author wrote, it does not judge it"
     verdict: ALIGNED
     test: "scripts/tests/bats/test-aid-plan-summary.bats"
   - id: plan_page_invalid_role
@@ -3363,7 +3363,7 @@ enforcements:
     surface: llm-facing
     status: active
     enforcement_degree: 3
-    does_not_guarantee: "that the plan is fixed — it names the defect and its cost; generation is what refuses"
+    not_guaranteed: "that the plan is fixed — it names the defect and its cost; generation is what refuses"
     verdict: ALIGNED
     test: "scripts/tests/bats/test-aid-plan-summary.bats"
 
@@ -3442,7 +3442,7 @@ enforcements:
     description: "P087 Step 5 — a Write/Edit that lands outside EVERY open step's allowed paths is named before it lands, with the path and each open step's list, as injected context under PreToolUse (owner any, so it reaches a role agent too). In a concurrent wave several steps are open at once and the hook cannot tell which agent is writing, so it judges against the union and the return validation of the right step settles it."
     recovery: "Nothing to recover; the notice is feedback. The return validation is the enforcement."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
-    does_not_guarantee: "that an out-of-scope write is PREVENTED — this rule names it before it lands and does not stop it; a shell redirection is not seen at all. The refusal happens at return time, in the dispatch contract, which compares the declared file list against the disk"
+    not_guaranteed: "that an out-of-scope write is PREVENTED — this rule names it before it lands and does not stop it; a shell redirection is not seen at all. The refusal happens at return time, in the dispatch contract, which compares the declared file list against the disk"
 
 
   - id: gate_script_in_tree
