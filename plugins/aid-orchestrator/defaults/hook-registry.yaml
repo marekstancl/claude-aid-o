@@ -111,15 +111,15 @@ rules:
     handler: aid_hook_rule_decision_card
     description: refuses to close a turn whose card asks the PM for a decision without options, a recommendation and its reason — it recognises a card by its opening label, so a bare question in no card shape is not detected
 
-  - id: plan_artifact_rendered
+  - id: milestone_artifact_rendered
     event: Stop
     owner: controller
     degree: 2
     failure: closed
     timeout_s: 5
     lib: scripts/lib/aid-artifact-obligation.sh
-    handler: aid_hook_rule_plan_artifact
-    description: refuses to close a turn that wrote a plan without rendering the PM's page for it
+    handler: aid_hook_rule_milestone_artifact
+    description: refuses to close a turn that finished a milestone — a written plan, an EPIC's review, a closed plan — without rendering the PM's page for it; a step, and a failed step, owe nothing
 
   - id: continuity_capture
     event: PreCompact

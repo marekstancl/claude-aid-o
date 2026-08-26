@@ -3114,19 +3114,19 @@ enforcements:
     recovery: "The finding names the heading and its line. Delete the section; the same content is rendered by aid_plan_summary_render and published by /aid-plan."
     test: "scripts/tests/bats/test-plan-lint.bats"
 
-  - id: plan_artifact_rendered
+  - id: milestone_artifact_rendered
     type: 12
-    source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check + defaults/hook-registry.yaml (rule plan_artifact_rendered)"
-    instruction: "commands/aid-plan.md (Mode: Write Plan, step 8p)"
+    source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check / _epic_check / _close_check + defaults/hook-registry.yaml (rule milestone_artifact_rendered)"
+    instruction: "commands/aid-plan.md (Mode: Write Plan, step 8p) + skills/pipeline.md (DONE telemetry)"
     severity: blocking
     surface: llm-facing
     status: active
     verdict: ALIGNED
     tier: n/a
     enforcement_degree: 2
-    not_guaranteed: "That the PM read the page, or that it says anything useful. The check is that the file exists and is newer than the plan it describes — presence and currency, never quality."
-    description: "P086 Step 4 — a written plan owes the PM a rendered page. scripts/aid-turn-gate.sh checks the file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and a Stop hook rule catches the same defect one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
-    recovery: "Run the render by hand: source scripts/lib/aid-plan-summary.sh && aid_plan_summary_render <plan> <out.html>, then publish the body."
+    not_guaranteed: "That the PM read the page, or that it says anything useful. The check is that the file exists and is newer than its source — presence and currency, never quality. For a finished EPIC the source is the EPIC branch's last commit; when that branch is gone the run record's mtime is used instead, which is a weaker test, and the message says which of the two it compared."
+    description: "P086 Step 4, widened by P089 Step 6 from one milestone to three — a written plan, an EPIC whose review ended, and a closed plan each owe the PM a rendered page. A STEP owes nothing, and a FAILED step owes nothing either (PM, 2026-08-25). scripts/aid-turn-gate.sh checks the plan file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and the Stop hook rule catches all three one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
+    recovery: "The finding names the missing page and the renderer that produces it: aid_plan_summary_render for a plan, aid_epic_summary_page_render for a finished EPIC (normally produced by `aid-fsm.sh done-advance review release`), aid_plan_close_render for a closed plan. Run it, then publish the body with the Artifact tool."
     test_covers: "the CHECK and its caller. What no suite can observe is a session choosing to publish the rendered body with the Artifact tool — that act stays a session-level one, and this row no longer claims otherwise about the rest."
     test: "scripts/tests/bats/test-artifact-obligation.bats"
 

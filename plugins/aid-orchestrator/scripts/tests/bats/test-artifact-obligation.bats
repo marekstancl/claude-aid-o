@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t0
-# test-artifact-obligation.bats — a written plan owes the PM a page (P086 Step 4).
+# test-artifact-obligation.bats — a finished MILESTONE owes the PM a page
+# (P086 Step 4, extended to three milestones by P089 Step 6).
 #
 # THE GROUNDED FAILURE MODE: `commands/aid-plan.md` step 8p has asked sessions
 # to render the page since P084 and said in its own text that nothing fails if
@@ -34,6 +35,10 @@ setup() {
   # A plan that OWES a page is one that can have one: since the rule asks the
   # renderer, a plan the renderer refuses owes nothing (see the case below).
   printf -- '---\nid: P900\ntype: plan\n---\n\n# Plan: fixture\n\n## Goal\n\nThe fixture has a goal, so it can be rendered.\n' > "$PLAN"
+  # The milestone-2 and -3 cases call the checks directly; the Stop-rule cases
+  # source the library in their own subshell, deliberately (see run_rule).
+  # shellcheck disable=SC1090
+  source "$PLUGIN_ROOT/scripts/lib/aid-artifact-obligation.sh"
 }
 
 teardown() {
@@ -137,7 +142,7 @@ transcript() { # transcript <iso_timestamp>
 # that. (The gate cases above do set it — they are invoked from bats' own cwd,
 # which is a different checkout entirely.)
 run_rule() { # run_rule <event_json>
-  run env -u AID_PROJECT_ROOT bash -c "printf '%s' '$1' | bash -c 'source \"$PLUGIN_ROOT/scripts/lib/aid-artifact-obligation.sh\"; aid_hook_rule_plan_artifact'"
+  run env -u AID_PROJECT_ROOT bash -c "printf '%s' '$1' | bash -c 'source \"$PLUGIN_ROOT/scripts/lib/aid-artifact-obligation.sh\"; aid_hook_rule_milestone_artifact'"
 }
 
 @test "the Stop rule refuses a session that wrote a plan and no page" {
@@ -153,6 +158,116 @@ run_rule() { # run_rule <event_json>
   run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
   [ "$status" -eq 3 ]
   [[ "$output" == *"current PM page"* ]]
+}
+
+# ── milestones 2 and 3: an EPIC's review, and a closed plan (P089 Step 6) ──
+
+# _epic_run <done_phase> — a run state file at the layout the rule scans.
+_epic_run() {
+  mkdir -p "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A"
+  cat > "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml" <<YAML
+epic_id: E-900-1_1
+run_id: R-A
+state: DONE
+branch: task/E-900-1_1/main
+done_phase: ${1}
+YAML
+  printf '%s' "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
+}
+_epic_page() {
+  mkdir -p "$ROOT/.aid-o/work/evidence/P900/E-900-1_1"
+  printf '<h1>E-900-1_1</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/E-900-1_1/epic-summary-artifact.html"
+}
+
+# _closed_plan <state> — a plan-state record at the layout the rule scans.
+_closed_plan() {
+  mkdir -p "$ROOT/.aid-o/work/plan-state/P900"
+  printf 'plan_id: P900\nplan_state: %s\n' "${1}" \
+    > "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
+  printf '%s' "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
+}
+_close_page() {
+  mkdir -p "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1"
+  printf '<h1>close</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
+}
+
+@test "AC16: a finished EPIC with no page stops the turn" {
+  local sf; sf="$(_epic_run release)"
+  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"finished its review but its PM page was not rendered"* ]]
+  [[ "$output" == *"P900/E-900-1_1/epic-summary-artifact.html"* ]]
+}
+
+@test "a finished EPIC with a current page passes" {
+  local sf; sf="$(_epic_run release)"
+  _epic_page
+  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
+  [ "$status" -eq 0 ]
+}
+
+@test "an EPIC page older than the EPIC's own last commit is a finding" {
+  local sf; sf="$(_epic_run release)"
+  _epic_page
+  # The branch the state file names, with a commit on it dated well after the
+  # page — the EPIC moved after it was summarised.
+  ( cd "$ROOT" && git checkout -q -b task/E-900-1_1/main \
+      && printf 'x\n' > x.txt && git add x.txt && git commit -q -m "later work" \
+      && git checkout -q main )
+  touch -d "2019-01-01 00:00" "$ROOT/.aid-o/work/evidence/P900/E-900-1_1/epic-summary-artifact.html"
+  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"posledního commitu EPICu"* ]]
+}
+
+@test "AC17: a run that has not finished its review owes nothing" {
+  local sf; sf="$(_epic_run review)"
+  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"has not finished its review"* ]]
+}
+
+@test "a closed plan with no closing page stops the turn" {
+  local ps; ps="$(_closed_plan CLOSED)"
+  run aid_artifact_obligation_close_check "$ROOT" "$ps"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"was closed but its closing page was not rendered"* ]]
+}
+
+@test "a closed plan with its closing page passes, and the NEWEST attempt is the one read" {
+  local ps; ps="$(_closed_plan CLOSED)"
+  _close_page
+  # An older attempt's page must not satisfy a later close.
+  mkdir -p "$ROOT/.aid-o/work/evidence/P900/R-P900-final-2"
+  printf '<h1>close 2</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-2/plan-close-artifact.html"
+  touch -d "2019-01-01 00:00" "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
+  run aid_artifact_obligation_close_check "$ROOT" "$ps"
+  [ "$status" -eq 0 ]
+}
+
+@test "a plan that is still open owes no closing page" {
+  local ps; ps="$(_closed_plan EPIC_INTEGRATION)"
+  run aid_artifact_obligation_close_check "$ROOT" "$ps"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"is not closed"* ]]
+}
+
+@test "the Stop rule reports all three milestones, not only the plan" {
+  render_page
+  _epic_run release >/dev/null
+  _closed_plan CLOSED >/dev/null
+  local t; t="$(transcript "2020-01-01T00:00:00Z")"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"finished its review but its PM page was not rendered"* ]]
+  [[ "$output" == *"was closed but its closing page was not rendered"* ]]
+}
+
+@test "AC18: the rule stays failure-closed in the registry, so the canary covers it" {
+  run yq -r '.rules[] | select(.id == "milestone_artifact_rendered") | .failure' \
+    "$PLUGIN_ROOT/defaults/hook-registry.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "closed" ]
 }
 
 @test "the Stop rule judges only plans this session wrote" {
