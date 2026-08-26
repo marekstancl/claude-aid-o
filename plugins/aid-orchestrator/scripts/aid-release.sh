@@ -55,6 +55,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-release-scope.sh" 2>/dev/null || true  # P089 Step 9 — the ONE release-scope authority
 
 # Find repo root (walk up from CWD, not from script location)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -107,6 +109,33 @@ if [[ "$BUMP_TYPE" == "auto" ]]; then
     BUMP_TYPE="patch"
   else
     COMMITS=$(git -C "$REPO_ROOT" log "${LAST_TAG}..HEAD" --oneline --no-merges 2>/dev/null || true)
+
+    # ── P089 Step 9: the SCOPE decides first, the labels only afterwards ────
+    # This file used to carry its own copy of the pre-push hook's label logic,
+    # so a range the hook let through could still be told here that it owed a
+    # bump. There is now one authority for "does this range require a release?",
+    # and it is asked before any subject line is read. `no_config` (or the
+    # library being unavailable at all) keeps the label behaviour whole, which
+    # is the same fail-open direction the hook takes.
+    if declare -F aid_release_scope_evaluate >/dev/null 2>&1; then
+      aid_release_scope_evaluate "$REPO_ROOT" "$LAST_TAG" HEAD || true
+      case "${_AID_RS_VERDICT:-}" in
+        exempt|no_commits)
+          echo "Every change since $LAST_TAG is inside the release-exempt paths (or carries a No-Release footer) — no version bump needed." >&2
+          if [[ -n "${_RELEASE_NOBUMP_HOOK:-}" ]]; then "$_RELEASE_NOBUMP_HOOK"; fi
+          exit 0
+          ;;
+      esac
+      # The commits the scope EXEMPTED must not drive the bump type either: a
+      # `feat:` carrying a No-Release footer would otherwise still choose minor.
+      local _kept="" _sha _short
+      while IFS= read -r _sha; do
+        [[ -n "$_sha" ]] || continue
+        _short="$(git -C "$REPO_ROOT" log -1 --format='%h %s' "$_sha" 2>/dev/null)"
+        [[ -n "$_short" ]] && _kept+="${_short}"$'\n'
+      done < <(_aid_rs_commits "$REPO_ROOT" "$LAST_TAG" HEAD)
+      [[ -n "$_kept" ]] && COMMITS="${_kept%$'\n'}"
+    fi
 
     if [[ -z "$COMMITS" ]]; then
       echo "No commits since $LAST_TAG — nothing to release." >&2
