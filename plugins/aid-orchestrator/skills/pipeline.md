@@ -1548,6 +1548,15 @@ refuses to close over an open `release_blocker`.
 Four telemetry mechanisms fire automatically during DONE state. Detail in [Telemetry Reference](#telemetry-reference) below.
 
 - **Epic Summary** (v2.18.0+) — after `done-advance review→release`, generates `evidence/<epic>/<run>/epic-summary.md` with delivery summary, warnings, and PM trust level (HIGH/MEDIUM/LOW). Best-effort; never blocks release.
+- **EPIC page for the PM** (P089) — on the same edge, and only there, `done-advance` renders
+  `evidence/<plan_id>/<epic_id>/epic-summary-artifact.html`: what the EPIC delivered, what the
+  audit found, and **which backlog items the Curator filed and why** — the one surface that says
+  why they exist rather than only that `backlog.md` grew. It renders after the REVIEW, not after
+  the last step, because that is when the phase is genuinely over. A missing audit or curator
+  report does not suppress the page; the page NAMES what is missing. Best-effort like the summary
+  above — but the page is then owed: the Stop rule `milestone_artifact_rendered` refuses a turn
+  that finished an EPIC without one. **Publish it with the Artifact tool** and hand the PM the
+  link; the renderer writes a body and never publishes.
 - **Compliance Telemetry** — writes `compliance.json` with 6 enforcement dimensions; `overall: pass` if all checks ∈ {true, null}. Aggregator: `aid-compliance-report.sh`.
 - **Tiered Severity** — `done-advance review release` refuses transition on `severity: blocking` failures; soft-fail if `yq` missing. Override via `--force --reason`. Severity registry: `.aid-o/config/check-severity.yaml`.
 - **Compliance Recovery Alert** (P042) — Telegram `🛑` on block, `✅` on recovery. Config gate: `notifications.telegram.alert_on_compliance_recovery` (default `true`).
@@ -3160,7 +3169,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-26
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
