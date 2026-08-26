@@ -5,7 +5,6 @@
 #
 #   aid_release_scope_start    <root>
 #   aid_release_scope_evaluate <root> <start> <end>
-#   aid_release_scope_verdict  <root> <start> <end>   → one word on stdout
 #   aid_release_scope_report   <root> <start> <end>   → the verdict plus who caused it
 #
 # WHY THIS EXISTS
@@ -23,7 +22,11 @@
 #   1. list the commits in `start..end` and REMOVE those carrying a
 #      `No-Release: <reason>` footer;
 #   2. over the REMAINING commits, take the UNION of the paths each touched;
-#   3. decide over that set.
+#   3. decide over that set — against `release_exempt_paths` ALONE. Everything
+#      in the exempt list passes; anything else requires a release, including a
+#      path in neither list, because "not proven exempt" is the conservative
+#      reading. `app_paths` decides NOTHING here: it is what the housekeeping
+#      warning and the anti-drift gate are measured against.
 #
 #   A UNION OF PATHS, NOT A DIFF. Once commits are removed the remainder is no
 #   longer a contiguous range, and `git diff` has nothing to compute over it —
@@ -234,12 +237,6 @@ aid_release_scope_evaluate() {
     done
   fi
   return 0
-}
-
-# aid_release_scope_verdict <root> <start> <end> — the one word.
-aid_release_scope_verdict() {
-  aid_release_scope_evaluate "$@" || return 1
-  printf '%s\n' "$_AID_RS_VERDICT"
 }
 
 # aid_release_scope_report <root> <start> <end> — the verdict plus the reasons.

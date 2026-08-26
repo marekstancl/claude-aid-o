@@ -70,7 +70,13 @@ _commit() {
     fi )
 }
 
-_verdict() { aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R" HEAD || true)" HEAD; }
+# The one-word verdict, for the cases that only care about it. It calls the
+# same entry point production does; there is no verdict-only function to keep
+# in step with this one.
+_verdict() {
+  aid_release_scope_evaluate "$R" "$(aid_release_scope_start "$R" HEAD || true)" HEAD || return 1
+  printf '%s\n' "$_AID_RS_VERDICT"
+}
 
 # ─── the two directions of the grounded failure ─────────────────────────────
 
@@ -218,7 +224,9 @@ _verdict() { aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R" HEAD
   # made the range B..B — empty — and the push passed unjudged.
   _commit "chore: later" docs/d.txt
   ( cd "$R" && git tag v2.0.0 )
-  run aid_release_scope_verdict "$R" "$(aid_release_scope_start "$R" "$b")" "$b"
+  run bash -c 'true'
+  aid_release_scope_evaluate "$R" "$(aid_release_scope_start "$R" "$b")" "$b"
+  output="$_AID_RS_VERDICT"
   [ "$output" = "release_required" ]
 }
 

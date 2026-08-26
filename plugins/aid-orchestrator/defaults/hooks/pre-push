@@ -245,12 +245,6 @@ aid_release_scope_evaluate() {
   return 0
 }
 
-# aid_release_scope_verdict <root> <start> <end> — the one word.
-aid_release_scope_verdict() {
-  aid_release_scope_evaluate "$@" || return 1
-  printf '%s\n' "$_AID_RS_VERDICT"
-}
-
 # aid_release_scope_report <root> <start> <end> — the verdict plus the reasons.
 aid_release_scope_report() {
   aid_release_scope_evaluate "$@" || return 1

@@ -661,8 +661,13 @@ fi
 # Fenced blocks are blanked first: a suite name inside a code example is an
 # illustration, not a promise.
 _ts_names() {
+  # The section ends at the next level-1/2 heading OR at a `### Step` heading.
+  # The heading test alone was not enough: `### Step 1: …` does not close a
+  # section, so a plan whose Testing Strategy is its last `##` section would
+  # have had every step's prose scanned as if it were the strategy.
   _aid_blank_fenced < "$PLAN" | awk '
     /^##[[:space:]]+Testing Strategy[[:space:]]*$/ { inside = 1; next }
+    /^###[[:space:]]+Step[[:space:]]/ { inside = 0; next }
     /^#+[[:space:]]/ { if ($0 !~ /^###/) inside = 0; next }
     inside { print }
   ' | grep -oE '[A-Za-z0-9_.-]+\.(bats|sh)' | sort -u

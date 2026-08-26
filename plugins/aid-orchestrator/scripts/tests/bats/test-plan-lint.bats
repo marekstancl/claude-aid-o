@@ -297,6 +297,21 @@ _plan_ts() {
   [[ "$output" != *"test-already-here.bats\` is named in"* ]]
 }
 
+@test "IMP-517: a suite named in a STEP, not in the strategy, is not scanned" {
+  # The section ends at `### Step`. Without that, a plan whose Testing Strategy
+  # is its last `##` section had every step's prose read as strategy.
+  { printf -- '---\nid: P900\ntype: regular\nrisk: low\n---\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nBez nové sady.\n'
+    printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n'
+    printf 'Prozaicka zminka o `test-only-in-a-step.bats`.\n\n**Files:**\n'
+    printf -- '- Modify: `src/b.ts` (lines ~1-9) — edit\n'
+    printf '\n**Architecture Context:**\nn/a\n'
+  } > p.md
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"test-only-in-a-step.bats"* ]]
+}
+
 @test "IMP-517: a name inside a fenced block is an illustration, not a promise" {
   _plan_ts p.md 'Postup:' '' '```bash' 'bats scripts/tests/bats/test-illustration.bats' '```'
   run "$LINT" p.md

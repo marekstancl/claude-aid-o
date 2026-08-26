@@ -120,10 +120,9 @@ aid_epic_summary_page_render() {
     [[ -f "$f" ]] && { audit_md="$f"; break; }
   done
 
-  local n_blocking=0 n_findings=0 audit_seen=0
+  local n_blocking=0 n_findings=0
   if [[ -f "$audit_json" ]] && command -v jq >/dev/null 2>&1 \
      && jq -e '.' "$audit_json" >/dev/null 2>&1; then
-    audit_seen=1
     n_findings="$(aid_artifact_number "$(jq -r '[(.audit_report.findings // .findings // [])[]] | length' "$audit_json" 2>/dev/null)")"
     n_blocking="$(aid_artifact_number "$(jq -r '[(.audit_report.findings // .findings // [])[] | select(.severity == "critical" or .severity == "high")] | length' "$audit_json" 2>/dev/null)")"
     if (( n_findings > 0 )); then
@@ -132,7 +131,6 @@ aid_epic_summary_page_render() {
       findings+=("Audit doběhl a nenašel nic")
     fi
   elif [[ -n "$audit_md" ]]; then
-    audit_seen=1
     # The .md/.yaml form of the report carries ONE machine-readable line, the
     # `blocking_findings:` flag the FSM already reads. Its ABSENCE is a third
     # state and must not be rounded down to "clean": a report whose verdict
