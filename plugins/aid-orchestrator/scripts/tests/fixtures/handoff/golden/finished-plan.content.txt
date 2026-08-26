@@ -20,12 +20,9 @@
 <li>Plan-final brány: pass (report: .aid-o/work/evidence/P080/plan-final/gates_report.json)</li>
 <li>Specialistická revize: clean</li>
 <li>Evidence: pass (ověřeno na HEAD: true), waiverů 0, zbývá v backlogu 0</li>
-<h2>Jak pokračovat</h2>
-<li>uzavřít plán</li>
 <h2>Čeho se to týká</h2>
-<li>Report plan-final bran: .aid-o/work/evidence/P080/plan-final/gates_report.json</li>
-<li>Dodané shrnutí: .aid-o/work/evidence/P080/delivery.md</li>
+<li>Report plan-final bran</li>
+<li>Dodané shrnutí plánu</li>
 <h2>Co se čeká ode mě</h2>
 <p>Nic — ozvu se, až bude hotovo</p>
-<div class="golink">Technický detail: <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/pm-brief-finished.json +… →</div>
 <footer>Vyrobil aid-plan-close-summary.sh z <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/pm-brief-finished.json a <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/release-decision-merged.json. Redigováno tajemství: 0.</footer>

@@ -38,11 +38,34 @@
 #      assert on the composed message instead of on the fact that nothing blew
 #      up.
 #
-# SCOPES — named after a part of the project, never just "aid" (the standard's
-# project rule: `wan` is too coarse when it covers the nightly, the dependency
-# check and an account lock at once):
-#   aid-beh     a plan/EPIC that is running RIGHT NOW
-#   aid-testy   the nightly test portfolio
+# SCOPES — the PROJECT and the part, never one without the other:
+#   <projekt>-aid-beh     a plan/EPIC that is running RIGHT NOW
+#   <projekt>-aid-testy   the nightly test portfolio
+#
+# The project half was added on 2026-08-26, when the PM asked the obvious next
+# question: this plugin is installed per project, so the day AID also runs over
+# WAN or Sousto, two identically-shaped messages arrive and nothing in either
+# says which repository they came from. `Host` is the machine, not the project.
+# The standard's own project rule is the same point one level down — `wan` is
+# too coarse when it covers the nightly, the dependency check and an account
+# lock at once — so `wan-aid-beh` says both halves: whose, and which part.
+#
+# The name is the git top-level directory, which needs no configuration and is
+# what a human calls the project. The `source` field carries it too, so the
+# FIRST line already reads "AID · wan".
+
+# _aid_alert_project — the project this AID is running over. Never fails: an
+# unnamed project is still an alert worth sending, it just says "projekt".
+_aid_alert_project() {
+  local top name
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top=""
+  [[ -n "$top" ]] || top="$PWD"
+  name="$(basename "$top")"
+  # Scope is read by humans and grouped by machines; keep it to the characters
+  # both handle without quoting.
+  name="$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')"
+  printf '%s' "${name:-projekt}"
+}
 #
 # Sourced, never executed. Re-source safe.
 # =============================================================================
@@ -132,9 +155,10 @@ _aid_alert_send() {
 aid_alert_run() {
   local severity="$1" id="$2" subject="$3" what="$4" action="$5"
   local context="${6:-}" runbook="${7:-}"
-  _aid_alert_send "$severity" "aid-beh" "$id" \
+  local project; project="$(_aid_alert_project)"
+  _aid_alert_send "$severity" "${project}-aid-beh" "$id" \
     "${subject} — ${what}" "$action" "$context" "$runbook" \
-    "BĚŽÍCÍ PLÁN" "aid-fsm"
+    "BĚŽÍCÍ PLÁN" "AID · ${project}"
 }
 
 # aid_alert_nightly <severity> <id> <what> <action> [context] [runbook]
@@ -145,7 +169,8 @@ aid_alert_run() {
 aid_alert_nightly() {
   local severity="$1" id="$2" what="$3" action="$4"
   local context="${5:-}" runbook="${6:-}"
-  _aid_alert_send "$severity" "aid-testy" "$id" \
+  local project; project="$(_aid_alert_project)"
+  _aid_alert_send "$severity" "${project}-aid-testy" "$id" \
     "$what" "$action" "$context" "$runbook" \
-    "NOČNÍ TESTY" "noční běh"
+    "NOČNÍ TESTY" "AID · ${project} · noční běh"
 }

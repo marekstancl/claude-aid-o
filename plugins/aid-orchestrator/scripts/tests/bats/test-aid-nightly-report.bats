@@ -130,7 +130,9 @@ _report() {
   # The FIELDS the standard makes mandatory, not the prose: one message, scoped
   # to the nightly, and its state line says so before anything else.
   [ "$(grep -c '^id=' "$SENT")" -eq 1 ]
-  [ "$(grep -c '^scope=aid-testy$' "$SENT")" -eq 1 ]
+  # The scope carries the PROJECT as well as the part, so an alert from another
+  # repository running AID is not confusable with this one.
+  [ "$(grep -cE '^scope=.+-aid-testy$' "$SENT")" -eq 1 ]
   [ "$(grep -c '^state=NOČNÍ TESTY$' "$SENT")" -eq 1 ]
   [ "$(grep -c '^id=nightly-red$' "$SENT")" -eq 1 ]
 }

@@ -183,17 +183,16 @@
   },
   "$defs": {
     "emitter_site": {
-      "description": "One real code site that detects the condition. `anchor` is a literal substring that must be greppable in `file` — line numbers drift, the anchor is what the anti-decoration test actually asserts.",
+      "description": "One real code site that detects the condition. `anchor` is a literal substring that must be greppable in `file`. A `line:` field is REFUSED (additionalProperties: false): this description always said line numbers drift and the anchor is what the test asserts, yet the field was required anyway — it rotted on 2026-08-14 and again by 08-19, one emitter by 110 lines, and nothing outside a test ever read it.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["file", "line", "anchor"],
+      "required": ["file", "anchor"],
       "properties": {
         "file": {
           "description": "Repository-relative path.",
           "type": "string",
           "pattern": "^plugins/aid-orchestrator/[^\\s]+$"
         },
-        "line": { "type": "integer", "minimum": 1 },
         "anchor": { "type": "string", "minLength": 3 },
         "note": { "type": "string" }
       }
@@ -314,7 +313,6 @@
         "budget_key",
         "budget_value",
         "budget_file",
-        "budget_line",
         "budget_kind"
       ],
       "properties": {
@@ -334,7 +332,6 @@
           "type": "string",
           "pattern": "^plugins/aid-orchestrator/[^\\s]+$"
         },
-        "budget_line": { "type": "integer", "minimum": 1 },
         "budget_kind": {
           "description": "Where the number physically lives, which is what tells the drift test how to re-read it.",
           "enum": ["policy_key", "shell_constant", "shell_default", "instruction"]

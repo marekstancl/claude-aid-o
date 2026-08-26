@@ -34,7 +34,7 @@ teardown() { cd /; [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"; return 
 # of .gitignore, which is the shape where generation requires a committed plan.
 _repo() {
   local d="$1" tracked="${2:-}"
-  mkdir -p "$d/.aid-o/config" "$d/.aid-o/plans" "$d/.aid-o/work/evidence"
+  mkdir -p "$d/.aid-o/config" "$d/.aid-o/plans" "$d/.aid-o/work/evidence" "$d/.aid-o/tasks"
   [[ -n "$tracked" ]] || printf '.aid-o/\n' > "$d/.gitignore"
   printf 'seed\n' > "$d/README.md"
   ( cd "$d"
@@ -44,6 +44,18 @@ _repo() {
     git add -A && git commit -q -m "seed" )
 }
 
+# _generate <root> — the REAL generator, with every argument it requires. A
+# partial invocation dies in argument validation and proves nothing about the
+# preconditions this file exists to hold.
+_generate() {
+  local d="$1"
+  run bash "$PLAN_TO_EPIC" --plan "$d/.aid-o/plans/P099-multi.md" --phase 1 --total 3 \
+    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
+    --output-dir "$d/.aid-o/tasks" \
+    --counter-yaml "$d/.aid-o/config/counter.yaml" \
+    --project-root "$d"
+}
+
 @test "CONTRACT: a seeded plan passes the REAL generation entry point (tracked .aid-o)" {
   local d="$TEST_TMPDIR/tracked"; _repo "$d" tracked
   run aid_fixture_seed_plan "$d" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md
@@ -51,10 +63,16 @@ _repo() {
   # The generator is what decides whether the seeding was enough. If a FOURTH
   # precondition lands, this line is where it is reported.
   cd "$d"
-  run bash "$PLAN_TO_EPIC" --plan "$d/.aid-o/plans/P099-multi.md" --phase 1 --total 3 --plugin-dir "$AID_PLUGIN_PATH"
-  [[ "$output" != *"has no current PM page"* ]]
-  [[ "$output" != *"not committed on main"* ]]
-  [[ "$output" != *"cannot resolve the project's execution.yaml"* ]]
+  _generate "$d"
+  # SUCCESS, not the absence of three strings. The first cut passed every
+  # argument-less invocation: aid-plan-to-epic.sh exited at argument validation,
+  # and asserting that three later messages were absent is true of any early
+  # exit whatsoever. It was a contract test that could not fail — the exact
+  # defect it exists to catch elsewhere (cross-model review, 2026-08-26).
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  # And the EPIC really exists: generation ran, it did not merely not-refuse.
+  run bash -c "ls '$d'/.aid-o/tasks/*.md 2>/dev/null | wc -l"
+  [ "$output" -ge 1 ]
 }
 
 @test "CONTRACT: the same holds when .aid-o is gitignored — no commit is required" {
@@ -66,8 +84,10 @@ _repo() {
   run git -C "$d" log --oneline
   [ "$(grep -c '' <<<"$output")" -eq 1 ]
   cd "$d"
-  run bash "$PLAN_TO_EPIC" --plan "$d/.aid-o/plans/P099-multi.md" --phase 1 --total 3 --plugin-dir "$AID_PLUGIN_PATH"
-  [[ "$output" != *"has no current PM page"* ]]
+  _generate "$d"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  run bash -c "ls '$d'/.aid-o/tasks/*.md 2>/dev/null | wc -l"
+  [ "$output" -ge 1 ]
 }
 
 @test "a renderable plan gets a real page, and the production obligation accepts it" {

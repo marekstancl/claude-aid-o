@@ -38,20 +38,31 @@ _f() { grep -m1 "^$1=" "$SENT" | cut -d= -f2-; }
       "tatáž precondition selhala třikrát." "Do konce dneška rozhodni." "epic=E-089-1_2"'
   [ "$status" -eq 0 ]
   [ "$(_f state)"    = "BĚŽÍCÍ PLÁN" ]
-  [ "$(_f scope)"    = "aid-beh" ]
+  [[ "$(_f scope)" == *-aid-beh ]]
   [ "$(_f id)"       = "plan-precondition-fail" ]
   [ "$(_f severity)" = "warning" ]
   # The subject is prepended to Co, so the reader learns WHICH run immediately.
   [[ "$(_f co)" == E-089-1_2* ]]
 }
 
-@test "a nightly alert says NOČNÍ TESTY and is scoped aid-testy — never confusable with a run" {
+@test "the scope and the source both name the PROJECT — an alert from another repo is not confusable with this one" {
+  # The plugin is installed per project. Without the project half, the day AID
+  # also runs over WAN two identically-shaped messages arrive and nothing in
+  # either says which repository they came from (`Host` is the machine).
+  local d="$TEST_TMPDIR/wan"; mkdir -p "$d"
+  ( cd "$d" && git init -q 2>/dev/null )
+  run bash -c 'cd "$1"; source "$LIB"; aid_alert_run warning plan-precondition-fail E-1_1 "x" "y"' _ "$d"
+  [ "$(_f scope)"  = "wan-aid-beh" ]
+  [ "$(_f source)" = "AID · wan" ]
+}
+
+@test "a nightly alert says NOČNÍ TESTY and is scoped <projekt>-aid-testy — never confusable with a run" {
   run bash -c 'source "$LIB"; aid_alert_nightly warning nightly-red \
       "3 sady spadly." "Do zítřejšího poledne přiděl vlastníka."'
   [ "$status" -eq 0 ]
   [ "$(_f state)" = "NOČNÍ TESTY" ]
-  [ "$(_f scope)" = "aid-testy" ]
-  [ "$(_f source)" = "noční běh" ]
+  [[ "$(_f scope)" == *-aid-testy ]]
+  [[ "$(_f source)" == "AID · "* ]]
 }
 
 @test "every mandatory field of the standard is filled — none is silently empty" {

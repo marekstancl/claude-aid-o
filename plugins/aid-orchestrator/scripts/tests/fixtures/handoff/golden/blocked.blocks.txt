@@ -6,9 +6,6 @@
 <h2>Jádro</h2>
 <section class="block">
 <h2>Jak pokračovat</h2>
-<section class="block">
-<h2>Čeho se to týká</h2>
 <section class="block ask">
 <h2>Co se čeká ode mě</h2>
-class="golink"
 <footer>

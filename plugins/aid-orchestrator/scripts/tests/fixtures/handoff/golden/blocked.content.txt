@@ -1,28 +1,26 @@
 <h1>Brány: E-080-1_3</h1>
 <div class="tile state-critical">
 <span class="k">Výsledek</span>
-<span class="v">1/2 prošlo</span>
+<span class="v">1 brána selhala</span>
 <div class="tile">
 <span class="k">Trvalo</span>
 <span class="v">15 s</span>
-<div class="tile">
-<span class="k">Rozsah</span>
-<span class="v">2</span>
-<div class="tile state-warn">
-<span class="k">Neuzavřeno</span>
-<span class="v">1</span>
+<div class="tile state-ok">
+<span class="k">Ověřeno</span>
+<span class="v">1 brána</span>
+<div class="tile state-ok">
+<span class="k">Neběželo</span>
+<span class="v">0</span>
 <h2>Shrnutí</h2>
-<p>Brány neprošly: 1 z 2 selhalo, běh je zastavený před DONE.</p>
+<p>Selhalo 1 z 2 bran, běh je zastavený před DONE.</p>
 <h2>Jádro</h2>
-<p>Prošlo 1, selhalo 1, přeskočeno 0, mimo profil 0, s výjimkou 0. Celkem 15 s.</p>
-<li>brána tests: selhala (exit 1)</li>
+<p>Ověřeno 1, selhalo 1, neběželo 0, prominuto 0. Celkem 15 s.</p>
+<li>brána tests: selhala (exit 1), důvod: 2 assertions failed</li>
+<li>brána lint: prošla — ověřila: bash scripts/aid-lint-skill.sh</li>
 <h2>Jak pokračovat</h2>
 <li>Zopakuj bránu: bash scripts/tests/run-all-tests.sh --tier t1</li>
 <li>Oprav příčinu a spusť brány znovu</li>
 <li>Nebo převezmi riziko: aid-fsm.sh transition GATES DONE &lt;state_file&gt; --force --reason &#39;&lt;≥20 chars — PM-authorized reason&gt;&#39;</li>
-<h2>Čeho se to týká</h2>
-<li>
 <h2>Co se čeká ode mě</h2>
-<p>Rozhodni, jestli opravíme příčinu, nebo jestli přebíráš riziko force příkazem.</p>
-<div class="golink">technický detail: <WORK>/blocked/gates/gates_report.json →</div>
+<p>Rozhodni, jestli příčinu opravíme, nebo jestli riziko přebíráš. Doporučuju opravit — prominutá brána není ověřená. Dokud nerozhodneš, běh stojí před DONE.</p>
 <footer>Zdroj: <WORK>/blocked/gates/gates_report.json. Vyrobil aid-gate-outcome-summary.sh. Redigováno tajemství: 0.</footer>

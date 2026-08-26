@@ -163,19 +163,43 @@ ladder_wired_from_code() {
   [[ -z "$failures" ]] || { echo "emitters that do not name live code:$failures"; false; }
 }
 
-@test "case 3: emitter line numbers still point near their anchor" {
+@test "case 3: the policy carries NO line numbers — an anchor is the fact, a line is a copy that rots" {
+  # WHAT THIS USED TO BE. Every emitter carried `line:` beside its `anchor:`,
+  # and this case asserted the two stayed within five lines of each other. It
+  # was repaired on 2026-08-14 and had drifted again by 08-19 — one emitter by
+  # 110 lines — because anyone inserting a line above an emitter invalidates it,
+  # and nothing else in the repository ever read the number.
+  #
+  # So the field is gone rather than corrected a third time, and this case now
+  # guards the ABSENCE. Case 2 above proves each anchor resolves to live code,
+  # which is the assertion the line numbers were only ever a weaker copy of.
   local json; json="$(policy_json)"
-  local drift=""
-  while IFS=$'\t' read -r cls file line anchor; do
-    [[ -z "$cls" ]] && continue
-    local abs="$REPO_ROOT/$file" found
-    found="$(grep -nF -- "$anchor" "$abs" | head -1 | cut -d: -f1)"
-    [[ -n "$found" ]] || { drift+=$'\n'"  ${cls}: anchor missing entirely (case 2 owns that)"; continue; }
-    local delta=$(( found > line ? found - line : line - found ))
-    (( delta <= 5 )) || drift+=$'\n'"  ${cls}: ${file} declares line ${line}, anchor is at ${found}"
-  done < <(jq -r '.stop_classes | to_entries[] | .key as $k
-                  | .value.emitter[] | [$k, .file, .line, .anchor] | @tsv' "$json")
-  [[ -z "$drift" ]] || { echo "emitter line drift:$drift"; false; }
+  local n_lines
+  n_lines="$(jq '[.stop_classes[]?.emitter[]? | select(has("line"))] | length' "$json")"
+  if [[ "$n_lines" -ne 0 ]]; then
+    echo "the policy carries ${n_lines} emitter line number(s) again — they rot on the next insertion above them, and nothing reads them; keep the anchor only" >&2
+    false
+  fi
+  # And the anchors are still there to be the fact — each one UNIQUE in its file.
+  #
+  # Uniqueness is what makes the anchor a STRICTLY better locator than the line
+  # number it replaced, rather than merely a more durable one. Cross-model
+  # review made the point: an anchor that occurs twice proves only that the name
+  # lives in that file, while the old coordinate at least selected an
+  # occurrence. Three anchors were ambiguous when this landed
+  # (gate_job_deadline_exceeded, timeout_policy_block, missing_dispatch_complete
+  # — each twice, the log line and the emitting call); each was lengthened to a
+  # literal that names its own emitting site. So: unique AND it moves with the
+  # code, which the line number never did.
+  local n_anchors ambiguous=""
+  n_anchors="$(jq '[.stop_classes[]?.emitter[]? | select(has("anchor"))] | length' "$json")"
+  [ "$n_anchors" -ge 6 ]
+  while IFS=$'\t' read -r file anchor; do
+    [[ -z "$file" ]] && continue
+    local hits; hits="$(grep -cF -- "$anchor" "$REPO_ROOT/$file" 2>/dev/null || echo 0)"
+    (( hits == 1 )) || ambiguous+=$'\n'"  ${anchor} occurs ${hits}× in ${file} — an anchor must name ONE site"
+  done < <(jq -r '.stop_classes[]?.emitter[]? | [.file, .anchor] | @tsv' "$json")
+  [[ -z "$ambiguous" ]] || { echo "ambiguous anchors:$ambiguous"; false; }
 }
 
 @test "case 4: DRIFT — every existing_loops budget matches the live value in its cited file" {
@@ -206,8 +230,13 @@ ladder_wired_from_code() {
         live="$(grep -Eo '\.max_retries // [0-9]+' "$abs" | head -1 | grep -Eo '[0-9]+$')"
         ;;
       instruction)
-        # The number is stated in prose on the cited line: "max 3 cycles per check".
-        live="$(sed -n "${line}p" "$abs" | grep -Eo 'max ([0-9]+) cycles per check' | grep -Eo '[0-9]+')"
+        # The number is stated in prose, and the PHRASE is what locates it —
+        # `budget_key` already holds it. This used to `sed -n "${line}p"` on a
+        # cited line number, which drifted the moment anyone inserted a line
+        # above it (the budget moved from 587 to 622 and this case went red).
+        # Every other budget_kind below already greps; this one now matches them.
+        local _pat; _pat="$(sed -E 's/[0-9]+/([0-9]+)/' <<<"$key")"
+        live="$(grep -Eo "$_pat" "$abs" | head -1 | grep -Eo '[0-9]+')"
         ;;
       *)
         failures+=$'\n'"  ${id}: unknown budget_kind ${kind}"

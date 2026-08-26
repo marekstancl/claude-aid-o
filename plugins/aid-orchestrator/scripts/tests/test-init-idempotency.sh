@@ -156,6 +156,13 @@ MANIFEST_FILES=(
   ".aid-o/config/plugin.yaml"
   ".aid-o/config/check-severity.yaml"
   ".aid-o/config/test-audit.yaml"
+  # v2.89.2: a fresh workspace could not allocate its first plan id, because
+  # /aid-init never created this file and the allocator refuses without it —
+  # pointing the PM back at the command that had just run. The file joined the
+  # command's product then (ten files, fourteen items) and this manifest was not
+  # updated, so aid-init.md said ten and this test asserted nine. The document
+  # is the one that is right.
+  ".aid-o/config/counter.yaml"
   ".aid-o/work/active.md"
   ".aid-o/work/backlog.md"
   ".aid-o/work/timeline.jsonl"
@@ -266,6 +273,11 @@ replay_init() {
     [[ -f ".aid-o/config/plugin.yaml" ]]      || printf 'plugin_path: %s\n' "$PLUGIN_DIR" > ".aid-o/config/plugin.yaml"
     [[ -f ".aid-o/work/active.md" ]]          || printf '# Active\n'                    > ".aid-o/work/active.md"
     [[ -f ".aid-o/work/backlog.md" ]]         || printf '# Backlog\n'                   > ".aid-o/work/backlog.md"
+    # counter.yaml joined the product in v2.89.2: without it a brand-new
+    # workspace could not allocate its first plan id, and the allocator's
+    # refusal pointed the PM back at the command that had just run. Seeded at 0,
+    # exactly as aid-init.md's block declares it.
+    [[ -f ".aid-o/config/counter.yaml" ]]     || printf 'plan: 0\nepic: 0\nquick: 0\n'   > ".aid-o/config/counter.yaml"
     [[ -f ".aid-o/work/timeline.jsonl" ]]     || : > ".aid-o/work/timeline.jsonl"
 
     # 4. Empty directories.

@@ -184,14 +184,19 @@ stop_classes:
     detector: mechanical
     ladder_entry: mechanical
     ladder_entry_status: live
+    # NO `line:` FIELDS HERE, and that is deliberate (2026-08-26). Every emitter
+    # used to carry one next to its anchor, nothing read it, and it rotted the
+    # moment anyone inserted a line above the emitter — this policy's own case 3
+    # was repaired on 2026-08-14 and had drifted again by 08-19, one of them by
+    # 110 lines. The ANCHOR is the fact: it is a string in the code, it moves
+    # with the code, and case 2 already proves every anchor resolves. A line
+    # number is a second copy of the same fact that ages badly.
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 1230
-        anchor: gate_job_deadline_exceeded
+        anchor: "_gate_ladder_emit GATE_TIMEOUT gate_job_deadline_exceeded"
         note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        line: 2135
-        anchor: timeout_policy_block
+        anchor: "_gate_ladder_emit GATE_TIMEOUT timeout_policy_block"
         note: "three censored samples at or above the current timeout — no further attempt is spent"
     allowed_actions: [rerun_targeted, collect_and_continue]
     budget: {attempts: 1, wall_clock_seconds: 900}
@@ -207,11 +212,9 @@ stop_classes:
     ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        line: 1286
         anchor: "its job was cancelled and stop_cmd run"
         note: "terminal per-service verdict after the retry budget is spent; registry state is timed_out|lost|unhealthy"
       - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        line: 1269
         anchor: "still unhealthy after the one authorized restart"
         note: "the restart-exhaustion failure_reason specifically"
     allowed_actions: [restart_service_once, wait_and_resume]
@@ -228,11 +231,9 @@ stop_classes:
     ladder_entry_status: live
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-job.sh
-        line: 456
         anchor: "owned process gone AND no terminal record"
         note: "_derive_state's lost verdict"
       - file: plugins/aid-orchestrator/scripts/aid-job.sh
-        line: 506
         anchor: 'reported="lost"'
         note: "collect reports lost and exits 3 rather than inventing an outcome"
     allowed_actions: [collect_and_continue, rerun_targeted]
@@ -250,11 +251,9 @@ stop_classes:
     ladder_entry_status: planned
     emitter:
       - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
-        line: 1742
         anchor: 'rate_limited) uo="rate_limited" ;;'
         note: "C3 attempt outcome mapping — unavailable / rate_limited / timeout"
       - file: plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh
-        line: 1152
         anchor: 'rate_limited) uo="rate_limited" ;;'
         note: "C0 attempt outcome mapping, same vocabulary"
     allowed_actions: [wait_and_resume, retry_once, resume_missing_lenses]
@@ -271,8 +270,7 @@ stop_classes:
     ladder_entry_status: planned
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-fsm.sh
-        line: 1647
-        anchor: missing_dispatch_complete
+        anchor: "die \"missing_dispatch_complete:"
         note: >-
           fsm_check_orphan_dispatches die site; writes fsm_orphan_dispatch_fail
           to audit-log.jsonl first, then dies naming the fix command
@@ -290,11 +288,9 @@ stop_classes:
     ladder_entry_status: planned
     emitter:
       - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
-        line: 1998
         anchor: budget_exhausted
         note: "C3 fix loop sets top_outcome=escalated with escalation_reason=budget_exhausted"
       - file: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
-        line: 521
         anchor: "increment rejected: budget exhausted"
         note: "CP1/C0 revision ledger refuses to advance past MAX_ATTEMPTS"
     allowed_actions: []
@@ -339,6 +335,10 @@ terminus_stages:
 # `budget_file` at test time and compared, so this table cannot quietly go
 # stale as the budgets evolve.
 existing_loops:
+# NO `budget_line:` EITHER, for the reason given at the emitters above: the
+# budget is located by its PHRASE (`budget_key`), which moves with the text.
+# The cited line drifted from 587 to 622 and took this section's drift check
+# down with it.
 
   - id: gate_fix_loop
     what: "GATES-state fix loop — a failed check is fixed and ONLY that check re-run"
@@ -347,7 +347,6 @@ existing_loops:
     budget_key: "max 3 cycles per check"
     budget_value: 3
     budget_file: plugins/aid-orchestrator/skills/pipeline.md
-    budget_line: 587
     budget_kind: instruction
     note: "LLM-facing instruction budget, not a mechanical constant; role-cards.md states the same 3."
 
@@ -358,7 +357,6 @@ existing_loops:
     budget_key: "review_checkpoints.fix_loop.max_iterations"
     budget_value: 2
     budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
-    budget_line: 20
     budget_kind: policy_key
 
   - id: c3_fix_loop
@@ -368,7 +366,6 @@ existing_loops:
     budget_key: "c3_fix_loop.max_rechecks"
     budget_value: 4
     budget_file: plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml
-    budget_line: 67
     budget_kind: policy_key
     note: "aid-c3-dispatch.sh reads this key and fails closed to the same 4."
 
@@ -379,7 +376,6 @@ existing_loops:
     budget_key: MAX_ATTEMPTS
     budget_value: 5
     budget_file: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
-    budget_line: 108
     budget_kind: shell_constant
     note: >-
       The MECHANICAL authority. review-checkpoints.yaml's
@@ -394,7 +390,6 @@ existing_loops:
     budget_key: "gates.<name>.max_retries"
     budget_value: 1
     budget_file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-    budget_line: 1957
     budget_kind: shell_default
     note: >-
       Per-gate, declared in the project's execution.yaml; 1 is the runner's

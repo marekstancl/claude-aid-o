@@ -137,7 +137,7 @@ aid_fixture_seed_plan() {
     case "$rrc" in
       0) ;;
       3) echo "aid_fixture_seed_plan: the renderer declined ${name}; no page seeded because no page is owed" >&2 ;;
-      9) echo "aid_fixture_seed_plan: ${summary_lib} has no renderer entry points" >&2 ;;
+      9) echo "aid_fixture_seed_plan: ${summary_lib} has no renderer entry points — the page cannot be seeded and the fixture is not generation-ready" >&2; return 1 ;;
       *) echo "aid_fixture_seed_plan: rendering ${name}'s PM page failed (rc=${rrc})" >&2; return 1 ;;
     esac
   fi
@@ -155,10 +155,17 @@ aid_fixture_seed_plan() {
     (
       cd "$root" || exit 2
       # shellcheck source=/dev/null
-      source "$obligation_lib" 2>/dev/null || exit 0
-      declare -F aid_artifact_obligation_check >/dev/null 2>&1 || exit 0
+      source "$obligation_lib" 2>/dev/null || exit 8
+      declare -F aid_artifact_obligation_check >/dev/null 2>&1 || exit 8
       aid_artifact_obligation_check "$plan" >/dev/null 2>&1
     ) || orc=$?
+    # 8 is "the obligation could not be ASKED". The first cut turned that into
+    # exit 0 — a half-seeded fixture reported as ready, which is the one outcome
+    # this helper exists to make impossible (cross-model review, 2026-08-26).
+    if [[ "$orc" -eq 8 ]]; then
+      echo "aid_fixture_seed_plan: ${obligation_lib} could not be used to verify the seeding — refusing rather than assuming it worked" >&2
+      return 1
+    fi
     if [[ "$orc" -ne 0 && "$orc" -ne 3 ]]; then
       echo "aid_fixture_seed_plan: ${name} is seeded but generation would still refuse it (artifact obligation rc=${orc}) — the fixture is not generation-ready" >&2
       return 1

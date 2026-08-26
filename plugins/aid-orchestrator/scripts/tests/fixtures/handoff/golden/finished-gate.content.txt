@@ -1,25 +1,22 @@
 <h1>Brány: E-080-1_3</h1>
 <div class="tile state-ok">
 <span class="k">Výsledek</span>
-<span class="v">2/2 prošlo</span>
+<span class="v">Nic neselhalo</span>
 <div class="tile">
 <span class="k">Trvalo</span>
 <span class="v">2 min 0 s</span>
-<div class="tile">
-<span class="k">Rozsah</span>
-<span class="v">2</span>
 <div class="tile state-ok">
-<span class="k">Neuzavřeno</span>
+<span class="k">Ověřeno</span>
+<span class="v">2 brány</span>
+<div class="tile state-ok">
+<span class="k">Neběželo</span>
 <span class="v">0</span>
 <h2>Shrnutí</h2>
-<p>Brány prošly: 2 z 2, běh může pokračovat na DONE.</p>
+<p>Ověřeno 2 z 2 bran, nic neselhalo.</p>
 <h2>Jádro</h2>
-<p>Prošlo 2, selhalo 0, přeskočeno 0, mimo profil 0, s výjimkou 0. Celkem 2 min 0 s.</p>
-<h2>Jak pokračovat</h2>
-<li>Pokračuj na DONE: aid-fsm.sh transition GATES DONE &lt;state_file&gt;</li>
-<h2>Čeho se to týká</h2>
-<li>
+<p>Ověřeno 2, selhalo 0, neběželo 0, prominuto 0. Celkem 2 min 0 s.</p>
+<li>brána tests: prošla — ověřila: bash scripts/tests/run-all-tests.sh --tier t1</li>
+<li>brána lint: prošla — ověřila: bash scripts/aid-lint-skill.sh</li>
 <h2>Co se čeká ode mě</h2>
 <p>Nic — ozvu se, až bude hotovo</p>
-<div class="golink">technický detail: <WORK>/finished-gate/gates/gates_report.json →</div>
 <footer>Zdroj: <WORK>/finished-gate/gates/gates_report.json. Vyrobil aid-gate-outcome-summary.sh. Redigováno tajemství: 0.</footer>

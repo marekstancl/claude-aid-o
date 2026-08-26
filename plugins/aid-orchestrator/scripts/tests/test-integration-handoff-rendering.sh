@@ -310,10 +310,17 @@ if _run_renderer finished-gate "${WORK}/finished-gate.card" aid_gate_outcome_ren
   _assert_card_first finished-gate "${WORK}/finished-gate.card" "$CARD_FINISHED"
   _assert_seven_blocks finished-gate "${GRUN}/gate-outcome-artifact.html"
   _golden finished-gate "${GRUN}/gate-outcome-artifact.html"
-  if grep -qF '<span class="v">2/2 prošlo</span>' "${GRUN}/gate-outcome-artifact.html"; then
+  # The tile is still COUNTED from the report — P089 Step 3 only changed what it
+  # counts. The headline is now HOW MANY FAILED (so a green run reads "Nic
+  # neselhalo"), and the numbers moved into four closed categories: ověřeno /
+  # selhalo / neběželo / prominuto. This asserts the counted half of that, which
+  # is the property the case is about; "2/2 prošlo" was the old wording of the
+  # same idea and is gone from the renderer, not from the requirement.
+  if grep -qF '<span class="v">2 brány</span>' "${GRUN}/gate-outcome-artifact.html" \
+     && grep -qF '<span class="k">Ověřeno</span>' "${GRUN}/gate-outcome-artifact.html"; then
     pass_msg "finished-gate: the result tile is COUNTED from the report, not asserted"
   else
-    fail_msg "finished-gate: expected a computed 2/2 result tile"
+    fail_msg "finished-gate: expected a computed 'Ověřeno 2 brány' tile"
   fi
 fi
 
@@ -389,8 +396,16 @@ if _run_renderer force-used "${WORK}/force-used.card" \
   # unit IS the line. Each surface is cut at its own granularity — cutting the
   # page by line would drag the neighbouring "Prošlo 1, …" count sentence into
   # the waived row and fail on legitimate text.
-  _waived_units_page() { grep -oE '<li>[^<]*</li>' "$1" | grep -F 'waived'; }
-  _waived_units_card() { grep -F 'waived' "$1"; }
+  # THE TOKEN IS CZECH NOW, and that is the renderer being right rather than
+  # this test being wrong. P089 Step 3 gave the gates page four closed
+  # categories — ověřeno / selhalo / neběželo / PROMINUTO — on a page that is
+  # Czech throughout; `waived` was the English label of the same idea and no
+  # longer appears anywhere. The requirement is unchanged and is what these two
+  # helpers still isolate: the waived gate must be VISIBLY waived on its own
+  # row, never absorbed into the pass count. `prominut` is the shared stem of
+  # prominuta / prominuto / prominuty, so no form escapes.
+  _waived_units_page() { grep -oE '<li>[^<]*</li>' "$1" | grep -Ei 'waived|prominut'; }
+  _waived_units_card() { grep -Ei 'waived|prominut' "$1"; }
   _pass_semantics() {  # any pass label, English or Czech, in the given text
     # Word forms are case-insensitive; the two-letter and all-caps LABELS are
     # not. `OK` folded to lowercase matches inside ordinary Czech words — the
@@ -409,11 +424,19 @@ if _run_renderer force-used "${WORK}/force-used.card" \
   ! _pass_semantics "$wl_card" || waiver_problems+=("the card's waived row carries pass semantics: ${wl_card}")
   # The counts must not absorb the waiver on EITHER surface: the tile counts it
   # out of the passes, and the card states the waived count explicitly.
-  grep -qF '<span class="v">1/2 prošlo</span>' "${WRUN}/gate-outcome-artifact.html" \
-    || waiver_problems+=("the page's result tile absorbed the waiver into the pass count")
-  grep -qF '<span class="v">1</span>' "${WRUN}/gate-outcome-artifact.html" \
-    || waiver_problems+=("the page's unresolved tile does not count the waived gate")
-  grep -qE 'waived 1\b' "${WORK}/force-used.card" \
+  # THE SAME REQUIREMENT ON THE SURFACE P089 STEP 3 BUILT. The counts must not
+  # absorb the waiver, and the new page states that more plainly than the old
+  # one did: the result tile NAMES the waiver ("Nic neselhalo, 1 prominuta"),
+  # the verified count EXCLUDES it ("Ověřeno 1 brána" out of two), and the core
+  # line spells out all four categories. The old assertions read "1/2 prošlo"
+  # and a bare unresolved tile, which are the previous wording of this idea.
+  grep -qE '<span class="v">[^<]*1 prominut[ay][^<]*</span>' "${WRUN}/gate-outcome-artifact.html" \
+    || waiver_problems+=("the page's result tile does not name the waiver — it absorbed it into the pass count")
+  grep -qF '<span class="v">1 brána</span>' "${WRUN}/gate-outcome-artifact.html" \
+    || waiver_problems+=("the page's verified tile does not EXCLUDE the waived gate")
+  grep -qE 'prominuto 1\b' "${WRUN}/gate-outcome-artifact.html" \
+    || waiver_problems+=("the page's core line does not state the waived count")
+  grep -qE 'prominut[oaé]' "${WORK}/force-used.card" \
     || waiver_problems+=("the card does not state the waived count")
   if (( ${#waiver_problems[@]} == 0 )); then
     pass_msg "force-used: the waived row carries no pass label (EN or CZ) on either surface, and both surfaces count it unresolved"
