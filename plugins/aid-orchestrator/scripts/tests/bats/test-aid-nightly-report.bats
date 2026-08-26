@@ -48,8 +48,27 @@ setup() {
 
   # A stub for the shared ecosystem helper — this suite must never reach a real
   # Telegram API, and it must be able to see whether a message was attempted.
+  #
+  # It stubs `send_alert`, NOT the legacy `send_telegram_alert`: since
+  # 2026-08-26 the reporter goes through lib/aid-alert.sh to the standard's
+  # shared sender, and a stub of the old name would have proved only that the
+  # new path is unreachable. The stub records the fields, one per line, so a
+  # case can assert on scope/ID/state instead of on prose.
   STUB_TG="$TEST_TMPDIR/telegram-notify.sh"
-  printf 'send_telegram_alert() { printf "%%s\\n" "$1" >> "$SENT"; return 0; }\n' > "$STUB_TG"
+  cat > "$STUB_TG" <<'STUB'
+send_alert() {
+  { printf 'severity=%s\nscope=%s\nid=%s\n' "$1" "$2" "$3"
+    printf 'co=%s\nakce=%s\n' "$4" "$5"
+    printf 'kontext=%s\nrunbook=%s\nstate=%s\nsource=%s\n' "${6:-}" "${7:-}" "${8:-}" "${9:-}"
+  } >> "$SENT"
+  return 0
+}
+STUB
+  # Pointing AID_TELEGRAM_LIB at this stub is ALSO what lets delivery happen
+  # under AID_TEST_MODE: lib/aid-alert.sh suppresses the PRODUCTION library, not
+  # a stub. A fixture that forgot to stub therefore cannot reach the real
+  # channel — the earlier design used an AID_ALERT_FORCE override, which any
+  # fixture could have inherited alongside real credentials.
   export AID_TELEGRAM_LIB="$STUB_TG"
 }
 
@@ -108,7 +127,12 @@ _report() {
   [ "$(jq -r '.failed[0].streak' "$NIGHTLY_DIR/latest.json")" = "1" ]
   [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "true" ]
   [ "$(grep -c '' "$SENT")" -ge 1 ]
-  [ "$(grep -c 'AID nightly' "$SENT")" -eq 1 ]
+  # The FIELDS the standard makes mandatory, not the prose: one message, scoped
+  # to the nightly, and its state line says so before anything else.
+  [ "$(grep -c '^id=' "$SENT")" -eq 1 ]
+  [ "$(grep -c '^scope=aid-testy$' "$SENT")" -eq 1 ]
+  [ "$(grep -c '^state=NOČNÍ TESTY$' "$SENT")" -eq 1 ]
+  [ "$(grep -c '^id=nightly-red$' "$SENT")" -eq 1 ]
 }
 
 @test "3: the same failure the next night counts a streak instead of re-sending" {

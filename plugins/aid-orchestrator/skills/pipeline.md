@@ -1350,7 +1350,8 @@ For post-deploy EPICs (`fsm-state.yaml.created_at >= AID_DEPLOY_DATE`):
 - `gates_report.json` MUST contain `_generated_by` field (set by `aid-run-gates.sh`).
 - Hand-written reports are rejected with copy-paste remediation in stderr.
 - Repeated-fail detection: ≥ 3 same-reason fails on the same EPIC trigger
-  `fsm_precondition_repeated_fail` event + best-effort `try_telegram_alert()`
+  `fsm_precondition_repeated_fail` event + a best-effort alert through
+  `lib/aid-alert.sh` (`aid_alert_run`, scope `aid-beh`, state `BĚŽÍCÍ PLÁN`)
   (HTTP POST to `localhost:8817/send_message`).
 
 For pre-deploy grandfathered EPICs (`created_at < AID_DEPLOY_DATE`): precondition

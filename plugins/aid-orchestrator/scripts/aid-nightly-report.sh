@@ -113,8 +113,20 @@ suites_passed="$(sed -nE 's/^[[:space:]]*Suites:[[:space:]]+([0-9]+)\/[0-9]+ pas
 # output present means the job was cut short — a partial result that says so,
 # never a green one.
 censored=false
-if ! grep -q '^  Summary$' "$RUNNER_LOG" && grep -q '^Suite [0-9]' "$RUNNER_LOG"; then
-  censored=true
+if ! grep -q '^  Summary$' "$RUNNER_LOG"; then
+  # The runner's end marker is missing. That is "we do not know", and the two
+  # shapes it comes in are BOTH incomplete:
+  #   * suites were flushed and then it stopped   (killed mid-portfolio)
+  #   * nothing was flushed at all                (killed before the first suite,
+  #     or the step timed out before any output) — the older condition required
+  #     a `Suite N` line and therefore called THIS case a red night, which is
+  #     the one classification the split exists to prevent (cross-model review,
+  #     2026-08-26).
+  # A missing/non-numeric exit code is the signature of a timed-out step: the
+  # step never reaches its own `echo exit_code=`.
+  if grep -q '^Suite [0-9]' "$RUNNER_LOG" || [[ ! "$EXIT_CODE" =~ ^[0-9]+$ ]] || [[ "$EXIT_CODE" -ne 0 ]]; then
+    censored=true
+  fi
 fi
 
 mapfile -t reported_failures < <(
@@ -249,6 +261,14 @@ if [[ -f "$LATEST" ]] \
   prev_undelivered=true
 fi
 
+# Was LAST night already incomplete? A run that is cut short two nights running
+# is one situation, not two messages — but the FIRST night it happens must
+# speak, even when the failing suites are all already known. Without this the
+# dedup could swallow the transition from "red" to "we know nothing", which is
+# a change of severity, not a repeat.
+prev_censored=false
+[[ -f "$LATEST" ]] && [[ "$(jq -r '.censored' "$LATEST" 2>/dev/null)" == "true" ]] && prev_censored=true
+
 # ─── Co přibylo do merge cesty ──────────────────────────────────────────────
 # Spoustecem NENI cas, ale ZMENA SLOZENI. Merge cesta vyrostla z 13 na 18 minut
 # za tri dny tim, ze pribylo 18 sad — kazda spravne oznacena, zadna nezpomalila.
@@ -346,7 +366,8 @@ notified=false
 # rules — so a budget that stays over does not become nightly noise.
 if [[ "$NOTIFY" -eq 1 ]] \
    && { [[ "$new_failures" -gt 0 ]] || [[ "$escalating" -gt 0 ]] \
-        || [[ -n "$_added_note" ]] || [[ "$prev_undelivered" == "true" ]]; }; then
+        || [[ -n "$_added_note" ]] || [[ "$prev_undelivered" == "true" ]] \
+        || [[ "$censored" == "true" && "$prev_censored" != "true" ]]; }; then
   msg="$(printf 'AID nightly %s: %s failed, %s flaky, %s quarantined\n' \
     "$TODAY" "$(jq 'length' <<<"$failed_json")" "$(jq 'length' <<<"$flaky_json")" \
     "$(jq 'length' <<<"$quarantined_json")")"
@@ -364,10 +385,32 @@ if [[ "$NOTIFY" -eq 1 ]] \
   fi
   [[ -n "$LOG_URL" ]] && msg+=$'\n'"$LOG_URL"
 
+  # TWO STATES, NEVER ONE (ecosystem alert standard, project rule 2). "The
+  # result is bad" and "nothing was measured" read the same in a free-text
+  # message and are not the same thing at all: the first means the portfolio ran
+  # and we know something unpleasant, the second means it was CUT SHORT and the
+  # numbers below are a fragment. That is exactly what happened on 2026-08-15,
+  # when the job hit GitHub's 6-hour ceiling mid-run and this reporter announced
+  # "17 failed" as if it were a result.
+  #
+  # `censored` is the runner's own end marker missing with suite output present.
+  # It raises the severity AND changes the ID, so the two cases are separable in
+  # the catalog, in a search, and in the reader's head.
+  local_id="nightly-red"; local_sev="warning"
+  local_what="$(jq 'length' <<<"$failed_json") sad spadlo v nočním portfoliu."
+  local_action="Do zítřejšího poledne přiděl každé spadlé sadě vlastníka, nebo rozhodni, že počká — pád T2 je úkol do druhého pracovního dne."
+  if [[ "$censored" == "true" ]]; then
+    local_id="nightly-neuplny"
+    local_sev="critical"
+    local_what="Noční běh se NEDOKONČIL — čísla níž jsou útržek, ne výsledek. O sadách, ke kterým nedošel, nevíme nic."
+    local_action="Do zítřejšího poledne zjisti, proč se běh usekl (strop úlohy, timeout, zrušení). Dokud to neplatí, neber zelenou ani červenou jako platnou."
+  fi
+
   if [[ -f "$TELEGRAM_LIB" ]]; then
     # shellcheck source=/dev/null
-    source "$TELEGRAM_LIB"
-    if send_telegram_alert "$msg"; then
+    source "$SCRIPT_DIR/lib/aid-alert.sh"
+    if aid_alert_nightly "$local_sev" "$local_id" "$local_what" "$local_action" \
+         "$msg" "${LOG_URL:-}"; then
       notified=true
     else
       # rc 2 is "credentials not configured" — a silent skip by contract. The

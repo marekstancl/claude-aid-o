@@ -27,7 +27,7 @@ Optional (Telegram alerts via `svc-mcp-tg-bot`):
 | Tool | Required for | Install |
 |------|--------------|---------|
 | `docker` + `docker compose` | `svc-mcp-tg-bot` deployment | per Docker docs |
-| `curl` | `try_telegram_alert` HTTP POST in FSM bash | OS default |
+| `curl` | Telegram alerts, through the ecosystem's shared `send_alert()` (see [Alerty z AID](https://docs.aidlab.dev/aid/alerty)) | OS default |
 
 Pre-flight verification: `bash $AID_PLUGIN_PATH/scripts/aid-check-deps.sh`
 (exits non-zero if a required dep is missing or the wrong variant).

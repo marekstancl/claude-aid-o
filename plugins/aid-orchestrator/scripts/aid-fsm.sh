@@ -27,6 +27,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# shellcheck disable=SC1091
+# 2026-08-26 — the ONE way AID alerts a human. Every call site discards its
+# return with `|| true`: an alert is telemetry, and a transition must never fail
+# because a message could not be delivered.
+source "${SCRIPT_DIR}/lib/aid-alert.sh"
 # P074 Step 1 — shared invoke-root/state-root resolution. State paths
 # (.aid-o/...) resolve through aid_state_path/aid_state_root so an invocation
 # from a linked worktree reads and writes the PRIMARY checkout's workspace;
@@ -2221,33 +2226,29 @@ fsm_emit_compliance_recovery() {
     | awk '{print $2}' | tr -d '"'"'"' ') || recovery_gate=""
   recovery_gate="${recovery_gate:-true}"
   [[ "$recovery_gate" == "false" ]] || \
-    try_telegram_alert "${message_prefix} Checks: ${recovery_checks}"
+    aid_alert_run info plan-compliance-recovered "$epic_id" \
+      "${message_prefix}" \
+      "Nic hned. Při nejbližším čtení ověř, že náprava byla záměrná, ne náhodná." \
+      "checks=${recovery_checks}" || true
   [[ -f "$timeline" ]] && log_event "$timeline" "fsm_done_advance_recovered" \
     recovered_checks="$recovery_checks"
   return 0
 }
 
-# Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
-# replaces the legacy svc-mcp-telegram MCP that previously held this port).
-# Never fails — if MCP service is unavailable, log info and continue.
-# Service deployed in Step 6; this helper works pre-deploy as a no-op.
+# RETIRED TRANSPORT, kept as a named refusal (2026-08-26).
 #
-# Test-mode guard: bats fixtures and other test contexts export AID_TEST_MODE=1
-# in their setup() to suppress real-world side effects. The same guard pattern
-# should be added to any future side-effect helpers (mail, Slack, webhook).
+# `try_telegram_alert` used to POST free text straight to the MCP bot on
+# localhost:8817 — a second transport AND a second format alongside the nightly
+# reporter's, and neither carried a single field the ecosystem alert standard
+# requires. A reader could not tell an alert about a RUNNING PLAN from one about
+# last night's tests, which is exactly the defect §2 of that standard describes.
+#
+# Everything now goes through lib/aid-alert.sh -> the shared `send_alert()`.
+# This shim stays only so an unconverted caller is LOUD rather than silently
+# unreachable: it says what to call instead and returns 0, because an alert path
+# must never fail a transition.
 try_telegram_alert() {
-  [[ "${AID_TEST_MODE:-0}" == "1" ]] && return 0
-  local message=$1
-  local payload
-  payload=$(jq -nc --arg t "$message" '{text:$t, parse_mode:"HTML"}')
-  if curl -fsS -X POST http://localhost:8817/send_message \
-       -H "Content-Type: application/json" \
-       --data "$payload" \
-       --max-time 3 \
-       > /dev/null 2>&1; then
-    return 0
-  fi
-  log_info "Telegram alert skipped (svc-mcp-tg-bot not available — non-fatal)"
+  echo "aid-fsm: try_telegram_alert() is retired — use aid_alert_run/aid_alert_nightly (lib/aid-alert.sh) so the message carries severity, scope, ID, Co and Akce. Message dropped: ${1:-}" >&2
   return 0
 }
 
@@ -2903,7 +2904,10 @@ check_preconditions() {
             local timeline="${evidence_dir}/timeline.jsonl"
             log_event "$timeline" "fsm_precondition_repeated_fail" \
               from="$from" to="$to" reason="gates_no_generated_by" attempt_count="$attempt_count"
-            try_telegram_alert "Repeated precondition fail (×${attempt_count}): EPIC=${epic_id}, transition=${from}→${to}, reason=gates_no_generated_by"
+            aid_alert_run warning plan-precondition-fail "$epic_id" \
+              "tatáž precondition selhala ${attempt_count}× v řadě na přechodu ${from}→${to} (gates_no_generated_by) — běh se zasekl a sám se z toho nedostane." \
+              "Do konce dneška rozhodni: buď ten důvod odstraň, nebo běh ukonči. Opakování samo o sobě nepomůže." \
+              "epic=${epic_id} transition=${from}→${to} reason=gates_no_generated_by" || true
           fi
           cat <<EOF >&2
 PRECONDITION FAIL: gates_report.json missing _generated_by field.
@@ -5763,12 +5767,18 @@ cmd_increment_step() {
         if (( attempt_step >= 3 )); then
           [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_step" \
             step="$step" precondition="missing_verifier_output" attempt_count="$attempt_step"
-          try_telegram_alert "Repeated step-level precondition fail (×${attempt_step}): EPIC=${epic_id}, step=${step}, precondition=missing_verifier_output"
+          aid_alert_run warning plan-precondition-fail "$epic_id" \
+            "krok ${step} selhal ${attempt_step}× na téže precondition (missing_verifier_output)." \
+            "Do konce dneška rozhodni, jestli ten krok přepsat, nebo běh ukončit." \
+            "epic=${epic_id} step=${step} precondition=missing_verifier_output" || true
         fi
         if (( attempt_epic >= 3 )); then
           [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_epic" \
             precondition="missing_verifier_output" attempt_count="$attempt_epic"
-          try_telegram_alert "Systematic precondition bypass (×${attempt_epic}): EPIC=${epic_id}, precondition=missing_verifier_output across multiple steps"
+          aid_alert_run critical plan-precondition-bypass "$epic_id" \
+            "tatáž precondition je obcházena napříč kroky (${attempt_epic}× v tomto EPICu) — to už není jeden špatný krok, ale vzorec." \
+            "Do zítřejšího poledne rozhodni, jestli EPIC pokračuje. Dokud to platí, jeho důkazům nevěř." \
+            "epic=${epic_id} precondition=missing_verifier_output" || true
         fi
 
         [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" \
@@ -6926,7 +6936,10 @@ Audit log entry will be appended to .aid-o/work/audit-log.jsonl with the full re
 and blocked_checks list. See AID-v3-principles.md §1 for the enforcement contract.
 EOF
 
-          try_telegram_alert "🛑 ${epic_id}: ${_blocking_count} blocking compliance failure(s) — release blocked. Checks: ${_blocking_names}"
+          aid_alert_run critical plan-compliance-blocked "$epic_id" \
+            "${_blocking_count} blokujících nálezů compliance — vydání je zastavené." \
+            "Do zítřejšího poledne rozhodni: opravit, nebo vědomě povolit (waiver). Bez rozhodnutí to nikam nepokročí." \
+            "checks=${_blocking_names}" || true
 
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
@@ -7663,9 +7676,12 @@ EOF
             "$_c4_rd" 2>/dev/null)
         fi
 
-        # Divergence → alert (AID_TEST_MODE suppresses the real send inside try_telegram_alert).
+        # Divergence → alert (AID_TEST_MODE suppresses the real send inside lib/aid-alert.sh).
         if [[ "$_c4_match" == "false" ]]; then
-          try_telegram_alert "⚖️ ${epic_id}: C4 dual-run divergence (class=${_c4_divclass}, legacy_ready=${_c4_legacy_ready}, c4_ready=${_c4_ready}) — observe-mode telemetry."
+          aid_alert_run warning plan-c4-divergence "$epic_id" \
+            "stará a nová logika vydání se na tomhle EPICu neshodly (třída ${_c4_divclass}) — zatím jen pozorujeme, nic to neblokuje." \
+            "Do konce týdne rozhodni, která z těch dvou má pravdu; jinak se přepnutí odkládá naslepo." \
+            "legacy_ready=${_c4_legacy_ready} c4_ready=${_c4_ready} class=${_c4_divclass}" || true
         fi
 
         # Enforcement: observe → transition unaffected; blocking → a C4 false stops it.

@@ -71,7 +71,7 @@ check_optional direnv "apt install direnv / brew install direnv"  "worktree .env
 echo
 echo "Optional (Telegram alerts via svc-mcp-tg-bot):"
 check_optional docker "https://docs.docker.com/engine/install/" "container deployment"
-check_optional curl   "apt install curl / brew install curl"     "try_telegram_alert HTTP POST"
+check_optional curl   "apt install curl / brew install curl"     "Telegram alerts via the shared send_alert()"
 
 echo
 if (( errors > 0 )); then
