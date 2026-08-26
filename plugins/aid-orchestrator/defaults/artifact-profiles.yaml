@@ -15,7 +15,10 @@
 #   outcome_from_state  the result, scope and unresolved tiles are COMPOSED by
 #                       the renderer from the four counts in facts.outcome
 #                       (passed / failed / not_run / waived) and whatever the
-#                       caller put there is dropped. This is how "6 of 9 passed"
+#                       caller put there is dropped. The optional
+#                       `outcome.blocked` covers the one honest exception: a run
+#                       whose only failures were infrastructure still has a fail
+#                       verdict, and the tile must not read green above it. This is how "6 of 9 passed"
 #                       beside zero failures is made impossible by construction,
 #                       rather than caught by inspecting prose for a vocabulary
 #                       of failure that would never be complete.

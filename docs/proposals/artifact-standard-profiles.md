@@ -127,8 +127,12 @@ Sekce sporů se nerenderuje, když žádný spor nezbyl.
 
 ### `gates`
 
-- **Dlaždice:** **kolik selhalo** (ne poměr prošlých) · kolik neběželo · kolik
-  bylo prominuto · doba běhu · pokus v pořadí
+- **Dlaždice:** **kolik selhalo** (ne poměr prošlých) · kolik se ověřilo ·
+  kolik neběželo · doba běhu
+
+Čtyři dlaždice, čtyři místa. Prominutí se jmenuje **na dlaždici výsledku**
+(„nic neselhalo, 1 prominuta"), protože je to kategorie výsledku, ne rozsahu;
+kolikátý to byl pokus, patří do jádra k té bráně, které se týká.
 - **Jádro:** které brány **běžely a co ověřily** · u těch, co neběžely, **proč**
   (mimo profil / přeskočeno / nespuštěno kvůli infrastruktuře) · u prominutých,
   **kdo prominutí schválil** · u druhého a dalšího pokusu, co se změnilo od minula

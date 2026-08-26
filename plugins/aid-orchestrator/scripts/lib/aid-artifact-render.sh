@@ -372,9 +372,19 @@ _aid_artifact_outcome_tiles() {
   not_run="$(aid_artifact_number "$(jq -r '.outcome.not_run_count' <<<"$_ot_facts")")"
   waived="$(aid_artifact_number "$(jq -r '.outcome.waived_count' <<<"$_ot_facts")")"
 
+  # `outcome.blocked` is OPTIONAL and exists for one honest case: a run whose
+  # only failures were infrastructure — so nothing the code owns failed, and the
+  # verdict is still fail. Without it the tile would read "nothing failed" in
+  # green above a page telling the PM the run is stopped.
+  local blocked
+  blocked="$(aid_artifact_number "$(jq -r 'if (.outcome.blocked // false) then 1 else 0 end' <<<"$_ot_facts")")"
+
   local result_value result_state
   if (( failed > 0 )); then
     result_value="$(_aid_artifact_czech "$failed" "brána selhala" "brány selhaly" "bran selhalo")"
+    result_state="critical"
+  elif (( blocked == 1 )); then
+    result_value="Nic neselhalo, běh přesto zastaven"
     result_state="critical"
   else
     result_value="Nic neselhalo"
