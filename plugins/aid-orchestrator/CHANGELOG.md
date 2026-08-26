@@ -3,6 +3,32 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.93.0] — 2026-08-26
+
+> A page carries what its phase owes and cannot contradict itself, and a release is required by what changed rather than by what a commit message promised.
+
+### Added
+- **Artifact profiles** — `defaults/artifact-profiles.yaml` declares what each of the five page types owes (brainstorming, plan, gates, finished EPIC, closed plan) and `aid_artifact_render` refuses a page that does not carry it; a new type is a section in that file, never a branch in the renderer.
+- **State-derived wording** — a type marked `outcome_from_state` hands the renderer four counts and the renderer composes the result, verified and did-not-run tiles from them, dropping whatever the caller wrote — so "6 of 9 passed" beside zero failures can no longer be written rather than merely being discouraged.
+- **A page for a finished EPIC** — `lib/aid-epic-summary-page.sh`, rendered by `cmd_done_advance` on the review→release edge, says what the EPIC delivered, what the audit found and **which backlog items the Curator filed and why**; a missing audit or curator report is named on the page instead of being implied away.
+- **Release scope decided by files** — `lib/aid-release-scope.sh` lists the commits since the last tag reachable from the judged commit, removes those carrying a `No-Release: <reason>` footer, takes the union of the paths the rest touched, and decides that set against `versioning.release_exempt_paths` and `versioning.app_paths`; `fix(tests):` over test files no longer blocks and `chore:` over application code no longer passes.
+- **A CI facade for the same verdict** — `scripts/aid-release-check.sh` prints the verdict and the commits behind it into a build log and always exits 0, and `.github/workflows/ci.yml` runs it; the hook is the only thing that blocks.
+- **Anti-drift gate over Dockerfiles** — `scripts/gates/release-paths-drift.sh` compares `COPY`/`ADD` sources against the two declared path lists, because the config and the image are two claims about the same thing; advisory, and attached to no runner in this repository, which its registry row says in as many words.
+- **A suite named only in prose is reported** — `aid-plan-lint.sh` flags a test suite named in `## Testing Strategy`, declared in no `Test:` bullet and absent from the repository, advisorily (IMP-517).
+
+### Changed
+- **The page obligation covers three milestones** — `plan_artifact_rendered` becomes `milestone_artifact_rendered` and refuses a turn that finished a written plan, an EPIC's review or a closed plan without its page; a step, and a failed step, owe nothing.
+- **The gates page** — four closed categories (verified, failed, did not run, waived), the headline is how many FAILED, the core names which gates ran and what each verified, a gate the harness stopped before it ran is counted as "did not run" and the page names the reason, and when nothing is expected the next-steps list is empty so no command stands beside "nothing is expected".
+- **Blocks 5 and 7 carry names** — the closing page and the brainstorming page stopped carrying file paths in their link blocks; the paths live in the provenance footer, where they already were.
+- **`aid-release.sh` has no second copy of the rule** — it asks the same library before reading any commit subject, and commits the scope exempted no longer choose the bump type either.
+- **`/aid-setup scan` owns the two release-path lists** — `/aid-init` seeds them for a new workspace and never mutates an existing config, so an already-initialised project gets them from the scan module.
+
+### Fixed
+- **A waived gate counted twice** — a row reported `fail` while `waived_gates` named it was counted once as a failure and once as a waiver; a rejected waiver is now removed from the waiver set entirely, so a rejection no longer reads as a waiver.
+- **A milestone record that names nothing** — a finished review with no usable EPIC id, or a closed plan with no plan id, used to buy its way out of the page obligation as "not applicable"; both are findings now, and `release_pending` / `CLOSED_PENDING` no longer match the milestone words by prefix.
+- **The push range was measured from HEAD** — with a later tag on HEAD the range for an older pushed commit came out empty and the push passed unjudged; the start is now the last tag reachable from the commit being pushed, and an untagged repository gets an explicit `no_tag` verdict instead of an accidentally empty range.
+- **Stale expectations in the artifact renderer suite** — four cases had been red since v2.91.0 (three over a link that stopped carrying an arrow, one over a vendored CSS digest that changed without either signature being updated).
+
 ## [2.92.0] — 2026-08-25
 
 > Agents run at the same time where the plan allows it, three hook rules and a gate check that P086 left out, and a UI proposal the PM can judge.
