@@ -107,26 +107,32 @@ _AID_GOS_ADVANCE_CMD="aid-fsm.sh transition GATES DONE <state_file>"
 #   also mean nothing ran, but they are defects in the gate configuration and
 #   belong in front of the PM as failures — the conservative direction, the same
 #   one an unknown reason takes.
-#   A MAP, not a packed `key|value` list: that list was split apart three
-#   different ways in this file, and a Czech label containing the delimiter
-#   would have corrupted the table.
-#   `declare -gA` and not `declare -A`: this library is sourced from inside a
-#   FUNCTION by every bats suite that uses it, and a bare `declare` there makes
-#   the array LOCAL to that function — it is gone by the time the test body
-#   runs, and every reason silently stops matching.
-declare -gA _AID_GOS_NOT_RUN_REASONS=(
-  [service_unhealthy]='služba, kterou brána potřebuje, neběžela'
-  [gate_script_missing_in_tree]='skript brány ve stromu nebyl'
-  [gate_row_stale]='záznam brány patřil jiné revizi, v tomhle běhu neběžela'
-  [job_lost]='běh brány na pozadí se ztratil, žádný záznam o dokončení'
+#   A PLAIN `key|label` ARRAY, and deliberately not an associative one. The
+#   map reads better, but it needs `declare -gA` to survive: this library is
+#   sourced from INSIDE a function by every bats suite, and a bare `declare`
+#   there makes the array local to that function. `-g` arrived in bash 4.2,
+#   and this plugin's stated floor is 4.0 — where the map would fail to load
+#   at all. A plain array assignment is global from inside a function on every
+#   bash there is, so the readable form loses to the one that runs.
+_AID_GOS_NOT_RUN_REASONS=(
+  'service_unhealthy|služba, kterou brána potřebuje, neběžela'
+  'gate_script_missing_in_tree|skript brány ve stromu nebyl'
+  'gate_row_stale|záznam brány patřil jiné revizi, v tomhle běhu neběžela'
+  'job_lost|běh brány na pozadí se ztratil, žádný záznam o dokončení'
 )
 
 # _aid_gos_not_run_reason <reason> — the Czech name when the reason means the
-# gate did not run; nothing (exit 1) otherwise.
+# gate did not run; nothing (exit 1) otherwise. `|` is the delimiter and no
+# label may contain one.
 _aid_gos_not_run_reason() {
-  local want="${1-}"
-  [[ -n "$want" && -n "${_AID_GOS_NOT_RUN_REASONS[$want]:-}" ]] || return 1
-  printf '%s' "${_AID_GOS_NOT_RUN_REASONS[$want]}"
+  local want="${1-}" entry
+  [[ -n "$want" ]] || return 1
+  for entry in "${_AID_GOS_NOT_RUN_REASONS[@]}"; do
+    [[ "${entry%%|*}" == "$want" ]] || continue
+    printf '%s' "${entry#*|}"
+    return 0
+  done
+  return 1
 }
 
 # aid_gate_outcome_redact <text>
@@ -354,17 +360,27 @@ aid_gate_outcome_render() {
         fi
         ;;
     esac
+  #
+  # `select(.name != null)` is load-bearing: an entry with no `name` makes jq
+  # fail while building an object key, and this jq runs inside a process
+  # substitution where its failure is invisible — the loop would simply receive
+  # nothing and every counter would come out zero over a run that passed.
+  #
+  # Every value is stripped of U+001F before it is joined. `@tsv` escapes tabs,
+  # newlines and backslashes but not this character, so a gate name carrying one
+  # would otherwise forge a field boundary and be read as a different category.
   done < <(jq -r --argjson rep "$report" --argjson w "$waived_json" '
-      (($rep._command_log // []) | map({(.name): .command}) | add // {}) as $cmds
+      def clean: (. // "") | tostring | gsub("\u001f"; " ");
+      (($rep._command_log // []) | map(select(.name != null)) | map({(.name|tostring): .command}) | add // {}) as $cmds
       | .[]
-      | [ (.gate // "?"),
-          (.result // "?"),
-          ((.exit_code // 0)|tostring),
-          ((.attempts // 0)|tostring),
-          (.reason // ""),
-          (.waiver_rejected // ""),
+      | [ ((.gate // "?")|clean),
+          ((.result // "?")|clean),
+          ((.exit_code // 0)|tostring|clean),
+          ((.attempts // 0)|tostring|clean),
+          (.reason|clean),
+          (.waiver_rejected|clean),
           (if ((.gate // "") as $g | $w | index($g)) then "1" else "0" end),
-          ($cmds[(.gate // "")] // "")
+          ($cmds[((.gate // "")|tostring)]|clean)
         ] | @tsv' <<<"$rows" | tr '\t' '\037')
 
   # A waiver named ONLY by top-level waived_gates[] (no matching row) still

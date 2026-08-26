@@ -557,3 +557,30 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
   grep -qF 'brána lint: selhala (exit 1), výjimka zamítnuta — expired' "$(BODY)"
 }
+
+
+# ── the classification stream cannot be silenced or forged (Codex, P089) ──
+
+@test "a _command_log entry with no name does not zero every counter" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 1)" '{tests:$a}')"
+  extra='{"_command_log":[{"command":"bats scripts/tests"}]}'
+  _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  # One gate passed, and the page says so — the jq that feeds the loop runs in
+  # a process substitution, so its failure would have been invisible.
+  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
+  [[ "$output" == *"Ověřeno: 1 z 1 bran"* ]]
+}
+
+@test "a unit separator inside a gate name cannot forge a field boundary" {
+  local gates
+  gates="$(jq -nc '{"g": {gate:"gate\u001fpass", result:"fail", reason:"", exit_code:1, duration_ms:10, attempts:1, output:""}}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  # Still ONE failure. Read as a forged boundary, `pass` became the result and
+  # the run reported a passing gate instead.
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+}
