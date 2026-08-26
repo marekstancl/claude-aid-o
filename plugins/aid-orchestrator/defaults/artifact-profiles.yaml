@@ -1,0 +1,74 @@
+# artifact-profiles.yaml — what each artifact type OWES (P089 Step 2).
+#
+# The ecosystem artifact standard describes ONE skeleton for every page: seven
+# blocks, caps, no paths in the link blocks. What belongs INSIDE a block it did
+# not say — so a page could satisfy the skeleton and still be worthless. The
+# proposed amendment (docs/proposals/artifact-standard-profiles.md) adds per-type
+# obligations; this file is that amendment as DATA.
+#
+# Data, not code: a new artifact type is a section here, never a branch in
+# lib/aid-artifact-render.sh.
+#
+#   required            dotted paths into facts_json that must exist and be
+#                       non-empty. An array counts as empty when it has no
+#                       elements; anything else when it is the empty string.
+#   outcome_from_state  the result, scope and unresolved tiles are COMPOSED by
+#                       the renderer from the four counts in facts.outcome
+#                       (passed / failed / not_run / waived) and whatever the
+#                       caller put there is dropped. This is how "6 of 9 passed"
+#                       beside zero failures is made impossible by construction,
+#                       rather than caught by inspecting prose for a vocabulary
+#                       of failure that would never be complete.
+#
+# The five types are closed. A type outside them is an error, not a reason to
+# improvise.
+#
+# **Last Updated:** 2026-08-26
+version: 1
+
+profiles:
+
+  # After a finished brainstorming, before the plan is written.
+  brainstorming:
+    required:
+      - tiles.result.value      # variants considered
+      - tiles.duration.value    # agreements
+      - tiles.scope.value       # disagreements
+      - tiles.unresolved.value  # open unknowns
+      - items
+
+  # After the plan is written, before EPIC generation.
+  plan:
+    required:
+      - tiles.result.value      # ceremony band
+      - tiles.duration.value    # steps
+      - tiles.scope.value       # declared files
+      - tiles.unresolved.value  # risks
+      - items
+      - deliverables            # what the plan will DO — the reason a PM opens it
+
+  # After the gates have run. Three of the four tiles are composed from
+  # facts.outcome, so only the one the counts cannot know is required here.
+  gates:
+    outcome_from_state: true
+    required:
+      - tiles.duration.value    # how long the run took
+      - items
+
+  # After the review of a finished EPIC.
+  epic_done:
+    required:
+      - tiles.result.value      # verdict
+      - tiles.duration.value
+      - tiles.scope.value       # steps
+      - tiles.unresolved.value  # audit findings still open
+      - items
+
+  # After the whole plan is closed out.
+  plan_done:
+    required:
+      - tiles.result.value      # released version
+      - tiles.duration.value
+      - tiles.scope.value       # EPICs
+      - tiles.unresolved.value  # items left open
+      - items
