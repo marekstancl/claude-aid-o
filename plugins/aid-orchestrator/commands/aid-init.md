@@ -188,6 +188,15 @@ Read project root to detect stack and populate `config/project.yaml`:
 
 If multiple detected, list all. Commands are suggestions — PM can override in `project.yaml`.
 
+**A new workspace also gets `versioning.release_exempt_paths` and
+`versioning.app_paths` (P089)** — the two lists the release guard decides by,
+seeded from the same scan (test directories, the detected docs root, CI config)
+and confirmed with the PM. Their meaning and shape are defined once, in
+`skills/setup/project-scan.md`; this command only seeds them at creation.
+An ALREADY-INITIALISED project gets them from `/aid-setup scan`, never from
+here: init creates and migrates, mutation belongs to `/aid-setup`. Both absent
+→ the guard keeps today's label behaviour and prints one hint.
+
 ### execution.yaml Generation
 
 After auto-detection, generate `.aid-o/config/execution.yaml` from per-stack template fragments under `defaults/execution-stacks/`. Idempotent: existing file is **not** overwritten.

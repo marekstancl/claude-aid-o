@@ -133,6 +133,13 @@ it on disk. `CLAUDE.md` is never created by `/aid-init` at all.
 | `.aid-o/config/integrations.yaml` | `/aid-init`, CONDITIONALLY (only when Qdrant memory is detected, and then only `memory.enabled: true`) | `/aid-setup integrations` | every enable/disable after creation |
 | `CLAUDE.md` | not created by `/aid-init` | `/aid-setup claude-md` | sole AID writer; never overwrites PM-authored content |
 
+**Also here: `versioning.release_exempt_paths` / `versioning.app_paths` (P089).**
+`scan` is where an ALREADY-INITIALISED project gets the two lists the release
+guard decides by. `/aid-init` seeds them for a new workspace and never mutates
+an existing config, so without this route every project that already exists —
+AID's own included — would stay on the old commit-label branch for ever. The
+detection and the PM confirmation are defined in `skills/setup/project-scan.md`.
+
 **Not here: `gate_profiles` upgrade for an existing `execution.yaml`.** `(4) Project Scan` /
 `scan` re-detects `test_cmd`/`lint_cmd`/`build_cmd` in `project.yaml` — it does not touch
 `config/execution.yaml`. The non-destructive, PM-confirmed `gate_profile_defaults`/`gate_profiles`
