@@ -247,3 +247,74 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   [ "$status" -eq 0 ]
   [[ "$output" != *"written for a human"* ]]
 }
+
+# ── IMP-517: a suite named only in prose (P089 Step 11) ─────────────────────
+#
+# ADVISORY, deliberately. The lint's exit code is unchanged in every case
+# below; what is asserted is the line, and its absence where the name is
+# already declared or already exists.
+
+# _plan_ts <file> <testing-strategy-body…> — a lint-clean plan whose Testing
+# Strategy is whatever the caller says.
+_plan_ts() {
+  local f="$1"; shift
+  { printf -- '---\nid: P900\ntype: regular\nrisk: low\n---\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\n'
+    printf '%s\n' "$@"
+    printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
+    printf -- '- Modify: `src/b.ts` (lines ~1-9) — edit\n'
+    printf '\n**Architecture Context:**\nn/a\n'
+  } > "$f"
+}
+
+@test "IMP-517: a suite named only in prose is reported, advisory" {
+  _plan_ts p.md 'Nová sada `test-nothing-writes-it.bats` pokryje obě větve.'
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-nothing-writes-it.bats"* ]]
+  [[ "$output" == *"[ADVISORY]"* ]]
+  [[ "$output" == *"is in no \`Test:\` bullet"* ]]
+}
+
+@test "IMP-517: the same name declared in a Test: bullet is not reported" {
+  { printf -- '---\nid: P900\ntype: regular\nrisk: low\n---\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nNová sada `test-declared.bats` pokryje obě větve.\n'
+    printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
+    printf -- '- Test: `scripts/tests/bats/test-declared.bats`\n'
+    printf '\n**Architecture Context:**\nn/a\n'
+  } > p.md
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"is in no \`Test:\` bullet"* ]]
+}
+
+@test "IMP-517: a suite that already exists is not a promise" {
+  mkdir -p suites
+  : > suites/test-already-here.bats
+  _plan_ts p.md 'Rozšíříme `test-already-here.bats` o dva případy.'
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"test-already-here.bats\` is named in"* ]]
+}
+
+@test "IMP-517: a suite named in a STEP, not in the strategy, is not scanned" {
+  # The section ends at `### Step`. Without that, a plan whose Testing Strategy
+  # is its last `##` section had every step's prose read as strategy.
+  { printf -- '---\nid: P900\ntype: regular\nrisk: low\n---\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nBez nové sady.\n'
+    printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n'
+    printf 'Prozaicka zminka o `test-only-in-a-step.bats`.\n\n**Files:**\n'
+    printf -- '- Modify: `src/b.ts` (lines ~1-9) — edit\n'
+    printf '\n**Architecture Context:**\nn/a\n'
+  } > p.md
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"test-only-in-a-step.bats"* ]]
+}
+
+@test "IMP-517: a name inside a fenced block is an illustration, not a promise" {
+  _plan_ts p.md 'Postup:' '' '```bash' 'bats scripts/tests/bats/test-illustration.bats' '```'
+  run "$LINT" p.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"test-illustration.bats"* ]]
+}

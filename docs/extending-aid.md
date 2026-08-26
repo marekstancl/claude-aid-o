@@ -2687,3 +2687,117 @@ decides.
 
 
 **Last Updated:** 2026-08-25
+
+## Artifact profiles and the file-based release scope (P089)
+
+Two independent mechanisms landed in the same window. They share nothing but
+the observation behind both: a rule that decides from a PROMISE — a block
+heading, a commit label — cannot be trusted, and a rule that decides from
+STATE can.
+
+### What a page of a given type owes
+
+`lib/aid-artifact-render.sh` renders every PM-facing page in AID, and until
+P089 it enforced one skeleton for all of them: seven blocks, caps, no paths in
+the link blocks. What belongs INSIDE a block it did not say — so the gates page
+could satisfy every structural rule and still be worthless (it announced "6 of
+9 passed" over a run where **nothing** failed and three gates had simply not
+run).
+
+`facts.artifact_type` now names one of five types, and
+`defaults/artifact-profiles.yaml` says what each owes. **Adding a type is a
+section in that file**, never a branch in the renderer.
+
+| `artifact_type` | Renderer/caller |
+|---|---|
+| `brainstorming` | `lib/aid-brainstorm-summary.sh` |
+| `plan` | `lib/aid-plan-summary.sh` |
+| `gates` | `lib/aid-gate-outcome-summary.sh` |
+| `epic_done` | `lib/aid-epic-summary-page.sh` |
+| `plan_done` | `lib/aid-plan-close-summary.sh` |
+
+Three things the profile decides:
+
+1. **Required fields.** A page missing one of its type's fields does not
+   render, and the refusal names the type and the field.
+2. **State-derived wording.** A type marked `outcome_from_state` hands the
+   renderer four counts (`passed` / `failed` / `not_run` / `waived`, plus an
+   optional `blocked`) and the renderer COMPOSES the result, verified and
+   did-not-run tiles from them, dropping whatever the caller wrote there.
+   This is the important half: "zero failures" beside a sentence about failure
+   is now impossible to write, rather than something a vocabulary check would
+   have to catch — and no vocabulary check is ever complete.
+3. **Between-field contradictions.** Block 6 may not say "nothing is expected"
+   beside a list of next steps; a link may not be nameless, may not repeat the
+   detail target, and **may not be a file path** in blocks 5 or 7.
+
+What is NOT checked is whether the page is any good. That is a reader's
+judgement, and the boundary is written into the standard the same way.
+
+**Adding a caller.** Build `facts` with `artifact_type`, call
+`aid_artifact_render`. If the renderer refuses, the profile is telling you
+what your type owes — the fix belongs in the profile or in your facts, never
+in an exception in the renderer. A caller that passes no `artifact_type` keeps
+the pre-P089 behaviour and says so on stderr; no production caller is on that
+branch, and `test-artifact-profiles.bats` asserts that over the whole caller
+set rather than per caller.
+
+**A milestone owes a page.** `lib/aid-artifact-obligation.sh` refuses to close
+a turn that finished one of three milestones without rendering its page: a
+written plan, an EPIC whose review ended, a closed plan. **A step owes nothing,
+and a failed step owes nothing either.** The EPIC page is produced by
+`cmd_done_advance` on the review→release edge — named, not instructed, because
+a rule that demands a page nobody produces is exactly the kind of rule this
+plan exists to stop writing.
+
+### Whether a range of work requires a release
+
+The pre-push guard used to decide from the commit subject. Both directions were
+wrong: `fix(tests):` blocked a push that changed no application code, and
+`chore:` could change the application and pass.
+
+`lib/aid-release-scope.sh` decides from the FILES, in a fixed order that is the
+same in all three copies of it:
+
+1. list the commits in `<last tag reachable from the judged commit>..<commit>`
+   and **remove** those carrying a `No-Release: <reason>` footer;
+2. take the **UNION** of the paths the remaining commits touched;
+3. decide that set against `versioning.release_exempt_paths` and
+   `versioning.app_paths` from `.aid-o/config/project.yaml`.
+
+A union and not a diff: once commits are removed the remainder is no longer a
+contiguous range, and `git diff` has nothing to compute over it — two
+implementations would each invent an answer. Consequences deliberately accepted
+and pinned by tests: a revert adds its own paths (a change and its undo still
+require a release); a merge commit contributes only its own first-parent diff,
+while the commits it brought in count on their own, because merged work is work
+being released; where an exempt and a non-exempt commit touch the same path,
+the non-exempt one wins.
+
+**The `release:` label does not move the boundary.** Anyone can write a commit
+whose subject starts `release:` after an application change; the boundary is
+the last version tag, which is a verifiable statement about what shipped.
+
+Three consumers, one authority:
+
+| Consumer | What it does |
+|---|---|
+| `defaults/hooks/pre-push` | blocks, naming the commits that caused it |
+| `scripts/aid-release-check.sh` | prints the same verdict into CI and **always exits 0** |
+| `scripts/aid-release.sh` | asks the library before reading any commit subject |
+
+The hook cannot source the library — it runs in the consumer's repository — so
+it carries a **verbatim copy** between `AID-RELEASE-SCOPE-PORTABLE-START/END`.
+`test-release-scope.bats` byte-compares the two. If you change the library,
+copy the region across; the test is the reason two copies are survivable.
+
+**Fail-open on purpose.** No `yq`, no config, or no
+`versioning.release_exempt_paths` → verdict `no_config` and every consumer
+keeps the old label behaviour, with one hint line. A repository with no version
+tag → `no_tag`, and it passes: a first push must not demand a release.
+
+**`scripts/gates/release-paths-drift.sh`** compares those two lists against a
+Dockerfile's `COPY`/`ADD` sources, because the config and the image are two
+claims about the same thing. In THIS repository it is attached to no runner, so
+its presence is not coverage — wiring it is the consumer's decision, and its
+registry row says so in as many words.

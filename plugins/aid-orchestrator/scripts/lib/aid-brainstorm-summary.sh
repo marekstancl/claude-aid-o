@@ -137,7 +137,9 @@ aid_brainstorm_summary_render() {
     + ["Odsouhlasit brainstorming (aid-brainstorm-state.sh approve)",
        "Nechat z něj napsat plán"]')"
 
-  links_json="$(jq -n --arg d "$dir" '["Pracovní artefakty: " + $d]')"
+  # NAMES, never paths (blocks 5 and 7). The working directory is in the
+  # provenance footer, which already names it.
+  links_json="$(jq -n '["Pracovní artefakty brainstormingu"]')"
 
   facts_json="$(jq -n \
     --arg plan_id "$plan_id" \
@@ -148,6 +150,7 @@ aid_brainstorm_summary_render() {
     --arg topic "$topic" \
     --argjson items "$items_json" --argjson next "$next_json" --argjson links "$links_json" \
     --arg dir "$dir" '{
+      artifact_type: "brainstorming",
       eyebrow: "Brainstorming",
       title: ("Brainstorming " + $plan_id),
       when: $when,
@@ -160,7 +163,7 @@ aid_brainstorm_summary_render() {
       items: $items,
       next_steps: $next,
       links: $links,
-      detail: {label: ("Technický detail: " + $dir)},
+      detail: {label: "Technický detail brainstormingu"},
       footer: ("Vyrobil aid-brainstorm-summary.sh z " + $dir + ". Čísla jsou spočítaná z běhu, ne opsaná.")
     }')" || {
     echo "aid_brainstorm_summary_render: failed to build facts" >&2

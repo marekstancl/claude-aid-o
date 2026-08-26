@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# lib/aid-artifact-obligation.sh — a written plan owes the PM a page
-# (P086 Step 4)
+# lib/aid-artifact-obligation.sh — a finished MILESTONE owes the PM a page
+# (P086 Step 4; extended from one milestone to three by P089 Step 6)
 #
-#   aid_artifact_obligation_check <plan_file>
-#   aid_hook_rule_plan_artifact              (Stop-event registry handler)
+#   aid_artifact_obligation_check       <plan_file>          milestone 1
+#   aid_artifact_obligation_epic_check  <root> <state_file>  milestone 2
+#   aid_artifact_obligation_close_check <root> <state_file>  milestone 3
+#   aid_hook_rule_milestone_artifact                (Stop-event registry handler)
+#
+# THREE MILESTONES, AND DELIBERATELY NOT MORE
+#   The PM's rule is that a page belongs at the END OF A MILESTONE: after the
+#   plan is written, after an EPIC's review, after the plan as a whole. A step
+#   owes nothing, and a FAILED step owes nothing either ("NECHCI ARTIFACT
+#   v tomto případě vůbec") — so neither activates this rule, and a test says
+#   so rather than leaving it to be inferred from the absence of code.
 #
 # WHY THIS EXISTS
 #   `commands/aid-plan.md` step 8p has told sessions to render the PM's page
@@ -34,7 +43,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-24
+# **Last Updated:** 2026-08-26
 # =============================================================================
 [[ -n "${_AID_ARTIFACT_OBLIGATION_SH_LOADED:-}" ]] && return 0
 _AID_ARTIFACT_OBLIGATION_SH_LOADED=1
@@ -44,6 +53,8 @@ _AID_AO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_AID_AO_LIB_DIR}/aid-roots.sh"
 # shellcheck source=aid-plan-summary.sh
 source "${_AID_AO_LIB_DIR}/aid-plan-summary.sh"
+# shellcheck source=aid-epic-summary-page.sh
+source "${_AID_AO_LIB_DIR}/aid-epic-summary-page.sh"
 
 # The page commands/aid-plan.md step 8p renders, in the one place that spells
 # it, so the instruction and the check cannot drift apart.
@@ -98,12 +109,155 @@ aid_artifact_obligation_check() {
 }
 
 # ---------------------------------------------------------------------------
-# aid_hook_rule_plan_artifact — the Stop-event handler.
+# MILESTONE 2 — a finished EPIC
+# ---------------------------------------------------------------------------
+
+# _aid_ao_epic_source_epoch <root> <state_file>
+#   Fills _AID_AO_SRC_EPOCH with when the EPIC's work last moved, and
+#   _AID_AO_SRC_WORD with the NAME of that moment; returns 1 when neither can
+#   be determined.
+#
+#   The EPIC's own last commit is the right source: the page is rendered at the
+#   release edge, so a commit landing AFTER it means the EPIC was re-worked and
+#   every figure on the page is stale. The branch is read from the run's state
+#   file. A merged-and-deleted branch has no commit to ask about any more, and
+#   then the state file's own mtime is used and the message SAYS which of the
+#   two was compared — an unstated fallback is how a weaker check gets mistaken
+#   for the strong one.
+#
+#   TWO GLOBALS AND NOT A PACKED LINE. This used to print "<epoch>\t<word>" and
+#   the caller unpacked it with `read`, which returns non-zero on input with no
+#   trailing newline — so every freshness comparison took the "cannot tell"
+#   branch and passed. The failure was silent and fail-open; the shape that
+#   allowed it is gone.
+_aid_ao_epic_source_epoch() {
+  local root="$1" state="$2" branch epoch=""
+  _AID_AO_SRC_EPOCH=""; _AID_AO_SRC_WORD=""
+  branch="$(_esp_yaml "$state" branch)"
+  if [[ -n "$branch" ]]; then
+    epoch="$(git -C "$root" log -1 --format=%ct "$branch" -- 2>/dev/null)" || epoch=""
+  fi
+  if [[ "$epoch" =~ ^[0-9]+$ ]]; then
+    _AID_AO_SRC_EPOCH="$epoch"
+    _AID_AO_SRC_WORD="posledního commitu EPICu"
+    return 0
+  fi
+  epoch="$(stat -c %Y "$state" 2>/dev/null || stat -f %m "$state" 2>/dev/null)" || epoch=""
+  [[ "$epoch" =~ ^[0-9]+$ ]] || return 1
+  _AID_AO_SRC_EPOCH="$epoch"
+  _AID_AO_SRC_WORD="záznamu běhu (větev EPICu už neexistuje)"
+  return 0
+}
+
+# aid_artifact_obligation_epic_check <root> <run_state_file>
+#   0 the page is there and current
+#   1 no page, or one older than the EPIC's last commit
+#   3 not applicable — this run has not finished its review
+aid_artifact_obligation_epic_check() {
+  local root="${1:?aid_artifact_obligation_epic_check: root required}"
+  local state="${2:?aid_artifact_obligation_epic_check: state file required}"
+  [[ -r "$state" ]] || { echo "no readable run state at ${state}" >&2; return 3; }
+
+  # THE MILESTONE IS THE REVIEW, NOT THE LAST STEP. `done_phase: release` is
+  # the one line that says the review is over — a run still in `review`, or a
+  # finished STEP, owes nothing.
+  grep -qE '^done_phase:[[:space:]]*"?release"?[[:space:]]*$' "$state" 2>/dev/null || {
+    echo "$(basename "$(dirname "$state")") has not finished its review — no page is owed yet" >&2
+    return 3
+  }
+
+  local epic_id page
+  epic_id="$(_esp_yaml "$state" epic_id)"
+  # A FINISHED REVIEW WHOSE ID CANNOT BE READ IS A FINDING, NOT AN EXEMPTION.
+  # Returning "not applicable" here would mean a corrupt or truncated run
+  # record silently buys its way out of the obligation — the one input a
+  # milestone cannot be trusted to supply about itself.
+  page="$(aid_epic_summary_page_path "$root" "$epic_id")" || {
+    echo "a run at ${state} says its review is finished but names no usable EPIC id ('${epic_id:-<none>}'), so its page cannot even be located — fix the run record, then render the page." >&2
+    return 1
+  }
+
+  if [[ ! -f "$page" ]]; then
+    echo "${epic_id} finished its review but its PM page was not rendered — expected ${page}. It is produced by 'aid-fsm.sh done-advance review release'; if that edge was crossed with the renderer unavailable, re-render it with aid_epic_summary_page_render (then publish it with the Artifact tool)." >&2
+    return 1
+  fi
+
+  local page_epoch
+  _aid_ao_epic_source_epoch "$root" "$state" || return 0
+  page_epoch="$(stat -c %Y "$page" 2>/dev/null || stat -f %m "$page" 2>/dev/null)" || return 0
+  if (( page_epoch < _AID_AO_SRC_EPOCH )); then
+    echo "${epic_id}'s PM page ${page} is OLDER than the time of ${_AID_AO_SRC_WORD} — the EPIC moved after it was summarised, so the page describes work that is no longer what merged. Re-render it." >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# MILESTONE 3 — the plan as a whole
+# ---------------------------------------------------------------------------
+
+# aid_artifact_obligation_close_page <root> <plan_id>
+#   The page of the HIGHEST-NUMBERED plan-final attempt, or nothing.
+#
+#   By attempt number and not by mtime: attempts are numbered, never deleted,
+#   and mtime is a different ordering — one `touch` on attempt 1's directory and
+#   the obligation would vouch for the wrong page. This is the same
+#   derive-from-disk rule aid-plan-fsm.sh's attempt allocator uses; the boundary
+#   manifest names the current run directory too, but reading it would pull the
+#   manifest library into a hook path that otherwise needs nothing.
+aid_artifact_obligation_close_page() {
+  local root="$1" plan_id="$2" best="" best_n=-1 f n
+  for f in "${root}/.aid-o/work/evidence/${plan_id}"/R-"${plan_id}"-final-*/plan-close-artifact.html; do
+    [[ -f "$f" ]] || continue
+    n="${f%/plan-close-artifact.html}"
+    n="${n##*-final-}"
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    if (( n > best_n )); then best_n="$n"; best="$f"; fi
+  done
+  [[ -n "$best" ]] || return 1
+  printf '%s' "$best"
+}
+
+# aid_artifact_obligation_close_check <root> <plan_state_file>
+#   0 the page is there and current
+#   1 no page, or one older than the close
+#   3 not applicable — the plan is not closed
+aid_artifact_obligation_close_check() {
+  local root="${1:?aid_artifact_obligation_close_check: root required}"
+  local state="${2:?aid_artifact_obligation_close_check: plan state file required}"
+  [[ -r "$state" ]] || { echo "no readable plan state at ${state}" >&2; return 3; }
+  grep -qE '^plan_state:[[:space:]]*"?CLOSED"?[[:space:]]*$' "$state" 2>/dev/null || {
+    echo "$(basename "$(dirname "$state")") is not closed — no closing page is owed yet" >&2
+    return 3
+  }
+  local plan_id
+  plan_id="$(_esp_yaml "$state" plan_id)"
+  # Same as the EPIC case: a CLOSED record that names no plan is corrupt, and
+  # corruption must not be the way past an obligation.
+  [[ -n "$plan_id" ]] || {
+    echo "the plan state at ${state} says CLOSED but names no plan, so its closing page cannot be located — fix the record, then render the page." >&2
+    return 1
+  }
+
+  local page
+  if ! page="$(aid_artifact_obligation_close_page "$root" "$plan_id")"; then
+    echo "${plan_id} was closed but its closing page was not rendered — expected .aid-o/work/evidence/${plan_id}/R-${plan_id}-final-<N>/plan-close-artifact.html. Render it: source \"\$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh\" && aid_plan_close_render \"<evidence>/pm-decision-brief.json\" \"<evidence>/release-decision.json\" \"${plan_id}\" \"<evidence>\" (then publish it with the Artifact tool)." >&2
+    return 1
+  fi
+  if [[ "$state" -nt "$page" ]]; then
+    echo "${plan_id}'s closing page ${page} is OLDER than the close itself — it describes a state the plan has already left. Re-render it." >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# aid_hook_rule_milestone_artifact — the Stop-event handler.
 #
 # The earlier catch of what scripts/aid-turn-gate.sh checks after the CLI
 # returns. Same check, same message; only the moment differs.
 # ---------------------------------------------------------------------------
-aid_hook_rule_plan_artifact() {
+aid_hook_rule_milestone_artifact() {
   local input; input="$(cat)"
   local cwd transcript
   cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null)"
@@ -130,19 +284,45 @@ aid_hook_rule_plan_artifact() {
   marker="$(mktemp)" || { echo "no temp file for the session window" >&2; return 3; }
   touch -d "$started" "$marker" 2>/dev/null || { rm -f "$marker"; echo "unreadable session start '${started}'" >&2; return 3; }
 
-  local findings="" plan
-  while IFS= read -r plan; do
-    [[ -n "$plan" ]] || continue
-    local err; err="$(aid_artifact_obligation_check "$plan" 2>&1)" || rc=$?
-    [[ "$rc" -eq 1 ]] && findings+="${err}"$'\n'
-    rc=0
-  done < <(find "$plans" -maxdepth 1 -name 'P*.md' -newer "$marker" 2>/dev/null)
+  # THE THREE MILESTONES ARE A TABLE, NOT THREE LOOPS. What differs between
+  # them is a root, a find depth, a filename and which check to call; the loop
+  # body — read a line, ask the check, keep only a rc==1 finding, reset — is
+  # the same three times, and its `rc` handling is exactly the kind of idiom
+  # that gets fixed in one copy and left wrong in the others.
+  #
+  # The run state files live at evidence/<epic_id>/<run_id>/fsm-state.yaml —
+  # depth 3. The EPIC pages live at evidence/<plan_id>/<epic_id>/ — depth 2,
+  # and carry no state file, so the two never collide.
+  local findings="" err
+
+  # _scan <check_fn> <dir> <depth> <name> — the shared body. A check is called
+  # with the workspace root first unless it takes only a file (milestone 1).
+  _scan() {
+    local fn="$1" dir="$2" depth="$3" name="$4" hit rc=0
+    [[ -d "$dir" ]] || return 0
+    while IFS= read -r hit; do
+      [[ -n "$hit" ]] || continue
+      if [[ "$fn" == "aid_artifact_obligation_check" ]]; then
+        err="$("$fn" "$hit" 2>&1)" || rc=$?
+      else
+        err="$("$fn" "$root" "$hit" 2>&1)" || rc=$?
+      fi
+      [[ "$rc" -eq 1 ]] && findings+="${err}"$'\n'
+      rc=0
+    done < <(find "$dir" -mindepth "$depth" -maxdepth "$depth" -name "$name" -newer "$marker" 2>/dev/null)
+  }
+
+  _scan aid_artifact_obligation_check       "$plans"                            1 'P*.md'
+  _scan aid_artifact_obligation_epic_check  "${root}/.aid-o/work/evidence"      3 'fsm-state.yaml'
+  _scan aid_artifact_obligation_close_check "${root}/.aid-o/work/plan-state"    2 'plan-state.yaml'
+  unset -f _scan
+
   rm -f "$marker"
 
   if [[ -n "$findings" ]]; then
     printf '%s' "$findings" >&2
     return 2
   fi
-  echo "every plan written in this session has a current PM page" >&2
+  echo "every milestone finished in this session has a current PM page" >&2
   return 3
 }

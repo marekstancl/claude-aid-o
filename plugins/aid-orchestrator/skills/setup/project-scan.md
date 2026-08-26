@@ -58,6 +58,35 @@ UI proposal and every UI check covers desktop AND mobile; `false` means desktop 
 asked only of a project that has a UI; confirm a `false` with the PM — it is a decision about
 the product, not a detection.
 
+### `versioning.release_exempt_paths` and `versioning.app_paths` (P089)
+
+The release guard decides by WHAT CHANGED, not by the label on a commit
+message. Two lists tell it which is which, and **this module owns them** —
+`/aid-init` seeds them for a new workspace, but an already-initialised project
+only ever gets them here, because init creates and migrates while mutation
+belongs to `/aid-setup`. Without that, every project that already exists —
+including AID's own — would stay on the label branch for ever.
+
+```yaml
+versioning:
+  release_exempt_paths:             # changing ONLY these never needs a release
+    - scripts/tests
+    - docs
+    - .github
+  app_paths:                        # what a user actually runs
+    - src
+    - plugins
+```
+
+Detect a first proposal from the repository's shape (test directories, the docs
+root already detected above, CI config) and **confirm it with the PM** — what
+ships is a product decision, not a detection. Preserve existing values; a
+project that has already answered this is not asked again.
+
+Both lists absent → the guard falls back to today's label behaviour and prints
+one hint line. That is deliberate: a project must not break because it has not
+been configured yet.
+
 **Omit a key the project does not have** — absent means the obligation does not
 apply, while an empty string looks like a path that failed to match. Any key
 under `documentation:` other than `screenshot_tool` counts as a surface, so a
@@ -94,4 +123,4 @@ Written to: .aid-o/config/project.yaml
 ```
 
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-26

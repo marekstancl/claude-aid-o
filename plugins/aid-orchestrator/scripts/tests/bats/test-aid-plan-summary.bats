@@ -321,3 +321,11 @@ PLAN
   [ "$status" -eq 0 ]
   ! grep -q "VADA" "$o"
 }
+
+@test "the plan page declares artifact_type plan (P089 Step 5)" {
+  local p="$BATS_TEST_TMPDIR/t.md" o="$BATS_TEST_TMPDIR/t.html"
+  printf -- '---\nid: P908\ntype: plan\n---\n# P908 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** backend\n' > "$p"
+  run aid_plan_summary_render "$p" "$o"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"declares no artifact_type"* ]]
+}

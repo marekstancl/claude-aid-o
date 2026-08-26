@@ -39,10 +39,11 @@ teardown() {
 
 # ─── fixture builders ───────────────────────────────────────────────────────
 
-# _row <gate> <result> <exit> <ms> <attempts>
+# _row <gate> <result> <exit> <ms> <attempts> [reason]
 _row() {
   jq -nc --arg g "$1" --arg r "$2" --argjson e "$3" --argjson d "$4" --argjson a "$5" \
-    '{gate:$g, result:$r, reason:"", exit_code:$e, duration_ms:$d, output:"", attempts:$a}'
+    --arg why "${6:-}" \
+    '{gate:$g, result:$r, reason:$why, exit_code:$e, duration_ms:$d, output:"", attempts:$a}'
 }
 
 # _report <overall> <gates_object_json> [extra_object_json]
@@ -65,19 +66,25 @@ _write() { printf '%s\n' "$1" > "$2"; }
 # order-assert technique test-aid-artifact-render.bats uses for the 7 blocks.
 _pos() { grep -abo -F -e "$2" "$1" | head -1 | cut -d: -f1; }
 
-# _assert_seven_blocks <body> — the ecosystem block order, structurally.
-_assert_seven_blocks() {
-  local f="$1" p1 p2 p3 p4 p5 p6 p7
+# _assert_block_order <body> — the ecosystem block order, structurally.
+#
+# BLOCK 5 IS NOT ASSERTED, AND THAT IS THE POINT (P089 Step 3). The standard
+# renders "Čeho se to týká" only when related links exist, and this page has
+# none any more: its only link was the report path, which the standard forbids
+# in blocks 5 and 7 and which the provenance footer already names. A helper
+# that demanded block 5 would demand the defect back.
+_assert_block_order() {
+  local f="$1" p1 p2 p3 p4 p6 p7
   p1="$(_pos "$f" '<header class="masthead">')"
   p2="$(_pos "$f" '<section class="tiles">')"
   p3="$(_pos "$f" '<h2>Shrnutí</h2>')"
   p4="$(_pos "$f" '<h2>Jádro</h2>')"
-  p5="$(_pos "$f" '<h2>Čeho se to týká</h2>')"
   p6="$(_pos "$f" '<h2>Co se čeká ode mě</h2>')"
-  p7="$(_pos "$f" 'class="golink"')"
-  for v in "$p1" "$p2" "$p3" "$p4" "$p5" "$p6" "$p7"; do [ -n "$v" ]; done
+  p7="$(_pos "$f" 'class="golink')"
+  for v in "$p1" "$p2" "$p3" "$p4" "$p6" "$p7"; do [ -n "$v" ]; done
   [ "$p1" -lt "$p2" ]; [ "$p2" -lt "$p3" ]; [ "$p3" -lt "$p4" ]
-  [ "$p4" -lt "$p5" ]; [ "$p5" -lt "$p6" ]; [ "$p6" -lt "$p7" ]
+  [ "$p4" -lt "$p6" ]; [ "$p6" -lt "$p7" ]
+  refute_grep -qF '<h2>Čeho se to týká</h2>' "$f"
 }
 
 BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
@@ -90,21 +97,31 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ "$status" -eq 0 ]
 
   [[ "$output" == Hotovo:* ]]
-  [[ "$output" == *"2 z 2 prošlo"* ]]
+  [[ "$output" == *"nic neselhalo"* ]]
+  [[ "$output" == *"Ověřeno: 2 z 2 bran"* ]]
   [[ "$output" != *Zastaveno:* ]]
   [[ "${output##*$'\n'}" == "Artifact: $(BODY)" ]]
 
-  # Tiles are DERIVED: 120000 ms of gate time is 2 min, not a claim.
-  grep -qF '<span class="v">2/2 prošlo</span>' "$(BODY)"
+  # Tiles are DERIVED: 120000 ms of gate time is 2 min, not a claim; and the
+  # headline is HOW MANY FAILED, never a ratio of passes.
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
   grep -qF '<span class="k">Trvalo</span><span class="v">2 min 0 s</span>' "$(BODY)"
-  grep -qF '<span class="k">Rozsah</span><span class="v">2</span>' "$(BODY)"
-  grep -qF '<span class="k">Neuzavřeno</span><span class="v">0</span>' "$(BODY)"
+  grep -qF '<span class="k">Ověřeno</span><span class="v">2 brány</span>' "$(BODY)"
+  grep -qF '<span class="k">Neběželo</span><span class="v">0</span>' "$(BODY)"
+  refute_grep -qF '2/2 prošlo' "$(BODY)"
+
+  # The core names WHICH gates ran and what each of them verified.
+  grep -qF 'brána tests: prošla — ověřila: bats scripts/tests' "$(BODY)"
+
+  # Nothing is expected, so no command stands beside block 6.
+  grep -qF 'Nic — ozvu se, až bude hotovo' "$(BODY)"
+  refute_grep -qF '<h2>Jak pokračovat</h2>' "$(BODY)"
 }
 
-@test "the rendered artifact carries all seven blocks in the standard's order" {
+@test "the rendered artifact carries its blocks in the standard's order, and no link block" {
   _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
   aid_gate_outcome_render "" "$RUN_DIR"
-  _assert_seven_blocks "$(BODY)"
+  _assert_block_order "$(BODY)"
 }
 
 # ─── fixture class 2: a failed required gate ────────────────────────────────
@@ -124,8 +141,9 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [[ "$output" == *"Doporučené řešení: zopakuj bránu příkazem \`bats scripts/tests\`"* ]]
   [[ "$output" == *"aid-fsm.sh transition GATES DONE <state_file> --force --reason"* ]]
 
-  grep -qF '<span class="v">1/2 prošlo</span>' "$(BODY)"
-  grep -qF '<span class="k">Neuzavřeno</span><span class="v">1</span>' "$(BODY)"
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
+  grep -qF '<span class="k">Neběželo</span><span class="v">0</span>' "$(BODY)"
 }
 
 # ─── fixture class 3: waived — the D3 rule ──────────────────────────────────
@@ -139,8 +157,8 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
 
-  grep -qF 'brána tests: waived — PM převzal riziko' "$(BODY)"
-  [[ "$output" == *"waived"* ]]
+  grep -qF 'brána tests: prominuta — PM převzal riziko' "$(BODY)"
+  [[ "$output" == *"prominutá"* ]]
 
   # "NEVER AS A PASS" IS A CLAIM ABOUT LABELS, NOT ABOUT ONE ENGLISH WORD.
   # This used to forbid only the literal `passed`, on surfaces that are written
@@ -148,9 +166,9 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   # saying exactly the thing the case is named for. The negative is now scoped
   # to the waived gate's own result item (the page is one long line, so the
   # unit is the <li>, and a document-wide grep would collide with the entirely
-  # legitimate "1/2 prošlo" count tile) and covers the Czech forms.
+  # legitimate count tiles) and covers the Czech forms.
   local waived_li
-  waived_li="$(grep -oE '<li>[^<]*</li>' "$(BODY)" | grep -F 'waived')"
+  waived_li="$(grep -oE '<li>[^<]*</li>' "$(BODY)" | grep -F 'prominuta')"
   [[ "$waived_li" == *"tests"* ]]
   refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_li"
   # `OK` is matched case-SENSITIVELY and as a whole word: folded to lowercase
@@ -158,14 +176,16 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_li"
 
   local waived_card
-  waived_card="$(grep -F 'waived' <<<"$output")"
+  waived_card="$(grep -F 'prominut' <<<"$output")"
   [ -n "$waived_card" ]
   refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_card"
   refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_card"
 
-  # A waived gate is unresolved, not a pass: 1 of 2 actually passed.
-  grep -qF '<span class="v">1/2 prošlo</span>' "$(BODY)"
-  grep -qF '<span class="k">Neuzavřeno</span><span class="v">1</span>' "$(BODY)"
+  # A waiver has its OWN count and is never folded into the passes: one gate
+  # passed, one was waived, and the result tile names the waiver.
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, 1 prominuta</span>' "$(BODY)"
+  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
+  grep -qF 'prominuto 1' "$(BODY)"
 }
 
 @test "the report alone carries the waiver — no waiver directory is passed at all" {
@@ -177,7 +197,7 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
 
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  grep -qF 'brána tests: waived — PM převzal riziko' "$(BODY)"
+  grep -qF 'brána tests: prominuta — PM převzal riziko' "$(BODY)"
   refute_grep -qF 'passed' "$(BODY)"
 }
 
@@ -188,7 +208,7 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  grep -qF 'brána docs_updated: waived — PM převzal riziko' "$(BODY)"
+  grep -qF 'brána docs_updated: prominuta — PM převzal riziko' "$(BODY)"
 }
 
 @test "the waiver receipt enriches the line but is never the source of the waiver" {
@@ -202,7 +222,7 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   run aid_gate_outcome_render "" "$RUN_DIR" "$RUN_DIR/waivers"
   [ "$status" -eq 0 ]
   grep -qF 'flaky suite, fixed in the next EPIC' "$(BODY)"
-  grep -qF 'waived — PM převzal riziko' "$(BODY)"
+  grep -qF 'prominuta — PM převzal riziko' "$(BODY)"
 }
 
 @test "a rejected waiver renders in the failed section with its verdict word, never as waived-ok" {
@@ -215,7 +235,7 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
 
   grep -qF 'brána tests: selhala (exit 1), výjimka zamítnuta — expired' "$(BODY)"
   [[ "$output" == Zastaveno:* ]]
-  grep -qF '<span class="v">0/1 prošlo</span>' "$(BODY)"
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
 }
 
 # ─── card selection follows .overall, never a per-row verdict ───────────────
@@ -231,9 +251,10 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ "$status" -eq 0 ]
 
   [[ "$output" == Hotovo:* ]]
-  grep -qF 'brána lint: přeskočena' "$(BODY)"
-  grep -qF 'brána build: mimo profil' "$(BODY)"
-  grep -qF '<span class="k">Neuzavřeno</span><span class="v">0</span>' "$(BODY)"
+  grep -qF 'brána lint neběžela: přeskočena' "$(BODY)"
+  grep -qF 'brána build neběžela: mimo profil' "$(BODY)"
+  grep -qF '<span class="k">Neběželo</span><span class="v">2</span>' "$(BODY)"
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
 }
 
 @test "a FAILING non-required gate with overall pass still selects the Finished card" {
@@ -258,7 +279,7 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   aid_gate_outcome_render "" "$RUN_DIR"
 
   grep -qF 'brána tests: prošla až na 3. pokus' "$(BODY)"
-  grep -qF '<span class="k">Neuzavřeno</span><span class="v">0</span>' "$(BODY)"
+  grep -qF '<span class="k">Neběželo</span><span class="v">0</span>' "$(BODY)"
 }
 
 # ─── edge: an empty profile ─────────────────────────────────────────────────
@@ -269,10 +290,10 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ "$status" -eq 0 ]
 
   [[ "$output" == Hotovo:* ]]
-  [[ "$output" == *"0 z 0 prošlo"* ]]
-  grep -qF '<span class="k">Rozsah</span><span class="v">0</span>' "$(BODY)"
-  grep -qF 'profil nespustil žádnou bránu' "$(BODY)"
-  _assert_seven_blocks "$(BODY)"
+  [[ "$output" == *"Ověřeno: 0 z 0 bran"* ]]
+  grep -qF '<span class="k">Ověřeno</span><span class="v">0 bran</span>' "$(BODY)"
+  grep -qF 'profil nespustil žádnou bránu, takže se nic neověřilo' "$(BODY)"
+  _assert_block_order "$(BODY)"
 }
 
 # ─── all three report locations, plus the escalation shape ──────────────────
@@ -447,4 +468,119 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
 
   refute_grep -qF 'ghp_0123456789abcdefghij' "$(BODY)"
   grep -qE 'Redigováno tajemství: [1-9]' "$(BODY)"
+}
+
+# ─── "did not run" versus "failed" is a mapping, not a guess (P089 Step 3) ──
+
+@test "a fail row whose reason means the harness stopped it counts as not-run, and the page names the reason" {
+  local gates
+  gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 1)" \
+    --argjson b "$(_row build fail 1 0 0 service_unhealthy)" \
+    '{tests:$a, build:$b}')"
+  _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
+  grep -qF '<span class="k">Neběželo</span><span class="v">1</span>' "$(BODY)"
+  grep -qF 'brána build neběžela: služba, kterou brána potřebuje, neběžela' "$(BODY)"
+  refute_grep -qF 'brána build: selhala' "$(BODY)"
+}
+
+@test "a fail row with an unknown reason counts as a failure, conservatively" {
+  local gates
+  gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1 disk_full)" '{tests:$a}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+  grep -qF 'brána tests: selhala (exit 1), důvod: disk_full' "$(BODY)"
+}
+
+@test "a fail row with no reason at all says the reason is unknown" {
+  local gates
+  gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1)" '{tests:$a}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  grep -qF 'brána tests: selhala (exit 1), důvod neznámý' "$(BODY)"
+}
+
+@test "a run blocked by nothing but infrastructure says so instead of reading green" {
+  local gates
+  gates="$(jq -nc --argjson a "$(_row tests fail 1 0 0 service_unhealthy)" '{tests:$a}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, běh přesto zastaven</span>' "$(BODY)"
+  grep -q 'state-critical' "$(BODY)"
+  [[ "$output" == *"neselhala žádná brána, ale 1 jich neproběhlo"* ]]
+}
+
+# ─── blocks 5 and 7 name things ─────────────────────────────────────────────
+
+@test "the report path is in the provenance footer and nowhere else on the page" {
+  _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
+  aid_gate_outcome_render "" "$RUN_DIR"
+
+  grep -qF "Zdroj: $RUN_DIR/gates/gates_report.json." "$(BODY)"
+  grep -qF '<div class="golink golink-flat">Technický detail běhu bran</div>' "$(BODY)"
+  # Once — in the footer. It used to be on this page three times.
+  [ "$(grep -oF "$RUN_DIR/gates/gates_report.json" "$(BODY)" | wc -l)" -eq 1 ]
+}
+
+@test "a fail row that waived_gates names is a waiver, not also a failure (Codex, P089)" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" --argjson b "$(_row tests pass 0 1000 1)" \
+    '{lint:$a, tests:$b}')"
+  extra='{"waived_gates":["lint"]}'
+  _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, 1 prominuta</span>' "$(BODY)"
+  grep -qF 'brána lint: prominuta — PM převzal riziko' "$(BODY)"
+  refute_grep -qF 'brána lint: selhala' "$(BODY)"
+}
+
+@test "a REJECTED waiver stays a failure even when waived_gates names the gate" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" \
+    '{lint:($a + {waiver_rejected:"expired"})}')"
+  extra='{"waived_gates":["lint"]}'
+  _write "$(_report fail "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+  grep -qF 'brána lint: selhala (exit 1), výjimka zamítnuta — expired' "$(BODY)"
+}
+
+
+# ── the classification stream cannot be silenced or forged (Codex, P089) ──
+
+@test "a _command_log entry with no name does not zero every counter" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 1)" '{tests:$a}')"
+  extra='{"_command_log":[{"command":"bats scripts/tests"}]}'
+  _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  # One gate passed, and the page says so — the jq that feeds the loop runs in
+  # a process substitution, so its failure would have been invisible.
+  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
+  [[ "$output" == *"Ověřeno: 1 z 1 bran"* ]]
+}
+
+@test "a unit separator inside a gate name cannot forge a field boundary" {
+  local gates
+  gates="$(jq -nc '{"g": {gate:"gate\u001fpass", result:"fail", reason:"", exit_code:1, duration_ms:10, attempts:1, output:""}}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  # Still ONE failure. Read as a forged boundary, `pass` became the result and
+  # the run reported a passing gate instead.
+  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
 }

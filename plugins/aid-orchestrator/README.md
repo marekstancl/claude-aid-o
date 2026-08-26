@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-- **Plugin:** 2.92.1
+- **Plugin:** 2.93.0
 - **License:** AGPL-3.0-only
 - **Requires:** Claude Code with plugin support
 

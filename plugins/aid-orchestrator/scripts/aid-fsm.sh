@@ -7736,6 +7736,33 @@ EOF
     bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
       2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
 
+    # ─── The PM's page about the finished EPIC (P089 Step 4) ─────────────
+    # HERE, and not in an instruction: the review is over at exactly this
+    # point, and the Step 6 obligation refuses a turn whose finished EPIC has
+    # no page. A rule that demands a page nobody produces is the kind of rule
+    # this plan exists to stop writing. Best-effort in the same sense as
+    # epic-summary.md above — a page that cannot be written never undoes a
+    # transition that already happened; the obligation will say so out loud on
+    # the next turn, which is the surface a PM reads.
+    # shellcheck source=lib/aid-epic-summary-page.sh
+    source "${SCRIPT_DIR}/lib/aid-epic-summary-page.sh" 2>/dev/null || true
+    if declare -F aid_epic_summary_page_render >/dev/null 2>&1; then
+      local _esp_out
+      if _esp_out="$(aid_epic_summary_page_path "$project_root" "$epic_id")"; then
+        aid_epic_summary_page_render "$evidence_dir" "$_esp_out" \
+          "${project_root%/}/.aid-o/work/backlog.md" \
+          || log_warn "epic-summary-artifact.html render failed (non-fatal)"
+      else
+        log_warn "epic-summary-artifact.html: cannot resolve the page path for ${epic_id} (non-fatal)"
+      fi
+    else
+      # SAID OUT LOUD. The library ships beside this script, so its absence is a
+      # broken installation — and a silent skip here would mean the page is
+      # never rendered while the FSM reports a clean release edge, which is the
+      # one failure mode the obligation from Step 6 then blames on the session.
+      log_warn "lib/aid-epic-summary-page.sh did not load — the EPIC's PM page was NOT rendered (non-fatal here; the milestone_artifact_rendered rule will refuse the next turn)"
+    fi
+
     # ─── LAST-RESORT service sweep (P076 Step 10) ────────────────────────
     # The run is complete. If its evidence still records a service that was never
     # released — a runner killed after its last gate, a teardown that could not

@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.92.1** (current) — one alert sender instead of two, and the first line of every message says whether it is about a running plan or last night's tests
+- **v2.93.0** (current) — a page carries what its phase owes and cannot contradict itself (artifact profiles, a page for a finished EPIC, the obligation widened to three milestones), and a release is required by what changed rather than by what a commit message promised
+- **v2.92.1** — one alert sender instead of two, and the first line of every message says whether it is about a running plan or last night's tests
 - **v2.92.0** — agents run concurrently where the plan proves it safe (dispatch contract, per-step worktrees, conflict = retry), three hook rules and a gate-script check, UI proposals built from the application with responsiveness as a project fact
 - **v2.91.0** — a plan's page finally says what the plan delivers, per EPIC and per step
 - **v2.90.2** — a plan title with a dash or diacritics no longer produces an EPIC filename nothing can reproduce

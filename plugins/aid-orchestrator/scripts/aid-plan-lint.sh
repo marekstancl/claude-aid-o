@@ -645,6 +645,59 @@ if _band_owes documentation && [[ -n "${_project_root:-}" ]]; then
   esac
 fi
 
+# ---------------------------------------------------------------------------
+# A suite named only in prose (P089 Step 11, IMP-517)
+# ---------------------------------------------------------------------------
+# `## Testing Strategy` is where a plan says what it verifies, and a suite named
+# THERE reads like a promise that the suite will exist. When no `Test:` bullet
+# declares it and no file of that name is in the repository, nobody is going to
+# write it: the step contract only ever creates what a Files bullet declares.
+#
+# ADVISORY, and that is the honest weight. A name in prose is a weaker signal
+# than a declared path — "we extend test-foo.bats" may be shorthand for a case
+# added to a suite that is declared under a different name — so this asks a
+# question rather than refusing a plan.
+#
+# Fenced blocks are blanked first: a suite name inside a code example is an
+# illustration, not a promise.
+_ts_names() {
+  # `_aid_plan_section` is the ONE reader of "the body of a `## <name>`
+  # section" (lib/aid-scoping.sh), already sourced by this file and already
+  # used by it a few checks up. Writing a fourth private awk here would also
+  # have lost its annotated-heading rule, so `## Testing Strategy (T1)` — the
+  # shape real plans use — would silently not have been scanned at all.
+  #
+  # `### Step` is the one thing the shared reader does not stop at, because a
+  # `###` heading does not end a `## ` section. A plan whose Testing Strategy
+  # is its last level-2 section would otherwise have had every step's prose
+  # read as strategy, so the terminator is applied here, over its output.
+  _aid_plan_section "$PLAN" "Testing Strategy" \
+    | awk '/^###[[:space:]]+Step[[:space:]]/ { exit } { print }' \
+    | grep -oE '[A-Za-z0-9_.-]+\.(bats|sh)' | sort -u
+}
+
+# _declared_in_test_bullet <basename> — is the name in ANY `- Test:` bullet?
+_declared_in_test_bullet() {
+  grep -qE '^[[:space:]]*-[[:space:]]*Test:' "$PLAN" \
+    && grep -E '^[[:space:]]*-[[:space:]]*Test:' "$PLAN" | grep -qF "$1"
+}
+
+while IFS= read -r _ts_name; do
+  [[ -n "$_ts_name" ]] || continue
+  _declared_in_test_bullet "$_ts_name" && continue
+  # A suite that ALREADY exists is not a promise — the plan is naming what it
+  # extends. Only a name that is neither declared nor on disk is the defect.
+  if [[ -n "${_project_root:-}" ]]; then
+    if find "$_project_root" -name "$_ts_name" -print -quit 2>/dev/null | grep -q .; then
+      continue
+    fi
+  else
+    # No root, no way to look: say nothing rather than guess.
+    continue
+  fi
+  _advisory "" "\`${_ts_name}\` is named in ## Testing Strategy, is in no \`Test:\` bullet and does not exist in the repository — declare it with a Test: bullet and a tier, or say in one sentence why the suite is not being written."
+done < <(_ts_names)
+
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 blocking=$errors
 [[ "$mode" == "strict" ]] && blocking=$((blocking + strict_hits))

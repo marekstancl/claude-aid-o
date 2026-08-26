@@ -107,6 +107,18 @@ aid_artifact_number() {
 #
 #   Escaping is applied AFTER redaction, never instead of it.
 #
+# PROFILES — what a page of THIS TYPE owes (P089 Step 2)
+#   `facts.artifact_type` names one of the five types in
+#   defaults/artifact-profiles.yaml, and the profile decides three things:
+#   which fields the page must carry, whether its result tile is COMPOSED from
+#   `facts.outcome` counts rather than written by the caller, and the
+#   between-field contradictions that make a page refuse to render (a block 6
+#   that asks for nothing beside a list of next steps; a link that carries a
+#   file path or repeats the detail target).
+#
+#   No artifact_type → today's behaviour, said out loud on stderr. That branch
+#   is transitional; after P089 Step 5 no production caller is on it.
+#
 # ERROR HANDLING
 #   invalid facts_json  → exit 1 with the jq error. An artifact carrying wrong
 #                         numbers is worse than no artifact.
@@ -277,6 +289,206 @@ _aid_artifact_region() {
   done
 }
 
+# ── PROFILES: what a page of THIS TYPE owes (P089 Step 2) ──────────────────
+#
+# `facts.artifact_type` names one of the five types in
+# defaults/artifact-profiles.yaml. Given one, this library refuses to render a
+# page that does not carry what its type owes — a page can no longer satisfy
+# the seven-block skeleton and still be worthless.
+#
+# A caller that passes NO artifact_type keeps today's behaviour and says so on
+# stderr. That branch is transitional; after P089 Step 5 no production caller
+# is on it.
+
+_AID_ARTIFACT_PROFILES_FILE="${AID_ARTIFACT_PROFILES:-${_AID_ARTIFACT_LIB_DIR}/../../defaults/artifact-profiles.yaml}"
+
+# _aid_artifact_profiles_json — the profile file as JSON, once per process.
+_aid_artifact_profiles_json() {
+  if [[ -n "${_AID_ARTIFACT_PROFILES_CACHE:-}" ]]; then
+    printf '%s' "$_AID_ARTIFACT_PROFILES_CACHE"
+    return 0
+  fi
+  [[ -f "$_AID_ARTIFACT_PROFILES_FILE" ]] || {
+    echo "aid_artifact_render: no profile file at ${_AID_ARTIFACT_PROFILES_FILE}" >&2
+    return 1
+  }
+  command -v yq >/dev/null 2>&1 || {
+    echo "aid_artifact_render: yq is required to read ${_AID_ARTIFACT_PROFILES_FILE}" >&2
+    return 1
+  }
+  _AID_ARTIFACT_PROFILES_CACHE="$(yq -o=json '.' "$_AID_ARTIFACT_PROFILES_FILE" 2>/dev/null)" || {
+    echo "aid_artifact_render: cannot parse ${_AID_ARTIFACT_PROFILES_FILE}" >&2
+    return 1
+  }
+  printf '%s' "$_AID_ARTIFACT_PROFILES_CACHE"
+}
+
+# _aid_artifact_looks_like_path <text> — 0 when the text carries a filesystem
+# path. Blocks 5 and 7 name things; a path is not something a reader of a
+# published page can act on, and the standard says so.
+#
+# Two rules, both anchored so ordinary prose survives: a path-ish PREFIX
+# (`/`, `./`, `../`, `~/`), or a slash-joined run ending in a file extension.
+# "5 kroků / 3 EPIKŮ" has spaces around its slash and no extension; "and/or"
+# has no extension. Neither is a path.
+_aid_artifact_looks_like_path() {
+  local s="${1-}"
+  [[ "$s" =~ (^|[[:space:]])(/|\./|\.\./|~/)[^[:space:]] ]] && return 0
+  [[ "$s" =~ [^[:space:]/]+/[^[:space:]]*\.[A-Za-z0-9]{1,6}([[:space:]]|$) ]] && return 0
+  return 1
+}
+
+# _aid_artifact_czech <n> <form-1> <form-2-4> <form-5+> — "1 brána", "3 brány",
+# "7 bran". A machine writes "3 brán" and a reader notices.
+_aid_artifact_czech() {
+  local n="$1"
+  case "$n" in
+    1) printf '%s %s' "$n" "$2" ;;
+    2|3|4) printf '%s %s' "$n" "$3" ;;
+    *) printf '%s %s' "$n" "$4" ;;
+  esac
+}
+
+# _aid_artifact_outcome_tiles <facts_var_name>
+#   Composes the result, scope and unresolved tiles FROM THE COUNTS and drops
+#   whatever the caller put there. This is the whole point: a page cannot say
+#   "6/9 passed" while nothing failed, because no caller writes that sentence
+#   any more — the renderer derives it from `facts.outcome`.
+_aid_artifact_outcome_tiles() {
+  local -n _ot_facts="$1"
+  local passed failed not_run waived missing=""
+  local k
+  for k in passed_count failed_count not_run_count waived_count; do
+    if [[ "$(jq -r --arg k "$k" 'has("outcome") and (.outcome | has($k))' <<<"$_ot_facts")" != "true" ]]; then
+      missing+="${missing:+, }outcome.${k}"
+    fi
+  done
+  if [[ -n "$missing" ]]; then
+    echo "aid_artifact_render: this type derives its result from state and is missing: ${missing}" >&2
+    return 1
+  fi
+  passed="$(aid_artifact_number "$(jq -r '.outcome.passed_count' <<<"$_ot_facts")")"
+  failed="$(aid_artifact_number "$(jq -r '.outcome.failed_count' <<<"$_ot_facts")")"
+  not_run="$(aid_artifact_number "$(jq -r '.outcome.not_run_count' <<<"$_ot_facts")")"
+  waived="$(aid_artifact_number "$(jq -r '.outcome.waived_count' <<<"$_ot_facts")")"
+
+  # `outcome.blocked` is OPTIONAL and exists for one honest case: a run whose
+  # only failures were infrastructure — so nothing the code owns failed, and the
+  # verdict is still fail. Without it the tile would read "nothing failed" in
+  # green above a page telling the PM the run is stopped.
+  local blocked
+  blocked="$(aid_artifact_number "$(jq -r 'if (.outcome.blocked // false) then 1 else 0 end' <<<"$_ot_facts")")"
+
+  local result_value result_state
+  if (( failed > 0 )); then
+    result_value="$(_aid_artifact_czech "$failed" "brána selhala" "brány selhaly" "bran selhalo")"
+    result_state="critical"
+  elif (( blocked == 1 )); then
+    result_value="Nic neselhalo, běh přesto zastaven"
+    result_state="critical"
+  else
+    result_value="Nic neselhalo"
+    result_state="ok"
+    (( passed == 0 )) && result_state="warn"
+  fi
+  # A waiver is accepted risk, never a pass — so it is named on the result tile
+  # rather than folded into the passed count.
+  if (( waived > 0 )); then
+    result_value+=", $(_aid_artifact_czech "$waived" "prominuta" "prominuty" "prominuto")"
+    [[ "$result_state" == "ok" ]] && result_state="warn"
+  fi
+
+  local scope_value unresolved_state="ok"
+  scope_value="$(_aid_artifact_czech "$passed" "brána" "brány" "bran")"
+  (( not_run > 0 )) && unresolved_state="warn"
+
+  _ot_facts="$(jq \
+    --arg rv "$result_value" --arg rs "$result_state" \
+    --arg sv "$scope_value" \
+    --arg uv "$not_run" --arg us "$unresolved_state" \
+    '.tiles.result     = {label: "Výsledek", value: $rv, state: $rs}
+     | .tiles.scope      = {label: "Ověřeno",  value: $sv, state: "ok"}
+     | .tiles.unresolved = {label: "Neběželo", value: $uv, state: $us}' <<<"$_ot_facts")" || {
+    echo "aid_artifact_render: failed to compose the outcome tiles" >&2
+    return 1
+  }
+  return 0
+}
+
+# _aid_artifact_apply_profile <facts_var_name> <artifact_type>
+#   Everything a profile decides: required fields, state-derived tiles, and the
+#   two contradictions a machine can see (a page that asks for nothing while
+#   listing next steps; a link that carries a path or duplicates the detail).
+_aid_artifact_apply_profile() {
+  local -n _ap_facts="$1"
+  local atype="$2" profiles known
+  profiles="$(_aid_artifact_profiles_json)" || return 1
+
+  if [[ "$(jq -r --arg t "$atype" '.profiles | has($t)' <<<"$profiles")" != "true" ]]; then
+    known="$(jq -r '.profiles | keys_unsorted | join(", ")' <<<"$profiles")"
+    echo "aid_artifact_render: unknown artifact_type '${atype}' (known: ${known})" >&2
+    return 1
+  fi
+
+  if [[ "$(jq -r --arg t "$atype" '.profiles[$t].outcome_from_state // false' <<<"$profiles")" == "true" ]]; then
+    _aid_artifact_outcome_tiles _ap_facts || return 1
+  fi
+
+  local path missing="" present
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    present="$(jq -r --arg p "$path" '
+      (reduce ($p | split(".")[]) as $k (.; if type == "object" then .[$k] else null end))
+      | if . == null then "no"
+        elif type == "array" then (if length > 0 then "yes" else "no" end)
+        elif type == "object" then (if length > 0 then "yes" else "no" end)
+        elif (tostring | gsub("^\\s+|\\s+$"; "")) == "" then "no"
+        else "yes" end' <<<"$_ap_facts")"
+    [[ "$present" == "yes" ]] || missing+="${missing:+, }${path}"
+  done < <(jq -r --arg t "$atype" '.profiles[$t].required[]? ' <<<"$profiles")
+
+  if [[ -n "$missing" ]]; then
+    echo "aid_artifact_render: artifact_type '${atype}' requires: ${missing}" >&2
+    return 1
+  fi
+  return 0
+}
+
+# _aid_artifact_check_consistency <facts_json> <ask_resolved>
+#   Contradictions BETWEEN FIELDS, never a vocabulary check on prose.
+_aid_artifact_check_consistency() {
+  local facts="$1" ask="$2"
+  local n_next detail_label link
+
+  n_next="$(aid_artifact_number "$(jq -r '(.next_steps // []) | length' <<<"$facts")")"
+  if [[ "$ask" == "$_AID_ARTIFACT_ASK_NOTHING" ]] && (( n_next > 0 )); then
+    echo "aid_artifact_render: block 6 says nothing is expected while ${n_next} next step(s) are listed" >&2
+    return 1
+  fi
+
+  detail_label="$(jq -r '.detail.label // .detail.name // "" | tostring' <<<"$facts")"
+  if [[ -n "$detail_label" ]] && _aid_artifact_looks_like_path "$detail_label"; then
+    echo "aid_artifact_render: block 7 carries a file path ('${detail_label}') — blocks 5 and 7 name things" >&2
+    return 1
+  fi
+
+  while IFS= read -r link; do
+    if [[ -z "${link// /}" ]]; then
+      echo "aid_artifact_render: block 5 carries a link with no name" >&2
+      return 1
+    fi
+    if _aid_artifact_looks_like_path "$link"; then
+      echo "aid_artifact_render: block 5 carries a file path ('${link}') — blocks 5 and 7 name things" >&2
+      return 1
+    fi
+    if [[ -n "$detail_label" && "$link" == "$detail_label" ]]; then
+      echo "aid_artifact_render: block 5 repeats the detail target ('${link}')" >&2
+      return 1
+    fi
+  done < <(jq -r '(.links // [])[] | if type == "object" then (.name // .label // "") else tostring end' <<<"$facts")
+  return 0
+}
+
 # aid_artifact_render <template_id> <facts_json> <prose_json> <out_path>
 aid_artifact_render() {
   local template_id="${1-}" facts_in="${2-}" prose_in="${3-}" out_path="${4-}"
@@ -322,6 +534,15 @@ aid_artifact_render() {
   if [[ -z "$prose_raw" ]] || ! jq -e '.' <<<"$prose_raw" >/dev/null 2>&1; then
     prose_ok="false"
     prose_raw='{}'
+  fi
+
+  # ── profile: what a page of this type owes (P089 Step 2) ──────────────────
+  local artifact_type
+  artifact_type="$(jq -r '.artifact_type // "" | tostring' <<<"$facts_raw")"
+  if [[ -n "$artifact_type" ]]; then
+    _aid_artifact_apply_profile facts_raw "$artifact_type" || return 1
+  else
+    echo "aid_artifact_render: facts_json declares no artifact_type — rendering on the transitional typeless path" >&2
   fi
 
   # ── computed facts: tile classes and the redaction count ──────────────────
@@ -435,6 +656,12 @@ aid_artifact_render() {
   # Block 6 NEVER disappears. Nothing asked for is itself the answer.
   if [[ -z "${p_ask// /}" ]]; then p_ask="$_AID_ARTIFACT_ASK_NOTHING"; fi
   [[ "$prose_ok" == "true" ]] || summary_missing=1
+
+  # Contradictions between FIELDS — never a vocabulary check on prose. Only on
+  # the typed path: the typeless one behaves exactly as it did before P089.
+  if [[ -n "$artifact_type" ]]; then
+    _aid_artifact_check_consistency "$facts_raw" "$p_ask" || return 1
+  fi
 
   p_summary="$(_aid_artifact_clip "$(_aid_artifact_cap_sentences "$p_summary")" "$_AID_ARTIFACT_CAP_SUMMARY")"
   p_core="$(_aid_artifact_clip "$(_aid_artifact_cap_sentences "$p_core")" "$_AID_ARTIFACT_CAP_CORE")"

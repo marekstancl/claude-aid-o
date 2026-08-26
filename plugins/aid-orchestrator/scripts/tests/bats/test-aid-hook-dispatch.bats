@@ -94,9 +94,9 @@ run_hook() { # run_hook <event> [json]
   # new rule had needed aid-hook.sh edited, the dispatcher would have been
   # built for its first consumer rather than for rules in general.
   unset AID_HOOK_REGISTRY
-  run yq -r '.rules[] | select(.id == "plan_artifact_rendered") | .lib' "$PLUGIN_ROOT/defaults/hook-registry.yaml"
+  run yq -r '.rules[] | select(.id == "milestone_artifact_rendered") | .lib' "$PLUGIN_ROOT/defaults/hook-registry.yaml"
   [ "$output" = "scripts/lib/aid-artifact-obligation.sh" ]
-  run grep -c "plan_artifact_rendered\|aid-artifact-obligation" "$HOOK"
+  run grep -c "milestone_artifact_rendered\|aid-artifact-obligation" "$HOOK"
   [ "$output" = "0" ]
 }
 

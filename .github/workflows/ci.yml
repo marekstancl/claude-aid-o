@@ -183,3 +183,23 @@ jobs:
       - run: npm ci
       - run: node scripts/check-path-validation.js
         timeout-minutes: 2
+
+  # ── P089 Step 9: the release-scope verdict, in a log that is read ─────────
+  # A NOTICE, NOT A GATE. The facade always exits 0 — the pre-push hook is the
+  # place that blocks, and a second blocker over one question would just be a
+  # second thing to argue with. What this step buys is that the decision, and
+  # the commits behind it, are visible after the fact.
+  #
+  # `fetch-depth: 0` is load-bearing: the range starts at the last version tag,
+  # and a shallow checkout carries no tags at all — the facade would report
+  # every commit in history as unreleased.
+  #
+  # This step is also the reference a consumer copies into their own workflow.
+  release-scope:
+    runs-on: [self-hosted, eco-dev]
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - name: Release scope for this range
+        run: bash plugins/aid-orchestrator/scripts/aid-release-check.sh
+        timeout-minutes: 2

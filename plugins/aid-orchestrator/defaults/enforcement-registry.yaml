@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 480          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 484          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3127,19 +3127,19 @@ enforcements:
     recovery: "The finding names the heading and its line. Delete the section; the same content is rendered by aid_plan_summary_render and published by /aid-plan."
     test: "scripts/tests/bats/test-plan-lint.bats"
 
-  - id: plan_artifact_rendered
+  - id: milestone_artifact_rendered
     type: 12
-    source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check + defaults/hook-registry.yaml (rule plan_artifact_rendered)"
-    instruction: "commands/aid-plan.md (Mode: Write Plan, step 8p)"
+    source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check / _epic_check / _close_check + defaults/hook-registry.yaml (rule milestone_artifact_rendered)"
+    instruction: "commands/aid-plan.md (Mode: Write Plan, step 8p) + skills/pipeline.md (DONE telemetry)"
     severity: blocking
     surface: llm-facing
     status: active
     verdict: ALIGNED
     tier: n/a
     enforcement_degree: 2
-    not_guaranteed: "That the PM read the page, or that it says anything useful. The check is that the file exists and is newer than the plan it describes — presence and currency, never quality."
-    description: "P086 Step 4 — a written plan owes the PM a rendered page. scripts/aid-turn-gate.sh checks the file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and a Stop hook rule catches the same defect one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
-    recovery: "Run the render by hand: source scripts/lib/aid-plan-summary.sh && aid_plan_summary_render <plan> <out.html>, then publish the body."
+    not_guaranteed: "That the PM read the page, or that it says anything useful. The check is that the file exists and is newer than its source — presence and currency, never quality. For a finished EPIC the source is the EPIC branch's last commit; when that branch is gone the run record's mtime is used instead, which is a weaker test, and the message says which of the two it compared."
+    description: "P086 Step 4, widened by P089 Step 6 from one milestone to three — a written plan, an EPIC whose review ended, and a closed plan each owe the PM a rendered page. A STEP owes nothing, and a FAILED step owes nothing either (PM, 2026-08-25). scripts/aid-turn-gate.sh checks the plan file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and the Stop hook rule catches all three one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
+    recovery: "The finding names the missing page and the renderer that produces it: aid_plan_summary_render for a plan, aid_epic_summary_page_render for a finished EPIC (normally produced by `aid-fsm.sh done-advance review release`), aid_plan_close_render for a closed plan. Run it, then publish the body with the Artifact tool."
     test_covers: "the CHECK and its caller. What no suite can observe is a session choosing to publish the rendered body with the Artifact tool — that act stays a session-level one, and this row no longer claims otherwise about the rest."
     test: "scripts/tests/bats/test-artifact-obligation.bats"
 
@@ -3517,3 +3517,65 @@ enforcements:
     description: "P087 Step 9 — responsiveness is a fact of the project (`ui.responsive`, default true), read once: a responsive project owes desktop AND mobile in every UI proposal and check, `false` owes desktop alone, a project without UI is not asked. A missing viewport stops the build or fails the check naming that viewport."
     recovery: "Capture the named viewport, or set ui.responsive: false deliberately for a desktop-only product."
     test: "scripts/tests/bats/test-ui-proposal.bats"
+
+  # ── P089: artifact profiles and the file-based release scope ──────────────
+
+  - id: artifact_type_profile
+    type: 1
+    source: "scripts/lib/aid-artifact-render.sh (_aid_artifact_apply_profile, _aid_artifact_outcome_tiles, _aid_artifact_check_consistency) + defaults/artifact-profiles.yaml"
+    instruction: "docs/proposals/artifact-standard-profiles.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That the page is any GOOD. What is checked is presence, shape and between-FIELD contradictions: a required field of the declared type is there, the type is one of the five, block 6 does not say 'nothing is expected' beside a list of next steps, and blocks 5 and 7 carry no file path. Whether the prose is worth reading is a reader's judgement and nothing here claims otherwise. The path detector recognises a path-ish prefix or a slash-joined run ending in a file extension — a bare directory name reads as a name. A caller that passes NO artifact_type keeps the pre-P089 behaviour and says so on stderr; after P089 Step 5 no production caller is on that branch, and one test asserts that over the whole caller set rather than per caller."
+    description: "P089 Steps 2-5 — a page must carry what its TYPE owes. The five types (brainstorming, plan, gates, epic_done, plan_done) and their required fields are DATA in defaults/artifact-profiles.yaml, so a new type is a section there and never a branch in the renderer. For a type marked `outcome_from_state` the result, verified and did-not-run tiles are COMPOSED by the renderer from four counts, and the caller's own values are dropped — which is how '6/9 passed' beside zero failures became impossible to write rather than merely discouraged."
+    recovery: "The refusal names the type and the missing field, or the contradiction and the value that caused it."
+    test: "scripts/tests/bats/test-artifact-profiles.bats"
+
+  - id: release_scope_by_files
+    type: 12
+    source: "scripts/lib/aid-release-scope.sh + the verbatim copy in defaults/hooks/pre-push (AID-RELEASE-SCOPE-PORTABLE-START/END) + scripts/aid-release.sh"
+    instruction: "commands/aid-init.md (pre-push) + skills/setup/project-scan.md (versioning.release_exempt_paths / app_paths)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 1
+    not_guaranteed: "Anything at all in a project that has not set `versioning.release_exempt_paths`: the library returns `no_config` and the caller keeps the pre-P089 commit-label behaviour, with one hint line. Nor in a repository with no version tag (`no_tag` — it passes, deliberately: a first push must not demand a release). It does not consult a remote, so a local unpushed tag narrows the range for whoever has it. A commit carrying a `No-Release: <reason>` footer is removed from the range even when it touches the application — that is a person's explicit decision and it stays in the history where it can be found. `git push --no-verify` bypasses the hook entirely, as it always could."
+    description: "P089 Steps 7-9 — a release is required by WHAT CHANGED, not by the label on a commit subject: `fix(tests):` over test files alone no longer blocks and `chore:` over application code no longer passes. The range starts at the last version tag reachable from the commit being judged; commits with a No-Release footer are removed; the UNION of the remaining commits' paths is decided against the two lists. The pre-push hook blocks, scripts/aid-release-check.sh prints the same verdict into CI and always exits 0, and scripts/aid-release.sh asks the same library instead of carrying a second copy of the rule."
+    recovery: "The refusal names the commits that caused it and offers three ways on: release, a No-Release footer with a reason, or --no-verify."
+    test: "scripts/tests/bats/test-release-scope.bats"
+
+  - id: release_paths_drift
+    type: 12
+    source: "scripts/gates/release-paths-drift.sh"
+    instruction: "skills/setup/project-scan.md (versioning.release_exempt_paths / app_paths)"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 3
+    not_guaranteed: "IN THIS REPOSITORY THE GATE IS ATTACHED TO NO RUNNER, so its presence is NOT coverage — it decides correctly and nothing invokes it. Wiring it is the consumer's decision, because what belongs in their image is theirs. It also reads only Dockerfiles at depth 2 or less, judges the shell and JSON COPY/ADD forms and nothing else (no BuildKit mounts, no .dockerignore), and says nothing about a project that declares neither list."
+    description: "P089 Step 10 — the declared release paths are one claim about what reaches a user and a Dockerfile's COPY/ADD lines are a second claim about the same thing. When they drift the release guard waves through a change that then ships. The gate refuses a packaged source that lies entirely inside release_exempt_paths, and a repository source app_paths does not cover; `COPY . .` is reported as the widest drift there is rather than waved through."
+    recovery: "Every offending source is named with the Dockerfile it came from — fix the lists or fix the image, whichever is the wrong claim."
+    test: "scripts/tests/bats/test-release-paths-drift.bats"
+
+  - id: plan_lint_prose_only_suite
+    type: 4
+    source: "scripts/aid-plan-lint.sh (_ts_names)"
+    instruction: "skills/plan-writing.md (## Testing Strategy)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 3
+    not_guaranteed: "Anything blocking — a name in prose is a weaker signal than a declared path, and 'we extend test-foo.bats' may be shorthand for a case added under another name. It says nothing when the project root cannot be resolved, when the name appears inside a fenced block, or when a suite of that name already exists somewhere in the repository."
+    description: "P089 Step 11 (IMP-517) — a suite named only in ## Testing Strategy prose, declared in no `Test:` bullet and absent from the repository, is a promise nobody will keep: the step contract only ever creates what a Files bullet declares. Reported so the plan either declares it with a tier or says in one sentence why the suite is not being written."
+    recovery: "Add a Test: bullet with a tier, or one sentence saying the suite is not being written."
+    test: "scripts/tests/bats/test-plan-lint.bats"

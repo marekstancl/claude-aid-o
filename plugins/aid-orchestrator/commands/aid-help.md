@@ -551,7 +551,7 @@ turn is degraded to fail-open, and the degradation is written to the audit trail
 |---|---|---|---|
 | `hook_canary` | SessionStart | 4 | leaves one audit line per start, so the canary can prove a harness reached AID |
 | `decision_card_complete` | Stop | 2 | refuses a turn whose card asks you to decide with no options, recommendation or reason |
-| `plan_artifact_rendered` | Stop | 2 | refuses a turn that wrote a plan without rendering your page for it |
+| `milestone_artifact_rendered` | Stop | 2 | refuses a turn that finished a milestone — a written plan, an EPIC's review, a closed plan — without rendering your page for it |
 | `continuity_capture` / `continuity_restore` | PreCompact / SessionStart | 3 | saves the run's bearings before a compaction and puts them back after |
 | `subagent_protocol_notice` | SubagentStart | 3 | tells a role agent when its installed protocol differs from this checkout's |
 

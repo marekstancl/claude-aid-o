@@ -49,6 +49,20 @@
 #   profile_excluded never affect it). Deriving the card from individual rows
 #   would tell the PM a run is blocked while the FSM advances.
 #
+# FOUR CLOSED CATEGORIES, AND THE PAGE COUNTS IN THEM (P089 Step 3)
+#   ověřeno · selhalo · neběželo · prominuto. The headline is HOW MANY FAILED,
+#   never a ratio of passes: "6/9 prošlo" beside zero failures is the sentence
+#   that made the PM call this page worthless, and it is now impossible to
+#   write — the renderer COMPOSES the result, verified and did-not-run tiles
+#   from the four counts this file hands it (defaults/artifact-profiles.yaml,
+#   `outcome_from_state`). Nothing here formats a verdict sentence at all.
+#
+#   The core list names WHICH gates ran and what each verified (its own command
+#   from the report's `_command_log`), and for the ones that did not, why.
+#
+#   Blocks 5 and 7 carry NAMES. The report path used to be on this page three
+#   times; it now lives only in the provenance footer.
+#
 # WAIVED IS NOT PASSED (D3)
 #   `waived` is a first-class row result. The REPORT is the primary waiver
 #   source: the runner rewrites a waived row to result:"waived" with a
@@ -78,6 +92,48 @@ _AID_GOS_ARTIFACT_BASENAME="gate-outcome-artifact.html"
 # The exact public risk-acceptance command (P073 surface, pipeline.md §5).
 _AID_GOS_FORCE_CMD="aid-fsm.sh transition GATES DONE <state_file> --force --reason '<≥20 chars — PM-authorized reason>'"
 _AID_GOS_ADVANCE_CMD="aid-fsm.sh transition GATES DONE <state_file>"
+
+# "DID NOT RUN" IS A MAPPING, NOT A GUESS (P089 Step 3)
+#   The runner has no separate result for "the harness stopped this gate before
+#   it could prove anything": such a row is a plain `fail` whose `reason` says
+#   what happened (aid-run-gates.sh:2040, :2071, :2391, and _bg_fail_row at
+#   :908). Counting those among the failures tells the PM the code broke when
+#   the code was never run; counting an unexplained failure among them would
+#   hide a real one. So the list is CLOSED and explicit, every entry is a reason
+#   whose own row text says the gate did not run in this invocation, and the
+#   page NAMES the reason it used.
+#
+#   `undefined_gate` and `unknown_placeholder` are deliberately NOT here. They
+#   also mean nothing ran, but they are defects in the gate configuration and
+#   belong in front of the PM as failures — the conservative direction, the same
+#   one an unknown reason takes.
+#   A PLAIN `key|label` ARRAY, and deliberately not an associative one. The
+#   map reads better, but it needs `declare -gA` to survive: this library is
+#   sourced from INSIDE a function by every bats suite, and a bare `declare`
+#   there makes the array local to that function. `-g` arrived in bash 4.2,
+#   and this plugin's stated floor is 4.0 — where the map would fail to load
+#   at all. A plain array assignment is global from inside a function on every
+#   bash there is, so the readable form loses to the one that runs.
+_AID_GOS_NOT_RUN_REASONS=(
+  'service_unhealthy|služba, kterou brána potřebuje, neběžela'
+  'gate_script_missing_in_tree|skript brány ve stromu nebyl'
+  'gate_row_stale|záznam brány patřil jiné revizi, v tomhle běhu neběžela'
+  'job_lost|běh brány na pozadí se ztratil, žádný záznam o dokončení'
+)
+
+# _aid_gos_not_run_reason <reason> — the Czech name when the reason means the
+# gate did not run; nothing (exit 1) otherwise. `|` is the delimiter and no
+# label may contain one.
+_aid_gos_not_run_reason() {
+  local want="${1-}" entry
+  [[ -n "$want" ]] || return 1
+  for entry in "${_AID_GOS_NOT_RUN_REASONS[@]}"; do
+    [[ "${entry%%|*}" == "$want" ]] || continue
+    printf '%s' "${entry#*|}"
+    return 0
+  done
+  return 1
+}
 
 # aid_gate_outcome_redact <text>
 #   The callable redaction entry point for anything raw the CONTROLLER has to
@@ -192,20 +248,32 @@ aid_gate_outcome_render() {
     return 1
   fi
 
-  local total n_pass n_fail n_skip n_excl n_waived total_ms
+  local total n_waived total_ms
   total="$(jq -r 'length' <<<"$rows")"
-  n_pass="$(jq -r '[.[] | select(.result == "pass")] | length' <<<"$rows")"
-  n_fail="$(jq -r '[.[] | select(.result == "fail")] | length' <<<"$rows")"
-  n_skip="$(jq -r '[.[] | select(.result == "skip")] | length' <<<"$rows")"
-  n_excl="$(jq -r '[.[] | select(.result == "profile_excluded")] | length' <<<"$rows")"
   total_ms="$(jq -r '[.[] | (.duration_ms // 0)] | add // 0' <<<"$rows")"
+
+  # EVERY OTHER COUNT COMES FROM THE CLASSIFICATION LOOP BELOW, and that is the
+  # point. The counts used to be computed here in jq and the same rows sorted
+  # into their categories again, in bash, further down — two spellings of one
+  # rule. A change to the did-not-run table or to the waiver union then landed
+  # in one of them and the page contradicted itself: tiles saying one thing,
+  # the list under them another. Which is the exact defect this whole step
+  # exists to make impossible.
 
   # Waivers: the report is PRIMARY. The union of top-level waived_gates[] and
   # any row already stamped result:"waived" — either alone is enough.
+  #
+  # A REJECTED waiver is REMOVED from that union, wherever it was named. The
+  # runner leaves such a row `fail` with `waiver_rejected`, but nothing stops
+  # the same gate from still appearing in top-level `waived_gates[]` — and then
+  # the page counted it as a failure AND as a waiver, over one gate.
   local waived_json
   waived_json="$(jq -c --argjson rows "$rows" '
-    ((.waived_gates // []) + [$rows[] | select(.result == "waived") | .gate]) | unique' <<<"$report")"
+    (((.waived_gates // []) + [$rows[] | select(.result == "waived") | .gate]) | unique) as $w
+    | [ $rows[] | select(has("waiver_rejected")) | .gate ] as $rejected
+    | [ $w[] | select(. as $g | $rejected | index($g) | not) ]' <<<"$report")"
   n_waived="$(jq -r 'length' <<<"$waived_json")"
+
 
   # `.overall` is REQUIRED and must be one of the two verdicts the runner
   # actually writes. `// "unknown"` made an ABSENT verdict decide the card: it
@@ -234,57 +302,117 @@ aid_gate_outcome_render() {
   local duration_human
   duration_human="$(_aid_gos_duration "$total_ms")"
 
-  # `unresolved` is fail + waived: both are gates this run did not prove.
-  local n_unresolved=$(( n_fail + n_waived ))
+  # ── the core list: WHICH gates ran, and what each of them verified ────────
+  # It used to list only what was not a plain first-attempt pass, which is how
+  # a page could say "6/9 passed" and never name a single gate. The order is
+  # the budget: the renderer caps the list at five and says how many it
+  # dropped, so failures come first and plain passes last.
+  local -a it_failed=() it_waived=() it_not_run=() it_passed=() failed_gates=()
+  local gate res code att reason rejected cmd waived_flag human
+  local n_pass=0 n_failed=0 n_not_run=0
 
-  # ── the core list: everything that is not a plain first-attempt pass ───────
-  local -a core_items=()
-  local gate res code att detail
-
-  while IFS=$'\t' read -r gate res code att; do
+  # ONE jq feeds the loop with everything a row is judged on, including the
+  # gate's own command from `_command_log` and whether the waiver union names
+  # it. Both used to be a jq fork PER ROW over the whole report.
+  # THE SEPARATOR IS \x1f, NOT A TAB. Tab is an IFS *whitespace* character, so
+  # bash collapses runs of it — and four of these eight fields are routinely
+  # empty (reason, waiver_rejected, command). With tabs, two empty fields in a
+  # row silently vanished and every later field shifted one place left: a gate's
+  # command was read as its reason. `@tsv` already escapes any tab inside a
+  # value, so the only raw tabs in the stream are the delimiters, and the
+  # translation below is exact.
+  while IFS=$'\037' read -r gate res code att reason rejected waived_flag cmd; do
     [[ -n "$gate" ]] || continue
     case "$res" in
       fail)
-        detail="$(jq -r --arg g "$gate" '
-          [.[] | select(.gate == $g) | (.waiver_rejected // empty)] | first // ""' <<<"$rows")"
-        if [[ -n "$detail" ]]; then
-          core_items+=("brána ${gate}: selhala (exit ${code}), výjimka zamítnuta — ${detail}")
+        if human="$(_aid_gos_not_run_reason "$reason")"; then
+          it_not_run+=("brána ${gate} neběžela: ${human}")
+          n_not_run=$(( n_not_run + 1 ))
+          continue
+        fi
+        # Still in the waiver set → it is the waiver's line to render, below,
+        # and not a failure line here as well. (A rejected waiver is no longer
+        # in that set, so it falls through and stays a failure.)
+        if [[ "$waived_flag" == "1" ]]; then continue; fi
+        failed_gates+=("$gate")
+        n_failed=$(( n_failed + 1 ))
+        if [[ -n "$rejected" ]]; then
+          it_failed+=("brána ${gate}: selhala (exit ${code}), výjimka zamítnuta — ${rejected}")
+        elif [[ -z "$reason" ]]; then
+          it_failed+=("brána ${gate}: selhala (exit ${code}), důvod neznámý")
         else
-          core_items+=("brána ${gate}: selhala (exit ${code})")
+          it_failed+=("brána ${gate}: selhala (exit ${code}), důvod: ${reason}")
         fi
         ;;
       waived)
-        core_items+=("brána ${gate}: waived — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$gate")")
+        it_waived+=("brána ${gate}: prominuta — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$gate")")
         ;;
-      skip)             core_items+=("brána ${gate}: přeskočena") ;;
-      profile_excluded) core_items+=("brána ${gate}: mimo profil") ;;
+      skip)
+        it_not_run+=("brána ${gate} neběžela: přeskočena"); n_not_run=$(( n_not_run + 1 )) ;;
+      profile_excluded)
+        it_not_run+=("brána ${gate} neběžela: mimo profil"); n_not_run=$(( n_not_run + 1 )) ;;
       pass)
+        n_pass=$(( n_pass + 1 ))
         if [[ "$att" =~ ^[0-9]+$ ]] && (( att > 1 )); then
-          core_items+=("brána ${gate}: prošla až na ${att}. pokus")
+          it_passed+=("brána ${gate}: prošla až na ${att}. pokus${cmd:+ — ověřila: ${cmd}}")
+        else
+          it_passed+=("brána ${gate}: prošla${cmd:+ — ověřila: ${cmd}}")
         fi
         ;;
     esac
-  done < <(jq -r '.[] | [(.gate // "?"), (.result // "?"), ((.exit_code // 0)|tostring), ((.attempts // 0)|tostring)] | @tsv' <<<"$rows")
+  #
+  # `select(.name != null)` is load-bearing: an entry with no `name` makes jq
+  # fail while building an object key, and this jq runs inside a process
+  # substitution where its failure is invisible — the loop would simply receive
+  # nothing and every counter would come out zero over a run that passed.
+  #
+  # Every value is stripped of U+001F before it is joined. `@tsv` escapes tabs,
+  # newlines and backslashes but not this character, so a gate name carrying one
+  # would otherwise forge a field boundary and be read as a different category.
+  done < <(jq -r --argjson rep "$report" --argjson w "$waived_json" '
+      def clean: (. // "") | tostring | gsub("\u001f"; " ");
+      (($rep._command_log // []) | map(select(.name != null)) | map({(.name|tostring): .command}) | add // {}) as $cmds
+      | .[]
+      | [ ((.gate // "?")|clean),
+          ((.result // "?")|clean),
+          ((.exit_code // 0)|tostring|clean),
+          ((.attempts // 0)|tostring|clean),
+          (.reason|clean),
+          (.waiver_rejected|clean),
+          (if ((.gate // "") as $g | $w | index($g)) then "1" else "0" end),
+          ($cmds[((.gate // "")|tostring)]|clean)
+        ] | @tsv' <<<"$rows" | tr '\t' '\037')
 
   # A waiver named ONLY by top-level waived_gates[] (no matching row) still
   # renders — the absence of a row is never allowed to hide risk acceptance.
+  # The orphans are computed in ONE jq rather than one per waived name.
   local w
   while IFS= read -r w; do
     [[ -n "$w" ]] || continue
-    if [[ "$(jq -r --arg g "$w" '[.[] | select(.gate == $g and .result == "waived")] | length' <<<"$rows")" == "0" ]]; then
-      core_items+=("brána ${w}: waived — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$w")")
-    fi
-  done < <(jq -r '.[]' <<<"$waived_json")
+    it_waived+=("brána ${w}: prominuta — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$w")")
+  done < <(jq -r --argjson rows "$rows" \
+    '([$rows[] | select(.result == "waived") | .gate]) as $have | .[] | select(. as $g | $have | index($g) | not)' \
+    <<<"$waived_json")
+
+  local -a core_items=()
+  core_items+=("${it_failed[@]+"${it_failed[@]}"}")
+  core_items+=("${it_waived[@]+"${it_waived[@]}"}")
+  core_items+=("${it_not_run[@]+"${it_not_run[@]}"}")
+  core_items+=("${it_passed[@]+"${it_passed[@]}"}")
 
   (( escalated == 1 )) && core_items+=("eskalace targeted → full: $(jq -r '.escalation.reason // "bez uvedeného důvodu"' <<<"$report")")
-  (( total == 0 )) && core_items+=("profil nespustil žádnou bránu")
+  (( total == 0 )) && core_items+=("profil nespustil žádnou bránu, takže se nic neověřilo")
 
   local items_json
   items_json="$(printf '%s\n' "${core_items[@]+"${core_items[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')"
 
   # ── the first failing gate and its reproduction command ───────────────────
-  local first_fail first_fail_code repro=""
-  first_fail="$(jq -r '[.[] | select(.result == "fail") | .gate] | first // ""' <<<"$rows")"
+  # Taken from the classification above, not re-derived: "the first REAL
+  # failure" is precisely the first thing that loop put in `failed_gates`, and
+  # asking jq the same question a second way is how the card and the list start
+  # naming different gates.
+  local first_fail="" first_fail_code repro=""
+  (( ${#failed_gates[@]} > 0 )) && first_fail="${failed_gates[0]}"
   first_fail_code="$(jq -r --arg g "$first_fail" '[.[] | select(.gate == $g) | (.exit_code // 0)] | first // 0' <<<"$rows")"
   if [[ -n "$first_fail" ]]; then
     # The gate's OWN command, taken from the report's _command_log. Gate
@@ -293,31 +421,39 @@ aid_gate_outcome_render() {
     repro="$(jq -r --arg g "$first_fail" '[(._command_log // [])[] | select(.name == $g) | .command] | first // ""' <<<"$report")"
   fi
 
+  # A COMMAND MAY NEVER STAND BESIDE "nothing is expected" (PM, 2026-08-25).
+  # A run that is not blocked asks nothing of the PM — the controller advances
+  # on its own — so the list is EMPTY and block 6 says so. The renderer refuses
+  # the contradiction outright (P089 Step 2), so this is enforced, not asked for.
   local -a next_steps=()
   if (( blocked == 1 )); then
     [[ -n "$repro" ]] && next_steps+=("Zopakuj bránu: ${repro}")
     next_steps+=("Oprav příčinu a spusť brány znovu")
     next_steps+=("Nebo převezmi riziko: ${_AID_GOS_FORCE_CMD}")
-  else
-    next_steps+=("Pokračuj na DONE: ${_AID_GOS_ADVANCE_CMD}")
   fi
   local next_json
-  next_json="$(printf '%s\n' "${next_steps[@]}" | jq -R . | jq -sc '.')"
+  next_json="$(printf '%s\n' "${next_steps[@]+"${next_steps[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')"
 
   # ── prose, computed — no model text at this boundary ───────────────────────
+  # Every sentence below is composed from the same four counters the tiles are
+  # composed from, so the page cannot disagree with itself.
   local p_summary p_core p_ask
-  if (( blocked == 1 )); then
-    p_summary="Brány neprošly: ${n_fail} z ${total} selhalo, běh je zastavený před DONE."
+  if (( n_failed > 0 )); then
+    p_summary="Selhalo ${n_failed} z ${total} bran, běh je zastavený před DONE."
+  elif (( blocked == 1 )); then
+    p_summary="Neselhala žádná brána, ale běh je zastavený: ${n_not_run} bran neproběhlo, takže verdikt zůstal fail."
   elif (( total == 0 )); then
-    p_summary="Profil nespustil žádnou bránu, takže není co blokovat."
+    p_summary="Profil nespustil žádnou bránu, takže se nic neověřilo a není co blokovat."
+  elif (( n_pass == 0 )); then
+    p_summary="Neselhalo nic, ale ani se nic neověřilo: všech ${n_not_run} bran neběželo."
   else
-    p_summary="Brány prošly: ${n_pass} z ${total}, běh může pokračovat na DONE."
+    p_summary="Ověřeno ${n_pass} z ${total} bran, nic neselhalo."
   fi
-  p_core="Prošlo ${n_pass}, selhalo ${n_fail}, přeskočeno ${n_skip}, mimo profil ${n_excl}, s výjimkou ${n_waived}. Celkem ${duration_human}."
+  p_core="Ověřeno ${n_pass}, selhalo ${n_failed}, neběželo ${n_not_run}, prominuto ${n_waived}. Celkem ${duration_human}."
   if (( blocked == 1 )); then
-    p_ask="Rozhodni, jestli opravíme příčinu, nebo jestli přebíráš riziko force příkazem."
+    p_ask="Rozhodni, jestli příčinu opravíme, nebo jestli riziko přebíráš. Doporučuju opravit — prominutá brána není ověřená. Dokud nerozhodneš, běh stojí před DONE."
   elif (( n_waived > 0 )); then
-    p_ask="Nic — jen ať víš, že ${n_waived} brána/y prošly s tvojí výjimkou, ne testem."
+    p_ask="Nerozhoduješ nic. Jen ať víš, že ${n_waived} z bran prošlo tvojí výjimkou, ne testem."
   else
     p_ask=""
   fi
@@ -325,32 +461,40 @@ aid_gate_outcome_render() {
   # ── facts + render ────────────────────────────────────────────────────────
   local out_path="${run_dir}/${_AID_GOS_ARTIFACT_BASENAME}"
   local facts prose
+  # The result, "verified" and "did not run" tiles are NOT written here: the
+  # renderer composes them from the four counts below, which is what makes a
+  # headline like "6/9 passed" beside zero failures impossible rather than
+  # merely discouraged. Blocks 5 and 7 carry NAMES: the report path lives in
+  # the provenance footer, where it already was, and nowhere else — it was on
+  # this page three times.
   facts="$(jq -nc \
     --arg title "Brány: $(jq -r '.epic_id // "?"' <<<"$report")" \
     --arg when "$(jq -r '.completed_at // ._generated_at // "—"' <<<"$report")" \
-    --arg rv "${n_pass}/${total} prošlo" \
-    --arg rs "$([[ $blocked -eq 1 ]] && echo critical || echo ok)" \
     --arg dv "$duration_human" \
-    --arg sv "$total" \
-    --arg uv "$n_unresolved" \
-    --arg us "$([[ $n_unresolved -gt 0 ]] && echo warn || echo ok)" \
+    --argjson pass "$n_pass" \
+    --argjson failed "$n_failed" \
+    --argjson not_run "$n_not_run" \
+    --argjson waived "$n_waived" \
+    --argjson blocked "$blocked" \
     --argjson items "$items_json" \
     --argjson next "$next_json" \
     --arg report_path "$report_path" \
     '{
+      artifact_type: "gates",
       eyebrow: "Výsledek bran",
       title: $title,
       when: $when,
-      tiles: {
-        result:     {value: $rv, state: $rs},
-        duration:   {value: $dv},
-        scope:      {value: $sv},
-        unresolved: {value: $uv, state: $us}
+      outcome: {
+        passed_count: $pass,
+        failed_count: $failed,
+        not_run_count: $not_run,
+        waived_count: $waived,
+        blocked: ($blocked == 1)
       },
+      tiles: {duration: {label: "Trvalo", value: $dv}},
       items: $items,
       next_steps: $next,
-      links: [$report_path],
-      detail: {label: ("technický detail: " + $report_path)},
+      detail: {label: "Technický detail běhu bran"},
       footer: ("Zdroj: " + $report_path + ". Vyrobil aid-gate-outcome-summary.sh.")
     }')" || { echo "aid_gate_outcome_render: failed to build facts" >&2; return 1; }
 
@@ -383,21 +527,31 @@ aid_gate_outcome_render() {
   [[ -z "$repro" ]] || repro="$(aid_gate_outcome_redact "$repro")"
 
   if (( blocked == 1 )); then
-    printf 'Zastaveno: brána %s selhala (exit %s).\n' "$first_fail" "$first_fail_code"
-    printf 'Dopad: běh nepokračuje na DONE; prošlo %s z %s, nic se nemerguje.\n' "$n_pass" "$total"
+    if [[ -n "$first_fail" ]]; then
+      printf 'Zastaveno: brána %s selhala (exit %s).\n' "$first_fail" "$first_fail_code"
+    else
+      printf 'Zastaveno: neselhala žádná brána, ale %s jich neproběhlo, takže verdikt zůstal fail.\n' "$n_not_run"
+    fi
+    printf 'Dopad: běh nepokračuje na DONE; ověřeno %s z %s bran, nic se nemerguje.\n' "$n_pass" "$total"
     if [[ -n "$repro" ]]; then
       printf 'Doporučené řešení: zopakuj bránu příkazem `%s` a oprav příčinu.\n' "$repro"
-    else
+    elif [[ -n "$first_fail" ]]; then
       printf 'Doporučené řešení: oprav příčinu selhání brány %s a spusť brány znovu.\n' "$first_fail"
+    else
+      printf 'Doporučené řešení: zjisti, proč brány neproběhly, a spusť je znovu.\n'
     fi
     printf 'Pokud chceš převzít riziko: %s — přeskočí jen tuhle podmínku přechodu, ne samotnou bránu.\n' "$_AID_GOS_FORCE_CMD"
   else
-    printf 'Hotovo: brány doběhly, %s z %s prošlo.\n' "$n_pass" "$total"
+    if (( n_failed == 0 )); then
+      printf 'Hotovo: brány doběhly, nic neselhalo.\n'
+    else
+      printf 'Hotovo: brány doběhly, %s z nich selhalo (žádná z nich povinná).\n' "$n_failed"
+    fi
     printf 'Změnilo se: nic v kódu — brány jen ověřily současný stav.\n'
-    printf 'Ověřeno: %s bran za %s (selhalo %s, přeskočeno %s, mimo profil %s, waived %s).\n' \
-      "$total" "$duration_human" "$n_fail" "$n_skip" "$n_excl" "$n_waived"
+    printf 'Ověřeno: %s z %s bran za %s (selhalo %s, neběželo %s, prominuto %s).\n' \
+      "$n_pass" "$total" "$duration_human" "$n_failed" "$n_not_run" "$n_waived"
     if (( n_waived > 0 )); then
-      printf 'Další krok: %s — ale %s brána/y jsou waived, tedy tvoje riziko, ne prokázaný výsledek.\n' \
+      printf 'Další krok: %s — ale %s z bran je prominutá, tedy tvoje riziko, ne prokázaný výsledek.\n' \
         "$_AID_GOS_ADVANCE_CMD" "$n_waived"
     else
       printf 'Další krok: %s.\n' "$_AID_GOS_ADVANCE_CMD"

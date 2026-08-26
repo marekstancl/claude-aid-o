@@ -434,3 +434,31 @@ _blockers_two() {
   # Blockers are the unresolved tile, counted from the brief.
   grep -qF 'Blokátory' "$body"
 }
+
+# ─── the page declares its type, and blocks 5 and 7 name things (P089 Step 5) ─
+
+@test "the close page declares artifact_type plan_done and names its links" {
+  _brief false blocked "$(_blockers_two)"
+  _decision null not_tagged
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"declares no artifact_type"* ]]
+  local body="$OUT_DIR/plan-close-artifact.html"
+  grep -qF '<div class="golink golink-flat">Technický detail uzávěrky plánu</div>' "$body"
+  refute_grep -qF "$BRIEF" <<<"$(grep -oE '<h2>Čeho se to týká</h2>[^§]*' "$body" || true)"
+}
+
+@test "a finished close asks for nothing, and lists no step beside that" {
+  # release_ready + auto is the finished card: no decision is owed, so block 6
+  # says so and the "Jak pokračovat" list is EMPTY. The renderer refuses the
+  # combination outright, which is what makes this case able to fail.
+  _brief true auto '[]'
+  _decision null not_tagged
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  local body="$OUT_DIR/plan-close-artifact.html"
+  grep -qF 'Nic — ozvu se, až bude hotovo' "$body"
+  refute_grep -qF '<h2>Jak pokračovat</h2>' "$body"
+}

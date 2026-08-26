@@ -20,4 +20,4 @@
 #     plugins/aid-orchestrator/defaults/templates/artifact-outcome.html \
 #     | sed '1d;$d' | sha256sum
 # and paste the digest below, replacing the old one.
-fb48aa62b99ba7db4d36326876683584873c576005b34b0aad5492587be501b6
+b64e90954ac03c08c4b9619f8f8552fbd459b0f5f4af227ff9b0b66b9d84552f

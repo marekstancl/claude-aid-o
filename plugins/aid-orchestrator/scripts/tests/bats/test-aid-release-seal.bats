@@ -149,3 +149,67 @@ _release() { bash -c "cd '$REPO' && exec bash '$RELEASE' patch" 3>&-; }
   run bash -c "cd '$REPO' && exec bash '$vv' 9.9.9" 3>&-
   [[ "$output" == *"byte-identical"* ]]
 }
+
+# ─── P089 Step 9: the SCOPE decides the bump, not the commit subject ────────
+#
+# The duplicated label logic this file's subject used to carry lived at
+# aid-release.sh:122-147 and could disagree with the pre-push hook over the same
+# range: a push the hook let through would still be told here that it owed a
+# bump. Both cases below drive `auto`, which is the only mode that resolves a
+# bump type at all.
+
+_scoped_repo() {
+  _mk_repo 1.0.0 --tagged
+  mkdir -p "$REPO/.aid-o/config" "$REPO/tests" "$REPO/src"
+  cat > "$REPO/.aid-o/config/project.yaml" <<'YAML'
+versioning:
+  release_exempt_paths:
+    - tests
+  app_paths:
+    - src
+YAML
+  printf '.aid-o/\n' >> "$REPO/.gitignore"
+  printf 'seed\n' > "$REPO/tests/t.txt"
+  printf 'seed\n' > "$REPO/src/app.txt"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m "chore: fixture paths"
+  git -C "$REPO" tag -f v1.0.0 >/dev/null 2>&1
+}
+
+_release_auto() { bash -c "cd '$REPO' && exec bash '$RELEASE' auto" 3>&-; }
+
+@test "AC27: an exempt fix: does not drive a bump" {
+  _scoped_repo
+  printf 'x\n' >> "$REPO/tests/t.txt"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m "fix(tests): flaky case"
+
+  run _release_auto
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"inside the release-exempt paths"* ]]
+  [[ "$output" == *"no version bump needed"* ]]
+  [ -z "$(git -C "$REPO" tag -l v1.0.1)" ]
+}
+
+@test "a feat: carrying a No-Release footer does not choose the bump type either" {
+  _scoped_repo
+  printf 'x\n' >> "$REPO/src/app.txt"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m "feat: regenerated fixture" -m "No-Release: fixture refresh, nothing ships"
+
+  run _release_auto
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no version bump needed"* ]]
+}
+
+@test "AC25: aid-release.sh carries no second copy of the label rule" {
+  # The old block decided HAS_FEAT/HAS_FIX/HAS_RELEASE for the RANGE, in
+  # parallel with the hook. What remains is the bump-TYPE choice, which is a
+  # different question and has only ever lived here.
+  run grep -c 'HAS_RELEASE' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
+  [ "$output" = "0" ]
+  # And it asks the library exactly once. Counted as a CALL, not as a string:
+  # the prose around it names the function too.
+  run grep -cE '^[[:space:]]*aid_release_scope_evaluate ' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
+  [ "$output" = "1" ]
+}
