@@ -7728,10 +7728,8 @@ EOF
     # epic-summary.md above — a page that cannot be written never undoes a
     # transition that already happened; the obligation will say so out loud on
     # the next turn, which is the surface a PM reads.
-    if [[ -f "${SCRIPT_DIR}/lib/aid-epic-summary-page.sh" ]]; then
-      # shellcheck source=lib/aid-epic-summary-page.sh
-      source "${SCRIPT_DIR}/lib/aid-epic-summary-page.sh" 2>/dev/null || true
-    fi
+    # shellcheck source=lib/aid-epic-summary-page.sh
+    source "${SCRIPT_DIR}/lib/aid-epic-summary-page.sh" 2>/dev/null || true
     if declare -F aid_epic_summary_page_render >/dev/null 2>&1; then
       local _esp_out
       if _esp_out="$(aid_epic_summary_page_path "$project_root" "$epic_id")"; then
@@ -7741,6 +7739,12 @@ EOF
       else
         log_warn "epic-summary-artifact.html: cannot resolve the page path for ${epic_id} (non-fatal)"
       fi
+    else
+      # SAID OUT LOUD. The library ships beside this script, so its absence is a
+      # broken installation — and a silent skip here would mean the page is
+      # never rendered while the FSM reports a clean release edge, which is the
+      # one failure mode the obligation from Step 6 then blames on the session.
+      log_warn "lib/aid-epic-summary-page.sh did not load — the EPIC's PM page was NOT rendered (non-fatal here; the milestone_artifact_rendered rule will refuse the next turn)"
     fi
 
     # ─── LAST-RESORT service sweep (P076 Step 10) ────────────────────────

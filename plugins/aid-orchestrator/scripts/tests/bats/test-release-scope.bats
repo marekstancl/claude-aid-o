@@ -339,3 +339,15 @@ _push() {
   run _push refs/heads/main "0000000000000000000000000000000000000000"
   [ "$status" -eq 0 ]
 }
+
+@test "an exempt LOCAL ref pushed onto a guarded remote ref is still judged" {
+  # `git push origin plan/P900:main` — the local side is exempt, what lands on
+  # the remote is not. The whole-push pre-pass has read both sides since P068;
+  # the per-ref loop now agrees with it instead of reading the remote alone.
+  _config
+  _commit "feat: real work" src/app.txt
+  local head; head="$(git -C "$R" rev-parse HEAD)"
+  run bash -c "cd '$R' && printf 'refs/heads/plan/P900 %s refs/heads/main 0000000\n' '$head' \
+      | bash '$AID_PLUGIN_PATH/defaults/hooks/pre-push' origin git@example:repo.git"
+  [ "$status" -eq 1 ]
+}

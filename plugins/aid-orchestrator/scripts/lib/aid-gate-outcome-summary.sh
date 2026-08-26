@@ -107,24 +107,26 @@ _AID_GOS_ADVANCE_CMD="aid-fsm.sh transition GATES DONE <state_file>"
 #   also mean nothing ran, but they are defects in the gate configuration and
 #   belong in front of the PM as failures — the conservative direction, the same
 #   one an unknown reason takes.
-_AID_GOS_NOT_RUN_REASONS=(
-  'service_unhealthy|služba, kterou brána potřebuje, neběžela'
-  'gate_script_missing_in_tree|skript brány ve stromu nebyl'
-  'gate_row_stale|záznam brány patřil jiné revizi, v tomhle běhu neběžela'
-  'job_lost|běh brány na pozadí se ztratil, žádný záznam o dokončení'
+#   A MAP, not a packed `key|value` list: that list was split apart three
+#   different ways in this file, and a Czech label containing the delimiter
+#   would have corrupted the table.
+#   `declare -gA` and not `declare -A`: this library is sourced from inside a
+#   FUNCTION by every bats suite that uses it, and a bare `declare` there makes
+#   the array LOCAL to that function — it is gone by the time the test body
+#   runs, and every reason silently stops matching.
+declare -gA _AID_GOS_NOT_RUN_REASONS=(
+  [service_unhealthy]='služba, kterou brána potřebuje, neběžela'
+  [gate_script_missing_in_tree]='skript brány ve stromu nebyl'
+  [gate_row_stale]='záznam brány patřil jiné revizi, v tomhle běhu neběžela'
+  [job_lost]='běh brány na pozadí se ztratil, žádný záznam o dokončení'
 )
 
 # _aid_gos_not_run_reason <reason> — the Czech name when the reason means the
 # gate did not run; nothing (exit 1) otherwise.
 _aid_gos_not_run_reason() {
-  local want="${1-}" entry
-  [[ -n "$want" ]] || return 1
-  for entry in "${_AID_GOS_NOT_RUN_REASONS[@]}"; do
-    [[ "${entry%%|*}" == "$want" ]] || continue
-    printf '%s' "${entry#*|}"
-    return 0
-  done
-  return 1
+  local want="${1-}"
+  [[ -n "$want" && -n "${_AID_GOS_NOT_RUN_REASONS[$want]:-}" ]] || return 1
+  printf '%s' "${_AID_GOS_NOT_RUN_REASONS[$want]}"
 }
 
 # aid_gate_outcome_redact <text>
@@ -240,19 +242,17 @@ aid_gate_outcome_render() {
     return 1
   fi
 
-  local total n_pass n_fail n_skip n_excl n_waived total_ms
+  local total n_waived total_ms
   total="$(jq -r 'length' <<<"$rows")"
-  n_pass="$(jq -r '[.[] | select(.result == "pass")] | length' <<<"$rows")"
-  n_fail="$(jq -r '[.[] | select(.result == "fail")] | length' <<<"$rows")"
-  n_skip="$(jq -r '[.[] | select(.result == "skip")] | length' <<<"$rows")"
-  n_excl="$(jq -r '[.[] | select(.result == "profile_excluded")] | length' <<<"$rows")"
   total_ms="$(jq -r '[.[] | (.duration_ms // 0)] | add // 0' <<<"$rows")"
 
-  # How many of those `fail` rows never actually ran — see the mapping table.
-  local not_run_reasons_json n_fail_not_run
-  not_run_reasons_json="$(printf '%s\n' "${_AID_GOS_NOT_RUN_REASONS[@]%%|*}" | jq -Rc . | jq -sc '.')"
-  n_fail_not_run="$(jq -r --argjson keys "$not_run_reasons_json" \
-    '[.[] | select(.result == "fail") | select((.reason // "") as $r | $keys | index($r))] | length' <<<"$rows")"
+  # EVERY OTHER COUNT COMES FROM THE CLASSIFICATION LOOP BELOW, and that is the
+  # point. The counts used to be computed here in jq and the same rows sorted
+  # into their categories again, in bash, further down — two spellings of one
+  # rule. A change to the did-not-run table or to the waiver union then landed
+  # in one of them and the page contradicted itself: tiles saying one thing,
+  # the list under them another. Which is the exact defect this whole step
+  # exists to make impossible.
 
   # Waivers: the report is PRIMARY. The union of top-level waived_gates[] and
   # any row already stamped result:"waived" — either alone is enough.
@@ -267,17 +267,6 @@ aid_gate_outcome_render() {
     | [ $rows[] | select(has("waiver_rejected")) | .gate ] as $rejected
     | [ $w[] | select(. as $g | $rejected | index($g) | not) ]' <<<"$report")"
   n_waived="$(jq -r 'length' <<<"$waived_json")"
-
-  # A `fail` ROW THAT `waived_gates` NAMES IS A WAIVER, NOT ALSO A FAILURE.
-  # The runner normally rewrites such a row to result:"waived", but the union
-  # above exists precisely because either source alone is enough — and without
-  # this the same gate was counted once as failed and once as waived, so the
-  # result tile stayed critical over a run the FSM had already cleared.
-  # Rejected waivers are already out of `waived_json`, so this needs no second
-  # rule for them.
-  local n_fail_waived
-  n_fail_waived="$(jq -r --argjson w "$waived_json" \
-    '[.[] | select(.result == "fail") | select(.gate as $g | $w | index($g))] | length' <<<"$rows")"
 
 
   # `.overall` is REQUIRED and must be one of the two verdicts the runner
@@ -312,28 +301,37 @@ aid_gate_outcome_render() {
   # a page could say "6/9 passed" and never name a single gate. The order is
   # the budget: the renderer caps the list at five and says how many it
   # dropped, so failures come first and plain passes last.
-  local -a it_failed=() it_waived=() it_not_run=() it_passed=()
-  local gate res code att reason detail human cmd
+  local -a it_failed=() it_waived=() it_not_run=() it_passed=() failed_gates=()
+  local gate res code att reason rejected cmd waived_flag human
+  local n_pass=0 n_failed=0 n_not_run=0
 
-  while IFS=$'\t' read -r gate res code att reason; do
+  # ONE jq feeds the loop with everything a row is judged on, including the
+  # gate's own command from `_command_log` and whether the waiver union names
+  # it. Both used to be a jq fork PER ROW over the whole report.
+  # THE SEPARATOR IS \x1f, NOT A TAB. Tab is an IFS *whitespace* character, so
+  # bash collapses runs of it — and four of these eight fields are routinely
+  # empty (reason, waiver_rejected, command). With tabs, two empty fields in a
+  # row silently vanished and every later field shifted one place left: a gate's
+  # command was read as its reason. `@tsv` already escapes any tab inside a
+  # value, so the only raw tabs in the stream are the delimiters, and the
+  # translation below is exact.
+  while IFS=$'\037' read -r gate res code att reason rejected waived_flag cmd; do
     [[ -n "$gate" ]] || continue
-    cmd="$(jq -r --arg g "$gate" '[(._command_log // [])[] | select(.name == $g) | .command] | first // ""' <<<"$report")"
     case "$res" in
       fail)
         if human="$(_aid_gos_not_run_reason "$reason")"; then
           it_not_run+=("brána ${gate} neběžela: ${human}")
+          n_not_run=$(( n_not_run + 1 ))
           continue
         fi
         # Still in the waiver set → it is the waiver's line to render, below,
         # and not a failure line here as well. (A rejected waiver is no longer
         # in that set, so it falls through and stays a failure.)
-        if [[ "$(jq -r --arg g "$gate" 'index($g) | if . == null then "0" else "1" end' <<<"$waived_json")" == "1" ]]; then
-          continue
-        fi
-        detail="$(jq -r --arg g "$gate" '
-          [.[] | select(.gate == $g) | (.waiver_rejected // empty)] | first // ""' <<<"$rows")"
-        if [[ -n "$detail" ]]; then
-          it_failed+=("brána ${gate}: selhala (exit ${code}), výjimka zamítnuta — ${detail}")
+        if [[ "$waived_flag" == "1" ]]; then continue; fi
+        failed_gates+=("$gate")
+        n_failed=$(( n_failed + 1 ))
+        if [[ -n "$rejected" ]]; then
+          it_failed+=("brána ${gate}: selhala (exit ${code}), výjimka zamítnuta — ${rejected}")
         elif [[ -z "$reason" ]]; then
           it_failed+=("brána ${gate}: selhala (exit ${code}), důvod neznámý")
         else
@@ -343,9 +341,12 @@ aid_gate_outcome_render() {
       waived)
         it_waived+=("brána ${gate}: prominuta — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$gate")")
         ;;
-      skip)             it_not_run+=("brána ${gate} neběžela: přeskočena") ;;
-      profile_excluded) it_not_run+=("brána ${gate} neběžela: mimo profil") ;;
+      skip)
+        it_not_run+=("brána ${gate} neběžela: přeskočena"); n_not_run=$(( n_not_run + 1 )) ;;
+      profile_excluded)
+        it_not_run+=("brána ${gate} neběžela: mimo profil"); n_not_run=$(( n_not_run + 1 )) ;;
       pass)
+        n_pass=$(( n_pass + 1 ))
         if [[ "$att" =~ ^[0-9]+$ ]] && (( att > 1 )); then
           it_passed+=("brána ${gate}: prošla až na ${att}. pokus${cmd:+ — ověřila: ${cmd}}")
         else
@@ -353,17 +354,29 @@ aid_gate_outcome_render() {
         fi
         ;;
     esac
-  done < <(jq -r '.[] | [(.gate // "?"), (.result // "?"), ((.exit_code // 0)|tostring), ((.attempts // 0)|tostring), (.reason // "")] | @tsv' <<<"$rows")
+  done < <(jq -r --argjson rep "$report" --argjson w "$waived_json" '
+      (($rep._command_log // []) | map({(.name): .command}) | add // {}) as $cmds
+      | .[]
+      | [ (.gate // "?"),
+          (.result // "?"),
+          ((.exit_code // 0)|tostring),
+          ((.attempts // 0)|tostring),
+          (.reason // ""),
+          (.waiver_rejected // ""),
+          (if ((.gate // "") as $g | $w | index($g)) then "1" else "0" end),
+          ($cmds[(.gate // "")] // "")
+        ] | @tsv' <<<"$rows" | tr '\t' '\037')
 
   # A waiver named ONLY by top-level waived_gates[] (no matching row) still
   # renders — the absence of a row is never allowed to hide risk acceptance.
+  # The orphans are computed in ONE jq rather than one per waived name.
   local w
   while IFS= read -r w; do
     [[ -n "$w" ]] || continue
-    if [[ "$(jq -r --arg g "$w" '[.[] | select(.gate == $g and .result == "waived")] | length' <<<"$rows")" == "0" ]]; then
-      it_waived+=("brána ${w}: prominuta — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$w")")
-    fi
-  done < <(jq -r '.[]' <<<"$waived_json")
+    it_waived+=("brána ${w}: prominuta — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$w")")
+  done < <(jq -r --argjson rows "$rows" \
+    '([$rows[] | select(.result == "waived") | .gate]) as $have | .[] | select(. as $g | $have | index($g) | not)' \
+    <<<"$waived_json")
 
   local -a core_items=()
   core_items+=("${it_failed[@]+"${it_failed[@]}"}")
@@ -377,17 +390,13 @@ aid_gate_outcome_render() {
   local items_json
   items_json="$(printf '%s\n' "${core_items[@]+"${core_items[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')"
 
-  # The four closed categories the page counts in. `n_failed` is what the code
-  # owns; `n_not_run` is everything the harness never let run.
-  local n_failed=$(( n_fail - n_fail_not_run - n_fail_waived ))
-  local n_not_run=$(( n_skip + n_excl + n_fail_not_run ))
-
   # ── the first failing gate and its reproduction command ───────────────────
-  # The first REAL failure: a row the harness stopped before it ran is not the
-  # thing to hand the PM a reproduction command for.
-  local first_fail first_fail_code repro=""
-  first_fail="$(jq -r --argjson keys "$not_run_reasons_json" \
-    '[.[] | select(.result == "fail") | select((.reason // "") as $r | ($keys | index($r)) | not) | .gate] | first // ""' <<<"$rows")"
+  # Taken from the classification above, not re-derived: "the first REAL
+  # failure" is precisely the first thing that loop put in `failed_gates`, and
+  # asking jq the same question a second way is how the card and the list start
+  # naming different gates.
+  local first_fail="" first_fail_code repro=""
+  (( ${#failed_gates[@]} > 0 )) && first_fail="${failed_gates[0]}"
   first_fail_code="$(jq -r --arg g "$first_fail" '[.[] | select(.gate == $g) | (.exit_code // 0)] | first // 0' <<<"$rows")"
   if [[ -n "$first_fail" ]]; then
     # The gate's OWN command, taken from the report's _command_log. Gate

@@ -127,13 +127,15 @@ _aid_rs_commits() {
   done < <(git -C "$root" rev-list "${start}..${end}" 2>/dev/null)
 }
 
-# _aid_rs_paths <root> <sha…> — the UNION of the paths those commits touched.
+# _aid_rs_paths <root> <sha> — the paths ONE commit touched.
+#   The flags are load-bearing and therefore live in exactly one place:
+#   `--first-parent -m` is what makes a merge commit contribute only its own
+#   diff, and `--no-renames` is what keeps a rename from looking like an
+#   unrelated new path. Written three times, they drift, and then the list of
+#   culprits stops agreeing with the verdict it is explaining.
 _aid_rs_paths() {
-  local root="$1"; shift
-  local sha
-  for sha in "$@"; do
-    git -C "$root" show --name-only --no-renames --first-parent -m --format='' "$sha" 2>/dev/null
-  done | sed '/^$/d' | sort -u
+  git -C "$1" show --name-only --no-renames --first-parent -m --format='' "$2" 2>/dev/null \
+    | sed '/^$/d'
 }
 
 # aid_release_scope_start <root> [rev]
@@ -156,12 +158,15 @@ aid_release_scope_start() {
 # aid_release_scope_evaluate <root> <start> <end>
 #   Fills three globals and returns 0. Split from the printers so the report
 #   and the one-word verdict cannot disagree by being computed twice.
-#     _AID_RS_VERDICT    no_config | no_commits | exempt | release_required
+#     _AID_RS_VERDICT    no_config | no_tag | no_commits | exempt | release_required
+#     _AID_RS_COMMITS    the commits the range KEPT, one sha per line — published
+#                        so a caller that needs them does not re-walk the range
+#                        through a private helper of this file
 #     _AID_RS_CULPRITS   "<sha> <subject>" lines that put a path in scope
 #     _AID_RS_WARNINGS   lines that never block
 aid_release_scope_evaluate() {
   local root="$1" start="$2" end="$3"
-  _AID_RS_VERDICT=""; _AID_RS_CULPRITS=""; _AID_RS_WARNINGS=""
+  _AID_RS_VERDICT=""; _AID_RS_CULPRITS=""; _AID_RS_WARNINGS=""; _AID_RS_COMMITS=""
 
   # NEVER RELEASED IS ITS OWN ANSWER. An empty `start` used to mean the root of
   # history, and `root..HEAD` EXCLUDES the root commit — so a repository whose
@@ -190,30 +195,40 @@ aid_release_scope_evaluate() {
     _AID_RS_VERDICT="no_commits"
     return 0
   fi
+  _AID_RS_COMMITS="$(printf '%s\n' "${shas[@]}")"
 
-  local paths outside="" p
-  paths="$(_aid_rs_paths "$root" "${shas[@]}")"
-  while IFS= read -r p; do
-    [[ -n "$p" ]] || continue
-    _aid_rs_match "$p" "$exempt" || outside+="${p}"$'\n'
-  done <<< "$paths"
+  # ONE walk of the range. Each commit's paths are read once and kept, because
+  # the same three questions — is the union exempt, which commits put a path
+  # outside it, which housekeeping commit touched the application — are all
+  # asked of the same data. Asking git again per question cost one process per
+  # commit per question, on the push path.
+  local -A _paths_of=() _outside=()
+  local p
+  for sha in "${shas[@]}"; do
+    _paths_of["$sha"]="$(_aid_rs_paths "$root" "$sha")"
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      _aid_rs_match "$p" "$exempt" || _outside["$p"]=1
+    done <<< "${_paths_of[$sha]}"
+  done
 
-  if [[ -z "$outside" ]]; then
+  if (( ${#_outside[@]} == 0 )); then
     _AID_RS_VERDICT="exempt"
   else
     _AID_RS_VERDICT="release_required"
     # WHO caused it: the commits that touched at least one path outside the
-    # exempt list. A refusal that only says "something" is a refusal nobody can act on.
+    # exempt list. A refusal that only says "something" is a refusal nobody can
+    # act on.
     local subj cp
     for sha in "${shas[@]}"; do
       while IFS= read -r cp; do
         [[ -n "$cp" ]] || continue
-        if grep -qxF "$cp" <<< "$outside"; then
+        if [[ -n "${_outside[$cp]:-}" ]]; then
           subj="$(git -C "$root" log -1 --format=%s "$sha" 2>/dev/null)"
           _AID_RS_CULPRITS+="${sha:0:8} ${subj}"$'\n'
           break
         fi
-      done < <(git -C "$root" show --name-only --no-renames --first-parent -m --format='' "$sha" 2>/dev/null)
+      done <<< "${_paths_of[$sha]}"
     done
   fi
 
@@ -233,7 +248,7 @@ aid_release_scope_evaluate() {
           _AID_RS_WARNINGS+="${sha:0:8} calls itself housekeeping (\"${msubj}\") but touched ${mp}"$'\n'
           break
         fi
-      done < <(git -C "$root" show --name-only --no-renames --first-parent -m --format='' "$sha" 2>/dev/null)
+      done <<< "${_paths_of[$sha]}"
     done
   fi
   return 0

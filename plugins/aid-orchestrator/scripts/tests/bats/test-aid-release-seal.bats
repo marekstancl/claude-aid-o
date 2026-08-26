@@ -208,7 +208,8 @@ _release_auto() { bash -c "cd '$REPO' && exec bash '$RELEASE' auto" 3>&-; }
   # different question and has only ever lived here.
   run grep -c 'HAS_RELEASE' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
   [ "$output" = "0" ]
-  # Twice: the guard that the library is loaded at all, and the one call.
-  run grep -c 'aid_release_scope_evaluate' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
-  [ "$output" = "2" ]
+  # And it asks the library exactly once. Counted as a CALL, not as a string:
+  # the prose around it names the function too.
+  run grep -cE '^[[:space:]]*aid_release_scope_evaluate ' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
+  [ "$output" = "1" ]
 }

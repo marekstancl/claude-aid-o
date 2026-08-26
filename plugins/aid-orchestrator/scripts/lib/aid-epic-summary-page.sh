@@ -208,13 +208,16 @@ aid_epic_summary_page_render() {
   next_json="$(printf '%s\n' "${next_steps[@]+"${next_steps[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')"
 
   local summary core
-  summary="EPIC ${epic_id} je hotový: ${total_steps} kroků za $(_esp_duration "$started_at" "$finished_at")."
+  # The declension helper the renderer already carries, applied to the PROSE as
+  # well as to the tiles — "1 kroků" beside a correctly declined tile is the
+  # same defect the helper exists for, one line lower.
+  summary="EPIC ${epic_id} je hotový: $(_aid_artifact_czech "$total_steps" "krok" "kroky" "kroků") za $(_esp_duration "$started_at" "$finished_at")."
   if (( ${#missing[@]} > 0 )); then
     core="Revize ale neproběhla celá — chybí $(printf '%s' "${missing[0]}"). Co je níž, platí jen pro tu část, která proběhla."
   elif (( n_blocking > 0 )); then
-    core="Audit našel ${n_blocking} blokujících nálezů; kurátor založil ${#backlog_items[@]} položek do backlogu."
+    core="Audit našel $(_aid_artifact_czech "$n_blocking" "blokující nález" "blokující nálezy" "blokujících nálezů"); kurátor založil $(_aid_artifact_czech "${#backlog_items[@]}" "položku" "položky" "položek") do backlogu."
   else
-    core="Revize proběhla celá, blokující nález žádný; kurátor založil ${#backlog_items[@]} položek do backlogu."
+    core="Revize proběhla celá, blokující nález žádný; kurátor založil $(_aid_artifact_czech "${#backlog_items[@]}" "položku" "položky" "položek") do backlogu."
   fi
 
   local facts prose

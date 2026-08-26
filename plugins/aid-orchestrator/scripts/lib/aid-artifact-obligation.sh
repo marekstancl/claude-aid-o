@@ -113,8 +113,9 @@ aid_artifact_obligation_check() {
 # ---------------------------------------------------------------------------
 
 # _aid_ao_epic_source_epoch <root> <state_file>
-#   When the EPIC's work last moved, as a unix timestamp, and the WORD for what
-#   that timestamp is — the page is compared against it.
+#   Fills _AID_AO_SRC_EPOCH with when the EPIC's work last moved, and
+#   _AID_AO_SRC_WORD with the NAME of that moment; returns 1 when neither can
+#   be determined.
 #
 #   The EPIC's own last commit is the right source: the page is rendered at the
 #   release edge, so a commit landing AFTER it means the EPIC was re-worked and
@@ -124,22 +125,28 @@ aid_artifact_obligation_check() {
 #   two was compared — an unstated fallback is how a weaker check gets mistaken
 #   for the strong one.
 #
-#   THE TRAILING NEWLINE IS LOAD-BEARING: the caller reads this with `read`,
-#   which returns non-zero on input that does not end in one — so without it
-#   every freshness comparison took the "could not determine" branch and passed.
+#   TWO GLOBALS AND NOT A PACKED LINE. This used to print "<epoch>\t<word>" and
+#   the caller unpacked it with `read`, which returns non-zero on input with no
+#   trailing newline — so every freshness comparison took the "cannot tell"
+#   branch and passed. The failure was silent and fail-open; the shape that
+#   allowed it is gone.
 _aid_ao_epic_source_epoch() {
   local root="$1" state="$2" branch epoch=""
-  branch="$(grep -m1 '^branch:' "$state" 2>/dev/null | sed 's/^branch:[[:space:]]*//; s/^"//; s/"$//')" || branch=""
+  _AID_AO_SRC_EPOCH=""; _AID_AO_SRC_WORD=""
+  branch="$(_esp_yaml "$state" branch)"
   if [[ -n "$branch" ]]; then
     epoch="$(git -C "$root" log -1 --format=%ct "$branch" -- 2>/dev/null)" || epoch=""
   fi
   if [[ "$epoch" =~ ^[0-9]+$ ]]; then
-    printf '%s\tposledního commitu EPICu\n' "$epoch"
+    _AID_AO_SRC_EPOCH="$epoch"
+    _AID_AO_SRC_WORD="posledního commitu EPICu"
     return 0
   fi
   epoch="$(stat -c %Y "$state" 2>/dev/null || stat -f %m "$state" 2>/dev/null)" || epoch=""
   [[ "$epoch" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\tzáznamu běhu (větev EPICu už neexistuje)\n' "$epoch"
+  _AID_AO_SRC_EPOCH="$epoch"
+  _AID_AO_SRC_WORD="záznamu běhu (větev EPICu už neexistuje)"
+  return 0
 }
 
 # aid_artifact_obligation_epic_check <root> <run_state_file>
@@ -160,7 +167,7 @@ aid_artifact_obligation_epic_check() {
   }
 
   local epic_id page
-  epic_id="$(grep -m1 '^epic_id:' "$state" 2>/dev/null | sed 's/^epic_id:[[:space:]]*//; s/^"//; s/"$//')" || epic_id=""
+  epic_id="$(_esp_yaml "$state" epic_id)"
   # A FINISHED REVIEW WHOSE ID CANNOT BE READ IS A FINDING, NOT AN EXEMPTION.
   # Returning "not applicable" here would mean a corrupt or truncated run
   # record silently buys its way out of the obligation — the one input a
@@ -175,12 +182,11 @@ aid_artifact_obligation_epic_check() {
     return 1
   fi
 
-  local src word page_epoch
-  IFS=$'\t' read -r src word < <(_aid_ao_epic_source_epoch "$root" "$state") || { src=""; word=""; }
-  [[ "$src" =~ ^[0-9]+$ ]] || return 0
+  local page_epoch
+  _aid_ao_epic_source_epoch "$root" "$state" || return 0
   page_epoch="$(stat -c %Y "$page" 2>/dev/null || stat -f %m "$page" 2>/dev/null)" || return 0
-  if (( page_epoch < src )); then
-    echo "${epic_id}'s PM page ${page} is OLDER than the time of ${word} — the EPIC moved after it was summarised, so the page describes work that is no longer what merged. Re-render it." >&2
+  if (( page_epoch < _AID_AO_SRC_EPOCH )); then
+    echo "${epic_id}'s PM page ${page} is OLDER than the time of ${_AID_AO_SRC_WORD} — the EPIC moved after it was summarised, so the page describes work that is no longer what merged. Re-render it." >&2
     return 1
   fi
   return 0
@@ -191,17 +197,25 @@ aid_artifact_obligation_epic_check() {
 # ---------------------------------------------------------------------------
 
 # aid_artifact_obligation_close_page <root> <plan_id>
-#   The NEWEST plan-close page across the plan-final attempts, or nothing.
-#   Attempts are numbered and never deleted, so a glob would otherwise hand
-#   back attempt 1's page for attempt 3's close.
+#   The page of the HIGHEST-NUMBERED plan-final attempt, or nothing.
+#
+#   By attempt number and not by mtime: attempts are numbered, never deleted,
+#   and mtime is a different ordering — one `touch` on attempt 1's directory and
+#   the obligation would vouch for the wrong page. This is the same
+#   derive-from-disk rule aid-plan-fsm.sh's attempt allocator uses; the boundary
+#   manifest names the current run directory too, but reading it would pull the
+#   manifest library into a hook path that otherwise needs nothing.
 aid_artifact_obligation_close_page() {
-  local root="$1" plan_id="$2" newest="" f
+  local root="$1" plan_id="$2" best="" best_n=-1 f n
   for f in "${root}/.aid-o/work/evidence/${plan_id}"/R-"${plan_id}"-final-*/plan-close-artifact.html; do
     [[ -f "$f" ]] || continue
-    [[ -z "$newest" || "$f" -nt "$newest" ]] && newest="$f"
+    n="${f%/plan-close-artifact.html}"
+    n="${n##*-final-}"
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    if (( n > best_n )); then best_n="$n"; best="$f"; fi
   done
-  [[ -n "$newest" ]] || return 1
-  printf '%s' "$newest"
+  [[ -n "$best" ]] || return 1
+  printf '%s' "$best"
 }
 
 # aid_artifact_obligation_close_check <root> <plan_state_file>
@@ -217,7 +231,7 @@ aid_artifact_obligation_close_check() {
     return 3
   }
   local plan_id
-  plan_id="$(grep -m1 '^plan_id:' "$state" 2>/dev/null | sed 's/^plan_id:[[:space:]]*//; s/^"//; s/"$//')" || plan_id=""
+  plan_id="$(_esp_yaml "$state" plan_id)"
   # Same as the EPIC case: a CLOSED record that names no plan is corrupt, and
   # corruption must not be the way past an obligation.
   [[ -n "$plan_id" ]] || {
@@ -270,40 +284,38 @@ aid_hook_rule_milestone_artifact() {
   marker="$(mktemp)" || { echo "no temp file for the session window" >&2; return 3; }
   touch -d "$started" "$marker" 2>/dev/null || { rm -f "$marker"; echo "unreadable session start '${started}'" >&2; return 3; }
 
-  local findings="" plan err
-
-  # ── milestone 1: plans written in this session ────────────────────────────
-  while IFS= read -r plan; do
-    [[ -n "$plan" ]] || continue
-    err="$(aid_artifact_obligation_check "$plan" 2>&1)" || rc=$?
-    [[ "$rc" -eq 1 ]] && findings+="${err}"$'\n'
-    rc=0
-  done < <(find "$plans" -maxdepth 1 -name 'P*.md' -newer "$marker" 2>/dev/null)
-
-  # ── milestone 2: EPIC runs whose review ended in this session ─────────────
+  # THE THREE MILESTONES ARE A TABLE, NOT THREE LOOPS. What differs between
+  # them is a root, a find depth, a filename and which check to call; the loop
+  # body — read a line, ask the check, keep only a rc==1 finding, reset — is
+  # the same three times, and its `rc` handling is exactly the kind of idiom
+  # that gets fixed in one copy and left wrong in the others.
+  #
   # The run state files live at evidence/<epic_id>/<run_id>/fsm-state.yaml —
   # depth 3. The EPIC pages live at evidence/<plan_id>/<epic_id>/ — depth 2,
   # and carry no state file, so the two never collide.
-  local ev_root="${root}/.aid-o/work/evidence" state
-  if [[ -d "$ev_root" ]]; then
-    while IFS= read -r state; do
-      [[ -n "$state" ]] || continue
-      err="$(aid_artifact_obligation_epic_check "$root" "$state" 2>&1)" || rc=$?
-      [[ "$rc" -eq 1 ]] && findings+="${err}"$'\n'
-      rc=0
-    done < <(find "$ev_root" -mindepth 3 -maxdepth 3 -name 'fsm-state.yaml' -newer "$marker" 2>/dev/null)
-  fi
+  local findings="" err
 
-  # ── milestone 3: plans closed in this session ─────────────────────────────
-  local ps_root="${root}/.aid-o/work/plan-state" pstate
-  if [[ -d "$ps_root" ]]; then
-    while IFS= read -r pstate; do
-      [[ -n "$pstate" ]] || continue
-      err="$(aid_artifact_obligation_close_check "$root" "$pstate" 2>&1)" || rc=$?
+  # _scan <check_fn> <dir> <depth> <name> — the shared body. A check is called
+  # with the workspace root first unless it takes only a file (milestone 1).
+  _scan() {
+    local fn="$1" dir="$2" depth="$3" name="$4" hit rc=0
+    [[ -d "$dir" ]] || return 0
+    while IFS= read -r hit; do
+      [[ -n "$hit" ]] || continue
+      if [[ "$fn" == "aid_artifact_obligation_check" ]]; then
+        err="$("$fn" "$hit" 2>&1)" || rc=$?
+      else
+        err="$("$fn" "$root" "$hit" 2>&1)" || rc=$?
+      fi
       [[ "$rc" -eq 1 ]] && findings+="${err}"$'\n'
       rc=0
-    done < <(find "$ps_root" -mindepth 2 -maxdepth 2 -name 'plan-state.yaml' -newer "$marker" 2>/dev/null)
-  fi
+    done < <(find "$dir" -mindepth "$depth" -maxdepth "$depth" -name "$name" -newer "$marker" 2>/dev/null)
+  }
+
+  _scan aid_artifact_obligation_check       "$plans"                            1 'P*.md'
+  _scan aid_artifact_obligation_epic_check  "${root}/.aid-o/work/evidence"      3 'fsm-state.yaml'
+  _scan aid_artifact_obligation_close_check "${root}/.aid-o/work/plan-state"    2 'plan-state.yaml'
+  unset -f _scan
 
   rm -f "$marker"
 

@@ -234,15 +234,26 @@ _close_page() {
   [[ "$output" == *"was closed but its closing page was not rendered"* ]]
 }
 
-@test "a closed plan with its closing page passes, and the NEWEST attempt is the one read" {
+@test "a closed plan with its closing page passes, and the HIGHEST attempt is the one read" {
   local ps; ps="$(_closed_plan CLOSED)"
   _close_page
-  # An older attempt's page must not satisfy a later close.
   mkdir -p "$ROOT/.aid-o/work/evidence/P900/R-P900-final-2"
   printf '<h1>close 2</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-2/plan-close-artifact.html"
-  touch -d "2019-01-01 00:00" "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
   run aid_artifact_obligation_close_check "$ROOT" "$ps"
   [ "$status" -eq 0 ]
+  run aid_artifact_obligation_close_page "$ROOT" P900
+  [[ "$output" == *"R-P900-final-2"* ]]
+}
+
+@test "one touch on an old attempt does not make it the page that is read" {
+  local ps; ps="$(_closed_plan CLOSED)"
+  _close_page
+  mkdir -p "$ROOT/.aid-o/work/evidence/P900/R-P900-final-2"
+  printf '<h1>close 2</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-2/plan-close-artifact.html"
+  # Attempt 1 is now the NEWEST file and still the wrong answer.
+  touch "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
+  run aid_artifact_obligation_close_page "$ROOT" P900
+  [[ "$output" == *"R-P900-final-2"* ]]
 }
 
 @test "a plan that is still open owes no closing page" {

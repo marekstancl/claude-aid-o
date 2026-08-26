@@ -128,12 +128,15 @@ if [[ "$BUMP_TYPE" == "auto" ]]; then
       esac
       # The commits the scope EXEMPTED must not drive the bump type either: a
       # `feat:` carrying a No-Release footer would otherwise still choose minor.
+      # The kept list is what `aid_release_scope_evaluate` already walked and
+      # published — re-deriving it here would be a fourth pass over the range,
+      # through a private helper of another file.
       local _kept="" _sha _short
       while IFS= read -r _sha; do
         [[ -n "$_sha" ]] || continue
         _short="$(git -C "$REPO_ROOT" log -1 --format='%h %s' "$_sha" 2>/dev/null)"
         [[ -n "$_short" ]] && _kept+="${_short}"$'\n'
-      done < <(_aid_rs_commits "$REPO_ROOT" "$LAST_TAG" HEAD)
+      done <<< "${_AID_RS_COMMITS:-}"
       [[ -n "$_kept" ]] && COMMITS="${_kept%$'\n'}"
     fi
 
