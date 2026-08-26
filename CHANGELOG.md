@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.93.1] — 2026-08-26
+
+> The nightly's wave of eighteen, and the check that was meant to prevent the next one — which
+> turned out to be a check that could not fail.
+
+### Added
+- **`scripts/tests/lib/aid-test-plan-fixture.sh` — THE one place a fixture seeds a plan** — it satisfies every generation precondition at once (a real `execution.yaml`, the plan committed where the workspace tracks it, the PM page rendered and current), so a fourth is one edit there rather than fifteen. Three landed in three weeks and each broke the same ~15 `t2` fixtures, because nothing runs those to completion. It never switches a gate off: a fixture that skips a precondition proves only that skipping works.
+- **`test-plan-fixture-contract.bats` (T1, the merge path)** — it seeds through that helper and runs the REAL generator with every argument, requires success, and asserts the EPIC exists. A fourth precondition now fails at merge in one place.
+
+### Fixed
+- **Eighteen suites the nightly reported** — the generation family (44 failures to 0), plus `init-idempotency`, `auto-recovery-policy` and the handoff renderer's goldens.
+- **`auto-recovery.yaml` no longer carries line numbers** — nothing outside one test read them, they drifted twice in five days (once by 110 lines), and the schema's own description had said for months that anchors are what the test asserts while requiring the field anyway. The schema now refuses their return, and every anchor is unique in its file — unique *and* moving with the code, where the line number was unique and rotting.
+- **`/aid-init`'s declared product and its test agree again** — the document was right: `counter.yaml` joined the ten in v2.89.2, when a fresh workspace could not allocate its first plan id.
+- **The handoff goldens follow P089 Step 3** — regenerated deliberately, after confirming the new gates page carries more than the old one. The one assertion that needed real work: "a waived gate must never read as passed" hunted the English word `waived` on a page that is Czech throughout, and now holds on the surface that exists — the tile must name the waiver and the verified count must exclude it.
+
+### Changed
+- **An AID alert names its project** — `Scope: wan-aid-beh`, source `AID · wan`. The plugin is installed per project, so without it two identically-shaped messages from two repositories are indistinguishable; `Host` is the machine, not the project.
+
 ## [2.93.0] — 2026-08-26
 
 > A page carries what its phase owes and cannot contradict itself, and a release is required by what changed rather than by what a commit message promised.
