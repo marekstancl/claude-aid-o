@@ -37,3 +37,5 @@
 {"ts":"2026-08-27T03:27:13Z","event":"plan_lint_result","band":"full","mode":"legacy","errors":0,"strict":0,"advisories":0,"blocked":false}
 {"ts":"2026-08-27T03:32:50Z","event":"plan_lint_result","band":"full","mode":"legacy","errors":0,"strict":0,"advisories":0,"blocked":false}
 {"ts":"2026-08-27T03:32:51Z","event":"plan_lint_result","band":"full","mode":"legacy","errors":0,"strict":0,"advisories":0,"blocked":false}
+{"ts":"2026-08-27T03:43:18Z","event":"cp1_band_classified","band":"full","reason":"frontmatter_risk_high","classify_only":false}
+{"ts":"2026-08-27T03:43:18Z","event":"cp1_gate_result","band":"full","result":"fail","exit_code":1}
