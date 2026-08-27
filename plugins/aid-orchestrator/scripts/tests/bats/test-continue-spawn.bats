@@ -210,24 +210,63 @@ YAML
   [ "$output" = "1" ]
 }
 
-@test "AC21: a job of this plan that is still alive stops a second one" {
+@test "AC21: a job of this plan that is still alive stops a second one — found by scanning, not by trusting the guidance" {
   _ready
   _permissions_auto
   _config '  spawn_next_epic: true'
-  # A job record whose process is this very shell: alive, and not ours.
-  mkdir -p "$JOBS/older-job"
+  # A job record whose process is this very shell: alive, and this plan's.
+  # NOTHING points at it — no guidance, no job_id — because the guidance names
+  # only the LAST job a run started, and a job left by an earlier link of the
+  # chain would otherwise be invisible.
+  mkdir -p "$JOBS/p090-P090-E-090-9_9-1"
   jq -n --arg pid "$$" --arg st "$(awk '{print $22}' "/proc/$$/stat")" \
-     '{id:"older-job", state:"running", pid:($pid|tonumber), proc_starttime:$st,
-       start_head:"x", start_tree:"y"}' > "$JOBS/older-job/job.json"
-  mkdir -p "$(dirname "$GUIDE")"
-  jq -n --arg jd "$JOBS" '{schema:"aid-plan-continue/1", plan_id:"P090",
-      last_completed_epic:"E-090-0_2", last_result:"", next_epic:"",
-      at:"2026-08-27T00:00:00Z", job_id:"older-job", jobs_dir:$jd,
-      job_fingerprint:"", spawned_count:0}' > "$GUIDE"
+     '{id:"p090-P090-E-090-9_9-1", state:"running", pid:($pid|tonumber),
+       proc_starttime:$st, start_head:"x", start_tree:"y"}' \
+     > "$JOBS/p090-P090-E-090-9_9-1/job.json"
+  [ ! -f "$GUIDE" ]
 
   _continue P090 E-090-1_2
   [ "$status" -eq 0 ]
-  [[ "$output" == *"job older-job for this plan is still alive"* ]]
+  [[ "$output" == *"job p090-P090-E-090-9_9-1 for this plan is still alive"* ]]
+  [ ! -f "$MARKER" ]
+
+  # Another PLAN's live job does not stop this one: the cap and the check are
+  # both per plan, which is the choice the registry records.
+  #
+  # The state is reset to what a fresh attempt faces: the run above claimed
+  # E-090-2_2 and recorded it in flight, and re-running the SAME finished EPIC
+  # against that record is (correctly) refused as out of sequence.
+  rm -f "$GUIDE"
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  rm -rf "$JOBS/p090-P090-E-090-9_9-1"
+  mkdir -p "$JOBS/p090-P091-E-091-1_1-1"
+  jq -n --arg pid "$$" --arg st "$(awk '{print $22}' "/proc/$$/stat")" \
+     '{id:"p090-P091-E-091-1_1-1", state:"running", pid:($pid|tonumber),
+       proc_starttime:$st, start_head:"x", start_tree:"y"}' \
+     > "$JOBS/p090-P091-E-091-1_1-1/job.json"
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spawn:   started"* ]]
+  [ -f "$MARKER" ]
+}
+
+@test "AC21: the cap is read under the lock, from disk — not from the copy this run parsed at startup" {
+  # The window: a run reads spawned_count at startup, a racing continuation
+  # spawns and raises it, and the first run then decides its cap on the value it
+  # read before. Simulated by raising the count on disk AFTER the run would have
+  # parsed it — which is what the racing writer does.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true
+  max_spawned_epics: 2'
+  mkdir -p "$(dirname "$GUIDE")"
+  jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", last_completed_epic:"E-090-0_2",
+          last_result:"", next_epic:"", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:2}' > "$GUIDE"
+
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cap reached"* ]]
   [ ! -f "$MARKER" ]
 }
 

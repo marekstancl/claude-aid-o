@@ -347,34 +347,52 @@ _pc_autonomous_mode() {
 }
 
 # _pc_spawned_count — how many sessions this PLAN has already started, read from
-# the guidance. Per plan, not per workspace: two plans with spawning on do not
-# add up. That is a choice, and the enforcement registry says so.
+# the guidance ON DISK. Per plan, not per workspace: two plans with spawning on
+# do not add up. That is a choice, and the enforcement registry says so.
+#
+# It re-reads the FILE rather than the copy this run parsed at startup, and it
+# is called under the lock: the count parsed before the lock was taken is
+# exactly the value a racing continuation may have raised in the meantime, and
+# a cap decided on a stale count is not a cap.
 _pc_spawned_count() {
-  [[ -n "$_PC_GUIDE_JSON" ]] || { printf '0'; return 0; }
-  local n; n="$(jq -r '.spawned_count // 0' <<<"$_PC_GUIDE_JSON" 2>/dev/null)" || n=0
+  local f; f="$(_pc_state_path)"
+  [[ -f "$f" ]] || { printf '0'; return 0; }
+  local n
+  n="$(jq -r 'select(.schema == "aid-plan-continue/1") | .spawned_count // 0' "$f" 2>/dev/null)" || n=0
   [[ "$n" =~ ^[0-9]+$ ]] || n=0
   printf '%s' "$n"
 }
 
-# _pc_own_job_running <jobs_dir> <job_id> — is a job of THIS plan still alive?
+# _pc_live_plan_job <jobs_dir> <plan_id> — the id of a job of THIS plan that is
+# still alive, or nothing.
+#
+# It scans the job directory for this plan's own id prefix rather than trusting
+# the single `job_id` in the guidance: the guidance names the LAST job this
+# plan started, and a job started by an earlier link of the chain — or by a run
+# whose guidance write did not land — would otherwise be invisible.
 #
 # THE ONE EXCLUSION THAT KEEPS THE CHAIN LONGER THAN ONE. The session started
 # here reaches its own merge, that merge calls this script again — and the job
 # it would find running is the job it is running INSIDE. Refusing on that would
 # stop the chain at length one, and nothing would restart it, because
 # `aid-job.sh` is a supervisor, not a daemon. So the job id this process was
-# launched under (AID_JOB_ID in its environment) is ignored here. That id is
-# known because it is PRE-ALLOCATED and passed to `aid-job.sh run --id`, and
-# handed to the session through `env AID_JOB_ID=<id>` — the supervisor itself
-# exports nothing.
-_pc_own_job_running() {
-  local jobs_dir="$1" job_id="$2"
-  [[ -n "$job_id" ]] || return 1
-  [[ "$job_id" == "${AID_JOB_ID:-}" ]] && return 1
-  [[ -d "${jobs_dir}/${job_id}" ]] || return 1
-  local state
-  state="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null)" || return 1
-  [[ "$state" == "running" || "$state" == "started" ]]
+# launched under (AID_JOB_ID in its environment) is skipped. That id is known
+# because it is PRE-ALLOCATED and passed to `aid-job.sh run --id`, and handed to
+# the session through `env AID_JOB_ID=<id>` — the supervisor exports nothing.
+_pc_live_plan_job() {
+  local jobs_dir="$1" plan_id="$2" d id state
+  [[ -d "$jobs_dir" ]] || return 0
+  for d in "$jobs_dir"/p090-"${plan_id}"-*; do
+    [[ -d "$d" ]] || continue
+    id="$(basename "$d")"
+    [[ "$id" == "${AID_JOB_ID:-}" ]] && continue
+    state="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$id" 2>/dev/null)" || continue
+    if [[ "$state" == "running" || "$state" == "started" ]]; then
+      printf '%s' "$id"
+      return 0
+    fi
+  done
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -396,7 +414,6 @@ _PC_SPAWN_FINGERPRINT=""
 _PC_SPAWN_COUNT=0
 _pc_spawn() {
   local plan_id="$1" epic_id="$2" override="$3"
-  _PC_SPAWN_COUNT="$(_pc_spawned_count)"
 
   local enabled
   if [[ "$override" == "yes" ]]; then enabled=true
@@ -457,6 +474,8 @@ _pc_spawn() {
   fi
   local fd="$AID_LOCK_FD"
 
+  # Read under the lock, never before it — see _pc_spawned_count.
+  _PC_SPAWN_COUNT="$(_pc_spawned_count)"
   if [[ "$_PC_SPAWN_COUNT" -ge "$max" ]]; then
     aid_lock_release "$fd"
     _pc_say "spawn:   cap reached — this plan has already started ${_PC_SPAWN_COUNT} session(s) and autonomy.max_spawned_epics is ${max}. That is a normal end, not a failure: ${epic_id} is claimed and ready."
@@ -464,12 +483,11 @@ _pc_spawn() {
     return 0
   fi
 
-  local prev_job=""
-  [[ -n "$_PC_GUIDE_JSON" ]] && prev_job="$(jq -r '.job_id // ""' <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
-  if _pc_own_job_running "$jobs_dir" "$prev_job"; then
+  local live_job; live_job="$(_pc_live_plan_job "$jobs_dir" "$plan_id")"
+  if [[ -n "$live_job" ]]; then
     aid_lock_release "$fd"
-    _pc_say "spawn:   not started — job ${prev_job} for this plan is still alive. ${epic_id} is claimed and ready."
-    _pc_note "spawn_skipped" "$epic_id" "reason=job_running job_id=${prev_job}"
+    _pc_say "spawn:   not started — job ${live_job} for this plan is still alive. ${epic_id} is claimed and ready."
+    _pc_note "spawn_skipped" "$epic_id" "reason=job_running job_id=${live_job}"
     return 0
   fi
 
