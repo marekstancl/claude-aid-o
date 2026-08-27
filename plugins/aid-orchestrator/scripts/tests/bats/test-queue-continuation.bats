@@ -184,7 +184,12 @@ YAML
   [ "$status" -eq 3 ]
 }
 
-@test "a queue it cannot read is never reported as 'nothing left'" {
+@test "a queue it cannot read makes the rule SILENT, and the reason is recorded" {
+  # Step 5's error handling, and the right call: this rule speaks into a
+  # prompt, and a reminder built on "I do not know" is noise that teaches a
+  # reader to skim past the ones that mean something. Silence is not a claim
+  # that the plan is finished — nothing is claimed at all — and the reason
+  # still goes on stderr where an operator and the audit log find it.
   _plan P090 auto
   _queue_ready
   : > "${QUEUE}.lock"
@@ -195,9 +200,31 @@ YAML
   kill "$holder" 2>/dev/null || true
   wait "$holder" 2>/dev/null || true
 
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"could not be read just now"* ]]
+  # 3 == "not applicable": there was nothing it could truthfully say.
+  [ "$status" -eq 3 ]
   [[ "$output" != *"every EPIC is accounted for"* ]]
+  [[ "$output" != *"is ready to be claimed"* ]]
+  # …and it said WHY, rather than going quiet without a trace.
+  [[ "$output" == *"could not be read"* ]]
+}
+
+@test "a guidance copied from ANOTHER plan is not read as this plan's" {
+  # Same failure the continuation script was hardened against: the schema name
+  # alone is not enough, because a file carrying another plan's in-flight EPIC
+  # would be announced as this one's.
+  _plan P090 auto
+  _queue_ready
+  mkdir -p "$ROOT/.aid-o/work/evidence/P090"
+  jq -n '{schema:"aid-plan-continue/1", plan_id:"P091", last_completed_epic:"E-091-1_2",
+          last_result:"E-091-2_2", next_epic:"E-091-2_2", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:0}' \
+     > "$ROOT/.aid-o/work/evidence/P090/continue-state.json"
+
+  run aid_hook_rule_queue_continuation_start <<< "$(_event)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-090-2_2 is ready to be claimed"* ]]
+  [[ "$output" != *"E-091-2_2"* ]]
+  [[ "$output" != *"in flight"* ]]
 }
 
 @test "AC13b: on SessionStart the guidance an interrupted run left is read back, with what the queue has next" {

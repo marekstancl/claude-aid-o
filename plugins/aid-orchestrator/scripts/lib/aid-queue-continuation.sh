@@ -71,9 +71,14 @@ _AID_QC_TERMINAL='CLOSED ABORTED ROLLED_BACK'
 #   one line:
 #     <plan_id>\t<plan_state>\t<peek result>\t<guidance next_epic or "">
 #   `peek result` is `queue_peek_next`'s own triple — `<epic_id>`,
-#   `blocked:<id>:<reason>` or `none` — or `unreadable` when the queue could not
-#   be read at all. `unreadable` is deliberately NOT `none`: this rule would
-#   rather say nothing than say a plan is finished when it could not look.
+#   `blocked:<id>:<reason>` or `none`.
+#
+#   A plan whose queue could NOT be read produces NO LINE AT ALL, and a note on
+#   stderr saying so. That is the Step 5 contract, and the right one: this rule
+#   speaks into a prompt, and a reminder built on "I do not know" is noise that
+#   teaches a reader to skim past the ones that mean something. Silence here is
+#   not a claim that the plan is finished — nothing is claimed — and the
+#   stderr note is what an operator or the audit log reads afterwards.
 #   Exit 0 always.
 # ---------------------------------------------------------------------------
 aid_queue_continuation_scan() {
@@ -93,14 +98,23 @@ aid_queue_continuation_scan() {
     local rc=0
     result="$(bash "$qlib" peek-next "$plan_id" --project-root "$root" 2>/dev/null)" || rc=$?
     # rc 3 is the lock; rc 2 a bad id. Either way the answer is "I don't know",
-    # and 0/1 are the only codes that carry one.
-    if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then result="unreadable"; fi
-    [[ -n "$result" ]] || result="unreadable"
+    # and 0/1 are the only codes that carry one. Say nothing, and record why.
+    if [[ "$rc" -ne 0 && "$rc" -ne 1 ]] || [[ -z "$result" ]]; then
+      echo "queue for ${plan_id} could not be read (peek-next rc=${rc}); saying nothing about it" >&2
+      continue
+    fi
 
+    # The guidance is accepted only if it is OUR schema AND about THIS plan: a
+    # file copied from another plan carries that plan's in-flight EPIC, and the
+    # reminder would name it as this one's (Codex review, EPIC 2).
     next=""
     guide="${root}/.aid-o/work/evidence/${plan_id}/continue-state.json"
     if [[ -f "$guide" ]]; then
-      next="$(jq -r 'select(.schema == "aid-plan-continue/1") | .next_epic // ""' "$guide" 2>/dev/null)" || next=""
+      next="$(jq -r --arg plan "$plan_id" '
+                select(.schema == "aid-plan-continue/1")
+                | select(.plan_id == $plan)
+                | select((.next_epic | type) == "string")
+                | .next_epic' "$guide" 2>/dev/null)" || next=""
     fi
 
     printf '%s\t%s\t%s\t%s\n' "$plan_id" "${state:-?}" "$result" "$next"
@@ -124,7 +138,6 @@ _aid_qc_line() {
   case "$result" in
     none)       printf -- '- %s (%s): every EPIC is accounted for; the plan still needs closing (plan-finalize / plan-merge-to-main / plan-close).%s\n' "$plan" "$state" "$tail" ;;
     blocked:*)  printf -- '- %s (%s): nothing is claimable — %s.%s\n' "$plan" "$state" "$result" "$tail" ;;
-    unreadable) printf -- '- %s (%s): its queue could not be read just now, so nothing is claimed here about what is left.%s\n' "$plan" "$state" "$tail" ;;
     *)          printf -- '- %s (%s): %s is ready to be claimed — `aid-plan-continue.sh` takes it after the current EPIC merges.%s\n' "$plan" "$state" "$result" "$tail" ;;
   esac
 }
@@ -143,9 +156,6 @@ aid_hook_rule_queue_continuation_stop() {
   local plan state result next n=0
   while IFS=$'\t' read -r plan state result next; do
     [[ -n "$plan" ]] || continue
-    # A plan with a ready EPIC or an unfinished one is worth a word; a plan
-    # whose queue simply could not be read is worth a word too, because
-    # silence there would be indistinguishable from "all done".
     (( n == 0 )) && echo "AID — this turn is ending with an autonomous plan still open (nothing was changed, and this cannot stop a turn):"
     n=$((n+1))
     _aid_qc_line "$plan" "$state" "$result" "$next"

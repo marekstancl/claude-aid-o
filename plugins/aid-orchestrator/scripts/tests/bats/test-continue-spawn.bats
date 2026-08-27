@@ -70,6 +70,17 @@ _await_marker() {
   return 1
 }
 
+# _live_job_record <job_id> — a job record whose recorded process really is
+# alive (this shell), so `aid-job.sh status` reports it running. The stub
+# `claude` exits at once, so a job DIRECTORY left behind by a real spawn is
+# already terminal: a case that needs a live job has to make one on purpose.
+_live_job_record() {
+  mkdir -p "$JOBS/$1"
+  jq -n --arg id "$1" --arg pid "$$" --arg st "$(awk '{print $22}' "/proc/$$/stat")" \
+     '{id:$id, state:"running", pid:($pid|tonumber), proc_starttime:$st,
+       start_head:"x", start_tree:"y"}' > "$JOBS/$1/job.json"
+}
+
 _plan_state() {
   mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
   cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
@@ -173,11 +184,17 @@ _ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
   [ "$output" = "p090-P090-E-090-2_2-1|true|true|1" ]
 }
 
-@test "AC21d: the spawned session is handed its own AID_JOB_ID, and that id is excluded from the running check" {
+@test "AC21d: the spawned session is handed its own AID_JOB_ID, and that id — and ONLY that id — is excluded" {
   # The chain would otherwise have length one: the session started here reaches
-  # its own merge, calls this script again, and sees as 'a job already running'
+  # its own merge, calls this script again, and sees as "a job already running"
   # the job it is running INSIDE. Nothing would restart it — aid-job.sh is a
   # supervisor, not a daemon.
+  #
+  # An earlier version of this case could not tell the exclusion from its
+  # absence (Codex review, EPIC 2): the stub exits at once, so the first job was
+  # already terminal and there was nothing to exclude. The record below is
+  # deliberately LIVE — this shell — so removing the exclusion turns the second
+  # half red.
   _ready
   _permissions_auto
   _config '  spawn_next_epic: true'
@@ -186,8 +203,8 @@ _ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
   _await_marker
   grep -q 'AID_JOB_ID=p090-P090-E-090-2_2-1' "$MARKER"
 
-  # Now play the second link of the chain: a run INSIDE that job, whose
-  # guidance names it. It must not refuse on account of itself.
+  # Play the second link of the chain: a run INSIDE that job, with the job
+  # genuinely alive.
   _merged_epic E-090-2_2
   bash "$QW" set-status E-090-2_2 running --queue "$QUEUE" --project-root "$ROOT" >/dev/null
   cat >> "$QUEUE" <<'YAML'
@@ -198,14 +215,44 @@ _ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
     merge_target: "plan/P090"
     depends_on: []
 YAML
-  # Pretend the first job is still alive by leaving its record in place; what
-  # decides is that AID_JOB_ID matches it.
+  rm -rf "$JOBS/p090-P090-E-090-2_2-1"
+  _live_job_record p090-P090-E-090-2_2-1
+
+  # Without AID_JOB_ID the live job blocks a second spawn — the control that
+  # proves the next assertion means something.
+  _continue P090 E-090-2_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"job p090-P090-E-090-2_2-1 for this plan is still alive"* ]]
+
+  # With it, the chain continues past itself.
+  rm -f "$MARKER" "$GUIDE"
+  bash "$QW" set-status E-090-3_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
   AID_JOB_ID=p090-P090-E-090-2_2-1 _continue P090 E-090-2_2
   [ "$status" -eq 0 ]
   [[ "$output" == *"claim:   E-090-3_2"* ]]
   [[ "$output" != *"is still alive"* ]]
   _await_marker
   grep -q -- '-p /aid-run --auto --epic E-090-3_2' "$MARKER"
+}
+
+@test "the spawned session holds none of the caller's descriptors — a captured run ends when the run ends" {
+  # MEASURED, not theoretical. `aid-job.sh` detaches with `setsid` and redirects
+  # the wrapper's own 0/1/2, but its deadline watchdog is a `sleep <deadline>`
+  # that lives for the WHOLE deadline — an hour by default — and inherits every
+  # other descriptor the caller had open. A caller reading this script's output
+  # through a pipe therefore waited an hour for EOF. It was found exactly that
+  # way: a bats suite finished its cases and then sat for fifteen minutes with
+  # no children, because six `sleep 3600` processes still held fd 3.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+
+  # `| cat` is the whole point: cat sees EOF only when the LAST writer of the
+  # pipe closes it. If a descriptor leaks into the spawned job, this times out.
+  run timeout 25 bash -c 'bash "$1" P090 E-090-1_2 --project-root "$2" 2>&1 | cat' \
+      _ "$CONTINUE" "$ROOT"
+  [ "$status" -ne 124 ]
+  [[ "$output" == *"spawn:   started"* ]]
 }
 
 @test "AC21: the cap stops the chain, and says how many it started" {
@@ -304,7 +351,9 @@ YAML
   bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
   _continue P090 E-090-1_2
   [[ "$output" == *"spawn:   off (autonomy.spawn_next_epic is false)"* ]]
-  [[ "$output" != *"is not configured"* ]]
+  # …about THAT key. The other two are genuinely unconfigured here and say so,
+  # which is the behaviour the case above asserts.
+  [[ "$output" != *"autonomy.spawn_next_epic is not configured"* ]]
 
   # A present but unusable value is NEVER silently defaulted: that is how a cap
   # of 3 becomes no cap.
@@ -409,8 +458,18 @@ YAML
   run bash -c 'grep -o "/aid-run[^\"]*" "$1" | grep -vc -- "--auto --epic" || true' _ "$cont"
   [ "$output" = "0" ]
 
-  # And the verdict is written down where a reader outside this working tree can
-  # find it, since the raw probe is not.
-  grep -q 'aid-run --auto --epic' "$AID_PLUGIN_PATH/../../docs/extending-aid.md"
-  grep -q 'predicate declared beforehand' "$AID_PLUGIN_PATH/../../docs/extending-aid.md"
+  # And the MEASUREMENT is written down where a reader outside this working tree
+  # can check it, since the raw probe is not (Codex review, EPIC 2: without
+  # this, the case could pass with no experiment ever having been run). The
+  # predicate and the number both live in the tracked document, and the number
+  # has to satisfy the predicate.
+  local doc="$AID_PLUGIN_PATH/../../docs/extending-aid.md"
+  grep -q 'aid-run --auto --epic' "$doc"
+  grep -q 'predicate (declared beforehand)' "$doc"
+  local declared measured
+  declared="$(grep -o 'grep -c -o .*≥ \*\*[0-9]*\*\*' "$doc" | grep -o '[0-9]*\*\*$' | tr -d '*')"
+  measured="$(grep -o '| measured | \*\*[0-9]*\*\*' "$doc" | grep -o '[0-9]*')"
+  [ -n "$declared" ]
+  [ -n "$measured" ]
+  [ "$measured" -ge "$declared" ]
 }

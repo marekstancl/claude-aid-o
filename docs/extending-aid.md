@@ -2890,11 +2890,22 @@ aid-job.sh run --jobs-dir .aid-o/work/jobs --id <pre-allocated> --deadline <n> \
 Four things in that line were decided rather than assumed:
 
 - **The slash form.** That `claude -p "/aid-run …"` dispatches a command rather
-  than echoing prose was not taken on trust: one run of
-  `claude -p "/aid-help" --output-format stream-json --verbose` was measured
-  against a predicate declared beforehand (at least two AID command names in the
-  answer; 44 were found). The fallback the plan had prepared — a sentence saying
-  what to run — is therefore not used.
+  than echoing prose was not taken on trust. One run, with the predicate fixed
+  BEFORE it:
+
+  | | |
+  |---|---|
+  | command | `claude -p "/aid-help" --output-format stream-json --verbose` |
+  | predicate (declared beforehand) | `grep -c -o '/aid-[a-z-]*'` ≥ **2** |
+  | measured | **44** — and `is_error: false`, `subtype: success`, 3 turns |
+  | verdict | SATISFIED → the slash form ships |
+
+  The answer was the `/aid-help` skill's own output, i.e. the command was
+  dispatched, not echoed. The fallback the plan had prepared — a sentence saying
+  what to run — is therefore not used. The raw transcript is in the gitignored
+  evidence directory (`.aid-o/work/evidence/P090/steps/step_6/`), which is why
+  the numbers are written here, where a reader outside the authoring tree can
+  check that a measurement happened at all.
 - **`--auto --epic`, never bare `/aid-run <epic>`.** The bare form is MANUAL
   mode. A session recorded as manual would not continue the plan after its own
   merge, and the chain would stop — a second time, by another route.
@@ -2908,14 +2919,30 @@ Four things in that line were decided rather than assumed:
   would restart it — `aid-job.sh` is a supervisor, not a daemon. So the check
   ignores `AID_JOB_ID`.
 
-The cap, the running check and the reservation of a slot happen under the
-queue's own lock, so two racing continuations cannot both start a session. The
-**launch is outside that hold** on purpose: `aid-job.sh` detaches with `setsid`,
-a detached child inherits a duplicate of the lock fd, and flock only drops when
-the last descriptor closes — launching under the hold would keep the queue
-locked for the whole life of the spawned session. The slot is therefore reserved
-(and durably recorded) under the lock, and spent even if the launch then fails:
-under-spawning by one costs a session, double-spawning costs two.
+The cap, the running check, the reservation **and the launch** all happen inside
+one hold of the queue's own lock, so two racing continuations cannot both start
+a session.
+
+That single hold is only safe because of one thing. `aid-job.sh` detaches with
+`setsid`, and a detached child inherits every descriptor the caller had open —
+including the lock, which flock drops only when the last one closes, and
+including any pipe the caller's output is being read through. Its deadline
+watchdog is a `sleep <deadline>` that lives for the whole deadline, an hour by
+default. So the launch goes through a wrapper that **closes every descriptor
+above stderr** before the supervisor runs. An earlier cut instead released the
+lock before launching, which left a window where a second continuation saw a
+raised count but no job directory yet and started a second session.
+
+Both hazards were measured, not reasoned about: a bats suite ran all its cases
+and then sat for fifteen minutes with no children, because six `sleep 3600`
+processes still held fd 3. `test-continue-spawn.bats` now pipes a spawning run
+through `cat` and fails if EOF does not arrive.
+
+A reservation that cannot be written, or a spawn decision that cannot be
+recorded in the plan's timeline, is a **refusal** — a session nobody could later
+find or count is not an auditable action. A slot reserved and then failed to
+launch stays spent: under-spawning by one costs a session, double-spawning costs
+two. And a job record that cannot be READ counts as live, for the same reason.
 
 `autonomy.max_spawned_epics` is **per plan**, not per workspace. Two plans with
 spawning on do not add up. That is a choice; the enforcement registry records it.
@@ -2935,6 +2962,11 @@ barrier, because everyone would believe it was one.
 
 It asks through `peek`, never `claim`. A reminder that consumed the queue would
 create the very orphan it exists to warn about.
+
+A plan whose queue it cannot read gets **no line at all**, and the reason goes
+to stderr. Silence there is not a claim that the plan is finished — nothing is
+claimed — and a reminder built on "I do not know" is noise that teaches a reader
+to skim past the ones that mean something.
 
 ### The guidance file
 

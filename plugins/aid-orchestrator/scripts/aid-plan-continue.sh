@@ -137,8 +137,24 @@ _pc_note() {
         --arg event "$1" --arg epic "${2:-}" --arg detail "${3:-}" \
         '{event:$event, plan_id:$plan, epic_id:$epic, detail:$detail, at:$ts}' 2>/dev/null)" || return 0
   [[ -n "$ev" ]] || return 0
-  mkdir -p "$ev_dir" 2>/dev/null || return 0
-  printf '%s\n' "$ev" >> "${ev_dir}/timeline.jsonl" 2>/dev/null || true
+  mkdir -p "$ev_dir" 2>/dev/null || return 1
+  printf '%s\n' "$ev" >> "${ev_dir}/timeline.jsonl" 2>/dev/null || return 1
+  return 0
+}
+
+# _pc_note_strict <event> [epic_id] [detail] — the same line, but a failure to
+# record it is a failure.
+#
+# Used for every SPAWN decision and for nothing else. Starting a session costs
+# money, and a decision about money that nobody can look up afterwards is not
+# an auditable decision — AC21 asks for the reasons to be recorded, not for
+# them to be attempted. Everything else in this script stays best-effort,
+# because losing a note about a merge that already landed helps nobody.
+_pc_note_strict() {
+  if ! _pc_note "$@"; then
+    _pc_fail "could not record the '$1' decision in ${ROOT}/.aid-o/work/evidence/${PLAN_ID}/timeline.jsonl. Starting a session is an action with a cost; refusing rather than doing it unrecorded."
+    return 1
+  fi
   return 0
 }
 
@@ -426,13 +442,53 @@ _pc_live_plan_job() {
     [[ -d "$d" ]] || continue
     id="$(basename "$d")"
     [[ "$id" == "${AID_JOB_ID:-}" ]] && continue
-    state="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$id" 2>/dev/null)" || continue
+    # A status we could NOT read counts as live. The alternative — treating an
+    # unreadable or half-written record as "nothing there" — fails open on the
+    # one decision in this plan that spends money (Codex review, EPIC 2).
+    if ! state="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$id" 2>/dev/null)"; then
+      printf '%s' "$id"
+      return 0
+    fi
     if [[ "$state" == "running" || "$state" == "started" ]]; then
       printf '%s' "$id"
       return 0
     fi
   done
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pc_launch_detached <cmd...> — run a command with EVERY inherited descriptor
+# above stderr closed first.
+#
+# MEASURED, not theoretical. `aid-job.sh` detaches the supervised command with
+# `setsid` and redirects ITS 0/1/2 to the job's wrapper.log — but nothing closes
+# the other descriptors the calling shell happened to have open, and the
+# supervisor's deadline watchdog is a `sleep <deadline>` that lives for the
+# WHOLE deadline. So a caller that captures this script's output through a pipe
+# waits an hour for EOF on a pipe a sleeping process still holds. It was found
+# exactly that way: a bats suite ran to completion and then sat for fifteen
+# minutes with no children, because six `sleep 3600` processes held fd 3.
+#
+# The loop is the portable-on-Linux idiom, and Linux is already this
+# supervisor's stated requirement (`aid-job.sh` reads /proc). The `$(...)` that
+# lists the descriptors opens one of its own and closes it before the loop runs.
+#
+# THIS IS ALSO WHAT MAKES IT SAFE TO LAUNCH UNDER THE QUEUE LOCK. The lock is an
+# open descriptor too; flock drops only when the LAST one closes, so a detached
+# child inheriting it would hold the queue for the job's lifetime. Closing every
+# descriptor above stderr removes that, which is why the cap check, the
+# running-job check, the reservation AND the launch can all sit inside one hold
+# — and therefore why two racing continuations cannot both start a session.
+_pc_launch_detached() {
+  bash -c '
+    exec 0</dev/null
+    _fds="$(ls /proc/self/fd 2>/dev/null)"
+    for _n in $_fds; do
+      [ "$_n" -gt 2 ] 2>/dev/null && eval "exec ${_n}>&-" 2>/dev/null
+    done
+    exec "$@"
+  ' _ "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -455,13 +511,24 @@ _PC_SPAWN_COUNT=0
 _pc_spawn() {
   local plan_id="$1" epic_id="$2" override="$3"
 
-  local enabled defaulted="no" crc=0
+  # EVERY key is validated first, before any short-circuit. AC21b says an
+  # unusable value is an error naming the key, and a `max_spawned_epics: 0`
+  # that goes unreported because spawning happens to be off today is a trap
+  # waiting for the day somebody turns it on (Codex review, EPIC 2).
+  local max deadline crc=0
+  crc=0; max="$(_pc_cfg_int max_spawned_epics "$_PC_SPAWN_DEFAULT_MAX")" || crc=$?
+  [[ "$crc" -ne 0 && "$crc" -ne "$_PC_CFG_RC_DEFAULTED" ]] && return 1
+  crc=0; deadline="$(_pc_cfg_int spawn_deadline_sec "$_PC_SPAWN_DEFAULT_DEADLINE")" || crc=$?
+  [[ "$crc" -ne 0 && "$crc" -ne "$_PC_CFG_RC_DEFAULTED" ]] && return 1
+
+  local enabled defaulted="no"
   if [[ "$override" == "yes" ]]; then enabled=true
   elif [[ "$override" == "no" ]]; then
     _pc_say "spawn:   off (--no-spawn). ${epic_id} is claimed and ready; starting it is the controller's move."
     _pc_note "spawn_skipped" "$epic_id" "reason=flag_no_spawn"
     return 0
   else
+    crc=0
     enabled="$(_pc_cfg_bool spawn_next_epic "$_PC_SPAWN_DEFAULT_ENABLED")" || crc=$?
     [[ "$crc" -eq "$_PC_CFG_RC_DEFAULTED" ]] && defaulted="yes"
     [[ "$crc" -ne 0 && "$defaulted" == "no" ]] && return 1
@@ -477,12 +544,6 @@ _pc_spawn() {
     return 0
   fi
 
-  local max deadline
-  crc=0; max="$(_pc_cfg_int max_spawned_epics "$_PC_SPAWN_DEFAULT_MAX")" || crc=$?
-  [[ "$crc" -ne 0 && "$crc" -ne "$_PC_CFG_RC_DEFAULTED" ]] && return 1
-  crc=0; deadline="$(_pc_cfg_int spawn_deadline_sec "$_PC_SPAWN_DEFAULT_DEADLINE")" || crc=$?
-  [[ "$crc" -ne 0 && "$crc" -ne "$_PC_CFG_RC_DEFAULTED" ]] && return 1
-
   if ! _pc_autonomous_mode; then
     _pc_fail "spawning is switched on, but .aid-o/config/permissions.yaml does not say 'autonomous_mode: true'. A session started without it would not run in the mode it was told to. ${epic_id} stays claimed and ready; nothing was started."
     _pc_note "spawn_refused" "$epic_id" "reason=autonomous_mode_absent"
@@ -497,23 +558,21 @@ _pc_spawn() {
   local jobs_dir="${ROOT%/}/.aid-o/work/jobs"
   mkdir -p "$jobs_dir" 2>/dev/null || true
 
-  # The cap, the "is one already running" test and the RESERVATION of the slot
-  # all happen inside ONE hold of the queue's own lock. Two continuations racing
-  # here would otherwise both read "nothing is running" and both start a
-  # session — and a session is the only thing in this plan that costs money, so
-  # at-most-once is not academic.
+  # THE WHOLE DECISION, AND THE LAUNCH, INSIDE ONE HOLD of the queue's own lock:
+  # the cap, the "is one already running" test, the reservation and
+  # `aid-job.sh run` itself. Two racing continuations therefore cannot both see
+  # "nothing is running" and both start a session, and a session is the only
+  # thing in this plan that costs money — at-most-once is not academic here.
   #
-  # THE LAUNCH ITSELF IS OUTSIDE THE HOLD, and that is not an oversight.
-  # `aid-job.sh run` detaches the command with `setsid`; a detached child
-  # inherits a duplicate of the lock fd, and flock only drops when the LAST
-  # descriptor closes — so launching under the hold would keep the queue locked
-  # for the whole life of the spawned session, which is the entire point of the
-  # `$(...)`-not-`< <(...)` rule in lib/aid-queue-write.sh, one level up. So the
-  # slot is RESERVED under the lock (the count is written to the guidance and
-  # therefore survives a crash), the lock is released, and only then does the
-  # session start. A launch that then fails has spent its slot — conservative in
-  # the direction that matters: an unspent slot costs a session, a double-spent
-  # one costs two.
+  # An earlier cut released the lock BEFORE launching, on the reasoning that a
+  # `setsid`-detached child inherits a duplicate of the lock descriptor and
+  # flock drops only when the last one closes. That reasoning was right about
+  # the hazard and wrong about the remedy: releasing early left a window in
+  # which a second continuation saw a raised count but no job directory yet, and
+  # with `max_spawned_epics > 1` it launched a second session (Codex review,
+  # EPIC 2). `_pc_launch_detached` closes EVERY descriptor above stderr before
+  # the supervisor runs, so the child holds neither the lock nor anything else
+  # of ours — which is what makes the single hold both safe and correct.
   if ! aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)"; then
     _pc_fail "could not take the queue lock to decide about spawning ${epic_id}; nothing was started. Retry."
     _pc_note "spawn_refused" "$epic_id" "reason=lock_unavailable"
@@ -526,7 +585,7 @@ _pc_spawn() {
   if [[ "$_PC_SPAWN_COUNT" -ge "$max" ]]; then
     aid_lock_release "$fd"
     _pc_say "spawn:   cap reached — this plan has already started ${_PC_SPAWN_COUNT} session(s) and autonomy.max_spawned_epics is ${max}. That is a normal end, not a failure: ${epic_id} is claimed and ready."
-    _pc_note "spawn_capped" "$epic_id" "spawned=${_PC_SPAWN_COUNT} max=${max}"
+    _pc_note_strict "spawn_capped" "$epic_id" "spawned=${_PC_SPAWN_COUNT} max=${max}" || return 1
     return 0
   fi
 
@@ -534,7 +593,7 @@ _pc_spawn() {
   if [[ -n "$live_job" ]]; then
     aid_lock_release "$fd"
     _pc_say "spawn:   not started — job ${live_job} for this plan is still alive. ${epic_id} is claimed and ready."
-    _pc_note "spawn_skipped" "$epic_id" "reason=job_running job_id=${live_job}"
+    _pc_note_strict "spawn_skipped" "$epic_id" "reason=job_running job_id=${live_job}" || return 1
     return 0
   fi
 
@@ -545,27 +604,45 @@ _pc_spawn() {
   local prompt="/aid-run --auto --epic ${epic_id}"
   local -a jobcmd=(env "AID_JOB_ID=${job_id}" claude -p "$prompt")
 
-  # The reservation. Written while the lock is held, so a second continuation
-  # arriving now reads the raised count and stops at the cap.
+  # The reservation, written BEFORE the launch and while the lock is held, so
+  # that after any interruption the job id is recoverable and the count that
+  # feeds the cap has already moved.
   _PC_SPAWN_JOB_ID="$job_id"
   _PC_SPAWN_JOBS_DIR="$jobs_dir"
   _PC_SPAWN_COUNT=$((_PC_SPAWN_COUNT + 1))
   _PC_SPAWN_FINGERPRINT="$(bash "${SCRIPT_DIR}/aid-job.sh" fingerprint -- "${jobcmd[@]}" 2>/dev/null)" \
     || _PC_SPAWN_FINGERPRINT=""
-  _pc_state_write "$epic_id" "$epic_id" || true
-  aid_lock_release "$fd"
+
+  # A reservation that could not be WRITTEN is not a reservation, and the docs
+  # and the registry both promise it is durable. Refuse rather than start a
+  # session nobody could later find or count (Codex review, EPIC 2).
+  if ! _pc_state_write "$epic_id" "$epic_id"; then
+    aid_lock_release "$fd"
+    _PC_SPAWN_JOB_ID=""
+    _PC_SPAWN_COUNT=$((_PC_SPAWN_COUNT - 1))
+    _pc_fail "could not record the reservation for ${job_id} before starting it; nothing was started. ${epic_id} stays claimed and ready."
+    return 1
+  fi
+  if ! _pc_note_strict "spawn_reserved" "$epic_id" "job_id=${job_id} n=${_PC_SPAWN_COUNT} max=${max} deadline=${deadline}"; then
+    aid_lock_release "$fd"
+    _PC_SPAWN_JOB_ID=""
+    _PC_SPAWN_COUNT=$((_PC_SPAWN_COUNT - 1))
+    return 1
+  fi
 
   local rc=0 out=""
-  out="$(bash "${SCRIPT_DIR}/aid-job.sh" run \
+  out="$(_pc_launch_detached bash "${SCRIPT_DIR}/aid-job.sh" run \
           --jobs-dir "$jobs_dir" --id "$job_id" \
           --label "continue ${plan_id} ${epic_id}" --repo "$ROOT" \
           --deadline "$deadline" \
           -- "${jobcmd[@]}" 2>&1)" || rc=$?
+  aid_lock_release "$fd"
+
   if [[ "$rc" -ne 0 ]]; then
-    # The slot is spent and stays spent — see the note above the lock. The
-    # RESERVED job id stays recorded too: clearing it made the caller's final
-    # write fall back to the guidance read at startup, so the record reverted to
-    # an older job that is not the one this run tried and failed to start.
+    # The slot is spent and stays spent, and the RESERVED job id stays recorded:
+    # clearing it made the caller's final write fall back to the guidance read
+    # at startup, so the record reverted to an older job that is not the one
+    # this run tried and failed to start.
     _pc_fail "aid-job.sh run failed for ${epic_id} (rc=${rc}); ${epic_id} stays claimed and ready and NOTHING is running: ${out}"
     _pc_note "spawn_refused" "$epic_id" "reason=job_run_failed rc=${rc}"
     return 1
