@@ -375,9 +375,21 @@ cmd_wrap() {
   cmd_pid=$!
 
   # Hard-deadline timer (kills only the command; marker disambiguates).
+  #
+  # THE SLEEP IS WAITED ON, NOT INLINED, so that cancelling the timer really
+  # cancels it. `kill $timer_pid` kills the SUBSHELL and not the `sleep` running
+  # inside it, so a job that finished in a second used to leave a `sleep 3600`
+  # orphaned to init for the whole hour — 43 of them after one test run of a
+  # suite that starts a few jobs. Backgrounding the sleep and trapping TERM lets
+  # the subshell take its own child down with it, with no new dependency (a
+  # `pkill -P` would add procps to a script that needs only util-linux).
   local timer_pid=""
   if [[ "$deadline" =~ ^[0-9]+$ && "$deadline" -gt 0 ]]; then
-    ( sleep "$deadline"; : > "$job_dir/.deadline_hit"; kill -TERM "$cmd_pid" 2>/dev/null || true
+    ( _sp=""
+      trap '[[ -n "$_sp" ]] && kill "$_sp" 2>/dev/null; exit 0' TERM
+      sleep "$deadline" & _sp=$!
+      wait "$_sp" 2>/dev/null || exit 0
+      : > "$job_dir/.deadline_hit"; kill -TERM "$cmd_pid" 2>/dev/null || true
       sleep 2; kill -KILL "$cmd_pid" 2>/dev/null || true ) &
     timer_pid=$!
   fi

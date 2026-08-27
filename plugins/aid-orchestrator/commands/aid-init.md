@@ -973,4 +973,4 @@ creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
 
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-27

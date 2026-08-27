@@ -667,4 +667,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-27
