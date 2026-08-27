@@ -522,15 +522,20 @@ Steps 14-16 fork on the plan's declared release mode
 15. `aid-plan-fsm.sh epic-complete`, then `aid-plan-fsm.sh epic-merge-to-plan` — only
     `plan/{plan_id}` moves; the target branch is never touched, and
     `plan-record-delivery` is deferred to `plan-merge-to-main` (P068)
-16. Queue, in this order, both direct calls to `lib/aid-queue-write.sh` (library only —
-    `aid-plan-fsm.sh` does not write the queue yet):
-    **16a** `aid-queue-write.sh set-status {epic_id} merged_to_plan` — mirrors the merge
-    step 15 proved in Git. **Never skip it:** `epic-merge-to-plan` leaves the entry at
-    `running`, and a dependent whose dependency has no `merge_target` is resolved from
-    that status, so the next EPIC is recorded `blocked:…:dependency_unmerged` and the
-    plan stalls at EPIC 2.
-    **16b** `aid-queue-write.sh claim-next {plan_id}` — exit 0 prints the claimed id,
-    exit 1 is `blocked:<id>:<reason>` or `none`, exit 2 usage, exit 3 lock.
+16. Queue — **there is nothing to do here in an autonomous plan.** Since P090 the whole
+    sequence (proof → mirror → ask → claim → start) is `scripts/aid-plan-continue.sh`,
+    and `epic-merge-to-plan` calls it itself after a successful merge whenever the plan's
+    `autonomy` field says `auto`. Its output is part of what step 15 printed.
+    In a MANUAL plan, or to re-run after a failure, invoke it yourself:
+    `aid-plan-continue.sh {plan_id} {epic_id}` — exit 0 the plan moved on or ended
+    cleanly, 1 a named failure, 2 usage, 3 transient (retry; never read as an end).
+    `--no-continue` on `epic-merge-to-plan` turns the automatic call off.
+    **Why the mirror inside it is never skipped:** `epic-merge-to-plan` leaves the entry
+    at `running`, and a dependent whose dependency has no `merge_target` is resolved from
+    that status — so without `merged_to_plan` the next EPIC is recorded
+    `blocked:…:dependency_unmerged` and the plan stalls at EPIC 2.
+    **This paragraph describes the behaviour; it does not create it** — the guarantee is
+    in the script and in `test-plan-continue.bats`, which is the entire point of P090.
     Then report: "EPIC complete and merged into `plan/{plan_id}`; plan remains open; no
     plan-final release decision has run yet"
 

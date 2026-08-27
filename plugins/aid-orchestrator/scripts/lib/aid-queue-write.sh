@@ -29,7 +29,10 @@
 # ── STATUS ENUM (source of truth: .aid-o/plans/P064-plan-branch-substrate.md
 #    → "## Data Model" → "Queue entry — added statuses") ──────────────────────
 #   pending           aid-queue-add.sh              queued, not claimed
-#   running           aid-plan-fsm.sh epic-start    claimed by a live run
+#   running           THIS FILE (queue_claim_next)  claimed by a live run
+#                     — `aid-plan-fsm.sh epic-start` registers the branch and the
+#                       manifest record; it does NOT write the queue (the one-way
+#                       edge documented at aid-plan-fsm.sh:89-92).
 #   merged_to_plan    aid-plan-fsm.sh epic-merge-to-plan
 #   released_to_main  aid-plan-fsm.sh plan-merge-to-main
 #   abandoned         aid-plan-fsm.sh epic-complete --abandon
@@ -1173,41 +1176,29 @@ queue_append_entry() {
   return 0
 }
 
-# queue_claim_next <plan_id>
-#   Read-and-claim inside ONE lock hold: scans entries in file order for the
-#   first one that (a) belongs to <plan_id>, (b) is claimable (`pending` —
-#   including the legacy `queued` — or a previously recorded `blocked`, which
-#   the manifest's own table also allows back to `running`), and (c) has every
-#   `depends_on` entry resolving as merged against ITS OWN declared
-#   merge_target. That entry is set to `running` and its id printed.
+# _queue_scan_next <plan_id> <file> <root>
+#   THE selection. Scans entries in file order for the first one that
+#   (a) belongs to <plan_id>, (b) is claimable (`pending` — including the
+#   legacy `queued` — or a previously recorded `blocked`, which the manifest's
+#   own table also allows back to `running`), and (c) has every `depends_on`
+#   entry resolving as merged against ITS OWN declared merge_target.
 #
-#   Because the read and the write happen under one hold, two concurrent
-#   callers cannot both win the same entry: the loser re-reads `running` and
-#   skips it.
+#   It writes NOTHING. It prints the scan as one line per decision, in scan
+#   order, so that `queue_claim_next` can apply exactly the writes it always
+#   applied and `queue_peek_next` can apply none:
 #
-#   Candidates that are NOT ready are recorded `blocked` with a `reason` before
-#   the scan moves on, so a plan aborted upstream leaves a durable, readable
-#   explanation on the dependent rather than silent inaction.
+#     blocked<TAB><epic_id><TAB><reason>   a candidate that is not ready
+#     ready<TAB><epic_id>                  the winner; always the LAST line
 #
-#   stdout / exit:
-#     <epic_id>                    rc 0 — claimed.
-#     blocked:<epic_id>:<reason>   rc 1 — candidates existed, none ready.
-#     none                         rc 1 — no candidate entry for this plan.
-queue_claim_next() {
-  local plan_id="${1:-}"
-  if [[ -z "$plan_id" ]] || ! _queue_valid_id "$plan_id"; then
-    _aid_queue_warn "queue_claim_next: usage: queue_claim_next <plan_id>"
-    return 2
-  fi
-
-  local file; file="$(queue_write_path)"
-  local root; root="$(_queue_project_root)"
-
-  aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)" || return 3
-  local fd="$AID_LOCK_FD"
+#   No `ready` line means no candidate was ready; no lines at all means the
+#   plan has no candidate entry.
+#
+#   The caller MUST already hold the queue lock: this function is a reader and
+#   never takes one (see the header's flock hazard note).
+_queue_scan_next() {
+  local plan_id="$1" file="$2" root="$3"
 
   local id status entry_plan dep dep_state reason
-  local first_blocked="" first_reason=""
   # Command substitution, NOT `done < <(...)` (CP2 finding 5): a process
   # substitution's subshell inherits a duplicate of the lock fd, and flock only
   # drops when the LAST descriptor on the open file description closes — so a
@@ -1221,7 +1212,7 @@ queue_claim_next() {
     # An epic_id read out of the hand-editable queue file is untrusted input
     # (CP2 finding 1): never act on one that is not a well-formed id.
     if ! _queue_valid_id "$id"; then
-      _aid_queue_warn "queue_claim_next: skipping malformed epic_id in ${file}"
+      _aid_queue_warn "queue: skipping malformed epic_id in ${file}"
       continue
     fi
     status="$(queue_get_status "$id" "$file")"
@@ -1257,11 +1248,7 @@ queue_claim_next() {
     done <<< "$deps_blob"
 
     if [[ -z "$reason" ]]; then
-      local rc=0
-      _queue_apply_fields "$file" "$id" "status=running" "started_at=\"$(_queue_timestamp)\"" || rc=$?
-      aid_lock_release "$fd"
-      [[ "$rc" -ne 0 ]] && return "$rc"
-      printf '%s\n' "$id"
+      printf 'ready\t%s\n' "$id"
       return 0
     fi
 
@@ -1269,20 +1256,117 @@ queue_claim_next() {
     # has already charset-validated, so this can only fire on a future edit
     # that introduces a new reason shape.
     if ! _queue_valid_reason "$reason"; then reason="dependency_unresolved"; fi
-
-    # AC4 says the block is recorded "with a recorded reason". This write used
-    # to be `|| true`, so a failed write still produced a `blocked:<id>:<reason>`
-    # line the caller believed was durable (CP2 finding 4). A write that MUST be
-    # durable and was not is a transaction failure (rc 3), never a quiet 1.
-    local wrc=0
-    _queue_apply_fields "$file" "$id" "status=blocked" "reason=\"${reason}\"" || wrc=$?
-    if [[ "$wrc" -ne 0 ]]; then
-      aid_lock_release "$fd"
-      _aid_queue_warn "queue_claim_next: could not record blocked/${reason} on ${id} (rc=${wrc}) — reporting the failure instead of an unrecorded block"
-      return 3
-    fi
-    [[ -n "$first_blocked" ]] || { first_blocked="$id"; first_reason="$reason"; }
+    printf 'blocked\t%s\t%s\n' "$id" "$reason"
   done <<< "$ids_blob"
+  return 0
+}
+
+# queue_peek_next <plan_id>
+#   The same selection as `queue_claim_next`, with NO side effect: not one byte
+#   of the queue file changes, and no entry is recorded `blocked`. This is what
+#   makes it possible to ASK the queue what is next without taking it — the
+#   whole of P090 stands on that split, because a caller that must claim in
+#   order to look consumes the queue every time it merely wonders.
+#
+#   stdout / exit — deliberately the SAME triple as queue_claim_next:
+#     <epic_id>                    rc 0 — this is what a claim would take.
+#     blocked:<epic_id>:<reason>   rc 1 — candidates existed, none ready.
+#     none                         rc 1 — no candidate entry for this plan.
+#     (nothing)                    rc 3 — the lock could not be taken. NEVER
+#                                  `none`: "I could not look" must not read as
+#                                  "there is nothing there", or a continuation
+#                                  loop would end a plan that is not finished.
+queue_peek_next() {
+  local plan_id="${1:-}"
+  if [[ -z "$plan_id" ]] || ! _queue_valid_id "$plan_id"; then
+    _aid_queue_warn "queue_peek_next: usage: queue_peek_next <plan_id>"
+    return 2
+  fi
+
+  local file; file="$(queue_write_path)"
+  local root; root="$(_queue_project_root)"
+
+  # The lock is taken even though nothing is written: without it a peek can
+  # read an entry mid-rewrite and report a state that never existed.
+  aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)" || return 3
+  local fd="$AID_LOCK_FD"
+  local scan; scan="$(_queue_scan_next "$plan_id" "$file" "$root")"
+  aid_lock_release "$fd"
+
+  local kind id reason
+  local first_blocked="" first_reason=""
+  while IFS=$'\t' read -r kind id reason; do
+    case "$kind" in
+      ready)   printf '%s\n' "$id"; return 0 ;;
+      blocked) [[ -n "$first_blocked" ]] || { first_blocked="$id"; first_reason="$reason"; } ;;
+    esac
+  done <<< "$scan"
+
+  if [[ -n "$first_blocked" ]]; then
+    printf 'blocked:%s:%s\n' "$first_blocked" "$first_reason"
+    return 1
+  fi
+  printf 'none\n'
+  return 1
+}
+
+# queue_claim_next <plan_id>
+#   Read-and-claim inside ONE lock hold: takes `_queue_scan_next`'s selection
+#   and applies the writes — `running` + `started_at` on the winner, and a
+#   durable `blocked` + `reason` on every candidate the scan passed over, so a
+#   plan aborted upstream leaves a readable explanation on the dependent rather
+#   than silent inaction.
+#
+#   Because the read and the write happen under one hold, two concurrent
+#   callers cannot both win the same entry: the loser re-reads `running` and
+#   skips it.
+#
+#   stdout / exit:
+#     <epic_id>                    rc 0 — claimed.
+#     blocked:<epic_id>:<reason>   rc 1 — candidates existed, none ready.
+#     none                         rc 1 — no candidate entry for this plan.
+queue_claim_next() {
+  local plan_id="${1:-}"
+  if [[ -z "$plan_id" ]] || ! _queue_valid_id "$plan_id"; then
+    _aid_queue_warn "queue_claim_next: usage: queue_claim_next <plan_id>"
+    return 2
+  fi
+
+  local file; file="$(queue_write_path)"
+  local root; root="$(_queue_project_root)"
+
+  aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)" || return 3
+  local fd="$AID_LOCK_FD"
+  local scan; scan="$(_queue_scan_next "$plan_id" "$file" "$root")"
+
+  local kind id reason rc=0
+  local first_blocked="" first_reason=""
+  while IFS=$'\t' read -r kind id reason; do
+    case "$kind" in
+      ready)
+        _queue_apply_fields "$file" "$id" "status=running" "started_at=\"$(_queue_timestamp)\"" || rc=$?
+        aid_lock_release "$fd"
+        [[ "$rc" -ne 0 ]] && return "$rc"
+        printf '%s\n' "$id"
+        return 0
+        ;;
+      blocked)
+        # AC4 says the block is recorded "with a recorded reason". This write
+        # used to be `|| true`, so a failed write still produced a
+        # `blocked:<id>:<reason>` line the caller believed was durable (CP2
+        # finding 4). A write that MUST be durable and was not is a transaction
+        # failure (rc 3), never a quiet 1.
+        local wrc=0
+        _queue_apply_fields "$file" "$id" "status=blocked" "reason=\"${reason}\"" || wrc=$?
+        if [[ "$wrc" -ne 0 ]]; then
+          aid_lock_release "$fd"
+          _aid_queue_warn "queue_claim_next: could not record blocked/${reason} on ${id} (rc=${wrc}) — reporting the failure instead of an unrecorded block"
+          return 3
+        fi
+        [[ -n "$first_blocked" ]] || { first_blocked="$id"; first_reason="$reason"; }
+        ;;
+    esac
+  done <<< "$scan"
 
   aid_lock_release "$fd"
   if [[ -n "$first_blocked" ]]; then
@@ -1305,6 +1389,7 @@ Subcommands:
   set-status <epic_id> <status> [reason]   Transition one entry's status.
   set-plan   <epic_id> <plan_id> <target>  Record plan_id + merge_target.
   claim-next <plan_id>                     Atomically claim the next ready entry.
+  peek-next  <plan_id>                     Print what claim-next would take, changing nothing.
   get        <epic_id> <key>               Print one field (empty when null).
   deps       <epic_id>                     Print depends_on ids, one per line.
 EOF
@@ -1328,6 +1413,7 @@ main() {
     set-status) queue_set_status "$@"; exit $? ;;
     set-plan)   queue_set_plan "$@";   exit $? ;;
     claim-next) queue_claim_next "$@"; exit $? ;;
+    peek-next)  queue_peek_next "$@";  exit $? ;;
     get)        a="$(queue_get_field "$@")" || exit $?; printf '%s\n' "$a"; exit 0 ;;
     deps)       queue_get_deps "$@"; exit $? ;;
     -h|--help|"")
