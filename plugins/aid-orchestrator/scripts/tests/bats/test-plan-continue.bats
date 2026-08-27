@@ -14,6 +14,9 @@
 # assert that a document describes the sequence, which is all a test could have
 # done while the sequence lived in `pipeline.md`.
 
+load test-helpers.bash
+load p090-fixture.bash
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
@@ -25,13 +28,10 @@ setup() {
   export TEST_TMPDIR
   ROOT="$TEST_TMPDIR/project"
   QUEUE="$ROOT/.aid-o/config/queue.yaml"
-  mkdir -p "$ROOT/.aid-o/plans" "$ROOT/.aid-o/config"
-  git init -q -b main "$ROOT"
-  git -C "$ROOT" config user.email "test@test.local"
-  git -C "$ROOT" config user.name "Test"
+  aid_test_mk_repo "$ROOT" "$ROOT/.aid-o/plans" "$ROOT/.aid-o/work/plan-state"
   printf '**EPIC 1: first**\n' > "$ROOT/.aid-o/plans/P090-test.md"
-  git -C "$ROOT" add -A
-  git -C "$ROOT" commit -qm "initial"
+  git -C "$ROOT" add -f .aid-o/plans/P090-test.md
+  git -C "$ROOT" commit -qm "plan file"
 }
 
 teardown() {
@@ -47,58 +47,17 @@ _continue() { run bash "$CONTINUE" "$@" --project-root "$ROOT"; }
 _qfield()   { bash "$QW" get "$1" "$2" --queue "$QUEUE" --project-root "$ROOT"; }
 _write_queue() { cat > "$QUEUE"; }
 
-# _plan_state_stub — the minimal plan-state file `plan-start` writes. The light
-# fixtures need it because `next-epic` refuses to answer for a plan this
-# repository has never started — `none` for an unknown plan is exactly the
-# answer that would end a plan prematurely.
-_plan_state_stub() {
-  mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
-  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
-plan_id: P090
-plan_state: OPEN
-mode: plan_branch
-plan_branch: plan/P090
-target_branch: main
-created_at: "2026-08-27T00:00:00Z"
-current_operation: null
-plan_final_attempt: 0
-autonomy: auto
-YML
-}
-
-# _light_merged <epic_id> — the git shape a finished EPIC leaves behind, built
-# by hand: a task branch with a commit, merged into plan/P090. No plan-state, no
-# manifest, no lifecycle — this is for the cases that never reach `epic-start`.
+# _light_merged / _light_unmerged <epic_id> — the git shape a finished EPIC
+# leaves behind, WITHOUT plan-start: for the cases that never reach epic-start.
 _light_merged() {
-  local epic_id="$1"
-  _plan_state_stub
-  git -C "$ROOT" show-ref --verify --quiet refs/heads/plan/P090 \
-    || git -C "$ROOT" branch plan/P090 main
-  git -C "$ROOT" branch "task/${epic_id}/main" main
-  git -C "$ROOT" checkout -q "task/${epic_id}/main"
-  echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
-  # Never `add -A`: `.aid-o/work/` is untracked runtime state here, and
-  # committing it onto the task branch would make `git checkout main` delete it.
-  git -C "$ROOT" add "work-${epic_id}.txt"
-  git -C "$ROOT" commit -qm "${epic_id}: work"
-  git -C "$ROOT" checkout -q main
-  git -C "$ROOT" branch -f plan/P090 "task/${epic_id}/main"
+  p090_plan_state "$ROOT" P090
+  git -C "$ROOT" show-ref --verify --quiet refs/heads/plan/P090 || git -C "$ROOT" branch plan/P090 main
+  p090_task_branch "$ROOT" "$1" merged
 }
-
-# _light_unmerged <epic_id> — the same, WITHOUT folding it into plan/P090.
 _light_unmerged() {
-  local epic_id="$1"
-  _plan_state_stub
-  git -C "$ROOT" show-ref --verify --quiet refs/heads/plan/P090 \
-    || git -C "$ROOT" branch plan/P090 main
-  git -C "$ROOT" branch "task/${epic_id}/main" main
-  git -C "$ROOT" checkout -q "task/${epic_id}/main"
-  echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
-  # Never `add -A`: `.aid-o/work/` is untracked runtime state here, and
-  # committing it onto the task branch would make `git checkout main` delete it.
-  git -C "$ROOT" add "work-${epic_id}.txt"
-  git -C "$ROOT" commit -qm "${epic_id}: work"
-  git -C "$ROOT" checkout -q main
+  p090_plan_state "$ROOT" P090
+  git -C "$ROOT" show-ref --verify --quiet refs/heads/plan/P090 || git -C "$ROOT" branch plan/P090 main
+  p090_task_branch "$ROOT" "$1" unmerged
 }
 
 # _real_epic <epic_id> — the production lifecycle for one EPIC, up to (not
@@ -122,23 +81,7 @@ _real_epic() {
 }
 
 _two_epic_queue() {
-  _write_queue <<'YAML'
-paused: false
-last_modified: "2026-01-01T00:00:00Z"
-
-queue:
-  - epic_id: E-090-1_2
-    status: running
-    plan_id: "P090"
-    merge_target: "plan/P090"
-    depends_on: []
-
-  - epic_id: E-090-2_2
-    status: pending
-    plan_id: "P090"
-    merge_target: "plan/P090"
-    depends_on: ["E-090-1_2"]
-YAML
+  p090_queue "$QUEUE" P090 "E-090-1_2:running" "E-090-2_2:pending:E-090-1_2"
 }
 
 # ───────────────────────────────────────────────────────────────────────────

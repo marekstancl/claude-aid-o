@@ -13,6 +13,9 @@
 # on, capped, already running, bad configuration, and the self-exclusion that
 # keeps a chain longer than one. The real `claude` is not the subject.
 
+load test-helpers.bash
+load p090-fixture.bash
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH AID_TEST_MODE=1
@@ -24,14 +27,7 @@ setup() {
   GUIDE="$ROOT/.aid-o/work/evidence/P090/continue-state.json"
   JOBS="$ROOT/.aid-o/work/jobs"
   MARKER="$TEST_TMPDIR/claude-was-called"
-  mkdir -p "$ROOT/.aid-o/config"
-  git init -q -b main "$ROOT"
-  git -C "$ROOT" config user.email t@t
-  git -C "$ROOT" config user.name T
-  echo init > "$ROOT/init.txt"
-  git -C "$ROOT" add init.txt
-  git -C "$ROOT" commit -qm initial
-  git -C "$ROOT" branch plan/P090 main
+  p090_mk_workspace "$ROOT"
 
   # The stub. It records its argv and exits 0 — it never contacts anything.
   STUBDIR="$TEST_TMPDIR/bin"
@@ -81,20 +77,7 @@ _live_job_record() {
        start_head:"x", start_tree:"y"}' > "$JOBS/$1/job.json"
 }
 
-_plan_state() {
-  mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
-  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
-plan_id: P090
-plan_state: OPEN
-mode: plan_branch
-plan_branch: plan/P090
-target_branch: main
-created_at: "2026-08-27T00:00:00Z"
-current_operation: null
-plan_final_attempt: 0
-autonomy: auto
-YML
-}
+_plan_state() { p090_plan_state "$ROOT" P090; }
 
 # A fixture in which link 4 (`epic-start`) SUCCEEDS without a real plan-start:
 # a stub CLI whose epic-start is a no-op, so this suite measures link 5 and
@@ -110,35 +93,10 @@ _stub_plan_fsm() {
   CONTINUE="$sdir/aid-plan-continue.sh"
 }
 
-_merged_epic() {
-  local epic_id="$1"
-  git -C "$ROOT" branch "task/${epic_id}/main" plan/P090
-  git -C "$ROOT" checkout -q "task/${epic_id}/main"
-  echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
-  git -C "$ROOT" add "work-${epic_id}.txt"
-  git -C "$ROOT" commit -qm "${epic_id}: work"
-  git -C "$ROOT" checkout -q main
-  git -C "$ROOT" branch -f plan/P090 "task/${epic_id}/main"
-}
+_merged_epic() { p090_task_branch "$ROOT" "$1" merged; }
 
 _queue() {
-  cat > "$QUEUE" <<'YAML'
-paused: false
-last_modified: "2026-01-01T00:00:00Z"
-
-queue:
-  - epic_id: E-090-1_2
-    status: running
-    plan_id: "P090"
-    merge_target: "plan/P090"
-    depends_on: []
-
-  - epic_id: E-090-2_2
-    status: pending
-    plan_id: "P090"
-    merge_target: "plan/P090"
-    depends_on: []
-YAML
+  p090_queue "$QUEUE" P090 "E-090-1_2:running" "E-090-2_2:pending"
 }
 
 _config() { printf 'autonomy:\n%s\n' "$1" > "$ROOT/.aid-o/config/project.yaml"; }

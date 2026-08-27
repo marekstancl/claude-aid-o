@@ -2923,20 +2923,29 @@ The cap, the running check, the reservation **and the launch** all happen inside
 one hold of the queue's own lock, so two racing continuations cannot both start
 a session.
 
-That single hold is only safe because of one thing. `aid-job.sh` detaches with
-`setsid`, and a detached child inherits every descriptor the caller had open —
-including the lock, which flock drops only when the last one closes, and
-including any pipe the caller's output is being read through. Its deadline
-watchdog is a `sleep <deadline>` that lives for the whole deadline, an hour by
-default. So the launch goes through a wrapper that **closes every descriptor
-above stderr** before the supervisor runs. An earlier cut instead released the
-lock before launching, which left a window where a second continuation saw a
-raised count but no job directory yet and started a second session.
+The lock is the **jobs directory's**, not the queue's: nothing in this decision
+reads or writes the queue file, and holding the queue lock across a launch would
+block `peek-next` and `claim-next` for every other plan in the workspace while
+one session starts.
 
-Both hazards were measured, not reasoned about: a bats suite ran all its cases
-and then sat for fifteen minutes with no children, because six `sleep 3600`
-processes still held fd 3. `test-continue-spawn.bats` now pipes a spawning run
-through `cat` and fails if EOF does not arrive.
+That single hold is only safe because of a fix that landed one level down.
+`aid-job.sh` detaches with `setsid` and used to redirect only 0/1/2, so the
+wrapper — and the deadline watchdog it starts, a `sleep <deadline>` that lives
+for the whole deadline, an hour by default — inherited every other descriptor
+the caller held. Two consequences: a caller holding an flock kept holding it for
+the job's lifetime (flock drops only on the last descriptor), and a caller whose
+output was read through a pipe never reached EOF. **`aid-job.sh` now closes every
+descriptor above stderr inside its own detach**, which is where it belongs: five
+scripts already call `run`, and each had the same latent hazard.
+
+That was measured, not reasoned about: a bats suite ran all its cases and then
+sat for fifteen minutes with no children, because six `sleep 3600` processes
+still held fd 3. `test-continue-spawn.bats` now pipes a spawning run through
+`cat` and fails if EOF does not arrive.
+
+An earlier cut of this code instead released the lock before launching, which
+left a window where a second continuation saw a raised count but no job
+directory yet and started a second session.
 
 A reservation that cannot be written, or a spawn decision that cannot be
 recorded in the plan's timeline, is a **refusal** — a session nobody could later

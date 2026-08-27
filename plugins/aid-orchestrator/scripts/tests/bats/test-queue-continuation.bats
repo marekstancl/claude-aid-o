@@ -9,6 +9,9 @@
 # once. What it does instead: it names what is left, and it never touches the
 # queue.
 
+load test-helpers.bash
+load p090-fixture.bash
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH AID_QUIET=1 AID_TEST_MODE=1
@@ -16,47 +19,17 @@ setup() {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-queue-continuation.sh"
   TMP="$(mktemp -d)"
   ROOT="$TMP/repo"
-  mkdir -p "$ROOT/.aid-o/config" "$ROOT/.aid-o/work/plan-state"
-  git init -q -b main "$ROOT"
-  git -C "$ROOT" config user.email t@t
-  git -C "$ROOT" config user.name T
-  : > "$ROOT/README.md"
-  git -C "$ROOT" add -A
-  git -C "$ROOT" commit -q -m seed
+  p090_mk_workspace "$ROOT"
   QUEUE="$ROOT/.aid-o/config/queue.yaml"
   export AID_HOOK_AUDIT="$TMP/audit.jsonl" AID_SESSION_STORE="$TMP/store"
 }
 teardown() { rm -rf "$TMP"; }
 
-_plan() {   # _plan <plan_id> <autonomy> [plan_state]
-  mkdir -p "$ROOT/.aid-o/work/plan-state/$1"
-  cat > "$ROOT/.aid-o/work/plan-state/$1/plan-state.yaml" <<YML
-plan_id: $1
-plan_state: ${3:-OPEN}
-mode: plan_branch
-plan_branch: plan/$1
-target_branch: main
-created_at: "2026-08-27T00:00:00Z"
-current_operation: null
-plan_final_attempt: 0
-autonomy: $2
-YML
-}
+_plan() { p090_plan_state "$ROOT" "$1" "$2" "${3:-OPEN}"; }
 
 _event() { jq -n --arg c "$ROOT" '{session_id:"s",cwd:$c,stop_hook_active:false}'; }
 
-_queue_ready() {
-  cat > "$QUEUE" <<'YAML'
-paused: false
-last_modified: "2026-01-01T00:00:00Z"
-
-queue:
-  - epic_id: E-090-2_2
-    status: pending
-    plan_id: "P090"
-    depends_on: []
-YAML
-}
+_queue_ready() { p090_queue "$QUEUE" P090 "E-090-2_2:pending"; }
 
 @test "AC13: a plan with a ready EPIC is named — and the queue is byte-identical afterwards" {
   _plan P090 auto

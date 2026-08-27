@@ -44,21 +44,24 @@ _AID_QC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-roots.sh
 source "${_AID_QC_LIB_DIR}/aid-roots.sh"
 
-# _aid_qc_autonomy <state_root> <plan_id> — `auto`, or nothing.
+# _aid_qc_state <state_root> <plan_id> — `<autonomy>\t<plan_state>` in ONE pass.
+#
 # Read with awk rather than by sourcing the plan-state library: this runs inside
-# a hook, where the budget is seconds and the library would pull in the lock
-# stack for a single scalar.
-_aid_qc_autonomy() {
+# a hook, where the whole dispatch budget is fifteen seconds shared by every
+# Stop rule, and the library would pull in the lock stack for two scalars. One
+# awk and not two for the same reason — the two fields live on adjacent lines of
+# the same small file, and two processes to read them is one too many on the
+# hottest path in this plan.
+_aid_qc_state() {
   local sf="$1/.aid-o/work/plan-state/$2/plan-state.yaml"
-  [[ -f "$sf" ]] || return 0
-  awk '/^autonomy:/ && a == "" { a = $2; gsub(/^"|"$/, "", a) } END { print a }' "$sf" 2>/dev/null
-}
-
-# _aid_qc_plan_state <state_root> <plan_id>
-_aid_qc_plan_state() {
-  local sf="$1/.aid-o/work/plan-state/$2/plan-state.yaml"
-  [[ -f "$sf" ]] || return 0
-  awk '/^plan_state:/ && s == "" { s = $2 } END { print s }' "$sf" 2>/dev/null
+  # US (0x1f), never a tab: a tab is IFS *whitespace*, so a plan with no
+  # `autonomy` line would collapse into one field and read its plan_state as
+  # its autonomy. `lib/aid-worktree-registry.sh` carries the same note.
+  [[ -f "$sf" ]] || { printf '\x1f'; return 0; }
+  awk '
+    /^autonomy:/    && a == "" { a = $2; gsub(/^"|"$/, "", a) }
+    /^plan_state:/  && s == "" { s = $2; gsub(/^"|"$/, "", s) }
+    END { printf "%s\037%s\n", a, s }' "$sf" 2>/dev/null
 }
 
 # Plans that owe nothing: a closed or abandoned plan has no next EPIC by
@@ -90,9 +93,8 @@ aid_queue_continuation_scan() {
   for sf in "$root"/.aid-o/work/plan-state/*/plan-state.yaml; do
     [[ -f "$sf" ]] || continue
     plan_id="$(basename "$(dirname "$sf")")"
-    autonomy="$(_aid_qc_autonomy "$root" "$plan_id")"
+    IFS=$'\x1f' read -r autonomy state <<< "$(_aid_qc_state "$root" "$plan_id")"
     [[ "$autonomy" == "auto" ]] || continue
-    state="$(_aid_qc_plan_state "$root" "$plan_id")"
     [[ " $_AID_QC_TERMINAL " == *" ${state} "* ]] && continue
 
     local rc=0
@@ -143,20 +145,28 @@ _aid_qc_line() {
 }
 
 # ---------------------------------------------------------------------------
-# aid_hook_rule_queue_continuation_stop — Stop handler.
+# _aid_qc_emit <heading> [footer] — the body both handlers share.
 #
-# Returns 0 ALWAYS when it has something to say, and 3 when it does not. It
-# never returns 2, and its registry row is `failure: open`, which is the
-# declaration that says so where a reader will find it.
-# ---------------------------------------------------------------------------
-aid_hook_rule_queue_continuation_stop() {
+# TWO HANDLERS AND ONE BODY, deliberately. The registry keys `handler` per
+# `event`, and one handler branching on the event name would hide from a reader
+# of `hook-registry.yaml` that these are two rules with two failure modes — the
+# house pattern is exactly this pair shape (`continuity_capture` /
+# `continuity_restore`). What the two must NOT have is two copies of the loop:
+# that is how they start behaving differently while two tests each assert one of
+# them.
+#
+# Returns 0 with something to say, 3 with nothing. Never 2 — this rule has no
+# refusal to make, and its registry rows say `failure: open` so that a reader
+# finds that out where it is recorded rather than by reading this file.
+_aid_qc_emit() {
+  local heading="$1" footer="${2:-}"
   local input; input="$(cat)"
   local root; root="$(_aid_qc_root "$input")" || return 3
 
   local plan state result next n=0
   while IFS=$'\t' read -r plan state result next; do
     [[ -n "$plan" ]] || continue
-    (( n == 0 )) && echo "AID — this turn is ending with an autonomous plan still open (nothing was changed, and this cannot stop a turn):"
+    (( n == 0 )) && echo "$heading"
     n=$((n+1))
     _aid_qc_line "$plan" "$state" "$result" "$next"
   done < <(aid_queue_continuation_scan "$root")
@@ -165,34 +175,23 @@ aid_hook_rule_queue_continuation_stop() {
     echo "no open autonomous plan in this workspace" >&2
     return 3
   fi
+  [[ -n "$footer" ]] && echo "$footer"
   echo "${n} open autonomous plan(s) named" >&2
   return 0
 }
 
-# ---------------------------------------------------------------------------
-# aid_hook_rule_queue_continuation_start — SessionStart handler.
-#
-# The event that actually rescues a lost chain. When a controller dies, the
-# `epic-merge-to-plan` that would have continued the plan never happens again —
+# aid_hook_rule_queue_continuation_stop — Stop handler. Names every autonomous
+# plan that still has work when a turn ends.
+aid_hook_rule_queue_continuation_stop() {
+  _aid_qc_emit "AID — this turn is ending with an autonomous plan still open (nothing was changed, and this cannot stop a turn):"
+}
+
+# aid_hook_rule_queue_continuation_start — SessionStart handler, and the event
+# that actually rescues a lost chain: when a controller dies, the
+# `epic-merge-to-plan` that would have continued the plan never happens again,
 # so the guidance Step 4 wrote would be read by nobody. This is who reads it.
-# ---------------------------------------------------------------------------
 aid_hook_rule_queue_continuation_start() {
-  local input; input="$(cat)"
-  local root; root="$(_aid_qc_root "$input")" || return 3
-
-  local plan state result next n=0
-  while IFS=$'\t' read -r plan state result next; do
-    [[ -n "$plan" ]] || continue
-    (( n == 0 )) && echo "AID — an autonomous plan from an earlier session is still open (nothing was changed):"
-    n=$((n+1))
-    _aid_qc_line "$plan" "$state" "$result" "$next"
-  done < <(aid_queue_continuation_scan "$root")
-
-  if (( n == 0 )); then
-    echo "no open autonomous plan in this workspace" >&2
-    return 3
-  fi
-  echo "  Continue it with: aid-plan-continue.sh <plan_id> <the EPIC that finished>"
-  echo "${n} open autonomous plan(s) named" >&2
-  return 0
+  _aid_qc_emit \
+    "AID — an autonomous plan from an earlier session is still open (nothing was changed):" \
+    "  Continue it with: aid-plan-continue.sh <plan_id> <the EPIC that finished>"
 }

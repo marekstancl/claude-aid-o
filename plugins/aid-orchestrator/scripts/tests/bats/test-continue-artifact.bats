@@ -11,6 +11,9 @@
 # and real task branches, because "is this EPIC actually merged" is a question
 # about Git.
 
+load test-helpers.bash
+load p090-fixture.bash
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
@@ -20,14 +23,7 @@ setup() {
   ROOT="$TEST_TMPDIR/project"
   QUEUE="$ROOT/.aid-o/config/queue.yaml"
   GUIDE="$ROOT/.aid-o/work/evidence/P090/continue-state.json"
-  mkdir -p "$ROOT/.aid-o/config"
-  git init -q -b main "$ROOT"
-  git -C "$ROOT" config user.email "test@test.local"
-  git -C "$ROOT" config user.name "Test"
-  echo init > "$ROOT/init.txt"
-  git -C "$ROOT" add -A
-  git -C "$ROOT" commit -qm initial
-  git -C "$ROOT" branch plan/P090 main
+  p090_mk_workspace "$ROOT"
 }
 
 teardown() {
@@ -37,61 +33,12 @@ teardown() {
 
 _continue() { run bash "$CONTINUE" "$@" --project-root "$ROOT"; }
 
-# _plan_state_stub — the minimal plan-state file `plan-start` writes. The light
-# fixtures need it because `next-epic` refuses to answer for a plan this
-# repository has never started — `none` for an unknown plan is exactly the
-# answer that would end a plan prematurely.
-_plan_state_stub() {
-  mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
-  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
-plan_id: P090
-plan_state: OPEN
-mode: plan_branch
-plan_branch: plan/P090
-target_branch: main
-created_at: "2026-08-27T00:00:00Z"
-current_operation: null
-plan_final_attempt: 0
-autonomy: auto
-YML
-}
-
-# _epic_branch <epic_id> [merged] — a task branch with one commit, optionally
-# folded into plan/P090. It branches off plan/P090, not off main: branching off
-# main and then force-moving the plan branch would silently DROP whatever an
-# earlier call had already put there.
-_epic_branch() {
-  local epic_id="$1" merged="${2:-yes}"
-  _plan_state_stub
-  git -C "$ROOT" branch "task/${epic_id}/main" plan/P090
-  git -C "$ROOT" checkout -q "task/${epic_id}/main"
-  echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
-  git -C "$ROOT" add "work-${epic_id}.txt"
-  git -C "$ROOT" commit -qm "${epic_id}: work"
-  git -C "$ROOT" checkout -q main
-  [[ "$merged" == "yes" ]] && git -C "$ROOT" branch -f plan/P090 "task/${epic_id}/main"
-  return 0
-}
+_epic_branch() { p090_plan_state "$ROOT" P090; p090_task_branch "$ROOT" "$1" "${2:-merged}"; }
 
 _queue_two() {
-  cat > "$QUEUE" <<'YAML'
-paused: false
-last_modified: "2026-01-01T00:00:00Z"
-
-queue:
-  - epic_id: E-090-1_2
-    status: running
-    plan_id: "P090"
-    merge_target: "plan/P090"
-    depends_on: []
-
-  - epic_id: E-090-2_2
-    status: pending
-    plan_id: "P090"
-    merge_target: "plan/P090"
-    depends_on: ["E-090-1_2"]
-YAML
+  p090_queue "$QUEUE" P090 "E-090-1_2:running" "E-090-2_2:pending:E-090-1_2"
 }
+
 
 @test "AC10: a run leaves a guidance naming what it finished and what it left in flight" {
   _epic_branch E-090-1_2
@@ -195,7 +142,7 @@ YAML
   # both cannot be true, and mirroring on that basis is how a dependent gets
   # unblocked on work that never landed.
   _epic_branch E-090-1_2
-  _epic_branch E-090-2_2 no
+  _epic_branch E-090-2_2 unmerged
   _queue_two
   mkdir -p "$(dirname "$GUIDE")"
   jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", last_completed_epic:"E-090-0_2",

@@ -1277,6 +1277,33 @@ _queue_scan_next() {
   return 0
 }
 
+# _queue_render_selection <scan> — turn a `_queue_scan_next` result into THE
+# answer both public functions give: `<epic_id>` (rc 0), `blocked:<id>:<reason>`
+# (rc 1) or `none` (rc 1).
+#
+# Shared for the same reason the SELECTION is shared. `peek` and `claim` must
+# never answer differently, and the answer is not only which entry was chosen —
+# it is the string `next-epic`, `aid-plan-continue.sh` and the hook rule all
+# parse. Leaving the selection single-sourced while both callers re-derived the
+# formatting kept exactly half of that promise.
+_queue_render_selection() {
+  local kind id reason
+  local first_blocked="" first_reason=""
+  while IFS=$'\t' read -r kind id reason; do
+    case "$kind" in
+      ready)   printf '%s\n' "$id"; return 0 ;;
+      blocked) [[ -n "$first_blocked" ]] || { first_blocked="$id"; first_reason="$reason"; } ;;
+    esac
+  done <<< "$1"
+
+  if [[ -n "$first_blocked" ]]; then
+    printf 'blocked:%s:%s\n' "$first_blocked" "$first_reason"
+    return 1
+  fi
+  printf 'none\n'
+  return 1
+}
+
 # queue_peek_next <plan_id>
 #   The same selection as `queue_claim_next`, with NO side effect: not one byte
 #   of the queue file changes, and no entry is recorded `blocked`. This is what
@@ -1309,21 +1336,7 @@ queue_peek_next() {
   local scan; scan="$(_queue_scan_next "$plan_id" "$file" "$root")"
   aid_lock_release "$fd"
 
-  local kind id reason
-  local first_blocked="" first_reason=""
-  while IFS=$'\t' read -r kind id reason; do
-    case "$kind" in
-      ready)   printf '%s\n' "$id"; return 0 ;;
-      blocked) [[ -n "$first_blocked" ]] || { first_blocked="$id"; first_reason="$reason"; } ;;
-    esac
-  done <<< "$scan"
-
-  if [[ -n "$first_blocked" ]]; then
-    printf 'blocked:%s:%s\n' "$first_blocked" "$first_reason"
-    return 1
-  fi
-  printf 'none\n'
-  return 1
+  _queue_render_selection "$scan"
 }
 
 # queue_claim_next <plan_id>
@@ -1355,8 +1368,10 @@ queue_claim_next() {
   local fd="$AID_LOCK_FD"
   local scan; scan="$(_queue_scan_next "$plan_id" "$file" "$root")"
 
+  # The WRITES only. The answer itself is rendered by the shared
+  # `_queue_render_selection` below, so `claim` and `peek` cannot word it
+  # differently.
   local kind id reason rc=0
-  local first_blocked="" first_reason=""
   while IFS=$'\t' read -r kind id reason; do
     case "$kind" in
       ready)
@@ -1379,18 +1394,12 @@ queue_claim_next() {
           _aid_queue_warn "queue_claim_next: could not record blocked/${reason} on ${id} (rc=${wrc}) — reporting the failure instead of an unrecorded block"
           return 3
         fi
-        [[ -n "$first_blocked" ]] || { first_blocked="$id"; first_reason="$reason"; }
         ;;
     esac
   done <<< "$scan"
 
   aid_lock_release "$fd"
-  if [[ -n "$first_blocked" ]]; then
-    printf 'blocked:%s:%s\n' "$first_blocked" "$first_reason"
-    return 1
-  fi
-  printf 'none\n'
-  return 1
+  _queue_render_selection "$scan"
 }
 
 # ===========================================================================

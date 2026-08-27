@@ -8,6 +8,9 @@
 # and the command must never write the queue — the one-way edge this file's
 # subject declares at aid-plan-fsm.sh:89-92.
 
+load test-helpers.bash
+load p090-fixture.bash
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
@@ -16,24 +19,12 @@ setup() {
   export TEST_TMPDIR
   ROOT="$TEST_TMPDIR/project"
   QUEUE="$ROOT/.aid-o/config/queue.yaml"
-  mkdir -p "$ROOT/.aid-o/config" "$ROOT/.aid-o/work/plan-state/P090"
-  # `next-epic` refuses to answer for a plan it has never heard of, so every
-  # case that expects an ANSWER needs the plan to exist. The file is the real
-  # shape `plan-start` writes; nothing here needs more of it than that.
-  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
-plan_id: P090
-plan_state: OPEN
-mode: plan_branch
-plan_branch: plan/P090
-target_branch: main
-created_at: "2026-08-27T00:00:00Z"
-current_operation: null
-plan_final_attempt: 0
-autonomy: auto
-YML
-  # A git repo is needed only so that --project-root is honoured as given
-  # (see _pfsm_resolve_project_root); no commits, no branches — this stays t0.
-  git init -q -b main "$ROOT" 2>/dev/null || git -C "$ROOT" init -q
+  # A committed repo, because `--project-root` is honoured as given only for a
+  # root that has one (see _pfsm_resolve_project_root); and the plan-state file,
+  # because `next-epic` refuses to answer for a plan this repository has never
+  # started rather than reporting it exhausted.
+  p090_mk_workspace "$ROOT"
+  p090_plan_state "$ROOT" P090
 }
 
 teardown() {
@@ -67,7 +58,12 @@ YAML
   run jq -r '"\(.event) \(.plan_id) \(.result)"' "$(_timeline P090)"
   [ "$status" -eq 0 ]
   [ "$output" = "queue_peek P090 E-090-1_2" ]
-  run jq -e '.at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")' "$(_timeline P090)"
+  # `ts`, like every other event in this file — the shared writer's field.
+  # A hand-rolled copy of this writer stamped `at`, and anything reading the
+  # timeline by time would have skipped P090's events.
+  run jq -e '.ts | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")' "$(_timeline P090)"
+  [ "$status" -eq 0 ]
+  run jq -e 'has("at") | not' "$(_timeline P090)"
   [ "$status" -eq 0 ]
 }
 
@@ -222,5 +218,6 @@ YAML
 
   _next_epic P090
   [ "$status" -eq 3 ]
-  [[ "$output" == *"could not record"* ]]
+  [[ "$output" == *"could not open"* ]]
+  [[ "$output" == *"rather than an unrecorded answer"* ]]
 }

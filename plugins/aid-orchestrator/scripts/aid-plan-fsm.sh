@@ -174,6 +174,10 @@ source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"   # P090 Step 2 — the ONE plan-timeline writer
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-permissions.sh" # P090 — the ONE autonomous_mode reader
 # P074 Step 6 — the SAME shared post-boundary helper aid-fsm.sh uses
 # (aid_active_boundary_sync): a direct `aid-plan-fsm.sh plan-close` /
 # `plan-rollback` (invocable without the aid-fsm.sh wrapper) performs
@@ -258,30 +262,6 @@ _pfsm_resolve_project_root() {
     return 0
   fi
   printf '%s' "$probe_dir"
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_resolve_autonomy <project_root> — `auto` or `manual` for a NEW plan.
-# (P090 Step 3.)
-#
-# The same fail-closed reader `aid-release-policy.sh:_read_autonomous_mode`
-# uses, and deliberately the same shape: ONLY a real YAML boolean
-# `autonomous_mode: true` in .aid-o/config/permissions.yaml is `auto`.
-# A missing file, a missing yq, a missing key, a non-boolean, a string
-# "true" — all `manual`. The asymmetry is the point: the cost of reading
-# manual as auto is a plan that continues itself without anyone asking;
-# the cost of the reverse is a plan that waits.
-# ---------------------------------------------------------------------------
-_pfsm_resolve_autonomy() {
-  local root="$1"
-  local perm="${root}/.aid-o/config/permissions.yaml"
-  [[ -f "$perm" ]] || { echo manual; return 0; }
-  command -v yq >/dev/null 2>&1 || { echo manual; return 0; }
-  local vtype vval
-  vtype="$(yq -r '.autonomous_mode | type' "$perm" 2>/dev/null)" || { echo manual; return 0; }
-  [[ "$vtype" == "!!bool" ]] || { echo manual; return 0; }
-  vval="$(yq -r '.autonomous_mode' "$perm" 2>/dev/null)" || { echo manual; return 0; }
-  [[ "$vval" == "true" ]] && echo auto || echo manual
 }
 
 # _pfsm_validate_plan_id <plan_id> — the strict ^P[0-9]{3}$ format (this CLI
@@ -2395,7 +2375,7 @@ cmd_plan_start() {
 
   if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
     local sirc=0 autonomy="${autonomy_opt}"
-    [[ -n "$autonomy" ]] || autonomy="$(_pfsm_resolve_autonomy "$project_root")"
+    [[ -n "$autonomy" ]] || autonomy="$(aid_autonomous_mode "$project_root")"
     plan_state_init "$plan_id" "$mode" "$plan_branch" "$target_branch" "$autonomy" >/dev/null || sirc=$?
     if [[ "$sirc" -ne 0 ]]; then
       echo "PRECONDITION FAIL: plan_state_init failed for ${plan_id} (rc=${sirc})." >&2
@@ -10926,21 +10906,23 @@ cmd_next_epic() {
     return 3
   fi
 
-  # The trace. Unlike the best-effort timeline writes elsewhere in this file,
-  # a failure here is fatal (rc 3): the whole point of the subcommand is that
-  # WHY a plan continued — or stopped — is recoverable afterwards, and an
-  # answer nobody recorded cannot serve that.
-  local ev_dir="${root}/.aid-o/work/evidence/${plan_id}"
-  local ev
-  ev="$(jq -nc --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-        --arg plan "$plan_id" --arg result "$out" \
-        '{event:"queue_peek", plan_id:$plan, result:$result, at:$ts}' 2>/dev/null)" || ev=""
-  if [[ -z "$ev" ]] \
-     || ! mkdir -p "$ev_dir" 2>/dev/null \
-     || ! printf '%s\n' "$ev" >> "${ev_dir}/timeline.jsonl" 2>/dev/null; then
-    echo "ERROR: next-epic: read ${out} for ${plan_id} but could not record it in ${ev_dir}/timeline.jsonl — reporting a failure rather than an unrecorded answer." >&2
+  # The trace, through the SHARED plan-timeline writer (lib/aid-stage-log.sh),
+  # so this event carries the same `ts` field as every other event in the same
+  # file — a hand-rolled copy here stamped `at`, and anything reading the
+  # timeline by time would have skipped it.
+  #
+  # Unlike the best-effort timeline writes elsewhere in this file, a failure is
+  # fatal (rc 3): the whole point of the subcommand is that WHY a plan continued
+  # — or stopped — is recoverable afterwards, and an answer nobody recorded
+  # cannot serve that. What is checked is that the timeline has a writable HOME;
+  # `log_event`'s own contract is that it never fails a pipeline, so the append
+  # itself is not a second failure mode to test for.
+  local tl
+  if ! tl="$(aid_plan_timeline "$root" "$plan_id")"; then
+    echo "ERROR: next-epic: read ${out} for ${plan_id} but could not open ${root}/.aid-o/work/evidence/${plan_id}/timeline.jsonl — reporting a failure rather than an unrecorded answer." >&2
     return 3
   fi
+  log_event "$tl" "queue_peek" "plan_id=${plan_id}" "result=${out}"
 
   printf '%s\n' "$out"
   return "$rc"

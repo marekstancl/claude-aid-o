@@ -38,15 +38,21 @@ _field() { yq -r ".enforcements[] | select(.id == \"$1\") | .$2 // \"\"" "$REG";
   # The same field set `scripts/tests/test-enforcement-registry-test-audit.sh`
   # requires — asserted here per row, because that script asks about the file as
   # a whole and would not tell you WHICH row lost a field.
-  local id f
-  for id in $ROWS; do
-    for f in type source description instruction severity surface status verdict test; do
-      run bash -c 'yq -r ".enforcements[] | select(.id == \"'"$id"'\") | .'"$f"' // \"\"" "$1"' _ "$REG"
-      [ "$status" -eq 0 ]
-      [ -n "$output" ]
-      [ "$output" != "null" ]
-    done
-  done
+  #
+  # ONE `yq` for all four rows, not one per field. The registry is 3600+ lines
+  # and each `yq` over it costs ~40ms; 4 rows x 9 fields was 36 processes and
+  # ~1.5s in a single t0 case, whose budget is 2s — spent on process startup
+  # rather than on what the case asserts.
+  local missing
+  missing="$(yq -r '
+      ["type","source","description","instruction","severity","surface","status","verdict","test"] as $req
+      | .enforcements[]
+      | select(.id == "queue_peek_readonly" or .id == "plan_continue_loop"
+               or .id == "plan_continue_spawn" or .id == "queue_continuation_notice")
+      | . as $row
+      | $req[] | select(($row[.] // "") == "" or ($row[.] | tostring) == "null")
+      | $row.id + "." + .' "$REG")"
+  [ -z "$missing" ]
 }
 
 @test "AC16: each row states its enforcement degree, and the degrees differ where the layers do" {

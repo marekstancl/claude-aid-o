@@ -95,6 +95,23 @@ PLAN_FSM="${SCRIPT_DIR}/aid-plan-fsm.sh"
 # transition, so this file never holds the queue lock.
 # shellcheck disable=SC1090
 source "$QUEUE_LIB"
+# The ONE resolver for where `.aid-o/` lives, and the ONE plan-timeline writer.
+# Resolving the root by hand is how the two halves of a run end up disagreeing
+# about which workspace they are in: `plan-start` gives a plan an execution
+# worktree, `.aid-o/` is gitignored so it is never checked out there, and a
+# hand-rolled `cd && pwd` would read a config that is not there while the
+# `--project-root` this script forwards to aid-plan-fsm.sh resolved to the real
+# checkout.
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# shellcheck source=lib/aid-stage-log.sh
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
+# The ONE fail-closed reader of `autonomous_mode`. Checked BEFORE anything is
+# started, never inferred afterwards from how a session behaved: a session
+# launched into a workspace that has not authorised autonomy would run without
+# the mode it was told to run in.
+# shellcheck source=lib/aid-permissions.sh
+source "${SCRIPT_DIR}/lib/aid-permissions.sh"
 
 # The run's subject, set by main before anything reads them. Declared here so
 # no path can reference one under `set -u` before it is assigned.
@@ -126,19 +143,24 @@ EOF
 # _pc_queue <args...> — the queue CLI against the resolved root.
 _pc_queue() { bash "$QUEUE_LIB" "$@" --project-root "$ROOT"; }
 
-# _pc_note <event> [epic_id] [detail] — one line into the plan's timeline.
+# _pc_note <event> [epic_id] [detail] — one line into the plan's timeline,
+# through the SHARED writer.
+#
+# `aid_plan_timeline` + `log_event` (lib/aid-stage-log.sh) exist precisely
+# because three call sites had each hand-rolled the same four-step ritual and
+# two had drifted on which root they resolved. A fourth hand-rolled copy here
+# had already drifted a different way: it stamped the timestamp as `at` while
+# every other event in the SAME file carries `ts`, so anything reading the
+# timeline by time would have skipped P090's events.
+#
 # Best-effort by design: the AUTHORITATIVE trace of what was asked is written
 # by `next-epic` itself (which fails hard if it cannot record). These are the
 # surrounding notes, and losing one must not undo a merge that already landed.
+# `_pc_note_strict` below is the exception, for spawn decisions.
 _pc_note() {
-  local ev_dir="${ROOT}/.aid-o/work/evidence/${PLAN_ID}"
-  local ev
-  ev="$(jq -nc --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --arg plan "$PLAN_ID" \
-        --arg event "$1" --arg epic "${2:-}" --arg detail "${3:-}" \
-        '{event:$event, plan_id:$plan, epic_id:$epic, detail:$detail, at:$ts}' 2>/dev/null)" || return 0
-  [[ -n "$ev" ]] || return 0
-  mkdir -p "$ev_dir" 2>/dev/null || return 1
-  printf '%s\n' "$ev" >> "${ev_dir}/timeline.jsonl" 2>/dev/null || return 1
+  local tl
+  tl="$(aid_plan_timeline "$ROOT" "$PLAN_ID")" || return 1
+  log_event "$tl" "$1" "plan_id=${PLAN_ID}" "epic_id=${2:-}" "detail=${3:-}"
   return 0
 }
 
@@ -255,6 +277,11 @@ _pc_state_write() {
 _pc_report_stranded() {
   local file; file="$(queue_write_path)"
   [[ -f "$file" ]] || return 0
+  # ONE awk over the file, not `queue_get_field` + `queue_get_status` per entry:
+  # those re-scan the whole file each time, so a hundred-entry queue cost two
+  # hundred processes and two hundred full reads — all of it inside the lock
+  # hold, blocking every concurrent claim. The `queued` synonym is normalised
+  # here because this reader does not go through queue_status_normalize.
   # Under the queue lock, like every other read that has to be self-consistent:
   # a scan racing a claim's rewrite can miss the very entry it exists to find
   # (Codex review, EPIC 1). A lock we cannot get is reported, never silently
@@ -264,16 +291,31 @@ _pc_report_stranded() {
     return 0
   fi
   local fd="$AID_LOCK_FD"
-  local id ids
-  ids="$(queue_entry_ids "$file")"
+  local id rows
+  rows="$(AID_PC_PLAN="$PLAN_ID" awk '
+    function flush(  st) {
+      if (id == "") return
+      st = (status == "queued" ? "pending" : status)
+      if (plan == ENVIRON["AID_PC_PLAN"] && st == "running") print id
+      id = ""; status = ""; plan = ""
+    }
+    /^[[:space:]]*-[[:space:]]+epic_id:/ {
+      flush()
+      id = $0
+      sub(/^[[:space:]]*-[[:space:]]+epic_id:[[:space:]]*/, "", id)
+      gsub(/"|\x27/, "", id); sub(/[[:space:]]*$/, "", id)
+      next
+    }
+    # FIRST occurrence of a key wins, exactly like queue_get_field.
+    id != "" && /^[[:space:]]+status:/  && status == "" { status = $2; gsub(/"|\x27/, "", status) }
+    id != "" && /^[[:space:]]+plan_id:/ && plan   == "" { plan   = $2; gsub(/"|\x27/, "", plan) }
+    END { flush() }' "$file" 2>/dev/null)"
   while IFS= read -r id; do
     [[ -n "$id" ]] && _queue_valid_id "$id" || continue
-    [[ "$(queue_get_field "$id" plan_id "$file")" == "$PLAN_ID" ]] || continue
-    [[ "$(queue_get_status "$id" "$file")" == "running" ]] || continue
     _pc_say "stuck:   ${id} is 'running'. If no run is behind it, it is a crash between claim and start;"
     _pc_say "         nothing here will collect it, because it may be a live run. Release it yourself with:"
     _pc_say "           aid-plan-continue.sh --reclaim ${id}"
-  done <<< "$ids"
+  done <<< "$rows"
   aid_lock_release "$fd"
   return 0
 }
@@ -328,16 +370,40 @@ _PC_SPAWN_DEFAULT_ENABLED=false
 _PC_SPAWN_DEFAULT_MAX=3
 _PC_SPAWN_DEFAULT_DEADLINE=3600
 
-# _pc_cfg <key> — the raw scalar under `autonomy.` in project.yaml, or nothing.
-# Nothing means "not configured", which is the caller's cue to use its default.
-_pc_cfg() {
-  command -v yq >/dev/null 2>&1 || return 1
+# _pc_cfg_load — read the whole `autonomy:` block in ONE `yq`, into
+# `_PC_CFG[<key>]`. Three keys used to cost three `yq` processes (plus three
+# `command -v`) over the same file, ~40ms each; they are read together because
+# they are decided together.
+#
+# An absent key, an absent file, an absent `yq`: the entry is simply missing,
+# which is the caller's cue to use its default.
+declare -A _PC_CFG=()
+_PC_CFG_LOADED=0
+_pc_cfg_load() {
+  [[ "$_PC_CFG_LOADED" -eq 1 ]] && return 0
+  _PC_CFG_LOADED=1
+  command -v yq >/dev/null 2>&1 || return 0
   local cfg="${ROOT%/}/.aid-o/config/project.yaml"
-  [[ -f "$cfg" ]] || return 1
-  local out
-  out="$(yq -r ".autonomy.$1" "$cfg" 2>/dev/null)" || return 1
-  [[ -n "$out" && "$out" != "null" ]] || return 1
-  printf '%s' "$out"
+  [[ -f "$cfg" ]] || return 0
+  # `key=value`, not a joined separator: mikefarah `yq` has no `\u001f` escape
+  # and fails to LEX an expression containing one — which fails silently here
+  # and would leave every key looking unconfigured. A `=` is unambiguous
+  # because the keys are a closed set of `[a-z_]+`. (`jq` and `awk` do support
+  # the escape, and both are used with it elsewhere in this file.)
+  local line k v
+  while IFS= read -r line; do
+    k="${line%%=*}"; v="${line#*=}"
+    [[ -n "$k" && "$k" != "$line" && -n "$v" && "$v" != "null" ]] && _PC_CFG["$k"]="$v"
+  done < <(yq -r '.autonomy // {} | to_entries[] | .key + "=" + (.value | tostring)' \
+             "$cfg" 2>/dev/null)
+  return 0
+}
+
+# _pc_cfg <key> — the raw scalar, or nothing.
+_pc_cfg() {
+  _pc_cfg_load
+  [[ -n "${_PC_CFG[$1]:-}" ]] || return 1
+  printf '%s' "${_PC_CFG[$1]}"
 }
 
 # _pc_cfg_bool <key> <default> / _pc_cfg_int <key> <default>
@@ -377,19 +443,6 @@ _pc_cfg_int() {
   fi
   printf '%s' "$raw"
   return 0
-}
-
-# _pc_autonomous_mode — `.aid-o/config/permissions.yaml` must really say
-# `autonomous_mode: true`, as a YAML boolean. Checked BEFORE anything is
-# started, not inferred afterwards from how the session behaved: a session
-# launched into a workspace that has not authorised autonomy would run without
-# the mode it was told to run in.
-_pc_autonomous_mode() {
-  local perm="${ROOT%/}/.aid-o/config/permissions.yaml"
-  [[ -f "$perm" ]] || return 1
-  command -v yq >/dev/null 2>&1 || return 1
-  [[ "$(yq -r '.autonomous_mode | type' "$perm" 2>/dev/null)" == "!!bool" ]] || return 1
-  [[ "$(yq -r '.autonomous_mode' "$perm" 2>/dev/null)" == "true" ]]
 }
 
 # _pc_spawned_count <jobs_dir> — how many sessions this PLAN has already
@@ -458,40 +511,6 @@ _pc_live_plan_job() {
 }
 
 # ---------------------------------------------------------------------------
-# _pc_launch_detached <cmd...> — run a command with EVERY inherited descriptor
-# above stderr closed first.
-#
-# MEASURED, not theoretical. `aid-job.sh` detaches the supervised command with
-# `setsid` and redirects ITS 0/1/2 to the job's wrapper.log — but nothing closes
-# the other descriptors the calling shell happened to have open, and the
-# supervisor's deadline watchdog is a `sleep <deadline>` that lives for the
-# WHOLE deadline. So a caller that captures this script's output through a pipe
-# waits an hour for EOF on a pipe a sleeping process still holds. It was found
-# exactly that way: a bats suite ran to completion and then sat for fifteen
-# minutes with no children, because six `sleep 3600` processes held fd 3.
-#
-# The loop is the portable-on-Linux idiom, and Linux is already this
-# supervisor's stated requirement (`aid-job.sh` reads /proc). The `$(...)` that
-# lists the descriptors opens one of its own and closes it before the loop runs.
-#
-# THIS IS ALSO WHAT MAKES IT SAFE TO LAUNCH UNDER THE QUEUE LOCK. The lock is an
-# open descriptor too; flock drops only when the LAST one closes, so a detached
-# child inheriting it would hold the queue for the job's lifetime. Closing every
-# descriptor above stderr removes that, which is why the cap check, the
-# running-job check, the reservation AND the launch can all sit inside one hold
-# — and therefore why two racing continuations cannot both start a session.
-_pc_launch_detached() {
-  bash -c '
-    exec 0</dev/null
-    _fds="$(ls /proc/self/fd 2>/dev/null)"
-    for _n in $_fds; do
-      [ "$_n" -gt 2 ] 2>/dev/null && eval "exec ${_n}>&-" 2>/dev/null
-    done
-    exec "$@"
-  ' _ "$@"
-}
-
-# ---------------------------------------------------------------------------
 # _pc_spawn <plan_id> <epic_id> <override>
 #   <override> is "", "yes" or "no" (--spawn / --no-spawn).
 #
@@ -544,7 +563,7 @@ _pc_spawn() {
     return 0
   fi
 
-  if ! _pc_autonomous_mode; then
+  if [[ "$(aid_autonomous_mode "$ROOT")" != "auto" ]]; then
     _pc_fail "spawning is switched on, but .aid-o/config/permissions.yaml does not say 'autonomous_mode: true'. A session started without it would not run in the mode it was told to. ${epic_id} stays claimed and ready; nothing was started."
     _pc_note "spawn_refused" "$epic_id" "reason=autonomous_mode_absent"
     return 1
@@ -558,23 +577,31 @@ _pc_spawn() {
   local jobs_dir="${ROOT%/}/.aid-o/work/jobs"
   mkdir -p "$jobs_dir" 2>/dev/null || true
 
-  # THE WHOLE DECISION, AND THE LAUNCH, INSIDE ONE HOLD of the queue's own lock:
-  # the cap, the "is one already running" test, the reservation and
-  # `aid-job.sh run` itself. Two racing continuations therefore cannot both see
-  # "nothing is running" and both start a session, and a session is the only
-  # thing in this plan that costs money — at-most-once is not academic here.
+  # THE WHOLE DECISION, AND THE LAUNCH, INSIDE ONE HOLD — of the JOBS
+  # directory's lock, not the queue's. The cap, the "is one already running"
+  # test, the reservation and `aid-job.sh run` all sit in it, so two racing
+  # continuations cannot both see "nothing is running" and both start a session;
+  # a session is the only thing in this plan that costs money, so at-most-once
+  # is not academic.
+  #
+  # THE QUEUE'S LOCK WOULD BE THE WRONG RESOURCE. Nothing in this decision reads
+  # or writes the queue file — it is about the jobs directory — and holding the
+  # queue lock across a launch blocks `peek-next` and `claim-next` for every
+  # OTHER plan in the workspace while one session starts. It also contradicted
+  # this file's own header, which says every queue write goes through the CLI so
+  # that this script never holds that lock.
   #
   # An earlier cut released the lock BEFORE launching, on the reasoning that a
   # `setsid`-detached child inherits a duplicate of the lock descriptor and
-  # flock drops only when the last one closes. That reasoning was right about
-  # the hazard and wrong about the remedy: releasing early left a window in
-  # which a second continuation saw a raised count but no job directory yet, and
-  # with `max_spawned_epics > 1` it launched a second session (Codex review,
-  # EPIC 2). `_pc_launch_detached` closes EVERY descriptor above stderr before
-  # the supervisor runs, so the child holds neither the lock nor anything else
-  # of ours — which is what makes the single hold both safe and correct.
-  if ! aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)"; then
-    _pc_fail "could not take the queue lock to decide about spawning ${epic_id}; nothing was started. Retry."
+  # flock drops only when the last one closes. That was right about the hazard
+  # and wrong about the remedy: releasing early left a window in which a second
+  # continuation saw a raised count but no job directory yet, and with
+  # `max_spawned_epics > 1` it launched a second session (Codex review, EPIC 2).
+  # The hazard itself now lives where it belongs — `aid-job.sh` closes every
+  # descriptor above stderr inside its own detach — so one hold is safe.
+  local jobs_lock="${jobs_dir}/.lock"
+  if ! aid_lock_acquire "$jobs_lock" "$(_queue_lock_timeout)"; then
+    _pc_fail "could not take the jobs lock to decide about spawning ${epic_id}; nothing was started. Retry."
     _pc_note "spawn_refused" "$epic_id" "reason=lock_unavailable"
     return 1
   fi
@@ -631,7 +658,7 @@ _pc_spawn() {
   fi
 
   local rc=0 out=""
-  out="$(_pc_launch_detached bash "${SCRIPT_DIR}/aid-job.sh" run \
+  out="$(bash "${SCRIPT_DIR}/aid-job.sh" run \
           --jobs-dir "$jobs_dir" --id "$job_id" \
           --label "continue ${plan_id} ${epic_id}" --repo "$ROOT" \
           --deadline "$deadline" \
@@ -696,7 +723,9 @@ main() {
     esac
   done
 
-  ROOT="$(cd "${root_opt:-$PWD}" 2>/dev/null && pwd)" || ROOT="${root_opt:-$PWD}"
+  ROOT="$(aid_state_root "${root_opt:-}" 2>/dev/null)" \
+    || ROOT="$(cd "${root_opt:-$PWD}" 2>/dev/null && pwd)" \
+    || ROOT="${root_opt:-$PWD}"
   export AID_QUEUE_WRITE_PROJECT_ROOT="$ROOT"
 
   if [[ -n "$reclaim_id" ]]; then
@@ -734,10 +763,13 @@ main() {
   local guide_next=""
   _pc_state_read
   if [[ -n "$_PC_GUIDE_JSON" ]]; then
-    guide_next="$(jq -r '.next_epic // ""' <<<"$_PC_GUIDE_JSON" 2>/dev/null)" || guide_next=""
+    # One `jq` for the three fields, not three over the same in-memory object.
+    # Joined with US (0x1f), never a tab: a tab is IFS *whitespace*, so an empty
+    # `next_epic` would collapse the fields and shift every value one place
+    # left. The same reason `lib/aid-worktree-registry.sh` uses US.
     local guide_last guide_at
-    guide_last="$(jq -r '.last_completed_epic // ""' <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
-    guide_at="$(jq -r '.at // ""' <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
+    IFS=$'\x1f' read -r guide_next guide_last guide_at <<< \
+      "$(jq -r '[.next_epic, .last_completed_epic, .at] | join("\u001f")' <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
     _pc_say "guide:   last run finished ${guide_last:-<none>} and left ${guide_next:-<nothing>} in flight (${guide_at:-<no time>})"
   else
     _pc_say "$_PC_GUIDE_NOTE"
