@@ -1,0 +1,49 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c0_plan_review",
+  "producer": "orchestrator@cp1-deep",
+  "created_at": "2026-08-27T03:31:09Z",
+  "identity": {
+    "plan_id": "P090"
+  },
+  "reviewed_plan_hash": "sha256:6844d2f509dd4feb6a4cf6a6dedb0970d4e4c2471b19f11ab2e1e35c60f8a160",
+  "reviewed_head": "d07c2149c675f3c21b5f2cb528f04c30a05327e1",
+  "input_manifest_hash": "sha256:7efb2ab0f1c56e3a51cb3bea8a1f968d4aae2d292e7a8b739b39c860b51a79b4",
+  "review_status": "findings",
+  "blocking_findings": true,
+  "findings": [
+    {
+      "fingerprint": "sha256:bf66b729c4dcae38f15b8a06d198538c089924c5dcbbe00eafd0ede19a3a2f26",
+      "occurrence_id": "c0-P090-0",
+      "severity": "high",
+      "action_owner": "implementer",
+      "area": "Scope & dependencies / repo mismatch",
+      "finding": "Step 3 makes implicit continuation depend on `auto_controller: active` in `active-runs.json`, and Step 5 uses the same source. In the real lifecycle, `aid-fsm.sh` removes an EPIC's active-runs entry at `done-advance review→release`; `pipeline.md` then performs `epic-complete` and `epic-merge-to-plan`. Thus the merge-time caller has no durable autonomous/manual signal to read, and neither Step 3 nor an ensuing SessionStart can implement AC7b reliably. No earlier step creates a replacement durable signal.",
+      "recommendation": "Persist an authoritative autonomous-mode value before the release-edge cleanup (for example in the plan manifest or a dedicated per-plan continuation record), define its producer and reader, and add the necessary `aid-fsm.sh`/manifest scope and lifecycle tests. Test both autonomous and manual runs through done-advance, merge, and SessionStart."
+    },
+    {
+      "fingerprint": "sha256:fae00115e080ef6fcb1d523160d0a958e6383e590d98d1fd8fa7f3f5711f2e8d",
+      "occurrence_id": "c0-P090-1",
+      "severity": "medium",
+      "action_owner": "implementer",
+      "area": "Acceptance criteria / testability",
+      "finding": "AC21c leaves the production command interface conditional on one live `claude -p` probe. Its success predicate ('contains help-command content') is not machine-defined, the result changes which command the suite tests, and the evidence location `evidence/<plan>/steps/step_6/slash-dispatch-probe.jsonl` is not a declared canonical state-root path. The AC is therefore not self-contained or deterministically verifiable.",
+      "recommendation": "Choose and document a fixed invocation contract, or define a version-pinned probe with a canonical `.aid-o/work/evidence/...` path, exact machine-readable predicate, timeout/authentication failure behavior, and a deterministic stub-based test for the selected branch."
+    },
+    {
+      "fingerprint": "sha256:d82a382b9b44e20f7637eff5c7f5cc68e31b1eb212b1838db239f310a14ab7df",
+      "occurrence_id": "c0-P090-2",
+      "severity": "medium",
+      "area": "Contracts",
+      "finding": "The plan claims no deviations from five `/ecosystem/specs/...` standards, but all five referenced paths are absent from the reviewed repository and no pinned copies or versions were supplied in the contract input. Their actual requirements cannot be verified.",
+      "recommendation": "Attach or cite version-pinned standard artifacts accessible to review, or replace the unverified no-deviation assertions with an explicit validation prerequisite."
+    }
+  ],
+  "codex": {
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "session_id": "01a04141-fccc-7c12-9766-b01035db75d8",
+    "achieved_independence_level": "cross_provider"
+  },
+  "outcome": "dispatched"
+}

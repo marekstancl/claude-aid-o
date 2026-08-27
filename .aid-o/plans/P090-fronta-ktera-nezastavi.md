@@ -68,6 +68,12 @@ artefakty a release guard (P089).
 
 ## Standards (V3)
 
+> **Kde ty standardy jsou.** Nežijí v tomhle repozitáři - jsou to ekosystémové
+> dokumenty v `/opt/eco/docs/docs/ecosystem/specs/`, publikované na
+> `docs.aidlab.dev`. Vazbu mezi cestami v plánu a standardy dělá mapa zavedená
+> v P085 (`scripts/lib/aid-standards-map.sh`). Posudek, který vidí jen tenhle
+> repozitář, je proto najít nemůže; není to chybějící soubor.
+
 | Standard | Proč se váže | Odchylka |
 |---|---|---|
 | `/ecosystem/specs/agent-hooks/` | EPIC 2 přidává hookové pravidlo | žádná |
@@ -210,7 +216,7 @@ a jde do `.aid-o/work/evidence/<plan_id>/timeline.jsonl`.
 
 **Files:**
 - Create: `plugins/aid-orchestrator/scripts/aid-plan-continue.sh` — spustitelný vstupní bod: celá posloupnost po merge v jednom příkazu
-- Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — `epic-merge-to-plan` volá vstupní bod po ÚSPĚŠNÉM merge; v autonomním běhu **implicitně**, `--no-continue` to vypne
+- Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — `plan-start` zapíše `autonomy` do `plan-state.yaml`; `epic-merge-to-plan` podle něj volá vstupní bod po ÚSPĚŠNÉM merge, `--no-continue` to vypne
 - Modify: `plugins/aid-orchestrator/commands/aid-run.md` — kontrakt volajícího: po dokončeném EPICu se volá tenhle příkaz
 - Modify: `plugins/aid-orchestrator/skills/pipeline.md` — kroky 16a/16b popisují skutečné chování místo ručního postupu
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-plan-continue.bats` (tier: t0) — celá posloupnost, konec na `none`, zastavení na `blocked:`, závislost bez `merge_target`, opakované spuštění
@@ -282,8 +288,17 @@ nikdy se nepokračuje „jako by prošel".
 **Spouští to kód, ne vzpomínka** (nález Codexu, kolo 3, přijat): kdyby posloupnost
 volal jen návod v `aid-run.md`, dokázal by test nanejvýš to, že ručně spuštěný
 skript funguje. Proto `epic-merge-to-plan` vstupní bod zavolá sám **po úspěšném merge**, a to
-**implicitně, když je běh autonomní** (`auto_controller: active` v záznamu
-běhu - týž zdroj pravdy jako u Kroku 5). V manuálním běhu se nevolá; `--continue`
+**implicitně, když plán běží autonomně**.
+
+**Signál musí být trvalý a `auto_controller` jím není** (nález Codexu, potvrzovací
+kolo, ověřeno): záznam běhu si svou položku maže sám na hraně `done-advance
+review→release` (`aid-fsm.sh:286` - „done-advance … and plan-close remove their
+OWN entry"). V okamžiku merge tam tedy už není co číst. Autonomie se proto
+zapisuje **na úroveň plánu**: pole `autonomy` v `plan-state.yaml`
+(`.aid-o/work/plan-state/<plan_id>/`), které zakládá `plan-start` a které žije
+tak dlouho jako plán sám. `auto_controller` zůstává tím, čím je - stavem
+JEDNOHO běhu - a Krok 5 ho čte jen tam, kde ještě existuje; když chybí, čte
+tentýž plánový příznak. V manuálním běhu se nevolá; `--continue`
 si ho vyžádá, `--no-continue` ho vypne i v autonomním. Nález Codexu z kola 4,
 přijat: kdyby to viselo jen na nepovinném přepínači, zůstala by hlavní cesta
 volatelná bez něj a slib „nikdo si nemusí vzpomenout" by neplatil. Hranice z `aid-plan-fsm.sh:89-92`
@@ -416,9 +431,11 @@ controllera už nikdy nenastane):
   tedy tatáž cesta, kterou se obnovuje kapsle kontinuity z P086.
 
 Pravidlo se ptá **`peek`**, nikdy `claim` - připomínka nesmí frontu spotřebovat.
-Aktivuje se jen v autonomním režimu; posuzuje se pole `auto_controller` ze
-záznamů běhu v tomhle workspace (`aid-fsm.sh:345-346`, uzavřený slovník
-`active manual blocked_for_pm`), čtené **ze souboru**, ne z prostředí. Hláška
+Aktivuje se jen v autonomním režimu. Zdrojem je **plánový příznak `autonomy`
+v `plan-state.yaml`** (Krok 3), protože ten přežije celý plán; `auto_controller`
+ze záznamu běhu (`aid-fsm.sh:345-346`, uzavřený slovník
+`active manual blocked_for_pm`) se použije jen tam, kde záznam ještě existuje.
+Obojí se čte **ze souboru**, ne z prostředí. Hláška
 jmenuje plán i EPIC. Záznamy `manual` a `blocked_for_pm` se ignorují, takže
 manuální práce v projektu, kde souběžně běží autonomní plán, se neblokuje kvůli
 cizímu záznamu. Jsou-li **autonomní plány dva**, připomínka jmenuje oba - je to
@@ -570,7 +587,7 @@ i v nočním běhu; tiše fungující sada by na každém běhu stála peníze a
 - [ ] AC20 — se zapnutým se spustí právě jeden dohlížený job pro právě nárokovaný EPIC
 - [ ] AC21 — strop a už běžící job spuštění zabrání a oba důvody se zapíšou
 - [ ] AC21b — chybějící konfigurace → výchozí hodnoty; neplatná → chyba se jménem klíče; `--spawn`/`--no-spawn` přebíjí konfiguraci
-- [ ] AC21c — tvar promptu je rozhodnutý **doložitelným pokusem**: `claude -p "/aid-help" --output-format stream-json --verbose` se spustí jednou, jeho výstup se uloží do `evidence/<plan>/steps/step_6/slash-dispatch-probe.jsonl`, a platí: obsahuje-li odpověď obsah help příkazu, posílá se lomítkový tvar; jinak se posílá věta, která session řekne, co spustit. Sada pak testuje **ten zvolený tvar**, ne obojí
+- [ ] AC21c — tvar promptu je rozhodnutý **doložitelným pokusem se strojovým předikátem**: jednou se spustí `claude -p "/aid-help" --output-format stream-json --verbose`, výstup jde do evidence adresáře Kroku 6 (`steps/step_6/`, tedy tam, kam kontrakt kroku evidenci stejně směruje), a předikát zní: **odpověď obsahuje aspoň dvě jména AID příkazů** (`grep -c -o '/aid-[a-z-]*'` ≥ 2). Splněno → posílá se lomítkový tvar; nesplněno → posílá se věta „Spusť /aid-run --auto --epic &lt;id&gt;". Sada testuje ten zvolený tvar, ne obojí
 - [ ] AC21d — spuštěná session dostane vlastní `AID_JOB_ID` a kontrola „neběží jiný job" ho ignoruje; test dokládá, že se řetěz nezastaví na sobě samém
 
 **Effort:** L

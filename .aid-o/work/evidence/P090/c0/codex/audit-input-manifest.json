@@ -1,0 +1,93 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "audit_input_manifest",
+  "producer": "orchestrator@cp1-deep",
+  "created_at": "2026-08-27T03:27:16Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "unknown",
+    "plan_id": "P090"
+  },
+  "subject": {
+    "subject_hash": "sha256:66077c39d5b7b8f16912199d83ece0c7cdfda9c1fd78586d9b617553677ce5de"
+  },
+  "revision": {
+    "head_sha": "d07c2149c675f3c21b5f2cb528f04c30a05327e1",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "pass",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-c0-plan-review.sh#build-manifest"
+  },
+  "audit_input_manifest": {
+    "allowlist": [
+      ".aid-o/plans/P090-fronta-ktera-nezastavi.md",
+      ".aid-o/work/evidence/P090/cp1-deep/cp1-adjudicator.md",
+      ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L1-behavior.md",
+      ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L2-feasibility.md",
+      ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L3-enforcement.md",
+      ".aid-o/work/evidence/P090/generation/provisional-graph.json"
+    ],
+    "input_hash": "sha256:95e715ba073c6bd6149c6f9b27c3223868eb2fcd7fd04d6ec2d5fc18fa18e159",
+    "prior_pass_summaries": "untrusted",
+    "required_independence_level": "cross_provider",
+    "c0_plan_review_input": {
+      "plan_file": ".aid-o/plans/P090-fronta-ktera-nezastavi.md",
+      "reviewed_plan_hash": "sha256:6844d2f509dd4feb6a4cf6a6dedb0970d4e4c2471b19f11ab2e1e35c60f8a160",
+      "reviewed_head": "d07c2149c675f3c21b5f2cb528f04c30a05327e1",
+      "plan_id": "P090",
+      "risk_profile": "high",
+      "contracts": [],
+      "plan_graph": "absent_pre_generation",
+      "source_plan_graph": {
+        "path": ".aid-o/work/evidence/P090/generation/provisional-graph.json",
+        "sha256": "sha256:44b19caea289833bfa57f0e9a3eb1722c3ad94673e64e1d0cb9e5ae8bc1e093c",
+        "size": 1453
+      },
+      "c0_evidence": [
+        ".aid-o/work/evidence/P090/cp1-deep/cp1-adjudicator.md",
+        ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L1-behavior.md",
+        ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L2-feasibility.md",
+        ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L3-enforcement.md"
+      ],
+      "files": [
+        {
+          "path": ".aid-o/plans/P090-fronta-ktera-nezastavi.md",
+          "sha256": "sha256:6844d2f509dd4feb6a4cf6a6dedb0970d4e4c2471b19f11ab2e1e35c60f8a160",
+          "size": 42423
+        },
+        {
+          "path": ".aid-o/work/evidence/P090/cp1-deep/cp1-adjudicator.md",
+          "sha256": "sha256:84e608ca71fb3becd2ad2373135d6462fac0ec5912e7368b3ac8d8955625bc2f",
+          "size": 6522
+        },
+        {
+          "path": ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L1-behavior.md",
+          "sha256": "sha256:715926cebec27b3265cc359d06b5223c81727216d74cdc6ec3ebfbfe8343ad7b",
+          "size": 3622
+        },
+        {
+          "path": ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L2-feasibility.md",
+          "sha256": "sha256:359396f67d8f9a5e19736f3f3ad72b025924f05a91e8cedd95d10ea74ea4f6cc",
+          "size": 3635
+        },
+        {
+          "path": ".aid-o/work/evidence/P090/cp1-deep/cp1-lens-L3-enforcement.md",
+          "sha256": "sha256:a17f324fd3a90658693d4a1fad5f4b79842424aaa02d0428100df1225cef8c57",
+          "size": 3926
+        },
+        {
+          "path": ".aid-o/work/evidence/P090/generation/provisional-graph.json",
+          "sha256": "sha256:44b19caea289833bfa57f0e9a3eb1722c3ad94673e64e1d0cb9e5ae8bc1e093c",
+          "size": 1453
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,37 @@
+schema_version: aid-2.0
+plan_id: P090
+attempts: 6
+max: 5
+pre_enforcement: false
+pm_override:
+  present: true
+  ref: 'PM Marek, 2026-08-27, chat: rozpocet C0 vycerpan 5/5 po sedmi kolech; PM zvolil variantu A - povolit jedno potvrzovaci kolo nad zapracovanou revizi (nalezy kola 7 jsou opravene: retez se zastavoval na vlastnim jobu a na manualnim rezimu spustene session). Neni to override VERDIKTU, je to povoleni jednoho dalsiho pokusu smycky.'
+  claim_artifact: cp1-pm-escalation-override.json.consumed-1787801470
+  claim_sha256: sha256:8430ad36d5b181f27397b594fa5d5632a208838a1f759d4e97ab5ecaecfa62d8
+created_at: "2026-08-26T11:27:16Z"
+updated_at: "2026-08-27T03:31:10Z"
+attempts_log:
+  - n: 1
+    plan_hash: sha256:da765e2a193407248860170dd1bff97593b15ea337bcde60812df0aa7b70321e
+    codex_session: 01a03dd3-2766-7a21-87e4-df784ede9ba4
+    at: "2026-08-26T11:30:27Z"
+  - n: 2
+    plan_hash: sha256:0d06f1a00e5c64feb045c0b44cb9b56d0f8edcf9943d8abec254dcea0aacc5db
+    codex_session: 01a03dd9-08b6-7312-a432-8a67c1e35995
+    at: "2026-08-26T11:36:27Z"
+  - n: 3
+    plan_hash: sha256:5d34591ced691c9803a87f3df6da39a8eb6a55d1ba0b6a1239efc016a0aef774
+    codex_session: 01a04115-199c-7601-b167-9bd70e2f3088
+    at: "2026-08-27T02:41:50Z"
+  - n: 4
+    plan_hash: sha256:35c85ff1eb8fa37271458feab005a61060a9b77d50911cf4222cf99fb47f71b4
+    codex_session: 01a0411a-ae53-7043-a06c-59c56cd65ae4
+    at: "2026-08-27T02:47:05Z"
+  - n: 5
+    plan_hash: sha256:1d08f3c515f167e73e3c420475c7ae3a5e99631bcb60f8ea502867b0738c2b69
+    codex_session: 01a04135-624b-7820-afb5-028c3f76b6d8
+    at: "2026-08-27T03:17:22Z"
+  - n: 6
+    plan_hash: sha256:6844d2f509dd4feb6a4cf6a6dedb0970d4e4c2471b19f11ab2e1e35c60f8a160
+    codex_session: 01a04141-fccc-7c12-9766-b01035db75d8
+    at: "2026-08-27T03:31:10Z"

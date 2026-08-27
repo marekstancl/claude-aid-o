@@ -1,0 +1,12 @@
+{
+  "plan_path": ".aid-o/plans/P090-fronta-ktera-nezastavi.md",
+  "plan_sha256": "sha256:6844d2f509dd4feb6a4cf6a6dedb0970d4e4c2471b19f11ab2e1e35c60f8a160",
+  "reviewed_head": "d07c2149c675f3c21b5f2cb528f04c30a05327e1",
+  "input_manifest_path": ".aid-o/work/evidence/P090/c0/codex/audit-input-manifest.json",
+  "input_manifest_hash": "sha256:7efb2ab0f1c56e3a51cb3bea8a1f968d4aae2d292e7a8b739b39c860b51a79b4",
+  "plan_graph_path": "absent_pre_generation",
+  "source_plan_graph_path": ".aid-o/work/evidence/P090/generation/provisional-graph.json",
+  "contracts_paths": "",
+  "c0_evidence_paths": ".aid-o/work/evidence/P090/cp1-deep/cp1-adjudicator.md, .aid-o/work/evidence/P090/cp1-deep/cp1-lens-L1-behavior.md, .aid-o/work/evidence/P090/cp1-deep/cp1-lens-L2-feasibility.md, .aid-o/work/evidence/P090/cp1-deep/cp1-lens-L3-enforcement.md",
+  "output_schema_path": "plugins/aid-orchestrator/defaults/schemas/c0-plan-review.schema.json"
+}

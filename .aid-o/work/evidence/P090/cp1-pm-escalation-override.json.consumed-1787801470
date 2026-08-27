@@ -1,0 +1,7 @@
+{
+  "schema_version": "aid-2.0",
+  "plan_id": "P090",
+  "pm_ref": "PM Marek, 2026-08-27, chat: rozpocet C0 vycerpan 5/5 po sedmi kolech; PM zvolil variantu A - povolit jedno potvrzovaci kolo nad zapracovanou revizi (nalezy kola 7 jsou opravene: retez se zastavoval na vlastnim jobu a na manualnim rezimu spustene session). Neni to override VERDIKTU, je to povoleni jednoho dalsiho pokusu smycky.",
+  "granted_at": "2026-08-27",
+  "scope": "one additional C0 cross-provider loop iteration"
+}

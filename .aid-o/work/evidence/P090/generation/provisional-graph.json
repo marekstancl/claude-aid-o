@@ -1,0 +1,98 @@
+{
+  "schema": "aid-source-plan-graph/v1",
+  "plan_sha256": "sha256:6844d2f509dd4feb6a4cf6a6dedb0970d4e4c2471b19f11ab2e1e35c60f8a160",
+  "steps": [
+    {
+      "step": 1,
+      "epic": 1
+    },
+    {
+      "step": 2,
+      "epic": 1
+    },
+    {
+      "step": 3,
+      "epic": 1
+    },
+    {
+      "step": 4,
+      "epic": 1
+    },
+    {
+      "step": 5,
+      "epic": 2
+    },
+    {
+      "step": 6,
+      "epic": 2
+    },
+    {
+      "step": 7,
+      "epic": 2
+    }
+  ],
+  "edges": [
+    {
+      "before": "step-1",
+      "after": "step-2"
+    },
+    {
+      "before": "step-2",
+      "after": "step-3"
+    },
+    {
+      "before": "step-3",
+      "after": "step-4"
+    },
+    {
+      "before": "step-1",
+      "after": "step-5"
+    },
+    {
+      "before": "step-4",
+      "after": "step-5"
+    },
+    {
+      "before": "step-3",
+      "after": "step-6"
+    },
+    {
+      "before": "step-4",
+      "after": "step-6"
+    },
+    {
+      "before": "step-1",
+      "after": "step-7"
+    },
+    {
+      "before": "step-2",
+      "after": "step-7"
+    },
+    {
+      "before": "step-3",
+      "after": "step-7"
+    },
+    {
+      "before": "step-4",
+      "after": "step-7"
+    },
+    {
+      "before": "step-5",
+      "after": "step-7"
+    },
+    {
+      "before": "step-6",
+      "after": "step-7"
+    }
+  ],
+  "topological_order": [
+    "step-1",
+    "step-2",
+    "step-3",
+    "step-4",
+    "step-5",
+    "step-6",
+    "step-7"
+  ],
+  "cycles": []
+}
