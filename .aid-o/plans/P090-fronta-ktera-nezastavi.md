@@ -50,8 +50,9 @@ hranice mezi manifestem a frontou.
 ## Scope
 
 **In:** dotaz na frontu bez nároku; pokračovací smyčka v controlleru; chování
-po přerušeném běhu; hookové pravidlo jako připomínka v mezích toho, co
-dispatcher dovolí; registr a dokumentace.
+po přerušeném běhu; **volitelné spuštění dalšího EPICu jako dohlíženého běhu**
+nad existujícím supervizorem (IMP-262); hookové pravidlo jako připomínka
+v mezích toho, co dispatcher dovolí; registr a dokumentace.
 
 **Out:** změna autority nad stavem EPICu (manifest zůstává); zápis do fronty
 z `epic-start`/`epic-merge-to-plan`; souběžný běh víc plánů naráz (P087);
@@ -196,6 +197,7 @@ a jde do `.aid-o/work/evidence/<plan_id>/timeline.jsonl`.
 
 **Files:**
 - Create: `plugins/aid-orchestrator/scripts/aid-plan-continue.sh` — spustitelný vstupní bod: celá posloupnost po merge v jednom příkazu
+- Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — `epic-merge-to-plan` volá vstupní bod po ÚSPĚŠNÉM merge; v autonomním běhu **implicitně**, `--no-continue` to vypne
 - Modify: `plugins/aid-orchestrator/commands/aid-run.md` — kontrakt volajícího: po dokončeném EPICu se volá tenhle příkaz
 - Modify: `plugins/aid-orchestrator/skills/pipeline.md` — kroky 16a/16b popisují skutečné chování místo ručního postupu
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-plan-continue.bats` (tier: t0) — celá posloupnost, konec na `none`, zastavení na `blocked:`, závislost bez `merge_target`, opakované spuštění
@@ -221,6 +223,11 @@ yet"). Původní znění tohohle kroku tvrdilo opak; opraveno.
 **Implementation Detail:**
 `aid-plan-continue.sh <plan_id> <hotový_epic_id>` udělá čtyři věci v tomhle pořadí
 a na každé se dá zastavit:
+0. **důkaz** - než se cokoliv zapíše, ověří se, že ten EPIC **opravdu je v plánové
+   větvi**: `git merge-base --is-ancestor <task větev> <plánová větev>`. Bez důkazu
+   se nezrcadlí nic (nález Codexu, kolo 3: `queue_claim_next` bere u položek bez
+   `merge_target` status jako důkaz připravenosti, takže nepodložené
+   `merged_to_plan` by falešně odblokovalo závislost);
 1. **zrcadlení** - `set-status <hotový_epic_id> merged_to_plan`; exit 1 (terminální
    stav) znamená, že fronta a manifest si odporují: **stop a report**, nikdy ruční
    srovnání;
@@ -248,15 +255,20 @@ timeline, aby vadná fronta nevyrobila nekonečný běh.
 **Error Handling:** kterýkoliv článek selhal → **nepokračuje se** a řekne se to;
 nikdy se nepokračuje „jako by prošel".
 
-**Kam tenhle krok nedosáhne, a proč to tu stojí** (nález Codexu, přijat):
-`epic-start` **EPIC nespouští** - registruje větev a záznam v manifestu. Vlastní
-práci EPICu dělá agent, a toho žádný shellový skript nespustí. `aid-plan-continue.sh`
-tedy dodá **připravený stav a jméno EPICu, který je na řadě**; pokračovat musí
-controller, který běží. Plán proto neslibuje, že se práce rozběhne bez živého
-controllera - slibuje, že **nikdo si nemusí pamatovat** posloupnost, že se na ni
-nedá zapomenout uprostřed a že když turn skončí, je zapsané, co bylo na řadě.
-Tohle je mez, ne vada; překonat by ji šlo jen externím runnerem, což je vlastní
-rozhodnutí a v tomhle plánu není.
+**Spouští to kód, ne vzpomínka** (nález Codexu, kolo 3, přijat): kdyby posloupnost
+volal jen návod v `aid-run.md`, dokázal by test nanejvýš to, že ručně spuštěný
+skript funguje. Proto `epic-merge-to-plan` vstupní bod zavolá sám **po úspěšném merge**, a to
+**implicitně, když je běh autonomní** (`auto_controller: active` v záznamu
+běhu - týž zdroj pravdy jako u Kroku 5). V manuálním běhu se nevolá; `--continue`
+si ho vyžádá, `--no-continue` ho vypne i v autonomním. Nález Codexu z kola 4,
+přijat: kdyby to viselo jen na nepovinném přepínači, zůstala by hlavní cesta
+volatelná bez něj a slib „nikdo si nemusí vzpomenout" by neplatil. Hranice z `aid-plan-fsm.sh:89-92`
+zůstává celá: samo `epic-merge-to-plan` do fronty pořád nezapisuje - zapisuje až
+vstupní bod, jako samostatný program s vlastním důkazem.
+
+`epic-start` přitom **EPIC neprovede** - registruje větev a záznam v manifestu;
+vlastní práci dělá agent. Kdo ho spustí, řeší **Krok 6** nad existujícím
+supervizorem běhů (IMP-262).
 
 **Edge Cases:**
 - Manuální režim → smyčka se nespustí, controller se zeptá PM.
@@ -273,7 +285,9 @@ frontou: celá posloupnost, `none`, `blocked:`, **závislost bez `merge_target`*
 spuštění nad týmž EPICem.
 
 **Acceptance Criteria:**
-- [ ] AC7 — jeden příkaz provede zrcadlení → nárok → start a test to dokládá od začátku do konce, ne z prózy
+- [ ] AC7 — jeden příkaz provede důkaz → zrcadlení → dotaz → nárok → start a test to dokládá od začátku do konce, ne z prózy
+- [ ] AC7b — v autonomním běhu zavolá `epic-merge-to-plan` ten příkaz sám, bez přepínače; v manuálním ne; `--no-continue` ho vypne i v autonomním
+- [ ] AC7c — bez důkazu o merge se `merged_to_plan` nezapíše
 - [ ] AC8 — `blocked:` i `none` končí bez chyby a `none` **vydá doporučení uzavřít plán** jmenovitě těmi příkazy, které to dnes dělají (`plan-finalize`, `plan-merge-to-main`, `plan-close`); samo uzavření zůstává rozhodnutím controllera, skript ho neprovádí
 - [ ] AC9 — `pipeline.md` už netvrdí, že pokračování je ruční, a poznámka „no production caller" mizí, protože volající existuje
 - [ ] AC9b — selhal-li start po úspěšném nároku, položka se vrátí na `pending` a je to zapsané
@@ -310,7 +324,11 @@ a **nezrcadlí** stav; teprve pak pokračuje obvyklou posloupností a na konci
 vodítko přepíše.
 
 `.aid-o/work/evidence/<plan_id>/continue-state.json`, schéma `aid-plan-continue/1`,
-pole: `plan_id`, `last_completed_epic`, `last_result`, `at`. Píše se **atomicky**
+pole: `plan_id`, `last_completed_epic`, `last_result`, `at`, a **kvůli Kroku 6**
+(nález Codexu, kolo 3) i `job_id`, `jobs_dir`, `job_fingerprint` a `spawned_count`.
+Bez nich by se po přerušení nedal najít vlastní běh: `aid-job.sh status`/`collect`
+chtějí **přesné job id**, kdežto `watchdog` se ptá na celý adresář a plán
+nerozlišuje. Strop na počet spuštění musí přežít restart, proto je taky tady. Píše se **atomicky**
 (zápis do dočasného souboru a přejmenování), aby přerušení nezanechalo půlku.
 Po obnově se **znovu zeptáme** - vodítko říká, kde jsme skončili, ne co dělat;
 mezitím se mohlo změnit, co je mergnuté. Položka `running` bez živého běhu se
@@ -342,28 +360,37 @@ už hotový.
 **Effort:** M
 **AID Role:** backend
 
-**EPIC 2: Steps 5-6 - Připomínka a dohledatelnost**
+**EPIC 2: Steps 5-7 - Spuštění, připomínka a dohledatelnost**
 
 ### Step 5: Hookové pravidlo v mezích toho, co dispatcher dovolí
 
 **Objective:** konec turnu s nedokončeným plánem se aspoň pojmenuje.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/defaults/hook-registry.yaml` — pravidlo `queue_continuation_notice` pro `Stop`
-- Create: `plugins/aid-orchestrator/scripts/lib/aid-queue-continuation.sh` — obsluha pravidla
+- Modify: `plugins/aid-orchestrator/defaults/hook-registry.yaml` — pravidlo `queue_continuation_notice` pro `Stop` **a pro `SessionStart`**
+- Create: `plugins/aid-orchestrator/scripts/lib/aid-queue-continuation.sh` — obsluha obou událostí
 - Test: `plugins/aid-orchestrator/scripts/tests/bats/test-queue-continuation.bats` (tier: t0) — připravený EPIC, prázdná fronta, manuální režim, izolace dvou plánů
 
 **Reuse check:** searched: `grep -rln 'aid_hook_rule' plugins/aid-orchestrator/scripts/lib` → several matching `aid-decision-card.sh` `aid-artifact-obligation.sh` `aid-continuity-capsule.sh` — tvar obsluhy pravidla je ustálený a přebírá se.
 
 **Architecture Context:**
-**Vědomě stupeň 3, ne 2.** `aid-hook.sh:316-318` při `stop_hook_active: true`
-odmítnutí zakazuje - pravidlo, které by se tvářilo jako závora, by lhalo hned
-napodruhé. Skutečné pokračování dodává Krok 3; tohle je záchranná síť, která
-řekne, co zůstalo rozdělané.
+**Vědomě stupeň 3, ne 2.** `aid-hook.sh:315-319` při `stop_hook_active: true`
+nastaví `no_block=1`: pravidlo **se pořád provede a smí mluvit**, jen z něj
+nesmí vzejít odmítnutí. Závora by tedy napodruhé mlčky změkla; připomínka
+funguje dál. (Opraveno v kole 4 - předchozí znění tvrdilo, že se pravidlo
+neuplatní vůbec, což dispatcher nedělá.) Skutečné pokračování dodává Krok 3,
+spuštění Krok 6; tohle je záchranná síť, která řekne, co zůstalo rozdělané.
 
 **Parallel group:** vlna-2
 
 **Implementation Detail:**
+Pravidlo běží nad **dvěma** událostmi (nález Codexu, kolo 4: vodítko z Kroku 4
+by jinak nikdo nepřečetl, protože `epic-merge-to-plan --continue` po pádu
+controllera už nikdy nenastane):
+- **`Stop`** - „tenhle turn končí a plán má rozdělaný EPIC";
+- **`SessionStart`** - „minule se to nedoběhlo; tady je vodítko a co je na řadě",
+  tedy tatáž cesta, kterou se obnovuje kapsle kontinuity z P086.
+
 Pravidlo se ptá **`peek`**, nikdy `claim` - připomínka nesmí frontu spotřebovat.
 Aktivuje se jen v autonomním režimu; posuzuje se pole `auto_controller` ze
 záznamů běhu v tomhle workspace (`aid-fsm.sh:345-346`, uzavřený slovník
@@ -390,13 +417,89 @@ izolace dvou souběžných plánů.
 
 **Acceptance Criteria:**
 - [ ] AC13 — pravidlo používá `peek`; po jeho běhu je fronta beze změny
+- [ ] AC13b — po startu session s nedoběhlým plánem se ohlásí vodítko z Kroku 4 i to, co je na řadě
 - [ ] AC14 — v manuálním režimu mlčí a manuální turn neblokuje ani při cizím autonomním běhu
-- [ ] AC15 — při `stop_hook_active` se neuplatní a je to otestované, ne jen napsané
+- [ ] AC15 — při `stop_hook_active` pravidlo **doběhne a promluví, ale neodmítne**; sada tvrdí obojí (že hláška je, a že návratový kód neblokuje)
 
 **Effort:** M
 **AID Role:** backend
 
-### Step 6: Registr, dokumentace, CHANGELOG
+### Step 6: Další EPIC se spustí jako dohlížený běh
+
+**Objective:** po nárokování dalšího EPICu se volitelně spustí headless session, která ho provede.
+
+**Files:**
+- Modify: `plugins/aid-orchestrator/scripts/aid-plan-continue.sh` — přepínač `--spawn`, který nárokovaný EPIC spustí jako dohlížený job
+- Modify: `plugins/aid-orchestrator/skills/setup/project-scan.md` — klíče `autonomy.spawn_next_epic` (výchozí `false`), `autonomy.max_spawned_epics` (výchozí 3) a `autonomy.spawn_deadline_sec` (výchozí 3600), včetně jejich tvaru a validace
+- Modify: `plugins/aid-orchestrator/commands/aid-init.md` — nový workspace je dostane rovnou
+- Test: `plugins/aid-orchestrator/scripts/tests/bats/test-continue-spawn.bats` (tier: t0) — vypnuto, zapnuto, strop, běžící job se nepřekrývá
+
+**Reuse check:** searched: `grep -rn 'aid-job.sh run' plugins/aid-orchestrator/skills/pipeline.md` → one match `pipeline.md:151` — supervizor běhů na pozadí **existuje** (`scripts/aid-job.sh`, IMP-262: vlastní process-group, durabilní záznam, PID-reuse-safe status, idempotentní `collect`, dotazovatelný `watchdog`); tenhle krok ho jen použije pro jiný druh příkazu, nový supervizor se nezakládá.
+
+**Architecture Context:**
+**Tohle je díl, který v původním znění chyběl - a v repu byl celou dobu.**
+`epic-start` EPIC neprovede; provede ho agent. Že AID umí spustit headless
+session, je doložené: `aid-hook-verify.sh:131` spouští
+`claude -p "…" --output-format stream-json --include-hook-events` pod `timeout`
+jako kanárka hooků. Spojení obou dílů - supervizor z IMP-262 a headless běh -
+je to, co dělá rozdíl mezi „stav je připravený" a „je hotovo".
+
+Zůstává **opt-in**, protože spouštět sessions, které spouštějí sessions, je
+rozhodnutí o penězích a o důvěře, ne technický detail. Výchozí stav je vypnuto.
+
+**Čte se `.aid-o/config/project.yaml` přes `yq`, stejným způsobem jako to dělá
+`aid-release-scope.sh:98-106`** (P089): chybí-li `yq`, konfigurace nebo klíč,
+platí **výchozí hodnota** a zapíše se to; neplatná hodnota (ne-číslo, záporný
+strop) je **chyba s jménem klíče**, ne tichý default. Přepínač `--spawn` na
+příkazové řádce má přednost před konfigurací a to je otestované.
+
+**Konfigurace jde toutéž cestou, kterou právě položil P089** (nález Codexu, kolo 3,
+ověřeno v repu): tvar a validaci klíčů vlastní `skills/setup/project-scan.md`
+(sekce `versioning.release_exempt_paths` / `app_paths` tam vznikla v P089),
+`/aid-init` je seedne novému workspace, `/aid-setup scan` je doplní existujícímu.
+Druhá konfigurační cesta se nezakládá.
+
+**Parallel group:** ---
+
+**Implementation Detail:**
+Po úspěšném nároku a `epic-start` se při `--spawn` a zapnutém přepínači spustí:
+`aid-job.sh run --jobs-dir .aid-o/work/jobs --deadline <autonomy.spawn_deadline_sec> -- claude -p "/aid-run <epic_id>" …`
+Vrácené **job id se ukládá do pokračovacího artefaktu z Kroku 4** - jinak by po
+přerušení nebylo podle čeho `collect` zavolat.
+Job má durabilní identitu, takže se na něj dá po přerušení navázat přes `collect`,
+a `watchdog` řekne, jestli žije. **Strop** (`autonomy.max_spawned_epics`, výchozí
+malý) omezuje řetězení; jeho vyčerpání je normální konec, ne chyba, a zapíše se.
+Před spuštěním se ověří, že pro tenhle plán **neběží jiný job** - dvě sessions
+nad týmž plánem by si šlapaly po větvích.
+
+**Error Handling:** `claude` v cestě není, nebo `aid-job.sh run` selže → EPIC
+zůstane nárokovaný a připravený, skript to **řekne** a skončí nenulově; nikdy se
+netváří, že se rozběhlo něco, co neběží.
+
+**Edge Cases:**
+- Přepínač vypnutý (výchozí) → chová se přesně jako Krok 3 dnes: stav je připravený, spuštění je na controllerovi.
+- Job pro tenhle plán už běží → nespouští se druhý, jen se to oznámí.
+- Strop vyčerpán → konec s vysvětlením, kolik EPICů se spustilo.
+- Session skončí bez dokončení EPICu → `collect` vrátí terminální výsledek a fronta zůstane v konzistentním stavu (položka `running` se ohlásí podle Kroku 4).
+
+**Dependencies:**
+- Depends on: Step 3, Step 4
+- Blocks: none
+
+**Tests:** nová sada `test-continue-spawn.bats` (t0) — čtyři případy; `claude`
+se v testech nahrazuje atrapou na `PATH`, takže se měří **rozhodování a záznam**,
+ne cizí binárka.
+
+**Acceptance Criteria:**
+- [ ] AC19 — s vypnutým přepínačem se nic nespouští a chování je jako dnes
+- [ ] AC20 — se zapnutým se spustí právě jeden dohlížený job pro právě nárokovaný EPIC
+- [ ] AC21 — strop a už běžící job spuštění zabrání a oba důvody se zapíšou
+- [ ] AC21b — chybějící konfigurace → výchozí hodnoty; neplatná → chyba se jménem klíče; `--spawn` přebíjí konfiguraci
+
+**Effort:** L
+**AID Role:** backend
+
+### Step 7: Registr, dokumentace, CHANGELOG
 
 **Objective:** co tenhle plán zavedl, je dohledatelné jinde než v kódu.
 
@@ -416,7 +519,11 @@ jako tři záruky - a příště by na tu nejslabší někdo spoléhal.
 **Parallel group:** ---
 
 **Implementation Detail:**
-Každá vrstva dostane řádek se stupněm vynucení a větou `not_guaranteed`.
+Každá vrstva dostane **úplný** řádek: `id`, `type`, `source`, `description`,
+`instruction`, `severity`, `surface`, `status`, `verdict`, `test`, stupeň
+vynucení a větu `not_guaranteed` - povinná pole si hlídá
+`scripts/tests/test-enforcement-registry-test-audit.sh` (nález Codexu, kolo 4:
+původní znění jmenovalo jen dvě z nich).
 U připomínky ta věta výslovně říká, že **turn nezadrží** a proč
 (`stop_hook_active`). `extending-aid.md` dostane odstavec o tom, kde smyčka
 začíná a kde končí.
@@ -429,7 +536,7 @@ kontrola úplnosti registru.
 - Konzument bez autonomního režimu → smyčka se ho netýká.
 
 **Dependencies:**
-- Depends on: Steps 1-5
+- Depends on: Steps 1-6
 - Blocks: none
 
 **Tests:** nová sada `test-queue-registry-rows.bats` (t0) — tvrdí **jmenovitě**,
@@ -441,7 +548,7 @@ a kontrola verzí je release-boundary skript, ne člen sady - původní znění 
 opíralo o kontroly, které tohle netvrdí.
 
 **Acceptance Criteria:**
-- [ ] AC16 — každá ze tří vrstev má řádek se stupněm a větou `not_guaranteed`
+- [ ] AC16 — každá ze tří vrstev má řádek se **všemi povinnými poli** registru, se stupněm a s větou `not_guaranteed`
 - [ ] AC17 — u připomínky je napsáno, že turn nezadrží, a proč
 - [ ] AC18 — oba CHANGELOGy nesou shodný záznam
 
@@ -457,6 +564,7 @@ opíralo o kontroly, které tohle netvrdí.
 | 3 | 3 (sám, `---`) |
 | 4 | 4 (sám, `---`) |
 | 5 | 6 (sám, `---`) |
+| 6 | 7 (sám, `---`) |
 
 Krok 1 je předpoklad všeho ostatního, proto stojí sám. Kroky 2 a 5 na něm stojí
 oba a navzájem si nesahají na soubory. Zbytek drží řetěz: příkaz → smyčka →
@@ -474,8 +582,7 @@ a CHANGELOGy kryjí existující kontroly; Codex ukázal, že netvrdí to, co by
 musely, a Krok 6 proto dostal vlastní sadu.
 
 **Patra:** všechny nové sady `t0`; žádná nezakládá git repozitáře ani neběží déle
-než jednotky sekund. **Nové sady: 6**, **rozšířené: 0**. Šest kroků, šest testových
-zásahů.
+než jednotky sekund. **Nové sady: 7**, **rozšířené: 0**. Sedm kroků, sedm testových zásahů.
 
 ## Risks
 
