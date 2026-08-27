@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 484          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 488          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3579,3 +3579,68 @@ enforcements:
     description: "P089 Step 11 (IMP-517) — a suite named only in ## Testing Strategy prose, declared in no `Test:` bullet and absent from the repository, is a promise nobody will keep: the step contract only ever creates what a Files bullet declares. Reported so the plan either declares it with a tier or says in one sentence why the suite is not being written."
     recovery: "Add a Test: bullet with a tier, or one sentence saying the suite is not being written."
     test: "scripts/tests/bats/test-plan-lint.bats"
+
+  # ── P090 "fronta, která nezastaví" — FOUR layers of very different strength.
+  # They are four rows and not one on purpose: an ASK that reads, a LOOP that
+  # decides, a SPAWN that is off until somebody turns it on, and a REMINDER that
+  # only speaks. Collapsed into one row they would read as four guarantees, and
+  # the next person would lean on the weakest of them.
+  - id: queue_peek_readonly
+    type: 12
+    source: "scripts/lib/aid-queue-write.sh (queue_peek_next)"
+    instruction: "skills/pipeline.md (§7 release — step 16)"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That anything HAPPENS. It is a read: it answers what a claim would take and changes nothing, so no plan continues because of it. It shares one selection function with `queue_claim_next`, so the two cannot drift, but it says nothing about whether the entry it names is still the right one a moment later — between a peek and a claim the queue can move, and the claim is what decides. A lock it cannot take is exit 3, never `none`."
+    description: "P090 Step 1 — before this, asking the queue what was next MEANT taking it: `queue_claim_next` selected and wrote `status=running` in the same breath, so a turn that then ended left an EPIC marked running with nothing running. The selection is now one shared function; `peek` applies none of its writes and `claim` applies all of them."
+    recovery: "n/a — a read has nothing to recover from. Exit 3 means retry."
+    test: "scripts/tests/bats/test-queue-peek.bats"
+
+  - id: plan_continue_loop
+    type: 1
+    source: "scripts/aid-plan-continue.sh"
+    instruction: "skills/pipeline.md (§7 release — step 16), commands/aid-run.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 1
+    not_guaranteed: "That the EPIC it starts is RUN. `epic-start` registers a branch and a manifest record; the work is an agent's, and starting that agent is `autonomy.spawn_next_epic` (see `plan_continue_spawn`), which is off by default. It does not close a plan either: on `none` it names `plan-finalize` / `plan-merge-to-main` / `plan-close` and stops. It has no loop and no cap of its own — one invocation moves a plan by one EPIC. It is called from `epic-merge-to-plan` ONLY when the plan's own `autonomy` field says `auto`; a plan created before P090 has no such field and reads as manual. And it never collects an entry left at `running`: that may be somebody else's live run, so it is reported and released only by a human's `--reclaim`."
+    description: "P090 Step 3 — the continuation used to be prose in `pipeline.md` that a controller had to remember: mirror the merge into the queue, ask what is next, claim it, start it. As prose a test could prove only that the prose existed. It is now a program with five links — a git ancestry PROOF before anything is written, the mirror, the read-only ask, the claim, and `epic-start` — and `epic-merge-to-plan` invokes it itself after a successful merge. The boundary at aid-plan-fsm.sh:89-92 is intact: the merge command still writes nothing to the queue; a separate program does, after earning the right with its own proof."
+    recovery: "Every link names its own failure. A start that fails after a successful claim undoes the claim back to `pending`. Exit 3 is transient — retry; exit 4 means the plan advanced but a configured spawn did not happen."
+    test: "scripts/tests/bats/test-plan-continue.bats"
+
+  - id: plan_continue_spawn
+    type: 1
+    source: "scripts/aid-plan-continue.sh (_pc_spawn)"
+    instruction: "skills/setup/project-scan.md (autonomy.*), commands/aid-init.md"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 1
+    not_guaranteed: "That it is ON: `autonomy.spawn_next_epic` defaults to FALSE and nothing turns it on by detection, because a session that starts sessions is a decision about money and trust. Even switched on it refuses without `autonomous_mode: true` in permissions.yaml, without `claude` on PATH, past `autonomy.max_spawned_epics` (default 3) and while a job of this plan is still alive. The cap is PER PLAN, not per workspace — two plans with spawning on do not add up; that is a choice and this line is where it is recorded. It guarantees nothing about what the spawned session then DOES: its deadline expiring is a normal terminal result, not a plan failure. A slot reserved under the lock stays spent even if the launch then fails, which under-spawns rather than double-spawns."
+    description: "P090 Step 6 — `epic-start` prepares state; it does not run an EPIC. With the switch on, the claimed EPIC is started as `claude -p \"/aid-run --auto --epic <id>\"` under `aid-job.sh` (IMP-262), with a pre-allocated job id passed through `env AID_JOB_ID=` so the session knows its own identity and the 'is a job already running' check can exclude it — without that exclusion the chain would stop at length one, because the session that reaches its own merge would see itself. The slash form was decided by a recorded experiment, not assumed (.aid-o/work/evidence/P090/steps/step_6/)."
+    recovery: "Every refusal names its reason and leaves the EPIC claimed and ready; the controller can start it by hand. `aid-job.sh collect --id <the guidance's job_id>` returns the terminal result of a session that did start."
+    test: "scripts/tests/bats/test-continue-spawn.bats"
+
+  - id: queue_continuation_notice
+    type: 12
+    source: "scripts/lib/aid-queue-continuation.sh"
+    instruction: "defaults/hook-registry.yaml (queue_continuation_notice, queue_continuation_resume)"
+    severity: advisory
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 3
+    not_guaranteed: "THAT IT HOLDS A TURN — it cannot, and the reason is structural rather than a matter of configuration. `aid-hook.sh:315-319` sets `no_block=1` as soon as the harness reports `stop_hook_active: true`, which it does on every Stop after the first hook-driven continuation: a rule may still SPEAK, but no refusal from it may stop the turn again. A barrier built here would therefore hold exactly once and then go quiet, which is worse than no barrier, because everyone would believe it was one. Its row is `failure: open` and its degree is 3 for that reason. It also guarantees nothing when hooks are switched off (AID_HOOKS_OFF, AID_HOOKS_OFF_RULES, `disabled: true`), when the plan has no `autonomy: auto` (every pre-P090 plan), or when the queue cannot be read — where it says so rather than reporting an empty queue."
+    description: "P090 Step 5 — the net under the mechanism. On `Stop` it names every autonomous plan that still has work; on `SessionStart` it reads back the continuation guidance an interrupted run left, which after a dead controller is the only reader that guidance has. It asks through `peek`, never `claim`: a reminder that consumed the queue would create the very orphan it exists to warn about."
+    recovery: "The notice names the plan, what the queue has next, and what the last continuation left in flight. `aid-plan-continue.sh <plan_id> <finished EPIC>` picks it up."
+    test: "scripts/tests/bats/test-queue-registry-rows.bats"

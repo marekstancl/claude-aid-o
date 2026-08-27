@@ -47,17 +47,39 @@ _continue() { run bash "$CONTINUE" "$@" --project-root "$ROOT"; }
 _qfield()   { bash "$QW" get "$1" "$2" --queue "$QUEUE" --project-root "$ROOT"; }
 _write_queue() { cat > "$QUEUE"; }
 
+# _plan_state_stub — the minimal plan-state file `plan-start` writes. The light
+# fixtures need it because `next-epic` refuses to answer for a plan this
+# repository has never started — `none` for an unknown plan is exactly the
+# answer that would end a plan prematurely.
+_plan_state_stub() {
+  mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
+  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
+plan_id: P090
+plan_state: OPEN
+mode: plan_branch
+plan_branch: plan/P090
+target_branch: main
+created_at: "2026-08-27T00:00:00Z"
+current_operation: null
+plan_final_attempt: 0
+autonomy: auto
+YML
+}
+
 # _light_merged <epic_id> — the git shape a finished EPIC leaves behind, built
 # by hand: a task branch with a commit, merged into plan/P090. No plan-state, no
 # manifest, no lifecycle — this is for the cases that never reach `epic-start`.
 _light_merged() {
   local epic_id="$1"
+  _plan_state_stub
   git -C "$ROOT" show-ref --verify --quiet refs/heads/plan/P090 \
     || git -C "$ROOT" branch plan/P090 main
   git -C "$ROOT" branch "task/${epic_id}/main" main
   git -C "$ROOT" checkout -q "task/${epic_id}/main"
   echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
-  git -C "$ROOT" add -A
+  # Never `add -A`: `.aid-o/work/` is untracked runtime state here, and
+  # committing it onto the task branch would make `git checkout main` delete it.
+  git -C "$ROOT" add "work-${epic_id}.txt"
   git -C "$ROOT" commit -qm "${epic_id}: work"
   git -C "$ROOT" checkout -q main
   git -C "$ROOT" branch -f plan/P090 "task/${epic_id}/main"
@@ -66,12 +88,15 @@ _light_merged() {
 # _light_unmerged <epic_id> — the same, WITHOUT folding it into plan/P090.
 _light_unmerged() {
   local epic_id="$1"
+  _plan_state_stub
   git -C "$ROOT" show-ref --verify --quiet refs/heads/plan/P090 \
     || git -C "$ROOT" branch plan/P090 main
   git -C "$ROOT" branch "task/${epic_id}/main" main
   git -C "$ROOT" checkout -q "task/${epic_id}/main"
   echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
-  git -C "$ROOT" add -A
+  # Never `add -A`: `.aid-o/work/` is untracked runtime state here, and
+  # committing it onto the task branch would make `git checkout main` delete it.
+  git -C "$ROOT" add "work-${epic_id}.txt"
   git -C "$ROOT" commit -qm "${epic_id}: work"
   git -C "$ROOT" checkout -q main
 }

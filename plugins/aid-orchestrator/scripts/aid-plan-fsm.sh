@@ -10875,6 +10875,18 @@ cmd_next_epic() {
   fi
 
   local root; root="$(_pfsm_resolve_project_root "$root_arg")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root"
+
+  # A well-formed id for a plan that does not exist is NOT an empty queue.
+  # Without this check `next-epic P999` prints `none`, and `none` is the word a
+  # continuation loop reads as "this plan is finished" (Codex review, EPIC 1).
+  # A plan that exists but has no queue entries still answers `none` — that is
+  # the documented edge case, and the two are told apart by the plan-state file
+  # `plan-start` writes, not by the queue.
+  if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
+    echo "ERROR: next-epic: no plan-state for ${plan_id} in ${root} — that plan was never started here. Refusing to answer 'none' for a plan that does not exist." >&2
+    return 2
+  fi
 
   local out rc=0
   out="$(bash "${SCRIPT_DIR}/lib/aid-queue-write.sh" peek-next "$plan_id" \

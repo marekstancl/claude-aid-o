@@ -33,7 +33,11 @@
 #                     — `aid-plan-fsm.sh epic-start` registers the branch and the
 #                       manifest record; it does NOT write the queue (the one-way
 #                       edge documented at aid-plan-fsm.sh:89-92).
-#   merged_to_plan    aid-plan-fsm.sh epic-merge-to-plan
+#   merged_to_plan    THIS FILE (queue_set_status), driven by
+#                     `scripts/aid-plan-continue.sh` after it has PROVEN the
+#                     merge with `git merge-base --is-ancestor` (P090 Step 3).
+#                     `aid-plan-fsm.sh epic-merge-to-plan` establishes the fact
+#                     in Git and hands over; it still writes nothing here.
 #   released_to_main  aid-plan-fsm.sh plan-merge-to-main
 #   abandoned         aid-plan-fsm.sh epic-complete --abandon
 #   superseded        aid-plan-fsm.sh epic-complete --supersede

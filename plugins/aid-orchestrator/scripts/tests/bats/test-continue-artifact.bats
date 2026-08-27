@@ -37,12 +37,32 @@ teardown() {
 
 _continue() { run bash "$CONTINUE" "$@" --project-root "$ROOT"; }
 
+# _plan_state_stub — the minimal plan-state file `plan-start` writes. The light
+# fixtures need it because `next-epic` refuses to answer for a plan this
+# repository has never started — `none` for an unknown plan is exactly the
+# answer that would end a plan prematurely.
+_plan_state_stub() {
+  mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
+  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
+plan_id: P090
+plan_state: OPEN
+mode: plan_branch
+plan_branch: plan/P090
+target_branch: main
+created_at: "2026-08-27T00:00:00Z"
+current_operation: null
+plan_final_attempt: 0
+autonomy: auto
+YML
+}
+
 # _epic_branch <epic_id> [merged] — a task branch with one commit, optionally
 # folded into plan/P090. It branches off plan/P090, not off main: branching off
 # main and then force-moving the plan branch would silently DROP whatever an
 # earlier call had already put there.
 _epic_branch() {
   local epic_id="$1" merged="${2:-yes}"
+  _plan_state_stub
   git -C "$ROOT" branch "task/${epic_id}/main" plan/P090
   git -C "$ROOT" checkout -q "task/${epic_id}/main"
   echo "$epic_id" > "$ROOT/work-${epic_id}.txt"
@@ -76,10 +96,14 @@ YAML
 @test "AC10: a run leaves a guidance naming what it finished and what it left in flight" {
   _epic_branch E-090-1_2
   _queue_two
-  _continue P090 E-090-1_2   # start fails (no manifest) — the guidance is not written then
-  # A run that never got past `start` deliberately writes no in-flight guidance:
-  # naming an EPIC that was never started would be worse than naming none.
-  [ ! -f "$GUIDE" ]
+  # A run that fails at `start` STILL leaves a record — the run that failed is
+  # exactly the one somebody comes back to — but `next_epic` stays empty,
+  # because naming an EPIC that was never started as "in flight" would be a lie.
+  _continue P090 E-090-1_2
+  [ "$status" -eq 1 ]
+  [ -f "$GUIDE" ]
+  run jq -r '"\(.last_result) [\(.next_epic)] jobs=\(.spawned_count)"' "$GUIDE"
+  [ "$output" = "start_failed_rc1 [] jobs=0" ]
 
   # A run that ENDS cleanly does write one.
   git -C "$ROOT" branch -f plan/P090 "task/E-090-1_2/main"
@@ -89,6 +113,11 @@ YAML
   [ -f "$GUIDE" ]
   run jq -r '"\(.schema) \(.plan_id) \(.last_completed_epic) \(.last_result)"' "$GUIDE"
   [ "$output" = "aid-plan-continue/1 P090 E-090-1_2 none" ]
+  # The four Step 6 fields are part of the schema even when nothing was
+  # spawned: after an interruption they are the only way to find this plan's
+  # own job, and a cap that did not survive a restart would be no cap.
+  run jq -r '[.job_id, .jobs_dir, .job_fingerprint, (.spawned_count|tostring)] | join("|")' "$GUIDE"
+  [ "$output" = "|||0" ]
   # Nothing half-written is left behind: the write is tmp + mv.
   run bash -c 'ls "$1"/.aid-o/work/evidence/P090/ | grep -c "\.tmp\." || true' _ "$ROOT"
   [ "$output" = "0" ]
@@ -111,13 +140,30 @@ YAML
 
   printf '{ this is not json' > "$GUIDE"
   _continue P090 E-090-1_2
-  [[ "$output" == *"unreadable or not aid-plan-continue/1"* ]]
+  [[ "$output" == *"unreadable, not aid-plan-continue/1, or not about P090"* ]]
   [[ "$output" == *"ask:     next is E-090-2_2"* ]]
 
   # Well-formed JSON of somebody ELSE's schema is equally not ours.
   printf '{"schema":"aid-auto-resume/1","next_epic":"E-090-9_9"}' > "$GUIDE"
   _continue P090 E-090-1_2
-  [[ "$output" == *"unreadable or not aid-plan-continue/1"* ]]
+  [[ "$output" == *"unreadable, not aid-plan-continue/1, or not about P090"* ]]
+  [[ "$output" != *"E-090-9_9"* ]]
+
+  # …and so is OUR schema carrying ANOTHER plan's answer. A guide copied from
+  # P091 names P091's unfinished EPIC, and obeying it would refuse P090's mirror
+  # for a reason that has nothing to do with P090.
+  jq -n '{schema:"aid-plan-continue/1", plan_id:"P091", last_completed_epic:"E-091-1_2",
+          last_result:"E-091-2_2", next_epic:"E-091-2_2", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:0}' > "$GUIDE"
+  _continue P090 E-090-1_2
+  [[ "$output" == *"or not about P090"* ]]
+  [[ "$output" != *"E-091-2_2"* ]]
+
+  # A guide of our schema and our plan but MISSING a required field is not
+  # half-read either.
+  jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", next_epic:"E-090-9_9"}' > "$GUIDE"
+  _continue P090 E-090-1_2
+  [[ "$output" == *"or not about P090"* ]]
   [[ "$output" != *"E-090-9_9"* ]]
 }
 
@@ -130,7 +176,8 @@ YAML
   _queue_two
   mkdir -p "$(dirname "$GUIDE")"
   jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", last_completed_epic:"E-090-0_2",
-          last_result:"E-090-2_2", next_epic:"E-090-2_2", at:"2026-08-27T00:00:00Z"}' > "$GUIDE"
+          last_result:"E-090-2_2", next_epic:"E-090-2_2", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:0}' > "$GUIDE"
 
   _continue P090 E-090-1_2
   [[ "$output" == *"left E-090-2_2 in flight"* ]]
@@ -147,7 +194,8 @@ YAML
   _queue_two
   mkdir -p "$(dirname "$GUIDE")"
   jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", last_completed_epic:"E-090-0_2",
-          last_result:"E-090-2_2", next_epic:"E-090-2_2", at:"2026-08-27T00:00:00Z"}' > "$GUIDE"
+          last_result:"E-090-2_2", next_epic:"E-090-2_2", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:0}' > "$GUIDE"
   local before; before="$(sha256sum "$QUEUE" | cut -d' ' -f1)"
 
   _continue P090 E-090-1_2
@@ -167,6 +215,42 @@ YAML
   [[ "$output" == *"--reclaim E-090-2_2"* ]]
   # Reported, NOT collected.
   [ "$(bash "$QW" get E-090-2_2 status --queue "$QUEUE" --project-root "$ROOT")" = "running" ]
+}
+
+@test "AC12: an orphan is named even when the run has a ready EPIC to get on with" {
+  # Codex review, EPIC 1: with the report tied to the `none`/`blocked:` endings,
+  # a plan holding one orphaned `running` entry AND one ready entry started the
+  # ready one and never mentioned the orphan. The report belongs after the
+  # mirror, on every path.
+  _epic_branch E-090-1_2
+  cat > "$QUEUE" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-090-1_2
+    status: running
+    plan_id: "P090"
+    merge_target: "plan/P090"
+    depends_on: []
+
+  - epic_id: E-090-2_2
+    status: running
+    plan_id: "P090"
+    merge_target: "plan/P090"
+    depends_on: []
+
+  - epic_id: E-090-3_2
+    status: pending
+    plan_id: "P090"
+    merge_target: "plan/P090"
+    depends_on: []
+YAML
+  _continue P090 E-090-1_2
+  # It got on with E-090-3_2 (start fails here — no manifest — which is not the
+  # subject) AND it named the orphan.
+  [[ "$output" == *"claim:   E-090-3_2"* ]]
+  [[ "$output" == *"stuck:   E-090-2_2 is 'running'"* ]]
 }
 
 @test "AC12b: aid-auto-resume/1 keeps its own producer, consumer and schema — nothing was folded into it" {

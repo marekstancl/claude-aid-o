@@ -197,6 +197,23 @@ An ALREADY-INITIALISED project gets them from `/aid-setup scan`, never from
 here: init creates and migrates, mutation belongs to `/aid-setup`. Both absent
 → the guard keeps today's label behaviour and prints one hint.
 
+**A new workspace also gets the `autonomy` block (P090)** — three keys that
+decide whether a finished EPIC starts the next one by itself:
+
+```yaml
+autonomy:
+  spawn_next_epic: false            # the default, and it stays false unless a
+                                    # human says otherwise
+  max_spawned_epics: 3
+  spawn_deadline_sec: 3600
+```
+
+Seed them at their defaults and **do not propose `true`**: starting sessions
+that start sessions is a decision about money and trust, and nothing in a
+repository's shape can make it. Their meaning is defined once, in
+`skills/setup/project-scan.md`; an already-initialised project changes them
+through `/aid-setup scan`, never here.
+
 ### execution.yaml Generation
 
 After auto-detection, generate `.aid-o/config/execution.yaml` from per-stack template fragments under `defaults/execution-stacks/`. Idempotent: existing file is **not** overwritten.

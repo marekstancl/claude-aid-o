@@ -16,7 +16,21 @@ setup() {
   export TEST_TMPDIR
   ROOT="$TEST_TMPDIR/project"
   QUEUE="$ROOT/.aid-o/config/queue.yaml"
-  mkdir -p "$ROOT/.aid-o/config" "$ROOT/.aid-o/work/plan-state"
+  mkdir -p "$ROOT/.aid-o/config" "$ROOT/.aid-o/work/plan-state/P090"
+  # `next-epic` refuses to answer for a plan it has never heard of, so every
+  # case that expects an ANSWER needs the plan to exist. The file is the real
+  # shape `plan-start` writes; nothing here needs more of it than that.
+  cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
+plan_id: P090
+plan_state: OPEN
+mode: plan_branch
+plan_branch: plan/P090
+target_branch: main
+created_at: "2026-08-27T00:00:00Z"
+current_operation: null
+plan_final_attempt: 0
+autonomy: auto
+YML
   # A git repo is needed only so that --project-root is honoured as given
   # (see _pfsm_resolve_project_root); no commits, no branches — this stays t0.
   git init -q -b main "$ROOT" 2>/dev/null || git -C "$ROOT" init -q
@@ -133,6 +147,20 @@ YAML
   [ "$status" -eq 1 ]
   [ "$output" = "none" ]
   [ -f "$(_timeline P090)" ]
+}
+
+@test "AC4: a plan that was never started here is an error (2), never none" {
+  # `none` is the word a continuation loop reads as "this plan is finished".
+  # A typo in an otherwise well-formed plan id must never produce it.
+  _next_epic P999
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no plan-state for P999"* ]]
+  # Not one line is the bare word a caller parses. (The refusal explains itself
+  # by quoting it, which is why this is a per-line check and not a substring
+  # check over the whole output.)
+  run bash -c 'grep -cx none <<<"$1" || true' _ "$output"
+  [ "$output" = "0" ]
+  [ ! -f "$(_timeline P999)" ]
 }
 
 @test "AC4: a malformed plan id is a usage error (2), never none" {

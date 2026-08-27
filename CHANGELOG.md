@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.94.0] — 2026-08-27
+
+> A plan with six EPICs used to need someone to remember to start the second one. Now four
+> layers do it, and they are four because they are not equally strong.
+
+### Added
+- **`queue_peek_next` — asking the queue no longer means taking it** — `queue_claim_next` used to select and write `status=running` in one breath, so a turn that merely wondered what was next left an EPIC marked running with nothing running. Selection is now one shared function that `peek` reads and `claim` writes through, so the two can never drift; a lock `peek` cannot take is an error, never the empty-queue answer.
+- **`aid-plan-fsm.sh next-epic <plan_id>`** — the read as a command, with `claim-next`'s own exit codes and a line in the plan's timeline for every answer, so why a plan continued — or stopped — is recoverable afterwards. It refuses a plan this repository never started rather than reporting it exhausted.
+- **`scripts/aid-plan-continue.sh` — the continuation is a program** — proof, mirror, ask, claim, start, in that order, stopping at the first link that fails. `epic-merge-to-plan` calls it itself after a successful merge whenever the plan runs autonomously, with no flag to remember; `--no-continue` turns it off and `--continue` forces it for a manual plan. Link 0 is a real `git merge-base --is-ancestor` check, because a queue entry with no `merge_target` is judged by its status alone and an unearned `merged_to_plan` there would falsely unblock its dependent.
+- **`autonomy` on the plan, not on the run** — `plan-start` writes it into `plan-state.yaml` (`--autonomy auto|manual`, otherwise resolved fail-closed from `permissions.yaml`). The run record's `auto_controller` cannot serve: a run deletes its own entry before its EPIC merges, so at merge time there is nothing left to read. Absence reads as manual, so every plan created earlier is unchanged.
+- **`continue-state.json` (schema `aid-plan-continue/1`)** — written atomically at the end of every run, including the ones that failed, and read at the start of the next. It carries the plan's position plus `job_id`, `jobs_dir`, `job_fingerprint` and `spawned_count`, because after an interruption nothing else knows this plan's own job and a cap that resets on restart is not a cap. A guidance, not an authority: the next run reads it and then asks the queue anyway.
+- **Starting the next EPIC as a supervised job (off by default)** — with `autonomy.spawn_next_epic: true` the claimed EPIC runs as `claude -p "/aid-run --auto --epic <id>"` under `aid-job.sh`, with a deadline and a collectable terminal result. The job id is pre-allocated and handed to the session in its own environment, so the "is a job already running" check can exclude the job the caller is running inside — without that the chain would stop at length one and nothing would restart it. Default off, because sessions that start sessions are a decision about money and trust.
+- **`autonomy.max_spawned_epics` / `autonomy.spawn_deadline_sec`** — read from `project.yaml` the way P089 reads its own keys: a missing key defaults and says so, a present-but-unusable one is an error naming the key. The cap is per plan, not per workspace.
+- **Two hook rows — a reminder that says what is unfinished** — on `Stop` it names every autonomous plan that still has work, on `SessionStart` it reads back the guidance an interrupted run left, which after a dead controller is that guidance's only reader. Deliberately degree 3: the dispatcher strips any refusal from a Stop rule once `stop_hook_active` is set, so a barrier here would hold exactly once and then go quiet.
+
+### Changed
+- **`skills/pipeline.md` step 16 and `commands/aid-run.md`** — they described a sequence a controller had to perform; they now describe a program that performs it, and the "no production caller invokes them yet" note is gone because a caller exists.
+- **An entry left at `running` is reported, never collected** — on every path, by name, with the human-invoked `aid-plan-continue.sh --reclaim <epic_id>` that releases it. It is either a crash between claim and start or somebody else's live run, and taking a live run's entry out from under it is worse than waiting.
+
+### Fixed
+- **`lib/aid-queue-write.sh`'s status table credited the wrong writer** — it said `aid-plan-fsm.sh epic-start` writes `running` and `epic-merge-to-plan` writes `merged_to_plan`. Neither ever did: the plan FSM does not touch the queue at all, by the design decision recorded ten lines above it.
+
 ## [2.93.1] — 2026-08-26
 
 > The nightly's wave of eighteen, and the check that was meant to prevent the next one — which

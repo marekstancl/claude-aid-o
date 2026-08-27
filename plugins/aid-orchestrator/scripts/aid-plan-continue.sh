@@ -9,11 +9,18 @@
 # that the prose existed. As a script it can be run, and a test can drive it end
 # to end. That is the whole difference this file makes.
 #
-# WHAT IT DOES NOT DO. It does not run the EPIC — `epic-start` registers the
-# branch and the manifest record, the work is an agent's. It does not close a
-# plan: on `none` it NAMES the closing sequence and stops, because closing is a
-# decision. It has no loop and no cap of its own: one invocation moves a plan by
-# one EPIC and exits.
+# WHAT IT DOES NOT DO. It does not close a plan: on `none` it NAMES the closing
+# sequence and stops, because closing is a decision. It has no loop of its own:
+# one invocation moves a plan by one EPIC and exits.
+#
+# WHAT IT CAN OPTIONALLY DO (P090 Step 6). `epic-start` registers the branch and
+# the manifest record; it does not RUN the EPIC — an agent does. With
+# `autonomy.spawn_next_epic: true` in `.aid-o/config/project.yaml` this script
+# starts that agent: a headless `claude -p "/aid-run --auto --epic <id>"` under
+# `aid-job.sh` (IMP-262), which gives it a durable identity, a deadline and a
+# collectable terminal result. DEFAULT OFF, and that is a decision about money
+# and trust rather than a technical detail — sessions that start sessions are
+# not something to switch on by accident.
 #
 # THE ORDER, AND WHY EACH LINK IS WHERE IT IS:
 #
@@ -46,8 +53,13 @@
 # `--reclaim <epic_id>`, which no automation calls.
 #
 # THE GUIDANCE FILE (P090 Step 4). `.aid-o/work/evidence/<plan>/continue-state.json`,
-# schema `aid-plan-continue/1`. Written at the end of every run, read at the start of
-# the next one. It is a GUIDANCE, not an authority: after a lost turn it says where the
+# schema `aid-plan-continue/1`. Written at the end of EVERY run — the ones that
+# advanced the plan and the ones that stopped at link 0 alike, because the run that
+# failed is exactly the one somebody will come back to. `next_epic` is filled in only
+# when an EPIC was really started; a guidance naming an unstarted EPIC as in flight
+# would be worse than none. A guidance that cannot itself be written is announced on
+# stderr and does not undo the advance that already happened. Read at the start of
+# the next run. It is a GUIDANCE, not an authority: after a lost turn it says where the
 # last run got to, and the next run still ASKS the queue, because what is merged can
 # have changed in between. It is deliberately NOT the existing `aid-auto-resume/1`
 # artifact — that one is written by aid-run-gates.sh about an unfinished GATE and read
@@ -59,6 +71,8 @@
 #   1  something in the chain failed and was named; the plan did NOT move
 #   2  usage
 #   3  transient — a lock was unavailable. RETRY LATER; never treat as an end.
+#   4  the plan advanced but the spawn it was configured to do did not happen
+#      (see Step 6). The state is correct and claimable; nothing is running.
 #
 # **Last Updated:** 2026-08-27
 # =============================================================================
@@ -83,12 +97,15 @@ _pc_fail() { printf 'ERROR: aid-plan-continue: %s\n' "$*" >&2; }
 
 _pc_usage() {
   cat <<'EOF'
-Usage: aid-plan-continue.sh <plan_id> <finished_epic_id> [--project-root <path>]
+Usage: aid-plan-continue.sh <plan_id> <finished_epic_id> [--spawn|--no-spawn]
+                           [--project-root <path>]
        aid-plan-continue.sh --reclaim <epic_id> [--project-root <path>]
 
 Moves a plan forward by one EPIC after a merge: proof -> mirror -> ask -> claim
 -> start. Prints what it did at every step.
 
+  --spawn / --no-spawn  Override autonomy.spawn_next_epic for this run. Without
+                        either, the configuration decides (default: off).
   --reclaim <epic_id>   Release an entry stuck at `running` with no live run
                         back to `pending`. HUMAN-INVOKED ONLY: automation must
                         never call it, because a `running` entry may be a live
@@ -141,9 +158,23 @@ _pc_state_read() {
     _PC_GUIDE_NOTE="guide:   none — this run starts from the queue alone"
     return 0
   fi
-  _PC_GUIDE_JSON="$(jq -ec 'select(.schema == "aid-plan-continue/1")' "$f" 2>/dev/null)" || _PC_GUIDE_JSON=""
+  # The guard is the whole schema, not just its name (Codex review, EPIC 1):
+  # the right `schema` on a file copied from ANOTHER plan carries that plan's
+  # `next_epic`, and an unfinished one from P091 would refuse P090's mirror.
+  # So: our schema, our plan, and every field present and a string.
+  _PC_GUIDE_JSON="$(jq -ec --arg plan "$PLAN_ID" '
+      select(.schema == "aid-plan-continue/1")
+      | select(.plan_id == $plan)
+      | select((.last_completed_epic | type) == "string")
+      | select((.last_result | type) == "string")
+      | select((.next_epic | type) == "string")
+      | select((.at | type) == "string")
+      | select((.job_id | type) == "string")
+      | select((.jobs_dir | type) == "string")
+      | select((.job_fingerprint | type) == "string")
+      | select((.spawned_count | type) == "number")' "$f" 2>/dev/null)" || _PC_GUIDE_JSON=""
   if [[ -z "$_PC_GUIDE_JSON" ]]; then
-    _PC_GUIDE_NOTE="guide:   ${f} is unreadable or not aid-plan-continue/1 — ignoring it and asking the queue instead"
+    _PC_GUIDE_NOTE="guide:   ${f} is unreadable, not aid-plan-continue/1, or not about ${PLAN_ID} — ignoring it and asking the queue instead"
   fi
   return 0
 }
@@ -151,15 +182,36 @@ _pc_state_read() {
 # _pc_state_write <last_result> [next_epic] — atomically. A crash mid-write must
 # not leave half a file behind, so it is tmp + mv, exactly like every other
 # durable write in this plugin.
+# The four job fields exist because of Step 6, and they are here rather than in
+# the job record for a reason: `aid-job.sh status`/`collect` need an EXACT job
+# id, and after an interruption nothing else in the plan knows it — `watchdog`
+# only asks about a whole directory. `spawned_count` is here too because a cap
+# that does not survive a restart is not a cap. They carry forward untouched on
+# a run that did not spawn, so an ordinary continuation never erases them.
 _pc_state_write() {
   local last_result="$1" next_epic="${2:-}"
   local f; f="$(_pc_state_path)"
   mkdir -p "$(dirname "$f")" 2>/dev/null || { _pc_fail "cannot create $(dirname "$f") — the guidance was not written."; return 1; }
+
+  local job_id="$_PC_SPAWN_JOB_ID" jobs_dir="$_PC_SPAWN_JOBS_DIR" fp="$_PC_SPAWN_FINGERPRINT" n="$_PC_SPAWN_COUNT"
+  if [[ -z "$job_id" && -n "$_PC_GUIDE_JSON" ]]; then
+    job_id="$(jq -r '.job_id // ""'          <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
+    jobs_dir="$(jq -r '.jobs_dir // ""'      <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
+    fp="$(jq -r '.job_fingerprint // ""'     <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
+  fi
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  if [[ "$n" -eq 0 && -n "$_PC_GUIDE_JSON" ]]; then
+    local prev; prev="$(jq -r '.spawned_count // 0' <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
+    [[ "$prev" =~ ^[0-9]+$ ]] && n="$prev"
+  fi
+
   local tmp="${f}.tmp.$$"
   if ! jq -n --arg plan "$PLAN_ID" --arg last "$FINISHED_EPIC" --arg res "$last_result" \
         --arg next "$next_epic" --arg at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --arg job "$job_id" --arg jd "$jobs_dir" --arg fp "$fp" --argjson n "$n" \
         '{schema:"aid-plan-continue/1", plan_id:$plan, last_completed_epic:$last,
-          last_result:$res, next_epic:$next, at:$at}' > "$tmp" 2>/dev/null; then
+          last_result:$res, next_epic:$next, at:$at,
+          job_id:$job, jobs_dir:$jd, job_fingerprint:$fp, spawned_count:$n}' > "$tmp" 2>/dev/null; then
     rm -f "$tmp"
     _pc_fail "could not stage the guidance at ${tmp}."
     return 1
@@ -177,6 +229,15 @@ _pc_state_write() {
 _pc_report_stranded() {
   local file; file="$(queue_write_path)"
   [[ -f "$file" ]] || return 0
+  # Under the queue lock, like every other read that has to be self-consistent:
+  # a scan racing a claim's rewrite can miss the very entry it exists to find
+  # (Codex review, EPIC 1). A lock we cannot get is reported, never silently
+  # turned into "nothing is stuck".
+  if ! aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)"; then
+    _pc_say "stuck:   could not read the queue under its lock just now — no claim is made here about entries left at 'running'."
+    return 0
+  fi
+  local fd="$AID_LOCK_FD"
   local id ids
   ids="$(queue_entry_ids "$file")"
   while IFS= read -r id; do
@@ -187,6 +248,7 @@ _pc_report_stranded() {
     _pc_say "         nothing here will collect it, because it may be a live run. Release it yourself with:"
     _pc_say "           aid-plan-continue.sh --reclaim ${id}"
   done <<< "$ids"
+  aid_lock_release "$fd"
   return 0
 }
 
@@ -222,6 +284,231 @@ _pc_prove_merged() {
   return 0
 }
 
+# ===========================================================================
+# STEP 6 — starting the claimed EPIC as a supervised job.
+#
+# Everything below is inert unless it is switched on. The switch lives in
+# `.aid-o/config/project.yaml`, read exactly the way P089 reads its own keys
+# (lib/aid-release-scope.sh): through `yq`, defaulting when the tool, the file
+# or the key is absent, and REFUSING — by name — when a key is present but not
+# a usable value. A silent default over a typo is how a cap of 3 becomes no cap.
+#
+#   autonomy.spawn_next_epic     bool  default false
+#   autonomy.max_spawned_epics   int>0 default 3
+#   autonomy.spawn_deadline_sec  int>0 default 3600
+# ===========================================================================
+
+_PC_SPAWN_DEFAULT_ENABLED=false
+_PC_SPAWN_DEFAULT_MAX=3
+_PC_SPAWN_DEFAULT_DEADLINE=3600
+
+# _pc_cfg <key> — the raw scalar under `autonomy.` in project.yaml, or nothing.
+# Nothing means "not configured", which is the caller's cue to use its default.
+_pc_cfg() {
+  command -v yq >/dev/null 2>&1 || return 1
+  local cfg="${ROOT%/}/.aid-o/config/project.yaml"
+  [[ -f "$cfg" ]] || return 1
+  local out
+  out="$(yq -r ".autonomy.$1" "$cfg" 2>/dev/null)" || return 1
+  [[ -n "$out" && "$out" != "null" ]] || return 1
+  printf '%s' "$out"
+}
+
+# _pc_cfg_bool <key> <default> / _pc_cfg_int <key> <default>
+# A missing value defaults and says so on the way past; a PRESENT but unusable
+# value is an error naming the key, never a quiet fallback.
+_pc_cfg_bool() {
+  local raw; raw="$(_pc_cfg "$1")" || { printf '%s' "$2"; return 0; }
+  case "$raw" in
+    true|false) printf '%s' "$raw" ;;
+    *) _pc_fail "autonomy.$1 in .aid-o/config/project.yaml is '${raw}'; it must be true or false. Nothing was spawned."; return 1 ;;
+  esac
+}
+_pc_cfg_int() {
+  local raw; raw="$(_pc_cfg "$1")" || { printf '%s' "$2"; return 0; }
+  if [[ ! "$raw" =~ ^[0-9]+$ ]] || [[ "$raw" -lt 1 ]]; then
+    _pc_fail "autonomy.$1 in .aid-o/config/project.yaml is '${raw}'; it must be a whole number of at least 1. Nothing was spawned."
+    return 1
+  fi
+  printf '%s' "$raw"
+}
+
+# _pc_autonomous_mode — `.aid-o/config/permissions.yaml` must really say
+# `autonomous_mode: true`, as a YAML boolean. Checked BEFORE anything is
+# started, not inferred afterwards from how the session behaved: a session
+# launched into a workspace that has not authorised autonomy would run without
+# the mode it was told to run in.
+_pc_autonomous_mode() {
+  local perm="${ROOT%/}/.aid-o/config/permissions.yaml"
+  [[ -f "$perm" ]] || return 1
+  command -v yq >/dev/null 2>&1 || return 1
+  [[ "$(yq -r '.autonomous_mode | type' "$perm" 2>/dev/null)" == "!!bool" ]] || return 1
+  [[ "$(yq -r '.autonomous_mode' "$perm" 2>/dev/null)" == "true" ]]
+}
+
+# _pc_spawned_count — how many sessions this PLAN has already started, read from
+# the guidance. Per plan, not per workspace: two plans with spawning on do not
+# add up. That is a choice, and the enforcement registry says so.
+_pc_spawned_count() {
+  [[ -n "$_PC_GUIDE_JSON" ]] || { printf '0'; return 0; }
+  local n; n="$(jq -r '.spawned_count // 0' <<<"$_PC_GUIDE_JSON" 2>/dev/null)" || n=0
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
+# _pc_own_job_running <jobs_dir> <job_id> — is a job of THIS plan still alive?
+#
+# THE ONE EXCLUSION THAT KEEPS THE CHAIN LONGER THAN ONE. The session started
+# here reaches its own merge, that merge calls this script again — and the job
+# it would find running is the job it is running INSIDE. Refusing on that would
+# stop the chain at length one, and nothing would restart it, because
+# `aid-job.sh` is a supervisor, not a daemon. So the job id this process was
+# launched under (AID_JOB_ID in its environment) is ignored here. That id is
+# known because it is PRE-ALLOCATED and passed to `aid-job.sh run --id`, and
+# handed to the session through `env AID_JOB_ID=<id>` — the supervisor itself
+# exports nothing.
+_pc_own_job_running() {
+  local jobs_dir="$1" job_id="$2"
+  [[ -n "$job_id" ]] || return 1
+  [[ "$job_id" == "${AID_JOB_ID:-}" ]] && return 1
+  [[ -d "${jobs_dir}/${job_id}" ]] || return 1
+  local state
+  state="$(bash "${SCRIPT_DIR}/aid-job.sh" status --jobs-dir "$jobs_dir" --id "$job_id" 2>/dev/null)" || return 1
+  [[ "$state" == "running" || "$state" == "started" ]]
+}
+
+# ---------------------------------------------------------------------------
+# _pc_spawn <plan_id> <epic_id> <override>
+#   <override> is "", "yes" or "no" (--spawn / --no-spawn).
+#
+#   Returns 0 when a session was started OR when spawning was legitimately not
+#   done (switched off, cap reached, a job already running) — those are normal
+#   outcomes and every one of them is recorded. Returns 1 only when spawning was
+#   ASKED FOR and could not happen, because then the caller is left believing
+#   something is running that is not.
+#
+#   Prints the job id it started on stdout via the "spawn:" line, and writes
+#   _PC_SPAWN_JOB_ID / _PC_SPAWN_COUNT for the guidance the caller then writes.
+# ---------------------------------------------------------------------------
+_PC_SPAWN_JOB_ID=""
+_PC_SPAWN_JOBS_DIR=""
+_PC_SPAWN_FINGERPRINT=""
+_PC_SPAWN_COUNT=0
+_pc_spawn() {
+  local plan_id="$1" epic_id="$2" override="$3"
+  _PC_SPAWN_COUNT="$(_pc_spawned_count)"
+
+  local enabled
+  if [[ "$override" == "yes" ]]; then enabled=true
+  elif [[ "$override" == "no" ]]; then
+    _pc_say "spawn:   off (--no-spawn). ${epic_id} is claimed and ready; starting it is the controller's move."
+    _pc_note "spawn_skipped" "$epic_id" "reason=flag_no_spawn"
+    return 0
+  else
+    enabled="$(_pc_cfg_bool spawn_next_epic "$_PC_SPAWN_DEFAULT_ENABLED")" || return 1
+  fi
+
+  if [[ "$enabled" != "true" ]]; then
+    _pc_say "spawn:   off (autonomy.spawn_next_epic is false — the default). ${epic_id} is claimed and ready; starting it is the controller's move."
+    _pc_note "spawn_skipped" "$epic_id" "reason=disabled"
+    return 0
+  fi
+
+  local max deadline
+  max="$(_pc_cfg_int max_spawned_epics "$_PC_SPAWN_DEFAULT_MAX")" || return 1
+  deadline="$(_pc_cfg_int spawn_deadline_sec "$_PC_SPAWN_DEFAULT_DEADLINE")" || return 1
+
+  if ! _pc_autonomous_mode; then
+    _pc_fail "spawning is switched on, but .aid-o/config/permissions.yaml does not say 'autonomous_mode: true'. A session started without it would not run in the mode it was told to. ${epic_id} stays claimed and ready; nothing was started."
+    _pc_note "spawn_refused" "$epic_id" "reason=autonomous_mode_absent"
+    return 1
+  fi
+  if ! command -v claude >/dev/null 2>&1; then
+    _pc_fail "spawning is switched on, but there is no 'claude' on PATH. ${epic_id} stays claimed and ready; nothing was started."
+    _pc_note "spawn_refused" "$epic_id" "reason=claude_not_on_path"
+    return 1
+  fi
+
+  local jobs_dir="${ROOT%/}/.aid-o/work/jobs"
+  _PC_SPAWN_JOBS_DIR="$jobs_dir"
+  mkdir -p "$jobs_dir" 2>/dev/null || true
+
+  # The cap, the "is one already running" test and the RESERVATION of the slot
+  # all happen inside ONE hold of the queue's own lock. Two continuations racing
+  # here would otherwise both read "nothing is running" and both start a
+  # session — and a session is the only thing in this plan that costs money, so
+  # at-most-once is not academic.
+  #
+  # THE LAUNCH ITSELF IS OUTSIDE THE HOLD, and that is not an oversight.
+  # `aid-job.sh run` detaches the command with `setsid`; a detached child
+  # inherits a duplicate of the lock fd, and flock only drops when the LAST
+  # descriptor closes — so launching under the hold would keep the queue locked
+  # for the whole life of the spawned session, which is the entire point of the
+  # `$(...)`-not-`< <(...)` rule in lib/aid-queue-write.sh, one level up. So the
+  # slot is RESERVED under the lock (the count is written to the guidance and
+  # therefore survives a crash), the lock is released, and only then does the
+  # session start. A launch that then fails has spent its slot — conservative in
+  # the direction that matters: an unspent slot costs a session, a double-spent
+  # one costs two.
+  if ! aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)"; then
+    _pc_fail "could not take the queue lock to decide about spawning ${epic_id}; nothing was started. Retry."
+    _pc_note "spawn_refused" "$epic_id" "reason=lock_unavailable"
+    return 1
+  fi
+  local fd="$AID_LOCK_FD"
+
+  if [[ "$_PC_SPAWN_COUNT" -ge "$max" ]]; then
+    aid_lock_release "$fd"
+    _pc_say "spawn:   cap reached — this plan has already started ${_PC_SPAWN_COUNT} session(s) and autonomy.max_spawned_epics is ${max}. That is a normal end, not a failure: ${epic_id} is claimed and ready."
+    _pc_note "spawn_capped" "$epic_id" "spawned=${_PC_SPAWN_COUNT} max=${max}"
+    return 0
+  fi
+
+  local prev_job=""
+  [[ -n "$_PC_GUIDE_JSON" ]] && prev_job="$(jq -r '.job_id // ""' <<<"$_PC_GUIDE_JSON" 2>/dev/null)"
+  if _pc_own_job_running "$jobs_dir" "$prev_job"; then
+    aid_lock_release "$fd"
+    _pc_say "spawn:   not started — job ${prev_job} for this plan is still alive. ${epic_id} is claimed and ready."
+    _pc_note "spawn_skipped" "$epic_id" "reason=job_running job_id=${prev_job}"
+    return 0
+  fi
+
+  # Pre-allocated, so the id exists BEFORE the command that carries it does.
+  # `aid-job.sh` generates one only after assembling argv and exports nothing,
+  # so there is no other way for the session to learn its own id.
+  local job_id="p090-${plan_id}-${epic_id}-$((_PC_SPAWN_COUNT + 1))"
+  local prompt="/aid-run --auto --epic ${epic_id}"
+  local -a jobcmd=(env "AID_JOB_ID=${job_id}" claude -p "$prompt")
+
+  # The reservation. Written while the lock is held, so a second continuation
+  # arriving now reads the raised count and stops at the cap.
+  _PC_SPAWN_JOB_ID="$job_id"
+  _PC_SPAWN_JOBS_DIR="$jobs_dir"
+  _PC_SPAWN_COUNT=$((_PC_SPAWN_COUNT + 1))
+  _PC_SPAWN_FINGERPRINT="$(bash "${SCRIPT_DIR}/aid-job.sh" fingerprint -- "${jobcmd[@]}" 2>/dev/null)" \
+    || _PC_SPAWN_FINGERPRINT=""
+  _pc_state_write "$epic_id" "$epic_id" || true
+  aid_lock_release "$fd"
+
+  local rc=0 out=""
+  out="$(bash "${SCRIPT_DIR}/aid-job.sh" run \
+          --jobs-dir "$jobs_dir" --id "$job_id" \
+          --label "continue ${plan_id} ${epic_id}" --repo "$ROOT" \
+          --deadline "$deadline" \
+          -- "${jobcmd[@]}" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    # The slot is spent and stays spent — see the note above the lock.
+    _PC_SPAWN_JOB_ID=""
+    _pc_fail "aid-job.sh run failed for ${epic_id} (rc=${rc}); ${epic_id} stays claimed and ready and NOTHING is running: ${out}"
+    _pc_note "spawn_refused" "$epic_id" "reason=job_run_failed rc=${rc}"
+    return 1
+  fi
+
+  _pc_say "spawn:   started ${job_id} for ${epic_id} (deadline ${deadline}s, ${_PC_SPAWN_COUNT}/${max} for this plan)"
+  _pc_note "spawn_started" "$epic_id" "job_id=${job_id} n=${_PC_SPAWN_COUNT} max=${max} deadline=${deadline}"
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # _pc_reclaim <epic_id> — the deliberately manual door.
 # ---------------------------------------------------------------------------
@@ -243,11 +530,18 @@ _pc_reclaim() {
 }
 
 main() {
-  local plan_id="" epic_id="" root_opt="" reclaim_id=""
+  local plan_id="" epic_id="" root_opt="" reclaim_id="" spawn_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-root) root_opt="${2:-}"; shift 2 ;;
       --reclaim)      reclaim_id="${2:-}"; shift 2 ;;
+      # Step 6: an EXPLICIT override of autonomy.spawn_next_epic, in either
+      # direction. The configuration decides by default, precisely because the
+      # implicit call from `epic-merge-to-plan` passes no flags — a switch that
+      # only a hand-typed command could set would never fire on the autonomous
+      # path it exists for.
+      --spawn)        spawn_opt="yes"; shift ;;
+      --no-spawn)     spawn_opt="no";  shift ;;
       -h|--help)      _pc_usage; return 0 ;;
       -*)             _pc_usage >&2; _pc_fail "unknown option: $1"; return 2 ;;
       *)
@@ -312,7 +606,10 @@ main() {
   fi
 
   # ── 0. proof ────────────────────────────────────────────────────────────
-  _pc_prove_merged "$plan_id" "$epic_id" || return 1
+  if ! _pc_prove_merged "$plan_id" "$epic_id"; then
+    _pc_state_write "unproven" "" || true
+    return 1
+  fi
 
   # ── 1. mirror ───────────────────────────────────────────────────────────
   local cur; cur="$(_pc_queue get "$epic_id" status)" || cur=""
@@ -324,12 +621,25 @@ main() {
     _pc_queue set-status "$epic_id" merged_to_plan >/dev/null || mrc=$?
     case "$mrc" in
       0) _pc_say "mirror:  ${epic_id} ${cur:-<absent>} -> merged_to_plan" ;;
-      3) _pc_fail "the queue lock was unavailable while mirroring ${epic_id} — nothing written. Retry."; return 3 ;;
+      3) _pc_fail "the queue lock was unavailable while mirroring ${epic_id} — nothing written. Retry."
+         _pc_state_write "mirror_lock_unavailable" "" || true
+         return 3 ;;
       1) _pc_fail "the queue refuses to move ${epic_id} to merged_to_plan: it is at a terminal status while the plan branch says it merged. Queue and manifest disagree — a human decides which is wrong. Nothing was written and nothing else was attempted."
+         _pc_state_write "mirror_refused_terminal" "" || true
          return 1 ;;
-      *) _pc_fail "could not mirror ${epic_id} into the queue (rc=${mrc})."; return 1 ;;
+      *) _pc_fail "could not mirror ${epic_id} into the queue (rc=${mrc})."
+         _pc_state_write "mirror_failed" "" || true
+         return 1 ;;
     esac
   fi
+
+  # Whatever else this run does, an entry left at `running` by a dead process is
+  # named NOW — not only on the paths that end early (Codex review, EPIC 1: with
+  # the report tied to `none`/`blocked:`, a plan with one orphan and one ready
+  # EPIC started the ready one and never mentioned the orphan). It runs after the
+  # mirror and before the claim, so the entry this run is about to take is not in
+  # it.
+  _pc_report_stranded
 
   # ── 2. ask ──────────────────────────────────────────────────────────────
   local peeked prc=0
@@ -338,7 +648,6 @@ main() {
     0) _pc_say "ask:     next is ${peeked}" ;;
     1)
       _pc_state_write "$peeked" "" || true
-      _pc_report_stranded
       if [[ "$peeked" == none ]]; then
         _pc_say "ask:     none — every EPIC of ${plan_id} is accounted for."
         _pc_say ""
@@ -354,7 +663,14 @@ main() {
       fi
       return 0
       ;;
-    *) _pc_fail "could not ask what is next for ${plan_id} (next-epic exited ${prc}) — the queue was NOT claimed. Retry."; return 3 ;;
+    2) # Usage, or a plan this repository has never started. Permanent: a retry
+       # changes nothing, and calling it transient would loop forever.
+       _pc_fail "cannot ask what is next for ${plan_id}: next-epic rejected it (exit 2, reason above). The queue was NOT claimed."
+       _pc_state_write "ask_rejected" "" || true
+       return 1 ;;
+    *) _pc_fail "could not ask what is next for ${plan_id} (next-epic exited ${prc}) — the queue was NOT claimed. Retry."
+       _pc_state_write "ask_failed_rc${prc}" "" || true
+       return 3 ;;
   esac
 
   # ── 3. claim ────────────────────────────────────────────────────────────
@@ -370,7 +686,9 @@ main() {
       _pc_state_write "$claimed" "" || true
       return 0
       ;;
-    *) _pc_fail "could not claim the next EPIC of ${plan_id} (rc=${crc}) — nothing was started. Retry."; return 3 ;;
+    *) _pc_fail "could not claim the next EPIC of ${plan_id} (rc=${crc}) — nothing was started. Retry."
+       _pc_state_write "claim_failed_rc${crc}" "" || true
+       return 3 ;;
   esac
   if [[ "$claimed" != "$peeked" ]]; then
     _pc_say "claim:   ${claimed} (the question had said ${peeked}; the claim wins)"
@@ -396,15 +714,34 @@ main() {
       _pc_fail "epic-start failed for ${claimed} (rc=${srrc}) AND the claim could not be undone (rc=${rrc}) — the entry is left 'running' with nothing running. Release it with: aid-plan-continue.sh --reclaim ${claimed}"
       _pc_note "continue_start_failed" "$claimed" "epic-start rc=${srrc}; claim NOT reverted (rc=${rrc})"
     fi
+    # The record exists even here — `next_epic` stays empty, because nothing was
+    # started and a guidance that named it as in flight would be a lie.
+    _pc_state_write "start_failed_rc${srrc}" "" || true
+    # A lock epic-start could not take is TRANSIENT, and the caller's own table
+    # says exit 3 means "retry later". Flattening it to 1 (Codex review, EPIC 1)
+    # told an automated caller a retryable condition was permanent.
+    [[ "$srrc" -eq 3 ]] && return 3
     return 1
   fi
 
   _pc_say "start:   ${claimed} is registered and ready to run."
   _pc_note "continue_advanced" "$claimed" "after=${epic_id}"
-  # Last, and only now: the run got all the way through, so the guidance can
-  # name what is in flight. Written after the start, never before — a guidance
-  # naming an EPIC that was never started is worse than none.
+
+  # ── 5. spawn (Step 6, off by default) ───────────────────────────────────
+  local sprc=0
+  _pc_spawn "$plan_id" "$claimed" "$spawn_opt" || sprc=$?
+
+  # The guidance is written LAST, and after the spawn, so it carries the job id
+  # there is no other way to recover. Written after the start, never before — a
+  # guidance naming an EPIC that was never started is worse than none.
   _pc_state_write "$claimed" "$claimed" || true
+
+  if [[ "$sprc" -ne 0 ]]; then
+    # The plan DID advance: the entry is claimed, the branch exists. Only the
+    # session did not start, and saying so with its own code keeps a caller from
+    # reading "the plan is stuck" or "something is running" — neither is true.
+    return 4
+  fi
   return 0
 }
 
