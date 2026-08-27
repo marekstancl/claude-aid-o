@@ -726,3 +726,55 @@ verification_pattern:
 
 Implementace po EPICech. EPIC 1 je to, co PM chtěl („přijdu k PC a je hotovo");
 EPIC 2 je záchranná síť a dohledatelnost.
+
+---
+
+## Odchylky od plánu (schválené PM při dokončení, 2026-08-27)
+
+Dvě věci se udělaly jinak, než plán psal. Obě jsou zapsané tady, protože plán
+je to, proti čemu se implementace posuzuje — a odchylka, kterou nikdo nenapsal,
+se za rok čte jako chyba.
+
+### 1. `aid-job.sh` se změnil, ačkoli Krok 6 říká „aid-job.sh se tím nemění"
+
+**Co se ukázalo.** Supervizor odpojuje příkaz přes `setsid` a přesměrovává mu
+`0/1/2` — a nic víc. Jeho hlídač deadlinu je `sleep <deadline>`, který žije
+celou dobu deadlinu (výchozí hodina), a dědil každý další deskriptor, který
+volající zrovna držel. Dva důsledky, oba reálné: volající držící `flock` ho
+držel po celý život jobu (flock pouští až poslední deskriptor), a volající,
+jehož výstup někdo čte rourou, se nikdy nedočkal EOF.
+
+**Naměřeno, ne odvozeno:** bats sada doběhla všechny případy a pak patnáct
+minut seděla bez potomků, protože šest procesů `sleep 3600` drželo fd 3.
+
+**Proč o patro níž.** První oprava byla obal v `aid-plan-continue.sh`, tedy na
+místě příznaku. `aid-job.sh run` už volá pět skriptů (`aid-run-gates.sh`,
+`lib/aid-service.sh`, `lib/aid-test-execution-unit.sh`,
+`lib/aid-test-audit-measure.sh`, `aid-test-audit-profile.sh`) a každý z nich má
+tutéž past latentně — projeví se v den, kdy bude držet zámek nebo poběží pod
+rourou. Oprava je uvnitř vlastního odpojení supervizoru.
+
+**Co to stálo:** větu z plánu. **Co to koupilo:** pět volajících, kteří ji
+dostali zadarmo, a možnost držet rozhodnutí o spuštění v jednom zámku.
+
+### 2. Tři sady jsou `t1`, ne `t0`
+
+Plán psal „všechny nové sady `t0`". Naměřená cena říká jinak:
+`test-plan-continue.bats`, `test-continue-artifact.bats` a
+`test-continue-spawn.bats` potřebují skutečný git strom — „je tenhle EPIC
+mergnutý" je otázka na Git, ne na soubor — a jeden případ s reálným merge trvá
+kolem dvaceti sekund. Patro sleduje **naměřenou cenu**, nikdy záměr; to je
+ekosystémový standard, ne volba tohohle plánu. Zbylé čtyři sady jsou `t0`, jak
+plán čekal.
+
+Obě patra jsou na merge cestě (T0 + T1), takže AC19–AC21d blokují merge tak
+jako tak.
+
+### Co se vědomě NEudělalo
+
+`_queue_scan_next` čte celou frontu znovu pro každou položku — 0,64 až 0,82 s
+na plán při **každém** konci turnu a startu session, naměřeno na frontě se 101
+položkami. Je to největší naměřený náklad v okolí a je **předexistující**
+v `queue_claim_next`; P090 ho jen přesunulo na hookovou cestu. Přepis
+nejkritičtějšího parseru v pluginu na konci plánu není něco, co by se dělalo bez
+vlastního zadání. Vše, co P090 přidalo, už platí jen jednou.

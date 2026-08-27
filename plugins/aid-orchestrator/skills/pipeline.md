@@ -2560,18 +2560,32 @@ run (P068). The FSM enforces the skip structurally; these instructions must matc
 15b. **Report to the PM, in these words:** "EPIC complete and merged into
     `plan/{plan_id}`; plan remains open; no plan-final release decision has run yet."
     Do not describe this as a release, a delivery or a merge to `{target_branch}`.
-16. **Queue — mirror the merge FIRST, then claim the next entry.** Two calls, in this
-    order, through the plan-aware writer; never edit `queue.yaml` by hand:
-    ```bash
-    # 16a — mirror into the queue the merge step 15 just proved in Git.
-    bash {plugin_path}/scripts/lib/aid-queue-write.sh set-status \
-      {epic_id} merged_to_plan --project-root {project_root}
+16. **Queue — the continuation is a program now; you do not perform it by hand.**
+    Since P090 this whole sequence lives in `scripts/aid-plan-continue.sh`, and
+    `epic-merge-to-plan` calls it ITSELF after a successful merge whenever the plan's
+    `autonomy` field (written by `plan-start`) says `auto`. In an autonomous plan there
+    is nothing for you to do at step 16: the merge you ran at step 15 already printed
+    what it did.
 
-    # 16b — claim the next entry of THIS plan.
-    bash {plugin_path}/scripts/lib/aid-queue-write.sh claim-next {plan_id} \
+    ```bash
+    # Only when you are driving a MANUAL plan, or re-running after a failure.
+    # Same sequence, same guarantees; --no-continue on epic-merge-to-plan turns
+    # the automatic call off.
+    bash {plugin_path}/scripts/aid-plan-continue.sh {plan_id} {epic_id} \
       --project-root {project_root}
     ```
-    **16a is not optional bookkeeping — without it a multi-EPIC plan stalls at its
+
+    **What it does, in order** — and it stops at the first link that fails:
+
+    | # | Link | What it guarantees |
+    |---|------|--------------------|
+    | 0 | **proof** | `git merge-base --is-ancestor <task branch> plan/{plan_id}`. Nothing is written before this passes |
+    | 1 | **mirror** | `set-status {epic_id} merged_to_plan`; skipped if already there, which is what makes a re-run harmless |
+    | 2 | **ask** | `aid-plan-fsm.sh next-epic {plan_id}` — changes nothing, records the answer in the plan timeline. `none`/`blocked:` ends here, queue unclaimed |
+    | 3 | **claim** | `claim-next {plan_id}`; if the queue moved since the ask, the claim wins and the difference is recorded |
+    | 4 | **start** | `epic-start` on exactly what the claim took. If it fails, the claim is undone back to `pending` |
+
+    **Link 1 is not optional bookkeeping — without it a multi-EPIC plan stalls at its
     second EPIC.** `epic-merge-to-plan` leaves the queue entry at `running`. When the
     dependency entry carries no `merge_target` — the shape `aid-queue-add.sh` writes
     whenever `plan/{plan_id}` did not yet exist at queue-add time, which is the normal
@@ -2581,27 +2595,29 @@ run (P068). The FSM enforces the skip structurally; these instructions must matc
     provably contained in `plan/{plan_id}` and provably absent from `{target_branch}` —
     exactly the state the plan exists to create — and the hand-off refuses it anyway.
 
-    **A queue entry is a DERIVED VIEW, never evidence.** 16a mirrors the ancestry fact
-    step 15 established in Git; it does not create it. For an entry that DOES carry a
-    `merge_target`, `claim-next` proves readiness with a live
-    `git merge-base --is-ancestor` check and ignores the status field entirely — so 16a
-    can never unblock anything that did not really merge.
+    **A queue entry is a DERIVED VIEW, never evidence.** Link 1 mirrors the ancestry fact
+    step 15 established in Git; it does not create it. That is why link 0 exists: for an
+    entry with no `merge_target` the status IS the readiness answer, so the mirror has to
+    be earned against Git before it is written. For an entry that DOES carry a
+    `merge_target`, `claim-next` proves readiness with its own live
+    `git merge-base --is-ancestor` check and ignores the status field entirely.
 
-    | Exit | `set-status` (16a) | `claim-next` (16b) |
-    |------|--------------------|--------------------|
-    | 0 | Status written | Prints the claimed `<epic_id>` |
-    | 1 | No such entry, or the entry sits in a terminal status (`released_to_main` / `abandoned` / `superseded`) — **nothing was written**. Stop: an EPIC that just merged cannot be terminal, so the queue and the manifest disagree. Report it; never hand-edit the queue to force agreement | Prints `blocked:<epic_id>:<reason>` (no dependency is ready) or `none` (no candidate entry for this plan). `none` after the last EPIC is the normal end of the plan |
-    | 2 | Usage/validation — bad `epic_id`, a status outside the writable enum, or a `reason` outside the allowed charset. Nothing written; fix the invocation | Bad `plan_id` |
-    | 3 | Lock unavailable, or a write that had to be durable was not. Retry once the holder finishes — never proceed as if it succeeded | Same |
+    **`aid-plan-fsm.sh` still does not write the queue.** The boundary at
+    `aid-plan-fsm.sh:89-92` is unchanged: `epic-merge-to-plan` moves Git and the plan
+    manifest and hands control to a separate program that establishes its own proof.
 
-    ⚠️ **Honest wiring status:** `queue_set_status` / `queue_claim_next` /
-    `queue_set_plan` ship as a library only — **no production caller invokes them yet**,
-    which is why the enforcement registry records the writer `status: planned`.
-    `aid-plan-fsm.sh` does NOT write the queue: `epic-merge-to-plan` moves Git and the
-    plan manifest and stops there. Until a later step (P068) wires these calls into it,
-    the controller invokes the library directly as shown above — that is why 16a exists
-    as its own explicit step rather than being described as a side effect of step 15. Do
-    not describe queue pickup as automatic in `plan_branch` mode.
+    | Exit | `aid-plan-continue.sh` |
+    |------|------------------------|
+    | 0 | The plan moved on — or ended cleanly (`none` / `blocked:` / nothing owed). On `none` it names `plan-finalize`, `plan-merge-to-main`, `plan-close` and stops; closing a plan is a decision, and it does not make it |
+    | 1 | A link failed and was named; the plan did not move. A refusal at link 1 because the entry is terminal means the queue and the manifest disagree — report it, never hand-edit the queue to force agreement |
+    | 2 | Usage |
+    | 3 | Transient: a lock was unavailable. Retry. **Never read as an end** |
+
+    **The one state it will not clean up.** If a process dies between claim and start,
+    the entry is left `running` with nothing running. `peek` deliberately does not return
+    such an entry and the script will not silently reset one — it may be somebody else's
+    live run. Release it explicitly with
+    `aid-plan-continue.sh --reclaim <epic_id>`, which no automation ever calls.
 
 #### `legacy_epic_release_mode` — the per-EPIC release ritual
 
@@ -2655,8 +2671,9 @@ intermediate EPIC really has:
    `blocking_findings: false`.
 
 All three true → proceed automatically through steps 14-16 (`epic-complete` →
-`epic-merge-to-plan` → queue `set-status merged_to_plan` → queue claim; the status write
-is step 16a and is never skipped in auto-mode — skipping it blocks the next EPIC). Any
+`epic-merge-to-plan`, which then calls `aid-plan-continue.sh` itself: mirror → ask →
+claim → start. The mirror is never skipped in auto-mode — skipping it blocks the next
+EPIC — and since P090 nothing has to remember to do it). Any
 one false → stop and show the summary; the
 merge into `plan/{plan_id}` needs a PM decision. **`epic-merge-to-plan` exiting 1/4/5 is
 never auto-retried** — report the printed reason as documented in step 15.
@@ -3170,7 +3187,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-26
+**Last Updated:** 2026-08-27
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

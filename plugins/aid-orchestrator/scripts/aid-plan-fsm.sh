@@ -90,6 +90,11 @@
 # owns every queue write and wires itself into both (the manifest is the
 # authority for EPIC status, the queue a derived view; that one-way edge is
 # what keeps Steps 6 and 7 free of a producer/consumer cycle).
+# P090 Step 3 DID NOT WEAKEN THIS. `epic-merge-to-plan` still writes nothing to
+# the queue; on an autonomous plan it hands over to `scripts/aid-plan-continue.sh`,
+# a separate program that establishes its own `git merge-base --is-ancestor`
+# proof before it mirrors anything. The write stays something a program earned
+# rather than something the merge path asserted, so the one-way edge holds.
 #
 # ── LINEAGE MODEL ─────────────────────────────────────────────────────────
 # `plan-start` creates `plan/<plan_id>` from EXACTLY `target_branch_head_at_start
@@ -169,6 +174,10 @@ source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"   # P090 Step 2 — the ONE plan-timeline writer
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-permissions.sh" # P090 — the ONE autonomous_mode reader
 # P074 Step 6 — the SAME shared post-boundary helper aid-fsm.sh uses
 # (aid_active_boundary_sync): a direct `aid-plan-fsm.sh plan-close` /
 # `plan-rollback` (invocable without the aid-fsm.sh wrapper) performs
@@ -2079,7 +2088,7 @@ _pfsm_refuse_inside_plan_worktree() {
 # dispatcher (i.e. when P068 lands them).
 # =============================================================================
 cmd_plan_start() {
-  local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt=""
+  local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt="" autonomy_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode="${2:-}"; shift 2 ;;
@@ -2091,6 +2100,11 @@ cmd_plan_start() {
       # what lets this command verify the source is committed before it
       # creates a branch or a manifest.
       --plan-file) plan_file_opt="${2:-}"; shift 2 ;;
+      # P090 Step 3 — record on the PLAN whether it runs autonomously, so the
+      # continuation loop has something durable to read at merge time. Without
+      # the flag the answer comes from .aid-o/config/permissions.yaml; with it,
+      # the caller has said so explicitly and that wins.
+      --autonomy) autonomy_opt="${2:-}"; shift 2 ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -2115,7 +2129,7 @@ cmd_plan_start() {
   # error, never a silently discarded argument.
   _pfsm_force_arg_check "plan-start" || exit 2
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--project-root <path>] [--op-id <id>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--autonomy auto|manual] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -2132,6 +2146,10 @@ cmd_plan_start() {
   case "$mode" in
     plan_branch|legacy_epic_release_mode) ;;
     *) echo "ERROR: plan-start: --mode must be 'plan_branch' or 'legacy_epic_release_mode' (got '${mode}')" >&2; exit 2 ;;
+  esac
+  case "${autonomy_opt}" in
+    ""|auto|manual) ;;
+    *) echo "ERROR: plan-start: --autonomy must be 'auto' or 'manual' (got '${autonomy_opt}')" >&2; exit 2 ;;
   esac
 
   local invoke_root project_root
@@ -2356,8 +2374,9 @@ cmd_plan_start() {
   fi
 
   if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
-    local sirc=0
-    plan_state_init "$plan_id" "$mode" "$plan_branch" "$target_branch" >/dev/null || sirc=$?
+    local sirc=0 autonomy="${autonomy_opt}"
+    [[ -n "$autonomy" ]] || autonomy="$(aid_autonomous_mode "$project_root")"
+    plan_state_init "$plan_id" "$mode" "$plan_branch" "$target_branch" "$autonomy" >/dev/null || sirc=$?
     if [[ "$sirc" -ne 0 ]]; then
       echo "PRECONDITION FAIL: plan_state_init failed for ${plan_id} (rc=${sirc})." >&2
       exit "$sirc"
@@ -3246,7 +3265,7 @@ cmd_epic_complete() {
 #                         [--project-root ...] [--op-id ...]
 # =============================================================================
 cmd_epic_merge_to_plan() {
-  local plan_id="" epic_id="" expected_sha="" project_root_opt="" op_id_opt=""
+  local plan_id="" epic_id="" expected_sha="" project_root_opt="" op_id_opt="" continue_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --expected-plan-sha)
@@ -3272,6 +3291,10 @@ cmd_epic_merge_to_plan() {
       --force) _PFSM_FORCE=1; shift ;;
       --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      # P090 Step 3 — override the plan's own `autonomy` field, in either
+      # direction, for this one merge.
+      --continue) continue_opt="yes"; shift ;;
+      --no-continue) continue_opt="no"; shift ;;
       --*) echo "ERROR: epic-merge-to-plan: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1";
@@ -3492,8 +3515,7 @@ cmd_epic_merge_to_plan() {
       echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan at ${recorded_mc} but its task branch has moved to ${merged_tip}, which is not contained in ${plan_branch}; the manifest status is terminal and this command will not create a second merge. Land the newer work through its own EPIC." >&2
       exit 1
     fi
-    echo "$recorded_mc"
-    exit 0
+    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$recorded_mc"
   fi
 
   # ── Provenance gate ──────────────────────────────────────────────────────
@@ -3528,8 +3550,7 @@ cmd_epic_merge_to_plan() {
       local wrc=0
       _pfsm_record_merged "$plan_id" "$epic_id" "$recorded_mc" "$cur_status" || wrc=$?
       [[ "$wrc" -ne 0 ]] && exit "$wrc"
-      echo "$recorded_mc"
-      exit 0
+      _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$recorded_mc"
     fi
     echo "PRECONDITION FAIL: unproven_merge — ${task_branch} does not exist and no recorded merge commit is an ancestor of ${plan_branch}. A deleted branch, a 'state: DONE' run and a queue entry claiming completion are NOT proof; re-create the branch or record a proven merge." >&2
     exit 1
@@ -3562,8 +3583,7 @@ cmd_epic_merge_to_plan() {
       exit "$crc"
     fi
     _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-    echo "$resulting_sha"
-    exit 0
+    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$resulting_sha"
   fi
 
   # ── Already merged: converge, never a second merge commit ────────────────
@@ -3580,8 +3600,7 @@ cmd_epic_merge_to_plan() {
     fi
     # Unreachable belt: cur_status == merged_to_plan already returned above.
     if [[ "$cur_status" == "merged_to_plan" && "$recorded_mc" == "$proven" ]]; then
-      echo "$proven"
-      exit 0
+      _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$proven"
     fi
     local brc=0
     plan_op_begin "$plan_id" "$op_id" "epic-merge-to-plan" "$epic_id" "$plan_head" || brc=$?
@@ -3601,8 +3620,7 @@ cmd_epic_merge_to_plan() {
       exit "$crc"
     fi
     _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-    echo "$proven"
-    exit 0
+    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$proven"
   fi
 
   # ── The real merge ───────────────────────────────────────────────────────
@@ -3730,8 +3748,92 @@ cmd_epic_merge_to_plan() {
 
   _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
 
-  echo "$merge_commit"
+  # ── P090 Step 3: continue the plan, if the plan is autonomous ────────────
+  # The merge is DONE and recorded above; nothing below can undo it, and
+  # nothing below is allowed to change this command's exit code, which reports
+  # the merge and only the merge.
+  #
+  # THE BOUNDARY AT :89-92 IS INTACT. This command still does not write the
+  # queue. It hands control to `aid-plan-continue.sh`, a separate program that
+  # establishes its OWN ancestry proof before it mirrors anything — so the
+  # queue write remains something a program earned, not something the merge
+  # path asserted.
+  #
+  # IMPLICIT, NOT OPT-IN. If continuing needed a flag, the main path would stay
+  # callable without it and "nobody has to remember" would be false the first
+  # time somebody typed the command by hand. The plan's own `autonomy` field
+  # decides; `--no-continue` overrides it, `--continue` forces it for a manual
+  # plan.
+  #
+  # Through the SAME door as the five convergence exits above — see
+  # _pfsm_merge_success for why there is only one.
+  _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$merge_commit"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_merge_success <project_root> <plan_id> <epic_id> <continue_opt> <sha>
+# (P090 Step 3.) THE one way `epic-merge-to-plan` succeeds.
+#
+# It exists because the command has SIX successful exits, not one: a fresh
+# merge, and five convergence paths (already merged_to_plan; the task branch
+# gone but the recorded merge still proven; a crash resumed from an operation
+# record at git_applied; the unreachable belt; and the tip already contained in
+# the plan branch). The first cut wired the continuation into the fresh-merge
+# exit alone — which left the two paths a resumed or re-run controller actually
+# takes (the crash recovery and the "already contained" convergence) silently
+# back on "somebody has to remember", in exactly the situation P090 exists for.
+# Routing every success through here makes that impossible to forget again, and
+# test-plan-continue.bats asserts that no `exit 0` in the command bypasses it.
+#
+# Prints the SHA on stdout first — that is this command's contract and nothing
+# below may disturb it — then hands over. Never returns.
+# ---------------------------------------------------------------------------
+_pfsm_merge_success() {
+  local root="$1" plan_id="$2" epic_id="$3" opt="$4" sha="$5"
+  printf '%s\n' "$sha"
+  _pfsm_maybe_continue "$root" "$plan_id" "$epic_id" "$opt"
   exit 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_maybe_continue <project_root> <plan_id> <epic_id> <continue_opt>
+# (P090 Step 3.) <continue_opt> is "", "yes" or "no".
+#
+# Best-effort by construction: the merge it follows has already landed and been
+# recorded, so a continuation that cannot run must be VISIBLE and must not turn
+# a successful merge into a failure. Always returns 0.
+# ---------------------------------------------------------------------------
+_pfsm_maybe_continue() {
+  local root="$1" plan_id="$2" epic_id="$3" opt="$4"
+
+  if [[ "$opt" == "no" ]]; then
+    echo "continue: skipped (--no-continue)." >&2
+    return 0
+  fi
+
+  if [[ "$opt" != "yes" ]]; then
+    # The plan-level flag, read from the file — never from the environment, and
+    # never from the run record, which by this point has already removed its own
+    # entry (aid-fsm.sh:286).
+    local autonomy=""
+    autonomy="$(plan_state_get "$plan_id" autonomy 2>/dev/null)" || autonomy=""
+    if [[ "$autonomy" != "auto" ]]; then
+      # Absence reads as manual: every plan created before P090 has no field.
+      return 0
+    fi
+  fi
+
+  local cont="${SCRIPT_DIR}/aid-plan-continue.sh"
+  if [[ ! -x "$cont" && ! -f "$cont" ]]; then
+    echo "continue: ${cont} is missing — the merge landed, but the plan did not advance." >&2
+    return 0
+  fi
+
+  echo "continue: advancing ${plan_id} after ${epic_id}…" >&2
+  bash "$cont" "$plan_id" "$epic_id" --project-root "$root" >&2 || {
+    echo "continue: aid-plan-continue.sh did not advance ${plan_id} (see above). The merge itself is recorded and unaffected." >&2
+  }
+  return 0
 }
 
 # =============================================================================
@@ -10727,15 +10829,115 @@ cmd_plan_scratch() {
   return 0
 }
 
+# ===========================================================================
+# cmd_next_epic <plan_id> [--project-root <path>]  (P090 Step 2)
+#
+# ASK the queue what a claim would take — and take nothing. This is the READ
+# half of the split introduced in `lib/aid-queue-write.sh` (`queue_peek_next`),
+# surfaced as a plan-FSM subcommand so a controller can ask in one line and so
+# the answer leaves a trace.
+#
+# WHY IT IS ITS OWN SUBCOMMAND, and not folded into `epic-merge-to-plan`:
+# the one-way edge this file declares at the top (neither `epic-start` nor
+# `epic-merge-to-plan` writes the queue; the manifest is the authority and the
+# queue a derived view) exists to keep producer and consumer from forming a
+# cycle. `next-epic` respects it by being a pure READ: it never writes the
+# queue, and the claim still happens where it always did.
+#
+# WHY IT IS A SUBPROCESS CALL and not a `source`: pulling the queue WRITER's
+# functions into this file's namespace would put `queue_set_status` and
+# `queue_claim_next` one typo away from every command here — precisely the
+# edge the header forbids. A subprocess gets the read and nothing else.
+#
+# Exit codes are the ones `claim-next` already uses (skills/pipeline.md carries
+# the table), so two questions this similar never answer differently:
+#   0  printed <epic_id>                — there is work
+#   1  printed `blocked:<id>:<reason>`  — nothing claimable; NOT an error
+#      or `none`
+#   2  bad plan_id or usage
+#   3  the queue lock was unavailable, or the timeline write failed. NEVER to
+#      be read as `none`: "I could not look" ending a plan is the one failure
+#      mode this whole plan exists to prevent.
+# ===========================================================================
+cmd_next_epic() {
+  local plan_id="" root_arg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root) root_arg="${2:-}"; shift 2 ;;
+      -*) echo "ERROR: next-epic: unknown option: $1" >&2; return 2 ;;
+      *)  if [[ -z "$plan_id" ]]; then plan_id="$1"; shift
+          else echo "ERROR: next-epic: unexpected argument: $1" >&2; return 2; fi ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" ]]; then
+    echo "ERROR: next-epic: usage: aid-plan-fsm.sh next-epic <plan_id> [--project-root <path>]" >&2
+    return 2
+  fi
+  if ! _pfsm_validate_plan_id "$plan_id"; then
+    echo "ERROR: next-epic: '${plan_id}' is not a plan id (expected P<NNN>)." >&2
+    return 2
+  fi
+
+  local root; root="$(_pfsm_resolve_project_root "$root_arg")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root"
+
+  # A well-formed id for a plan that does not exist is NOT an empty queue.
+  # Without this check `next-epic P999` prints `none`, and `none` is the word a
+  # continuation loop reads as "this plan is finished" (Codex review, EPIC 1).
+  # A plan that exists but has no queue entries still answers `none` — that is
+  # the documented edge case, and the two are told apart by the plan-state file
+  # `plan-start` writes, not by the queue.
+  if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
+    echo "ERROR: next-epic: no plan-state for ${plan_id} in ${root} — that plan was never started here. Refusing to answer 'none' for a plan that does not exist." >&2
+    return 2
+  fi
+
+  local out rc=0
+  out="$(bash "${SCRIPT_DIR}/lib/aid-queue-write.sh" peek-next "$plan_id" \
+          --project-root "$root")" || rc=$?
+
+  # rc 3 (or anything unexpected) is reported AS a failure, with no result
+  # line: a caller that saw `none` here would conclude the plan is finished.
+  # rc 0 and 1 are the only codes that carry an answer, and both always print
+  # one — so there is no "succeeded but said nothing" case to guard against.
+  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
+    echo "ERROR: next-epic: could not read the queue for ${plan_id} (aid-queue-write.sh peek-next exited ${rc})." >&2
+    return 3
+  fi
+
+  # The trace, through the SHARED plan-timeline writer (lib/aid-stage-log.sh),
+  # so this event carries the same `ts` field as every other event in the same
+  # file — a hand-rolled copy here stamped `at`, and anything reading the
+  # timeline by time would have skipped it.
+  #
+  # Unlike the best-effort timeline writes elsewhere in this file, a failure is
+  # fatal (rc 3): the whole point of the subcommand is that WHY a plan continued
+  # — or stopped — is recoverable afterwards, and an answer nobody recorded
+  # cannot serve that. What is checked is that the timeline has a writable HOME;
+  # `log_event`'s own contract is that it never fails a pipeline, so the append
+  # itself is not a second failure mode to test for.
+  local tl
+  if ! tl="$(aid_plan_timeline "$root" "$plan_id")"; then
+    echo "ERROR: next-epic: read ${out} for ${plan_id} but could not open ${root}/.aid-o/work/evidence/${plan_id}/timeline.jsonl — reporting a failure rather than an unrecorded answer." >&2
+    return 3
+  fi
+  log_event "$tl" "queue_peek" "plan_id=${plan_id}" "result=${out}"
+
+  printf '%s\n' "$out"
+  return "$rc"
+}
+
 _aid_plan_fsm_usage() {
   cat <<'EOF'
 Usage: aid-plan-fsm.sh <subcommand> [args...]
 
 Subcommands:
-  plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--project-root <path>] [--op-id <id>]
+  plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--autonomy auto|manual] [--project-root <path>] [--op-id <id>]
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
-  epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
+  epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--continue|--no-continue] [--project-root <path>] [--op-id <id>]
+  next-epic <plan_id> [--project-root <path>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
@@ -10754,6 +10956,7 @@ main() {
     epic-start) cmd_epic_start "$@" ;;
     epic-complete) cmd_epic_complete "$@" ;;
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
+    next-epic) cmd_next_epic "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-close) cmd_plan_close "$@" ;;

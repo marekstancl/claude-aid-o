@@ -238,7 +238,34 @@ cmd_run() {
 
   # Launch the supervised wrapper in its own session (setsid => new PGID),
   # fully detached from this shell so it survives controller replacement.
-  setsid bash "$SELF" __wrap "$job_dir" </dev/null >>"$job_dir/wrapper.log" 2>&1 &
+  #
+  # EVERY INHERITED DESCRIPTOR ABOVE STDERR IS CLOSED FIRST, and that is not
+  # tidiness. `</dev/null >>wrapper.log 2>&1` covers 0/1/2 and nothing else, so
+  # the wrapper — and the deadline timer it starts, a `sleep <deadline>` that
+  # lives for the WHOLE deadline — used to inherit every other fd the caller
+  # happened to hold. Two consequences, both real:
+  #   * a caller holding an flock keeps holding it for the job's lifetime,
+  #     because flock drops only when the LAST descriptor closes;
+  #   * a caller whose output is read through a pipe never reaches EOF, because
+  #     a sleeping process still holds the write end.
+  # The second one was MEASURED on this branch: a bats suite ran every case and
+  # then sat for fifteen minutes with no children, because six `sleep 3600`
+  # processes held fd 3. Fixed here rather than in one caller, because five
+  # scripts already call `run` (aid-run-gates.sh, lib/aid-service.sh,
+  # lib/aid-test-execution-unit.sh, lib/aid-test-audit-measure.sh,
+  # aid-test-audit-profile.sh) and each of them has the same hazard the day it
+  # holds a lock or is read through a pipe.
+  #
+  # The loop is Linux-only, which this supervisor already is (it reads /proc for
+  # PID-reuse safety). The `$(...)` listing the descriptors opens one of its own
+  # and closes it before the loop runs.
+  setsid bash -c '
+    _fds="$(ls /proc/self/fd 2>/dev/null)"
+    for _n in $_fds; do
+      [ "$_n" -gt 2 ] 2>/dev/null && eval "exec ${_n}>&-" 2>/dev/null
+    done
+    exec bash "$1" __wrap "$2"
+  ' _ "$SELF" "$job_dir" </dev/null >>"$job_dir/wrapper.log" 2>&1 &
   disown 2>/dev/null || true
 
   # Best-effort: wait briefly for the wrapper to record its running identity,
@@ -348,9 +375,21 @@ cmd_wrap() {
   cmd_pid=$!
 
   # Hard-deadline timer (kills only the command; marker disambiguates).
+  #
+  # THE SLEEP IS WAITED ON, NOT INLINED, so that cancelling the timer really
+  # cancels it. `kill $timer_pid` kills the SUBSHELL and not the `sleep` running
+  # inside it, so a job that finished in a second used to leave a `sleep 3600`
+  # orphaned to init for the whole hour — 43 of them after one test run of a
+  # suite that starts a few jobs. Backgrounding the sleep and trapping TERM lets
+  # the subshell take its own child down with it, with no new dependency (a
+  # `pkill -P` would add procps to a script that needs only util-linux).
   local timer_pid=""
   if [[ "$deadline" =~ ^[0-9]+$ && "$deadline" -gt 0 ]]; then
-    ( sleep "$deadline"; : > "$job_dir/.deadline_hit"; kill -TERM "$cmd_pid" 2>/dev/null || true
+    ( _sp=""
+      trap '[[ -n "$_sp" ]] && kill "$_sp" 2>/dev/null; exit 0' TERM
+      sleep "$deadline" & _sp=$!
+      wait "$_sp" 2>/dev/null || exit 0
+      : > "$job_dir/.deadline_hit"; kill -TERM "$cmd_pid" 2>/dev/null || true
       sleep 2; kill -KILL "$cmd_pid" 2>/dev/null || true ) &
     timer_pid=$!
   fi

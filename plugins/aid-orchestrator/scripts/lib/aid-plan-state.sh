@@ -48,6 +48,22 @@
 #   created_at         string   ISO-8601 UTC
 #   current_operation  string|null
 #   plan_final_attempt integer  >= 0
+#   autonomy           enum     auto | manual   OPTIONAL (P090 Step 3). Whether
+#                                this plan runs autonomously. Absent on every
+#                                plan created before P090, and absence reads as
+#                                `manual` — fail-closed, because the one thing
+#                                that must never happen is a manual plan
+#                                continuing itself.
+#
+#                                WHY IT LIVES AT THE PLAN LEVEL AND NOT ON THE
+#                                RUN. `auto_controller` in the run record is
+#                                the obvious candidate and is the wrong one: a
+#                                run removes its OWN entry on the
+#                                `done-advance review→release` edge
+#                                (aid-fsm.sh:286), so by the time an EPIC
+#                                merges there is nothing left to read. This
+#                                field is written by plan-start and lives
+#                                exactly as long as the plan.
 #   worktree_path      string|null  OPTIONAL (P074 Step 7). The plan's
 #                                execution worktree (`.aid-worktrees/plan-<id>`,
 #                                created by plan-start, torn down by
@@ -431,11 +447,32 @@ _plan_state_validate_json() {
       ;;
   esac
 
+  # P090 Step 3 — `autonomy` is OPTIONAL and closed: absent/null is every
+  # pre-P090 plan and reads as manual; present must be one of the two words.
+  # A third value is corruption, not a new mode, because every consumer of it
+  # decides whether to continue a plan without a human.
+  local au_type au_val
+  au_type="$(jq -r 'if has("autonomy") then (.autonomy | type) else "absent" end' <<<"$json" 2>/dev/null)"
+  case "$au_type" in
+    absent|null) ;;
+    string)
+      au_val="$(jq -r '.autonomy' <<<"$json" 2>/dev/null)"
+      if [[ "$au_val" != "auto" && "$au_val" != "manual" ]]; then
+        echo "PRECONDITION FAIL: plan state file for $plan_id is corrupt — offending key: autonomy (must be 'auto' or 'manual' when present, got '$au_val')" >&2
+        return 5
+      fi
+      ;;
+    *)
+      echo "PRECONDITION FAIL: plan state file for $plan_id is corrupt — offending key: autonomy (must be a string or null, got ${au_type})" >&2
+      return 5
+      ;;
+  esac
+
   return 0
 }
 
 # ===========================================================================
-# plan_state_init <plan_id> <mode> <plan_branch> <target_branch>
+# plan_state_init <plan_id> <mode> <plan_branch> <target_branch> [autonomy]
 #
 # Creates a fresh state file at plan_state=OPEN. Refuses to overwrite an
 # existing one (never a silent reset — matches aid-cp1-ledger.sh's `init`
@@ -445,7 +482,7 @@ _plan_state_validate_json() {
 # 3 lock timeout.
 # ===========================================================================
 plan_state_init() {
-  local plan_id="$1" mode="$2" plan_branch="$3" target_branch="$4"
+  local plan_id="$1" mode="$2" plan_branch="$3" target_branch="$4" autonomy="${5:-manual}"
 
   _plan_state_require_deps || return 2
   _validate_plan_id "$plan_id" || return 1
@@ -466,6 +503,13 @@ plan_state_init() {
     _plan_warn "plan_state_init: target_branch is required"
     return 1
   fi
+  case "$autonomy" in
+    auto|manual) ;;
+    *)
+      _plan_warn "plan_state_init: autonomy must be 'auto' or 'manual' (got '${autonomy}')"
+      return 1
+      ;;
+  esac
 
   local dir path
   dir="$(_plan_state_dir "$plan_id")"
@@ -495,10 +539,10 @@ plan_state_init() {
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   json="$(jq -n \
     --arg pid "$plan_id" --arg mode "$mode" --arg pb "$plan_branch" \
-    --arg tb "$target_branch" --arg now "$now" \
+    --arg tb "$target_branch" --arg now "$now" --arg au "$autonomy" \
     '{plan_id: $pid, plan_state: "OPEN", mode: $mode, plan_branch: $pb,
       target_branch: $tb, created_at: $now, current_operation: null,
-      plan_final_attempt: 0}')"
+      plan_final_attempt: 0, autonomy: $au}')"
 
   if ! _plan_state_write_json "$path" "$json"; then
     aid_lock_release "$fd"

@@ -87,6 +87,37 @@ Both lists absent → the guard falls back to today's label behaviour and prints
 one hint line. That is deliberate: a project must not break because it has not
 been configured yet.
 
+### `autonomy.*` — starting the next EPIC by itself (P090)
+
+Three keys, and the first one is a decision about **money and trust**, not a
+detection. Never propose `true` from the shape of a repository; ask, and take
+`false` for an answer.
+
+```yaml
+autonomy:
+  spawn_next_epic: false            # default. true = after an EPIC merges, the
+                                    # next one is started as a headless session
+  max_spawned_epics: 3              # how many sessions ONE PLAN may chain
+  spawn_deadline_sec: 3600          # each spawned session's wall clock
+```
+
+Read by `scripts/aid-plan-continue.sh`. What each value means when it is wrong
+or missing:
+
+| Situation | What happens |
+|---|---|
+| key absent, file absent, or no `yq` | the default above, and the run says which |
+| `spawn_next_epic` is anything but `true`/`false` | **error naming the key**, nothing is started |
+| `max_spawned_epics` / `spawn_deadline_sec` not a whole number ≥ 1 | **error naming the key**, nothing is started |
+| `spawn_next_epic: true` but `permissions.yaml` has no `autonomous_mode: true` | **refused before anything starts**, with the reason |
+
+A present-but-unusable value is never quietly replaced by a default: that is how
+a cap of 3 becomes no cap at all.
+
+`max_spawned_epics` counts **per plan**, not per workspace — two plans with
+spawning on do not add up. That is a choice rather than an oversight, and the
+enforcement registry records it.
+
 **Omit a key the project does not have** — absent means the obligation does not
 apply, while an empty string looks like a path that failed to match. Any key
 under `documentation:` other than `screenshot_tool` counts as a surface, so a
@@ -123,4 +154,4 @@ Written to: .aid-o/config/project.yaml
 ```
 
 
-**Last Updated:** 2026-08-26
+**Last Updated:** 2026-08-27

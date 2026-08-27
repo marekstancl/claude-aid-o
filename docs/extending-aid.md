@@ -2806,3 +2806,200 @@ through the git marketplace and never enters the image — is a question for a
 person, not a defect the running EPIC introduced. It matches LITERALLY, so a
 glob in the Dockerfile (`COPY package*.json`) needs the same glob in
 `app_paths`. A consumer project has it attached to nothing until they wire it.
+
+## The plan continues itself (P090)
+
+**The question this answers:** a plan has six EPICs; who starts the second one?
+Until P090 the answer was "whoever remembers" — `skills/pipeline.md` described
+the sequence to a human, and a test could prove at most that the description
+existed. It is now four layers, and they are worth keeping apart because they
+have very different strength.
+
+### Layer 1 — the ask (`queue_peek_next`)
+
+Everything else stands on one split. `queue_claim_next` used to select AND write
+`status=running` in the same breath, so **asking the queue what was next meant
+taking it**: a turn that then ended left an EPIC marked running with nothing
+running. The selection is now one shared function, `_queue_scan_next`; `peek`
+applies none of its writes, `claim` applies all of them. One selection, so the
+two can never drift.
+
+`aid-plan-fsm.sh next-epic <plan_id>` is that read as a command. Same exit
+codes as `claim-next` (0 an id, 1 `blocked:`/`none`, 2 usage, 3 lock), plus one
+rule that matters more than the rest: **a lock it could not take is exit 3 and
+never `none`.** "I could not look" read as "there is nothing left" is precisely
+how a plan ends while it is unfinished. For the same reason `next-epic` refuses
+a plan this repository never started, rather than answering `none` for it.
+
+### Layer 2 — the loop (`scripts/aid-plan-continue.sh`)
+
+Five links, and it stops at the first that fails:
+
+| # | Link | Guarantee |
+|---|---|---|
+| 0 | **proof** | `git merge-base --is-ancestor <task branch> plan/<id>`. Nothing is written before it passes |
+| 1 | **mirror** | `set-status <epic> merged_to_plan`, skipped if already there — that is what makes a re-run harmless |
+| 2 | **ask** | `next-epic`, no side effect, recorded in the plan timeline |
+| 3 | **claim** | `claim-next`; if the queue moved since the ask, the claim wins and the difference is recorded |
+| 4 | **start** | `epic-start` on exactly what the claim took; if it fails, the claim is undone |
+
+Link 0 exists because of one asymmetry: a queue entry that carries no
+`merge_target` is judged **by its status alone**, so an unearned
+`merged_to_plan` there would falsely unblock its dependent. The mirror has to be
+earned against Git before it is written.
+
+`epic-merge-to-plan` calls this itself after a successful merge, **implicitly**,
+whenever the plan's own `autonomy` field says `auto`. Implicitly and not behind
+a flag: a flag leaves the main path callable without it, and "nobody has to
+remember" would be false the first time someone typed the command by hand.
+`--no-continue` turns it off, `--continue` forces it for a manual plan.
+
+**The `autonomy` field is WRITE-ONCE, and that is the sharpest limit on all of
+this.** `plan-start` sets it from `--autonomy auto|manual`, or — since no
+production caller passes that flag today, `aid-auto-pipeline.sh` included — from
+`.aid-o/config/permissions.yaml` (`autonomous_mode: true`, read fail-closed, a
+real YAML boolean or nothing). Nothing changes it afterwards. So a plan started
+before autonomy was switched on reads as manual for its whole life, one started
+after it stays `auto` even while a PM drives it by hand (`--no-continue` is the
+per-merge escape), and a workspace with no `permissions.yaml` — which includes
+**this** repository — resolves every plan to manual and leaves the continuation
+inert. Changing a live plan's mind means editing `plan-state.yaml`.
+
+**The field lives on the PLAN, in `plan-state.yaml`** — not on the run record. `auto_controller` is the obvious
+candidate and is the wrong one: a run removes its own entry on the
+`done-advance review→release` edge (`aid-fsm.sh:286`), so by the time an EPIC
+merges there is nothing left to read. Absence reads as `manual`, so every plan
+created before P090 is silent rather than surprising.
+
+**The boundary at `aid-plan-fsm.sh:89-92` is intact.** That command still writes
+nothing to the queue. It hands over to a separate program which establishes its
+own proof — the queue write stays something a program earned, not something the
+merge path asserted.
+
+### Layer 3 — the spawn (off by default)
+
+`epic-start` prepares state; it does not RUN an EPIC — an agent does. With
+`autonomy.spawn_next_epic: true` in `.aid-o/config/project.yaml`, the claimed
+EPIC is started as a supervised job:
+
+```
+aid-job.sh run --jobs-dir .aid-o/work/jobs --id <pre-allocated> --deadline <n> \
+  -- env AID_JOB_ID=<pre-allocated> claude -p "/aid-run --auto --epic <id>"
+```
+
+Four things in that line were decided rather than assumed:
+
+- **The slash form.** That `claude -p "/aid-run …"` dispatches a command rather
+  than echoing prose was not taken on trust. One run, with the predicate fixed
+  BEFORE it:
+
+  | | |
+  |---|---|
+  | command | `claude -p "/aid-help" --output-format stream-json --verbose` |
+  | predicate (declared beforehand) | `grep -c -o '/aid-[a-z-]*'` ≥ **2** |
+  | measured | **44** — and `is_error: false`, `subtype: success`, 3 turns |
+  | verdict | SATISFIED → the slash form ships |
+
+  The answer was the `/aid-help` skill's own output, i.e. the command was
+  dispatched, not echoed. The fallback the plan had prepared — a sentence saying
+  what to run — is therefore not used. The raw transcript is in the gitignored
+  evidence directory (`.aid-o/work/evidence/P090/steps/step_6/`), which is why
+  the numbers are written here, where a reader outside the authoring tree can
+  check that a measurement happened at all.
+- **`--auto --epic`, never bare `/aid-run <epic>`.** The bare form is MANUAL
+  mode. A session recorded as manual would not continue the plan after its own
+  merge, and the chain would stop — a second time, by another route.
+- **The pre-allocated id, passed twice.** `aid-job.sh` generates an id only
+  after assembling argv and exports nothing, so the session has no other way to
+  learn its own. It goes to the supervisor as `--id` and into the session's
+  environment as `env AID_JOB_ID=`. Which matters because of the next point.
+- **The self-exclusion.** The session started here reaches its own merge, calls
+  the loop again, and the job it would find running is **the job it is running
+  inside**. Refusing on that would stop the chain at length one, and nothing
+  would restart it — `aid-job.sh` is a supervisor, not a daemon. So the check
+  ignores `AID_JOB_ID`.
+
+The cap, the running check, the reservation **and the launch** all happen inside
+one hold of the queue's own lock, so two racing continuations cannot both start
+a session.
+
+The lock is the **jobs directory's**, not the queue's: nothing in this decision
+reads or writes the queue file, and holding the queue lock across a launch would
+block `peek-next` and `claim-next` for every other plan in the workspace while
+one session starts.
+
+That single hold is only safe because of a fix that landed one level down.
+`aid-job.sh` detaches with `setsid` and used to redirect only 0/1/2, so the
+wrapper — and the deadline watchdog it starts, a `sleep <deadline>` that lives
+for the whole deadline, an hour by default — inherited every other descriptor
+the caller held. Two consequences: a caller holding an flock kept holding it for
+the job's lifetime (flock drops only on the last descriptor), and a caller whose
+output was read through a pipe never reached EOF. **`aid-job.sh` now closes every
+descriptor above stderr inside its own detach**, which is where it belongs: five
+scripts already call `run`, and each had the same latent hazard.
+
+That was measured, not reasoned about: a bats suite ran all its cases and then
+sat for fifteen minutes with no children, because six `sleep 3600` processes
+still held fd 3. `test-continue-spawn.bats` now pipes a spawning run through
+`cat` and fails if EOF does not arrive.
+
+An earlier cut of this code instead released the lock before launching, which
+left a window where a second continuation saw a raised count but no job
+directory yet and started a second session.
+
+A reservation that cannot be written, or a spawn decision that cannot be
+recorded in the plan's timeline, is a **refusal** — a session nobody could later
+find or count is not an auditable action. A slot reserved and then failed to
+launch stays spent: under-spawning by one costs a session, double-spawning costs
+two. And a job record that cannot be READ counts as live, for the same reason.
+
+`autonomy.max_spawned_epics` is **per plan**, not per workspace. Two plans with
+spawning on do not add up. That is a choice; the enforcement registry records it.
+
+### Layer 4 — the reminder (`lib/aid-queue-continuation.sh`)
+
+Two hook rows, both degree 3, both `failure: open`. On `Stop` it names every
+autonomous plan that still has work; on `SessionStart` it reads back the
+continuation guidance an interrupted run left — after a dead controller, the
+only reader that guidance has.
+
+**It is degree 3 because it cannot be anything else.** `aid-hook.sh:315-319`
+sets `no_block=1` the moment the harness reports `stop_hook_active: true`: a
+Stop rule may still speak, but no refusal from it may stop the turn again. A
+barrier built here would hold exactly once and then go quiet — worse than no
+barrier, because everyone would believe it was one.
+
+It asks through `peek`, never `claim`. A reminder that consumed the queue would
+create the very orphan it exists to warn about.
+
+A plan whose queue it cannot read gets **no line at all**, and the reason goes
+to stderr. Silence there is not a claim that the plan is finished — nothing is
+claimed — and a reminder built on "I do not know" is noise that teaches a reader
+to skim past the ones that mean something.
+
+### The guidance file
+
+`.aid-o/work/evidence/<plan>/continue-state.json`, schema `aid-plan-continue/1`,
+written atomically at the end of **every** run — including the ones that failed,
+since those are the ones somebody comes back to. It carries `job_id`,
+`jobs_dir`, `job_fingerprint` and `spawned_count` as well as the plan's own
+position, because `aid-job.sh status`/`collect` need an exact job id and nothing
+else in the plan knows it after an interruption, and because a cap that does not
+survive a restart is not a cap.
+
+It is a **guidance, not an authority**: the next run reads it, refuses an
+out-of-sequence mirror on the strength of it, and then asks the queue anyway —
+what is merged can have changed while the turn was gone. It is deliberately NOT
+the existing `aid-auto-resume/1`, which `aid-run-gates.sh` writes about an
+unfinished gate and `aid-fsm.sh` reads: folding a queue answer into it would
+change a schema somebody else parses.
+
+### The one state nothing cleans up
+
+An entry left at `running` by a dead process is either a crash between claim and
+start, or somebody else's live run — indistinguishable from the outside. It is
+**reported by name** on every path that gets past the mirror — a run that stops
+at the proof has established nothing about this plan and says so instead — and
+released only by a human's
+`aid-plan-continue.sh --reclaim <epic_id>`, which no automation calls. Taking a
+live run's entry out from under it is worse than waiting.

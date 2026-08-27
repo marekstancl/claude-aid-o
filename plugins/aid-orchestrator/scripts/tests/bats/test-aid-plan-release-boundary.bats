@@ -7113,30 +7113,43 @@ YAML
   [ "$output" = "blocked:E-064-2_1:dependency_unmerged:E-064-1_1" ]
 }
 
-@test "CP3-F1: the controller instructions write the queue BETWEEN the merge and the claim" {
-  # The fix is a documented sequence, so the documentation is what regresses.
+@test "CP3-F1: the queue is written BETWEEN the merge and the claim — and P090 moved that from prose into a program" {
+  # WHAT THIS CASE USED TO ASSERT, and why it changed. The ordering fix
+  # (mirror the merge into the queue BEFORE claiming the next entry, or a
+  # dependent with no merge_target stays blocked forever) shipped as a
+  # documented sequence, so the documentation was the only thing that could
+  # regress. P090 Step 3 turned that sequence into `aid-plan-continue.sh`,
+  # which `epic-merge-to-plan` invokes itself. The ordering is therefore
+  # asserted end to end by test-plan-continue.bats, and what is left for the
+  # documents is that they point at the program and still state the
+  # consequence of skipping the mirror.
   local pm="$AID_PLUGIN_PATH/skills/pipeline.md"
   local rn="$AID_PLUGIN_PATH/commands/aid-run.md"
-  local f set_line claim_line
+  local cont="$AID_PLUGIN_PATH/scripts/aid-plan-continue.sh"
+  local f
+
+  [ -f "$cont" ]
 
   for f in "$pm" "$rn"; do
-    # The status write is named as an explicit aid-queue-write.sh call…
-    grep -q 'aid-queue-write.sh set-status' "$f"
+    grep -q 'aid-plan-continue.sh' "$f"
     grep -q 'merged_to_plan' "$f"
-    # …and it comes BEFORE the claim, not after it.
-    set_line="$(grep -n 'aid-queue-write.sh set-status' "$f" | head -1 | cut -d: -f1)"
-    claim_line="$(grep -nE 'claim-next|queue_claim_next' "$f" | head -1 | cut -d: -f1)"
-    [ -n "$set_line" ]
-    [ -n "$claim_line" ]
-    [ "$set_line" -lt "$claim_line" ]
-    # The consequence of skipping it is stated, not left to be rediscovered.
+    # The consequence of skipping the mirror is stated, not left to be rediscovered.
     grep -q 'dependency_unmerged' "$f"
   done
 
-  # The CLI shape the instructions print must be the one the library exposes.
+  # The ordering itself: in the program, the mirror precedes the claim.
+  local set_line claim_line
+  set_line="$(grep -n 'set-status "\$epic_id" merged_to_plan' "$cont" | head -1 | cut -d: -f1)"
+  claim_line="$(grep -n 'claim-next "\$plan_id"' "$cont" | head -1 | cut -d: -f1)"
+  [ -n "$set_line" ]
+  [ -n "$claim_line" ]
+  [ "$set_line" -lt "$claim_line" ]
+
+  # The CLI shapes the program drives must be the ones the library exposes.
   grep -q 'set-status <epic_id> <status> \[reason\]' \
     "$AID_PLUGIN_PATH/scripts/lib/aid-queue-write.sh"
   grep -q 'claim-next <plan_id>' "$AID_PLUGIN_PATH/scripts/lib/aid-queue-write.sh"
+  grep -q 'peek-next  <plan_id>' "$AID_PLUGIN_PATH/scripts/lib/aid-queue-write.sh"
 }
 
 # ─── CP3 integration review, "also fix while you are here" ─────────────────

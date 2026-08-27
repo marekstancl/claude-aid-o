@@ -1,0 +1,433 @@
+#!/usr/bin/env bats
+# aid-tier: t1
+# test-continue-spawn.bats — P090 Step 6.
+#
+# THE STUB IS LOAD-BEARING. `claude` is replaced on PATH by a script that writes
+# a marker file, and every case that expects a spawn INSISTS on that marker. If
+# PATH ever drifted and the suite reached the real binary, these cases must go
+# red rather than quietly pass — a suite that silently launches real sessions
+# runs on the merge path and in the nightly, and would cost money and minutes on
+# every single run.
+#
+# What is measured here is the DECISION and the RECORD: switched off, switched
+# on, capped, already running, bad configuration, and the self-exclusion that
+# keeps a chain longer than one. The real `claude` is not the subject.
+
+load test-helpers.bash
+load p090-fixture.bash
+
+setup() {
+  AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  export AID_PLUGIN_PATH AID_TEST_MODE=1
+  CONTINUE="$AID_PLUGIN_PATH/scripts/aid-plan-continue.sh"
+  QW="$AID_PLUGIN_PATH/scripts/lib/aid-queue-write.sh"
+  TEST_TMPDIR="$(mktemp -d)"; export TEST_TMPDIR
+  ROOT="$TEST_TMPDIR/project"
+  QUEUE="$ROOT/.aid-o/config/queue.yaml"
+  GUIDE="$ROOT/.aid-o/work/evidence/P090/continue-state.json"
+  JOBS="$ROOT/.aid-o/work/jobs"
+  MARKER="$TEST_TMPDIR/claude-was-called"
+  p090_mk_workspace "$ROOT"
+
+  # The stub. It records its argv and exits 0 — it never contacts anything.
+  STUBDIR="$TEST_TMPDIR/bin"
+  mkdir -p "$STUBDIR"
+  cat > "$STUBDIR/claude" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$MARKER"
+printf 'AID_JOB_ID=%s\n' "\${AID_JOB_ID:-<unset>}" >> "$MARKER"
+exit 0
+STUB
+  chmod +x "$STUBDIR/claude"
+  PATH="$STUBDIR:$PATH"
+  export PATH
+}
+
+teardown() {
+  [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
+  return 0
+}
+
+_continue() { run bash "$CONTINUE" "$@" --project-root "$ROOT"; }
+
+# _await_marker — the spawned command is launched DETACHED (`aid-job.sh` uses
+# `setsid … &`, and its wait loop returns as soon as the wrapper has recorded a
+# pid, which happens BEFORE the command execs). The marker is therefore written
+# asynchronously, and `[ -f "$MARKER" ]` on the next line would be a timing bet,
+# not an assertion — it would usually win and flake on a loaded machine. This
+# waits, briefly and with a hard bound, so a case fails on "it never ran" rather
+# than on "it had not run yet".
+_await_marker() {
+  local i
+  for i in $(seq 1 100); do
+    [[ -s "$MARKER" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+# _live_job_record <job_id> — a job record whose recorded process really is
+# alive (this shell), so `aid-job.sh status` reports it running. The stub
+# `claude` exits at once, so a job DIRECTORY left behind by a real spawn is
+# already terminal: a case that needs a live job has to make one on purpose.
+_live_job_record() {
+  mkdir -p "$JOBS/$1"
+  jq -n --arg id "$1" --arg pid "$$" --arg st "$(awk '{print $22}' "/proc/$$/stat")" \
+     '{id:$id, state:"running", pid:($pid|tonumber), proc_starttime:$st,
+       start_head:"x", start_tree:"y"}' > "$JOBS/$1/job.json"
+}
+
+_plan_state() { p090_plan_state "$ROOT" P090; }
+
+# A fixture in which link 4 (`epic-start`) SUCCEEDS without a real plan-start:
+# a stub CLI whose epic-start is a no-op, so this suite measures link 5 and
+# nothing else. Every other link is the real code.
+_stub_plan_fsm() {
+  local sdir="$TEST_TMPDIR/fsm"
+  mkdir -p "$sdir"
+  ln -sfn "$AID_PLUGIN_PATH/scripts/lib" "$sdir/lib"
+  ln -sfn "$AID_PLUGIN_PATH/scripts/aid-job.sh" "$sdir/aid-job.sh"
+  cp "$AID_PLUGIN_PATH/scripts/aid-plan-continue.sh" "$sdir/aid-plan-continue.sh"
+  sed 's|    epic-start) cmd_epic_start "$@" ;;|    epic-start) echo "stub epic-start $*"; exit 0 ;;|' \
+    "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" > "$sdir/aid-plan-fsm.sh"
+  CONTINUE="$sdir/aid-plan-continue.sh"
+}
+
+_merged_epic() { p090_task_branch "$ROOT" "$1" merged; }
+
+_queue() {
+  p090_queue "$QUEUE" P090 "E-090-1_2:running" "E-090-2_2:pending"
+}
+
+_config() { printf 'autonomy:\n%s\n' "$1" > "$ROOT/.aid-o/config/project.yaml"; }
+_permissions_auto() { printf 'autonomous_mode: true\n' > "$ROOT/.aid-o/config/permissions.yaml"; }
+
+_ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
+
+# ───────────────────────────────────────────────────────────────────────────
+@test "AC19: with the switch off — the default — nothing is started and the state is exactly as before Step 6" {
+  _ready
+  _permissions_auto           # deliberately present: it is not what decides
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claim:   E-090-2_2"* ]]
+  # "nobody configured it" and "somebody configured it off" are different facts
+  # and lead to different next actions, so the line distinguishes them.
+  [[ "$output" == *"spawn:   off (autonomy.spawn_next_epic is not configured, and the default is false)"* ]]
+  [[ "$output" == *"NOTE: aid-plan-continue: autonomy.spawn_next_epic is not configured; using the default 'false'."* ]]
+  [ ! -f "$MARKER" ]
+  [ ! -d "$JOBS" ] || [ -z "$(ls -A "$JOBS")" ]
+  # The plan still moved: that is the pre-Step-6 behaviour, unchanged.
+  [ "$(bash "$QW" get E-090-2_2 status --queue "$QUEUE" --project-root "$ROOT")" = "running" ]
+}
+
+@test "AC20: switched on, exactly one supervised job is started, for exactly the EPIC that was claimed" {
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spawn:   started p090-P090-E-090-2_2-1 for E-090-2_2"* ]]
+
+  # The stub really ran — and with the slash form AC21c's experiment chose.
+  _await_marker
+  grep -q -- '-p /aid-run --auto --epic E-090-2_2' "$MARKER"
+  # Exactly one job directory, and it is the pre-allocated id.
+  run bash -c 'ls "$1" | wc -l' _ "$JOBS"
+  [ "$output" = "1" ]
+  [ -d "$JOBS/p090-P090-E-090-2_2-1" ]
+
+  # …and the guidance carries what a later `collect` needs.
+  run jq -r '[.job_id, (.jobs_dir | test("/.aid-o/work/jobs$") | tostring), (.job_fingerprint|length > 0|tostring), (.spawned_count|tostring)] | join("|")' "$GUIDE"
+  [ "$output" = "p090-P090-E-090-2_2-1|true|true|1" ]
+}
+
+@test "AC21d: the spawned session is handed its own AID_JOB_ID, and that id — and ONLY that id — is excluded" {
+  # The chain would otherwise have length one: the session started here reaches
+  # its own merge, calls this script again, and sees as "a job already running"
+  # the job it is running INSIDE. Nothing would restart it — aid-job.sh is a
+  # supervisor, not a daemon.
+  #
+  # An earlier version of this case could not tell the exclusion from its
+  # absence (Codex review, EPIC 2): the stub exits at once, so the first job was
+  # already terminal and there was nothing to exclude. The record below is
+  # deliberately LIVE — this shell — so removing the exclusion turns the second
+  # half red.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  _await_marker
+  grep -q 'AID_JOB_ID=p090-P090-E-090-2_2-1' "$MARKER"
+
+  # Play the second link of the chain: a run INSIDE that job, with the job
+  # genuinely alive.
+  _merged_epic E-090-2_2
+  bash "$QW" set-status E-090-2_2 running --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  cat >> "$QUEUE" <<'YAML'
+
+  - epic_id: E-090-3_2
+    status: pending
+    plan_id: "P090"
+    merge_target: "plan/P090"
+    depends_on: []
+YAML
+  rm -rf "$JOBS/p090-P090-E-090-2_2-1"
+  _live_job_record p090-P090-E-090-2_2-1
+
+  # Without AID_JOB_ID the live job blocks a second spawn — the control that
+  # proves the next assertion means something.
+  _continue P090 E-090-2_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"job p090-P090-E-090-2_2-1 for this plan is still alive"* ]]
+
+  # With it, the chain continues past itself.
+  rm -f "$MARKER" "$GUIDE"
+  bash "$QW" set-status E-090-3_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  AID_JOB_ID=p090-P090-E-090-2_2-1 _continue P090 E-090-2_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claim:   E-090-3_2"* ]]
+  [[ "$output" != *"is still alive"* ]]
+  _await_marker
+  grep -q -- '-p /aid-run --auto --epic E-090-3_2' "$MARKER"
+}
+
+@test "the spawned session holds none of the caller's descriptors — a captured run ends when the run ends" {
+  # MEASURED, not theoretical. `aid-job.sh` detaches with `setsid` and redirects
+  # the wrapper's own 0/1/2, but its deadline watchdog is a `sleep <deadline>`
+  # that lives for the WHOLE deadline — an hour by default — and inherits every
+  # other descriptor the caller had open. A caller reading this script's output
+  # through a pipe therefore waited an hour for EOF. It was found exactly that
+  # way: a bats suite finished its cases and then sat for fifteen minutes with
+  # no children, because six `sleep 3600` processes still held fd 3.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+
+  # `| cat` is the whole point: cat sees EOF only when the LAST writer of the
+  # pipe closes it. If a descriptor leaks into the spawned job, this times out.
+  run timeout 25 bash -c 'bash "$1" P090 E-090-1_2 --project-root "$2" 2>&1 | cat' \
+      _ "$CONTINUE" "$ROOT"
+  [ "$status" -ne 124 ]
+  [[ "$output" == *"spawn:   started"* ]]
+}
+
+@test "AC21: the cap stops the chain, and says how many it started" {
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true
+  max_spawned_epics: 1'
+  mkdir -p "$(dirname "$GUIDE")"
+  jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", last_completed_epic:"E-090-0_2",
+          last_result:"", next_epic:"", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:1}' > "$GUIDE"
+
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cap reached"* ]]
+  [[ "$output" == *"already started 1 session(s)"* ]]
+  [[ "$output" == *"autonomy.max_spawned_epics is 1"* ]]
+  [ ! -f "$MARKER" ]
+  # A cap is a normal end, not a failure — and the EPIC is still claimed.
+  [ "$(bash "$QW" get E-090-2_2 status --queue "$QUEUE" --project-root "$ROOT")" = "running" ]
+  # The count survives into the next guidance: a cap that resets on restart is no cap.
+  run jq -r '.spawned_count' "$GUIDE"
+  [ "$output" = "1" ]
+}
+
+@test "AC21: a job of this plan that is still alive stops a second one — found by scanning, not by trusting the guidance" {
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+  # A job record whose process is this very shell: alive, and this plan's.
+  # NOTHING points at it — no guidance, no job_id — because the guidance names
+  # only the LAST job a run started, and a job left by an earlier link of the
+  # chain would otherwise be invisible.
+  mkdir -p "$JOBS/p090-P090-E-090-9_9-1"
+  jq -n --arg pid "$$" --arg st "$(awk '{print $22}' "/proc/$$/stat")" \
+     '{id:"p090-P090-E-090-9_9-1", state:"running", pid:($pid|tonumber),
+       proc_starttime:$st, start_head:"x", start_tree:"y"}' \
+     > "$JOBS/p090-P090-E-090-9_9-1/job.json"
+  [ ! -f "$GUIDE" ]
+
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"job p090-P090-E-090-9_9-1 for this plan is still alive"* ]]
+  [ ! -f "$MARKER" ]
+
+  # Another PLAN's live job does not stop this one: the cap and the check are
+  # both per plan, which is the choice the registry records.
+  #
+  # The state is reset to what a fresh attempt faces: the run above claimed
+  # E-090-2_2 and recorded it in flight, and re-running the SAME finished EPIC
+  # against that record is (correctly) refused as out of sequence.
+  rm -f "$GUIDE"
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  rm -rf "$JOBS/p090-P090-E-090-9_9-1"
+  mkdir -p "$JOBS/p090-P091-E-091-1_1-1"
+  jq -n --arg pid "$$" --arg st "$(awk '{print $22}' "/proc/$$/stat")" \
+     '{id:"p090-P091-E-091-1_1-1", state:"running", pid:($pid|tonumber),
+       proc_starttime:$st, start_head:"x", start_tree:"y"}' \
+     > "$JOBS/p090-P091-E-091-1_1-1/job.json"
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spawn:   started"* ]]
+  _await_marker
+}
+
+@test "AC21: the cap is read under the lock, from disk — not from the copy this run parsed at startup" {
+  # The window: a run reads spawned_count at startup, a racing continuation
+  # spawns and raises it, and the first run then decides its cap on the value it
+  # read before. Simulated by raising the count on disk AFTER the run would have
+  # parsed it — which is what the racing writer does.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true
+  max_spawned_epics: 2'
+  mkdir -p "$(dirname "$GUIDE")"
+  jq -n '{schema:"aid-plan-continue/1", plan_id:"P090", last_completed_epic:"E-090-0_2",
+          last_result:"", next_epic:"", at:"2026-08-27T00:00:00Z",
+          job_id:"", jobs_dir:"", job_fingerprint:"", spawned_count:2}' > "$GUIDE"
+
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cap reached"* ]]
+  [ ! -f "$MARKER" ]
+}
+
+@test "AC21b: a missing configuration defaults; a broken one is an error naming the key" {
+  _ready
+  _permissions_auto
+  # No project.yaml at all → the documented default (off), and it says so.
+  _continue P090 E-090-1_2
+  [[ "$output" == *"is not configured, and the default is false"* ]]
+
+  # An EXPLICIT false is reported as an explicit false, not as a missing key.
+  rm -f "$GUIDE"
+  _config '  spawn_next_epic: false'
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  _continue P090 E-090-1_2
+  [[ "$output" == *"spawn:   off (autonomy.spawn_next_epic is false)"* ]]
+  # …about THAT key. The other two are genuinely unconfigured here and say so,
+  # which is the behaviour the case above asserts.
+  [[ "$output" != *"autonomy.spawn_next_epic is not configured"* ]]
+
+  # A present but unusable value is NEVER silently defaulted: that is how a cap
+  # of 3 becomes no cap.
+  #
+  # The guidance is cleared between attempts and the claim is undone, because
+  # that is the state a real retry starts from: the run above claimed
+  # E-090-2_2 and recorded it as in flight, and re-running the SAME finished
+  # EPIC against that record is (correctly) refused as out of sequence.
+  rm -f "$GUIDE"
+  _config '  spawn_next_epic: maybe'
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  _continue P090 E-090-1_2
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"autonomy.spawn_next_epic"* ]]
+  [[ "$output" == *"must be true or false"* ]]
+  [ ! -f "$MARKER" ]
+
+  rm -f "$GUIDE"
+  _config '  spawn_next_epic: true
+  max_spawned_epics: 0'
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  _continue P090 E-090-1_2
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"autonomy.max_spawned_epics"* ]]
+  [[ "$output" == *"at least 1"* ]]
+  [ ! -f "$MARKER" ]
+}
+
+@test "AC21b: --spawn and --no-spawn override the configuration, in both directions" {
+  _ready
+  _permissions_auto
+  # config off, flag on → it starts
+  _continue P090 E-090-1_2 --spawn
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spawn:   started"* ]]
+  _await_marker
+
+  # config on, flag off → it does not
+  rm -f "$MARKER"
+  _merged_epic E-090-2_2
+  cat >> "$QUEUE" <<'YAML'
+
+  - epic_id: E-090-3_2
+    status: pending
+    plan_id: "P090"
+    merge_target: "plan/P090"
+    depends_on: []
+YAML
+  _config '  spawn_next_epic: true'
+  _continue P090 E-090-2_2 --no-spawn
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spawn:   off (--no-spawn)"* ]]
+  [ ! -f "$MARKER" ]
+}
+
+@test "spawning without autonomous_mode is refused BEFORE anything starts, and the EPIC stays claimed" {
+  _ready
+  _config '  spawn_next_epic: true'
+  # permissions.yaml absent — and a `false` reads the same way.
+  _continue P090 E-090-1_2
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"does not say 'autonomous_mode: true'"* ]]
+  [ ! -f "$MARKER" ]
+  [ "$(bash "$QW" get E-090-2_2 status --queue "$QUEUE" --project-root "$ROOT")" = "running" ]
+
+  rm -f "$GUIDE"
+  printf 'autonomous_mode: "true"\n' > "$ROOT/.aid-o/config/permissions.yaml"
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  _continue P090 E-090-1_2
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"does not say 'autonomous_mode: true'"* ]]
+  [ ! -f "$MARKER" ]
+}
+
+@test "AC21c: the prompt form is the one the recorded experiment chose" {
+  # The plan refused to ASSUME that a slash command under `claude -p` is
+  # dispatched rather than echoed as prose, and prepared a fallback sentence in
+  # case it was not. One run decided it — `claude -p "/aid-help"` answered with
+  # the skill's own output, 44 matches of `/aid-[a-z-]*` against a predicate
+  # declared beforehand of 2 — so the slash form is what ships.
+  #
+  # THIS CASE DOES NOT ASSERT THE RAW TRANSCRIPT. It lives under `.aid-o/`,
+  # which is gitignored, so a suite that required it would be red in every
+  # checkout but the author's.
+  local cont="$AID_PLUGIN_PATH/scripts/aid-plan-continue.sh"
+
+  # What the session ACTUALLY receives, read off the stub's own record of its
+  # argv — not a grep of the source line that produces it, which would assert
+  # only that the source is the source.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  _await_marker
+  grep -q -- '-p /aid-run --auto --epic E-090-2_2' "$MARKER"
+
+  # `--auto --epic`, never the bare form: bare `/aid-run <epic>` is MANUAL mode,
+  # a session recorded manual would not continue the plan after its own merge,
+  # and the chain would stop — a second time, by another route. Not one prompt
+  # this file can send is bare.
+  run bash -c 'grep -o "/aid-run[^\"]*" "$1" | grep -vc -- "--auto --epic" || true' _ "$cont"
+  [ "$output" = "0" ]
+
+  # And the MEASUREMENT is written down where a reader outside this working tree
+  # can check it, since the raw probe is not (Codex review, EPIC 2: without
+  # this, the case could pass with no experiment ever having been run). The
+  # predicate and the number both live in the tracked document, and the number
+  # has to satisfy the predicate.
+  local doc="$AID_PLUGIN_PATH/../../docs/extending-aid.md"
+  grep -q 'aid-run --auto --epic' "$doc"
+  grep -q 'predicate (declared beforehand)' "$doc"
+  local declared measured
+  declared="$(grep -o 'grep -c -o .*≥ \*\*[0-9]*\*\*' "$doc" | grep -o '[0-9]*\*\*$' | tr -d '*')"
+  measured="$(grep -o '| measured | \*\*[0-9]*\*\*' "$doc" | grep -o '[0-9]*')"
+  [ -n "$declared" ]
+  [ -n "$measured" ]
+  [ "$measured" -ge "$declared" ]
+}

@@ -78,6 +78,8 @@ C3_POLICY_FILE="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
 # substrate.
 # shellcheck source=lib/aid-review-signals.sh
 source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-permissions.sh"   # the ONE autonomous_mode reader
 
 # ---------------------------------------------------------------------------
 # Accumulators (globals mutated by add_input / add_blocker / waiver loop)
@@ -343,19 +345,14 @@ process_profile_gated() {
   fi
 }
 
-# _read_autonomous_mode — echoes auto|manual from .aid-o/config/permissions.yaml.
-# ONLY a real YAML boolean `autonomous_mode: true` → auto; everything else (false, null,
-# missing key, non-boolean, missing file, no yq, preset-model file) → manual (fail-closed).
-_read_autonomous_mode() {
-  local perm="${PROJECT_ROOT}/.aid-o/config/permissions.yaml"
-  [[ -f "$perm" ]] || { echo manual; return 0; }
-  command -v yq >/dev/null 2>&1 || { echo manual; return 0; }
-  local vtype vval
-  vtype="$(yq -r '.autonomous_mode | type' "$perm" 2>/dev/null)" || { echo manual; return 0; }
-  [[ "$vtype" == "!!bool" ]] || { echo manual; return 0; }
-  vval="$(yq -r '.autonomous_mode' "$perm" 2>/dev/null)" || { echo manual; return 0; }
-  [[ "$vval" == "true" ]] && echo auto || echo manual
-}
+# _read_autonomous_mode — echoes auto|manual for this script's PROJECT_ROOT.
+#
+# The rule (only a real YAML boolean `autonomous_mode: true` is auto; everything
+# else fail-closes to manual) lives in `lib/aid-permissions.sh` now, because it
+# had been written out four times and each copy named another as its original.
+# This wrapper stays so the call sites below keep reading in this file's own
+# vocabulary.
+_read_autonomous_mode() { aid_autonomous_mode "$PROJECT_ROOT"; }
 
 # _status_to_verdict / _status_headmatch — map a reporter/simplifier 5-enum status onto the
 # inputs[] verdict enum + head_match field.
