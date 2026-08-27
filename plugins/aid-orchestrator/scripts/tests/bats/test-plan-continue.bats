@@ -204,15 +204,40 @@ STUB
   [ "$(wc -l < "$TEST_TMPDIR/continued.log")" = "2" ]
 }
 
-@test "AC7b: the merge command's call to the continuation is not behind a flag" {
-  # The structural half of AC7b. If the call ever acquires a guard like
-  # `[[ -n "$continue_opt" ]] &&`, the promise "nobody has to remember" is gone
-  # and every other case here would still pass.
-  run bash -c 'sed -n "/^cmd_epic_merge_to_plan()/,/^}/p" "$1" | grep -n "_pfsm_maybe_continue"' _ "$PLAN_FSM"
+@test "AC7b: EVERY success of the merge command reaches the continuation, and none of them is behind a flag" {
+  # The structural half of AC7b, and the case that would have caught the real
+  # defect: `cmd_epic_merge_to_plan` has SIX successful exits, not one — a fresh
+  # merge plus five convergence paths, two of which (crash recovery from an
+  # operation record, and "the tip is already contained") are exactly what a
+  # resumed controller hits. Wiring only the fresh-merge exit left those back on
+  # "somebody has to remember".
+  #
+  # An earlier version of this case grepped for the call and asserted the
+  # matching line held no `if`. `grep` returns only the matching line, so a
+  # guard written on the line ABOVE would have passed it. This asks the two
+  # questions that actually matter instead.
+  local body="$TEST_TMPDIR/merge-body.sh"
+  sed -n '/^cmd_epic_merge_to_plan()/,/^}$/p' "$PLAN_FSM" > "$body"
+  [ -s "$body" ]
+
+  # 1. Not one bare `exit 0` remains: every success leaves through the shared
+  #    door, so a seventh convergence path cannot silently skip the handover.
+  run grep -c '^[[:space:]]*exit 0[[:space:]]*$' "$body"
+  [ "$output" = "0" ]
+
+  # 2. The door is used, more than once, and every use passes the SAME four
+  #    arguments — no call site quietly drops $continue_opt.
+  run grep -c '_pfsm_merge_success "\$project_root" "\$plan_id" "\$epic_id" "\$continue_opt"' "$body"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'_pfsm_maybe_continue "$project_root" "$plan_id" "$epic_id" "$continue_opt"'* ]]
-  [[ "$output" != *"if"* ]]
-  [[ "$output" != *"&&"* ]]
+  [ "$output" -ge 6 ]
+
+  # 3. Inside the door, the handover is unconditional — no flag, no `if`.
+  local door="$TEST_TMPDIR/door.sh"
+  sed -n '/^_pfsm_merge_success()/,/^}$/p' "$PLAN_FSM" > "$door"
+  [ -s "$door" ]
+  run grep -c 'if\|&&\|||' "$door"
+  [ "$output" = "0" ]
+  grep -q '_pfsm_maybe_continue "\$root" "\$plan_id" "\$epic_id" "\$opt"' "$door"
 }
 
 @test "AC7c: without proof that the EPIC merged, nothing is written" {

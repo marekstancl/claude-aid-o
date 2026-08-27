@@ -70,7 +70,11 @@
 #   0  the plan moved on (or ended cleanly: `none` / `blocked:` / nothing owed)
 #   1  something in the chain failed and was named; the plan did NOT move
 #   2  usage
-#   3  transient — a lock was unavailable. RETRY LATER; never treat as an end.
+#   3  transient — retry later, and never treat it as an end. A lock that was
+#      unavailable, or any unexpected non-usage failure of `next-epic` /
+#      `claim-next`. A `next-epic` USAGE refusal (exit 2 — an unknown plan) is
+#      permanent and comes back as 1 instead, because retrying it forever is
+#      what a loop would otherwise do.
 #   4  the plan advanced but the spawn it was configured to do did not happen
 #      (see Step 6). The state is correct and claimable; nothing is running.
 #
@@ -91,6 +95,12 @@ PLAN_FSM="${SCRIPT_DIR}/aid-plan-fsm.sh"
 # transition, so this file never holds the queue lock.
 # shellcheck disable=SC1090
 source "$QUEUE_LIB"
+
+# The run's subject, set by main before anything reads them. Declared here so
+# no path can reference one under `set -u` before it is assigned.
+ROOT=""
+PLAN_ID=""
+FINISHED_EPIC=""
 
 _pc_say()  { printf '%s\n' "$*"; }
 _pc_fail() { printf 'ERROR: aid-plan-continue: %s\n' "$*" >&2; }
@@ -116,7 +126,7 @@ EOF
 # _pc_queue <args...> — the queue CLI against the resolved root.
 _pc_queue() { bash "$QUEUE_LIB" "$@" --project-root "$ROOT"; }
 
-# _pc_timeline <event-json-fields...> — one line into the plan's timeline.
+# _pc_note <event> [epic_id] [detail] — one line into the plan's timeline.
 # Best-effort by design: the AUTHORITATIVE trace of what was asked is written
 # by `next-epic` itself (which fails hard if it cannot record). These are the
 # surrounding notes, and losing one must not undo a merge that already landed.
@@ -315,22 +325,42 @@ _pc_cfg() {
 }
 
 # _pc_cfg_bool <key> <default> / _pc_cfg_int <key> <default>
-# A missing value defaults and says so on the way past; a PRESENT but unusable
-# value is an error naming the key, never a quiet fallback.
+#
+# A missing value defaults AND SAYS SO — on stderr, because stdout is the value.
+# Saying so is not decoration: "it is off" and "nothing told me, so it is off"
+# lead to different next actions, and only one of them is a configuration bug.
+# A PRESENT but unusable value is an error naming the key, never a quiet
+# fallback: a silent default over a typo is how a cap of 3 becomes no cap.
+#
+# "It was defaulted" is reported through the EXIT CODE — 0 configured, 10
+# defaulted, 1 unusable — and never through a global. Both are called in
+# `$(...)`, and a variable assigned inside a command substitution dies with the
+# subshell: the first cut of this used a global and the caller read it as unset
+# every single time.
+_PC_CFG_RC_DEFAULTED=10
 _pc_cfg_bool() {
-  local raw; raw="$(_pc_cfg "$1")" || { printf '%s' "$2"; return 0; }
+  local raw
+  if ! raw="$(_pc_cfg "$1")"; then
+    echo "NOTE: aid-plan-continue: autonomy.$1 is not configured; using the default '$2'." >&2
+    printf '%s' "$2"; return "$_PC_CFG_RC_DEFAULTED"
+  fi
   case "$raw" in
-    true|false) printf '%s' "$raw" ;;
+    true|false) printf '%s' "$raw"; return 0 ;;
     *) _pc_fail "autonomy.$1 in .aid-o/config/project.yaml is '${raw}'; it must be true or false. Nothing was spawned."; return 1 ;;
   esac
 }
 _pc_cfg_int() {
-  local raw; raw="$(_pc_cfg "$1")" || { printf '%s' "$2"; return 0; }
+  local raw
+  if ! raw="$(_pc_cfg "$1")"; then
+    echo "NOTE: aid-plan-continue: autonomy.$1 is not configured; using the default '$2'." >&2
+    printf '%s' "$2"; return "$_PC_CFG_RC_DEFAULTED"
+  fi
   if [[ ! "$raw" =~ ^[0-9]+$ ]] || [[ "$raw" -lt 1 ]]; then
     _pc_fail "autonomy.$1 in .aid-o/config/project.yaml is '${raw}'; it must be a whole number of at least 1. Nothing was spawned."
     return 1
   fi
   printf '%s' "$raw"
+  return 0
 }
 
 # _pc_autonomous_mode — `.aid-o/config/permissions.yaml` must really say
@@ -346,20 +376,30 @@ _pc_autonomous_mode() {
   [[ "$(yq -r '.autonomous_mode' "$perm" 2>/dev/null)" == "true" ]]
 }
 
-# _pc_spawned_count — how many sessions this PLAN has already started, read from
-# the guidance ON DISK. Per plan, not per workspace: two plans with spawning on
-# do not add up. That is a choice, and the enforcement registry says so.
+# _pc_spawned_count <jobs_dir> — how many sessions this PLAN has already
+# started. Per plan, not per workspace: two plans with spawning on do not add
+# up. That is a choice, and the enforcement registry says so.
 #
-# It re-reads the FILE rather than the copy this run parsed at startup, and it
-# is called under the lock: the count parsed before the lock was taken is
-# exactly the value a racing continuation may have raised in the meantime, and
-# a cap decided on a stale count is not a cap.
+# TWO SOURCES, AND THE HIGHER ONE WINS. The guidance carries the count, and it
+# is re-read from the FILE rather than from the copy this run parsed at startup,
+# because a racing continuation may have raised it since — a cap decided on a
+# stale count is not a cap. But the guidance can also be missing, truncated or
+# rejected by its own schema guard, and a cap that a deleted file resets is not
+# a cap either. So the job directory is counted too: one directory per session
+# this plan ever started, which no lost file can undo.
 _pc_spawned_count() {
+  local jobs_dir="${1:-}" n=0 m=0 d
   local f; f="$(_pc_state_path)"
-  [[ -f "$f" ]] || { printf '0'; return 0; }
-  local n
-  n="$(jq -r 'select(.schema == "aid-plan-continue/1") | .spawned_count // 0' "$f" 2>/dev/null)" || n=0
-  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  if [[ -f "$f" ]]; then
+    n="$(jq -r 'select(.schema == "aid-plan-continue/1") | .spawned_count // 0' "$f" 2>/dev/null)" || n=0
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  fi
+  if [[ -n "$jobs_dir" && -d "$jobs_dir" ]]; then
+    for d in "$jobs_dir"/p090-"${PLAN_ID}"-*; do
+      [[ -d "$d" ]] && m=$((m + 1))
+    done
+  fi
+  [[ "$m" -gt "$n" ]] && n="$m"
   printf '%s' "$n"
 }
 
@@ -415,25 +455,33 @@ _PC_SPAWN_COUNT=0
 _pc_spawn() {
   local plan_id="$1" epic_id="$2" override="$3"
 
-  local enabled
+  local enabled defaulted="no" crc=0
   if [[ "$override" == "yes" ]]; then enabled=true
   elif [[ "$override" == "no" ]]; then
     _pc_say "spawn:   off (--no-spawn). ${epic_id} is claimed and ready; starting it is the controller's move."
     _pc_note "spawn_skipped" "$epic_id" "reason=flag_no_spawn"
     return 0
   else
-    enabled="$(_pc_cfg_bool spawn_next_epic "$_PC_SPAWN_DEFAULT_ENABLED")" || return 1
+    enabled="$(_pc_cfg_bool spawn_next_epic "$_PC_SPAWN_DEFAULT_ENABLED")" || crc=$?
+    [[ "$crc" -eq "$_PC_CFG_RC_DEFAULTED" ]] && defaulted="yes"
+    [[ "$crc" -ne 0 && "$defaulted" == "no" ]] && return 1
   fi
 
   if [[ "$enabled" != "true" ]]; then
-    _pc_say "spawn:   off (autonomy.spawn_next_epic is false — the default). ${epic_id} is claimed and ready; starting it is the controller's move."
-    _pc_note "spawn_skipped" "$epic_id" "reason=disabled"
+    # "nobody configured it" and "somebody configured it off" are different
+    # facts and lead to different next actions.
+    local why="autonomy.spawn_next_epic is false"
+    [[ "$defaulted" == "yes" ]] && why="autonomy.spawn_next_epic is not configured, and the default is false"
+    _pc_say "spawn:   off (${why}). ${epic_id} is claimed and ready; starting it is the controller's move."
+    _pc_note "spawn_skipped" "$epic_id" "reason=disabled defaulted=${defaulted}"
     return 0
   fi
 
   local max deadline
-  max="$(_pc_cfg_int max_spawned_epics "$_PC_SPAWN_DEFAULT_MAX")" || return 1
-  deadline="$(_pc_cfg_int spawn_deadline_sec "$_PC_SPAWN_DEFAULT_DEADLINE")" || return 1
+  crc=0; max="$(_pc_cfg_int max_spawned_epics "$_PC_SPAWN_DEFAULT_MAX")" || crc=$?
+  [[ "$crc" -ne 0 && "$crc" -ne "$_PC_CFG_RC_DEFAULTED" ]] && return 1
+  crc=0; deadline="$(_pc_cfg_int spawn_deadline_sec "$_PC_SPAWN_DEFAULT_DEADLINE")" || crc=$?
+  [[ "$crc" -ne 0 && "$crc" -ne "$_PC_CFG_RC_DEFAULTED" ]] && return 1
 
   if ! _pc_autonomous_mode; then
     _pc_fail "spawning is switched on, but .aid-o/config/permissions.yaml does not say 'autonomous_mode: true'. A session started without it would not run in the mode it was told to. ${epic_id} stays claimed and ready; nothing was started."
@@ -447,7 +495,6 @@ _pc_spawn() {
   fi
 
   local jobs_dir="${ROOT%/}/.aid-o/work/jobs"
-  _PC_SPAWN_JOBS_DIR="$jobs_dir"
   mkdir -p "$jobs_dir" 2>/dev/null || true
 
   # The cap, the "is one already running" test and the RESERVATION of the slot
@@ -475,7 +522,7 @@ _pc_spawn() {
   local fd="$AID_LOCK_FD"
 
   # Read under the lock, never before it — see _pc_spawned_count.
-  _PC_SPAWN_COUNT="$(_pc_spawned_count)"
+  _PC_SPAWN_COUNT="$(_pc_spawned_count "$jobs_dir")"
   if [[ "$_PC_SPAWN_COUNT" -ge "$max" ]]; then
     aid_lock_release "$fd"
     _pc_say "spawn:   cap reached — this plan has already started ${_PC_SPAWN_COUNT} session(s) and autonomy.max_spawned_epics is ${max}. That is a normal end, not a failure: ${epic_id} is claimed and ready."
@@ -515,8 +562,10 @@ _pc_spawn() {
           --deadline "$deadline" \
           -- "${jobcmd[@]}" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    # The slot is spent and stays spent — see the note above the lock.
-    _PC_SPAWN_JOB_ID=""
+    # The slot is spent and stays spent — see the note above the lock. The
+    # RESERVED job id stays recorded too: clearing it made the caller's final
+    # write fall back to the guidance read at startup, so the record reverted to
+    # an older job that is not the one this run tried and failed to start.
     _pc_fail "aid-job.sh run failed for ${epic_id} (rc=${rc}); ${epic_id} stays claimed and ready and NOTHING is running: ${out}"
     _pc_note "spawn_refused" "$epic_id" "reason=job_run_failed rc=${rc}"
     return 1
@@ -582,7 +631,6 @@ main() {
       _pc_fail "--reclaim: '${reclaim_id}' is not an epic id."
       return 2
     fi
-    PLAN_ID=""
     _pc_reclaim "$reclaim_id"
     return $?
   fi
@@ -623,18 +671,23 @@ main() {
     return 1
   fi
 
-  # ── 0. proof ────────────────────────────────────────────────────────────
-  if ! _pc_prove_merged "$plan_id" "$epic_id"; then
-    _pc_state_write "unproven" "" || true
-    return 1
-  fi
-
-  # ── 1. mirror ───────────────────────────────────────────────────────────
+  # ── 0. proof, and 1. mirror ─────────────────────────────────────────────
+  # The status is read FIRST, because the proof exists to earn a write and an
+  # entry that already says `merged_to_plan` has no write to earn. That order
+  # also matters after a task branch is pruned: `_queue_resolve_dep_branch` can
+  # no longer find a ref, so the proof would fail for ever on a plan that has
+  # long since merged — while `epic-merge-to-plan` itself converges happily on
+  # its recorded merge commit. Asking "is there anything to write" first keeps
+  # the two commands agreeing about a finished EPIC.
   local cur; cur="$(_pc_queue get "$epic_id" status)" || cur=""
   cur="$(queue_status_normalize "$cur")"
   if [[ "$cur" == "merged_to_plan" ]]; then
-    _pc_say "mirror:  ${epic_id} already merged_to_plan — skipped"
+    _pc_say "mirror:  ${epic_id} already merged_to_plan — skipped (nothing to write, so nothing to prove)"
   else
+    if ! _pc_prove_merged "$plan_id" "$epic_id"; then
+      _pc_state_write "unproven" "" || true
+      return 1
+    fi
     local mrc=0
     _pc_queue set-status "$epic_id" merged_to_plan >/dev/null || mrc=$?
     case "$mrc" in
@@ -651,12 +704,14 @@ main() {
     esac
   fi
 
-  # Whatever else this run does, an entry left at `running` by a dead process is
-  # named NOW — not only on the paths that end early (Codex review, EPIC 1: with
-  # the report tied to `none`/`blocked:`, a plan with one orphan and one ready
-  # EPIC started the ready one and never mentioned the orphan). It runs after the
-  # mirror and before the claim, so the entry this run is about to take is not in
-  # it.
+  # An entry left at `running` by a dead process is named here — on every path
+  # that gets PAST THE MIRROR, which is the honest scope: a run that stops at
+  # link 0 or 1 has not established anything about this plan's state and says so
+  # instead. (Codex review, EPIC 1: with the report tied to the `none`/`blocked:`
+  # endings alone, a plan with one orphan and one ready EPIC started the ready
+  # one and never mentioned the orphan.) After the mirror and before the claim,
+  # so the entry this run is about to take is not in it — and after the mirror,
+  # so the EPIC this run just finished is not either.
   _pc_report_stranded
 
   # ── 2. ask ──────────────────────────────────────────────────────────────

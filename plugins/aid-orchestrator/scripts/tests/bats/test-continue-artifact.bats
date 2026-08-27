@@ -118,10 +118,15 @@ YAML
   # own job, and a cap that did not survive a restart would be no cap.
   run jq -r '[.job_id, .jobs_dir, .job_fingerprint, (.spawned_count|tostring)] | join("|")' "$GUIDE"
   [ "$output" = "|||0" ]
-  # Nothing half-written is left behind: the write is tmp + mv.
+  # Nothing half-written is left behind. The observable half of atomicity is
+  # that no partial file survives a completed write; a grep for `mv --` in the
+  # source used to stand in for the rest of it and asserted nothing a reader
+  # could not see by looking.
   run bash -c 'ls "$1"/.aid-o/work/evidence/P090/ | grep -c "\.tmp\." || true' _ "$ROOT"
   [ "$output" = "0" ]
-  grep -q 'mv -- "$tmp" "$f"' "$CONTINUE"
+  # …and the file that IS there parses as one whole object, never a prefix.
+  run jq -e '.schema == "aid-plan-continue/1"' "$GUIDE"
+  [ "$status" -eq 0 ]
 }
 
 @test "AC10: a missing guidance is announced, and the run proceeds from the queue alone" {

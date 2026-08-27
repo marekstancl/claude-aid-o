@@ -90,6 +90,11 @@
 # owns every queue write and wires itself into both (the manifest is the
 # authority for EPIC status, the queue a derived view; that one-way edge is
 # what keeps Steps 6 and 7 free of a producer/consumer cycle).
+# P090 Step 3 DID NOT WEAKEN THIS. `epic-merge-to-plan` still writes nothing to
+# the queue; on an autonomous plan it hands over to `scripts/aid-plan-continue.sh`,
+# a separate program that establishes its own `git merge-base --is-ancestor`
+# proof before it mirrors anything. The write stays something a program earned
+# rather than something the merge path asserted, so the one-way edge holds.
 #
 # ── LINEAGE MODEL ─────────────────────────────────────────────────────────
 # `plan-start` creates `plan/<plan_id>` from EXACTLY `target_branch_head_at_start
@@ -3530,8 +3535,7 @@ cmd_epic_merge_to_plan() {
       echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan at ${recorded_mc} but its task branch has moved to ${merged_tip}, which is not contained in ${plan_branch}; the manifest status is terminal and this command will not create a second merge. Land the newer work through its own EPIC." >&2
       exit 1
     fi
-    echo "$recorded_mc"
-    exit 0
+    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$recorded_mc"
   fi
 
   # ── Provenance gate ──────────────────────────────────────────────────────
@@ -3566,8 +3570,7 @@ cmd_epic_merge_to_plan() {
       local wrc=0
       _pfsm_record_merged "$plan_id" "$epic_id" "$recorded_mc" "$cur_status" || wrc=$?
       [[ "$wrc" -ne 0 ]] && exit "$wrc"
-      echo "$recorded_mc"
-      exit 0
+      _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$recorded_mc"
     fi
     echo "PRECONDITION FAIL: unproven_merge — ${task_branch} does not exist and no recorded merge commit is an ancestor of ${plan_branch}. A deleted branch, a 'state: DONE' run and a queue entry claiming completion are NOT proof; re-create the branch or record a proven merge." >&2
     exit 1
@@ -3600,8 +3603,7 @@ cmd_epic_merge_to_plan() {
       exit "$crc"
     fi
     _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-    echo "$resulting_sha"
-    exit 0
+    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$resulting_sha"
   fi
 
   # ── Already merged: converge, never a second merge commit ────────────────
@@ -3618,8 +3620,7 @@ cmd_epic_merge_to_plan() {
     fi
     # Unreachable belt: cur_status == merged_to_plan already returned above.
     if [[ "$cur_status" == "merged_to_plan" && "$recorded_mc" == "$proven" ]]; then
-      echo "$proven"
-      exit 0
+      _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$proven"
     fi
     local brc=0
     plan_op_begin "$plan_id" "$op_id" "epic-merge-to-plan" "$epic_id" "$plan_head" || brc=$?
@@ -3639,8 +3640,7 @@ cmd_epic_merge_to_plan() {
       exit "$crc"
     fi
     _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-    echo "$proven"
-    exit 0
+    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$proven"
   fi
 
   # ── The real merge ───────────────────────────────────────────────────────
@@ -3768,8 +3768,6 @@ cmd_epic_merge_to_plan() {
 
   _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
 
-  echo "$merge_commit"
-
   # ── P090 Step 3: continue the plan, if the plan is autonomous ────────────
   # The merge is DONE and recorded above; nothing below can undo it, and
   # nothing below is allowed to change this command's exit code, which reports
@@ -3786,7 +3784,34 @@ cmd_epic_merge_to_plan() {
   # time somebody typed the command by hand. The plan's own `autonomy` field
   # decides; `--no-continue` overrides it, `--continue` forces it for a manual
   # plan.
-  _pfsm_maybe_continue "$project_root" "$plan_id" "$epic_id" "$continue_opt"
+  #
+  # Through the SAME door as the five convergence exits above — see
+  # _pfsm_merge_success for why there is only one.
+  _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$merge_commit"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_merge_success <project_root> <plan_id> <epic_id> <continue_opt> <sha>
+# (P090 Step 3.) THE one way `epic-merge-to-plan` succeeds.
+#
+# It exists because the command has SIX successful exits, not one: a fresh
+# merge, and five convergence paths (already merged_to_plan; the task branch
+# gone but the recorded merge still proven; a crash resumed from an operation
+# record at git_applied; the unreachable belt; and the tip already contained in
+# the plan branch). The first cut wired the continuation into the fresh-merge
+# exit alone — which left the two paths a resumed or re-run controller actually
+# takes (the crash recovery and the "already contained" convergence) silently
+# back on "somebody has to remember", in exactly the situation P090 exists for.
+# Routing every success through here makes that impossible to forget again, and
+# test-plan-continue.bats asserts that no `exit 0` in the command bypasses it.
+#
+# Prints the SHA on stdout first — that is this command's contract and nothing
+# below may disturb it — then hands over. Never returns.
+# ---------------------------------------------------------------------------
+_pfsm_merge_success() {
+  local root="$1" plan_id="$2" epic_id="$3" opt="$4" sha="$5"
+  printf '%s\n' "$sha"
+  _pfsm_maybe_continue "$root" "$plan_id" "$epic_id" "$opt"
   exit 0
 }
 
@@ -10894,12 +10919,10 @@ cmd_next_epic() {
 
   # rc 3 (or anything unexpected) is reported AS a failure, with no result
   # line: a caller that saw `none` here would conclude the plan is finished.
+  # rc 0 and 1 are the only codes that carry an answer, and both always print
+  # one — so there is no "succeeded but said nothing" case to guard against.
   if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
     echo "ERROR: next-epic: could not read the queue for ${plan_id} (aid-queue-write.sh peek-next exited ${rc})." >&2
-    return 3
-  fi
-  if [[ -z "$out" ]]; then
-    echo "ERROR: next-epic: the queue answered nothing for ${plan_id} — refusing to report that as an empty queue." >&2
     return 3
   fi
 

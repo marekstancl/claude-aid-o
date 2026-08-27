@@ -54,6 +54,22 @@ teardown() {
 
 _continue() { run bash "$CONTINUE" "$@" --project-root "$ROOT"; }
 
+# _await_marker — the spawned command is launched DETACHED (`aid-job.sh` uses
+# `setsid … &`, and its wait loop returns as soon as the wrapper has recorded a
+# pid, which happens BEFORE the command execs). The marker is therefore written
+# asynchronously, and `[ -f "$MARKER" ]` on the next line would be a timing bet,
+# not an assertion — it would usually win and flake on a loaded machine. This
+# waits, briefly and with a hard bound, so a case fails on "it never ran" rather
+# than on "it had not run yet".
+_await_marker() {
+  local i
+  for i in $(seq 1 100); do
+    [[ -s "$MARKER" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 _plan_state() {
   mkdir -p "$ROOT/.aid-o/work/plan-state/P090"
   cat > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml" <<'YML'
@@ -126,7 +142,10 @@ _ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
   _continue P090 E-090-1_2
   [ "$status" -eq 0 ]
   [[ "$output" == *"claim:   E-090-2_2"* ]]
-  [[ "$output" == *"spawn:   off (autonomy.spawn_next_epic is false — the default)"* ]]
+  # "nobody configured it" and "somebody configured it off" are different facts
+  # and lead to different next actions, so the line distinguishes them.
+  [[ "$output" == *"spawn:   off (autonomy.spawn_next_epic is not configured, and the default is false)"* ]]
+  [[ "$output" == *"NOTE: aid-plan-continue: autonomy.spawn_next_epic is not configured; using the default 'false'."* ]]
   [ ! -f "$MARKER" ]
   [ ! -d "$JOBS" ] || [ -z "$(ls -A "$JOBS")" ]
   # The plan still moved: that is the pre-Step-6 behaviour, unchanged.
@@ -142,7 +161,7 @@ _ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
   [[ "$output" == *"spawn:   started p090-P090-E-090-2_2-1 for E-090-2_2"* ]]
 
   # The stub really ran — and with the slash form AC21c's experiment chose.
-  [ -f "$MARKER" ]
+  _await_marker
   grep -q -- '-p /aid-run --auto --epic E-090-2_2' "$MARKER"
   # Exactly one job directory, and it is the pre-allocated id.
   run bash -c 'ls "$1" | wc -l' _ "$JOBS"
@@ -164,6 +183,7 @@ _ready() { _plan_state; _stub_plan_fsm; _merged_epic E-090-1_2; _queue; }
   _config '  spawn_next_epic: true'
   _continue P090 E-090-1_2
   [ "$status" -eq 0 ]
+  _await_marker
   grep -q 'AID_JOB_ID=p090-P090-E-090-2_2-1' "$MARKER"
 
   # Now play the second link of the chain: a run INSIDE that job, whose
@@ -184,6 +204,7 @@ YAML
   [ "$status" -eq 0 ]
   [[ "$output" == *"claim:   E-090-3_2"* ]]
   [[ "$output" != *"is still alive"* ]]
+  _await_marker
   grep -q -- '-p /aid-run --auto --epic E-090-3_2' "$MARKER"
 }
 
@@ -247,7 +268,7 @@ YAML
   _continue P090 E-090-1_2
   [ "$status" -eq 0 ]
   [[ "$output" == *"spawn:   started"* ]]
-  [ -f "$MARKER" ]
+  _await_marker
 }
 
 @test "AC21: the cap is read under the lock, from disk — not from the copy this run parsed at startup" {
@@ -275,7 +296,15 @@ YAML
   _permissions_auto
   # No project.yaml at all → the documented default (off), and it says so.
   _continue P090 E-090-1_2
-  [[ "$output" == *"spawn_next_epic is false — the default"* ]]
+  [[ "$output" == *"is not configured, and the default is false"* ]]
+
+  # An EXPLICIT false is reported as an explicit false, not as a missing key.
+  rm -f "$GUIDE"
+  _config '  spawn_next_epic: false'
+  bash "$QW" set-status E-090-2_2 pending --queue "$QUEUE" --project-root "$ROOT" >/dev/null
+  _continue P090 E-090-1_2
+  [[ "$output" == *"spawn:   off (autonomy.spawn_next_epic is false)"* ]]
+  [[ "$output" != *"is not configured"* ]]
 
   # A present but unusable value is NEVER silently defaulted: that is how a cap
   # of 3 becomes no cap.
@@ -310,8 +339,8 @@ YAML
   # config off, flag on → it starts
   _continue P090 E-090-1_2 --spawn
   [ "$status" -eq 0 ]
-  [ -f "$MARKER" ]
   [[ "$output" == *"spawn:   started"* ]]
+  _await_marker
 
   # config on, flag off → it does not
   rm -f "$MARKER"
@@ -354,24 +383,34 @@ YAML
   # The plan refused to ASSUME that a slash command under `claude -p` is
   # dispatched rather than echoed as prose, and prepared a fallback sentence in
   # case it was not. One run decided it — `claude -p "/aid-help"` answered with
-  # the skill's own output, 44 matches of `/aid-[a-z-]*` against a declared
-  # predicate of 2 — so the slash form is what ships.
+  # the skill's own output, 44 matches of `/aid-[a-z-]*` against a predicate
+  # declared beforehand of 2 — so the slash form is what ships.
   #
   # THIS CASE DOES NOT ASSERT THE RAW TRANSCRIPT. It lives under `.aid-o/`,
   # which is gitignored, so a suite that required it would be red in every
-  # checkout but the author's. What is asserted is what is tracked: the code
-  # sends the chosen form, the fallback is absent, and the verdict is written
-  # down where a reader will find it.
+  # checkout but the author's.
   local cont="$AID_PLUGIN_PATH/scripts/aid-plan-continue.sh"
-  grep -q 'local prompt="/aid-run --auto --epic ${epic_id}"' "$cont"
+
+  # What the session ACTUALLY receives, read off the stub's own record of its
+  # argv — not a grep of the source line that produces it, which would assert
+  # only that the source is the source.
+  _ready
+  _permissions_auto
+  _config '  spawn_next_epic: true'
+  _continue P090 E-090-1_2
+  [ "$status" -eq 0 ]
+  _await_marker
+  grep -q -- '-p /aid-run --auto --epic E-090-2_2' "$MARKER"
 
   # `--auto --epic`, never the bare form: bare `/aid-run <epic>` is MANUAL mode,
   # a session recorded manual would not continue the plan after its own merge,
-  # and the chain would stop — a second time, by another route.
-  # Every `/aid-run` this file can send carries `--auto --epic`; none is bare.
+  # and the chain would stop — a second time, by another route. Not one prompt
+  # this file can send is bare.
   run bash -c 'grep -o "/aid-run[^\"]*" "$1" | grep -vc -- "--auto --epic" || true' _ "$cont"
   [ "$output" = "0" ]
 
-  # The verdict is recorded in a tracked file, not only in the ignored evidence.
+  # And the verdict is written down where a reader outside this working tree can
+  # find it, since the raw probe is not.
   grep -q 'aid-run --auto --epic' "$AID_PLUGIN_PATH/../../docs/extending-aid.md"
+  grep -q 'predicate declared beforehand' "$AID_PLUGIN_PATH/../../docs/extending-aid.md"
 }

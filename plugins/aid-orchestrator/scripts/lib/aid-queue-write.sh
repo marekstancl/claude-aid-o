@@ -38,9 +38,21 @@
 #                     merge with `git merge-base --is-ancestor` (P090 Step 3).
 #                     `aid-plan-fsm.sh epic-merge-to-plan` establishes the fact
 #                     in Git and hands over; it still writes nothing here.
-#   released_to_main  aid-plan-fsm.sh plan-merge-to-main
-#   abandoned         aid-plan-fsm.sh epic-complete --abandon
-#   superseded        aid-plan-fsm.sh epic-complete --supersede
+#   released_to_main  THIS FILE (queue_set_status). The transition BELONGS to
+#                     `aid-plan-fsm.sh plan-merge-to-main`, but that command —
+#                     like every other one in the plan FSM — does not write the
+#                     queue itself; a caller mirrors it here afterwards.
+#   abandoned         THIS FILE (queue_set_status), mirroring
+#                     `aid-plan-fsm.sh epic-complete --abandon`.
+#   superseded        THIS FILE (queue_set_status), mirroring
+#                     `aid-plan-fsm.sh epic-complete --supersede`.
+#
+#   THE PATTERN, AND WHY THE COLUMN SAYS "THIS FILE" FIVE TIMES: the plan FSM
+#   is the authority for an EPIC's status and writes it to the MANIFEST; the
+#   queue is a derived view and every byte of it is written here, by a caller
+#   that mirrors what the FSM established (aid-plan-fsm.sh:89-97). The column
+#   used to name the FSM command for five of the seven statuses, which read as
+#   though the FSM wrote them. It never did.
 #   blocked           THIS FILE (queue_claim_next)  dependency unresolved
 #
 # READ-ONLY LEGACY VALUES — accepted when reading an existing entry, never

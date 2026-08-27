@@ -2854,8 +2854,18 @@ a flag: a flag leaves the main path callable without it, and "nobody has to
 remember" would be false the first time someone typed the command by hand.
 `--no-continue` turns it off, `--continue` forces it for a manual plan.
 
-**The `autonomy` field lives on the PLAN, in `plan-state.yaml`, written by
-`plan-start`** — not on the run record. `auto_controller` is the obvious
+**The `autonomy` field is WRITE-ONCE, and that is the sharpest limit on all of
+this.** `plan-start` sets it from `--autonomy auto|manual`, or — since no
+production caller passes that flag today, `aid-auto-pipeline.sh` included — from
+`.aid-o/config/permissions.yaml` (`autonomous_mode: true`, read fail-closed, a
+real YAML boolean or nothing). Nothing changes it afterwards. So a plan started
+before autonomy was switched on reads as manual for its whole life, one started
+after it stays `auto` even while a PM drives it by hand (`--no-continue` is the
+per-merge escape), and a workspace with no `permissions.yaml` — which includes
+**this** repository — resolves every plan to manual and leaves the continuation
+inert. Changing a live plan's mind means editing `plan-state.yaml`.
+
+**The field lives on the PLAN, in `plan-state.yaml`** — not on the run record. `auto_controller` is the obvious
 candidate and is the wrong one: a run removes its own entry on the
 `done-advance review→release` edge (`aid-fsm.sh:286`), so by the time an EPIC
 merges there is nothing left to read. Absence reads as `manual`, so every plan
@@ -2947,6 +2957,8 @@ change a schema somebody else parses.
 
 An entry left at `running` by a dead process is either a crash between claim and
 start, or somebody else's live run — indistinguishable from the outside. It is
-**reported by name** on every path, and released only by a human's
+**reported by name** on every path that gets past the mirror — a run that stops
+at the proof has established nothing about this plan and says so instead — and
+released only by a human's
 `aid-plan-continue.sh --reclaim <epic_id>`, which no automation calls. Taking a
 live run's entry out from under it is worse than waiting.

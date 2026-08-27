@@ -20,7 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **`skills/pipeline.md` step 16 and `commands/aid-run.md`** — they described a sequence a controller had to perform; they now describe a program that performs it, and the "no production caller invokes them yet" note is gone because a caller exists.
-- **An entry left at `running` is reported, never collected** — on every path, by name, with the human-invoked `aid-plan-continue.sh --reclaim <epic_id>` that releases it. It is either a crash between claim and start or somebody else's live run, and taking a live run's entry out from under it is worse than waiting.
+- **An entry left at `running` is reported, never collected** — by name, on every path that gets past the mirror, with the human-invoked `aid-plan-continue.sh --reclaim <epic_id>` that releases it. It is either a crash between claim and start or somebody else's live run, and taking a live run's entry out from under it is worse than waiting.
 
 ### Fixed
 - **`lib/aid-queue-write.sh`'s status table credited the wrong writer** — it said `aid-plan-fsm.sh epic-start` writes `running` and `epic-merge-to-plan` writes `merged_to_plan`. Neither ever did: the plan FSM does not touch the queue at all, by the design decision recorded ten lines above it.

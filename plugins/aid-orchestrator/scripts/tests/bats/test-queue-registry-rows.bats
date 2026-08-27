@@ -105,8 +105,18 @@ _field() { yq -r ".enforcements[] | select(.id == \"$1\") | .$2 // \"\"" "$REG";
   done
 }
 
+# _top_version — the newest `## [X.Y.Z]` header in the root CHANGELOG, which is
+# the single source of truth for the plugin version. Read rather than hardcoded:
+# a version frozen in the test keeps passing over the next release instead of
+# tracking it, which is the opposite of what these two cases are for.
+_top_version() {
+  grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' "$REPO_ROOT/CHANGELOG.md" \
+    | tr -d '#[] '
+}
+
 @test "AC18: both CHANGELOGs carry this version's section, character for character" {
-  local ver="2.94.0"
+  local ver; ver="$(_top_version)"
+  [ -n "$ver" ]
   local a="$REPO_ROOT/CHANGELOG.md"
   local b="$AID_PLUGIN_PATH/CHANGELOG.md"
   [ -f "$a" ]
@@ -123,7 +133,8 @@ _field() { yq -r ".enforcements[] | select(.id == \"$1\") | .$2 // \"\"" "$REG";
 }
 
 @test "AC18: this version's section actually describes P090, not an empty stub" {
-  local ver="2.94.0"
+  local ver; ver="$(_top_version)"
+  [ -n "$ver" ]
   run bash -c 'awk "/^## \[$2\]/{f=1} f&&/^## \[/&&!/^## \[$2\]/{exit} f" "$1"' _ \
       "$REPO_ROOT/CHANGELOG.md" "$ver"
   [[ "$output" == *"queue_peek_next"* ]]
