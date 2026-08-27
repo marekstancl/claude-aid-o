@@ -1,7 +1,7 @@
 ---
 id: P089
 type: plan
-status: draft
+status: done
 created: 2026-08-25
 author: PM + AI
 risk: high
