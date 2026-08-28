@@ -11,10 +11,11 @@ updated: 2026-08-12
 # Artefakty v AID
 
 Tahle stránka je **projektový záznam** k obecnému
-[standardu artefaktů](../../ecosystem/specs/artifact-standard.md). Standard říká,
-jak má vypadat artefakt kdekoli v ekosystému; tady je, jak to dopadlo v AID —
-který soubor je šablona, jak se plní, co v ní vynucuje kód a co zůstává na
-člověku.
+[standardu artefaktů](/ecosystem/specs/artifact-standard) a k
+[typům artefaktů v AID](/aid/specs/artefakty). Standard říká, jakou má artefakt
+kdekoli v ekosystému kostru, stropy a tvar rozhodnutí; typy a jejich obsah určuje
+stránka AID; tady je, jak to dopadlo v implementaci - který soubor je šablona, jak
+se plní, co v ní vynucuje kód a co zůstává na člověku.
 
 Přišlo to s plánem P080 (v2.85.0). Jeden odstavec na úvod, ať je hned jasné, co
 tu čtete: AID **vyrábí tělo stránky deterministicky ze zaznamenaných dat**.
