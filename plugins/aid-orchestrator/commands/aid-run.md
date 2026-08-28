@@ -6,6 +6,24 @@ user_invocable: true
 
 Run the 6-state FSM controller to orchestrate an EPIC through its full lifecycle. Replaces the old `/aid-run-epic` and `/aid-first-aid` commands.
 
+
+## A plan that predates the autonomy flag
+
+`plan-start` stamps a plan-level `autonomy` field (P090). A plan STARTED BEFORE
+that carries none, and continuation then falls back to the project's own
+`autonomous_mode` and says so on every merge. That fallback is a safety net, not
+a state to live in: stamp the plan once, and it stops guessing.
+
+```bash
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-state <plan_id> --set-autonomy auto|manual
+```
+
+Stamp it when you first touch such a plan — the line the merge prints names the
+command. `auto` is right when the project runs this plan unattended; `manual`
+when a human drives it. Until 2026-08-28 the absent field read as `manual`
+outright, so a project with `autonomous_mode: true` stopped after every EPIC
+and nothing said why.
+
 ## Usage
 
 ```

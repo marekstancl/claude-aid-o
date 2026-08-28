@@ -379,3 +379,17 @@ _close_page() {
   run_rule "{\"cwd\":\"$ws\",\"transcript_path\":\"$ws/transcript.jsonl\"}"
   [[ "$output" != *"P062"* ]]
 }
+
+@test "IMP-528: a run's plan is derived from its EPIC id, not only from the path's P-number" {
+  # A run's state file lives under evidence/E-900-1_1/R-… and carries no P900 in
+  # the path. Codex, 2026-08-28: the derivation branch had no test.
+  local sf; sf="$(_epic_run release)"
+  local t; t="$(transcript "2020-01-01T00:00:00Z" "P900")"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" == *"E-900-1_1"* ]]
+
+  # …and a session that names a DIFFERENT plan is not held to this run.
+  local t2; t2="$(transcript "2020-01-01T00:00:00Z" "P123")"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t2\"}"
+  [[ "$output" != *"E-900-1_1"* ]]
+}

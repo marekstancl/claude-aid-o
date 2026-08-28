@@ -135,7 +135,11 @@ aid_epic_summary_page_render() {
       [[ -n "$_dline" ]] || continue
       delivered+=("$_dline")
     done < <(awk '
-      /^##[[:space:]]*.*([Cc]o (EPIC )?dodal|[Cc]o bylo dodáno|delivered|Delivered)/ { grab=1; next }
+      # The English alternatives are ANCHORED, not substrings: "delivered" alone
+      # also matches "## Not delivered" and "## Undelivered items", whose
+      # contents would then be published as what the EPIC produced (Codex,
+      # 2026-08-28). Czech headings are affirmative by construction.
+      /^##[[:space:]]*[^[:alnum:]]*([Cc]o (EPIC )?dodal|[Cc]o bylo dodáno|(What (the )?(EPIC|plan) delivered)|Delivered)[[:space:]]*$/ { grab=1; next }
       grab && /^##[[:space:]]/ { exit }
       # Both list grammars: "- item" and "1. item". final_report.md numbers its
       # deliverables, epic-summary.md bullets them, and taking only one form was

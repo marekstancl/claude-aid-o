@@ -268,3 +268,35 @@ MD
   run aid_epic_summary_page_render "$EV" "$OUT"
   [ "$status" -ne 0 ]
 }
+
+@test "deliverables: a NEGATIVE heading is not read as what was delivered (Codex, 2026-08-28)" {
+  _state
+  cat > "$EV/final_report.md" <<'MD'
+# Final report
+
+## Not delivered
+
+- tohle se NEdodalo
+
+## Undelivered items
+
+- ani tohle
+MD
+  run aid_epic_summary_page_render "$EV" "$OUT"
+  # No affirmative heading anywhere → no deliverables → the profile refuses.
+  [ "$status" -ne 0 ]
+}
+
+@test "deliverables: an English affirmative heading is read" {
+  _state
+  cat > "$EV/final_report.md" <<'MD'
+# Final report
+
+## What the EPIC delivered
+
+- the read-only tool set
+MD
+  run aid_epic_summary_page_render "$EV" "$OUT"
+  [ "$status" -eq 0 ]
+  grep -q "the read-only tool set" "$OUT"
+}

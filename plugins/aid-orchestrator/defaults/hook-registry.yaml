@@ -119,6 +119,14 @@ rules:
     timeout_s: 5
     lib: scripts/lib/aid-artifact-obligation.sh
     handler: aid_hook_rule_milestone_artifact
+    scope: >-
+      Only plans THIS session mentioned. The window used to be time ("changed
+      since this session started"), which in a workspace shared by several
+      sessions demanded a page for a plan another window had edited — every
+      window was told to fix work it could not see (PM, 2026-08-28). The
+      transcript is the only per-session record a hook is handed, so a plan id
+      appearing in it is what this session can honestly be held to; a run is
+      matched through its EPIC id. A session that names no plan reports nothing.
     description: refuses to close a turn that finished a milestone — a written plan, an EPIC's review, a closed plan — without rendering the PM's page for it; a step, and a failed step, owe nothing
 
   - id: continuity_capture
