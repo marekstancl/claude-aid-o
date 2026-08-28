@@ -45,7 +45,15 @@ make_dogfood_fixture() {
   mkdir -p "$dir/plugins/aid-orchestrator/.claude-plugin"
   if [[ "$mode" == "match" ]]; then
     cp "$PLUGIN_ROOT/.claude-plugin/plugin.json" "$dir/plugins/aid-orchestrator/.claude-plugin/plugin.json"
-    cp -r "$PLUGIN_ROOT/scripts" "$dir/plugins/aid-orchestrator/scripts"
+    # P062 Step 2: the preflight compares scripts/, agents/, skills/ and
+    # defaults/. A fixture that mirrors only scripts/ stopped being a "match"
+    # the moment coverage widened — every other tree was present on one side
+    # only, which is skew, and correctly so. Mirror all four.
+    local _t
+    for _t in scripts agents skills defaults; do
+      [[ -d "$PLUGIN_ROOT/$_t" ]] || continue
+      cp -r "$PLUGIN_ROOT/$_t" "$dir/plugins/aid-orchestrator/$_t"
+    done
   else
     cat > "$dir/plugins/aid-orchestrator/.claude-plugin/plugin.json" <<EOF
 { "name": "aid-orchestrator", "version": "9.9.9-stale" }
@@ -60,6 +68,74 @@ init_git_repo() {
     git config user.email "test@test.local"; git config user.name "Test"
     [[ -e .gitkeep ]] || echo init > .gitkeep
     git add -A && git commit -q -m initial )
+}
+
+# ─── P062 Step 2: agents/ is covered, and that is the IMP-179 class ─────────
+
+@test "P062 Step 2: an agents/ tree that differs HARD STOPS and names the tree" {
+  # The class IMP-179 was actually about: scripts/ identical, the agent CARD
+  # stale. Before this step the preflight hashed scripts/ only, so this exact
+  # situation reported ok — which is how three separate Auditor/Curator runs
+  # executed against a protocol they did not have.
+  local repo="$WORK/agentskew"
+  make_dogfood_fixture "$repo" match
+  init_git_repo "$repo"
+  echo "# a card the cache does not have" >> "$repo/plugins/aid-orchestrator/agents/auditor.md"
+  ( cd "$repo" && git add -A && git commit -q -m "agent card drift" )
+  cd "$repo"
+  run bash -c 'source "$LIB"; run_cache_preflight "" ""'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"agents"* ]]
+  # scripts/ is identical here, so a message blaming scripts/ would be a lie.
+  [[ "$output" == *"Trees that differ"* ]]
+}
+
+@test "P062 Step 2: with every covered tree identical the run still passes" {
+  # The complement of the case above. Without it, "hard stop on any difference"
+  # is satisfiable by a preflight that hard stops on everything.
+  local repo="$WORK/allmatch"
+  make_dogfood_fixture "$repo" match
+  init_git_repo "$repo"
+  cd "$repo"
+  run bash -c 'source "$LIB"; run_cache_preflight "" ""'
+  [ "$status" -eq 0 ]
+}
+
+@test "P062 Step 2: the freshness artifact records the skewed tree by name" {
+  local repo="$WORK/artskew"
+  make_dogfood_fixture "$repo" match
+  init_git_repo "$repo"
+  echo "# drift" >> "$repo/plugins/aid-orchestrator/agents/auditor.md"
+  ( cd "$repo" && git add -A && git commit -q -m drift )
+  cd "$repo"
+  run bash -c 'source "$LIB"; run_cache_preflight "" "" || true; aid_cache_preflight_freshness_artifact "$WORK/af.json"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .preflight_ran "$WORK/af.json")" = "true" ]
+  [ "$(jq -r .stale_count "$WORK/af.json")" -gt 0 ]
+  [ "$(jq -r '.skewed_trees | index("agents")' "$WORK/af.json")" != "null" ]
+}
+
+@test "P062 Step 2: the artifact never reports a clean bill for a run that did not happen" {
+  # Called WITHOUT a preflight in the same shell. Zero skew here would read as
+  # "nothing is stale" when the truth is "nothing was compared" — the same
+  # silence-as-cleanliness failure the E10 preflight has its own verdict for.
+  run bash -c 'source "$LIB"; aid_cache_preflight_freshness_artifact "$WORK/af2.json"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .preflight_ran "$WORK/af2.json")" = "false" ]
+  [[ "$(jq -r .scope_note "$WORK/af2.json")" == *"not a clean result"* ]]
+}
+
+@test "P062 Step 2: the artifact states what it cannot prove" {
+  local repo="$WORK/artok"
+  make_dogfood_fixture "$repo" match
+  init_git_repo "$repo"
+  cd "$repo"
+  run bash -c 'source "$LIB"; run_cache_preflight "" ""; aid_cache_preflight_freshness_artifact "$WORK/af3.json"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .stale_count "$WORK/af3.json")" -eq 0 ]
+  # The honest limit travels WITH the green result, which is the only place it
+  # matters — nobody rereads a scope note on a failure.
+  [[ "$(jq -r .scope_note "$WORK/af3.json")" == *"does NOT prove what any individual Agent() dispatch received"* ]]
 }
 
 # ─── (a) dogfood + skew → hard stop, exit != 0 ───────────────────────────────

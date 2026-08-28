@@ -375,9 +375,19 @@ BLOKUJE postup do kalibrace/promotion — E10 nesmí měřit bordel (D7).
 
 **Dependencies:** none — nezávislý na Step 1 (jiná vrstva: dispatch, ne bookkeeping)
 
-> **Vyrábí artefakt `agent-freshness.json`** v run evidence:
-> `{dispatches_checked: N, stale_count: N, stale: [{role, expected_hash, seen_hash}]}`.
-> AC2 ho čte. (C0 nález 2026-08-15.)
+> **Vyrábí artefakt `agent-freshness.json`**:
+> `{preflight_ran: bool, trees_checked: [...], skewed_trees: [...], stale_count: N,
+> scope_note: "..."}`. AC2 ho čte.
+>
+> **Pole jsou přejmenovaná proti prvnímu návrhu, a to je ta oprava.** Původně tu stálo
+> `dispatches_checked` a `stale: [{role, ...}]`, jenže žádný dispatch se nepozoruje — v
+> default režimu dispatchuje controller přes `Agent()` bez shellu. Pole slibující počet
+> zkontrolovaných dispatchů by bylo over-claim zabudovaný do schématu, tedy přesně tam, kde
+> ho nikdo nekontroluje. Měří se stromy, tak se tak jmenují. `scope_note` cestuje i se
+> zeleným výsledkem, protože u selhání ho stejně nikdo znovu nečte.
+>
+> `preflight_ran: false` je vlastní stav: „neproběhlo srovnání" není totéž co „nic není
+> zastaralé".
 
 **Objective:** Mechanicky prokázat, že dispatchovaný subagent (Auditor/Curator/Verifier) dostal
 AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promotion na jejich výstupech
@@ -912,10 +922,10 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
   cmd: "f=.aid-o/work/evidence/P062/e10/e10-preflight.json; test -f \"$f\" || exit 1; jq -e '.verdict | IN(\"clean\",\"excluded_by_pm\")' \"$f\" >/dev/null && jq -e '(.checked | length) >= 4' \"$f\" >/dev/null && jq -e 'if .verdict == \"excluded_by_pm\" then ((.exclusions // []) | length) > 0 and all(.exclusions[]; (.reason // \"\") | length >= 20) else true end' \"$f\" >/dev/null"
   expected_exit: 0
   ```
-- [ ] AC2: IMP-179 freshness suite existuje a je zelená (EPIC 1 Step 2).
+- [ ] AC2: IMP-179 freshness — rozšířený cache preflight kryje `agents/`, obě strany (skew i shoda) jsou dokázané, a artefakt nese poctivý rozsah (EPIC 1 Step 2). **Sada je `test-cache-preflight.bats`, ne nová `test-agent-freshness.bats`:** kontrola se dopsala tam, kde ta rodina žije, takže tam žijí i její testy.
   ```yaml
   type: cmd
-  cmd: "b=plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 || exit 1; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' || exit 1; echo \"$out\" | grep -qi 'stale' || exit 1; echo \"$out\" | grep -qi 'fresh' || exit 1; f=.aid-o/work/evidence/P062/e10/agent-freshness.json; test -f \"$f\" && jq -e '.stale_count != null and .dispatches_checked > 0' \"$f\" >/dev/null"
+  cmd: "b=plugins/aid-orchestrator/scripts/tests/bats/test-cache-preflight.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 || exit 1; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' || exit 1; echo \"$out\" | grep -q 'agents/ tree that differs HARD STOPS' || exit 1; echo \"$out\" | grep -q 'every covered tree identical the run still passes' || exit 1; f=.aid-o/work/evidence/P062/e10/agent-freshness.json; test -f \"$f\" || exit 1; jq -e '.preflight_ran == true and (.trees_checked | index(\"agents\")) != null and .stale_count != null and ((.scope_note // \"\") | length) > 0' \"$f\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC3: IMP-201 evidence-freshness-exception suite zelená (EPIC 1 Step 3).

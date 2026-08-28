@@ -14,11 +14,22 @@
 # forgotten update now fails loud). It does NOT replace the update itself — the
 # update stays manual (`claude plugin update ...` / cache force-refresh).
 #
-# It covers ONLY:  plugin.json `version`  +  a deterministic sha256 of the
-#                  `scripts/` tree.
-# It does NOT cover: stale `skills/`, `defaults/`, `agents/`. Those staleness
-# classes are NOT solved here — IMP-179 and its neighbours remain E10 blockers.
-# Do not read a green preflight as "the whole plugin cache is fresh".
+# It covers:       plugin.json `version`  +  a deterministic sha256 of EACH of
+#                  the `scripts/`, `agents/`, `skills/` and `defaults/` trees.
+#
+# P062 Step 2 (2026-08-15) added the last three. Until then this covered
+# `scripts/` alone and this header said so — the uncovered trees were named
+# here as remaining E10 blockers, and this is E10 closing them. `agents/` is
+# the one IMP-179 was actually about: three separate Auditor/Curator runs did
+# not know their own current protocol because the cache held an older card.
+#
+# WHAT IT STILL DOES NOT PROVE, and must never be read as proving:
+#   that any INDIVIDUAL Agent() call received those bytes. In the default
+#   `agent_tool` mode the controller dispatches directly (skills/pipeline.md)
+#   with no shell in between, so nothing here can observe one dispatch. What is
+#   proven is that the cache the controller runs FROM matches this repo at
+#   check time — which is the condition whose absence caused every recorded
+#   incident.
 #
 # ── D5 CONTRACT ─────────────────────────────────────────────────────────────
 #   Compares the RUNNING (version, scripts-tree-hash) against a reference:
@@ -90,6 +101,14 @@ _aid_cp_log() {
   return 0
 }
 
+# The trees whose staleness this preflight is answerable for. `scripts/` stays
+# FIRST and keeps its own variable throughout, because the consumer-mode
+# reference recorded in fsm-state by an earlier preflight of the same run is a
+# scripts-only hash; widening that recorded value's meaning would make every
+# in-flight run compare a new number against an old one and report skew that
+# is not there.
+_AID_CP_TREES=(scripts agents skills defaults)
+
 # Deterministic sha256 of a directory's file tree (relative paths, C locale).
 # Prints the leading hash field. Empty string if dir missing.
 _aid_cp_tree_hash() {
@@ -97,6 +116,43 @@ _aid_cp_tree_hash() {
   [[ -n "$dir" && -d "$dir" ]] || { printf '%s' ""; return 0; }
   ( cd "$dir" && find . -type f -print0 | LC_ALL=C sort -z \
       | xargs -0 sha256sum | sha256sum ) 2>/dev/null | awk '{print $1}'
+}
+
+# aid_cache_preflight_freshness_artifact <out_file>
+#   P062 Step 2 — the evidence E10's promotion gate reads. It records what this
+#   preflight ACTUALLY compared, in the words of what it compared, because the
+#   field names are the place an over-claim would hide: there is no
+#   `dispatches_checked` here, since no dispatch is observed. `stale_count` is
+#   the number of covered trees that differ, and `scope_note` travels with it so
+#   a later reader cannot mistake this for proof about one Agent() call.
+#
+#   Safe to call after run_cache_preflight in the same shell; on its own it
+#   reports zero skew with an explicit `not_run` note rather than a clean bill.
+aid_cache_preflight_freshness_artifact() {
+  local out="${1:-}"
+  [[ -n "$out" ]] || return 0
+  local skewed="${_AID_CP_SKEWED_TREES-__notrun__}"
+  local note="proves the plugin material the controller runs from matches this repository at check time; does NOT prove what any individual Agent() dispatch received"
+  local ran=true
+  if [[ "$skewed" == "__notrun__" ]]; then
+    ran=false; skewed=""
+    note="preflight did not run in this shell — no comparison was made, so this is not a clean result"
+  fi
+  mkdir -p "$(dirname "$out")" 2>/dev/null || true
+  jq -n \
+    --arg trees "$(printf '%s ' "${_AID_CP_TREES[@]}")" \
+    --arg skewed "$skewed" \
+    --argjson ran "$ran" \
+    --arg note "$note" \
+    '{schema_version: "aid-2.0",
+      artifact_type: "agent_freshness",
+      generated_by: "aid-cache-preflight.sh",
+      preflight_ran: $ran,
+      trees_checked: ($trees | split(" ") | map(select(length > 0))),
+      skewed_trees: ($skewed | split(",") | map(select(length > 0))),
+      stale_count: ($skewed | split(",") | map(select(length > 0)) | length),
+      scope_note: $note}' > "$out" 2>/dev/null || return 1
+  return 0
 }
 
 # Read one flat `key: value` scalar from a YAML-ish state file (self-contained
@@ -228,6 +284,19 @@ run_cache_preflight() {
   running_version="$(jq -r '.version // ""' "${_AID_CP_RUNNING_PLUGIN_JSON}" 2>/dev/null || true)"
   running_hash="$(_aid_cp_tree_hash "${_AID_CP_RUNNING_SCRIPTS_DIR}" || true)"
 
+  # Per-tree running hashes (P062 Step 2). `scripts` reuses the value above so
+  # there is exactly one definition of it.
+  local _cp_plugin_root; _cp_plugin_root="$(cd "${_AID_CP_RUNNING_SCRIPTS_DIR}/.." && pwd)"
+  declare -A _cp_running_trees=()
+  local _t
+  for _t in "${_AID_CP_TREES[@]}"; do
+    if [[ "$_t" == "scripts" ]]; then
+      _cp_running_trees[$_t]="$running_hash"
+    else
+      _cp_running_trees[$_t]="$(_aid_cp_tree_hash "${_cp_plugin_root}/${_t}" || true)"
+    fi
+  done
+
   # ── Env override: continue regardless, with an audit event ────────────────
   if [[ "${AID_CACHE_PREFLIGHT_OVERRIDE:-}" == "1" ]]; then
     _aid_cp_log "$timeline" "cache_preflight_override" \
@@ -257,7 +326,24 @@ run_cache_preflight() {
     dogfood_version="$(jq -r '.version // ""' "$dogfood_pj" 2>/dev/null || true)"
     dogfood_hash="$(_aid_cp_tree_hash "$dogfood_scripts" || true)"
 
-    if [[ "$running_version" == "$dogfood_version" && "$running_hash" == "$dogfood_hash" ]]; then
+    # Which trees actually differ. A tree absent on BOTH sides hashes empty on
+    # both and therefore matches — an absent tree is not skew. A tree present
+    # on one side only does differ, which is the honest answer.
+    local _cp_dogfood_root; _cp_dogfood_root="$(cd "${dogfood_scripts}/.." && pwd)"
+    _AID_CP_SKEWED_TREES=""
+    for _t in "${_AID_CP_TREES[@]}"; do
+      local _dh
+      if [[ "$_t" == "scripts" ]]; then
+        _dh="$dogfood_hash"
+      else
+        _dh="$(_aid_cp_tree_hash "${_cp_dogfood_root}/${_t}" || true)"
+      fi
+      if [[ "${_cp_running_trees[$_t]}" != "$_dh" ]]; then
+        _AID_CP_SKEWED_TREES="${_AID_CP_SKEWED_TREES}${_AID_CP_SKEWED_TREES:+,}${_t}"
+      fi
+    done
+
+    if [[ "$running_version" == "$dogfood_version" && -z "$_AID_CP_SKEWED_TREES" ]]; then
       _aid_cp_log "$timeline" "cache_preflight_ok" mode="dogfood" \
         running_version="$running_version"
       return 0
@@ -292,13 +378,13 @@ run_cache_preflight() {
     _aid_cp_error "AID cache-preflight HARD STOP — controller is running from a STALE plugin cache."
     _aid_cp_error "  running: version=${running_version} scripts=${running_hash:0:12}"
     _aid_cp_error "  cache:   version=${dogfood_version} scripts=${dogfood_hash:0:12}"
-    _aid_cp_error "  The scripts/ currently executing differ from this repo's installed plugin."
+    _aid_cp_error "  Trees that differ: ${_AID_CP_SKEWED_TREES:-scripts}. The plugin material in use differs from this repo's installed plugin."
     _aid_cp_error "  Fix (update the cache, then retry):"
     _aid_cp_error "    claude plugin update aid-orchestrator@claude-aid-o"
     _aid_cp_error "    # or: git -C ~/.claude/plugins/marketplaces/claude-aid-o fetch origin \\"
     _aid_cp_error "    #     && git -C ~/.claude/plugins/marketplaces/claude-aid-o reset --hard origin/main"
     _aid_cp_error "  Override (NOT recommended): AID_CACHE_PREFLIGHT_OVERRIDE=1"
-    _aid_cp_error "  NOTE: covers plugin.json version + scripts/ only — skills/defaults/agents NOT covered."
+    _aid_cp_error "  NOTE: covers plugin.json version + the scripts/, agents/, skills/ and defaults/ trees. It does NOT prove what an individual Agent() dispatch received."
     return 1
   fi
 
