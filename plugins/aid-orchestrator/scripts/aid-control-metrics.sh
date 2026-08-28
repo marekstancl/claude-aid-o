@@ -119,20 +119,81 @@ controls="$(jq -c ". + [$(_row c2 'semantic-review-final.json' '(.findings // []
 
 runs="$(find "$EVIDENCE_ROOT" -name 'fsm-state.yaml' -type f 2>/dev/null | wc -l | tr -d ' ')"
 
+# ── speed (P062 Step 5) ─────────────────────────────────────────────────────
+#
+# THE THREE UNITS THAT EXIST, AND THE ONE THAT DOES NOT
+#   After P068 a plan pays the expensive gates ONCE, at its own boundary, so
+#   "full suite per EPIC" stopped describing anything that runs and is not
+#   measured here. What runs is: the merge path (T0+T1), the plan-final
+#   boundary, and the nightly portfolio.
+#
+# MEASURED, NOT RE-MEASURED
+#   The durations journal and the tier tags already own these numbers, and both
+#   the nightly report and the reaper read them from there. Summing suites here
+#   with a private discovery would let this file answer "what did the portfolio
+#   cost" differently from the two consumers that already ask — so it asks the
+#   same libraries. A missing journal yields null, never 0: an unmeasured path
+#   is not a free one.
+_speed_json='{"dispatch_count":0,"llm_calls":0,"merge_path_seconds":null,"plan_final_seconds":null,"nightly_seconds":null,"median_gate_cycle":null,"baseline_seconds":null,"e10_added_seconds":null,"fast_mode":"not_measurable"}'
+
+_TD_LIB="plugins/aid-orchestrator/scripts/lib/aid-test-durations.sh"
+if [[ -f "$_TD_LIB" ]]; then
+  # shellcheck disable=SC1090
+  if source "$_TD_LIB" 2>/dev/null && declare -F aid_durations_by_suite >/dev/null 2>&1; then
+    _merge_ms=0; _all_ms=0; _have=0
+    while IFS=$'\t' read -r _suite _ms; do
+      [[ -n "$_suite" && "$_ms" =~ ^[0-9]+$ ]] || continue
+      _have=1
+      _all_ms=$(( _all_ms + _ms ))
+      # aid_durations_by_suite prints BASENAMES; aid_test_tier_of needs a real
+      # path and returns 1 on anything else, which silently made every suite
+      # untiered and the merge path 0 s. Resolve the basename back to the file
+      # through the same discovery both libraries use, so the tier answer here
+      # and the tier answer in CI come from one place.
+      _path=""
+      _path="$(aid_test_discover_suites 2>/dev/null | grep -m1 -E "/${_suite}\$" || true)"
+      _tier=""
+      [[ -n "$_path" ]] && _tier="$(aid_test_tier_of "$_path" 2>/dev/null || echo "")"
+      case "$_tier" in t0|t1) _merge_ms=$(( _merge_ms + _ms )) ;; esac
+    done < <(aid_durations_by_suite 2>/dev/null || true)
+    if (( _have == 1 )); then
+      _speed_json="$(jq -nc --argjson m "$_merge_ms" --argjson a "$_all_ms" \
+        '{dispatch_count:0, llm_calls:0,
+          merge_path_seconds: ($m / 1000), plan_final_seconds: null,
+          nightly_seconds: ($a / 1000), median_gate_cycle: null,
+          baseline_seconds: ($m / 1000), e10_added_seconds: null,
+          fast_mode: "not_measurable"}')"
+    fi
+  fi
+fi
+
+# dispatch_count / llm_calls come from the timeline events the runs already
+# write; counted, not estimated.
+_dispatches=0
+while IFS= read -r _tl; do
+  [[ -n "$_tl" ]] || continue
+  _n="$(grep -c '"event"[[:space:]]*:[[:space:]]*"dispatch' "$_tl" 2>/dev/null || echo 0)"
+  _dispatches=$(( _dispatches + _n ))
+done < <(find "$EVIDENCE_ROOT" -name 'timeline.jsonl' -type f 2>/dev/null)
+_speed_json="$(jq -c --argjson d "$_dispatches" '.dispatch_count = $d | .llm_calls = $d' <<<"$_speed_json")"
+
 mkdir -p "$(dirname "$OUT_FILE")"
 jq -n \
   --arg head "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
   --argjson controls "$controls" \
   --argjson runs "${runs:-0}" \
   --argjson p "$c3_pass" --argjson f "$c3_fail" --argjson u "$c3_unver" \
+  --argjson speed "$_speed_json" \
   '{schema_version: "aid-2.0",
     artifact_type: "control_metrics",
     generated_by: "aid-control-metrics.sh",
     head: $head,
     runs_scanned: $runs,
     controls: $controls,
-    c3_verdict_mix: {pass: $p, fail: $f, unverifiable: $u}}' > "$OUT_FILE"
+    c3_verdict_mix: {pass: $p, fail: $f, unverifiable: $u},
+    speed: $speed}' > "$OUT_FILE"
 
 echo "aid-control-metrics: ${runs} run(s), ground_truth=${gt} → ${OUT_FILE}"
 echo "  C3 verdicts: pass=${c3_pass} fail=${c3_fail} unverifiable=${c3_unver}"
 jq -r '.controls[] | "  \(.control): \(.caught_classes | length) caught class(es)"' "$OUT_FILE"
+jq -r '.speed | "  merge path: \(.merge_path_seconds // "unmeasured") s, portfolio: \(.nightly_seconds // "unmeasured") s, dispatches: \(.dispatch_count)"' "$OUT_FILE"

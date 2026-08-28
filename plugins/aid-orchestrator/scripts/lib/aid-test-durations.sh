@@ -203,5 +203,11 @@ aid_durations_by_suite() {
     base="$(basename "$suite")"
     d="$(aid_durations_latest "$base" 2>/dev/null)" || continue
     printf '%s\t%s\n' "$base" "$d"
-  done < <(aid_test_discover_suites "$1")
+  # "${1-}", not "$1": the argument is documented OPTIONAL, and the callee
+  # already defaults an empty value to the standard tests dir. Unguarded, this
+  # aborted with "$1: unbound variable" for every caller running under `set -u`
+  # — which is every script in this repository — so the no-argument form, the
+  # one the docstring advertises, could not be used at all. Found from a strict
+  # caller in P062 Step 5, 2026-08-15.
+  done < <(aid_test_discover_suites "${1-}")
 }

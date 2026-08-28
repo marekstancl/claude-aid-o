@@ -79,6 +79,19 @@ _journal() { printf '%s/.aid-o/work/test-durations.jsonl' "$ROOT"; }
   [ "$output" = "2000" ]
 }
 
+@test "8: aid_durations_by_suite works with NO argument under set -u" {
+  # The documented no-argument form was unusable: `"$1"` was unguarded, so
+  # every strict-mode caller — which is every script here — died on
+  # "$1: unbound variable" before reading a single record. Found from a strict
+  # caller in P062 Step 5. The assertion is that it RUNS, not what it counts:
+  # the count depends on the journal, the crash did not.
+  run bash -c 'set -euo pipefail
+    source "'"$BATS_TEST_DIRNAME"'/../../lib/aid-test-durations.sh"
+    aid_durations_by_suite >/dev/null'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"unbound variable"* ]]
+}
+
 @test "4: a suite with no record is reported absent, never as zero" {
   run bash -c 'source "$LIB"
     aid_durations_append test-thing.bats bats 1000 0

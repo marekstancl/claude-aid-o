@@ -92,6 +92,40 @@ _audit() { printf '{"status":"%s","findings":[]}' "$2" > "$EV/E-900-1_1/R-1/$1";
   [ "$(jq -r '.controls[] | select(.control=="c0") | .caught_classes | length' "$TEST_TMPDIR/m.json")" -eq 2 ]
 }
 
+@test "Step 5: with no durations journal the wall-clock fields are NULL, not 0" {
+  # An unmeasured path is not a free one. A 0 here would put "the merge path
+  # costs nothing" into the artifact the decision table reads.
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.speed.merge_path_seconds' "$TEST_TMPDIR/m.json")" = "null" ]
+  [ "$(jq -r '.speed.nightly_seconds' "$TEST_TMPDIR/m.json")" = "null" ]
+}
+
+@test "Step 5: Fast Mode is not_measurable, and the schema allows nothing else" {
+  # IMP-506: /aid-do invokes no AID script, so a measured 0 would read as
+  # "Fast Mode never escalates" — a claim about behaviour nobody made.
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  [ "$(jq -r '.speed.fast_mode' "$TEST_TMPDIR/m.json")" = "not_measurable" ]
+  run jq -e '.properties.speed.properties.fast_mode.enum | length == 1' "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
+@test "Step 5: the per-EPIC full-suite unit is absent from the schema on purpose" {
+  # P068 pays the expensive gates once per PLAN. A field for a unit that no
+  # longer runs is how a stale measurement story survives a redesign.
+  run jq -e '.properties.speed.properties | has("full_suite_time") | not' "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
+@test "Step 5: durations are read through the shared library, tiers included" {
+  # Not a re-implementation: the journal and the tier tags own these numbers,
+  # and the nightly report and the reaper already read them from there. This
+  # asserts the wiring rather than the arithmetic.
+  run grep -c "aid_durations_by_suite\|aid_test_tier_of" "$TOOL"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 2 ]
+}
+
 @test "a missing evidence root is refused, not reported as a clean measurement" {
   run bash "$TOOL" --evidence-root "$TEST_TMPDIR/nope" --out "$TEST_TMPDIR/m.json"
   [ "$status" -eq 2 ]
