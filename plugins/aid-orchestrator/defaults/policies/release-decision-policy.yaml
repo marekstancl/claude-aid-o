@@ -35,7 +35,32 @@
 #              `unknown` basis NEVER counts as at-head but does not block; it is surfaced in the
 #              PM brief's "At-HEAD verification warnings" section. (default until E10.)
 #   blocking → reserved for E10: promote the head_match signal into a transition-level hard fail.
+#
+# evidence_pack_freshness_policy (P062 Step 3, IMP-201) — the TRAILING-COMMIT class, held
+# separate from head_match_policy above so it can be promoted, or refused promotion, on its
+# own evidence.
+#
+#   The defect: aid-fsm.sh's CP3 freshness check has a narrow, audited exception (the D4
+#   `CP3-Freshness-Exception` trailer plus a path scope) for a trailing cosmetic commit.
+#   `_artifact_head_match` in aid-release-policy.sh has no counterpart — it compares the
+#   stamped head_sha to HEAD for exact equality — so the SAME commit that CP3 adjudicated
+#   cosmetic still stamps gates_report.json one commit behind and reads as a hard blocker.
+#
+#   Adjudicated 2026-08-15 (cross-model, escalated per PM instruction): HOLD, do not fix
+#   under E10. The fix means extracting the D4 classifier into a shared function and
+#   calling it from a blocking precondition inside aid-fsm.sh, and it BROADENS a permissive
+#   exception on a release gate. That is the kind of gap that should PREVENT a promotion,
+#   not ride along inside one.
+#
+#   Consequence, stated rather than hidden: C4 freshness CANNOT be promoted to blocking for
+#   this class in E10. The decision table records it as
+#   `cannot_promote_runtime_budget`'s sibling case — an explicit non-promotion with a named
+#   closure condition (IMP-201), not a silent observe.
+#
+#   observe  → stale-by-trailing-commit is reported and never blocks. (current)
+#   blocking → forbidden until IMP-201 is closed by the shared classifier.
 # =============================================================================
 version: 1
 enforcement: observe
 head_match_policy: observe
+evidence_pack_freshness_policy: observe

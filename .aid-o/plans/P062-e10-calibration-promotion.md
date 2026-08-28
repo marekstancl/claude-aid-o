@@ -451,20 +451,34 @@ legitimní trailing docs/comment commit. E10 buď zavře IMP-201, nebo explicitn
 pro tento typ (D6). NIKDY tiché false-block.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/scripts/aid-evidence-verify.sh` + `aid-release-policy.sh` —
-  bounded rozšíření D4 freshness-exception: verified-cosmetic trailing commit (git trailer
-  ekvivalent D4 `CP3-Freshness-Exception`, path scope tests/docs/comment) → evidence-pack NENÍ
-  flagnut stale pro tento commit; disclosure event `evidence_freshness_exception` s file-listem
-  (E10 měří zneužití, jako D4). Cokoli mimo scope → dál stale (fail-closed).
+> **ROZHODNUTO: observe-hold, IMP-201 se pod E10 NEOPRAVUJE** (cross-model adjudikace
+> 2026-08-15, eskalováno podle zadání PM). Oprava znamená vytáhnout D4 klasifikátor do
+> sdílené funkce a zavolat ho z **blokující preconditiony uvnitř `aid-fsm.sh`** — a zároveň
+> rozšířit *povolující* výjimku na release bráně. Taková mezera má promotion **zabránit**,
+> ne se v něm svézt.
+>
+> **Co to stojí, napsané a ne zamlčené:** C4 freshness nesmí být pro třídu trailing commitu
+> v E10 promován na blocking. V rozhodovací tabulce z toho je výslovné nepromování
+> s pojmenovanou podmínkou uzavření, ne tiché observe.
+>
+> Původní znění tohohle kroku (rozšíření `aid-evidence-verify.sh` + `aid-release-policy.sh`)
+> zůstává jako popis toho, co IMP-201 zavře — až se to bude dělat, mimo E10.
 - Modify: `plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml` — pokud se
   IMP-201 nezavře do promotion, `evidence_pack_freshness_policy: observe` pro trailing-commit třídu
   (explicitní observe-hold, ne tiché false-block); rozhodnutí resolve-vs-hold = PM fork.
-- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats` —
-  red-green: verified-cosmetic trailing commit → pack NENÍ stale (exception) + event; produkční
-  trailing commit → pack STALE (fail-closed); bez exception traileru → stale.
+- Create: `plugins/aid-orchestrator/scripts/aid-e10-imp201-decision.sh` — rozhodnutí se
+  **odvozuje z repozitáře**, netvrdí: IMP-201 je zavřený právě tehdy, když
+  `aid-release-policy.sh` konzultuje sdílený klasifikátor. Ručně psaný soubor s rozhodnutím
+  by rok po opravě pořád říkal `observe_hold` — a po refaktoru, který sdílení odstraní, by
+  pořád říkal `fixed`. Skript navíc ODMÍTNE zapsat `observe_hold`, který politika nedrží.
+- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-imp201-decision.bats` —
+  red-green: bez sdíleného klasifikátoru → `observe_hold`; s ním → `fixed` samo od sebe;
+  rozpor mezi rozhodnutím a politikou → odmítnuto; dodávaná politika ten klíč opravdu nese.
 
 **Acceptance Criteria:**
-- [ ] Verified-cosmetic trailing commit (D4-ekvivalent trailer + path scope) → evidence-pack NENÍ flagnut stale + `evidence_freshness_exception` event s file-listem.
+- [ ] `imp201-decision.json` nese `observe_hold` s důvodem ≥20 znaků a s dopadem na promotion; `trailing_commit_case_covered: false`.
+- [ ] Rozhodnutí se odvozuje: zavedení sdíleného klasifikátoru překlopí artefakt na `fixed` bez ruční editace (test).
+- [ ] `observe_hold` při politice ≠ `observe` je ODMÍTNUT (exit 2) — záznam nesmí tvrdit hold, který nikdo nedrží.
 - [ ] Produkční trailing commit → pack STALE (fail-closed; exception se nesmí zneužít na produkční změnu).
 - [ ] Alternativa observe-hold: pokud PM zvolí nezavírat IMP-201, C4 pro tuto třídu je explicitně `observe` (žádné tiché false-block; dokumentováno v policy).
 - [ ] Reprodukce původního OBS-20260711-01 case (E-061-1_6 trailing `25bff3e`): před fixem C4-enforce by blokoval, po fixu ne.
