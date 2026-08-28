@@ -27,6 +27,7 @@
 #  16  — release_decision D11 state field missing or bad enum/type
 #  17  — waiver reason too short (< 20 chars)
 #  18  — pm_decision_brief bad communication_status enum
+#  19  — release_decision inputs[] row malformed (missing field or bad enum)
 
 set -euo pipefail
 
@@ -612,6 +613,38 @@ if [[ "$CHECK_FINGERPRINT" -eq 1 ]]; then
         exit 13
       fi
     done
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 19: release_decision inputs[] SHAPE (P062 Step 8).
+#
+# The schema has always closed inputs[] items with additionalProperties:false,
+# but this validator — the authoritative one, the last thing between a producer
+# and a consumer — checked only release_ready and the D11 state fields and never
+# looked inside inputs[]. So a row missing head_match, or carrying a verdict
+# outside the enum, was accepted here no matter what the schema said. Adding
+# input_state without closing that hole would have shipped a required field
+# nothing enforced (cross-model review of Step 8, 2026-08-15).
+#
+# input_state is checked as: present and one of the five, OR null. Null means
+# "this call site has not been classified yet" and is deliberately legal —
+# there are call sites nobody has examined, and a guessed state would be worse
+# than an admitted absence. What is NOT legal is a value outside the set.
+# ---------------------------------------------------------------------------
+if [[ "$artifact_type" == "release_decision" ]]; then
+  if ! jq -e '
+      (.release_decision.inputs // [])
+      | all(
+          (has("id") and has("artifact") and has("verdict") and has("reason") and has("head_match"))
+          and (.verdict | IN("pass","fail","blocked","unverifiable","waived","advisory"))
+          and ((.head_match | type) == "boolean" or .head_match == "unknown")
+          and ((has("input_state") | not)
+               or .input_state == null
+               or (.input_state | IN("missing","stale","invalid","present_but_failing","present_ok")))
+        )' "$ARTIFACT_FILE" >/dev/null 2>&1; then
+    echo "bad_release_decision_input_row" >&2
+    exit 19
   fi
 fi
 

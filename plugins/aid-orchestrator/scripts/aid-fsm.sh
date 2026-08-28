@@ -7629,10 +7629,24 @@ EOF
         [[ "$_pol_rdp" == "blocking" ]] && _rdp_enforcement="blocking"
       fi
 
+      # P062 Step 8 — the content-verdict switch, read from the SAME policy file
+      # and passed to the aggregator, which reads no policy of its own. Its own
+      # key, separate from `enforcement` above, so E10's promotion step can flip
+      # the content verdict for an approved control without also flipping the
+      # release_ready dual-run toggle. Fail-safe observe on a missing key,
+      # missing file or missing yq — every "cannot tell" path leaves it OFF.
+      local _cvp="observe"
+      if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
+        local _pol_cvp
+        _pol_cvp=$(yq e '.content_verdict_policy // "observe"' "$_rdp_policy" 2>/dev/null || echo "observe")
+        [[ "$_pol_cvp" == "blocking" ]] && _cvp="blocking"
+      fi
+
       # Run the aggregator GUARDED. AID_RELEASE_POLICY_BIN = test seam (default: shipped).
       local _c4_bin _c4_out _c4_rc=0
       _c4_bin="${AID_RELEASE_POLICY_BIN:-${SCRIPT_DIR}/aid-release-policy.sh}"
-      _c4_out=$(AID_PROJECT_ROOT="$project_root" bash "$_c4_bin" "$epic_id" "$run_id" 2>&1) || _c4_rc=$?
+      _c4_out=$(AID_PROJECT_ROOT="$project_root" CONTENT_VERDICT_POLICY="$_cvp" \
+                bash "$_c4_bin" "$epic_id" "$run_id" 2>&1) || _c4_rc=$?
 
       if [[ "$_c4_rc" -ne 0 ]]; then
         # Aggregator crashed → observe only, NEVER block (could not obtain a verdict).

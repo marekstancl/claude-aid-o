@@ -219,6 +219,76 @@ if (( _dl_count > 0 )); then
   _speed_json="$(jq -c --argjson d "$_dispatches" '.dispatch_count = $d' <<<"$_speed_json")"
 fi
 
+# ── profile calibration (P062 Step 9) ───────────────────────────────────────
+#
+# WHAT THE BASELINE IS, AND WHAT IT IS NOT
+#   The comparison is against P063's measured per-gate p95, NOT against a
+#   "full suite per EPIC" run. P068 abolished that unit — a plan pays the
+#   expensive gates once at its own boundary — so measuring a saving against it
+#   would compare today's cost to a run that no longer happens.
+#
+# SCOPE IS PART OF THE RESULT
+#   This measures /aid-run only. Fast Mode invokes no AID script and emits no
+#   profile events (IMP-506), so "profiles make things faster" is a statement
+#   about ONE of the two entry points and the artifact says which.
+#
+# NULL WHEN THE BASELINE CANNOT ANSWER: gate_baseline_report_json reports
+# data_sufficient=false until it has enough non-censored samples, and a saving
+# computed from insufficient data is a guess with a decimal point.
+_profile_json='null'
+_EXEC_YAML="${AID_EXECUTION_YAML:-.aid-o/config/execution.yaml}"
+_GBR_LIB="plugins/aid-orchestrator/scripts/lib/aid-gate-runtime-baseline.sh"
+if [[ -f "$_EXEC_YAML" && -f "$_GBR_LIB" ]] && command -v yq >/dev/null 2>&1; then
+  # shellcheck disable=SC1090
+  if source "$_GBR_LIB" 2>/dev/null && declare -F gate_baseline_report_json >/dev/null 2>&1; then
+    _all_p95=0; _quick_p95=0; _known=0; _unknown=0
+    while IFS= read -r _g; do
+      [[ -n "$_g" ]] || continue
+      _rep="$(gate_baseline_report_json "$_g" 2>/dev/null || echo '{}')"
+      _suf="$(jq -r '.data_sufficient // false' <<<"$_rep" 2>/dev/null || echo false)"
+      _p95="$(jq -r '.p95_ms // "null"' <<<"$_rep" 2>/dev/null || echo null)"
+      if [[ "$_suf" != "true" || "$_p95" == "null" ]]; then _unknown=$(( _unknown + 1 )); continue; fi
+      _known=$(( _known + 1 ))
+      _all_p95=$(( _all_p95 + _p95 ))
+      if yq -r '.gate_profiles.quick.include[]?' "$_EXEC_YAML" 2>/dev/null | grep -qxF "$_g"; then
+        _quick_p95=$(( _quick_p95 + _p95 ))
+      fi
+    done < <(yq -r '.gates | keys | .[]' "$_EXEC_YAML" 2>/dev/null)
+
+    # Escalation is PROVEN by running the shared resolver, not asserted: a
+    # high-risk path must resolve above a docs-only one.
+    _esc="false"
+    if source plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh 2>/dev/null \
+       && declare -F gate_profile_resolve >/dev/null 2>&1; then
+      _lo_f="$(mktemp)"; _hi_f="$(mktemp)"
+      printf 'README.md\n' > "$_lo_f"
+      printf 'plugins/aid-orchestrator/scripts/aid-fsm.sh\n' > "$_hi_f"
+      _lo="$(gate_profile_resolve "$_lo_f" 2>/dev/null || echo "")"
+      _hi="$(gate_profile_resolve "$_hi_f" 2>/dev/null || echo "")"
+      if [[ -n "$_lo" && -n "$_hi" ]] && declare -F gate_profile_rank >/dev/null 2>&1; then
+        _lr="$(gate_profile_rank "$_lo" 2>/dev/null || echo 0)"
+        _hr="$(gate_profile_rank "$_hi" 2>/dev/null || echo 0)"
+        [[ "$_hr" =~ ^[0-9]+$ && "$_lr" =~ ^[0-9]+$ ]] && (( _hr > _lr )) && _esc="true"
+      fi
+      rm -f "$_lo_f" "$_hi_f"
+    fi
+
+    if (( _known > 0 )); then
+      _profile_json="$(jq -nc --argjson a "$_all_p95" --argjson q "$_quick_p95" \
+        --argjson esc "$_esc" --argjson unk "$_unknown" \
+        '{baseline_source: "p063",
+          savings_seconds: (($a - $q) / 1000),
+          escalation_proven: $esc,
+          scope: "aid_run_only",
+          gates_without_baseline: $unk}')"
+    else
+      _profile_json="$(jq -nc --argjson esc "$_esc" --argjson unk "$_unknown" \
+        '{baseline_source: "p063", savings_seconds: null, escalation_proven: $esc,
+          scope: "aid_run_only", gates_without_baseline: $unk}')"
+    fi
+  fi
+fi
+
 # c3_hook_fired — the roadmap precondition Step 4 owes an answer to (IMP-177
 # end-to-end). Counted from the dispatch records C3 actually leaves behind, and
 # reported as its own field rather than inferred from the verdict mix: a run
@@ -235,6 +305,7 @@ jq -n \
   --argjson p "$c3_pass" --argjson f "$c3_fail" --argjson u "$c3_unver" \
   --argjson speed "$_speed_json" \
   --argjson c3hook "$_c3_hook" \
+  --argjson profcal "$_profile_json" \
   '{schema_version: "aid-2.0",
     artifact_type: "control_metrics",
     generated_by: "aid-control-metrics.sh",
@@ -243,7 +314,8 @@ jq -n \
     controls: $controls,
     c3_verdict_mix: {pass: $p, fail: $f, unverifiable: $u},
     c3_hook_fired: $c3hook,
-    speed: $speed}' > "$OUT_FILE"
+    speed: $speed,
+    profile_calibration: $profcal}' > "$OUT_FILE"
 
 echo "aid-control-metrics: ${runs} run(s), ground_truth=${gt} → ${OUT_FILE}"
 echo "  C3 verdicts: pass=${c3_pass} fail=${c3_fail} unverifiable=${c3_unver}"

@@ -167,6 +167,34 @@ _audit() { printf '{"status":"%s","findings":[]}' "$2" > "$EV/E-900-1_1/R-1/$1";
   [ "$status" -eq 0 ]
 }
 
+@test "Step 9: the baseline source is P063, never a full-suite-per-EPIC run" {
+  # P068 abolished that unit. Measuring a saving against a run that no longer
+  # happens would be a saving against nothing.
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  pc="$(jq -r '.profile_calibration' "$TEST_TMPDIR/m.json")"
+  if [ "$pc" != "null" ]; then
+    [ "$(jq -r '.profile_calibration.baseline_source' "$TEST_TMPDIR/m.json")" = "p063" ]
+    [ "$(jq -r '.profile_calibration.scope' "$TEST_TMPDIR/m.json")" = "aid_run_only" ]
+  fi
+}
+
+@test "Step 9: the schema pins the only two honest values for source and scope" {
+  # scope is aid_run_only because Fast Mode emits no profile events (IMP-506);
+  # a calibration silently covering "both entry points" would be a claim about
+  # a path nobody measured.
+  run jq -e '.properties.profile_calibration.properties.baseline_source.enum == ["p063"]' "$SCHEMA"
+  [ "$status" -eq 0 ]
+  run jq -e '.properties.profile_calibration.properties.scope.enum == ["aid_run_only"]' "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
+@test "Step 9: a saving computed over unmeasured gates would be a guess — null instead" {
+  run jq -e '(.properties.profile_calibration.properties.savings_seconds.type | index("null")) != null' "$SCHEMA"
+  [ "$status" -eq 0 ]
+  run jq -e '.properties.profile_calibration.properties | has("gates_without_baseline")' "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
 @test "a missing evidence root is refused, not reported as a clean measurement" {
   run bash "$TOOL" --evidence-root "$TEST_TMPDIR/nope" --out "$TEST_TMPDIR/m.json"
   [ "$status" -eq 2 ]

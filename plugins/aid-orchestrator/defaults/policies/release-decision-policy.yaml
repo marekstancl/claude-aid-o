@@ -60,7 +60,23 @@
 #   observe  → stale-by-trailing-commit is reported and never blocks. (current)
 #   blocking → forbidden until IMP-201 is closed by the shared classifier.
 # =============================================================================
+# content_verdict_policy (P062 Step 8) — whether a required input that is present and
+# parseable but whose OWN CONTENT reports a failure may block the release.
+#
+#   The gap it closes: C4 verified that an artifact was there and readable and never
+#   asked what it said, so an audit report full of blocking findings satisfied
+#   "present and parseable" and the release read as ready.
+#
+#   observe  → the inputs[] row records `verdict: fail` + `input_state:
+#              present_but_failing` and NO blocker is added, so release_ready is
+#              unchanged and no in-flight run changes behaviour. (default)
+#   blocking → the row becomes `blocked` and adds a blocker. E10's promotion step
+#              flips this, and only for a control its decision table approved.
+#
+#   Its own key, not part of `enforcement` above, so the content verdict can be promoted
+#   without also flipping the release_ready dual-run toggle.
 version: 1
 enforcement: observe
 head_match_policy: observe
 evidence_pack_freshness_policy: observe
+content_verdict_policy: observe

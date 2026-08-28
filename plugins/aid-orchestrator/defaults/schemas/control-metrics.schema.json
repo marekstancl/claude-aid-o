@@ -199,7 +199,10 @@
       "additionalProperties": false
     },
     "profile_calibration": {
-      "type": "object",
+      "type": [
+        "object",
+        "null"
+      ],
       "$comment": "P062 Step 9.",
       "properties": {
         "baseline_source": {
@@ -211,7 +214,8 @@
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "$comment": "null when P063 has insufficient samples: a saving computed from insufficient data is a guess with a decimal point."
         },
         "escalation_proven": {
           "type": "boolean"
@@ -221,6 +225,11 @@
             "aid_run_only"
           ],
           "$comment": "the measurement covers /aid-run only; Fast Mode is out of scope by IMP-506 and the output says so rather than implying both entry points"
+        },
+        "gates_without_baseline": {
+          "type": "integer",
+          "minimum": 0,
+          "$comment": "how many gates P063 could not answer for. A saving computed while this is large is a saving over a partly unmeasured set, and the reader is entitled to know."
         }
       },
       "additionalProperties": false

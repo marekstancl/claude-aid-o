@@ -249,6 +249,33 @@ _plan_identity_reason() {
 # present+parseable → pass; missing/unreadable → blocked + blocker.
 # In PLAN mode a present, parseable artifact must ALSO be bound to this plan and this
 # attempt — otherwise a copied EPIC pack would satisfy the requirement.
+# _content_says_fail <id> <file> — 0 when the artifact is present and parseable
+# and its OWN CONTENT reports a failure (P062 Step 8).
+#
+# This is the gap C4 had: it verified that a required artifact was there and
+# readable, and never asked what it said. An audit report full of blocking
+# findings, or a gates report with overall=fail, satisfied "present and
+# parseable" and the release read as ready.
+#
+# The question is per artifact type, because there is no shared "did it pass"
+# field across them — asking a generic one would be inventing a contract these
+# producers never agreed to. An id this does not know returns 1 (no opinion),
+# never a guess.
+_content_says_fail() {
+  local id="$1" f="$2"
+  case "$id" in
+    audit_report)
+      [[ "$(jq -r '.blocking_findings // false' "$f" 2>/dev/null)" == "true" ]] && return 0
+      [[ "$(jq -r '.status // ""' "$f" 2>/dev/null)" == "fail" ]] && return 0 ;;
+    gates_report)
+      local ov; ov="$(jq -r '.overall // ""' "$f" 2>/dev/null)"
+      [[ -n "$ov" && "$ov" != "pass" ]] && return 0 ;;
+    semantic_review_final|delivery_gate|curator_report)
+      [[ "$(jq -r '.status // ""' "$f" 2>/dev/null)" == "fail" ]] && return 0 ;;
+  esac
+  return 1
+}
+
 check_required_present() {
   local id="$1" bid="$2" file="$3"
   if _is_json "$file"; then
@@ -260,10 +287,30 @@ check_required_present() {
         return 0
       fi
     fi
+    if _content_says_fail "$id" "$file"; then
+      # OBSERVE (default) records the truth without blocking: the row carries
+      # `fail` and `present_but_failing`, and NO blocker is added, so
+      # release_ready is unchanged and no in-flight run changes behaviour.
+      # BLOCKING is what E10's promotion step flips, and only for a control its
+      # decision table approved.
+      if [[ "${CONTENT_VERDICT_POLICY:-observe}" == "blocking" ]]; then
+        add_input "$id" "$(basename "$file")" "blocked" "present and parseable, but its content reports a failure" "$(_artifact_head_match "$file")" "present_but_failing"
+        add_blocker "$bid" "blocking" "$(basename "$file") is present but its content reports a failure"
+      else
+        add_input "$id" "$(basename "$file")" "fail" "present and parseable, but its content reports a failure (content_verdict_policy=observe, not blocking)" "$(_artifact_head_match "$file")" "present_but_failing"
+      fi
+      return 0
+    fi
     add_input "$id" "$(basename "$file")" "pass" "present and parseable" "$(_artifact_head_match "$file")" "present_ok"
+  elif [[ -f "$file" ]]; then
+    # Present but unparseable is INVALID, not missing. They were one row before,
+    # and they are different facts: one is an absent producer, the other a
+    # producer emitting garbage.
+    add_input "$id" "$(basename "$file")" "blocked" "required artifact present but not parseable JSON" false "invalid"
+    add_blocker "$bid" "blocking" "required artifact present but not parseable: $(basename "$file")"
   else
-    add_input "$id" "$(basename "$file")" "blocked" "required artifact missing or unreadable" false "missing"
-    add_blocker "$bid" "blocking" "required artifact missing or unreadable: $(basename "$file")"
+    add_input "$id" "$(basename "$file")" "blocked" "required artifact missing" false "missing"
+    add_blocker "$bid" "blocking" "required artifact missing: $(basename "$file")"
   fi
 }
 
@@ -1293,4 +1340,11 @@ main() {
   exit 0
 }
 
-main "$@"
+# Run the CLI only when EXECUTED, not when sourced (P062 Step 8). Same guard
+# aid-c0-plan-review.sh and aid-c3-dispatch.sh already use. Without it, sourcing
+# this file to reach one pure function ran the whole aggregator and exited,
+# which is why its classification logic had never been unit-tested — only
+# observed through a full evidence pack.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
