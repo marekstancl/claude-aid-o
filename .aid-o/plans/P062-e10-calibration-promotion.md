@@ -384,26 +384,43 @@ AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promo
 (D5 hard blocker). Textové „agent má použít aktuální" nestačí.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/scripts/lib/` (nový `aid-agent-freshness.sh`) — dispatch-time
-  freshness: spočítá hash relevantního `agents/<role>.md` (+ plugin cache controller hash, navazuje
-  na P060 cache-preflight) a zapíše `agent_instruction_hash` do dispatch eventu; při konzumaci
-  výstupu FSM porovná zapsaný hash s aktuálním repo hashem → mismatch = `agent_instructions_stale`
-  event. **Mechanismus ROZHODNUT (re-ground 2026-08-15, poslední průchod): varianta A** —
+> **Producent OPRAVEN (C0 nález 2026-08-15).** Krok chtěl hash „při dispatchi" a jmenoval
+> `aid-fsm.sh` — jenže ten výstupy jen KONZUMUJE. V default režimu `agent_tool` dispatchuje
+> controller přímo přes `Agent()` (`skills/pipeline.md:874`), žádný shell mezi tím není, takže
+> hash při dispatchi tam shellem zachytit NELZE. `aid-emit-dispatch.sh` existuje, ale jede jen
+> v režimu `subagent` a žádný hash instrukcí nenese.
+>
+> **Co ale JDE mechanicky a řeší skutečnou příčinu IMP-179:** ta vada nikdy nebyla „agent
+> dostal jiný soubor", byla to **zastaralá cache pluginu**. A na to už existuje
+> `lib/aid-cache-preflight.sh` (P060 Krok 5), který porovnává běžící verzi a hash stromu
+> `scripts/` proti repozitáři a tvrdě staví běh při `skew_dogfood`. **Jeho vlastní hlavička
+> říká, že `agents/`, `skills/` a `defaults/` nepokrývá a že tyhle třídy zůstávají blokerem
+> E10** — tenhle krok je tam, kde se to dopisuje.
+>
+> **Poctivý rozsah, který se NESMÍ přehnat:** dokazuje se, že cache, ze které controller běží,
+> odpovídá repozitáři v okamžiku kontroly. NEdokazuje se, co dostalo jednotlivé volání
+> `Agent()`. Ten rozdíl se napíše do výstupu, ne zamlčí.
+
+- Modify: `plugins/aid-orchestrator/scripts/lib/aid-cache-preflight.sh` — rozšířit pokrytí ze
+  samotného `scripts/` na `agents/` (a `skills/`, `defaults/`), stejným deterministickým
+  tree-hashem a stejnou trojicí stavů `ok|skew_consumer|skew_dogfood`. Žádná nová knihovna:
+  díra je pojmenovaná v hlavičce toho souboru a zavírá se tam, kde je. **Mechanismus ROZHODNUT (re-ground 2026-08-15, poslední průchod): varianta A** —
   dispatch-time hash check, detekce v režimu observe, a promotion-gate čte nenulový
   stale-count. Fork se zavírá tady, ne až při vettingu: B (povinný restart/plugin-refresh
   před blocking) sahá na hostitele, kterého AID neovládá, což zakazuje D5 vstupního
   dokumentu; C je A plus B. A je jediná varianta, kterou AID umí sám prokázat.
-- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — dispatch/konzumpce hook (kde se
-  Auditor/Curator/Verifier výstup čte) volá freshness check; stale → event, promotion-gate to počítá.
+- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — hook v místě, kde se výstup
+  Auditor/Curator/Verifier KONZUMUJE, volá rozšířený preflight; skew → `agent_instructions_stale`
+  event, promotion-gate ho počítá.
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats` — red-green:
   dispatch se stale hashem (agents/*.md změněné po dispatchi) → `agent_instructions_stale` event;
   fresh → žádný event; promotion-gate s nenulovým stale-count → blokuje blocking-promotion agent-checků.
 
 **Acceptance Criteria:**
-- [ ] Dispatch zapíše `agent_instruction_hash`; konzumpce s mismatch → `agent_instructions_stale` event (mechanický důkaz, ne text).
-- [ ] Fresh dispatch → žádný stale event.
+- [ ] Rozšířený preflight detekuje skew ve stromu `agents/` stejně tvrdě jako dnes ve `scripts/` (red-green: rozejít cache a repo → `skew_dogfood`, hard stop).
+- [ ] Shodná cache → žádný stale event (kontrola nesmí pálit naprázdno).
 - [ ] Promotion-gate: nenulový stale-count v datech → BLOKUJE promotion agent-output kontrol (Auditor/Curator/Verifier) na blocking (D5).
-- [ ] Pokrytí je poctivé: freshness kryje agents/*.md + plugin cache; NEkryje jiné vrstvy → dokumentováno (žádné over-claim).
+- [ ] Pokrytí je poctivé a NAPSANÉ ve výstupu: kryje shodu cache s repozitářem pro `scripts/`+`agents/`(+`skills/`,`defaults/`); NEdokazuje, co dostalo konkrétní volání `Agent()`. Over-claim = red.
 
 **Effort:** L
 **AID Role:** backend
@@ -469,9 +486,20 @@ unique detekci vs legacy (D1, D8 podklad). + ověří nenulový `c3_hook_fired` 
 IMP-177 end-to-end).
 
 **Files:**
+> **Jedno schéma, ne tři pravopisy (C0 nález 2026-08-15).** Krok 4, krok 10 a AC4 pojmenovávaly
+> tatáž pole třemi způsoby (`caught_classes` vs `caught`, `false_done` vs `false_positives`,
+> `cost` vs `cost_seconds`), takže krok 10 nemohl spolehlivě konzumovat krok 4 a AC mohlo projít
+> nad jiným tvarem, než tabulka potřebuje. **Kanonický tvar je níže a je závazný pro kroky 4, 5,
+> 9, 10 i pro AC4/AC5/AC9.**
+
+- Create: `plugins/aid-orchestrator/defaults/schemas/control-metrics.schema.json` — verzované
+  schéma artefaktu. Per kontrola: `control` (id), `caught_classes[]`, `false_done`,
+  `false_positives`, `cost_seconds`, `unique_detection_vs_legacy`. Plan-level: `speed{...}`
+  (pole viz krok 5), `profile_calibration{...}` (krok 9),
+  `c3_verdict_mix{pass,fail,unverifiable}`.
 - Create: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` — vstup: run-evidence dirs
-  + timeline events; výstup: `control-metrics.json` (per check: caught_classes[],
-  false_done, false_positive, unique_detection_vs_legacy). Deterministické (žádný LLM).
+  + timeline events; výstup: `control-metrics.json` **validovaný proti tomu schématu**.
+  Deterministické (žádný LLM).
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats` — red-green na
   fixture evidence: check který chytil známou vadu → caught; check který pustil → false_done; +
   `c3_hook_fired` count nenulový na fixture s live C3 runem.
@@ -603,9 +631,15 @@ klasifikovat divergence (D1). Navazuje na P059 dual-run substrát (`release_poli
 **Dependencies:** none — C4 content-verdict je samostatná změna release-policy
 
 > **Vyrábí `c4-content-verdict.json`** v run evidence: `{states_exercised: [...],
-> waived_blocks_release: bool, present_but_failing_blocks_release: bool}` — důkaz, že se
-> stavy opravdu odehrály za běhu, ne že o nich existuje test. AC8 ho čte.
-> (C0 nález 2026-08-15.)
+> waived_verdict_exercised: bool, waived_blocks_release: bool,
+> present_but_failing_blocks_release: bool}` — důkaz, že se stavy opravdu odehrály za běhu, ne
+> že o nich existuje test. AC8 ho čte.
+>
+> **Pozor na tu záměnu kategorie (C0 nález 2026-08-15):** `states_exercised` obsahuje **pět
+> `input_state` hodnot včetně `present_ok`** — a `waived` mezi nimi NENÍ, protože je to
+> verdikt, ne stav. Waiver se dokazuje odděleně přes `waived_verdict_exercised`. První verze
+> AC8 vyžadovala `waived` mezi stavy a `present_ok` vynechávala, tedy si odporovala se svým
+> vlastním krokem.
 
 **Objective:** C4 dnes umí hlavně presence/freshness. E10 přidá content-verdict: REQUIRED input
 present+valid-JSON ale OBSAHOVĚ failující → NESMÍ pustit release (D4). Navazuje na P060 Krok 8
@@ -643,6 +677,13 @@ head_match/waived semantiku.
 - Modify: `plugins/aid-orchestrator/defaults/schemas/release-decision.schema.json` — přidat
   do `inputs[]` povinné pole `input_state` s pětihodnotovým enumem. `verdict` enum se
   **nemění** (P060 poučení: neměnit enum, po kterém sahá waiver).
+- Modify: `plugins/aid-orchestrator/scripts/aid-protocol-validate.sh` **(C0 nález 2026-08-15 —
+  chybělo)** — `inputs[]` má ve schématu `additionalProperties: false`, takže nové povinné pole
+  musí projít i autoritativním validátorem; ten dnes validuje jen `release_ready` a D11 pole,
+  tvar `inputs[]` vůbec ne. Bez tohohle kroku by artefakt s chybějícím nebo poškozeným
+  `input_state` prošel tím validátorem, který má být poslední instancí. Přidat kontrolu tvaru
+  `inputs[]` (id, artifact, verdict, head_match, input_state) + protocol-v2 fixtury
+  `release_decision` valid/invalid.
 - Modify: `plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml` —
   `content_verdict_policy: observe|blocking` (default observe do promotion; E10 promotion ho flipne
   jen po kalibraci, D8).
@@ -655,6 +696,7 @@ head_match/waived semantiku.
 - [ ] `input_state` rozlišuje všechna čtyři pozorování + `present_ok`; každé má test. `waived` se testuje na `verdict`, protože to je rozhodnutí, ne pozorování.
 - [ ] Waiver na failing input → `verdict: waived` PŘI ZACHOVANÉM `input_state: present_but_failing`, blocker ZŮSTÁVÁ, release_ready se NEZmění na pass (waiver = viditelné povolení, ne přepsání).
 - [ ] `verdict` enum je bajtově nezměněný oproti výchozímu stavu (regresní test — rozšíření by rozbilo waiver mapování).
+- [ ] `aid-protocol-validate.sh` ODMÍTNE `release_decision` artefakt s chybějícím nebo mimo-enum `input_state` (negativní fixtura); platný artefakt projde. Bez toho je nové povinné pole hlídané jen schématem, které autoritativní validátor nečte.
 - [ ] `content_verdict_policy` default observe; blocking se zapne jen promotion krokem (Step 11) po kalibraci; stávající release-policy suite zelená.
 
 **Effort:** L
@@ -716,7 +758,8 @@ keep_observe / keep_dual_run / defer / remove_or_alias_in_E11_candidate /
 **Files:**
 - Create: `plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh` — vstup: control-metrics.json
   + dual-run-report.json; výstup: `e10-decision-table.json` + human `e10-decision-table.md`. Per
-  check: rozhodnutí + podklad (caught_classes, false_positives, cena_času, unique_detection) +
+  check: rozhodnutí + podklad (kanonická pole ze schématu: `caught_classes`, `false_positives`,
+  `cost_seconds`, `unique_detection_vs_legacy`) +
   `evidence_refs[]` (odkaz na artefakt, ze kterého to rozhodnutí vzniklo — bez něj se řádek
   nezapíše). Navíc plan-level pole `c3_verdict_mix {pass, fail, unverifiable}`. Řádek
   bez datového podkladu se NEZAPÍŠE (nebo `defer` s důvodem „insufficient data").
@@ -763,10 +806,25 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 > route v `aid-fsm.sh` řízená prostředím — takže potřebuje vlastní obdobnou vazbu a
 > **přes ty mapy ji promovat nejde**.
 
+> **Bez inventáře to nejde spustit (C0 nález 2026-08-15).** `controls.<control_id>` byl
+> zástupný symbol — plán nikde neřekl, jaká ID existují ani který čtenář je má číst. A
+> `aid-fsm.sh` dnes čte globální `.enforcement` na PĚTI různých místech
+> (`:5951`, `:6711`, `:6752`, `:6801`, `:7610`), každé pro jinou kontrolu. Bez mapy nelze
+> prokázat ani „jen schválené se zapnuly", ani „nezapnutý sourozenec zůstal v observe".
+
+- Create: `plugins/aid-orchestrator/defaults/policies/control-inventory.yaml` — kanonický
+  seznam ID kontrol C0-C4, a ke každému: policy soubor, **konkrétní čtenář** (soubor:funkce)
+  a jestli je promovatelná. CP3 freshness je v seznamu s `promotable: false` a důvodem
+  (žije v `_cp3_freshness_route`, ne v policy souboru) — nezpůsobilost se zapíše, nezamlčí.
 - Modify: příslušné policy soubory (`c3-audit-policy.yaml`, `release-decision-policy.yaml`,
   `delivery-gate.yaml`, `review-profiles.yaml`) — přidat `controls.<id>.enforcement` a naučit
-  jejich čtenáře brát per-control hodnotu s fallbackem na souborový default. Flip JEN pro
-  checky se `promote_to_blocking` v rozhodovací tabulce.
+  **každého z pěti čtenářů** brát per-control hodnotu s fallbackem na souborový default.
+  Flip JEN pro checky se `promote_to_blocking` v rozhodovací tabulce.
+- **Sémantika agregátu u C4 (výslovně, protože jinak per-control mapa nic neoddělí):** C4
+  blokuje na agregátu `release_ready`, takže vstup patřící NEPROMOVANÉ kontrole nesmí
+  `release_ready` shodit. Jeho `input_state` se zaznamená a `verdict` zůstane, ale do
+  agregátu nevstupuje, dokud ta kontrola není promovaná. Bez tohohle pravidla by první
+  promovaný sourozenec zablokoval release za všechny ostatní.
 - Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — CP3 freshness dostane tutéž
   per-control vazbu ve své vlastní route (`_cp3_freshness_route`), protože do policy map
   nespadá. Bez toho je CP3 nepromovatelná a tak se zapíše do tabulky.
@@ -787,6 +845,9 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 
 **Acceptance Criteria:**
 - [ ] Promotion flip observe→blocking JEN pro checky se `promote_to_blocking` v decision-table A splněnými branami §Preconditions B; ostatní zůstávají observe/dual-run (test: check bez schválení zůstane observe, **i když je ve stejném policy souboru jako promovaný sourozenec** — to je ta vazba, kterou globální přepínač neuměl).
+- [ ] `control-inventory.yaml` pokrývá každou kontrolu C0-C4 a každé ID má uvedeného konkrétního čtenáře; kontrola v rozhodovací tabulce, která v inventáři chybí, je red.
+- [ ] Test PRO KAŽDÉHO z pěti čtenářů: promovaný a nepromovaný sourozenec se chovají nezávisle.
+- [ ] Vstup nepromované kontroly NEshodí `release_ready` (test agregátu), ale jeho `input_state` je v artefaktu zapsaný.
 - [ ] Promotion je HARD-gated na preconditions: preflight dirty NEBO nenulový agent-stale-count NEBO nevyřešený IMP-201 → promotion NEproběhne (blocking-promotion na agent-checkách blokován D5).
 - [ ] Codex honesty: bez mechanického důkazu Codex dispatchi → audit report `unverifiable`/`context_only` (ne falešné „independent").
 - [ ] Legacy netknuté (D10): git diff neukazuje mazání legacy kontrol; `disabled-for-calibration` jen s PM podpisem v decision-table.
@@ -866,7 +927,7 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
 - [ ] AC4: aid-control-metrics.sh existuje + kvalitní metriky suite zelená (EPIC 2 Step 4).
   ```yaml
   type: cmd
-  cmd: "m=.aid-o/work/evidence/P062/e10/control-metrics.json; test -f \"$m\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.caught != null) and (.false_positives != null) and (.cost_seconds != null))' \"$m\" >/dev/null && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats 2>&1) || rc=$?; test $rc -eq 0"
+  cmd: "m=.aid-o/work/evidence/P062/e10/control-metrics.json; test -f \"$m\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.control != null) and (.caught_classes != null) and (.false_done != null) and (.false_positives != null) and (.cost_seconds != null) and (.unique_detection_vs_legacy != null))' \"$m\" >/dev/null || exit 1; rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC5: Speed metriky přítomné ve výstupu (EPIC 2 Step 5) — control-metrics.json má speed sekci s 6 poli.
@@ -890,7 +951,7 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
 - [ ] AC8: C4 content-verdict 5-stav + waiver-visible-not-pass suite zelená (EPIC 4 Step 8).
   ```yaml
   type: cmd
-  cmd: "c=.aid-o/work/evidence/P062/e10/c4-content-verdict.json; test -f \"$c\" || exit 1; jq -e '[.states_exercised[]] as $s | ([\"missing\",\"stale\",\"invalid\",\"present_but_failing\",\"waived\"] | all(. as $need | $s | index($need) != null)) and (.waived_blocks_release == true) and (.present_but_failing_blocks_release == true)' \"$c\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
+  cmd: "c=.aid-o/work/evidence/P062/e10/c4-content-verdict.json; test -f \"$c\" || exit 1; jq -e '[.states_exercised[]] as $s | ([\"missing\",\"stale\",\"invalid\",\"present_but_failing\",\"present_ok\"] | all(. as $need | $s | index($need) != null)) and (.waived_verdict_exercised == true) and (.waived_blocks_release == true) and (.present_but_failing_blocks_release == true)' \"$c\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC9: Gate-profile speed kalibrace + escalation suite zelená (EPIC 4 Step 9).
