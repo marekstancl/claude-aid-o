@@ -21,12 +21,12 @@ setup() {
   cp "$AID_PLUGIN_PATH"/defaults/policies/*.yaml "$POL/"
   printf '{"verdict":"clean"}'  > "$TEST_TMPDIR/pf.json"
   printf '{"decision":"fixed"}' > "$TEST_TMPDIR/i.json"
-  _table '{"control":"c1","decision":"promote_to_blocking"}'
+  _table '{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
 }
 
 teardown() { teardown_test_evidence_dir; }
 
-_table() { printf '{"controls":[%s]}' "$1" > "$TEST_TMPDIR/dt.json"; }
+_table() { printf '{"artifact_type":"e10_decision_table","controls":[%s]}' "$1" > "$TEST_TMPDIR/dt.json"; }
 _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST_TMPDIR/pf.json" \
            --imp201 "$TEST_TMPDIR/i.json" --inventory "$INV" --policy-dir "$POL" "$@"; }
 
@@ -64,7 +64,7 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
   # The whole point of Step 11. c1_delivery_gate and c2_semantic_review live in
   # different files, but review-profiles.yaml holds TWO c2 controls — promoting
   # one must not promote the other.
-  _table '{"control":"c1","decision":"promote_to_blocking"}'
+  _table '{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 0 ]
   [ "$(yq -r '.controls.c1_delivery_gate.enforcement' "$POL/delivery-gate.yaml")" = "blocking" ]
@@ -82,10 +82,51 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
 }
 
 @test "a malformed override is not an override — it neither promotes nor demotes" {
+  # The file-wide default stands, because a typo must not silently promote OR
+  # silently demote. That the FILE default can itself be `blocking` is the
+  # PRE-EXISTING behaviour of this switch, not something per-control promotion
+  # introduced: a project that sets it deliberately keeps getting it, and
+  # changing that would quietly demote controls elsewhere. What Step 11 owes is
+  # that the PROMOTION MECHANISM never sets it — see the next case.
   yq -i '.enforcement = "blocking"' "$POL/delivery-gate.yaml"
   yq -i '.controls.c1_delivery_gate.enforcement = "blokcing"' "$POL/delivery-gate.yaml"
   run bash -c 'source "$1"; aid_control_enforcement "$2" c1_delivery_gate' _ "$LIB" "$POL/delivery-gate.yaml"
   [ "$output" = "blocking" ]
+}
+
+@test "promotion NEVER writes a file-wide default — only the per-control key" {
+  # Otherwise one approval would promote every control in that file through the
+  # back door, which is the thing this step exists to make impossible.
+  _table '{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
+  before="$(yq -r '.enforcement' "$POL/delivery-gate.yaml")"
+  run _run --apply
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.enforcement' "$POL/delivery-gate.yaml")" = "$before" ]
+  [ "$(yq -r '.controls.c1_delivery_gate.enforcement' "$POL/delivery-gate.yaml")" = "blocking" ]
+}
+
+@test "a hand-authored decision table is refused — the apparatus is not a formality" {
+  printf '{"controls":[{"control":"c1","decision":"promote_to_blocking"}]}' > "$TEST_TMPDIR/dt.json"
+  run _run --apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not an e10_decision_table"* ]]
+}
+
+@test "an ambiguous control that maps to several promotable rows is refused" {
+  # Approving `c4` must not flip both the release decision and the content
+  # verdict. One approval, one control.
+  _table '{"control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
+  run _run --apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"names none of them"* ]]
+}
+
+@test "naming the inventory row promotes exactly that row" {
+  _table '{"control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"],"inventory_ids":["c4_content_verdict"]}'
+  run _run --apply
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.controls.c4_content_verdict.enforcement' "$POL/release-decision-policy.yaml")" = "blocking" ]
+  [ "$(yq -r '.controls.c4_release_decision.enforcement // "unset"' "$POL/release-decision-policy.yaml")" = "unset" ]
 }
 
 @test "every cannot-tell path resolves to observe, never to blocking" {
@@ -97,7 +138,7 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
 }
 
 @test "a control the inventory calls not-promotable is refused with its reason" {
-  _table '{"control":"c4","decision":"promote_to_blocking"}'
+  _table '{"control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"],"inventory_ids":["c4_evidence_pack_freshness"]}'
   run _run --apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"IMP-201"* ]]
@@ -113,14 +154,14 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
 }
 
 @test "a decision that is not promote_to_blocking is skipped, not quietly applied" {
-  _table '{"control":"c1","decision":"keep_observe"}'
+  _table '{"control":"c1","decision":"keep_observe","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 0 ]
   [ "$(yq -r '.controls // "none"' "$POL/delivery-gate.yaml")" = "none" ]
 }
 
 @test "a control with no inventory row is refused, never guessed at" {
-  _table '{"control":"c9","decision":"promote_to_blocking"}'
+  _table '{"control":"c9","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"no row in the control inventory"* ]]

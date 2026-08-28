@@ -44,7 +44,24 @@ done
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 2; }
 command -v yq >/dev/null 2>&1 || { echo "ERROR: yq is required" >&2; exit 2; }
 [[ -n "$TABLE" && -f "$TABLE" ]] || { echo "ERROR: --decision-table is required and must exist" >&2; exit 2; }
-jq -e '.controls' "$TABLE" >/dev/null 2>&1 || { echo "ERROR: ${TABLE} carries no .controls" >&2; exit 2; }
+# The table must be the GENERATOR'S output, not any JSON with a .controls key.
+# A hand-authored file with one promote_to_blocking row satisfied every gate
+# here (cross-model review, 2026-08-15), which turned the whole decision
+# apparatus into a formality. `.controls` must also be an ARRAY — `jq -e` is
+# true for a truthy scalar, and `.controls[]` on one aborts under set -e with an
+# implementation error rather than the documented refusal.
+if ! jq -e '(.artifact_type == "e10_decision_table")
+            and ((.controls | type) == "array")
+            and ((.controls | length) > 0)
+            and all(.controls[];
+                    ((.control | type) == "string") and ((.decision | type) == "string")
+                    and (((.reason // "") | length) > 0)
+                    and ((.evidence_refs | type) == "array"))' "$TABLE" >/dev/null 2>&1; then
+  echo "ERROR: ${TABLE} is not an e10_decision_table with well-formed control rows" >&2
+  echo "  Every row needs a string control, a string decision, a non-empty reason and an evidence_refs array." >&2
+  echo "  Generate it with aid-e10-decision-table.sh rather than by hand." >&2
+  exit 2
+fi
 
 INVENTORY="${INVENTORY:-${SCRIPT_DIR}/../defaults/policies/control-inventory.yaml}"
 POLICY_DIR="${POLICY_DIR:-${SCRIPT_DIR}/../defaults/policies}"
@@ -52,6 +69,12 @@ POLICY_DIR="${POLICY_DIR:-${SCRIPT_DIR}/../defaults/policies}"
 
 # shellcheck source=lib/aid-control-enforcement.sh
 source "${SCRIPT_DIR}/lib/aid-control-enforcement.sh"
+
+# Ids reach yq expressions by interpolation, so they are constrained to a safe
+# charset rather than trusted. The shipped inventory is fine; the advertised
+# --inventory input is not, and a quote in an id could otherwise rewrite the
+# query (cross-model review, 2026-08-15).
+_safe_id() { [[ "${1-}" =~ ^[A-Za-z0-9_.-]+$ ]]; }
 
 rc=0
 
@@ -82,8 +105,35 @@ while IFS=$'\t' read -r ctl decision; do
     refused=$(( refused + 1 )); rc=1; continue
   fi
 
+  # A decision row names a CONTROL (c0..c4); the inventory may hold SEVERAL
+  # promotable rows for it. Promoting all of them on one approval is broader
+  # than "only the approved controls were promoted" — approving c4 would flip
+  # both the release decision and the content verdict (cross-model review,
+  # 2026-08-15). When the table does not name the inventory row, an ambiguous
+  # control is REFUSED rather than resolved generously.
+  promotable_rows=()
+  for _r in "${rows[@]}"; do
+    [[ -n "$_r" ]] || continue
+    aid_control_promotable "$INVENTORY" "$_r" && promotable_rows+=("$_r")
+  done
+  named_ids=""
+  named_ids="$(jq -r --arg c "$ctl" '.controls[] | select(.control == $c) | (.inventory_ids // [])[]' "$TABLE" 2>/dev/null || true)"
+  if [[ "$decision" == "promote_to_blocking" && -z "${named_ids//[[:space:]]/}" && ${#promotable_rows[@]} -gt 1 ]]; then
+    echo "refused  ${ctl}: maps to ${#promotable_rows[@]} promotable inventory rows (${promotable_rows[*]}) and the decision names none of them" >&2
+    echo "         add \"inventory_ids\" to that decision row; one approval must not flip several controls" >&2
+    refused=$(( refused + 1 )); rc=1; continue
+  fi
+
   for id in "${rows[@]}"; do
     [[ -n "$id" ]] || continue
+    if ! _safe_id "$id"; then
+      echo "refused  <malformed id>: inventory ids must match [A-Za-z0-9_.-]+" >&2
+      refused=$(( refused + 1 )); rc=1; continue
+    fi
+    if [[ -n "${named_ids//[[:space:]]/}" ]] && ! grep -qxF "$id" <<<"$named_ids"; then
+      echo "skipped  ${id}: not named by the decision row's inventory_ids"
+      continue
+    fi
     if [[ "$decision" != "promote_to_blocking" ]]; then
       echo "skipped  ${id}: decision is '${decision}'"
       continue
@@ -108,7 +158,21 @@ while IFS=$'\t' read -r ctl decision; do
     [[ -f "$pf_path" ]] || { echo "refused  ${id}: policy file not found at ${pf_path}" >&2; refused=$(( refused + 1 )); rc=1; continue; }
 
     if (( APPLY == 1 )); then
-      yq -i ".controls.\"${id}\".enforcement = \"blocking\"" "$pf_path"
+      # Written through a temp copy and moved into place. `yq -i` edits the
+      # shipped policy directly, so a yq failure part-way through a multi-control
+      # run left earlier policies promoted and later ones not — a partial,
+      # non-transactional promotion nobody recorded (cross-model review,
+      # 2026-08-15). The result is also re-parsed before it replaces the
+      # original, so a mangled file never lands.
+      _tmp="$(mktemp)"
+      if ! cp "$pf_path" "$_tmp" \
+         || ! yq -i ".controls.\"${id}\".enforcement = \"blocking\"" "$_tmp" \
+         || ! yq -e '.' "$_tmp" >/dev/null 2>&1; then
+        rm -f "$_tmp"
+        echo "refused  ${id}: editing $(basename "$pf_path") failed; the original is untouched" >&2
+        refused=$(( refused + 1 )); rc=1; continue
+      fi
+      mv "$_tmp" "$pf_path"
       echo "promoted ${id}: ${key} -> blocking in $(basename "$pf_path")"
     else
       echo "would promote ${id}: ${key} -> blocking in $(basename "$pf_path")  [dry run]"

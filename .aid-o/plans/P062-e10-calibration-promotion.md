@@ -894,6 +894,35 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 
 ---
 
+## Jak se to spouští — pořadí a kdo je volající
+
+**Doplněno 2026-08-15 při závěrečném auditu zadrátování.** Nástroje E10 **nemají
+a nemají mít** volajícího ve FSM: E10 je kalibrační BĚH, ne fáze pipeline.
+Volajícím je operátor (nebo controller) podle tohohle pořadí. Bez téhle sekce by
+„je to zadrátované?" nešlo zodpovědět jinak než hledáním v kódu — a odpověď
+„nikdo to nevolá" by vypadala jako vada místo jako záměr.
+
+```text
+1. aid-e10-preflight.sh                 → e10-preflight.json
+   (brána: dirty i unproven zastaví běh)
+2. aid-e10-imp201-decision.sh           → imp201-decision.json
+3. aid-control-metrics.sh               → control-metrics.json
+   (nad kalibračním datasetem z kroku 6; --ground-truth manifest)
+4. aid-dual-run.sh --outcomes <měření>  → dual-run-report.json
+   (exit 1 = legacy chytil, co nový ne — D8)
+5. aid-e10-decision-table.sh            → e10-decision-table.{json,md}
+6. aid-e10-promote.sh                   → dry run; --apply až po PM rozhodnutí
+```
+
+**Dva nástroje mají volajícího ve FSM a jsou tam schválně:** rozšířený
+`lib/aid-cache-preflight.sh` (běží při každém init/resume) a per-control
+resolver `lib/aid-control-enforcement.sh` (šest čtenářů). To jsou trvalé
+mechanismy, ne kroky běhu.
+
+`merge-path-budget.json` **nevyrábí žádný z nich** — pole `measured_seconds`
+naplní krok 5 z naměřených dob, ale `decision` je tvoje. Je to jediná brána,
+kterou běh sám nevyrobí.
+
 ## Plan-level evidence — kde leží artefakty celého plánu
 
 **Zavedeno re-groundem 2026-08-15 (C0 nález, severity medium).** Kritéria dřív četla

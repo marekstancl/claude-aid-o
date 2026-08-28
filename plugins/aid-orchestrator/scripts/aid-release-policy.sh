@@ -1146,10 +1146,19 @@ main() {
   # --- release_ready + merge_mode ---
   #
   # AGGREGATE SEMANTICS FOR PER-CONTROL PROMOTION (P062 Step 11).
-  # release_ready is false when ANY blocker exists, so the obvious worry is that
-  # the first control promoted to blocking would block releases on behalf of
-  # every control sharing this artifact. It cannot, and the reason is structural
-  # rather than a filter: a control that is NOT promoted adds no blocker at all.
+  #
+  # SCOPE OF THE CLAIM, stated narrowly on purpose (cross-model review,
+  # 2026-08-15, which read the earlier wording as claiming more): this is about
+  # blockers gated by a PER-CONTROL policy. C4's baseline blockers — a required
+  # artifact missing, unparseable, or unbound to this attempt — block regardless
+  # of any promotion, exactly as they always have. They are not per-control
+  # promotions and nothing here changes them.
+  #
+  # Within that scope: release_ready is false when ANY blocker exists, so the
+  # worry is that the first control promoted to blocking would block releases on
+  # behalf of every control sharing this artifact. It cannot, and the reason is
+  # structural rather than a filter: a per-control-gated check that is NOT
+  # promoted adds no blocker at all.
   # `check_required_present` under content_verdict_policy=observe records
   # `verdict: fail` + `input_state: present_but_failing` on the row and returns
   # WITHOUT calling add_blocker, so the observation is visible and the aggregate

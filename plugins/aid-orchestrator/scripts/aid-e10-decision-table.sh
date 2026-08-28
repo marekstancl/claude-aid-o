@@ -11,6 +11,15 @@
 #
 # Exit: 0 = table written; 2 = usage/environment error.
 #
+# ONE APPROVAL, ONE CONTROL
+#   A row here names a control (c0..c4). The control inventory may hold several
+#   promotable ROWS for one control — c4 has both the release decision and the
+#   content verdict — and promoting all of them on one approval is broader than
+#   "only the approved controls were promoted" (cross-model review,
+#   2026-08-15). A row may therefore carry `inventory_ids` to name exactly which
+#   rows it approves; the promotion step REFUSES an ambiguous control that names
+#   none.
+#
 # THE SIX OUTCOMES, and why the sixth exists:
 #   promote_to_blocking | keep_observe | keep_dual_run | defer |
 #   remove_or_alias_in_E11_candidate | cannot_promote_runtime_budget
@@ -89,6 +98,7 @@ table="$(jq -n \
         | (($mix.unverifiable // 0) > (($mix.pass // 0) + ($mix.fail // 0))) as $c3_mostly_unverifiable
         | {
             control: $id,
+            inventory_ids: ($c.inventory_ids // []),
             evidence_refs: ($c.evidence_refs // []),
             caught_classes: ($c.caught_classes // []),
             false_done: $c.false_done,
