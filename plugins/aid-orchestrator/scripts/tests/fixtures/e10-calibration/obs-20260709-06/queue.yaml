@@ -1,0 +1,5 @@
+queue:
+  - epic_id: E-900-1_1
+    status: blocked
+    blocked_on: E-899-1_1
+    note: "E-899-1_1 merged long ago; this row never revalidated"
