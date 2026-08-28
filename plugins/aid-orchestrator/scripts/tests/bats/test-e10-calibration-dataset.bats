@@ -4,15 +4,18 @@
 # Provenance: P062 Step 6 (D3).
 #
 # WHAT THIS SUITE PROVES, AND WHAT IT DELIBERATELY DOES NOT
-#   It proves the dataset is HONEST: every grounded entry has a real fixture,
-#   every excluded entry says why it was excluded, every declared catcher is a
-#   control that exists, and the negative control is genuinely not a defect.
+#   It proves the manifest is well-formed and self-consistent: every grounded
+#   entry names a non-empty incident, has a real fixture directory and states
+#   both expected outcomes; every excluded entry says why; every declared
+#   catcher is a control that exists. That is SHAPE — it is not a claim that the
+#   incidents are real, which was established by the grounding pass and is
+#   recorded in each entry's source_incident.
 #
-#   It proves a CATCH for exactly one class — the one whose catcher is a tool
-#   that can be run directly. For C1/C2/C3/C4 the manifest records an
-#   expectation and the proof is the calibration run itself. A suite here that
-#   claimed "every control catches its case" would be the over-claim this plan
-#   keeps taking out.
+#   It proves a CATCH, by RUNNING the control, for exactly one class — the one
+#   whose catcher can be driven directly — together with its complement, so
+#   "it caught it" cannot be satisfied by a detector that flags everything. For
+#   C1/C2/C3/C4 the manifest records an expectation and the proof is the
+#   calibration run itself.
 
 load test-helpers.bash
 
@@ -27,10 +30,27 @@ setup() {
 
 teardown() { teardown_test_evidence_dir; }
 
-@test "the manifest is valid and every entry carries its provenance" {
+@test "the manifest is valid and every entry carries a NON-EMPTY provenance" {
+  # `has()` is satisfied by a null, and `all()` is satisfied by an empty array —
+  # so the earlier version of this case was green over a manifest that said
+  # nothing (cross-model review, 2026-08-15). Both holes are closed.
+  run jq -e '(.fixtures | length) >= 1' "$MAN"
+  [ "$status" -eq 0 ]
   run jq -e 'all(.fixtures[];
-      has("id") and has("source_incident") and has("failure_class")
-      and has("control") and has("expected_catcher") and has("grounded"))' "$MAN"
+      ((.id // "") | length) > 0
+      and ((.source_incident // "") | length) > 0
+      and ((.failure_class // "") | length) > 0
+      and (.control | IN("positive","negative"))
+      and ((.expected_catcher // "") | length) > 0
+      and (.grounded | type == "boolean"))' "$MAN"
+  [ "$status" -eq 0 ]
+}
+
+@test "every grounded fixture states BOTH expected outcomes" {
+  # Without them the dual run has nothing to confirm or contradict, and
+  # `expectation_held` would be meaningless.
+  run jq -e 'all(.fixtures[] | select(.grounded);
+      ((.expected_old // "") | length) > 0 and ((.expected_new // "") | length) > 0)' "$MAN"
   [ "$status" -eq 0 ]
 }
 
@@ -83,18 +103,37 @@ teardown() { teardown_test_evidence_dir; }
   [ "$output" = "caught_but_held" ]
 }
 
-@test "PROVEN CATCH: the preflight flags the DONE-with-pending-steps fixture" {
-  # The one class whose catcher can be driven directly. Everything else in this
-  # dataset records an expectation; this one is demonstrated.
-  run grep -q "status: pending" "$DS/obs-20260708-04/fsm-state.yaml"
-  [ "$status" -eq 0 ]
-  run grep -q "^state: DONE" "$DS/obs-20260708-04/fsm-state.yaml"
-  [ "$status" -eq 0 ]
+# _project_with <fixture-subdir> — a throwaway project whose evidence is that
+# fixture, so the REAL preflight can be run against it.
+_project_with() {
+  local fx="$1" proj="$TEST_TMPDIR/p_$fx"
+  mkdir -p "$proj/.aid-o/plans" "$proj/.aid-o/work/evidence/E-900-1_1/R-FIX-1"
+  : > "$proj/.aid-o/plans/P900-fixture.md"
+  cp "$DS/$fx/fsm-state.yaml" "$proj/.aid-o/work/evidence/E-900-1_1/R-FIX-1/fsm-state.yaml"
+  git -C "$proj" init -q 2>/dev/null || true
+  git -C "$proj" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null || true
+  printf '%s' "$proj"
 }
 
-@test "PROVEN NON-CATCH: the negative control has no pending step to flag" {
-  run grep -c "status: pending" "$DS/negative-ordinary/fsm-state.yaml"
-  [ "$output" = "0" ]
+@test "PROVEN CATCH: the real preflight flags the DONE-with-pending-steps fixture" {
+  # This case USED to grep the fixture it had itself written, which proved the
+  # fixture contained two strings and nothing about the control (cross-model
+  # review, 2026-08-15). It now runs aid-e10-preflight.sh over a project whose
+  # evidence IS the fixture, and reads the verdict.
+  proj="$(_project_with obs-20260708-04)"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-e10-preflight.sh" \
+    --project-root "$proj" --out "$proj/pf.json"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.checked[] | select(.class=="steps_pending_at_done") | .status' "$proj/pf.json")" = "dirty" ]
+}
+
+@test "PROVEN NON-CATCH: the same preflight leaves the negative control alone" {
+  # Without this the case above is satisfied by a preflight that flags
+  # everything, which is not a detector.
+  proj="$(_project_with negative-ordinary)"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-e10-preflight.sh" \
+    --project-root "$proj" --out "$proj/pf.json"
+  [ "$(jq -r '.checked[] | select(.class=="steps_pending_at_done") | .status' "$proj/pf.json")" = "clean" ]
 }
 
 @test "the three exclusions are the ones grounding actually rejected" {

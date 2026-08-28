@@ -16,8 +16,16 @@ dataset of nothing but defects is satisfied by a control stack that blocks
 unconditionally.
 
 **What this directory does NOT prove.** Only the classes whose catcher is a
-tool that can be run directly — today `e10_preflight` — are proven caught here.
-For C1, C2, C3 and C4 the manifest records the EXPECTATION; the proof is the
-calibration run itself (Steps 4 and 7 over this dataset). Reading a green suite
-here as "every control catches its case" would be exactly the over-claim this
-plan keeps removing.
+tool that can be run directly — today `e10_preflight` — are proven caught here,
+and "proven" means the suite RUNS that control against the fixture and reads its
+verdict, together with the negative control, so a detector that flagged
+everything would fail. For C1, C2, C3 and C4 the manifest records the
+EXPECTATION; the proof is the calibration run itself (Steps 4 and 7 over this
+dataset). Reading a green suite here as "every control catches its case" would
+be exactly the over-claim this plan keeps removing.
+
+The suite also checks the manifest's SHAPE — non-empty provenance, both expected
+outcomes present, a catcher that exists, exclusions with reasons. That is not a
+claim that the incidents are real; their reality was established by the
+grounding pass and each entry carries its `source_incident` so it can be
+re-checked.

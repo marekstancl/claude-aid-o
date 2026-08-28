@@ -32,17 +32,51 @@
           "description": "Every evidence input that contributed to the decision.",
           "items": {
             "type": "object",
-            "required": ["id", "artifact", "verdict", "reason", "head_match"],
+            "required": [
+              "id",
+              "artifact",
+              "verdict",
+              "reason",
+              "head_match"
+            ],
             "properties": {
-              "id": { "type": "string" },
-              "artifact": { "type": "string" },
-              "verdict": {
-                "enum": ["pass", "fail", "blocked", "unverifiable", "waived", "advisory"]
+              "id": {
+                "type": "string"
               },
-              "reason": { "type": "string" },
+              "artifact": {
+                "type": "string"
+              },
+              "verdict": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "blocked",
+                  "unverifiable",
+                  "waived",
+                  "advisory"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
               "head_match": {
-                "enum": [true, false, "unknown"],
+                "enum": [
+                  true,
+                  false,
+                  "unknown"
+                ],
                 "$comment": "E-060-2_2 Step 8 — at-HEAD basis is per-input (plan_review=ancestry, gates_report=direct compare, markdown=Head: provenance). An UNCOMPUTABLE basis is the JSON string \"unknown\" (NEVER a silent true); \"unknown\" never counts as at-head; only false blocks."
+              },
+              "input_state": {
+                "enum": [
+                  "missing",
+                  "stale",
+                  "invalid",
+                  "present_but_failing",
+                  "present_ok",
+                  null
+                ],
+                "$comment": "P062 Step 8. The OBSERVED condition of the artifact, separate from `verdict`, which is the DECISION about it. They are two axes: a `waived` row still has an observed condition, and `waived` is a decision rather than a state, so listing it among the states was a category error the plan carried from the start (cross-model adjudication 2026-08-15). Keeping them apart is also what preserves the waiver mechanism, which maps a waiver onto a row and flips `blocked` -> `waived`; extending the verdict enum instead would have stopped that match. NULL is permitted and means 'this call site has not been classified yet' — there are 27 of them and guessing a state from a reason string would put a confident wrong value on rows nobody has examined."
               }
             },
             "additionalProperties": false
@@ -53,7 +87,11 @@
           "description": "Inputs that block release, keyed by canonical input_id.",
           "items": {
             "type": "object",
-            "required": ["input_id", "severity", "reason"],
+            "required": [
+              "input_id",
+              "severity",
+              "reason"
+            ],
             "properties": {
               "input_id": {
                 "$comment": "P068 E-068-1_2 Step 4 — CLOSED oneOf, not a widened enum. A finite enum cannot express `epic_rollup:<epic_id>` for arbitrary future EPIC IDs, so the second branch is a pattern rather than more members. It stays closed in both directions: a typo in a canonical id still fails (branch 1), and a malformed EPIC id in a roll-up blocker still fails (branch 2). `delivery_report` joins branch 1 because plan mode's Reporter input is the run-scoped delivery-report.json.",
@@ -81,8 +119,12 @@
                   }
                 ]
               },
-              "severity": { "type": "string" },
-              "reason": { "type": "string" }
+              "severity": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -90,22 +132,47 @@
         "waivers_applied": {
           "type": "array",
           "description": "References to waiver artifacts applied to this decision.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "profile_hash_freshness": {
-          "enum": ["evaluated", "not_evaluated", "mismatch"]
+          "enum": [
+            "evaluated",
+            "not_evaluated",
+            "mismatch"
+          ]
         },
         "waiver_findings": {
           "type": "array",
           "description": "E-060-2_2 Step 8 — per-waiver disposition. A waiver NEVER unblocks (release_ready calc unchanged, D11 *_status unchanged); it maps a waiver file to a canonical input_id and, if that input is blocked, flips ONLY that inputs[] row blocked→waived while the blocker line stays. A waiver with no canonical mapping, or mapping to a non-blocked input, is an orphan_waiver.",
           "items": {
             "type": "object",
-            "required": ["waiver", "mapped_input", "finding", "reason"],
+            "required": [
+              "waiver",
+              "mapped_input",
+              "finding",
+              "reason"
+            ],
             "properties": {
-              "waiver": { "type": "string" },
-              "mapped_input": { "type": ["string", "null"] },
-              "finding": { "enum": ["applied", "orphan_waiver"] },
-              "reason": { "type": "string" }
+              "waiver": {
+                "type": "string"
+              },
+              "mapped_input": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "finding": {
+                "enum": [
+                  "applied",
+                  "orphan_waiver"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -115,13 +182,23 @@
           "description": "OPTIONAL — C4 dual-run comparison against the legacy path. Present but NOT required; enforcement is FSM-patched in a later step.",
           "$comment": "reference — not validated by aid-protocol-validate.sh in this phase",
           "properties": {
-            "legacy_verdict": { "type": "string" },
-            "match": { "type": "boolean" },
-            "divergence_class": { "type": "string" }
+            "legacy_verdict": {
+              "type": "string"
+            },
+            "match": {
+              "type": "boolean"
+            },
+            "divergence_class": {
+              "type": "string"
+            }
           }
         },
         "merge_mode": {
-          "enum": ["manual", "auto", "blocked"],
+          "enum": [
+            "manual",
+            "auto",
+            "blocked"
+          ],
           "$comment": "enforced (exit 16) — D11"
         },
         "pm_brief_required": {
@@ -129,7 +206,12 @@
           "$comment": "enforced (exit 16) — D11"
         },
         "pm_brief_status": {
-          "enum": ["pending", "generated", "failed", "incomplete"],
+          "enum": [
+            "pending",
+            "generated",
+            "failed",
+            "incomplete"
+          ],
           "$comment": "enforced (exit 16) — D11"
         },
         "evidence_verified_at_head": {
@@ -137,11 +219,21 @@
           "$comment": "enforced (exit 16) — D11"
         },
         "evidence_verification_status": {
-          "enum": ["pass", "fail", "unverifiable"],
+          "enum": [
+            "pass",
+            "fail",
+            "unverifiable"
+          ],
           "$comment": "enforced (exit 16) — D11"
         },
         "reporter_status": {
-          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
+          "enum": [
+            "pass",
+            "fail",
+            "missing",
+            "not_applicable",
+            "disabled"
+          ],
           "$comment": "enforced (exit 16) — D11"
         },
         "reporter_reason": {
@@ -150,7 +242,13 @@
           "$comment": "enforced (exit 16) — D11 non-empty string"
         },
         "simplifier_status": {
-          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
+          "enum": [
+            "pass",
+            "fail",
+            "missing",
+            "not_applicable",
+            "disabled"
+          ],
           "$comment": "enforced (exit 16) — D11"
         },
         "simplifier_reason": {
@@ -159,7 +257,10 @@
           "$comment": "enforced (exit 16) — D11 non-empty string"
         },
         "delivered_summary_ref": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "$comment": "enforced (exit 16) — D11 required-but-nullable: key must be present, value may be null"
         },
         "summary_for_pm": {
@@ -172,17 +273,45 @@
           "description": "PLAN mode only (P068 Step 4) — absent for every EPIC-mode decision. The substrate aid-pm-brief.sh renders the plan-level PM summary from, so the renderer still reads exactly ONE file (the D6/D9 cycle-break). reviewed_candidate_sha, approved_target_sha, final_merge_sha and release_tag_status are four DISTINCT fields so a PM summary can never imply an intermediate EPIC was released; final_merge_sha is null until the plan is merged to the target branch.",
           "$comment": "reference — not validated by aid-protocol-validate.sh",
           "properties": {
-            "plan_id": { "type": "string" },
-            "plan_final_run_id": { "type": "string" },
-            "reviewed_candidate_sha": { "type": "string" },
-            "approved_target_sha": { "type": "string" },
-            "target_ref": { "type": "string" },
-            "final_merge_sha": { "type": ["string", "null"] },
-            "release_tag_status": { "type": "string" },
-            "epics": { "type": "array" },
-            "plan_final_gates": { "type": "object" },
-            "specialist_review": { "type": ["object", "null"] },
-            "remaining_backlog": { "type": "array" }
+            "plan_id": {
+              "type": "string"
+            },
+            "plan_final_run_id": {
+              "type": "string"
+            },
+            "reviewed_candidate_sha": {
+              "type": "string"
+            },
+            "approved_target_sha": {
+              "type": "string"
+            },
+            "target_ref": {
+              "type": "string"
+            },
+            "final_merge_sha": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "release_tag_status": {
+              "type": "string"
+            },
+            "epics": {
+              "type": "array"
+            },
+            "plan_final_gates": {
+              "type": "object"
+            },
+            "specialist_review": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "remaining_backlog": {
+              "type": "array"
+            }
           }
         }
       },
@@ -207,5 +336,7 @@
       ]
     }
   },
-  "required": ["release_decision"]
+  "required": [
+    "release_decision"
+  ]
 }

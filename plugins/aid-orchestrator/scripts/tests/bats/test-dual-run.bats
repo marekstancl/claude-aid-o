@@ -90,6 +90,50 @@ _outcomes() { printf '%s' "$1" > "$TEST_TMPDIR/o.json"; echo "$TEST_TMPDIR/o.jso
   [ "$(jq -r '[.pairs[] | select(.fixture == "e-044-original")] | length' "$OUT")" -eq 0 ]
 }
 
+@test "verification_only can no longer swallow a measured legacy-only catch" {
+  # It used to be tested BEFORE the unique-catch classes, so a verification-only
+  # fixture measured old=caught / new=not_caught was filtered away as noise and
+  # exited 0 — the noise filter suppressing the exact finding this harness
+  # exists for (cross-model review, 2026-08-15).
+  o="$(_outcomes '{"obs-20260709-06-queue-active-stale":{"old":"caught","new":"not_caught"}}')"
+  run bash "$TOOL" --manifest "$MAN" --outcomes "$o" --out "$OUT"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.status' "$OUT")" = "legacy_unique_catch_found" ]
+}
+
+@test "two different actions are both_acted, not a confident strictness verdict" {
+  # caught and blocked are different actions with no declared severity between
+  # them; calling either one "stricter" invents an ordering.
+  o="$(_outcomes '{"e-047-1-original":{"old":"caught","new":"blocked"}}')"
+  run bash "$TOOL" --manifest "$MAN" --outcomes "$o" --out "$OUT"
+  [ "$(jq -r '.pairs[] | select(.fixture=="e-047-1-original") | .divergence' "$OUT")" = "both_acted" ]
+}
+
+@test "a word outside the outcome vocabulary is refused, not classified" {
+  # It used to fall through to legacy_stricter, so a typo could hide a
+  # legacy-only catch behind a plausible-looking class.
+  o="$(_outcomes '{"e-047-1-original":{"old":"caught","new":"garbage"}}')"
+  run bash "$TOOL" --manifest "$MAN" --outcomes "$o" --out "$OUT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"vocabulary"* ]]
+}
+
+@test "a one-sided measurement is refused rather than called unmeasured" {
+  # Epistemically `unmeasured` is right, but a caller would then see no
+  # legacy_unique_catch and proceed on a comparison that never happened on one
+  # side.
+  o="$(_outcomes '{"e-047-1-original":{"old":"caught","new":null}}')"
+  run bash "$TOOL" --manifest "$MAN" --outcomes "$o" --out "$OUT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"only ONE stack"* ]]
+}
+
+@test "the report carries a machine-readable status beside the exit code" {
+  # A caller under set -e cannot tell exit 1 from an ordinary command failure.
+  run bash "$TOOL" --manifest "$MAN" --out "$OUT"
+  [ "$(jq -r '.status' "$OUT")" = "ok" ]
+}
+
 @test "a manifest with no fixtures key is refused" {
   printf '{"something":"else"}' > "$TEST_TMPDIR/bad.json"
   run bash "$TOOL" --manifest "$TEST_TMPDIR/bad.json" --out "$OUT"

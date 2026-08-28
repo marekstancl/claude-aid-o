@@ -108,12 +108,33 @@ SIMPLIFIER_ARTIFACT="simplifier-report.md"
 # already echo the JSON-encoded form (true | false | "unknown").
 # jq -n (null input) — the row is built purely from --arg/--argjson; without -n jq would
 # block reading stdin.
+# input_state (6th arg, OPTIONAL) — P062 Step 8. The OBSERVED condition of the
+# artifact, held apart from `verdict`, which is the DECISION about it:
+#
+#     input_state ∈ missing | stale | invalid | present_but_failing | present_ok
+#     verdict     ∈ pass | fail | blocked | unverifiable | waived | advisory
+#
+# The two are separate because `waived` is a decision, not a state (cross-model
+# adjudication, 2026-08-15) — a waived row still HAS an observed condition, and
+# folding them into one field is what made the five states unrepresentable. It
+# also keeps the waiver mechanism working: that maps a waiver onto a row and
+# flips `blocked` → `waived`, so extending the verdict enum with
+# present_but_failing would have stopped the waiver matching.
+#
+# OPTIONAL, and omitted means NULL — "this call site has not been classified" —
+# never a guessed value. There are 27 call sites; defaulting them by pattern-
+# matching their reason strings would put a confident wrong state on rows
+# nobody has looked at. The sites that decide content failure pass it
+# explicitly; the rest say null and a test holds the line on which are which.
 add_input() {
+  local _state_json='null'
+  [[ $# -ge 6 && -n "${6:-}" ]] && _state_json="$(jq -Rn --arg s "$6" '$s')"
   INPUTS_JSON="$(jq -cn \
     --argjson arr "$INPUTS_JSON" \
     --arg id "$1" --arg artifact "$2" --arg verdict "$3" --arg reason "$4" \
     --argjson head_match "$5" \
-    '$arr + [{id:$id, artifact:$artifact, verdict:$verdict, reason:$reason, head_match:$head_match}]')"
+    --argjson input_state "$_state_json" \
+    '$arr + [{id:$id, artifact:$artifact, verdict:$verdict, reason:$reason, head_match:$head_match, input_state:$input_state}]')"
 }
 
 # add_blocker <input_id(canonical)> <severity> <reason>
@@ -234,14 +255,14 @@ check_required_present() {
     if [[ "${MODE:-epic}" == "plan" ]]; then
       local ireason; ireason="$(_plan_identity_reason "$file")"
       if [[ -n "$ireason" ]]; then
-        add_input "$id" "$(basename "$file")" "blocked" "present but not bound to this plan-final attempt: ${ireason}" false
+        add_input "$id" "$(basename "$file")" "blocked" "present but not bound to this plan-final attempt: ${ireason}" false "stale"
         add_blocker "$bid" "blocking" "$(basename "$file") is not bound to this plan-final attempt: ${ireason}"
         return 0
       fi
     fi
-    add_input "$id" "$(basename "$file")" "pass" "present and parseable" "$(_artifact_head_match "$file")"
+    add_input "$id" "$(basename "$file")" "pass" "present and parseable" "$(_artifact_head_match "$file")" "present_ok"
   else
-    add_input "$id" "$(basename "$file")" "blocked" "required artifact missing or unreadable" false
+    add_input "$id" "$(basename "$file")" "blocked" "required artifact missing or unreadable" false "missing"
     add_blocker "$bid" "blocking" "required artifact missing or unreadable: $(basename "$file")"
   fi
 }
@@ -338,7 +359,7 @@ process_profile_gated() {
   if _is_json "$file"; then
     add_input "$id" "$(basename "$file")" "pass" "present" "$(_artifact_head_match "$file")"
   elif [[ "$C3_ACTIVE" == "true" ]]; then
-    add_input "$id" "$(basename "$file")" "blocked" "required when C3 audit gate active; missing" false
+    add_input "$id" "$(basename "$file")" "blocked" "required when C3 audit gate active; missing" false "missing"
     add_blocker "$id" "blocking" "$(basename "$file") required (C3 audit gate active) but missing"
   else
     add_input "$id" "$(basename "$file")" "advisory" "not required (C3 audit gate inactive); absent" true
