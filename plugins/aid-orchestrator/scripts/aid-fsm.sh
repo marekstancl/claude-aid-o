@@ -63,6 +63,11 @@ source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
 # cmd_advance_to_gates (auto-resolve, this EPIC's Step 2 / "Step 8") and the
 # GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
 source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
+# P062 Step 11 — ONE per-control enforcement resolver for all five readers
+# below. Five private copies is how two of them end up disagreeing in the
+# blocking direction (the P084 incident).
+# shellcheck source=lib/aid-control-enforcement.sh
+source "${SCRIPT_DIR}/lib/aid-control-enforcement.sh"
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"  # IMP-232 v2.58.0 — canonical plan-level closure + D1 cross-plan gate
 # P064 E-064-1_2 Step 5 — plan-boundary-manifest reader (plan_manifest_path/
 # plan_manifest_get), for the new init-time plan-branch lineage precondition
@@ -5963,7 +5968,7 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   if [[ -n "${SEMANTIC_REVIEW_POLICY:-}" ]]; then
     _semantic_enforcement="${SEMANTIC_REVIEW_POLICY}"
   elif [[ -f "$_policy_file" ]] && command -v yq >/dev/null 2>&1; then
-    _semantic_enforcement=$(yq -r '.enforcement // "observe"' "$_policy_file" 2>/dev/null || echo "observe")
+    _semantic_enforcement=$(aid_control_enforcement "$_policy_file" "c2_semantic_review")
   fi
 
   # Count how many C2 modes have been dispatched (dispatch_observed)
@@ -6723,7 +6728,7 @@ cmd_done_advance() {
       _dg07_enforcement="observe"   # fail-safe default
       if [[ -f "$_dg07_policy" ]] && command -v yq >/dev/null 2>&1; then
         local _pol_enforcement
-        _pol_enforcement=$(yq e '.enforcement // "observe"' "$_dg07_policy" 2>/dev/null || echo "observe")
+        _pol_enforcement=$(aid_control_enforcement "$_dg07_policy" "c1_delivery_gate")
         [[ "$_pol_enforcement" == "blocking" ]] && _dg07_enforcement="blocking"
       fi
 
@@ -6764,7 +6769,7 @@ cmd_done_advance() {
       _rp_enforcement="observe"
       if [[ -f "$_rp_policy" ]] && command -v yq >/dev/null 2>&1; then
         local _pol_rp_enforcement
-        _pol_rp_enforcement=$(yq e '.enforcement // "observe"' "$_rp_policy" 2>/dev/null || echo "observe")
+        _pol_rp_enforcement=$(aid_control_enforcement "$_rp_policy" "c2_review_profile")
         [[ "$_pol_rp_enforcement" == "blocking" ]] && _rp_enforcement="blocking"
       fi
 
@@ -6813,7 +6818,7 @@ cmd_done_advance() {
       local _c3_timeline="${evidence_dir}/timeline.jsonl"
       if [[ -f "$c3_enforce_policy" ]] && command -v yq >/dev/null 2>&1; then
         local _pol_c3_enf
-        _pol_c3_enf=$(yq e '.enforcement // "observe"' "$c3_enforce_policy" 2>/dev/null || echo "observe")
+        _pol_c3_enf=$(aid_control_enforcement "$c3_enforce_policy" "c3_audit")
         [[ "$_pol_c3_enf" == "blocking" ]] && c3_enforcement="blocking"
       fi
 
@@ -7625,7 +7630,7 @@ EOF
       _rdp_policy="${RELEASE_DECISION_POLICY:-${SCRIPT_DIR}/../defaults/policies/release-decision-policy.yaml}"
       if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
         local _pol_rdp
-        _pol_rdp=$(yq e '.enforcement // "observe"' "$_rdp_policy" 2>/dev/null || echo "observe")
+        _pol_rdp=$(aid_control_enforcement "$_rdp_policy" "c4_release_decision")
         [[ "$_pol_rdp" == "blocking" ]] && _rdp_enforcement="blocking"
       fi
 
@@ -7638,7 +7643,7 @@ EOF
       local _cvp="observe"
       if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
         local _pol_cvp
-        _pol_cvp=$(yq e '.content_verdict_policy // "observe"' "$_rdp_policy" 2>/dev/null || echo "observe")
+        _pol_cvp=$(aid_control_enforcement "$_rdp_policy" "c4_content_verdict" "content_verdict_policy")
         [[ "$_pol_cvp" == "blocking" ]] && _cvp="blocking"
       fi
 

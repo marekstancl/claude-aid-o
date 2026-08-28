@@ -1144,6 +1144,24 @@ main() {
   fi
 
   # --- release_ready + merge_mode ---
+  #
+  # AGGREGATE SEMANTICS FOR PER-CONTROL PROMOTION (P062 Step 11).
+  # release_ready is false when ANY blocker exists, so the obvious worry is that
+  # the first control promoted to blocking would block releases on behalf of
+  # every control sharing this artifact. It cannot, and the reason is structural
+  # rather than a filter: a control that is NOT promoted adds no blocker at all.
+  # `check_required_present` under content_verdict_policy=observe records
+  # `verdict: fail` + `input_state: present_but_failing` on the row and returns
+  # WITHOUT calling add_blocker, so the observation is visible and the aggregate
+  # is untouched.
+  #
+  # Deliberately NOT built: a blocker-tagging-and-filtering layer. Every blocker
+  # here is either C4's own baseline behaviour — a required artifact missing,
+  # which has always blocked — or one whose control is promoted. There is no
+  # third case for a filter to catch, and machinery for a case that cannot arise
+  # is the kind of thing this plan keeps removing. If a future control adds a
+  # blocker while unpromoted, THAT is the change that needs the tag, and the
+  # test named below is what will fail.
   local blocker_count release_ready=false merge_mode
   blocker_count="$(jq 'length' <<<"$BLOCKERS_JSON")"
   if [[ "$blocker_count" -eq 0 && "$evidence_verified_at_head" == "true" ]]; then

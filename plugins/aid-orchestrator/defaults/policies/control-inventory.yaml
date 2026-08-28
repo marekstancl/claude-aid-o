@@ -1,0 +1,84 @@
+# control-inventory.yaml — the canonical list of C0-C4 controls (P062 Step 11).
+#
+# WHY IT EXISTS
+#   Step 11 promised to promote individual controls from observe to blocking,
+#   but `controls.<control_id>` was a placeholder: the plan never said which ids
+#   exist, and aid-fsm.sh reads a GLOBAL `.enforcement` at five separate sites,
+#   one per control. Without this table "only the approved controls were
+#   promoted" cannot be stated, let alone proven (C0 finding, 2026-08-15).
+#
+# EVERY ROW NAMES ITS READER, not just its policy file. A control whose reader
+# is not named cannot be promoted independently of its siblings, and saying so
+# here is the difference between a plan and a wish.
+#
+# `promotable: false` is a first-class answer, with a reason. A control that
+# cannot be promoted is recorded as such rather than left out — an absent row
+# would read as "no such control" instead of "this one is out of reach".
+version: 1
+controls:
+  - id: c0_contract
+    control: c0
+    policy_file: defaults/policies/c0-contract.yaml
+    reader: "scripts/aid-auto-pipeline.sh:_c0_policy (C0 contract gate; C0_CONTRACT_POLICY env still overrides)"
+    promotable: true
+
+  - id: c1_delivery_gate
+    control: c1
+    policy_file: defaults/policies/delivery-gate.yaml
+    reader: "scripts/aid-fsm.sh:_dg07_enforcement (done-advance DG-07 hook)"
+    promotable: true
+
+  - id: c2_semantic_review
+    control: c2
+    policy_file: defaults/policies/review-profiles.yaml
+    reader: "scripts/aid-fsm.sh:_semantic_enforcement"
+    promotable: true
+
+  - id: c2_review_profile
+    control: c2
+    policy_file: defaults/policies/review-profiles.yaml
+    reader: "scripts/aid-fsm.sh:_rp_enforcement (review_profile missing_lenses hook)"
+    promotable: true
+
+  - id: c3_audit
+    control: c3
+    policy_file: defaults/policies/c3-audit-policy.yaml
+    reader: "scripts/aid-fsm.sh:_pol_c3_enf"
+    promotable: true
+
+  - id: c4_release_decision
+    control: c4
+    policy_file: defaults/policies/release-decision-policy.yaml
+    reader: "scripts/aid-fsm.sh:_rdp_enforcement (release_policy_dual_run hook)"
+    promotable: true
+
+  - id: c4_content_verdict
+    control: c4
+    policy_file: defaults/policies/release-decision-policy.yaml
+    policy_key: content_verdict_policy
+    reader: "scripts/aid-fsm.sh:_cvp -> aid-release-policy.sh:check_required_present"
+    promotable: true
+
+  - id: c4_evidence_pack_freshness
+    control: c4
+    policy_file: defaults/policies/release-decision-policy.yaml
+    policy_key: evidence_pack_freshness_policy
+    reader: "scripts/aid-release-policy.sh:_artifact_head_match"
+    promotable: false
+    not_promotable_reason: >-
+      IMP-201 is on observe-hold by P062 Step 3's adjudication. Closing it means
+      extracting the D4 freshness classifier into a shared function and calling
+      it from a blocking precondition inside aid-fsm.sh, which is the kind of
+      gap that should prevent a promotion rather than travel inside one.
+
+  - id: cp3_freshness
+    control: c3
+    policy_file: null
+    reader: "scripts/aid-fsm.sh:_cp3_freshness_route (CP3_FRESHNESS_POLICY env)"
+    promotable: false
+    not_promotable_reason: >-
+      It is not in any policy file — it is a route in aid-fsm.sh driven by an
+      environment value — so the per-control maps cannot reach it. Named here
+      rather than omitted, because an absent row would read as "no such
+      control". Promoting it needs its own binding first; that cost was stated
+      when the per-control design was chosen.

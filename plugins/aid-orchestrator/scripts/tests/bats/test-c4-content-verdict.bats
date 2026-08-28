@@ -157,6 +157,26 @@ _run_check() {
   [ "$status" -eq 19 ]
 }
 
+@test "AGGREGATE: an unpromoted control cannot pull release_ready down" {
+  # The rule per-control promotion stands or falls on. It holds by
+  # construction — an unpromoted control adds no blocker — so this asserts the
+  # construction rather than a filter: under observe the row is visibly failing
+  # AND the blocker list is empty, which is what leaves the aggregate alone.
+  printf '{"overall":"fail"}' > "$TEST_TMPDIR/gates_report.json"
+  out="$(_run_check gates_report "$TEST_TMPDIR/gates_report.json" observe)"
+  inputs="${out%%$'\t'*}"; blockers="${out##*$'\t'}"
+  [ "$(jq -r '.[0].input_state' <<<"$inputs")" = "present_but_failing" ]
+  [ "$(jq -r 'length' <<<"$blockers")" -eq 0 ]
+}
+
+@test "AGGREGATE: a promoted control DOES contribute its blocker" {
+  # The complement. Without it the case above is satisfied by a control that
+  # never blocks at all, which is not a promotion mechanism.
+  printf '{"overall":"fail"}' > "$TEST_TMPDIR/gates_report.json"
+  out="$(_run_check gates_report "$TEST_TMPDIR/gates_report.json" blocking)"
+  [ "$(jq -r 'length' <<<"${out##*$'\t'}")" -eq 1 ]
+}
+
 @test "the shipped policy defaults content_verdict_policy to observe" {
   run yq -r '.content_verdict_policy' "$AID_PLUGIN_PATH/defaults/policies/release-decision-policy.yaml"
   [ "$output" = "observe" ]

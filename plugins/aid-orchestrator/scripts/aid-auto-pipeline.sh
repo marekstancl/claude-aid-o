@@ -1870,8 +1870,19 @@ for phase in $(seq 1 "$total_phases"); do
     if [[ -n "${C0_CONTRACT_POLICY:-}" ]]; then
       _c0_policy="$C0_CONTRACT_POLICY"
     elif [[ -f "$_c0_policy_file" ]] && command -v yq &>/dev/null; then
-      _c0_policy_val="$(yq '.enforcement // "observe"' "$_c0_policy_file" 2>/dev/null)"
-      [[ -n "$_c0_policy_val" && "$_c0_policy_val" != "null" ]] && _c0_policy="$_c0_policy_val"
+      # P062 Step 11 — the sixth reader, through the shared per-control
+      # resolver. The C0_CONTRACT_POLICY env override above still wins, so the
+      # existing test/CI seam is untouched.
+      if [[ -f "${SCRIPT_DIR}/lib/aid-control-enforcement.sh" ]]; then
+        # shellcheck source=lib/aid-control-enforcement.sh
+        source "${SCRIPT_DIR}/lib/aid-control-enforcement.sh"
+      fi
+      if declare -F aid_control_enforcement >/dev/null 2>&1; then
+        _c0_policy="$(aid_control_enforcement "$_c0_policy_file" "c0_contract")"
+      else
+        _c0_policy_val="$(yq '.enforcement // "observe"' "$_c0_policy_file" 2>/dev/null)"
+        [[ -n "$_c0_policy_val" && "$_c0_policy_val" != "null" ]] && _c0_policy="$_c0_policy_val"
+      fi
     fi
 
     # Run C0 contract producer
