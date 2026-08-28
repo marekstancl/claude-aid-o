@@ -10,14 +10,27 @@ design_ref: docs/AID-control-system-v2-unified-refactor-PLAN.md (master §10 E10
 brief_ref: .aid-o/work/interim-P062.md (PM 11-bodový scope-extension brief, 2026-07-12)
 depends_on: "TVRDÉ preconditions (§Preconditions, přepsané re-groundem 2026-08-14). P061 je UZAVŘENÝ (2026-08-14, E1-E5 dodané mimo D5, které je odloženo jako IMP-506) — tím padá původní zámek. Zbývající tvrdé podmínky jsou IMP-179, IMP-201 a rozpočet merge cesty; viz §Re-grounding."
 risk: high
-write_only_until: "SPLNĚNO 2026-08-14 pro P061. Plán zůstává nespuštěný do PM revize re-groundu; zámek už ale nedrží P061, nýbrž tři podmínky vyjmenované v §Re-grounding."
+write_only_until: "ZRUŠENO 2026-08-15. P061 padl 2026-08-14; poslední brána startu je PM revize re-groundu + lint/CP1/nezávislé ověření (§Preconditions A). IMP-179, IMP-201 a bookkeeping NEJSOU brány startu — vyrábí je EPIC 1 — jsou to brány promotion (§Preconditions B)."
 regrounded: 2026-08-14
 regrounding_method: "dva nezávislé průchody (controller + Codex nad stejným faktickým podkladem), sloučené; body, které měřil jen jeden z nich, jsou označené"
 ---
 
 # Plan: E10 — Kalibrace, dual-run metriky, rychlost a datově podložená promotion rozhodnutí
 
-## Re-grounding 2026-08-14 — čti první, přebíjí vše starší
+## Re-grounding — čti první, přebíjí vše starší
+
+> **Dva průchody, druhý je poslední (PM 2026-08-15: „uděláme jeden a poslední").**
+> **14. 8.** se srovnala rozhodnutí, podmínky a dvě kritéria, která procházela
+> naprázdno. **15. 8.** se dodělalo všechno, co první průchod vědomě nechal
+> otevřené: zbývajících deset přejímacích kritérií, zastaralé měřicí jednotky
+> uvnitř kroků 5 a 9, spotřebované číslo verze v kroku 11, otevřená vidlička
+> v kroku 2 a zrušení zámku write-only. **Po tomhle průchodu už v tomhle plánu
+> není nic, co by čekalo na další re-ground.** Zbývá lint, CP1/C0, nezávislé
+> ověření a generování EPICů.
+>
+> Průchod z 14. 8. vznikl ze dvou nezávislých čtení (controller + Codex) nad
+> stejným faktickým podkladem; u nálezů, které měl jen jeden z nich, je to
+> napsané u nich.
 
 Plán je z 12. 7. Od té doby přibylo třicet vydání a **zmizel celý subsystém,
 o který se opíral**. Tahle sekce je autoritativní; kde se rozchází se zbytkem
@@ -140,9 +153,11 @@ až po tvojí revizi téhle sekce, aby se nesrovnávaly dvakrát.
 > bezpečnosti na základě reálných incidentů** (PM brief 2026-07-12; není změna směru, je to
 > zpřesnění podle toho, co jsme mezitím zjistili v praxi).
 >
-> **⚠️ WRITE-ONLY:** tento plán se smí napsat a projít celým review procesem, ale
-> `/aid-run P062` se NESMÍ spustit, dokud P061 (gate profily) není kompletně DONE+merged — jinak
-> E10 kalibruje starý pomalý stav, který už nechceme (PM brief bod 2).
+> **⚠️ WRITE-ONLY ZRUŠENO (2026-08-15).** P061 je uzavřený od 14. 8., takže zámek,
+> který tady stál, padl. Poslední brána startu je PM revize sekce `## Re-grounding`
+> plus lint/CP1/nezávislé ověření. **Pozor na záměnu:** IMP-179, IMP-201 a čistý
+> bookkeeping nejsou brány startu — vyrábí je EPIC 1 tohohle plánu — jsou to brány
+> promotion, viz §Preconditions B.
 
 ## Klíčová rozhodnutí (PM-potvrzená, brief 2026-07-12)
 
@@ -152,7 +167,8 @@ až po tvojí revizi téhle sekce, aby se nesrovnávaly dvakrát.
 - **D2 (P061 gate-profily = vstup/precondition):** risk-based profily jsou součást cílového
   zrychlení. E10 NESMÍ znovu zafixovat full-suite-per-EPIC jako default; MUSÍ měřit wall-clock
   před/po profilech a potvrdit, že rizikové změny pořád eskalují na full/release profil.
-  **P061 nekompletní → plán write-only, nespuštěn** (viz frontmatter + §Preconditions).
+  **P061 uzavřen 2026-08-14 → zámek padl.** Výjimka: Fast Mode nevydává profilové
+  události (IMP-506), takže se vykáže jako `not_measurable`, ne jako naměřená nula.
 - **D3 (rozšířený kalibrační dataset):** původní E-047-1/4/5 + E-044 + P045 ZŮSTÁVAJÍ. + nové
   reálné incidenty (§Context; každý s honest grounding statusem): OBS-20260711-01/IMP-201 (stale
   evidence-pack po trailing commitu), OBS-20260711-02 (CP2 míjí e2e), OBS-20260708-04 (steps[]
@@ -217,14 +233,18 @@ Stav (grounded 2026-07-12; detail + honest grounding statusy v `.aid-o/work/inte
   regression fixtures E-047/E-044/P045; `aid-control-metrics.sh` (false-DONE/false-positive/náklady);
   dual-run new-vs-old; numerické budget stropy (T6); promotion observe→blocking + negative fixtures
   + positive controls. Tvrdé preconditions: IMP-179 + cache drift; nenulový `c3_hook_fired`; P060 DONE.
-- **Verze:** v2.55.0 (P061 E1 merged, `4bcc86a`). P060 = v2.54.0 DONE. P059 = v2.53.0. E10 cílí
-  **v2.56.0** (ověřit CHANGELOG header při run-startu).
+- **Verze (přepsáno re-groundem 2026-08-14):** repozitář je na **v2.86.1**, ne na v2.55.0.
+  P060 = v2.54.0 DONE, P059 = v2.53.0 — to platí. **E10 už necílí na žádné konkrétní číslo:**
+  v2.56.0 je dávno spotřebované jiným vydáním, takže by pin buď procházel naprázdno, nebo
+  nutil krok zpátky. Vydání se alokuje při release boundary a ověřuje
+  `verify-version-files.sh`.
 - **C4 dnes** (`aid-release-policy.sh`, P059 + P060 Krok 8): 12 vstupů, presence/freshness/at-head
   (head_match), missing required → blocked. **Content-verdict blocking záměrně NENÍ** (P059 D-decision,
   „deferred to E10"). `RELEASE_DECISION_POLICY=observe` default (dual-run neblokuje). → D4.
-- **P061 gate-profily** (v2.55.0, E1/6): risk-based gate profiles substrate + plan-gate floor
+- **P061 gate-profily** (UZAVŘENO 2026-08-14, E1-E5 dodané mimo D5): substrate + plan-gate floor
   (`plan_gate_profile_excluded`, `--profile` flag na aid-run-gates.sh, `gate_profiles` v projektu).
-  E2-E6 pending. E10 měří rychlost s/bez profilů. → D2, D9.
+  E6 byl vždycky backlog; D5 odloženo jako IMP-506. E10 měří rychlost s/bez profilů, ale
+  **jen na `/aid-run`** — Fast Mode do měření nevstupuje. → D2, D9.
 - **Firmně doložené kalibrační incidenty:** OBS-20260711-01 (BACKLOG:1934) = IMP-201 (stale
   evidence-pack po verified-cosmetic trailing commitu → C4 by false-blockl; live-caught na AID
   E-061-1_6, positive control); OBS-20260711-02 (BACKLOG:2002, CP2 scope míjí full e2e, stale
@@ -233,7 +253,7 @@ Stav (grounded 2026-07-12; detail + honest grounding statusy v `.aid-o/work/inte
   .aid-o/work/backlog.md, stale agent instrukce, session+cache vrstva).
 - **PM-citované, ZATÍM NEDOLOŽENÉ v committed ledgeru (honest flag — NEVYMÝŠLET):** (a) audit-log
   dirty-tree self-block při `aid-fsm init --force` (grep BACKLOG/backlog.md = 0); (b) yq `--profile`
-  injection/selection bypass z P061 E2 (E2 nemerged, R-E061-2 evidence existuje, grep = 0). Oba se
+  injection/selection bypass z P061 E2 (E2 je od té doby mergnutý, R-E061-2 evidence existuje, grep = 0). Oba se
   GROUNDUJÍ při EPIC 1 (a) / EPIC 3 (b); nedoloží-li se konkrétní incident, VYJMOUT z datasetu
   s poznámkou, ne fabrikovat.
 
@@ -244,8 +264,8 @@ legitimní změny a za jakou cenu (kvalita + rychlost); vyřešit tvrdé precond
 mechanicky, IMP-201, bookkeeping hygiene); přidat C4 content-verdict blocking (5 stavů, waiver
 visible-not-pass); a vyprodukovat datově podloženou **rozhodovací tabulku** per C0-C4 check
 (promote/observe/dual-run/defer/E11-remove-candidate). Promotion observe→blocking JEN pro checky,
-které kalibraci projdou a mají splněné preconditions. Žádné mazání legacy (E11). Vše write-only
-dokud P061 není DONE.
+které kalibraci projdou a mají splněné brány promotion (§Preconditions B). Žádné mazání
+legacy (E11).
 
 ## Scope
 
@@ -262,11 +282,21 @@ neutralizace (E10 promotion sousedí, ale samotná neutralizace = cutover); B-00
 nové C2 lenses; jakákoli změna, která P061 gate-profile mechaniku přepisuje (E10 ji jen měří/používá,
 neopravuje — P061 doména); executable run před P061 DONE.
 
-## Preconditions (TVRDÉ — `/aid-run P062` NESMÍ začít, dokud vše neplatí)
+## Preconditions (TVRDÉ — brány A pro start běhu, brány B pro promotion)
 
-**Přepsáno re-groundem 2026-08-14.** Původní znění (šest mergnutých EPICů,
-cíl v2.56.0) je zachované v git historii tohoto souboru; nepřepisuje se
-zpětně, ale neplatí. Doložit ve run-start evidenci:
+**Přepsáno re-groundem 2026-08-14, rozděleno 2026-08-15.** Původní znění (šest
+mergnutých EPICů, cíl v2.56.0) je zachované v git historii tohoto souboru;
+nepřepisuje se zpětně, ale neplatí.
+
+> **Dvě různé brány, které se předtím pletly do jedné.** První průchod
+> re-groundu je vypsal jako jeden seznam, takže to četlo, jako by se běh nesměl
+> ani spustit, dokud není vyřešený IMP-179 a IMP-201. **To je špatně, a byla to
+> moje chyba** — IMP-179 řeší EPIC 1 Step 2 a IMP-201 EPIC 1 Step 3, tedy sám
+> tenhle plán. Nemůžou být podmínkou svého vlastního vzniku. Seznam se proto
+> dělí na to, co musí platit, **než se běh spustí**, a na to, co musí platit,
+> **než se cokoli přepne na blokující** — což je úplný závěr běhu.
+
+### A — než se běh spustí (musí platit dnes)
 
 1. **P061 uzavřený** — SPLNĚNO 2026-08-14. Ověření je uzavírací záznam plánu
    (`.aid-o/plans/P061-*.md`, sekce `## Uzavření`, `status: closed`), **ne**
@@ -275,22 +305,31 @@ zpětně, ale neplatí. Doložit ve run-start evidenci:
    D5 nedodáno (IMP-506), takže Fast Mode nevydává profilové události a
    **není předmětem měření E10**. Nesmí se to vydávat za změřenou nulu.
 2. **P060 DONE** — SPLNĚNO (`## [2.54.0]`, tag v2.54.0).
-3. **Bookkeeping hygiene** (D7) — `aid-e10-preflight.sh` vrací clean NEBO PM
+3. **Checkout main, clean**; roadmap + BACKLOG čitelné z disku.
+4. **PM přečetl `## Re-grounding`** a plán prošel lint + CP1/C0 + nezávislým
+   ověřením. Tohle je jediná zbývající brána startu.
+
+### B — než se cokoli přepne na blokující (závěr běhu, EPIC 5 Step 11)
+
+Tyhle body **neblokují start**. Blokují promotion, a EPIC 1 je z velké části
+právě prací na nich.
+
+5. **Bookkeeping hygiene** (D7) — `aid-e10-preflight.sh` vrací clean NEBO PM
    položky výslovně vyjme. Dnes clean NENÍ: `R-E045-1`, `R-E049-1`, `R-E057-2`
    jsou `DONE` s kroky ve stavu `pending` (změřeno 2026-08-14).
-4. **IMP-179 mechanický důkaz** (D5) — bez něj **žádná** blocking promotion
+6. **IMP-179 mechanický důkaz** (D5, dodává EPIC 1 Step 2) — bez něj **žádná** blocking promotion
    kontroly stojící na výstupu subagenta. Nezpůsobilé kontroly se v rozhodovací
    tabulce označí, ne vynechají.
-5. **IMP-201 rozhodnut** (D6) — buď opraveno a otestováno proti doloženému
+7. **IMP-201 rozhodnut** (D6, dodává EPIC 1 Step 3) — buď opraveno a otestováno proti doloženému
    případu trailing commitu, nebo C4 výslovně **drží observe** pro freshness a
    content blocking. Procházející test výjimky sám o sobě nestačí: IMP-201 je
    ověřeně reálný a ožívá ve chvíli, kdy E10 přepne na blocking.
-6. **Rozpočet merge cesty rozhodnut** (nová podmínka) — merge cesta je
+8. **Rozpočet merge cesty rozhodnut** (nová podmínka) — merge cesta je
    18 min 07 s proti rozpočtu 10 min, tedy **81 % nad**, ještě než E10 cokoli
    přidá. Před promotion musí padnout jedno ze tří: rozpočet se zvedne cestou
    vlastníka standardu, merge cesta se zmenší, nebo se výjimka výslovně
-   zapíše. E10 tenhle stav nesmí mlčky znormalizovat.
-7. **Checkout main, clean**; roadmap + BACKLOG čitelné z disku.
+   zapíše. E10 tenhle stav nesmí mlčky znormalizovat. **Tohle je jediná
+   z brán B, kterou nevyrábí sám běh — potřebuje tvoje rozhodnutí.**
 
 ---
 
@@ -334,9 +373,11 @@ AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promo
   freshness: spočítá hash relevantního `agents/<role>.md` (+ plugin cache controller hash, navazuje
   na P060 cache-preflight) a zapíše `agent_instruction_hash` do dispatch eventu; při konzumaci
   výstupu FSM porovná zapsaný hash s aktuálním repo hashem → mismatch = `agent_instructions_stale`
-  event. **Rozhodnout mechanismus** (fork pro vetting): (A) dispatch-time hash check (detekce +
-  block promotion), (B) povinný restart/plugin-refresh gate před blocking, (C) kombinace. Default
-  návrh: A (detekce + observe) + promotion-gate čte nenulový stale-count.
+  event. **Mechanismus ROZHODNUT (re-ground 2026-08-15, poslední průchod): varianta A** —
+  dispatch-time hash check, detekce v režimu observe, a promotion-gate čte nenulový
+  stale-count. Fork se zavírá tady, ne až při vettingu: B (povinný restart/plugin-refresh
+  před blocking) sahá na hostitele, kterého AID neovládá, což zakazuje D5 vstupního
+  dokumentu; C je A plus B. A je jediná varianta, kterou AID umí sám prokázat.
 - Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — dispatch/konzumpce hook (kde se
   Auditor/Curator/Verifier výstup čte) volá freshness check; stale → event, promotion-gate to počítá.
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats` — red-green:
@@ -411,25 +452,34 @@ IMP-177 end-to-end).
 **Effort:** L
 **AID Role:** backend
 
-### Step 5: Speed metriky (dispatch/LLM/wall-clock/full-suite/profile-úspora/medián)
+### Step 5: Speed metriky (dispatch/LLM/merge cesta/plan-final/noční/medián)
 
 **Objective:** Rychlost jako tvrdé acceptance kritérium (D9). Bez těchto dat E10 NENÍ hotové —
 jinak nemáme důkaz, že v2 není jen další pomalá vrstva.
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` (+ lib) — speed sekce:
-  dispatch count/EPIC, LLM/model calls (z timeline dispatch eventů), test/gate wall-clock, čas
-  full suites, úspora risk-profile selectoru (P061: full vs profile wall-clock delta), medián
-  běžného EPIC gate cyklu po P061. Zdroj: timeline event timestamps + gate report durations +
-  P061 profile eventy.
+  dispatch count/EPIC, LLM/model calls (z timeline dispatch eventů), a wall-clock ve
+  **třech jednotkách, které dnes existují** (re-ground 2026-08-14): merge cesta (T0+T1),
+  plan-final brány a noční portfolio. „Čas full suites per EPIC" jako jednotka **padá** —
+  P068 platí drahé brány jednou za plán, ne za EPIC. Úspora risk-profile selectoru se měří
+  proti runtime baseline z P063, ne proti neexistujícímu full-suite-per-EPIC běhu.
+  **Přírůstek E10 se vykazuje odděleně od výchozího stavu**, jinak si E10 přičte 18 minut,
+  které nezpůsobilo, nebo v nich schová vlastní náklady. Zdroj: timeline timestamps, gate
+  report durations, `lib/aid-test-durations.sh`, noční záznamy
+  `/opt/eco/data/aid-nightly/aid-orchestrator/<datum>.json`, `lib/aid-gate-runtime-baseline.sh`,
+  `lib/aid-token-count.sh`. Fast Mode profilové události **nejsou vstup** (IMP-506) — vykáže se
+  jako `not_measurable`, nikdy jako naměřená nula.
 - Modify: FSM/gate-runner instrumentace (pokud chybí timestamp granularita) — zajistit, že timeline
   nese dispatch start/end + gate durations (navazuje na aid-run-gates.sh duration_ms).
 - Create/extend: `test-control-metrics.bats` — red-green: speed sekce spočítá dispatch count +
   wall-clock z fixture timeline; profile-úspora = full - profile delta > 0 na fixtuře.
 
 **Acceptance Criteria:**
-- [ ] `control-metrics.json` speed sekce: dispatch_count, llm_calls, gate_wall_clock, full_suite_time, profile_savings, median_gate_cycle — všechny spočítané z reálných evidence timestampů.
-- [ ] Profile-úspora měřitelná: full-suite wall-clock vs P061-profile wall-clock delta na dataset EPICu.
+- [ ] `control-metrics.json` speed sekce: dispatch_count, llm_calls, merge_path_seconds, plan_final_seconds, nightly_seconds, profile_savings, median_gate_cycle — všechny spočítané z reálných evidence timestampů.
+- [ ] Přírůstek E10 je vykázaný odděleně od výchozího stavu (`baseline_seconds` a `e10_added_seconds` jako dvě různá pole).
+- [ ] Profile-úspora měřitelná proti P063 baseline, ne proti full-suite-per-EPIC.
+- [ ] Fast Mode je `not_measurable` s odkazem na IMP-506, ne 0.
 - [ ] Speed metriky jsou POVINNÉ acceptance: chybí-li kterákoli → E10 metrics report `incomplete` (D9, ne tichý pass).
 
 **Effort:** M
@@ -533,18 +583,24 @@ head_match/waived semantiku.
 **Objective:** Potvrdit, že P061 risk-based profily reálně zrychlují A že rizikové změny pořád
 eskalují na full/release profil (D2). E10 NESMÍ znovu zafixovat full-suite-per-EPIC default.
 
+> **Re-ground 2026-08-15:** srovnávací základnou už NENÍ „full-suite per EPIC" — ten běh
+> po P068 neexistuje, drahé brány se platí jednou za plán. Základnou je runtime baseline
+> z P063 a naměřené doby pater. A tenhle krok měří jen `/aid-run`: Fast Mode do měření
+> nevstupuje (IMP-506), takže „profily zrychlují" platí o jedné ze dvou vstupních cest a
+> tak se to i napíše.
+
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` — profile-kalibrační sekce:
-  wall-clock full-suite vs profile per risk level; escalation matrix (které změny → který profil).
+  wall-clock proti P063 baseline per risk level; escalation matrix (které změny → který profil).
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats` —
   red-green: low-risk change → light profil (rychlejší, měřitelná úspora); high-risk/security change
   → eskaluje na full/release profil (NESMÍ zůstat na light); default NENÍ full-suite-per-EPIC.
 
 **Acceptance Criteria:**
-- [ ] Profile speed delta měřená: low-risk profil vs full-suite wall-clock, úspora > 0 doložená.
+- [ ] Profile speed delta měřená proti P063 runtime baseline, úspora > 0 doložená; rozsah platnosti (`/aid-run`, ne Fast Mode) je v tom výstupu napsaný.
 - [ ] Escalation důkaz: high-risk/security change eskaluje na full/release profil (behaviorální test, ne konfigurace).
 - [ ] Default NENÍ full-suite-per-EPIC (regrese by to znovu zafixovala = red).
-- [ ] **Precondition guard:** tento krok předpokládá P061 DONE; při write-only stavu je AC ověřitelné jen na fixtuře, ne na živém P061 — dokumentováno.
+- [ ] **Precondition guard:** P061 je uzavřený (2026-08-14), takže tenhle krok běží na živých datech, ne na fixtuře. Fixturová varianta zůstává jen jako fallback, když běh nemá dost vlastních dat.
 
 **Effort:** M
 **AID Role:** backend
@@ -594,8 +650,11 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
   `unverifiable`/`context_only`; „host má codex binary" ≠ důkaz reálného Codex dispatchi.
 - Modify: `enforcement-registry.yaml` (nové řádky: e10_preflight, agent_freshness_check,
   evidence_freshness_exception, content_verdict_5state, e10_decision_table + per-check promoted
-  flags; totals sync); 7 version míst → **v2.56.0**; CHANGELOG ×2; roadmap E10→DONE poznámka +
-  E11 vstup (decision table).
+  flags; totals sync); **vydání se alokuje až za běhu** — číslo `2.56.0` z původního znění je
+  dávno spotřebované jiným vydáním, takže se nepinuje vůbec. Platí registr osmi míst z
+  `CLAUDE.md` (sedm nese verzi, osmé je licenční řádek, u kterého se kontroluje PŘÍTOMNOST) a
+  ověřuje ho `scripts/tests/verify-version-files.sh <nová_verze> --baseline <stará>`.
+  CHANGELOG ×2 identické; roadmap E10→DONE poznámka + E11 vstup (decision table).
 - **D10 guard:** žádný legacy check se v E10 nemaže; `disabled-for-calibration` JEN s explicitním
   PM rozhodnutím zapsaným v decision-table.
 
@@ -604,7 +663,7 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 - [ ] Promotion je HARD-gated na preconditions: preflight dirty NEBO nenulový agent-stale-count NEBO nevyřešený IMP-201 → promotion NEproběhne (blocking-promotion na agent-checkách blokován D5).
 - [ ] Codex honesty: bez mechanického důkazu Codex dispatchi → audit report `unverifiable`/`context_only` (ne falešné „independent").
 - [ ] Legacy netknuté (D10): git diff neukazuje mazání legacy kontrol; `disabled-for-calibration` jen s PM podpisem v decision-table.
-- [ ] Registry totals == length; 7 version míst = 2.56.0; CHANGELOG ×2 `## [2.56.0]`; roadmap E10 označen DONE + decision-table jako E11 vstup.
+- [ ] Registry totals == length; `verify-version-files.sh <nová_verze> --baseline <stará>` končí 0 (osm míst v souladu, obě CHANGELOG sekce identické); roadmap E10 označen DONE + decision-table jako E11 vstup. Žádné číslo verze není v plánu napevno.
 
 **Effort:** L
 **AID Role:** release
@@ -616,80 +675,88 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací vrací absent/fail
 (artefakty vznikají až během runu), NIKDY skip.
 
-> **Re-grounding 2026-08-14 — co s tímhle blokem ještě zbývá.** AC11 a AC12
-> byly přepsané níže, protože **procházely naprázdno**: jedna půlka AC11 je
-> pravda z historie a AC12 vracelo zelenou nad prázdným repozitářem. Přibyly
-> AC13 a AC14 na rozpočet a rozhodovací tabulku.
+> **Re-grounding, druhý a poslední průchod (2026-08-15).** V prvním průchodu
+> byly přepsané jen AC11 a AC12 (procházela naprázdno) a přibyly AC13/AC14.
+> **Zbytek se dodělal teď: AC1 až AC10 jsou přepsané všechny.**
 >
-> **AC1, AC4, AC6, AC7 a AC9 zůstávají zatím tak, jak byly, a je to vědomý
-> dluh** — jsou to kontroly existence artefaktu (soubor existuje, sada je
-> zelená, adresář má devět položek). Projdou nad špinavým preflightem stejně
-> jako nad čistým, nad nespuštěným dual-runem stejně jako nad spuštěným.
-> Stejně tak AC5 a AC10 grepují jméno v souboru místo aby cokoli změřily nebo
-> rozhodly, a AC2/3/8 dokazují jen, že *nějaké* testy proběhly. Přepsat se mají
-> na tvrzení o **výsledku v evidenci běhu**, ne o přítomnosti souboru — stejným
-> vzorem, jaký používají nová AC13/AC14. Neudělalo se to v tomhle průchodu
-> záměrně: mění to, co jednotlivé kroky musí vyrobit, a to patří do srovnání
-> kroků po PM revizi, ne před ní.
+> Co bylo špatně: byly to kontroly, jestli existuje soubor, jestli se skript dá
+> naparsovat a jestli nějaká sada skončila nulou. Takové kritérium projde nad
+> špinavým preflightem stejně jako nad čistým a nad nespuštěným dual-runem
+> stejně jako nad spuštěným — dokazovalo, že práce **vznikla**, ne že něco
+> **zjistila**.
+>
+> Nová podoba je u všech stejná: kritérium čte **artefakt vlastního běhu**
+> (`.aid-o/work/evidence/<epic>/<run>/…`) a ptá se na výsledek. Preflight musí
+> mít verdikt, a je-li to `excluded_by_pm`, musí mít u každé výjimky důvod.
+> Freshness musí prokázat **oba směry** (stale i fresh), ne jen zelenou sadu.
+> IMP-201 musí nést **rozhodnutí** — buď `fixed` s pokrytým případem trailing
+> commitu, nebo `observe_hold` se zdůvodněním; zelený test výjimky sám o sobě
+> rozhodnutí není. C4 musí mít **odehraných všech pět stavů** a doložit, že
+> `waived` i `present_but_failing` release blokují. Fixtury nesou provenienci
+> místo počtu. Dual-run musí mít verdikty pro obě strany. Rozhodovací tabulka
+> musí mít jedno rozhodnutí na kontrolu, každé s odkazem na důkaz, a bez
+> duplicit.
+>
+> **Po tomhle průchodu nezbývá v tomhle bloku nic k dodělání.**
 
 - [ ] AC1: Bookkeeping preflight existuje a je spustitelný (EPIC 1 Step 1).
   ```yaml
   type: cmd
-  cmd: "test -f plugins/aid-orchestrator/scripts/aid-e10-preflight.sh && bash -n plugins/aid-orchestrator/scripts/aid-e10-preflight.sh"
+  cmd: "f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/e10-preflight.json; test -f \"$f\" || exit 1; jq -e '.verdict | IN(\"clean\",\"excluded_by_pm\")' \"$f\" >/dev/null && jq -e '(.checked | length) >= 4' \"$f\" >/dev/null && jq -e 'if .verdict == \"excluded_by_pm\" then ((.exclusions // []) | length) > 0 and all(.exclusions[]; (.reason // \"\") | length >= 20) else true end' \"$f\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC2: IMP-179 freshness suite existuje a je zelená (EPIC 1 Step 2).
   ```yaml
   type: cmd
-  cmd: "test -f plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  cmd: "b=plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 || exit 1; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' || exit 1; echo \"$out\" | grep -qi 'stale' || exit 1; echo \"$out\" | grep -qi 'fresh' || exit 1; f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/agent-freshness.json; test -f \"$f\" && jq -e '.stale_count != null and .dispatches_checked > 0' \"$f\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC3: IMP-201 evidence-freshness-exception suite zelená (EPIC 1 Step 3).
   ```yaml
   type: cmd
-  cmd: "rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  cmd: "f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/imp201-decision.json; test -f \"$f\" || exit 1; d=$(jq -r '.decision // \"\"' \"$f\"); case \"$d\" in fixed) b=plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 && echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && jq -e '.trailing_commit_case_covered == true' \"$f\" >/dev/null ;; observe_hold) jq -e '.c4_freshness_enforcement == \"observe\" and ((.reason // \"\") | length >= 20)' \"$f\" >/dev/null ;; *) exit 1 ;; esac"
   expected_exit: 0
   ```
 - [ ] AC4: aid-control-metrics.sh existuje + kvalitní metriky suite zelená (EPIC 2 Step 4).
   ```yaml
   type: cmd
-  cmd: "test -f plugins/aid-orchestrator/scripts/aid-control-metrics.sh && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  cmd: "m=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/control-metrics.json; test -f \"$m\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.caught != null) and (.false_positives != null) and (.cost_seconds != null))' \"$m\" >/dev/null && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats 2>&1) || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC5: Speed metriky přítomné ve výstupu (EPIC 2 Step 5) — control-metrics.json má speed sekci s 6 poli.
   ```yaml
   type: cmd
-  cmd: "grep -qE 'dispatch_count|gate_wall_clock|profile_savings|median_gate_cycle' plugins/aid-orchestrator/scripts/aid-control-metrics.sh"
+  cmd: "m=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/control-metrics.json; test -f \"$m\" || exit 1; jq -e '.speed | (.dispatch_count != null) and (.llm_calls != null) and (.merge_path_seconds > 0) and (.plan_final_seconds != null) and (.nightly_seconds != null) and (.median_gate_cycle != null) and (.baseline_seconds != null) and (.e10_added_seconds != null) and (.fast_mode == \"not_measurable\")' \"$m\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC6: Kalibrační dataset fixtury existují (původní + grounded nové) (EPIC 3 Step 6).
   ```yaml
   type: cmd
-  cmd: "test -d plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration && test $(ls plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration | wc -l) -ge 9"
+  cmd: "man=plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration/manifest.json; test -f \"$man\" || exit 1; jq -e '(.fixtures | length) >= 6 and all(.fixtures[]; (.source_incident // \"\") != \"\" and (.failure_class // \"\") != \"\" and (.control // \"\") | IN(\"positive\",\"negative\") and (.expected_old != null) and (.expected_new != null)) and all(.fixtures[]; .grounded == true or ((.excluded_reason // \"\") | length >= 10))' \"$man\" >/dev/null; r=$?; test $r -eq 0 && for fx in $(jq -r '.fixtures[] | select(.grounded == true) | .path' \"$man\"); do test -e \"plugins/aid-orchestrator/scripts/tests/fixtures/e10-calibration/$fx\" || exit 1; done"
   expected_exit: 0
   ```
 - [ ] AC7: Dual-run harness + legacy_unique_catch detekce (EPIC 3 Step 7).
   ```yaml
   type: cmd
-  cmd: "test -f plugins/aid-orchestrator/scripts/aid-dual-run.sh && grep -q 'legacy_unique_catch' plugins/aid-orchestrator/scripts/aid-dual-run.sh"
+  cmd: "d=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/dual-run.json; test -f \"$d\" || exit 1; jq -e '(.pairs | length) > 0 and all(.pairs[]; (.old_result != null) and (.new_result != null) and (.divergence != null)) and (.legacy_unique_catch != null)' \"$d\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC8: C4 content-verdict 5-stav + waiver-visible-not-pass suite zelená (EPIC 4 Step 8).
   ```yaml
   type: cmd
-  cmd: "rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0 && test $(grep -cE '^@test.*(present-but-failing|content_verdict|5.state|waived)' plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats) -ge 3"
+  cmd: "c=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/c4-content-verdict.json; test -f \"$c\" || exit 1; jq -e '[.states_exercised[]] as $s | ([\"missing\",\"stale\",\"invalid\",\"present_but_failing\",\"waived\"] | all(. as $need | $s | index($need) != null)) and (.waived_blocks_release == true) and (.present_but_failing_blocks_release == true)' \"$c\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC9: Gate-profile speed kalibrace + escalation suite zelená (EPIC 4 Step 9).
   ```yaml
   type: cmd
-  cmd: "rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats 2>&1) || rc=$?; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && test $rc -eq 0"
+  cmd: "m=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/control-metrics.json; jq -e '.profile_calibration | (.baseline_source == \"p063\") and (.savings_seconds != null) and (.escalation_proven == true) and (.scope == \"aid_run_only\")' \"$m\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC10: Rozhodovací tabulka generátor + 5 rozhodnutí (EPIC 5 Step 10).
   ```yaml
   type: cmd
-  cmd: "test -f plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh && grep -qE 'promote_to_blocking' plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh && grep -qE 'remove_or_alias_in_E11_candidate' plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh"
+  cmd: "t=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/e10-decision-table.json; test -f \"$t\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.decision != null) and ((.evidence_refs // []) | length) > 0) and ((.controls | map(.control) | unique | length) == (.controls | length))' \"$t\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC11: Promotion gated na preconditions + Codex honesty + **vydání alokované za běhu**
@@ -735,7 +802,9 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
 
 | Riziko | P | Dopad | Mitigace |
 |---|---|---|---|
-| P061 nedokončeno → E10 kalibruje starý stav | H | H | write-only gate; §Preconditions 1; spuštění až po P061 DONE (PM brief bod 2) |
+| ~~P061 nedokončeno~~ → **ZAVŘENO 2026-08-14.** Zbytkové riziko: Fast Mode zůstává neměřený (IMP-506) | M | M | vykázat jako `not_measurable`, nikdy jako 0; rozsah („platí pro `/aid-run`") napsaný ve výstupu |
+| Merge cesta je 81 % nad rozpočtem dřív, než E10 začne | **H** | **H** | brána promotion §Preconditions B/8 + šestý výsledek tabulky `cannot_promote_runtime_budget` + AC14; přírůstek E10 se vykazuje odděleně od výchozího stavu |
+| C3 vydává ve 3 ze 4 případů `unverifiable` → promotion na základě „skoro neblokuje" | **H** | **H** | `unverifiable` je vlastní metrika, ne ne-fail (AC10 + decision table); C3 nesmí být promován na základě datasetu, kde převažuje „nedalo se rozhodnout" |
 | PM-cited incidenty (yq bypass, audit-log) se nedoloží → fabrikace | M | H | honest `not_grounded` skip, ground-first při EPIC 1/3, ne vymýšlet (D3) |
 | Promotion zapnutá dřív, než IMP-179/IMP-201 vyřešené → blocking na stale/false | M | H | HARD precondition gate (D5, D6); promotion krok čte preflight + freshness + IMP-201 status |
 | Content-verdict blocking rozbije stávající release-policy suite | M | M | default observe, flip jen promotion krokem; schema enum ověřit (P060 poučení) |
@@ -747,17 +816,25 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
 
 Napsáno /aid-plan write. Dále (stejný rigor jako P059/P060): per-step vetting (adversariální, 1
 agent/step + koherence) → CP1-deep (high-risk: fsm/state, policy, release) → nezávislý
-/aid-verify-plan (kompletní check-table) → fix. **EPIC-gen a `/aid-run` AŽ po P061 DONE+merged**
-(write-only, PM brief bod 2). Do té doby plán zůstává jako schválený, ale nespuštěný podklad E10.
+/aid-verify-plan (kompletní check-table) → fix. **EPIC-gen a `/aid-run` až po lint/CP1/ověření re-groundu**
+— **splněno 2026-08-14.** Zbývá poslední krok procesu: lint + CP1/C0 + nezávislé ověření
+nad re-groundovaným zněním, a pak generování EPICů.
 
 ## Amendment (P068, 2026-07-26) — E10 precondition
 
 The "all 6 EPICs complete" precondition counted EPIC-level releases. Under
 `plan_branch` an EPIC merges into the plan branch and only the plan releases, so
 the precondition is the plans own close marker plus its committed lifecycle
-receipt, not six EPIC releases. P062 remains `write_only_until` its
-preconditions are met; this amendment does not make it executable and does not
+receipt, not six EPIC releases. P062 remained `write_only_until` its
+preconditions were met; this amendment did not make it executable and did not
 change its status.
+
+**Superseded 2026-08-15 by the second re-grounding.** The condition this
+amendment describes is now SATISFIED: P061 closed on 2026-08-14 with its
+durable closure record, and the `write_only_until` lock is lifted in the
+frontmatter. The amendment is kept for provenance — it was right about the
+mechanism, and the re-grounding's Precondition A/1 implements exactly what it
+prescribed: read the plan's own closure record, never a merge count.
 
 This file is gitignored, so this note is for local readers. The durable record
 is in `plugins/aid-orchestrator/defaults/enforcement-registry.yaml`.
