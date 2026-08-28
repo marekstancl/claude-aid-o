@@ -121,6 +121,7 @@ while [[ $# -gt 0 ]]; do
     --exclude-lock) [[ $# -ge 2 ]] || usage; EXCLUDE_LOCKS+=("$2"); shift 2 ;;
     --close-op-id) [[ $# -ge 2 ]] || usage; CLOSE_OP_ID="$2"; shift 2 ;;
     --skip-delivery-report) SKIP_DELIVERY_REPORT=1; shift ;;
+    --json) JSON_OUT=1; shift ;;
     -h|--help) usage ;;
     -*) echo "Unknown flag: $1" >&2; usage ;;
     *)
@@ -182,6 +183,13 @@ ACTIVE_FILE=".aid-o/work/active.md"
 
 RESULT_LINES=()
 OVERALL_RC=0
+# --json (P062 Step 1): the SAME results, rendered for a consumer instead of a
+# human. Added because E10's bookkeeping preflight needs exactly these checks
+# and parsing this script's prose would have been a second, drifting copy of
+# the same knowledge. The accumulator below is unchanged; this only adds a
+# second way to print it, so a check can never pass in one mode and fail in
+# the other.
+JSON_OUT="${JSON_OUT:-0}"
 
 _pass() { RESULT_LINES+=("PASS  [$1] $2"); }
 _fail() { RESULT_LINES+=("FAIL  [$1] $2"); OVERALL_RC=1; }
@@ -1145,6 +1153,21 @@ main() {
   check6_carried_obligations
   if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
     check5_plan_branch_boundary
+  fi
+
+  if [[ "$JSON_OUT" -eq 1 ]]; then
+    # Each accumulator entry is "STATUS  [check_id] message" — split on the
+    # first two fields and keep the remainder verbatim, so a message
+    # containing brackets survives.
+    local line
+    printf '%s\n' "${RESULT_LINES[@]+"${RESULT_LINES[@]}"}" \
+      | jq -R -s --arg plan "$PLAN_ID" --argjson rc "$OVERALL_RC" '
+          {plan_id: $plan,
+           overall: (if $rc == 0 then "pass" else "fail" end),
+           results: (split("\n") | map(select(length > 0)) | map(
+             capture("^(?<status>PASS|FAIL|INFO)\\s+\\[(?<check>[^]]+)\\]\\s*(?<message>.*)$")
+             | .status |= ascii_downcase))}'
+    exit "$OVERALL_RC"
   fi
 
   echo "=== aid-plan-close-check: ${PLAN_ID} ==="
