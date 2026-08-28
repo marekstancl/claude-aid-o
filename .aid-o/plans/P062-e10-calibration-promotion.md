@@ -176,7 +176,10 @@ až po tvojí revizi téhle sekce, aby se nesrovnávaly dvakrát.
   E2, audit-log dirty-tree) — ty se GROUNDUJÍ při EPIC 1/3, jinak vyjmou; NEVYMÝŠLET detaily.
 - **D4 (C4 content-verdict blocking):** dnes C4 umí hlavně presence/freshness. E10 přidá
   content-verdict: REQUIRED input present+valid-JSON, ale OBSAHOVĚ failující → NESMÍ pustit release.
-  C4 rozlišuje 5 stavů: `missing` / `stale` / `invalid` / `present-but-failing` / `waived`.
+  C4 rozlišuje **čtyři pozorování + rozhodnutí**: `input_state` ∈ {missing, stale, invalid,
+  present_but_failing, present_ok} a odděleně `verdict` ∈ {…, waived}. **Oprava kategorie
+  (C0/Codex 2026-08-15):** původní znění vyjmenovalo `waived` jako pátý stav vedle čtyř
+  pozorování — waiver je ale rozhodnutí o vstupu, ne jeho pozorovaný stav. Detail v Step 8.
   **Waiver NEmění fail→pass** — jen ho viditelně povolí jako waiver (blocker zůstává, release_ready
   logika nezměněná; navazuje na P060 Krok 8 waived semantiku).
 - **D5 (IMP-179 = HARD blocker promotion):** dokud subagenti Auditor/Curator/Verifier mohou běžet
@@ -339,6 +342,12 @@ právě prací na nich.
 
 ### Step 1: Bookkeeping hygiene preflight (aid-e10-preflight.sh)
 
+**Dependencies:** none — první krok plánu
+
+> **Vyrábí artefakt `e10-preflight.json`** v run evidence: `{verdict: clean|excluded_by_pm,
+> checked: [...], exclusions: [{item, reason}]}`. AC1 ho čte. (C0 nález 2026-08-15: kritéria
+> jmenovala artefakty, které žádný krok nevyráběl.)
+
 **Objective:** Samostatný preflight, který PROKÁŽE, že bookkeeping vrstva není stale, jinak
 BLOKUJE postup do kalibrace/promotion — E10 nesmí měřit bordel (D7).
 
@@ -363,6 +372,12 @@ BLOKUJE postup do kalibrace/promotion — E10 nesmí měřit bordel (D7).
 **AID Role:** backend
 
 ### Step 2: IMP-179 mechanický freshness důkaz agent instrukcí
+
+**Dependencies:** none — nezávislý na Step 1 (jiná vrstva: dispatch, ne bookkeeping)
+
+> **Vyrábí artefakt `agent-freshness.json`** v run evidence:
+> `{dispatches_checked: N, stale_count: N, stale: [{role, expected_hash, seen_hash}]}`.
+> AC2 ho čte. (C0 nález 2026-08-15.)
 
 **Objective:** Mechanicky prokázat, že dispatchovaný subagent (Auditor/Curator/Verifier) dostal
 AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promotion na jejich výstupech
@@ -394,6 +409,14 @@ AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promo
 **AID Role:** backend
 
 ### Step 3: IMP-201 resolution (D4-extension) nebo explicit C4 observe-hold
+
+**Dependencies:** none — nezávislý na Steps 1-2
+
+> **Vyrábí artefakt `imp201-decision.json`** v run evidence:
+> `{decision: "fixed"|"observe_hold", reason: "<>=20 znaků>",
+> trailing_commit_case_covered: bool, c4_freshness_enforcement: "observe"|"blocking"}`.
+> AC3 ho čte a rozlišuje obě větve. Zelený test výjimky sám o sobě rozhodnutí NENÍ.
+> (C0 nález 2026-08-15.)
 
 **Objective:** Zavřít stale-evidence-pack false-block třídu (OBS-20260711-01): D4
 CP3-Freshness-Exception nemá ekvivalent pro gates/evidence pack → jakmile C4 enforcuje, false-blockne
@@ -430,6 +453,16 @@ pro tento typ (D6). NIKDY tiché false-block.
 
 ### Step 4: aid-control-metrics.sh — kvalitní metriky (detekce, false-DONE, false-positive)
 
+**Dependencies:** Steps 1-3 (preflight musí být clean nebo vyjmutý, jinak metriky měří nepořádek)
+
+> **Konflikt pořadí VYŘEŠEN (C0 nález 2026-08-15).** Krok deklaroval jako vstup „dataset
+> EPIC 3", tedy výstup kroku 6, který je v pořadí AŽ ZA NÍM — plán tím sám sobě odporoval.
+> Rozdělení: **tenhle krok staví a testuje NÁSTROJ** na vlastních malých fixturách (jeho
+> AC to tak už formulovaly: „na fixture datasetu"). **Spuštění nad kalibračním datasetem**
+> je až po kroku 6 a jeho výsledek konzumuje krok 10. Plan-level `control-metrics.json`
+> v `evidence/P062/e10/` proto vzniká po kroku 6, ne tady; AC4/AC5 jsou plan-level, ne
+> hranice tohohle kroku.
+
 **Objective:** Nástroj, který z run-evidence spočítá KVALITU kontrol: kolik failure classes který
 C0-C4 check chytil, false-DONE (prošlo a nemělo), false-positive (blokoval zbytečně), per-control
 unique detekci vs legacy (D1, D8 podklad). + ověří nenulový `c3_hook_fired` (roadmap precondition,
@@ -437,7 +470,7 @@ IMP-177 end-to-end).
 
 **Files:**
 - Create: `plugins/aid-orchestrator/scripts/aid-control-metrics.sh` — vstup: run-evidence dirs
-  (dataset EPIC 3) + timeline events; výstup: `control-metrics.json` (per check: caught_classes[],
+  + timeline events; výstup: `control-metrics.json` (per check: caught_classes[],
   false_done, false_positive, unique_detection_vs_legacy). Deterministické (žádný LLM).
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats` — red-green na
   fixture evidence: check který chytil známou vadu → caught; check který pustil → false_done; +
@@ -453,6 +486,8 @@ IMP-177 end-to-end).
 **AID Role:** backend
 
 ### Step 5: Speed metriky (dispatch/LLM/merge cesta/plan-final/noční/medián)
+
+**Dependencies:** Step 4 (rozšiřuje aid-control-metrics.sh o speed sekci)
 
 **Objective:** Rychlost jako tvrdé acceptance kritérium (D9). Bez těchto dat E10 NENÍ hotové —
 jinak nemáme důkaz, že v2 není jen další pomalá vrstva.
@@ -482,6 +517,12 @@ jinak nemáme důkaz, že v2 není jen další pomalá vrstva.
 - [ ] Fast Mode je `not_measurable` s odkazem na IMP-506, ne 0.
 - [ ] Speed metriky jsou POVINNÉ acceptance: chybí-li kterákoli → E10 metrics report `incomplete` (D9, ne tichý pass).
 
+> **Vyrábí `merge-path-budget.json`** v run evidence: `{measured_seconds, budget_seconds,
+> over_budget_pct, decision: "budget_raised"|"path_reduced"|"exception_recorded",
+> decided_by, reason}`. Krok naměří a předvyplní `measured_seconds`; pole `decision`
+> vyplní PM u brány §Preconditions B/8 — je to jediná brána, kterou běh sám nevyrobí.
+> AC14 ho čte. (C0 nález 2026-08-15.)
+
 **Effort:** M
 **AID Role:** backend
 
@@ -492,6 +533,14 @@ jinak nemáme důkaz, že v2 není jen další pomalá vrstva.
 **EPIC 3: Calibration dataset + dual-run (Steps 6-7)**
 
 ### Step 6: Kompozitní regression fixtury (původní + grounded nové)
+
+**Dependencies:** none — fixtury stojí samostatně
+
+> **Vyrábí `fixtures/e10-calibration/manifest.json`** — provenience, ne počet. Každá položka:
+> `{path, source_incident, failure_class, control: "positive"|"negative", expected_old,
+> expected_new, grounded: bool, excluded_reason?}`. Nedoložená fixtura se VYLOUČÍ s důvodem,
+> nikdy nedomýšlí (D3). AC6 čte manifest a ověří, že každá `grounded` položka má existující
+> soubor. (C0 nález 2026-08-15.)
 
 **Objective:** Dataset známých vad, proti kterému se měří (D3). Každá fixtura deklaruje, KTERÁ
 vrstva ji má chytit (C1 deterministicky / C2 sémanticky / C3 audit / C4 agregace) — jinak je
@@ -518,6 +567,8 @@ vrstva ji má chytit (C1 deterministicky / C2 sémanticky / C3 audit / C4 agrega
 **AID Role:** qa
 
 ### Step 7: Dual-run new-vs-old harness + divergence klasifikace
+
+**Dependencies:** Step 6 (dual-run potřebuje kalibrační dataset)
 
 **Objective:** Pustit dataset (i běžné EPICy) oběma cestami — nový C0-C4 vs starý CP/legacy — a
 klasifikovat divergence (D1). Navazuje na P059 dual-run substrát (`release_policy_dual_run`,
@@ -549,19 +600,49 @@ klasifikovat divergence (D1). Navazuje na P059 dual-run substrát (`release_poli
 
 ### Step 8: C4 content-verdict blocking (5 stavů + waiver visible-not-pass)
 
+**Dependencies:** none — C4 content-verdict je samostatná změna release-policy
+
+> **Vyrábí `c4-content-verdict.json`** v run evidence: `{states_exercised: [...],
+> waived_blocks_release: bool, present_but_failing_blocks_release: bool}` — důkaz, že se
+> stavy opravdu odehrály za běhu, ne že o nich existuje test. AC8 ho čte.
+> (C0 nález 2026-08-15.)
+
 **Objective:** C4 dnes umí hlavně presence/freshness. E10 přidá content-verdict: REQUIRED input
 present+valid-JSON ale OBSAHOVĚ failující → NESMÍ pustit release (D4). Navazuje na P060 Krok 8
 head_match/waived semantiku.
 
 **Files:**
-- Modify: `plugins/aid-orchestrator/scripts/aid-release-policy.sh` — per-input **5-stavová**
-  klasifikace: `missing` / `stale` / `invalid` (nevalidní JSON/schema) / `present-but-failing`
-  (present+valid, ale obsahový verdikt = fail, např. audit-report blocking_findings, gates_report
-  overall≠pass, semantic-review-final fail) / `waived`. REQUIRED s `present-but-failing` → blocked
-  → release_ready=false. **Waiver NEmění fail→pass** (blocker zůstává, jen viditelně `waived`;
-  navazuje na P060 `applies_to`).
-- Modify: `plugins/aid-orchestrator/defaults/schemas/release-decision.schema.json` — input status
-  enum rozšířit o 5 stavů (dnes má verdict enum; ověřit, jinak schema break — poučení P060 Krok 8).
+> **Reprezentace ROZHODNUTA (C0 nález, Codex adjudikace 2026-08-15): nové pole
+> `input_state` vedle `verdict`, nikoli rozšíření `verdict`.**
+>
+> C0 ukázal, proč to nejde napsat do `verdict`: waiver mapuje na jednu řádku
+> `inputs[]` a flipuje `blocked → waived`. Kdyby `verdict` nesl
+> `present_but_failing`, waiver by na tu řádku přestal sedět; kdyby zůstal
+> `blocked`, pět stavů se do jednoho pole nevejde.
+>
+> **A `waived` vůbec není stav vstupu — je to ROZHODNUTÍ o něm.** Plán ho
+> vyjmenovával jako pátý stav vedle čtyř pozorování, což je záměna kategorie
+> (Codex, 2026-08-15). Rozpad je proto tenhle:
+>
+> - `input_state` (pozorování): `missing` / `stale` / `invalid` /
+>   `present_but_failing` / `present_ok`
+> - `verdict` (rozhodnutí, enum se NEMĚNÍ): `pass` / `fail` / `blocked` /
+>   `unverifiable` / `waived` / `advisory`
+>
+> Waiver dál klíčuje na `blocked`, dál nechává blocker stát a `release_ready`
+> beze změny. Cena volby: jedno pole navíc a konzument musí číst obě, aby měl
+> celý obrázek. **Podtržítková podoba `present_but_failing` je kanonická** —
+> plán ji dřív psal dvěma způsoby.
+
+- Modify: `plugins/aid-orchestrator/scripts/aid-release-policy.sh` — per-input klasifikace
+  do NOVÉHO pole `input_state` (pět hodnot výše). `present_but_failing` = present + valid,
+  ale obsahový verdikt selhává (audit-report `blocking_findings`, gates_report `overall≠pass`,
+  semantic-review-final fail). REQUIRED s `input_state: present_but_failing` → `verdict: blocked`
+  → `release_ready=false`. **Waiver NEmění fail→pass**: `verdict` jde na `waived`, `input_state`
+  zůstává, blocker stojí.
+- Modify: `plugins/aid-orchestrator/defaults/schemas/release-decision.schema.json` — přidat
+  do `inputs[]` povinné pole `input_state` s pětihodnotovým enumem. `verdict` enum se
+  **nemění** (P060 poučení: neměnit enum, po kterém sahá waiver).
 - Modify: `plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml` —
   `content_verdict_policy: observe|blocking` (default observe do promotion; E10 promotion ho flipne
   jen po kalibraci, D8).
@@ -570,15 +651,18 @@ head_match/waived semantiku.
   `waived`, blocker ZŮSTÁVÁ, release_ready NEpřejde na true.
 
 **Acceptance Criteria:**
-- [ ] REQUIRED input present + valid JSON + obsahový verdikt fail → `present-but-failing` → blocked → release_ready=false (dnes prochází = red-green důkaz).
-- [ ] C4 rozlišuje všech 5 stavů (missing/stale/invalid/present-but-failing/waived) — každý má test.
-- [ ] Waiver na failing input → `waived`, blocker ZŮSTÁVÁ, release_ready se NEZmění na pass (waiver = viditelné povolení, ne přepsání).
+- [ ] REQUIRED input present + valid JSON + obsahový verdikt fail → `input_state: present_but_failing` → `verdict: blocked` → release_ready=false (dnes prochází = red-green důkaz).
+- [ ] `input_state` rozlišuje všechna čtyři pozorování + `present_ok`; každé má test. `waived` se testuje na `verdict`, protože to je rozhodnutí, ne pozorování.
+- [ ] Waiver na failing input → `verdict: waived` PŘI ZACHOVANÉM `input_state: present_but_failing`, blocker ZŮSTÁVÁ, release_ready se NEZmění na pass (waiver = viditelné povolení, ne přepsání).
+- [ ] `verdict` enum je bajtově nezměněný oproti výchozímu stavu (regresní test — rozšíření by rozbilo waiver mapování).
 - [ ] `content_verdict_policy` default observe; blocking se zapne jen promotion krokem (Step 11) po kalibraci; stávající release-policy suite zelená.
 
 **Effort:** L
 **AID Role:** backend
 
 ### Step 9: P061 gate-profile speed kalibrace + escalation důkaz
+
+**Dependencies:** Step 5 (měří přes speed sekci) + Step 6 (potřebuje dataset)
 
 **Objective:** Potvrdit, že P061 risk-based profily reálně zrychlují A že rizikové změny pořád
 eskalují na full/release profil (D2). E10 NESMÍ znovu zafixovat full-suite-per-EPIC default.
@@ -613,21 +697,37 @@ eskalují na full/release profil (D2). E10 NESMÍ znovu zafixovat full-suite-per
 
 ### Step 10: Per-control rozhodovací tabulka (datově podložená)
 
+**Dependencies:** Steps 4, 5, 7, 8, 9 (tabulka konzumuje control-metrics.json a dual-run-report.json)
+
 **Objective:** Pro každý C0-C4 check vyprodukovat datové rozhodnutí (D8): promote_to_blocking /
-keep_observe / keep_dual_run / defer / remove_or_alias_in_E11_candidate. Podklad: EPIC 2 metriky +
-EPIC 3 dual-run.
+keep_observe / keep_dual_run / defer / remove_or_alias_in_E11_candidate /
+**cannot_promote_runtime_budget**. Podklad: EPIC 2 metriky + EPIC 3 dual-run.
+
+> **Šestý výsledek (re-ground 2026-08-15, C0 nález).** `cannot_promote_runtime_budget`
+> byl původně jen v AC13, takže krok o něm nevěděl a kritérium by nešlo splnit. Znamená:
+> kontrola by jinak prošla, ale merge cesta je nad rozpočtem, takže se nezapíná, dokud
+> nepadne rozhodnutí z §Preconditions B/8. Není to `defer` — u `defer` chybí data, tady
+> data jsou a brání tomu rozpočet.
+>
+> **Metrika `unverifiable` u C3** patří sem taky, ne jen do AC13: tabulka nese pole
+> `c3_verdict_mix` s počty pass/fail/unverifiable. Bez něj by C3 vyšlo jako „skoro nikdy
+> neblokuje", což je ta past, kterou re-ground pojmenoval.
 
 **Files:**
 - Create: `plugins/aid-orchestrator/scripts/aid-e10-decision-table.sh` — vstup: control-metrics.json
   + dual-run-report.json; výstup: `e10-decision-table.json` + human `e10-decision-table.md`. Per
-  check: rozhodnutí + podklad (caught_classes, false_positives, cena_času, unique_detection). Řádek
+  check: rozhodnutí + podklad (caught_classes, false_positives, cena_času, unique_detection) +
+  `evidence_refs[]` (odkaz na artefakt, ze kterého to rozhodnutí vzniklo — bez něj se řádek
+  nezapíše). Navíc plan-level pole `c3_verdict_mix {pass, fail, unverifiable}`. Řádek
   bez datového podkladu se NEZAPÍŠE (nebo `defer` s důvodem „insufficient data").
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-e10-decision-table.bats` — red-green:
   check s nulovou unique detekcí + má legacy dvojče → `remove_or_alias_in_E11_candidate`; check
   s unique detekcí + nízké FP → `promote_to_blocking` kandidát; nedostatek dat → `defer`.
 
 **Acceptance Criteria:**
-- [ ] `e10-decision-table.{json,md}` per C0-C4 check: 1 z 5 rozhodnutí + datový podklad (4 pole: caught_classes, false_positives, cost, unique_detection_vs_legacy).
+- [ ] `e10-decision-table.{json,md}` per C0-C4 check: 1 ze **6** rozhodnutí + datový podklad (4 pole: caught_classes, false_positives, cost, unique_detection_vs_legacy) + neprázdné `evidence_refs[]`; jedna kontrola právě jednou (bez duplicit).
+- [ ] Plan-level `c3_verdict_mix` s počtem `unverifiable` je přítomný; C3 nesmí dostat `promote_to_blocking`, pokud `unverifiable` převažuje nad (pass+fail).
+- [ ] `cannot_promote_runtime_budget` se použije, když kontrola prošla kalibrací, ale rozpočet merge cesty není rozhodnutý (§Preconditions B/8) — nezaměňovat s `defer` (tam chybí data).
 - [ ] Check bez datového podkladu → `defer` s důvodem (NE promote naslepo).
 - [ ] `remove_or_alias_in_E11_candidate` JEN pro check s prokázanou nulovou unique detekcí v dual-run datech (D8; legacy s unique catch se nikdy neoznačí).
 - [ ] Tabulka je vstup pro E11 (D10: E10 rozhoduje, E11 provádí).
@@ -637,14 +737,41 @@ EPIC 3 dual-run.
 
 ### Step 11: Promotion mechanismus + Codex honesty + registry/version
 
+**Dependencies:** Step 10 (promuje se jen podle tabulky)
+
 **Objective:** Zapnout blocking JEN pro checky, které tabulka (Step 10) schválila `promote_to_blocking`
 A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex independence honesty (D11).
 
 **Files:**
+> **Mechanismus ROZHODNUT (C0 nález, Codex adjudikace 2026-08-15): per-control mapa
+> UVNITŘ každého stávajícího policy souboru.**
+>
+> C0 ukázal díru: každý ten soubor má dnes JEDEN globální `enforcement: observe`, takže
+> „zapneme jen schválené kontroly" nešlo ani zapsat, natož prokázat. Vybraná varianta
+> nechává vlastnictví i čtenáře tam, kde jsou:
+>
+> ```yaml
+> enforcement: observe            # default pro celý soubor, beze změny
+> controls:
+>   <control_id>:
+>     enforcement: blocking       # zapíná se JEN kontrola, sourozenci dědí observe
+> ```
+>
+> Zamítnuto: centrální promotion soubor (zavádí nový konfigurační subsystém napříč
+> politikami) i promotion po celých souborech (nesplní kritérium „jen schválené").
+> **Cena volby, pojmenovaná:** CP3 freshness není v žádném z těch souborů — je to
+> route v `aid-fsm.sh` řízená prostředím — takže potřebuje vlastní obdobnou vazbu a
+> **přes ty mapy ji promovat nejde**.
+
 - Modify: příslušné policy soubory (`c3-audit-policy.yaml`, `release-decision-policy.yaml`,
-  `delivery-gate.yaml`, `review-profiles.yaml`, CP3 freshness policy) — per-check flip
-  observe→blocking JEN pro schválené checky; ostatní zůstávají observe/dual-run. Flip je gated na
-  §Preconditions (preflight clean + IMP-179 mechanický důkaz + IMP-201 resolved/observe-hold).
+  `delivery-gate.yaml`, `review-profiles.yaml`) — přidat `controls.<id>.enforcement` a naučit
+  jejich čtenáře brát per-control hodnotu s fallbackem na souborový default. Flip JEN pro
+  checky se `promote_to_blocking` v rozhodovací tabulce.
+- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — CP3 freshness dostane tutéž
+  per-control vazbu ve své vlastní route (`_cp3_freshness_route`), protože do policy map
+  nespadá. Bez toho je CP3 nepromovatelná a tak se zapíše do tabulky.
+- Flip je gated na §Preconditions B (preflight clean + IMP-179 mechanický důkaz +
+  IMP-201 resolved/observe-hold + rozpočet rozhodnut).
 - Modify: `plugins/aid-orchestrator/scripts/` audit dispatch (Auditor) — **Codex honesty guard
   (D11):** není-li Codex CLI/cross-provider mechanicky dostupný+doložený → audit report
   `unverifiable`/`context_only`; „host má codex binary" ≠ důkaz reálného Codex dispatchi.
@@ -659,7 +786,7 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
   PM rozhodnutím zapsaným v decision-table.
 
 **Acceptance Criteria:**
-- [ ] Promotion flip observe→blocking JEN pro checky se `promote_to_blocking` v decision-table A splněnými preconditions; ostatní zůstávají observe/dual-run (test: check bez schválení zůstane observe).
+- [ ] Promotion flip observe→blocking JEN pro checky se `promote_to_blocking` v decision-table A splněnými branami §Preconditions B; ostatní zůstávají observe/dual-run (test: check bez schválení zůstane observe, **i když je ve stejném policy souboru jako promovaný sourozenec** — to je ta vazba, kterou globální přepínač neuměl).
 - [ ] Promotion je HARD-gated na preconditions: preflight dirty NEBO nenulový agent-stale-count NEBO nevyřešený IMP-201 → promotion NEproběhne (blocking-promotion na agent-checkách blokován D5).
 - [ ] Codex honesty: bez mechanického důkazu Codex dispatchi → audit report `unverifiable`/`context_only` (ne falešné „independent").
 - [ ] Legacy netknuté (D10): git diff neukazuje mazání legacy kontrol; `disabled-for-calibration` jen s PM podpisem v decision-table.
@@ -669,6 +796,25 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 **AID Role:** release
 
 ---
+
+## Plan-level evidence — kde leží artefakty celého plánu
+
+**Zavedeno re-groundem 2026-08-15 (C0 nález, severity medium).** Kritéria dřív četla
+`${AID_EPIC_ID}/${AID_RUN_ID}`, jenže tyhle proměnné patří JEDNOMU EPICu a plán nikde
+neřekl, který z pěti má dodat artefakty platné pro celý plán. Kritérium závislé na
+nepřiřazené proměnné se nedá spolehlivě splnit.
+
+Artefakty na úrovni plánu proto mají **jedno pevné místo**:
+
+```text
+.aid-o/work/evidence/P062/e10/
+```
+
+Patří sem: `e10-preflight.json`, `agent-freshness.json`, `imp201-decision.json`,
+`control-metrics.json`, `merge-path-budget.json`, `dual-run-report.json`,
+`c4-content-verdict.json`, `e10-decision-table.{json,md}`.
+Per-EPIC běhové artefakty zůstávají tam, kde jsou (`<epic>/<run>/`) — tohle je adresář
+pro to, co se vyhodnocuje jednou za plán.
 
 ## Acceptance Criteria
 
@@ -702,31 +848,31 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
 - [ ] AC1: Bookkeeping preflight existuje a je spustitelný (EPIC 1 Step 1).
   ```yaml
   type: cmd
-  cmd: "f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/e10-preflight.json; test -f \"$f\" || exit 1; jq -e '.verdict | IN(\"clean\",\"excluded_by_pm\")' \"$f\" >/dev/null && jq -e '(.checked | length) >= 4' \"$f\" >/dev/null && jq -e 'if .verdict == \"excluded_by_pm\" then ((.exclusions // []) | length) > 0 and all(.exclusions[]; (.reason // \"\") | length >= 20) else true end' \"$f\" >/dev/null"
+  cmd: "f=.aid-o/work/evidence/P062/e10/e10-preflight.json; test -f \"$f\" || exit 1; jq -e '.verdict | IN(\"clean\",\"excluded_by_pm\")' \"$f\" >/dev/null && jq -e '(.checked | length) >= 4' \"$f\" >/dev/null && jq -e 'if .verdict == \"excluded_by_pm\" then ((.exclusions // []) | length) > 0 and all(.exclusions[]; (.reason // \"\") | length >= 20) else true end' \"$f\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC2: IMP-179 freshness suite existuje a je zelená (EPIC 1 Step 2).
   ```yaml
   type: cmd
-  cmd: "b=plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 || exit 1; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' || exit 1; echo \"$out\" | grep -qi 'stale' || exit 1; echo \"$out\" | grep -qi 'fresh' || exit 1; f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/agent-freshness.json; test -f \"$f\" && jq -e '.stale_count != null and .dispatches_checked > 0' \"$f\" >/dev/null"
+  cmd: "b=plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 || exit 1; echo \"$out\" | grep -qE '^1\\.\\.[1-9]' || exit 1; echo \"$out\" | grep -qi 'stale' || exit 1; echo \"$out\" | grep -qi 'fresh' || exit 1; f=.aid-o/work/evidence/P062/e10/agent-freshness.json; test -f \"$f\" && jq -e '.stale_count != null and .dispatches_checked > 0' \"$f\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC3: IMP-201 evidence-freshness-exception suite zelená (EPIC 1 Step 3).
   ```yaml
   type: cmd
-  cmd: "f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/imp201-decision.json; test -f \"$f\" || exit 1; d=$(jq -r '.decision // \"\"' \"$f\"); case \"$d\" in fixed) b=plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 && echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && jq -e '.trailing_commit_case_covered == true' \"$f\" >/dev/null ;; observe_hold) jq -e '.c4_freshness_enforcement == \"observe\" and ((.reason // \"\") | length >= 20)' \"$f\" >/dev/null ;; *) exit 1 ;; esac"
+  cmd: "f=.aid-o/work/evidence/P062/e10/imp201-decision.json; test -f \"$f\" || exit 1; d=$(jq -r '.decision // \"\"' \"$f\"); case \"$d\" in fixed) b=plugins/aid-orchestrator/scripts/tests/bats/test-evidence-freshness-exception.bats; test -f \"$b\" || exit 1; rc=0; out=$(bats \"$b\" 2>&1) || rc=$?; test $rc -eq 0 && echo \"$out\" | grep -qE '^1\\.\\.[1-9]' && jq -e '.trailing_commit_case_covered == true' \"$f\" >/dev/null ;; observe_hold) jq -e '.c4_freshness_enforcement == \"observe\" and ((.reason // \"\") | length >= 20)' \"$f\" >/dev/null ;; *) exit 1 ;; esac"
   expected_exit: 0
   ```
 - [ ] AC4: aid-control-metrics.sh existuje + kvalitní metriky suite zelená (EPIC 2 Step 4).
   ```yaml
   type: cmd
-  cmd: "m=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/control-metrics.json; test -f \"$m\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.caught != null) and (.false_positives != null) and (.cost_seconds != null))' \"$m\" >/dev/null && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats 2>&1) || rc=$?; test $rc -eq 0"
+  cmd: "m=.aid-o/work/evidence/P062/e10/control-metrics.json; test -f \"$m\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.caught != null) and (.false_positives != null) and (.cost_seconds != null))' \"$m\" >/dev/null && rc=0; out=$(bats plugins/aid-orchestrator/scripts/tests/bats/test-control-metrics.bats 2>&1) || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC5: Speed metriky přítomné ve výstupu (EPIC 2 Step 5) — control-metrics.json má speed sekci s 6 poli.
   ```yaml
   type: cmd
-  cmd: "m=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/control-metrics.json; test -f \"$m\" || exit 1; jq -e '.speed | (.dispatch_count != null) and (.llm_calls != null) and (.merge_path_seconds > 0) and (.plan_final_seconds != null) and (.nightly_seconds != null) and (.median_gate_cycle != null) and (.baseline_seconds != null) and (.e10_added_seconds != null) and (.fast_mode == \"not_measurable\")' \"$m\" >/dev/null"
+  cmd: "m=.aid-o/work/evidence/P062/e10/control-metrics.json; test -f \"$m\" || exit 1; jq -e '.speed | (.dispatch_count != null) and (.llm_calls != null) and (.merge_path_seconds > 0) and (.plan_final_seconds != null) and (.nightly_seconds != null) and (.median_gate_cycle != null) and (.baseline_seconds != null) and (.e10_added_seconds != null) and (.fast_mode == \"not_measurable\")' \"$m\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC6: Kalibrační dataset fixtury existují (původní + grounded nové) (EPIC 3 Step 6).
@@ -738,25 +884,25 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
 - [ ] AC7: Dual-run harness + legacy_unique_catch detekce (EPIC 3 Step 7).
   ```yaml
   type: cmd
-  cmd: "d=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/dual-run.json; test -f \"$d\" || exit 1; jq -e '(.pairs | length) > 0 and all(.pairs[]; (.old_result != null) and (.new_result != null) and (.divergence != null)) and (.legacy_unique_catch != null)' \"$d\" >/dev/null"
+  cmd: "d=.aid-o/work/evidence/P062/e10/dual-run-report.json; test -f \"$d\" || exit 1; jq -e '(.pairs | length) > 0 and all(.pairs[]; (.old_result != null) and (.new_result != null) and (.divergence != null)) and (.legacy_unique_catch != null)' \"$d\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC8: C4 content-verdict 5-stav + waiver-visible-not-pass suite zelená (EPIC 4 Step 8).
   ```yaml
   type: cmd
-  cmd: "c=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/c4-content-verdict.json; test -f \"$c\" || exit 1; jq -e '[.states_exercised[]] as $s | ([\"missing\",\"stale\",\"invalid\",\"present_but_failing\",\"waived\"] | all(. as $need | $s | index($need) != null)) and (.waived_blocks_release == true) and (.present_but_failing_blocks_release == true)' \"$c\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
+  cmd: "c=.aid-o/work/evidence/P062/e10/c4-content-verdict.json; test -f \"$c\" || exit 1; jq -e '[.states_exercised[]] as $s | ([\"missing\",\"stale\",\"invalid\",\"present_but_failing\",\"waived\"] | all(. as $need | $s | index($need) != null)) and (.waived_blocks_release == true) and (.present_but_failing_blocks_release == true)' \"$c\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-release-policy.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC9: Gate-profile speed kalibrace + escalation suite zelená (EPIC 4 Step 9).
   ```yaml
   type: cmd
-  cmd: "m=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/control-metrics.json; jq -e '.profile_calibration | (.baseline_source == \"p063\") and (.savings_seconds != null) and (.escalation_proven == true) and (.scope == \"aid_run_only\")' \"$m\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
+  cmd: "m=.aid-o/work/evidence/P062/e10/control-metrics.json; jq -e '.profile_calibration | (.baseline_source == \"p063\") and (.savings_seconds != null) and (.escalation_proven == true) and (.scope == \"aid_run_only\")' \"$m\" >/dev/null && rc=0; bats plugins/aid-orchestrator/scripts/tests/bats/test-e10-profile-calibration.bats >/dev/null 2>&1 || rc=$?; test $rc -eq 0"
   expected_exit: 0
   ```
 - [ ] AC10: Rozhodovací tabulka generátor + 5 rozhodnutí (EPIC 5 Step 10).
   ```yaml
   type: cmd
-  cmd: "t=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/e10-decision-table.json; test -f \"$t\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.decision != null) and ((.evidence_refs // []) | length) > 0) and ((.controls | map(.control) | unique | length) == (.controls | length))' \"$t\" >/dev/null"
+  cmd: "t=.aid-o/work/evidence/P062/e10/e10-decision-table.json; test -f \"$t\" || exit 1; jq -e '(.controls | length) >= 5 and all(.controls[]; (.decision != null) and ((.evidence_refs // []) | length) > 0) and ((.controls | map(.control) | unique | length) == (.controls | length))' \"$t\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC11: Promotion gated na preconditions + Codex honesty + **vydání alokované za běhu**
@@ -769,7 +915,7 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
   jmenuje E10.
   ```yaml
   type: cmd
-  cmd: "v=$(jq -r .version plugins/aid-orchestrator/.claude-plugin/plugin.json); top=$(grep -m1 -oE '^## \\[[0-9]+\\.[0-9]+\\.[0-9]+\\]' CHANGELOG.md | tr -d '## []'); test -n \"$v\" && test \"$v\" = \"$top\" && awk -v v=\"$v\" '$0 ~ \"^## \\\\[\"v\"\\\\]\"{f=1;next} f&&/^## \\[/{exit} f' CHANGELOG.md | grep -qiE 'E10|control-metrics|decision table|promotion'"
+  cmd: "v=$(jq -r .version plugins/aid-orchestrator/.claude-plugin/plugin.json); test -n \"$v\" || exit 1; base=$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD); old=$(git show \"$base\":plugins/aid-orchestrator/.claude-plugin/plugin.json | jq -r .version); bash plugins/aid-orchestrator/scripts/tests/verify-version-files.sh \"$v\" --baseline \"$old\" >/dev/null || exit 1; awk -v v=\"$v\" '$0 ~ \"^## \\\\[\"v\"\\\\]\"{f=1;next} f&&/^## \\[/{exit} f' CHANGELOG.md | grep -qiE 'E10|control-metrics|decision table|promotion'"
   expected_exit: 0
   ```
 - [ ] AC12: Legacy netknuté (D10) — žádné mazání legacy kontrolních skriptů **za běhu E10**.
@@ -778,7 +924,7 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
   historii, ne chování E10. Kotvou je výchozí commit vlastního běhu.
   ```yaml
   type: cmd
-  cmd: "base=$(jq -r '.base_commit // empty' .aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/fsm-state.json 2>/dev/null || yq -r '.base_commit // \"\"' .aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/fsm-state.yaml); test -n \"$base\" || { echo 'no base_commit — AC12 cannot anchor'; exit 1; }; del=$(git diff --name-only --diff-filter=D \"$base\"..HEAD -- plugins/aid-orchestrator/scripts/ plugins/aid-orchestrator/agents/ | wc -l); test \"$del\" -eq 0"
+  cmd: "base=$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD); test -n \"$base\" || { echo 'AC12: no branch point to anchor on'; exit 1; }; del=$(git diff --name-only --diff-filter=D \"$base\"..HEAD -- plugins/aid-orchestrator/scripts/ plugins/aid-orchestrator/agents/ | wc -l); test \"$del\" -eq 0"
   expected_exit: 0
   ```
 - [ ] AC13 (nové): Rozhodovací tabulka má pro každou kontrolu C0-C4 **právě jeden**
@@ -787,14 +933,14 @@ Plan-diff-spustitelný formát (`- [ ] ACn:` + `type: cmd`). Před implementací
   nad rozpočtem ještě před E10, a tabulka na to musí mít slovo.
   ```yaml
   type: cmd
-  cmd: "t=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/e10-decision-table.json; test -f \"$t\" || exit 1; jq -e 'if (.controls|length) < 5 then false else ([.controls[].decision] | all(. as $d | [\"promote_to_blocking\",\"keep_observe\",\"keep_dual_run\",\"defer\",\"remove_or_alias_in_E11_candidate\",\"cannot_promote_runtime_budget\"] | index($d) != null)) end' \"$t\" >/dev/null && jq -e '.c3_verdict_mix.unverifiable != null' \"$t\" >/dev/null"
+  cmd: "t=.aid-o/work/evidence/P062/e10/e10-decision-table.json; test -f \"$t\" || exit 1; jq -e 'if (.controls|length) < 5 then false else ([.controls[].decision] | all(. as $d | [\"promote_to_blocking\",\"keep_observe\",\"keep_dual_run\",\"defer\",\"remove_or_alias_in_E11_candidate\",\"cannot_promote_runtime_budget\"] | index($d) != null)) end' \"$t\" >/dev/null && jq -e '.c3_verdict_mix.unverifiable != null' \"$t\" >/dev/null"
   expected_exit: 0
   ```
 - [ ] AC14 (nové): Rozpočtové rozhodnutí je zapsané, ne obejité — evidence běhu
   obsahuje naměřenou dobu merge cesty a jedno ze tří rozhodnutí PM.
   ```yaml
   type: cmd
-  cmd: "f=.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}/merge-path-budget.json; test -f \"$f\" && jq -e '.measured_seconds > 0 and (.decision | IN(\"budget_raised\",\"path_reduced\",\"exception_recorded\"))' \"$f\" >/dev/null"
+  cmd: "f=.aid-o/work/evidence/P062/e10/merge-path-budget.json; test -f \"$f\" && jq -e '.measured_seconds > 0 and (.decision | IN(\"budget_raised\",\"path_reduced\",\"exception_recorded\"))' \"$f\" >/dev/null"
   expected_exit: 0
   ```
 
