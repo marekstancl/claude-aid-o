@@ -134,48 +134,98 @@ runs="$(find "$EVIDENCE_ROOT" -name 'fsm-state.yaml' -type f 2>/dev/null | wc -l
 #   cost" differently from the two consumers that already ask — so it asks the
 #   same libraries. A missing journal yields null, never 0: an unmeasured path
 #   is not a free one.
-_speed_json='{"dispatch_count":0,"llm_calls":0,"merge_path_seconds":null,"plan_final_seconds":null,"nightly_seconds":null,"median_gate_cycle":null,"baseline_seconds":null,"e10_added_seconds":null,"fast_mode":"not_measurable"}'
+# Everything starts NULL. A number appears only when something measured it,
+# because every field here is read by a decision table and "0 seconds" is a
+# far more dangerous answer than "not measured" (cross-model review,
+# 2026-08-15, which found four separate ways an unmeasured value was coming
+# out as a plausible zero).
+_speed_json='{"dispatch_count":null,"llm_calls":null,"merge_path_seconds":null,"plan_final_seconds":null,"nightly_seconds":null,"median_gate_cycle":null,"baseline_seconds":null,"e10_added_seconds":null,"fast_mode":"not_measurable"}'
 
 _TD_LIB="plugins/aid-orchestrator/scripts/lib/aid-test-durations.sh"
 if [[ -f "$_TD_LIB" ]]; then
   # shellcheck disable=SC1090
   if source "$_TD_LIB" 2>/dev/null && declare -F aid_durations_by_suite >/dev/null 2>&1; then
-    _merge_ms=0; _all_ms=0; _have=0
-    while IFS=$'\t' read -r _suite _ms; do
-      [[ -n "$_suite" && "$_ms" =~ ^[0-9]+$ ]] || continue
-      _have=1
-      _all_ms=$(( _all_ms + _ms ))
-      # aid_durations_by_suite prints BASENAMES; aid_test_tier_of needs a real
-      # path and returns 1 on anything else, which silently made every suite
-      # untiered and the merge path 0 s. Resolve the basename back to the file
-      # through the same discovery both libraries use, so the tier answer here
-      # and the tier answer in CI come from one place.
-      _path=""
-      _path="$(aid_test_discover_suites 2>/dev/null | grep -m1 -E "/${_suite}\$" || true)"
-      _tier=""
-      [[ -n "$_path" ]] && _tier="$(aid_test_tier_of "$_path" 2>/dev/null || echo "")"
-      case "$_tier" in t0|t1) _merge_ms=$(( _merge_ms + _ms )) ;; esac
-    done < <(aid_durations_by_suite 2>/dev/null || true)
-    if (( _have == 1 )); then
-      _speed_json="$(jq -nc --argjson m "$_merge_ms" --argjson a "$_all_ms" \
-        '{dispatch_count:0, llm_calls:0,
-          merge_path_seconds: ($m / 1000), plan_final_seconds: null,
-          nightly_seconds: ($a / 1000), median_gate_cycle: null,
-          baseline_seconds: ($m / 1000), e10_added_seconds: null,
-          fast_mode: "not_measurable"}')"
+    # Discovery is asked ONCE and its failure is a failure, not an empty list.
+    # `|| true` on discovery turned a broken lookup into a short portfolio and
+    # then reported that as the portfolio's cost.
+    _suite_paths=""
+    if _suite_paths="$(aid_test_discover_suites 2>/dev/null)"; then
+      # basename -> path, built ONCE. Resolving inside the per-suite loop was
+      # quadratic (a `basename` subshell per candidate per suite, ~70k of them
+      # over this repository's 264 suites) and simply never finished.
+      # AMBIGUITY IS DROPPED, NOT GUESSED: two suites sharing a basename get no
+      # tier rather than one of them silently taking the other's — the wrong
+      # tier is a wrong merge-path total, which is exactly the plausible-but-
+      # false number this rewrite exists to remove.
+      declare -A _path_of=() _dup=()
+      while IFS= read -r _cand; do
+        [[ -n "$_cand" ]] || continue
+        _b="$(basename "$_cand")"
+        if [[ -n "${_path_of[$_b]:-}" ]]; then _dup[$_b]=1; else _path_of[$_b]="$_cand"; fi
+      done <<< "$_suite_paths"
+
+      _merge_ms=0; _all_ms=0; _measured=0; _tiered=0
+      while IFS=$'\t' read -r _suite _ms; do
+        [[ -n "$_suite" && "$_ms" =~ ^[0-9]+$ ]] || continue
+        _measured=$(( _measured + 1 ))
+        _all_ms=$(( _all_ms + _ms ))
+        [[ -z "${_dup[$_suite]:-}" ]] || continue
+        _path="${_path_of[$_suite]:-}"
+        [[ -n "$_path" ]] || continue
+        _tier="$(aid_test_tier_of "$_path" 2>/dev/null || echo "")"
+        case "$_tier" in
+          t0|t1) _tiered=$(( _tiered + 1 )); _merge_ms=$(( _merge_ms + _ms )) ;;
+          t2)    _tiered=$(( _tiered + 1 )) ;;
+        esac
+      done < <(aid_durations_by_suite 2>/dev/null)
+
+      if (( _measured > 0 )); then
+        _speed_json="$(jq -c --argjson a "$_all_ms" '.nightly_seconds = ($a / 1000)' <<<"$_speed_json")"
+      fi
+      # The merge path is reported ONLY when tiers were actually readable. With
+      # no tier answers _merge_ms is 0 for a reason that has nothing to do with
+      # cost, and 0 would read as "the merge path is free".
+      if (( _tiered > 0 )); then
+        _speed_json="$(jq -c --argjson m "$_merge_ms" '.merge_path_seconds = ($m / 1000)' <<<"$_speed_json")"
+      fi
     fi
   fi
 fi
 
-# dispatch_count / llm_calls come from the timeline events the runs already
-# write; counted, not estimated.
-_dispatches=0
-while IFS= read -r _tl; do
-  [[ -n "$_tl" ]] || continue
-  _n="$(grep -c '"event"[[:space:]]*:[[:space:]]*"dispatch' "$_tl" 2>/dev/null || echo 0)"
+# dispatch_count is COUNTED from the timelines the runs already write, and stays
+# null when there is no timeline to count: a genuine zero and an unread file
+# must not look the same.
+#
+# llm_calls stays NULL. It was briefly set to the dispatch count, which is a
+# different quantity wearing this field's name — one dispatch is not one model
+# call, and a fabricated number in a field a promotion decision reads is worse
+# than an absent one. It gains a value when something actually counts calls.
+# The source is pending-dispatches.jsonl, which is where the dispatch lifecycle
+# actually records `start`. The first version grepped timeline.jsonl for an
+# `"event":"dispatch*"` key that no timeline in this repository contains, so it
+# matched nothing and reported 0 across sixty runs — a measurement of the wrong
+# file, indistinguishable from a run that dispatched nothing. Checked before
+# changing it: the whole evidence tree holds exactly one such ledger, so this
+# number is usually null here, and null is the truthful answer.
+_dl_count=0; _dispatches=0
+while IFS= read -r _dl; do
+  [[ -n "$_dl" ]] || continue
+  _dl_count=$(( _dl_count + 1 ))
+  _n="$(grep -c '"event"[[:space:]]*:[[:space:]]*"start"' "$_dl" 2>/dev/null || true)"
+  [[ "$_n" =~ ^[0-9]+$ ]] || _n=0
   _dispatches=$(( _dispatches + _n ))
-done < <(find "$EVIDENCE_ROOT" -name 'timeline.jsonl' -type f 2>/dev/null)
-_speed_json="$(jq -c --argjson d "$_dispatches" '.dispatch_count = $d | .llm_calls = $d' <<<"$_speed_json")"
+done < <(find "$EVIDENCE_ROOT" -name 'pending-dispatches.jsonl' -type f 2>/dev/null)
+if (( _dl_count > 0 )); then
+  _speed_json="$(jq -c --argjson d "$_dispatches" '.dispatch_count = $d' <<<"$_speed_json")"
+fi
+
+# c3_hook_fired — the roadmap precondition Step 4 owes an answer to (IMP-177
+# end-to-end). Counted from the dispatch records C3 actually leaves behind, and
+# reported as its own field rather than inferred from the verdict mix: a run
+# whose hook never fired and a run whose hook fired and could not decide both
+# produce no pass, and only one of them is a wiring problem.
+_c3_hook="$(find "$EVIDENCE_ROOT" -name 'c3-dispatch.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
+[[ "$_c3_hook" =~ ^[0-9]+$ ]] || _c3_hook=0
 
 mkdir -p "$(dirname "$OUT_FILE")"
 jq -n \
@@ -184,6 +234,7 @@ jq -n \
   --argjson runs "${runs:-0}" \
   --argjson p "$c3_pass" --argjson f "$c3_fail" --argjson u "$c3_unver" \
   --argjson speed "$_speed_json" \
+  --argjson c3hook "$_c3_hook" \
   '{schema_version: "aid-2.0",
     artifact_type: "control_metrics",
     generated_by: "aid-control-metrics.sh",
@@ -191,9 +242,11 @@ jq -n \
     runs_scanned: $runs,
     controls: $controls,
     c3_verdict_mix: {pass: $p, fail: $f, unverifiable: $u},
+    c3_hook_fired: $c3hook,
     speed: $speed}' > "$OUT_FILE"
 
 echo "aid-control-metrics: ${runs} run(s), ground_truth=${gt} → ${OUT_FILE}"
 echo "  C3 verdicts: pass=${c3_pass} fail=${c3_fail} unverifiable=${c3_unver}"
 jq -r '.controls[] | "  \(.control): \(.caught_classes | length) caught class(es)"' "$OUT_FILE"
-jq -r '.speed | "  merge path: \(.merge_path_seconds // "unmeasured") s, portfolio: \(.nightly_seconds // "unmeasured") s, dispatches: \(.dispatch_count)"' "$OUT_FILE"
+jq -r '"  c3_hook_fired: \(.c3_hook_fired)"' "$OUT_FILE"
+jq -r '.speed | "  merge path: \(.merge_path_seconds // "unmeasured") s, portfolio: \(.nightly_seconds // "unmeasured") s, dispatches: \(.dispatch_count // "unmeasured")"' "$OUT_FILE"

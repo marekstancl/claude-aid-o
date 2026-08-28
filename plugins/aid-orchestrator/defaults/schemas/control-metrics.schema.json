@@ -5,55 +5,124 @@
   "$comment": "producer: aid-control-metrics.sh (P062 Steps 4/5/9), consumers: [aid-e10-decision-table.sh, PM brief]",
   "description": "Deterministic quality and cost measurement of the C0-C4 control stack over a set of run-evidence directories. Every number here is COUNTED from evidence; nothing is asserted. Field names are canonical: three different spellings of these fields across the plan's steps and acceptance criteria were what made the decision table unable to consume its own input (C0 finding, 2026-08-15).",
   "type": "object",
-  "required": ["schema_version", "artifact_type", "controls", "c3_verdict_mix"],
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "controls",
+    "c3_verdict_mix",
+    "c3_hook_fired"
+  ],
   "properties": {
-    "schema_version": { "const": "aid-2.0" },
-    "artifact_type": { "const": "control_metrics" },
-    "generated_by": { "type": "string" },
-    "head": { "type": "string" },
-    "runs_scanned": { "type": "integer", "minimum": 0 },
+    "schema_version": {
+      "const": "aid-2.0"
+    },
+    "artifact_type": {
+      "const": "control_metrics"
+    },
+    "generated_by": {
+      "type": "string"
+    },
+    "head": {
+      "type": "string"
+    },
+    "runs_scanned": {
+      "type": "integer",
+      "minimum": 0
+    },
     "controls": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["control", "caught_classes", "false_done", "false_positives", "cost_seconds", "unique_detection_vs_legacy"],
+        "required": [
+          "control",
+          "caught_classes",
+          "false_done",
+          "false_positives",
+          "cost_seconds",
+          "unique_detection_vs_legacy"
+        ],
         "properties": {
-          "control": { "type": "string", "$comment": "canonical control id, e.g. c0, c3, c4" },
+          "control": {
+            "type": "string",
+            "$comment": "canonical control id, e.g. c0, c3, c4"
+          },
           "caught_classes": {
-            "type": "array", "items": { "type": "string" },
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
             "$comment": "failure classes this control actually flagged, one entry per distinct class"
           },
           "false_done": {
-            "type": ["integer", "null"], "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
             "$comment": "passed while a defect was present. NULL, never 0, when no ground truth is available — a control cannot be shown to have missed nothing by a dataset that says nothing. See ground_truth below."
           },
           "false_positives": {
-            "type": ["integer", "null"], "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
             "$comment": "blocked with no defect present. Same null-not-zero rule as false_done."
           },
-          "cost_seconds": { "type": ["number", "null"], "minimum": 0 },
+          "cost_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
           "unique_detection_vs_legacy": {
-            "type": ["integer", "null"], "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
             "$comment": "classes this control caught that no legacy control caught. NULL until a dual-run supplies the legacy side (Step 7)."
           },
           "ground_truth": {
-            "enum": ["present", "absent"],
+            "enum": [
+              "present",
+              "absent"
+            ],
             "$comment": "whether the calibration dataset supplied expected outcomes for this control's runs. `absent` is why the three counters above may be null; it must never be silently read as a clean record."
           },
-          "evidence_refs": { "type": "array", "items": { "type": "string" } }
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
         "additionalProperties": false
       }
     },
     "c3_verdict_mix": {
       "type": "object",
-      "required": ["pass", "fail", "unverifiable"],
+      "required": [
+        "pass",
+        "fail",
+        "unverifiable"
+      ],
       "$comment": "C3's OWN outcome distribution, tracked separately because `unverifiable` is not a non-fail. A dataset in which C3 mostly could not reach a verdict is not evidence that C3 catches defects, and reading it as 'it hardly ever blocks' is the exact mistake this field exists to prevent (re-grounding, 2026-08-15).",
       "properties": {
-        "pass": { "type": "integer", "minimum": 0 },
-        "fail": { "type": "integer", "minimum": 0 },
-        "unverifiable": { "type": "integer", "minimum": 0 }
+        "pass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unverifiable": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
@@ -61,19 +130,69 @@
       "type": "object",
       "$comment": "P062 Step 5. The three wall-clock units that exist after P068: the merge path (T0+T1), the plan-final boundary, and the nightly portfolio. `full_suite_time per EPIC` is deliberately absent — P068 pays the expensive gates once per plan, so that unit no longer describes anything that runs.",
       "properties": {
-        "dispatch_count": { "type": "integer", "minimum": 0 },
-        "llm_calls": { "type": "integer", "minimum": 0 },
-        "merge_path_seconds": { "type": ["number", "null"], "minimum": 0 },
-        "plan_final_seconds": { "type": ["number", "null"], "minimum": 0 },
-        "nightly_seconds": { "type": ["number", "null"], "minimum": 0 },
-        "median_gate_cycle": { "type": ["number", "null"], "minimum": 0 },
-        "baseline_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "dispatch_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "$comment": "null when no timeline was readable: a genuine zero and an unread file must not look the same."
+        },
+        "llm_calls": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "$comment": "NULL until something actually counts model calls. It was briefly set to the dispatch count, which is a different quantity wearing this name — one dispatch is not one model call, and a fabricated number in a field a promotion decision reads is worse than an absent one."
+        },
+        "merge_path_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "plan_final_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "nightly_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "median_gate_cycle": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "baseline_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "$comment": "the PRE-E10 cost, which only a measurement taken before E10's controls were added can supply. It is null until then; it was briefly set to the current merge path, which is not a baseline but the same number under a causal name."
+        },
         "e10_added_seconds": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "$comment": "E10's OWN increment, reported apart from the baseline it did not cause. Without the split E10 either inherits the 18-minute merge path or hides its own cost inside it."
         },
         "fast_mode": {
-          "enum": ["not_measurable"],
+          "enum": [
+            "not_measurable"
+          ],
           "$comment": "IMP-506: /aid-do invokes no AID script and emits no risk-profile events, so Fast Mode is not measurable here. The only permitted value is the honest one — a measured 0 would read as 'Fast Mode never escalates', which is a claim about behaviour nobody made."
         }
       },
@@ -83,15 +202,33 @@
       "type": "object",
       "$comment": "P062 Step 9.",
       "properties": {
-        "baseline_source": { "enum": ["p063"] },
-        "savings_seconds": { "type": ["number", "null"] },
-        "escalation_proven": { "type": "boolean" },
+        "baseline_source": {
+          "enum": [
+            "p063"
+          ]
+        },
+        "savings_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "escalation_proven": {
+          "type": "boolean"
+        },
         "scope": {
-          "enum": ["aid_run_only"],
+          "enum": [
+            "aid_run_only"
+          ],
           "$comment": "the measurement covers /aid-run only; Fast Mode is out of scope by IMP-506 and the output says so rather than implying both entry points"
         }
       },
       "additionalProperties": false
+    },
+    "c3_hook_fired": {
+      "type": "integer",
+      "minimum": 0,
+      "$comment": "how many times C3's dispatch actually happened, counted from c3-dispatch.json records. Its own field, not inferred from the verdict mix: a hook that never fired and a hook that fired and could not decide both produce no pass, and only one of those is a wiring problem. The roadmap precondition is that this is NON-ZERO."
     }
   },
   "additionalProperties": false

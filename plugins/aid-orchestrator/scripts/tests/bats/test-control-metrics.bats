@@ -126,6 +126,47 @@ _audit() { printf '{"status":"%s","findings":[]}' "$2" > "$EV/E-900-1_1/R-1/$1";
   [ "$output" -ge 2 ]
 }
 
+@test "Step 5: llm_calls stays NULL — it is not the dispatch count under another name" {
+  mkdir -p "$EV/d"
+  printf '{"event":"start","focus":"impl"}\n{"event":"start","focus":"verify"}\n' > "$EV/d/pending-dispatches.jsonl"
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.speed.dispatch_count' "$TEST_TMPDIR/m.json")" -eq 2 ]
+  # One dispatch is not one model call. A number here would be a fabrication in
+  # a field a promotion decision reads.
+  [ "$(jq -r '.speed.llm_calls' "$TEST_TMPDIR/m.json")" = "null" ]
+}
+
+@test "Step 5: with no dispatch ledger the count is NULL, not a confident zero" {
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  [ "$(jq -r '.speed.dispatch_count' "$TEST_TMPDIR/m.json")" = "null" ]
+}
+
+@test "Step 5: baseline_seconds is NULL — the current merge path is not a baseline" {
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  [ "$(jq -r '.speed.baseline_seconds' "$TEST_TMPDIR/m.json")" = "null" ]
+  [ "$(jq -r '.speed.e10_added_seconds' "$TEST_TMPDIR/m.json")" = "null" ]
+}
+
+@test "Step 4: c3_hook_fired is counted from dispatch records and is its own field" {
+  mkdir -p "$EV/h1" "$EV/h2"
+  printf '{"dispatch":{"invoked":true}}' > "$EV/h1/c3-dispatch.json"
+  printf '{"dispatch":{"invoked":true}}' > "$EV/h2/c3-dispatch.json"
+  run bash "$TOOL" --evidence-root "$EV" --out "$TEST_TMPDIR/m.json"
+  [ "$(jq -r '.c3_hook_fired' "$TEST_TMPDIR/m.json")" -eq 2 ]
+  # Not inferred from the verdict mix: a hook that never fired and a hook that
+  # fired and could not decide both produce no pass, and only one is a wiring
+  # problem.
+  [ "$(jq -r '.c3_verdict_mix.pass' "$TEST_TMPDIR/m.json")" -eq 0 ]
+}
+
+@test "the schema closes the root and the speed object, not just the control rows" {
+  run jq -e '.additionalProperties == false and .properties.speed.additionalProperties == false' "$SCHEMA"
+  [ "$status" -eq 0 ]
+  run jq -e '(.required | index("c3_hook_fired")) != null' "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
 @test "a missing evidence root is refused, not reported as a clean measurement" {
   run bash "$TOOL" --evidence-root "$TEST_TMPDIR/nope" --out "$TEST_TMPDIR/m.json"
   [ "$status" -eq 2 ]
