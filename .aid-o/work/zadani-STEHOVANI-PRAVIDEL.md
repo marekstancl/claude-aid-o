@@ -29,6 +29,10 @@ Všechno, co platí pro každý projekt bez ohledu na nástroj:
 Doplnit jednu větu: *typy artefaktů si definuje každý nástroj sám ve své
 dokumentaci; standard určuje kostru, stropy a tvar rozhodnutí.*
 
+Čistý řez: v ekosystémovém standardu NEsmí zůstat odkaz na AID stránku ani
+zmínka o konkrétním nástroji. Věta výše stojí sama, bez „viz /aid/specs/…".
+(Rozhodl PM 2026-08-28.)
+
 ### 3. Do dokumentace AID PŘIDAT
 Nová stránka `/opt/eco/docs/docs/aid/specs/artefakty.md` (sekce `aid/specs/`
 existuje a je skoro prázdná — leží v ní jen `plan-ceremony-bands.md`).
@@ -47,12 +51,14 @@ je doporučená a proč si mám zrovna tuhle vybrat."
 
 ### 4. Sladit odkazy
 `sidebars.ts` (nová stránka do navigace) a v pluginu odkazy na standard:
-`defaults/artifact-profiles.yaml`, `defaults/templates/artifact-templates-spec.md`,
-`skills/communication.md`, `commands/aid-plan.md`.
+`defaults/templates/artifact-templates-spec.md`, `skills/communication.md`,
+`commands/aid-plan.md`.
 
 ## Co NEDĚLAT
-- Neměnit `defaults/artifact-profiles.yaml` (povinná pole) — ten opravuje AID
-  vlastní opravou, souběžně. Tvoje práce je dokumentace a její rozdělení.
+- Nesahat na `defaults/artifact-profiles.yaml` VŮBEC — ani na povinná pole, ani
+  na odkaz na standard uvnitř. Celý soubor opravuje AID souběžně, jeden soubor =
+  jeden vlastník. Odkaz na novou strukturu si tam doladí AID sám.
+  (Rozhodl PM 2026-08-28.)
 - Nevymýšlet nové typy ani nová pravidla. Přesouváš a přepisuješ do PM tvaru.
 
 ## Doklad, proč to vzniklo

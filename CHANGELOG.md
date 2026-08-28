@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.0] — 2026-08-28
+
+### Added
+- **E10 — kalibrace a povyšování kontrol podle měření** — šest nástrojů, které nahrazují dohad čísly: `aid-e10-preflight.sh` (tvrdé podmínky), `aid-control-metrics.sh` (kvalita detekce C0-C4), `aid-dual-run.sh` (nová vrstva proti staré nad kalibračními fixturami), `aid-e10-decision-table.sh` (jedno rozhodnutí na kontrolu, šest možných výsledků), `aid-e10-promote.sh` (povýšení schválených kontrol na blokující) a `aid-e10-imp201-decision.sh`. Rozhodnutí je klíčované řádkem kontroly, ne kontrolou, takže jedno schválení nepřeklopí několik z nich.
+- **Stránka říká, co se dodalo** — profily `epic_done` a `plan_done` nyní vyžadují `deliverables`; stránka dokončeného EPICu je čte z `final_report.md` nebo `epic-summary.md` (číslovaný i odrážkový seznam, odkazy se rozbalují na text) a nadpis se řídí typem artefaktu. Bez zdroje se stránka nevyrenderuje.
+- **`plan-state --set-autonomy auto|manual`** — orazítkuje plán založený před P090, aby pokračování nemuselo pokaždé odvozovat režim z konfigurace projektu.
+
+### Fixed
+- **Krok s výstupem v jiném repozitáři** — očekávaný artefakt se skládal jako `${root}/${cesta}`, takže absolutní cesta se slepila za kořen stromu a krok byl odmítnut, přestože oba soubory na disku byly (nahlásil WAN jako blokující).
+- **Plán se v autonomním režimu zastavoval po každém EPICu** — chybějící pole `autonomy` u plánu založeného před P090 se četlo jako „manuální", takže projekt s `autonomous_mode: true` po každém merge tiše stál. Chybějící pole nyní spadne zpět na nastavení projektu a řekne to.
+- **Hooky hlásily cizí práci všem oknům** — milníkové pravidlo soudilo plány podle času (`find -newer`), takže v jednom projektu dostalo každé okno výzvu dorenderovat stránku plánu, který měnilo okno jiné. Nově se soudí jen plány, které session sama zmínila; u běhu se plán odvodí z EPIC id.
+- **Prošlá brána nechávala po sobě stránku, o kterou nikdo nestál** — WAN jich za dva dny vyrobil 17 pro jednu, kterou PM chtěl. Stránku nyní renderuje jen běh, který blokuje; karta do chatu se tiskne dál, takže se výsledek hlásí vždy.
+- **Nadpis „delivered" se hledal jako podřetězec** — `## Not delivered` i `## Undelivered items` by se publikovaly jako to, co EPIC dodal.
+
+### Changed
+- **Registr pravidel a specifikace šablon dohnaly kód** — milníkové pravidlo nese pole `scope` s tím, čí plány soudí a proč se ustoupilo od časového okna; `artifact-templates-spec.md` popisuje `{{prose:deliverables_heading}}` a tři nadpisy podle typu; `commands/aid-run.md` říká, kdy orazítkovat zděděný plán.
+- **Pole „co nezaručuje" má v registru jediný název** — `not_guaranteed` (26 řádků); tři řádky používaly `does_not_guarantee`.
+
 ## [2.94.0] — 2026-08-27
 
 > A plan with six EPICs used to need someone to remember to start the second one. Now four
