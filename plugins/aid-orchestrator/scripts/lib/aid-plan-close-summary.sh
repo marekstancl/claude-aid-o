@@ -288,6 +288,20 @@ aid_plan_close_render() {
   epics_skipped=$(( epics_total - epics_merged ))
   backlog_n="$(jq -r '(.remaining_backlog // []) | length' <<<"$ps")"
 
+  # WHAT THE PLAN PRODUCED, per EPIC — required by the `plan_done` profile since
+  # 2026-08-28. The close page used to report counts (N EPICs, M merged) and
+  # never what any of them was; the PM opens this page to judge a release, and a
+  # count is not something one can judge. Each EPIC contributes its id and, when
+  # the decision carries one, its own summary line. Nothing is invented: an EPIC
+  # with no summary contributes its id alone.
+  local deliverables_json="[]" _pcd
+  _pcd="$(jq -c '[{epic: "", steps: [ (.epics // [])[]
+            | {n: "", text: ((.epic_id // .id // "EPIC")
+                             + (if ((.summary // .summary_for_pm // "") | length) > 0
+                                then " — " + (.summary // .summary_for_pm) else "" end)
+                             + (if (.skipped // false) then " (přeskočen)" else "" end))} ]}]' \
+          <<<"$ps" 2>/dev/null)" && [[ -n "$_pcd" ]] && deliverables_json="$_pcd"
+
   local specialist
   specialist="$(jq -r 'if .specialist_review == null then "neproběhl"
                        elif (.specialist_review | type) == "object"
@@ -412,6 +426,7 @@ aid_plan_close_render() {
     --argjson items "$items_json" \
     --argjson next "$next_json" \
     --argjson links "$links_json" \
+    --argjson deliv "$deliverables_json" \
     --arg brief "$brief_path" --arg dec "$decision_path" '{
       artifact_type: "plan_done",
       eyebrow: "Uzávěrka plánu",
@@ -424,6 +439,7 @@ aid_plan_close_render() {
         unresolved: {label: "Blokátory", value: $unres, state: $us}
       },
       items: $items,
+      deliverables: $deliv,
       next_steps: $next,
       links: $links,
       detail: {label: "Technický detail uzávěrky plánu"},

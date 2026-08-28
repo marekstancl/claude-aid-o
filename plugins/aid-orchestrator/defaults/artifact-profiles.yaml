@@ -59,6 +59,13 @@ profiles:
       - items
 
   # After the review of a finished EPIC.
+  #
+  # `deliverables` IS REQUIRED HERE, and that is the whole point of this profile
+  # (PM, 2026-08-28). Until then it asked for four tiles and `items`, so a page
+  # could pass while its core said nothing about what the EPIC produced —
+  # measured on WAN P099, whose three EPIC pages were near-identical, said only
+  # "hotový: N kroků za T", and reported the audit report as missing. The text
+  # the PM wanted was two files away in the same run's `final_report.md`.
   epic_done:
     required:
       - tiles.result.value      # verdict
@@ -66,6 +73,7 @@ profiles:
       - tiles.scope.value       # steps
       - tiles.unresolved.value  # audit findings still open
       - items
+      - deliverables            # what the EPIC actually produced, in plain words
 
   # After the whole plan is closed out.
   plan_done:
@@ -75,3 +83,4 @@ profiles:
       - tiles.scope.value       # EPICs
       - tiles.unresolved.value  # items left open
       - items
+      - deliverables            # what the plan produced, per EPIC

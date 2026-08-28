@@ -1239,6 +1239,12 @@ The gate boundary has no free-form summary. When the runner returns — on the D
 the failing branch alike, in manual and auto mode — source `scripts/lib/aid-gate-outcome-summary.sh`
 and run:
 
+**A PASSING run leaves no page** (PM, 2026-08-28). The card is printed either way, so the run is
+always reported; what a clean run does not do is leave a page nobody asked for. Only a run that
+BLOCKS renders one, because only that one puts a decision in front of the PM. The library decides
+this itself — there is no flag to remember, and the `Artifact:` line is simply absent when no page
+was written.
+
 ```bash
 aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>" "<evidence_dir>/waivers"
 ```

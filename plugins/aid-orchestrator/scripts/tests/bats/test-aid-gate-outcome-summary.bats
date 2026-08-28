@@ -23,6 +23,12 @@
 load test-helpers.bash
 
 setup() {
+
+  # Since 2026-08-28 a PASSING gate run leaves no page (PM: a page is owed only
+  # when something is asked of him). These cases assert the page's CONTENT, so
+  # they opt back into always-render; the cases that assert the new behaviour
+  # set it themselves.
+  export AID_ARTIFACT_ALWAYS=1
   setup_test_evidence_dir
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
@@ -583,4 +589,28 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   # Still ONE failure. Read as a forged boundary, `pass` became the result and
   # the run reported a passing gate instead.
   grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+}
+
+# --- a passing gate run owes the PM nothing -------------------------------
+# PM, 2026-08-28: pages are owed at milestones after every check, or earlier
+# ONLY when a decision is wanted. Gates run many times per EPIC; a passing run
+# decides nothing. WAN made 17 pages in two days for the one he wanted.
+
+@test "a passing gate run renders NO page, and prints no Artifact line" {
+  _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
+  unset AID_ARTIFACT_ALWAYS
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Artifact: "* ]]
+  [ ! -f "$RUN_DIR/gate-outcome-artifact.html" ]
+}
+
+@test "a blocking gate run still renders its page — that one asks for a decision" {
+  local gates; gates="$(jq -nc --argjson a "$(_row tests fail 1 90000 1)" '{tests:$a}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  unset AID_ARTIFACT_ALWAYS
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Artifact: "* ]]
+  [ -f "$RUN_DIR/gate-outcome-artifact.html" ]
 }
