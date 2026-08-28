@@ -501,11 +501,30 @@ aid_gate_outcome_render() {
   prose="$(jq -nc --arg s "$p_summary" --arg c "$p_core" --arg a "$p_ask" \
     '{summary:$s, core:$c, ask:$a}')"
 
+  # ── WHETHER THIS RUN OWES THE PM A PAGE AT ALL ────────────────────────────
+  # PM, 2026-08-28: a page is owed when the plan is written and approved, at the
+  # end of a milestone after every check — "PŘÍPADNĚ dříve, jen za předpokladu,
+  # že se po mě chtějí nějaká rozhodnutí". Gates run many times per EPIC and a
+  # passing run decides nothing: WAN produced 17 pages in two days for one the
+  # PM wanted, and the gates page said, in its own ask block, "Nic — ozvu se, až
+  # bude hotovo". A page that states it wants nothing should not have been made.
+  #
+  # So: gates render a page only when they BLOCK. The chat card below is printed
+  # either way, so a passing run still reports — it just does not leave a page
+  # nobody asked for. `AID_ARTIFACT_ALWAYS=1` restores the old behaviour for a
+  # caller that genuinely wants the record (the test suite uses it).
+  if (( ! blocked )) && [[ "${AID_ARTIFACT_ALWAYS:-0}" != "1" ]]; then
+    echo "aid_gate_outcome_render: gates passed — no page rendered (nothing is being asked of the PM); the card below reports the run" >&2
+    out_path=""
+  fi
+
   local rc=0
-  aid_artifact_render outcome "$facts" "$prose" "$out_path" || rc=$?
-  if (( rc != 0 )); then
-    echo "aid_gate_outcome_render: artifact render failed (exit ${rc}) for ${out_path}" >&2
-    return "$rc"
+  if [[ -n "$out_path" ]]; then
+    aid_artifact_render outcome "$facts" "$prose" "$out_path" || rc=$?
+    if (( rc != 0 )); then
+      echo "aid_gate_outcome_render: artifact render failed (exit ${rc}) for ${out_path}" >&2
+      return "$rc"
+    fi
   fi
 
   # ── the chat card (communication.md shapes 1 and 3) ────────────────────────
@@ -557,6 +576,8 @@ aid_gate_outcome_render() {
       printf 'Další krok: %s.\n' "$_AID_GOS_ADVANCE_CMD"
     fi
   fi
-  printf 'Artifact: %s\n' "$out_path"
+  # No page, no Artifact line — a caller that publishes what this prints must
+  # not be handed a path that was deliberately not written.
+  [[ -n "$out_path" ]] && printf 'Artifact: %s\n' "$out_path"
   return 0
 }

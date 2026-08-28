@@ -113,6 +113,44 @@ aid_epic_summary_page_render() {
   started_at="$(_esp_yaml "$state" started_at)"
   finished_at="$(grep 'completed_at:' "$state" 2>/dev/null | tail -1 | sed 's/.*completed_at:[[:space:]]*//; s/^"//; s/"$//')"
 
+  # ── WHAT THE EPIC ACTUALLY PRODUCED ───────────────────────────────────────
+  # The page exists so the PM learns what came out of the EPIC. Until 2026-08-28
+  # this renderer never asked: it read the audit and curator reports, and when
+  # they were absent it said so and stopped — three near-identical pages for WAN
+  # P099, none of which named a single thing the work produced.
+  #
+  # The text was there the whole time. Two files in the SAME evidence directory
+  # carry it, written by the run itself:
+  #   final_report.md   — "## Co EPIC dodal" / "## What the EPIC delivered"
+  #   epic-summary.md   — "## ✅ Co bylo dodáno" / "## What was delivered"
+  # Whichever exists is read, first heading wins, and its bullet lines become
+  # the deliverables the profile now requires. Neither present → the field is
+  # empty and the profile refuses the render, which is the honest outcome: a
+  # page that cannot say what was delivered has nothing to tell the PM.
+  local -a delivered=()
+  local _dsrc _dline
+  for _dsrc in "${ev}/final_report.md" "${ev}/epic-summary.md"; do
+    [[ -f "$_dsrc" ]] || continue
+    while IFS= read -r _dline; do
+      [[ -n "$_dline" ]] || continue
+      delivered+=("$_dline")
+    done < <(awk '
+      /^##[[:space:]]*.*([Cc]o (EPIC )?dodal|[Cc]o bylo dodáno|delivered|Delivered)/ { grab=1; next }
+      grab && /^##[[:space:]]/ { exit }
+      # Both list grammars: "- item" and "1. item". final_report.md numbers its
+      # deliverables, epic-summary.md bullets them, and taking only one form was
+      # how the first version of this fell through to a list of commit hashes.
+      grab && /^[[:space:]]*([-*]|[0-9]+\.)[[:space:]]+/ {
+        sub(/^[[:space:]]*([-*]|[0-9]+\.)[[:space:]]+/, "");
+        gsub(/\*\*/, "");           # bold markers
+        gsub(/`/, "");               # code ticks
+        gsub(/\]\([^)]*\)/, "");   # markdown link target …
+        gsub(/\[/, "");            # … leaving just its text
+        if (length($0) > 0) print
+      }' "$_dsrc" 2>/dev/null | head -5)
+    [[ "${#delivered[@]}" -gt 0 ]] && break
+  done
+
   # ── the review's two inputs; a missing one is NAMED, never implied away ────
   local -a missing=() findings=() backlog_items=()
   local audit_json="${ev}/audit-report.json" audit_md=""
@@ -220,6 +258,16 @@ aid_epic_summary_page_render() {
     core="Revize proběhla celá, blokující nález žádný; kurátor založil $(_aid_artifact_czech "${#backlog_items[@]}" "položku" "položky" "položek") do backlogu."
   fi
 
+  # The profile requires `deliverables`; shape it the way the plan page does —
+  # one group whose steps carry the delivered lines — so the renderer's existing
+  # region draws it without a second code path.
+  local deliverables_json="[]" _dj
+  if [[ "${#delivered[@]}" -gt 0 ]]; then
+    _dj="$(printf '%s\n' "${delivered[@]}" | jq -R . | jq -sc \
+      '[{epic: "", steps: [ to_entries[] | {n: (.key + 1 | tostring), text: .value} ]}]')" \
+      && deliverables_json="$_dj"
+  fi
+
   local facts prose
   facts="$(jq -nc \
     --arg epic "$epic_id" \
@@ -231,6 +279,7 @@ aid_epic_summary_page_render() {
     --arg bs "$( (( n_blocking > 0 )) && echo warn || echo ok )" \
     --argjson items "$items_json" \
     --argjson next "$next_json" \
+    --argjson deliv "$deliverables_json" \
     --arg ev "$ev" '{
       artifact_type: "epic_done",
       eyebrow: "Dokončený EPIC",
@@ -243,6 +292,7 @@ aid_epic_summary_page_render() {
         unresolved: {label: "Blokující", value: $blocking, state: $bs}
       },
       items: $items,
+      deliverables: $deliv,
       next_steps: $next,
       detail: {label: "Technický detail běhu EPICu"},
       footer: ("Zdroj: " + $ev + ". Vyrobil aid-epic-summary-page.sh; čísla jsou spočítaná z evidence, ne opsaná.")

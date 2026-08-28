@@ -132,8 +132,17 @@ P
 }
 
 # ── The Stop rule: the same check, one turn earlier ────────────────────────
-transcript() { # transcript <iso_timestamp>
+transcript() { # transcript <iso_timestamp> [plan_id...]
+  # Since IMP-528 the rule only judges plans THIS session mentioned, so the
+  # fixture transcript has to name them — exactly as a real session does the
+  # moment it opens or renders one. Extra ids may be passed; the default names
+  # the plan these cases use.
   printf '{"type":"user","timestamp":"%s","message":{"content":"go"}}\n' "$1" > "$TMP/transcript.jsonl"
+  local _p
+  for _p in "${@:2}"; do
+    printf '{"type":"assistant","message":{"content":"pracuji na %s"}}\n' "$_p" >> "$TMP/transcript.jsonl"
+  done
+  [[ "$#" -gt 1 ]] || printf '{"type":"assistant","message":{"content":"pracuji na P900 P905"}}\n' >> "$TMP/transcript.jsonl"
   printf '%s' "$TMP/transcript.jsonl"
 }
 
@@ -333,4 +342,40 @@ _close_page() {
     > "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
   run aid_artifact_obligation_close_check "$ROOT" "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
   [ "$status" -eq 3 ]
+}
+
+# --- IMP-528: a session is held only to the plans it worked on ------------
+# PM, 2026-08-28: "potom mě to spamuje všechny okna a ne to který má". Several
+# sessions share one workspace, so `find -newer` — a question about TIME — made
+# every window liable for a plan edited in ANOTHER window.
+
+@test "IMP-528: a plan this session never mentioned is not reported" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/.aid-o/plans" "$ws/.aid-o/work/evidence/P062" "$ws/.aid-o/work/evidence/P091"
+  printf '{"timestamp":"2026-08-28T05:00:00Z"}\n{"text":"pracuju na P091"}\n' > "$ws/transcript.jsonl"
+  for id in P062 P091; do
+    printf -- "---\nid: %s\ntype: plan\n---\n# %s - x\n## Goal\nneco\n" "$id" "$id" > "$ws/.aid-o/plans/$id-x.md"
+    echo "<html>x</html>" > "$ws/.aid-o/work/evidence/$id/plan-summary-artifact.html"
+    touch -d "2026-08-27" "$ws/.aid-o/work/evidence/$id/plan-summary-artifact.html"
+    touch -d "2026-08-28 12:00" "$ws/.aid-o/plans/$id-x.md"
+  done
+  ( cd "$ws" && git init -q . )
+
+  run_rule "{\"cwd\":\"$ws\",\"transcript_path\":\"$ws/transcript.jsonl\"}"
+  [[ "$output" == *"P091"* ]]
+  [[ "$output" != *"P062"* ]]
+}
+
+@test "IMP-528: a transcript naming no plan reports nothing at all" {
+  local ws="$BATS_TEST_TMPDIR/ws2"
+  mkdir -p "$ws/.aid-o/plans" "$ws/.aid-o/work/evidence/P062"
+  printf '{"timestamp":"2026-08-28T05:00:00Z"}\n{"text":"nic o planech"}\n' > "$ws/transcript.jsonl"
+  printf -- "---\nid: P062\ntype: plan\n---\n# P062 - x\n## Goal\nneco\n" > "$ws/.aid-o/plans/P062-x.md"
+  echo "<html>x</html>" > "$ws/.aid-o/work/evidence/P062/plan-summary-artifact.html"
+  touch -d "2026-08-27" "$ws/.aid-o/work/evidence/P062/plan-summary-artifact.html"
+  touch -d "2026-08-28 12:00" "$ws/.aid-o/plans/P062-x.md"
+  ( cd "$ws" && git init -q . )
+
+  run_rule "{\"cwd\":\"$ws\",\"transcript_path\":\"$ws/transcript.jsonl\"}"
+  [[ "$output" != *"P062"* ]]
 }

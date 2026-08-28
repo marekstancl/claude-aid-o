@@ -590,6 +590,16 @@ aid_artifact_render() {
   # itself is still clipped at the sentence cap, so a step whose Objective runs
   # long is shortened — never dropped, and never silently: the clip is the same
   # one every other block on this page uses.
+  # The heading names what the reader is looking at, so it follows the TYPE:
+  # a plan page promises, a finished EPIC or plan reports. One literal heading
+  # for both read as a plan's promise printed over an EPIC's result.
+  local _deliv_heading
+  case "$(jq -r '.artifact_type // ""' <<<"$facts_raw")" in
+    epic_done) _deliv_heading="Co EPIC dodal" ;;
+    plan_done) _deliv_heading="Co plán dodal" ;;
+    *)         _deliv_heading="Co plán dodá" ;;
+  esac
+
   local html_deliv="" have_deliv=0 _d_epic _d_rows _d_i _d_j _d_n _d_t _d_a
   if [[ "$(jq -r 'has("deliverables") and (.deliverables | type == "array") and (.deliverables | length > 0)' <<<"$facts_raw")" == "true" ]]; then
     have_deliv=1
@@ -602,7 +612,14 @@ aid_artifact_render() {
         _d_n="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].n // ""' <<<"$facts_raw")"
         _d_t="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].text // ""' <<<"$facts_raw")"
         _d_a="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].acs // "0"' <<<"$facts_raw")"
-        html_deliv+="<li><b>Krok $(_aid_artifact_escape "$_d_n"):</b> $(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
+        # A PLAN page numbers steps because the reader is following a sequence
+        # not yet run. A FINISHED page lists what came out, where "Krok 3" is
+        # noise — the delivered thing is the subject, not its position.
+        if [[ -n "$_d_n" && "$_deliv_heading" == "Co plán dodá" ]]; then
+          html_deliv+="<li><b>Krok $(_aid_artifact_escape "$_d_n"):</b> $(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
+        else
+          html_deliv+="<li>$(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
+        fi
         # Czech declension, because "3 kritérií" is what a machine writes and a
         # reader notices: 1 kritérium, 2-4 kritéria, 5+ kritérií.
         if [[ -n "$_d_a" && "$_d_a" != "0" ]]; then
@@ -710,6 +727,7 @@ aid_artifact_render() {
           summary) value="$(_aid_artifact_escape "$p_summary")" ;;
           core)    value="$(_aid_artifact_escape "$p_core")" ;;
           ask)     value="$(_aid_artifact_escape "$p_ask")" ;;
+          deliverables_heading) value="$(_aid_artifact_escape "$_deliv_heading")" ;;
           *)       value="$_AID_ARTIFACT_ABSENT" ;;
         esac
         ;;

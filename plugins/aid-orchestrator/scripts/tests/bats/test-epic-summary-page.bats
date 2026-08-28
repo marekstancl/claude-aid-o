@@ -57,6 +57,16 @@ steps:
     completed_at: "2026-08-26T10:30:00Z"
 done_phase: review
 YAML
+  # A real run always leaves one of these behind, and since 2026-08-28 the
+  # profile requires what they carry. Fixtures that render successfully must
+  # therefore have one too; the test that proves the refusal removes it.
+  cat > "$EV/final_report.md" <<'MD'
+# Final report
+
+## Co EPIC dodal
+
+- co bylo dodáno v této fixture
+MD
 }
 
 _audit() {
@@ -207,4 +217,54 @@ YAML
   grep -qF 'CHYBÍ čitelný verdikt auditu' "$OUT"
   grep -qF 'Revize neúplná' "$OUT"
   refute_grep -qF 'Audit doběhl a blokující nálezy nehlásí' "$OUT"
+}
+
+# --- the page must say what the EPIC produced -----------------------------
+# PM, 2026-08-28, on three near-identical WAN P099 pages: none of them named a
+# single thing the work produced, while the text sat two files away in the same
+# evidence directory.
+
+@test "deliverables: the numbered list in final_report.md becomes what the EPIC delivered" {
+  _state
+  cat > "$EV/final_report.md" <<'MD'
+# Final report
+
+## Co EPIC dodal
+
+Úvodní věta, která se nemá brát.
+
+1. **Stránka [`/wan/mcp`](https://example.test/x)** (repozitář `docs`) — 16 nástrojů
+2. **Nasazení a noční sestava** — wan-mcp v compose
+MD
+  run aid_epic_summary_page_render "$EV" "$OUT"
+  [ "$status" -eq 0 ]
+  grep -q "Co EPIC dodal" "$OUT"
+  grep -q "Stránka /wan/mcp" "$OUT"          # link target stripped, text kept
+  grep -q "Nasazení a noční sestava" "$OUT"
+  ! grep -q "Úvodní věta" "$OUT"             # prose under the heading is not a deliverable
+  ! grep -q "Krok 1:" "$OUT"                 # a finished page lists results, not step numbers
+}
+
+@test "deliverables: a bulleted epic-summary.md is read when final_report.md has none" {
+  _state
+  rm -f "$EV/final_report.md"
+  cat > "$EV/epic-summary.md" <<'MD'
+# summary
+
+## ✅ Co bylo dodáno
+
+- první věc
+- druhá věc
+MD
+  run aid_epic_summary_page_render "$EV" "$OUT"
+  [ "$status" -eq 0 ]
+  grep -q "první věc" "$OUT"
+  grep -q "druhá věc" "$OUT"
+}
+
+@test "deliverables: with neither source the render refuses rather than shipping an empty page" {
+  _state
+  rm -f "$EV/final_report.md" "$EV/epic-summary.md"
+  run aid_epic_summary_page_render "$EV" "$OUT"
+  [ "$status" -ne 0 ]
 }

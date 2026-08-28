@@ -295,6 +295,38 @@ aid_hook_rule_milestone_artifact() {
   # and carry no state file, so the two never collide.
   local findings="" err
 
+  # WHICH PLANS THIS SESSION ACTUALLY WORKED ON — not merely which files moved
+  # while it happened to be running. `find -newer` answers a question about
+  # TIME, and several sessions share one workspace: a plan edited in ANOTHER
+  # window is newer than this session's start too, so the rule demanded a page
+  # for work this session never touched (PM, 2026-08-28: "potom mě to spamuje
+  # všechny okna a ne to který má"; observed on P062, edited in a different
+  # window while this session worked on P091).
+  #
+  # The transcript is the only per-session record a hook is handed, so the plan
+  # ids it mentions are what this session can honestly be held to. A session
+  # that never names a plan owes nothing for it. When the transcript yields no
+  # id at all, the rule reports nothing rather than falling back to "everything
+  # recent" — silence is the safe failure here, since a false demand costs
+  # another window its turn.
+  local _ao_mine
+  _ao_mine="$(grep -oE '\bP[0-9]{3}\b' "$transcript" 2>/dev/null | sort -u | tr '\n' ' ')"
+
+  # _mine_only <path> — true when the path names a plan this session mentioned.
+  # A path with no plan id in it (a run's fsm-state under an EPIC id) is judged
+  # by its own plan_id where the check can resolve one; unresolvable means the
+  # same "not mine".
+  _mine_only() {
+    local pth="$1" id
+    id="$(grep -oE '\bP[0-9]{3}\b' <<< "$pth" | head -1)"
+    # A run's state file lives under its EPIC id (evidence/E-900-1_1/R-…), which
+    # carries the plan number without the P: derive it rather than treating the
+    # whole milestone as nobody's.
+    [[ -n "$id" ]] || id="$(grep -oE '\bE-[0-9]{3}-' <<< "$pth" | head -1 | sed 's/^E-/P/; s/-$//')"
+    [[ -n "$id" ]] || return 1
+    [[ " $_ao_mine " == *" $id "* ]]
+  }
+
   # _scan <check_fn> <dir> <depth> <name> — the shared body. A check is called
   # with the workspace root first unless it takes only a file (milestone 1).
   _scan() {
@@ -302,6 +334,7 @@ aid_hook_rule_milestone_artifact() {
     [[ -d "$dir" ]] || return 0
     while IFS= read -r hit; do
       [[ -n "$hit" ]] || continue
+      _mine_only "$hit" || continue
       if [[ "$fn" == "aid_artifact_obligation_check" ]]; then
         err="$("$fn" "$hit" 2>&1)" || rc=$?
       else
