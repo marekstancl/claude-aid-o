@@ -51,8 +51,28 @@ RELEASE_POLICY_SH="plugins/aid-orchestrator/scripts/aid-release-policy.sh"
 # defect P084 already recorded once.
 shared_classifier="aid_freshness_exception_applies"
 fixed=false
-if [[ -f "$RELEASE_POLICY_SH" ]] && grep -q "$shared_classifier" "$RELEASE_POLICY_SH" 2>/dev/null; then
-  fixed=true
+if [[ -f "$RELEASE_POLICY_SH" ]]; then
+  # A bare grep marked IMP-201 fixed on a COMMENT that merely mentions the name
+  # (cross-model review, 2026-08-15) — the detector-without-enforcement shape
+  # this project keeps writing down. Three things must hold, and comment text
+  # is stripped before any of them is asked:
+  #   1. the name appears in executable text, not prose;
+  #   2. it appears inside _artifact_head_match, the function whose exact
+  #      comparison IS the defect — a call on an unrelated path proves nothing
+  #      about the trailing-commit class;
+  #   3. some library actually DEFINES it, so the call is not to a name that
+  #      does not exist.
+  _code_only() { sed -e 's/[[:space:]]*#.*$//' "$1"; }
+  _fn_body="$(_code_only "$RELEASE_POLICY_SH" \
+    | awk '/^_artifact_head_match\(\)/{inside=1} inside{print} inside && /^}/{exit}')"
+  if grep -q "$shared_classifier" <<<"$_fn_body" 2>/dev/null; then
+    if grep -rqE "^[[:space:]]*(function[[:space:]]+)?${shared_classifier}[[:space:]]*\(\)" \
+         plugins/aid-orchestrator/scripts/lib/ 2>/dev/null; then
+      fixed=true
+    else
+      echo "[WARN] ${shared_classifier} is called by _artifact_head_match but no lib defines it — treating IMP-201 as still open" >&2
+    fi
+  fi
 fi
 
 enforcement="unknown"
@@ -68,6 +88,15 @@ else
   decision="observe_hold"
   reason="IMP-201 deliberately NOT fixed under E10 (cross-model adjudication 2026-08-15): the fix means surgery on a blocking precondition in aid-fsm.sh and widens a permissive exception on a release gate, which should prevent a promotion rather than ride inside one"
   covered=false
+fi
+
+# The contradiction is refused BEFORE anything is written. Writing first and
+# exiting 2 afterwards (the earlier order) left a consumer free to read an
+# invalid hold record the run had already rejected, and made the comment that
+# promises a refusal false (cross-model review, 2026-08-15).
+if [[ "$decision" == "observe_hold" && "$enforcement" != "observe" ]]; then
+  echo "ERROR: decision is observe_hold but evidence_pack_freshness_policy is '${enforcement}' — the hold is not actually in force; refusing to write ${OUT_FILE}" >&2
+  exit 2
 fi
 
 mkdir -p "$(dirname "$OUT_FILE")"
@@ -88,13 +117,5 @@ jq -n \
     promotion_consequence: (if $decision == "observe_hold"
       then "C4 freshness must NOT be promoted to blocking for the trailing-commit class; the decision table records an explicit non-promotion with IMP-201 as the closure condition"
       else "C4 freshness is eligible for promotion on this class, subject to the remaining gates" end)}' > "$OUT_FILE"
-
-# An observe_hold whose policy is NOT observe is a contradiction: the record
-# would claim a hold that the policy is not holding. Refuse it rather than
-# write a decision nobody is honouring.
-if [[ "$decision" == "observe_hold" && "$enforcement" != "observe" ]]; then
-  echo "ERROR: decision is observe_hold but evidence_pack_freshness_policy is '${enforcement}' — the hold is not actually in force" >&2
-  exit 2
-fi
 
 echo "aid-e10-imp201-decision: ${decision} (policy=${enforcement}) → ${OUT_FILE}"

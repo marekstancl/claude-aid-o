@@ -844,6 +844,16 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
   `delivery-gate.yaml`, `review-profiles.yaml`) — přidat `controls.<id>.enforcement` a naučit
   **každého z pěti čtenářů** brát per-control hodnotu s fallbackem na souborový default.
   Flip JEN pro checky se `promote_to_blocking` v rozhodovací tabulce.
+> **Dva konzumenti, které tenhle krok DLUŽÍ krokům 1 a 3** (cross-model verifikace EPICu 1,
+> 2026-08-15). Obojí je dnes producent bez konzumenta a bez tohohle zápisu by se to ztratilo:
+>
+> 1. **`aid-e10-preflight.sh` nikdo nespouští.** Krok 1 ho postavil a brána §Preconditions B/5
+>    ho vyžaduje, ale volající neexistuje. Promotion krok ho MUSÍ spustit a odmítnout postup
+>    při `dirty` i `unproven` — `unproven` obzvlášť, protože to znamená „nešlo se podívat".
+> 2. **`evidence_pack_freshness_policy` nikdo nečte.** Krok 3 ten klíč zavedl jako záznam
+>    drženého observe-holdu. Promotion krok ho MUSÍ číst a při `observe` **odmítnout** promovat
+>    C4 freshness pro třídu trailing commitu — jinak je hold jen komentář v YAML.
+
 - **Sémantika agregátu u C4 (výslovně, protože jinak per-control mapa nic neoddělí):** C4
   blokuje na agregátu `release_ready`, takže vstup patřící NEPROMOVANÉ kontrole nesmí
   `release_ready` shodit. Jeho `input_state` se zaznamená a `verdict` zůstane, ale do
@@ -872,6 +882,8 @@ A mají splněné preconditions (D1, D5, D6, D7). Legacy NETKNUTÉ (D10). Codex 
 - [ ] `control-inventory.yaml` pokrývá každou kontrolu C0-C4 a každé ID má uvedeného konkrétního čtenáře; kontrola v rozhodovací tabulce, která v inventáři chybí, je red.
 - [ ] Test PRO KAŽDÉHO z pěti čtenářů: promovaný a nepromovaný sourozenec se chovají nezávisle.
 - [ ] Vstup nepromované kontroly NEshodí `release_ready` (test agregátu), ale jeho `input_state` je v artefaktu zapsaný.
+- [ ] Promotion krok SPUSTÍ `aid-e10-preflight.sh` a odmítne postup při verdiktu `dirty` NEBO `unproven` (test obou větví). Producent z kroku 1 tím dostává konzumenta.
+- [ ] Promotion krok ČTE `evidence_pack_freshness_policy`; při `observe` odmítne promovat C4 freshness pro třídu trailing commitu (test). Bez toho je observe-hold z kroku 3 jen komentář.
 - [ ] Promotion je HARD-gated na preconditions: preflight dirty NEBO nenulový agent-stale-count NEBO nevyřešený IMP-201 → promotion NEproběhne (blocking-promotion na agent-checkách blokován D5).
 - [ ] Codex honesty: bez mechanického důkazu Codex dispatchi → audit report `unverifiable`/`context_only` (ne falešné „independent").
 - [ ] Legacy netknuté (D10): git diff neukazuje mazání legacy kontrol; `disabled-for-calibration` jen s PM podpisem v decision-table.

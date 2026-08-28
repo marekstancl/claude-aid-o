@@ -138,6 +138,15 @@ init_git_repo() {
   [[ "$(jq -r .scope_note "$WORK/af3.json")" == *"does NOT prove what any individual Agent() dispatch received"* ]]
 }
 
+@test "P062 Step 2: the FSM writes the freshness artifact where the run lives" {
+  # The wiring case. Without it the artifact has no producer in the real flow
+  # and exists only in the three cases above, which call the function by hand —
+  # a proof that the function works, not that anything runs it.
+  run grep -n "aid_cache_preflight_freshness_artifact" "$PLUGIN_ROOT/scripts/aid-fsm.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"agent-freshness.json"* ]]
+}
+
 # ─── (a) dogfood + skew → hard stop, exit != 0 ───────────────────────────────
 @test "F4a: dogfood + version skew → HARD STOP (exit != 0) + skew_dogfood event" {
   local repo="$WORK/skewrepo"

@@ -116,15 +116,24 @@ fi
 all_results="[]"
 for plan in "${PLANS[@]}"; do
   out=""
-  # A plan whose check errors out (exit 2) is NOT treated as clean: its failure
-  # is recorded so the class it belonged to cannot come out green by silence.
-  if ! out="$(bash "$CLOSE_CHECK" "$plan" --json 2>/dev/null)"; then
-    if [[ -z "$out" ]] || ! jq -e . >/dev/null 2>&1 <<<"$out"; then
-      all_results="$(jq -c --arg p "$plan" \
-        '. + [{plan_id:$p, status:"fail", check:"unrunnable", message:"aid-plan-close-check.sh produced no usable JSON for this plan"}]' \
-        <<<"$all_results")"
-      continue
-    fi
+  # A plan whose check cannot produce usable JSON is NOT treated as clean: its
+  # failure is recorded so the class it belonged to cannot come out green by
+  # silence.
+  #
+  # The JSON is validated on EVERY path, not only when the exit code is
+  # non-zero (cross-model review, 2026-08-15). close-check exits 1 for ordinary
+  # blocking findings — a perfectly good run — and could exit 0 while emitting
+  # nothing usable; the earlier version only looked at the output when the exit
+  # was non-zero, so an exit-0-with-garbage fell through to `--argjson` below
+  # and killed the whole sweep under `set -e`, producing no verdict artefact at
+  # all. Exit code and parseability are separate questions and are asked
+  # separately.
+  out="$(bash "$CLOSE_CHECK" "$plan" --json 2>/dev/null || true)"
+  if [[ -z "$out" ]] || ! jq -e 'type == "object" and has("results")' >/dev/null 2>&1 <<<"$out"; then
+    all_results="$(jq -c --arg p "$plan" \
+      '. + [{plan_id:$p, status:"fail", check:"unrunnable", message:"aid-plan-close-check.sh produced no usable JSON for this plan"}]' \
+      <<<"$all_results")"
+    continue
   fi
   all_results="$(jq -c --argjson r "$out" \
     '. + ($r.results | map(. + {plan_id: $r.plan_id}))' <<<"$all_results")"

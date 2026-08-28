@@ -20,7 +20,7 @@ setup() {
   export TOOL
 
   PROJ="$TEST_TMPDIR/proj"
-  mkdir -p "$PROJ/plugins/aid-orchestrator/scripts" \
+  mkdir -p "$PROJ/plugins/aid-orchestrator/scripts/lib" \
            "$PROJ/plugins/aid-orchestrator/defaults/policies"
   export PROJ
   cp "$AID_PLUGIN_PATH/defaults/policies/release-decision-policy.yaml" \
@@ -45,14 +45,61 @@ teardown() { teardown_test_evidence_dir; }
   [ "${#reason}" -ge 20 ]
 }
 
-@test "once the shared classifier is consulted the decision flips to fixed on its own" {
-  # This is the whole point of deriving it. Nobody edits the decision; the
-  # decision follows the code.
-  echo 'aid_freshness_exception_applies "$@"' >> "$PROJ/plugins/aid-orchestrator/scripts/aid-release-policy.sh"
+@test "once the shared classifier is really consulted the decision flips to fixed on its own" {
+  # This is the whole point of deriving it: nobody edits the decision, the
+  # decision follows the code. The fixture is what a REAL closure looks like —
+  # a lib defines the classifier and _artifact_head_match calls it.
+  cat > "$PROJ/plugins/aid-orchestrator/scripts/lib/aid-freshness.sh" <<'LIB'
+aid_freshness_exception_applies() { return 1; }
+LIB
+  cat > "$PROJ/plugins/aid-orchestrator/scripts/aid-release-policy.sh" <<'RP'
+_artifact_head_match() {
+  local f="$1"
+  if aid_freshness_exception_applies "$f"; then echo true; return 0; fi
+  echo false
+}
+RP
   run bash "$TOOL" --project-root "$PROJ" --out "$PROJ/d.json"
   [ "$status" -eq 0 ]
   [ "$(jq -r .decision "$PROJ/d.json")" = "fixed" ]
   [ "$(jq -r .trailing_commit_case_covered "$PROJ/d.json")" = "true" ]
+}
+
+@test "a COMMENT naming the classifier does not close IMP-201" {
+  # The earlier check was a bare grep over the whole file, so this exact fixture
+  # reported `fixed` — a defect closed by prose. Found by cross-model review,
+  # which noted the previous test had codified the false positive rather than
+  # catching it.
+  cat > "$PROJ/plugins/aid-orchestrator/scripts/aid-release-policy.sh" <<'RP'
+# TODO: one day route this through aid_freshness_exception_applies
+_artifact_head_match() { echo false; }
+RP
+  run bash "$TOOL" --project-root "$PROJ" --out "$PROJ/d.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .decision "$PROJ/d.json")" = "observe_hold" ]
+}
+
+@test "a call from some unrelated function does not close IMP-201 either" {
+  # The defect is _artifact_head_match's exact comparison. A call anywhere else
+  # says nothing about the trailing-commit class.
+  cat > "$PROJ/plugins/aid-orchestrator/scripts/lib/aid-freshness.sh" <<'LIB'
+aid_freshness_exception_applies() { return 1; }
+LIB
+  cat > "$PROJ/plugins/aid-orchestrator/scripts/aid-release-policy.sh" <<'RP'
+_something_else() { aid_freshness_exception_applies "$@"; }
+_artifact_head_match() { echo false; }
+RP
+  run bash "$TOOL" --project-root "$PROJ" --out "$PROJ/d.json"
+  [ "$(jq -r .decision "$PROJ/d.json")" = "observe_hold" ]
+}
+
+@test "a call to a classifier no library defines does not close IMP-201" {
+  cat > "$PROJ/plugins/aid-orchestrator/scripts/aid-release-policy.sh" <<'RP'
+_artifact_head_match() { aid_freshness_exception_applies "$1"; }
+RP
+  run bash "$TOOL" --project-root "$PROJ" --out "$PROJ/d.json"
+  [ "$(jq -r .decision "$PROJ/d.json")" = "observe_hold" ]
+  [[ "$output" == *"no lib defines it"* ]]
 }
 
 @test "an observe_hold the policy is not honouring is REFUSED, not recorded" {

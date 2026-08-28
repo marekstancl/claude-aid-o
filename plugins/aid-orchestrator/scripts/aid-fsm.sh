@@ -4752,7 +4752,9 @@ cmd_init() {
   # skew this aborts here so fsm-state.yaml is never created (scenario f). The
   # state file does not exist yet, so consumer recording is deferred to the
   # post-write call (anchor: cache_preflight_init_record). Covers plugin.json
-  # version + scripts/ tree ONLY — see aid-cache-preflight.sh honesty header.
+  # version + the scripts/, agents/, skills/ and defaults/ trees (P062 Step 2
+  # widened it from scripts/ alone) — see aid-cache-preflight.sh honesty header
+  # for what it still does not prove.
   if ! run_cache_preflight "$state_file" "$timeline_path"; then
     exit 1
   fi
@@ -5002,6 +5004,19 @@ EOF
   fi
 
   run_cache_preflight "$state_file" "$timeline_path" || true
+
+  # P062 Step 2: record what that preflight compared, next to the run it
+  # belongs to. Without this the artefact E10's promotion gate reads would have
+  # had no producer in the real flow — it would have existed only in its own
+  # tests, which is the producer-without-consumer shape inverted (cross-model
+  # review, 2026-08-15). Best-effort: a missing artefact must never fail a
+  # transition, and its `preflight_ran` field already distinguishes "no skew"
+  # from "no comparison".
+  if declare -F aid_cache_preflight_freshness_artifact >/dev/null 2>&1; then
+    local _af_dir
+    _af_dir="$(dirname "$state_file")"
+    aid_cache_preflight_freshness_artifact "${_af_dir}/agent-freshness.json" || true
+  fi
 
   # Audit trail
   local timeline
