@@ -1,0 +1,49 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "release_decision",
+  "producer": "aid-release-policy.sh@1.0",
+  "created_at": "2026-07-11T10:57:15Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "claude-aid-o",
+    "epic_id": "E-061-1_6",
+    "run_id": "R-E061-1",
+    "step_id": null
+  },
+  "subject": {
+    "subject_hash": "sha256:fdac3e53769c4ad2efdea507d769010b0049ee07dd916e31451149d0886c7e4b"
+  },
+  "revision": {
+    "head_sha": "25bff3eb747e7a7428d7d6241e60eed6f72bc217",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "blocked",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-release-policy.sh"
+  },
+  "release_decision": {
+    "release_ready": false,
+    "decided_by": "C4",
+    "blockers": [],
+    "waivers_applied": [],
+    "waiver_findings": [],
+    "profile_hash_freshness": "not_evaluated",
+    "merge_mode": "blocked",
+    "pm_brief_required": true,
+    "pm_brief_status": "pending",
+    "evidence_verified_at_head": true,
+    "evidence_verification_status": "pass",
+    "reporter_status": "not_applicable",
+    "reporter_reason": "not_plan_boundary",
+    "simplifier_status": "not_applicable",
+    "simplifier_reason": "not_plan_boundary",
+    "delivered_summary_ref": ".aid-o/work/evidence/E-061-1_6/R-E061-1/final_report.md",
+    "summary_for_pm": "release_ready=false; evidence=pass; reporter=not_applicable; simplifier=not_applicable; waivers=0; blockers=3; merge_mode=blocked"
+  }
+}

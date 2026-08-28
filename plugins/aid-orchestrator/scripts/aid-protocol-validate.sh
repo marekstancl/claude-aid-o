@@ -633,8 +633,15 @@ fi
 # than an admitted absence. What is NOT legal is a value outside the set.
 # ---------------------------------------------------------------------------
 if [[ "$artifact_type" == "release_decision" ]]; then
+  # `.inputs // []` accepted a release decision with NO inputs at all: all()
+  # over an empty array is true, so the row check passed by having no rows
+  # (cross-model review, 2026-08-15). A release decision without inputs is
+  # malformed — it is a verdict with nothing behind it — so the field must be
+  # present and an array before the rows are examined.
   if ! jq -e '
-      (.release_decision.inputs // [])
+      (.release_decision | has("inputs"))
+      and ((.release_decision.inputs | type) == "array")
+      and (.release_decision.inputs
       | all(
           (has("id") and has("artifact") and has("verdict") and has("reason") and has("head_match"))
           and (.verdict | IN("pass","fail","blocked","unverifiable","waived","advisory"))
@@ -642,7 +649,7 @@ if [[ "$artifact_type" == "release_decision" ]]; then
           and ((has("input_state") | not)
                or .input_state == null
                or (.input_state | IN("missing","stale","invalid","present_but_failing","present_ok")))
-        )' "$ARTIFACT_FILE" >/dev/null 2>&1; then
+        ))' "$ARTIFACT_FILE" >/dev/null 2>&1; then
     echo "bad_release_decision_input_row" >&2
     exit 19
   fi

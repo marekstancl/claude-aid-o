@@ -134,6 +134,29 @@ _run_check() {
   [ "$status" -eq 19 ]
 }
 
+@test "the input_state coverage gap is PINNED, so it cannot widen unnoticed" {
+  # 7 of 28 add_input call sites classify their state; the rest pass null,
+  # meaning "not classified yet". That is deliberate — guessing a state from a
+  # call site's reason string would put a confident wrong value on rows nobody
+  # has examined — but it must not be read as five-state classification
+  # everywhere (cross-model review, 2026-08-15). This case makes the number
+  # visible: adding a call site without classifying it FAILS here, so the gap
+  # can only shrink or be consciously re-pinned.
+  local pol="$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
+  total="$(grep -c '^[[:space:]]*add_input ' "$pol")"
+  classified="$(grep -cE '^[[:space:]]*add_input .*"(missing|stale|invalid|present_but_failing|present_ok)"' "$pol")"
+  [ "$total" -eq 28 ]
+  [ "$classified" -eq 7 ]
+}
+
+@test "the validator refuses a release decision with NO inputs at all" {
+  # `.inputs // []` let this pass: all() over an empty array is true, so the row
+  # check was satisfied by having no rows. A verdict with nothing behind it is
+  # malformed.
+  run bash "$VAL" "$AID_PLUGIN_PATH/scripts/tests/fixtures/release-decision/invalid-no-inputs.json"
+  [ "$status" -eq 19 ]
+}
+
 @test "the shipped policy defaults content_verdict_policy to observe" {
   run yq -r '.content_verdict_policy' "$AID_PLUGIN_PATH/defaults/policies/release-decision-policy.yaml"
   [ "$output" = "observe" ]

@@ -246,8 +246,12 @@ if [[ -f "$_EXEC_YAML" && -f "$_GBR_LIB" ]] && command -v yq >/dev/null 2>&1; th
       [[ -n "$_g" ]] || continue
       _rep="$(gate_baseline_report_json "$_g" 2>/dev/null || echo '{}')"
       _suf="$(jq -r '.data_sufficient // false' <<<"$_rep" 2>/dev/null || echo false)"
-      _p95="$(jq -r '.p95_ms // "null"' <<<"$_rep" 2>/dev/null || echo null)"
-      if [[ "$_suf" != "true" || "$_p95" == "null" ]]; then _unknown=$(( _unknown + 1 )); continue; fi
+      # p95_ms is a JSON NUMBER and may legitimately be a decimal. Feeding that
+      # straight into bash arithmetic aborts under set -e, turning a valid
+      # measurement into a dead script (cross-model review, 2026-08-15). It is
+      # rounded to an integer by jq, where the value already lives.
+      _p95="$(jq -r 'if (.p95_ms // null) == null then "null" else ((.p95_ms) | round | tostring) end' <<<"$_rep" 2>/dev/null || echo null)"
+      if [[ "$_suf" != "true" || ! "$_p95" =~ ^[0-9]+$ ]]; then _unknown=$(( _unknown + 1 )); continue; fi
       _known=$(( _known + 1 ))
       _all_p95=$(( _all_p95 + _p95 ))
       if yq -r '.gate_profiles.quick.include[]?' "$_EXEC_YAML" 2>/dev/null | grep -qxF "$_g"; then
@@ -260,20 +264,54 @@ if [[ -f "$_EXEC_YAML" && -f "$_GBR_LIB" ]] && command -v yq >/dev/null 2>&1; th
     _esc="false"
     if source plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh 2>/dev/null \
        && declare -F gate_profile_resolve >/dev/null 2>&1; then
-      _lo_f="$(mktemp)"; _hi_f="$(mktemp)"
-      printf 'README.md\n' > "$_lo_f"
-      printf 'plugins/aid-orchestrator/scripts/aid-fsm.sh\n' > "$_hi_f"
-      _lo="$(gate_profile_resolve "$_lo_f" 2>/dev/null || echo "")"
-      _hi="$(gate_profile_resolve "$_hi_f" 2>/dev/null || echo "")"
-      if [[ -n "$_lo" && -n "$_hi" ]] && declare -F gate_profile_rank >/dev/null 2>&1; then
-        _lr="$(gate_profile_rank "$_lo" 2>/dev/null || echo 0)"
-        _hr="$(gate_profile_rank "$_hi" 2>/dev/null || echo 0)"
-        [[ "$_hr" =~ ^[0-9]+$ && "$_lr" =~ ^[0-9]+$ ]] && (( _hr > _lr )) && _esc="true"
-      fi
-      rm -f "$_lo_f" "$_hi_f"
+      # One temp dir with a trap: two bare mktemps leaked the first when the
+      # second failed, and both on an interrupt.
+      _esc_dir="$(mktemp -d)"
+      trap 'rm -rf "${_esc_dir:-}"' RETURN
+      printf 'README.md\n' > "${_esc_dir}/lo"
+      _lo="$(gate_profile_resolve "${_esc_dir}/lo" 2>/dev/null || echo "")"
+
+      # EVERY high-risk path the resolver documents, not one hard-coded name.
+      # A single pair could come out "true" purely because two static ranks
+      # differ; requiring each of the declared high-risk paths to resolve to at
+      # least `full` tests the rule rather than one row of a table
+      # (cross-model review, 2026-08-15). It is still a resolver-level proof —
+      # what a whole RUN does is the calibration run's business, and the
+      # artifact's scope field says so.
+      _esc_all="true"; _esc_seen=0
+      for _hp in \
+        plugins/aid-orchestrator/scripts/aid-fsm.sh \
+        plugins/aid-orchestrator/scripts/aid-run-gates.sh \
+        plugins/aid-orchestrator/scripts/aid-release-policy.sh \
+        plugins/aid-orchestrator/scripts/aid-evidence-verify.sh \
+        plugins/aid-orchestrator/defaults/policies/delivery-gate.yaml \
+        plugins/aid-orchestrator/agents/auditor.md; do
+        printf '%s\n' "$_hp" > "${_esc_dir}/hi"
+        _hi="$(gate_profile_resolve "${_esc_dir}/hi" 2>/dev/null || echo "")"
+        [[ -n "$_hi" ]] || { _esc_all="false"; continue; }
+        _esc_seen=$(( _esc_seen + 1 ))
+        if declare -F gate_profile_rank >/dev/null 2>&1; then
+          _lr="$(gate_profile_rank "${_lo:-quick}" 2>/dev/null || echo 0)"
+          _hr="$(gate_profile_rank "$_hi" 2>/dev/null || echo 0)"
+          _fr="$(gate_profile_rank full 2>/dev/null || echo 0)"
+          if ! { [[ "$_hr" =~ ^[0-9]+$ && "$_lr" =~ ^[0-9]+$ && "$_fr" =~ ^[0-9]+$ ]] \
+                 && (( _hr > _lr )) && (( _hr >= _fr )); }; then
+            _esc_all="false"
+          fi
+        else
+          _esc_all="false"
+        fi
+      done
+      [[ "$_esc_all" == "true" && "$_esc_seen" -gt 0 ]] && _esc="true"
     fi
 
-    if (( _known > 0 )); then
+    # The saving is computed ONLY when EVERY gate has a baseline. Disclosing
+    # `gates_without_baseline` beside a number is not the same as refusing the
+    # number: the reader gets a decimal that looks measured and a footnote
+    # saying part of the set was not (cross-model review, 2026-08-15). A saving
+    # over a partly unmeasured set is a guess with a decimal point, so it is
+    # null and the count says why.
+    if (( _known > 0 && _unknown == 0 )); then
       _profile_json="$(jq -nc --argjson a "$_all_p95" --argjson q "$_quick_p95" \
         --argjson esc "$_esc" --argjson unk "$_unknown" \
         '{baseline_source: "p063",
