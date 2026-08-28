@@ -422,9 +422,14 @@ AKTUÁLNÍ instrukce (agents/*.md + plugin cache), jinak žádný blocking promo
 - Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — hook v místě, kde se výstup
   Auditor/Curator/Verifier KONZUMUJE, volá rozšířený preflight; skew → `agent_instructions_stale`
   event, promotion-gate ho počítá.
-- Create: `plugins/aid-orchestrator/scripts/tests/bats/test-agent-freshness.bats` — red-green:
-  dispatch se stale hashem (agents/*.md změněné po dispatchi) → `agent_instructions_stale` event;
-  fresh → žádný event; promotion-gate s nenulovým stale-count → blokuje blocking-promotion agent-checků.
+- Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-cache-preflight.bats` — red-green
+  **tam, kde ta rodina žije**, ne v nové sadě: strom `agents/` rozejitý s cache → hard stop, který
+  ten strom pojmenuje; všechny stromy shodné → průchod (jinak je „zastaví se na rozdílu"
+  splnitelné tím, že se to zastaví vždycky); artefakt nese `preflight_ran`, `skewed_trees` a
+  poctivý rozsah.
+  **Nová `test-agent-freshness.bats` se nevytváří** — původní znění tohohle řádku ji jmenovalo
+  a odporovalo tím AC2 níže (závěrečný audit 2026-08-15). Kontrola se dopsala do existující
+  cache preflight, takže testy patří k ní.
 
 **Acceptance Criteria:**
 - [ ] Rozšířený preflight detekuje skew ve stromu `agents/` stejně tvrdě jako dnes ve `scripts/` (red-green: rozejít cache a repo → `skew_dogfood`, hard stop).

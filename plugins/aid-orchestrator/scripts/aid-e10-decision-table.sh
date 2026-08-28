@@ -36,7 +36,8 @@
 #   single failure this table exists to prevent.
 set -euo pipefail
 
-METRICS=""; DUALRUN=""; PREFLIGHT=""; IMP201=""; BUDGET=""; OUT_FILE=""
+METRICS=""; DUALRUN=""; PREFLIGHT=""; IMP201=""; BUDGET=""; OUT_FILE=""; INVENTORY=""
+_DT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --metrics)   [[ $# -ge 2 ]] || { echo "--metrics needs a path" >&2; exit 2; };   METRICS="$2";   shift 2 ;;
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --preflight) [[ $# -ge 2 ]] || { echo "--preflight needs a path" >&2; exit 2; }; PREFLIGHT="$2"; shift 2 ;;
     --imp201)    [[ $# -ge 2 ]] || { echo "--imp201 needs a path" >&2; exit 2; };    IMP201="$2";    shift 2 ;;
     --budget)    [[ $# -ge 2 ]] || { echo "--budget needs a path" >&2; exit 2; };    BUDGET="$2";    shift 2 ;;
+    --inventory) [[ $# -ge 2 ]] || { echo "--inventory needs a path" >&2; exit 2; }; INVENTORY="$2"; shift 2 ;;
     --out)       [[ $# -ge 2 ]] || { echo "--out needs a path" >&2; exit 2; };       OUT_FILE="$2";  shift 2 ;;
     -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -57,6 +59,10 @@ done
 jq -e '.controls' "$METRICS" >/dev/null 2>&1 || { echo "ERROR: ${METRICS} carries no .controls" >&2; exit 2; }
 jq -e '.pairs'    "$DUALRUN" >/dev/null 2>&1 || { echo "ERROR: ${DUALRUN} carries no .pairs" >&2; exit 2; }
 OUT_FILE="${OUT_FILE:-.aid-o/work/evidence/P062/e10/e10-decision-table.json}"
+INVENTORY="${INVENTORY:-${_DT_SCRIPT_DIR}/../defaults/policies/control-inventory.yaml}"
+[[ -f "$INVENTORY" ]] || { echo "ERROR: control inventory not found: ${INVENTORY}" >&2; exit 2; }
+command -v yq >/dev/null 2>&1 || { echo "ERROR: yq is required — the control inventory is YAML" >&2; exit 2; }
+_inv_json="$(yq -o=json '.' "$INVENTORY" 2>/dev/null)" || { echo "ERROR: cannot parse ${INVENTORY}" >&2; exit 2; }
 
 # ── the gates that constrain EVERY row, read once ───────────────────────────
 #
@@ -72,13 +78,13 @@ _budget="undecided"
 # ── IMP-179: which controls rest on subagent output ─────────────────────────
 # Named explicitly rather than pattern-matched, because being wrong here means
 # promoting a control whose inputs may have come from a stale plugin cache.
-_subagent_controls='["c2","c3"]'
-_stale_count="$(jq -r '.speed.dispatch_count // 0' "$METRICS" 2>/dev/null || echo 0)"
+_subagent_controls='["c2","c3"]' 
 
 table="$(jq -n \
   --slurpfile m "$METRICS" \
   --slurpfile d "$DUALRUN" \
   --arg pf "$_pf" --arg imp201 "$_imp201" --arg budget "$_budget" \
+  --argjson inv "$_inv_json" \
   --argjson subagent "$_subagent_controls" '
   ($m[0]) as $met | ($d[0]) as $dual
   | ($met.c3_verdict_mix // {}) as $mix
@@ -89,8 +95,9 @@ table="$(jq -n \
       artifact_type: "e10_decision_table",
       gates: {preflight: $pf, imp201: $imp201, merge_path_budget: $budget},
       c3_verdict_mix: $mix,
-      controls: [ $met.controls[] | . as $c
-        | ($c.control) as $id
+      controls: [ $inv.controls[] as $row
+        | ($row.control) as $id
+        | (([$met.controls[] | select(.control == $id)] | first) // {control: $id}) as $c
         | ([$dual.pairs[]? | select(.expected_catcher == $id)]) as $pairs
         | ([$pairs[] | select(.divergence == "legacy_unique_catch")] | length) as $n_luc
         | (($c.false_done == null) or ($c.false_positives == null)
@@ -98,7 +105,8 @@ table="$(jq -n \
         | (($mix.unverifiable // 0) > (($mix.pass // 0) + ($mix.fail // 0))) as $c3_mostly_unverifiable
         | {
             control: $id,
-            inventory_ids: ($c.inventory_ids // []),
+            inventory_id: $row.id,
+            promotable: ($row.promotable // false),
             evidence_refs: ($c.evidence_refs // []),
             caught_classes: ($c.caught_classes // []),
             false_done: $c.false_done,
@@ -108,9 +116,14 @@ table="$(jq -n \
             decision:
               # PRECEDENCE. Every branch above `promote_to_blocking` is a reason
               # NOT to promote, and they are asked first on purpose.
+              # A row that can NEVER be promoted says so before it says "no
+              # data": "insufficient data" invites someone to go measure, and
+              # for these rows measuring changes nothing (final audit ordering
+              # fix, 2026-08-15).
               (if $n_luc > 0 then "keep_dual_run"
+               elif ($row.promotable // false) == false then "keep_observe"
+               elif $row.id == "c4_evidence_pack_freshness" and $imp201 != "fixed" then "keep_observe"
                elif $unmeasured then "defer"
-               elif ($subagent | index($id)) != null and $imp201 != "fixed" and $id == "c4" then "keep_observe"
                elif $id == "c3" and $c3_mostly_unverifiable then "keep_observe"
                elif $pf != "clean" and $pf != "excluded_by_pm" then "defer"
                elif $budget != "budget_raised" and $budget != "path_reduced" and $budget != "exception_recorded"
@@ -121,8 +134,9 @@ table="$(jq -n \
                else "promote_to_blocking" end),
             reason:
               (if $n_luc > 0 then "legacy caught what this control did not (\($n_luc) fixture(s)); D8 forbids marking it for removal and it is not yet safe to promote"
+               elif ($row.promotable // false) == false then ($row.not_promotable_reason // "the control inventory marks this row not promotable")
+               elif $row.id == "c4_evidence_pack_freshness" and $imp201 != "fixed" then "IMP-201 is \($imp201): C4 freshness cannot block the trailing-commit class"
                elif $unmeasured then "insufficient data: at least one of false_done / false_positives / unique_detection_vs_legacy was not measured"
-               elif ($subagent | index($id)) != null and $imp201 != "fixed" and $id == "c4" then "IMP-201 is \($imp201): C4 freshness cannot block the trailing-commit class"
                elif $id == "c3" and $c3_mostly_unverifiable then "C3 returned unverifiable more often than it reached a verdict (\($mix.unverifiable // 0) vs \(($mix.pass // 0) + ($mix.fail // 0))); a dataset of shrugs is not evidence that it catches defects"
                elif $pf != "clean" and $pf != "excluded_by_pm" then "the bookkeeping preflight is \($pf); calibration over a layer nobody could read proves nothing"
                elif $budget != "budget_raised" and $budget != "path_reduced" and $budget != "exception_recorded"
@@ -145,10 +159,10 @@ md="${OUT_FILE%.json}.md"
   echo
   echo "Gates: preflight=$(jq -r '.gates.preflight' "$OUT_FILE"), IMP-201=$(jq -r '.gates.imp201' "$OUT_FILE"), merge-path budget=$(jq -r '.gates.merge_path_budget' "$OUT_FILE")."
   echo
-  echo "| Control | Decision | Why |"
-  echo "|---|---|---|"
-  jq -r '.controls[] | "| \(.control) | \(.decision) | \(.reason) |"' "$OUT_FILE"
+  echo "| Control row | Control | Decision | Why |"
+  echo "|---|---|---|---|"
+  jq -r '.controls[] | "| \(.inventory_id) | \(.control) | \(.decision) | \(.reason) |"' "$OUT_FILE"
 } > "$md"
 
 echo "aid-e10-decision-table: $(jq -r '.controls | length' "$OUT_FILE") control(s) → ${OUT_FILE}"
-jq -r '.controls[] | "  \(.control): \(.decision)"' "$OUT_FILE"
+jq -r '.controls[] | "  \(.inventory_id) (\(.control)): \(.decision)"' "$OUT_FILE"

@@ -55,6 +55,7 @@ if ! jq -e '(.artifact_type == "e10_decision_table")
             and ((.controls | length) > 0)
             and all(.controls[];
                     ((.control | type) == "string") and ((.decision | type) == "string")
+                    and ((.inventory_id | type) == "string")
                     and (((.reason // "") | length) > 0)
                     and ((.evidence_refs | type) == "array"))' "$TABLE" >/dev/null 2>&1; then
   echo "ERROR: ${TABLE} is not an e10_decision_table with well-formed control rows" >&2
@@ -92,94 +93,72 @@ fi
 imp201="unknown"
 [[ -n "$IMP201" && -f "$IMP201" ]] && imp201="$(jq -r '.decision // "unknown"' "$IMP201" 2>/dev/null || echo unknown)"
 
-# ── per control ─────────────────────────────────────────────────────────────
+# ── per inventory row ───────────────────────────────────────────────────────
+#
+# The decision table is now keyed by INVENTORY ROW ID, so this loop has nothing
+# left to disambiguate. It previously mapped a control (c0..c4) onto every
+# inventory row sharing it and refused when there was more than one — machinery
+# built to describe an ambiguity rather than remove it, and it made c2 and c4
+# permanently unpromotable because nothing ever produced the `inventory_ids`
+# field it needed (found independently by two reviews, 2026-08-15). Joining the
+# inventory in the table instead means rows and ids are the same thing here.
 promoted=0; refused=0
-while IFS=$'\t' read -r ctl decision; do
-  [[ -n "$ctl" ]] || continue
+while IFS=$'\t' read -r id ctl decision; do
+  [[ -n "$id" ]] || continue
 
-  # Map the decision-table control (c0..c4) onto the inventory rows that
-  # implement it. A control with no inventory row is refused, not guessed at.
-  mapfile -t rows < <(yq -r ".controls[] | select(.control == \"${ctl}\") | .id" "$INVENTORY" 2>/dev/null)
-  if (( ${#rows[@]} == 0 )); then
-    echo "refused  ${ctl}: no row in the control inventory — the inventory is the authority on what exists" >&2
+  if ! _safe_id "$id"; then
+    echo "refused  <malformed id>: inventory ids must match [A-Za-z0-9_.-]+" >&2
     refused=$(( refused + 1 )); rc=1; continue
   fi
 
-  # A decision row names a CONTROL (c0..c4); the inventory may hold SEVERAL
-  # promotable rows for it. Promoting all of them on one approval is broader
-  # than "only the approved controls were promoted" — approving c4 would flip
-  # both the release decision and the content verdict (cross-model review,
-  # 2026-08-15). When the table does not name the inventory row, an ambiguous
-  # control is REFUSED rather than resolved generously.
-  promotable_rows=()
-  for _r in "${rows[@]}"; do
-    [[ -n "$_r" ]] || continue
-    aid_control_promotable "$INVENTORY" "$_r" && promotable_rows+=("$_r")
-  done
-  named_ids=""
-  named_ids="$(jq -r --arg c "$ctl" '.controls[] | select(.control == $c) | (.inventory_ids // [])[]' "$TABLE" 2>/dev/null || true)"
-  if [[ "$decision" == "promote_to_blocking" && -z "${named_ids//[[:space:]]/}" && ${#promotable_rows[@]} -gt 1 ]]; then
-    echo "refused  ${ctl}: maps to ${#promotable_rows[@]} promotable inventory rows (${promotable_rows[*]}) and the decision names none of them" >&2
-    echo "         add \"inventory_ids\" to that decision row; one approval must not flip several controls" >&2
+  if [[ "$decision" != "promote_to_blocking" ]]; then
+    echo "skipped  ${id}: decision is '${decision}'"
+    continue
+  fi
+
+  # The inventory is still consulted, not trusted from the table: a table that
+  # says promote for a row the inventory calls unpromotable is a disagreement,
+  # and the inventory is the authority on what may be promoted at all.
+  if ! aid_control_promotable "$INVENTORY" "$id"; then
+    reason="$(yq -r ".controls[] | select(.id == \"${id}\") | .not_promotable_reason // \"not promotable\"" "$INVENTORY" 2>/dev/null | tr '\n' ' ')"
+    echo "refused  ${id}: ${reason}" >&2
     refused=$(( refused + 1 )); rc=1; continue
   fi
 
-  for id in "${rows[@]}"; do
-    [[ -n "$id" ]] || continue
-    if ! _safe_id "$id"; then
-      echo "refused  <malformed id>: inventory ids must match [A-Za-z0-9_.-]+" >&2
-      refused=$(( refused + 1 )); rc=1; continue
-    fi
-    if [[ -n "${named_ids//[[:space:]]/}" ]] && ! grep -qxF "$id" <<<"$named_ids"; then
-      echo "skipped  ${id}: not named by the decision row's inventory_ids"
-      continue
-    fi
-    if [[ "$decision" != "promote_to_blocking" ]]; then
-      echo "skipped  ${id}: decision is '${decision}'"
-      continue
-    fi
-    if ! aid_control_promotable "$INVENTORY" "$id"; then
-      reason="$(yq -r ".controls[] | select(.id == \"${id}\") | .not_promotable_reason // \"not promotable\"" "$INVENTORY" 2>/dev/null | tr '\n' ' ')"
-      echo "refused  ${id}: ${reason}" >&2
-      refused=$(( refused + 1 )); rc=1; continue
-    fi
-    if [[ "$id" == "c4_evidence_pack_freshness" && "$imp201" != "fixed" ]]; then
-      echo "refused  ${id}: IMP-201 is '${imp201}'" >&2
-      refused=$(( refused + 1 )); rc=1; continue
-    fi
+  if [[ "$id" == "c4_evidence_pack_freshness" && "$imp201" != "fixed" ]]; then
+    echo "refused  ${id}: IMP-201 is '${imp201}'" >&2
+    refused=$(( refused + 1 )); rc=1; continue
+  fi
 
-    pf_rel="$(yq -r ".controls[] | select(.id == \"${id}\") | .policy_file" "$INVENTORY" 2>/dev/null)"
-    key="$(yq -r ".controls[] | select(.id == \"${id}\") | .policy_key // \"enforcement\"" "$INVENTORY" 2>/dev/null)"
-    if [[ -z "$pf_rel" || "$pf_rel" == "null" ]]; then
-      echo "refused  ${id}: no policy file — it cannot be promoted through the per-control maps" >&2
+  pf_rel="$(yq -r ".controls[] | select(.id == \"${id}\") | .policy_file" "$INVENTORY" 2>/dev/null)"
+  if [[ -z "$pf_rel" || "$pf_rel" == "null" ]]; then
+    echo "refused  ${id}: no policy file — it cannot be promoted through the per-control maps" >&2
+    refused=$(( refused + 1 )); rc=1; continue
+  fi
+  pf_path="${POLICY_DIR}/$(basename "$pf_rel")"
+  [[ -f "$pf_path" ]] || { echo "refused  ${id}: policy file not found at ${pf_path}" >&2; refused=$(( refused + 1 )); rc=1; continue; }
+
+  if (( APPLY == 1 )); then
+    # Written through a temp copy and moved into place. `yq -i` edits the
+    # shipped policy directly, so a yq failure part-way through a multi-row run
+    # left earlier policies promoted and later ones not — a partial,
+    # non-transactional promotion nobody recorded. The result is re-parsed
+    # before it replaces the original, so a mangled file never lands.
+    _tmp="$(mktemp)"
+    if ! cp "$pf_path" "$_tmp" \
+       || ! yq -i ".controls.\"${id}\".enforcement = \"blocking\"" "$_tmp" \
+       || ! yq -e '.' "$_tmp" >/dev/null 2>&1; then
+      rm -f "$_tmp"
+      echo "refused  ${id}: editing $(basename "$pf_path") failed; the original is untouched" >&2
       refused=$(( refused + 1 )); rc=1; continue
     fi
-    pf_path="${POLICY_DIR}/$(basename "$pf_rel")"
-    [[ -f "$pf_path" ]] || { echo "refused  ${id}: policy file not found at ${pf_path}" >&2; refused=$(( refused + 1 )); rc=1; continue; }
-
-    if (( APPLY == 1 )); then
-      # Written through a temp copy and moved into place. `yq -i` edits the
-      # shipped policy directly, so a yq failure part-way through a multi-control
-      # run left earlier policies promoted and later ones not — a partial,
-      # non-transactional promotion nobody recorded (cross-model review,
-      # 2026-08-15). The result is also re-parsed before it replaces the
-      # original, so a mangled file never lands.
-      _tmp="$(mktemp)"
-      if ! cp "$pf_path" "$_tmp" \
-         || ! yq -i ".controls.\"${id}\".enforcement = \"blocking\"" "$_tmp" \
-         || ! yq -e '.' "$_tmp" >/dev/null 2>&1; then
-        rm -f "$_tmp"
-        echo "refused  ${id}: editing $(basename "$pf_path") failed; the original is untouched" >&2
-        refused=$(( refused + 1 )); rc=1; continue
-      fi
-      mv "$_tmp" "$pf_path"
-      echo "promoted ${id}: ${key} -> blocking in $(basename "$pf_path")"
-    else
-      echo "would promote ${id}: ${key} -> blocking in $(basename "$pf_path")  [dry run]"
-    fi
-    promoted=$(( promoted + 1 ))
-  done
-done < <(jq -r '.controls[] | [.control, .decision] | @tsv' "$TABLE")
+    mv "$_tmp" "$pf_path"
+    echo "promoted ${id} (${ctl}): enforcement -> blocking in $(basename "$pf_path")"
+  else
+    echo "would promote ${id} (${ctl}): enforcement -> blocking in $(basename "$pf_path")  [dry run]"
+  fi
+  promoted=$(( promoted + 1 ))
+done < <(jq -r '.controls[] | [(.inventory_id // .control), .control, .decision] | @tsv' "$TABLE")
 
 echo "aid-e10-promote: ${promoted} promotion(s)$( (( APPLY == 0 )) && printf ' (dry run — nothing changed)'), ${refused} refusal(s)"
 exit "$rc"

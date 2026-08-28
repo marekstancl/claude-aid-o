@@ -109,7 +109,7 @@ RP
     "$PROJ/plugins/aid-orchestrator/defaults/policies/release-decision-policy.yaml"
   run bash "$TOOL" --project-root "$PROJ" --out "$PROJ/d.json"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"the hold is not actually in force"* ]]
+  [[ "$output" == *"the record and the policy disagree"* ]]
 }
 
 @test "the shipped policy really carries the key the hold depends on" {

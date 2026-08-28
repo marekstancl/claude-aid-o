@@ -90,12 +90,19 @@ else
   covered=false
 fi
 
+# WHAT THIS CHECK IS AND IS NOT (final audit, 2026-08-15). The policy key is a
+# RECORD of a refused promotion, not a runtime switch — aid-release-policy.sh
+# does not read it. What actually holds the line is control-inventory.yaml's
+# `promotable: false` on c4_evidence_pack_freshness, which aid-e10-promote.sh
+# enforces. This check keeps the two statements from contradicting each other;
+# it does not, by itself, make anything observe.
+#
 # The contradiction is refused BEFORE anything is written. Writing first and
 # exiting 2 afterwards (the earlier order) left a consumer free to read an
 # invalid hold record the run had already rejected, and made the comment that
 # promises a refusal false (cross-model review, 2026-08-15).
 if [[ "$decision" == "observe_hold" && "$enforcement" != "observe" ]]; then
-  echo "ERROR: decision is observe_hold but evidence_pack_freshness_policy is '${enforcement}' — the hold is not actually in force; refusing to write ${OUT_FILE}" >&2
+  echo "ERROR: decision is observe_hold but evidence_pack_freshness_policy is '${enforcement}' — the record and the policy disagree; refusing to write ${OUT_FILE}" >&2
   exit 2
 fi
 

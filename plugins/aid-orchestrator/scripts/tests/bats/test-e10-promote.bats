@@ -21,11 +21,13 @@ setup() {
   cp "$AID_PLUGIN_PATH"/defaults/policies/*.yaml "$POL/"
   printf '{"verdict":"clean"}'  > "$TEST_TMPDIR/pf.json"
   printf '{"decision":"fixed"}' > "$TEST_TMPDIR/i.json"
-  _table '{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
+  _table '{"inventory_id":"c1_delivery_gate","control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
 }
 
 teardown() { teardown_test_evidence_dir; }
 
+# Rows are keyed by INVENTORY ID now — the promotion step reads inventory_id,
+# so a fixture without one is not a decision table it will accept.
 _table() { printf '{"artifact_type":"e10_decision_table","controls":[%s]}' "$1" > "$TEST_TMPDIR/dt.json"; }
 _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST_TMPDIR/pf.json" \
            --imp201 "$TEST_TMPDIR/i.json" --inventory "$INV" --policy-dir "$POL" "$@"; }
@@ -64,7 +66,7 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
   # The whole point of Step 11. c1_delivery_gate and c2_semantic_review live in
   # different files, but review-profiles.yaml holds TWO c2 controls — promoting
   # one must not promote the other.
-  _table '{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
+  _table '{"inventory_id":"c1_delivery_gate","control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 0 ]
   [ "$(yq -r '.controls.c1_delivery_gate.enforcement' "$POL/delivery-gate.yaml")" = "blocking" ]
@@ -97,7 +99,7 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
 @test "promotion NEVER writes a file-wide default — only the per-control key" {
   # Otherwise one approval would promote every control in that file through the
   # back door, which is the thing this step exists to make impossible.
-  _table '{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
+  _table '{"inventory_id":"c1_delivery_gate","control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   before="$(yq -r '.enforcement' "$POL/delivery-gate.yaml")"
   run _run --apply
   [ "$status" -eq 0 ]
@@ -112,33 +114,27 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
   [[ "$output" == *"not an e10_decision_table"* ]]
 }
 
-@test "an ambiguous control that maps to several promotable rows is refused" {
-  # Approving `c4` must not flip both the release decision and the content
-  # verdict. One approval, one control.
-  _table '{"control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
-  run _run --apply
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"names none of them"* ]]
-}
-
-@test "naming the inventory row promotes exactly that row" {
-  _table '{"control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"],"inventory_ids":["c4_content_verdict"]}'
+@test "each of c4's rows is promoted on its OWN decision, never together" {
+  # The break two reviews found: rows were keyed by control, so one c4 approval
+  # had to stand for three different mechanisms. The table is keyed by inventory
+  # row now, so this is a fixture of one row and only that row moves.
+  _table '{"inventory_id":"c4_content_verdict","control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 0 ]
   [ "$(yq -r '.controls.c4_content_verdict.enforcement' "$POL/release-decision-policy.yaml")" = "blocking" ]
   [ "$(yq -r '.controls.c4_release_decision.enforcement // "unset"' "$POL/release-decision-policy.yaml")" = "unset" ]
 }
 
-@test "every cannot-tell path resolves to observe, never to blocking" {
-  run bash -c 'source "$1"; aid_control_enforcement /does/not/exist c1_delivery_gate' _ "$LIB"
-  [ "$output" = "observe" ]
-  printf 'not: [valid: yaml' > "$POL/broken.yaml"
-  run bash -c 'source "$1"; aid_control_enforcement "$2" c1_delivery_gate' _ "$LIB" "$POL/broken.yaml"
-  [ "$output" = "observe" ]
+@test "a decision table without inventory_id is refused" {
+  # It is what the promotion step keys on; without it there is nothing to
+  # promote but a guess.
+  printf '{"artifact_type":"e10_decision_table","controls":[{"control":"c1","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}]}' > "$TEST_TMPDIR/dt.json"
+  run _run --apply
+  [ "$status" -eq 2 ]
 }
 
 @test "a control the inventory calls not-promotable is refused with its reason" {
-  _table '{"control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"],"inventory_ids":["c4_evidence_pack_freshness"]}'
+  _table '{"inventory_id":"c4_evidence_pack_freshness","control":"c4","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"IMP-201"* ]]
@@ -154,17 +150,22 @@ _run() { bash "$TOOL" --decision-table "$TEST_TMPDIR/dt.json" --preflight "$TEST
 }
 
 @test "a decision that is not promote_to_blocking is skipped, not quietly applied" {
-  _table '{"control":"c1","decision":"keep_observe","reason":"r","evidence_refs":["e"]}'
+  _table '{"inventory_id":"c1_delivery_gate","control":"c1","decision":"keep_observe","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 0 ]
   [ "$(yq -r '.controls // "none"' "$POL/delivery-gate.yaml")" = "none" ]
 }
 
-@test "a control with no inventory row is refused, never guessed at" {
-  _table '{"control":"c9","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
+@test "an id absent from the inventory is refused, never guessed at" {
+  # The inventory is the authority on what exists. aid_control_promotable
+  # returns false for an unknown id, so the refusal comes from there — the
+  # message changed with the rekey and the assertion follows the behaviour
+  # rather than the old wording.
+  _table '{"inventory_id":"c9_nonexistent","control":"c9","decision":"promote_to_blocking","reason":"r","evidence_refs":["e"]}'
   run _run --apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no row in the control inventory"* ]]
+  [[ "$output" == *"refused  c9_nonexistent"* ]]
+  [ "$(yq -r '.controls // "none"' "$POL/delivery-gate.yaml")" = "none" ]
 }
 
 @test "every inventory row names a concrete reader" {

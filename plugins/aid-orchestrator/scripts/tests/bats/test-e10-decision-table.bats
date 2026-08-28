@@ -40,7 +40,12 @@ _run_all() {
     --budget "${5:-$TEST_TMPDIR/b.json}" --out "$OUT"
 }
 
-_decision() { jq -r --arg c "$1" '.controls[] | select(.control==$c) | .decision' "$OUT"; }
+# Rows are keyed by INVENTORY ID now, and one control may own several. These
+# helpers ask by control and expect a single distinct decision across its rows,
+# which is what the metrics-per-control model produces; a case that needs one
+# specific row asks for it by id.
+_decision() { jq -r --arg c "$1" '[.controls[] | select(.control==$c) | .decision] | unique | .[0]' "$OUT"; }
+_decision_id() { jq -r --arg i "$1" '.controls[] | select(.inventory_id==$i) | .decision' "$OUT"; }
 
 @test "a measured, gated, useful control is promoted" {
   # The baseline. Without it every refusal below is satisfiable by a table that
@@ -54,7 +59,7 @@ _decision() { jq -r --arg c "$1" '.controls[] | select(.control==$c) | .decision
   jq '.controls[0].false_positives = null' "$TEST_TMPDIR/m.json" > "$TEST_TMPDIR/m2.json"
   run _run_all "$TEST_TMPDIR/m2.json"
   [ "$(_decision c0)" = "defer" ]
-  [[ "$(jq -r '.controls[0].reason' "$OUT")" == *"insufficient data"* ]]
+  [[ "$(jq -r '.controls[] | select(.control=="c0") | .reason' "$OUT")" == *"insufficient data"* ]]
 }
 
 @test "a legacy-only catch keeps the dual run and never recommends removal" {
@@ -99,7 +104,7 @@ _decision() { jq -r --arg c "$1" '.controls[] | select(.control==$c) | .decision
 M
   run _run_all "$TEST_TMPDIR/m3.json"
   [ "$(_decision c3)" = "keep_observe" ]
-  [[ "$(jq -r '.controls[0].reason' "$OUT")" == *"shrugs"* ]]
+  [[ "$(jq -r '.controls[] | select(.control=="c3") | .reason' "$OUT" | head -1)" == *"shrugs"* ]]
 }
 
 @test "a control that caught nothing unique is a removal CANDIDATE, decided in E11" {
@@ -107,7 +112,7 @@ M
     "$TEST_TMPDIR/m.json" > "$TEST_TMPDIR/m4.json"
   run _run_all "$TEST_TMPDIR/m4.json"
   [ "$(_decision c0)" = "remove_or_alias_in_E11_candidate" ]
-  [[ "$(jq -r '.controls[0].reason' "$OUT")" == *"E11"* ]]
+  [[ "$(jq -r '.controls[] | select(.control=="c0") | .reason' "$OUT")" == *"E11"* ]]
 }
 
 @test "every row carries evidence and a reason; every decision is one of the six" {
@@ -119,10 +124,34 @@ M
   [ "$status" -eq 0 ]
 }
 
-@test "no control appears twice" {
+@test "no inventory row appears twice" {
+  # Keyed by inventory id, not by control: c4 legitimately has three rows.
   run _run_all
-  run jq -e '(.controls | map(.control) | unique | length) == (.controls | length)' "$OUT"
+  run jq -e '(.controls | map(.inventory_id) | unique | length) == (.controls | length)' "$OUT"
   [ "$status" -eq 0 ]
+}
+
+@test "every row carries its inventory id — the promotion step keys on it" {
+  # Before this, rows were per control and the promotion step had to guess which
+  # of a control's inventory rows an approval meant; it refused every
+  # multi-row control forever because nothing produced the field it needed.
+  run _run_all
+  run jq -e 'all(.controls[]; ((.inventory_id // "") | length) > 0)' "$OUT"
+  [ "$status" -eq 0 ]
+}
+
+@test "a row the inventory calls not-promotable is held, with the inventory's own reason" {
+  run _run_all
+  [ "$(_decision_id cp3_freshness)" = "keep_observe" ]
+  [[ "$(jq -r '.controls[] | select(.inventory_id=="cp3_freshness") | .reason' "$OUT")" == *"policy file"* ]]
+}
+
+@test "c4's three rows are decided separately, not as one control" {
+  # The break two reviews found: one c4 approval could not distinguish the
+  # release decision from the content verdict from the held freshness check.
+  run _run_all
+  [ "$(jq -r '[.controls[] | select(.control=="c4")] | length' "$OUT")" -eq 3 ]
+  [ "$(_decision_id c4_evidence_pack_freshness)" = "keep_observe" ]
 }
 
 @test "the human twin is rendered from the same data, never re-derived" {

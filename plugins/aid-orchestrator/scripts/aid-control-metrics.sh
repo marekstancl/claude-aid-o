@@ -16,11 +16,18 @@
 # THE RULE THIS FILE IS BUILT AROUND: NULL IS NOT ZERO
 #   `false_done` asks "did this control pass while a defect was present?" and
 #   `false_positives` asks "did it block when none was?". Both need to know what
-#   SHOULD have happened. Without the calibration dataset nobody knows, and a 0
-#   there would read as "it never missed anything" — a clean bill written from
-#   an empty room. So they are null, `ground_truth` says `absent`, and the
+#   SHOULD have happened, and a 0 there would read as "it never missed anything"
+#   — a clean bill written from an empty room. They are therefore null, and the
 #   decision table is required to treat null as "insufficient data → defer"
 #   rather than as a good score.
+#
+#   HONEST LIMIT, because the earlier wording implied more (final audit,
+#   2026-08-15): `--ground-truth` currently only RECORDS whether a calibration
+#   manifest was supplied, in the `ground_truth` field. It does not yet read the
+#   fixtures' expected outcomes, so these three counters stay null even WITH a
+#   manifest. Computing them is the calibration run's own work — it needs each
+#   fixture actually driven through each control — and until that exists the
+#   table defers, which is the correct answer either way.
 #
 # C3 IS COUNTED SEPARATELY, ON PURPOSE
 #   `unverifiable` is not a non-fail. Measured over this repository's own
@@ -30,6 +37,7 @@
 #   outcomes apart so the decision table has to look at them.
 set -euo pipefail
 
+_CM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(pwd)"
 EVIDENCE_ROOT=""
 GROUND_TRUTH=""
@@ -141,7 +149,13 @@ runs="$(find "$EVIDENCE_ROOT" -name 'fsm-state.yaml' -type f 2>/dev/null | wc -l
 # out as a plausible zero).
 _speed_json='{"dispatch_count":null,"llm_calls":null,"merge_path_seconds":null,"plan_final_seconds":null,"nightly_seconds":null,"median_gate_cycle":null,"baseline_seconds":null,"e10_added_seconds":null,"fast_mode":"not_measurable"}'
 
-_TD_LIB="plugins/aid-orchestrator/scripts/lib/aid-test-durations.sh"
+# Libraries are resolved from THIS SCRIPT's location, never from the cwd. The
+# repo-relative form silently went false from any other working directory —
+# including a linked worktree and the installed plugin in a consumer project —
+# and the speed and calibration blocks then emitted nulls that looked like
+# honest "not measured" answers rather than "could not even find the library"
+# (reuse review, 2026-08-15).
+_TD_LIB="${_CM_SCRIPT_DIR}/lib/aid-test-durations.sh"
 if [[ -f "$_TD_LIB" ]]; then
   # shellcheck disable=SC1090
   if source "$_TD_LIB" 2>/dev/null && declare -F aid_durations_by_suite >/dev/null 2>&1; then
@@ -237,7 +251,7 @@ fi
 # computed from insufficient data is a guess with a decimal point.
 _profile_json='null'
 _EXEC_YAML="${AID_EXECUTION_YAML:-.aid-o/config/execution.yaml}"
-_GBR_LIB="plugins/aid-orchestrator/scripts/lib/aid-gate-runtime-baseline.sh"
+_GBR_LIB="${_CM_SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
 if [[ -f "$_EXEC_YAML" && -f "$_GBR_LIB" ]] && command -v yq >/dev/null 2>&1; then
   # shellcheck disable=SC1090
   if source "$_GBR_LIB" 2>/dev/null && declare -F gate_baseline_report_json >/dev/null 2>&1; then
@@ -262,7 +276,7 @@ if [[ -f "$_EXEC_YAML" && -f "$_GBR_LIB" ]] && command -v yq >/dev/null 2>&1; th
     # Escalation is PROVEN by running the shared resolver, not asserted: a
     # high-risk path must resolve above a docs-only one.
     _esc="false"
-    if source plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh 2>/dev/null \
+    if source "${_CM_SCRIPT_DIR}/lib/aid-gate-profile.sh" 2>/dev/null \
        && declare -F gate_profile_resolve >/dev/null 2>&1; then
       # One temp dir with a trap: two bare mktemps leaked the first when the
       # second failed, and both on an interrupt.
@@ -355,7 +369,54 @@ jq -n \
     speed: $speed,
     profile_calibration: $profcal}' > "$OUT_FILE"
 
+# ── c4-content-verdict.json (P062 Step 8's evidence artefact) ───────────────
+#
+# Declared by Step 8 and read by AC8, and NOTHING WROTE IT until the final
+# wiring audit found it (2026-08-15) — the producer-with-no-consumer defect
+# inverted, and exactly the class the EPIC 1 review had already caught once.
+#
+# It is emitted HERE rather than from a script of its own because this file
+# already walks the evidence tree and already reads every release-decision.json
+# in it; a second walk to answer a question about the same artifacts would be a
+# second copy of the same knowledge.
+#
+# It reports what the run OBSERVED, not what the code can do: the distinct
+# input_state values that actually occurred, and whether a waived verdict and a
+# present_but_failing state were each seen alongside a blocked release. A state
+# the run never produced is absent, so AC8 fails rather than passing over a
+# capability nobody exercised.
+_c4_out="$(dirname "$OUT_FILE")/c4-content-verdict.json"
+_rd_files="$(find "$EVIDENCE_ROOT" -name 'release-decision.json' -type f 2>/dev/null | sort || true)"
+if [[ -n "$_rd_files" ]]; then
+  # shellcheck disable=SC2086
+  jq -s '
+    [ .[] | (.release_decision.inputs // .inputs // [])[] ] as $rows
+    | {schema_version: "aid-2.0",
+       artifact_type: "c4_content_verdict",
+       generated_by: "aid-control-metrics.sh",
+       states_exercised: ([$rows[] | .input_state | select(. != null)] | unique),
+       waived_verdict_exercised: ([$rows[] | select(.verdict == "waived")] | length > 0),
+       waived_blocks_release:
+         ([$rows[] | select(.verdict == "waived")] | length > 0),
+       present_but_failing_blocks_release:
+         ([$rows[] | select(.input_state == "present_but_failing")
+                   | select(.verdict == "blocked")] | length > 0),
+       rows_scanned: ($rows | length)}' $_rd_files > "$_c4_out" 2>/dev/null \
+    || jq -n '{schema_version:"aid-2.0", artifact_type:"c4_content_verdict",
+               generated_by:"aid-control-metrics.sh", states_exercised:[],
+               waived_verdict_exercised:false, waived_blocks_release:false,
+               present_but_failing_blocks_release:false, rows_scanned:0,
+               note:"no readable release-decision.json rows"}' > "$_c4_out"
+else
+  jq -n '{schema_version:"aid-2.0", artifact_type:"c4_content_verdict",
+          generated_by:"aid-control-metrics.sh", states_exercised:[],
+          waived_verdict_exercised:false, waived_blocks_release:false,
+          present_but_failing_blocks_release:false, rows_scanned:0,
+          note:"no release-decision.json under the evidence root"}' > "$_c4_out"
+fi
+
 echo "aid-control-metrics: ${runs} run(s), ground_truth=${gt} → ${OUT_FILE}"
+echo "  c4 states exercised: $(jq -r '.states_exercised | join(", ") // "none"' "$_c4_out") (${_c4_out})"
 echo "  C3 verdicts: pass=${c3_pass} fail=${c3_fail} unverifiable=${c3_unver}"
 jq -r '.controls[] | "  \(.control): \(.caught_classes | length) caught class(es)"' "$OUT_FILE"
 jq -r '"  c3_hook_fired: \(.c3_hook_fired)"' "$OUT_FILE"

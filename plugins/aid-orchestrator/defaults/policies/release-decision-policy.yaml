@@ -57,8 +57,19 @@
 #   `cannot_promote_runtime_budget`'s sibling case — an explicit non-promotion with a named
 #   closure condition (IMP-201), not a silent observe.
 #
+#   WHAT THIS KEY IS, EXACTLY (final audit, 2026-08-15 — the earlier wording
+#   claimed more): it is a RECORD of a refused promotion, not a runtime switch.
+#   `aid-release-policy.sh` does not read it, and saying otherwise was an
+#   over-claim. What actually holds the line is elsewhere and is enforced:
+#   `control-inventory.yaml` marks `c4_evidence_pack_freshness` as
+#   `promotable: false`, so `aid-e10-promote.sh` refuses it, and
+#   `aid-e10-imp201-decision.sh` refuses to record an `observe_hold` while this
+#   key says anything else. The key exists so the refusal is visible where the
+#   policy lives, and so a future `blocking` here cannot be set quietly.
+#
 #   observe  → stale-by-trailing-commit is reported and never blocks. (current)
-#   blocking → forbidden until IMP-201 is closed by the shared classifier.
+#   blocking → forbidden until IMP-201 is closed by the shared classifier, at
+#              which point this key gains a reader along with the fix.
 # =============================================================================
 # content_verdict_policy (P062 Step 8) — whether a required input that is present and
 # parseable but whose OWN CONTENT reports a failure may block the release.
