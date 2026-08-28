@@ -755,6 +755,66 @@ plan_state_set_worktree_path() {
 }
 
 # ===========================================================================
+# plan_state_set_autonomy <plan_id> auto|manual
+#
+# Stamps the plan-level autonomy flag on an EXISTING record. P090 writes it at
+# plan-start; every plan started before that has no field, and continuation then
+# falls back to the project setting on every merge. This lets a plan say what it
+# is, once. Same lock and same validation path as the other field writer.
+#
+# Returns: 0 success, 1 bad value / no state file / unwritable, 2 missing deps,
+# 3 lock timeout, 5 corrupt state file.
+# ===========================================================================
+plan_state_set_autonomy() {
+  local plan_id="$1" value="${2-}"
+
+  _plan_state_require_deps || return 2
+  _validate_plan_id "$plan_id" || return 1
+  case "$value" in
+    auto|manual) ;;
+    *) _plan_warn "plan_state_set_autonomy: value must be 'auto' or 'manual' (got '$value')"; return 1 ;;
+  esac
+
+  local path
+  path="$(plan_state_path "$plan_id")"
+  if [[ ! -f "$path" ]]; then
+    _plan_warn "plan_state_set_autonomy: no state file for $plan_id at $path — run plan_state_init first"
+    return 1
+  fi
+
+  local lock_path
+  lock_path="$(_plan_lock_path "$plan_id")"
+  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || return 3
+  local fd="$AID_LOCK_FD"
+
+  local json rc
+  json="$(_plan_state_read_raw_json "$path")"
+  if [[ -z "$json" ]]; then
+    aid_lock_release "$fd"
+    echo "PRECONDITION FAIL: plan state file for $plan_id at $path is unreadable or unparseable YAML — offending key: plan_state" >&2
+    return 5
+  fi
+  _plan_state_validate_json "$json" "$plan_id"; rc=$?
+  if [[ "$rc" -ne 0 ]]; then aid_lock_release "$fd"; return 5; fi
+
+  local new_json
+  new_json="$(jq --arg a "$value" '.autonomy = $a' <<<"$json" 2>/dev/null)"
+  if [[ -z "$new_json" ]]; then
+    aid_lock_release "$fd"
+    _plan_warn "plan_state_set_autonomy: cannot render the updated state JSON for $plan_id"
+    return 1
+  fi
+  if ! _plan_state_write_json "$path" "$new_json"; then
+    aid_lock_release "$fd"
+    _plan_warn "plan_state_set_autonomy: cannot write state file to $path"
+    return 1
+  fi
+
+  aid_lock_release "$fd"
+  return 0
+}
+
+# ===========================================================================
 # plan_state_transition <plan_id> <from> <to>
 #
 # Validates "<from>:<to>" against _AID_PLAN_TRANSITIONS BEFORE touching the

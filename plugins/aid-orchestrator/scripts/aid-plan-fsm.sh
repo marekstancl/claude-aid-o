@@ -3817,8 +3817,18 @@ _pfsm_maybe_continue() {
     # entry (aid-fsm.sh:286).
     local autonomy=""
     autonomy="$(plan_state_get "$plan_id" autonomy 2>/dev/null)" || autonomy=""
+    if [[ -z "$autonomy" ]]; then
+      # ABSENCE IS NOT "manual". Every plan started before P090 has no field —
+      # and reading that as manual meant a project with `autonomous_mode: true`
+      # silently stopped after every EPIC, which is exactly what P090 set out to
+      # end (WAN P099, started 2026-08-27, reported the same day: field absent,
+      # config `autonomous_mode: true`, plan stopped after each EPIC anyway).
+      # Fall back to the project's own setting — the SAME function `plan-start`
+      # uses when it stamps the field in the first place.
+      autonomy="$(aid_autonomous_mode "$root" 2>/dev/null)" || autonomy="manual"
+      echo "continue: ${plan_id} predates the plan-level autonomy flag; using the project setting (${autonomy}). Stamp it with: aid-plan-fsm.sh plan-state ${plan_id} --set-autonomy auto|manual" >&2
+    fi
     if [[ "$autonomy" != "auto" ]]; then
-      # Absence reads as manual: every plan created before P090 has no field.
       return 0
     fi
   fi
@@ -8413,7 +8423,7 @@ cmd_worktrees() {
 }
 
 cmd_plan_state() {
-  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0
+  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0 set_autonomy=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
@@ -8425,6 +8435,11 @@ cmd_plan_state() {
       # P073 Step 13: the supported recovery for a stale EPIC run. Deliberately
       # NOT forceable — see the supersede header: this IS the audited
       # transaction force would otherwise be used to fake.
+      # P090 follow-up: a plan started before the plan-level autonomy flag
+      # existed carries no field, and continuation then falls back to the
+      # project setting on every merge (printing a line each time). This stamps
+      # it once, so the plan says what it is.
+      --set-autonomy) set_autonomy="${2:-}"; shift 2 ;;
       --supersede-epic) supersede_epic="${2:-}"; shift 2 ;;
       --attest-source-ref) attest_ref="${2:-}"; shift 2 ;;
       --reason) attest_reason="${2:-}"; shift 2 ;;
@@ -8437,7 +8452,7 @@ cmd_plan_state() {
     esac
   done
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--recreate-worktree --reason <text>] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--set-autonomy auto|manual] [--recreate-worktree --reason <text>] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -8449,6 +8464,21 @@ cmd_plan_state() {
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  if [[ -n "$set_autonomy" ]]; then
+    case "$set_autonomy" in
+      auto|manual) ;;
+      *) echo "ERROR: plan-state: --set-autonomy must be 'auto' or 'manual' (got '${set_autonomy}')" >&2; exit 2 ;;
+    esac
+    local sarc=0
+    plan_state_set_autonomy "$plan_id" "$set_autonomy" >/dev/null || sarc=$?
+    if [[ "$sarc" -eq 0 ]]; then
+      echo "plan-state: ${plan_id} autonomy=${set_autonomy}" >&2
+    else
+      echo "ERROR: plan-state: could not write autonomy for ${plan_id} (rc=${sarc})" >&2
+    fi
+    exit "$sarc"
+  fi
 
   if [[ -n "$supersede_epic" ]]; then
     local src=0

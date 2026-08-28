@@ -261,7 +261,15 @@ aid_dispatch_contract_validate() {
   declared="$(jq -r '.changed_files[]? // empty' "$r")"
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue
-    [[ -e "${root}/${a}" ]] || _add missing "$a"
+    # An ABSOLUTE expected artifact is checked where it actually is, not glued
+    # behind the tree root. A step whose output lives in another repository
+    # (a plan may declare one deliberately) otherwise produced
+    # `<root>//opt/eco/docs/...`, which never exists — so the contract refused a
+    # step whose files were both on disk and already reviewed (WAN P099 step 11,
+    # reported 2026-08-27; the plan there declares one absolute and one relative
+    # artifact, and NO single root satisfies both).
+    local _a_path; [[ "$a" == /* ]] && _a_path="$a" || _a_path="${root}/${a}"
+    [[ -e "$_a_path" ]] || _add missing "$a"
   done <<< "$expected"
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
 

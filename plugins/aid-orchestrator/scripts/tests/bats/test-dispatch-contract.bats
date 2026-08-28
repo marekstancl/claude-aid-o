@@ -173,3 +173,46 @@ _return() {
   aid_dispatch_contract_build plan.json 0 c-abs.json "$TEST_DIR/.aid-o/work/evidence/E/R"
   [ "$(jq -r .evidence_dir c-abs.json)" = "$TEST_DIR/.aid-o/work/evidence/E/R/steps/step_1_backend" ]
 }
+
+# --- IMP-521: an expected artifact in ANOTHER repository -----------------
+# WAN reported this as blocking on 2026-08-27: a step declaring one absolute and
+# one relative artifact could not be accepted by ANY root, because the absolute
+# path was glued behind the tree root (`<root>//opt/eco/docs/...`).
+
+@test "IMP-521: an absolute expected artifact is checked where it is, not behind the root" {
+  local other="$TEST_DIR/other-repo"
+  mkdir -p "$other" "$TEST_DIR/docs"
+  echo "in another repo" > "$other/mcp.md"
+  echo "in this repo"    > "$TEST_DIR/docs/map-request.md"
+
+  cat > "$TEST_DIR/c.json" <<JSON
+{"step_id":"step_11","allowed_paths":["$other/mcp.md","docs/*"],
+ "expected_artifacts":["$other/mcp.md","docs/map-request.md"],"version":"v1"}
+JSON
+  cat > "$TEST_DIR/r.json" <<JSON
+{"step_id":"step_11","step_status":"done","version":"v1","contract_version":"v1",
+ "changed_files":["$other/mcp.md","docs/map-request.md"],"gates":[],"summary":"s"}
+JSON
+
+  source "$LIB"
+  run aid_dispatch_contract_validate "$TEST_DIR/c.json" "$TEST_DIR/r.json" "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.verdict' <<< "$output")" = "accept" ]
+  [ "$(jq -r '.missing_artifacts | length' <<< "$output")" -eq 0 ]
+}
+
+@test "IMP-521: an absolute artifact that really is absent is still reported missing" {
+  mkdir -p "$TEST_DIR/docs"
+  cat > "$TEST_DIR/c2.json" <<JSON
+{"step_id":"step_11","allowed_paths":["/nonexistent/gone.md"],
+ "expected_artifacts":["/nonexistent/gone.md"],"version":"v1"}
+JSON
+  cat > "$TEST_DIR/r2.json" <<JSON
+{"step_id":"step_11","step_status":"done","version":"v1","contract_version":"v1",
+ "changed_files":["/nonexistent/gone.md"],"gates":[],"summary":"s"}
+JSON
+  source "$LIB"
+  run aid_dispatch_contract_validate "$TEST_DIR/c2.json" "$TEST_DIR/r2.json" "$TEST_DIR"
+  [ "$(jq -r '.verdict' <<< "$output")" = "reject" ]
+  [[ "$output" == *"/nonexistent/gone.md"* ]]
+}
