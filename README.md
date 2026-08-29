@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.5** (current) — amend-scope, uzávěrka dluží jen brány z profilu, plan-start commituje plán, merge se už tiše nevrátí
+- **v2.95.7** (current) — aid-plugin-issues.md vzniká sám + připomínka + sběr; rebase-plan; force nepřeskočí evidenci; opravy z inboxu
+- **v2.95.5** — amend-scope, uzávěrka dluží jen brány z profilu, plan-start commituje plán, merge se už tiše nevrátí
 - **v2.95.3** — odstraněny měřicí nástroje E10, plán P062 zrušen
-- **v2.95.2** — zápis se počítá jen tam, kam míří; čtení plánu není práce na něm
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
