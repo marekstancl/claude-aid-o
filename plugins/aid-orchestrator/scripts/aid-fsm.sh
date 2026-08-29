@@ -2994,7 +2994,9 @@ Reason: AID v3 Session B requires CP3 integration review before EXECUTE→GATES.
 Fix: Dispatch TWO verifiers in parallel (single message, two Agent tool calls):
      a. subagent_type: aid-orchestrator:verifier, focus: code-review
      b. subagent_type: aid-orchestrator:verifier, focus: security
-     Each writes its verifier-output-cp3-{focus}.md with _generated_by + verdict.
+     Each writes its verifier-output-cp3-{focus}.md with _generated_by, _generated_at,
+     classification: FULL_REVIEW and verdict: pass|fail (the validator requires all four;
+     CP2 gets classification from the pre-filter, CP3 does not — the verifier writes it).
 Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
           return 1
@@ -5370,7 +5372,7 @@ cmd_advance_to_gates() {
 
     _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
     if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
-      profile_arg=(--profile "$_gp_resolved")
+      profile_arg=(--profile "$_gp_resolved" --profile-reason "FSM auto-resolved profile ${_gp_resolved} from base_commit..HEAD (boundary ${_gp_boundary:-legacy})")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
         profile="$_gp_resolved" source="auto_resolved" boundary="${_gp_boundary:-legacy}"
     else
@@ -5388,6 +5390,9 @@ cmd_advance_to_gates() {
   # fixture fallback still apply).
   local -a timeline_arg=()
   [[ -n "$timeline" ]] && timeline_arg=("$timeline")
+  # The runner prints the whole report JSON on stdout; here it already goes to
+  # --report-file, so the terminal gets the verdict and the path, not 300 lines
+  # of JSON ahead of the reason (agents #7).
   AID_GATES_TRIGGERED_BY_FSM=1 \
     "${SCRIPT_DIR}/aid-run-gates.sh" run-all \
       "$execution_yaml" "$epic_id" "$run_id" \
@@ -5396,7 +5401,7 @@ cmd_advance_to_gates() {
       --report-file "$report_file" \
       "${plan_json_arg[@]}" \
       "${profile_arg[@]}" \
-    || rc=$?
+    >/dev/null || rc=$?
 
   if (( rc == 0 )); then
     # Gates passed — route through cmd_transition for full precondition validation.
@@ -5445,7 +5450,9 @@ cmd_advance_to_gates() {
     # Gates failed — state was never modified, leave at EXECUTE.
     [[ -n "$timeline" ]] && log_event "$timeline" "fsm_advance_to_gates_fail" \
       reason="gates_runner_exit_${rc}" runner_exit="$rc"
-    echo "advance-to-gates: FAIL — gates runner exit=$rc, state unchanged (EXECUTE)" >&2
+    local _failed_gates=""
+    [[ -f "$report_file" ]] && _failed_gates="$(jq -r '[.gates // {} | to_entries[] | select(.value.result == "fail") | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
+    echo "advance-to-gates: FAIL — gates runner exit=$rc${_failed_gates:+; failed: ${_failed_gates}}; state unchanged (EXECUTE). Report: ${report_file}" >&2
     return "$rc"
   fi
 }
@@ -5563,7 +5570,11 @@ _increment_binding_verified() {
 }
 
 cmd_increment_step() {
-  local state_file="$1"
+  local state_file="${1:-}"
+  if [[ -z "$state_file" ]]; then
+    echo "Usage: aid-fsm.sh increment-step <state_file> [--force --reason \"<why, 20+ chars>\" [--blocked-checks <id,...>]]" >&2
+    exit 2
+  fi
   local force="false"
   [[ "${2:-}" == "--force" ]] && force="true"
 
@@ -5653,47 +5664,54 @@ cmd_increment_step() {
     # fail-closed preconditions below; a strict run rejects the unverifiable state.
   fi
 
+  # A --force with a bad reason fails on the reason, before any evidence is
+  # looked at — the same refusal fsm_handle_force_override gives, just first.
+  if [[ "$force" == "true" ]]; then
+    local _fr="" _fa=("${@:3}") _fi
+    for (( _fi=0; _fi<${#_fa[@]}; _fi++ )); do [[ "${_fa[$_fi]}" == "--reason" ]] && _fr="${_fa[$((_fi+1))]:-}"; done
+    [[ ${#_fr} -ge 20 ]] || die "ERROR: --force requires --reason argument with min 20 characters (got ${#_fr})."
+  fi
+
   # Precondition: step verification evidence must exist + content checks.
-  # Each failure goes through _increment_fail (message → timeline event → exit 1).
+  # These run EVEN under --force: force waives scope, binding and contract
+  # preconditions below, never the evidence itself — a --force used to hide a
+  # step-verify file that was never written (agents P001: a heredoc died on a
+  # '%' and the step advanced with empty evidence). Structural findings are
+  # collected and reported ONCE, each with its own audit reason code.
+  local verify_file="${evidence_dir}/step-${step}-verify.md"
+  [[ -f "$verify_file" ]] || _increment_fail missing_step_verify \
+    "PRECONDITION FAIL: Step verification evidence not found." \
+    "Expected: ${verify_file}  (FSM step ${step} = the plan's step $((step+1)); evidence is 0-based, plans are 1-based)" \
+    "Write verification (AC checklist + result) before advancing to next step. --force does not waive this file."
+
+  # Content checks — single file read, bash pattern matches (was 5 grep forks).
+  local _verify_content
+  _verify_content=$(<"$verify_file")
+  local -a _vf_reasons=() _vf_lines=()
+  # P079 Step 4 (IMP-472): case-tolerant, same rule as the verdict field.
+  [[ "${_verify_content,,}" == *"## result: pass"* ]] \
+    || { _vf_reasons+=(step_verify_not_pass); _vf_lines+=("no '## Result: PASS' — fix failing AC or mark PASS when all criteria are met"); }
+  [[ "$_verify_content" == *"- [x]"* ]] \
+    || { _vf_reasons+=(verify_no_ac_checklist); _vf_lines+=("no acceptance-criteria checklist — at least one '- [x] ...' item matching the plan AC"); }
+  [[ "$_verify_content" =~ [a-f0-9]{7,} ]] \
+    || { _vf_reasons+=(verify_no_commit_ref); _vf_lines+=("no commit reference — at least one commit hash (7+ hex chars)"); }
+  # Memory sections — line-anchored (^## ...), hence the prepended newline.
+  [[ $'\n'"$_verify_content" == *$'\n'"## Memory Used"* ]] \
+    || { _vf_reasons+=(verify_no_memory_used); _vf_lines+=("missing '## Memory Used' section (or 'N/A — <reason>')"); }
+  [[ $'\n'"$_verify_content" == *$'\n'"## Memory Written"* ]] \
+    || { _vf_reasons+=(verify_no_memory_written); _vf_lines+=("missing '## Memory Written' section (or 'N/A — <reason>')"); }
+  if (( ${#_vf_reasons[@]} > 0 )); then
+    local _vf_timeline _vf_r
+    _vf_timeline=$(derive_timeline "$state_file") || true
+    for _vf_r in "${_vf_reasons[@]}"; do
+      [[ -n "$_vf_timeline" ]] && log_event "$_vf_timeline" "fsm_increment_fail" step="$step" reason="$_vf_r"
+    done
+    printf '%s\n' "PRECONDITION FAIL: step verification is incomplete (${#_vf_reasons[@]} problem(s)) — File: ${verify_file}" >&2
+    printf '  - %s\n' "${_vf_lines[@]}" >&2
+    exit 1
+  fi
+
   if [[ "$force" != "true" ]]; then
-    local verify_file="${evidence_dir}/step-${step}-verify.md"
-    [[ -f "$verify_file" ]] || _increment_fail missing_step_verify \
-      "PRECONDITION FAIL: Step verification evidence not found." \
-      "Expected: ${verify_file}  (FSM step ${step} = the plan's step $((step+1)); evidence is 0-based, plans are 1-based)" \
-      "Write verification (AC checklist + result) before advancing to next step."
-
-    # Content checks — single file read, bash pattern matches (was 5 grep forks).
-    local _verify_content
-    _verify_content=$(<"$verify_file")
-
-    # P079 Step 4 (IMP-472): case-tolerant, same rule as the verdict field.
-    # The canonical form in every template stays uppercase; a verifier writing
-    # `## Result: pass` means the same thing and is no longer rejected for it.
-    [[ "${_verify_content,,}" == *"## result: pass"* ]] || _increment_fail step_verify_not_pass \
-      "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." \
-      "File: ${verify_file}" \
-      "Fix failing AC or mark '## Result: PASS' when all criteria met."
-
-    [[ "$_verify_content" == *"- [x]"* ]] || _increment_fail verify_no_ac_checklist \
-      "PRECONDITION FAIL: Step verification has no acceptance criteria checklist." \
-      "File: ${verify_file}" \
-      "Must contain at least one '- [x] ...' item matching plan AC."
-
-    [[ "$_verify_content" =~ [a-f0-9]{7,} ]] || _increment_fail verify_no_commit_ref \
-      "PRECONDITION FAIL: Step verification has no commit reference." \
-      "File: ${verify_file}" \
-      "Must contain at least one commit hash (7+ hex chars)."
-
-    # Memory sections — line-anchored (^## ...), hence the prepended newline.
-    [[ $'\n'"$_verify_content" == *$'\n'"## Memory Used"* ]] || _increment_fail verify_no_memory_used \
-      "PRECONDITION FAIL: Step verification missing '## Memory Used' section." \
-      "File: ${verify_file}" \
-      "List memory entries used (or 'N/A — <reason>' if none applicable)."
-
-    [[ $'\n'"$_verify_content" == *$'\n'"## Memory Written"* ]] || _increment_fail verify_no_memory_written \
-      "PRECONDITION FAIL: Step verification missing '## Memory Written' section." \
-      "File: ${verify_file}" \
-      "List new memory entries proposed (or 'N/A — <reason>' if none applicable)."
 
     # Visual Anchoring precondition (E161, AID-052): a frontend step carrying visual_refs
     # MUST emit a "## Visual Anchoring" section in its output (the frontend role card
@@ -5961,7 +5979,7 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
     fi
   else
     fsm_handle_force_override "step-${step}" "step-$((step + 1))" "$state_file" "increment-step" "${@:3}"
-    echo "WARNING: --force used, skipping step verification check" >&2
+    echo "WARNING: --force used — scope, binding, contract and review preconditions bypassed (the step-verify file itself was still required and checked)" >&2
   fi
 
   # ---- E5 C2 Semantic Wiring-Gate (observe) ─────────────────────────────

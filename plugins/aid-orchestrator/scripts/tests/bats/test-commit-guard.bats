@@ -21,7 +21,7 @@
 #   (e2) DONE/review: file within union passes; file outside union fails
 #   (e3) consumer without versioning config → warn + pass + disclosure
 #   (f)  jq missing → warn + skip scope check (NOT blocked by absent tooling)
-#   (g)  empty allowed_paths → warn + pass + disclosure
+#   (g)  plan.json declares no allowed_paths → warn + pass + disclosure
 #   (h)  outside an AID run (no active state file) → no-op pass
 #   (i)  companion: --no-verify bypass → commit_scope_violation at step-advance
 
@@ -70,7 +70,7 @@ _write_plan() {
 JSON
 }
 
-# _write_plan_empty_step1 — step1 has an empty allowed_paths list.
+# _write_plan_empty_step1 — step1 has an plan.json declares no allowed_paths list.
 _write_plan_empty_step1() {
   cat > "$TEST_EVIDENCE_DIR/plan.json" <<'JSON'
 { "steps": [
@@ -270,15 +270,15 @@ _farm_excluding() {
   grep -q '"reason":"jq_absent"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
 }
 
-# ─── (g) empty allowed_paths → warn + pass + disclosure ───────────────────────
-@test "g: empty allowed_paths warns, passes, and discloses" {
+# ─── (g) plan.json declares no allowed_paths → warn + pass + disclosure ───────────────────────
+@test "g: plan.json declares no allowed_paths warns, passes, and discloses" {
   git checkout -q -b task/E-test/main
   _write_plan_empty_step1
   _write_state EXECUTE task/E-test/main "" 1
   _stage src/whatever.txt
   run bash "$HOOK"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"empty allowed_paths"* ]]
+  [[ "$output" == *"plan.json declares no allowed_paths"* ]]
   grep -q '"reason":"empty_allowed_paths"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
 }
 
@@ -404,7 +404,7 @@ _farm_excluding() {
   _stage src/a.txt
   run bash "$HOOK"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"empty allowed_paths"* ]]
+  [[ "$output" != *"plan.json declares no allowed_paths"* ]]
   _stage src/elsewhere.txt
   run bash "$HOOK"
   [ "$status" -ne 0 ]

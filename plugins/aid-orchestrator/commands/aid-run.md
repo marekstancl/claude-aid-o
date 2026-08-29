@@ -666,7 +666,8 @@ trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
 - **`done-advance review → release` requires integration review only** — instead
   of accumulated per-step CP2 evidence, the transition refuses to advance unless
   all three integration-review files exist in the run's evidence dir:
-  `verifier-output-cp3-code-review.md`, `verifier-output-cp3-security.md`, and
+  `verifier-output-cp3-code-review.md`, `verifier-output-cp3-security.md` (each with
+  `_generated_by`, `_generated_at`, `classification: FULL_REVIEW`, `verdict`), and
   `gates_report.json`. Missing any one hard-fails with `streamlined_integration_review`.
 - **CP4 validation is advisory** — when the §7 curator/auditor auto-fix touched
   production code, full mode hard-fails without `verifier-output-cp4-curator-validation.md`;

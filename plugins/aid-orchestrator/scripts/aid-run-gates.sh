@@ -1548,7 +1548,7 @@ run_all_gates() {
 
   # Parse optional flags: --state-file, --report-file, --plan-json, --profile,
   # --base-commit, --plan-path
-  local state_file="" report_file="" plan_json="" profile=""
+  local state_file="" report_file="" plan_json="" profile="" profile_reason_opt=""
   # P068 Step 2 — explicit substitution inputs. ADDITIVE and OPTIONAL: when
   # absent, both fall back to --state-file exactly as before, so every existing
   # EPIC-scoped caller is byte-for-byte unaffected. They exist because a
@@ -1564,6 +1564,7 @@ run_all_gates() {
       --report-file) report_file="$2"; shift 2 ;;
       --plan-json) plan_json="$2"; shift 2 ;;
       --profile) profile="$2"; shift 2 ;;
+      --profile-reason) profile_reason_opt="$2"; shift 2 ;;
       --base-commit) base_commit_opt="$2"; base_commit_opt_set=1; shift 2 ;;
       --plan-path) plan_path_opt="$2"; plan_path_opt_set=1; shift 2 ;;
       *) shift ;;
@@ -1650,8 +1651,13 @@ run_all_gates() {
       fi
     done < <(jq -r '.[]' <<< "$include_gates_json")
 
-    profile_source="cli_flag"
-    profile_reason="explicit --profile flag"
+    # The FSM passes the profile it resolved with its reason; a bare --profile
+    # from a human is what "explicit --profile flag" was ever meant to say.
+    if [[ -n "${profile_reason_opt:-}" ]]; then
+      profile_source="fsm_resolved"; profile_reason="$profile_reason_opt"
+    else
+      profile_source="cli_flag"; profile_reason="explicit --profile flag"
+    fi
   fi
 
   # FSM state check: refuse to run if state is not GATES, UNLESS caller is
