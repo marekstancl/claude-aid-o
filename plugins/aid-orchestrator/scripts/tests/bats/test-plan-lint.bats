@@ -318,3 +318,27 @@ _plan_ts() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"test-illustration.bats"* ]]
 }
+
+# ── AID Role is a closed set ─────────────────────────────────────────────────
+_plan_role() { # <file> <role>
+  _plan "$1" legacy '- Create: `src/a.ts` — new'
+  printf '\n**AID Role:** %s\n' "$2" >> "$1"
+}
+@test "lint: a valid AID Role passes" {
+  _plan_role p.md backend
+  run "$LINT" p.md; [ "$status" -eq 0 ]
+}
+@test "lint ERROR: an AID Role outside the closed set (fullstack) blocks before generation" {
+  _plan_role p.md fullstack
+  AID_QUIET=0 run "$LINT" p.md; [ "$status" -ne 0 ]
+  [[ "$output" == *"AID Role 'fullstack' is not an AID role"* ]]
+}
+@test "lint ERROR: the colon-less header '**AID Role** fullstack' is checked too (generation accepts that form)" {
+  _plan p.md legacy '- Create: `src/a.ts` — new'
+  printf '\n**AID Role** fullstack\n' >> p.md
+  run "$LINT" p.md; [ "$status" -ne 0 ]
+}
+@test "lint ERROR: a role with trailing words ('backend and frontend') is one value, and not a role" {
+  _plan_role p.md 'backend and frontend'
+  run "$LINT" p.md; [ "$status" -ne 0 ]
+}

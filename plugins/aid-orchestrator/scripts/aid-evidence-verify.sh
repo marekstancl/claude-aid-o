@@ -857,6 +857,12 @@ emit_report() {
     }')"
 
   # --- Write output ---
+  if [[ -z "$OUT_PATH" && -z "$EVIDENCE_DIR" ]]; then
+    # No pack was found and no --out given: the default would be
+    # "/verification-report.json" — the filesystem root. Refuse instead.
+    echo "aid-evidence-verify: no evidence pack found and no --out given — nowhere to write the report (see the check details above)" >&2
+    return 1
+  fi
   local out_path="${OUT_PATH:-$EVIDENCE_DIR/verification-report.json}"
   # Create parent dir if needed
   mkdir -p "$(dirname "$out_path")"

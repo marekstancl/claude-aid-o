@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 494          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 495          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -1244,6 +1244,18 @@ enforcements:
     verdict: ALIGNED
     description: "Malformed **Files:** entries are caught at PLAN time, not phase-by-phase during EPIC generation. aid-plan-lint.sh shares the SAME extractor (_aid_extract_files_bullets), path cleaner (_aid_split_path_entry) and shape predicate (_aid_path_shape_ok) as the generator (aid-plan-to-epic.sh) and the D5 gate (gates/aid-contract-validate.sh) — all in lib/aid-scoping.sh, single source of truth — so a plan that passes the lint provably passes the gate (proven by an integration test that runs plan-to-epic -> epic-to-json -> contract gate on a lint-clean plan). ENFORCEMENT is the deterministic hard pre-flight inside aid-plan-to-epic.sh (Step 1a), which fail-fasts before any EPIC file is written or the plan counter is bumped and CANNOT be skipped; the /aid-plan skill auto-runs the lint after writing the plan (before CP1) as EARLY feedback, and CP1 only includes its output. Two-tier severity: ERROR (cleaner yields no path / bad-shape path — WILL break the gate) always blocks; STRICT (cleaner-OK but non-canonical: no `backtick` path, a non-(lines …) parenthetical, or a verb+path split across two lines) blocks lifecycle_strict plans and is a loud advisory for legacy plans (so already-working plans are never suddenly globally blocked). v2.58.3 also DE-DUPLICATES the generator: aid-plan-to-epic.sh's own copy of _aid_split_path_entry + its inline Files-extraction awk were replaced by the shared lib functions (byte-identical generation verified)."
     test: "scripts/tests/bats/test-plan-lint.bats"
+
+  # ── v2.95.1: plan-time AID Role check (WAN issue 2) ─────────────────────────
+  - id: plan_role_closed_set_lint
+    type: 1
+    source: "scripts/aid-plan-lint.sh (AID Role closed-set loop)"
+    instruction: "skills/plan-writing.md (AID Role field) + defaults/templates/plan.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "A step whose **AID Role** is outside the closed role set (the list aid-epic-to-json.sh validate_role enforces) is an ERROR at plan-lint time, in both modes. Before this the same defect passed lint, CP1 and every review and failed only inside aid-auto-pipeline.sh phase 1 (WAN P099: fullstack, devops, docs). The lint reads the header with the SAME grammar as aid-plan-to-epic.sh's extractor (colon optional, whole rest of the line is the value), so what the lint accepts is what generation accepts. Enforced by the same Step 1a pre-flight as plan_files_shape_lint."
+    test: "scripts/tests/bats/test-plan-lint.bats (grep: 'AID Role')"
 
   # ── v2.59.0: P065 C3 cross-provider dispatch bridge (real codex audit) ──────
   - id: c3_cross_provider_dispatch

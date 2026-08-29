@@ -69,7 +69,10 @@ gates:
     timeout_seconds: 900
     pass_criteria: "exit code 0"
 
-  # The rest of the portfolio, off the merge path. Wire this to a scheduled CI
+  # The rest of the portfolio, off the merge path. A key such as `nightly: true`
+  # on a gate is IGNORED by aid-run-gates.sh — the gate profile (`--profile`) is
+  # the only thing that decides what runs, and plan-finalize does not read the
+  # key either. Do not put a nightly suite into `gates:` at all; wire it to a scheduled CI
   # job rather than to a gate profile — see .github/workflows/nightly-tests.yml
   # in the aid-orchestrator repo for the shape, including the result artifact
   # and the red-only report.

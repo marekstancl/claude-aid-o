@@ -1278,7 +1278,7 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
     # of proceeding — but its WARN below is likewise branch-diagnosed and
     # grammar-free on this rc.
     [[ -z "$_pb_cur_branch" ]] && _pb_cur_branch="<detached>"
-    error_exit "you are on '${_pb_cur_branch}' but lifecycle writes require '${_pb_lc_target}' — run: git checkout ${_pb_lc_target}, or run generation for a worktree-recorded plan from its plan worktree" 6
+    error_exit "you are on '${_pb_cur_branch}' but lifecycle writes require '${_pb_lc_target}' — the plan file and .aid-lifecycle/manifests/${plan_id}.yaml must be COMMITTED on '${_pb_lc_target}' (plan-start commits them on the plan branch only): commit them there, then run: git checkout ${_pb_lc_target} and generate again" 6
   elif [[ "$_pb_default_mode" == "plan_branch" && "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
     # P068 Step 7 — THE ESCAPE HATCH IS CLOSED UNDER plan_branch.
     # This path used to WARN and proceed whenever the plan did not opt into

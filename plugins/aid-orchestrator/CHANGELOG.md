@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.1] — 2026-08-29
+
+### Added
+- **Role kroku se kontroluje už v lintu plánu** — `aid-plan-lint.sh` odmítne `**AID Role:**` mimo uzavřený číselník (typicky `fullstack`, `devops`, `docs`) se stejnou gramatikou hlavičky jako generátor, takže plán už nespadne až uprostřed generování EPICů.
+- **`{evidence_dir}` v příkazu brány** — `aid-run-gates.sh` doplní adresář evidence běhu odvozený ze stavového kořene, takže brána spuštěná z worktree plánu najde evidenci bez projektového triku v `execution.yaml`.
+- **Problémy AID samotného mají své místo** — agenti i controller zapisují chyby pluginu (brána odmítne platný stav, skript spadne, hláška lže) do `.aid-o/work/aid-plugin-issues.md` místo projektového backlogu; pravidlo v `skills/agent-protocol.md`, `commands/aid-run.md` a `commands/aid-plan.md`.
+
+### Fixed
+- **Karta uzávěru plánu neměla řádek `Důvod:`** — `aid_plan_close_render` vykreslil rozhodovací kartu, kterou Stop hook téhož pluginu odmítl jako neúplnou; řádek s důvodem doporučení se nyní vypisuje.
+- **`aid-evidence-verify.sh` psal report do kořene souborového systému** — bez nalezeného balíku evidence a bez `--out` skončil na `/verification-report.json`; nyní odmítne s jasnou hláškou.
+- **Zavádějící hláška při generování mimo cílovou větev** — místo rady „spusť z worktree plánu" (stav, který už platil) říká, že plán a manifest musí být commitnuté na cílové větvi a jak to udělat.
+
+### Changed
+- **Dokumentace sedmi nálezů z WAN** — `output.md` píše výhradně controller, kroky se v evidenci číslují od nuly, obálku vygenerovaných skeletů smí měnit jen payload (a jak se z toho vzpamatovat), stránka PM stárne s každou úpravou plánu, `--recreate-worktree` neobnoví smazanou větev, verifiér smí ignorovat varování hooku na svůj evidence soubor, značka `nightly:` v `execution.yaml` není mechanismus (profil je jediná autorita).
+
 ## [2.95.0] — 2026-08-28
 
 ### Added

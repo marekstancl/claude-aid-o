@@ -269,6 +269,8 @@ See what is running:
 
 If a plan's worktree is missing or broken:
   aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"
+  (repairs the DIRECTORY only; if the plan/<id> branch itself is gone,
+   first: git branch plan/<id> <sha from git reflog>, then the line above)
 ```
 
 ### Topic: status
@@ -581,4 +583,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-29

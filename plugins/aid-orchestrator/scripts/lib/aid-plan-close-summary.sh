@@ -328,17 +328,20 @@ aid_plan_close_render() {
   # revert SHA trips aid-artifact-render.sh's high_entropy_blob detector and
   # would reach the page as <redacted:…>, i.e. an uninvocable command on a
   # shareable page. Plain steps on the page, exact commands in the card.
-  local lab_a lab_b lab_c opt_a opt_b opt_c
+  local lab_a lab_b lab_c opt_a opt_b opt_c reason_a
   if [[ -n "$merge_sha" ]]; then
     # Already merged to main — the remaining decisions are close or revert.
+    reason_a="merge už je v main; zbývá jen uvolnit větev a worktree"
     lab_a="uzavřít plán"           ; opt_a="${lab_a} — \`${cmd_close}\`"
     lab_b="vrátit merge zpět"      ; opt_b="${lab_b} — \`${cmd_rollback}\`"
     lab_c="${_APCS_DEFER}"         ; opt_c="${lab_c}"
   elif [[ "$release_ready" == "true" ]]; then
+    reason_a="všechny vstupy uzávěru prošly; merge je jediný zbývající krok"
     lab_a="mergnout plán do main"  ; opt_a="${lab_a} — \`${cmd_merge}\`"
     lab_b="uzavřít plán bez merge" ; opt_b="${lab_b} — \`${cmd_close}\`"
     lab_c="${_APCS_DEFER}"         ; opt_c="${lab_c}"
   else
+    reason_a="nevyřešené blokátory by merge přenesl do main"
     lab_a="${_APCS_DEFER}"         ; opt_a="${lab_a}"
     lab_b="mergnout plán do main i tak, na vlastní riziko"
     opt_b="${lab_b} — \`${cmd_merge}\`"
@@ -504,6 +507,9 @@ aid_plan_close_render() {
     printf 'Potřebuji tvoje rozhodnutí: jak uzavřít plán %s?\n' "$plan_id"
     printf 'Proč teď: %s\n' "$why"
     printf 'Doporučení: A — %s\n' "$opt_a"
+    # The Decision skeleton owes a reason for the recommendation; without this
+    # line the Stop hook refused the very card this renderer produced.
+    printf 'Důvod: %s\n' "$reason_a"
     printf 'Alternativy: B — %s; C — %s\n' "$opt_b" "$opt_c"
     [[ -n "$merge_sha" ]] || printf '%s\n' "$_APCS_ROLLBACK_NA"
     printf 'Riziko / co není ověřeno: %s\n' "$risk"

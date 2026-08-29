@@ -576,6 +576,11 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    field in `skills/role-cards.md` (single source of truth); an optional `step.model`
    in `plan.json` overrides it for that one step (default: `opus` if neither is set)
 7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
+   **The controller writes this file, from the agent's final message, and nobody else.** Do
+   not ask the agent to write its own `output.md`: the `aid-return` block sits in the
+   agent's final message, and a file the agent wrote itself will not carry it — the contract
+   validator then rejects the step as "files changed on disk but not declared in the
+   return", which reads as a lie about the changes when only the block is missing.
    Every step, concurrent or not, has its own subdirectory; nothing is written into another
    step's.
 8. Verify output (see Output Verification below)
@@ -705,6 +710,14 @@ When `standards.active == 'none'`: omit the Standards section entirely.
 For steps with `role: backend` or `role: frontend`:
 - If the step changes public API or user-visible behavior, the agent MUST update relevant docs (README, API docs, CHANGELOG) before marking the step complete.
 - The `docs_updated` gate in GATES state will fail if API-path files changed without corresponding docs updates.
+
+### Step numbers: humans count from 1, the FSM from 0
+
+`current_step`, `increment-step`, `classify N`, `step-N-verify.md` and
+`verifier-output-step-N.md` are **0-based**; the plan, the EPIC, the agent's report and
+every message to the PM are **1-based**. This is deliberate and not going to change —
+renumbering would orphan every existing evidence pack. When you write for a human, say
+"step 3 (evidence `step-2-*`)"; when you look for evidence, subtract one.
 
 ### Output verification
 
@@ -1679,7 +1692,12 @@ an FSM-internal producer step — it dispatches nothing — that derives `review
 `acceptance-evidence.json`, and (IMP-465/D3) generates the schema-valid protocol-v2 skeletons
 for `curator-report.json`, `semantic-review-final.json` and `delivery-report.json` — every
 envelope field filled, the artifact's own payload key left `null` for the dispatched specialist
-to fill. Skipping this step does not just lose those artifacts: `--stage review`'s
+to fill. **The specialist may change the payload key and nothing else** — `--stage review`
+hashes the file with the payload set back to `null` and compares against what `--stage inputs`
+generated, so a changed `producer`, `provenance` or `created_at` fails with "does not carry
+the exact envelope AID generated". The specialist is the author of the payload, not of the
+envelope. Recovery when an envelope was touched: delete that skeleton file and run
+`--stage inputs` again (it is idempotent and regenerates only what is missing). Skipping this step does not just lose those artifacts: `--stage review`'s
 generated-skeleton immutability check (D3) and its `plan_final_inputs.plan_diff_sha256` binding
 (D2) both assume `--stage inputs` ran first, and specialists dispatched without it must
 construct their entire envelope from prose again, exactly the failure mode D3 exists to remove.
@@ -3193,7 +3211,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-27
+**Last Updated:** 2026-08-29
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

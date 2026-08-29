@@ -195,6 +195,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 13. **Plan-level DONE gate** — `aid-fsm.sh init` blocks new cross-plan run if previous plan has unreviewed C+A findings (no `ca-review-complete` marker)
 14. **Per-plan C+A review** — after last EPIC in a plan, ALL C+A findings (S+M+L) must be addressed before starting next plan
 15. **Wave dispatch is decided by code** — before a wave, `aid_parallel_decide` (`lib/aid-parallel-dispatch.sh`) says `concurrent` or `serial: <reason>`; only `concurrent` may dispatch several agents at once, each in its own step worktree, and never more than `orchestration.yaml → dispatch.max_parallel`. Returns are still taken ONE at a time: validate the contract return, commit, write step-verify, merge, increment-step (`pipeline.md §4` "Parallel groups").
+16a. **AID's own defects go to `.aid-o/work/aid-plugin-issues.md`** (date → what happened → what it caused → what you did), never to the project backlog — see `skills/agent-protocol.md` §"Problems with AID itself". This includes anything you had to `--force` past.
 16. **Per-step commit** — the controller commits each accepted return (`aid_dispatch_contract_commit`) BEFORE calling `increment-step`. One commit per step, never a bulk commit at the end — also when steps ran concurrently.
 
 ### Precondition failures are HARD STOPS:
@@ -685,4 +686,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-27
+**Last Updated:** 2026-08-29

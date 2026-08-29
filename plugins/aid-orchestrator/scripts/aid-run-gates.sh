@@ -44,6 +44,10 @@
 #   {epic_id}      — EPIC identifier (e.g., E-037-1_2)
 #   {run_id}       — Run identifier within EPIC (e.g., R-E037-1)
 #   {base_commit}  — git SHA at EPIC start (recorded in fsm-state.yaml)
+#   {evidence_dir} — this run's evidence directory, resolved against the STATE root
+#                    (the primary checkout's .aid-o), so a gate run from a plan
+#                    worktree finds the evidence the FSM wrote — a relative
+#                    `.aid-o/work/evidence/...` in a gate command does not.
 #   {plugin_path}  — absolute path of the installed aid-orchestrator plugin (P069 Step 12),
 #                    resolved from .aid-o/config/plugin.yaml's plugin_path field (the same
 #                    value /aid-init discovers and writes), falling back to $AID_PLUGIN_PATH
@@ -186,7 +190,7 @@ aid_gate_baseline_ensure_gitignored() {
 }
 
 # Phase 2 (P037) — resolve {token} placeholders in gate commands via bash parameter expansion.
-# Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}.
+# Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}, {evidence_dir}.
 # Unknown {<token>} → fail-loud exit 1 (silent pass-through is a debug trap).
 #
 # Args: $1=command string, $2=epic_id, $3=run_id, $4=base_commit, $5=plan_path (may be "null" or
@@ -202,13 +206,14 @@ resolve_placeholders() {
   cmd="${cmd//\{run_id\}/$run}"
   cmd="${cmd//\{base_commit\}/$base}"
   cmd="${cmd//\{plan_path\}/$plan}"
+  cmd="${cmd//\{evidence_dir\}/$(_gates_evidence_dir "$epic" "$run")}"
   [[ -n "$plugin_path" ]] && cmd="${cmd//\{plugin_path\}/$plugin_path}"
 
   # Fail-loud on any remaining {<token>} — gate authors must not introduce unknown placeholders
   if [[ "$cmd" =~ \{[a-zA-Z_]+\} ]]; then
     local bad_token="${BASH_REMATCH[0]}"
     echo "ERROR: aid-run-gates.sh: unknown placeholder $bad_token in gate command" >&2
-    echo "  Valid tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}" >&2
+    echo "  Valid tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}, {evidence_dir}" >&2
     return 1
   fi
 

@@ -1695,6 +1695,27 @@ YAML
   [[ "$output" == *"$AID_PLUGIN_PATH"* ]]
 }
 
+@test "{evidence_dir} resolves to this run's evidence directory" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  echo_evidence_dir:
+    command: "echo {evidence_dir}"
+    required: false
+YAML
+
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.echo_evidence_dir.output' "$report"
+  [[ "$output" == *".aid-o/work/evidence/E-X/R-1"* ]]
+}
+
 @test "{plugin_path} unresolvable (no plugin.yaml, no \$AID_PLUGIN_PATH) fails loud — same unknown-token contract, never a bare command" {
   [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
   setup_test_evidence_dir E-X R-1
