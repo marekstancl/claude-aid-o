@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.1** (current) — hooky mluví jen na okno, které plán opravdu zapsalo, a řeknou to jednou
+- **v2.95.2** (current) — zápis se počítá jen tam, kam míří; čtení plánu není práce na něm
+- **v2.95.1** — hooky mluví jen na okno, které plán opravdu zapsalo
 - **v2.95.0** — E10 měří kontroly místo dohadů; stránka říká, co se dodalo
-- **v2.94.0** — a plan with six EPICs continues itself: asking the queue no longer means taking it, the merge hands over to a program instead of to somebody's memory, and the next EPIC can start as a supervised session
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

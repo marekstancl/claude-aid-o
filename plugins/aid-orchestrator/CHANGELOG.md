@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.2] — 2026-08-28
+
+### Fixed
+- **Zápis se počítá jen tam, kam opravdu míří** — pravidlo rozeznávalo „tahle session plán zapsala" řádkovým grepem, takže `cat plán.md | tee jinam` platilo za zápis do plánu a `{"name": "Write"}` s mezerou za klíčem se naopak minulo. Přepis se nyní **parsuje**: berou se jen cesta z editačního nástroje a shellový příkaz, `content` nikdy, a zápisová forma musí být ve stejném segmentu příkazu jako cesta k plánu.
+- **Čtení plánu není práce na něm** — `cat .aid-o/plans/P900.md` zakládalo povinnost vyrenderovat stránku. Nově platí jen whitelist zápisových forem (`sed -i`, `tee`, přesměrování, `cp`/`mv`, otevření pro zápis).
+- **Dvě změny v jedné sekundě umlčely druhý nález** — paměť „řekni to jednou za session" klíčovala na `mtime` se sekundovým rozlišením. Klíč nyní nese **obsahový hash** zdroje, takže plán opravený a vzápětí znovu změněný se ohlásí znovu.
+
+### Changed
+- **Mez metody je napsaná v kódu, ne zamlčená** — statickou inspekcí shellového řetězce nelze rozhodnout, co příkaz zapíše (`echo "tee …/P900.md"` se stále počítá). Zavře to jedině skutečný záznam zápisu; zapsáno jako IMP-529 a poznámka je na místě, kde by to někdo chtěl zase zužovat.
+
 ## [2.95.2] — 2026-08-29
 
 ### Added
