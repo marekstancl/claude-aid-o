@@ -109,6 +109,7 @@ _blockers_two() {
   [[ "$output" == *"Doporučení:"* ]]
   # Every card field of the Decision skeleton is present.
   [[ "$output" == *"Proč teď:"* ]]
+  [[ "$output" == *"Důvod: "* ]]
   [[ "$output" == *"Alternativy:"* ]]
   [[ "$output" == *"Riziko / co není ověřeno:"* ]]
   # The blocker count is COUNTED, not asserted by prose.

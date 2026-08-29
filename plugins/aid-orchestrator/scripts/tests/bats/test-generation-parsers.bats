@@ -336,7 +336,7 @@ PLAN
   [ "$status" -eq 6 ]
   [[ "$output" == *"you are on 'side' but lifecycle writes require 'main'"* ]]
   [[ "$output" == *"git checkout main"* ]]
-  [[ "$output" == *"plan worktree"* ]]
+  [[ "$output" == *"plan-start commits them on the plan branch only"* ]]   # the old "run from its plan worktree" advice described a state that already held (WAN issue 1)
   [[ "$output" != *"grammar"* ]]
   [[ "$output" != *"EPIC N"* ]]
 }

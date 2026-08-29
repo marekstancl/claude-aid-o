@@ -236,6 +236,22 @@ for _bi in "${!_bullet_lns[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
+# naming a role outside it (fullstack, devops, docs) used to pass this lint,
+# CP1 and every review, and fail only inside generation, phase 1.
+# ---------------------------------------------------------------------------
+_VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
+while IFS=$'\t' read -r _rl_ln _rl_role; do
+  [[ -n "${_rl_role:-}" ]] || continue
+  case " ${_VALID_ROLES} " in *" ${_rl_role} "*) continue;; esac
+  errors=$((errors+1))
+  [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rl_ln}: ERROR AID Role '${_rl_role}' is not an AID role — one of: ${_VALID_ROLES} (a step that is both backend and frontend is two steps)" >&2
+done < <(_aid_blank_fenced < "$PLAN" | awk '/^\*\*AID Role:?\*\*/ { s=$0; sub(/^\*\*AID Role:?\*\*[[:space:]]*/, "", s); gsub(/[[:space:]]+$/, "", s); print NR "\t" tolower(s) }')
+# ^ same header grammar and same whole-line value as aid-plan-to-epic.sh's
+#   extractor (colon optional, rest of the line is the role) — so what the
+#   lint accepts is exactly what generation will accept.
+
+# ---------------------------------------------------------------------------
 # Band-scoped per-step obligations
 # ---------------------------------------------------------------------------
 # The band comes from the LIB (`aid_plan_band_name`, which already defaults an

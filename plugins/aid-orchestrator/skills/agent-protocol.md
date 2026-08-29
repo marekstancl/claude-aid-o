@@ -194,6 +194,18 @@ Severity levels:
 
 Only create this section if you found genuine issues outside your scope.
 
+## Problems with AID itself
+
+When the thing misbehaving is **AID, not the project** — a gate refuses a state
+that is valid, a script crashes, a message tells you to do something that is
+already true, two AID tools contradict each other — write it to
+`.aid-o/work/aid-plugin-issues.md` in the project (create the file with a
+`# Problems with the AID plugin` heading if it does not exist), NOT into the
+project backlog. Per entry: date and what you were doing, what happened, what it
+caused, what you did about it (workaround, `--force`, gave up). The plugin owner
+collects these files across projects; nothing else reads them, so a missed entry
+costs nothing and a fabricated one costs trust.
+
 ---
 
 ## Scope Enforcement
@@ -354,7 +366,7 @@ about that path is available to a dispatched agent.
 
 ---
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-29
 
 ## Agent handoff contract at the plan boundary
 

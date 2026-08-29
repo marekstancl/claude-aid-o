@@ -944,6 +944,17 @@ Blocked card "plan-close brief missing — run aid-pm-brief.sh" rather than
 assembling a summary from evidence files. `legacy_epic_release_mode` plans keep
 their existing per-EPIC release text unchanged.
 
+## The PM page goes stale with every plan edit
+
+`aid-plan-to-epic.sh` refuses to generate when the PM page is older than the plan file
+("has no current PM page"). That is by design — the page is what the PM approved — so after
+every plan edit, re-render it with the command the refusal prints before running generation
+again.
+
+## When AID itself misbehaves
+
+A gate that refuses a valid plan, a script that crashes, a message that tells you to do what is already true — write it to `.aid-o/work/aid-plugin-issues.md` (date → what happened → what it caused → what you did), not to the project backlog. Rule text: `skills/agent-protocol.md` §"Problems with AID itself".
+
 ## Reference Files
 
 - `skills/brainstorming.md` — brainstorm process rules, principles, and context persistence (interim doc) protocol
@@ -990,7 +1001,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-29
 
 ## Plan mode
 
