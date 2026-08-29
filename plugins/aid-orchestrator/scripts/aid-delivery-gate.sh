@@ -21,7 +21,8 @@
 #
 # Environment:
 #   DELIVERY_GATE_POLICY — overrides default policy path
-#   AID_PROJECT_ROOT     — project root (default: git toplevel)
+#   AID_PROJECT_ROOT     — state root: evidence + delivery map (default: the tree)
+#   AID_GIT_TREE         — the checkout to MEASURE (HEAD/diff/probes); default: cwd's toplevel
 #   AID_EVIDENCE_BASE    — overrides .aid-o/work/evidence/ base path
 #
 # Exit codes:
@@ -136,13 +137,22 @@ fi
 # ---------------------------------------------------------------------------
 # Resolve project root
 # ---------------------------------------------------------------------------
+# Two roots, deliberately (agents #8):
+#   TREE_ROOT    — the checkout the gate MEASURES: HEAD, the diff, the
+#                  profile, the applicability probes. AID_GIT_TREE (the FSM
+#                  passes the run's worktree), else the caller's cwd. It used
+#                  to be derived from this script's own install dir, which is
+#                  never the project.
+#   PROJECT_ROOT — the state root where the evidence and the delivery map
+#                  live: AID_PROJECT_ROOT, else TREE_ROOT.
+TREE_ROOT="$(git -C "${AID_GIT_TREE:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "ERROR: cannot determine the tree to measure: '${AID_GIT_TREE:-$PWD}' is not inside a git checkout (set AID_GIT_TREE or run from the checkout)" >&2
+  exit 1
+}
 if [[ -n "${AID_PROJECT_ROOT:-}" ]]; then
   PROJECT_ROOT="$AID_PROJECT_ROOT"
 else
-  PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "ERROR: cannot determine project root (not a git repo?)" >&2
-    exit 1
-  }
+  PROJECT_ROOT="$TREE_ROOT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -189,7 +199,7 @@ mkdir -p "$OUTPUT_DIR" || {
 # ---------------------------------------------------------------------------
 # Resolve current HEAD and freshness
 # ---------------------------------------------------------------------------
-HEAD_SHA="$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null)" || {
+HEAD_SHA="$(git -C "$TREE_ROOT" rev-parse HEAD 2>/dev/null)" || {
   echo "ERROR: cannot resolve HEAD sha" >&2
   exit 1
 }
@@ -216,7 +226,7 @@ fi
 if [[ -n "${AID_DELIVERY_PROFILE:-}" ]]; then
   PROFILE="${AID_DELIVERY_PROFILE}"
 else
-  PROFILE="$(resolve_profile "$PROJECT_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
+  PROFILE="$(resolve_profile "$TREE_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
     echo "ERROR: resolve_profile failed" >&2
     exit 1
   }
@@ -405,35 +415,35 @@ _check_applicable() {
     local hl
     hl="$(echo "$cond_json" | jq -r '.has_lockfile // false')"
     if [[ "$hl" == "true" ]]; then
-      _has_lockfile "$PROJECT_ROOT" && return 0
+      _has_lockfile "$TREE_ROOT" && return 0
     fi
 
     # Check has_workspaces
     local hw
     hw="$(echo "$cond_json" | jq -r '.has_workspaces // false')"
     if [[ "$hw" == "true" ]]; then
-      _has_workspaces "$PROJECT_ROOT" && return 0
+      _has_workspaces "$TREE_ROOT" && return 0
     fi
 
     # Check has_build_script
     local hbs
     hbs="$(echo "$cond_json" | jq -r '.has_build_script // false')"
     if [[ "$hbs" == "true" ]]; then
-      _has_build_script "$PROJECT_ROOT" && return 0
+      _has_build_script "$TREE_ROOT" && return 0
     fi
 
     # Check has_typecheck_script
     local hts
     hts="$(echo "$cond_json" | jq -r '.has_typecheck_script // false')"
     if [[ "$hts" == "true" ]]; then
-      _has_typecheck_script "$PROJECT_ROOT" && return 0
+      _has_typecheck_script "$TREE_ROOT" && return 0
     fi
 
     # Check has_ts_files
     local htf
     htf="$(echo "$cond_json" | jq -r '.has_ts_files // false')"
     if [[ "$htf" == "true" ]]; then
-      _has_ts_files "$PROJECT_ROOT" && return 0
+      _has_ts_files "$TREE_ROOT" && return 0
     fi
 
     # Check changed_paths_match
@@ -447,7 +457,7 @@ _check_applicable() {
     local dr
     dr="$(echo "$cond_json" | jq -r '.dep_removed // false')"
     if [[ "$dr" == "true" ]]; then
-      _dep_removed "$PROJECT_ROOT" "$BASE_SHA" "${CHANGED_PATHS_FILE:-}" && return 0
+      _dep_removed "$TREE_ROOT" "$BASE_SHA" "${CHANGED_PATHS_FILE:-}" && return 0
     fi
 
     # Check has_authority_surface
@@ -637,7 +647,7 @@ _run_check() {
 
   local _t_start _t_end duration_ms
   _t_start=$(date +%s%3N 2>/dev/null || date +%s)
-  check_output="$(AID_PROJECT_ROOT="$PROJECT_ROOT" \
+  check_output="$(AID_PROJECT_ROOT="$TREE_ROOT" \
     AID_EPIC_ID="$EPIC_ID" \
     AID_RUN_ID="$RUN_ID" \
     AID_BASE_SHA="$BASE_SHA" \

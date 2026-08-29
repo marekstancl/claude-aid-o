@@ -87,7 +87,9 @@ You do NOT see:
 Verify whether the diff satisfies the DoD WITHOUT touching forbidden paths.
 Do not infer intent. Report findings.
 
-Output: write to verifier-output-step-N.md (or cp3-{focus}.md) with:
+Output: write to the ABSOLUTE path the dispatch names (evidence/<epic>/<run>/verifier-output-step-N.md
+or verifier-output-cp3-{focus}.md — never a bare file name in the working directory; the FSM reads
+only the evidence dir and a stray copy in the checkout root counts as "missing"), with:
   _generated_by: aid-orchestrator:verifier@<your_agent_id>
   _generated_at: <ISO 8601 UTC timestamp, e.g. 2026-06-18T14:00:00Z>
   classification: <unchanged from pre-filter, or FULL_REVIEW for CP3>

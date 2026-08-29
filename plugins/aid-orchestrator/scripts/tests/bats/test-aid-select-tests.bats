@@ -357,3 +357,17 @@ commit_change() {
   [ "$status" -eq 10 ]
   [[ "$output" == *"--evidence-file requires a value"* ]]
 }
+
+@test "v2.95.8 (agents #9): outside the plugin's own repository the selector is INACTIVE — exit 2, relevance inactive, nothing selected, never pass" {
+  local other; other="$(mktemp -d)"
+  ( cd "$other" && git init -q -b main && git config user.email t@t && git config user.name t \
+    && mkdir -p bin && echo 'print(1)' > bin/app.py && git add . && git commit -qm one \
+    && echo 'print(2)' > bin/app.py && git commit -qam two )
+  run bash -c "cd '$other' && unset AID_SELECT_TESTS_PLUGIN_ROOT && bash '$SELECTOR' --base HEAD~1 --evidence-file '$other/sel.json'"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.relevance' "$other/sel.json")" = "inactive" ]
+  [ "$(jq -r '.exit_status' "$other/sel.json")" = "2" ]
+  [ "$(jq '.selected_tests | length' "$other/sel.json")" = "0" ]
+  [[ "$output" == *"INACTIVE"* ]]
+  rm -rf "$other"
+}

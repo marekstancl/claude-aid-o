@@ -1085,6 +1085,11 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
           prompt: <full diff, plan.json overall>})
    ```
 
+   The dispatch names each output file by its ABSOLUTE path (`$evidence_dir/verifier-output-cp3-<focus>.md`);
+   a verifier given a bare name writes it where it stands (acta #32). After the return, if an untracked
+   `verifier-output-*.md` sits in the checkout root (`git status --porcelain -- 'verifier-output-*.md'`),
+   move it into `$evidence_dir` before `aid-emit-dispatch.sh complete` — the FSM never reads it from there.
+
    After both `Agent()` calls return (`subagent` mode only):
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \

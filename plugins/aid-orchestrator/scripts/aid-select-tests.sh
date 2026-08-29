@@ -50,6 +50,10 @@
 # Exit codes:
 #   0  — pass: every selected test passed, OR the change is docs-only /
 #        outside the production surface (selected_tests is empty by design)
+#   2  — INACTIVE: not the plugin's own repository, so the Initial mapping
+#        knows no production surface here; nothing selected, nothing run;
+#        summary carries relevance: "inactive". A gate whose pass_criteria
+#        names "exit 2" records skip, never pass (agents #9).
 #   1  — fail: at least one selected test failed
 #   3  — fail (unverifiable): a changed path fell inside the production
 #        surface but outside the Initial mapping (D-selector-1). Recovery:
@@ -109,7 +113,8 @@ Options:
                          to <file>. The exit-code contract (0/1/3/10/11) is
                          unchanged; exit 3 (D-selector-1 unverifiable) and
                          exit 11 (P069 Step 10 mapping_gap) both write no
-                         units file.
+                         units file. Exit 2 (inactive outside the plugin's
+                         own repository) also writes no units file.
   --dry-run              Report the selection and exit WITHOUT running any of
                          it (P081 Step 9). The exit-code contract is unchanged
                          except that 1 (a test failed) can no longer occur,
@@ -155,6 +160,30 @@ if [[ -z "$BASE_REF" && -z "$PATHS_FILE" ]]; then
   echo "ERROR: one of --base or --paths-file is required." >&2
   usage
   exit 10
+fi
+
+# ─── Is this the plugin's own repository? (agents #9) ───────────────────────
+# The Initial mapping knows ONE production surface: this plugin's scripts/ and
+# defaults/. In any other repository every changed path is "outside the
+# surface", nothing is selected, and the gate used to say pass — a green gate
+# over zero tests. Outside this repository the selector is INACTIVE and says
+# so with exit 2, which the gate runner records as skip when the gate's
+# pass_criteria names "exit 2" (the rendered consumer gate does).
+# "The plugin's own repository" = the checkout carries the plugin's scripts/
+# tree at its canonical path (a consumer repo has the plugin installed elsewhere, never
+# under its own plugins/aid-orchestrator/). Path shape, not realpath identity:
+# the plugin's fixtures rebuild that shape in a temp repo and must stay in-repo.
+_own_repo_toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$_own_repo_toplevel" || ! -d "${_own_repo_toplevel}/${PLUGIN_PREFIX}/scripts" ]]; then
+  _inactive=$(jq -n \
+    --arg gb "aid-select-tests.sh@${PLUGIN_VERSION}" \
+    --arg ga "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg r "no test mapping for this repository — the Initial mapping covers only the plugin's own scripts/ and defaults/; targeted_tests is INACTIVE here (exit 2 = skip), rely on the project's fixed suites or map its surface (backlog: project-configurable production surface)" \
+    '{_generated_by: $gb, _generated_at: $ga, selected_tests: [], reasoning: [$r], test_results: [], relevance: "inactive", exit_status: 2}')
+  echo "$_inactive"
+  if [[ -n "$EVIDENCE_FILE" ]]; then mkdir -p "$(dirname "$EVIDENCE_FILE")"; echo "$_inactive" > "$EVIDENCE_FILE"; fi
+  echo "aid-select-tests: INACTIVE outside the plugin's own repository (no mapping for '${_own_repo_toplevel:-<no git toplevel>}') — exit 2" >&2
+  exit 2
 fi
 
 # ─── Resolve changed paths ──────────────────────────────────────────────────

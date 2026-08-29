@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.8] — 2026-08-29
+
+### Fixed
+- **`transition` a delivery gate měřily HEAD hlavního repa, ne pracovní kopie běhu** — `cmd_transition` se nyní (stejně jako `advance-to-gates`) přesměruje do worktree plánu dřív, než cokoli čte; CP3 čerstvost tak porovnává správné revize. `aid-delivery-gate.sh` rozlišuje strom, který měří (`AID_GIT_TREE`, jinak cwd), od stavového kořene s evidencí; už neodvozuje kořen z vlastního instalačního adresáře, takže jde spustit i z worktree.
+- **`targeted_tests` už nehlásí pass nad nulou testů** — mimo vlastní repozitář pluginu je výběr testů NEAKTIVNÍ: vrátí `relevance: inactive`, exit 2, a brána to zapíše jako skip (renderer konzumentského `execution.yaml` dostal `pass_criteria` s „exit 2 = skip"). Projekt s dřívější konfigurací bez té věty uvidí poctivý fail řádek brány (`required: false`, celkový výsledek nemění) — přidat větu, nebo namapovat svůj produkční povrch (backlog).
+- **Validátor výstupu verifiéra poradí, když soubor leží v kořeni** — při „file missing" zkontroluje `cwd/<název>` a řekne, kam ho přesunout; nikdy ho odtud nepřijme. Dispatch pojmenovává výstup absolutní cestou (`agents/verifier.md`, `skills/pipeline.md`).
+
 ## [2.95.7] — 2026-08-29
 
 ### Added

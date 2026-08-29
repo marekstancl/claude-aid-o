@@ -53,6 +53,10 @@ render_targeted_tests_gate_block() {
   targeted_tests:
     command: "{plugin_path}/scripts/aid-select-tests.sh --base {base_commit}"
     required: false
+    # exit 2 = the selector is INACTIVE in this repository (its mapping covers
+    # only the plugin's own tree) — recorded as skip, never as pass. Map this
+    # project's production surface before trusting this gate.
+    pass_criteria: "exit code 0; exit 2 = no test mapping for this repository (skip)"
 EOF
 }
 #

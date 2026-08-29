@@ -2489,3 +2489,11 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   [[ "$output" =~ "plan_step_hash does not match" ]]
   [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
 }
+
+@test "v2.95.8 (acta #32): a verifier output written to the checkout root is named in the diagnostic and still refused" {
+  local td="$TEST_EVIDENCE_DIR"
+  printf '_generated_by: x\n_generated_at: y\nclassification: FULL_REVIEW\nverdict: pass\n' > "$TEST_PROJECT_ROOT/verifier-output-cp3-security.md"
+  run bash -c "cd '$TEST_PROJECT_ROOT' && source '$FSM' 2>/dev/null; fsm_check_verifier_output '$td/verifier-output-cp3-security.md'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file missing"* && "$output" == *"exists at ${TEST_PROJECT_ROOT}/verifier-output-cp3-security.md"* ]]
+}

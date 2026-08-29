@@ -576,3 +576,15 @@ _from_no_yq() {
   [[ "$output" == *"execution worktree pointer was NOT restored"* ]]
   [[ "$output" == *"--recreate-worktree"* ]]
 }
+
+@test "v2.95.8 (agents #8): aid-fsm.sh transition invoked FROM THE PRIMARY CHECKOUT redirects into the plan worktree" {
+  _mk_project
+  _seed_plan 1
+  local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
+  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
+  [ "$status" -eq 0 ]
+  # the run is READY: EXECUTE→GATES is refused — from the WORKTREE, i.e. after the redirect
+  run _from "$ROOT" "$FSM" transition EXECUTE GATES "$sf"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"executes in its own worktree"* ]]
+}

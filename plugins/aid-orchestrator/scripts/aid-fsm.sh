@@ -1238,7 +1238,16 @@ fsm_check_verifier_output() {
   # Each refusal names its reason on stderr (verifier_output_invalid: …), so a
   # caller's "missing or invalid" is never the whole story (agents #3: three
   # verifier rounds were re-run for a missing `classification:` line).
-  [[ -f "$file" ]] || { echo "verifier_output_invalid: ${file}: file missing" >&2; return 1; }
+  if [[ ! -f "$file" ]]; then
+    echo "verifier_output_invalid: ${file}: file missing" >&2
+    # Diagnostic only, never accepted: a verifier given a bare file name
+    # writes it where it stands (acta #32) — say so, so the review is moved,
+    # not re-run.
+    local _stray="${PWD}/$(basename "$file")"
+    [[ -f "$_stray" && "$_stray" != "$file" ]] \
+      && echo "verifier_output_invalid: a file with that name exists at ${_stray} — it was written outside the evidence dir; move it to ${file} (the validator never reads it from there)" >&2
+    return 1
+  fi
   grep -q '^_generated_by:' "$file" || { echo "verifier_output_invalid: ${file}: no _generated_by: line" >&2; return 1; }
   grep -q '^_generated_at:' "$file" || { echo "verifier_output_invalid: ${file}: no _generated_at: line" >&2; return 1; }
   grep -q '^classification:' "$file" || { echo "verifier_output_invalid: ${file}: no classification: line (CP3 verifiers write classification: FULL_REVIEW themselves)" >&2; return 1; }
@@ -5153,6 +5162,13 @@ read_steps_array() {
 
 cmd_transition() {
   local from="$1" to="$2" state_file="$3"
+  [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
+  # P074 Step 8 shape, applied here too (agents #8): a transition reads git —
+  # CP3 freshness compares Reviewed-Head with HEAD, the D0 delivery gate
+  # measures the tree — so it runs where the plan's tree IS. Before the force
+  # parser, which writes an audit record while it parses: the re-executed
+  # process must be the only one with side effects.
+  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
   local force="false"
   if [[ "${4:-}" == "--force" ]]; then
     local epic_id run_id evidence_dir
@@ -5166,8 +5182,6 @@ cmd_transition() {
     fsm_handle_force_override "$from" "$to" "$state_file" "transition" "${@:5}"
     force="true"
   fi
-
-  [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
 
   local current_state
   current_state=$(yaml_field "$state_file" state)
@@ -5430,10 +5444,16 @@ cmd_advance_to_gates() {
         # AID_PROJECT_ROOT. Legacy expression kept only when nothing resolves.
         local _d0_project_root
         _d0_project_root="$(aid_state_root 2>/dev/null || pwd)"
+        # The tree the gate MEASURES is this run's checkout (after the
+        # worktree re-exec above, $PWD); the state root only says where the
+        # evidence and the delivery map live. Before this the gate read HEAD
+        # from the primary checkout and stamped the artifact head_is_current
+        # against a tree the run never touched (agents #8).
         _d0_output=$(
           DELIVERY_GATE_POLICY="$_d0_policy" \
           AID_EVIDENCE_BASE="${_d0_project_root}/.aid-o/work/evidence" \
           AID_PROJECT_ROOT="$_d0_project_root" \
+          AID_GIT_TREE="$PWD" \
           timeout 300 bash "$_d0_script" \
             --epic "$epic_id" --run "$run_id" \
             --base "${_d0_base_sha:-HEAD~1}" \
