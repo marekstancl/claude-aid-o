@@ -371,6 +371,29 @@ _aid_lc_precheck_write() {
   return 0
 }
 
+# _aid_lc_sync_checkout_of <root> <branch> <old_sha> <new_sha>
+#   A ref advanced by plumbing (update-ref) leaves the worktree that has
+#   <branch> CHECKED OUT — normally the primary checkout — with an index and
+#   tree from BEFORE the write. The next ordinary `git commit` there commits
+#   that stale index and silently REVERTS the write (WAN P099: a plan merge
+#   undone twice by one-file commits). So: find that worktree and bring its
+#   index and tree forward with a two-tree read-tree, which refuses rather than
+#   overwrite local edits; when it refuses, say loudly what to run first.
+_aid_lc_sync_checkout_of() {
+  local root="$1" branch="$2" old="$3" new="$4"
+  [[ -n "$old" && -n "$new" && "$old" != "$new" ]] || return 0
+  local wt=""
+  wt="$(git -C "$root" worktree list --porcelain 2>/dev/null \
+        | awk -v b="branch refs/heads/${branch}" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
+  [[ -n "$wt" ]] || return 0
+  if git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null; then
+    echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${new:0:12}, so the next commit there does not revert this write." >&2
+  else
+    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree still show the state BEFORE ${new:0:12} (local changes overlap). A plain 'git commit' there would REVERT this write. Before any commit in ${wt} run: git -C ${wt} reset --merge" >&2
+  fi
+  return 0
+}
+
 _aid_lc_isolated_commit() {
   local root="$1" msg="$2"; shift 2
   local rels=("$@")
@@ -420,7 +443,7 @@ _aid_lc_isolated_commit() {
       # Advance the CAS base so a SECOND plan-mode commit in the same pass (the
       # receipt, Step 6) chains onto this one instead of re-CASing against a
       # commit the ref has already left.
-      [[ -n "$newsha" ]] && _AID_LC_PLAN_PARENT="$newsha"
+      [[ -n "$newsha" ]] && { _aid_lc_sync_checkout_of "$root" "$tb" "$parent" "$newsha"; _AID_LC_PLAN_PARENT="$newsha"; }
       # Restore the worktree copies: the content is durable on the target branch,
       # and leaving the plan branch dirty would fail the next stage's clean-tree
       # precondition for a change that is not the plan branch's.

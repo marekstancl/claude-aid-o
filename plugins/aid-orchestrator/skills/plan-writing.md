@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-29
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -1437,6 +1437,20 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
+## Resuming a plan written under an older plugin version
+
+A paused plan resumes against TODAY's grammar, and the readiness check blocks on
+form, not content. Four rules hit resumed plans most (ACTA P016, July → August):
+`## Stakeholder Brief` is a forbidden section (the rendered PM page replaced it);
+every step needs `**Parallel group:**`; `**Dependencies:**` is a bullet block, not
+a one-line `Depends on: X. Blocks: Y.`; a dependency token is `Step 2, Step 3`,
+never `Steps 2, 3`. Run `aid-plan-lint.sh` and `aid-generation-readiness.sh`
+on the plan FIRST and fix the form in one pass; there is no `--fix` and none is
+planned — the rewrite is mechanical and takes minutes, a fixer would need to be
+right about every plan ever written. A step that is already merged keeps its
+obligations (a `Reuse check:` on a delivered step is answered truthfully by
+"implemented, files exist", never invented).
+
 ## Reference Files
 
 - `commands/aid-plan.md` — unified command that invokes this skill (write mode or brainstorm Step 8)
@@ -1450,7 +1464,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-29
 
 ## Plan-boundary note
 

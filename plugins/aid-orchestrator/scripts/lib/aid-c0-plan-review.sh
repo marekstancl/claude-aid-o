@@ -1126,6 +1126,7 @@ _c0_process_response() {
     case "$dispatch_outcome" in
       timeout)      uo="timeout" ;;
       rate_limited) uo="rate_limited" ;;
+      capacity)     uo="capacity" ;;
       *)            uo="unavailable" ;;
     esac
     _c0_write_unverifiable "$evidence_dir" "$manifest" "$uo" "$achieved" "$session_id" "" ""
@@ -1496,6 +1497,8 @@ cmd_dispatch() {
     events_valid="false"
   elif [[ "$events_valid" == "true" ]]; then
     outcome="dispatched"
+  elif _looks_at_capacity "$events_file" "$stderr_file"; then
+    outcome="capacity"
   elif _looks_rate_limited "$events_file" "$stderr_file"; then
     outcome="rate_limited"
   else

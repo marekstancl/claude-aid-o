@@ -866,6 +866,13 @@ elif [[ ! -f "$fsm_state_file" ]]; then
     exit "$fsm_init_rc"
   fi
 else
+  # Idempotent only when the existing state describes THIS EPIC: a state left
+  # from an earlier generation with a different step count would run the FSM
+  # against the wrong plan.json (ACTA P016: total_steps 6 vs 5 steps).
+  _existing_total="$(grep -E '^total_steps:' "$fsm_state_file" 2>/dev/null | awk '{print $2}')"
+  if [[ -n "$_existing_total" && "$_existing_total" != "$step_count" ]]; then
+    error_exit "fsm-state.yaml at $fsm_state_file records total_steps: ${_existing_total}, but this EPIC has ${step_count} steps — it is from an earlier generation. Move it aside (e.g. rename to fsm-state.yaml.stale-<date>, with its timeline.jsonl) and re-run; nothing was changed." 1
+  fi
   echo "P040 Component E: fsm-state.yaml already exists at $fsm_state_file; skipping init (idempotent)" >&2
 fi
 

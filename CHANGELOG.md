@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.4] — 2026-08-29
+
+### Fixed
+- **Merge plánu tiše vrácený dalším commitem** — `plan-merge-to-main` i plumbing lifecycle commit posouvaly `main` jen v refu; checkout, který má `main` vykoupnutý, zůstal na stavu před merge a nejbližší obyčejný commit merge vrátil (stalo se ve WAN dvakrát). Nový helper `_aid_lc_sync_checkout_of` ten checkout dotáhne dvoustromovým `read-tree` (lokální úpravy nepřepíše) a když nemůže, hlasitě řekne, co spustit před dalším commitem.
+- **Prázdný scope po posledním kroku** — pre-commit hook po dokončení posledního kroku pouštěl vše (okno pro opravy po CP3); nyní kontroluje proti sjednocení `allowed_paths` všech kroků, stejně jako v GATES.
+- **Stará `fsm-state.yaml` přežila regeneraci** — `aid-json-to-run.sh` přeskakoval init podle existence souboru; při jiném `total_steps` teď odmítne s instrukcí místo tichého přeskočení.
+- **„Model at capacity" hlášeno jako `rate_limited`** — Codex transport rozlišuje přechodný výpadek (`capacity`, zkus za chvíli) od vyčerpaného limitu (`rate_limited`, čekej na reset) v C0 i C3.
+- **`aid-fsm.sh init` padal na `$6: unbound variable`** — s méně než sedmi argumenty vypíše usage a skončí kódem 2.
+
+### Changed
+- **Rozpočet C0 revizí je vidět dopředu** — CP1 brána vypíše „N z M kol zbývá" před každým kolem, ne až po vyčerpání.
+- **Pět hlášek a dokumentů** — lineage odmítnutí nabízí nejkratší bezpečnou cestu (`git branch -d` + `epic-start`), `--output-dir` u `aid-epic-to-json.sh` se popisuje jako kořen workspace `.aid-o`, hláška `increment-step` uvádí číslo kroku v plánu (1-based) vedle FSM (0-based), patička lintu říká, že paralelní skupiny blokují v readiness, a `plan-writing.md` popisuje obnovení plánu psaného pod starší verzí (bez `--fix`, záměrně).
+
 ## [2.95.2] — 2026-08-29
 
 ### Added

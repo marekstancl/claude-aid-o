@@ -550,6 +550,10 @@ ERRMSG
     if [[ "$ledger_rc" -ne 0 ]]; then
       ledger_ok=0
       ledger_reason="aid-cp1-ledger.sh check-budget rc=${ledger_rc}: ${ledger_out}"
+    else
+      # Say the budget out loud BEFORE a round is spent — until now the count
+      # was visible only once it ran out.
+      echo "CP1-gate: review budget for ${plan_id}: $(jq -r '"\(.remaining) of \(.max) round(s) remaining (\(.attempts) used)"' <<<"$ledger_out" 2>/dev/null || echo "${ledger_out}")" >&2
     fi
   fi
 

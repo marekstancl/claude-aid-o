@@ -4331,6 +4331,10 @@ cmd_resume() {
 }
 
 cmd_init() {
+  if [[ $# -lt 7 ]]; then
+    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; aid-json-to-run.sh is the normal caller, a manual re-init must pass the same seven." >&2
+    exit 2
+  fi
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
@@ -4563,7 +4567,7 @@ cmd_init() {
               _pb_detail="${epic_id} is recorded status=abandoned in ${_pb_plan_id}'s plan-boundary-manifest.json — restarting an abandoned EPIC without a PM decision would silently resurrect it."
             elif [[ "$_pb_lineage" != "proven" || "$_pb_epic_source_ref" != "plan/${_pb_plan_id}" ]]; then
               _pb_reason="epic_lineage_unproven"
-              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'."
+              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'. If the old task branch is fully contained in the target (git branch --merged shows it), the shortest safe path is: git branch -d <task_branch>, then epic-start."
             elif [[ "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
               _pb_reason="plan_branch_mismatch"
               _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."
@@ -5650,7 +5654,7 @@ cmd_increment_step() {
     local verify_file="${evidence_dir}/step-${step}-verify.md"
     [[ -f "$verify_file" ]] || _increment_fail missing_step_verify \
       "PRECONDITION FAIL: Step verification evidence not found." \
-      "Expected: ${verify_file}" \
+      "Expected: ${verify_file}  (FSM step ${step} = the plan's step $((step+1)); evidence is 0-based, plans are 1-based)" \
       "Write verification (AC checklist + result) before advancing to next step."
 
     # Content checks — single file read, bash pattern matches (was 5 grep forks).

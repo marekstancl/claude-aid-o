@@ -7593,6 +7593,14 @@ cmd_plan_merge_to_main() {
     fi
   fi
 
+  # The publish above moved the ref only; the checkout that has the target
+  # branch out (the primary checkout) is still at the pre-merge state and its
+  # next plain commit would revert the merge — bring it forward or say so.
+  if declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1; then
+    _aid_lc_sync_checkout_of "$root" "$target_branch" "$target_head" "$merge_commit"
+  fi
+
+
   local grc=0
   plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
   _pfsm_crash_seam git_applied

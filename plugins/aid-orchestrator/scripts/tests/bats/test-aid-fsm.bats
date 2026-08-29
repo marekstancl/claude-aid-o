@@ -2318,3 +2318,10 @@ VF
   [[ "$output" =~ binding ]]
   [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
 }
+
+@test "init with fewer than seven positional arguments is a usage error, not an unbound-variable crash (ACTA #16)" {
+  run bash "$FSM" init E-1 R-1 5 full
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Usage: aid-fsm.sh init"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+}

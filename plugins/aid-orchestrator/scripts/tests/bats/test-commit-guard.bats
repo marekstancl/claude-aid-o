@@ -395,3 +395,18 @@ _farm_excluding() {
   grep -q '"event":"commit_scope_violation"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
   grep -q 'src/rogue.txt' "$TEST_EVIDENCE_DIR/timeline.jsonl"
 }
+
+# ─── after the LAST step: union of all steps, not an empty set (ACTA #21) ────
+@test "after the last step the guard scopes to the union of all steps, not nothing" {
+  git checkout -q -b task/E-test/main
+  _write_plan
+  _write_state EXECUTE task/E-test/main "" 2      # current_step == total_steps
+  _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"empty allowed_paths"* ]]
+  _stage src/elsewhere.txt
+  run bash "$HOOK"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"union of all steps"* ]]
+}

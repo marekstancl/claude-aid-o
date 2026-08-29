@@ -1071,6 +1071,12 @@ _session_id_of() {
 _looks_rate_limited() {
   grep -qiE 'rate[_ ]?limit|"status"[[:space:]]*:[[:space:]]*429' "$1" "$2" 2>/dev/null
 }
+# "Selected model is at capacity" is a transient provider outage — retry in
+# minutes — while a usage limit means wait for the window to reset. Mapping
+# both to rate_limited cost an 88-minute wait on a five-minute problem.
+_looks_at_capacity() {
+  grep -qiE 'at capacity|overloaded|"status"[[:space:]]*:[[:space:]]*(503|529)' "$1" "$2" 2>/dev/null
+}
 
 # _run_codex_isolated <project_root> <prompt_file> <events_out> <stderr_out> <last_out>
 #   Launch the REAL codex CLI as an independent, fresh, read-only process and
@@ -1740,6 +1746,7 @@ _process_response() {
     case "$dispatch_outcome" in
       timeout)      uo="timeout" ;;
       rate_limited) uo="rate_limited" ;;
+      capacity)     uo="capacity" ;;
       *)            uo="unavailable" ;;
     esac
     _write_unverifiable "$evidence_dir" "$manifest" "$uo" "$achieved" "$session_id" "" ""
@@ -2523,6 +2530,8 @@ cmd_dispatch() {
     events_valid="false"
   elif [[ "$events_valid" == "true" ]]; then
     outcome="dispatched"
+  elif _looks_at_capacity "$events_file" "$stderr_file"; then
+    outcome="capacity"
   elif _looks_rate_limited "$events_file" "$stderr_file"; then
     outcome="rate_limited"
   else

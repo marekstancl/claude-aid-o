@@ -730,7 +730,7 @@ if [[ "$QUIET" -eq 0 ]]; then
   # since P085 it also carries reuse-degree, standards-map and wave advisories,
   # and calling all of them "description-only path" advisories was a count that
   # contradicted the lines printed right above it.
-  [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} advisory finding(s) above — never blocking, in either mode." >&2
+  [[ "$advisories" -gt 0 ]] && echo "aid-plan-lint: ${advisories} advisory finding(s) above — never blocking here, in either mode; parallel-group findings DO block in the readiness check before EPIC generation." >&2
 fi
 
 # Telemetry (P084 Step 7): how often this lint STOPS a plan, and on what. The

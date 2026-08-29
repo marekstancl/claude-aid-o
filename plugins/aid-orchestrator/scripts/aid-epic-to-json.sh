@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./aid-epic-to-json.sh \
-#     --epic <path> --schema <path> --output-dir <path> \
+#     --epic <path> --schema <path> --output-dir <aid-workspace-root, i.e. .aid-o> \
 #     [--plan-source <path>]
 #
 # Parses the EPIC, extracts steps/dependencies/parallel groups, auto-generates
@@ -49,7 +49,7 @@ done
 # =============================================================================
 [[ -z "$epic" ]]       && error_exit "Missing required argument: --epic" 1
 [[ -z "$schema" ]]     && error_exit "Missing required argument: --schema" 1
-[[ -z "$output_dir" ]] && error_exit "Missing required argument: --output-dir" 1
+[[ -z "$output_dir" ]] && error_exit "Missing required argument: --output-dir (the AID workspace root, normally .aid-o — evidence goes under <it>/work/evidence)" 1
 
 [[ ! -f "$epic" ]]   && error_exit "EPIC file not found: $epic" 3
 [[ ! -f "$schema" ]] && error_exit "Schema file not found: $schema" 3

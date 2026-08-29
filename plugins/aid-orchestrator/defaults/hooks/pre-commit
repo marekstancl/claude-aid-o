@@ -170,8 +170,17 @@ _aid_run_scope_check() {
   local _label
   case "$_st" in
     EXECUTE)
-      _paths=$(jq -r --argjson i "${_cs:-0}" '.steps[$i].allowed_paths[]?' "$_plan" 2>/dev/null)
-      _label="EXECUTE step ${_cs}"
+      # After the LAST step (current_step == steps count) there is no step to
+      # scope against, and an empty set used to pass every commit — exactly
+      # the window where post-CP3 fixes land. Use the union of all steps, as
+      # GATES does; a commit outside everything the EPIC touched then shows.
+      if [[ "${_cs:-0}" -ge "$(jq -r '.steps | length' "$_plan" 2>/dev/null || echo 0)" ]]; then
+        _paths=$(jq -r '.steps[].allowed_paths[]?' "$_plan" 2>/dev/null)
+        _label="EXECUTE after last step (union of all steps)"
+      else
+        _paths=$(jq -r --argjson i "${_cs:-0}" '.steps[$i].allowed_paths[]?' "$_plan" 2>/dev/null)
+        _label="EXECUTE step ${_cs}"
+      fi
       ;;
     GATES)
       _paths=$(jq -r '.steps[].allowed_paths[]?' "$_plan" 2>/dev/null)

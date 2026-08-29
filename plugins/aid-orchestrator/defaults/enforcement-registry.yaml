@@ -1022,7 +1022,7 @@ enforcements:
     severity: blocking
     surface: "commit-time + step-advance"
     status: active
-    description: "the pre-commit hook restricts an orchestrated commit to the per-step allowed_paths (P058 machinery) and refuses when git symbolic-ref HEAD != the fsm-state branch (blocking at commit time); the FSM companion emits commit_scope_violation advisory-telemetry at step-advance plus a commit_guard_disclosure event; closes OBS-20260709-01 + OBS-20260709-04"
+    description: "the pre-commit hook restricts an orchestrated commit to the per-step allowed_paths (P058 machinery) and refuses when git symbolic-ref HEAD != the fsm-state branch (blocking at commit time); the FSM companion emits commit_scope_violation advisory-telemetry at step-advance plus a commit_guard_disclosure event; closes OBS-20260709-01 + OBS-20260709-04. v2.95.4: after the LAST step (current_step == steps count) the scope is the union of all steps, not an empty set that passed everything — the post-CP3 fix window is covered (ACTA #21)."
   - id: queue_dep_revalidation
     type: 1
     source: "scripts/aid-fsm.sh (grep: 'queue_revalidate')"
