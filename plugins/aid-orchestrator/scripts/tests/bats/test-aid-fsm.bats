@@ -2325,3 +2325,40 @@ VF
   [[ "$output" == *"Usage: aid-fsm.sh init"* ]]
   [[ "$output" != *"unbound variable"* ]]
 }
+
+# ─── amend-scope (ACTA #17): one command moves all three scope readers ───────
+@test "amend-scope widens the current step, re-stamps plan_json_hash, records the amendment and refuses the rest" {
+  local td="$TEST_EVIDENCE_DIR"
+  cat > "$td/plan.json" <<'PLAN'
+{"steps":[{"id":"step_1_backend","allowed_paths":["src/a.py"]},{"id":"step_2_qa","allowed_paths":["tests/b.py"]}]}
+PLAN
+  cat > "$td/fsm-state.yaml" <<EOS
+epic_id: E-AS
+run_id: R-AS
+state: EXECUTE
+current_step: 0
+total_steps: 2
+plan_json_hash: $(sha256sum "$td/plan.json" | awk '{print $1}')
+EOS
+  : > "$td/timeline.jsonl"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_a.py --reason "short"
+  [ "$status" -ne 0 ]; [[ "$output" == *"20 characters"* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add /etc/passwd --reason "AC3 demands a test the plan forgot"
+  [ "$status" -ne 0 ]; [[ "$output" == *"relative path"* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/ --reason "a whole directory is not a file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"FILES"* ]]
+  jq '.steps[0].forbidden_paths = ["secrets/"]' "$td/plan.json" > "$td/p.tmp" && mv "$td/p.tmp" "$td/plan.json"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add secrets/key.pem --reason "trying to widen into a forbidden path"
+  [ "$status" -ne 0 ]; [[ "$output" == *"forbidden_paths"* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_a.py --add src/a_helper.py --reason "AC3 demands a test the plan forgot"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.steps[0].allowed_paths' "$td/plan.json")" = '["src/a.py","src/a_helper.py","tests/test_a.py"]' ]
+  [ "$(jq -c '.steps[1].allowed_paths' "$td/plan.json")" = '["tests/b.py"]' ]          # other step untouched
+  [ "$(grep '^plan_json_hash:' "$td/fsm-state.yaml" | awk '{print $2}')" = "$(sha256sum "$td/plan.json" | awk '{print $1}')" ]
+  [ "$(jq -r '.[0].reason' "$td/steps/step_1_backend/scope-amendment.json")" = "AC3 demands a test the plan forgot" ]
+  grep -q '"event":"scope_amended"' "$td/timeline.jsonl"
+  # not in EXECUTE → refused
+  sed -i 's/^state: EXECUTE/state: GATES/' "$td/fsm-state.yaml"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "trying to widen after the work is done"
+  [ "$status" -ne 0 ]; [[ "$output" == *"not EXECUTE"* ]]
+}

@@ -719,6 +719,23 @@ every message to the PM are **1-based**. This is deliberate and not going to cha
 renumbering would orphan every existing evidence pack. When you write for a human, say
 "step 3 (evidence `step-2-*`)"; when you look for evidence, subtract one.
 
+### Scope amendment (a file the step did not list)
+
+The step's `allowed_paths` come from the plan's `Files:` block. When work needs one more
+file — most often a test beside an in-scope source, sometimes a genuinely new file the PM
+approves — the controller widens the scope with ONE command and re-dispatches:
+
+```bash
+bash {plugin_path}/scripts/aid-fsm.sh amend-scope "$state_file" --add tests/test_x.py --reason "AC3 demands a test and the plan did not list it"
+```
+
+It updates the three readers of scope together: `plan.json` (the commit hook), the
+`plan_json_hash` stamp (the `increment-step` tamper check) and `steps/<id>/scope-amendment.json`
+(the contract validator unions it with the contract's own list). The contract is not rewritten
+and the agent keeps quoting the version it was given. Never edit `plan.json` by hand mid-step:
+that satisfies the hook and trips the hash, which is the contradiction this command exists to
+end. Prevention is cheaper than amendment — a plan lists its tests in `Files:` (`Test:` bullet).
+
 ### Output verification
 
 After agent completes:

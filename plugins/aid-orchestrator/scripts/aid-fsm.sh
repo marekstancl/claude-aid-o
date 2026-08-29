@@ -13,6 +13,7 @@
 #   aid-fsm.sh get-field <field> <state_file>
 #   aid-fsm.sh step-evidence-dir <state_file> <step_index>   # the step's OWN evidence subdirectory (P087 Step 2)
 #   aid-fsm.sh set-field <field> <value> <state_file>
+#   aid-fsm.sh amend-scope <state_file> --add <path> [--add <path>...] --reason "<≥20 chars>"
 #   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
 #   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 #   aid-fsm.sh promote-check <check_name> <state_file>
@@ -6226,6 +6227,84 @@ cmd_set_field() {
   fi
 }
 
+# ─── Scope amendment (PM-approved extra paths, mid-step) ─────────────────
+# Three guards read a step's scope: the pre-commit hook (plan.json, live), the
+# increment-step tamper check (plan.json, by hash stamped at init) and the
+# dispatch-contract validator (contract.json, immutable). Before this command
+# the sanctioned way to add a file did not exist: editing plan.json satisfied
+# the hook and tripped the hash; leaving it tripped the hook. This is the ONE
+# write that moves all three together, with the reason on record:
+#   plan.json  steps[current].allowed_paths += paths  (hook sees it)
+#   fsm-state  plan_json_hash re-stamped               (tamper check sees it)
+#   steps/<id>/scope-amendment.json                    (validator unions it)
+#   timeline scope_amended + audit-log                 (someone can ask why)
+# It never widens a step that is not the current one, never removes a path,
+# and refuses paths that leave the tree.
+cmd_amend_scope() {
+  local state_file="" reason=""; local -a add=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --add)    [[ -n "${2:-}" ]] || die "amend-scope: --add needs a path"; add+=("$2"); shift 2 ;;
+      --reason) reason="${2:-}"; shift 2 ;;
+      *)        [[ -z "$state_file" ]] || die "amend-scope: unexpected argument '$1'"; state_file="$1"; shift ;;
+    esac
+  done
+  [[ -n "$state_file" && -f "$state_file" ]] || die "amend-scope: state_file not found — usage: aid-fsm.sh amend-scope <state_file> --add <path> [--add ...] --reason \"<why, 20+ chars>\""
+  [[ ${#add[@]} -gt 0 ]] || die "amend-scope: nothing to add — pass --add <path> at least once"
+  [[ ${#reason} -ge 20 ]] || die "amend-scope: --reason must say why in at least 20 characters (it is the audit record)"
+  local state; state=$(yaml_field "$state_file" state)
+  [[ "$state" == "EXECUTE" ]] || die "amend-scope: the run is in ${state:-<unknown>}, not EXECUTE — scope is only amended while a step is being worked"
+  local evidence_dir; evidence_dir="$(cd "$(dirname "$state_file")" && pwd)"
+  local plan="${evidence_dir}/plan.json"
+  [[ -f "$plan" ]] || die "amend-scope: ${plan} not found"
+  local cs; cs=$(yaml_field "$state_file" current_step); cs="${cs:-0}"
+  local total; total=$(jq '.steps | length' "$plan")
+  [[ "$cs" -lt "$total" ]] || die "amend-scope: current_step ${cs} is past the last step (${total}) — nothing to widen"
+  # Files, not subtrees, and never a path the step is forbidden: a widening
+  # is a named file with a reason, not "scripts/" with a sentence.
+  local p forbidden
+  forbidden="$(jq -r --argjson i "$cs" '(.steps[$i].forbidden_paths // [])[]' "$plan" 2>/dev/null || true)"
+  for p in "${add[@]}"; do
+    [[ -n "$p" && "$p" != /* && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a relative path inside the tree (no leading /, no ..)"
+    [[ "$p" != */ && "$p" != *"*"* && "$p" != *"?"* ]] || die "amend-scope: '${p}' is a directory or a glob — amend names FILES, one --add each"
+    local fb
+    while IFS= read -r fb; do
+      [[ -n "$fb" ]] || continue
+      if [[ "$p" == "$fb" || "$p" == "${fb%/}/"* ]]; then
+        die "amend-scope: '${p}' is under the step's forbidden_paths ('${fb}') — a forbidden path is not widened into, it is a PM decision on the plan itself"
+      fi
+    done <<< "$forbidden"
+  done
+  local add_json; add_json="$(printf '%s\n' "${add[@]}" | jq -R . | jq -s .)"
+  local step_id; step_id="$(jq -r --argjson i "$cs" '.steps[$i].id // ("step_" + ($i|tostring))' "$plan")"
+
+  # Order of writes: build everything in temp files first, then publish the
+  # amendment record, then plan.json, then the hash — so a failure anywhere
+  # leaves either nothing changed or a record the validator reads but a
+  # plan.json the hook does not yet honour (the safe side), never the reverse.
+  local step_dir="${evidence_dir}/steps/${step_id}"; mkdir -p "$step_dir"
+  local amend="${step_dir}/scope-amendment.json"
+  local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local entry; entry="$(jq -n --arg at "$now" --argjson step "$cs" --arg sid "$step_id" --argjson paths "$add_json" --arg reason "$reason" \
+    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason}')"
+  local tmp_amend tmp_plan; tmp_amend="$(mktemp)"; tmp_plan="$(mktemp)"
+  if [[ -f "$amend" ]]; then
+    jq --argjson e "$entry" '. + [$e]' "$amend" > "$tmp_amend" || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: ${amend} is not a JSON array — repair or remove it first; nothing was changed"; }
+  else
+    jq -n --argjson e "$entry" '[$e]' > "$tmp_amend"
+  fi
+  jq --argjson i "$cs" --argjson add "$add_json" \
+     '.steps[$i].allowed_paths = ((.steps[$i].allowed_paths // []) + $add | unique)' "$plan" > "$tmp_plan" \
+     || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: could not rewrite ${plan}; nothing was changed"; }
+  mv "$tmp_amend" "$amend" || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: could not write ${amend}; nothing was changed"; }
+  mv "$tmp_plan" "$plan" || { rm -f "$tmp_plan"; die "amend-scope: amendment recorded but ${plan} could not be rewritten — re-run the same command"; }
+  local new_hash; new_hash=$(sha256sum "$plan" | awk '{print $1}')
+  cmd_set_field plan_json_hash "$new_hash" "$state_file"
+  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason"
+  fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
+  echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."
+}
+
 # ─── DONE Sub-Phase Advancement ─────────────────────────────────────────
 # Phases within DONE: review → release
 # Preconditions for review → release:
@@ -8940,6 +9019,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     get-field)         shift; cmd_get_field "$@" ;;
     step-evidence-dir) shift; cmd_step_evidence_dir "$@" ;;
     set-field)         shift; cmd_set_field "$@" ;;
+    amend-scope)       shift; cmd_amend_scope "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;

@@ -213,7 +213,17 @@ costs nothing and a fabricated one costs trust.
 You MUST NOT modify files outside `allowed_paths` from your task input.
 If you need to touch a file outside your allowed paths:
 - Set `result: escalate` in AGENT OUTPUT
-- Describe what you need and why in summary
+- Name the exact paths and the reason in one sentence each (the controller
+  pastes them into the amendment; vague asks come back as questions)
+
+What happens next is fixed, not negotiated: the controller runs
+`aid-fsm.sh amend-scope <state_file> --add <path> --reason "<why>"` (PM approval
+for a material expansion; a forgotten test file next to a source file in scope
+is not material), and re-dispatches you with the wider list. Do NOT edit
+`plan.json`, `contract.json` or the state file yourself, and do not "just make the
+change" and explain later — the commit hook, the step-advance check and the
+contract validator all read the amended scope, so once it is amended the work
+goes through first time.
 
 Second violation of allowed_paths → orchestrator transitions to ESCALATION state.
 

@@ -4486,6 +4486,33 @@ _pfsm_required_gates() {
   yq -r '.gates | to_entries | map(select(.value.required == true)) | .[].key' "$1" 2>/dev/null || true
 }
 
+# _pfsm_plan_required_floor <execution_yaml> <release_include> <manifest_gates>
+#   The gates the plan-final run OWES: `required: true` gates THAT ARE IN THE
+#   RESOLVED PROFILE, plus the manifest's accumulated plan_final_required_gates,
+#   plus plan_diff. Bounding by the profile is the point: a profile is the
+#   whitelist of one run, so a gate no profile includes (WAN: a nightly suite
+#   kept in `gates:` with required: true for a coverage meta-test) cannot be
+#   owed by a run that never selects it — before this, closure demanded a
+#   28-minute nightly suite that runs elsewhere, and four finished plans stood.
+_pfsm_plan_required_floor() {
+  local execution_yaml="$1" release_include="$2" manifest_gates="$3"
+  local g in_profile=""
+  while IFS= read -r g; do
+    [[ -z "$g" ]] && continue
+    _pfsm_in_list "$g" "$release_include" && in_profile+="${g}"$'\n'
+  done < <(_pfsm_required_gates "$execution_yaml")
+  printf '%s\n%s\nplan_diff\n' "$in_profile" "$manifest_gates" | grep -v '^$' | sort -u
+}
+
+# _pfsm_plan_has_patterns <plan_path> — does the plan carry ANY machine
+#   verification_pattern? Without one plan_diff has nothing to evaluate and
+#   takes its exit-2 skip; the template makes the pattern optional and the
+#   plan lint does not require it, so closure must not demand what writing
+#   never did (WAN: 60 of 95 plans have none).
+_pfsm_plan_has_patterns() {
+  [[ -n "$1" && -f "$1" ]] && grep -qE '^[[:space:]]*(- )?(\*\*)?verification_pattern(\*\*)?:' "$1" 2>/dev/null
+}
+
 # _pfsm_in_list <needle> <newline-separated haystack>
 _pfsm_in_list() {
   local needle="$1" hay="$2" line
@@ -4725,12 +4752,11 @@ _pfsm_finalize_gates_body() {
   # `plan_diff` — which this stage treats as plan-required for the plan-final
   # run regardless of its `required: false` default, because the whole point of
   # the run is to evaluate the plan's acceptance criteria against the candidate.
-  local plan_required
-  plan_required="$(_pfsm_required_gates "$execution_yaml")"
   local manifest_gates=""
   manifest_gates="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_required_gates[]?' 2>/dev/null)" || manifest_gates=""
   [[ "$manifest_gates" == "not_found" ]] && manifest_gates=""
-  plan_required="$(printf '%s\n%s\nplan_diff\n' "$plan_required" "$manifest_gates" | grep -v '^$' | sort -u)"
+  local plan_required
+  plan_required="$(_pfsm_plan_required_floor "$execution_yaml" "$release_include" "$manifest_gates")"
 
   # ── The plan file the gates evaluate against ────────────────────────────
   local plan_path="" cand
@@ -4883,15 +4909,26 @@ _pfsm_finalize_gates_body() {
     if [[ "$res" == "<absent>" || "$res" == "profile_excluded" ]]; then
       _gassert "release gate '${inc}' has result '${res}' — a non-quarantined gate of the resolved profile must appear with a real result (notably shell_pipeline_smoke, which the EPIC-scoped bats_all_quarantine profile omits)."
     elif [[ "$res" == "skip" ]] && _pfsm_in_list "$inc" "$plan_required"; then
-      _gassert "required gate '${inc}' reported result 'skip' — a required gate is never satisfied by a skip."
+      if [[ "$inc" == "plan_diff" ]] && ! _pfsm_plan_has_patterns "$plan_path"; then
+        :   # judged below: a plan with no machine pattern has nothing for plan_diff to evaluate
+      else
+        _gassert "required gate '${inc}' reported result 'skip' — a required gate is never satisfied by a skip."
+      fi
     fi
   done <<< "$release_include"
 
-  # plan_diff specifically: a REAL evaluation, not the Fast-Mode exit-2 skip.
+  # plan_diff specifically: a REAL evaluation, not the Fast-Mode exit-2 skip —
+  # UNLESS the plan carries no verification_pattern at all, in which case the
+  # skip is the truthful verdict ("nothing machine-checkable here") and the
+  # acceptance criteria were judged by the reviews, as for every prose AC.
   local pd
   pd="$(jq -r '.gates.plan_diff.result // "<absent>"' "$report_file")"
-  [[ "$pd" == "pass" ]] \
-    || _gassert "plan_diff result is '${pd}', expected 'pass' — an exit-2 Fast Mode skip against '--plan null' does not evaluate the plan's acceptance criteria. plan_diff is plan-required for the plan-final run and has no substitute path (it carries no quarantine block)."
+  if [[ "$pd" == "skip" ]] && ! _pfsm_plan_has_patterns "$plan_path"; then
+    echo "NOTE: plan-finalize --stage gates: plan_diff skipped and the plan declares no verification_pattern — nothing machine-checkable, the skip is accepted (prose acceptance criteria are judged by the reviews)." >&2
+  else
+    [[ "$pd" == "pass" ]] \
+      || _gassert "plan_diff result is '${pd}', expected 'pass' — an exit-2 Fast Mode skip against '--plan null' does not evaluate the plan's acceptance criteria. plan_diff is plan-required for the plan-final run and has no substitute path (it carries no quarantine block)."
+  fi
 
   # Quarantined gates: never `pass`, and each must carry a matching substitute.
   local qg2

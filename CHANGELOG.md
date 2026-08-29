@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.5] — 2026-08-29
+
+### Added
+- **`aid-fsm.sh amend-scope`** — jediná schválená cesta, jak uprostřed kroku rozšířit seznam souborů, které smí agent měnit: jeden příkaz upraví `plan.json`, přerazítkuje `plan_json_hash` a zapíše `steps/<id>/scope-amendment.json` (kontrakt kroku zůstává, validátor ho sjednotí), s důvodem v timeline i auditu. Do té doby hlídač commitů chtěl úpravu `plan.json`, kterou kontrola otisku trestala. Postup pro agenty je v `skills/agent-protocol.md`, pro controller v `commands/aid-run.md` (pravidlo 16b) a `skills/pipeline.md`.
+
+### Fixed
+- **Uzávěrka plánu vyžadovala brány, které žádný běh nevybírá** — plan-final počítal jako povinnou každou bránu s `required: true` v celém `execution.yaml`, i tu, kterou žádný profil nezahrnuje (noční sada ve WANu); teď jsou povinné jen brány z rozlišeného profilu plus nastřádané z manifestu a `plan_diff`. Čtyři hotové plány ve WANu tím přestanou stát.
+- **`plan_diff` blokoval plán bez strojových vzorů** — když plán nemá žádný `verification_pattern`, skip brány je pravdivý výsledek („nic strojově ověřitelného") a uzávěrka ho uzná; šablona ani lint vzory nevyžadují, uzávěrka nemá chtít víc.
+
 ## [2.95.4] — 2026-08-29
 
 ### Fixed

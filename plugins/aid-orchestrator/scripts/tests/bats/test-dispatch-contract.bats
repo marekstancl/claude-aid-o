@@ -216,3 +216,18 @@ JSON
   [ "$(jq -r '.verdict' <<< "$output")" = "reject" ]
   [[ "$output" == *"/nonexistent/gone.md"* ]]
 }
+
+@test "contract: a scope-amendment.json beside the contract widens the allowed paths without rewriting the packet" {
+  : > src/extra.sh
+  _return '{changed_files: ["src/thing.sh","tests/test-thing.bats","src/extra.sh"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -ne 0 ]; [[ "$output" == *"outside the allowed paths"* ]]
+  echo '[{"at":"2026-08-29T00:00:00Z","step":0,"step_id":"step_1_backend","paths":["src/extra.sh"],"reason":"PM approved the helper"}]' > scope-amendment.json
+  # the record alone is not enough — the agent can write it; plan.json must agree
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -ne 0 ]
+  jq '.steps[0].allowed_paths += ["src/extra.sh"]' plan.json > p.tmp && mv p.tmp plan.json
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ "$VERSION" = "$(jq -r .version contract.json)" ]   # the packet is untouched
+}
