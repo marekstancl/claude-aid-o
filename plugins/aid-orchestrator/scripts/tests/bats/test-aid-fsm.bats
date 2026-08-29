@@ -2475,3 +2475,17 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
   [ "$status" -ne 0 ]; [[ "$output" == *"done step(s) 0"* ]]
 }
+
+@test "rebase-plan/amend-scope: an amendment changes the current step, so its OLD IMP-263 binding no longer completes it — the step is re-verified" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0                      # a valid, bound step-0 verification
+  # the plan.json hash stamp + snapshot, as init would leave them
+  "$FSM" set-field plan_json_hash "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" "$state_file"
+  ( source "$FSM" 2>/dev/null || true; _step_hashes_write "$TEST_EVIDENCE_DIR" "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" )
+  run "$FSM" amend-scope "$state_file" --add src/extra.py --reason "PM approved one more file for step 0"
+  [ "$status" -eq 0 ]
+  AID_STEP_BINDING=strict run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "plan_step_hash does not match" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
+}
