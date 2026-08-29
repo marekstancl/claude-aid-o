@@ -145,10 +145,16 @@ fi
 #                  never the project.
 #   PROJECT_ROOT — the state root where the evidence and the delivery map
 #                  live: AID_PROJECT_ROOT, else TREE_ROOT.
-TREE_ROOT="$(git -C "${AID_GIT_TREE:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || {
-  echo "ERROR: cannot determine the tree to measure: '${AID_GIT_TREE:-$PWD}' is not inside a git checkout (set AID_GIT_TREE or run from the checkout)" >&2
+# TREE_ROOT is taken AS GIVEN (AID_GIT_TREE, else AID_PROJECT_ROOT, else the
+# cwd's toplevel) and only checked to be inside a git checkout — a fixture
+# directory below a repo root is a legitimate tree, and git -C works from it.
+if [[ -n "${AID_GIT_TREE:-}" ]]; then TREE_ROOT="$AID_GIT_TREE"
+elif [[ -n "${AID_PROJECT_ROOT:-}" ]]; then TREE_ROOT="$AID_PROJECT_ROOT"
+else TREE_ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"; fi
+if [[ -z "$TREE_ROOT" ]] || ! git -C "$TREE_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "ERROR: cannot determine the tree to measure: '${TREE_ROOT:-$PWD}' is not inside a git checkout (set AID_GIT_TREE or run from the checkout)" >&2
   exit 1
-}
+fi
 if [[ -n "${AID_PROJECT_ROOT:-}" ]]; then
   PROJECT_ROOT="$AID_PROJECT_ROOT"
 else
@@ -190,6 +196,10 @@ fi
 OUTPUT_DIR="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}"
 OUTPUT_FILE="${OUTPUT_DIR}/delivery-gate.json"
 PROJECT_ID="$(basename "$PROJECT_ROOT")"  # must be set before findings[] loop at line ~648
+# The delivery map is resolved ONCE from the state root and passed to every
+# check by path (AID_DELIVERY_MAP), so a check running in the tree reads the
+# same map this script does.
+DELIVERY_MAP_FILE="$(AID_PROJECT_ROOT="$PROJECT_ROOT" _aid_delivery_map_path 2>/dev/null || true)"
 
 mkdir -p "$OUTPUT_DIR" || {
   echo "ERROR: cannot create output directory: ${OUTPUT_DIR}" >&2
@@ -647,7 +657,13 @@ _run_check() {
 
   local _t_start _t_end duration_ms
   _t_start=$(date +%s%3N 2>/dev/null || date +%s)
+  # Checks run against the TREE (probes, git, build); the evidence and the
+  # delivery map live in the STATE root and are handed over explicitly, so a
+  # check never has to guess which of the two a path belongs to (Codex: dg07
+  # reads evidence from ROOT, dg15/dg17 read the map through get_section).
   check_output="$(AID_PROJECT_ROOT="$TREE_ROOT" \
+    AID_STATE_ROOT="$PROJECT_ROOT" \
+    AID_DELIVERY_MAP="${DELIVERY_MAP_FILE:-}" \
     AID_EPIC_ID="$EPIC_ID" \
     AID_RUN_ID="$RUN_ID" \
     AID_BASE_SHA="$BASE_SHA" \

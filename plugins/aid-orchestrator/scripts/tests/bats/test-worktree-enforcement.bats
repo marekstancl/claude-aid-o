@@ -588,3 +588,36 @@ _from_no_yq() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"executes in its own worktree"* ]]
 }
+
+@test "v2.95.8 (agents #8): transition GATES→DONE from the primary checkout also redirects (CP3 freshness reads the worktree's HEAD)" {
+  _mk_project
+  _seed_plan 1
+  local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
+  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
+  [ "$status" -eq 0 ]
+  run _from "$ROOT" "$FSM" transition GATES DONE "$sf"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"executes in its own worktree"* ]]
+}
+
+@test "v2.95.8 (agents #8): aid-delivery-gate.sh measures AID_GIT_TREE (the worktree), evidence stays in the state root" {
+  _mk_project
+  _seed_plan 1
+  local wt; wt="$(_wt)"
+  ( cd "$wt" && echo change > tree-change.txt && git add tree-change.txt && git -c user.email=t@t -c user.name=t commit -qm "on the plan branch" )
+  local tree_head; tree_head="$(git -C "$wt" rev-parse HEAD)"
+  local root_head; root_head="$(git -C "$ROOT" rev-parse HEAD)"
+  [ "$tree_head" != "$root_head" ]
+  mkdir -p "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-x"
+  run env AID_PROJECT_ROOT="$ROOT" AID_GIT_TREE="$wt" AID_EVIDENCE_BASE="$ROOT/.aid-o/work/evidence" \
+      bash "$AID_PLUGIN_PATH/scripts/aid-delivery-gate.sh" --epic "$EPIC_ID" --run R-x --base "$root_head" --phase D0
+  [ -f "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-x/delivery-gate.json" ]
+  [ "$(jq -r '.revision.head_sha' "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-x/delivery-gate.json")" = "$tree_head" ]
+  # run FROM the worktree by hand (no AID_GIT_TREE, no AID_PROJECT_ROOT): the tree is the
+  # cwd's checkout, not the script's install dir — this used to die with "cannot determine
+  # project root". (With AID_PROJECT_ROOT set, that root is the tree unless AID_GIT_TREE says
+  # otherwise — the FSM always passes AID_GIT_TREE.)
+  run bash -c "cd '$wt' && AID_EVIDENCE_BASE='$ROOT/.aid-o/work/evidence' bash '$AID_PLUGIN_PATH/scripts/aid-delivery-gate.sh' --epic '$EPIC_ID' --run R-y --base '$root_head' --phase D0"
+  [[ "$output" != *"cannot determine"* ]]
+  [ "$(jq -r '.revision.head_sha' "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-y/delivery-gate.json")" = "$tree_head" ]
+}

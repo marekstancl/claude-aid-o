@@ -26,7 +26,9 @@ if [[ -z "${AID_EPIC_ID:-}" || -z "${AID_RUN_ID:-}" ]]; then
 fi
 
 ROOT="${AID_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo ".")}"
-EVIDENCE_DIR="${ROOT}/.aid-o/work/evidence/${AID_EPIC_ID}/${AID_RUN_ID}"
+# Evidence lives in the STATE root, which may differ from the tree the gate
+# measures (a plan worktree): the dispatcher passes AID_EVIDENCE_BASE.
+EVIDENCE_DIR="${AID_EVIDENCE_BASE:-${AID_STATE_ROOT:-$ROOT}/.aid-o/work/evidence}/${AID_EPIC_ID}/${AID_RUN_ID}"
 STATE_FILE="${EVIDENCE_DIR}/fsm-state.yaml"
 
 # The step counter this check prints is the 0-BASED `current_step`, and every

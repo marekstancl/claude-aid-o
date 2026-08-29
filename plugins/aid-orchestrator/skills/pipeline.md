@@ -1080,9 +1080,11 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
 
    ```
    Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 code-review",
-          prompt: <full diff (run_start..HEAD), DoD list, plan.json overall>})
+          prompt: <full diff (run_start..HEAD), DoD list, plan.json overall,
+                  "Write your output to $evidence_dir/verifier-output-cp3-code-review.md (absolute path)">})
    Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 security",
-          prompt: <full diff, plan.json overall>})
+          prompt: <full diff, plan.json overall,
+                  "Write your output to $evidence_dir/verifier-output-cp3-security.md (absolute path)">})
    ```
 
    The dispatch names each output file by its ABSOLUTE path (`$evidence_dir/verifier-output-cp3-<focus>.md`);

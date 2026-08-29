@@ -38,6 +38,9 @@ setup() {
   export AID_PLUGIN_PATH
   SELECTOR="$AID_PLUGIN_PATH/scripts/aid-select-tests.sh"
   export SELECTOR
+  # this suite rebuilds the plugin's shape in a temp repo: classification must
+  # run as in-repo (v2.95.8 made the selector INACTIVE outside the plugin repo)
+  export AID_SELECT_TESTS_ASSUME_OWN_REPO=1
   SCHEMA="$AID_PLUGIN_PATH/defaults/schemas/execution-unit.schema.json"
   export SCHEMA
 }

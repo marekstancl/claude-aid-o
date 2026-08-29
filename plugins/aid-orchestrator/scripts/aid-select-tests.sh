@@ -169,12 +169,17 @@ fi
 # over zero tests. Outside this repository the selector is INACTIVE and says
 # so with exit 2, which the gate runner records as skip when the gate's
 # pass_criteria names "exit 2" (the rendered consumer gate does).
-# "The plugin's own repository" = the checkout carries the plugin's scripts/
-# tree at its canonical path (a consumer repo has the plugin installed elsewhere, never
-# under its own plugins/aid-orchestrator/). Path shape, not realpath identity:
-# the plugin's fixtures rebuild that shape in a temp repo and must stay in-repo.
+# "The plugin's own repository" = the script that is running lives INSIDE the
+# checkout's toplevel (a consumer runs the installed copy from elsewhere). The
+# bats isolation seam (AID_SELECT_TESTS_PLUGIN_ROOT) counts as in-repo: those
+# fixtures rebuild the plugin's shape in a temp repo. A vendored directory
+# with the plugin's shape is NOT enough (Codex: it would pass zero tests as green).
 _own_repo_toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -z "$_own_repo_toplevel" || ! -d "${_own_repo_toplevel}/${PLUGIN_PREFIX}/scripts" ]]; then
+_own_self="$(realpath -q "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+# AID_SELECT_TESTS_ASSUME_OWN_REPO=1 is the second fixture seam: suites that
+# rebuild the plugin's shape in a temp repo without the execution stub.
+if [[ -z "${AID_SELECT_TESTS_PLUGIN_ROOT:-}" && "${AID_SELECT_TESTS_ASSUME_OWN_REPO:-0}" != "1" ]] \
+   && [[ -z "$_own_repo_toplevel" || "$_own_self" != "$(realpath -q "$_own_repo_toplevel" 2>/dev/null)/"* ]]; then
   _inactive=$(jq -n \
     --arg gb "aid-select-tests.sh@${PLUGIN_VERSION}" \
     --arg ga "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
