@@ -39,6 +39,7 @@ source "${SCRIPT_DIR}/lib/aid-alert.sh"
 # tree checks use aid_invoke_root.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+source "${SCRIPT_DIR}/lib/aid-plugin-issues.sh"   # the project's record of AID's own defects
 # P076 CP3 — THE shared continuation vocabulary (artifact basename, revision
 # pair, pending-pointer resolution, gate-row binding key). Sourced fail-CLOSED:
 # the live-job init precondition and `resume` are only as good as these
@@ -5068,6 +5069,9 @@ except: pass
       echo "WARNING: plan.json has steps without 'objective': $empty_steps" >&2
     fi
   fi
+
+  # The project's record of AID's own defects exists from the first run on.
+  aid_plugin_issues_ensure || true
 
   # Session B: stamp plan.json sha256 for mid-EPIC tampering detection.
   # Additive key — existing readers tolerate unknown keys via grep-awk pattern.

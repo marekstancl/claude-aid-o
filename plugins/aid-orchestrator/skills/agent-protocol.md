@@ -199,12 +199,17 @@ Only create this section if you found genuine issues outside your scope.
 When the thing misbehaving is **AID, not the project** — a gate refuses a state
 that is valid, a script crashes, a message tells you to do something that is
 already true, two AID tools contradict each other — write it to
-`.aid-o/work/aid-plugin-issues.md` in the project (create the file with a
-`# Problems with the AID plugin` heading if it does not exist), NOT into the
-project backlog. Per entry: date and what you were doing, what happened, what it
-caused, what you did about it (workaround, `--force`, gave up). The plugin owner
-collects these files across projects; nothing else reads them, so a missed entry
-costs nothing and a fabricated one costs trust.
+`.aid-o/work/aid-plugin-issues.md` in the project — it exists (AID creates it at
+plan-start and at every EPIC init; its header carries the rules and the entry
+format), NOT into the project backlog. Per entry: date and what you were doing,
+what happened, what it caused, what you did about it (workaround, `--force`, gave
+up). Every `--force` and every `amend-scope` you needed because AID was wrong is
+an entry. A plugin defect found by an external reviewer (Codex) is written by the
+controller — Codex runs read-only. The plugin owner collects these files across
+projects; nothing else reads them, so a missed entry costs nothing and a
+fabricated one costs trust. A Stop-hook line may remind you when AID refused or
+was bypassed in this session and the file did not change — it is a reminder,
+not a demand: a project defect needs no entry.
 
 ---
 

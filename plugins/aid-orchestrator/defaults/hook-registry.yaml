@@ -189,6 +189,15 @@ rules:
     handler: aid_hook_rule_worktree_registry
     description: reports plan worktree records that need a decision — a recorded tree that is gone, a closed plan's tree still on disk — with the audited command for each; nothing is ever removed by it
 
+  - id: plugin_issues_reminder
+    event: Stop
+    owner: controller
+    degree: 3
+    failure: open
+    timeout_s: 10
+    lib: scripts/lib/aid-plugin-issues.sh
+    handler: aid_hook_rule_plugin_issues_reminder
+    description: a REMINDER, never a refusal — when this session saw AID refuse or get bypassed (force, amend-scope, a precondition failure in a timeline) and .aid-o/work/aid-plugin-issues.md has not changed since the session began, say so once; a later refusal re-opens it. Writing is not enforced (a missed entry costs nothing); the reminder exists because the entry is only truthful while the failure is fresh
   - id: queue_continuation_notice
     event: Stop
     owner: controller

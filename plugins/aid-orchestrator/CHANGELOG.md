@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.6] — 2026-08-29
+
+### Added
+- **Soubor pro problémy pluginu vzniká sám** — `.aid-o/work/aid-plugin-issues.md` (jeden na projekt, pro všechny jeho plány) založí `plan-start` i `aid-fsm.sh init` ze šablony, která má v hlavičce pravidla kdy a jak psát; agent píše do existujícího souboru, do chybějícího ne.
+- **Připomínka na konci tahu** — Stop hook `plugin_issues_reminder` (stupeň 3, nikdy neodmítá) řekne jednou za session: „AID N× odmítl nebo byl obejit a soubor se nezměnil — pokud šlo o chybu pluginu, zapiš ji"; nová událost připomínku znovu otevře. Zápis se nevynucuje (PM: chybějící zápis nic nestojí).
+- **Řádek ve `/aid-status` a věta v kartě uzávěrky** — počet zápisů a poslední změna; při uzávěrce plánu kolikrát AID během jeho EPICů odmítl nebo byl obejit.
+- **Sběr na straně vlastníka** — `bin/aid-plugin-issues-collect.sh` projde `/opt/eco/projects/*/.aid-o/work/aid-plugin-issues.md`, nepřevzaté body slepí do `docs/plans/plugin-issues-inbox.md` a v projektech je označí `PŘEVZATO <datum>`; nic se nemaže, soubor zůstává záznamem projektu.
+
+### Changed
+- **Pravidlo pro agenty zpřesněno** — každý `--force` a `amend-scope` kvůli chybě AID je zápis; nálezy Codexu o pluginu přepisuje controller (Codex běží jen pro čtení).
+
 ## [2.95.5] — 2026-08-29
 
 ### Added

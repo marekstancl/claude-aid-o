@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# =============================================================================
+# bin/aid-plugin-issues-collect.sh — the plugin owner's inbox
+#
+# Walks every AID workspace under a projects root, takes the entries of each
+# project's .aid-o/work/aid-plugin-issues.md that carry NO decision marker yet
+# (PŘEVZATO / HOTOVO / ZAMÍTNUTO / ČÁSTEČNĚ / UŽ ŘEŠENO), appends them to
+# docs/plans/plugin-issues-inbox.md here, and marks them PŘEVZATO <date> in the
+# project file so the next run skips them. Nothing is deleted anywhere: the
+# project file stays the project's record; the inbox is where decisions are
+# made. Run by hand, by the owner, when it is time to decide:
+#
+#   bin/aid-plugin-issues-collect.sh [--root /opt/eco/projects] [--dry-run]
+#
+# An entry is a heading `## N. …` or `### N. …`; its body runs to the next
+# heading of the same or higher level. The marker is a blockquote line right
+# under the heading — the same shape the owner has been writing by hand.
+# =============================================================================
+set -euo pipefail
+
+ROOT="${AID_PROJECTS_ROOT:-/opt/eco/projects}"
+DRY=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --root) ROOT="$2"; shift 2 ;;
+    --dry-run) DRY=1; shift ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+INBOX="${HERE}/docs/plans/plugin-issues-inbox.md"
+TODAY="$(date -u +%Y-%m-%d)"
+MARK_RE='^> \*\*(PŘEVZATO|HOTOVO|ZAMÍTNUTO|ČÁSTEČNĚ|UŽ ŘEŠENO)'
+
+taken=0; projects=0; out=""
+for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
+  [[ -f "$f" ]] || continue
+  project="$(basename "$(dirname "$(dirname "$(dirname "$f")")")")"
+  [[ "$project" == "aid-orchestrator" ]] && continue     # the owner's own file is not an inbox source
+  projects=$((projects+1))
+  # awk: emit each unmarked entry as a block; rewrite the file with a marker
+  # under each heading it took.
+  tmp="$(mktemp)"; blocks="$(mktemp)"
+  awk -v today="$TODAY" -v mark_re="$MARK_RE" -v blocks="$blocks" -v project="$project" '
+    function flush() {
+      if (inentry && !marked) {
+        printf "\n---\n\n#### %s — %s\n\n%s\n", project, headline, body >> blocks
+        taken++
+      }
+    }
+    BEGIN { inentry=0; marked=0 }
+    /^##+ [0-9]+\. / {
+      flush()
+      inentry=1; marked=0; headline=$0; sub(/^#+ /, "", headline); body=""
+      print; pending=1; next
+    }
+    /^## / && !/^## [0-9]+\. / { flush(); inentry=0; marked=0; print; next }
+    {
+      if (inentry && pending) {
+        # the marker may sit right under the heading or after a blank line
+        if ($0 == "") { print; next }
+        pending=0
+        if ($0 ~ mark_re) { marked=1; print; next }
+        # first non-blank line after an unmarked heading: insert the marker here
+        print "> **PŘEVZATO " today " (aid-orchestrator)**"
+        print ""
+      }
+      if (inentry) body = body $0 "\n"
+      print
+    }
+    END {
+      # an entry that is only a heading at EOF still gets its marker
+      if (inentry && pending && !marked) { print "> **PŘEVZATO " today " (aid-orchestrator)**" }
+      flush(); print taken+0 > countfile
+    }
+  ' countfile="$blocks.n" "$f" > "$tmp"
+  n="$(cat "$blocks.n" 2>/dev/null || echo 0)"
+  if [[ "$n" -gt 0 ]]; then
+    out+="$(cat "$blocks")"$'\n'
+    taken=$((taken+n))
+    if [[ "$DRY" -eq 0 ]]; then cp "$tmp" "$f"; fi
+    echo "${project}: ${n} entr$( [[ "$n" -eq 1 ]] && echo y || echo ies) taken" >&2
+  else
+    echo "${project}: nothing new" >&2
+  fi
+  rm -f "$tmp" "$blocks" "$blocks.n"
+done
+
+if [[ "$taken" -eq 0 ]]; then
+  echo "inbox: nothing new across ${projects} project(s)" >&2
+  exit 0
+fi
+if [[ "$DRY" -eq 1 ]]; then
+  printf '%s\n' "$out"
+  echo "dry run: ${taken} entr$( [[ "$taken" -eq 1 ]] && echo y || echo ies) would be taken; nothing written" >&2
+  exit 0
+fi
+mkdir -p "$(dirname "$INBOX")"
+[[ -f "$INBOX" ]] || printf '# AID plugin issues — inbox\n\nCollected by `bin/aid-plugin-issues-collect.sh` from every project'"'"'s `.aid-o/work/aid-plugin-issues.md`. Decide here; mark the project file HOTOVO / ZAMÍTNUTO when done.\n' > "$INBOX"
+{ printf '\n## Collected %s — %s entr%s from %s project(s)\n' "$TODAY" "$taken" "$( [[ "$taken" -eq 1 ]] && echo y || echo ies)" "$projects"; printf '%s\n' "$out"; } >> "$INBOX"
+echo "inbox: ${taken} entr$( [[ "$taken" -eq 1 ]] && echo y || echo ies) appended to ${INBOX#${HERE}/}" >&2

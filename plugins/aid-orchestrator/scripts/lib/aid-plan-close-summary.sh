@@ -85,6 +85,7 @@
 _APCS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-artifact-render.sh
 source "${_APCS_LIB_DIR}/aid-artifact-render.sh"
+source "${_APCS_LIB_DIR}/aid-roots.sh"   # aid_state_root for the plugin-issues line
 
 # The eight fields the brief MUST carry, from build_brief_payload
 # (scripts/aid-pm-brief.sh:116-133):
@@ -125,6 +126,20 @@ _apcs_short() {
 }
 
 # aid_plan_close_render <brief_json> <release_decision_json> <plan_id> <out_dir>
+# _apcs_plugin_issues_line <plan_id> — one line at plan close: how often AID
+# refused or was bypassed during this plan's EPICs, and how many entries the
+# project's aid-plugin-issues.md carries. A count, not a judgement — the file
+# is the record, this is the nudge to look at it while the plan is fresh.
+_apcs_plugin_issues_line() {
+  local plan_id="$1" num="${1#P}" n=0 f entries
+  local root; root="$(aid_state_root 2>/dev/null || pwd)"
+  while IFS= read -r f; do
+    n=$(( n + $(jq -r 'select((.event // "") | (. == "fsm_force_override" or . == "scope_amended" or test("^fsm_.*(fail|blocked)$"))) | 1' "$f" 2>/dev/null | wc -l) ))
+  done < <(find "${root}/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -path "*/E-${num}-*/*" -name timeline.jsonl 2>/dev/null)
+  entries="$(grep -cE '^#{2,3} [0-9]+\. ' "${root}/.aid-o/work/aid-plugin-issues.md" 2>/dev/null || echo 0)"
+  printf 'AID sám: během plánu %s× odmítl nebo byl obejit; aid-plugin-issues.md má %s zápisů — pokud něco z toho byla chyba pluginu a zápis chybí, teď je čas.\n' "$n" "$entries"
+}
+
 aid_plan_close_render() {
   local brief_path="${1-}" decision_path="${2-}" plan_id="${3-}" out_dir="${4-}"
 
@@ -503,6 +518,7 @@ aid_plan_close_render() {
     printf 'Ověřeno: plan-final brány %s (report %s); evidence %s, ověřeno na HEAD: %s.\n' \
       "$gates_result" "${gates_report:-—}" "$ev_status" "$ev_at_head"
     printf 'Další krok: %s\n' "$opt_a"
+    _apcs_plugin_issues_line "$plan_id"
   else
     printf 'Potřebuji tvoje rozhodnutí: jak uzavřít plán %s?\n' "$plan_id"
     printf 'Proč teď: %s\n' "$why"
@@ -513,6 +529,7 @@ aid_plan_close_render() {
     printf 'Alternativy: B — %s; C — %s\n' "$opt_b" "$opt_c"
     [[ -n "$merge_sha" ]] || printf '%s\n' "$_APCS_ROLLBACK_NA"
     printf 'Riziko / co není ověřeno: %s\n' "$risk"
+    _apcs_plugin_issues_line "$plan_id"
   fi
   printf 'Artifact body: %s\n' "$out_path"
   return 0

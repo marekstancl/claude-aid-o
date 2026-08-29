@@ -172,6 +172,7 @@ source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+source "${SCRIPT_DIR}/lib/aid-plugin-issues.sh"   # the project's record of AID's own defects
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 # shellcheck disable=SC1091
@@ -2430,6 +2431,8 @@ cmd_plan_start() {
     echo "PRECONDITION FAIL: aid_lifecycle_set_plan_mode failed for ${plan_id} (rc=${lc_rc}) — op remains at git_applied, retry converges." >&2
     exit "$lc_rc"
   fi
+
+  aid_plugin_issues_ensure "$project_root" || true
 
   if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
     local sirc=0 autonomy="${autonomy_opt}"

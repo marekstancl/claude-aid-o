@@ -386,6 +386,18 @@ worktree_line() {
 ```
 
 ```bash
+# recipe: plugin-issues-line — defines plugin_issues_line(): how many entries
+# the project's record of AID's own defects carries (.aid-o/work/
+# aid-plugin-issues.md) and when it last changed. Absent file renders NOTHING.
+plugin_issues_line() {
+  local _f _n _d
+  _f="$(aid_state_path .aid-o/work/aid-plugin-issues.md 2>/dev/null || echo .aid-o/work/aid-plugin-issues.md)"
+  [ -f "$_f" ] || return 0
+  _n="$(grep -cE '^#{2,3} [0-9]+\. ' "$_f" 2>/dev/null || echo 0)"
+  _d="$(date -u -r "$_f" +%Y-%m-%d 2>/dev/null || echo '?')"
+  printf 'AID plugin issues: %s entries (last change %s) — %s\n\n' "$_n" "$_d" "$_f"
+}
+
 # recipe: nightly-line — defines nightly_line(): the last nightly portfolio
 # result, in ONE line, where work starts (P081 Step 8).
 #
@@ -996,6 +1008,7 @@ render_overview() {
   printf 'AID Status\n'
   printf '====================================\n\n'
   nightly_line
+  plugin_issues_line
   if [ -z "$_rows" ]; then
     printf 'Active EPICs:\n'
     _body="$(planless_epics)"
@@ -1181,7 +1194,7 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-29
 
 ## Plan mode
 
