@@ -2435,3 +2435,43 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
   [ "$status" -eq 0 ]
 }
+
+@test "rebase-plan: init writes the per-step snapshot; outside EXECUTE it refuses; after a rebase increment-step passes" {
+  printf '{"steps":[{"id":"s1","allowed_paths":["a.py"]},{"id":"s2","allowed_paths":["b.py"]},{"id":"s3","allowed_paths":["c.py"]}]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [ "$(jq '.steps | length' "$TEST_EVIDENCE_DIR/step-hashes.json")" = "3" ]
+  # outside EXECUTE → refused
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  run "$FSM" rebase-plan "$state_file" --reason "PM regenerated the plan after a rename"
+  [ "$status" -ne 0 ]; [[ "$output" == *"not EXECUTE"* ]]
+  # a real increment after a rebase: seed the passing preconditions at step 3 of a 4-step plan
+  _p040_seed_increment_preconditions "$state_file"
+  # current_step is 3 (0-based) → index 3 is the step in flight; index 4 is a FUTURE step
+  jq '.steps += [{"id":"s4","allowed_paths":["d.py"]},{"id":"s5","allowed_paths":["e.py"]}]' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"
+  ( source "$FSM" 2>/dev/null || true; _step_hashes_write "$TEST_EVIDENCE_DIR" "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" )
+  "$FSM" set-field plan_json_hash "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" "$state_file"
+  "$FSM" set-field total_steps 5 "$state_file"
+  : > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+  # the PM regenerates the FUTURE step (index 4)
+  jq '.steps[4].objective = "regenerated"' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"hash mismatch"* && "$output" == *"rebase-plan"* ]]
+  run "$FSM" rebase-plan "$state_file" --reason "PM regenerated the plan after a rename"
+  [ "$status" -eq 0 ]
+  grep -q '"event":"plan_rebased"' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  grep -q '"epic_id":"E-test"' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "4" ]
+}
+
+@test "rebase-plan: amend-scope moves only the current step's snapshot — a hand edit of a done step is still refused afterwards" {
+  _rebase_fixture
+  _edit_step 0 "history rewritten by hand"
+  run bash "$FSM" amend-scope "$TEST_EVIDENCE_DIR/fsm-state.yaml" --add tests/test_b.py --reason "AC demands a test the plan forgot"
+  [ "$status" -eq 0 ]
+  _edit_step 2 "future change"
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -ne 0 ]; [[ "$output" == *"done step(s) 0"* ]]
+}

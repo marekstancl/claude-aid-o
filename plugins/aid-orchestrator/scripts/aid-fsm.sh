@@ -5088,7 +5088,8 @@ except: pass
     # Per-step canonical hashes, the authority `rebase-plan` compares against:
     # "the step as it was when the run started" (amend-scope re-stamps its own
     # step; a legacy run without this file cannot be rebased, only re-inited).
-    _step_hashes_write "$evidence_dir" "$plan_hash" || true
+    _step_hashes_write "$evidence_dir" "$plan_hash" \
+      || die "ERROR: init: could not write ${evidence_dir}/step-hashes.json (the per-step snapshot rebase-plan relies on) — a run without it could never be rebased, so init refuses rather than start it."
   fi
 
   # Phase 2 (P037) — write plan_path field with realpath-normalized absolute path or null.
@@ -6276,6 +6277,16 @@ _step_hashes_write() { # <evidence_dir> <plan_json_hash>
   jq -n --arg ph "$ph" --argjson s "$list" '{plan_json_hash: $ph, steps: $s}' > "${ev}/step-hashes.json.tmp" \
     && mv "${ev}/step-hashes.json.tmp" "${ev}/step-hashes.json"
 }
+# _step_hashes_update_one <evidence_dir> <idx> <plan_json_hash> — after an
+# amend-scope: ONLY the widened step's hash moves; every other step keeps its
+# init value, so a hand edit elsewhere cannot be laundered through an amendment.
+_step_hashes_update_one() {
+  local ev="$1" idx="$2" ph="$3" snap="${1}/step-hashes.json" h
+  [[ -f "$snap" ]] || return 0
+  h="$(_increment_plan_step_hash "${ev}/plan.json" "$idx")"
+  jq --argjson i "$idx" --arg h "$h" --arg ph "$ph" '.steps[$i] = $h | .plan_json_hash = $ph' "$snap" > "${snap}.tmp" \
+    && mv "${snap}.tmp" "$snap"
+}
 
 # cmd_rebase_plan <state_file> --reason "<why>" — the sanctioned answer to
 # "the PM regenerated the plan mid-EPIC". The whole-file plan_json_hash is a
@@ -6333,7 +6344,8 @@ cmd_rebase_plan() {
   _step_hashes_write "$evidence_dir" "$current_hash" || die "rebase-plan: record written but the per-step snapshot could not be updated — re-run the same command"
   cmd_set_field plan_json_hash "$current_hash" "$state_file"
   log_event "${evidence_dir}/timeline.jsonl" "plan_rebased" step="$cs" from_hash="$stored_hash" to_hash="$current_hash" changed_future_steps="$(jq -r 'join(",")' <<<"$fut_json")" reason="$reason"
-  fsm_emit_audit_log "plan_rebased" --evidence-dir "$evidence_dir" --step "$cs" --from-hash "$stored_hash" --to-hash "$current_hash" --reason "$reason" 2>/dev/null || true
+  local _rb_epic _rb_run; _rb_epic=$(yaml_field "$state_file" epic_id); _rb_run=$(yaml_field "$state_file" run_id)
+  fsm_emit_audit_log "plan_rebased" --epic-id "${_rb_epic:-unknown}" --run-id "${_rb_run:-unknown}" --evidence-dir "$evidence_dir" --step "$cs" --from-hash "$stored_hash" --to-hash "$current_hash" --reason "$reason" 2>/dev/null || true
   echo "rebase-plan: plan.json accepted (step ${cs} and every done step unchanged; future step(s) changed: ${changed_future[*]:-none}) — plan_json_hash re-stamped, recorded in ${rec#${evidence_dir}/} and the timeline. The step in flight keeps its contract and binding."
 }
 
@@ -6414,7 +6426,7 @@ cmd_amend_scope() {
   # dispatched" for a later rebase-plan. (The IMP-263 binding of an already
   # written step-verify file no longer matches — the step is re-verified, as
   # any change to it requires.)
-  [[ -f "${evidence_dir}/step-hashes.json" ]] && { _step_hashes_write "$evidence_dir" "$new_hash" || true; }
+  _step_hashes_update_one "$evidence_dir" "$cs" "$new_hash" || true
   # The scope_check GATE (defaults/execution.yaml) reads a static
   # <epic>/allowed_paths.txt, one path per line, when a project maintains one;
   # keep it in step so the amended file does not pass the hook and the return

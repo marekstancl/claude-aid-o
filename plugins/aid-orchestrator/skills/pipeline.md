@@ -746,8 +746,9 @@ later step rewritten), the sanctioned path is ONE command, never `set-field plan
 bash {plugin_path}/scripts/aid-fsm.sh rebase-plan "$state_file" --reason "plan regenerated after the helpdesk→asistent rename; steps 1-2 untouched"
 ```
 
-It accepts the new plan only if the step in flight and every done step are byte-identical
-to their init snapshot (`step-hashes.json`; future steps may change freely), re-stamps the
+It accepts the new plan only if the step in flight and every done step are unchanged
+(same canonical hash — sorted-key JSON of the step — as their init snapshot in
+`step-hashes.json`; future steps may change freely), re-stamps the
 hash, and records from/to/reason in `plan-rebase.json`, the timeline and the audit log.
 It never touches `base_commit` or `current_step`. If the current step changed, finish or
 abandon it first (or `amend-scope` for an approved file); if a done step changed, restore
