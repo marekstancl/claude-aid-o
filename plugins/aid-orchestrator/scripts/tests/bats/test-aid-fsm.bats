@@ -2365,3 +2365,73 @@ EOS
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "trying to widen after the work is done"
   [ "$status" -ne 0 ]; [[ "$output" == *"not EXECUTE"* ]]
 }
+
+# ─── rebase-plan (agents #2): a regenerated plan is accepted under three conditions ─
+_rebase_fixture() {   # 3-step plan, run on step 1, init snapshot written by hand the way init does
+  local td="$TEST_EVIDENCE_DIR"
+  cat > "$td/plan.json" <<'PLAN'
+{"steps":[{"id":"step_1","allowed_paths":["a.py"]},{"id":"step_2","allowed_paths":["b.py"]},{"id":"step_3","allowed_paths":["c.py"]}]}
+PLAN
+  cat > "$td/fsm-state.yaml" <<EOS
+epic_id: E-RB
+run_id: R-RB
+state: EXECUTE
+current_step: 1
+total_steps: 3
+base_commit: abc1234def5678
+plan_json_hash: $(sha256sum "$td/plan.json" | awk '{print $1}')
+EOS
+  : > "$td/timeline.jsonl"
+  ( source "$FSM" 2>/dev/null || true; _step_hashes_write "$td" "$(sha256sum "$td/plan.json" | awk '{print $1}')" )
+  [ -f "$td/step-hashes.json" ]
+}
+_edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"; }
+
+@test "rebase-plan: nothing to do when the hash still matches" {
+  _rebase_fixture
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -eq 0 ]; [[ "$output" == *"nothing to rebase"* ]]
+}
+
+@test "rebase-plan: a change to a FUTURE step is accepted, recorded, and the hash re-stamped" {
+  _rebase_fixture
+  _edit_step 2 "renamed objective"
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -eq 0 ]; [[ "$output" == *"future step(s) changed: 2"* ]]
+  [ "$(grep '^plan_json_hash:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" ]
+  [ "$(jq -r '.[0].reason' "$TEST_EVIDENCE_DIR/plan-rebase.json")" = "PM regenerated the plan after a rename" ]
+  grep -q '"event":"plan_rebased"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  grep -q '^base_commit: abc1234def5678' "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  grep -q '^current_step: 1' "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+}
+
+@test "rebase-plan: a change to the CURRENT step or a DONE step is refused and nothing is written" {
+  _rebase_fixture
+  _edit_step 1 "the step in flight changed"
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -ne 0 ]; [[ "$output" == *"step 1"* && "$output" == *"being worked on"* ]]
+  [ ! -f "$TEST_EVIDENCE_DIR/plan-rebase.json" ]
+  _rebase_fixture
+  _edit_step 0 "history rewritten"
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -ne 0 ]; [[ "$output" == *"done step(s) 0"* ]]
+  [ ! -f "$TEST_EVIDENCE_DIR/plan-rebase.json" ]
+}
+
+@test "rebase-plan: a legacy run without step-hashes.json is refused fail-closed; a short reason is refused" {
+  _rebase_fixture
+  rm "$TEST_EVIDENCE_DIR/step-hashes.json"; _edit_step 2 "x"
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -ne 0 ]; [[ "$output" == *"step-hashes.json"* ]]
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "short"
+  [ "$status" -ne 0 ]; [[ "$output" == *"20 characters"* ]]
+}
+
+@test "rebase-plan: amend-scope keeps the snapshot, so a later rebase does not refuse the widened current step" {
+  _rebase_fixture
+  run bash "$FSM" amend-scope "$TEST_EVIDENCE_DIR/fsm-state.yaml" --add tests/test_b.py --reason "AC demands a test the plan forgot"
+  [ "$status" -eq 0 ]
+  _edit_step 2 "future change after the amendment"
+  run bash "$FSM" rebase-plan "$TEST_EVIDENCE_DIR/fsm-state.yaml" --reason "PM regenerated the plan after a rename"
+  [ "$status" -eq 0 ]
+}

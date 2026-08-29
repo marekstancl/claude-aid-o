@@ -736,6 +736,23 @@ and the agent keeps quoting the version it was given. Never edit `plan.json` by 
 that satisfies the hook and trips the hash, which is the contradiction this command exists to
 end. Prevention is cheaper than amendment — a plan lists its tests in `Files:` (`Test:` bullet).
 
+### Plan regenerated mid-EPIC
+
+`increment-step` refuses when `plan.json` no longer matches the hash stamped at init — a
+mid-EPIC edit could widen scope. When the PM regenerated the plan on purpose (a rename, a
+later step rewritten), the sanctioned path is ONE command, never `set-field plan_json_hash`:
+
+```bash
+bash {plugin_path}/scripts/aid-fsm.sh rebase-plan "$state_file" --reason "plan regenerated after the helpdesk→asistent rename; steps 1-2 untouched"
+```
+
+It accepts the new plan only if the step in flight and every done step are byte-identical
+to their init snapshot (`step-hashes.json`; future steps may change freely), re-stamps the
+hash, and records from/to/reason in `plan-rebase.json`, the timeline and the audit log.
+It never touches `base_commit` or `current_step`. If the current step changed, finish or
+abandon it first (or `amend-scope` for an approved file); if a done step changed, restore
+it — GATES scope is the union of all steps and history is not rewritten.
+
 ### Output verification
 
 After agent completes:

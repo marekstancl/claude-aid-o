@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.95.7] — 2026-08-29
 
+### Added
+- **`aid-fsm.sh rebase-plan`** — schválená cesta, jak přijmout plán přegenerovaný uprostřed EPICu: uzná ho jen když rozpracovaný krok i všechny hotové kroky odpovídají snímku z `init` (`step-hashes.json`), přerazítkuje otisk a zapíše od/do/důvod do `plan-rebase.json`, timeline i auditu; `base_commit` ani `current_step` nemění. Dosud dva projekty přepisovaly `plan_json_hash` ručně.
+
 ### Fixed
 - **`--force` u `increment-step` už nepřeskočí samotnou evidenci kroku** — soubor `step-N-verify.md` a jeho struktura se kontrolují vždy; force obchází ostatní podmínky kroku (scope, vazbu evidence, kontrakt, vizuální a revizní kontroly) jako dřív. Dřív force zamaskoval krok, jehož verifikace se vůbec nezapsala (agents P001).
 - **Pre-filter nepřepíše dokončený report verifiéra** — hotový report předchozí iterace (verdict pass/fail) se odsune na `verifier-output-step-N.iter-<čas>.md` místo přepsání; nálezy iterace 1 už nemizí.
