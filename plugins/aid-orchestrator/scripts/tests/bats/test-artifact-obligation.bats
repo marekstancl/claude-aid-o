@@ -420,3 +420,89 @@ _close_page() {
   run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
   [[ "$output" != *"P900"* ]]
 }
+
+# --- Codex, 2026-08-28: the four ways the line-grep version was wrong -------
+
+@test "write detection: a plan path inside CONTENT of a write to another file does not count" {
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"notes.txt","content":"see .aid-o/plans/P900-hooks.md"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]
+}
+
+@test "write detection: whitespace after the JSON key does not hide a real write" {
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":  "Write","input":{"file_path":".aid-o/plans/P900-hooks.md"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" == *"P900"* ]]
+}
+
+@test "write detection: a plan written through a shell command counts" {
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"sed -i s/x/y/ .aid-o/plans/P900-hooks.md"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" == *"P900"* ]]
+}
+
+@test "once-per-session: a finding that becomes true AGAIN in the same session is reported again" {
+  local t; t="$(transcript "2020-01-01T00:00:00Z" "P900")"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" == *"P900"* ]]
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]          # said once…
+
+  # A CONTENT change, and no sleep: the key is a content hash precisely so that
+  # two edits inside one second are still two findings (Codex, 2026-08-28).
+  printf '\n<!-- edited again -->\n' >> "$PLAN"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" == *"P900"* ]]           # …so it is said again
+}
+
+@test "once-per-session: an unwritable store degrades to reporting, never to silence" {
+  local t; t="$(transcript "2020-01-01T00:00:00Z" "P900")"
+  run env AID_SESSION_STORE=/proc/nonexistent-store bash -c "
+    printf '%s' '{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}' \
+      | bash -c 'source \"$PLUGIN_ROOT/scripts/lib/aid-artifact-obligation.sh\"; aid_hook_rule_milestone_artifact'"
+  [[ "$output" == *"P900"* ]]
+}
+
+@test "write detection: a shell command that only READS a plan does not count" {
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cat .aid-o/plans/P900-hooks.md"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]
+}
+
+@test "write detection: a path this heuristic cannot see is MISSED, not guessed" {
+  # `cd .aid-o/plans && sed -i … P900-hooks.md` — the path is relative after a
+  # cd, so no static match exists. Documented as a deliberate miss: a missed
+  # write costs an un-rendered page, a guessed one costs another window its turn.
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cd .aid-o/plans && sed -i s/x/y/ P900-hooks.md"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]
+}
+
+@test "write detection: reading a plan and writing ELSEWHERE in one pipeline does not count" {
+  # `cat .aid-o/plans/P900.md | tee notes.txt` — the whitelist matched `tee`
+  # and the path matched anywhere on the line, so the two were never tied
+  # together (Codex, 2026-08-28, fourth round).
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cat .aid-o/plans/P900-hooks.md | tee notes.txt"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]
+}
+
+@test "write detection: writing INTO the plan through a pipeline does count" {
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo x | tee .aid-o/plans/P900-hooks.md"}}]}}' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" == *"P900"* ]]
+}

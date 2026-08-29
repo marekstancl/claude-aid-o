@@ -325,16 +325,64 @@ aid_hook_rule_milestone_artifact() {
   # recent" — silence is the safe failure here, since a false demand costs
   # another window its turn.
   local _ao_mine
-  # MENTIONING A PLAN IS NOT WORKING ON IT. The first version of this filter
-  # took any `P###` in the transcript, and a session that merely DISCUSSED a
-  # plan was then held to it — measured on this repository's own transcript on
-  # 2026-08-28: P062 appeared 299 times in conversation while another window
-  # was editing it, and the rule demanded a page from the wrong session, over
-  # and over. Narrow it to ids that appear where a plan file is being WRITTEN:
-  # a Write/Edit tool call, a `sed -i`, a Python open-for-write, a shell
-  # redirect. Reading a plan, or naming it, creates no obligation.
-  _ao_mine="$(grep -E '"name":"(Write|Edit|NotebookEdit)"|sed -i|open\([^)]*,.w.\)|>[[:space:]]*[^ ]*\.aid-o/plans/' "$transcript" 2>/dev/null \
-              | grep -oE '\.aid-o/plans/P[0-9]{3}' | grep -oE 'P[0-9]{3}' | sort -u | tr '\n' ' ')"
+  # WHICH PLANS THIS SESSION WROTE — parsed, not grepped.
+  #
+  # Two earlier attempts failed, each for its own reason, and both are worth
+  # keeping written down:
+  #   • by TIME (`find -newer`): every window was told to fix a plan another
+  #     window had edited — they share one workspace.
+  #   • by MENTION (any `P###` in the transcript): a session discusses plans it
+  #     never touches. Measured here: 299 mentions of P062 in a session that
+  #     never wrote it.
+  # A line-grep for a write fails too, in both directions (Codex, 2026-08-28):
+  #   {"name":"Write","input":{"file_path":"notes.txt","content":"see .aid-o/plans/P062-x.md"}}
+  # counts P062 though the write went elsewhere, and `{"name": "Write"` — one
+  # space — is missed entirely.
+  #
+  # So the transcript is PARSED. Only two fields can name a file a session
+  # wrote: a file-editing tool's `file_path`, and a shell command. `content` is
+  # deliberately excluded — that is what carried the false positive.
+  local _ao_mine
+  _ao_mine="$(jq -rs '
+      [ .[]?
+        | (.message.content? // empty)
+        | if type == "array" then .[] else . end
+        | select(type == "object" and .type == "tool_use")
+        | if (.name // "") == "Bash" then
+            # A shell command counts only where a write form and the plan path
+            # are in the SAME segment — the write must target THAT plan.
+            # `cat .aid-o/plans/P900.md | tee notes.txt` reads one file and
+            # writes another, and an earlier version counted it (Codex,
+            # 2026-08-28): the whitelist matched `tee`, the path matched
+            # anywhere, and the two were never tied together.
+            #
+            # Splitting on the operators that separate the target of one command
+            # from the next (`|`, `&&`, `;`) is the cheap approximation of that
+            # tie. What it still cannot see — a path built in a variable, or a
+            # relative path after `cd` — is MISSED rather than guessed: a missed
+            # write costs one un-rendered page, a guessed one costs another
+            # window its turn, which is the failure this rule exists to stop.
+            #
+            # WHERE THIS STOPS, AND WHY IT STOPS THERE. Static inspection of a
+            # shell string cannot decide what a command writes. Five review
+            # rounds each produced a narrower version and a new counter-example;
+            # the last one, `echo "tee .aid-o/plans/P900.md"`, still counts,
+            # because the words are indistinguishable from the deed without
+            # parsing the shell. That is a real limit and it is not closed here.
+            #
+            # What makes the rule usable anyway is NOT this detection: it is the
+            # once-per-session memory below. A wrong hit costs the reader ONE
+            # line for the whole session instead of one at every turn, which was
+            # the actual complaint. Precision reduces those lines; it is not
+            # what keeps the rule from being noise.
+            (.input.command // "")
+            | split("|") | .[] | split("&&") | .[] | split(";") | .[]
+            | select(test("\\.aid-o/plans/P[0-9]{3}"))
+            | select(test("(sed +-i|tee |>>?[[:space:]]*[^ ]*\\.aid-o/plans/|cp +|mv +|open\\([^)]*.w)"))
+          elif ((.name // "") | test("^(Write|Edit|MultiEdit|NotebookEdit)$")) then (.input.file_path // "")
+          else empty end
+      ] | join("\n")' "$transcript" 2>/dev/null \
+    | grep -oE '\.aid-o/plans/P[0-9]{3}' | grep -oE 'P[0-9]{3}' | sort -u | tr '\n' ' ')"
 
   # _mine_only <path> — true when the path names a plan this session mentioned.
   # A path with no plan id in it (a run's fsm-state under an EPIC id) is judged
@@ -365,12 +413,21 @@ aid_hook_rule_milestone_artifact() {
         err="$("$fn" "$root" "$hit" 2>&1)" || rc=$?
       fi
       if [[ "$rc" -eq 1 ]]; then
-        # The key is PLAN + MILESTONE. Keyed by plan alone, the plan's own
-        # finding would silence the EPIC's and the close's — three different
-        # things the PM needs to hear about separately.
-        local _seen_id; _seen_id="$(grep -oE '\bP[0-9]{3}\b' <<< "$hit" | head -1)"
-        [[ -n "$_seen_id" ]] || _seen_id="$(grep -oE '\bE-[0-9]{3}-' <<< "$hit" | head -1 | sed 's/^E-/P/; s/-$//')"
-        [[ -n "$_seen_id" ]] && _seen_id="${_seen_id}:${fn}"
+        # The key is the MILESTONE'S OWN PATH plus the mtime of the thing that
+        # made it stale. Keyed by plan alone, the plan's finding would silence
+        # the EPIC's and the close's. Keyed without the mtime, a plan that is
+        # fixed and then edited AGAIN in the same session stays silenced —
+        # a finding the PM genuinely needs, suppressed (Codex, 2026-08-28).
+        # Path + mtime changes the moment the situation changes, which is
+        # exactly when the reader should hear about it again.
+        # The key carries a CONTENT hash of the milestone's source, not its
+        # mtime: `stat -c %Y` has one-second resolution, so two edits inside one
+        # second reused the key and the second finding was swallowed (Codex,
+        # 2026-08-28 — the test's own `sleep 1` was hiding exactly that).
+        local _seen_id _seen_h
+        _seen_h="$(sha256sum "$hit" 2>/dev/null | cut -c1-16)" || _seen_h=""
+        [[ -n "$_seen_h" ]] || _seen_h="$(stat -c %Y "$hit" 2>/dev/null || echo 0)"
+        _seen_id="${fn}:${hit}:${_seen_h}"
         if [[ -n "$_seen_id" && " $_ao_seen " == *" $_seen_id "* ]]; then
           : # already said once this session; saying it again only teaches the reader to skip it
         else
