@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.2** (current) — zápis se počítá jen tam, kam míří; čtení plánu není práce na něm
+- **v2.95.3** (current) — odstraněny měřicí nástroje E10, plán P062 zrušen
+- **v2.95.2** — zápis se počítá jen tam, kam míří; čtení plánu není práce na něm
 - **v2.95.1** — hooky mluví jen na okno, které plán opravdu zapsalo
 - **v2.95.0** — E10 měří kontroly místo dohadů; stránka říká, co se dodalo
 

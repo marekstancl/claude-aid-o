@@ -1,7 +1,0 @@
-{
-  "epic_id": "E-900-1_1",
-  "run_id": "R-FIX-1",
-  "overall": "pass",
-  "revision": { "head_sha": "0000000000000000000000000000000000000001" },
-  "gates": { "tests": { "gate": "tests", "result": "pass", "exit_code": 0, "duration_ms": 1000, "attempts": 1 } }
-}

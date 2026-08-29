@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 495          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 493          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -1076,15 +1076,6 @@ enforcements:
   # today. Three are `planned`: their reader exists but the calibration run that
   # feeds them has not happened, and a row claiming active would be the
   # writer-with-no-reader overclaim IMP-274 already had to demote once.
-  - id: e10_bookkeeping_preflight
-    type: 1
-    source: "scripts/aid-e10-preflight.sh"
-    instruction: "scripts/aid-e10-promote.sh (gate 1)"
-    severity: blocking
-    surface: "E10 promotion step"
-    status: active
-    description: "P062 Step 1 (D7): E10 must not calibrate over a stale bookkeeping layer and blame the controls for the mess. Sweeps every plan through aid-plan-close-check.sh --json (three of its four classes were already implemented there; a second copy would drift) and returns clean | excluded_by_pm | dirty | unproven. `unproven` is its own verdict and BLOCKS: a close-check that could not run contributes no rows, so every class came out clean by silence — 'we could not look' is not 'we found nothing'. The fourth class, audit-log dirty-tree self-block, was GROUNDED AWAY rather than built: the init dirty guard filters .aid-o/work/audit-log.jsonl out precisely so the force override cannot dirty its own tree, so it reports not_grounded with the citation. Enforcement: aid-e10-promote.sh refuses to promote anything unless the verdict is clean or excluded_by_pm, and a missing artefact is `unknown`, never a satisfied gate."
-    test: "scripts/tests/bats/test-e10-preflight.bats"
   - id: cache_preflight_tree_coverage
     type: 1
     source: "scripts/lib/aid-cache-preflight.sh (_AID_CP_TREES)"
@@ -1110,26 +1101,17 @@ enforcements:
     severity: advisory
     surface: "C4 release decision"
     status: planned
-    description: "P062 Step 8 (D4): C4 verified that a required artifact was present and parseable and never asked what it REPORTED, so an audit report full of blocking findings satisfied 'present and parseable' and the release read as ready. The check asks per artifact type — there is no shared did-it-pass field across these producers and a generic one would be a contract they never agreed to; an unknown id gets no opinion rather than a guess. DEFAULT IS OBSERVE and that is why this row is advisory/planned: the row records verdict fail + input_state present_but_failing and adds NO blocker, so release_ready is untouched and nothing in flight changes. It becomes blocking only when E10's decision table approves c4_content_verdict and aid-e10-promote.sh flips its per-control key."
+    description: "P062 Step 8 (D4): C4 verified that a required artifact was present and parseable and never asked what it REPORTED, so an audit report full of blocking findings satisfied 'present and parseable' and the release read as ready. The check asks per artifact type — there is no shared did-it-pass field across these producers and a generic one would be a contract they never agreed to; an unknown id gets no opinion rather than a guess. DEFAULT IS OBSERVE and that is why this row is advisory/planned: the row records verdict fail + input_state present_but_failing and adds NO blocker, so release_ready is untouched and nothing in flight changes. It becomes blocking only when the PM flips its per-control key in release-decision-policy.yaml (E10 was cancelled 2026-08-29; there is no automated promotion)."
     test: "scripts/tests/bats/test-c4-content-verdict.bats"
   - id: per_control_enforcement
     type: 9
     source: "scripts/lib/aid-control-enforcement.sh (aid_control_enforcement)"
-    instruction: "defaults/policies/control-inventory.yaml"
+    instruction: "defaults/policies/release-decision-policy.yaml (controls.<id>.enforcement)"
     severity: advisory
     surface: "six policy readers"
     status: active
-    description: "P062 Step 11: each policy file had ONE global enforcement switch and aid-fsm.sh read it at five separate sites, one per control, so promoting any control promoted every sibling sharing the file — 'only the approved controls were promoted' could not even be stated. One resolver now serves six readers (five in aid-fsm.sh plus the C0 contract gate in aid-auto-pipeline.sh) and prefers controls.<id>.enforcement over the file default; teaching each site separately is how two of them end up disagreeing in the blocking direction, which is the P084 incident. FAIL-SAFE IS OBSERVE ON EVERY PATH: a missing file, missing yq, unparseable YAML and an out-of-enum value must never switch a control ON, and a misspelled override is not an override in either direction. The file-wide default keeps its pre-existing meaning; what changed is that the promotion mechanism never writes it."
-    test: "scripts/tests/bats/test-e10-promote.bats"
-  - id: e10_promotion_gate
-    type: 1
-    source: "scripts/aid-e10-promote.sh"
-    instruction: "scripts/aid-e10-decision-table.sh"
-    severity: blocking
-    surface: "E10 promotion step"
-    status: planned
-    description: "P062 Steps 10-11 (D8): promotion happens only for an inventory ROW whose decision-table row says promote_to_blocking, and the table is keyed by inventory id rather than by control — c4 owns three mechanisms and one approval must not move all three. Refusals are asked one at a time so each names its own cause: preflight not clean/excluded (unproven included), a table that is not the generator's output (any hand-authored JSON with a promote row satisfied the whole apparatus before), an id absent from or marked not-promotable by the inventory, IMP-201 unfixed for c4_evidence_pack_freshness, and any non-promote decision. DEFAULT IS A DRY RUN — the last step of a calibration plan should not be the easiest thing in it to trigger — and --apply writes through a re-parsed temp copy so a failure part-way through cannot leave a partial promotion. `planned` until the calibration run that produces a real decision table has happened."
-    test: "scripts/tests/bats/test-e10-promote.bats"
+    description: "P062 Step 11: each policy file had ONE global enforcement switch and aid-fsm.sh read it at five separate sites, one per control, so promoting any control promoted every sibling sharing the file — 'only the approved controls were promoted' could not even be stated. One resolver now serves six readers (five in aid-fsm.sh plus the C0 contract gate in aid-auto-pipeline.sh) and prefers controls.<id>.enforcement over the file default; teaching each site separately is how two of them end up disagreeing in the blocking direction, which is the P084 incident. FAIL-SAFE IS OBSERVE ON EVERY PATH: a missing file, missing yq, unparseable YAML and an out-of-enum value must never switch a control ON, and a misspelled override is not an override in either direction. The file-wide default keeps its pre-existing meaning; the per-control key is set by the PM by hand (the E10 promotion tooling was removed 2026-08-29)."
+    test: "scripts/tests/bats/test-control-enforcement.bats"
   - id: risk_upgrade
     type: 1
     source: "scripts/aid-fsm.sh (grep: 'risk_profile_below_required|risk_profile_unresolvable')"

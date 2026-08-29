@@ -1,7 +1,9 @@
 ---
 id: P062
 type: plan
-status: draft
+status: cancelled
+closed: 2026-08-29
+closure: "PM 2026-08-29: E10 se dělat nebude, E11 také ne. Měřicí nástroje z v2.95.0 odstraněny (v2.95.3). Téma kontrol se řeší mimo tento plán, po částech."
 created: 2026-07-12
 author: PM + AI
 phase_of: AID Control System v2 (roadmap E10 — Kalibrace + dual-run metriky + speed + promotion decision table)

@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.3] — 2026-08-29
+
+### Removed
+- **Měřicí nástroje E10** — `aid-e10-preflight.sh`, `aid-control-metrics.sh`, `aid-dual-run.sh`, `aid-e10-decision-table.sh`, `aid-e10-promote.sh`, `aid-e10-imp201-decision.sh`, schéma `control-metrics.schema.json`, inventář `control-inventory.yaml` a kalibrační fixtury odstraněny; PM 2026-08-29 rozhodl, že kalibrační kampaň E10 ani slučovací fáze E11 nebudou, plán P062 uzavřen jako zrušený. Sdílený resolver `aid-control-enforcement.sh` zůstává (čte ho FSM i generátor) a má vlastní test `test-control-enforcement.bats`; klíč `controls.<id>.enforcement` nastavuje PM ručně.
+
 ## [2.95.2] — 2026-08-28
 
 ### Fixed

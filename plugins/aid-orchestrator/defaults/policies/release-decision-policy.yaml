@@ -60,12 +60,10 @@
 #   WHAT THIS KEY IS, EXACTLY (final audit, 2026-08-15 — the earlier wording
 #   claimed more): it is a RECORD of a refused promotion, not a runtime switch.
 #   `aid-release-policy.sh` does not read it, and saying otherwise was an
-#   over-claim. What actually holds the line is elsewhere and is enforced:
-#   `control-inventory.yaml` marks `c4_evidence_pack_freshness` as
-#   `promotable: false`, so `aid-e10-promote.sh` refuses it, and
-#   `aid-e10-imp201-decision.sh` refuses to record an `observe_hold` while this
-#   key says anything else. The key exists so the refusal is visible where the
-#   policy lives, and so a future `blocking` here cannot be set quietly.
+#   over-claim. The E10 calibration/promotion tooling that used to guard this
+#   key was removed on 2026-08-29 (E10 cancelled); the key stays so the refusal
+#   is visible where the policy lives, and so a future `blocking` here cannot
+#   be set quietly.
 #
 #   observe  → stale-by-trailing-commit is reported and never blocks. (current)
 #   blocking → forbidden until IMP-201 is closed by the shared classifier, at
