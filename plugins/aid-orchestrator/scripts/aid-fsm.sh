@@ -6266,7 +6266,7 @@ cmd_amend_scope() {
   forbidden="$(jq -r --argjson i "$cs" '(.steps[$i].forbidden_paths // [])[]' "$plan" 2>/dev/null || true)"
   for p in "${add[@]}"; do
     [[ -n "$p" && "$p" != /* && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a relative path inside the tree (no leading /, no ..)"
-    [[ "$p" != */ && "$p" != *"*"* && "$p" != *"?"* ]] || die "amend-scope: '${p}' is a directory or a glob — amend names FILES, one --add each"
+    [[ "$p" != */ && "$p" != *"*"* && "$p" != *"?"* && ! -d "$p" ]] || die "amend-scope: '${p}' is a directory or a glob — amend names FILES, one --add each"
     local fb
     while IFS= read -r fb; do
       [[ -n "$fb" ]] || continue
@@ -6300,6 +6300,17 @@ cmd_amend_scope() {
   mv "$tmp_plan" "$plan" || { rm -f "$tmp_plan"; die "amend-scope: amendment recorded but ${plan} could not be rewritten — re-run the same command"; }
   local new_hash; new_hash=$(sha256sum "$plan" | awk '{print $1}')
   cmd_set_field plan_json_hash "$new_hash" "$state_file"
+  # The scope_check GATE (defaults/execution.yaml) reads a static
+  # <epic>/allowed_paths.txt, one path per line, when a project maintains one;
+  # keep it in step so the amended file does not pass the hook and the return
+  # validator only to fail the gate. Absent file = nobody keeps it = nothing.
+  local ap_txt="$(dirname "$evidence_dir")/allowed_paths.txt"
+  if [[ -f "$ap_txt" ]]; then
+    for p in "${add[@]}"; do grep -qxF -- "$p" "$ap_txt" || printf '%s\n' "$p" >> "$ap_txt"; done
+  fi
+  # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
+  # compares plan.json against the EPIC's scope blocks; it runs at generation,
+  # not mid-EPIC, and a REGENERATION resets the amendment by design.
   log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."

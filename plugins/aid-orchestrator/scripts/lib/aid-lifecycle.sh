@@ -458,19 +458,24 @@ _aid_lc_isolated_commit() {
   fi
 
   ( cd "$root"
+    # The parent is read ONCE and the publish is a compare-and-swap against
+    # it: two writers building on the same HEAD (two plan-starts at once) no
+    # longer let the second silently replace the first's commit — the loser
+    # fails and re-runs on the new head.
+    local parent; parent="$(git rev-parse HEAD 2>/dev/null)"
+    [[ -n "$parent" ]] || exit 1
     local tmpidx; tmpidx="$(mktemp)"
-    if ! GIT_INDEX_FILE="$tmpidx" git read-tree HEAD 2>/dev/null; then rm -f "$tmpidx"; exit 1; fi
+    if ! GIT_INDEX_FILE="$tmpidx" git read-tree "$parent" 2>/dev/null; then rm -f "$tmpidx"; exit 1; fi
     GIT_INDEX_FILE="$tmpidx" git add -- "${rels[@]}" 2>/dev/null
     local tree; tree="$(GIT_INDEX_FILE="$tmpidx" git write-tree 2>/dev/null)"
     rm -f "$tmpidx"
     [[ -n "$tree" ]] || exit 1
     # No-op if the paths are already committed identically.
-    [[ "$tree" == "$(git rev-parse 'HEAD^{tree}' 2>/dev/null)" ]] && exit 0
-    local parent commit
-    parent="$(git rev-parse HEAD 2>/dev/null)"
+    [[ "$tree" == "$(git rev-parse "${parent}^{tree}" 2>/dev/null)" ]] && exit 0
+    local commit
     commit="$(git commit-tree "$tree" -p "$parent" -m "$msg" 2>/dev/null)"
     [[ -n "$commit" ]] || exit 1
-    git update-ref HEAD "$commit" 2>/dev/null || exit 1
+    git update-ref HEAD "$commit" "$parent" 2>/dev/null || { echo "lifecycle: HEAD moved while committing ${rels[*]} — nothing published, re-run" >&2; exit 1; }
     git reset -q -- "${rels[@]}" 2>/dev/null || true
   )
 }

@@ -202,7 +202,7 @@ aid_hook_rule_turn_write_scope() {
   rel="$(_aid_hrt_relative "$path" "$cwd")"
   while IFS=$'\t' read -r _ _ _ sid contract; do
     [[ -n "$sid" ]] || continue
-    allowed="$(jq -c '.allowed_paths // []' "$contract")"
+    allowed="$(aid_dispatch_contract_allowed "$contract")"   # packet + any amend-scope record
     _aid_dc_path_allowed "$rel" "$allowed" "steps/${sid}" && return 0
     summary="${summary:+$summary; }${sid}: $(jq -r 'join(", ")' <<< "$allowed")"
   done <<< "$lines"

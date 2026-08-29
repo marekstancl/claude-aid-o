@@ -793,6 +793,61 @@ _pfsm_check_committed_source() {
   return 0
 }
 
+# _pfsm_ensure_committed_source <root> <plan_file> <plan_id>
+#   plan-start used to DEMAND that the PM had already committed the plan on the
+#   target branch and refuse otherwise (WAN #1: every plan meant a hand commit
+#   on main, and a --force left the plan on the plan branch only). The plan is
+#   the PM's own file; this commits the worktree bytes to the target branch
+#   with the same isolated, index-preserving commit the lifecycle manifest
+#   uses — only that path, nothing else staged is touched. Applies only when
+#   the plan is a tracked-able repository path (gitignored plans keep their
+#   source_plan_sha binding) and the checkout is ON the target branch: from
+#   another branch the old refusal still speaks, because restoring worktree
+#   copies after a plumbing commit would overwrite the PM's edited file.
+#   Concurrency: the commit is CAS-free on HEAD here but takes only this
+#   plan's own path, so two plans starting at once never touch each other's
+#   file; the lifecycle manifest write right after it is the CAS one.
+_pfsm_ensure_committed_source() {
+  local root="$1" plan_file="$2" plan_id="$3"
+  [[ -n "$plan_file" && -f "$plan_file" ]] || return 0
+  _pfsm_check_committed_source "$root" "$plan_file" >/dev/null 2>&1 && return 0
+  local repo_root; repo_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || echo "")"
+  [[ -n "$repo_root" ]] || return 0
+  local plan_lex; plan_lex="$(realpath -m --no-symlinks -- "$plan_file" 2>/dev/null || echo "$plan_file")"
+  [[ "$plan_lex" == "$repo_root"/* ]] || return 0
+  local rel="${plan_lex#"$repo_root"/}"
+  # Only a plan under .aid-o/plans/ and only a regular file: `--plan-file
+  # README.md` must not turn into "plan-start committed your README", and a
+  # symlink would be committed as a link the check then cannot match.
+  [[ "$rel" == .aid-o/plans/* && ! -L "$plan_lex" && -f "$plan_lex" ]] || return 0
+  git -C "$root" check-ignore -q -- "$rel" 2>/dev/null && return 0
+  local target; target="$(aid_target_branch 2>/dev/null || echo "")"
+  [[ -n "$target" ]] && git -C "$root" rev-parse --verify --quiet "$target" >/dev/null 2>&1 || return 0
+  local cur; cur="$(git -C "$root" branch --show-current 2>/dev/null || true)"
+  if [[ "$cur" != "$target" ]]; then
+    echo "plan-start: ${rel} is not on ${target} and this checkout is on '${cur:-<detached>}' — plan-start commits the plan for you only from a checkout ON ${target}; either run it there, or commit ${rel} on ${target} yourself." >&2
+    return 1
+  fi
+  # A staged copy: if it matches the file on disk it is the PM's own add of
+  # the same bytes and the index entry is released so the isolated commit can
+  # take them; if it DIFFERS, the PM has two versions and plan-start does not
+  # pick one — it says so and leaves both untouched.
+  if ! git -C "$root" diff --quiet --cached -- "$rel" 2>/dev/null; then
+    if ! git -C "$root" diff --quiet -- "$rel" 2>/dev/null; then
+      echo "plan-start: ${rel} is staged with content that differs from the file on disk — commit or unstage it yourself; plan-start does not choose between the two." >&2
+      return 1
+    fi
+    git -C "$root" reset -q -- "$rel" 2>/dev/null || true
+  fi
+  if ! declare -F _aid_lc_isolated_commit >/dev/null 2>&1; then return 1; fi
+  if _aid_lc_isolated_commit "$root" "plan(${plan_id}): source plan ${rel}" "$rel" >/dev/null 2>&1; then
+    echo "plan-start: committed ${rel} on ${target} ($(git -C "$root" rev-parse --short "$target" 2>/dev/null)) — the plan branch is cut from a head that carries the plan." >&2
+    return 0
+  fi
+  echo "plan-start: could not commit ${rel} on ${target} (a staged collision or a git refusal) — commit it yourself and rerun." >&2
+  return 1
+}
+
 # _pfsm_preflight <project_root> <needs_clean_tree> — the shared preflight
 # both lifecycle-opening commands run before creating anything.
 #
@@ -2163,6 +2218,9 @@ cmd_plan_start() {
   # lifecycle is about to be generated from. Forceable — a PM who knowingly
   # accepts an unshared source can proceed with an audited receipt.
   if [[ -n "$plan_file_opt" ]]; then
+    # Commit the plan on the target branch ourselves when we can (WAN #1);
+    # the precondition below then passes, or explains what it could not do.
+    _pfsm_ensure_committed_source "$project_root" "$plan_file_opt" "$plan_id" || true
     _pfsm_precondition "committed_source_plan" forceable \
       _pfsm_check_committed_source "$project_root" "$plan_file_opt" || exit 1
   fi

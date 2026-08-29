@@ -55,34 +55,53 @@ _no_mutation() {
 
 # ─── tracked plan, not committed ──────────────────────────────────────────
 
-@test "P073 Step 11: a TRACKED but uncommitted plan is refused, and nothing was created" {
-  # `git add` without a commit: the file is tracked, so the gitignore carve-out
-  # does not apply, but the target branch has no such blob.
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md )
+@test "v2.95.5 (WAN #1): a TRACKED but uncommitted plan is COMMITTED on main by plan-start itself" {
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md )
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"source plan is not committed on main"* ]]
-  [[ "$output" == *"commit the plan on main and rerun generation"* ]]
-  _no_mutation
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
+  [[ "$output" == *"committed .aid-o/plans/plan.md on main"* ]]
+  [[ "$output" != *"source plan is not committed on main"* ]]
+  [ "$( cd "$ROOT" && git show main:.aid-o/plans/plan.md )" = "# Plan" ]
+  # only that path went into the commit
+  [ "$( cd "$ROOT" && git show --stat --format= main | grep -c '|' )" = "1" ]
+}
+
+@test "v2.95.5 (WAN #1): an UNTRACKED plan on disk is committed too, and the plan branch carries it" {
+  printf '# Plan untracked\n' > "$ROOT/.aid-o/plans/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
+  [[ "$output" == *"committed .aid-o/plans/plan.md on main"* ]]
+  [ "$( cd "$ROOT" && git show main:.aid-o/plans/plan.md )" = "# Plan untracked" ]
+  if ( cd "$ROOT" && git rev-parse --verify --quiet plan/P900 >/dev/null ); then
+    [ "$( cd "$ROOT" && git show plan/P900:.aid-o/plans/plan.md )" = "# Plan untracked" ]
+  fi
 }
 
 @test "P073 Step 11: a plan committed on ANOTHER branch is still refused — the check is target-branch specific" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
   ( cd "$ROOT"
     git checkout -q -b side
-    git add docs/plan.md && git commit -qm "plan on side"
+    git add .aid-o/plans/plan.md && git commit -qm "plan on side"
     git checkout -q main )
   # Back on main the blob exists only on `side`, and git removed the directory
   # with it (an empty `docs/` was never tracked), so both have to be recreated
   # — otherwise the fixture would be testing "file missing", not "committed on
   # the wrong branch".
-  mkdir -p "$ROOT/docs"
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
+  mkdir -p "$ROOT/.aid-o/plans"
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
+  # here the checkout IS on main, so plan-start commits the worktree bytes
+  [[ "$output" == *"committed .aid-o/plans/plan.md on main"* ]]
+  [ "$( cd "$ROOT" && git show main:.aid-o/plans/plan.md )" = "# Plan" ]
+}
+
+@test "v2.95.5 (WAN #1): from a checkout NOT on main plan-start does not commit — the old refusal speaks, with the reason" {
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git checkout -q -b side )
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"only from a checkout ON main"* ]]
   [[ "$output" == *"not committed on main"* ]]
   _no_mutation
 }
@@ -90,37 +109,56 @@ _no_mutation() {
 # ─── committed but edited ─────────────────────────────────────────────────
 
 @test "P073 Step 11: a committed plan EDITED in the worktree is refused — byte equality, not mere presence" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md && git commit -qm "plan" )
-  printf '# Plan\n\nAn edit that was never committed.\n' > "$ROOT/docs/plan.md"
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md && git commit -qm "plan" )
+  printf '# Plan\n\nAn edit that was never committed.\n' > "$ROOT/.aid-o/plans/plan.md"
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"differs from the worktree copy"* ]]
-  _no_mutation
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
+  # the edit is the PM's current text: it is committed, the stale blob is history
+  [[ "$output" == *"committed .aid-o/plans/plan.md on main"* ]]
+  [[ "$( cd "$ROOT" && git show main:.aid-o/plans/plan.md )" == *"never committed"* ]]
 }
 
 @test "P073 Step 11: even a WHITESPACE-only difference is refused (byte equality is the point)" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md && git commit -qm "plan" )
-  printf '# Plan\n\n' > "$ROOT/docs/plan.md"
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md && git commit -qm "plan" )
+  printf '# Plan\n\n' > "$ROOT/.aid-o/plans/plan.md"
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"differs from the worktree copy"* ]]
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
+  [[ "$output" == *"committed .aid-o/plans/plan.md on main"* ]]
 }
 
 # ─── committed and identical ──────────────────────────────────────────────
 
 @test "P073 Step 11: a committed, identical plan PASSES the preflight" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md && git commit -qm "plan" )
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md && git commit -qm "plan" )
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   # plan-start may still fail later on this bare fixture's lifecycle identity;
   # what matters here is that it did NOT fail on the source-plan preflight.
   [[ "$output" != *"not committed on main"* ]]
   [[ "$output" != *"differs from the worktree copy"* ]]
+}
+
+@test "v2.95.5 (WAN #1): a plan OUTSIDE .aid-o/plans is never auto-committed — the refusal speaks" {
+  printf '# Plan\n' > "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not committed on main"* ]]
+  [[ "$output" != *"committed docs/plan.md"* ]]
+  _no_mutation
+}
+
+@test "v2.95.5 (WAN #1): a staged copy that differs from the file on disk is not chosen for the PM" {
+  printf '# Plan v1\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md )
+  printf '# Plan v2\n' > "$ROOT/.aid-o/plans/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"differs from the file on disk"* ]]
+  [ "$( cd "$ROOT" && git show :.aid-o/plans/plan.md )" = "# Plan v1" ]   # staging untouched
+  _no_mutation
 }
 
 # ─── the gitignored carve-out ─────────────────────────────────────────────
@@ -139,8 +177,8 @@ _no_mutation() {
 # ─── legacy callers and the force route ───────────────────────────────────
 
 @test "P073 Step 11: WITHOUT --plan-file the behaviour is unchanged (legacy callers keep working)" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md )
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md )
 
   run _pf plan-start P900 --mode legacy_epic_release_mode
   [[ "$output" != *"not committed on main"* ]]
@@ -155,11 +193,12 @@ _no_mutation() {
 }
 
 @test "P073 Step 11: the preflight is FORCEABLE — a PM who accepts an unshared source proceeds with a receipt" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md )
+  # the one case plan-start does not commit for you: a checkout off main
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md && git checkout -q -b side )
 
   run _pf plan-start P900 --mode legacy_epic_release_mode \
-      --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
+      --plan-file "$ROOT/.aid-o/plans/plan.md" --force --force-reason "$REASON"
   # The check still printed its own recovery first.
   [[ "$output" == *"not committed on main"* ]]
   [[ "$output" == *"FORCE: bypassing precondition 'committed_source_plan'"* ]]
@@ -211,10 +250,10 @@ _no_mutation() {
   # This one MUST still refuse: the plan is inside the repo and not ignored,
   # so its availability is verifiable in principle and simply is not proven.
   ( cd "$ROOT" && git checkout -q -b other && git branch -D main -q )
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md )
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md )
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   [ "$status" -ne 0 ]
   [[ "$output" == *"does not exist"* ]]
   [[ "$output" == *"gitignore the plan if it is deliberately unshared"* ]]
@@ -238,9 +277,9 @@ _no_mutation() {
   local outside="$BATS_TEST_TMPDIR/outside"
   mkdir -p "$outside"
   printf '# Plan\n' > "$outside/plan.md"
-  ln -s "$outside/plan.md" "$ROOT/docs/plan.md"
+  ln -s "$outside/plan.md" "$ROOT/.aid-o/plans/plan.md"
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   [ "$status" -ne 0 ]
   [[ "$output" == *"resolves through a symlink"* ]]
   [[ "$output" == *"outside the repository"* ]]
@@ -252,9 +291,9 @@ _no_mutation() {
   # the repository contains.
   printf '# Plan\n' > "$ROOT/docs/real.md"
   ( cd "$ROOT" && git add docs/real.md && git commit -qm "plan" )
-  ln -s "$ROOT/docs/real.md" "$ROOT/docs/plan.md"
+  ln -s "$ROOT/docs/real.md" "$ROOT/.aid-o/plans/plan.md"
 
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   [[ "$output" != *"resolves through a symlink"* ]]
 }
 
@@ -277,13 +316,13 @@ _no_mutation() {
 }
 
 @test "P073 Step 11 (review finding 2): a committed plan verifies identically from a foreign CWD" {
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md && git commit -qm "plan" )
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md && git commit -qm "plan" )
 
   run bash -c "cd '$(dirname "$ROOT")' && bash '$PFSM' plan-start P900 \
       --mode legacy_epic_release_mode \
       --project-root '$(basename "$ROOT")' \
-      --plan-file '$(basename "$ROOT")/docs/plan.md'"
+      --plan-file '$(basename "$ROOT")/.aid-o/plans/plan.md'"
   [[ "$output" != *"not committed on"* ]]
   [[ "$output" != *"differs from the worktree copy"* ]]
 }

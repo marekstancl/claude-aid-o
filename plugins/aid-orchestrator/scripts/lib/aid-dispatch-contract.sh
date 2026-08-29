@@ -226,6 +226,31 @@ _aid_dc_path_allowed() {
 #   judged over the union of the two. `extra_artifacts` — declared, in scope,
 #   not promised — is recorded, never refused.
 # ---------------------------------------------------------------------------
+# aid_dispatch_contract_allowed <contract.json> — the step's allowed paths AS
+#   OF NOW: the packet's list, plus any `aid-fsm.sh amend-scope` record beside
+#   it. The record sits in the step's evidence dir, which the agent can write,
+#   so it is NOT trusted on its own: an amended path counts only if plan.json
+#   (which amend-scope widened and the increment-step hash protects) lists it
+#   for this step too. The record says why; plan.json says whether. Every
+#   reader of a step's scope (the return validator, the write-hook notice)
+#   goes through here so none of them can disagree.
+aid_dispatch_contract_allowed() {
+  local c="$1" allowed
+  allowed="$(jq -c '.allowed_paths // []' "$c")"
+  local amend_file; amend_file="$(dirname "$c")/scope-amendment.json"
+  [[ -f "$amend_file" ]] || { printf '%s' "$allowed"; return 0; }
+  local plan_json="" cand sid
+  for cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do
+    [[ -f "$cand" ]] && { plan_json="$cand"; break; }
+  done
+  [[ -n "$plan_json" ]] || { printf '%s' "$allowed"; return 0; }
+  sid="$(jq -r '.step_id // ""' "$c")"
+  jq -c --slurpfile a "$amend_file" --slurpfile p "$plan_json" --arg sid "$sid" '
+    (($p[0].steps // []) | map(select(.id == $sid)) | .[0].allowed_paths // []) as $planned
+    | . + ([$a[0][]? | .paths[]?] | map(select(. as $x | $planned | index($x)))) | unique' <<<"$allowed" 2>/dev/null \
+    || printf '%s' "$allowed"
+}
+
 aid_dispatch_contract_validate() {
   local c="${1:?contract: contract file required}" r="${2:?contract: return file required}" root="${3:-.}"
   [[ -r "$c" ]] || { echo "contract: cannot read ${c}" >&2; return 2; }
@@ -290,27 +315,7 @@ aid_dispatch_contract_validate() {
   # Scope, over the declared list AND the disk's: every file outside the
   # allowed paths is named.
   local allowed evidence f
-  allowed="$(jq -c '.allowed_paths // []' "$c")"
-  # A PM-approved scope amendment (aid-fsm.sh amend-scope) lives next to the
-  # contract; the contract itself stays as dispatched — the amendment is the
-  # record that the scope grew, and of why.
-  # The file sits in the step's evidence dir, which the agent can write — so
-  # it is NOT trusted on its own: an amended path counts only if plan.json
-  # (which amend-scope widened and the increment-step hash protects) lists it
-  # for this step too. The record says why; plan.json says whether.
-  local amend_file; amend_file="$(dirname "$c")/scope-amendment.json"
-  if [[ -f "$amend_file" ]]; then
-    local plan_json="" cand sid
-    for cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do
-      [[ -f "$cand" ]] && { plan_json="$cand"; break; }
-    done
-    sid="$(jq -r '.step_id // ""' "$c")"
-    if [[ -n "$plan_json" ]]; then
-      allowed="$(jq -c --slurpfile a "$amend_file" --slurpfile p "$plan_json" --arg sid "$sid" '
-        (($p[0].steps // []) | map(select(.id == $sid)) | .[0].allowed_paths // []) as $planned
-        | . + ([$a[0][]? | .paths[]?] | map(select(. as $x | $planned | index($x)))) | unique' <<<"$allowed" 2>/dev/null || echo "$allowed")"
-    fi
-  fi
+  allowed="$(aid_dispatch_contract_allowed "$c")"
   evidence="steps/$(jq -r '.step_id // ""' "$c")"
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue

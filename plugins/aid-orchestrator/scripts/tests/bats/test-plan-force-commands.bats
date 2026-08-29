@@ -68,9 +68,13 @@ _dirty() { printf 'uncommitted\n' >> "$ROOT/README.md"; }
 # is the re-anchor for the force-path tests after P074 Step 5 removed the
 # plan-start/epic-start clean-worktree preflight.
 _uncommitted_plan() {
-  mkdir -p "$ROOT/docs"
-  printf '# Plan\n' > "$ROOT/docs/plan.md"
-  ( cd "$ROOT" && git add docs/plan.md )
+  mkdir -p "$ROOT/.aid-o/plans"
+  printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
+  # Since v2.95.5 plan-start commits an uncommitted plan itself when the
+  # checkout is ON main — so to keep a refusable committed-source precondition
+  # as this file's fixture, the checkout sits on a side branch, the one case
+  # plan-start leaves to the PM.
+  ( cd "$ROOT" && git add .aid-o/plans/plan.md && git checkout -q -b side )
 }
 
 # _seed_lifecycle — the plan source + git-tracked lifecycle manifest
@@ -130,7 +134,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 @test "P073 Step 8 / P074 Step 5: plan-start ignores a dirty worktree, but a kept forceable precondition still REFUSES without --force" {
   _dirty
   _uncommitted_plan
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   [ "$status" -ne 0 ]
   # The refusal is the KEPT committed-source preflight, never the removed
   # dirty-tree one.
@@ -141,7 +145,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 @test "P073 Step 8 / P074 Step 5: plan-start PASSES the kept committed-source refusal under --force and mints exactly one receipt" {
   _uncommitted_plan
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md" --force --force-reason "$REASON"
   # The check still printed its own recovery first — the normal path is never
   # hidden behind the force.
   [[ "$output" == *"source plan is not committed"* ]]
@@ -152,7 +156,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 @test "P073 Step 8 / P074 Step 5: the forced plan-start receipt names the command and the bypass" {
   _uncommitted_plan
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md" --force --force-reason "$REASON"
   local w; w="$(find "$ROOT/.aid-o" -name 'waiver-plan-plan-start-*.json' | head -1)"
   [ -n "$w" ]
   [ "$(jq -r '.forced_override' "$w")" = "true" ]
@@ -192,7 +196,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
   # and the dirty tree — a non-event since P074 — must not add a second one.
   _uncommitted_plan
   _dirty
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md" --force --force-reason "$REASON"
   [ "$(_receipts)" = "1" ]
 }
 
@@ -222,7 +226,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 @test "P073 Step 8 / P074 Step 5: every forced run appends to the cross-plan audit log" {
   _uncommitted_plan
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md" --force --force-reason "$REASON"
   [ -s "$ROOT/.aid-o/work/audit-log.jsonl" ]
   run grep -c 'plan_force_override' "$ROOT/.aid-o/work/audit-log.jsonl"
   [ "$output" -ge 1 ]
@@ -304,7 +308,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
   # as "this operation happened". (P074 Step 5: re-anchored from the removed
   # dirty-tree preflight to the kept committed-source one.)
   _uncommitted_plan
-  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md" --force --force-reason "$REASON"
+  run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md" --force --force-reason "$REASON"
   local w; w="$(find "$ROOT/.aid-o" -name 'waiver-plan-plan-start-*.json' | head -1)"
   [ -n "$w" ]
   [ "$(jq -r '.records' "$w")" = "precondition_bypass" ]

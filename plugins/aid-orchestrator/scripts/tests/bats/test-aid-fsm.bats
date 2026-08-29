@@ -2347,6 +2347,8 @@ EOS
   [ "$status" -ne 0 ]; [[ "$output" == *"relative path"* ]]
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/ --reason "a whole directory is not a file"
   [ "$status" -ne 0 ]; [[ "$output" == *"FILES"* ]]
+  mkdir -p "$td/lib"; ( cd "$td" && run bash "$FSM" amend-scope fsm-state.yaml --add lib --reason "an existing directory without a slash"; [ "$status" -ne 0 ] )
+  printf 'src/a.py\n' > "$(dirname "$td")/allowed_paths.txt"
   jq '.steps[0].forbidden_paths = ["secrets/"]' "$td/plan.json" > "$td/p.tmp" && mv "$td/p.tmp" "$td/plan.json"
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add secrets/key.pem --reason "trying to widen into a forbidden path"
   [ "$status" -ne 0 ]; [[ "$output" == *"forbidden_paths"* ]]
@@ -2357,6 +2359,7 @@ EOS
   [ "$(grep '^plan_json_hash:' "$td/fsm-state.yaml" | awk '{print $2}')" = "$(sha256sum "$td/plan.json" | awk '{print $1}')" ]
   [ "$(jq -r '.[0].reason' "$td/steps/step_1_backend/scope-amendment.json")" = "AC3 demands a test the plan forgot" ]
   grep -q '"event":"scope_amended"' "$td/timeline.jsonl"
+  grep -qx 'tests/test_a.py' "$(dirname "$td")/allowed_paths.txt"   # the scope_check gate's file kept in step
   # not in EXECUTE → refused
   sed -i 's/^state: EXECUTE/state: GATES/' "$td/fsm-state.yaml"
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "trying to widen after the work is done"

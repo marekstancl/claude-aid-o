@@ -115,6 +115,7 @@ shape `/aid-status` renders) and carry on. No artifact at all: say nothing.
 | No plan-state files, no `.aid-worktrees/` | Nothing else is running. Proceed silently — do not narrate an empty check. |
 | Another plan active, its worktree present | Name it and its phase, say this plan can be written and generated anyway, proceed. |
 | PM's checkout has uncommitted work | Irrelevant to planning and to `plan-start`. Do not ask them to clean it. |
+| The plan file is not committed on `main` | `plan-start --plan-file` commits it for you (only that path, index untouched) when the checkout is ON `main`; from another branch it refuses and says so — do not commit plans by hand as a ritual. |
 | A plan records `worktree_path` but the directory is gone | Name it and the repair — `aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"` — then continue; a broken sibling does not block a new plan. |
 | A worktree directory exists that `git worktree list` does not know | Leftover from a crash plus a manual prune. Name it and `git worktree prune`; do not delete a directory you did not create. |
 | `git worktree list` shows trees OUTSIDE `.aid-worktrees/` | Not AID's. Someone else's branch checkout, another session, a sibling clone. AID neither manages nor tears these down. Name them once so the PM knows what else is checked out, note which branch each is on, and leave them alone — in particular, a branch checked out there cannot be checked out again, which is the one way they can make a later `plan-start` or `--recreate-worktree` fail. |
