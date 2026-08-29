@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [2.95.7] — 2026-08-29
 
 ### Fixed
-- **`--force` u `increment-step` už nepřeskočí samotnou evidenci kroku** — soubor `step-N-verify.md` a jeho struktura se kontrolují vždy; force obchází jen scope, vazbu a kontrakt. Dřív force zamaskoval krok, jehož verifikace se vůbec nezapsala (agents P001).
+- **`--force` u `increment-step` už nepřeskočí samotnou evidenci kroku** — soubor `step-N-verify.md` a jeho struktura se kontrolují vždy; force obchází ostatní podmínky kroku (scope, vazbu evidence, kontrakt, vizuální a revizní kontroly) jako dřív. Dřív force zamaskoval krok, jehož verifikace se vůbec nezapsala (agents P001).
 - **Pre-filter nepřepíše dokončený report verifiéra** — hotový report předchozí iterace (verdict pass/fail) se odsune na `verifier-output-step-N.iter-<čas>.md` místo přepsání; nálezy iterace 1 už nemizí.
 - **`increment-step` bez argumentu** vypíše usage (exit 2) místo pádu na `$1: unbound variable`.
 - **Report bran neříká „explicit --profile flag", když profil odvodil FSM** — `aid-run-gates.sh` má `--profile-reason` a `advance-to-gates` mu předá skutečný důvod (`FSM auto-resolved profile <name>`).

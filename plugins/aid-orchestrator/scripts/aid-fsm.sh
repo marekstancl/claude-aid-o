@@ -1234,16 +1234,19 @@ fsm_count_recent_fails_epic() {
 # CP6 is advisory and never reaches this check via the FSM flow.
 fsm_check_verifier_output() {
   local file=$1
-  [[ -f "$file" ]] || return 1
-  grep -q '^_generated_by:' "$file" || return 1
-  grep -q '^_generated_at:' "$file" || return 1
-  grep -q '^classification:' "$file" || return 1
+  # Each refusal names its reason on stderr (verifier_output_invalid: …), so a
+  # caller's "missing or invalid" is never the whole story (agents #3: three
+  # verifier rounds were re-run for a missing `classification:` line).
+  [[ -f "$file" ]] || { echo "verifier_output_invalid: ${file}: file missing" >&2; return 1; }
+  grep -q '^_generated_by:' "$file" || { echo "verifier_output_invalid: ${file}: no _generated_by: line" >&2; return 1; }
+  grep -q '^_generated_at:' "$file" || { echo "verifier_output_invalid: ${file}: no _generated_at: line" >&2; return 1; }
+  grep -q '^classification:' "$file" || { echo "verifier_output_invalid: ${file}: no classification: line (CP3 verifiers write classification: FULL_REVIEW themselves)" >&2; return 1; }
 
   local generated_by generated_at classification
   generated_by=$(yaml_field "$file" _generated_by)
-  [[ -z "$generated_by" ]] && return 1  # non-empty: rejects pre-filter placeholder or blank
+  [[ -z "$generated_by" ]] && { echo "verifier_output_invalid: ${file}: _generated_by is empty" >&2; return 1; }
   generated_at=$(yaml_field "$file" _generated_at)
-  [[ -z "$generated_at" ]] && return 1  # non-empty: ensures verifier wrote a real timestamp
+  [[ -z "$generated_at" ]] && { echo "verifier_output_invalid: ${file}: _generated_at is empty" >&2; return 1; }
 
   # P079 Step 4 (IMP-472): these two fields are the only ones a HUMAN-facing
   # agent writes by hand, and they carry OPPOSITE casing conventions —
@@ -1258,17 +1261,17 @@ fsm_check_verifier_output() {
       grep -q '^reason:' "$file" || return 1
       ;;
     run|fail|full_review)
-      grep -q '^verdict:' "$file" || return 1
+      grep -q '^verdict:' "$file" || { echo "verifier_output_invalid: ${file}: no verdict: line" >&2; return 1; }
       local verdict
       verdict=$(yaml_field "$file" verdict)
       case "${verdict,,}" in
         pass|fail) ;;          # only valid completed verdicts
-        pending)   return 1 ;; # pre-filter placeholder: verifier not dispatched
-        *)         return 1 ;; # unknown/garbage verdict (e.g. banana, empty, typo)
+        pending)   echo "verifier_output_invalid: ${file}: verdict is still 'pending' — the verifier was not dispatched, or did not write its verdict" >&2; return 1 ;;
+        *)         echo "verifier_output_invalid: ${file}: verdict '${verdict}' is not pass|fail" >&2; return 1 ;;
       esac
       ;;
     *)
-      return 1  # unknown classification
+      echo "verifier_output_invalid: ${file}: classification '${classification}' is not SKIP|RUN|FAIL|FULL_REVIEW" >&2; return 1
       ;;
   esac
 
@@ -2986,7 +2989,7 @@ EOF
         if ! fsm_check_verifier_output "$cp3_code_review"; then
           _PRECONDITION_FAIL_REASON="missing_cp3_code_review"
           cat <<EOF >&2
-PRECONDITION FAIL: verifier-output-cp3-code-review.md missing or invalid.
+PRECONDITION FAIL: verifier-output-cp3-code-review.md missing or invalid (the verifier_output_invalid line above names what).
 
 Reason: AID v3 Session B requires CP3 integration review before EXECUTE→GATES.
         Both verifiers (code-review + security) must review the full EPIC diff.
@@ -5372,7 +5375,7 @@ cmd_advance_to_gates() {
 
     _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
     if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
-      profile_arg=(--profile "$_gp_resolved" --profile-reason "FSM auto-resolved profile ${_gp_resolved} from base_commit..HEAD (boundary ${_gp_boundary:-legacy})")
+      profile_arg=(--profile "$_gp_resolved" --profile-reason "FSM auto-resolved profile ${_gp_resolved}")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
         profile="$_gp_resolved" source="auto_resolved" boundary="${_gp_boundary:-legacy}"
     else

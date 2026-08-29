@@ -54,6 +54,13 @@ main() {
   esac
 }
 
+# _classify_say <classification> <step> <reason> <exit_code> — the one line a
+# caller sees; every classification exit goes through here so the branches
+# cannot drift (the result used to be visible only in the file and the exit code).
+_classify_say() {
+  printf 'classify: %s step=%s reason=%s (exit %s)\n' "$1" "$2" "$3" "$4"
+}
+
 cmd_classify() {
   [[ $# -lt 2 ]] && die "classify requires <step_n> <evidence_dir> [--checkpoint <cp2|cp3|cp4|cp6>]"
   local step_n=$1 evidence_dir=$2
@@ -142,6 +149,7 @@ commits (OBS-20260705-01). Emit step_commit/base_commit to restore step-boundary
         echo "range_undetermined: cp2 step $step_n has no step_commit event in timeline.jsonl \
 and no base_commit in fsm-state.yaml. Emit step_commit (FSM increment) or base_commit, or set \
 CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the output file." >&2
+        _classify_say NONE "$step_n" range_undetermined 22
         exit 22
       fi
     fi
@@ -258,13 +266,6 @@ matches_fail() {
   [[ "$diff_content" =~ $pattern ]]
 }
 
-# _classify_say <classification> <step> <reason> <exit_code> — the one line a
-# caller sees; every classification exit goes through here so the branches
-# cannot drift (the result used to be visible only in the file and the exit code).
-_classify_say() {
-  printf 'classify: %s step=%s reason=%s (exit %s)\n' "$1" "$2" "$3" "$4"
-}
-
 write_output() {
   local file=$1 step_n=$2 classification=$3 reason=$4 matched_rules=$5 checkpoint=${6:-cp2}
   local now
@@ -296,10 +297,13 @@ behavior_trace_skip_reason: \"classification SKIP — ${reason}\""
   # the canonical file.
   if [[ -f "$file" ]]; then
     local _old_verdict; _old_verdict="$(grep -m1 -E '^verdict:' "$file" 2>/dev/null | awk '{print tolower($2)}')"
-    if [[ "$_old_verdict" == "pass" || "$_old_verdict" == "fail" ]]; then
-      local _arch="${file%.md}.iter-$(date -u +%Y%m%dT%H%M%SZ).md" _k=1
-      while [[ -e "$_arch" ]]; do _arch="${file%.md}.iter-$(date -u +%Y%m%dT%H%M%SZ)-${_k}.md"; _k=$((_k+1)); done
-      mv "$file" "$_arch" && echo "prefilter: archived the completed report of the previous iteration as $(basename "$_arch")" >&2
+    if [[ "$_old_verdict" == "pass" || "$_old_verdict" == "fail" || "$_old_verdict" == "skip" ]]; then
+      local _arch
+      _arch="$(mktemp "${file%.md}.iter-$(date -u +%Y%m%dT%H%M%SZ)-XXXX")" \
+        || die "prefilter: cannot create an archive name for the previous report ${file} — refusing to overwrite it"
+      mv -f "$file" "$_arch" || die "prefilter: could not archive the previous report ${file} → ${_arch}; refusing to overwrite it"
+      mv -f "$_arch" "${_arch}.md" 2>/dev/null && _arch="${_arch}.md"
+      echo "prefilter: archived the completed report of the previous iteration as $(basename "$_arch")" >&2
     fi
   fi
   cat > "$file" <<EOF
