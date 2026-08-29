@@ -779,3 +779,104 @@ dokumentovaný způsob, jak legitimní druhý pokus odlišit od zakázaného „
 širokého běhu pod nálepkou full" — kromě force. Nabízí se čítač pokusů
 (`plan_final_attempt` v plan-state existuje a zůstává na 0).
 
+
+## Collected 2026-08-29 — 3 entries from 3 project(s)
+
+---
+
+#### acta — 32. Verifier zapíše výstup mimo evidenci, pokud dostane jen název souboru
+
+**Kde:** dispatch `aid-orchestrator:verifier`, zápis
+`verifier-output-cp3-*.md`.
+
+**Co se stalo:** v zadání jsem uvedl „Přepiš `verifier-output-cp3-security.md`
+(kanonický název)" a plnou cestu zmínil o odstavec výš. Agent soubor zapsal do
+KOŘENE worktree:
+
+```
+$ git status --porcelain
+?? verifier-output-cp3-security.md
+```
+
+FSM přitom evidenci hledá v
+`.aid-o/work/evidence/<epic>/<run>/`. Precondition `EXECUTE → GATES` by
+ohlásila „file missing" a výstup by se hledal jinde, ačkoli existuje.
+
+**Proč to vadí:** jde o soubor, který FSM čte jako důkaz, že review proběhla.
+Když skončí jinde, kontrola tvrdí, že review neexistuje — což je nepravda —
+a orchestrátor buď review zbytečně opakuje, nebo hledá chybu tam, kde není.
+Navíc zůstane netrackovaný soubor v pracovním stromu, který se snadno
+přibalí do commitu.
+
+**Obcházka:** v zadání uvádět VŽDY absolutní cestu, i za cenu opakování, a po
+návratu agenta ověřit `git status --porcelain`.
+
+**Návrh:** validátor by mohl při chybějícím souboru zkusit i kořen worktree
+a poradit „nalezeno v `<cesta>`, přesuň do evidence" místo holého
+„file missing". Nebo dát verifierovi cestu jako parametr, ne jako text
+v promptu.
+
+---
+
+#### agents — 8. `advance-to-gates` a `transition` čtou HEAD z jiného repa (29. 8., důkaz)
+
+Dva kroky téhož běhu, spuštěné ze **stejného cwd** `/opt/eco/projects/agents`, se
+neshodly na tom, co je HEAD:
+
+- `advance-to-gates` zapsal do `gates_report.json`
+  `revision.head_sha = 8c36974` — HEAD **pracovní kopie** `.aid-worktrees/plan-P001`
+  na větvi `task/E-001-2_2/main`, tedy správně.
+- `transition GATES DONE` hned poté odmítl přechod větou
+  `CP3 Reviewed-Head dfa7a2b is not an ancestor of HEAD 2322d84`. `2322d84` je HEAD
+  **hlavního repa na `main`** — větve, na které běh nepracuje. `dfa7a2b` přitom
+  předkem HEADu pracovní kopie **je** (`git merge-base --is-ancestor` uspěje).
+
+Kontrola čerstvosti CP3 tak porovnávala revizi z jedné větve proti revizi z druhé.
+
+**Táž příčina, dva další výskyty (29. 8.):**
+
+- `delivery-gate.json` v evidenci běhu má `head_sha = 2322d84` — zase HEAD `main`,
+  tedy revizi **před** `base_commit` toho běhu, o 51 commitů zpět — a k tomu
+  `head_is_current: true` a `freshness: "current"`. Artefakt tvrdí o sobě, že je
+  aktuální, a přitom posuzoval strom, jaký byl před začátkem EPICu. Našel to
+  kurátor v DONE, ne kontrola.
+- `aid-delivery-gate.sh` spuštěný **z pracovní kopie** skončí
+  `ERROR: cannot determine project root (not a git repo?)`. Přegenerovat ten
+  artefakt správně tedy nejde: z pracovní kopie skript nespustíš, z hlavního repa
+  zapíše zase cizí HEAD.
+
+Dohromady to není překlep na jednom místě, ale vzorec: **plugin odvozuje git kontext
+z aktuálního adresáře, ne z pracovní kopie, se kterou běh pracuje.** Kde to selže
+hlasitě (`transition`, `aid-delivery-gate.sh`), je to jen tření. Kde to selže tiše
+(`delivery-gate.json`, který se označí za aktuální), zůstane v evidenci tvrzení,
+kterému někdo uvěří.
+Obejde se spuštěním `transition` z adresáře pracovní kopie — pak se ohlásí věcně
+správně, tedy že delta za CP3 se dotkla `CLAUDE.md`. Dokud se to spouští odjinud,
+je verdikt té kontroly náhodný: může projít i zastaralé čtení, když `main` shodou
+okolností stojí za HEADem větve.
+
+
+
+---
+
+#### agents — 9. Brána `targeted_tests` v tomhle repu nevybere nikdy nic (29. 8., důkaz)
+
+`aid-select-tests.sh` vrací pro **každý** změněný soubor prázdný výběr s odůvodněním
+`outside production surface (not under scripts/ or defaults/)`. Tenhle projekt má kód
+v `bin/` a `asistent/`, ne v `scripts/` ani `defaults/`, takže se brána netrefí nikdy.
+
+Změřeno dvakrát nezávisle:
+
+- `advance-to-gates` pro EPIC 2 doběhl s `covered_paths: []`,
+  `changed_paths_covered: false`, `relevance: "unknown"` a krokem `targeted_tests`
+  za **393 ms** — tedy nespustil žádný test asistenta.
+- Audit EPICu 1 našel v `gates_rows/targeted_tests.json` totéž pro
+  `bin/model_runner.py`, `bin/telegram-gateway.py` i `bin/master-mcp.py`.
+
+Brána přesto hlásí `pass`. Skutečné ověření obstarávají pevné sady (`smoke_hermetic`,
+`gateway_smoke`) a ruční běhy zapsané v `step-N-verify.md` — kdyby ne, byla by
+zelená brána nad nespuštěnými testy. **Nebezpečné je to jméno**: „targeted_tests:
+exit_code 0" čte každý jako „cílené testy prošly", ne jako „žádné se nevybraly".
+
+---
+
