@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.7] — 2026-08-29
+
+### Fixed
+- **`--force` u `increment-step` už nepřeskočí samotnou evidenci kroku** — soubor `step-N-verify.md` a jeho struktura se kontrolují vždy; force obchází ostatní podmínky kroku (scope, vazbu evidence, kontrakt, vizuální a revizní kontroly) jako dřív. Dřív force zamaskoval krok, jehož verifikace se vůbec nezapsala (agents P001).
+- **Pre-filter nepřepíše dokončený report verifiéra** — hotový report předchozí iterace (verdict pass/fail) se odsune na `verifier-output-step-N.iter-<čas>.md` místo přepsání; nálezy iterace 1 už nemizí.
+- **`increment-step` bez argumentu** vypíše usage (exit 2) místo pádu na `$1: unbound variable`.
+- **Report bran neříká „explicit --profile flag", když profil odvodil FSM** — `aid-run-gates.sh` má `--profile-reason` a `advance-to-gates` mu předá skutečný důvod (`FSM auto-resolved profile <name>`).
+- **`aid-prefilter.sh classify` vypíše výsledek** — jedna řádka `classify: RUN|SKIP|FAIL step=N reason=… (exit K)` přes společný helper, dřív jen soubor a exit kód.
+
+### Changed
+- **Chyby verifikačního souboru se hlásí najednou** — všech pět strukturálních kontrol se posbírá a vypíše jedním hlášením (každá se svým auditním kódem), ne po jedné na každé spuštění.
+- **`advance-to-gates` při selhání řekne důvod, ne 300 řádků JSON** — výpis reportu jde do souboru, na terminál jde verdikt, seznam spadlých bran a cesta k reportu; varování hooku o prázdném scope říká, že jde o `plan.json` a že kroky jsou číslované od nuly.
+- **CP3 šablona uvádí `classification: FULL_REVIEW`** — validátor to pole vyžaduje, šablona i hláška ho dosud zamlčely (tři zbytečná kola verifiérů v agents); a návod k psaní plánu říká, že krok smí záviset jen na nižším čísle.
+
 ## [2.95.6] — 2026-08-29
 
 ### Added

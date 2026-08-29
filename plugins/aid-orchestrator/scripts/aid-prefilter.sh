@@ -54,6 +54,13 @@ main() {
   esac
 }
 
+# _classify_say <classification> <step> <reason> <exit_code> — the one line a
+# caller sees; every classification exit goes through here so the branches
+# cannot drift (the result used to be visible only in the file and the exit code).
+_classify_say() {
+  printf 'classify: %s step=%s reason=%s (exit %s)\n' "$1" "$2" "$3" "$4"
+}
+
 cmd_classify() {
   [[ $# -lt 2 ]] && die "classify requires <step_n> <evidence_dir> [--checkpoint <cp2|cp3|cp4|cp6>]"
   local step_n=$1 evidence_dir=$2
@@ -142,6 +149,7 @@ commits (OBS-20260705-01). Emit step_commit/base_commit to restore step-boundary
         echo "range_undetermined: cp2 step $step_n has no step_commit event in timeline.jsonl \
 and no base_commit in fsm-state.yaml. Emit step_commit (FSM increment) or base_commit, or set \
 CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the output file." >&2
+        _classify_say NONE "$step_n" range_undetermined 22
         exit 22
       fi
     fi
@@ -175,6 +183,7 @@ CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the outp
     log_warn "No diff for step $step_n (empty diff or initial commit) — defaulting to RUN (conservative)"
     write_output "$output_file" "$step_n" "RUN" "no_diff" "[]" "$checkpoint"
     log_event "$timeline" "prefilter_classification" step="$step_n" classification="RUN" matched_rules="[]" checkpoint="$checkpoint"
+    _classify_say RUN "$step_n" no_diff 10
     exit 10
   fi
 
@@ -186,6 +195,7 @@ CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the outp
       local matched_json="[\"${rule_id}\"]"
       write_output "$output_file" "$step_n" "SKIP" "$rule_id" "$matched_json" "$checkpoint"
       log_event "$timeline" "prefilter_classification" step="$step_n" classification="SKIP" matched_rules="$matched_json" checkpoint="$checkpoint"
+      _classify_say SKIP "$step_n" "$rule_id" 0
       exit 0
     fi
   done
@@ -205,12 +215,14 @@ CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the outp
     matched_json=$(printf '%s\n' "${matched_fail[@]}" | jq -R . | jq -sc .)
     write_output "$output_file" "$step_n" "FAIL" "${matched_fail[*]}" "$matched_json" "$checkpoint"
     log_event "$timeline" "prefilter_classification" step="$step_n" classification="FAIL" matched_rules="$matched_json" checkpoint="$checkpoint"
+    _classify_say FAIL "$step_n" "${matched_fail[*]// /,}" 20
     exit 20
   fi
 
   # Default: RUN
   write_output "$output_file" "$step_n" "RUN" "default" "[]" "$checkpoint"
   log_event "$timeline" "prefilter_classification" step="$step_n" classification="RUN" matched_rules="[]" checkpoint="$checkpoint"
+  _classify_say RUN "$step_n" default 10
   exit 10
 }
 
@@ -278,6 +290,22 @@ behavior_trace_skip_reason: \"classification SKIP — ${reason}\""
   fi
 
   mkdir -p "$(dirname "$file")"
+  # A COMPLETED report of an earlier iteration (verdict pass|fail, not the
+  # pre-filter's own pending/skip) is archived, not overwritten: the fix loop
+  # re-classifies, and iteration 1's findings used to vanish before anyone
+  # read them (agents #4). Collision-safe name; increment-step still reads
+  # the canonical file.
+  if [[ -f "$file" ]]; then
+    local _old_verdict; _old_verdict="$(grep -m1 -E '^verdict:' "$file" 2>/dev/null | awk '{print tolower($2)}')"
+    if [[ "$_old_verdict" == "pass" || "$_old_verdict" == "fail" || "$_old_verdict" == "skip" ]]; then
+      local _arch
+      _arch="$(mktemp "${file%.md}.iter-$(date -u +%Y%m%dT%H%M%SZ)-XXXX")" \
+        || die "prefilter: cannot create an archive name for the previous report ${file} — refusing to overwrite it"
+      mv -f "$file" "$_arch" || die "prefilter: could not archive the previous report ${file} → ${_arch}; refusing to overwrite it"
+      mv -f "$_arch" "${_arch}.md" 2>/dev/null && _arch="${_arch}.md"
+      echo "prefilter: archived the completed report of the previous iteration as $(basename "$_arch")" >&2
+    fi
+  fi
   cat > "$file" <<EOF
 # Verifier output step ${step_n}
 

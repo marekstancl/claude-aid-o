@@ -32,7 +32,18 @@ setup() {
   # Transition with precondition layer bypassed (mechanics under test).
   fsm_tr() { "$FSM" transition "$1" "$2" "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
   # Increment step with precondition layer bypassed (counter mechanics under test).
-  fsm_inc() { "$FSM" increment-step "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
+  # Since v2.95.7 --force never waives the step-verify FILE (only scope/binding/
+  # contract preconditions), so the mechanics helper writes a minimal valid one
+  # for the step it is about to advance past.
+  _min_verify() {
+    # the FSM re-anchors a relative state file under .aid-o/work/evidence/<epic>/<run>
+    local _e _r _d
+    _e="$("$FSM" get-field epic_id "$STATE_FILE" 2>/dev/null || echo E-001)"; _r="$("$FSM" get-field run_id "$STATE_FILE" 2>/dev/null || echo run-001)"
+    _d="$TEST_DIR/.aid-o/work/evidence/${_e}/${_r}"; mkdir -p "$_d"
+    printf '# Step %s\n\n## Result: PASS\n\n- [x] mechanics fixture\n\nCommit: abc1234def5678\n\n## Memory Used\nN/A — fixture\n\n## Memory Written\nN/A — fixture\n' "$1" > "$_d/step-$1-verify.md"
+    cp "$_d/step-$1-verify.md" "$TEST_DIR/step-$1-verify.md" 2>/dev/null || true
+  }
+  fsm_inc() { local _s; _s="$("$FSM" get-field current_step "$STATE_FILE" 2>/dev/null || echo 0)"; _min_verify "$_s"; "$FSM" increment-step "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
 
   # Run all tests with TEST_DIR as cwd so PRE-FLIGHT git checks have a repo.
   cd "$TEST_DIR"

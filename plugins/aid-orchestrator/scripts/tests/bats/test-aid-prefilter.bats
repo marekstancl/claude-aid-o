@@ -241,7 +241,9 @@ EOF
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"        # current_step: 3, epic E-test run R-test
   local head_sha; head_sha=$(git rev-parse HEAD)
-  # --force skips per-step preconditions; the producer at the step-advance tail still runs.
+  # --force skips scope/binding/contract preconditions but (since v2.95.7) never the
+  # step-verify file itself; the producer at the step-advance tail still runs.
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
   run "$FSM" increment-step "$state_file" --force --reason "P060 step3 producer test — verify step_commit emitted"
   [ "$status" -eq 0 ]
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_commit"

@@ -400,6 +400,8 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 
 **Dependencies:**
 - Depends on: Step {X} — {what it needs from that step: files, contracts, data}
+  (X must be a LOWER step number — a step never depends forward; the readiness
+  check before generation refuses a forward dependency, so order the steps now)
 - Blocks: Step {Y} — {what it produces that the next step needs}
 
 **Dependency grammar (enforced before EPIC generation).** Put dependencies in

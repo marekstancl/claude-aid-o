@@ -197,7 +197,7 @@ _aid_run_scope_check() {
   esac
 
   if [[ -z "$_paths" ]]; then
-    echo "AID HOOK: warning — empty allowed_paths for ${_label}; passing commit." >&2
+    echo "AID HOOK: warning — plan.json declares no allowed_paths for ${_label} (steps are 0-based: current_step ${_cs:-?} is the plan's step $(( ${_cs:-0} + 1 ))); nothing to check against, passing commit." >&2
     _aid_emit "$_tl" commit_guard_disclosure reason=empty_allowed_paths state="$_st" step="${_cs}"
     return 0
   fi

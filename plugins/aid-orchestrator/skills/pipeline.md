@@ -1086,8 +1086,9 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    semantics as CP2 (last pair is authoritative).
 
 2. **Outputs** (each verifier writes its dedicated file):
-   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `Reviewed-Head: <sha>`
-   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `Reviewed-Head: <sha>`
+   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `classification: FULL_REVIEW`, `Reviewed-Head: <sha>`
+   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `classification: FULL_REVIEW`, `Reviewed-Head: <sha>`
+   - `classification: FULL_REVIEW` is written by the VERIFIER at CP3 (at CP2 the pre-filter writes it); `fsm_check_verifier_output` rejects the file without it, so a CP3 report missing the line is "missing or invalid" however good its review was.
 
    **CP3 dispatch passes/requires `Reviewed-Head` explicitly.** Dispatch each CP3
    verifier with the sha the full-EPIC diff was generated against, and each verifier
