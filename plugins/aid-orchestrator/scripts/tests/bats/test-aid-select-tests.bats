@@ -371,3 +371,15 @@ commit_change() {
   [[ "$output" == *"INACTIVE"* ]]
   rm -rf "$other"
 }
+
+@test "v2.95.8 (agents #9): a consumer repo that VENDORS a copy of the selector is still not the plugin's repo — inactive" {
+  local other; other="$(mktemp -d)"
+  ( cd "$other" && git init -q -b main && git config user.email t@t && git config user.name t \
+    && mkdir -p plugins/aid-orchestrator/scripts bin && cp "$SELECTOR" plugins/aid-orchestrator/scripts/ \
+    && echo 'print(1)' > bin/app.py && git add . && git commit -qm one \
+    && echo 'print(2)' > bin/app.py && git commit -qam two )
+  run bash -c "cd '$other' && unset AID_SELECT_TESTS_PLUGIN_ROOT AID_SELECT_TESTS_ASSUME_OWN_REPO && bash '$SELECTOR' --base HEAD~1"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"relevance": "inactive"'* ]]
+  rm -rf "$other"
+}
