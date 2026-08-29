@@ -1,9 +1,0 @@
-{
-  "artifact_type": "release_decision",
-  "release_decision": {
-    "release_ready": true,
-    "inputs": [
-      { "id": "gates_report", "artifact": "gates_report.json", "verdict": "blocked", "reason": "required artifact missing", "head_match": false }
-    ]
-  }
-}

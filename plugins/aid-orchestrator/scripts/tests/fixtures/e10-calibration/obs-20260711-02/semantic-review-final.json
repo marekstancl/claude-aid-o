@@ -1,6 +1,0 @@
-{
-  "artifact_type": "semantic_review_final",
-  "status": "pass",
-  "scope": { "paths_reviewed": ["src/unit/*"], "paths_declared": ["src/unit/*", "e2e/*"] },
-  "findings": []
-}

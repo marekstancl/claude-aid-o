@@ -1,7 +1,0 @@
-{
-  "artifact_type": "delivery_gate",
-  "status": "pass",
-  "declared_paths": ["src/a.ts", "src/b.ts"],
-  "delivered_paths": ["src/a.ts"],
-  "checks": [ { "id": "dg01", "status": "pass" } ]
-}
