@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.1] — 2026-08-28
+
+### Fixed
+- **Milníkové pravidlo hlásilo cizí plány dál** — oprava ve 2.95.0 brala za „plán téhle session" každé `P###` v transkriptu, jenže o plánu se dá celý den mluvit, aniž by se na něj sáhlo: v tomhle repozitáři bylo P062 v přepisu 299×, zatímco ho měnilo jiné okno. Nově se počítá jen id, které se v přepisu objeví u **zápisu** souboru plánu (Write/Edit, `sed -i`, otevření pro zápis, přesměrování); pouhé čtení ani zmínka povinnost nezakládá.
+- **Týž nález se opakoval na každém tahu** — i správná výtka přestane být čtená, když ji člověk vidí celý den. Pravidlo si v úložišti session pamatuje, co už řeklo, a řekne to **jednou za session** na každý plán a milník zvlášť.
+- **Test CHANGELOGu se vázal na nejnovější sekci** — a rozbil se, jakmile nad ní přibyla další; teď je připnutý k vydání, které popisuje.
+
 ## [2.95.0] — 2026-08-28
 
 ### Added

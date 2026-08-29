@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.0** (current) — E10 měří kontroly místo dohadů; stránka říká, co se dodalo; hooky mluví jen na toho, kdo pracoval
+- **v2.95.1** (current) — hooky mluví jen na okno, které plán opravdu zapsalo, a řeknou to jednou
+- **v2.95.0** — E10 měří kontroly místo dohadů; stránka říká, co se dodalo
 - **v2.94.0** — a plan with six EPICs continues itself: asking the queue no longer means taking it, the merge hands over to a program instead of to somebody's memory, and the next EPIC can start as a supervised session
-- **v2.93.1** — one place where a fixture seeds a plan, so the next generation precondition breaks one file instead of fifteen, and a merge-path contract test that actually runs the generator
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

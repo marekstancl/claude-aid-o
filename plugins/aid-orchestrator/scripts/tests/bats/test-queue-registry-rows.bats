@@ -138,9 +138,11 @@ _top_version() {
   [ "$sec_a" = "$sec_b" ]
 }
 
-@test "AC18: this version's section actually describes P090, not an empty stub" {
-  local ver; ver="$(_top_version)"
-  [ -n "$ver" ]
+@test "AC18: P090's own section actually describes it, not an empty stub" {
+  # Pinned to 2.94.0, the release P090 shipped in. It used to read whatever the
+  # TOP section was, which held only until the next release was written — and
+  # 2.95.0 duly broke it. A changelog entry is judged where it lives.
+  local ver="2.94.0"
   run bash -c 'awk "/^## \[$2\]/{f=1} f&&/^## \[/&&!/^## \[$2\]/{exit} f" "$1"' _ \
       "$REPO_ROOT/CHANGELOG.md" "$ver"
   [[ "$output" == *"queue_peek_next"* ]]

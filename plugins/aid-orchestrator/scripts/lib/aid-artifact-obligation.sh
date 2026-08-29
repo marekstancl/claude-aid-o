@@ -48,6 +48,11 @@
 [[ -n "${_AID_ARTIFACT_OBLIGATION_SH_LOADED:-}" ]] && return 0
 _AID_ARTIFACT_OBLIGATION_SH_LOADED=1
 
+# The once-per-session memory below lives in the session store, never in
+# `.aid-o/` — it is ephemeral and belongs to one session, not to the workspace.
+# shellcheck source=aid-session-store.sh
+source "${BASH_SOURCE[0]%/*}/aid-session-store.sh" 2>/dev/null || true
+
 _AID_AO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-roots.sh
 source "${_AID_AO_LIB_DIR}/aid-roots.sh"
@@ -293,6 +298,16 @@ aid_hook_rule_milestone_artifact() {
   # The run state files live at evidence/<epic_id>/<run_id>/fsm-state.yaml —
   # depth 3. The EPIC pages live at evidence/<plan_id>/<epic_id>/ — depth 2,
   # and carry no state file, so the two never collide.
+  # AND AT MOST ONCE PER SESSION PER PLAN. Even a correct finding repeated at
+  # every turn stops being read — the PM saw the same P062 line through a whole
+  # day's work. The session store remembers what this session was already told;
+  # a finding it has reported once is not reported again. (Session-scoped by
+  # construction: a new session starts with an empty file and says it once.)
+  local _ao_seen="" _ao_seen_file=""
+  if _ao_seen_file="$(aid_session_store_dir "artifact-obligation" 2>/dev/null)/reported-$(printf '%s' "${transcript}" | sha256sum | cut -c1-16)"; then
+    [[ -f "$_ao_seen_file" ]] && _ao_seen="$(tr '\n' ' ' < "$_ao_seen_file")"
+  fi
+
   local findings="" err
 
   # WHICH PLANS THIS SESSION ACTUALLY WORKED ON — not merely which files moved
@@ -310,7 +325,16 @@ aid_hook_rule_milestone_artifact() {
   # recent" — silence is the safe failure here, since a false demand costs
   # another window its turn.
   local _ao_mine
-  _ao_mine="$(grep -oE '\bP[0-9]{3}\b' "$transcript" 2>/dev/null | sort -u | tr '\n' ' ')"
+  # MENTIONING A PLAN IS NOT WORKING ON IT. The first version of this filter
+  # took any `P###` in the transcript, and a session that merely DISCUSSED a
+  # plan was then held to it — measured on this repository's own transcript on
+  # 2026-08-28: P062 appeared 299 times in conversation while another window
+  # was editing it, and the rule demanded a page from the wrong session, over
+  # and over. Narrow it to ids that appear where a plan file is being WRITTEN:
+  # a Write/Edit tool call, a `sed -i`, a Python open-for-write, a shell
+  # redirect. Reading a plan, or naming it, creates no obligation.
+  _ao_mine="$(grep -E '"name":"(Write|Edit|NotebookEdit)"|sed -i|open\([^)]*,.w.\)|>[[:space:]]*[^ ]*\.aid-o/plans/' "$transcript" 2>/dev/null \
+              | grep -oE '\.aid-o/plans/P[0-9]{3}' | grep -oE 'P[0-9]{3}' | sort -u | tr '\n' ' ')"
 
   # _mine_only <path> — true when the path names a plan this session mentioned.
   # A path with no plan id in it (a run's fsm-state under an EPIC id) is judged
@@ -340,7 +364,21 @@ aid_hook_rule_milestone_artifact() {
       else
         err="$("$fn" "$root" "$hit" 2>&1)" || rc=$?
       fi
-      [[ "$rc" -eq 1 ]] && findings+="${err}"$'\n'
+      if [[ "$rc" -eq 1 ]]; then
+        # The key is PLAN + MILESTONE. Keyed by plan alone, the plan's own
+        # finding would silence the EPIC's and the close's — three different
+        # things the PM needs to hear about separately.
+        local _seen_id; _seen_id="$(grep -oE '\bP[0-9]{3}\b' <<< "$hit" | head -1)"
+        [[ -n "$_seen_id" ]] || _seen_id="$(grep -oE '\bE-[0-9]{3}-' <<< "$hit" | head -1 | sed 's/^E-/P/; s/-$//')"
+        [[ -n "$_seen_id" ]] && _seen_id="${_seen_id}:${fn}"
+        if [[ -n "$_seen_id" && " $_ao_seen " == *" $_seen_id "* ]]; then
+          : # already said once this session; saying it again only teaches the reader to skip it
+        else
+          findings+="${err}"$'\n'
+          [[ -n "$_ao_seen_file" && -n "$_seen_id" ]] && printf '%s\n' "$_seen_id" >> "$_ao_seen_file" 2>/dev/null
+          _ao_seen+=" $_seen_id"
+        fi
+      fi
       rc=0
     done < <(find "$dir" -mindepth "$depth" -maxdepth "$depth" -name "$name" -newer "$marker" 2>/dev/null)
   }

@@ -138,11 +138,17 @@ transcript() { # transcript <iso_timestamp> [plan_id...]
   # moment it opens or renders one. Extra ids may be passed; the default names
   # the plan these cases use.
   printf '{"type":"user","timestamp":"%s","message":{"content":"go"}}\n' "$1" > "$TMP/transcript.jsonl"
+  # Since 2026-08-28 the rule needs a WRITE, not a mention: it looks for a plan
+  # path inside a Write/Edit tool call. Simulate exactly that.
   local _p
   for _p in "${@:2}"; do
-    printf '{"type":"assistant","message":{"content":"pracuji na %s"}}\n' "$_p" >> "$TMP/transcript.jsonl"
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".aid-o/plans/%s-x.md"}}]}}\n' "$_p" >> "$TMP/transcript.jsonl"
   done
-  [[ "$#" -gt 1 ]] || printf '{"type":"assistant","message":{"content":"pracuji na P900 P905"}}\n' >> "$TMP/transcript.jsonl"
+  if [[ "$#" -le 1 ]]; then
+    for _p in P900 P905; do
+      printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".aid-o/plans/%s-x.md"}}]}}\n' "$_p" >> "$TMP/transcript.jsonl"
+    done
+  fi
   printf '%s' "$TMP/transcript.jsonl"
 }
 
@@ -352,7 +358,7 @@ _close_page() {
 @test "IMP-528: a plan this session never mentioned is not reported" {
   local ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$ws/.aid-o/plans" "$ws/.aid-o/work/evidence/P062" "$ws/.aid-o/work/evidence/P091"
-  printf '{"timestamp":"2026-08-28T05:00:00Z"}\n{"text":"pracuju na P091"}\n' > "$ws/transcript.jsonl"
+  printf '{"timestamp":"2026-08-28T05:00:00Z"}\n{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".aid-o/plans/P091-y.md"}}]}}\n' > "$ws/transcript.jsonl"
   for id in P062 P091; do
     printf -- "---\nid: %s\ntype: plan\n---\n# %s - x\n## Goal\nneco\n" "$id" "$id" > "$ws/.aid-o/plans/$id-x.md"
     echo "<html>x</html>" > "$ws/.aid-o/work/evidence/$id/plan-summary-artifact.html"
@@ -392,4 +398,25 @@ _close_page() {
   local t2; t2="$(transcript "2020-01-01T00:00:00Z" "P123")"
   run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t2\"}"
   [[ "$output" != *"E-900-1_1"* ]]
+}
+
+@test "IMP-528: a plan only DISCUSSED, never written, creates no obligation" {
+  # The first fix took any P### in the transcript, so a session that merely
+  # talked about a plan another window was editing got told to render its page —
+  # measured on this repository's own transcript, 299 mentions of P062.
+  local t="$TMP/transcript.jsonl"
+  printf '{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"content":"go"}}\n' > "$t"
+  printf '{"type":"assistant","message":{"content":"mluvíme o P900, ale nesaháme na něj"}}\n' >> "$t"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]
+}
+
+@test "IMP-528: the same finding is reported once per session, not every turn" {
+  local t; t="$(transcript "2020-01-01T00:00:00Z" "P900")"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  local first="$output"
+  [[ "$first" == *"P900"* ]]
+  # Same session, same transcript, next turn: it has already been said.
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [[ "$output" != *"P900"* ]]
 }
