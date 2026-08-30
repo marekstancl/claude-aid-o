@@ -1730,8 +1730,9 @@ already used for C3, where `aid-fsm.sh` validates a dispatch record the controll
 
 **Inputs and their trees:** the source plan comes from the candidate worktree when it carries a
 copy (else the state root); `execution.yaml`, evidence and plan-state are always the state
-root's. The stage prints where each came from — read that line before blaming a config edit
-that "did nothing" (a plan branch's `.aid-o/config` is not read).
+root's. `--stage gates` prints where both came from and `--stage inputs` prints the plan it
+used — read that line before blaming a config edit that "did nothing" (a plan branch's
+`.aid-o/config` is not read).
 
 **Before the first `--stage review` invocation, run `--stage inputs` exactly once.** This is
 an FSM-internal producer step — it dispatches nothing — that derives `review-profile.json`,
