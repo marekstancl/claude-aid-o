@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.10** (current) — uzávěrka čte plán z pracovní kopie kandidáta a říká, odkud plán i execution.yaml vzala
+- **v2.95.11** (current) — připomínka o plánu se řekne jednou a jen o tvých plánech
+- **v2.95.10** — uzávěrka čte plán z pracovní kopie kandidáta a říká, odkud plán i execution.yaml vzala
 - **v2.95.9** — zápisy problémů pluginu nesou verzi; mrtvý sběr compliance napříč projekty odstraněn
-- **v2.95.8** — transition a delivery gate měří worktree běhu; targeted_tests mimo plugin = skip, ne pass; validátor poradí u souboru v kořeni
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

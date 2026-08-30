@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.11] — 2026-08-30
+
+### Fixed
+- **Připomínka o otevřeném plánu se řekne jednou, ne na každém tahu** — pravidlo četlo všechny záznamy plánů v projektu a jmenovalo je při každém konci tahu, včetně plánů, na kterých session nepracovala. V konzumentském projektu se čtyři otevřené plány hlásily dokola a agent na každou připomínku odpověděl „čekám na tebe": pravidlo, které se opakuje, naučí čtenáře přeskakovat i tu jednu větu, která měla význam.
+- **Konec tahu mluví jen o plánech této session; začátek session o všech** — přehled celého workspace dává smysl na začátku, ne uprostřed práce na něčem jiném.
+- **Paměť „řekni to jednou" nemá jak spolknout připomínku, kterou nikdo nedostal** — bez identity session se připomínka řekne (dřív by prázdný klíč znamenal jednu sdílenou paměť pro všechny); `transcript_path: ""` nyní správně přepadne na `session_id`; a značce v úložišti se věří jen tehdy, když do ní jde zapsat — jen-pro-čtení úložiště dřív mlčelo navždy, přestože se chování jmenovalo „fail-open".
+- **Klíč session a přepis konverzace jsou dvě různé hodnoty** — `session_id`, které náhodou pojmenuje čitelný soubor, se už nečte jako přepis.
+
+### Changed
+- **`aid_session_once` je sdílená** — pravidlo „řekni to jednou za session" žije v session store, ne jako kopie v jednom pravidle; dvě kopie téže logiky by se rozešly.
+- **Vědomá mez je napsaná v kódu i pojištěná testem** — plán otevřený uprostřed session, který tahle session nezmíní, se ohlásí až při příštím startu. Ztráta je ohraničená jednou session; opačná vada, cizí plán hlášený na každém tahu, je ta, kvůli které se připomínky přestaly číst.
+
 ## [2.95.10] — 2026-08-30
 
 ### Fixed
