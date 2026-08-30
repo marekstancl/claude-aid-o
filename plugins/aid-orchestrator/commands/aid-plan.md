@@ -918,6 +918,13 @@ EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L
 
 ## Plan-final / close boundary
 
+**Which tree each input is read from** (ACTA #33): the source plan is read from the
+**candidate worktree** when it has a copy (a plan branch that edited its own acceptance
+criteria is judged on what it edited), else from the state root; `execution.yaml` and the
+evidence are **always the state root's** — a plan branch's copy of `.aid-o/config` is never
+read, edit it in the primary checkout. `plan-finalize --stage gates|inputs` prints both paths
+before it runs anything.
+
 Under `plan_branch`, the plan-final boundary is the PM's decision moment — so it
 gets a card and a one-screen page, not a file listing. After `aid-pm-brief.sh`
 has produced the handoff pair, render both from it:
@@ -1002,7 +1009,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-08-30
 
 ## Plan mode
 

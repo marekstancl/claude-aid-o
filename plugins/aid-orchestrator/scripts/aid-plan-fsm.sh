@@ -4745,6 +4745,39 @@ _pfsm_finalize_gates() {
   return "$rc"
 }
 
+# _pfsm_plan_file_for_gates <root> <troot> <plan_id> — the source plan the
+# plan-final run evaluates: the CANDIDATE tree's copy first (a plan branch may
+# have edited its own acceptance criteria — ACTA #33: a gate judged criteria
+# the work never saw), the state root's copy as the fallback (the usual
+# gitignored .aid-o has no copy in a worktree). Prints "<path>\t<origin>",
+# origin ∈ candidate|state_root; exit 1 when neither exists.
+_pfsm_plan_file_for_gates() {
+  local root="$1" troot="$2" plan_id="$3" cand
+  if [[ -n "$troot" && "$troot" != "$root" ]]; then
+    for cand in "${troot}/.aid-o/plans/${plan_id}"-*.md "${troot}/.aid-o/plans/${plan_id}"*.md; do
+      [[ -f "$cand" ]] || continue
+      printf '%s\tcandidate\n' "$cand"; return 0
+    done
+  fi
+  for cand in "${root}/.aid-o/plans/${plan_id}"-*.md "${root}/.aid-o/plans/${plan_id}"*.md; do
+    [[ -f "$cand" ]] || continue
+    printf '%s\tstate_root\n' "$cand"; return 0
+  done
+  return 1
+}
+
+# _pfsm_say_plan_inputs <stage> <plan_path> <origin> <execution_yaml> — one
+# stderr line naming WHERE the two inputs came from, before anything runs:
+# the config is always the state root's (editing a plan branch's copy of
+# .aid-o/config changes nothing — ACTA #33 lost half an hour to that).
+_pfsm_say_plan_inputs() {
+  local stage="$1" plan_path="$2" origin="$3" execution_yaml="$4"
+  local what="candidate worktree" cfg=""
+  [[ "$origin" == "state_root" ]] && what="state root (no copy in the candidate worktree)"
+  [[ -n "$execution_yaml" ]] && cfg="; execution.yaml = ${execution_yaml} (state root — a plan branch copy of .aid-o/config is NOT read; edit it in the primary checkout)"
+  echo "plan-finalize --stage ${stage}: plan = ${plan_path} (${what})${cfg}" >&2
+}
+
 # _pfsm_finalize_gates_body — everything that runs WITH the candidate checked
 # out. Split out so the HEAD restore above happens on every exit path.
 _pfsm_finalize_gates_body() {
@@ -4819,16 +4852,14 @@ _pfsm_finalize_gates_body() {
   local plan_required
   plan_required="$(_pfsm_plan_required_floor "$execution_yaml" "$release_include" "$manifest_gates")"
 
-  # ── The plan file the gates evaluate against ────────────────────────────
-  local plan_path="" cand
-  for cand in "${root}/.aid-o/plans/${plan_id}"*.md; do
-    [[ -f "$cand" ]] || continue
-    plan_path="$cand"; break
-  done
+  # ── The plan file the gates evaluate against: the candidate's copy ──────
+  local plan_path="" plan_origin=""
+  IFS=$'\t' read -r plan_path plan_origin < <(_pfsm_plan_file_for_gates "$root" "$troot" "$plan_id" || true)
   if [[ -z "$plan_path" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage gates: no plan file matching .aid-o/plans/${plan_id}*.md — without it plan_diff would run against '--plan null', take its Fast Mode exit-2 skip and report a green gate that verified nothing. Refusing the vacuous run." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: no plan file matching .aid-o/plans/${plan_id}*.md in the candidate worktree or the state root — without it plan_diff would run against '--plan null', take its Fast Mode exit-2 skip and report a green gate that verified nothing. Refusing the vacuous run." >&2
     return 1
   fi
+  _pfsm_say_plan_inputs gates "$plan_path" "$plan_origin" "$execution_yaml"
 
   local run_dir_abs="${root}/${run_dir_rel}"
   local report_file="${run_dir_abs}/gates_report.json"
@@ -9965,7 +9996,12 @@ _pfsm_finalize_inputs() {
   fi
 
   local project_id; project_id="$(basename "$root")"
-  local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
+  # The same plan the gates stage evaluates (candidate copy first): the
+  # prefilter profile and plan-diff.json must judge the SAME text as plan_diff.
+  local plan_file="" _in_origin="" _in_troot; _in_troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
+  IFS=$'\t' read -r plan_file _in_origin < <(_pfsm_plan_file_for_gates "$root" "$_in_troot" "$plan_id" || true)
+  [[ -n "$plan_file" ]] || plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"   # archive/ fallback, as before
+  [[ -n "$plan_file" ]] && _pfsm_say_plan_inputs inputs "$plan_file" "${_in_origin:-state_root}" ""
 
   # D3 / IMP-465: generate the three plan-boundary specialist scaffolds
   # (curator, verifier, reporter) BEFORE any of them are dispatched, so none

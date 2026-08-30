@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.10] — 2026-08-30
+
+### Fixed
+- **Uzávěrka hodnotila starou verzi plánu** — `plan-finalize --stage gates` i `--stage inputs` čtou zdrojový plán nejdřív z pracovní kopie kandidáta (plán, který si během práce upravil kritéria, je souzen podle toho, co upravil), teprve pak ze stavového kořene; brána `plan_diff`, profil revize i `plan-diff.json` tak hodnotí tentýž text. Obě fáze před během vypíší, odkud plán a `execution.yaml` vzaly – konfigurace bran je vždy ze stavového kořene, kopie na plánové větvi se nečte (ACTA ztratila půl hodiny hledáním, proč úprava timeoutu „nefunguje").
+
 ## [2.95.9] — 2026-08-30
 
 ### Changed
