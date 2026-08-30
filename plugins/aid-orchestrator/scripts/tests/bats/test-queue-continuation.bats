@@ -18,6 +18,9 @@ setup() {
   HOOK="$AID_PLUGIN_PATH/scripts/aid-hook.sh"
   source "$AID_PLUGIN_PATH/scripts/lib/aid-queue-continuation.sh"
   TMP="$(mktemp -d)"
+  # Each case gets its own session store: the rule now says a thing once per
+  # session, so a shared store would let one case silence the next.
+  export AID_SESSION_STORE="$TMP/session-store"
   ROOT="$TMP/repo"
   p090_mk_workspace "$ROOT"
   QUEUE="$ROOT/.aid-o/config/queue.yaml"
@@ -242,6 +245,11 @@ YAML
   [[ "$output" == *"E-090-2_2"* ]]
 
   # …and without the flag it is still 0: this rule has no refusal to strip.
+  # The once-per-session memory is cleared between the two, because what is
+  # under test here is the DISPATCHER, not the memory: leaving it would make
+  # the second call silent for the right reason and prove nothing about the
+  # wrong one.
+  rm -rf "${AID_SESSION_STORE:?}/queue-continuation"
   run bash "$HOOK" Stop <<< "$(_event)"
   [ "$status" -eq 0 ]
   [[ "$output" == *"E-090-2_2"* ]]
@@ -255,4 +263,48 @@ YAML
   [ "$output" = "Stop 3 open controller aid_hook_rule_queue_continuation_stop" ]
   run yq -r '.rules[] | select(.id == "queue_continuation_resume") | "\(.event) \(.degree) \(.failure) \(.owner) \(.handler)"' "$reg"
   [ "$output" = "SessionStart 3 open controller aid_hook_rule_queue_continuation_start" ]
+}
+
+# --- said once, not at every turn -----------------------------------------
+# 2026-08-30, a consumer project: this rule reads EVERY plan-state record in the
+# workspace, so four open plans were named at every single turn — including
+# plans the session was not working on. The agent answered "čekám na tebe" to
+# each one, which is what a rule that repeats teaches a reader to do.
+
+@test "an open plan is named once per session, not at every turn" {
+  _plan P020 auto EPIC_INTEGRATION
+  _queue_ready
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" == *"P020"* ]]
+
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" != *"P020"* ]]
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" != *"P020"* ]]
+}
+
+@test "a plan that MOVES is named again — that is news, standing still is not" {
+  _plan P020 auto EPIC_INTEGRATION
+  _queue_ready
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" == *"P020"* ]]
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" != *"P020"* ]]
+
+  _plan P020 auto PLAN_GATES
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" == *"P020"* ]]
+}
+
+@test "two open plans are both named, and both fall silent together" {
+  _plan P018 auto EPIC_INTEGRATION
+  _plan P020 auto EPIC_INTEGRATION
+  _queue_ready
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" == *"P018"* ]]
+  [[ "$output" == *"P020"* ]]
+
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [[ "$output" != *"P018"* ]]
+  [[ "$output" != *"P020"* ]]
 }

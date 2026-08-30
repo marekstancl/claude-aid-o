@@ -125,6 +125,12 @@ aid_queue_continuation_scan() {
 }
 
 # _aid_qc_root <event json> — the state root, or nothing (and a reason on
+
+# The once-per-session memory lives in the session store, shared with the
+# milestone rule rather than copied — two copies of "say it once" drift.
+# shellcheck source=aid-session-store.sh
+source "${BASH_SOURCE[0]%/*}/aid-session-store.sh" 2>/dev/null || true
+
 # stderr). Shared by both handlers.
 _aid_qc_root() {
   local cwd
@@ -163,9 +169,23 @@ _aid_qc_emit() {
   local input; input="$(cat)"
   local root; root="$(_aid_qc_root "$input")" || return 3
 
+  # SAY IT ONCE PER SESSION, PER PLAN, PER STATE. This rule reads every
+  # plan-state record in the workspace, so in a project with four open plans it
+  # named all four at EVERY turn — including plans the session was not working
+  # on. Measured 2026-08-30 in a consumer project: the reminder repeated for a
+  # dozen turns and the agent answered "čekám na tebe" to each one, which is
+  # what a rule that repeats teaches. The key carries the plan AND its state, so
+  # a plan that MOVES is named again — that is news; standing still is not.
+  local _qc_skey; _qc_skey="$(printf '%s' "$input" | jq -r '.transcript_path // .session_id // ""' 2>/dev/null)"
+  local _qc_once_ok=1
+  command -v aid_session_once >/dev/null 2>&1 || _qc_once_ok=0
+
   local plan state result next n=0
   while IFS=$'\t' read -r plan state result next; do
     [[ -n "$plan" ]] || continue
+    if (( _qc_once_ok )) && ! aid_session_once "queue-continuation" "$_qc_skey" "${plan}:${state}:${result}"; then
+      continue
+    fi
     (( n == 0 )) && echo "$heading"
     n=$((n+1))
     _aid_qc_line "$plan" "$state" "$result" "$next"
