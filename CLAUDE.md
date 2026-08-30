@@ -397,6 +397,32 @@ for a pass: a continuity capsule across a real compaction (a compaction cannot
 be triggered on demand) and the subagent protocol notice reaching a real role
 agent (the mechanism is measured, that delivery is not).
 
+## Problémy pluginu hlášené projekty (aid-plugin-issues)
+
+Každý projekt, který AID používá, má soubor `.aid-o/work/aid-plugin-issues.md`
+(vzniká sám při `plan-start` a každém `init`; pravidla kdy a jak psát má v
+hlavičce). Píší do něj agenti i controller, když se špatně chová **AID sám** –
+ne projekt. Sem se to stahuje a tady se rozhoduje.
+
+**Sběr:** `bash bin/aid-plugin-issues-collect.sh [--dry-run]`
+- projde `/opt/eco/projects/*/.aid-o/work/aid-plugin-issues.md`,
+- nepřevzaté body slepí do `docs/plans/plugin-issues-inbox.md` (gitignorováno –
+  commitovat `git add -f`),
+- v projektu je označí `> **PŘEVZATO <datum> (aid-orchestrator)**`; nic nemaže.
+Pouští se ručně, když je čas rozhodovat (`--dry-run` jen ukáže, co přibylo).
+
+**Postup po sběru:**
+1. Každý bod ověřit v kódu a nechat nezávisle posoudit Codexem
+   (reálná chyba / dokumentace / design / už opraveno).
+2. Předložit PM lidsky: co se děje, možnosti, doporučení, proč – PM rozhodne.
+   Nic nejde do backlogu bez tohoto popisu.
+3. Schválené opravy: návrh → Codex → oprava → Codex → merge cesta (t0+t1) → vydání.
+4. Výsledek dopsat pod bod v souboru projektu:
+   `> **HOTOVO vX.Y.Z (datum):** co se změnilo` / `ZAMÍTNUTO:` proč /
+   `NECHAT, ověřit <kdy>`. Soubor projektu je jeho záznam, nikdy se nemaže.
+5. Designové body, které PM schválil odložit, dostanou řádek `IMP-NNN`
+   v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu.
+
 ## Conventions
 
 ### Test tiers (P081 — AID is the ecosystem pilot)
