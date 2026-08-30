@@ -203,7 +203,9 @@ already true, two AID tools contradict each other — write it to
 plan-start and at every EPIC init; its header carries the rules and the entry
 format), NOT into the project backlog. Per entry: date and what you were doing,
 what happened, what it caused, what you did about it (workaround, `--force`, gave
-up). Every `--force` and every `amend-scope` you needed because AID was wrong is
+up), and the plugin version on the `Plugin:` line (the file header says where to
+read it; the Stop-hook reminder prints it) — a month later that line is what says
+whether the defect was already fixed. Every `--force` and every `amend-scope` you needed because AID was wrong is
 an entry. A plugin defect found by an external reviewer (Codex) is written by the
 controller — Codex runs read-only. The plugin owner collects these files across
 projects; nothing else reads them, so a missed entry costs nothing and a
@@ -381,7 +383,7 @@ about that path is available to a dispatched agent.
 
 ---
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-08-30
 
 ## Agent handoff contract at the plan boundary
 

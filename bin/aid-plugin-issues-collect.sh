@@ -44,9 +44,11 @@ for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
   # under each heading it took.
   tmp="$(mktemp)"; blocks="$(mktemp)"
   awk -v today="$TODAY" -v mark_re="$MARK_RE" -v blocks="$blocks" -v project="$project" '
-    function flush() {
+    function flush(   v) {
       if (inentry && !marked) {
-        printf "\n---\n\n#### %s — %s\n\n%s\n", project, headline, body >> blocks
+        v = "plugin: not recorded"
+        if (match(body, /\*\*Plugin:\*\* *v?[0-9][0-9.]*/)) { v = substr(body, RSTART, RLENGTH); sub(/^\*\*Plugin:\*\* */, "plugin v", v); sub(/vv/, "v", v) }
+        printf "\n---\n\n#### %s — %s (%s)\n\n%s\n", project, headline, v, body >> blocks
         taken++
       }
     }

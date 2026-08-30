@@ -34,14 +34,27 @@ aid_plugin_issues_path() {
   aid_state_path "$AID_PLUGIN_ISSUES_REL" 2>/dev/null || printf '%s' "$AID_PLUGIN_ISSUES_REL"
 }
 
+# aid_plugin_issues_version — this plugin's version, from its own manifest
+# (../../.claude-plugin/plugin.json relative to this lib — the same path the
+# cache preflight uses, valid for the marketplace cache, a worktree and
+# --plugin <dir>). "unknown" when unreadable; never fails.
+aid_plugin_issues_version() {
+  local m="${_AID_PI_LIB_DIR}/../../.claude-plugin/plugin.json" v=""
+  [[ -r "$m" ]] && command -v jq >/dev/null 2>&1 && v="$(jq -r '.version // "unknown"' "$m" 2>/dev/null)"
+  printf '%s' "${v:-unknown}"
+}
+
 # aid_plugin_issues_ensure [root] — create the file from the template when
-# absent. Prints one line on stderr when it creates; never fails the caller.
+# absent; the header's {{PLUGIN_VERSION}} / {{CREATED_DATE}} tokens are filled
+# once at creation. Prints one line on stderr when it creates; never fails.
 aid_plugin_issues_ensure() {
   local f; f="$(aid_plugin_issues_path "${1:-}")"
   [[ -f "$f" ]] && return 0
   local tpl="${_AID_PI_LIB_DIR}/../../defaults/templates/aid-plugin-issues.md"
   mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
-  if [[ -r "$tpl" ]]; then cp "$tpl" "$f" 2>/dev/null || return 0
+  if [[ -r "$tpl" ]]; then
+    local v d; v="$(aid_plugin_issues_version)"; d="$(date -u +%Y-%m-%d)"
+    sed -e "s/{{PLUGIN_VERSION}}/${v}/g" -e "s/{{CREATED_DATE}}/${d}/g" "$tpl" > "$f" 2>/dev/null || return 0
   else printf '# Problems with the AID plugin\n\n<!-- entries below, newest last -->\n' > "$f" 2>/dev/null || return 0
   fi
   echo "aid-plugin-issues: created ${f} — AID's own defects go there, not into the project backlog (rules in its header)" >&2
@@ -103,8 +116,8 @@ aid_hook_rule_plugin_issues_reminder() {
   fi
   # "since this session began", not "this session did": a parallel session on
   # the same project is counted too — the reminder is a nudge, not a charge.
-  printf 'AID: since this session began, AID refused or was bypassed %s time(s) in this project (force, amend-scope, or a precondition failure) and %s has no new entry. If any of that was a defect of the PLUGIN — a valid state refused, a crash, a misleading message — record it there (format in its header). A defect of the project is not one; then nothing to do.\n' \
-    "$n" "${f#"${root}"/}"
+  printf 'AID: since this session began, AID refused or was bypassed %s time(s) in this project (force, amend-scope, or a precondition failure) and %s has no new entry. If any of that was a defect of the PLUGIN — a valid state refused, a crash, a misleading message — record it there (format in its header; this is plugin v%s, put it on the entry'"'"'s Plugin: line). A defect of the project is not one; then nothing to do.\n' \
+    "$n" "${f#"${root}"/}" "$(aid_plugin_issues_version)"
   [[ -n "$mark" ]] && : > "$mark" 2>/dev/null
   return 0
 }

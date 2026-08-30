@@ -23,6 +23,9 @@ _transcript_started_at() { printf '{"type":"user","timestamp":"%s"}\n' "$1" > "$
   [ "$status" -eq 0 ]; [[ "$output" == *"created"* ]]
   grep -q '^# Problems with the AID plugin' "$T/proj/.aid-o/work/aid-plugin-issues.md"
   grep -q 'When to write here' "$T/proj/.aid-o/work/aid-plugin-issues.md"
+  local v; v="$(jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json")"
+  grep -q "created by aid-orchestrator v${v} on $(date -u +%Y-%m-%d)" "$T/proj/.aid-o/work/aid-plugin-issues.md"
+  ! grep -q '{{PLUGIN_VERSION}}' "$T/proj/.aid-o/work/aid-plugin-issues.md"
   printf '### 1. something\n' >> "$T/proj/.aid-o/work/aid-plugin-issues.md"
   run aid_plugin_issues_ensure "$T/proj"
   [ -z "$output" ]
@@ -43,6 +46,7 @@ _transcript_started_at() { printf '{"type":"user","timestamp":"%s"}\n' "$1" > "$
   printf '{"ts":"%s","event":"fsm_force_override","epic_id":"E-1"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T/proj/.aid-o/work/audit-log.jsonl"
   run aid_hook_rule_plugin_issues_reminder <<< "$(_stop)"
   [ "$status" -eq 0 ]; [[ "$output" == *"1 time(s)"* && "$output" == *"aid-plugin-issues.md has no new entry"* ]]
+  [[ "$output" == *"this is plugin v$(jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json")"* ]]
   run aid_hook_rule_plugin_issues_reminder <<< "$(_stop)"
   [ -z "$output" ]                                                     # said once
   printf '{"ts":"%s","event":"fsm_increment_fail","step":"2"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T/proj/.aid-o/work/evidence/E-1/R-1/timeline.jsonl"
@@ -88,7 +92,7 @@ _transcript_started_at() { printf '{"type":"user","timestamp":"%s"}\n' "$1" > "$
 > **HOTOVO v2.95.2 (2026-08-29):** fixed
 
 ### 2. init crashed on $6
-**Date:** 2026-08-27
+**Date:** 2026-08-27 · **Plugin:** v2.94.0
 what happened here
 
 ### 3. message lied
@@ -103,7 +107,8 @@ EOF
   grep -c 'PŘEVZATO' "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md" | grep -qx 2
   grep -q '^### 1. gate refused' "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md"   # nothing deleted
   grep -q 'HOTOVO v2.95.2' "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md"
-  grep -q '#### alpha — 2. init crashed' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
+  grep -q '#### alpha — 2. init crashed on $6 (plugin v2.94.0)' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
+  grep -q '#### alpha — 3. message lied (plugin: not recorded)' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
   grep -q '#### beta — 1. only one' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
   grep -q 'what happened here' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
   run bash "$HOME_INBOX/bin/aid-plugin-issues-collect.sh" --root "$T/projects"

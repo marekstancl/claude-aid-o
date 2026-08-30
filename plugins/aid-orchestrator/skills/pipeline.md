@@ -271,11 +271,10 @@ aid-fsm.sh done-advance review release $state_file --force --reason \
 - `fsm_force_override` timeline event records `from`, `to`, `reason`, `caller`, `operator` fields
 - Persistent entry to `.aid-o/work/audit-log.jsonl` (cross-EPIC trail, append-only)
 - `compliance.json` captures `force_override_count` (int) + `force_override_reasons` (array) per EPIC
-- `aid-compliance-report.sh --reflect` flags **🔴 SYSTEMATIC** if:
-  - avg force_override_count across post-session-b EPICs > 1, OR
-  - max per single EPIC > 3, OR
-  - ≥ 30 % of EPICs used force at all, OR
-  - any reason < 30 chars or matches low-quality regex `^(fix|bug|needed|done)$`
+- Overuse of `--force` is read where it is recorded: the audit log, and the project's
+  `.aid-o/work/aid-plugin-issues.md` (every force needed because AID was wrong is an entry,
+  collected by the owner). The cross-project `aid-compliance-report.sh --reflect` aggregator
+  was removed in v2.95.9 — nothing called it.
 
 ### FSM States
 
@@ -1620,7 +1619,7 @@ Four telemetry mechanisms fire automatically during DONE state. Detail in [Telem
   above — but the page is then owed: the Stop rule `milestone_artifact_rendered` refuses a turn
   that finished an EPIC without one. **Publish it with the Artifact tool** and hand the PM the
   link; the renderer writes a body and never publishes.
-- **Compliance Telemetry** — writes `compliance.json` with 6 enforcement dimensions; `overall: pass` if all checks ∈ {true, null}. Aggregator: `aid-compliance-report.sh`.
+- **Compliance Telemetry** — writes `compliance.json` with 6 enforcement dimensions; `overall: pass` if all checks ∈ {true, null}. Read by the P042 recovery alert and the C4 release aggregator (the cross-project era report was removed in v2.95.9).
 - **Tiered Severity** — `done-advance review release` refuses transition on `severity: blocking` failures; soft-fail if `yq` missing. Override via `--force --reason`. Severity registry: `.aid-o/config/check-severity.yaml`.
 - **Compliance Recovery Alert** (P042) — Telegram `🛑` on block, `✅` on recovery. Config gate: `notifications.telegram.alert_on_compliance_recovery` (default `true`).
 
@@ -2819,10 +2818,7 @@ After every successful `done-advance` to `release`, `aid-fsm.sh` writes
 `compliance_written` timeline event is emitted with `deploy_era`, `overall`,
 `checks_passed`, `checks_failed` payload.
 
-Aggregator: `bash $AID_PLUGIN_PATH/scripts/aid-compliance-report.sh --since YYYY-MM-DD`
-produces a pre vs post comparison table.
-
-Backfill (one-shot post-deploy): `bash $AID_PLUGIN_PATH/scripts/aid-compliance-backfill.sh --deploy-date YYYY-MM-DDTHH:MM:SSZ`
+Cross-project aggregation and the one-shot backfill were removed in v2.95.9 (the May 2026 era comparison had no caller left); per-run `compliance.json` stays.
 retroactively generates `compliance.json` for existing EPICs with `deploy_era: pre-session-a`
 AND stamps missing `created_at:` field into `fsm-state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
 

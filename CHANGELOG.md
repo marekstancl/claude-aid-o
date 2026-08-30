@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.95.9] — 2026-08-30
+
+### Changed
+- **Zápis problému pluginu nese verzi pluginu** — formát má řádek `**Plugin:** vX.Y.Z` (hlavička říká, kde verzi přečíst), soubor se při založení orazítkuje verzí, která ho vytvořila, připomínkový hook aktuální verzi vypíše a sběrný skript ji dá do nadpisu v inboxu. Za měsíc tak jde říct, zda byl bod zapsán před opravou nebo po ní – z data se to dovodit nedalo.
+
+### Removed
+- **Sběr compliance napříč projekty** — `aid-compliance-report.sh` (srovnání „ér“ před/po Session A/B z května, `--reflect` nad nadužíváním `--force`) a jednorázový `aid-compliance-backfill.sh`: čtyři měsíce je nikdo nezavolal a nadužívání `--force` se dnes čte z audit logu a ze souboru problémů pluginu. Zápis `compliance.json` po každém EPICu zůstává – čte ho kontrola P042 a C4.
+
 ## [2.95.8] — 2026-08-29
 
 ### Fixed
