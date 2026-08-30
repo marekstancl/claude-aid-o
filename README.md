@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.8** (current) — transition a delivery gate měří worktree běhu; targeted_tests mimo plugin = skip, ne pass; validátor poradí u souboru v kořeni
+- **v2.95.9** (current) — zápisy problémů pluginu nesou verzi; mrtvý sběr compliance napříč projekty odstraněn
+- **v2.95.8** — transition a delivery gate měří worktree běhu; targeted_tests mimo plugin = skip, ne pass; validátor poradí u souboru v kořeni
 - **v2.95.7** — aid-plugin-issues.md vzniká sám + připomínka + sběr; rebase-plan; force nepřeskočí evidenci; opravy z inboxu
-- **v2.95.5** — amend-scope, uzávěrka dluží jen brány z profilu, plan-start commituje plán, merge se už tiše nevrátí
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
