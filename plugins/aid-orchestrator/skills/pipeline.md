@@ -2818,9 +2818,8 @@ After every successful `done-advance` to `release`, `aid-fsm.sh` writes
 `compliance_written` timeline event is emitted with `deploy_era`, `overall`,
 `checks_passed`, `checks_failed` payload.
 
-Cross-project aggregation and the one-shot backfill were removed in v2.95.9 (the May 2026 era comparison had no caller left); per-run `compliance.json` stays.
-retroactively generates `compliance.json` for existing EPICs with `deploy_era: pre-session-a`
-AND stamps missing `created_at:` field into `fsm-state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
+Cross-project aggregation and the one-shot backfill were removed in v2.95.9 (the May 2026
+era comparison had no caller left); per-run `compliance.json` stays.
 
 Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produces
 a forensic frequency table (file counts, branch hygiene, gate authenticity, top
