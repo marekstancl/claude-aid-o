@@ -308,3 +308,94 @@ YAML
   [[ "$output" != *"P018"* ]]
   [[ "$output" != *"P020"* ]]
 }
+
+# --- the failure paths Codex named, 2026-08-30 ----------------------------
+
+@test "memory: two sessions do not silence each other" {
+  _plan P020 auto EPIC_INTEGRATION
+  _queue_ready
+  local a="$TMP/ta.jsonl" b="$TMP/tb.jsonl"
+  printf 'P020\n' > "$a"; printf 'P020\n' > "$b"
+
+  run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$a" '{cwd:$c,transcript_path:$t}')"
+  [[ "$output" == *"P020"* ]]
+  # A DIFFERENT session must still hear it, even for the same plan and state.
+  run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$b" '{cwd:$c,transcript_path:$t}')"
+  [[ "$output" == *"P020"* ]]
+}
+
+@test "memory: an empty transcript_path falls back to session_id, not to a shared key" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-session-store.sh'
+    AID_SESSION_STORE='$TMP/s2' aid_session_once ns 'sid-a' 'item' && echo first-said
+    AID_SESSION_STORE='$TMP/s2' aid_session_once ns 'sid-a' 'item' || echo second-silent
+    AID_SESSION_STORE='$TMP/s2' aid_session_once ns 'sid-b' 'item' && echo other-session-said"
+  [[ "$output" == *"first-said"* ]]
+  [[ "$output" == *"second-silent"* ]]
+  [[ "$output" == *"other-session-said"* ]]
+}
+
+@test "memory: with no session identity at all the reminder is SAID, never assumed said" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-session-store.sh'
+    AID_SESSION_STORE='$TMP/s3' aid_session_once ns '' 'item' && echo said-1
+    AID_SESSION_STORE='$TMP/s3' aid_session_once ns '' 'item' && echo said-2"
+  [[ "$output" == *"said-1"* ]]
+  [[ "$output" == *"said-2"* ]]
+}
+
+@test "memory: a store that cannot be written does not silence — it reports" {
+  local ro="$TMP/ro"
+  mkdir -p "$ro/ns"
+  printf 'item\n' > "$ro/ns/seen-$(printf '%s' sid | sha256sum | cut -c1-16)"
+  chmod -w "$ro/ns/seen-$(printf '%s' sid | sha256sum | cut -c1-16)"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-session-store.sh'
+    AID_SESSION_STORE='$ro' aid_session_once ns sid item && echo said-despite-marker"
+  chmod +w "$ro/ns/"* 2>/dev/null || true
+  [[ "$output" == *"said-despite-marker"* ]]
+}
+
+@test "a plan this session has never been in is not named at all" {
+  _plan P018 auto EPIC_INTEGRATION     # the session's own
+  _plan P077 auto EPIC_INTEGRATION     # somebody else's
+  _queue_ready
+  local t="$TMP/tc.jsonl"; printf 'pracuji na P018\n' > "$t"
+  run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$t" '{cwd:$c,transcript_path:$t}')"
+  [[ "$output" == *"P018"* ]]
+  [[ "$output" != *"P077"* ]]
+}
+
+@test "SessionStart names a plan this session has never been in — Stop does not" {
+  # Codex, 2026-08-30: filtering by transcript at Stop could bury a plan nobody
+  # has mentioned. The start of a session is where the whole workspace belongs.
+  _plan P018 auto EPIC_INTEGRATION
+  _plan P077 auto EPIC_INTEGRATION
+  _queue_ready
+  local t="$TMP/td.jsonl"; printf 'pracuji na P018\n' > "$t"
+  local ev; ev="$(jq -n --arg c "$ROOT" --arg t "$t" '{cwd:$c,transcript_path:$t}')"
+
+  run aid_hook_rule_queue_continuation_stop <<< "$ev"
+  [[ "$output" != *"P077"* ]]
+
+  run aid_hook_rule_queue_continuation_start <<< "$ev"
+  [[ "$output" == *"P077"* ]]
+}
+
+@test "a plan opened mid-session is not lost — the next SessionStart names it" {
+  # The accepted limit, pinned: a plan that opens during a session this one
+  # never mentions is silent at Stop, and the NEXT SessionStart says it. The
+  # loss is bounded by one session, never permanent.
+  _plan P018 auto EPIC_INTEGRATION
+  _queue_ready
+  local t="$TMP/te.jsonl"; printf 'pracuji na P018\n' > "$t"
+  local ev; ev="$(jq -n --arg c "$ROOT" --arg t "$t" '{cwd:$c,transcript_path:$t}')"
+
+  run aid_hook_rule_queue_continuation_start <<< "$ev"
+  [[ "$output" != *"P077"* ]]              # not open yet
+
+  _plan P077 auto EPIC_INTEGRATION         # …another actor opens it mid-session
+  run aid_hook_rule_queue_continuation_stop <<< "$ev"
+  [[ "$output" != *"P077"* ]]              # this session is not told — by design
+
+  local t2="$TMP/tf.jsonl"; printf 'nova session\n' > "$t2"
+  run aid_hook_rule_queue_continuation_start <<< "$(jq -n --arg c "$ROOT" --arg t "$t2" '{cwd:$c,transcript_path:$t}')"
+  [[ "$output" == *"P077"* ]]              # …the next session start is
+}

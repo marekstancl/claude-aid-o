@@ -71,14 +71,31 @@ aid_session_once() {
   local skey="${2-}" item="${3-}"
   [[ -n "$item" ]] || return 0
 
+  # NO IDENTITY, NO MEMORY. An empty session key would hash to one shared file,
+  # so session B would be silenced by something session A was told — a reminder
+  # swallowed by a session that never received it (Codex, 2026-08-30). Unknown
+  # identity therefore means "say it", never "assume it was said".
+  [[ -n "$skey" ]] || return 0
+
   local dir file
   dir="$(aid_session_store_dir "$ns" 2>/dev/null)" || return 0
   file="${dir}/seen-$(printf '%s' "${skey}" | sha256sum 2>/dev/null | cut -c1-16)"
-  [[ -n "$file" ]] || return 0
+  [[ "$file" == */seen-?* ]] || return 0
 
-  if [[ -f "$file" ]] && grep -qxF -- "$item" "$file" 2>/dev/null; then
+  # THE MARKER IS TRUSTED ONLY IF IT CAN STILL BE WRITTEN. A read-only store
+  # that already holds the item would otherwise suppress for ever while the
+  # function claims to fail open: the read succeeds, the write never could, and
+  # nothing new is ever recorded. Establish writability first, and treat its
+  # absence as "no memory available" — which means say it.
+  if [[ -e "$file" ]]; then
+    [[ -w "$file" ]] || return 0
+  else
+    [[ -w "$dir" ]] || return 0
+  fi
+
+  if grep -qxF -- "$item" "$file" 2>/dev/null; then
     return 1
   fi
-  printf '%s\n' "$item" >> "$file" 2>/dev/null || true
+  printf '%s\n' "$item" >> "$file" 2>/dev/null || return 0
   return 0
 }

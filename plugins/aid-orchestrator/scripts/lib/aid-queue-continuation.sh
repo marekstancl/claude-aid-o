@@ -176,13 +176,57 @@ _aid_qc_emit() {
   # dozen turns and the agent answered "čekám na tebe" to each one, which is
   # what a rule that repeats teaches. The key carries the plan AND its state, so
   # a plan that MOVES is named again — that is news; standing still is not.
-  local _qc_skey; _qc_skey="$(printf '%s' "$input" | jq -r '.transcript_path // .session_id // ""' 2>/dev/null)"
+  # `//` in jq falls back on null and false, NOT on an empty string, so an
+  # event carrying `"transcript_path": ""` never reached session_id and every
+  # such session shared one memory (Codex, 2026-08-30). Pick the first field
+  # that is actually non-empty.
+  # The session KEY and the TRANSCRIPT are two different things: a session_id
+  # that happens to name a readable file must never be read as a transcript
+  # (Codex, 2026-08-30). The key identifies, the transcript is evidence.
+  local _qc_transcript
+  _qc_transcript="$(printf '%s' "$input" | jq -r '.transcript_path? // "" | if type == "string" then . else "" end' 2>/dev/null)"
+  local _qc_skey
+  _qc_skey="$(printf '%s' "$input" | jq -r '[.transcript_path?, .session_id?] | map(select(type == "string" and . != "")) | first // ""' 2>/dev/null)"
   local _qc_once_ok=1
   command -v aid_session_once >/dev/null 2>&1 || _qc_once_ok=0
+
+  # WHOSE PLANS THIS SESSION IS TOLD ABOUT. Deduplicating was not enough: the
+  # rule still named every open plan in the workspace, so an unrelated plan
+  # moving produced a fresh end-of-turn reminder for work this session never
+  # touched (Codex, 2026-08-30, finding 5 — and the PM's original complaint,
+  # "info z jinýho plánu pořád"). A session hears about a plan it has actually
+  # been in: one named in its own transcript. With no transcript to read, the
+  # filter does not apply — a rule that cannot tell whose work it is says its
+  # piece rather than staying silent about everything.
+  # WHAT THIS DELIBERATELY DOES NOT COVER, and why it is the right trade.
+  # A plan that becomes open DURING this session, and that this session never
+  # mentions, is named at neither hook: SessionStart already happened, and Stop
+  # filters it out (Codex, 2026-08-30, third round). That is accepted, for two
+  # reasons. Whoever opened it has it in THEIR transcript, so it is reported —
+  # just not here; and the next SessionStart in this workspace names it anyway,
+  # so the loss is bounded by one session rather than permanent. The PM asked
+  # for the opposite failure to stop: "info z jinýho plánu pořád" — an unrelated
+  # plan named at every turn until the reminder itself stopped being read.
+  # Between a reminder that arrives one session late and a reminder nobody
+  # reads, this picks the first.
+  #
+  # …and it applies to the END of a turn only. SessionStart is the one moment
+  # where hearing about the whole workspace is the point, so the overview is
+  # not filtered there: a plan nobody has mentioned yet would otherwise never
+  # be named at all (Codex, 2026-08-30, finding 5). Stop says only yours;
+  # SessionStart says everything, once.
+  local _qc_mine="" _qc_filter=0
+  if [[ "${_qc_scope:-stop}" == "stop" && -n "$_qc_transcript" && -r "$_qc_transcript" ]]; then
+    _qc_mine=" $(grep -oE '\bP[0-9]{3}\b' "$_qc_transcript" 2>/dev/null | sort -u | tr '\n' ' ')"
+    [[ -n "${_qc_mine// /}" ]] && _qc_filter=1
+  fi
 
   local plan state result next n=0
   while IFS=$'\t' read -r plan state result next; do
     [[ -n "$plan" ]] || continue
+    if (( _qc_filter )) && [[ "$_qc_mine" != *" $plan "* ]]; then
+      continue
+    fi
     if (( _qc_once_ok )) && ! aid_session_once "queue-continuation" "$_qc_skey" "${plan}:${state}:${result}"; then
       continue
     fi
@@ -211,6 +255,9 @@ aid_hook_rule_queue_continuation_stop() {
 # `epic-merge-to-plan` that would have continued the plan never happens again,
 # so the guidance Step 4 wrote would be read by nobody. This is who reads it.
 aid_hook_rule_queue_continuation_start() {
+  # `all`: the start of a session is exactly where the whole workspace is worth
+  # hearing about — including a plan this session has not been in yet.
+  local _qc_scope=all
   _aid_qc_emit \
     "AID — an autonomous plan from an earlier session is still open (nothing was changed):" \
     "  Continue it with: aid-plan-continue.sh <plan_id> <the EPIC that finished>"
