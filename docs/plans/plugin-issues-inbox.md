@@ -880,3 +880,76 @@ exit_code 0" čte každý jako „cílené testy prošly", ne jako „žádné s
 
 ---
 
+
+## Collected 2026-08-30 — 1 entry from 3 project(s)
+
+---
+
+#### acta — 33. Brány čtou `execution.yaml` z hlavního stromu, ne z worktree plánu (plugin: not recorded)
+
+**Kde:** `aid-run-gates.sh` / `aid-plan-fsm.sh plan-finalize --stage gates`,
+načtení `.aid-o/config/execution.yaml`.
+
+**Co se stalo:** brána `plan_diff` padala na timeout (exit 124, 180 s), ačkoli
+ruční běh ukázal, že všech 11 akceptačních kritérií je `present` — potřebuje
+jen 318 s. Zvýšil jsem `timeout_seconds` na 900 a commitnul do `plan/P016`,
+tedy do worktree, kde plán žije a kde probíhá celá práce.
+
+Další běh spadl **stejně, na 180 s**:
+
+```
+=== plan_diff exit 124 dur 180 s ===
+```
+
+Konfigurace se čte z `$AID_PROJECT_ROOT/.aid-o/config/execution.yaml`, což je
+**hlavní checkout** — ten byl na `main` a moji změnu neměl. Ověřeno:
+
+| Strom | `plan_diff.timeout_seconds` |
+|-------|------------------------------|
+| worktree `plan/P016` (kde jsem editoval) | 900 |
+| hlavní checkout (odkud se čte) | 180 |
+
+**Proč to vadí:** je to tichá past. Změna konfigurace v místě, kde se pracuje,
+nemá žádný účinek a nic to neřekne — brána prostě spadne znovu se stejným
+číslem. Člověk hledá chybu v konfiguraci, kterou právě opravil.
+
+Navíc to znamená, že konfigurace bran **není verzovaná spolu s prací**:
+`.aid-o/config/` v plánové větvi je mrtvý soubor, který se nikdy nepoužije,
+dokud se plán nemergne do `main`.
+
+**Stejná třída jako #20, #25 a #27** — čtvrté místo, kde se plete hlavní
+checkout s worktree plánu.
+
+**Obcházka:** editovat `.aid-o/config/execution.yaml` v HLAVNÍM stromu, ne
+v worktree. Ale pak ta změna není součástí plánu, což je vlastní problém.
+
+**Návrh:** buď číst konfiguraci z worktree běhu (konzistentní s tím, že se
+tam pouští testy), nebo aspoň při startu vypsat, ODKUD se `execution.yaml`
+načetl. Jeden řádek by tuhle půlhodinu ušetřil.
+
+**Netýká se jen konfigurace — týká se i PLÁNU (2026-08-30).** Po opravě
+timeoutu doběhla brána `plan_diff` celá a spadla na AC5:
+
+```
+AC5  absent  exit=127 (expected 0)  Migrace 0031 a 0032 existují, jedou up i down
+```
+
+`exit 127` = příkaz neexistuje. Kritérium volá
+`backend/scripts/verify_migrations_0031_0032.sh`, jenže ten se v P016
+přejmenoval na `_0033` (Step 16 si vzal migraci 0032). Plán v worktree to
+má správně:
+
+| Strom | AC5 volá |
+|-------|----------|
+| worktree `plan/P016` (kde plán žije a kde se edituje) | `verify_migrations_0031_0033.sh` |
+| hlavní checkout (odkud brána čte) | `verify_migrations_0031_0032.sh` |
+
+Ruční běh správného skriptu: `exit=0`. Kritérium tedy **splněné je**, brána
+jen hodnotila zastaralé zadání.
+
+To je horší než u konfigurace: `plan_diff` má ověřovat, že akceptační kritéria
+PLÁNU jsou v kódu splněná — a čte je z verze plánu, kterou práce na plánu
+nikdy neviděla. Dokud se plán nemergne do `main`, brána hodnotí něco jiného,
+než co se dělalo. U plánu, který mění vlastní akceptační kritéria (a to dělá
+každý delší plán), je výsledek systematicky nepravdivý.
+
