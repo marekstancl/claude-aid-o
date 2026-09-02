@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aid-evidence-verify.sh — AID evidence pack verifier (Step 2: core checks)
 #
-# Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head]
+# Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>]
 #
 # Verifies git cleanliness, locates the canonical evidence pack, and validates
 # every protocol-v2 artifact for freshness, protocol conformance, and fingerprint.
@@ -119,9 +119,15 @@ parse_args() {
         AT_HEAD_MODE=true
         shift
         ;;
+      --tree)
+        # The working tree whose HEAD and cleanliness are judged — see
+        # resolve_root. Evidence still comes from the state root.
+        TREE="${2:-}"
+        shift 2
+        ;;
       -*)
         echo "aid-evidence-verify: unknown option: $1" >&2
-        echo "Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head]" >&2
+        echo "Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>]" >&2
         exit 2
         ;;
       *)
@@ -141,7 +147,7 @@ parse_args() {
       ;;
     *)
       echo "aid-evidence-verify: expected 0 or 2 positional args (epic_id run_id), got ${#positional[@]}" >&2
-      echo "Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head]" >&2
+      echo "Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>]" >&2
       exit 2
       ;;
   esac
@@ -167,6 +173,28 @@ resolve_root() {
     ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || ROOT="."
   fi
   export ROOT
+
+  # TWO DIFFERENT QUESTIONS, TWO DIFFERENT DIRECTORIES.
+  #   ROOT — where the EVIDENCE lives: always the state root, because `.aid-o/`
+  #          resolves there from every worktree.
+  #   TREE — the working tree whose HEAD and cleanliness are being judged.
+  # They were the same value, so a plan-branch candidate in its own worktree was
+  # judged by the PRIMARY checkout: ACTA, 2026-08-31 — the report named main's
+  # head and failed `git_clean` on unrelated work belonging to another session
+  # and another plan. C4 is `enforcement: observe`, which is the only reason
+  # that was survivable; as a blocking check it could never have verified a
+  # plan-branch candidate at all.
+  # `--tree` is how a caller says which one it means. Without it the tree
+  # containing the CURRENT DIRECTORY is used, which is right for a hand-run and
+  # is RECORDED in the report either way — a check that will not say which tree
+  # it looked at is how this went unnoticed.
+  if [[ -z "${TREE:-}" ]]; then
+    TREE="$(git rev-parse --show-toplevel 2>/dev/null)" || TREE="$ROOT"
+    TREE_SOURCE="cwd"
+  else
+    TREE_SOURCE="--tree"
+  fi
+  export TREE TREE_SOURCE
 }
 
 # ---------------------------------------------------------------------------
@@ -174,22 +202,22 @@ resolve_root() {
 # ---------------------------------------------------------------------------
 run_git_clean_check() {
   local git_output
-  git_output=$(git -C "$ROOT" status --porcelain 2>&1)
+  git_output=$(git -C "$TREE" status --porcelain 2>&1)
   local exit_code=$?
 
   if [[ $exit_code -ne 0 ]]; then
     CHECK_git_clean_STATUS="unverifiable"
-    CHECK_git_clean_DETAIL="git status failed (not a git repo or git unavailable)"
+    CHECK_git_clean_DETAIL="git status failed in ${TREE} (not a git repo or git unavailable)"
     CHECK_git_clean_EVIDENCE="$git_output"
     return
   fi
 
   if [[ -z "$git_output" ]]; then
     CHECK_git_clean_STATUS="pass"
-    CHECK_git_clean_DETAIL="working tree is clean"
+    CHECK_git_clean_DETAIL="working tree ${TREE} is clean (tree from ${TREE_SOURCE})"
   else
     CHECK_git_clean_STATUS="fail"
-    CHECK_git_clean_DETAIL="working tree has uncommitted changes"
+    CHECK_git_clean_DETAIL="working tree ${TREE} has uncommitted changes (tree from ${TREE_SOURCE})"
     CHECK_git_clean_EVIDENCE="$git_output"
   fi
 }
@@ -311,7 +339,7 @@ run_freshness_check() {
   fi
 
   # Resolve current HEAD
-  CURRENT_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null) || {
+  CURRENT_HEAD=$(git -C "$TREE" rev-parse HEAD 2>/dev/null) || {
     CHECK_artifact_head_freshness_STATUS="unverifiable"
     CHECK_artifact_head_freshness_DETAIL="git rev-parse HEAD failed"
     return
@@ -357,13 +385,13 @@ run_freshness_check() {
       CHECK_artifact_head_freshness_EVIDENCE="artifact: $artifact"
       return
     fi
-    if ! git -C "$ROOT" cat-file -e "${w_head}^{commit}" 2>/dev/null; then
+    if ! git -C "$TREE" cat-file -e "${w_head}^{commit}" 2>/dev/null; then
       CHECK_artifact_head_freshness_STATUS="fail"
       CHECK_artifact_head_freshness_DETAIL="waiver's recorded head_sha is not a known commit object"
       CHECK_artifact_head_freshness_EVIDENCE="reason: waiver_head_not_a_commit, artifact: $(basename "$artifact"), head_sha: $w_head"
       return
     fi
-    if ! git -C "$ROOT" merge-base --is-ancestor "$w_head" HEAD 2>/dev/null; then
+    if ! git -C "$TREE" merge-base --is-ancestor "$w_head" HEAD 2>/dev/null; then
       CHECK_artifact_head_freshness_STATUS="fail"
       CHECK_artifact_head_freshness_DETAIL="waiver's recorded head_sha is not an ancestor of current HEAD"
       CHECK_artifact_head_freshness_EVIDENCE="reason: waiver_head_not_ancestor, artifact: $(basename "$artifact"), head_sha: $w_head, current_head: $CURRENT_HEAD"
@@ -417,14 +445,14 @@ run_freshness_check() {
   PACK_HEAD="${seen_heads[0]}"
 
   # Verify pack_head is a real, reachable commit
-  if ! git -C "$ROOT" cat-file -e "${PACK_HEAD}^{commit}" 2>/dev/null; then
+  if ! git -C "$TREE" cat-file -e "${PACK_HEAD}^{commit}" 2>/dev/null; then
     CHECK_artifact_head_freshness_STATUS="fail"
     CHECK_artifact_head_freshness_DETAIL="pack_head is not a known commit object"
     CHECK_artifact_head_freshness_EVIDENCE="reason: divergent_stale, pack_head: $PACK_HEAD"
     return
   fi
 
-  if ! git -C "$ROOT" merge-base --is-ancestor "$PACK_HEAD" HEAD 2>/dev/null; then
+  if ! git -C "$TREE" merge-base --is-ancestor "$PACK_HEAD" HEAD 2>/dev/null; then
     CHECK_artifact_head_freshness_STATUS="fail"
     CHECK_artifact_head_freshness_DETAIL="pack_head is not reachable from HEAD"
     CHECK_artifact_head_freshness_EVIDENCE="reason: divergent_stale, pack_head: $PACK_HEAD, current_head: $CURRENT_HEAD"

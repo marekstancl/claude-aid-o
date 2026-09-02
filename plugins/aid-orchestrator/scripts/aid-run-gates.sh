@@ -2307,7 +2307,12 @@ run_all_gates() {
     $first || gates_json+=","
     first=false
     local merged_row
-    merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" ". + {\"attempts\":${attempt}, \"runtime_baseline\": \$rb}")
+    # `required` travels WITH the row. Without it the report cannot say why a
+    # run passed or failed, and the end-of-run verdict has nothing to re-derive
+    # from — which is how "overall: pass" survived a failed required gate.
+    merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" \
+      --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
+      ". + {\"attempts\":${attempt}, \"required\": \$req, \"runtime_baseline\": \$rb}")
     gates_json+="\"${gate_name}\":${merged_row}"
     processed=$((processed+1))
 
@@ -2504,6 +2509,32 @@ run_all_gates() {
   fi
 
   gates_json+="}"
+
+  # ─── the verdict is DERIVED from the rows, once, here ──────────────────
+  # `overall` is set in seven places above, each inside its own branch, and a
+  # path that reaches none of them used to leave the run reported as `pass`
+  # however its gates ended (ACTA/WAN, 2026-08-27..09-01: "overall: pass
+  # navzdory spadlým branám"). Those assignments stay as the fast path; this is
+  # the authority. A row that FAILED and is REQUIRED makes the run fail, and
+  # nothing downstream has to agree for that to hold.
+  #
+  # `waived` is deliberately not a failure here — a waiver is a recorded PM
+  # decision, and the surrounding code already surfaces it as risk acceptance
+  # rather than as a pass.
+  local _derived_fail
+  _derived_fail="$(jq -r '[to_entries[]
+      | select((.value.result? // "") == "fail")
+      | select((.value.required? // false) == true)] | length' <<<"$gates_json" 2>/dev/null)" || _derived_fail=""
+  if [[ "$_derived_fail" =~ ^[0-9]+$ ]] && (( _derived_fail > 0 )) && [[ "$overall" != "fail" ]]; then
+    log_event "$timeline_file" "gate_overall_corrected" was="$overall" required_failures="$_derived_fail"
+    echo "aid-run-gates: overall was '${overall}' with ${_derived_fail} required gate(s) failed — corrected to fail" >&2
+    overall="fail"
+  fi
+  if [[ ! "$_derived_fail" =~ ^[0-9]+$ ]]; then
+    # The rows could not be counted. That is not evidence of a pass: say so and
+    # leave whatever the branches decided, rather than silently blessing it.
+    echo "aid-run-gates: could not re-derive the verdict from the gate rows — '${overall}' is the branch verdict, unconfirmed" >&2
+  fi
 
   local completed_at
   completed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
