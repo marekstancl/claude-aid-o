@@ -92,59 +92,57 @@ setup() {
 # exercise the guard's actual manifest combinations". These call the classifier
 # with real check output instead.
 
-# _classify <check_output> — echoes the findings the guard would REFUSE on.
-# Mirrors the loop in cmd_plan_close; kept here as the executable statement of
-# what "an absence" means, so a change to either side shows up as a red test.
+# The REAL classifier, sourced from the script under test — not a copy.
+# Codex, 2026-09-02: "the tests exercise a duplicated _classify implementation,
+# not cmd_plan_close's real guard; they can stay green while the production
+# classifier diverges." So they call the production function.
 _classify() {
-  local ccout="$1" bad="" line
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    case "$line" in
-      *"FAIL"*|*"check"[0-9]*)
-        case "$line" in
-          *"there is nothing to close against"*|\
-          *"the plan-final candidate binding is gone"*|\
-          *"does not exist and no valid durable close-evidence"*|\
-          *"report never generated"*|\
-          *"the lifecycle layer resolves to"*|\
-          *"has no Head field"*) ;;
-          *) bad+="${line}"$'\n' ;;
-        esac ;;
-    esac
-  done <<< "$ccout"
-  printf '%s' "$bad"
+  bash -c "
+    _pfsm_admin_close_blockers() { :; }
+    eval \"\$(sed -n '/^_pfsm_admin_close_blockers()/,/^}/p' '$FSM')\"
+    _pfsm_admin_close_blockers \"\$1\"" _ "$1"
 }
 
 @test "guard: pure absences are accepted" {
-  run _classify "check5: the manifest has no candidate_sha — the plan-final candidate binding is gone, close is blocked
-check1: reports/P019-delivery.md does not exist — report never generated (report_storage: committed)"
+  run _classify "PASS  [check3] every step is terminal
+FAIL  [check5] the manifest has no candidate_sha — the plan-final candidate binding is gone, close is blocked
+FAIL  [check1] reports/P019-delivery.md does not exist — report never generated (report_storage: committed)"
   [ -z "$output" ]
 }
 
 @test "guard: a NEGATIVE result is refused, not closed around" {
   # The case Codex constructed: a frozen candidate, a negative verdict, no
   # plan_final_run_id. The old two-field test let this through.
-  run _classify "check5: non-terminal EPIC(s): E-019-2_3 — every EPIC must be terminal before the plan closes"
+  run _classify "FAIL  [check5] non-terminal EPIC(s): E-019-2_3 — every EPIC must be terminal before the plan closes"
   [[ "$output" == *"non-terminal EPIC"* ]]
 }
 
 @test "guard: something WRONG is refused — corrupt manifest, unparseable queue, unprovable ancestry" {
-  run _classify "check5: .aid-o/work/plan-state/P019/manifest.json is not a parseable plan-boundary manifest — close is blocked"
+  run _classify "FAIL  [check5] manifest.json is not a parseable plan-boundary manifest — close is blocked"
   [ -n "$output" ]
-  run _classify "check4: queue.yaml is unparseable — cannot revalidate"
+  run _classify "FAIL  [check4] queue.yaml is unparseable — cannot revalidate"
   [ -n "$output" ]
-  run _classify "check5: EPIC ancestry is not provable against plan/P019: E-019-1_3"
+  run _classify "FAIL  [check5] EPIC ancestry is not provable against plan/P019: E-019-1_3"
   [ -n "$output" ]
 }
 
-@test "guard: unrecognised text refuses, it does not pass" {
-  run _classify "check7: something nobody has classified yet"
+@test "guard: a line in NO known shape refuses — the hole Codex found" {
+  # `ERROR: …` carries neither a PASS/INFO/FAIL prefix. The earlier cut filtered
+  # for FAIL-or-checkN and skipped everything else, so this closed the plan.
+  run _classify "ERROR: frozen candidate abc123 has a negative plan-final verdict: fail"
   [ -n "$output" ]
+  [[ "$output" == *"negative plan-final verdict"* ]]
+}
+
+@test "guard: PASS and INFO lines are not blockers" {
+  run _classify "PASS  [check1] the report is committed
+INFO  [check2] Head is current"
+  [ -z "$output" ]
 }
 
 @test "guard: one absence and one real problem together still refuse" {
-  run _classify "check5: the plan-final candidate binding is gone, close is blocked
-check3: state=DONE but 2 step(s) still status:pending"
+  run _classify "FAIL  [check5] the plan-final candidate binding is gone, close is blocked
+FAIL  [check3] state=DONE but 2 step(s) still status:pending"
   [[ "$output" == *"still status:pending"* ]]
   [[ "$output" != *"candidate binding is gone"* ]]
 }

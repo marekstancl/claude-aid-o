@@ -6432,10 +6432,17 @@ cmd_amend_scope() {
       if [[ -z "$_as_dest" ]]; then
         die "amend-scope: cannot create a retirement directory beside ${_as_rows} — refusing to widen the scope while the gate rows judged against the old one are still replayable"
       fi
-      if ! mv "$_as_rows"/* "$_as_dest"/ 2>/dev/null && [[ -n "$(ls -A "$_as_rows" 2>/dev/null)" ]]; then
+      # The whole DIRECTORY moves, contents unexamined. Moving `"$dir"/*`
+      # skips dotfiles, so a `.row-2` beside a `row-1` stayed behind while the
+      # message said everything had been retired (Codex, 2026-09-02). mktemp
+      # already created the destination, so the directory is nested inside it —
+      # nothing is overwritten and nothing needs globbing.
+      if ! mv "$_as_rows" "${_as_dest}/gates_rows" 2>/dev/null; then
         die "amend-scope: could not retire the recorded gate rows from ${_as_rows} — refusing to widen the scope while they remain replayable"
       fi
-      rmdir "$_as_rows" 2>/dev/null || true
+      if [[ -e "$_as_rows" ]]; then
+        die "amend-scope: ${_as_rows} still exists after retirement — refusing to widen the scope while its rows remain replayable"
+      fi
       echo "amend-scope: the gate rows recorded for this run were retired to $(basename "$_as_dest") — the scope they were judged against no longer exists. Re-run the gates." >&2
     else
       echo "amend-scope: ${state} — no recorded gate rows to retire; the gates must still be re-run, because the scope they would have judged has changed." >&2

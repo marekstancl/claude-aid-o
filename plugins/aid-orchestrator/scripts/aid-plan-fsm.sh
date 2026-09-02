@@ -8240,6 +8240,45 @@ _pfsm_close_lock_contended() {
   return 0
 }
 
+# _pfsm_admin_close_blockers <close_check_output>
+#   Echoes every line that BLOCKS an administrative close; echoes nothing when
+#   the close may proceed. THE classifier — cmd_plan_close calls it, and the
+#   test suite calls this same function rather than a copy of its logic.
+#
+#   The check emits three prefixes and nothing else: `PASS  [checkN]`,
+#   `INFO  [checkN]`, `FAIL  [checkN]` (aid-plan-close-check.sh:194-196).
+#     · PASS / INFO      — not a blocker.
+#     · FAIL + absence   — the plan never produced this. Not a blocker.
+#     · FAIL + anything  — something is WRONG. Blocker.
+#     · any other line   — an output shape this does not know. BLOCKER.
+#
+#   That last rule is the one an earlier cut got backwards: it filtered for
+#   lines containing FAIL or checkN and SKIPPED everything else, so a line like
+#   `ERROR: frozen candidate abc123 has a negative plan-final verdict: fail`
+#   was neither classified nor refused and the close proceeded (Codex,
+#   2026-09-02). Unknown means unknown, and unknown refuses.
+_pfsm_admin_close_blockers() {
+  local ccout="${1-}" line bad=""
+  while IFS= read -r line; do
+    [[ -n "${line//[[:space:]]/}" ]] || continue
+    case "$line" in
+      "PASS "*|"INFO "*) continue ;;
+      "FAIL "*)
+        case "$line" in
+          *"there is nothing to close against"*|\
+          *"the plan-final candidate binding is gone"*|\
+          *"does not exist and no valid durable close-evidence"*|\
+          *"report never generated"*|\
+          *"the lifecycle layer resolves to"*|\
+          *"has no Head field"*) continue ;;
+        esac
+        bad+="  · ${line}"$'\n' ;;
+      *) bad+="  · ${line}"$'\n' ;;
+    esac
+  done <<< "$ccout"
+  printf '%s' "$bad"
+}
+
 cmd_plan_close() {
   local plan_id="" project_root_opt="" op_id_opt="" skip_delivery_report=0
   while [[ $# -gt 0 ]]; do
@@ -8428,24 +8467,8 @@ cmd_plan_close() {
     # EPIC, unprovable ancestry, a stale or unreadable report — is not an
     # absence, and it refuses. Unrecognised text refuses too: a classifier that
     # guesses in the permissive direction is the hole this replaces.
-    local _adm_bad="" _adm_line
-    while IFS= read -r _adm_line; do
-      [[ -n "$_adm_line" ]] || continue
-      case "$_adm_line" in
-        *"FAIL"*|*"check"[0-9]*)
-          case "$_adm_line" in
-            # ABSENCES — the plan never produced this, and never will.
-            *"there is nothing to close against"*|\
-            *"the plan-final candidate binding is gone"*|\
-            *"does not exist and no valid durable close-evidence"*|\
-            *"report never generated"*|\
-            *"the lifecycle layer resolves to"*|\
-            *"has no Head field"*) ;;
-            # Everything else: something is WRONG, not missing.
-            *) _adm_bad+="  · ${_adm_line}"$'\n' ;;
-          esac ;;
-      esac
-    done <<< "$ccout"
+    local _adm_bad
+    _adm_bad="$(_pfsm_admin_close_blockers "$ccout")"
 
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release
