@@ -56,3 +56,26 @@ setup() {
   block="$(sed -n '/ADMINISTRATIVE CLOSE: .* is being closed WITHOUT evidence/,/ccrc=0/p' "$FSM")"
   [[ "$block" == *"nothing below fabricates a candidate"* ]]
 }
+
+# --- Codex's two high findings on the implementation, 2026-09-02 -----------
+
+@test "a plan WITH an evidence chain is refused, however its check ended" {
+  local block
+  block="$(sed -n '/IT CLOSES A PLAN WITH NO EVIDENCE/,/ccrc=0/p' "$FSM")"
+  [[ "$block" == *"candidate_sha"* && "$block" == *"plan_final_run_id"* ]]
+  [[ "$block" == *"not a way around evidence that came back negative"* ]]
+  [[ "$block" == *"exit 1"* ]]
+}
+
+@test "the administrative path never falls through to the evidence-backed one" {
+  local block
+  block="$(sed -n '/IT CLOSES A PLAN WITH NO EVIDENCE/,/ccrc=0/p' "$FSM")"
+  [[ "$block" == *"never the ordinary path"* ]]
+  [[ "$block" == *"a receipt and a label that disagree"* ]]
+}
+
+@test "with nothing to list, the record still says what was absent" {
+  local block
+  block="$(sed -n '/IT CLOSES A PLAN WITH NO EVIDENCE/,/ccrc=0/p' "$FSM")"
+  [[ "$block" == *"no candidate_sha and no plan_final_run_id in the manifest"* ]]
+}

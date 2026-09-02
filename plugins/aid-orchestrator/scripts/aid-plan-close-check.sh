@@ -446,6 +446,11 @@ check2_head_freshness() {
       _fail "check2" "${f}: frontmatter cannot be read, so its recorded Head cannot be compared — fix the YAML or remove the file"
       continue
     fi
+    # These two are OPTIONAL fields, so an absent value is legitimate — but an
+    # unreadable FILE is not, and that case was already caught above by the Head
+    # read. Swallowing an error here therefore cannot hide a broken file; it can
+    # only default an optional annotation, which is the intended behaviour
+    # (Codex asked; recorded rather than left looking inconsistent).
     head_at_gen=$(_yq_frontmatter_field "$f" "Head_at_generation") || head_at_gen=""
     head_note=$(_yq_frontmatter_field "$f" "Head_note") || head_note=""
 

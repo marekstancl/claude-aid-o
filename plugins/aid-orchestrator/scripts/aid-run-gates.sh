@@ -2533,7 +2533,16 @@ run_all_gates() {
   if [[ ! "$_derived_fail" =~ ^[0-9]+$ ]]; then
     # The rows could not be counted. That is not evidence of a pass: say so and
     # leave whatever the branches decided, rather than silently blessing it.
-    echo "aid-run-gates: could not re-derive the verdict from the gate rows — '${overall}' is the branch verdict, unconfirmed" >&2
+    # AN UNCONFIRMABLE PASS IS NOT A PASS. Printing "unconfirmed" to stderr left
+    # `pass` in the report, and every consumer downstream reads the report, not
+    # the warning (Codex, 2026-09-02). A verdict that cannot be checked against
+    # its own rows becomes a failure, which is the direction that cannot hide a
+    # broken run.
+    echo "aid-run-gates: could not re-derive the verdict from the gate rows — refusing to report '${overall}' unchecked" >&2
+    if [[ "$overall" == "pass" ]]; then
+      log_event "$timeline_file" "gate_overall_unverifiable" was="$overall"
+      overall="fail"
+    fi
   fi
 
   local completed_at

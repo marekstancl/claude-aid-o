@@ -78,7 +78,11 @@ for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
     # only ever looked for `## N.`. A collector that silently sees nothing is
     # worse than no collector: it answers the question it was asked with a
     # confident, wrong "no".
-    /^##+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ && (NR in container) {
+    # A CONTAINER IS A CONTAINER WHATEVER ITS HEADING SAYS. Restricting this to
+    # dated headings left `## 1. …` with `### …` children matching the ordinary
+    # entry rule, which is the same false positive one level down (Codex,
+    # 2026-09-02).
+    (NR in container) && /^##+ ([0-9]+\. |[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])/ {
       flush(); inentry=0; marked=0; print; next
     }
     /^##+ ([0-9]+\. |[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])/ {

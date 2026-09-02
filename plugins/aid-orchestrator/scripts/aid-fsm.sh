@@ -6409,11 +6409,23 @@ cmd_amend_scope() {
   esac
   if [[ "$state" == "GATES" ]]; then
     # A widened scope during GATES invalidates what the gates already decided:
-    # the tree they judged is not the tree that will exist. Say so — a silent
-    # amendment here would make the next report describe a run that no longer
-    # matches its own verdict, which is the class of defect this same session
-    # spent the day removing.
-    echo "amend-scope: ${state} — the gate rows for this run are now stale by construction; re-run the gates after the fix rather than trusting the ones already recorded." >&2
+    # the tree they judged is not the tree that will exist. SAYING so was not
+    # enough — a caller could keep a prior passing verdict over changed scope
+    # (Codex, 2026-09-02), which is the same false-green this session spent the
+    # day removing. The recorded rows are therefore RETIRED here, not merely
+    # doubted: they are moved aside with a timestamp, so nothing replays them
+    # and nothing is destroyed either.
+    local _as_ev _as_rows _as_moved=0
+    _as_ev="$(cd "$(dirname "$state_file")" && pwd)"
+    _as_rows="${_as_ev}/gates_rows"
+    if [[ -d "$_as_rows" ]]; then
+      local _as_dest="${_as_rows}.superseded-$(date -u +%Y%m%dT%H%M%SZ)"
+      if mv "$_as_rows" "$_as_dest" 2>/dev/null; then
+        _as_moved=1
+        echo "amend-scope: the gate rows recorded for this run were retired to $(basename "$_as_dest") — the scope they were judged against no longer exists. Re-run the gates." >&2
+      fi
+    fi
+    (( _as_moved )) || echo "amend-scope: ${state} — no recorded gate rows to retire; the gates must still be re-run, because the scope they would have judged has changed." >&2
   fi
   local evidence_dir; evidence_dir="$(cd "$(dirname "$state_file")" && pwd)"
   local plan="${evidence_dir}/plan.json"
@@ -8316,7 +8328,9 @@ _fsm_plan_mode_args() {
   fi
   parent="$(git -C "${root%/}" rev-parse "${merge_sha}^" 2>/dev/null)" || parent=""
   [[ -n "$parent" ]] || parent="$merge_sha"
-  printf '%s %s %s' "$merge_sha" "$abs" "$parent"
+  # Tab-separated: an evidence directory may contain spaces, and the caller
+  # reads these back into three distinct values.
+  printf '%s\t%s\t%s' "$merge_sha" "$abs" "$parent"
   return 0
 }
 
@@ -9251,10 +9265,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 # 2026-08-31). The three values the mode needs are all in the
                                 # manifest; read them, and REFUSE by name when one is missing
                                 # rather than reconciling into a guaranteed "unverifiable".
+                                # Read into an ARRAY, never word-split: an evidence path
+                                # containing a space would otherwise arrive as two broken
+                                # arguments (Codex, 2026-09-02). The helper separates its
+                                # three values with a tab for exactly this reason.
                                 _pr_mode="$(_fsm_plan_mode_args "$_pr_id" "$_pr_root")" || exit 1
                                 if [[ -n "$_pr_mode" ]]; then
-                                  # shellcheck disable=SC2086
-                                  aid_lc_plan_mode_begin $_pr_mode
+                                  IFS=$'\t' read -r _pm_sha _pm_dir _pm_parent <<< "$_pr_mode"
+                                  aid_lc_plan_mode_begin "$_pm_sha" "$_pm_dir" "$_pm_parent"
                                 fi
                                 aid_lifecycle_plan_reconcile "$_pr_id" "$_pr_root" "$_pr_apply" ;;
     plan-record-delivery)       shift

@@ -8411,10 +8411,28 @@ cmd_plan_close() {
   # closing a plan whose evidence is known to be absent. The check's OUTPUT is
   # still printed and still recorded — what is missing is precisely the thing
   # worth writing down.
-  if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && "$ccrc" -ne 0 ]]; then
+  if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
     printf '%s\n' "$ccout" >&2
+    # IT CLOSES A PLAN WITH NO EVIDENCE — NOT A PLAN WHOSE EVIDENCE SAYS NO.
+    # Without this distinction the flag would clear ANY failing check, including
+    # a completed review whose verdict is `fail`, and an evidence-backed
+    # rejection could be closed around (Codex, 2026-09-02). The two are told
+    # apart by the manifest: a plan that reached a frozen candidate and a
+    # plan-final run HAS an evidence chain, whatever that chain concluded.
+    local _adm_cand _adm_run
+    _adm_cand="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha' 2>/dev/null)" || _adm_cand=""
+    _adm_run="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id' 2>/dev/null)" || _adm_run=""
+    if [[ -n "$_adm_cand" && "$_adm_cand" != "null" && -n "$_adm_run" && "$_adm_run" != "null" ]]; then
+      _pfsm_close_release
+      echo "PRECONDITION FAIL: plan-close --administrative refused for ${plan_id}: it HAS an evidence chain (candidate ${_adm_cand}, run ${_adm_run}). This flag closes a plan that never produced evidence; it is not a way around evidence that came back negative. Fix what the check reports, or use --force if the data is sound and only a check is stuck." >&2
+      exit 1
+    fi
+    # …and it is never the ordinary path. A plan with no evidence whose check
+    # somehow passes would otherwise take the evidence-backed route and be
+    # ANNOUNCED as administrative — a receipt and a label that disagree.
     _PFSM_ADMIN_MISSING="$(printf '%s' "$ccout" | grep -oE '^[[:space:]]*(FAIL|check[0-9]+)[^\n]*' | head -20 | tr '\n' '|')"
-    echo "ADMINISTRATIVE CLOSE: ${plan_id} is being closed WITHOUT evidence. What the check could not confirm is recorded above and in the close record; nothing below fabricates a candidate, a run id or a verdict." >&2
+    [[ -n "$_PFSM_ADMIN_MISSING" ]] || _PFSM_ADMIN_MISSING="no candidate_sha and no plan_final_run_id in the manifest"
+    echo "ADMINISTRATIVE CLOSE: ${plan_id} is being closed WITHOUT evidence. What could not be confirmed is recorded above and in the close record; nothing below fabricates a candidate, a run id or a verdict." >&2
     ccrc=0
   fi
   if [[ "$ccrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
