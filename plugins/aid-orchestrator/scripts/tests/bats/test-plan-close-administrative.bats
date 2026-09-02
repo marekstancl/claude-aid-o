@@ -82,8 +82,8 @@ setup() {
 @test "the refusal prints the findings it objected to" {
   local block
   block="$(sed -n '/WHAT THIS CLOSES IS DECIDED POSITIVELY/,/ccrc=0/p' "$FSM")"
-  [[ "$block" == *"closing around those would hide them"* ]]
-  [[ "$block" == *'printf '"'"'%s'"'"' "$_adm_bad"'* ]]
+  [[ "$block" == *"could be closing around what it concluded"* ]]
+  [[ "$block" == *'_adm_bad'* ]]
   [[ "$block" == *"exit 1"* ]]
 }
 
@@ -92,83 +92,61 @@ setup() {
 # exercise the guard's actual manifest combinations". These call the classifier
 # with real check output instead.
 
-# The REAL classifier, sourced from the script under test — not a copy.
-# Codex, 2026-09-02: "the tests exercise a duplicated _classify implementation,
-# not cmd_plan_close's real guard; they can stay green while the production
-# classifier diverges." So they call the production function.
-_classify() {
-  bash -c "
-    _pfsm_admin_close_blockers() { :; }
-    eval \"\$(sed -n '/^_pfsm_admin_close_blockers()/,/^}/p' '$FSM')\"
-    _pfsm_admin_close_blockers \"\$1\"" _ "$1"
+# THE TEST IS NOW ABOUT EVIDENCE ON DISK, not about wording.
+# Six rounds of classifying the close check's prose each ended with a new string
+# that slipped through; the guard no longer reads prose at all. These call the
+# production function that decides.
+_evidence() {
+  MANIFEST_STUB="${MANIFEST_STUB:-}" bash -c "
+    plan_manifest_get() { printf '%s' \"\${MANIFEST_STUB:-}\"; }
+    eval \"\$(sed -n '/^_pfsm_admin_close_evidence()/,/^}/p' '$FSM')\"
+    _pfsm_admin_close_evidence \"\$1\" \"\$2\"" _ "$1" "$2"
 }
 
-@test "guard: pure absences are accepted" {
-  run _classify "PASS  [check3] every step is terminal
-FAIL  [check5] the manifest has no candidate_sha — the plan-final candidate binding is gone, close is blocked
-FAIL  [check1] reports/P019-delivery.md does not exist — report never generated (report_storage: committed)"
+@test "evidence: a plan with nothing recorded and nothing on disk may be closed" {
+  local root="$BATS_TEST_TMPDIR/empty"
+  mkdir -p "$root/.aid-o/work/evidence/P019"
+  MANIFEST_STUB="" run _evidence "$root" P019
   [ -z "$output" ]
 }
 
-@test "guard: a NEGATIVE result is refused, not closed around" {
-  # The case Codex constructed: a frozen candidate, a negative verdict, no
-  # plan_final_run_id. The old two-field test let this through.
-  run _classify "FAIL  [check5] non-terminal EPIC(s): E-019-2_3 — every EPIC must be terminal before the plan closes"
-  [[ "$output" == *"non-terminal EPIC"* ]]
-}
-
-@test "guard: something WRONG is refused — corrupt manifest, unparseable queue, unprovable ancestry" {
-  run _classify "FAIL  [check5] manifest.json is not a parseable plan-boundary manifest — close is blocked"
+@test "evidence: an audit report on disk refuses the close, and is named" {
+  local root="$BATS_TEST_TMPDIR/withaudit"
+  mkdir -p "$root/.aid-o/work/evidence/P019/R-P019-final-1"
+  printf '{"status":"fail"}' > "$root/.aid-o/work/evidence/P019/R-P019-final-1/audit-report.json"
+  MANIFEST_STUB="" run _evidence "$root" P019
   [ -n "$output" ]
-  run _classify "FAIL  [check4] queue.yaml is unparseable — cannot revalidate"
+  [[ "$output" == *"audit-report.json"* ]]
+}
+
+@test "evidence: a curator report, a release decision or a delivery gate each refuse" {
+  local root="$BATS_TEST_TMPDIR/each" f
+  for f in curator-report.json release-decision.json delivery-gate.json; do
+    rm -rf "$root"; mkdir -p "$root/.aid-o/work/evidence/P019/R-1"
+    printf '{}' > "$root/.aid-o/work/evidence/P019/R-1/$f"
+    MANIFEST_STUB="" run _evidence "$root" P019
+    [ -n "$output" ]
+  done
+}
+
+@test "evidence: a recorded candidate refuses even with an empty evidence tree" {
+  local root="$BATS_TEST_TMPDIR/cand"
+  mkdir -p "$root/.aid-o/work/evidence/P019"
+  MANIFEST_STUB="abc123" run _evidence "$root" P019
   [ -n "$output" ]
-  run _classify "FAIL  [check5] EPIC ancestry is not provable against plan/P019: E-019-1_3"
-  [ -n "$output" ]
+  [[ "$output" == *"manifest."* ]]
 }
 
-@test "guard: a line in NO known shape refuses — the hole Codex found" {
-  # `ERROR: …` carries neither a PASS/INFO/FAIL prefix. The earlier cut filtered
-  # for FAIL-or-checkN and skipped everything else, so this closed the plan.
-  run _classify "ERROR: frozen candidate abc123 has a negative plan-final verdict: fail"
-  [ -n "$output" ]
-  [[ "$output" == *"negative plan-final verdict"* ]]
-}
-
-@test "guard: PASS and INFO lines are not blockers" {
-  run _classify "PASS  [check1] the report is committed
-INFO  [check2] Head is current"
-  [ -z "$output" ]
-}
-
-@test "guard: one absence and one real problem together still refuse" {
-  run _classify "FAIL  [check5] the plan-final candidate binding is gone, close is blocked
-FAIL  [check3] state=DONE but 2 step(s) still status:pending"
-  [[ "$output" == *"still status:pending"* ]]
-  [[ "$output" != *"candidate binding is gone"* ]]
-}
-
-@test "guard: a composite line carrying an absence AND a refusal is refused" {
-  # Codex, 2026-09-02, fourth round: the allowlist matches substrings, so one
-  # absence phrase anywhere on the line used to suppress the whole line —
-  # including the negative verdict beside it.
-  run _classify "FAIL  [check5] the plan-final candidate binding is gone; frozen candidate abc123 has a negative plan-final verdict: fail"
-  [ -n "$output" ]
-  [[ "$output" == *"negative plan-final verdict"* ]]
-}
-
-@test "guard: a single-clause absence still passes" {
-  run _classify "FAIL  [check5] the manifest has no candidate_sha — the plan-final candidate binding is gone, close is blocked"
-  [ -z "$output" ]
-}
-
-@test "guard: a refusal wearing an INFO label still blocks" {
-  # Codex, fifth round: classifying by prefix first let a refusal through when
-  # it was stamped INFO instead of FAIL.
-  run _classify "INFO  [check5] frozen candidate abc123 has a negative plan-final verdict: fail"
-  [ -n "$output" ]
-}
-
-@test "guard: an ordinary INFO line does not block" {
-  run _classify "INFO  [check2] Head is current"
-  [ -z "$output" ]
+@test "evidence: the refusal cannot be talked around — no wording is consulted" {
+  # The inputs that defeated six rounds of prose classification: none of them is
+  # read any more. What decides is whether the artifacts exist.
+  local root="$BATS_TEST_TMPDIR/prose"
+  mkdir -p "$root/.aid-o/work/evidence/P019"
+  MANIFEST_STUB="" run _evidence "$root" P019
+  [ -z "$output" ]                      # no evidence -> may close, whatever any message said
+  printf '{}' > "$root/.aid-o/work/evidence/P019/x.json"
+  mkdir -p "$root/.aid-o/work/evidence/P019/R-1"
+  printf '{}' > "$root/.aid-o/work/evidence/P019/R-1/audit-report.json"
+  MANIFEST_STUB="" run _evidence "$root" P019
+  [ -n "$output" ]                      # evidence -> refuses, whatever any message said
 }

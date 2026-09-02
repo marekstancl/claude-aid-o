@@ -8240,6 +8240,44 @@ _pfsm_close_lock_contended() {
   return 0
 }
 
+# _pfsm_admin_close_evidence <root> <plan_id>
+#   Echoes every piece of plan-final EVIDENCE that exists for this plan; echoes
+#   nothing when the plan never produced any. THE test an administrative close
+#   turns on, and it is a question about FILES AND FIELDS — never about the
+#   wording of a message.
+#
+#   Six review rounds went the other way, classifying the close check's prose,
+#   and each round produced a new string that slipped through: a line with no
+#   FAIL prefix, a composite line carrying an absence and a refusal together, a
+#   refusal stamped INFO, and finally `rejected by plan-final`, which contains
+#   none of the words a denylist had learned. Codex named the conclusion:
+#   "a keyword denylist cannot reliably recognize refusal semantics".
+#
+#   It cannot, and it does not have to. An evidence-backed refusal REQUIRES
+#   evidence: a frozen candidate, a recorded final run, an audit or curator
+#   report, a release decision. Where none of those exist there is nothing to
+#   close around, whatever any message says. Where ANY of them exists, this
+#   close refuses and names it — including the case where that evidence
+#   concluded `fail`, which is exactly the case that must never be closed here.
+_pfsm_admin_close_evidence() {
+  local root="${1:-.}" plan_id="$2" found="" v d f
+  for v in candidate_sha plan_final_run_id final_merge_sha; do
+    d="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.${v}" 2>/dev/null)" || d=""
+    [[ -n "$d" && "$d" != "null" && "$d" != "not_found" ]] && found+="  · manifest.${v} = ${d}"$'\n'
+  done
+  d="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_skeletons' 2>/dev/null)" || d=""
+  [[ -n "$d" && "$d" != "null" && "$d" != "not_found" && "$d" != "{}" ]] \
+    && found+="  · manifest.plan_final_skeletons is present"$'\n'
+  # Any plan-final run directory that holds a verdict-bearing artifact.
+  for f in "${root%/}/.aid-o/work/evidence/${plan_id}"/*/audit-report.json \
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/curator-report.json \
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/release-decision.json \
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/delivery-gate.json; do
+    [[ -f "$f" ]] && found+="  · ${f#"${root%/}/"}"$'\n'
+  done
+  printf '%s' "$found"
+}
+
 # _pfsm_admin_close_blockers <close_check_output>
 #   Echoes every line that BLOCKS an administrative close; echoes nothing when
 #   the close may proceed. THE classifier — cmd_plan_close calls it, and the
@@ -8496,13 +8534,13 @@ cmd_plan_close() {
     # absence, and it refuses. Unrecognised text refuses too: a classifier that
     # guesses in the permissive direction is the hole this replaces.
     local _adm_bad
-    _adm_bad="$(_pfsm_admin_close_blockers "$ccout")"
+    _adm_bad="$(_pfsm_admin_close_evidence "$root" "$plan_id")"
 
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release
-      echo "PRECONDITION FAIL: plan-close --administrative refused for ${plan_id}. This flag closes a plan whose evidence was never PRODUCED; the check reports findings that say something is WRONG instead, and closing around those would hide them:" >&2
+      echo "PRECONDITION FAIL: plan-close --administrative refused for ${plan_id}. This flag closes a plan that never produced plan-final evidence; this one HAS some, and a close here could be closing around what it concluded:" >&2
       printf '%s' "$_adm_bad" >&2
-      echo "Fix those, or use --force if the data is sound and only a check is stuck." >&2
+      echo "Read that evidence and act on it, or use --force if the data is sound and only a check is stuck." >&2
       exit 1
     fi
 
