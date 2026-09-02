@@ -160,3 +160,15 @@ FAIL  [check3] state=DONE but 2 step(s) still status:pending"
   run _classify "FAIL  [check5] the manifest has no candidate_sha — the plan-final candidate binding is gone, close is blocked"
   [ -z "$output" ]
 }
+
+@test "guard: a refusal wearing an INFO label still blocks" {
+  # Codex, fifth round: classifying by prefix first let a refusal through when
+  # it was stamped INFO instead of FAIL.
+  run _classify "INFO  [check5] frozen candidate abc123 has a negative plan-final verdict: fail"
+  [ -n "$output" ]
+}
+
+@test "guard: an ordinary INFO line does not block" {
+  run _classify "INFO  [check2] Head is current"
+  [ -z "$output" ]
+}

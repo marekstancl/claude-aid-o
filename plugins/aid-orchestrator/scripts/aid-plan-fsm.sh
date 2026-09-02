@@ -8261,6 +8261,22 @@ _pfsm_admin_close_blockers() {
   local ccout="${1-}" line bad=""
   while IFS= read -r line; do
     [[ -n "${line//[[:space:]]/}" ]] || continue
+    # CONTENT IS READ BEFORE THE PREFIX.
+    # Classifying by prefix first meant a refusal wearing an INFO label went
+    # through untouched — Codex, 2026-09-02:
+    #   INFO [check5] frozen candidate abc123 has a negative plan-final verdict: fail
+    # `_info` is not supposed to carry a refusal (only `_fail` sets the check's
+    # own exit code), but "supposed to" is not a guard. The words a refusal is
+    # made of block the close whatever severity is stamped on them. An INFO line
+    # that merely mentions one of them blocks too — for an operation this rare,
+    # a needless refusal costs a sentence and the other direction costs the
+    # whole point of the flag.
+    case "$line" in
+      *";"*|*" verdict"*|*"ancestry"*|*"unparseable"*|*"non-terminal"*|*"status:pending"*)
+        case "$line" in
+          "PASS "*|"INFO "*) bad+="  · ${line}"$'\n'; continue ;;
+        esac ;;
+    esac
     case "$line" in
       "PASS "*|"INFO "*) continue ;;
       "FAIL "*)
