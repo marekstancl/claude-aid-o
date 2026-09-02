@@ -99,6 +99,7 @@ setup() {
 _evidence() {
   MANIFEST_STUB="${MANIFEST_STUB:-}" bash -c "
     plan_manifest_get() { printf '%s' \"\${MANIFEST_STUB:-}\"; }
+    plan_manifest_path() { printf '%s' \"\$1/.aid-o/work/plan-state/\$2/plan-boundary-manifest.json\"; }
     eval \"\$(sed -n '/^_pfsm_admin_close_evidence()/,/^}/p' '$FSM')\"
     _pfsm_admin_close_evidence \"\$1\" \"\$2\"" _ "$1" "$2"
 }
@@ -149,4 +150,30 @@ _evidence() {
   printf '{}' > "$root/.aid-o/work/evidence/P019/R-1/audit-report.json"
   MANIFEST_STUB="" run _evidence "$root" P019
   [ -n "$output" ]                      # evidence -> refuses, whatever any message said
+}
+
+@test "evidence: a corrupt manifest is broken, not absent — it blocks" {
+  local root="$BATS_TEST_TMPDIR/corrupt"
+  mkdir -p "$root/.aid-o/work/plan-state/P019" "$root/.aid-o/work/evidence/P019"
+  printf '{ this is not json' > "$root/.aid-o/work/plan-state/P019/plan-boundary-manifest.json"
+  MANIFEST_STUB="" run _evidence "$root" P019
+  [ -n "$output" ]
+  [[ "$output" == *"not parseable"* ]]
+}
+
+@test "evidence: work still in progress blocks — it is unfinished, not absent" {
+  local root="$BATS_TEST_TMPDIR/running"
+  mkdir -p "$root/.aid-o/work/evidence/P019/R-1"
+  printf 'state: EXECUTE\n' > "$root/.aid-o/work/evidence/P019/R-1/fsm-state.yaml"
+  MANIFEST_STUB="" run _evidence "$root" P019
+  [ -n "$output" ]
+  [[ "$output" == *"still in progress"* ]]
+}
+
+@test "evidence: a terminal run with no verdict artifacts does not block" {
+  local root="$BATS_TEST_TMPDIR/terminal"
+  mkdir -p "$root/.aid-o/work/evidence/P019/R-1"
+  printf 'state: DONE\n' > "$root/.aid-o/work/evidence/P019/R-1/fsm-state.yaml"
+  MANIFEST_STUB="" run _evidence "$root" P019
+  [ -z "$output" ]
 }

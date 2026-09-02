@@ -8275,6 +8275,36 @@ _pfsm_admin_close_evidence() {
            "${root%/}/.aid-o/work/evidence/${plan_id}"/*/delivery-gate.json; do
     [[ -f "$f" ]] && found+="  · ${f#"${root%/}/"}"$'\n'
   done
+  # AND THE STATES THAT ARE BROKEN RATHER THAN ABSENT.
+  # Deciding purely on "is there evidence" under-blocks (Codex, 2026-09-02,
+  # seventh round): a corrupt manifest, an unparseable queue or work that is
+  # still running leaves no artifact behind, so the close would sail past all
+  # three. These are three more DATA questions — no message is read for them.
+  local _mf="${root%/}/.aid-o/work/plan-state/${plan_id}/plan-boundary-manifest.json"
+  [[ -f "$_mf" ]] || _mf="$(plan_manifest_path "$plan_id" 2>/dev/null)" || _mf=""
+  if [[ -n "$_mf" && -f "$_mf" ]] && ! jq -e '.' "$_mf" >/dev/null 2>&1; then
+    found+="  · the plan-boundary manifest is not parseable JSON (${_mf}) — that is broken, not absent"$'\n'
+  fi
+  local _q="${root%/}/.aid-o/config/queue.yaml"
+  if [[ -f "$_q" ]] && command -v yq >/dev/null 2>&1 && ! yq -e '.' "$_q" >/dev/null 2>&1; then
+    found+="  · ${_q} is not parseable — that is broken, not absent"$'\n'
+  fi
+  local _st _nonterm=""
+  for _st in "${root%/}/.aid-o/work/evidence/${plan_id}"/*/fsm-state.yaml; do
+    [[ -f "$_st" ]] || continue
+    d="$(grep -m1 '^state:' "$_st" 2>/dev/null | awk '{print $2}')"
+    case "$d" in DONE|CLOSED|ABORTED|ROLLED_BACK|"") ;; *) _nonterm+="${_st##*/evidence/} " ;; esac
+  done
+  [[ -n "$_nonterm" ]] && found+="  · work is still in progress: ${_nonterm}— that is unfinished, not absent"$'\n'
+
+  # WHAT THIS DELIBERATELY OVER-BLOCKS, and why that is the right side to err on.
+  # A stale report from an abandoned early run, or a candidate recorded and never
+  # used, blocks this close although no CURRENT refusal stands (same review).
+  # Telling those apart means deciding which artifacts are live, which is the
+  # judgement this guard exists to avoid making. An over-block costs the PM a
+  # sentence — they resolve the leftover, or use --force where the data is sound.
+  # An under-block closes a plan around a refusal, which is the thing that must
+  # not happen.
   printf '%s' "$found"
 }
 
