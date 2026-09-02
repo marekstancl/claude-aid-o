@@ -6415,17 +6415,31 @@ cmd_amend_scope() {
     # day removing. The recorded rows are therefore RETIRED here, not merely
     # doubted: they are moved aside with a timestamp, so nothing replays them
     # and nothing is destroyed either.
-    local _as_ev _as_rows _as_moved=0
+    local _as_ev _as_rows
     _as_ev="$(cd "$(dirname "$state_file")" && pwd)"
     _as_rows="${_as_ev}/gates_rows"
     if [[ -d "$_as_rows" ]]; then
-      local _as_dest="${_as_rows}.superseded-$(date -u +%Y%m%dT%H%M%SZ)"
-      if mv "$_as_rows" "$_as_dest" 2>/dev/null; then
-        _as_moved=1
-        echo "amend-scope: the gate rows recorded for this run were retired to $(basename "$_as_dest") — the scope they were judged against no longer exists. Re-run the gates." >&2
+      # A COLLISION-PROOF DESTINATION, AND A FAILURE THAT FAILS.
+      # A one-second timestamp collides with a second amendment in the same
+      # second, and swallowing `mv` left the rows in place while the message
+      # claimed there were none to retire (Codex, 2026-09-02) — the stale-row
+      # problem intact, now with a reassuring line over it. `mktemp -d` gives a
+      # destination nothing else can hold, and a retirement that was REQUIRED
+      # and did not happen aborts the amendment: the scope must not widen while
+      # rows judged against the old one are still replayable.
+      local _as_dest
+      _as_dest="$(mktemp -d "${_as_rows}.superseded-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX" 2>/dev/null)" || _as_dest=""
+      if [[ -z "$_as_dest" ]]; then
+        die "amend-scope: cannot create a retirement directory beside ${_as_rows} — refusing to widen the scope while the gate rows judged against the old one are still replayable"
       fi
+      if ! mv "$_as_rows"/* "$_as_dest"/ 2>/dev/null && [[ -n "$(ls -A "$_as_rows" 2>/dev/null)" ]]; then
+        die "amend-scope: could not retire the recorded gate rows from ${_as_rows} — refusing to widen the scope while they remain replayable"
+      fi
+      rmdir "$_as_rows" 2>/dev/null || true
+      echo "amend-scope: the gate rows recorded for this run were retired to $(basename "$_as_dest") — the scope they were judged against no longer exists. Re-run the gates." >&2
+    else
+      echo "amend-scope: ${state} — no recorded gate rows to retire; the gates must still be re-run, because the scope they would have judged has changed." >&2
     fi
-    (( _as_moved )) || echo "amend-scope: ${state} — no recorded gate rows to retire; the gates must still be re-run, because the scope they would have judged has changed." >&2
   fi
   local evidence_dir; evidence_dir="$(cd "$(dirname "$state_file")" && pwd)"
   local plan="${evidence_dir}/plan.json"
@@ -8328,8 +8342,14 @@ _fsm_plan_mode_args() {
   fi
   parent="$(git -C "${root%/}" rev-parse "${merge_sha}^" 2>/dev/null)" || parent=""
   [[ -n "$parent" ]] || parent="$merge_sha"
-  # Tab-separated: an evidence directory may contain spaces, and the caller
-  # reads these back into three distinct values.
+  # Tab-separated: an evidence directory may contain spaces, and the caller reads
+  # these back into three distinct values. A path containing a TAB would still
+  # be split wrongly (Codex, 2026-09-02) — so it is REFUSED rather than quietly
+  # mangled. Serialising three values through one string has this limit; naming
+  # it beats pretending the encoding is total.
+  case "$abs" in
+    *$'\t'*) echo "PRECONDITION FAIL: plan-reconcile ${plan_id}: the evidence path contains a tab character, which this three-value handoff cannot carry. Move or rename it." >&2; return 1 ;;
+  esac
   printf '%s\t%s\t%s' "$merge_sha" "$abs" "$parent"
   return 0
 }
