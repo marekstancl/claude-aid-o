@@ -285,9 +285,21 @@ _extract_frontmatter() {
 # _yq_frontmatter_field <file> <field> — echoes the field's value from the
 # file's frontmatter (empty string if absent). Handles both plain scalars
 # (Head: abc123) and folded/literal block scalars (Head_note: >-\n  ...).
+# A TOOL FAILURE IS NOT AN ANSWER. Under this script's `set -euo pipefail` a
+# broken frontmatter made `yq` exit non-zero inside a command substitution,
+# which ended the WHOLE check mid-run — so a check that should have FAILED
+# looked to its caller like a check that never objected (ACTA, 2026-09-01).
+# Return 0 with the value, 3 with nothing when the YAML cannot be read; the
+# caller must tell "the field is absent" from "I could not look".
 _yq_frontmatter_field() {
-  local file="$1" field="$2"
-  _extract_frontmatter "$file" | yq -r ".${field} // \"\"" - 2>/dev/null
+  local file="$1" field="$2" out rc=0
+  out="$(_extract_frontmatter "$file" 2>/dev/null | yq -r ".${field} // \"\"" - 2>/dev/null)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "cannot read frontmatter of ${file} (yq exit ${rc}) — this is 'unknown', never 'passed'" >&2
+    return 3
+  fi
+  printf '%s' "$out"
+  return 0
 }
 
 # _auto_annotate_report <file> <old_head> <new_head>
@@ -426,9 +438,16 @@ check2_head_freshness() {
   local f
   for f in "${FOUND_REPORTS[@]}"; do
     local recorded_head head_note head_at_gen
-    recorded_head=$(_yq_frontmatter_field "$f" "Head")
-    head_at_gen=$(_yq_frontmatter_field "$f" "Head_at_generation")
-    head_note=$(_yq_frontmatter_field "$f" "Head_note")
+    # An unreadable file is reported as a finding, not as silence: the check
+    # continues over the remaining files rather than dying on this one.
+    local _fm_rc=0
+    recorded_head=$(_yq_frontmatter_field "$f" "Head") || _fm_rc=$?
+    if [[ "$_fm_rc" -ne 0 ]]; then
+      _fail "check2" "${f}: frontmatter cannot be read, so its recorded Head cannot be compared — fix the YAML or remove the file"
+      continue
+    fi
+    head_at_gen=$(_yq_frontmatter_field "$f" "Head_at_generation") || head_at_gen=""
+    head_note=$(_yq_frontmatter_field "$f" "Head_note") || head_note=""
 
     if [[ -z "$recorded_head" ]]; then
       _fail "check2" "$f: frontmatter has no Head field — cannot verify freshness"

@@ -1771,7 +1771,7 @@ _process_response() {
 
   # Step 4: provenance-binding hash checks (Codex must have echoed the SEALED brief
   # and reviewed the EXACT commit — otherwise the audit doesn't bind to this run).
-  local manifest_brief_hash raw_brief_hash raw_head current_head
+  local manifest_brief_hash raw_brief_hash raw_head
   manifest_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest" 2>/dev/null || echo "")"
   raw_brief_hash="$(jq -r '.codex_brief_hash // ""' "$last_msg" 2>/dev/null || echo "")"
   if [[ -z "$manifest_brief_hash" || "$raw_brief_hash" != "$manifest_brief_hash" ]]; then
@@ -1779,8 +1779,17 @@ _process_response() {
     return 2
   fi
   raw_head="$(jq -r '.reviewed_head // ""' "$last_msg" 2>/dev/null || echo "")"
-  current_head="$(git -C "$evidence_dir" rev-parse HEAD 2>/dev/null || echo "")"
-  if [[ -z "$head_sha" || "$raw_head" != "$head_sha" || -z "$current_head" || "$raw_head" != "$current_head" ]]; then
+  # THE CANDIDATE IS THE AUTHORITY, NOT THE DIRECTORY THIS RUNS IN.
+  # `git -C "$evidence_dir" rev-parse HEAD` used to be a third condition here,
+  # and it is the wrong question twice over: the evidence directory lives in the
+  # PRIMARY checkout, so it answers with main's head, while the work under audit
+  # sits on a candidate branch in a worktree. ACTA hit it on 2026-08-31 — Codex
+  # returned the correct `reviewed_head` with two blocking findings, this
+  # comparison called it a head_mismatch, and the report was written as
+  # `unverifiable` with `findings: []`: the exact opposite of what the audit
+  # said. `head_sha` comes from the sealed manifest and IS the candidate, so it
+  # is the only head worth comparing against.
+  if [[ -z "$head_sha" || "$raw_head" != "$head_sha" ]]; then
     _write_unverifiable "$evidence_dir" "$manifest" head_mismatch "$achieved" "$session_id" "$last_msg" ""
     return 2
   fi

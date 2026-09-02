@@ -2092,3 +2092,26 @@ _write_pd() {
   [ "$output" = "$real_pd_sha" ]
   [ "$output" != "sha256:$(sha256sum "$TEST_EVIDENCE_DIR/plan-diff.json" | awk '{print $1}')" ]
 }
+
+# --- the head under audit is the candidate, not the directory's HEAD -------
+# ACTA, 2026-08-31: Codex returned the CORRECT reviewed_head with two blocking
+# findings; the third condition of the old head check asked
+# `git -C "$evidence_dir" rev-parse HEAD`, which answers with the PRIMARY
+# checkout's head because that is where evidence lives — never the candidate
+# branch under audit. The report was written as unverifiable/head_mismatch with
+# findings: [], the exact opposite of the audit.
+
+@test "head check: only the sealed candidate head decides — the evidence dir's own HEAD does not" {
+  # The guard lives in _process_response step 4. Assert on the SOURCE that the
+  # cwd-derived head is gone from that comparison: a behavioural fixture would
+  # need a worktree whose HEAD differs from the candidate, which this suite's
+  # fake-codex harness cannot build.
+  local lib="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  local block
+  # Comments are stripped: the block explains the old condition by name, and a
+  # test that cannot tell an explanation from an instruction would forbid
+  # writing down why the code is the way it is.
+  block="$(sed -n '/Step 4: provenance-binding hash checks/,/Step 5a/p' "$lib" | grep -v '^[[:space:]]*#')"
+  [[ "$block" == *'"$raw_head" != "$head_sha"'* ]]
+  [[ "$block" != *'rev-parse HEAD'* ]]
+}
