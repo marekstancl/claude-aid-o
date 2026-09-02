@@ -73,7 +73,15 @@ aid_gate_row_revision() {
   local repo="${1:-}" rev head tree
   rev="$(aid_repo_revision "$repo")"
   head="${rev%% *}"; tree="${rev##* }"
+  # BOTH halves are normalized, not just the head. The supervisor answers
+  # "nogit nogit" outside a repository, and normalizing only the head left the
+  # asymmetric pair ("", "nogit") — a tree that LOOKS like a real digest and
+  # compares equal to every other non-repo run, which is the shape a staleness
+  # check is least able to question. "No revision" has to look like no revision
+  # on both sides (found while investigating ACTA's 2026-08-31 checkpoint
+  # report; not the defect that report describes, but a real one beside it).
   [[ "$head" == "none" || "$head" == "nogit" ]] && head=""
+  [[ "$tree" == "none" || "$tree" == "nogit" ]] && tree=""
   printf '%s %s' "$head" "$tree"
 }
 

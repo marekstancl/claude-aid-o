@@ -2543,7 +2543,31 @@ cmd_epic_start() {
     exit 1
   fi
 
-  local run_id="${run_id_opt:-R-${epic_id}-plan}"
+  # THE RUN ID IS READ, NOT INVENTED.
+  # `R-${epic_id}-plan` used to be the default, and it is a guess: when
+  # `aid-json-to-run.sh --run-id R-E020-2` had already created the state and the
+  # evidence under THAT id, epic-start recorded a different one in the manifest,
+  # and `epic-complete` could no longer find its own run (ACTA, 2026-08-31).
+  # An id given on the command line wins; otherwise the id is taken from the run
+  # that already exists on disk for this EPIC. Two candidates, or none, is a
+  # refusal — inventing a third is what produced the split.
+  local run_id="${run_id_opt:-}"
+  if [[ -z "$run_id" ]]; then
+    local _ev_base=".aid-o/work/evidence/${epic_id}" _found=() _d
+    if [[ -d "${project_root}/${_ev_base}" ]]; then
+      for _d in "${project_root}/${_ev_base}"/*/; do
+        [[ -f "${_d}fsm-state.yaml" ]] || continue
+        _found+=("$(basename "${_d%/}")")
+      done
+    fi
+    case "${#_found[@]}" in
+      1) run_id="${_found[0]}" ;;
+      0) echo "PRECONDITION FAIL: epic-start ${epic_id}: no run exists on disk and no --run-id was given. Pass --run-id explicitly (aid-json-to-run.sh creates the run and names it); epic-start no longer invents one, because an invented id splits the evidence from the manifest." >&2
+         exit 1 ;;
+      *) echo "PRECONDITION FAIL: epic-start ${epic_id}: ${#_found[@]} runs exist on disk (${_found[*]}) — pass --run-id to say which one this manifest entry is for." >&2
+         exit 1 ;;
+    esac
+  fi
   local task_branch="task/${epic_id}/main"
   local plan_branch="plan/${plan_id}"
   local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"

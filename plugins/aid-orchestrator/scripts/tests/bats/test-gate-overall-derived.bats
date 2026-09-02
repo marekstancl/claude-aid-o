@@ -47,3 +47,13 @@ setup() {
   block="$(sed -n '/the verdict is DERIVED from the rows/,/local completed_at/p' "$RUNNER")"
   [[ "$block" == *"gate_overall_corrected"* ]]
 }
+
+@test "revision pair: 'no revision' looks like no revision on BOTH halves" {
+  # Outside a repository the supervisor answers "nogit nogit". Normalizing only
+  # the head left ("", "nogit") — a tree that looks like a digest and compares
+  # equal across every non-repo run.
+  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-resume-artifact.sh'
+               aid_gate_row_revision /tmp"
+  [[ "$output" != *"nogit"* ]]
+  [[ "$output" != *"none"* ]]
+}
