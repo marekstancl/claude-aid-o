@@ -53,12 +53,23 @@ for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
       }
     }
     BEGIN { inentry=0; marked=0 }
-    /^##+ [0-9]+\. / {
+    # AN ENTRY IS A NUMBERED **OR** A DATED HEADING. The date is spelled out
+    # digit by digit on purpose: this awk does not take interval quantifiers
+    # (`{4}`) without --re-interval, and a pattern that silently matches
+    # nothing is exactly the failure being fixed.
+    # AN ENTRY IS A NUMBERED **OR** A DATED HEADING. Projects number their
+    # entries while a list is being kept and switch to dates once it is a
+    # running log — ACTA did exactly that on 2026-08-30, and the collector then
+    # reported "nothing new" for 19 real reports over three days, because it
+    # only ever looked for `## N.`. A collector that silently sees nothing is
+    # worse than no collector: it answers the question it was asked with a
+    # confident, wrong "no".
+    /^##+ ([0-9]+\. |[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])/ {
       flush()
       inentry=1; marked=0; headline=$0; sub(/^#+ /, "", headline); body=""
       print; pending=1; next
     }
-    /^## / && !/^## [0-9]+\. / { flush(); inentry=0; marked=0; print; next }
+    /^## / && !/^##+ ([0-9]+\. |[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])/ { flush(); inentry=0; marked=0; print; next }
     {
       if (inentry && pending) {
         # the marker may sit right under the heading or after a blank line
