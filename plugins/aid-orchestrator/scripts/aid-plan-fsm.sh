@@ -8264,6 +8264,18 @@ _pfsm_admin_close_blockers() {
     case "$line" in
       "PASS "*|"INFO "*) continue ;;
       "FAIL "*)
+        # A COMPOSITE LINE IS NEVER AN ABSENCE.
+        # The allowlist matches substrings, so a line carrying an absence phrase
+        # AND a refusal was skipped whole — Codex, 2026-09-02:
+        #   FAIL  [check5] the plan-final candidate binding is gone; frozen
+        #   candidate abc123 has a negative plan-final verdict: fail
+        # A real absence is one short statement. A line that also carries a
+        # second clause, or any of the words a REFUSAL is made of, is judged as
+        # the refusal it contains — the direction that cannot lose one.
+        case "$line" in
+          *";"*|*" verdict"*|*"ancestry"*|*"unparseable"*|*"non-terminal"*|*"status:pending"*)
+            bad+="  · ${line}"$'\n'; continue ;;
+        esac
         case "$line" in
           *"there is nothing to close against"*|\
           *"the plan-final candidate binding is gone"*|\

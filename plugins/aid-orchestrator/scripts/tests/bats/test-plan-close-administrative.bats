@@ -146,3 +146,17 @@ FAIL  [check3] state=DONE but 2 step(s) still status:pending"
   [[ "$output" == *"still status:pending"* ]]
   [[ "$output" != *"candidate binding is gone"* ]]
 }
+
+@test "guard: a composite line carrying an absence AND a refusal is refused" {
+  # Codex, 2026-09-02, fourth round: the allowlist matches substrings, so one
+  # absence phrase anywhere on the line used to suppress the whole line —
+  # including the negative verdict beside it.
+  run _classify "FAIL  [check5] the plan-final candidate binding is gone; frozen candidate abc123 has a negative plan-final verdict: fail"
+  [ -n "$output" ]
+  [[ "$output" == *"negative plan-final verdict"* ]]
+}
+
+@test "guard: a single-clause absence still passes" {
+  run _classify "FAIL  [check5] the manifest has no candidate_sha — the plan-final candidate binding is gone, close is blocked"
+  [ -z "$output" ]
+}
