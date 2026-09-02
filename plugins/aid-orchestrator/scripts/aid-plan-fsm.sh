@@ -5234,7 +5234,11 @@ _pfsm_render_plan_final_skeleton() {
       subject:{subject_hash:$subj},
       revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
       status:"pass", verdict:{kind:"none", ready:false},
-      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-plan-fsm.sh#skeleton"}}
+      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-plan-fsm.sh#skeleton"},
+      _locked:{
+        note:("everything outside ." + $pk + " is part of the hashed envelope and must be returned byte-for-byte"),
+        fields:["schema_version","artifact_type","created_at","control_protocol","identity","subject","revision","status","verdict","provenance"],
+        payload_key:$pk}}
      | .[$pk] = null' > "$out_file" 2>/dev/null
 }
 
@@ -5334,7 +5338,28 @@ _pfsm_verify_plan_final_skeleton_envelope() {
   [[ "$payload_type" == "object" ]] || { printf '%s payload key .%s is not an object (got %s) — never read as a filled specialist output.' "$fname" "$pkey" "${payload_type:-<unreadable>}"; return 1; }
   local actual_hash; actual_hash="sha256:$(jq -S -c --arg pk "$pkey" '.[$pk] = null' "$f" 2>/dev/null | sha256sum | awk '{print $1}')"
   [[ "$actual_hash" == "$rec_hash" ]] && return 0
-  printf '%s does not carry the exact envelope AID generated for this plan/candidate/run (identity, revision, schema_version/artifact_type/control_protocol, producer or provenance was altered).' "$fname"
+  # NAME THE FIELDS THAT ACTUALLY DIFFER.
+  # The old message listed identity/revision/schema/producer/provenance — and
+  # NOT `status` or `verdict`, which the hash protects just as much. An agent
+  # that changed those two (on its dispatcher's own wrong instruction) was
+  # refused twice without being able to see why, and only found the cause by
+  # reading the hash computation (ACTA, 2026-08-31). A refusal that will not say
+  # what it objects to makes the reader guess, and the reader guessed wrong.
+  local _skel _diff=""
+  _skel="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.envelope" 2>/dev/null || true)"
+  if [[ -n "$_skel" && "$_skel" != "null" && "$_skel" != "not_found" ]]; then
+    _diff="$(jq -r --argjson skel "$_skel" --arg pk "$pkey" '
+        . as $now
+        | ($skel | keys_unsorted) + ($now | keys_unsorted) | unique
+        | map(select(. != $pk))
+        | map(select(($skel[.] // null) != ($now[.] // null)))
+        | join(", ")' "$f" 2>/dev/null || true)"
+  fi
+  if [[ -n "$_diff" ]]; then
+    printf '%s does not carry the exact envelope AID generated for this plan/candidate/run. These fields differ from the skeleton: %s. Everything outside the payload key .%s is part of the envelope — including status and verdict, which are NOT yours to fill in.' "$fname" "$_diff" "$pkey"
+  else
+    printf '%s does not carry the exact envelope AID generated for this plan/candidate/run. Everything outside the payload key .%s is protected — identity, revision, schema_version/artifact_type/control_protocol, producer, provenance, AND status and verdict. Only .%s may be written.' "$fname" "$pkey" "$pkey"
+  fi
   return 1
 }
 
@@ -8071,6 +8096,26 @@ _pfsm_render_close_projections() {
   # was published WITHOUT its verdict section, misrepresenting the
   # authoritative JSON as a complete projection (adversarial-review finding).
   # A malformed report now yields NO projection and a warning.
+  # AN UNRECOGNISED SHAPE IS NOT AN EMPTY REPORT.
+  # The guard below catches a report whose `.epics` is the wrong TYPE. It does
+  # not catch one whose keys simply live somewhere else — and an older shape
+  # (`delivery_report.delivered`, `.found_and_fixed_beyond_scope`, written up to
+  # 2026-08-24) does exactly that. Every `//` default then fired, and the render
+  # replaced a hundred lines of real delivery notes with twenty-five lines of
+  # "(no summary recorded)" (ACTA P018, 2026-09-01). The data was never gone —
+  # the renderer was reading a schema it did not know and reporting the result
+  # as emptiness.
+  #
+  # So: recognise the shape FIRST. None of the expected keys present means this
+  # file is not what this renderer projects, and the honest outcome is to write
+  # nothing and say which keys were looked for.
+  local _known
+  _known="$(jq -r 'if (has("summary") or has("epics") or has("delivered_paths")) then "yes" else "no" end' "$src" 2>/dev/null)" || _known="unreadable"
+  if [[ "$_known" != "yes" ]]; then
+    echo "WARNING: ${run_dir_rel}/delivery-report.json carries none of the keys this projection reads (summary, epics, delivered_paths) — it is a different or older shape, so NOTHING was rendered and ${delivery} is left as it is. Convert the report, or write the projection by hand; an empty template over real notes is worse than no template." >&2
+    return 0
+  fi
+
   local sec_summary sec_epics sec_paths
   if ! sec_summary="$(jq -r '.summary // "(no summary recorded)"' "$src" 2>&1)" \
      || ! sec_epics="$(jq -r '(.epics // []) | if (type != "array") then error("epics is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>&1)" \
@@ -8223,6 +8268,25 @@ cmd_plan_close() {
       --force) _PFSM_FORCE=1; shift ;;
       --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      # ADMINISTRATIVE CLOSE — a different thing from --force, and the
+      # difference is the whole point.
+      #
+      # `--force` unlocks a CHECK over data that is real: the plan went through
+      # the loop, the candidate and the review exist, and some bookkeeping step
+      # refused. That is why it worked for ACTA's P018 and P020.
+      #
+      # It cannot close P019, and should not: there the DATA is missing or says
+      # `fail` — no candidate_sha, no plan_final_run_id, a post-merge review
+      # whose verdict is `fail`. Forcing there would mean INVENTING the receipt's
+      # contents, which is fabricating evidence, and the reporting agent refused
+      # to do it even with the PM's blessing (2026-09-01). Right call.
+      #
+      # So this close does not pretend. It writes no candidate, no run id and no
+      # verdict; it records `closure_kind: administrative`, LISTS what was
+      # missing, and leaves the plan closed and unmistakably not
+      # evidence-backed. The PM asked for it for two real cases: work developed
+      # outside AID, and a plugin defect that strands a plan for hours.
+      --administrative) _PFSM_ADMIN_CLOSE=1; shift ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -8233,6 +8297,22 @@ cmd_plan_close() {
   # P073 Step 8 (review finding): a force reason without --force is an
   # error, never a silently discarded argument.
   _pfsm_force_arg_check "plan-close" || exit 2
+
+  # An administrative close is a PM decision on the record, so it needs a reason
+  # like every other audited bypass here, and it is deliberately NOT combinable
+  # with --force: one says "the data is fine, the check is stuck", the other
+  # says "there is no data". Asking for both means the caller has not decided
+  # which is true, and the close would record a contradiction.
+  if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
+    if [[ "$_PFSM_FORCE" -eq 1 ]]; then
+      echo "ERROR: plan-close: --administrative and --force say different things (no evidence vs a stuck check) — pick one." >&2
+      exit 2
+    fi
+    if [[ "${#_PFSM_FORCE_REASON}" -lt 20 ]]; then
+      echo "ERROR: plan-close --administrative needs --reason with at least 20 characters: it is recorded verbatim as the only account of why a plan was closed without evidence." >&2
+      exit 2
+    fi
+  fi
 
   if [[ -z "$plan_id" ]]; then
     echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]" >&2
@@ -8327,6 +8407,16 @@ cmd_plan_close() {
   # Classified forceable, so the PM proceeds with an audited waiver instead of
   # hand-editing state. The full check output is still printed FIRST, forced or
   # not: the force is offered as the second route, never as a way to not look.
+  # An administrative close does not run the check's verdict as a gate: it is
+  # closing a plan whose evidence is known to be absent. The check's OUTPUT is
+  # still printed and still recorded — what is missing is precisely the thing
+  # worth writing down.
+  if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && "$ccrc" -ne 0 ]]; then
+    printf '%s\n' "$ccout" >&2
+    _PFSM_ADMIN_MISSING="$(printf '%s' "$ccout" | grep -oE '^[[:space:]]*(FAIL|check[0-9]+)[^\n]*' | head -20 | tr '\n' '|')"
+    echo "ADMINISTRATIVE CLOSE: ${plan_id} is being closed WITHOUT evidence. What the check could not confirm is recorded above and in the close record; nothing below fabricates a candidate, a run id or a verdict." >&2
+    ccrc=0
+  fi
   if [[ "$ccrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
     printf '%s\n' "$ccout" >&2
     if _pfsm_precondition "close_check_complete" forceable false; then
@@ -8390,7 +8480,15 @@ cmd_plan_close() {
       # P073 Step 8: forceable — this IS the stranding scenario the backdoor
       # exists for (a manually deleted manifest, a branch removed by hand). The
       # close still records what it could not prove.
-      if [[ "$_PFSM_FORCE" -eq 1 ]] && _pfsm_precondition "lifecycle_manifest_present" forceable false; then
+      if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
+        # No manifest is the ORDINARY case for work that never went through the
+        # loop. It is recorded as its own note, not as a receipt that is merely
+        # late: `closed_pending_receipt` promises a receipt will follow, and
+        # here none ever will.
+        lifecycle_note="closed_administrative"
+        applied_sha="$target_head"
+        echo "ADMINISTRATIVE CLOSE: ${plan_id} has no lifecycle manifest and none is expected — the close is recorded as closed_administrative, never as closed." >&2
+      elif [[ "$_PFSM_FORCE" -eq 1 ]] && _pfsm_precondition "lifecycle_manifest_present" forceable false; then
         lifecycle_note="closed_pending_receipt"
         applied_sha="$target_head"
         echo "RECONCILIATION REQUIRED: ${plan_id} has no .aid-lifecycle manifest, so this close carries NO durable receipt and is recorded as closed_pending_receipt. The force waiver names the bypass; restore the manifest and re-run plan-close to converge." >&2
@@ -8532,7 +8630,15 @@ cmd_plan_close() {
 
   echo "$marker"
   if [[ "$close_mode" == "merge" ]]; then
-    if [[ "$lifecycle_note" == "closed_pending_receipt" ]]; then
+    if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
+      # The word "closed" is never used bare for this either. An administrative
+      # close is terminal and legitimate — and it is not the same fact as a plan
+      # that went through the loop, so it never reads as one.
+      echo "CLOSED ADMINISTRATIVELY: ${plan_id} is terminal WITHOUT an evidence chain. Reason: ${_PFSM_FORCE_REASON}" >&2
+      [[ -n "${_PFSM_ADMIN_MISSING:-}" ]] \
+        && echo "  what could not be confirmed: ${_PFSM_ADMIN_MISSING//|/ · }" >&2
+      echo "  Nothing here asserts a candidate, a run id or a review verdict; where an evidence-backed close is required, this one does not count as it." >&2
+    elif [[ "$lifecycle_note" == "closed_pending_receipt" ]]; then
       # NEVER the word "closed" alone here. `aid-lifecycle.sh` defines closed as
       # receipt-committed-and-reachable; saying it while the receipt is missing
       # would be the one contradiction this whole path exists to avoid.

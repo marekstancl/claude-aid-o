@@ -271,6 +271,20 @@ steps 1–3 are ONE TRANSACTION held under a single lock:
    flag. The positional execution `mode` stays `full` — streamlined is a
    separate dimension carried only by the `--streamlined` flag.
 
+8. `{plugin_path}/scripts/aid-queue-add.sh` — put every generated EPIC in the
+   queue. **This step is not optional and nothing later creates the entries for
+   you:** a plan whose EPICs never reached the queue merges its first EPIC and
+   then stalls, because `epic-merge-to-plan` finds nothing to continue with, and
+   the failure surfaces as a queue inconsistency far from its cause (ACTA P020,
+   2026-08-31 — reported as a merge defect and it was this).
+
+**Before you commit anything, be on the branch you mean to commit to.** The
+pipeline leaves the plan worktree on `plan/<id>` after each init (step 7), so a
+step's commit belongs on that step's `task/<epic>/main` and getting there is the
+caller's job — no script switches for you at commit time. This is written here
+because agents were told they had got it wrong without ever having been told the
+rule (ACTA, 2026-08-31).
+
 These are **bash scripts**. No LLM involvement. Exit non-zero → abort with error message.
 PM must fix the underlying issue (missing steps, circular deps, invalid EPIC format).
 

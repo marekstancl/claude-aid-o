@@ -6395,7 +6395,26 @@ cmd_amend_scope() {
   [[ ${#add[@]} -gt 0 ]] || die "amend-scope: nothing to add — pass --add <path> at least once"
   [[ ${#reason} -ge 20 ]] || die "amend-scope: --reason must say why in at least 20 characters (it is the audit record)"
   local state; state=$(yaml_field "$state_file" state)
-  [[ "$state" == "EXECUTE" ]] || die "amend-scope: the run is in ${state:-<unknown>}, not EXECUTE — scope is only amended while a step is being worked"
+  # GATES IS THE OTHER TIME SCOPE LEGITIMATELY WIDENS.
+  # A gate that fails names a file the step must touch to satisfy it, and that
+  # file is regularly outside the step's declared paths. Refusing here left the
+  # documented gate-fix loop with no sanctioned route: the fix could not be
+  # committed inside the contract, so it happened outside it (ACTA, 2026-08-31).
+  #
+  # It stays a REFUSAL everywhere else. A terminal run has nothing left to widen
+  # for, and the message says which state it found.
+  case "$state" in
+    EXECUTE|GATES) ;;
+    *) die "amend-scope: the run is in ${state:-<unknown>} — scope is amended while a step is being worked (EXECUTE) or while a gate is asking for a file the step does not declare (GATES), never after the run is terminal" ;;
+  esac
+  if [[ "$state" == "GATES" ]]; then
+    # A widened scope during GATES invalidates what the gates already decided:
+    # the tree they judged is not the tree that will exist. Say so — a silent
+    # amendment here would make the next report describe a run that no longer
+    # matches its own verdict, which is the class of defect this same session
+    # spent the day removing.
+    echo "amend-scope: ${state} — the gate rows for this run are now stale by construction; re-run the gates after the fix rather than trusting the ones already recorded." >&2
+  fi
   local evidence_dir; evidence_dir="$(cd "$(dirname "$state_file")" && pwd)"
   local plan="${evidence_dir}/plan.json"
   [[ -f "$plan" ]] || die "amend-scope: ${plan} not found"
@@ -8273,6 +8292,34 @@ cmd_check_promotion_candidates() {
 # delivery-report.md  is skipped when reporter.enabled:false  in execution.yaml.
 # Skips are logged to audit-log.jsonl with rationale.
 # Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
+# _fsm_plan_mode_args <plan_id> <root> — the three values `aid_lc_plan_mode_begin`
+# needs, read from the plan's own manifest: merge sha, plan-final run directory
+# (absolute), parent commit. Echoes them space-separated for a plan that has
+# been merged; echoes NOTHING for a plan that has not (an epic-mode plan
+# reconciles as before). Refuses, naming the missing field, when the plan IS
+# merged but the manifest cannot say where its evidence is — reconciling then
+# would report "unverifiable" for every epic and blame the evidence.
+_fsm_plan_mode_args() {
+  local plan_id="$1" root="${2:-.}" merge_sha rel parent abs
+  merge_sha="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.final_merge_sha' 2>/dev/null)" || merge_sha=""
+  [[ -n "$merge_sha" && "$merge_sha" != "null" ]] || { printf ''; return 0; }
+
+  rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || rel=""
+  if [[ -z "$rel" || "$rel" == "null" ]]; then
+    echo "PRECONDITION FAIL: plan-reconcile ${plan_id}: the plan is merged (${merge_sha}) but its manifest carries no plan_final_evidence_dir, so the reviewed-head provenance cannot be read. Reconciling now would call every EPIC unverifiable and blame the evidence for it." >&2
+    return 1
+  fi
+  abs="${root%/}/${rel#./}"
+  if [[ ! -d "$abs" ]]; then
+    echo "PRECONDITION FAIL: plan-reconcile ${plan_id}: manifest points at '${rel}', which is not a directory under ${root}. Fix the manifest or pass the right root; a missing directory here makes every EPIC look unverifiable." >&2
+    return 1
+  fi
+  parent="$(git -C "${root%/}" rev-parse "${merge_sha}^" 2>/dev/null)" || parent=""
+  [[ -n "$parent" ]] || parent="$merge_sha"
+  printf '%s %s %s' "$merge_sha" "$abs" "$parent"
+  return 0
+}
+
 cmd_plan_close() {
   # P073 Step 9: this function took three positionals and NOTHING else, so the
   # dispatcher's `"$@"` handed it any `--force --reason ...` the operator
@@ -9192,6 +9239,23 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 _pr_id="${1:-}"; shift || true; _pr_apply=false; _pr_root="."
                                 for _a in "$@"; do case "$_a" in --apply) _pr_apply=true ;; --dry-run) _pr_apply=false ;; *) _pr_root="$_a" ;; esac; done
                                 [[ -n "$_pr_id" ]] || { echo "Usage: aid-fsm.sh plan-reconcile <plan_id> [--dry-run|--apply] [root]" >&2; exit 1; }
+                                # PLAN MODE HAS TO BE BEGUN, AND NOBODY WAS BEGINNING IT.
+                                # In plan mode the lifecycle reads the reviewed head from
+                                # $_AID_LC_PLAN_RUN_DIR/audit-report.json. This dispatch called
+                                # the reconcile directly and the function does not begin the mode
+                                # itself, so the path resolved to /audit-report.json, the read
+                                # came back empty, and EVERY epic of EVERY plan_branch plan was
+                                # reported "unverifiable — no reviewed-head provenance" while the
+                                # real report sat in the evidence directory. plan-close's check5
+                                # then refused a plan that was genuinely delivered (ACTA P020,
+                                # 2026-08-31). The three values the mode needs are all in the
+                                # manifest; read them, and REFUSE by name when one is missing
+                                # rather than reconciling into a guaranteed "unverifiable".
+                                _pr_mode="$(_fsm_plan_mode_args "$_pr_id" "$_pr_root")" || exit 1
+                                if [[ -n "$_pr_mode" ]]; then
+                                  # shellcheck disable=SC2086
+                                  aid_lc_plan_mode_begin $_pr_mode
+                                fi
                                 aid_lifecycle_plan_reconcile "$_pr_id" "$_pr_root" "$_pr_apply" ;;
     plan-record-delivery)       shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-record-delivery <epic_id> [root]" >&2; exit 1; }

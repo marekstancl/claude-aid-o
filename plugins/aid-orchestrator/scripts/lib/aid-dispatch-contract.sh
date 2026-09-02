@@ -303,7 +303,17 @@ aid_dispatch_contract_validate() {
   # stages, so an omission would leave an edit behind unstaged and unseen.
   local undeclared="[]" changed_on_disk="" g
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    changed_on_disk="$(git -C "$root" status --porcelain --untracked-files=all 2>/dev/null \
+    # `core.quotepath=false` — WITHOUT it git escapes any non-ASCII byte, so a
+    # file named `příloha.md` comes back as "p\305\231\303\255loha.md", never
+    # matches the declared path, and the step is refused although everything
+    # about it is correct (WAN, reproduced 2026-09-02). The quoting is git's
+    # display convention, not the file's name.
+    #
+    # A name containing a NEWLINE would still break this line-oriented read;
+    # `--porcelain -z` is the durable answer and is not taken here because it
+    # changes how every consumer below reads the value. Recorded rather than
+    # implied: a plan touching such a file is the input that finds it.
+    changed_on_disk="$(git -C "$root" -c core.quotepath=false status --porcelain --untracked-files=all 2>/dev/null \
       | cut -c4- | sed 's/^.* -> //' | grep -v '^\.aid-o/' || true)"
     while IFS= read -r g; do
       [[ -n "$g" ]] || continue
