@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 496          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 497          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3686,6 +3686,20 @@ enforcements:
     description: "P090 Step 6 — `epic-start` prepares state; it does not run an EPIC. With the switch on, the claimed EPIC is started as `claude -p \"/aid-run --auto --epic <id>\"` under `aid-job.sh` (IMP-262), with a pre-allocated job id passed through `env AID_JOB_ID=` so the session knows its own identity and the 'is a job already running' check can exclude it — without that exclusion the chain would stop at length one, because the session that reaches its own merge would see itself. The slash form was decided by a recorded experiment against a predicate declared beforehand, not assumed; the verdict is written up in docs/extending-aid.md (the raw transcript stays in the gitignored evidence directory, so nothing here cites it). The decision and the launch hold the JOBS directory's lock, not the queue's — nothing in the decision touches the queue, and holding that one would block every other plan's peek/claim while a session starts."
     recovery: "Every refusal names its reason and leaves the EPIC claimed and ready; the controller can start it by hand. `aid-job.sh collect --id <the guidance's job_id>` returns the terminal result of a session that did start."
     test: "scripts/tests/bats/test-continue-spawn.bats"
+
+  - id: plan_close_administrative
+    type: 2
+    source: "scripts/aid-plan-fsm.sh (cmd_plan_close, --administrative)"
+    instruction: "commands/aid-run.md + skills/pipeline.md (plan-final / close boundary)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    test: "scripts/tests/bats/test-plan-close-administrative.bats"
+    enforcement_degree: 2
+    description: "PM-requested route (2026-09-02) for closing a plan that never produced an evidence chain — work developed outside AID, or a plugin defect that strands a plan. It writes NO candidate, run id or verdict; it records closure_kind and lists what could not be confirmed. Refused whenever the manifest carries both candidate_sha and plan_final_run_id, so a plan whose evidence exists and says `fail` cannot be closed around; refused together with --force, which means the opposite thing (real data, stuck check); and requires a reason of 20+ characters, recorded verbatim."
+    not_guaranteed: "that the plan was delivered, reviewed, or is releasable. It guarantees only that the closure is RECORDED as evidence-free and is never presented as an ordinary close — where an evidence-backed close is required, this one does not satisfy it."
 
   - id: queue_continuation_notice
     type: 12

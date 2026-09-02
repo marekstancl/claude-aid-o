@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Nevydáno]
+
+### Added
+- **Administrativní zavření plánu** — `plan-close --administrative --reason "…"` zavře plán, který nikdy nevyrobil řetěz evidence: práci vyvinutou mimo AID, nebo plán uvízlý na vadě pluginu. Nezapisuje kandidáta, běh ani verdikt; zaznamená, co nešlo potvrdit, a nikdy nezní jako řádné uzavření. Odmítne se, když evidence existuje (i když říká „fail"), a nelze ho kombinovat s `--force`, který znamená opak.
+- **`--tree` u ověření evidence** — kontrola dostane strom, který má posoudit, a report jmenuje, který to byl a odkud se vzal.
+
+### Fixed
+- **Brány hlásily průchod, i když povinná brána spadla** — verdikt se nastavoval v sedmi větvích a běh, který neprošel žádnou z nich, zůstal „prošel". Nyní se odvozuje z řádků a řádek nese `required`. Verdikt, který nejde ověřit proti vlastním řádkům, je selhání.
+- **Audit zahazoval nálezy** — porovnávala se hlava adresáře evidence, který leží v hlavním checkoutu, místo hlavy kandidáta. Codex vracel blokující nálezy a zapsalo se `unverifiable` s prázdným seznamem.
+- **Ověření evidence se dívalo na hlavní checkout** — kandidát ve vlastní pracovní kopii se posuzoval podle cizí rozpracované práce.
+- **Chyba nástroje vypadala jako průchod** — kontrola uzávěrky umírala na rozbitém YAML uprostřed běhu.
+- **`epic-start` si vymýšlel ID běhu** — když běh existoval pod jiným ID, manifest ukazoval jinam než evidence a dokončení EPICu svůj běh nenašlo.
+- **`plan-reconcile` prohlašoval každý EPIC za neověřitelný** — nezahajoval režim plánu, takže se reviewed-head četl z neexistující cesty.
+- **Soubor s diakritikou v názvu byl odmítnut** — `git status` bez `core.quotepath=false` vrací escapovanou podobu, která se s deklarovanou cestou neshodne.
+- **`amend-scope` po posledním kroku** — brána si vyžádá soubor mimo rozsah a dosud pro to nebyla cesta. Nově je povolen i ve fázi bran a zaznamenané řádky bran se odloží stranou, aby se nedaly přehrát.
+- **Projekce delivery reportu přepsala skutečné poznámky prázdnou šablonou** — starší schéma má klíče jinde; neznámý tvar se nyní nerenderuje a řekne, co hledal.
+- **Sběrač hlášení neviděl datované nadpisy** — devatenáct hlášení tři dny propadalo, zatímco hlásil „nic nového". Nadpis s hlubším nadpisem pod sebou je oddíl, ne položka.
+
+### Changed
+- **Odmítnutí obálky jmenuje pole, která se liší** — `status` a `verdict` v seznamu chráněných polí chyběly, ačkoliv chráněné jsou; šablona nyní nese seznam zamčených polí.
+- **`aid-run.md` říká, co po volajícím chce** — že se fronta plní v předletové kontrole a že commit patří na větev, na kterou se autor musí přepnout. Obojí dosud nebylo napsané nikde a agenti byli káráni za jejich nesplnění.
+
 ## [2.95.11] — 2026-08-30
 
 ### Fixed
