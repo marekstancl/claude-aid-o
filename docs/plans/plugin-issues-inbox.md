@@ -1873,19 +1873,202 @@ podle ID položek to začalo u E-018 (srpen 2026), tedy dávno před P024.
 
 ---
 
----
 
-#### wan — 2026-08-27, generování EPICů pro P099 (plugin: not recorded)
-
-
+## Collected 2026-09-02 — 6 entries from 3 project(s)
 
 ---
 
-#### wan — 2026-08-27, běh EPICu E-099-1_3 (`/aid-run --auto`) (plugin: not recorded)
+#### acta — 2026-09-02 — Stop hook hlásí prázdný plán jako „hotový k zavření" (plugin: not recorded)
+
+**Plugin:** aid-orchestrator (plugin_path `~/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator`)
+
+**Co se stalo:** hned po `aid-plan-fsm.sh plan-start P021 --mode plan_branch
+--autonomy auto`, kdy pro P021 ještě neexistoval ani jeden EPIC (žádný záznam
+v `active-runs.json`, žádný `plan.json`, žádná `fsm-state.yaml`), vypsal Stop hook:
+
+```
+AID — this turn is ending with an autonomous plan still open (nothing was changed,
+and this cannot stop a turn):
+- P021 (OPEN): every EPIC is accounted for; the plan still needs closing
+  (plan-finalize / plan-merge-to-main / plan-close).
+```
+
+**Co to způsobilo:** nic přímo — hook sám říká, že nic nemění a nemůže zastavit tah.
+Ale hláška je nepravdivá a míří přesně opačným směrem, než jaký je skutečný stav:
+plán byl dvě minuty po založení, ve stavu `OPEN`, před CP1-deep review a před
+generováním EPICů. Doporučení „plán ještě potřebuje zavřít (plan-finalize /
+plan-merge-to-main / plan-close)" by při doslovném uposlechnutí vedlo k pokusu
+uzavřít plán, ve kterém se nic neudělalo.
+
+**Příčina (odhad):** kontrola zřejmě počítá EPICy plánu, které nejsou v terminálním
+stavu, a nulu z prázdné množiny čte jako „všechny vyřízené". Klasické vacuous truth —
+`all([])` je pravda. Chybí rozlišení „plán nemá žádné EPICy, protože ještě nebyly
+vygenerované" od „plán měl EPICy a všechny doběhly".
+
+**Co jsem udělal:** nic, pokračoval jsem v CP1-deep review. Zapisuji sem, protože
+hláška se objeví u každého plánu mezi `plan-start` a dokončením generování EPICů,
+tedy pokaždé, když `/aid-run` dohání deep review za plán, který jím neprošel.
+
+→ Návrh: podmínku doplnit o „a zároveň má plán aspoň jeden EPIC". Pro plán s nula
+EPICy je správná hláška opačná — plán je založený a čeká na generování EPICů
+(`aid-plan-to-epic.sh` / CP1 brána), ne na zavření.
+
+---
 
 
 
 ---
 
-#### wan — 2026-08-28, uzavírání plánu P099 (plugin: not recorded)
+#### acta — 2026-09-02 — `aid-release.sh` neumí vydat konkrétní verzi a v běžícím EPICu se odmítne spustit (plugin: not recorded)
+
+**Plugin:** aid-orchestrator
+
+**Co se stalo:** plán P021 předepisoval vydání verze 0.11.0 přes `aid-release.sh`.
+CP1-deep čočka (C0 reuse_compat) a následně revizní agent skript přečetli a doložili,
+že to takhle nejde:
+
+- `aid-release.sh` přijímá jako typ vydání pouze `auto|patch|minor|major` (ř. 69, 188).
+  Cílovou verzi předat nelze.
+- Nové číslo počítá z `package.json`, kde je 0.10.0. Při `auto` bez `feat:` commitu
+  od v0.10.0 vyjde 0.10.1 — tedy jiná verze, než jakou má changelog připravenou.
+- `update_changelog` (ř. 519-556) pak spadne do větve `else`, která PŘEDŘADÍ prázdný
+  stub nad hotový záznam `## [0.11.0]`. Výsledkem jsou dvě nevydané verze.
+- `_release_fsm_guard` (ř. 197, 946) skript uvnitř běžícího EPICu (stav EXECUTE)
+  odmítne spustit a chce `--force --reason`.
+
+**Co to způsobilo:** plán musel `aid-release.sh` obejít. Revize P021 předepisuje ruční
+bump tří souborů + `git tag` jako primární cestu a v textu vysvětluje proč. Není to
+slepá ulička, ale je to obcházení nástroje, který na tenhle úkol má být.
+
+**Proč je to vada pluginu, ne plánu:** v režimu `plan_branch` je vydání verze legitimní
+krok uvnitř EPICu — přesně tam ho AID staví. Nástroj, který má vydání provést, ale
+v tom kontextu odmítá běžet a neumí přijmout verzi, kterou plán vydat chce. Ty dvě
+vlastnosti se navzájem násobí: i kdyby FSM guard nebyl, skript by vydal jiné číslo.
+
+**Doplněk (kolo 3 CP1 review P021):** čočka L3 našla ještě jeden důsledek. Jakmile
+ACTA zavede pre-commit hook z P021 (kontrola, že vydávaná verze má záznam v changelogu
+a že nevydaná verze je nejvýš jedna), přestane být `aid-release.sh` v tomhle projektu
+použitelný úplně — jeho `update_changelog` zapisuje prázdný stub, který ten hook
+z definice odmítne. Není to vada P021: hook dělá přesně to, k čemu je. Je to vada
+souběhu, kdy si dva nástroje na tutéž věc odporují a AID o tom neví.
+
+→ Návrh: (1) přidat `aid-release.sh --version X.Y.Z` pro případ, kdy verzi určuje plán,
+ne inference z commitů; (2) `update_changelog` nesmí předsadit stub nad existující
+záznam téže nebo vyšší verze — má to být tvrdá chyba, ne tichý zápis; (3) rozmyslet,
+jestli `_release_fsm_guard` má blokovat i vydání, které je samo krokem EPICu — dnes
+nutí každý takový plán buď k `--force`, nebo k ručnímu obejití.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — CP1-deep není součástí PRE-FLIGHT `/aid-run` (plugin: not recorded)
+
+**Plugin:** aid-orchestrator
+
+**Co se stalo:** `/aid-run --AUTO P021` na plánu, který neprošel `/aid-plan --deep`.
+PRE-FLIGHT podle `commands/aid-run.md` začíná krokem `aid-cp1-gate.sh`. Ten plán
+klasifikoval jako band `full` (kvůli `package.json` v deklarovaných cestách) a odmítl:
+
+```
+CP1-gate: plan P021 is band=full (full_path:package.json) — checking CP1-deep evidence.
+ERROR: A full-band plan requires CP1-deep evidence.
+Missing files in .aid-o/work/evidence/P021/cp1-deep/:
+  - cp1-lens-L1-behavior.md … cp1-adjudicator.md
+Run /aid-plan --deep to generate CP1-deep evidence before EPIC generation.
+```
+
+**Co to způsobilo:** `/aid-run` musel celý CP1-deep review odvést sám — dvě kola po
+devíti čočkách plus adjudikátor a cílená revize plánu mezi nimi. To je řádově větší
+kus práce než PRE-FLIGHT, jak ho popisuje dokumentace příkazu (pět bash kroků,
+„No LLM involvement").
+
+**Proč to považuji za vadu:** hláška je věcně správná a říká, co dělat. Problém je
+v tom, že se to zjistí až refusalem uprostřed PRE-FLIGHTu, přestože band plánu jde
+zjistit dopředu jedním voláním (`aid-cp1-gate.sh --classify-only`), které dokumentace
+sama popisuje. `/aid-run` na plán bez CP1 evidence tedy může buď (a) rovnou říct
+„tenhle plán je band=full a nemá deep review, spustím ho / spusť `/aid-plan --deep`",
+nebo (b) deep review udělat jako deklarovanou součást PRE-FLIGHTu. Dnešní stav je
+třetí varianta: refusal, po kterém orchestrátor improvizuje postup, který je popsaný
+v jiném příkazu.
+
+**Co jsem udělal:** CP1-deep jsem odvedl podle `commands/aid-plan.md` a
+`skills/review-checkpoint-contracts.md` — devět čoček, adjudikátor, revizní smyčka.
+Evidence je na standardních místech, takže brána ji přijme. Nic jsem neobcházel
+a `--force` nepoužil.
+
+→ Návrh: do PRE-FLIGHT sekce `/aid-run` přidat krok 0 „klasifikuj band a zkontroluj
+CP1 evidenci" s explicitním rozhodnutím, co se stane, když chybí — a to rozhodnutí
+napsat do `aid-run.md`, ať ho orchestrátor nemusí odvozovat z hlášky brány.
+
+---
+
+#### wan — 1. Chybějící hranice EPICů se nehlásí tam, kde vzniknou (plugin: not recorded)
+
+Plán bez `**EPIC N: …**` markerů generátor **tiše rozdělil sám**:
+```
+[INFO] No phase markers found. 10 steps divided into 2 phase(s) (~6 steps each)
+```
+Je to `[INFO]`, ne varování — a to dělení ignoruje deklarované závislosti mezi
+kroky (P101 má tři přirozené celky, ne dva stejně velké). Kdyby se generování
+nezastavilo o krok dál, vznikly by EPICy rozseknuté uprostřed závislosti.
+
+Chyba se ohlásila teprve u zakládání lifecycle manifestu:
+```
+Lifecycle manifest could not be created for P101 (rc=2) … Fix the plan's EPIC
+declaration (strict '**EPIC N: …**' …)
+```
+Diagnostika je tedy o krok pozdě a hlásí jiný objekt (manifest), než co je
+skutečně vadné (chybějící markery v plánu). Kdo čte jen první chybu, jde
+opravovat manifest.
+
+**Co by pomohlo:** hlásit chybějící markery už při detekci fází, a to jako
+varování s odkazem na gramatiku — ne jako `[INFO]` o automatickém dělení.
+
+
+
+---
+
+#### wan — 2. `aid-plan-lint.sh` nekontroluje gramatiku závislostí (plugin: not recorded)
+
+Napsal jsem u kroku bez následníka:
+```
+- Blocks: — (Krok 3 na tenhle krok NEnavazuje: …)
+```
+Lint: **PASS**. Generátor:
+```
+line 212: unrecognised dependency token '…' — accepted: 'Step N', 'Steps N-M',
+'Task N', 'Tasks N-M', 'none', '---', …
+READINESS: FAIL
+```
+Lint se sám prezentuje jako „early feedback before the plan is handed to CP1 or
+to EPIC generation", ale tuhle třídu vad nechytá — takže „lint PASS" nic neříká
+o tom, jestli plán projde generováním. Hláška generátoru je naopak výborná
+(vyjmenuje přijímané tvary), jen přijde o tři kroky později.
+
+**Co by pomohlo:** přidat kontrolu `Depends on:` / `Blocks:` do lintu, kde už
+se stejně parsují `**Files:**` a `**Reuse check:**`.
+
+
+
+---
+
+#### wan — 3. Papercut: každá oprava vadného plánu si vyžádá `supersede-generation` (plugin: not recorded)
+
+Selhané generování nechá rozpracovanou transakci. Oprava vady ale ze své
+podstaty **změní plán**, takže se změní i jeho hash — a další pokus skončí na
+`generation transaction identity mismatch`, dokud se předchozí transakce
+neodarchivuje. Cyklus „spustit → selže na vadě plánu → opravit → spustit" tedy
+vždy vyžaduje mezikrok navíc.
+
+Není to chyba (míchat artefakty ze dvou verzí plánu se nemá) a hláška je
+vzorná — cituje přesný příkaz včetně `--reason`. Ale u vad, které generátor
+odhalí AŽ SÁM (body 1 a 2 výš), je ten mezikrok vynucený jeho vlastní
+pozdní diagnostikou. Kdyby lint chytil víc, transakce by ani nevznikla.
+
+**Poznámka k dopadu:** v tomhle případě transakce nic nevyprodukovala
+(`phase 1-3: not generated`), takže archivace byla bezbolestná. U částečně
+vygenerované by to znamenalo ruční úklid přes `plan-rollback`.
 

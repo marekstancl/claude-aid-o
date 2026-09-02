@@ -43,7 +43,21 @@ for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
   # awk: emit each unmarked entry as a block; rewrite the file with a marker
   # under each heading it took.
   tmp="$(mktemp)"; blocks="$(mktemp)"
-  awk -v today="$TODAY" -v mark_re="$MARK_RE" -v blocks="$blocks" -v project="$project" '
+  # Line numbers of `##` headings that have a deeper heading under them. Those
+  # are CONTAINERS, never entries: WAN writes `## 2026-08-27, generování EPICů`
+  # and puts `### 1. …` reports beneath it, while ACTA writes
+  # `## 2026-08-31 — …` with the report in its own body. Nothing in the heading
+  # text separates the two — judging by a comma or a dash took three WAN section
+  # headers as reports, which test-plugin-issues caught before the inbox did.
+  # Plain awk on purpose: this host runs mawk, which has no gensub.
+  container_lines="$(awk '
+    /^## / { last2 = NR; next }
+    /^### / { if (last2 != 0) { print last2; last2 = 0 } }
+  ' "$f" 2>/dev/null | sort -u | tr "\n" " ")"
+  awk -v today="$TODAY" -v mark_re="$MARK_RE" -v blocks="$blocks" -v project="$project" \
+      -v container_lines="$container_lines" '
+    BEGIN { _n = split(container_lines, _cl, " ")
+            for (_i = 1; _i <= _n; _i++) if (_cl[_i] != "") container[_cl[_i]+0] = 1 }
     function flush(   v) {
       if (inentry && !marked) {
         v = "plugin: not recorded"
@@ -64,6 +78,9 @@ for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
     # only ever looked for `## N.`. A collector that silently sees nothing is
     # worse than no collector: it answers the question it was asked with a
     # confident, wrong "no".
+    /^##+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ && (NR in container) {
+      flush(); inentry=0; marked=0; print; next
+    }
     /^##+ ([0-9]+\. |[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])/ {
       flush()
       inentry=1; marked=0; headline=$0; sub(/^#+ /, "", headline); body=""
