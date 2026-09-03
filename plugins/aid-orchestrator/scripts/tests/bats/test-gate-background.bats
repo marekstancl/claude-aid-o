@@ -177,6 +177,14 @@ golden_normalize() {
       .completed_at = "NORMALIZED"
     | ._generated_at = "NORMALIZED"
     | .revision.head_sha = "NORMALIZED"
+    # The command log carries its own durations, and nothing was zeroing them:
+    # the golden holds 0 there, so any machine on which a command took a
+    # measurable millisecond failed this comparison. That is why it had been
+    # red — a timing flake wearing the costume of a shape regression.
+    | (if (._command_log | type) == "array"
+       then ._command_log |= map(if (. | type) == "object" and (has("duration_ms"))
+                                 then .duration_ms = 0 else . end)
+       else . end)
     | .gates |= with_entries(
         if (.value | type) == "object" then
           .value |= (

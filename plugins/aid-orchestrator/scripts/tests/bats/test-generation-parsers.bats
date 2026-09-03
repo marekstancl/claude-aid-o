@@ -63,6 +63,14 @@ EOF
   done
   printf '{"schema_version":"aid-2.0","artifact_type":"c0_plan_review","review_status":"pass","blocking_findings":false,"findings":[]}\n' \
     > "$GPROJ/.aid-o/work/evidence/P902/c0-plan-review.json"
+  # The fixture declares `risk: high`, so the gate classifies it as band=full
+  # and — since the reuse_evidence C0 lens became a full-band requirement —
+  # refuses before it ever reaches the adjudicator parser these cases are
+  # about. Without this the whole file measured "the gate refuses for an
+  # unrelated reason", which is not what any of its names claim.
+  mkdir -p "$GPROJ/.aid-o/work/evidence/P902/c0"
+  printf 'findings: []\nstop_rule_blockers: []\n' \
+    > "$GPROJ/.aid-o/work/evidence/P902/c0/c0-lens-reuse_evidence.md"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$TEST_TMPDIR/stub/ok.sh"
   chmod +x "$TEST_TMPDIR/stub/ok.sh"
   export AID_CP1_GATE_C0_REVIEW_BIN="$TEST_TMPDIR/stub/ok.sh"

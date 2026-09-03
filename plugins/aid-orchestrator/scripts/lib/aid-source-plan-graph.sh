@@ -43,12 +43,36 @@ _aid_spg_dep_numbers() {
   # corpus uses ("Step 1 (visual_refs field in schema)"). Anchoring without
   # it rejected 5 plans that previously generated, which the loosening
   # directive forbids.
-  raw="$(printf '%s' "$raw" | sed 's/[—–].*$//; s/ - .*$//; s/ (.*$//')"
+  # The collector separates DECLARATIONS with \035, because the strip below
+  # runs from the first separator to end of string and would otherwise eat
+  # every declaration after the first (2026-09-02). Strip per declaration,
+  # then rejoin the surviving reference lists with a comma — from here down
+  # the code is unchanged and sees the full list.
+  local _seg _refs=""
+  while IFS= read -r -d $'\035' _seg || [[ -n "$_seg" ]]; do
+    _seg="$(printf '%s' "$_seg" | sed 's/[—–].*$//; s/ - .*$//; s/ (.*$//')"
+    _seg="$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -z "$_seg" ]] && continue
+    _refs="${_refs:+${_refs}, }${_seg}"
+  done < <(printf '%s\035' "$raw")
+  raw="$_refs"
   # The two accepted no-dependency markers: `none` is the authoring form,
   # `---` the generated-canonical one. Case-insensitive; nothing else counts.
-  case "$(printf '%s' "$raw" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
-    ---|none) return 0 ;;
-  esac
+  # Checked per declaration so that repeating a marker is the same statement
+  # made twice (accepted), while a marker MIXED with a real reference is the
+  # contradiction it looks like and falls through to the loud token error.
+  local _all_marker=1 _any=0
+  # `read` returns non-zero on a final line with no trailing newline, so the
+  # `|| [[ -n ... ]]` is what lets a single unterminated `none` be seen at all.
+  while IFS= read -r _seg || [[ -n "$_seg" ]]; do
+    [[ -z "$_seg" ]] && continue
+    _any=1
+    case "$(printf '%s' "$_seg" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+      ---|none) ;;
+      *) _all_marker=0 ;;
+    esac
+  done < <(printf '%s' "$raw" | tr ',' '\n')
+  (( _any && _all_marker )) && return 0
   raw="$(printf '%s' "$raw" | tr '\n' ' ' | sed 's/,/\n/g')"
   while IFS= read -r token; do
     token="$(printf '%s' "$token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -87,6 +111,15 @@ aid_source_plan_graph() {
   _aid_spg_error=""
   [[ -f "$plan" ]] || { _aid_spg_error="plan file not found: $plan"; return 1; }
 
+  # \034 separates the RECORDS this function emits and \035 the dependency
+  # DECLARATIONS inside one; both are therefore reserved input bytes. A plan
+  # carrying either could manufacture a record or a declaration boundary, so
+  # it is refused by name rather than parsed into a graph nobody wrote.
+  if LC_ALL=C grep -qU $'\034\|\035' "$plan" 2>/dev/null; then
+    _aid_spg_error="plan contains a reserved control byte (0x1C or 0x1D), which this parser uses to separate records and dependency declarations — remove it from the plan text"
+    return 1
+  fi
+
   # Records are unit-separated (dependency prose may contain tabs). The awk keeps
   # the source block intact, including multi-line dependency continuations.
   local records
@@ -107,7 +140,29 @@ aid_source_plan_graph() {
       # guard matches the FIELD at the start of the line only: a Depends line
       # whose annotation merely mentions "Blocks:" must keep its dependency.
       if (in_deps && $0 ~ /^[[:space:]]*-?[[:space:]]*Blocks:/) next
-      if (in_deps) { if ($0 ~ /^[[:space:]]*-[[:space:]]*Depends on:/ || $0 ~ /^[[:space:]]+/ || $0 ~ /^[[:space:]]*Depends on:/) { t=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", t); sub(/^Depends on:[[:space:]]*/, "", t); deps=deps t " " } }
+      # A step may declare its dependencies on SEVERAL lines. Until 2026-09-02
+      # every such line was folded into one space-joined string and the
+      # annotation strip in _aid_spg_dep_numbers — which runs from the FIRST
+      # separator to end of string — then discarded declarations 2..n along
+      # with the prose of declaration 1. Five of eleven steps in a real plan lost
+      # their dependencies that way, silently: the graph simply came out
+      # smaller, and the divergence surfaced much later as an unexplained
+      # plan.json disagreement. Declarations are now separated by \035 so the
+      # strip can run per declaration.
+      #
+      # The boundary is STRUCTURAL, not the line starts with Depends-on:
+      # continuation prose is unconstrained and may legitimately begin with
+      # those words ("- Depends on: Step 1 — rationale:" / "  Depends on: the
+      # schema staying stable"). A declaration is a LIST ITEM, or an
+      # unindented field; anything else indented continues the current one.
+      if (in_deps) {
+        if ($0 ~ /^[[:space:]]*-[[:space:]]*Depends on:/ || $0 ~ /^Depends on:/) {
+          t=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", t); sub(/^Depends on:[[:space:]]*/, "", t)
+          deps = (deps == "" ? t : deps "\035" t) " "
+        } else if ($0 ~ /^[[:space:]]+/) {
+          deps = deps $0 " "
+        }
+      }
     }
     END { flush() }
   ' "$plan")"

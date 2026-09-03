@@ -45,6 +45,7 @@ check_prerequisites
 # state, never a forked workspace inside the worktree.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
 
 # =============================================================================
 # Parse CLI arguments
@@ -760,9 +761,17 @@ elif [[ ! -f "$fsm_state_file" ]]; then
   # otherwise refuse on lineage nobody registered.
   # plan_id is already derived above (Step 18's base_commit choice needs it);
   # this stays as the guard for a caller that passed it explicitly.
+  # The AUTHORITATIVE reader, not a local one. This used to be
+  # `git show "<current branch>:.aid-lifecycle/manifests/<id>.yaml" | yq .mode`,
+  # which asks whichever branch happens to be checked out — during generation
+  # that is frequently not the branch carrying the declaration, and an
+  # unreadable answer silently became "legacy", skipping both epic-start and
+  # the base resolution below. `aid_lifecycle_plan_mode` reads the tracked
+  # manifest at the state root and is documented fail-SAFE to the pre-P064
+  # model, which is the convention every other consumer already follows.
   if [[ -z "$plan_mode" && -n "$plan_id" ]]; then
-    plan_mode="$(git show "$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo main):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null \
-                 | yq -r '.mode // ""' 2>/dev/null || true)"
+    plan_mode="$(aid_lifecycle_plan_mode "$plan_id" "$(aid_state_root)" 2>/dev/null || true)"
+    [[ "$plan_mode" == "plan_branch" ]] || plan_mode=""
   fi
 
   if [[ "$plan_mode" == "plan_branch" && -n "$plan_id" ]]; then
@@ -773,6 +782,34 @@ elif [[ ! -f "$fsm_state_file" ]]; then
       echo "P075: epic-start registered task/${epic_id}/main for ${plan_id} before FSM init" >&2
     else
       echo "P075: epic-start for ${epic_id} returned ${_es_rc} — continuing to init, which decides whether the branch state is usable (already-registered is the normal resume case)" >&2
+    fi
+  fi
+
+  # P090 follow-up (2026-09-02, WAN): the base written into fsm-state must be
+  # the EPIC's recorded CUT POINT, and until now it was `git rev-parse HEAD` in
+  # whatever checkout generation ran in. For a plan_branch plan generated from
+  # the primary checkout that is main's head — not on the plan branch at all —
+  # and the plan could not advance itself past its first EPIC: reconciliation
+  # refused EPIC 2 on a base nothing could explain.
+  #
+  # The task branch's CURRENT head is not the answer either. On a resume it
+  # already carries EPIC commits, and using it would collapse every
+  # `base_commit..HEAD` range the FSM computes (gate profile, production paths,
+  # review scope) to empty. Only the manifest records the cut point, so the
+  # manifest is asked — through `epic-base`, which proves the entry's lineage
+  # before answering. This runs after epic-start, which is what creates the
+  # entry; a refusal here is loud, because writing a base this run cannot
+  # explain is what detonated one EPIC later.
+  if [[ "$plan_mode" == "plan_branch" && -n "$plan_id" ]]; then
+    _jr_base=""
+    _jr_base="$(bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-base "$plan_id" "$epic_id" 2>/dev/null || true)"
+    if [[ -n "$_jr_base" ]]; then
+      if [[ "$_jr_base" != "$fsm_base_commit" ]]; then
+        echo "base_commit for ${epic_id}: using the manifest's recorded cut point ${_jr_base} instead of the generating checkout's head ${fsm_base_commit}" >&2
+      fi
+      fsm_base_commit="$_jr_base"
+    else
+      error_exit "aid-json-to-run.sh: ${epic_id} belongs to plan_branch plan ${plan_id}, but its recorded epic_base_commit could not be read from the manifest (see the PRECONDITION FAIL above). Refusing to fall back to this checkout's HEAD — that base is what wedges the plan one EPIC later." 1
     fi
   fi
 

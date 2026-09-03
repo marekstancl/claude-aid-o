@@ -87,6 +87,28 @@ EOF
   export PATH="$BIN:$PATH_BEFORE"
 }
 
+# A PATH identical to the real one MINUS the two harness binaries. Naming
+# /usr/bin:/bin used to be enough and stopped being so the day codex was
+# installed globally (2026-08-31) — four cases then silently measured a
+# REACHABLE opponent while asserting the unreachable one. Listing the
+# utilities by hand rots the same way (the script sources two libraries that
+# between them reach for two dozen tools), so this mirrors the whole PATH and
+# omits exactly what the test is about.
+path_without_codex() {
+  local nobin="${BATS_TEST_TMPDIR}/nobin" d f
+  mkdir -p "$nobin"
+  local IFS=:
+  for d in $PATH; do
+    [[ -d "$d" ]] || continue
+    for f in "$d"/*; do
+      [[ -x "$f" && ! -d "$f" ]] || continue
+      case "${f##*/}" in claude|codex) continue ;; esac
+      [[ -e "${nobin}/${f##*/}" ]] || ln -s "$f" "${nobin}/${f##*/}"
+    done
+  done
+  export PATH="$nobin"
+}
+
 run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
 
 @test "AC24: what both models agree on is recorded without troubling the PM" {
@@ -131,7 +153,7 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
 
 @test "AC26: an opponent that cannot be reached is recorded as such, never as agreement" {
   approve_vision
-  export PATH="/usr/bin:/bin"   # no codex at all
+  path_without_codex
   run_opponent
   [ "$status" -eq 3 ]
   [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "unreached" ]
@@ -178,7 +200,7 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   # "The artifact says so" has to be a fact about a file. A run that could not
   # write its record must not report one.
   approve_vision
-  export PATH="/usr/bin:/bin"        # opponent unavailable -> the unreached path
+  path_without_codex
   chmod 500 "$TMP/out"
   run_opponent
   chmod 700 "$TMP/out"
@@ -188,7 +210,7 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
 
 @test "AC8/AC9: an unreachable opponent is recorded with its attempt count, for the PM to decide on" {
   approve_vision
-  export PATH="/usr/bin:/bin"
+  path_without_codex
   run_opponent
   [ "$status" -eq 3 ]
   local d="$TMP/out/dispute.json"
@@ -205,7 +227,7 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   # interruptions — worse than the monologue it was avoiding. Codex returned
   # 529 three times in a row on the day this was written.
   approve_vision
-  export PATH="/usr/bin:/bin"
+  path_without_codex
   run_opponent; [ "$status" -eq 3 ]
   [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "true" ]
   run_opponent; [ "$status" -eq 3 ]

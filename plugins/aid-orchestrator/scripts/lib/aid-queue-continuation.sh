@@ -119,7 +119,29 @@ aid_queue_continuation_scan() {
                 | .next_epic' "$guide" 2>/dev/null)" || next=""
     fi
 
-    printf '%s\t%s\t%s\t%s\n' "$plan_id" "${state:-?}" "$result" "$next"
+    # `peek-next` answering `none` means "nothing CLAIMABLE", which is not the
+    # same statement as "every EPIC finished". For a plan that has never had an
+    # EPIC in its queue the two readings point in opposite directions, and the
+    # hook used to advise closing a plan two minutes after plan-start. Ask how
+    # many entries this plan owns, in any status, and let the renderer say
+    # which of the two it is. An unreadable answer stays "I do not know": the
+    # count is left empty and the existing wording is used, matching this
+    # function's own policy of never turning an unknown into a claim.
+    local qcount="" qrc=0
+    if [[ "$result" == "none" ]]; then
+      qcount="$(bash "$qlib" count-plan "$plan_id" --project-root "$root" 2>/dev/null)" || qrc=$?
+      if [[ "$qrc" -ne 0 || ! "$qcount" =~ ^[0-9]+$ ]]; then
+        echo "queue count for ${plan_id} could not be read (count-plan rc=${qrc}); not distinguishing 'before generation' from 'drained'" >&2
+        qcount=""
+      fi
+    fi
+
+    # \037 and not a tab: a TAB is IFS whitespace, so a run of them collapses
+    # into one delimiter and an empty field in the MIDDLE of the record simply
+    # disappears — the reader then takes the next value as `next`. That was
+    # harmless while `next` was last and only ever empty at the end; adding a
+    # field after it made the collapse visible (the count arrived as `next`).
+    printf '%s\037%s\037%s\037%s\037%s\n' "$plan_id" "${state:-?}" "$result" "$next" "$qcount"
   done
   return 0
 }
@@ -139,10 +161,19 @@ _aid_qc_root() {
   (cd "$cwd" && aid_state_root 2>/dev/null) || { echo "cwd is not inside an AID workspace" >&2; return 3; }
 }
 
-# _aid_qc_line <plan> <state> <result> <next> — one sentence, for either event.
+# _aid_qc_line <plan> <state> <result> <next> [queue_count] — one sentence,
+# for either event. An empty queue_count means "not determined".
 _aid_qc_line() {
-  local plan="$1" state="$2" result="$3" next="$4" tail=""
+  local plan="$1" state="$2" result="$3" next="$4" qcount="${5:-}" tail=""
   [[ -n "$next" ]] && tail=" The last continuation left ${next} in flight."
+  # Zero entries is the plan BEFORE generation, or one interrupted during it —
+  # never a plan that finished. The wording deliberately does not claim "no
+  # EPIC was ever generated": generation can produce artifacts and then fail
+  # before the queue insert, so the queue can only speak for the queue.
+  if [[ "$result" == "none" && "$qcount" == "0" ]]; then
+    printf -- '- %s (%s): no EPIC is recorded in this plan queue yet — the plan is before, or was interrupted during, generation; do not close it.%s\n' "$plan" "$state" "$tail"
+    return 0
+  fi
   case "$result" in
     none)       printf -- '- %s (%s): every EPIC is accounted for; the plan still needs closing (plan-finalize / plan-merge-to-main / plan-close).%s\n' "$plan" "$state" "$tail" ;;
     blocked:*)  printf -- '- %s (%s): nothing is claimable — %s.%s\n' "$plan" "$state" "$result" "$tail" ;;
@@ -221,8 +252,8 @@ _aid_qc_emit() {
     [[ -n "${_qc_mine// /}" ]] && _qc_filter=1
   fi
 
-  local plan state result next n=0
-  while IFS=$'\t' read -r plan state result next; do
+  local plan state result next qcount n=0
+  while IFS=$'\037' read -r plan state result next qcount; do
     [[ -n "$plan" ]] || continue
     if (( _qc_filter )) && [[ "$_qc_mine" != *" $plan "* ]]; then
       continue
@@ -232,7 +263,7 @@ _aid_qc_emit() {
     fi
     (( n == 0 )) && echo "$heading"
     n=$((n+1))
-    _aid_qc_line "$plan" "$state" "$result" "$next"
+    _aid_qc_line "$plan" "$state" "$result" "$next" "$qcount"
   done < <(aid_queue_continuation_scan "$root")
 
   if (( n == 0 )); then

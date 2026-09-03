@@ -38,6 +38,8 @@
       "exit_code": 0,
       "gate": "alpha",
       "output": "alpha-ok",
+      "required": true,
+      "required_source": "explicit",
       "result": "pass",
       "runtime_baseline": {
         "data_sufficient": false,
@@ -58,6 +60,8 @@
       "exit_code": 0,
       "gate": "beta",
       "output": "beta-ok",
+      "required": false,
+      "required_source": "explicit",
       "result": "pass",
       "runtime_baseline": {
         "data_sufficient": false,
@@ -79,6 +83,8 @@
       "gate": "delta_nocmd",
       "output": "",
       "reason": "no_command",
+      "required": false,
+      "required_source": "explicit",
       "result": "skip"
     },
     "gamma": {
@@ -87,6 +93,8 @@
       "exit_code": 1,
       "gate": "gamma",
       "output": "gamma-broke",
+      "required": false,
+      "required_source": "explicit",
       "result": "fail",
       "runtime_baseline": {
         "data_sufficient": false,

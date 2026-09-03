@@ -1404,6 +1404,40 @@ if [[ -z "$dod_gates" ]]; then
   # Reached only when the config WAS read and genuinely defines none of them —
   # a valid state for a project whose DoD rides on review rather than a gate.
   dod_gates="<!-- no DoD gate declared: ${_exec_yaml} defines none of ${_dod_candidates[*]} -->"
+else
+  # The two maps must agree, and until 2026-09-02 nothing checked that they did.
+  # The gate above is chosen from `gates:` and written into plan.json; the
+  # GATES -> DONE precondition then judges the run against `gate_profiles:`,
+  # refusing when the plan requires a gate the active profile excludes. A
+  # project with hand-authored profiles (ACTA) had `docs_updated` in `gates:`
+  # and not in `standard`, so EVERY run the FSM auto-resolved to `standard`
+  # passed its gates and then wedged on the transition — after the whole gate
+  # run had been paid for, and with nothing at generation time to warn it.
+  #
+  # Checked here because generation is the last moment where both maps are
+  # visible and nothing is hash-bound yet. The FSM precondition stays as it is:
+  # an explicit `--profile <name>` can still exclude the gate, and only the FSM
+  # sees that. This is the earlier, cheaper half of the same guarantee.
+  #
+  # The set asked about is the resolver's, not the file's: `aid-gate-profile.sh`
+  # owns the canonical names and caps auto-resolution at `standard` on an EPIC
+  # boundary, so those three are the ones a run can land on without anybody
+  # choosing. A canonical profile the config does not define is skipped — the
+  # FSM runs every gate when the resolved profile is absent, so its exclusion
+  # list is empty by definition.
+  _dod_gate_name="${dod_gates#- }"
+  _dod_bad=""
+  if [[ "$(yq -r '.gate_profiles != null' "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
+    for _prof in quick targeted standard; do
+      [[ "$(yq -r ".gate_profiles.\"${_prof}\" != null" "$_exec_yaml" 2>/dev/null)" == "true" ]] || continue
+      if [[ "$(yq -r "[.gate_profiles.\"${_prof}\".include[]? | select(. == \"${_dod_gate_name}\")] | length" "$_exec_yaml" 2>/dev/null)" == "0" ]]; then
+        _dod_bad="${_dod_bad:+${_dod_bad}, }${_prof}"
+      fi
+    done
+  fi
+  if [[ -n "$_dod_bad" ]]; then
+    error_exit "DoD gate '${_dod_gate_name}' is defined in ${_exec_yaml} under gates: and would be written into this EPIC's plan.json, but the auto-resolvable profile(s) [${_dod_bad}] do not include it. Every run the FSM resolves to one of those would pass its gates and then be refused at GATES -> DONE (plan_gate_profile_excluded). Fix one of the two: add '${_dod_gate_name}' to those profiles' include[] in gate_profiles, or remove it from gates:." 1
+  fi
 fi
 
 # Dependencies section

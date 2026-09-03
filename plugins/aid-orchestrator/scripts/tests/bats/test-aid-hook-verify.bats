@@ -93,6 +93,28 @@ EOF
   export AID_HOOK_TOOL=codex
 }
 
+# A PATH identical to the real one MINUS the two harness binaries. Naming
+# /usr/bin:/bin used to be enough and stopped being so the day codex was
+# installed globally (2026-08-31) — four cases then silently measured a
+# REACHABLE opponent while asserting the unreachable one. Listing the
+# utilities by hand rots the same way (the script sources two libraries that
+# between them reach for two dozen tools), so this mirrors the whole PATH and
+# omits exactly what the test is about.
+path_without_codex() {
+  local nobin="${BATS_TEST_TMPDIR}/nobin" d f
+  mkdir -p "$nobin"
+  local IFS=:
+  for d in $PATH; do
+    [[ -d "$d" ]] || continue
+    for f in "$d"/*; do
+      [[ -x "$f" && ! -d "$f" ]] || continue
+      case "${f##*/}" in claude|codex) continue ;; esac
+      [[ -e "${nobin}/${f##*/}" ]] || ln -s "$f" "${nobin}/${f##*/}"
+    done
+  done
+  export PATH="$nobin"
+}
+
 @test "AC5: the canary passes only when AID's own rule really ran" {
   fake_claude 2.1.226 success yes
   run bash "$VERIFY" --canary --timeout 10
@@ -180,9 +202,7 @@ EOF
 }
 
 @test "no tool on PATH is a verdict, not a crash" {
-  # A PATH with the usual tools but neither harness on it — emptying PATH
-  # entirely would test that `bash` is missing, which is a different story.
-  export PATH="/usr/bin:/bin"
+  path_without_codex
   export AID_HOOK_TOOL=auto
   run bash "$VERIFY" --canary --timeout 10
   [ "$status" -eq 1 ]

@@ -5,11 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Nevydáno]
 
+### ⚠️ Změna chování — přečti před upgradem
+
+Od této verze **může brána, která dosud nikdy nic nezastavila, začít běh blokovat**.
+Týká se to bran, které mají `required_when` a nemají `required`. Takové brány
+runner dosud počítal jako nepovinné, takže jejich pád nikoho nezastavil.
+
+Pokud má brána zůstat doporučující, dopiš jí do `.aid-o/config/execution.yaml`
+jeden řádek — výslovné rozhodnutí vždy vyhrává nad odvozením:
+
+```yaml
+    required: false
+```
+
+Konfigurace projektů se nepřepisuje automaticky. Report u každé brány nově nese
+`required_source` (`explicit` / `required_when` / `not_applicable` /
+`legacy_default`), takže je dohledatelné, proč byla brána povinná.
+
 ### Added
+- **`required_when` u bran se konečně čte** — klíč byl ve všech 14 branách všech 5 dodávaných šablon a v každém projektu, který kdy vznikl přes `/aid-init`; runner ho nečetl. Rozhoduje, zda brána na tenhle strom vůbec platí: výslovné `required:` má přednost, jinak rozhodne `required_when`, jinak zůstává původní `false`. Mluvnice je uzavřená (`always`, nebo `<maska> exists` spojené doslovným ` OR `) a ověří se u každé brány dřív, než se spustí jediný příkaz.
 - **Administrativní zavření plánu** — `plan-close --administrative --reason "…"` zavře plán, který nikdy nevyrobil řetěz evidence: práci vyvinutou mimo AID, nebo plán uvízlý na vadě pluginu. Nezapisuje kandidáta, běh ani verdikt; zaznamená, co nešlo potvrdit, a nikdy nezní jako řádné uzavření. Odmítne se, když evidence existuje (i když říká „fail"), a nelze ho kombinovat s `--force`, který znamená opak.
 - **`--tree` u ověření evidence** — kontrola dostane strom, který má posoudit, a report jmenuje, který to byl a odkud se vzal.
 
 ### Fixed
+- **Padající test nechal běh projít ve všech projektech založených AIDem** — `required_when` runner neuměl přečíst, takže se u brány dosadilo „nepovinná". Spadlý pytest, ruff, mypy, eslint i tsc zapsaly `fail` a verdikt zůstal `pass`. Postižené projekty neudělaly nic špatně: jejich konfigurace byla bajt po bajtu ta, kterou jim AID vygeneroval.
+- **Brána vložená do plánu, kterou profil vylučuje** — bránu vybírá generování z mapy `gates:`, ale přechod GATES→DONE ji posuzuje podle `gate_profiles:`. Shodu nikdo nekontroloval, takže běh zaplatil celý průchod branami a teprve pak byl odmítnut. Generování to nyní odmítne dřív, než se cokoli zapečetí.
+- **Graf závislostí tiše zahodil vše kromě prvního `Depends on:`** — ořez lidského komentáře běžel od první pomlčky do konce a bral s sebou i následující deklarace. Pět kroků z jedenácti přišlo v reálném plánu o závislosti a rozpor se ukázal až o několik kroků dál.
+- **`base_commit` z jiné větve zasekl plán po prvním EPICu** — zapisoval se z adresáře, kde běželo generování, tedy typicky hlava `main`. Nově se bere zapsaný řez EPICu z manifestu, jehož rodokmen se před odpovědí prokáže.
+- **Stop hook radil zavřít plán, ve kterém se nic neudělalo** — prázdná fronta se nerozlišovala od vyčerpané, takže dvě minuty po založení plánu zněla rada „ještě zbývá zavřít".
+- **Testovací sady padaly na zestárlých předpokladech** — čtyři sady měřily něco jiného, než tvrdily: „PATH bez codexu" ho od jeho globální instalace obsahoval, fixture nesplňovala požadavek na C0 čočku, který přibyl později, a zlatý otisk reportu porovnával naměřené doby běhu proti nulám.
 - **Brány hlásily průchod, i když povinná brána spadla** — verdikt se nastavoval v sedmi větvích a běh, který neprošel žádnou z nich, zůstal „prošel". Nyní se odvozuje z řádků a řádek nese `required`. Verdikt, který nejde ověřit proti vlastním řádkům, je selhání.
 - **Audit zahazoval nálezy** — porovnávala se hlava adresáře evidence, který leží v hlavním checkoutu, místo hlavy kandidáta. Codex vracel blokující nálezy a zapsalo se `unverifiable` s prázdným seznamem.
 - **Ověření evidence se dívalo na hlavní checkout** — kandidát ve vlastní pracovní kopii se posuzoval podle cizí rozpracované práce.

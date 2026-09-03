@@ -70,6 +70,8 @@ source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
 source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
 # shellcheck source=lib/aid-gate-row.sh
 source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
+# shellcheck source=lib/aid-gate-applicability.sh
+source "${SCRIPT_DIR}/lib/aid-gate-applicability.sh"
 # shellcheck source=lib/aid-resume-artifact.sh
 # THE shared continuation vocabulary (artifact basename, revision pair,
 # pending-pointer resolution, gate-row binding key). Sourced fail-CLOSED: this
@@ -1721,6 +1723,44 @@ run_all_gates() {
   local gate_count gate_names_json
   gate_count=$(yq '.gates | length' "$execution_yaml")
   gate_names_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
+
+  # ─── required_when validation, BEFORE anything runs ────────────────
+  # Every gate's requirement is resolved up front, for two reasons. A gate the
+  # active profile excludes never reaches the per-gate read, so a malformed
+  # expression there would go unnoticed until the day that profile is used.
+  # And a bad expression late in the file would otherwise let the gates before
+  # it run — including their side effects — before the run refuses.
+  #
+  # The applicability root is `$PWD` — the SAME directory `run_gate`'s
+  # `bash -c` executes in. An earlier version used the git top-level, which is
+  # only equal to it when the runner is invoked from the root: from
+  # `repo/subdir` applicability would have been judged against the whole
+  # repository while every gate command saw one directory. A gate could then be
+  # required on the strength of files its own command cannot reach. Whatever
+  # the commands can see is what decides whether they were applicable.
+  local _rw_root="$PWD"
+  local _rw_gate _rw_ans _rw_rc
+  declare -A _AID_REQ_RESOLVED=() _AID_REQ_SOURCE=()
+  # Taken HERE, explicitly, once per run — not left to the library's
+  # root-keyed cache. Two run_all_gates calls in one shell at the same cwd
+  # would otherwise share the first run's snapshot, so the "one snapshot per
+  # run" contract would hold only for the first of them.
+  aid_gate_snapshot_candidates "$_rw_root"
+  while IFS= read -r _rw_gate; do
+    [[ -n "$_rw_gate" ]] || continue
+    # Called directly, NOT through $(...): the reason for a refusal lives in
+    # _AID_GA_ERROR, and a command substitution's subshell takes it with it.
+    _rw_rc=0
+    aid_gate_required "$execution_yaml" "$_rw_gate" "$_rw_root" >/dev/null || _rw_rc=$?
+    _rw_ans="${_AID_GA_REQUIRED}"$'\t'"${_AID_GA_SOURCE}"
+    if [[ "$_rw_rc" -ne 0 ]]; then
+      echo "ERROR: ${_AID_GA_ERROR:-gate '${_rw_gate}': unreadable requirement}" >&2
+      echo "ERROR: accepted forms are 'required: true|false', or 'required_when: always' / 'required_when: \"<glob> exists\"' (clauses joined by the literal ' OR '). Refusing to run any gate on a requirement this runner cannot read — guessing it is what left failing gates green." >&2
+      return 1
+    fi
+    _AID_REQ_RESOLVED["$_rw_gate"]="${_rw_ans%%$'\t'*}"
+    _AID_REQ_SOURCE["$_rw_gate"]="${_rw_ans##*$'\t'}"
+  done < <(yq '.gates | keys | .[]' "$execution_yaml")
   log_event "$timeline_file" "gate_runner_start" \
     report_path="$report_path" gate_count="$gate_count" \
     command_list="$gate_names_json"
@@ -1948,6 +1988,17 @@ run_all_gates() {
   while IFS= read -r gate_name; do
     [[ -z "$gate_name" ]] && continue
 
+    # Every row carries the resolved requirement and where it came from —
+    # including the branches that never run a command. Without it the final
+    # "derive the verdict from the rows" pass is blind on exactly those
+    # branches, and a reader cannot tell a gate that was excused from one that
+    # was never required. (Codex review, 2026-09-02.)
+    _req_fields() {
+      printf '"required":%s,"required_source":"%s"' \
+        "$([[ "${_AID_REQ_RESOLVED[$1]:-false}" == "true" ]] && echo true || echo false)" \
+        "${_AID_REQ_SOURCE[$1]:-legacy_default}"
+    }
+
     # Test-only fault injection (never set in production): drop a gate's
     # iteration WITHOUT emitting a row or incrementing `processed`, simulating a
     # silently-lost gate so the defined==processed integrity assert below can be
@@ -1987,7 +2038,7 @@ run_all_gates() {
       log_event "$timeline_file" "gate_complete" gate="$gate_name" result="profile_excluded" reason="profile_excluded" profile="$profile"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"profile_excluded\",\"reason\":\"profile_excluded\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"profile_excluded\",\"reason\":\"profile_excluded\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       excluded_gates+=("$gate_name")
       continue
@@ -1995,7 +2046,13 @@ run_all_gates() {
 
     local cmd required max_retries timeout_s pass_criteria run_mode
     cmd=$(yq ".gates.\"${gate_name}\".command" "$execution_yaml")
-    required=$(yq ".gates.\"${gate_name}\".required // false" "$execution_yaml")
+    # Resolved up front (see the validation block above): explicit `required:`
+    # wins; otherwise `required_when` decides; otherwise the pre-2026-09
+    # default of false. Reading `.required // false` here was the whole defect:
+    # `required_when` is what the shipped templates and every generated project
+    # actually carried, and it was never read at all.
+    required="${_AID_REQ_RESOLVED[$gate_name]:-false}"
+    local required_source="${_AID_REQ_SOURCE[$gate_name]:-legacy_default}"
     max_retries=$(yq ".gates.\"${gate_name}\".max_retries // 1" "$execution_yaml")
     timeout_s=$(yq ".gates.\"${gate_name}\".timeout_seconds // 60" "$execution_yaml")
     pass_criteria=$(yq ".gates.\"${gate_name}\".pass_criteria // \"\"" "$execution_yaml")
@@ -2011,7 +2068,7 @@ run_all_gates() {
       log_event "$timeline_file" "gate_complete" gate="$gate_name" result="skip" reason="no_command"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"skip\",\"reason\":\"no_command\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"skip\",\"reason\":\"no_command\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       continue
     fi
@@ -2048,8 +2105,11 @@ run_all_gates() {
         $first || gates_json+=","
         first=false
         gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_unhealthy" \
+          --argjson rq "$([[ "${_AID_REQ_RESOLVED[$gate_name]:-false}" == "true" ]] && echo true || echo false)" \
+          --arg rs "${_AID_REQ_SOURCE[$gate_name]:-legacy_default}" \
           '{gate:$g, result:"fail", reason:"service_unhealthy", exit_code:1, duration_ms:0,
-            output:("required service(s) not healthy: " + $s), attempts:0, unhealthy_services:($s | split(", "))}')"
+            output:("required service(s) not healthy: " + $s), attempts:0, unhealthy_services:($s | split(", ")),
+            required:$rq, required_source:$rs}')"
         processed=$((processed+1))
         if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
         continue
@@ -2064,7 +2124,7 @@ run_all_gates() {
       overall="fail"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       continue
     fi
@@ -2079,8 +2139,11 @@ run_all_gates() {
       $first || gates_json+=","
       first=false
       gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_ms_list" --arg t "$_plugin_project_root" \
+        --argjson rq "$([[ "${_AID_REQ_RESOLVED[$gate_name]:-false}" == "true" ]] && echo true || echo false)" \
+        --arg rs "${_AID_REQ_SOURCE[$gate_name]:-legacy_default}" \
         '{gate:$g, result:"fail", reason:"gate_script_missing_in_tree", exit_code:1, duration_ms:0,
-          output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0}')"
+          output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0,
+          required:$rq, required_source:$rs}')"
       processed=$((processed+1))
       if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
       continue
@@ -2310,9 +2373,15 @@ run_all_gates() {
     # `required` travels WITH the row. Without it the report cannot say why a
     # run passed or failed, and the end-of-run verdict has nothing to re-derive
     # from — which is how "overall: pass" survived a failed required gate.
+    # `required_source` rides along so a reader can tell WHY a gate was (or
+    # was not) required — `explicit`, `required_when`, `not_applicable` or
+    # `legacy_default`. Without it, a run that stopped blocking because a
+    # required_when stopped matching looks identical to one that was never
+    # required, and adoption of this change could not be audited.
     merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" \
       --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
-      ". + {\"attempts\":${attempt}, \"required\": \$req, \"runtime_baseline\": \$rb}")
+      --arg reqsrc "${required_source:-legacy_default}" \
+      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc, \"runtime_baseline\": \$rb}")
     gates_json+="\"${gate_name}\":${merged_row}"
     processed=$((processed+1))
 
@@ -2396,23 +2465,32 @@ run_all_gates() {
         _stale_reason="row_not_written_by_this_run"
       fi
 
-      _required_rg="$(yq ".gates.\"${_rg}\".required // false" "$execution_yaml")"
+      # The SAME resolution every executed gate got. Reading `.required // false`
+      # here would have left a restored failing row non-blocking for exactly
+      # the gates this change exists to make blocking — a false green on the
+      # path that does not run the command and therefore gets the least
+      # scrutiny.
+      _required_rg="${_AID_REQ_RESOLVED[$_rg]:-false}"
+      local _reqsrc_rg="${_AID_REQ_SOURCE[$_rg]:-legacy_default}"
       $first || gates_json+=","
       first=false
       if [[ -n "$_stale_reason" ]]; then
         gates_json+="\"${_rg}\":$(jq -nc --arg g "$_rg" --arg sr "$_stale_reason" \
           --arg rec "$_rec_head" --arg cur "$_rows_head" --arg src "$_rf" \
+          --arg rq "$_required_rg" --arg rs "$_reqsrc_rg" \
           '{gate:$g, result:"fail", exit_code:1, duration_ms:0, attempts:0,
             output:("checkpointed gate row at " + $src + " is not valid for the current revision (" + $sr + "); the gate did not run in this invocation"),
             reason:"gate_row_stale", stale_reason:$sr,
             recorded_head:(if $rec == "" then null else $rec end),
-            current_head:(if $cur == "" then null else $cur end)}')"
+            current_head:(if $cur == "" then null else $cur end),
+            required:($rq == "true"), required_source:$rs}')"
         processed=$((processed+1))
         log_event "$timeline_file" "gate_row_stale" gate="$_rg" source="$_rf" \
           reason="$_stale_reason" recorded_head="$_rec_head" current_head="$_rows_head"
         if [[ "$_required_rg" == "true" ]]; then overall="fail"; fi
       else
-        gates_json+="\"${_rg}\":${_rrow}"
+        gates_json+="\"${_rg}\":$(jq -c --arg rq "$_required_rg" --arg rs "$_reqsrc_rg" \
+          '. + {required:($rq == "true"), required_source:$rs}' <<<"$_rrow")"
         processed=$((processed+1))
         log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf" \
           head="$_rec_head"
@@ -2504,7 +2582,12 @@ run_all_gates() {
       log_event "$timeline_file" "gate_complete" gate="$declared_gate" result="fail" reason="undefined_gate"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${declared_gate}\":{\"gate\":\"${declared_gate}\",\"result\":\"fail\",\"reason\":\"undefined_gate\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"gate declared in plan.json but not defined in execution.yaml\",\"attempts\":0}"
+      # `required` is stated as true and `required_source` as `undefined_gate`
+      # rather than left absent. The gate has no definition, so there is no
+      # requirement to resolve — but a row without the two fields makes "every
+      # row says whether it counted" untrue, and this one counts: it forces
+      # overall=fail on the next line.
+      gates_json+="\"${declared_gate}\":{\"gate\":\"${declared_gate}\",\"result\":\"fail\",\"reason\":\"undefined_gate\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"gate declared in plan.json but not defined in execution.yaml\",\"attempts\":0,\"required\":true,\"required_source\":\"undefined_gate\"}"
     done < <(jq -r '.gates // [] | .[]' "$plan_json" 2>/dev/null)
   fi
 

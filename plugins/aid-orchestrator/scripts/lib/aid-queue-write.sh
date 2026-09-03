@@ -1339,6 +1339,48 @@ queue_peek_next() {
   _queue_render_selection "$scan"
 }
 
+
+# queue_count_plan <plan_id>
+#   How many entries this plan has in the queue, in ANY status. Read-only,
+#   taken under the same lock as a peek so it cannot see a mid-rewrite file.
+#
+#   Why it exists (2026-09-02, ACTA report): `peek-next` answering `none` means
+#   "no CLAIMABLE entry", and the Stop hook rendered that as "every EPIC is
+#   accounted for; the plan still needs closing" — which it also said two
+#   minutes after plan-start, about a plan that had never generated an EPIC at
+#   all. all([]) is true; a plan before generation is not a plan that finished.
+#
+#   Entries are matched on plan_id AND on the epic id carrying that plan's
+#   number, so an entry copied in from another plan cannot vouch for this one.
+#   Prints the count. Returns 2 on a bad id, 3 when the lock cannot be taken —
+#   callers must treat both as "I do not know", never as zero.
+queue_count_plan() {
+  local plan_id="${1:-}"
+  if [[ -z "$plan_id" ]] || ! _queue_valid_id "$plan_id"; then
+    _aid_queue_warn "queue_count_plan: usage: queue_count_plan <plan_id>"
+    return 2
+  fi
+  local file; file="$(queue_write_path)"
+  [[ -f "$file" ]] || { printf '0\n'; return 0; }
+
+  aid_lock_acquire "$(_queue_lock_path)" "$(_queue_lock_timeout)" || return 3
+  local fd="$AID_LOCK_FD"
+  local ids_blob; ids_blob="$(queue_entry_ids "$file")"
+  local id entry_plan n=0
+  # The plan number as EPIC ids carry it: P021 -> E-021-
+  local want_prefix="E-${plan_id#P}-"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    _queue_valid_id "$id" || continue
+    [[ "$id" == "${want_prefix}"* ]] || continue
+    entry_plan="$(queue_get_field "$id" plan_id "$file")"
+    [[ "$entry_plan" == "$plan_id" ]] || continue
+    n=$(( n + 1 ))
+  done <<< "$ids_blob"
+  aid_lock_release "$fd"
+  printf '%s\n' "$n"
+}
+
 # queue_claim_next <plan_id>
 #   Read-and-claim inside ONE lock hold: takes `_queue_scan_next`'s selection
 #   and applies the writes — `running` + `started_at` on the winner, and a
@@ -1439,6 +1481,7 @@ main() {
     set-plan)   queue_set_plan "$@";   exit $? ;;
     claim-next) queue_claim_next "$@"; exit $? ;;
     peek-next)  queue_peek_next "$@";  exit $? ;;
+    count-plan) queue_count_plan "$@"; exit $? ;;
     get)        a="$(queue_get_field "$@")" || exit $?; printf '%s\n' "$a"; exit 0 ;;
     deps)       queue_get_deps "$@"; exit $? ;;
     -h|--help|"")

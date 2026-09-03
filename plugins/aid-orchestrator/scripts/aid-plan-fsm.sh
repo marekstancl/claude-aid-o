@@ -11412,6 +11412,61 @@ Subcommands:
 EOF
 }
 
+
+# ---------------------------------------------------------------------------
+# cmd_epic_base <plan_id> <epic_id> [--project-root <dir>]
+# Read-only: print the EPIC's recorded cut point (`epic_base_commit`) from the
+# plan-boundary manifest, after proving the entry is one we may trust.
+#
+# Why this exists (2026-09-02, WAN report). `aid-json-to-run.sh` used to write
+# each EPIC's fsm-state `base_commit` from `git rev-parse HEAD` in whatever
+# checkout generation ran in — for a plan_branch plan generated from the
+# primary checkout that is main's head, which is not on the plan branch at
+# all. The plan then could not advance itself: reconciliation refused EPIC 2
+# because its base was not an ancestor of anything it could explain.
+#
+# The right value is NOT "the task branch's current head" either. On a resume
+# (branch exists and already carries EPIC commits) that would collapse every
+# `base_commit..HEAD` range the FSM computes — gate profile, production paths,
+# review scope — to empty. The invariant is the EPIC's recorded CUT POINT, and
+# the manifest is the only place that records it. The two coincide only for a
+# freshly cut branch, which is exactly why using the head looked correct.
+#
+# Deliberately undocumented in the usage text: a resolver other scripts
+# consult, not an operator command.
+# ---------------------------------------------------------------------------
+cmd_epic_base() {
+  local plan_id="${1:-}" epic_id="${2:-}"
+  shift 2 2>/dev/null || true
+  local project_root=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root) project_root="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -n "$plan_id" && -n "$epic_id" ]] || {
+    echo "usage: aid-plan-fsm.sh epic-base <plan_id> <epic_id> [--project-root <dir>]" >&2; return 2; }
+  local root; root="$(_pfsm_resolve_project_root "$project_root")" || return 2
+
+  local entry_json="" erc=0
+  entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || erc=$?
+  if [[ "$erc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt or unreadable — refusing to guess ${epic_id}'s base." >&2
+    return 1
+  fi
+  if [[ -z "$entry_json" ]]; then
+    echo "PRECONDITION FAIL: ${plan_id}'s manifest has no entry for ${epic_id}, so no base was ever recorded for it." >&2
+    return 1
+  fi
+
+  # Proves lineage, source ref, a recorded base, and that the branch really is
+  # cut where the manifest says. Same authority epic-start itself uses.
+  _pfsm_verify_epic_lineage "$root" "$plan_id" "$epic_id" "task/${epic_id}/main" "$entry_json" >/dev/null || return 1
+
+  jq -r '.epic_base_commit' <<<"$entry_json"
+}
+
 main() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -11426,6 +11481,7 @@ main() {
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
+    epic-base) cmd_epic_base "$@" ;;
     worktrees)  cmd_worktrees "$@" ;;
     plan-scratch) cmd_plan_scratch "$@" ;;
     inventory) cmd_inventory "$@" ;;

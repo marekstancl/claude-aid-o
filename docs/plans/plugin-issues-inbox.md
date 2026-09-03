@@ -2072,3 +2072,452 @@ pozdní diagnostikou. Kdyby lint chytil víc, transakce by ani nevznikla.
 (`phase 1-3: not generated`), takže archivace byla bezbolestná. U částečně
 vygenerované by to znamenalo ruční úklid přes `plan-rollback`.
 
+
+## Collected 2026-09-02 — 8 entries from 3 project(s)
+
+---
+
+#### acta — 2026-09-02 — Stop hook hlásí prázdný plán jako „hotový k zavření" (plugin: not recorded)
+
+**Plugin:** aid-orchestrator (plugin_path `~/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator`)
+
+**Co se stalo:** hned po `aid-plan-fsm.sh plan-start P021 --mode plan_branch
+--autonomy auto`, kdy pro P021 ještě neexistoval ani jeden EPIC (žádný záznam
+v `active-runs.json`, žádný `plan.json`, žádná `fsm-state.yaml`), vypsal Stop hook:
+
+```
+AID — this turn is ending with an autonomous plan still open (nothing was changed,
+and this cannot stop a turn):
+- P021 (OPEN): every EPIC is accounted for; the plan still needs closing
+  (plan-finalize / plan-merge-to-main / plan-close).
+```
+
+**Co to způsobilo:** nic přímo — hook sám říká, že nic nemění a nemůže zastavit tah.
+Ale hláška je nepravdivá a míří přesně opačným směrem, než jaký je skutečný stav:
+plán byl dvě minuty po založení, ve stavu `OPEN`, před CP1-deep review a před
+generováním EPICů. Doporučení „plán ještě potřebuje zavřít (plan-finalize /
+plan-merge-to-main / plan-close)" by při doslovném uposlechnutí vedlo k pokusu
+uzavřít plán, ve kterém se nic neudělalo.
+
+**Příčina (odhad):** kontrola zřejmě počítá EPICy plánu, které nejsou v terminálním
+stavu, a nulu z prázdné množiny čte jako „všechny vyřízené". Klasické vacuous truth —
+`all([])` je pravda. Chybí rozlišení „plán nemá žádné EPICy, protože ještě nebyly
+vygenerované" od „plán měl EPICy a všechny doběhly".
+
+**Co jsem udělal:** nic, pokračoval jsem v CP1-deep review. Zapisuji sem, protože
+hláška se objeví u každého plánu mezi `plan-start` a dokončením generování EPICů,
+tedy pokaždé, když `/aid-run` dohání deep review za plán, který jím neprošel.
+
+→ Návrh: podmínku doplnit o „a zároveň má plán aspoň jeden EPIC". Pro plán s nula
+EPICy je správná hláška opačná — plán je založený a čeká na generování EPICů
+(`aid-plan-to-epic.sh` / CP1 brána), ne na zavření.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — `aid-release.sh` neumí vydat konkrétní verzi a v běžícím EPICu se odmítne spustit (plugin: not recorded)
+
+**Plugin:** aid-orchestrator
+
+**Co se stalo:** plán P021 předepisoval vydání verze 0.11.0 přes `aid-release.sh`.
+CP1-deep čočka (C0 reuse_compat) a následně revizní agent skript přečetli a doložili,
+že to takhle nejde:
+
+- `aid-release.sh` přijímá jako typ vydání pouze `auto|patch|minor|major` (ř. 69, 188).
+  Cílovou verzi předat nelze.
+- Nové číslo počítá z `package.json`, kde je 0.10.0. Při `auto` bez `feat:` commitu
+  od v0.10.0 vyjde 0.10.1 — tedy jiná verze, než jakou má changelog připravenou.
+- `update_changelog` (ř. 519-556) pak spadne do větve `else`, která PŘEDŘADÍ prázdný
+  stub nad hotový záznam `## [0.11.0]`. Výsledkem jsou dvě nevydané verze.
+- `_release_fsm_guard` (ř. 197, 946) skript uvnitř běžícího EPICu (stav EXECUTE)
+  odmítne spustit a chce `--force --reason`.
+
+**Co to způsobilo:** plán musel `aid-release.sh` obejít. Revize P021 předepisuje ruční
+bump tří souborů + `git tag` jako primární cestu a v textu vysvětluje proč. Není to
+slepá ulička, ale je to obcházení nástroje, který na tenhle úkol má být.
+
+**Proč je to vada pluginu, ne plánu:** v režimu `plan_branch` je vydání verze legitimní
+krok uvnitř EPICu — přesně tam ho AID staví. Nástroj, který má vydání provést, ale
+v tom kontextu odmítá běžet a neumí přijmout verzi, kterou plán vydat chce. Ty dvě
+vlastnosti se navzájem násobí: i kdyby FSM guard nebyl, skript by vydal jiné číslo.
+
+**Doplněk (kolo 3 CP1 review P021):** čočka L3 našla ještě jeden důsledek. Jakmile
+ACTA zavede pre-commit hook z P021 (kontrola, že vydávaná verze má záznam v changelogu
+a že nevydaná verze je nejvýš jedna), přestane být `aid-release.sh` v tomhle projektu
+použitelný úplně — jeho `update_changelog` zapisuje prázdný stub, který ten hook
+z definice odmítne. Není to vada P021: hook dělá přesně to, k čemu je. Je to vada
+souběhu, kdy si dva nástroje na tutéž věc odporují a AID o tom neví.
+
+**Nezávislé potvrzení (Codex C0 review P021, kolo 5, 2026-09-02):** cross-provider
+review našel tentýž rozpor sám, bez znalosti tohohle souboru, a formuloval ho jako
+vadu plánu: „Step 3's proposed error remediation tells users to run `aid-release.sh`,
+while Step 10 states that the same tool cannot produce the required 0.11.0 release and
+would create a duplicate/incompatible changelog entry. The plan does not define a
+supported future-release path after installing the new changelog hook."
+
+Jinými slovy: projekt, který si zavede kontrolu changelogu podle ekosystémového
+standardu, tím zároveň přijde o funkční `aid-release.sh` a AID mu nenabízí náhradu.
+Plán P021 to teď musí řešit vlastním ručním postupem. To je systémový problém pro
+každý další projekt, který ten standard přijme.
+
+→ Návrh: (1) přidat `aid-release.sh --version X.Y.Z` pro případ, kdy verzi určuje plán,
+ne inference z commitů; (2) `update_changelog` nesmí předsadit stub nad existující
+záznam téže nebo vyšší verze — má to být tvrdá chyba, ne tichý zápis; (3) rozmyslet,
+jestli `_release_fsm_guard` má blokovat i vydání, které je samo krokem EPICu — dnes
+nutí každý takový plán buď k `--force`, nebo k ručnímu obejití.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — CP1-deep není součástí PRE-FLIGHT `/aid-run` (plugin: not recorded)
+
+**Plugin:** aid-orchestrator
+
+**Co se stalo:** `/aid-run --AUTO P021` na plánu, který neprošel `/aid-plan --deep`.
+PRE-FLIGHT podle `commands/aid-run.md` začíná krokem `aid-cp1-gate.sh`. Ten plán
+klasifikoval jako band `full` (kvůli `package.json` v deklarovaných cestách) a odmítl:
+
+```
+CP1-gate: plan P021 is band=full (full_path:package.json) — checking CP1-deep evidence.
+ERROR: A full-band plan requires CP1-deep evidence.
+Missing files in .aid-o/work/evidence/P021/cp1-deep/:
+  - cp1-lens-L1-behavior.md … cp1-adjudicator.md
+Run /aid-plan --deep to generate CP1-deep evidence before EPIC generation.
+```
+
+**Co to způsobilo:** `/aid-run` musel celý CP1-deep review odvést sám — dvě kola po
+devíti čočkách plus adjudikátor a cílená revize plánu mezi nimi. To je řádově větší
+kus práce než PRE-FLIGHT, jak ho popisuje dokumentace příkazu (pět bash kroků,
+„No LLM involvement").
+
+**Proč to považuji za vadu:** hláška je věcně správná a říká, co dělat. Problém je
+v tom, že se to zjistí až refusalem uprostřed PRE-FLIGHTu, přestože band plánu jde
+zjistit dopředu jedním voláním (`aid-cp1-gate.sh --classify-only`), které dokumentace
+sama popisuje. `/aid-run` na plán bez CP1 evidence tedy může buď (a) rovnou říct
+„tenhle plán je band=full a nemá deep review, spustím ho / spusť `/aid-plan --deep`",
+nebo (b) deep review udělat jako deklarovanou součást PRE-FLIGHTu. Dnešní stav je
+třetí varianta: refusal, po kterém orchestrátor improvizuje postup, který je popsaný
+v jiném příkazu.
+
+**Co jsem udělal:** CP1-deep jsem odvedl podle `commands/aid-plan.md` a
+`skills/review-checkpoint-contracts.md` — devět čoček, adjudikátor, revizní smyčka.
+Evidence je na standardních místech, takže brána ji přijme. Nic jsem neobcházel
+a `--force` nepoužil.
+
+→ Návrh: do PRE-FLIGHT sekce `/aid-run` přidat krok 0 „klasifikuj band a zkontroluj
+CP1 evidenci" s explicitním rozhodnutím, co se stane, když chybí — a to rozhodnutí
+napsat do `aid-run.md`, ať ho orchestrátor nemusí odvozovat z hlášky brány.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — Plány specifikují implementaci, ale posuzují se čtením: review nemá důvod skončit (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — týká se `skills/plan-writing.md`, `commands/aid-plan.md`
+(CP1-deep) a `lib/aid-c0-plan-review.sh` (cross-provider smyčka)
+
+**Co se stalo:** CP1 review plánu P021 proběhlo v osmi kolech — tři kola vlastního
+panelu (9 čoček + adjudikátor: 12 → 3 → 0 blokerů, verdikt `pass`) a pět kol
+cross-provider Codex review (8 → 4 → 1 → 5 → 4 nálezů). Rozpočet 5 sezení se
+vyčerpal a brána generování EPICů plán pořád odmítala.
+
+**Diagnostický údaj:** za všech osm kol **nepřežil ani jeden otisk nálezu**. Nikdy
+se nic neopakovalo. Kdyby měl plán pevnou množinu vad, review by je našel a opakoval,
+dokud se neopraví. Místo toho každé kolo našlo čerstvou dávku něčeho jiného. To není
+konvergence — to je vzorkování z prakticky neomezeného prostoru.
+
+**Příčina:** plán o 2158 řádcích obsahuje několik set řádků skutečného shellu a YAMLu
+(`sed` výrazy, `gh api` volání, `permissions` bloky, jq filtry) — kód, který nikdy
+neběžel. Ten se pak posuzuje ČTENÍM. Plocha review tedy roste s množstvím vloženého
+kódu, ne s množstvím rozhodnutí, která plán dělá. Devět nálezů z těch osmi kol znělo
+doslova „tenhle příkaz nefunguje":
+
+| Nález | Co ho zabije |
+|---|---|
+| `sed` s oddělovačem `\|` proti alternaci `(api\|ui)` | jedno spuštění |
+| `SHORT=abc1234 sed … "${SHORT}"` — prefix se nedostane do rozvinutí | jedno spuštění |
+| `gh run list --commit` na gh 2.23.0 neexistuje | `gh run list --help` |
+| `type=sha,value=` — atribut, který `docker/metadata-action` nezná | čtení zdroje akce |
+| `gh pr diff --json` neexistuje | `gh pr diff --help` |
+| chybějící `packages: read` / `actions: read` v `permissions` | jedno volání API |
+
+Agenti je nakonec spouštěli — ale až POTOM, co je review objevilo. Osm kol postupně
+znovuobjevovalo věci, které jedno spuštění při psaní plánu zabije naráz.
+
+**Dopad:** `/aid-run` na plán band=full se může proměnit v mnohahodinovou smyčku, která
+nemá mechanický důvod skončit. Rozpočet 5 Codex sezení ji zastaví, ale zastaví ji
+vyčerpáním, ne dosažením čistého stavu — a vyústí v PM eskalaci, i když plán mezitím
+prokazatelně zkvalitněl. Náklady rostou s délkou plánu, ne s jeho rizikovostí.
+
+**Co to NENÍ:** není to vada Codexu. Ten našel dvě nejlepší věci celého review — že se
+tag pushuje v EPICu 2, zatímco workflows reagující na něj vznikají až v EPICu 3
+(vydání by neproběhlo a plán zakazuje tag přesunout), a že Step 8 nedeklaruje závislost
+na Step 7, takže by se images stavěly za CI bez kontroly verzí. Obojí devět čoček
+vlastního panelu přes tři kola minulo. Cross-provider kolo má smysl; problém je tvar
+artefaktu, který dostává na vstup.
+
+→ Návrh, tři body:
+
+1. **Plán nemá obsahovat kód, který nikdo nespustil.** Buď specifikuje KONTRAKT (co má
+   skript umět, jaké návratové kódy, jaké vstupy a výstupy) a implementace vzniká
+   v EXECUTE, kde ji posoudí CP2/CP3 nad skutečným diffem — nebo kód v plánu je, ale
+   `plan-writing.md` žádá, aby ho autor při psaní SPUSTIL a vlepil skutečný výstup.
+   Pak review nemá co objevovat. Dnešní instrukce tlačí k maximální doslovnosti
+   („verbatim implementation detail", „mechanicky kontrolovatelná AC s reálnými
+   příkazy") a zároveň nežádají jejich spuštění — ty dva požadavky se navzájem ruší.
+2. **Review škálovat na EPIC, ne na dokument.** Dnes oprava ve Step 9 znovu otevřela
+   plochu Steps 1-8 a reviewer tam našel něco nového. Osmkrát. Kolo by mělo posuzovat
+   jen kroky, kterých se revize dotkla, plus jejich hrany.
+3. **Stop rule má být „žádná nová TŘÍDA nálezu", ne „žádný nález".** Nula nálezů nad
+   dvoutisícovým dokumentem s vloženým kódem nenastane nikdy. Smyčka by měla končit,
+   když nové kolo nepřinese nález jiné třídy než předchozí — a `blocking_findings`
+   by mělo rozlišovat vadu rozhodnutí od vady zápisu příkazu.
+
+**Co jsem udělal:** po vyčerpání rozpočtu eskalace na PM (správně, dle kontraktu).
+PM zvolil variantu B — opravit tři konkrétní nálezy a použít PM-escalation override
+na generování EPICů bez dalšího Codex kola, se zbývajícími nálezy ponechanými
+v evidenci. Nic se nezametá.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — Graf závislostí čte jen první řádek `Depends on:`, plan.json čte všechny → generování EPICů se zastaví (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — `aid-generation-readiness.sh` (`--write-provisional`)
+vs. `aid-epic-to-json.sh`, porovnává je `aid-generation-finalize.sh:104`
+
+**Co se stalo:** generování EPICů pro P021 spadlo na:
+
+```
+ERROR: phase 2 plan.json dependencies disagree with the source-plan graph
+note: AID's own checks passed — this failure is not an AID gate
+```
+
+**Příčina, doložená porovnáním obou artefaktů.** Plán měl závislosti zapsané po
+jedné na řádek, což je tvar, který si tenhle projekt zavedl commitem `b075c03`
+(„plan(P024): závislosti na vlastním řádku jako 'Depends on:'"):
+
+```
+- Depends on: Step 2 — přidává job do souboru vytvořeného v tom kroku
+- Depends on: Step 3, Step 5 — volá skripty z těch kroků
+- Depends on: Step 6 — bez převedeného changelogu by job na `main` svítil červeně
+```
+
+`provisional-graph.json` z toho pro Step 7 vyrobil **jedinou** hranu `step-2 → step-7`.
+`plan.json` z `aid-epic-to-json.sh` naproti tomu vyrobil hrany všechny.
+`aid-generation-finalize.sh` je porovná a generování zastaví.
+
+Postiženo bylo pět kroků z jedenácti — Steps 6, 7, 8, 9 a 10, tedy každý, který má
+víc než jeden řádek `Depends on:`. Builder grafu u každého vzal jen ten první:
+
+| Krok | Deklarováno v plánu | V provizorním grafu |
+|---|---|---|
+| Step 6 | Step 5; Step 3 | jen `step-5 → step-6` |
+| Step 7 | Step 2; Step 3, Step 5; Step 6 | jen `step-2 → step-7` |
+| Step 8 | Step 2; Step 7 | jen `step-2 → step-8` |
+| Step 9 | Step 4; Step 6; Step 7; Step 8 | jen `step-4 → step-9` |
+| Step 10 | Step 6; Step 7; Step 8; Step 9 | jen `step-6 → step-10` |
+
+Po sloučení do jediného řádku na krok (`- Depends on: Step 2, Step 3, Step 5, Step 6 — …`)
+vyrobí týž builder všech 28 hran správně a generování projde.
+
+**Dopad, a proč je horší, než vypadá:**
+
+1. **Generování se zastaví** u každého plánu, kde má aspoň jeden krok víc řádků
+   `Depends on:`. To je zrovna tvar, ke kterému se tenhle projekt vědomě přiklonil.
+2. **`aid-plan-lint.sh` i `aid-generation-readiness.sh` hlásí `dependencies: canonical`
+   a `READINESS: PASS`.** Vada se tedy neprojeví při kontrole plánu, ale až uprostřed
+   generování, po tom, co brána CP1 proběhla a autorita je zapečetěná. U P021 to
+   navíc znamenalo dvakrát `supersede-generation` a dvakrát spotřebovaný PM override.
+3. **Tiché zúžení grafu je nebezpečnější než pád.** Kdyby `finalize` obě strany
+   neporovnával, prošel by graf, ve kterém Step 10 nezávisí na Steps 7, 8 a 9 —
+   tedy plán, kde se smí vydat verze dřív, než existuje `release.yml`. Ta kontrola
+   v `finalize` je jediné, co tomu zabránilo, a zafungovala náhodou: chytá rozpor
+   mezi dvěma parsery, ne chybu jednoho z nich.
+4. Hláška `note: AID's own checks passed — this failure is not an AID gate` je
+   v tomhle případě **nepravdivá**. Je to vada AID, ne plánu.
+
+→ Návrh:
+  (1) sjednotit parsování `Depends on:` do jedné funkce, kterou použije builder grafu
+      i `aid-epic-to-json.sh` — dva parsery téhož zápisu jsou zdroj přesně tohohle;
+  (2) do `aid-plan-lint.sh` přidat kontrolu, že počet hran odvozených z plánu sedí
+      s počtem deklarovaných závislostí, ať se rozpor pozná před generováním;
+  (3) v `plan-writing.md` výslovně říct, který tvar je kanonický — jestli víc řádků,
+      nebo jeden řádek s čárkami. Dnes to lint přijímá obojí a generování jen jedno.
+
+**Co jsem udělal:** závislosti v P021 sloučil do jednoho řádku na krok (anotace
+spojené středníkem, žádná se neztratila) a generování pak proběhlo.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — Plugin vkládá `docs_updated` do každého plánu, ale auto-resolvnutý profil ji vylučuje → zaručený zásek na GATES→DONE (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — injekce `plan.json.gates` vs. `--profile` auto-resolve v `aid-fsm.sh`
+
+**Co se stalo:** EPIC E-021-1_3 dojel brány s `overall: pass`, ale `GATES → DONE`
+byl odmítnut:
+
+```
+Fix: widen the active profile's include[] in execution.yaml.gate_profiles to
+     cover: docs_updated
+```
+
+**Příčina.** Dvě strany AID si o téže bráně myslí opak:
+
+- Plugin vkládá `docs_updated` do `plan.json.gates` **každého** vygenerovaného
+  EPICu (brána má `required_when: "always"`).
+- FSM si sám zvolil profil `standard` (`profile_source: fsm_resolved`,
+  `profile_reason: "FSM auto-resolved profile standard"`), a ten `docs_updated`
+  ve svém `include[]` nemá — má ji jen `full` a `release`.
+- Pravidlo o podlaze plánu pak správně odmítne přechod: plán bránu vyžaduje,
+  profil ji vylučuje.
+
+**Dopad:** zásek nastane u **každého** běhu, který FSM auto-resolvne na `standard`
+(a stejně tak `targeted` a `quick`, které `docs_updated` taky nemají). Není to
+konfigurační chyba tohohle projektu ve smyslu „někdo zapomněl" — profily i injekci
+dodává plugin a míjejí se spolu. Projekt to nemá jak předvídat: brána se do
+`plan.json` dostane až při generování, profil se vybere až v GATES.
+
+Zvlášť matoucí je, že `docs_updated` je definovaná jako **advisory graceful skip**
+(`exit 2`, `pass_criteria: "advisory manual DoD item"`). Zaseknutý běh tedy blokuje
+brána, která by po spuštění stejně jen vypsala hlášku a skončila. Cena za zahrnutí
+je nulová, cena za nezahrnutí je zastavený EPIC.
+
+**Co jsem udělal:** rozšířil `gate_profiles.standard.include[]` v
+`.aid-o/config/execution.yaml` o `docs_updated`, podle návodu, který hláška sama
+tiskne, a s komentářem proč. `full` a `release` ji už měly.
+
+→ Návrh: (1) auto-resolve profilu by měl do `include[]` doplnit každou bránu, kterou
+plugin vložil do `plan.json.gates` — jinak si dvě části téhož nástroje odporují;
+nebo (2) injektovat `docs_updated` jen do profilů, které ji obsahují; nebo (3)
+u bran s `required_when: always` a `pass_criteria` typu graceful skip vůbec
+neuplatňovat podlahu plánu — vyloučení advisory skipu není falešná zelená.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — `required_when:` je v gate runneru MRTVÝ KLÍČ: padlá brána nechá `overall: pass` (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — `aid-run-gates.sh` (výpočet `overall`), `aid-fsm.sh` (precondition GATES→DONE)
+
+**Závažnost: falešná zelená.** Tohle není nepohodlí, tohle je brána, která pustí dál
+běh, jehož testy spadly.
+
+**Co se stalo:** při běhu bran EPICu E-021-1_3 bez profilu skončila brána `ts_e2e`
+s `result: fail, exit_code: 1` — a `gates_report.json` přesto hlásil `overall: pass`.
+
+**Příčina, doložená v kódu:**
+
+```bash
+# aid-run-gates.sh:2329
+if [[ "$final_result" == "fail" && "${required:-false}" == "true" ]]; then
+  overall="fail"
+fi
+
+# aid-run-gates.sh:1998 — odkud se `required` bere
+required=$(yq ".gates.\"${gate_name}\".required // false" "$execution_yaml")
+```
+
+Runner tedy čte **výhradně literální klíč `required:`** a defaultuje na `false`.
+Klíč **`required_when:` se v `aid-run-gates.sh` nečte NIKDE** — ověřeno:
+`grep -c required_when aid-run-gates.sh` → **0**. (Najde se jen v
+`aid-delivery-gate.sh`, což je jiný soubor a jiná politika.)
+
+V `.aid-o/config/execution.yaml` tohoto projektu měla `required: true` **jediná
+brána — `plan_diff`**. Zbylých deset (`py_test`, `py_lint`, `py_type_check`,
+`ts_test`, `ts_lint`, `ts_type_check`, `ts_e2e`, `ts_e2e_pwa`, `vat_labels_sync`,
+`docs_updated`) mělo jen `required_when:`, tedy fakticky `required=false`.
+
+A FSM to nedochytí: precondition `GATES→DONE` testuje jen `overall == "pass"`,
+jednotlivé řádky bran neprochází.
+
+**Co to znamenalo:** zelené `overall` u tohohle projektu neznamenalo „všechny brány
+prošly". Znamenalo **„`plan_diff` neselhal"**. Spadlý pytest, spadlý mypy, spadlý
+tsc i spadlý vitest by zapsaly `result: fail` do reportu a nechaly `overall: pass`,
+FSM by pustil EPIC do DONE a nikdo by si toho nevšiml, pokud by report nečetl řádek
+po řádku.
+
+**Proč je klíč `required_when:` obzvlášť zrádný.** Není to překlep ani opomenutí —
+vypadá jako plnohodnotná deklarace („kdy je brána povinná") a projekt ho používá
+konzistentně u deseti bran s promyšlenými hodnotami (`always`, `frontend/e2e exists`
+a podobně). Autor konfigurace má důvod věřit, že brány povinné JSOU. Mrtvý klíč,
+který vypadá živě, je horší než chybějící klíč — ten by aspoň nikoho nezmátl.
+
+**Co jsem udařil:** doplnil `required: true` do `.aid-o/config/execution.yaml`
+u devíti bran, které skutečně něco kontrolují a jejich pád má běh shodit
+(`py_test`, `py_lint`, `py_type_check`, `ts_test`, `ts_lint`, `ts_type_check`,
+`vat_labels_sync`, `ts_e2e`, `ts_e2e_pwa`). `docs_updated` zůstává `false` —
+je to záměrný advisory graceful skip (exit 2), ne kontrola. `plan_diff` už ho měla.
+
+→ Návrh vlastníkovi pluginu, tři body:
+  1. **`required_when:` buď implementovat, nebo odmítnout.** Dnes se tiše ignoruje.
+     Minimum je, aby `aid-run-gates.sh` při načtení konfigurace, která `required_when:`
+     obsahuje a `required:` ne, **hlasitě varovala** — nebo rovnou selhala.
+  2. **Otočit default.** `required // false` znamená, že opomenutí vede k falešné
+     zelené. Bezpečný default je `true`: brána, u které nikdo neřekl, že smí selhat,
+     má běh shodit.
+  3. **FSM precondition posílit.** `GATES→DONE` by neměl věřit jen poli `overall`,
+     ale odmítnout přechod, když kterýkoli řádek v `gates_report.json` má
+     `result: fail` — nezávisle na tom, co si runner spočítal. Dvě nezávislé
+     kontroly téhož jsou přesně to, co tenhle nález zachránilo u sousední vady
+     (rozpor dvou parserů závislostí).
+
+---
+
+#### wan — 2026-09-02 — `init` uloží `base_commit`, který na plánové větvi neexistuje (plugin: not recorded)
+
+**Verze pluginu:** 2.95.11
+**Kde:** `aid-json-to-run.sh` → `aid-fsm.sh init`, projeví se až v
+`aid-plan-continue.sh` → `epic-start`.
+
+**Co se stalo.** Generování P101 založilo všem třem EPICům `fsm-state.yaml`
+s `base_commit: 889fe48f` — commit, který leží na `main`. Plánová větev
+`plan/P101` ale vede jinudy (`0ab16f98` → `dd714d7a` → `0e9012c1`) a
+`889fe48f` **není jejím předkem**. EPIC 1 to nevadilo, protože si toho nikdo
+nevšiml. Po jeho sloučení do plánu se `aid-plan-continue.sh` pokusil srovnat
+základ EPICu 2 a odmítl:
+
+```
+PRECONDITION FAIL: E-101-2_3's fsm-state base_commit is 889fe48f…, which is
+not an ancestor of the 4622a4a1… this reconciliation would write (the base it
+saw was 0e9012c1…) — something else moved it. Refusing to overwrite a base
+this run cannot explain.
+```
+
+**Co to způsobilo.** Plán se po prvním EPICu sám neposunul. Fronta se vrátila
+na `pending` (to je správně a hláška to říká), ale bez ručního zásahu se
+další EPIC nedá spustit — a příčina není v tom, co ta hláška podezírá
+(„something else moved it"). Nic to neposunulo; ten základ byl špatně od
+začátku.
+
+**Hláška je zavádějící.** Tvrdí, že základ někdo přesunul mezi generováním
+a teď. Ve skutečnosti nikdy nebyl na plánové větvi. Diagnostika by se zkrátila
+z deseti minut na jednu, kdyby řekla „základ EPICu není předkem plánové
+větve — takhle ho zapsal `init`".
+
+**Co jsem udělal.** Znovu jsem EPIC 2 inicializoval, aby dostal základ
+odpovídající plánové větvi.
+
+**Návrh.** `init` by měl u `plan_branch` plánů brát základ z plánové větve,
+ne z aktuálního `HEAD` hlavního checkoutu — nebo aspoň při zápisu ověřit, že
+je zapisovaný základ jejím předkem, a padnout hned, ne až o EPIC později.
+

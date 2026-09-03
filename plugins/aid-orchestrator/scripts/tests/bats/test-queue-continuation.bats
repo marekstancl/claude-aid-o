@@ -73,6 +73,44 @@ YAML
   [[ "$output" == *"plan-close"* ]]
 }
 
+@test "a plan with nothing in its queue is before generation, not finished" {
+  # `peek-next` answers `none` for both, and the hook used to render both as
+  # "every EPIC is accounted for; the plan still needs closing" — advice that,
+  # taken literally two minutes after plan-start, closes a plan in which
+  # nothing was done. (ACTA, 2026-09-02.)
+  _plan P090 auto
+  cat > "$QUEUE" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue: []
+YAML
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no EPIC is recorded in this plan queue yet"* ]]
+  [[ "$output" != *"every EPIC is accounted for"* ]]
+  [[ "$output" != *"plan-close"* ]]
+}
+
+@test "an entry belonging to another plan does not vouch for this one" {
+  # Matching on plan_id alone is not enough: a queue file copied from another
+  # plan would make an ungenerated plan look generated.
+  _plan P090 auto
+  cat > "$QUEUE" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-077-1_2
+    status: merged_to_plan
+    plan_id: "P090"
+    depends_on: []
+YAML
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no EPIC is recorded in this plan queue yet"* ]]
+}
+
 @test "AC13: a blocked queue says what is being waited on" {
   _plan P090 auto
   cat > "$QUEUE" <<'YAML'
