@@ -221,31 +221,39 @@ _aid_qc_emit() {
   local _qc_once_ok=1
   command -v aid_session_once >/dev/null 2>&1 || _qc_once_ok=0
 
-  # WHOSE PLANS THIS SESSION IS TOLD ABOUT. Deduplicating was not enough: the
-  # rule still named every open plan in the workspace, so an unrelated plan
-  # moving produced a fresh end-of-turn reminder for work this session never
-  # touched (Codex, 2026-08-30, finding 5 — and the PM's original complaint,
-  # "info z jinýho plánu pořád"). A session hears about a plan it has actually
-  # been in: one named in its own transcript. With no transcript to read, the
-  # filter does not apply — a rule that cannot tell whose work it is says its
-  # piece rather than staying silent about everything.
-  # WHAT THIS DELIBERATELY DOES NOT COVER, and why it is the right trade.
-  # A plan that becomes open DURING this session, and that this session never
-  # mentions, is named at neither hook: SessionStart already happened, and Stop
-  # filters it out (Codex, 2026-08-30, third round). That is accepted, for two
-  # reasons. Whoever opened it has it in THEIR transcript, so it is reported —
-  # just not here; and the next SessionStart in this workspace names it anyway,
-  # so the loss is bounded by one session rather than permanent. The PM asked
-  # for the opposite failure to stop: "info z jinýho plánu pořád" — an unrelated
-  # plan named at every turn until the reminder itself stopped being read.
-  # Between a reminder that arrives one session late and a reminder nobody
-  # reads, this picks the first.
+  # WHOSE "once" IS IT. Stop already speaks only about plans this session has
+  # been in, so a per-session marker is right there. SessionStart speaks about
+  # the whole workspace, and a per-session marker made it repeat in EVERY new
+  # window: five terminals open on one project meant the same open plan
+  # announced five times, which was the PM's complaint ("hlásí to pořád
+  # v jiných oknech"). At SessionStart the memory is therefore keyed on the
+  # WORKSPACE — the first window to open says it, the rest stay quiet — and it
+  # speaks again the moment the plan's state actually moves, because the state
+  # is part of the remembered item.
   #
-  # …and it applies to the END of a turn only. SessionStart is the one moment
-  # where hearing about the whole workspace is the point, so the overview is
-  # not filtered there: a plan nobody has mentioned yet would otherwise never
-  # be named at all (Codex, 2026-08-30, finding 5). Stop says only yours;
-  # SessionStart says everything, once.
+  # NOT a per-day repeat. An earlier version added the date to the item so a
+  # dormant plan would be re-announced daily; that is a retention policy
+  # smuggled in as a key trick, and it nags about plans nobody is touching
+  # while growing the marker file by a line a day (Codex, 2026-09-03). The
+  # window that is genuinely working on the plan still hears about it at every
+  # Stop, so nothing is forgotten by staying quiet here.
+  #
+  # THE KEY MUST BE A REAL WORKSPACE, or not be shared at all.
+  # `workspace:${root}` is non-empty even when root is empty, which would hash
+  # every workspace on the machine onto ONE marker file — the cross-workspace
+  # silencing aid_session_once explicitly warns about, arrived at from the
+  # other direction. An unusable root therefore leaves the per-session key in
+  # place, which merely repeats: the failure this code may have is the noisy
+  # one, never the silent one. The path is canonicalised first so a symlinked
+  # spelling of the same checkout does not get its own memory.
+  if [[ "${_qc_scope:-stop}" == "all" ]]; then
+    local _qc_ws=""
+    if [[ -n "$root" && -d "$root" ]]; then
+      _qc_ws="$(cd -- "$root" 2>/dev/null && pwd -P)" || _qc_ws=""
+    fi
+    [[ -n "$_qc_ws" ]] && _qc_skey="workspace:${_qc_ws}"
+  fi
+
   local _qc_mine="" _qc_filter=0
   if [[ "${_qc_scope:-stop}" == "stop" && -n "$_qc_transcript" && -r "$_qc_transcript" ]]; then
     _qc_mine=" $(grep -oE '\bP[0-9]{3}\b' "$_qc_transcript" 2>/dev/null | sort -u | tr '\n' ' ')"

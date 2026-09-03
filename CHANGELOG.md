@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.96.1] — 2026-09-03
+
+### Fixed
+- **Připomínka otevřeného plánu chodila do každého okna** — konec tahu už mluvil jen o plánech z vlastního okna, ale start sezení hlásí celý projekt a jeho paměť „tohle už jsem řekl" byla vázaná na okno. Pět otevřených terminálů nad jedním projektem tedy znamenalo pětkrát tutéž větu. Paměť je nyní vázaná na projekt: první okno to řekne, ostatní mlčí, a znovu se to ozve, jakmile se plán skutečně pohne. Okno, které na plánu pracuje, ho slyší dál na konci každého tahu.
+- **Dvě jména téhož adresáře měla každé vlastní paměť** — cesta se převádí na skutečný tvar, takže přístup přes symlink není nový projekt.
+- **Neplatný kořen by umlčel všechny projekty najednou** — sdílený klíč se staví jen z existujícího adresáře; jinak zůstává klíč vázaný na okno, takže se připomínka nanejvýš zopakuje, nikdy neztratí.
+
 ## [2.96.0] — 2026-09-03
 
 ### ⚠️ Změna chování — přečti před upgradem

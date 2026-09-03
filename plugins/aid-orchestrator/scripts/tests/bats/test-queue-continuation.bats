@@ -18,8 +18,9 @@ setup() {
   HOOK="$AID_PLUGIN_PATH/scripts/aid-hook.sh"
   source "$AID_PLUGIN_PATH/scripts/lib/aid-queue-continuation.sh"
   TMP="$(mktemp -d)"
-  # Each case gets its own session store: the rule now says a thing once per
-  # session, so a shared store would let one case silence the next.
+  # Each case gets its own session store: the rule remembers what it has
+  # already said (per session at Stop, per workspace at SessionStart), so a
+  # shared store would let one case silence the next.
   export AID_SESSION_STORE="$TMP/session-store"
   ROOT="$TMP/repo"
   p090_mk_workspace "$ROOT"
@@ -31,6 +32,19 @@ teardown() { rm -rf "$TMP"; }
 _plan() { p090_plan_state "$ROOT" "$1" "$2" "${3:-OPEN}"; }
 
 _event() { jq -n --arg c "$ROOT" '{session_id:"s",cwd:$c,stop_hook_active:false}'; }
+
+_q_merged() {
+  cat > "$QUEUE" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-090-1_2
+    status: merged_to_plan
+    plan_id: "P090"
+    depends_on: []
+YAML
+}
 
 _queue_ready() { p090_queue "$QUEUE" P090 "E-090-2_2:pending"; }
 
@@ -109,6 +123,130 @@ YAML
   run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
   [ "$status" -eq 0 ]
   [[ "$output" == *"no EPIC is recorded in this plan queue yet"* ]]
+}
+
+@test "SessionStart says it once per WORKSPACE, not once per window" {
+  # The PM had five terminals open on one project and heard about the same
+  # open plan five times. Stop was already filtered to its own transcript;
+  # SessionStart was not, and its "once" marker was keyed per session — so
+  # every new window was a new first time.
+  _plan P090 auto
+  cat > "$QUEUE" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-090-1_2
+    status: merged_to_plan
+    plan_id: "P090"
+    depends_on: []
+YAML
+  local ev_a ev_b
+  ev_a="$(jq -n --arg c "$ROOT" '{session_id:"window-A",cwd:$c}')"
+  ev_b="$(jq -n --arg c "$ROOT" '{session_id:"window-B",cwd:$c}')"
+
+  run aid_hook_rule_queue_continuation_start <<< "$ev_a"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"P090"* ]]
+
+  # A different window, same workspace, same plan in the same state. Silence
+  # here must be the once-marker doing its job — asserted by the exit code and
+  # the "nothing to say" line, not merely by P090 being absent, which an error
+  # would also satisfy.
+  run aid_hook_rule_queue_continuation_start <<< "$ev_b"
+  [ "$status" -eq 3 ]
+  [[ "$output" != *"P090"* ]]
+  [[ "$output" == *"no open autonomous plan"* ]]
+}
+
+@test "a workspace reminder returns when the plan actually moves" {
+  _plan P090 auto
+  _q_merged
+  local ev; ev="$(jq -n --arg c "$ROOT" '{session_id:"w1",cwd:$c}')"
+  run aid_hook_rule_queue_continuation_start <<< "$ev"
+  [[ "$output" == *"P090"* ]]
+
+  run aid_hook_rule_queue_continuation_start <<< "$ev"
+  [ "$status" -eq 3 ]
+  [[ "$output" != *"P090"* ]]
+
+  # The state moves: the item carries it, so it is said again. The remembered
+  # item is plan:state:result, so a change in EITHER the plan state or what
+  # the queue offers brings the reminder back. What does not bring it back is
+  # merely opening another window — which was the whole complaint. A dormant
+  # plan is announced once and then left alone; the window working on it still
+  # hears about it at Stop.
+  _plan P090 auto PLAN_REVIEW
+  run aid_hook_rule_queue_continuation_start <<< "$ev"
+  [[ "$output" == *"P090"* ]]
+}
+
+@test "the same checkout reached through a symlink shares one memory" {
+  # Without canonicalising the root, /tmp/link and /tmp/real would each get
+  # their own marker and the reminder would come twice.
+  _plan P090 auto
+  _q_merged
+  local link="${BATS_TEST_TMPDIR}/link"
+  ln -sfn "$ROOT" "$link"
+  run aid_hook_rule_queue_continuation_start <<< "$(jq -n --arg c "$ROOT" '{session_id:"w1",cwd:$c}')"
+  [[ "$output" == *"P090"* ]]
+  run aid_hook_rule_queue_continuation_start <<< "$(jq -n --arg c "$link" '{session_id:"w2",cwd:$c}')"
+  [ "$status" -eq 3 ]
+  [[ "$output" != *"P090"* ]]
+}
+
+@test "two different workspaces never share one memory" {
+  # `workspace:${root}` is non-empty even when root is not a usable path, and
+  # that string would hash every project on the machine onto ONE marker file —
+  # a plan in project A silencing a plan in project B. The key is built only
+  # from a canonicalised directory that exists; anything else falls back to
+  # the per-session key, which merely repeats.
+  _plan P090 auto
+  _q_merged
+
+  local other="${TMP}/other"
+  p090_mk_workspace "$other"
+  p090_plan_state "$other" P091 auto
+  cat > "$other/.aid-o/config/queue.yaml" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-091-1_2
+    status: merged_to_plan
+    plan_id: "P091"
+    depends_on: []
+YAML
+
+  run aid_hook_rule_queue_continuation_start <<< "$(jq -n --arg c "$ROOT" '{session_id:"w1",cwd:$c}')"
+  [[ "$output" == *"P090"* ]]
+
+  # A different project must still be heard.
+  run aid_hook_rule_queue_continuation_start <<< "$(jq -n --arg c "$other" '{session_id:"w2",cwd:$c}')"
+  [[ "$output" == *"P091"* ]]
+}
+
+@test "Stop is still per-session — a second window working on the plan hears it" {
+  # The workspace marker must not silence the window that is actually in the
+  # plan; that would trade one complaint for a worse one.
+  _plan P090 auto
+  cat > "$QUEUE" <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-090-1_2
+    status: merged_to_plan
+    plan_id: "P090"
+    depends_on: []
+YAML
+  local ev; ev="$(jq -n --arg c "$ROOT" '{session_id:"w1",cwd:$c}')"
+  run aid_hook_rule_queue_continuation_start <<< "$ev"
+  [[ "$output" == *"P090"* ]]
+
+  run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"P090"* ]]
 }
 
 @test "AC13: a blocked queue says what is being waited on" {
@@ -309,7 +447,7 @@ YAML
 # plans the session was not working on. The agent answered "čekám na tebe" to
 # each one, which is what a rule that repeats teaches a reader to do.
 
-@test "an open plan is named once per session, not at every turn" {
+@test "at Stop, an open plan is named once per session, not at every turn" {
   _plan P020 auto EPIC_INTEGRATION
   _queue_ready
   run aid_hook_rule_queue_continuation_stop <<< "$(_event)"
