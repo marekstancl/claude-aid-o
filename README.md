@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.95.11** (current) — připomínka o plánu se řekne jednou a jen o tvých plánech
+- **v2.96.0** (current) — brány, které nikdy nic nezastavily, konečně zastavují: `required_when` se čte
+- **v2.95.11** — připomínka o plánu se řekne jednou a jen o tvých plánech
 - **v2.95.10** — uzávěrka čte plán z pracovní kopie kandidáta a říká, odkud plán i execution.yaml vzala
-- **v2.95.9** — zápisy problémů pluginu nesou verzi; mrtvý sběr compliance napříč projekty odstraněn
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

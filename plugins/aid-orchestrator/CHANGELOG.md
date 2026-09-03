@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Nevydáno]
+## [2.96.0] — 2026-09-03
 
 ### ⚠️ Změna chování — přečti před upgradem
 
