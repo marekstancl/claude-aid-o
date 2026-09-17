@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-09-17
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -831,6 +831,16 @@ AFTER assembling plan content, BEFORE writing:
 
 Before the plan document is written to disk, the AI MUST pass this gate. This is a **hard gate** — the file MUST NOT be written until all checks pass.
 
+**Since 2026-09-17 the mechanical half of this gate is a script, not a judgment:**
+`scripts/aid-plan-check.sh <plan>` decides checks 4, 5, 6, 7, 8 (where a range
+is given), 9, 13, 14, 17a, 17d, 17e, 18 and 20a-c, plus what no check below
+asked for (a file the plan founds already exists; a removed file is still
+imported elsewhere; a criterion that already holds on HEAD; a revision that adds
+behaviour). Run it and repair its `BLOCK` lines — "I evaluated the checklist"
+is not an answer the generation gate accepts, because `aid-generation-readiness.sh`
+runs the same script. The checks that remain a judgment (1-3, 10-12, 15, 16,
+17c, 19, 21) are what the model reviewers are for.
+
 **First move: classify the band** (`aid-cp1-gate.sh --classify-only`, see
 "Obligations by ceremony band" above). Eight of the checks below are band-scoped
 and a `light` plan does not owe them; the verdict per check is tabulated after
@@ -1466,7 +1476,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-09-17
 
 ## Plan-boundary note
 

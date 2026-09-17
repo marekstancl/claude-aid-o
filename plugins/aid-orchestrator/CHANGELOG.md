@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.97.0] — 2026-09-17
+
+### Added
+- **Deterministická kontrola plánu** — nový `scripts/aid-plan-check.sh` spustí lint a k němu všechno, co o plánu jde rozhodnout bez modelu: soudržnost plánu (graf závislostí bez cyklů a neexistujících kroků, číslování, kroky M/L se třemi kritérii a třemi hraničními případy, zakázané fráze včetně českých, cesty v kritériích deklarované, tvar `verification_pattern`, úprava souboru, který nikdo nezakládá, prázdné sekce, dvakrát zkopírovaný text bulletu, varování u velikosti), plán proti repu (cesty v próze existují nebo vznikají, rozsahy řádků a symboly u nich, mazané soubory existují a nikdo je dál nepoužívá, blok Resources Verification nelže o tom, co existuje, kritérium splněné už dnes, zakládaný soubor už existuje, kolize jmen testů) a po opravě (`--snapshot` + `--fixes`: nová tvrzení opravy proti kódu, zastaralá dvojčata, kroky mimo seznam oprav, a oprava, která PŘIDÁVÁ chování, se odmítne). Dva stupně jako u lintu: plán s `lifecycle_strict` blokuje vše, legacy plán jen to, co by rozbilo generování. Výstup i jako JSON s otiskem plánu. Vzniklo z pilotů ACTA P025 a Agents P005 (17. 9. 2026): 9 z 16 nálezů první kontroly byly věci pro skript, opravy vyráběly 19 až 45 % nových chyb a kola nekonvergovala, protože opravy přidávaly mechanismy.
+
+### Changed
+- **Brána před generováním** — `aid-generation-readiness.sh` po lintu spouští i `aid-plan-check.sh` a blokuje na jeho nálezech; každý nález má odkaz na kontrolu, kterou v pilotech dělal placený model.
+
 ## [2.96.1] — 2026-09-03
 
 ### Fixed
