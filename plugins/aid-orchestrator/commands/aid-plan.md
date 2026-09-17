@@ -282,6 +282,33 @@ fix the exact Files entries it names — per the grammar in `skills/plan-writing
 blocking Files-shape violations to CP1 or to EPIC generation. CP1 (Step 9) then
 INCLUDES the lint's output in its review context but does not replace it.
 
+**Deterministic plan check (automatic — the same moment, the same rule).** The
+lint is one part of it. Run:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" ".aid-o/plans/P{NNN}-{topic}.md" \
+  --json ".aid-o/work/evidence/P{NNN}/plan-check.json"
+```
+
+It decides everything about the plan that needs no model — the graph of
+`Dependencies:`, step counts, forbidden phrases, paths and symbols against the
+repository, `Resources Verification` claims, criteria already true on HEAD —
+and hands the reviewers its warnings and the list of identifiers the repository
+does not know. `BLOCK` lines must be repaired before CP1; a `lifecycle_strict`
+plan is blocked by every one of them, a legacy plan only by what would break
+generation. The check is what `aid-generation-readiness.sh` runs, so a plan
+that skips it here is refused there. After EVERY revision of the plan, run it
+again with the snapshot of the plan as it was and the steps the revision was
+allowed to touch:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "<plan>" --snapshot "<plan-before-revision>" --fixes "3,7"
+```
+
+A revision that adds a step, a Files entry or an acceptance criterion outside
+the fix list is refused: that is a design change, and a design change is the
+PM's to make (cut it out, or bring it as a choice), not a fix to slip in.
+
 ### Step 9: Plan Quality Review (CP1)
 Dispatch verifier with `docs-review` focus on the written plan file.
 Present findings to PM with full context (no auto-fix — design decisions).
@@ -1009,7 +1036,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-17
 
 ## Plan mode
 

@@ -50,6 +50,19 @@ fi
 # `if`, not `[[ … ]] && …`: a bare AND-list is the script's last command status
 # under `set -e`, so an empty lint_out would abort a PASSING readiness check.
 if [[ -n "$lint_out" ]]; then printf '%s\n' "$lint_out" >&2; fi
+# The deterministic plan check (aid-plan-check.sh): internal consistency, the
+# plan against the repository, and — when a snapshot is recorded — the claims
+# the last revision added. Same two tiers as the lint. BLOCKING here for the
+# same reason the lint is: this is the last point before the plan becomes
+# EPICs, and every one of these findings is something a model reviewer was
+# paid to find in the 2026-09 pilots.
+if ! check_out="$(AID_PLAN_CHECK_RUN_CMDS=0 "${SCRIPT_DIR}/aid-plan-check.sh" "$plan" 2>&1)"; then
+  printf '%s\n' "$check_out" >&2
+  aid_plan_log "$plan" "plan_readiness_blocked" reason="plan_check"
+  echo "READINESS: FAIL — repair the aid-plan-check findings; the check list: skills/plan-writing.md §Completeness Gate" >&2
+  exit 1
+fi
+if [[ -n "$check_out" ]]; then printf '%s\n' "$check_out" >&2; fi
 # Disjointness of the declared waves (P085 Step 7). Here rather than in the
 # lint because it is a property of the step GRAPH, which is what this script
 # already grades; and BLOCKING here because this is the last point before the
