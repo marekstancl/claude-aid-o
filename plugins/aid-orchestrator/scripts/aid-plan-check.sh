@@ -19,7 +19,13 @@
 # Usage:
 #   aid-plan-check.sh <plan.md> [--project-root <dir>] [--json <out.json>]
 #                     [--snapshot <previous-plan.md> --fixes <steps>]
-#                     [--strict|--legacy] [--quiet]
+#                     [--strict|--legacy] [--run-cmds] [--quiet]
+#
+# --run-cmds  lets B7 EXECUTE each `cmd:` verification pattern (timeout 20 s,
+#             cwd = project root) to see whether it already passes on HEAD. Off
+#             by default and off in the generation gate: a plan is model-written
+#             text, and a `cmd:` may write, migrate or delete. Opt in only when
+#             you have read every cmd: in the plan.
 #
 # Two tiers, the same two the lint has: a plan with `lifecycle_strict: true`
 # (the template default) is BLOCKED by every finding marked BLOCK; a legacy plan
@@ -41,7 +47,7 @@ source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-plan-graph.sh
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
 
-PLAN="" ROOT="" JSON_OUT="" SNAPSHOT="" FIXES="" QUIET=0 FORCE_MODE=""
+PLAN="" ROOT="" JSON_OUT="" SNAPSHOT="" FIXES="" QUIET=0 FORCE_MODE="" RUN_CMDS="${AID_PLAN_CHECK_RUN_CMDS:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root) ROOT="${2:-}"; shift 2 ;;
@@ -49,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --snapshot)     SNAPSHOT="${2:-}"; shift 2 ;;
     --fixes)        FIXES="${2:-}"; shift 2 ;;
     --quiet)        QUIET=1; shift ;;
+    --run-cmds)     RUN_CMDS=1; shift ;;
     --strict)       FORCE_MODE="strict"; shift ;;
     --legacy)       FORCE_MODE="legacy"; shift ;;
     -*) echo "aid-plan-check: unknown option: $1" >&2; exit 2 ;;
@@ -92,7 +99,7 @@ _warn()  { WARNS+=("$1	$2	$3"); }
 BLANKED="$(_aid_blank_fenced < "$PLAN")"
 TOTAL_LINES="$(wc -l < "$PLAN")"
 
-declare -a STEP_S STEP_E STEP_N STEP_HEAD
+declare -a STEP_S=() STEP_E=() STEP_N=() STEP_HEAD=()
 while IFS=$'\t' read -r s e head; do
   [[ -n "${s:-}" ]] || continue
   n="$(sed -E 's/^### Step ([0-9]+).*/\1/' <<< "$head")"
@@ -114,7 +121,7 @@ _field_lines() {
 _step_index_for_line() { local ln="$1" i; for i in "${!STEP_S[@]}"; do (( ln >= STEP_S[i] && ln <= STEP_E[i] )) && { printf '%s' "$i"; return 0; }; done; return 1; }
 
 # Files bullets with line numbers, verb and cleaned paths.
-declare -a FB_LN FB_VERB FB_PATHS
+declare -a FB_LN=() FB_VERB=() FB_PATHS=()
 while IFS=$'\t' read -r ln bullet; do
   [[ -n "${bullet:-}" ]] || continue
   verb="$(_aid_files_bullet_verb "$bullet")" || verb=""
@@ -214,7 +221,7 @@ _count_items() {
   local best=$(( b > n ? (b > l ? b : l) : (n > l ? n : l) ))
   # Unmarked prose: count the clauses the author separated with ";" or full stops.
   if (( best == 0 )) && [[ "$txt" =~ [^[:space:]] ]]; then
-    best="$(tr '\n' ' ' <<< "$txt" | grep -oE ';|\. [A-ZÁ-Ž]|\.$' | wc -l)"; (( best == 0 )) && best=1
+    best="$(tr '\n' ' ' <<< "$txt" | grep -oE ';|\. [[:upper:]]|\.$' | wc -l)"; (( best == 0 )) && best=1
   fi
   printf '%s' "$best"
 }
@@ -236,7 +243,7 @@ FORBIDDEN=(
   "as appropriate" "as the case may be"
   "atd." "apod." "a podobně" "dle potřeby" "podle potřeby" "a další nezbytné" "standardní ošetření chyb"
   "vhodnou validaci" "podle existujících vzorů"
-  "ověřit při implementaci" "ověří se při implementaci" "verify during implementation" "TBD" "TODO:"
+  "případně" "ověřit při implementaci" "ověří se při implementaci" "verify during implementation" "TBD" "TODO:"
 )
 while IFS= read -r hit; do
   [[ -n "$hit" ]] || continue
@@ -385,16 +392,26 @@ if (( HAS_REPO )); then
     while [[ "$rest" == *'`'*'`'* ]]; do
       rest="${rest#*\`}"; tok="${rest%%\`*}"; rest="${rest#*\`}"
       note="${rest%%\`*}"                       # what follows this token up to the next one
-      [[ "$tok" =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] || continue
-      grep -qiE '\b(nov[áý]|new|zav[áa]d[íi]|vznik|Step [0-9]+|ruší|zaniká|to be created)\b' <<< "$note" && continue
+      [[ "$tok" =~ ^(--)?[A-Za-z_][A-Za-z0-9_.-]*$ ]] || continue
+      grep -qiE '\b(nov[áý]|new|zav[áa]d[íi]|vznik|Step [0-9]+|ruší|zaniká|to be created|mimo repo|outside|external|obraz|image|container|kontejner|docker|compose)\b' <<< "$note" && continue
+      tok="${tok##*.}"                          # `module.NAME` → the name is what source code contains
       printf '%s\n' "$tok"
     done
   done | sort -u)"
   if [[ -n "$RES_TOKENS" ]]; then
     found="$(grep -rIohF --exclude-dir=.git --exclude-dir=.aid-o --exclude-dir=node_modules --exclude-dir=.aid-worktrees --exclude="$(basename "$PLAN")" --exclude='*.md' -f <(printf '%s\n' "$RES_TOKENS") "$ROOT" 2>/dev/null | sort -u)"
+    # Names the plan itself founds are claims about the plan, not the repo:
+    # the stem of any Create:/Test: path, or a name written on a Create: bullet.
+    PLAN_OWN_NAMES="$(
+      for i in "${!FB_LN[@]}"; do
+        [[ "${FB_VERB[$i]}" == "Create" || "${FB_VERB[$i]}" == "Test" ]] || continue
+        for p in ${FB_PATHS[$i]}; do b="${p##*/}"; printf '%s\n' "${b%%.*}"; done
+        [[ "${FB_VERB[$i]}" == "Create" ]] && sed -n "${FB_LN[$i]}p" "$PLAN" | grep -oE '`[A-Za-z_][A-Za-z0-9_]*`' | tr -d '`'
+      done | sort -u)"
     while IFS= read -r t; do
       [[ -n "$t" ]] || continue
       _in_list "$t" "$found" && continue
+      _in_list "$t" "$PLAN_OWN_NAMES" && continue
       command -v "$t" >/dev/null 2>&1 && continue
       _block "B4" "$PLAN" "## Resources Verification lists \`${t}\` as existing, but nothing in the repository contains it"
     done <<< "$RES_TOKENS"
@@ -402,9 +419,15 @@ if (( HAS_REPO )); then
     _warn "B4" "$PLAN" "## Resources Verification names no existing functions / env vars / commands — the reviewers cannot tell what the plan presumes"
   fi
   # B5 — external commands the plan relies on must be on this machine.
-  for c in $(grep -iE '^- \[.\] *(External commands|Commands)' <<< "$RES_BLOCK" | grep -viE 'obraz|image|container|kontejner|docker|compose' | grep -oE '`[a-z][a-z0-9_.-]*' | tr -d '`' | sort -u); do
-    command -v "$c" >/dev/null 2>&1 || _warn "B5" "$PLAN" "external command \`${c}\` is not installed here (Resources Verification lists it)"
-  done
+  grep -iE '^- \[.\] *(External commands|Commands)' <<< "$RES_BLOCK" | while IFS= read -r line; do
+    rest="${line#*:}"
+    while [[ "$rest" == *'`'*'`'* ]]; do
+      rest="${rest#*\`}"; c="${rest%%\`*}"; rest="${rest#*\`}"; note="${rest%%\`*}"
+      [[ "$c" =~ ^[a-z][a-z0-9_.-]*$ ]] || continue
+      grep -qiE 'obraz|image|container|kontejner|docker|compose|v CI|in CI' <<< "$note" && continue
+      command -v "$c" >/dev/null 2>&1 || printf '%s\n' "$c"
+    done
+  done | sort -u | while IFS= read -r c; do [[ -n "$c" ]] && _warn "B5" "$PLAN" "external command \`${c}\` is not installed here (Resources Verification lists it; say \"v obrazu <x>\" if it lives in a container)"; done
   # Identifiers in step prose with no hit anywhere in the repo: not a finding
   # (most are the plan's own new names) but handed to the reviewers as a list.
   UNKNOWN_IDS="$(printf '%s\n' "$BLANKED" | grep -oE '`[A-Za-z_][A-Za-z0-9_]*(\(\))?`|`[A-Z][A-Z0-9_]{3,}`' | tr -d '`' | sed 's/()$//' | grep -E '_|^[A-Z0-9_]+$' | sort -u)"
@@ -434,7 +457,7 @@ if (( HAS_REPO )); then
       cmd)
         c="$(tr '|' '\n' <<< "$blk" | grep -E '^cmd:' | head -1 | sed -E 's/^cmd:[[:space:]]*//; s/^"//; s/"$//')"
         ex="$(tr '|' '\n' <<< "$blk" | grep -E '^expected_exit:' | head -1 | sed -E 's/^expected_exit:[[:space:]]*//')"
-        [[ -n "$c" && "${AID_PLAN_CHECK_RUN_CMDS:-1}" == "1" ]] || continue
+        [[ -n "$c" && "$RUN_CMDS" == "1" ]] || continue
         ( cd "$ROOT" && timeout 20 bash -c "$c" >/dev/null 2>&1 ); rc=$?
         [[ "$rc" == "${ex:-0}" ]] && _warn "B7" "$PLAN:$ln" "cmd criterion already exits ${rc} on HEAD — it passes before any work: ${c}"
         ;;
@@ -534,6 +557,7 @@ if [[ $QUIET -eq 0 ]]; then
   echo "aid-plan-check [${MODE}]: ${#BLOCKS[@]} blocking, ${#LEGACY[@]} legacy advisory, ${#WARNS[@]} warning(s), ${n_unknown} identifier(s) unknown to the repository (list in --json); lint rc=${LINT_RC}; steps=${NSTEPS}; sha256=${SHA:0:12}" >&2
 fi
 if [[ -n "$JSON_OUT" ]]; then
+  mkdir -p "$(dirname "$JSON_OUT")" || { echo "aid-plan-check: cannot create $(dirname "$JSON_OUT")" >&2; exit 2; }
   _rows() { for f in "$@"; do IFS=$'\t' read -r id loc msg <<< "$f"; jq -cn --arg id "$id" --arg loc "$loc" --arg msg "$msg" '{id:$id,location:$loc,message:$msg}'; done | jq -s '.'; }
   jq -n --arg plan "$PLAN" --arg sha "$SHA" --arg root "$ROOT" --argjson lint "$LINT_RC" --argjson steps "$NSTEPS" \
      --argjson blocks "$(_rows "${BLOCKS[@]}")" --argjson warns "$(_rows "${WARNS[@]}")" --argjson legacy "$(_rows "${LEGACY[@]}")" --arg mode "$MODE" \

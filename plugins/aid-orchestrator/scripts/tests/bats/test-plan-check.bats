@@ -165,3 +165,18 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _plan p.md strict '- Depends on: Step 7'
   run "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"aid-plan-check"* ]]
 }
+@test "readiness: a passing check writes plan-check.json into the plan's evidence directory" {
+  mkdir -p .aid-o/plans; _plan .aid-o/plans/P900.md strict
+  run "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" .aid-o/plans/P900.md; [ "$status" -eq 0 ]
+  [ -f .aid-o/work/evidence/P900/plan-check.json ]
+  [ "$(jq -r .pass .aid-o/work/evidence/P900/plan-check.json)" = "true" ]
+}
+@test "plan-check B7: cmd criteria are NOT executed unless --run-cmds is given" {
+  _plan p.md strict; printf '\n## Acceptance Criteria\n\n- [ ] side\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "touch SIDE_EFFECT"\n    expected_exit: 0\n  ```\n' >> p.md
+  run "$CHECK" p.md; [ ! -e SIDE_EFFECT ]
+  run "$CHECK" p.md --run-cmds; [ -e SIDE_EFFECT ]; [[ "$output" == *"WARN  B7"* ]]
+}
+@test "plan-check: a plan with no step sections does not crash" {
+  printf -- '---\nid: P900\n---\n# x\n\n## Goal\n\nno steps\n' > p.md
+  run "$CHECK" p.md; [[ "$output" != *"unbound variable"* ]]
+}

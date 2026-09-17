@@ -294,7 +294,8 @@ It decides everything about the plan that needs no model — the graph of
 `Dependencies:`, step counts, forbidden phrases, paths and symbols against the
 repository, `Resources Verification` claims, criteria already true on HEAD —
 and hands the reviewers its warnings and the list of identifiers the repository
-does not know. `BLOCK` lines must be repaired before CP1; a `lifecycle_strict`
+does not know. It never executes a \`cmd:\` criterion unless you pass
+\`--run-cmds\` after reading every one of them: a plan is model-written text. `BLOCK` lines must be repaired before CP1; a `lifecycle_strict`
 plan is blocked by every one of them, a legacy plan only by what would break
 generation. The check is what `aid-generation-readiness.sh` runs, so a plan
 that skips it here is refused there. After EVERY revision of the plan, run it

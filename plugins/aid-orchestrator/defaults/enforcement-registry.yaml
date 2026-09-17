@@ -720,13 +720,13 @@ enforcements:
   - id: plan_check_revision
     type: out-of-band
     source: scripts/aid-plan-check.sh
-    instruction: skills/plan-writing.md
-    severity: fail
+    instruction: commands/aid-plan.md
+    severity: advisory
     surface: internal-guard
     status: active
-    verdict: ALIGNED
+    verdict: unmapped
     test: scripts/tests/bats/test-plan-check.bats
-    description: "C-checks (--snapshot + --fixes): claims a revision added are re-grounded, retired tokens kept elsewhere, steps touched outside the fix list, a fix that ADDS behaviour (new step, new Files entry, new AC outside the fix list) is refused. Enforced at invocation by the caller that records the snapshot; readiness enforces A+B."
+    description: "C-checks (--snapshot + --fixes): claims a revision added are re-grounded, retired tokens kept elsewhere, steps touched outside the fix list, a fix that ADDS behaviour (new step, new Files entry, new AC outside the fix list) is refused. ADVISORY until a caller records the snapshot and invokes it (the reviewer-packet builder planned as step 2 of the CP1 redesign); today only the prose in commands/aid-plan.md asks for it. Readiness enforces A+B only."
 
   # ── E4 C0 Plan Contract Gate — observe mode, blocking promotion E10 ──────────
   - id: c0_contract_producer

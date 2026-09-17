@@ -56,7 +56,13 @@ if [[ -n "$lint_out" ]]; then printf '%s\n' "$lint_out" >&2; fi
 # same reason the lint is: this is the last point before the plan becomes
 # EPICs, and every one of these findings is something a model reviewer was
 # paid to find in the 2026-09 pilots.
-if ! check_out="$(AID_PLAN_CHECK_RUN_CMDS=0 "${SCRIPT_DIR}/aid-plan-check.sh" "$plan" 2>&1)"; then
+# The report lands next to the plan's other evidence when the plan carries an
+# id and lives in a workspace; a plan outside one is still checked, just unreported.
+_pc_id="$(sed -n '1,/^---$/{/^---$/!p}' "$plan" | awk -F': *' '/^id:/{print $2; exit}' | tr -d '"' )"
+_pc_root="$(dirname "$(realpath "$plan")")"; while [[ "$_pc_root" != "/" && ! -d "$_pc_root/.aid-o" ]]; do _pc_root="$(dirname "$_pc_root")"; done
+_pc_json=()
+if [[ -n "$_pc_id" && -d "$_pc_root/.aid-o" ]]; then _pc_json=(--json "$_pc_root/.aid-o/work/evidence/${_pc_id}/plan-check.json"); fi
+if ! check_out="$(AID_PLAN_CHECK_RUN_CMDS=0 "${SCRIPT_DIR}/aid-plan-check.sh" "$plan" "${_pc_json[@]}" 2>&1)"; then
   printf '%s\n' "$check_out" >&2
   aid_plan_log "$plan" "plan_readiness_blocked" reason="plan_check"
   echo "READINESS: FAIL — repair the aid-plan-check findings; the check list: skills/plan-writing.md §Completeness Gate" >&2
