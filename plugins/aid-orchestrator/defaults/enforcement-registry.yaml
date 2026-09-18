@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 506          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 508          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -704,7 +704,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     test: scripts/tests/bats/test-plan-check.bats
-    description: "A-checks: dependency graph (missing step, cycle), step numbering, M/L steps owe 3 AC + 3 edge cases, forbidden phrases incl. Czech, AC paths declared, verification_pattern shape, Modify of a file nothing creates, empty sections, duplicated bullet text, size warning. Enforced by aid-generation-readiness.sh (blocking, two tiers like the lint)."
+    description: "A-checks: dependency graph (missing step, cycle), step numbering, M/L steps owe 3 AC + 3 edge cases, forbidden phrases incl. Czech, AC paths declared, verification_pattern shape, Modify of a file nothing creates, empty sections, duplicated bullet text, size warning, A11: a type docs plan declaring a code path (always blocking). Enforced by aid-generation-readiness.sh (blocking, two tiers like the lint)."
 
   - id: plan_check_grounding
     type: out-of-band
@@ -771,6 +771,28 @@ enforcements:
     verdict: ALIGNED
     test: scripts/tests/bats/test-plan-review-round.bats
     description: "fix-check diffs the author's fix against the round's packet with aid-plan-check.sh --snapshot --fixes (the steps of open blockers and majors); a step, Files entry or acceptance criterion added outside that list fails it and prepare refuses the next round; after the last round finalize allows only acceptance-criteria additions outside the list."
+
+  - id: cp1_round_evidence
+    type: out-of-band
+    source: scripts/aid-cp1-gate.sh
+    instruction: commands/aid-plan.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: scripts/tests/bats/test-cp1-gate.bats
+    description: "EPIC generation needs plan-review round evidence: round 1 closed (measurement.json) and valid (collect.json), every existing round closed and valid, the plan byte-identical to what the last round reviewed or to its finalized plan-final.md, a second round when the first left blockers (unless the PM's override.json says one round), no round beyond rounds_default without that override. Called once per generation by aid-auto-pipeline.sh; exit 1 is forceable by the PM, exit 3 (unreadable or tampered evidence, invalid config) is not."
+
+  - id: cp1_open_blocker_needs_ac
+    type: out-of-band
+    source: scripts/aid-cp1-gate.sh
+    instruction: skills/plan-review-roles.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: scripts/tests/bats/test-cp1-gate.bats
+    description: "Every plan-review blocker still open or disputed in any closed round must be quoted (its first eight words, case and whitespace normalised) in an acceptance criterion of its step, read with the shared aid_ac_extract_criteria, or under ## Success Criteria for a plan-level finding; otherwise the gate fails naming the step and the text."
 
   # ── E4 C0 Plan Contract Gate — observe mode, blocking promotion E10 ──────────
   - id: c0_contract_producer
@@ -2422,9 +2444,10 @@ enforcements:
     instruction: "skills/review-checkpoint-contracts.md (grep: 'adjudication')"
     severity: blocking
     surface: llm-facing
-    status: active
+    status: removed_scoped
+    replacement_guard: "cp1_round_evidence"
     verdict: ALIGNED
-    description: "P074 Step 17 — an INDENTED (nested) `accepted_blockers:` / `rejected_blockers:` key used to read as 'no field' and pass silently, or to shadow a valid top-level key: an adjudication the PM wrote and the gate never saw. A nested key is now a loud structural error naming its line, whether or not a valid top-level key also exists. The same fix makes `- []`, `- none` and `- (none)` parse as genuinely EMPTY instead of as one blocker named 'none', and terminates the key walk correctly on blank/comment lines and on a final line without a trailing newline."
+    description: "RETIRED by P093 Step 7: the gate no longer reads a free-text adjudicator file; plan-review findings are JSON checked by the adjudicator script and merged.json is the only thing the gate reads. P074 Step 17 — an INDENTED (nested) `accepted_blockers:` / `rejected_blockers:` key used to read as 'no field' and pass silently, or to shadow a valid top-level key: an adjudication the PM wrote and the gate never saw. A nested key is now a loud structural error naming its line, whether or not a valid top-level key also exists. The same fix makes `- []`, `- none` and `- (none)` parse as genuinely EMPTY instead of as one blocker named 'none', and terminates the key walk correctly on blank/comment lines and on a final line without a trailing newline."
     recovery: "The error names the offending line; move the key to column 0."
     test: "scripts/tests/bats/test-generation-parsers.bats"
 

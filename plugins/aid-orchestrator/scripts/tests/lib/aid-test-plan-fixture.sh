@@ -11,12 +11,13 @@
 #   2026-08-05  the source plan must be COMMITTED on the target branch (P073 S11)
 #   2026-08-14  DoD gate resolution requires a real execution.yaml   (IMP-503)
 #   2026-08-24  the plan must have a rendered PM page                (P086 S4)
+#   2026-09-18  the plan must have a closed plan-review round        (P093 S7)
 #
 # Every one of those was a correct precondition and a correct refusal. The
 # defect was never the rule — it was that fifteen fixtures each carried their
 # own private idea of "a plan is now ready to generate from".
 #
-# So there is one idea, here. A fourth precondition is one edit in this file.
+# So there is one idea, here. The next precondition is one edit in this file.
 #
 # WHAT IT DELIBERATELY DOES **NOT** DO: switch anything off. There is no seam
 # that disables the gate for tests. A fixture that satisfies the real
@@ -26,6 +27,8 @@
 #
 # Usage (bats via test-helpers.bash, or a flat .sh harness that sources it):
 #   aid_fixture_seed_plan <project_root> <plan_source> [plan_basename]
+#   aid_fixture_seed_plan_review <project_root> <plan>   (the round alone, for a
+#     suite that places its plan itself)
 #
 # Sourced, never executed.
 # =============================================================================
@@ -172,5 +175,41 @@ aid_fixture_seed_plan() {
     fi
   fi
 
+  # ── 5. P093 Step 7 (2026-09-18): the CP1 gate needs a closed plan-review round.
+  aid_fixture_seed_plan_review "$root" "$plan" || return 1
+
   printf '%s\n' "$plan"
+}
+
+# aid_fixture_seed_plan_review <project_root> <plan>
+#
+# One plan-review round that found nothing, produced by the REAL round script
+# (plan check, prepare, six empty answers, collect, close) and PROVEN by the real
+# gate, which must then pass. Convergent like the rest of this file: edit the
+# plan afterwards and the gate refuses it again, exactly as in production.
+aid_fixture_seed_plan_review() {
+  local root="${1:?aid_fixture_seed_plan_review: project root required}"
+  local plan="${2:?aid_fixture_seed_plan_review: plan required}"
+  local plugin="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+  local round_sh="$plugin/scripts/aid-plan-review-round.sh" id dir role
+  id="$(awk -F': *' 'NR > 1 && /^---$/ {exit} /^id:/ {gsub(/["\x27]/, "", $2); print $2; exit}' "$plan")"
+  [[ -n "$id" ]] || { echo "aid_fixture_seed_plan_review: ${plan} has no frontmatter id" >&2; return 2; }
+  dir="$root/.aid-o/work/evidence/${id}/cp1"
+  # A re-seed replaces the fixture's own earlier round; nothing else lives here.
+  rm -rf "$dir"
+  bash "$plugin/scripts/aid-plan-check.sh" "$plan" --project-root "$root" \
+    --json "$root/.aid-o/work/evidence/${id}/plan-check.json" --quiet >/dev/null 2>&1 || true
+  bash "$round_sh" prepare "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 || {
+    echo "aid_fixture_seed_plan_review: prepare failed for ${plan}" >&2; return 1; }
+  for role in $(jq -r '.reviewers_expected[]' "$dir/round-1/round.json"); do
+    jq -n --arg r "$role" '{role: $r, findings: [], no_findings_reason: "fixture: nothing to review"}' \
+      > "$dir/round-1/reviewer-${role}.json"
+  done
+  bash "$round_sh" collect "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 \
+    && bash "$round_sh" close "$plan" --round 1 --project-root "$root" \
+         --tokens $(jq -r '.reviewers_expected[] | "\(.)=unknown"' "$dir/round-1/round.json") >/dev/null 2>&1 || {
+    echo "aid_fixture_seed_plan_review: collect/close failed for ${plan}" >&2; return 1; }
+  bash "$plugin/scripts/aid-cp1-gate.sh" --plan "$plan" --project-root "$root" >/dev/null 2>&1 || {
+    echo "aid_fixture_seed_plan_review: the seeded round does not pass aid-cp1-gate.sh — the fixture is not generation-ready" >&2
+    return 1; }
 }

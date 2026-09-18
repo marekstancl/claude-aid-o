@@ -123,28 +123,27 @@ _GEN_LOCK_FD=""
 #
 # WHY THIS CLASSIFICATION IS DECIDABLE (and not guesswork — PM decision 3
 # dropped the host-error detector precisely because it was). It is read from
-# aid-cp1-gate.sh's own documented exit-code contract plus its three literal
-# pre-verdict error strings:
+# aid-cp1-gate.sh's own documented exit-code contract:
 #
-#   rc 1  a genuine CP1 CONDITION verdict — missing/empty/field-less CP1-deep
-#         evidence, an adjudicator `verdict: fail|revise`, surviving accepted
-#         blockers, a structurally broken adjudicator key, a missing/
-#         unverifiable/still-blocking C0 plan review, an exhausted CP1 ledger.
-#         All of these are review evidence a PM may deliberately waive.
-#         -> FORCEABLE.
+#   rc 1  a plan-review CONDITION — no closed or valid round, a plan changed
+#         after its last round, blockers without a second round or without an
+#         acceptance criterion quoting them, a round beyond rounds_default
+#         without the PM's override. Review evidence a PM may deliberately
+#         waive. -> FORCEABLE.
 #   rc 2  usage error ("Unknown argument") — the gate was mis-invoked and never
 #         evaluated a condition. -> HARD.
-#   rc 3  I/O error ("Plan file not found") — same: no verdict was rendered.
-#         -> HARD.
-#   rc 1, but one of the three PLAN-IDENTITY errors the gate raises BEFORE it
-#         ever determines risk: no closing frontmatter `---`, no `id:` field,
-#         or an `id` failing the path-traversal guard. These are not review
-#         evidence at all; forcing past them would seal an authority whose
-#         plan identity is the very thing that is broken. -> HARD.
+#   rc 3  the gate could not trust what it would judge: the plan file or its
+#         id, an invalid plan_review config, unreadable round evidence, a round
+#         the index lists but that is gone, a malformed override.json. -> HARD.
+#   rc 1, but one of three PLAN-IDENTITY strings (no closing frontmatter `---`,
+#         no `id:` field, an `id` failing the path-traversal guard): a stub or
+#         an older gate may still report those with rc 1, and forcing past them
+#         would seal an authority whose plan identity is the very thing that is
+#         broken. -> HARD.
 #
-# The three hard rc-1 strings are matched literally because they are literal in
-# aid-cp1-gate.sh. If that vocabulary changes, this list changes with it — it
-# is a mapping of one script's strings, never an inference about them.
+# The three rc-1 strings are matched literally. If the gate's vocabulary
+# changes, this list changes with it — it is a mapping of one script's strings,
+# never an inference about them.
 AID_GEN_LABEL_BLOCKED="aid_cp1_blocked"
 AID_GEN_LABEL_FORCE_REQUIRED="aid_generation_force_required"
 

@@ -9,9 +9,10 @@
 # aid_plan_review_config_load <project_root>
 #   Exports PR_CONFIG_FILE, PR_ROUNDS_DEFAULT, PR_MIN_ANSWERS, PR_DOCS_REVIEWERS
 #   (space-separated), PR_BANNED_MODELS (space-separated), arrays PR_ROLE[],
-#   PR_PROVIDER[], PR_MODEL[] (same index = same reviewer) and PR_DEGRADED
-#   (1 when both generalists use the same model). Returns 2 without yq, 1 on
-#   unreadable YAML or a missing block.
+#   PR_PROVIDER[], PR_MODEL[] (same index = same reviewer), PR_DEGRADED
+#   (1 when both generalists use the same model) and PR_ENABLED (0 when the
+#   project switched review_checkpoints.enabled or cp1_plan_review off).
+#   Returns 2 without yq, 1 on unreadable YAML or a missing block.
 # aid_plan_review_config_validate
 #   Refuses a loaded config that breaks an invariant; prints
 #   "plan_review config: <reason>" and returns 1.
@@ -67,11 +68,25 @@ aid_plan_review_config_load() {
     PR_ROLE+=("$role"); PR_PROVIDER+=("$provider"); PR_MODEL+=("$model")
   done < <(yq -r '.review_checkpoints.plan_review.reviewers // [] | .[] | [.role, .provider, .model] | @tsv' "$PR_CONFIG_FILE")
 
+  # The two switches are read where the PM sets them: the project file first,
+  # whether or not it carries a plan_review block.
+  PR_ENABLED=1
+  local flag file value
+  for flag in enabled cp1_plan_review; do
+    value=""
+    for file in "$project" "$default"; do
+      [[ -f "$file" ]] || continue
+      value="$(yq -r ".review_checkpoints.${flag}" "$file" 2>/dev/null)"
+      [[ "$value" == true || "$value" == false ]] && break
+    done
+    [[ "$value" == false ]] && PR_ENABLED=0
+  done
+
   PR_DEGRADED=0
   local a b
   a="$(aid_plan_review_role_index generalist_a)" && b="$(aid_plan_review_role_index generalist_b)" \
     && [[ "${PR_MODEL[$a]}" == "${PR_MODEL[$b]}" ]] && PR_DEGRADED=1
-  export PR_CONFIG_FILE PR_ROUNDS_DEFAULT PR_MIN_ANSWERS PR_DOCS_REVIEWERS PR_BANNED_MODELS PR_DEGRADED
+  export PR_CONFIG_FILE PR_ROUNDS_DEFAULT PR_MIN_ANSWERS PR_DOCS_REVIEWERS PR_BANNED_MODELS PR_DEGRADED PR_ENABLED
   return 0
 }
 

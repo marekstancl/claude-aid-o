@@ -3,10 +3,8 @@
 # test-generation-parsers.bats — P074 Step 17: parser and diagnosis defect
 # fixes for the three generation defects found live on 2026-08-04.
 #
-#   1. aid-cp1-gate.sh — the adjudicator block-scalar empty-list forms
-#      (`- []`, `- none`, `- (none)`) parse as EMPTY; a genuine item still
-#      fails; a nested-only `accepted_blockers:`/`rejected_blockers:` key is a
-#      loud structural error instead of a silent "no field" pass.
+#   1. (retired by P093: the CP1 gate no longer parses a free-text adjudicator
+#      file; its round evidence is covered by test-cp1-gate.bats.)
 #   2. aid-plan-to-epic.sh / aid-epic-to-json.sh — the steps-table cell
 #      grammar is a two-rule escape (`\\` then `\|`), decoded by a
 #      character-walk splitter; a short row is a hard arity error, never
@@ -22,171 +20,15 @@ setup() {
   setup_test_evidence_dir
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
-  GATE="$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh"
   PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
   EPIC_TO_JSON="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
   PIPELINE="$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh"
   SCHEMA="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
-  export GATE PLAN_TO_EPIC EPIC_TO_JSON PIPELINE SCHEMA
+  export PLAN_TO_EPIC EPIC_TO_JSON PIPELINE SCHEMA
 }
 
 teardown() {
   teardown_test_evidence_dir
-}
-
-# ─── adjudicator fixtures (aid-cp1-gate.sh) ────────────────────────────────
-
-# _gate_fixture — a high-risk plan + full CP1-deep evidence + a clean C0
-# review, with the C0-verify and ledger shell-outs stubbed to OK so the ONLY
-# thing deciding pass/fail is the adjudicator read under test.
-_gate_fixture() {
-  GPROJ="$TEST_TMPDIR/gate-proj"
-  GEV="$GPROJ/.aid-o/work/evidence/P902/cp1-deep"
-  mkdir -p "$GEV" "$TEST_TMPDIR/stub"
-  cat > "$GPROJ/plan.md" <<'EOF'
----
-id: P902
-type: plan
-status: draft
-risk: high
----
-
-# Plan: Gate fixture
-
-## Context
-
-authenticate call present.
-EOF
-  local f
-  for f in cp1-lens-L1-behavior.md cp1-lens-L2-feasibility.md cp1-lens-L3-enforcement.md; do
-    printf 'findings: []\nstop_rule_blockers: []\n' > "$GEV/$f"
-  done
-  printf '{"schema_version":"aid-2.0","artifact_type":"c0_plan_review","review_status":"pass","blocking_findings":false,"findings":[]}\n' \
-    > "$GPROJ/.aid-o/work/evidence/P902/c0-plan-review.json"
-  # The fixture declares `risk: high`, so the gate classifies it as band=full
-  # and — since the reuse_evidence C0 lens became a full-band requirement —
-  # refuses before it ever reaches the adjudicator parser these cases are
-  # about. Without this the whole file measured "the gate refuses for an
-  # unrelated reason", which is not what any of its names claim.
-  mkdir -p "$GPROJ/.aid-o/work/evidence/P902/c0"
-  printf 'findings: []\nstop_rule_blockers: []\n' \
-    > "$GPROJ/.aid-o/work/evidence/P902/c0/c0-lens-reuse_evidence.md"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$TEST_TMPDIR/stub/ok.sh"
-  chmod +x "$TEST_TMPDIR/stub/ok.sh"
-  export AID_CP1_GATE_C0_REVIEW_BIN="$TEST_TMPDIR/stub/ok.sh"
-  export AID_CP1_GATE_LEDGER_BIN="$TEST_TMPDIR/stub/ok.sh"
-  export GPROJ GEV
-}
-
-_run_gate() {
-  run bash "$GATE" --plan "$GPROJ/plan.md" --project-root "$GPROJ" 3>&-
-}
-
-@test "P074 Step 17: adjudicator block item '- []' parses as EMPTY (pass)" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  - []\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -eq 0 ]
-}
-
-@test "P074 Step 17: adjudicator block item '- none' parses as EMPTY, case- and whitespace-tolerant" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  -   None  \nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -eq 0 ]
-}
-
-@test "P074 Step 17: adjudicator block item '- (none)' parses as EMPTY (pass)" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  - (None)\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -eq 0 ]
-}
-
-@test "P074 Step 17: inline 'accepted_blockers: []' (canonical form) still passes — regression" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers: []\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -eq 0 ]
-}
-
-@test "P074 Step 17: a genuine '- <text>' blocker item still FAILS the gate" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  - auth bypass via direct db query at auth.py:42\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"unresolved blockers"* ]]
-  [[ "$output" == *"auth bypass"* ]]
-}
-
-@test "P074 Step 17: a nested-only 'accepted_blockers:' key is a LOUD structural error naming the line (was a silent no-field pass)" {
-  _gate_fixture
-  printf 'verdict: pass\nsummary:\n  accepted_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"INDENTED/nested 'accepted_blockers:'"* ]]
-  [[ "$output" == *"line 3"* ]]
-}
-
-@test "P074 Step 17: a nested-only 'rejected_blockers:' key gets the same structural error" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers: []\nnested:\n  rejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"INDENTED/nested 'rejected_blockers:'"* ]]
-  [[ "$output" == *"line 4"* ]]
-}
-
-@test "P074 Step 17 (review): a blank + comment line between '- []' and a REAL item does not hide the blocker" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  - []\n\n  # reviewer note\n  - auth bypass via direct db query at auth.py:42\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"unresolved blockers"* ]]
-  [[ "$output" == *"auth bypass"* ]]
-}
-
-@test "P074 Step 17 (review): blank and comment lines between EMPTY forms only still parse as EMPTY (pass)" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  - []\n\n  # nothing survived adjudication\n  - none\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -eq 0 ]
-}
-
-@test "P074 Step 17 (review): an indented 'accepted_blockers:' duplicate errors loudly EVEN when a valid top-level key exists" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers: []\nmetadata:\n  accepted_blockers: real blocker hidden here\nrejected_blockers: []\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"INDENTED/nested 'accepted_blockers:'"* ]]
-  [[ "$output" == *"line 4"* ]]
-}
-
-@test "P074 Step 17 (review 2): a REAL blocker on a no-final-newline last line still FAILS the gate" {
-  _gate_fixture
-  # printf WITHOUT a trailing \n: a wc-l-bounded walk would drop this line
-  # and report EMPTY, silently passing a genuine blocker.
-  printf 'verdict: pass\naccepted_blockers:\n  - auth bypass via direct db query at auth.py:42' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"unresolved blockers"* ]]
-  [[ "$output" == *"auth bypass"* ]]
-}
-
-@test "P074 Step 17 (review 2): an EMPTY form on a no-final-newline last line still parses as EMPTY (pass)" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers:\n  - none' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -eq 0 ]
-}
-
-@test "P074 Step 17 (review): an indented 'rejected_blockers:' duplicate errors loudly EVEN when a valid top-level key exists" {
-  _gate_fixture
-  printf 'verdict: pass\naccepted_blockers: []\nrejected_blockers: []\nmetadata:\n  rejected_blockers: shadowed duplicate\n' > "$GEV/cp1-adjudicator.md"
-  _run_gate
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"INDENTED/nested 'rejected_blockers:'"* ]]
-  [[ "$output" == *"line 5"* ]]
 }
 
 # ─── steps-table escape grammar (plan-to-epic → epic-to-json) ──────────────
@@ -254,6 +96,7 @@ Exercise the table escape grammar.
 **Effort:** S
 **AID Role:** backend
 EOF
+  aid_fixture_seed_plan_review "$RTPROJ" "$RTPROJ/plan.md"
   export RTPROJ
 }
 

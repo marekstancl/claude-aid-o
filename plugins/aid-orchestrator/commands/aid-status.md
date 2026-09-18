@@ -461,6 +461,21 @@ A project with no nightly artifact renders none of them, which is why the
 example renders below — whose fixtures have no artifact — are unchanged.
 
 ```bash
+# recipe: review-line — defines review_line <plan_id>: what the plan's review
+# rounds cost, from scripts/lib/aid-plan-review-summary.sh. A plan with no
+# plan-review evidence renders NOTHING, so the example renders below stay as
+# they are.
+review_line() {
+  local _root _line
+  _root="$(aid_state_root)" || return 0
+  # shellcheck source=/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-summary.sh" 2>/dev/null || return 0
+  _line="$(aid_plan_review_summary "${1:?review_line: plan id required}" "$_root")"
+  [ "$_line" = "review: none" ] || printf '  %s\n' "$_line"
+}
+```
+
+```bash
 # recipe: plan-rows — defines plan_rows(): one TSV row per plan-state file,
 # columns: id, phase, worktree, marker (ok|missing!|unreadable), bucket
 # (active|closing). Sorted by plan id.
@@ -1030,6 +1045,7 @@ render_overview() {
       else
         printf 'Plan %s — %s\n  worktree: %s\n' "$_id" "$_phase" "$_wt"
       fi
+      review_line "$_id"
       printf '  EPICs:\n'
       _body="$(plan_epics "$_id")"
       printf '%s\n' "${_body:-    (none active)}"
@@ -1194,7 +1210,7 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-09-18
 
 ## Plan mode
 

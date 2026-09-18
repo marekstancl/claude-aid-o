@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-09-18
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -357,11 +357,9 @@ something new (any `Create:` bullet in its `Files:`) MUST carry a
 
 **What the replay does NOT prove.** It proves the declared result matches what
 the command returns — not that the search was wide enough. A narrowly aimed
-`grep` with an honest `none` passes. Width is judged by the `reuse_evidence`
-C0 lens, and only in the `full` band; `medium` and `light` keep the replay
-alone. That is a deliberate boundary: a review costs a dispatch, and on a small
-plan it is not worth one. (The lens's side of that boundary:
-`skills/review-checkpoint-contracts.md` §"Lens: reuse_evidence".)
+`grep` with an honest `none` passes. Width is judged by the `reuse` reviewer of
+plan review (`skills/plan-review-roles.md` §"Role: reuse"), which searches by
+what a step's new thing does rather than by its new name.
 
 **The N+1 rule.** The field is about the thing the step FOUNDS — that is what
 "of the same kind" means below, and it is why the rule can be checked at all: a
@@ -1476,7 +1474,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-09-18
 
 ## Plan-boundary note
 

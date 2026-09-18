@@ -82,7 +82,7 @@ Planning:
   /aid-plan epic plan.md   → generate EPICs from plan
 
 Before you trust either end:
-  /aid-verify-plan             → adversarial review of the plan
+  /aid-verify-plan             → one plan reviewer, by hand (not a review round)
   /aid-verify-implementation   → adversarial review of a claimed-done result
 ```
 
@@ -184,7 +184,9 @@ drives directly: a plan becomes EPIC files, then `plan.json`, then a run.
 PRE-FLIGHT (bash, before FSM):
   1. generation-readiness validates the source plan + provisional graph
   2. transaction skeleton written under the generation lock
-  3. CP1 gate — ONCE per plan → generation-authority.json
+  3. CP1 gate — ONCE per plan → generation-authority.json (needs closed
+     plan review rounds: six reviewer roles, two rounds by default, a third
+     or only one on the PM's recorded override)
   4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
      never re-runs the gate)
   5. aid-epic-to-json.sh → every plan.json + contract validation
@@ -229,7 +231,11 @@ while another stream is live does not — that is a known limitation.
 ### Topic: plan-lifecycle
 
 A plan owns a git worktree and a branch, and declares how it releases.
-`/aid-verify-plan` reviews a plan before execution; `/aid-verify-implementation`
+Before EPIC generation a plan goes through plan review (CP1): six reviewer
+roles answer the same packet, each finding needs a command and a file:line or
+it is rejected, two rounds by default, a third or only one only on the PM's
+recorded override (`aid-plan-review-round.sh override`). `/aid-verify-plan`
+runs one of those reviewers by hand, outside the rounds; `/aid-verify-implementation`
 reviews a result that claims to be done. Both dispatch an independent agent in a
 fresh context, so neither is grading its own homework.
 
@@ -583,4 +589,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-09-18

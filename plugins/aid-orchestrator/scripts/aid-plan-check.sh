@@ -88,7 +88,7 @@ MODE="$FORCE_MODE"
 if [[ -z "$MODE" ]]; then
   if grep -qE '^lifecycle_strict:[[:space:]]*true' "$PLAN" 2>/dev/null; then MODE="strict"; else MODE="legacy"; fi
 fi
-ALWAYS_BLOCK=" LINT A1 A2 A6 B8 C5 "
+ALWAYS_BLOCK=" LINT A1 A2 A6 A11 B8 C5 "
 BLOCKS=() WARNS=() LEGACY=() UNKNOWN_IDS="" REV_UNKNOWN_IDS=""
 _block() {   # id, location, message — downgraded on a legacy plan unless structural
   if [[ "$MODE" == "strict" || "$ALWAYS_BLOCK" == *" $1 "* ]]; then BLOCKS+=("$1	$2	$3"); else LEGACY+=("$1	$2	$3"); fi
@@ -321,6 +321,22 @@ for i in "${!STEP_S[@]}"; do
           done | sort | uniq -d | head -1)"
   [[ -n "$dupe" ]] && _block "A10" "$PLAN:${STEP_S[$i]}" "Step ${STEP_N[$i]} has two Files bullets with the same description — say per file what changes there: ${dupe:0:80}…"
 done
+
+# A11 — a `type: docs` plan gets two plan reviewers instead of six, so its
+# header must not hide code: any Create/Modify/Rewrite path that is code blocks.
+# A Test: bullet does not count (a docs plan may test its documentation build).
+PLAN_TYPE="$(sed -n '1,/^---$/{/^---$/!p}' "$PLAN" | awk -F': *' '/^type:/{print $2; exit}' | tr -d '"'"'"' ')"
+if [[ "$PLAN_TYPE" == docs ]]; then
+  for i in "${!FB_LN[@]}"; do
+    [[ "${FB_VERB[$i]}" =~ ^(Create|Modify|Rewrite)$ ]] || continue
+    for p in ${FB_PATHS[$i]}; do
+      if [[ "$p" =~ \.(sh|bash|py|js|ts|tsx|jsx|go|rs|java|rb|php|sql|yaml|yml|json|toml)$ || "$p" =~ (^|/)(scripts|src|bin|lib)/ ]]; then
+        idx="$(_step_index_for_line "${FB_LN[$i]}")" || idx=""
+        _block "A11" "$PLAN:${FB_LN[$i]}" "type: docs but step ${STEP_N[$idx]:-?} declares code path ${p} — a docs plan is reviewed by two generalists only; declare the real type"
+      fi
+    done
+  done
+fi
 
 # A9 — size: the pilots could not review a 16-step / 1200-line plan to a close.
 (( NSTEPS > 10 )) && _warn "A9" "$PLAN" "${NSTEPS} steps — plans this size did not converge in the pilots (ACTA P025: 16 steps); consider splitting"

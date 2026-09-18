@@ -4,11 +4,11 @@
 # into (P084 Step 1).
 #
 # WHAT THIS SUITE IS ABOUT, AND WHAT IT IS NOT
-#   Only the classification: which band a plan lands in, and why. The gate's
-#   evidence/adjudicator/C0/ledger behaviour keeps living in
-#   scripts/tests/test-cp1-gate.sh (t2, it needs git + ledger fixtures). Here
-#   nothing is written, dispatched or committed — every case is a plan file in
-#   a temp dir and one `--classify-only` run, which is what makes it t0.
+#   Only the classification: which band a plan lands in, and why. What the
+#   gate requires (plan-review round evidence, for every band) is asserted in
+#   scripts/tests/bats/test-cp1-gate.bats. Here nothing is written, dispatched
+#   or committed — every case is a plan file in a temp dir and one
+#   `--classify-only` run, which is what makes it t0.
 #
 # The load-bearing distinction is prose vs declaration: before P084 the gate
 # grepped the WHOLE document, so a plan that merely DESCRIBED the state machine
@@ -181,96 +181,18 @@ YAML
   [ "$(band_of "$plan")" = "full" ]
 }
 
-# ─── what a band OWES (the requirement table, P084 Step 2) ──────────────────
-#
-# The cases below run the whole gate, not just the classifier, so they need an
-# .aid-o/ workspace — still no git, no dispatch, no network. The C0/ledger
-# behaviour of a `full` plan is covered in depth by scripts/tests/test-cp1-gate.sh
-# (t2); here only the band-driven difference is asserted.
+# ─── the band no longer decides what a plan owes ────────────────────────────
+# Every plan owes plan-review round evidence (P093); the round evidence itself
+# is asserted in scripts/tests/bats/test-cp1-gate.bats.
 
-write_clean_cp1_evidence() {
-  local plan_id="$1"
-  local dir="$TMP/.aid-o/work/evidence/${plan_id}/cp1-deep"
-  mkdir -p "$dir"
-  local f
-  for f in cp1-lens-L1-behavior.md cp1-lens-L2-feasibility.md cp1-lens-L3-enforcement.md; do
-    printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "${dir}/${f}"
-  done
-  printf 'accepted_blockers: []\nrejected_blockers: []\nverdict: pass\n' > "${dir}/cp1-adjudicator.md"
-  # P085: a `full` plan also owes the reuse_evidence C0 lens, one level above
-  # cp1-deep/. Written here so the cases below keep testing what they are named
-  # after — the C0 cross-provider requirement — rather than tripping on the
-  # lens check that now runs first.
-  mkdir -p "$TMP/.aid-o/work/evidence/${plan_id}/c0"
-  printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' \
-    > "$TMP/.aid-o/work/evidence/${plan_id}/c0/c0-lens-reuse_evidence.md"
-}
-
-@test "AC6/AC7: a light plan passes the gate with no evidence on disk at all" {
+@test "a light plan without round evidence fails the gate naming round-1" {
   mkdir -p "$TMP/.aid-o"
   plan="$(write_plan P910 "risk: medium" \
     '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
-  run bash "$GATE" --plan "$plan" --project-root "$TMP"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"CP1-deep not required"* ]]
-  # No lens evidence was demanded and none was invented. The plan's evidence
-  # dir itself DOES appear — the gate writes its band there (P084 Step 7) — so
-  # the claim under test is the absence of cp1-deep/, not of the directory.
-  [ ! -d "$TMP/.aid-o/work/evidence/P910/cp1-deep" ]
-  [ -s "$TMP/.aid-o/work/evidence/P910/timeline.jsonl" ]
-}
-
-@test "a medium plan passes on CP1-deep evidence alone — no C0 review, no ledger" {
-  mkdir -p "$TMP/.aid-o"
-  plan="$(write_plan P911 "risk: medium" \
-    '- Modify: `plugins/aid-orchestrator/defaults/schemas/thing.schema.json` — what the decision reads')"
-  write_clean_cp1_evidence P911
-  run bash "$GATE" --plan "$plan" --project-root "$TMP"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"owes no C0 cross-provider review"* ]]
-  [ ! -f "$TMP/.aid-o/work/evidence/P911/c0-plan-review.json" ]
-}
-
-@test "the same evidence in band full is NOT enough — the C0 review is still owed" {
-  mkdir -p "$TMP/.aid-o"
-  plan="$(write_plan P912 "risk: medium" \
-    '- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — the state machine')"
-  write_clean_cp1_evidence P912
+  [ "$(band_of "$plan")" = "light" ]
   run bash "$GATE" --plan "$plan" --project-root "$TMP"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"c0-plan-review.json missing"* ]]
-}
-
-@test "a band missing from the requirements table falls back to the full ceremony" {
-  mkdir -p "$TMP/.aid-o/config/policies"
-  cat > "$TMP/.aid-o/config/policies/review-checkpoints.yaml" <<'YAML'
-review_checkpoints:
-  ceremony_bands:
-    full:
-      cp1_deep_lenses: true
-      c0_cross_provider: true
-      cp1_ledger: true
-YAML
-  plan="$(write_plan P913 "risk: medium" \
-    '- Modify: `plugins/aid-orchestrator/defaults/schemas/thing.schema.json` — what the decision reads')"
-  write_clean_cp1_evidence P913
-  run bash "$GATE" --plan "$plan" --project-root "$TMP"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"c0-plan-review.json missing"* ]]
-}
-
-@test "the C0 review asks the SAME classifier as the gate" {
-  # Both used to scan the plan's prose with their own copy of the same eight
-  # patterns, and they could disagree: a full-band plan whose prose matched
-  # nothing had its cross-provider review skipped, and then the gate blocked on
-  # the report that skip never produced.
-  full_plan="$(write_plan P917 "risk: medium" \
-    '- Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — the state machine')"
-  light_plan="$(write_plan P918 "risk: medium" \
-    '- Modify: `plugins/aid-orchestrator/commands/aid-help.md` — help text')"
-  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-c0-plan-review.sh' 2>/dev/null
-               printf '%s %s' \"\$(_c0_risk_of '$full_plan')\" \"\$(_c0_risk_of '$light_plan')\""
-  [ "$output" = "high low" ]
+  [[ "$output" == *"no plan review round-1"* ]]
 }
 
 # ─── fail-closed: the ways a classification can be WRONG rather than absent ──
@@ -313,18 +235,4 @@ YAML
 - Modify: `docs/x.md` — a real one')"
   [ "$(band_of "$plan")" = "full" ]
   [[ "$(reason_of "$plan")" == *"unparseable_files_entry"* ]]
-}
-
-# ── What the band OWES, as opposed to which band a plan is in ────────────────
-# The evidence FLOW for the reuse_evidence lens (P085 Step 5) is asserted in
-# scripts/tests/test-cp1-gate.sh, which has the evidence and ledger fixtures and
-# is t2 for that reason. What belongs HERE, on the merge path, is the one thing
-# that is purely about the band: that the shipped table still says which bands
-# owe the lens. Silently losing that row is how an enforcement becomes a
-# decoration, and it is a one-line regression a t0 case can catch.
-@test "the shipped band table still asks band full — and only full — for the reuse_evidence lens" {
-  policy="$PLUGIN_ROOT/defaults/policies/review-checkpoints.yaml"
-  [ "$(yq -r '.review_checkpoints.ceremony_bands.full.c0_reuse_lens' "$policy")" = "true" ]
-  [ "$(yq -r '.review_checkpoints.ceremony_bands.medium.c0_reuse_lens' "$policy")" = "false" ]
-  [ "$(yq -r '.review_checkpoints.ceremony_bands.light.c0_reuse_lens' "$policy")" = "false" ]
 }

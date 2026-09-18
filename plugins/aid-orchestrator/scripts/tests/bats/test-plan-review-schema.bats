@@ -111,3 +111,16 @@ _answer() {
   done
   [ ! -s "$TEST_DIR/pending-dispatches.jsonl" ]
 }
+@test "adapter: commands/aid-plan.md quotes the claude adapter instruction byte for byte" {
+  local cmd="$AID_PLUGIN_PATH/commands/aid-plan.md"
+  diff <(awk '/^<!-- adapter:end -->$/{on=0} on{print} /^<!-- adapter:begin -->$/{on=1}' "$cmd") \
+       "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
+}
+@test "command: the CP1 section names every round subcommand inside a fenced block" {
+  local sec
+  sec="$(awk '/^## Plan review \(CP1\)$/{on=1} on && /^## / && !/Plan review/{exit} on' "$AID_PLUGIN_PATH/commands/aid-plan.md" \
+         | awk '/^ *```/{f=!f; next} f')"
+  for sub in prepare dispatch collect close fix-check finalize dispute retry override; do
+    grep -qE "aid-plan-review-round.sh\"? ${sub} |\"\\\$R\" ${sub} " <<< "$sec" || { echo "missing: $sub"; return 1; }
+  done
+}

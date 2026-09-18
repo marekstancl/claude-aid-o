@@ -1,194 +1,86 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-cp1-gate.sh — CP1-deep evidence gate, scaled by a plan's ceremony band
+# aid-cp1-gate.sh — the plan review (CP1) gate before EPIC generation
 #
 # Usage:
-#   ./aid-cp1-gate.sh --plan <path> [--project-root <path>]
+#   aid-cp1-gate.sh --plan <path> [--project-root <path>] [--json <out>]
+#   aid-cp1-gate.sh --plan <path> --classify-only
 #
-# For a `light` plan: exits 0 immediately (no evidence required).
-# For a `full` plan: verifies that all 4 CP1-deep evidence files exist,
-# that the adjudicator verdict has no unresolved accepted blockers, that a
-# verified C0 cross-provider Codex plan review exists with no surviving
-# blocking findings, and that the CP1 revision-limit ledger has budget left
-# (P065 E-065-7_7 Step 20 — see "C0 review + CP1 ledger gate" below).
-# For a `medium` plan: the CP1-deep lens files and the adjudicator verdict only
-# — the shipped bands table gives it neither the C0 review nor the ledger,
-# because the loop that would create the ledger never runs for it.
+# Reads only the round evidence aid-plan-review-round.sh writes under
+# .aid-o/work/evidence/<plan_id>/cp1/ (cp1/manual/ is never read) and passes
+# when all of these hold:
+#   - review_checkpoints.plan_review is valid (aid-plan-review-config.sh);
+#   - every round cp1/rounds.json lists has its directory;
+#   - round 1 exists, is closed (measurement.json) and was valid (collect.json);
+#   - every round that exists is closed and valid;
+#   - the plan is byte-identical to what the last round reviewed, or to the
+#     round's plan-final.md written by `finalize`;
+#   - round 1 left no open blocker, or round 2 ran, or the PM's
+#     cp1/override.json says one round;
+#   - a round beyond rounds_default exists only with override.json allowing it;
+#   - every blocker still open or disputed in any round is quoted (its first
+#     eight words) in an acceptance criterion of its step, or under
+#     "## Success Criteria" for a plan-level finding.
+# review_checkpoints.enabled or cp1_plan_review set to false passes with a
+# notice; a plan outside any .aid-o/ workspace is not gated.
 #
-# Ceremony band (P084) — full | medium | light
+# --classify-only prints the plan's ceremony band and decides nothing; it stays
+# until the band classifier is removed.
 #
-# The band is classified from the paths the plan's steps DECLARE in their
-# **Files:** blocks — never from prose anywhere in the document. Two data files
-# own the policy and this script only READS them; the rationale for WHAT lands
-# in which band lives with the data, so a project that overrides the map gets
-# the reasoning with it:
-#
-#   defaults/policies/risk-paths.yaml         which paths mean which band
-#   defaults/policies/review-checkpoints.yaml what each band OWES
-#     (review_checkpoints.ceremony_bands: cp1_deep_lenses / c0_cross_provider /
-#      cp1_ledger). `full` owes all three — today's behaviour, unchanged.
-#
-# What IS this script's own behaviour, and therefore documented here:
-#   - Frontmatter `risk: high` raises the band to `full`; nothing lowers a band
-#     except changing the declared paths.
-#   - Every uncertainty resolves to `full`: a plan declaring no path at all
-#     (`no_files_declared`), a missing map (`no_risk_map`), an unparseable one
-#     (`unreadable_risk_map`), a host without yq (`no_yq`), and a band absent
-#     from the requirements table. There is deliberately NO "guess from the
-#     prose" fallback: the whole-document scan this replaced answers `light`
-#     for a plan that declares aid-run-gates.sh but says nothing alarming, and
-#     that is the one direction that must never happen.
-#   - A band owing no CP1-deep evidence exits at Step 3 without reading any.
-#
-# Evidence dir: <project_root>/.aid-o/work/evidence/<plan_id>/cp1-deep/
-# Required files (all 4 must exist, be non-empty, and contain required fields):
-#   cp1-lens-L1-behavior.md     — L1: behavior/user-flow/edge cases; must have stop_rule_blockers:
-#   cp1-lens-L2-feasibility.md  — L2: feasibility/file-contracts/producer→consumer; must have stop_rule_blockers:
-#   cp1-lens-L3-enforcement.md  — L3: enforcement/CI/artifact-visibility/testability; must have stop_rule_blockers:
-#   cp1-adjudicator.md          — adjudicator verdict; must have verdict: at line-start
-#
-# Adjudicator check: reads cp1-adjudicator.md and fails if verdict is fail|revise
-# or if accepted_blockers: is non-empty. Empty accepted_blockers + verdict:pass = pass.
-#
-# ---------------------------------------------------------------------------
-# C0 review + CP1 ledger gate (P065 E-065-7_7 Step 20)
-# ---------------------------------------------------------------------------
-# For a high-risk plan, AFTER the 4-file CP1-deep evidence + adjudicator
-# checks above pass, two further mechanical requirements are enforced,
-# mirroring the C3 fix->reverify loop's terminal-outcome guard pattern
-# (aid-c3-dispatch.sh / pipeline.md §6a) at plan level:
-#
-#   1. C0 cross-provider plan review — a real second-provider (Codex) pass
-#      over the FINAL plan MUST exist and MUST be provably genuine:
-#        - <plan_evidence_root>/c0-plan-review.json must be present
-#        - its review_status must NOT be "unverifiable"
-#        - its blocking_findings must NOT be true
-#        - `aid-c0-plan-review.sh verify <plan_evidence_root>` (the SAME
-#          verify subcommand aid-c0-plan-review.sh ships, Step 18) must exit
-#          0 — this is what makes the provenance/raw-binding check a CODE
-#          gate, not prose: a hand-edited or stale c0-plan-review.json fails
-#          `verify` even if its top-level fields look clean.
-#      <plan_evidence_root> is `.aid-o/work/evidence/<plan_id>/` — the SAME
-#      root aid-c0-plan-review.sh writes/reads (one level ABOVE cp1-deep/).
-#
-#   2. CP1 revision-limit ledger budget — `aid-cp1-ledger.sh check-budget`
-#      must report an available budget (exit 0). A missing/corrupt ledger
-#      with CP1-deep evidence already present is FAIL-CLOSED by that script
-#      (never a silent reset) and therefore blocks here too.
-#
-# Either requirement's failure can be bypassed ONLY by an explicit,
-# ONE-SHOT PM-escalation override artifact at
-# `<plan_evidence_root>/cp1-pm-escalation-override.json` — see
-# `_cp1_check_pm_override` / `_cp1_claim_pm_override` below. Once consumed to bypass a failure, the
-# override file is renamed to `<...>.consumed-<epoch>` so it cannot silently
-# authorize a second bypass (mirrors "the override permits exactly one more
-# attempt", plan Error Handling section).
-#
-# Test seams (mirror aid-c0-plan-review.sh's AID_C0_INDEPENDENCE_BIN/
-# AID_C0_RENDER_BIN convention): AID_CP1_GATE_C0_REVIEW_BIN /
-# AID_CP1_GATE_LEDGER_BIN let tests substitute a stub for the real scripts
-# without needing a full git+codex fixture. Production callers never set
-# these — the real scripts are always used.
-#
-# stdout: human-readable status lines
-# stderr: JSON error on failure (consistent with other AID scripts)
-# Exit codes: 0=pass or not-applicable, 1=gate failure, 2=usage error, 3=I/O error
+# Exit: 0 pass
+#       1 a review condition fails (forceable by the PM through
+#         aid-auto-pipeline.sh --force; every failure is named)
+#       2 usage error
+#       3 a hard condition --force must not cover: the plan file or its id,
+#         an invalid plan_review config, unreadable round evidence, a round the
+#         index lists but that is gone, a malformed override.json
 # =============================================================================
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export AID_PLUGIN_PATH="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/common.sh"
 # shellcheck source=lib/aid-plan-band.sh
 source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
+# shellcheck source=lib/aid-plan-review-config.sh
+source "${SCRIPT_DIR}/lib/aid-plan-review-config.sh"
+# shellcheck source=lib/aid-ac-extract.sh
+source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"
 
-CP1_CHECKPOINTS_DEFAULT="${AID_PLUGIN_PATH:-${SCRIPT_DIR}/..}/defaults/policies/review-checkpoints.yaml"
-
-CP1_GATE_C0_REVIEW_BIN="${AID_CP1_GATE_C0_REVIEW_BIN:-${SCRIPT_DIR}/lib/aid-c0-plan-review.sh}"
-CP1_GATE_LEDGER_BIN="${AID_CP1_GATE_LEDGER_BIN:-${SCRIPT_DIR}/lib/aid-cp1-ledger.sh}"
-
-# ---------------------------------------------------------------------------
-# Parse CLI arguments
-# ---------------------------------------------------------------------------
-plan=""
-project_root=""
-classify_only=0
-
+plan="" project_root="" classify_only=0 json_out=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)          plan="$2";         shift 2 ;;
-    --project-root)  project_root="$2"; shift 2 ;;
-    --classify-only) classify_only=1;   shift ;;
-    --help|-h)
-      echo "Usage: $(basename "$0") --plan <path> [--project-root <path>] [--classify-only]"
-      echo ""
-      echo "Options:"
-      echo "  --plan <path>          Path to the plan .md file (required)"
-      echo "  --project-root <path>  Project root containing .aid-o/ (default: cwd)"
-      echo "  --classify-only        Print the ceremony band (full|medium|light) on"
-      echo "                         stdout and exit 0 without running the gate"
-      echo "  --help                 Show this help"
-      exit 0
-      ;;
-    *)
-      error_exit "Unknown argument: $1" 2
-      ;;
+    --plan)          plan="${2:-}";         shift 2 ;;
+    --project-root)  project_root="${2:-}"; shift 2 ;;
+    --json)          json_out="${2:-}";     shift 2 ;;
+    --classify-only) classify_only=1;       shift ;;
+    --help|-h) sed -n '4,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) error_exit "Unknown argument: $1" 2 ;;
   esac
 done
 
 [[ -z "$plan" ]] && error_exit "Missing required argument: --plan" 2
 [[ ! -f "$plan" ]] && error_exit "Plan file not found: $plan" 3
-
-# Default project root: the workspace the PLAN lives in, falling back to cwd.
-# Plan-relative first, because the lint and the readiness check resolve a plan's
-# telemetry home the same way — a cwd-first default put the same plan's events
-# in two different timelines depending on where the gate happened to be run.
 if [[ -z "$project_root" ]]; then
   project_root="$(_aid_plan_project_root "$plan")" || project_root="$(pwd)"
 fi
-
-# ---------------------------------------------------------------------------
-# Step 1: Extract plan ID from frontmatter
-# ---------------------------------------------------------------------------
-# One reader (lib/aid-plan-band.sh), which also carries the `^[A-Za-z0-9_-]+$`
-# guard this file used to repeat — the id becomes a directory name below.
+# The id becomes a directory name below; a plan without a usable one is a hard
+# condition, never a review verdict.
 plan_id="$(_aid_plan_id_of "$plan")" \
-  || error_exit "Plan file missing a usable 'id' in its frontmatter (expected: id: P{NNN}, letters/digits/-/_ only)." 1
+  || error_exit "Plan file missing a usable 'id' in its frontmatter (expected: id: P{NNN}, letters/digits/-/_ only)." 3
 
 # ---------------------------------------------------------------------------
-# Step 2: Classify the plan's ceremony band from its declared Files: paths
+# The ceremony band, for --classify-only and telemetry only
 # ---------------------------------------------------------------------------
 _cp1_band_line="$(aid_plan_band "$plan" "$project_root")"
 AID_PLAN_RISK_BAND="${_cp1_band_line%%$'\t'*}"
 AID_PLAN_RISK_REASON="${_cp1_band_line#*$'\t'}"
 
-# Telemetry (P084 Step 7). What the band was and WHY, so the next revision of
-# this policy argues from numbers instead of impressions. Never blocking:
-# log_event is a no-op when the target cannot be resolved, and a plan must not
-# fail to be classified because a directory was unwritable.
-# The gate logs through the shared verb so its events land in the same place
-# the lint's and the readiness check's do — resolved from the PLAN, never from
-# this process's cwd, which is what made the three resolvers drift before.
 _cp1_log() { aid_plan_log "$plan" "$@"; }
 _cp1_log cp1_band_classified band="$AID_PLAN_RISK_BAND" reason="$AID_PLAN_RISK_REASON" \
   classify_only="$( [[ "$classify_only" -eq 1 ]] && echo true || echo false )"
-
-# The OUTCOME is logged from an EXIT trap, not from each success path. The gate
-# leaves through a dozen different `exit 1`s (missing evidence, an empty lens,
-# an adjudicator verdict, C0, the ledger) and a telemetry line written only on
-# the two happy paths would count exactly the runs nobody needs counted.
-# `_cp1_result` is set where an outcome is KNOWN; anything else is a failure.
-_cp1_result="fail"
-_cp1_on_exit() {
-  local rc=$?
-  [[ "$classify_only" -eq 1 ]] && return 0   # a classification is not a gate run
-  _cp1_log cp1_gate_result band="$AID_PLAN_RISK_BAND" \
-    result="$( [[ "$rc" -eq 0 ]] && printf '%s' "$_cp1_result" || printf 'fail' )" \
-    exit_code="$rc"
-  return 0
-}
-trap _cp1_on_exit EXIT
 
 if [[ "$classify_only" -eq 1 ]]; then
   echo "$AID_PLAN_RISK_BAND"
@@ -196,524 +88,150 @@ if [[ "$classify_only" -eq 1 ]]; then
   exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Step 2b: What this band actually requires
-# ---------------------------------------------------------------------------
-# The band alone decides nothing — defaults/policies/review-checkpoints.yaml
-# maps it to the three requirement flags below, and this gate READS that table
-# rather than describing it. Every uncertainty resolves to `true`: no table, no
-# yq, an unknown band, a value that is not true/false. A band is lowered only by
-# what the plan declares it will touch, never by a gap in configuration.
-# How many flags the band table carries. One number, so the reader, the
-# fail-closed default and the padding below cannot disagree.
-CP1_BAND_FLAG_COUNT=4
-
-_cp1_band_flags() {
-  local band="$1" root="$2" file="" cand raw
-  for cand in "${root}/.aid-o/config/policies/review-checkpoints.yaml" "$CP1_CHECKPOINTS_DEFAULT"; do
-    [[ -f "$cand" ]] && { file="$cand"; break; }
-  done
-  if [[ -z "$file" ]] || ! command -v yq >/dev/null 2>&1; then
-    printf 'true\ntrue\ntrue\ntrue\n'; return 0
-  fi
-  # ONE read of the band's node, not one fork per key. NOT `// "true"`: yq's
-  # alternative operator treats an explicit `false` as falsy, which would
-  # silently turn every switched-OFF requirement back on. An absent key reads
-  # as `null` here and lands in the fail-closed default below, while `false`
-  # reaches the arm that honours it.
-  # The parentheses are load-bearing: in yq, `A | .x, .y` evaluates .y against
-  # the ROOT, not against A, so an unparenthesised list silently returns null
-  # for every key after the first — and null reads as fail-closed `true`, which
-  # is the shape that makes a `medium` plan demand the full ceremony.
-  raw="$(yq -r ".review_checkpoints.ceremony_bands.${band} |
-                (.cp1_deep_lenses, .c0_cross_provider, .cp1_ledger, .c0_reuse_lens)" "$file" 2>/dev/null)" || raw=""
-  # Read the lines back in the shell rather than forking `sed -n Np` once per
-  # key to index a string this loop is already walking. The count is padded to
-  # CP1_BAND_FLAG_COUNT: a yq that errors returns nothing, and a caller reading
-  # four values off fewer lines would leave the tail EMPTY — which reads as
-  # "not required" everywhere below, i.e. fail-open, the one direction this
-  # table must never fail in.
-  local val emitted=0
-  while IFS= read -r val || [[ -n "$val" ]]; do
-    case "$val" in
-      true|false) printf '%s\n' "$val" ;;
-      *)          printf 'true\n' ;;
-    esac
-    emitted=$((emitted+1))
-  done <<< "$raw"
-  while [[ "$emitted" -lt "$CP1_BAND_FLAG_COUNT" ]]; do printf 'true\n'; emitted=$((emitted+1)); done
-}
-
-{ IFS= read -r cp1_need_lenses
-  IFS= read -r cp1_need_c0
-  IFS= read -r cp1_need_ledger
-  IFS= read -r cp1_need_reuse_lens
-} < <(_cp1_band_flags "$AID_PLAN_RISK_BAND" "$project_root")
-
-# ---------------------------------------------------------------------------
-# Step 3: A band that owes no CP1-deep evidence exits here
-# ---------------------------------------------------------------------------
-if [[ "$cp1_need_lenses" != "true" ]]; then
-  echo "CP1-gate: plan $plan_id is band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON}) — CP1-deep not required. Proceeding." >&2
-  _cp1_result="not_applicable"
+if [[ "$classify_only" -eq 1 ]]; then
+  echo "$AID_PLAN_RISK_BAND"
+  echo "CP1-gate: plan ${plan_id} band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON})" >&2
   exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Step 3b: If no .aid-o/ workspace exists, gate is not applicable.
-# The gate only enforces within AID-managed projects. Scripts calling
-# aid-plan-to-epic.sh directly (e.g., from test harnesses) without a
-# workspace are not subject to CP1-deep enforcement.
-# ---------------------------------------------------------------------------
 if [[ ! -d "${project_root}/.aid-o" ]]; then
-  echo "CP1-gate: no .aid-o/ workspace found at ${project_root} — gate skipped (not an AID project)." >&2
+  echo "CP1-gate: no .aid-o/ workspace at ${project_root} — not an AID project, not gated." >&2
   exit 0
 fi
 
-echo "CP1-gate: plan $plan_id is band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON}) — checking CP1-deep evidence." >&2
+# The outcome is logged once, from the exit trap, whichever way the gate leaves.
+_cp1_result="fail"
+trap '_cp1_log cp1_gate_result result="$_cp1_result" exit_code="$?"' EXIT
 
-# ---------------------------------------------------------------------------
-# Step 4: Check for evidence dir and required files (existence + content)
-# ---------------------------------------------------------------------------
-evidence_dir="${project_root}/.aid-o/work/evidence/${plan_id}/cp1-deep"
+CP1="${project_root}/.aid-o/work/evidence/${plan_id}/cp1"
+FAILS=() HARD=()
+_fail() { FAILS+=("$1"); }
+_hard() { HARD+=("$1"); }
 
-# Lens files follow the plan taxonomy: L1 behavior/user-flow, L2 feasibility/producer→consumer,
-# L3 enforcement/CI/artifact-visibility. Each must be non-empty and contain stop_rule_blockers:.
-LENS_FILES=(
-  "cp1-lens-L1-behavior.md"
-  "cp1-lens-L2-feasibility.md"
-  "cp1-lens-L3-enforcement.md"
-)
-adjudicator_file="${evidence_dir}/cp1-adjudicator.md"
+# _finish — print the verdict, write --json, exit with the contract's code.
+_finish() {
+  local verdict=pass rc=0 line
+  if (( ${#HARD[@]} )); then verdict=hard; rc=3
+  elif (( ${#FAILS[@]} )); then verdict=fail; rc=1; fi
+  for line in "${HARD[@]}";  do echo "CP1-gate HARD: ${line}" >&2; done
+  for line in "${FAILS[@]}"; do echo "CP1-gate FAIL: ${line}" >&2; done
+  (( rc == 0 )) && echo "CP1-gate: plan ${plan_id} PASS${1:+ — $1}" >&2
+  if [[ -n "$json_out" ]]; then
+    jq -n --arg v "$verdict" --arg id "$plan_id" --arg note "${1:-}" \
+      --argjson fails "$(printf '%s\n' "${FAILS[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
+      --argjson hard "$(printf '%s\n' "${HARD[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
+      '{verdict: $v, plan_id: $id, failures: $fails, hard: $hard} + (if $note == "" then {} else {note: $note} end)' > "$json_out"
+  fi
+  [[ "$verdict" == pass ]] && _cp1_result=pass
+  exit "$rc"
+}
 
-missing_files=()
-for f in "${LENS_FILES[@]}"; do
-  [[ ! -f "${evidence_dir}/${f}" ]] && missing_files+=("$f")
+for tool in jq yq; do
+  command -v "$tool" >/dev/null 2>&1 || { _hard "${tool} not installed"; _finish; }
 done
-[[ ! -f "$adjudicator_file" ]] && missing_files+=("cp1-adjudicator.md")
-
-if [[ "${#missing_files[@]}" -gt 0 ]]; then
-  missing_list="$(printf '  - %s\n' "${missing_files[@]}")"
-  cat >&2 <<ERRMSG
-ERROR: A ${AID_PLAN_RISK_BAND}-band plan requires CP1-deep evidence.
-Missing files in ${evidence_dir}/:
-${missing_list}
-Run /aid-plan --deep to generate CP1-deep evidence before EPIC generation.
-ERRMSG
-  exit 1
+_cfg_err="$(aid_plan_review_config_load "$project_root" 2>&1 && aid_plan_review_config_validate 2>&1)" \
+  || { _hard "$(grep 'plan_review config:' <<< "$_cfg_err" | tail -1)"; _finish; }
+aid_plan_review_config_load "$project_root" 2>/dev/null
+if [[ "$PR_ENABLED" != 1 ]]; then
+  _finish "plan review is switched off (review_checkpoints.enabled or cp1_plan_review is false)"
 fi
 
-# Content check: each lens file must be non-empty and declare stop_rule_blockers:.
-for f in "${LENS_FILES[@]}"; do
-  fpath="${evidence_dir}/${f}"
-  if [[ ! -s "$fpath" ]]; then
-    error_exit "CP1-deep lens file is empty: ${f}. Substantive evidence required." 1
-  fi
-  if ! grep -q "^stop_rule_blockers:" "$fpath" 2>/dev/null; then
-    error_exit "CP1-deep lens file missing required 'stop_rule_blockers:' field: ${f}" 1
-  fi
-done
+_round_dir() { printf '%s/round-%s' "$CP1" "$1"; }
+_prepare_hint="run: aid-plan-review-round.sh prepare ${plan} --round 1 (commands/aid-plan.md, Plan review (CP1))"
 
-# Adjudicator must be non-empty and declare verdict:.
-if [[ ! -s "$adjudicator_file" ]]; then
-  error_exit "CP1-deep adjudicator file is empty. Substantive evidence required." 1
-fi
-if ! grep -q "^verdict:" "$adjudicator_file" 2>/dev/null; then
-  error_exit "CP1-deep adjudicator missing required 'verdict:' field. Gate cannot proceed without explicit verdict." 1
-fi
-
-echo "CP1-gate: all 4 evidence files present and structurally valid in ${evidence_dir}/" >&2
-
-# ---------------------------------------------------------------------------
-# Step 4b: the `reuse_evidence` C0 lens (P085 Step 5)
-# ---------------------------------------------------------------------------
-# The lens judges what the plan lint's replay cannot reach; the division of
-# labour between them is stated once in skills/review-checkpoint-contracts.md
-# §"Lens: reuse_evidence". Required in `full` only: it costs a dispatch, and on
-# a smaller plan the replay alone is the trade.
-#
-# C0 lenses live one level ABOVE cp1-deep/, the same place c0-plan-review.json
-# does. Required here rather than "produced by the dispatch and hopefully
-# present": a lens whose absence stops nothing is a lens nobody has to run.
-if [[ "$cp1_need_reuse_lens" == "true" ]]; then
-  reuse_lens_file="$(dirname "$evidence_dir")/c0/c0-lens-reuse_evidence.md"
-  if [[ ! -s "$reuse_lens_file" ]]; then
-    error_exit "A ${AID_PLAN_RISK_BAND}-band plan requires the reuse_evidence C0 lens: ${reuse_lens_file} is missing or empty. It judges whether each founding step's reuse search was wide enough — see skills/review-checkpoint-contracts.md §'Lens: reuse_evidence'." 1
-  fi
-  if ! grep -q "^stop_rule_blockers:" "$reuse_lens_file" 2>/dev/null; then
-    error_exit "reuse_evidence C0 lens output is missing the required 'stop_rule_blockers:' field: ${reuse_lens_file}" 1
-  fi
-  echo "CP1-gate: reuse_evidence C0 lens present and structurally valid." >&2
-fi
-
-# ---------------------------------------------------------------------------
-# _cp1_override_file <plan_evidence_root>
-# ---------------------------------------------------------------------------
-_cp1_override_file() {
-  printf '%s/cp1-pm-escalation-override.json' "$1"
-}
-
-# ---------------------------------------------------------------------------
-# _cp1_check_pm_override <plan_evidence_root>
-#   READ-ONLY: reports whether a structurally valid PM-escalation override
-#   (non-empty pm_ref field, >= 20 chars) is currently present. Never
-#   consumes/renames anything. Echoes the pm_ref reason and returns 0 iff
-#   valid; returns 1 (nothing echoed) otherwise.
-#
-#   Deliberately separate from consumption (see _cp1_claim_pm_override
-#   below): a live DONE-review audit (E-065-7_7, finding c3-E-065-7_7-0)
-#   found the EARLIER single-call design (check-and-consume as one eager
-#   operation, called unconditionally before evaluating C0/ledger) consumed
-#   a present override even on a run where NEITHER check would have failed
-#   — violating "Available + clean gate should remain Available." The gate
-#   now evaluates C0-ok and ledger-ok FIRST using only this read-only check,
-#   and calls the atomic claim below ONLY if at least one actually failed.
-# ---------------------------------------------------------------------------
-_cp1_check_pm_override() {
-  local plan_evidence_root="$1" override_file reason
-  override_file="$(_cp1_override_file "$plan_evidence_root")"
-  [[ -f "$override_file" ]] || return 1
-  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
-  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
-  printf '%s' "$reason"
-  return 0
-}
-
-# _cp1_claim_pm_override <plan_evidence_root>
-#   Atomically CLAIMS (consumes) a present, valid PM-escalation override —
-#   call this ONLY once a caller has determined the override is actually
-#   needed (a check alone, via _cp1_check_pm_override, must never trigger
-#   consumption). Attempts a no-clobber rename to a `.consumed-<epoch>`
-#   sibling and returns 0 (echoing the pm_ref reason) iff BOTH `mv -n`
-#   itself reports success AND the source file is confirmed gone afterward.
-#
-#   WHY BOTH checks together (a live DONE-review audit found real bugs on
-#   EACH side of this, in two successive rounds):
-#   - Checking source-gone ALONE (round 2's first attempt) is not enough:
-#     under a genuine concurrent race, the LOSING process's own `mv -n`
-#     call can itself fail (non-zero exit, e.g. its `rename(2)` hits ENOENT
-#     because the winner already removed the source) while the source
-#     happens to be gone anyway — because the WINNER removed it, not this
-#     process. Trusting source-gone alone made the loser wrongly believe
-#     it also won, an empirically-confirmed double-claim (verified via a
-#     200-iteration concurrent-race harness: source-only check produced
-#     200/200 double-claims; requiring both conditions produced 0/200).
-#   - Checking `mv -n`'s exit code ALONE (round 1's original bug) is not
-#     enough either: `mv -n src dst` ALSO exits 0 — without moving
-#     anything — when `dst` already exists as a stale `.consumed-<epoch>`
-#     sibling from an earlier, unrelated run landing on the SAME epoch
-#     second, silently leaving the override intact and reusable.
-#   Only the CONJUNCTION of "mv itself reported success" AND "the source
-#   is now confirmed gone" distinguishes all three cases correctly: a
-#   genuine solo claim (both true), a race loser (mv fails OR, if mv
-#   spuriously reports 0, source-gone was caused by someone else — but the
-#   mv-exit-code check alone already screens out the real race-loser case
-#   per the harness above), and a stale-destination collision (mv reports
-#   0 via -n's no-clobber skip, but source remains — caught by the
-#   source-gone half).
-#
-#   Platform note: relies on GNU coreutils' `mv -n` using an atomic
-#   renameat2(RENAME_NOREPLACE) on Linux (this project's target platform,
-#   confirmed empirically via a 550-iteration concurrent-race harness,
-#   0 double-claims) — not a portability guarantee across all `mv`
-#   implementations.
-# ---------------------------------------------------------------------------
-_cp1_claim_pm_override() {
-  local plan_evidence_root="$1" override_file consumed_file reason
-  override_file="$(_cp1_override_file "$plan_evidence_root")"
-  [[ -f "$override_file" ]] || return 1
-  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
-  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
-
-  consumed_file="${override_file}.consumed-$(date -u +%s)"
-  if mv -n "$override_file" "$consumed_file" 2>/dev/null && [[ ! -f "$override_file" ]]; then
-    printf '%s' "$reason"
-    return 0
-  fi
-  # Either mv failed outright (a race loser, or a permission error), or it
-  # no-op'd on a pre-existing destination (source still present) — we do
-  # NOT own this override. Fail closed.
-  return 1
-}
-
-# ---------------------------------------------------------------------------
-# _cp1_c0_and_ledger_gate <plan_id> <project_root>
-#   Runs only after the 4-file CP1-deep evidence + adjudicator check has
-#   already PASSED. Enforces the C0 cross-provider plan review requirement
-#   and the CP1 ledger budget (P065 E-065-7_7 Step 20 — see header comment
-#   above). Always terminates the script (exit 0 or exit 1) — never returns
-#   — matching the two call sites' prior bare `exit 0`.
-# ---------------------------------------------------------------------------
-_cp1_c0_and_ledger_gate() {
-  local plan_id="$1" project_root="$2"
-  local plan_evidence_root="${project_root}/.aid-o/work/evidence/${plan_id}"
-  local c0_review_file="${plan_evidence_root}/c0-plan-review.json"
-
-  # Read-only override peek — used ONLY to decide whether either check below
-  # is allowed to proceed on a failure; does NOT consume anything. Genuine
-  # consumption happens later, exactly once, and only if actually needed —
-  # see the claim call after both checks (E-065-7_7 live DONE-review finding
-  # c3-E-065-7_7-0: an earlier eager-consume design spent a valid override
-  # on runs that would have passed cleanly with no override at all).
-  local override_reason="" override_present=0
-  if override_reason="$(_cp1_check_pm_override "$plan_evidence_root")"; then
-    override_present=1
-  fi
-
-  # --- 1. C0 cross-provider plan review ------------------------------------
-  # Positive shape, matching the ledger check below: the band either owes this
-  # review or the block is skipped. (The earlier `!= "true"` arm re-assigned
-  # c0_ok the value it was just initialised to — a branch that did nothing.)
-  local c0_ok=1 c0_reason=""
-  if [[ "$cp1_need_c0" != "true" ]]; then
-    :
-  elif [[ ! -f "$c0_review_file" ]]; then
-    c0_ok=0
-    c0_reason="c0-plan-review.json missing at ${c0_review_file}"
-  else
-    local review_status blocking
-    review_status="$(jq -r '.review_status // ""' "$c0_review_file" 2>/dev/null || echo "")"
-    # NOTE: NOT `.blocking_findings // true` — jq's `//` alternative operator
-    # treats an explicit `false` as falsy too, which would silently flip a
-    # genuinely clean `blocking_findings: false` into "true" and always
-    # block. `has(...)` distinguishes "absent" (fail-closed to true) from
-    # "explicitly false".
-    blocking="$(jq -r 'if has("blocking_findings") then .blocking_findings else true end' "$c0_review_file" 2>/dev/null || echo "true")"
-    if [[ "$review_status" == "unverifiable" ]]; then
-      c0_ok=0
-      c0_reason="c0-plan-review.json review_status=unverifiable"
-    elif [[ "$blocking" == "true" ]]; then
-      c0_ok=0
-      c0_reason="c0-plan-review.json has surviving blocking_findings=true"
-    else
-      # THE code-level enforcement point (not prose): re-prove the raw-
-      # binding/provenance chain via the SAME verify subcommand
-      # aid-c0-plan-review.sh itself ships (Step 18) — a hand-edited or
-      # stale report fails this even when its top-level fields look clean.
-      local verify_out verify_ok=1
-      if ! verify_out="$(bash "$CP1_GATE_C0_REVIEW_BIN" verify "$plan_evidence_root" 2>&1)"; then
-        verify_ok=0
-      fi
-      if [[ "$verify_ok" -ne 1 ]]; then
-        c0_ok=0
-        c0_reason="aid-c0-plan-review.sh verify failed for ${plan_evidence_root}: ${verify_out}"
-      fi
-    fi
-  fi
-
-  # override_claimed: -1 = not yet attempted this run, 0 = attempted and
-  # failed (no valid override, or lost a concurrent race), 1 = claimed —
-  # attempted at most ONCE per gate invocation, only on genuine first need,
-  # and its result is reused for the ledger check below (a single override
-  # authorizes bypassing both, exactly once, never a re-claim per check).
-  # _cp1_ensure_override_claimed sets override_reason/override_claimed as a
-  # side effect; wrapped in `if` (not a bare `&&`/`||` chain) so a failed
-  # claim attempt never trips `set -e`.
-  local override_claimed=-1
-  _cp1_ensure_override_claimed() {
-    if [[ "$override_claimed" -eq -1 ]]; then
-      if override_reason="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
-        override_claimed=1
-      else
-        override_claimed=0
-      fi
-    fi
-  }
-
-  if [[ "$c0_ok" -ne 1 ]]; then
-    if [[ "$override_present" -eq 1 ]]; then
-      _cp1_ensure_override_claimed
-    fi
-    if [[ "$override_claimed" -eq 1 ]]; then
-      echo "CP1-gate: WARNING — proceeding past C0 plan-review requirement (${c0_reason}) via PM-escalation override: ${override_reason}" >&2
-    else
-      cat >&2 <<ERRMSG
-ERROR: A ${AID_PLAN_RISK_BAND}-band plan requires a verified C0 cross-provider plan review before EPIC generation.
-Reason: ${c0_reason}
-Fix: run the C0 review loop (aid-c0-plan-review.sh build-manifest / dispatch / verify) until it is
-clean, or obtain a PM-escalation override artifact at:
-  ${plan_evidence_root}/cp1-pm-escalation-override.json
-  (must contain a non-empty "pm_ref" field, >= 20 characters)
-ERRMSG
-      exit 1
-    fi
-  fi
-
-  # --- 2. CP1 revision-limit ledger budget ----------------------------------
-  local ledger_ok=1 ledger_reason="" ledger_out="" ledger_rc=0
-  if [[ "$cp1_need_ledger" == "true" ]]; then
-    if ledger_out="$(bash "$CP1_GATE_LEDGER_BIN" check-budget --project-root "$project_root" "$plan_id" 2>&1)"; then
-      ledger_rc=0
-    else
-      ledger_rc=$?
-    fi
-    if [[ "$ledger_rc" -ne 0 ]]; then
-      ledger_ok=0
-      ledger_reason="aid-cp1-ledger.sh check-budget rc=${ledger_rc}: ${ledger_out}"
-    else
-      # Say the budget out loud BEFORE a round is spent — until now the count
-      # was visible only once it ran out.
-      echo "CP1-gate: review budget for ${plan_id}: $(jq -r '"\(.remaining) of \(.max) round(s) remaining (\(.attempts) used)"' <<<"$ledger_out" 2>/dev/null || echo "${ledger_out}")" >&2
-    fi
-  fi
-
-  if [[ "$ledger_ok" -ne 1 ]]; then
-    if [[ "$override_present" -eq 1 ]]; then
-      _cp1_ensure_override_claimed
-    fi
-    if [[ "$override_claimed" -eq 1 ]]; then
-      echo "CP1-gate: WARNING — proceeding past CP1 ledger budget check (${ledger_reason}) via PM-escalation override: ${override_reason}" >&2
-    else
-      cat >&2 <<ERRMSG
-ERROR: CP1 revision-limit ledger blocks EPIC generation for plan ${plan_id}.
-${ledger_reason}
-Fix: run 'aid-cp1-ledger.sh init [--pre-enforcement] --project-root <root> ${plan_id}' for a
-genuinely new/in-flight plan, or obtain a PM-escalation override artifact at:
-  ${plan_evidence_root}/cp1-pm-escalation-override.json
-  (must contain a non-empty "pm_ref" field, >= 20 characters)
-ERRMSG
-      exit 1
-    fi
-  fi
-
-  # NOTE: the PM-override, if present, is claimed (atomically consumed) at
-  # MOST once per gate invocation — only at the point one of the two checks
-  # above genuinely needs it, never eagerly on a clean pass. A single claim
-  # covers both checks if both failed in the same run.
-
-  # A band that owes neither check reaches here having skipped both guards —
-  # one exit point, and the two per-check guards stay the only place that
-  # encodes what a band owes.
-  if [[ "$cp1_need_c0" != "true" && "$cp1_need_ledger" != "true" ]]; then
-    echo "CP1-gate: band=${AID_PLAN_RISK_BAND} owes no C0 cross-provider review and no ledger budget. PASS." >&2
-  else
-    echo "CP1-gate: band=${AID_PLAN_RISK_BAND} — required C0 plan review / ledger budget checks passed for ${plan_id}." >&2
-  fi
-  _cp1_result="pass"
-  exit 0
-}
-
-# ---------------------------------------------------------------------------
-# Step 5: Check adjudicator verdict — no unresolved accepted_blockers allowed
-# ---------------------------------------------------------------------------
-
-# verdict field is now guaranteed to exist (checked above).
-verdict_value="$(grep "^verdict:" "$adjudicator_file" | head -1 | sed 's/^verdict:[[:space:]]*//' | sed 's/[[:space:]]*$//')"
-if [[ "$verdict_value" == "fail" || "$verdict_value" == "revise" ]]; then
-  cat >&2 <<ERRMSG
-ERROR: CP1-deep adjudicator has unresolved verdict: ${verdict_value}
-Resolve blockers or escalate to PM before EPIC generation.
-Adjudicator file: ${adjudicator_file}
-ERRMSG
-  exit 1
-fi
-
-# Extract the accepted_blockers value from the adjudicator file.
-# We look for `accepted_blockers:` followed by either:
-#   accepted_blockers: []        → empty list = pass
-#   accepted_blockers: [...]     → non-empty = fail
-#   accepted_blockers:           (block scalar) → items decide (P074 Step 17):
-#     the canonical empty forms `- []`, `- none`, `- (none)` (case-insensitive,
-#     whitespace-tolerant) parse as EMPTY; any genuine `- <text>` item fails.
-# An INDENTED/nested occurrence of the key with NO top-level key was previously
-# a silent "no field" pass — it is now a loud structural error (P074 Step 17).
-
-# _cp1_blocker_empty_item <item-text> — 0 iff the list item text is one of the
-# canonical empty forms: `[]`, `none`, `(none)` (case-insensitive, trimmed).
-_cp1_blocker_empty_item() {
-  local t
-  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  [[ "$t" == "[]" || "$t" == "none" || "$t" == "(none)" ]]
-}
-
-# _cp1_toplevel_key_line <key> — echoes the `lineno:key: value` of the first
-# TOP-LEVEL occurrence of <key> (or nothing when absent). ANY indented/nested
-# occurrence of the key is a structural error naming its line — whether or not
-# a top-level key also exists: the gate reads exclusively top-level keys, so a
-# nested key is either a silent "no field" pass (no top-level) or a shadowed
-# duplicate the gate would silently ignore (top-level present). Exit 1 either
-# way.
-_cp1_toplevel_key_line() {
-  local key="$1" top nested
-  nested="$(grep -nE "^[[:space:]]+${key}:" "$adjudicator_file" 2>/dev/null | head -1 || true)"
-  if [[ -n "$nested" ]]; then
-    cat >&2 <<ERRMSG
-ERROR: CP1-deep adjudicator has an INDENTED/nested '${key}:' key at line ${nested%%:*}.
-The gate reads only a top-level '${key}:' — a nested key would be silently ignored (as "no field" when no top-level key exists, or as a shadowed duplicate when one does).
-Remove the nested key or move it to column 0 in: ${adjudicator_file}
-ERRMSG
-    exit 1
-  fi
-  top="$(grep -n "^${key}:" "$adjudicator_file" 2>/dev/null | head -1 || true)"
-  printf '%s' "$top"
-}
-
-# rejected_blockers is not consulted for pass/fail, but the same structural
-# nested-key trap applies to its read: nested-only is a loud error, not silence.
-_cp1_toplevel_key_line "rejected_blockers" >/dev/null || exit 1
-
-accepted_blockers_line="$(_cp1_toplevel_key_line "accepted_blockers")" || exit 1
-
-if [[ -z "$accepted_blockers_line" ]]; then
-  # verdict:pass already confirmed above; no accepted_blockers field = no blockers.
-  echo "CP1-gate: verdict=pass, no accepted_blockers field. PASS." >&2
-  _cp1_c0_and_ledger_gate "$plan_id" "$project_root"
-fi
-
-# Extract the value after "accepted_blockers:"
-accepted_value="$(echo "$accepted_blockers_line" | sed 's/^[0-9]*:accepted_blockers:[[:space:]]*//')"
-accepted_value="$(echo "$accepted_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-
-if [[ "$accepted_value" == "[]" || -z "$accepted_value" ]]; then
-  # Block-scalar walk: consume the list region below the key. Empty forms
-  # (`- []`, `- none`, `- (none)`) parse as EMPTY; a genuine item fails.
-  # Blank lines and `#` comment lines INSIDE the region are SKIPPED, never
-  # terminators — otherwise `- []` + blank line + `- <real blocker>` would
-  # report EMPTY and pass the gate. The region ends only at a line starting
-  # a new key at the parent indent (column 0, the key's own level) or EOF.
-  line_num="$(echo "$accepted_blockers_line" | cut -d: -f1)"
-  # Newline-terminator-agnostic read: mapfile keeps an unterminated final
-  # line, where a `wc -l` upper bound silently drops it — a real blocker on a
-  # no-final-newline last line must not bypass the walk.
-  mapfile -t _adj_lines < "$adjudicator_file"
-  item_idx=$(( line_num ))  # 0-based index of the first line AFTER the key line
-  while [[ "$item_idx" -lt "${#_adj_lines[@]}" ]]; do
-    raw_line="${_adj_lines[$item_idx]}"
-    next_line="$(echo "$raw_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    if [[ -z "$next_line" || "$next_line" == \#* ]]; then
-      # blank/comment inside the list region — skip, do not terminate
-      item_idx=$(( item_idx + 1 ))
-      continue
-    fi
-    if [[ "$raw_line" =~ ^[^[:space:]] ]]; then
-      # a new key/content at the parent indent level — the region ends here
-      break
-    fi
-    if [[ "$next_line" =~ ^-([[:space:]]+(.*))?$ ]]; then
-      item_text="${BASH_REMATCH[2]:-}"
-      if ! _cp1_blocker_empty_item "$item_text"; then
-        cat >&2 <<ERRMSG
-ERROR: CP1-deep adjudicator has unresolved blockers (block scalar list).
-First blocker item: - ${item_text}
-Resolve blockers or escalate to PM before EPIC generation.
-Adjudicator file: ${adjudicator_file}
-ERRMSG
-        exit 1
-      fi
-    fi
-    # indented non-item lines (map continuations of an item) are skipped
-    item_idx=$(( item_idx + 1 ))
+# --- the round index and the round directories -----------------------------
+if [[ -f "${CP1}/rounds.json" ]]; then
+  jq -e 'type == "array"' "${CP1}/rounds.json" >/dev/null 2>&1 \
+    || { _hard "round evidence unreadable: ${CP1}/rounds.json"; _finish; }
+  for n in $(jq -r '.[].round' "${CP1}/rounds.json" | sort -un); do
+    [[ -d "$(_round_dir "$n")" ]] || _hard "rounds.json lists a round that is missing: round-${n}"
   done
-
-  echo "CP1-gate: adjudicator accepted_blockers is empty. PASS." >&2
-  _cp1_c0_and_ledger_gate "$plan_id" "$project_root"
-else
-  # Non-empty inline list — has accepted blockers
-  cat >&2 <<ERRMSG
-ERROR: CP1-deep adjudicator has unresolved blockers.
-accepted_blockers: ${accepted_value}
-Resolve blockers or escalate to PM before EPIC generation.
-Adjudicator file: ${adjudicator_file}
-ERRMSG
-  exit 1
 fi
+override_rounds=""
+if [[ -f "${CP1}/override.json" ]]; then
+  override_rounds="$(jq -r 'if (.rounds | type) == "number" and .rounds >= 1 and .rounds <= 3
+                             and ((.reason // "") | length) >= 20 then .rounds else "" end' "${CP1}/override.json" 2>/dev/null)"
+  [[ -n "$override_rounds" ]] || _hard "override.json is malformed: ${CP1}/override.json"
+fi
+(( ${#HARD[@]} )) && _finish
+
+rounds=()
+for d in "${CP1}"/round-*/; do
+  [[ -d "$d" ]] || continue
+  n="${d%/}"; n="${n##*-}"; [[ "$n" =~ ^[0-9]+$ ]] && rounds+=("$n")
+done
+mapfile -t rounds < <(printf '%s\n' "${rounds[@]}" | grep -v '^$' | sort -n)
+if [[ ! -d "$(_round_dir 1)" ]]; then
+  _fail "no plan review round-1 for ${plan_id}; ${_prepare_hint}"
+  _finish
+fi
+
+last=""
+for n in "${rounds[@]}"; do
+  d="$(_round_dir "$n")"
+  if [[ ! -f "${d}/measurement.json" ]]; then
+    _fail "round-${n} is not closed (measurement.json missing): run collect and close for round ${n}"
+    continue
+  fi
+  for f in collect.json merged.json round.json; do
+    jq -e . "${d}/${f}" >/dev/null 2>&1 || _hard "round ${n} evidence unreadable: ${d}/${f}"
+  done
+  [[ -f "${d}/collect.json" && "$(jq -r .status "${d}/collect.json" 2>/dev/null)" == valid ]] \
+    || _fail "round-${n} invalid: $(jq -r '.reason // "too few answers"' "${d}/collect.json" 2>/dev/null); retry the missing roles with aid-plan-review-round.sh retry, then collect and close"
+  last="$n"
+  allowed="${override_rounds:-$PR_ROUNDS_DEFAULT}"
+  (( n > PR_ROUNDS_DEFAULT && n > allowed )) \
+    && _fail "round-${n} exists without the PM's override.json allowing ${n} rounds"
+done
+(( ${#HARD[@]} )) && _finish
+[[ -n "$last" ]] || _finish
+
+# --- the plan is what the last round reviewed, or its finalized snapshot -----
+last_dir="$(_round_dir "$last")"
+plan_sha="$(sha256sum "$plan" | cut -d' ' -f1)"
+reviewed_sha="$(jq -r '.plan_sha256' "${last_dir}/round.json")"
+if [[ "$plan_sha" != "$reviewed_sha" ]]; then
+  if [[ -f "${last_dir}/plan-final.md" ]]; then
+    cmp -s "$plan" "${last_dir}/plan-final.md" \
+      || _fail "the plan changed after finalize (sha256 ${plan_sha:0:12} differs from round-${last}/plan-final.md); run finalize again"
+  else
+    _fail "the plan changed after round ${last} (sha256 ${plan_sha:0:12}, reviewed ${reviewed_sha:0:12}); fix what the round found and run aid-plan-review-round.sh finalize"
+  fi
+fi
+
+# --- a second round when the first left blockers ------------------------------
+if (( last == 1 )) && [[ "$override_rounds" != 1 ]]; then
+  open1="$(jq '.blockers_open' "$(_round_dir 1)/merged.json")"
+  (( open1 > 0 )) && _fail "round-1 left ${open1} blocker(s) open and there is no round-2: fix the plan, run fix-check, then prepare --round 2"
+fi
+[[ -n "$override_rounds" && "$override_rounds" == 1 && "$last" -gt 1 ]] \
+  && echo "CP1-gate: override.json says one round, but round ${last} ran; the later round decides" >&2
+
+# --- every blocker still open is quoted in an acceptance criterion ----------
+_norm() { tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
+# _criteria <step|null> — the criteria of one step, or the Success Criteria bullets.
+_criteria() {
+  if [[ "$1" == null ]]; then
+    awk '/^## Success Criteria/{on=1; next} on && /^## /{exit} on && /^- /{sub(/^- (\[[ x]\] )?/, ""); print}' "$plan"
+    return
+  fi
+  local s e head
+  while IFS=$'\t' read -r s e head; do
+    [[ "$head" =~ ^###\ Step\ ${1}[^0-9] || "$head" == "### Step ${1}" ]] || continue
+    sed -n "${s},${e}p" "$plan" | aid_ac_extract_criteria
+  done < <(_aid_plan_step_bounds "$plan")
+}
+while IFS=$'\t' read -r n step claim; do
+  [[ -n "$n" ]] || continue
+  key="$(cut -d' ' -f1-8 <<< "$(_norm <<< "$claim")")"
+  if ! _criteria "$step" | _norm | grep -qF -- "$key"; then
+    where="Step ${step}"; [[ "$step" == null ]] && where="## Success Criteria"
+    _fail "round-${n} blocker still open is not quoted in an acceptance criterion of ${where}: \"${key}\""
+  fi
+done < <(for n in "${rounds[@]}"; do
+           [[ -f "$(_round_dir "$n")/measurement.json" ]] || continue
+           jq -r --arg n "$n" '.findings[] | select(.severity == "blocker" and (.status == "open" or .status == "disputed"))
+                               | [$n, (.step | tostring), .claim] | @tsv' "$(_round_dir "$n")/merged.json"
+         done)
+
+_finish "round ${last} closed$([[ "$PR_DEGRADED" == 1 ]] && echo ', degraded: both generalists on one model')"
