@@ -94,8 +94,8 @@ _finish() {
   (( rc == 0 )) && echo "CP1-gate: plan ${plan_id} PASS${1:+ — $1}" >&2
   if [[ -n "$json_out" ]]; then
     jq -n --arg v "$verdict" --arg id "$plan_id" --arg note "${1:-}" \
-      --argjson fails "$(printf '%s\n' "${FAILS[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
-      --argjson hard "$(printf '%s\n' "${HARD[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
+      --argjson fails "$(jq -nc '$ARGS.positional' --args "${FAILS[@]}")" \
+      --argjson hard "$(jq -nc '$ARGS.positional' --args "${HARD[@]}")" \
       '{verdict: $v, plan_id: $id, failures: $fails, hard: $hard} + (if $note == "" then {} else {note: $note} end)' > "$json_out"
   fi
   [[ "$verdict" == pass ]] && _cp1_result=pass
@@ -183,7 +183,7 @@ if (( last == 1 )) && [[ "$override_rounds" != 1 && -f "$(_round_dir 1)/merged.j
   open1="$(jq '.blockers_open' "$(_round_dir 1)/merged.json")"
   (( open1 > 0 )) && _fail "round-1 left ${open1} blocker(s) open and there is no round-2: fix the plan, run fix-check, then prepare --round 2"
 fi
-[[ -n "$override_rounds" && "$override_rounds" == 1 && "$last" -gt 1 ]] \
+[[ "$override_rounds" == 1 ]] && (( last > 1 )) \
   && echo "CP1-gate: override.json says one round, but round ${last} ran; the later round decides" >&2
 
 # --- every blocker still open is quoted in an acceptance criterion ----------

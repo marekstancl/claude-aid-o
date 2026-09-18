@@ -175,6 +175,8 @@ _existing_round() {
   [[ -f "${dir}/round.json" ]] || _die "round ${ROUND} is not prepared (${dir}/round.json missing)"
   printf '%s' "$dir"
 }
+# _json_strings <s>... — the arguments as a JSON array of strings.
+_json_strings() { jq -nc '$ARGS.positional' --args "$@"; }
 _expects() { jq -e --arg r "$1" '.reviewers_expected | index($r) != null' "$2/round.json" >/dev/null; }
 
 cmd_dispatch() {
@@ -269,10 +271,10 @@ cmd_collect() {
     status=invalid; reason="no generalist answered"
   fi
 
-  jq -n --argjson valid "$(printf '%s\n' "${valid[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
+  jq -n --argjson valid "$(_json_strings "${valid[@]}")" \
         --argjson invalid "$(printf '%s\n' "${invalid[@]}" | jq -s '.')" \
-        --argjson missing "$(printf '%s\n' "${missing[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
-        --argjson unexpected "$(printf '%s\n' "${unexpected[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
+        --argjson missing "$(_json_strings "${missing[@]}")" \
+        --argjson unexpected "$(_json_strings "${unexpected[@]}")" \
         --argjson required "$required" --argjson gp "$generalist_present" --arg status "$status" --arg reason "$reason" \
     '{valid: $valid, invalid: $invalid, missing: $missing, unexpected: $unexpected,
       answered: ($valid | length), required: $required, generalist_present: $gp,

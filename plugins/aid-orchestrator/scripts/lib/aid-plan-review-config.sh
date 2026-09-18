@@ -51,11 +51,12 @@ aid_plan_review_config_load() {
     [[ " $_AID_PRC_KNOWN_KEYS " == *" $key "* ]] || echo "plan_review config: ignored unknown key plan_review.${key}" >&2
   done
   # Only a project file is the PM's to clean up; the plugin default is not.
-  for key in $_AID_PRC_LEGACY_KEYS; do
-    if [[ "$PR_CONFIG_FILE" == "$project" ]] && yq -e ".review_checkpoints.${key}" "$PR_CONFIG_FILE" >/dev/null 2>&1; then
-      echo "plan_review config: ignored legacy key ${key}" >&2
-    fi
-  done
+  if [[ "$PR_CONFIG_FILE" == "$project" ]]; then
+    for key in $_AID_PRC_LEGACY_KEYS; do
+      yq -e ".review_checkpoints.${key}" "$PR_CONFIG_FILE" >/dev/null 2>&1 \
+        && echo "plan_review config: ignored legacy key ${key}" >&2
+    done
+  fi
 
   PR_ROUNDS_DEFAULT="$(yq -r '.review_checkpoints.plan_review.rounds_default // ""' "$PR_CONFIG_FILE")"
   PR_MIN_ANSWERS="$(yq -r '.review_checkpoints.plan_review.min_answers // ""' "$PR_CONFIG_FILE")"
