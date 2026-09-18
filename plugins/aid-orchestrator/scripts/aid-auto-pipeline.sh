@@ -213,7 +213,7 @@ _gen_gate_hard_condition() {
   local rc="$1" out="$2" line=""
   case "$rc" in
     2) printf 'the CP1 gate exited 2 (usage error) — it was mis-invoked and never evaluated a CP1 condition'; return 0 ;;
-    3) printf 'the CP1 gate exited 3 (I/O error) — it could not read what it needed and never evaluated a CP1 condition'; return 0 ;;
+    3) printf 'the CP1 gate exited 3 (hard condition) — its input could not be trusted (unreadable or tampered evidence, invalid configuration, missing tool), so no CP1 condition was evaluated'; return 0 ;;
   esac
   while IFS= read -r line; do
     case "$line" in

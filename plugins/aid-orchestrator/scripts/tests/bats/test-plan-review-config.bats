@@ -72,7 +72,7 @@ _load_validate() { aid_plan_review_config_load "$ROOT" && aid_plan_review_config
   _project '.review_checkpoints.plan_review.max_rechecks = 4'
   run _load_validate
   [ "$status" -eq 0 ]
-  [ "$(grep -c 'ignored legacy key plan_review.max_rechecks' <<<"$output")" -eq 1 ]
+  [ "$(grep -c 'ignored unknown key plan_review.max_rechecks' <<<"$output")" -eq 1 ]
 }
 @test "config: without yq the load fails closed naming yq" {
   run env PATH=/nonexistent /bin/bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-config.sh'; aid_plan_review_config_load '$ROOT'"

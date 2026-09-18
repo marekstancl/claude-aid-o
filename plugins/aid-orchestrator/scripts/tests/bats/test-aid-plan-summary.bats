@@ -12,7 +12,7 @@
 #   The renderer underneath (lib/aid-artifact-render.sh) has its own suite; what
 #   is proved HERE is this caller: that every number on the page is counted from
 #   the plan, that a plan with nothing to say is refused rather than rendered
-#   half-empty, and that the page states the ceremony band.
+#   half-empty, and that the page states the plan review state.
 
 setup() {
   PLUGIN_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -212,7 +212,7 @@ EOF
 }
 
 # ── "Co plán dodá" (PM, 2026-08-25) ─────────────────────────────────────────
-# The first real page told the PM a plan's band and risk count and never what
+# The first real page told the PM a plan's ceremony and risk count and never what
 # the plan would DO. These cases pin the block that answers that, and the two
 # defects the same page carried: a path where the standard demands a name, and
 # an arrow that promised navigation nowhere.

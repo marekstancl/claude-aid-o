@@ -27,7 +27,7 @@
 #       1 a review condition fails (forceable by the PM through
 #         aid-auto-pipeline.sh --force; every failure is named)
 #       2 usage error
-#       3 a hard condition --force must not cover: the plan file or its id,
+#       3 a hard condition --force must not cover: jq or yq missing, the plan file or its id,
 #         an invalid plan_review config, unreadable round evidence, a round the
 #         index lists but that is gone, a malformed override.json
 # =============================================================================

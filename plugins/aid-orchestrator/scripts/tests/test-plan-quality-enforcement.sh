@@ -9,7 +9,7 @@
 #   Layer 3: /aid-plan write Step 9 — CP1 lifecycle (commands/aid-plan.md)
 #   Layer 4: EVIDENCE REQUIREMENT — reviewer prompt (commands/aid-plan.md)
 #
-# Strategy: mirror test-cp1-grounding.sh — exercise extraction patterns and
+# Strategy: exercise extraction patterns and
 # document presence checks, not LLM verification. Production verifier
 # dispatch uses the same patterns; if these pass, verifier receives correct
 # inputs.

@@ -15,6 +15,13 @@ setup() {
 }
 teardown() { rm -rf "$TEST_DIR"; }
 
+# _proof <finding.json> — the adjudicator's per-finding proof check; prints the
+# rejection reason, nothing for a proven finding.
+_proof() {
+  local r; r="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) proof_error" "$1")"
+  [[ -z "$r" ]] || { echo "$r"; return 1; }
+}
+
 # _answer <jq-filter applied to a valid answer> — writes $TEST_DIR/a.json
 _answer() {
   jq -n '{role: "reuse", findings: [{id: "reuse-1", step: 3, severity: "major",
@@ -29,25 +36,25 @@ _answer() {
 }
 @test "proof: a finding without command is missing_command" {
   _answer '.findings[0] | del(.command)'
-  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  run _proof "$TEST_DIR/a.json"
   [ "$status" -eq 1 ]; [ "$output" = missing_command ]
 }
 @test "proof: a finding without evidence is missing_evidence" {
   _answer '.findings[0] | del(.evidence)'
-  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  run _proof "$TEST_DIR/a.json"
   [ "$status" -eq 1 ]; [ "$output" = missing_evidence ]
 }
 @test "proof: evidence without a line number is missing_evidence" {
   _answer '.findings[0] | .evidence = "scripts/a.sh"'
-  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  run _proof "$TEST_DIR/a.json"
   [ "$status" -eq 1 ]; [ "$output" = missing_evidence ]
 }
 @test "proof: a write command is missing_command; a read-only one passes" {
   _answer '.findings[0] | .command = "sed -i s/a/b/ scripts/a.sh"'
-  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  run _proof "$TEST_DIR/a.json"
   [ "$status" -eq 1 ]; [ "$output" = missing_command ]
   _answer '.findings[0]'
-  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  run _proof "$TEST_DIR/a.json"
   [ "$status" -eq 0 ]
 }
 @test "answer: a finding without its claim is refused naming the field" {

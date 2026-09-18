@@ -9,7 +9,7 @@
 #
 # Both halves read the role list and the two patterns (command, evidence) from
 # the schema file itself, so the schema is the one source of the contract.
-# Sourced by scripts/aid-plan-review-round.sh; tested by
+# Sourced by scripts/aid-plan-review-round.sh and aid-plan-review-adjudicate.sh; tested by
 # scripts/tests/bats/test-plan-review-schema.bats and test-plan-review-round.bats.
 
 _AID_PR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -116,7 +116,7 @@ aid_plan_review_unfence() {
 #   no_findings_reason) and findings that carry id, step, severity, claim and
 #   fix. Prints the first rule the answer breaks and returns 1, or returns 0.
 #   Whether each finding has a read-only command and a path:line evidence is
-#   judged per finding by aid_plan_review_proof_error, so one unproven finding
+#   judged per finding by the adjudicator (aid_plan_review_proof_jq), so one unproven finding
 #   rejects that finding, not the reviewer's whole answer.
 aid_plan_review_answer_error() {
   local file="$1" err
@@ -164,13 +164,4 @@ def proof_error:
     elif ((.evidence // "") | test($f.evidence.pattern) | not) then "missing_evidence"
     else empty end;
 JQ
-}
-
-# aid_plan_review_proof_error <finding.json> — prints the proof defect of one
-# finding (missing_command, missing_evidence) and returns 1, or returns 0.
-aid_plan_review_proof_error() {
-  local err
-  err="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) proof_error" "$1")"
-  [[ -z "$err" ]] && return 0
-  echo "$err"; return 1
 }

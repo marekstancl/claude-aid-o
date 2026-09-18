@@ -43,7 +43,7 @@ source "${SCRIPT_DIR}/lib/aid-plan-review-config.sh"
 # shellcheck source=lib/aid-plan-review-packet.sh
 source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
 
-usage() { sed -n '4,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
@@ -149,10 +149,8 @@ cmd_prepare() {
   local min=$(( PR_MIN_ANSWERS < ${#roles[@]} ? PR_MIN_ANSWERS : ${#roles[@]} ))
   jq -n --argjson round "$ROUND" --arg sha "$(jq -r .plan_sha256 "${dir}/packet/manifest.json")" \
     --argjson min "$min" --arg at "$(_now)" --argjson degraded "$([[ "$PR_DEGRADED" == 1 ]] && echo true || echo false)" \
-    --arg narrow "$( (( ROUND >= 2 )) && echo "round-$((ROUND - 1))/fix-diff.json")" \
     '{round: $round, plan_sha256: $sha, reviewers_expected: $ARGS.positional,
-      min_answers_effective: $min, degraded: $degraded, started_at: $at,
-      narrow_from: (if $narrow == "" then null else $narrow end)}' \
+      min_answers_effective: $min, degraded: $degraded, started_at: $at}' \
     --args "${roles[@]}" > "${dir}/round.json"
 
   for role in "${roles[@]}"; do
