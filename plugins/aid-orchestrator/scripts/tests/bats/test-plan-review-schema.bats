@@ -1,0 +1,93 @@
+#!/usr/bin/env bats
+# aid-tier: t0
+# test-plan-review-schema.bats — the plan reviewer's answer contract.
+# A valid answer passes; each broken rule is refused with the field named; the
+# example answers in skills/plan-review-roles.md pass; the prompt template
+# renders through the sanctioned renderer.
+# Origin: P093 Step 1 (plan review rebuild).
+
+setup() {
+  AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  export AID_PLUGIN_PATH
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-packet.sh"
+  TEST_DIR="$(mktemp -d)"
+}
+teardown() { rm -rf "$TEST_DIR"; }
+
+# _answer <jq-filter applied to a valid answer> — writes $TEST_DIR/a.json
+_answer() {
+  jq -n '{role: "reuse", findings: [{id: "reuse-1", step: 3, severity: "major",
+          claim: "c", command: "grep -n x scripts/a.sh", evidence: "scripts/a.sh:4; plan.md:10",
+          fix: "f"}]}' | jq "$1" > "$TEST_DIR/a.json"
+}
+
+@test "answer: a valid answer passes" {
+  _answer '.'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+}
+@test "answer: a finding without command is refused naming the field" {
+  _answer 'del(.findings[0].command)'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing command"* ]]
+}
+@test "answer: a finding without evidence is refused naming the field" {
+  _answer 'del(.findings[0].evidence)'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing evidence"* ]]
+}
+@test "answer: evidence without a line number is refused" {
+  _answer '.findings[0].evidence = "scripts/a.sh"'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"evidence must be path:line"* ]]
+}
+@test "answer: a write command is refused" {
+  _answer '.findings[0].command = "sed -i s/a/b/ scripts/a.sh"'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"command is not a read-only command"* ]]
+}
+@test "answer: empty findings without a reason is refused" {
+  _answer '.findings = []'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no_findings_reason"* ]]
+}
+@test "answer: an unknown role and an unknown severity are refused" {
+  _answer '.role = "lens_l1"'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"role must be one of"* ]]
+  _answer '.findings[0].severity = "critical"'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"severity"* ]]
+}
+@test "answer: a fenced answer passes after unfencing" {
+  _answer '.'
+  { echo '```json'; cat "$TEST_DIR/a.json"; echo '```'; } > "$TEST_DIR/fenced.txt"
+  aid_plan_review_unfence "$TEST_DIR/fenced.txt" "$TEST_DIR/b.json"
+  run aid_plan_review_answer_error "$TEST_DIR/b.json"
+  [ "$status" -eq 0 ]
+}
+@test "skill: both example answers in plan-review-roles.md pass" {
+  awk '/^```json$/{on=1; n++; next} /^```$/{on=0} on{print > (dir "/ex" n ".json")}' \
+    dir="$TEST_DIR" "$AID_PLUGIN_PATH/skills/plan-review-roles.md"
+  [ -f "$TEST_DIR/ex1.json" ] && [ -f "$TEST_DIR/ex2.json" ]
+  run aid_plan_review_answer_error "$TEST_DIR/ex1.json"; [ "$status" -eq 0 ]
+  run aid_plan_review_answer_error "$TEST_DIR/ex2.json"; [ "$status" -eq 0 ]
+}
+@test "skill: six role sections, each with Questions and a Stop rule" {
+  local s="$AID_PLUGIN_PATH/skills/plan-review-roles.md"
+  [ "$(grep -c '^## Role: ' "$s")" -eq 6 ]
+  [ "$(grep -c '^### Questions$' "$s")" -eq 6 ]
+  [ "$(grep -c '^### Stop rule$' "$s")" -eq 6 ]
+  # the role ids are exactly the schema's enum
+  diff <(grep '^## Role: ' "$s" | sed 's/^## Role: //' | sort) \
+       <(jq -r '.properties.role.enum[]' "$AID_PR_SCHEMA" | sort)
+}
+@test "template: renders from three string variables with nothing left unresolved" {
+  jq -n '{role_section: "## Role: reuse", round: "1", output_path: "/tmp/x.json"}' > "$TEST_DIR/vars.json"
+  run bash "$AID_PLUGIN_PATH/scripts/lib/aid-render-prompt.sh" \
+    --template "$AID_PLUGIN_PATH/defaults/prompts/plan-review-prompt-v1.md" \
+    --vars-json "$TEST_DIR/vars.json" --output "$TEST_DIR/prompt.md"
+  [ "$status" -eq 0 ]
+  ! grep -q '{{' "$TEST_DIR/prompt.md"
+  grep -q '^# Plan review, round 1$' "$TEST_DIR/prompt.md"
+}

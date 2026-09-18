@@ -1,6 +1,6 @@
 ---
 name: review-checkpoint-contracts
-description: Per-checkpoint contracts for AID review agents — plan ceremony bands, diff scopes, behavior_trace gate, CP1-deep 3-lens adjudicator
+description: Per-checkpoint contracts for AID review agents — plan review pointer, diff scopes, behavior_trace gate, CP2 to CP6
 user_invocable: false
 ---
 
@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-09-18
 
 ## False-Green Guardrails
 
@@ -130,78 +130,23 @@ Required fields: standard verifier fields + `checkpoint: cp6`
 High-risk gate: NOT enforced (advisory only)
 Note: CP6 is never promoted to blocking — it is intentionally light.
 
-## CP1-deep Contract (bands `full` and `medium`)
+## CP1 Contract — Plan Review
 
-**Triggered by the plan's ceremony BAND, not by a pattern match** (P084). The
-band is classified from the paths the plan's steps DECLARE in their `Files:`
-blocks — `bash scripts/aid-cp1-gate.sh --plan <plan> --classify-only` — against
-`defaults/policies/risk-paths.yaml`. What each band owes is a table the gate
-itself reads: `defaults/policies/review-checkpoints.yaml` →
-`review_checkpoints.ceremony_bands`.
+Plan review is not a verifier dispatch. Six reviewer roles answer from one
+template, in at most two rounds by default, and a deterministic adjudicator
+merges what survives the evidence rule:
 
-| Band | CP1-deep lenses | C0 cross-provider round + ledger |
-|---|---|---|
-| `full` | 3 lenses (L1/L2/L3) + adjudicator + the 5 observe-only C0 lenses | required |
-| `medium` | 3 lenses (L1/L2/L3) + adjudicator | **not required** |
-| `light` | none — dispatch no lens at all | not required |
-
-Frontmatter `risk: high` raises a band to `full`; nothing lowers one except
-changing what the plan declares it touches. Every uncertainty (no declared
-path, no map, no `yq`, an unknown band) resolves to `full`.
-
-Why the old trigger went: it grepped the WHOLE plan document for eight content
-patterns, so Context and Architecture prose matched — measured 2026-08-16, six
-live plans scored 5 to 33 hits each and every one came out high-risk. A
-ceremony that fires on everything is proportional to nothing.
-
-### 3 Lenses (dispatched in parallel, per plan taxonomy)
-
-| Lens | File | Focus | Stop-Rule Criteria |
-|------|------|-------|-------------------|
-| L1 behavior | `cp1-lens-L1-behavior.md` | request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases | any finding showing a handler branch is undeclared or produces an unintended user-visible outcome |
-| L2 feasibility | `cp1-lens-L2-feasibility.md` | touched files, output contracts, parser/producer ordering, implementation feasibility | any finding showing a consumer reads a field before the producer emits it, or a file-contract is violated |
-| L3 enforcement | `cp1-lens-L3-enforcement.md` | gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage | any finding showing an artifact is unreachable in CI, a test does not actually run, or a release gate is broken |
-
-Each lens produces (required fields — gate rejects empty files or files without `stop_rule_blockers:`):
-- `stop_rule_blockers: []` — issues that should BLOCK EPIC generation (required field at line-start)
-- `findings: []` — all issues (any severity)
-- `confidence: high|medium|low`
-
-**L3 is the class that caught gitignored CI artifacts and non-executing tests** — it is the enforcement/visibility dimension, distinct from L1 user-flow and L2 contract correctness.
-
-### Adjudicator Contract
-
-Reviews all 3 lens outputs. Accepts a `stop_rule_blocker` ONLY if it has:
-- Command or artifact reference (e.g., function name, file path, SQL query, config key)
-- File:line evidence OR explicit quote from the plan
-
-Rejects blockers that are: vague ("might have security issues"), hypothetical without plan grounding, or duplicates across lenses.
-
-Produces (required fields — gate rejects empty files or files without `verdict:`):
-- `verdict: pass|revise|fail` (required field at line-start)
-- `accepted_blockers: []`
-- `rejected_blockers: []` (with rejection_reason per entry)
-- `revision_count: N` (cumulative)
-
-### Revision Loop
-
-- `verdict: revise` + `revision_count < 2` → auto-revise plan targeting accepted_blockers → re-run CP1-deep
-- `revision_count >= 2` + accepted_blockers survive → **PM escalation** (not pass, not auto-revise)
-- `accepted_blockers: []` AND `verdict: pass` → EPIC generation proceeds
-
-### Evidence Requirements
-
-Before EPIC generation for a `full`- or `medium`-band plan, all 4 files must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`:
-- `cp1-lens-L1-behavior.md` — must contain `stop_rule_blockers:` at line-start
-- `cp1-lens-L2-feasibility.md` — must contain `stop_rule_blockers:` at line-start
-- `cp1-lens-L3-enforcement.md` — must contain `stop_rule_blockers:` at line-start
-- `cp1-adjudicator.md` — must contain `verdict:` at line-start
-
-Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation.
+- the roles, their questions, the evidence rule and the answer shape:
+  `skills/plan-review-roles.md` (schema `defaults/schemas/plan-review-finding.schema.json`);
+- the controller's procedure, command by command: "Plan review (CP1)" in
+  `commands/aid-plan.md`;
+- the rounds, the adjudicator and the round evidence under
+  `.aid-o/work/evidence/<plan_id>/cp1/`: `scripts/aid-plan-review-round.sh`
+  and `scripts/aid-plan-review-adjudicate.sh`;
+- the gate before EPIC generation: `scripts/aid-cp1-gate.sh`, which reads only
+  that round evidence.
 
 **Where the gate is called from — once per TRANSACTION, never once per phase.** A plan's generation is one transaction. `scripts/aid-auto-pipeline.sh` calls this gate exactly ONCE per plan, before any EPIC, `plan.json`, run, FSM state or queue entry exists, and seals the decision into `.aid-o/work/evidence/<plan_id>/generation/generation-authority.json`. Every phase then VERIFIES that sealed authority (schema, self-hash, plan bytes, target head, phase range, re-derived ids) instead of re-running the gate. A STANDALONE `scripts/aid-plan-to-epic.sh` invocation — one given neither `--generation-authority` nor `--transaction` — still runs the full gate per invocation; that is the only surface where a per-invocation gate call remains.
-
-As of P065 Step 20, the same gate ALSO enforces the C0 cross-provider plan review and the CP1 ledger budget below — both are additional, independent requirements checked AFTER the 4-file/adjudicator check above passes.
 
 ### C0 Cross-Provider Plan Review — Adjudicator MUST-Consume Contract
 

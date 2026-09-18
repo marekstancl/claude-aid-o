@@ -699,7 +699,7 @@ enforcements:
     type: out-of-band
     source: scripts/aid-plan-check.sh
     instruction: skills/plan-writing.md
-    severity: fail
+    severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
@@ -710,7 +710,7 @@ enforcements:
     type: out-of-band
     source: scripts/aid-plan-check.sh
     instruction: skills/plan-writing.md
-    severity: fail
+    severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
