@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 507          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 497          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -250,7 +250,6 @@ enforcements:
   # ── Type 7: Command-orchestration-rule ─────────────────────────────────────
   - {id: aid_run_fsm_enforced,         type: 7, source: "commands/aid-run.md:42",  instruction: "commands/aid-run.md:42", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "FSM mechanically enforced, scripts refuse to proceed"}
   - {id: aid_do_prefilter_fixloop,     type: 7, source: "commands/aid-do.md:81",   instruction: "commands/aid-do.md:81", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "Fast Mode pre-filter FAIL + fix loop max 2 iterations"}
-  - {id: aid_plan_cp1_dispatch,        type: 7, source: "commands/aid-plan.md:103", instruction: "commands/aid-plan.md:103", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "cp1_round_evidence", verdict: ALIGNED, description: "RETIRED by P093: plan review no longer dispatches the verifier; six reviewer roles answer in rounds and the gate reads their evidence. Was: CP1 docs-review verifier dispatch on written plan"}
   - {id: research_idempotency,         type: 7, source: "commands/aid-research.md:104", instruction: "commands/aid-research.md:104", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "framework active + sufficient depth → STOP (no re-fetch) (P080 Step 4: DEAD — the /aid-research command was removed with the knowledge layer; there is no re-fetch to suppress and no file left to enforce it.)"}
   - {id: status_duplicate_reject,      type: 7, source: "commands/aid-status.md:123", instruction: "commands/aid-status.md:123", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "queue-add rejects duplicate EPIC"}
   - {id: status_read_only,             type: 7, source: "commands/aid-status.md:177", instruction: "commands/aid-status.md:177", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "/aid-status never modifies files"}
@@ -347,7 +346,6 @@ enforcements:
   - {id: test_instruction_consistency, type: 14, source: "scripts/tests/test-instruction-consistency.sh:5", instruction: "scripts/tests/test-instruction-consistency.sh", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "META: verifies instruction files match aid-fsm.sh reality"}
   - {id: per_script_test_suites,       type: 14, source: "scripts/tests/test-fsm.sh", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "per-script regression suites locking enforcement behavior"}
   - {id: test_plan_quality,            type: 14, source: "scripts/tests/test-plan-quality-enforcement.sh:3", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P036 plan-quality layers smoke test"}
-  - {id: test_cp1_grounding,           type: 14, source: "scripts/tests/test-cp1-grounding.sh:3", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "CP1 grounding sub-checks 17a-17d smoke test"}
   - {id: preflight_branch_matrix,      type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:26", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "locks PRE-FLIGHT branch matrix (auto-create, foreign-branch fail, dirty reject)"}
   - {id: grandfather_clause,           type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:103", instruction: "skills/pipeline.md:159", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "locks _generated_by bypass when created_at < AID_DEPLOY_DATE"}
   - {id: orphan_tz_utc_margin,         type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:346", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "locks orphan deadline math pinned to TZ=UTC"}
@@ -804,101 +802,6 @@ enforcements:
     verdict: ALIGNED
     test: scripts/tests/bats/test-cp1-gate.bats
     description: "Every plan-review blocker still open or disputed in any closed round must be quoted (its first eight words, case and whitespace normalised) in an acceptance criterion of its step, read with the shared aid_ac_extract_criteria, or under ## Success Criteria for a plan-level finding; otherwise the gate fails naming the step and the text."
-
-  # ── E4 C0 Plan Contract Gate — observe mode, blocking promotion E10 ──────────
-  - id: c0_contract_producer
-    type: out-of-band
-    source: scripts/aid-c0-contract.sh
-    instruction: docs/extending-aid.md
-    severity: advisory
-    surface: internal-guard
-    status: active
-    verdict: unmapped
-    description: "C0 artifact producer (plan-graph/contract-manifest/plan-review), authority none, observe"
-
-  - id: c0_would_block
-    type: out-of-band
-    source: scripts/aid-auto-pipeline.sh
-    instruction: defaults/policies/c0-contract.yaml
-    severity: fail
-    surface: internal-guard
-    enforcement: observe
-    status: planned
-    verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    description: "observe C0 would_block telemetry; blocking promotion E10"
-
-  - id: c0_lens_reuse_compat
-    type: out-of-band
-    source: skills/review-checkpoint-contracts.md
-    instruction: skills/review-checkpoint-contracts.md
-    severity: fail
-    surface: internal-guard
-    enforcement: observe
-    status: planned
-    verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    description: "C0 observe lens: reuse_compat (advisory, promotion E10)"
-
-  - id: c0_lens_planned_call_feasibility
-    type: out-of-band
-    source: skills/review-checkpoint-contracts.md
-    instruction: skills/review-checkpoint-contracts.md
-    severity: fail
-    surface: internal-guard
-    enforcement: observe
-    status: planned
-    verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    description: "C0 observe lens: planned_call_feasibility (advisory, promotion E10)"
-
-  - id: c0_lens_dep_api_grounding
-    type: out-of-band
-    source: skills/review-checkpoint-contracts.md
-    instruction: skills/review-checkpoint-contracts.md
-    severity: fail
-    surface: internal-guard
-    enforcement: observe
-    status: planned
-    verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    description: "C0 observe lens: dep_api_grounding (advisory, promotion E10)"
-
-  - id: c0_lens_idempotency_matrix
-    type: out-of-band
-    source: skills/review-checkpoint-contracts.md
-    instruction: skills/review-checkpoint-contracts.md
-    severity: fail
-    surface: internal-guard
-    enforcement: observe
-    status: planned
-    verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    description: "C0 observe lens: idempotency_matrix (advisory, promotion E10)"
-
-  - id: c0_lens_authority_runtime_matrix
-    type: out-of-band
-    source: skills/review-checkpoint-contracts.md
-    instruction: skills/review-checkpoint-contracts.md
-    severity: fail
-    surface: internal-guard
-    enforcement: observe
-    status: planned
-    verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    description: "C0 observe lens: authority_runtime_matrix (advisory, promotion E10)"
 
   # ── E5: C2 Semantic Review Engine (E-054-1_1, observe/best-effort) ──────────
   - {id: c2_wiring_gate_observe,         type: 11, source: "scripts/aid-fsm.sh:~2250 (cmd_increment_step)", instruction: "defaults/policies/semantic-review.yaml + agents/verifier.md", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 wiring-gate observe: unresolved Critical/High in semantic-review-wiring.json → log_event semantic_wiring_would_block + increment continues (blocking deferred to E10 via SEMANTIC_REVIEW_POLICY=blocking)"}
@@ -2449,19 +2352,6 @@ enforcements:
     recovery: "The error names the row and the field count found versus expected."
     test: "scripts/tests/bats/test-generation-parsers.bats"
 
-  - id: cp1_adjudicator_nested_key_structural_error
-    type: 4
-    source: "scripts/aid-cp1-gate.sh:_cp1_toplevel_key_line (+ _cp1_blocker_empty_item for the empty-list forms)"
-    instruction: "skills/review-checkpoint-contracts.md (grep: 'adjudication')"
-    severity: blocking
-    surface: llm-facing
-    status: removed_scoped
-    replacement_guard: "cp1_round_evidence"
-    verdict: ALIGNED
-    description: "RETIRED by P093 Step 7: the gate no longer reads a free-text adjudicator file; plan-review findings are JSON checked by the adjudicator script and merged.json is the only thing the gate reads. P074 Step 17 — an INDENTED (nested) `accepted_blockers:` / `rejected_blockers:` key used to read as 'no field' and pass silently, or to shadow a valid top-level key: an adjudication the PM wrote and the gate never saw. A nested key is now a loud structural error naming its line, whether or not a valid top-level key also exists. The same fix makes `- []`, `- none` and `- (none)` parse as genuinely EMPTY instead of as one blocker named 'none', and terminates the key walk correctly on blank/comment lines and on a final line without a trailing newline."
-    recovery: "The error names the offending line; move the key to column 0."
-    test: "scripts/tests/bats/test-generation-parsers.bats"
-
   - id: lifecycle_rc3_branch_diagnosis
     type: 4
     source: "scripts/aid-auto-pipeline.sh (aid_lifecycle_ensure_manifest rc=3 + HEAD not on the lifecycle target branch)"
@@ -3191,7 +3081,7 @@ enforcements:
   - id: plan_standards_named
     type: 4
     source: "scripts/aid-plan-lint.sh (Standards named against the map) + scripts/lib/aid-standards-map.sh + the map's own `tag_paths` block"
-    instruction: "skills/plan-writing.md (Obligations by ceremony band) + commands/aid-init.md (Where the standards map lives)"
+    instruction: "skills/plan-writing.md (What every plan owes) + commands/aid-init.md (Where the standards map lives)"
     severity: blocking
     surface: llm-facing
     status: active

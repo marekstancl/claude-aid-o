@@ -43,7 +43,7 @@ profiles:
   # After the plan is written, before EPIC generation.
   plan:
     required:
-      - tiles.result.value      # ceremony band
+      - tiles.result.value      # plan review state
       - tiles.duration.value    # steps
       - tiles.scope.value       # declared files
       - tiles.unresolved.value  # risks

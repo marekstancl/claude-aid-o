@@ -89,6 +89,8 @@ setup() {
   PROJ="$TEST_TMPDIR/project"
   EVID="$PROJ/.aid-o/work/evidence/$EPIC/$RUN"
   C0="$PROJ/.aid-o/work/evidence/$PLANREF_ID/c0"
+  # Plan review is read from the plan's sealed generation authority (P093).
+  AUTH="$PROJ/.aid-o/work/evidence/$PLANREF_ID/generation/generation-authority.json"
   CFG="$PROJ/.aid-o/config"
   REPORTS="$PROJ/.aid-o/reports"
   OUT="$EVID/release-decision.json"
@@ -135,16 +137,16 @@ _build_healthy() {
   cp "$FIX/pack/acceptance-evidence.json"   "$EVID/acceptance-evidence.json"
   cp "$FIX/pack/gates_report.json"          "$EVID/gates_report.json"
   cp "$FIX/pack/epic_input.md"              "$EVID/epic_input.md"
-  cp "$FIX/plan-review/plan-review.json"        "$C0/plan-review.json"
   cp "$FIX/config/execution.yaml"               "$CFG/execution.yaml"
   cp "$FIX/config/permissions-auto.yaml"        "$CFG/permissions.yaml"
   HEAD_SHA="$(_git_init_commit)"
   local f
   for f in "$EVID/review-profile.json" "$EVID/delivery-gate.json" \
-           "$EVID/semantic-review-final.json" "$EVID/acceptance-evidence.json" \
-           "$C0/plan-review.json"; do
+           "$EVID/semantic-review-final.json" "$EVID/acceptance-evidence.json"; do
     _rewrite_head "$f" "$HEAD_SHA"
   done
+  mkdir -p "$(dirname "$AUTH")"
+  jq -n --arg h "$HEAD_SHA" '{cp1: {verdict: "pass"}, target_head: $h}' > "$AUTH"
 }
 
 # On-boundary layout with BOTH reporter + simplifier VALID (each maps to pass).
@@ -236,7 +238,7 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
 }
 
 @test "REQUIRED removed: plan-review → release_ready:false + blocker plan_review" {
-  _build_healthy; rm -f "$C0/plan-review.json"
+  _build_healthy; rm -f "$AUTH"
   _run_agg
   [ "$(_rd '.release_decision.release_ready')" == "false" ]
   _has_blocker plan_review
@@ -287,12 +289,12 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   _build_healthy
   _run_agg
   [ "$(_input_verdict plan_review)" == "pass" ]
-  jq -e --arg id "plan_review" '.release_decision.inputs[] | select(.id==$id) | .reason | test("P059-release-policy/c0")' "$OUT" >/dev/null
+  jq -e --arg id "plan_review" '.release_decision.inputs[] | select(.id==$id) | .reason | test("P059-release-policy/generation")' "$OUT" >/dev/null
 }
 
 @test "plan-review hop is FOLLOWED: wrong plan_ref → plan-review not found → blocked" {
   _build_healthy
-  # Repoint epic_input.md plan_ref at a plan whose c0 evidence does not exist.
+  # Repoint epic_input.md plan_ref at a plan with no sealed generation authority.
   printf -- '---\nstatus: active\nplan_ref: .aid-o/plans/P999-nonexistent.md\n---\n# EPIC\n' > "$EVID/epic_input.md"
   _run_agg
   [ "$(_input_verdict plan_review)" == "blocked" ]
@@ -1100,7 +1102,7 @@ EOF
 @test "F4(a) plan_review out-of-pack stale sha → per-input verdict blocked + blocker (NOT just release_ready)" {
   _build_healthy
   # A non-ancestor (foreign/rebased) sha in the GITIGNORED plan-review artifact.
-  _rewrite_head "$C0/plan-review.json" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  jq '.target_head = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"' "$AUTH" > "$AUTH.tmp" && mv "$AUTH.tmp" "$AUTH"
   _run_agg
   [ "$status" -eq 0 ]
   # PER-INPUT assert (release_ready alone would mask the out-of-pack detection).
@@ -1181,7 +1183,7 @@ EOF
   [ "$(_input_head_match plan_review)" == "true" ]       # ancestor → true even after HEAD moved
   [ "$(_input_verdict plan_review)" == "pass" ]
   # Foreign / rebased lineage (non-ancestor) → false → blocked.
-  _rewrite_head "$C0/plan-review.json" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  jq '.target_head = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"' "$AUTH" > "$AUTH.tmp" && mv "$AUTH.tmp" "$AUTH"
   _run_agg
   [ "$(_input_head_match plan_review)" == "false" ]
   [ "$(_input_verdict plan_review)" == "blocked" ]

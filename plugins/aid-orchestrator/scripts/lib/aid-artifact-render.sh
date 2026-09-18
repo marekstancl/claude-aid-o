@@ -583,7 +583,7 @@ aid_artifact_render() {
   # A DELIBERATE DEVIATION from the artifact standard's "one A4, detail
   # separately", taken on the PM's instruction of 2026-08-25 and recorded here
   # rather than left as a silent stretch: the short page told him a plan's
-  # ceremony band and its risk count but never what the plan would DO, which is
+  # review state and its risk count but never what the plan would DO, which is
   # the one thing he opens it to judge. Every step is listed — a collapsed tail
   # hides exactly the part being judged. The per-line clip still applies, so the
   # page grows by lines, never by paragraphs. EVERY STEP gets a line; the line

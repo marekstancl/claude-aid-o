@@ -153,7 +153,7 @@ _mk_shadow() {
   cat > "$SHADOW/scripts/aid-cp1-gate.sh" <<'STUB'
 #!/usr/bin/env bash
 [[ -n "${AID_TEST_CP1_COUNTER:-}" ]] && printf 'call\n' >> "$AID_TEST_CP1_COUNTER"
-echo "CP1 GATE: low-risk plan, no CP1-deep evidence required"
+echo "CP1-gate: plan PASS — round 1 closed"
 exit 0
 STUB
 

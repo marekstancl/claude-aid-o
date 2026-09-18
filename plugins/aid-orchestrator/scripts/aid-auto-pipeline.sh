@@ -1770,25 +1770,21 @@ for phase in $(seq 1 "$total_phases"); do
   fi
 
   # -------------------------------------------------------------------------
-  # Phase N.b5: Contract Validation Gate (blocking, D5) + C0 Plan Contract
-  # Gate (observe). Runs after plan.json exists; before FSM init. The
-  # contract-validate sub-block below is the one BLOCKING exception in this
-  # phase — everything else here is plan-level observe-only evidence.
+  # Phase N.b5: Contract Validation Gate (blocking, D5). Runs after plan.json
+  # exists; before FSM init.
   # -------------------------------------------------------------------------
   {
     # Determine plan_id from plan filename
     _c0_plan_id="$(basename "$plan" .md)"
-    # Each generated EPIC owns its own C0 contract graph and validation
-    # evidence. A shared plan-level c0/ directory made phase N overwrite phase
-    # N-1, leaving the last graph to masquerade as evidence for the whole plan.
-    # The plan-global source graph and C0 bridge remain at their own named
-    # generation/ and c0/ paths respectively.
+    # Each generated EPIC owns its own contract validation evidence (the c0/
+    # directory name is historical). A shared plan-level directory made phase N
+    # overwrite phase N-1, leaving the last result to masquerade as evidence for
+    # the whole plan.
     _c0_dir="$(aid_state_path ".aid-o/work/evidence/${_c0_plan_id}/generation/epics/${epic_id}/c0")"
     mkdir -p "$_c0_dir"
 
     # -------------------------------------------------------------------------
-    # D5: Contract Validation Gate (BLOCKING — deliberately NOT part of the
-    # observe-only C0 block below). A malformed generator contract (broadcast
+    # D5: Contract Validation Gate (BLOCKING). A malformed generator contract (broadcast
     # outputs/allowed_paths, `|`-split AC fragments, prose leaking into
     # allowed_paths) is a hard error per plan D5 ("Contract-gate blocking +
     # C0 evidence — malformed = hard-fail před /aid-run") and must stop the
@@ -1847,75 +1843,6 @@ for phase in $(seq 1 "$total_phases"); do
       fi
       error_exit "Contract validation could NOT BE RUN for phase ${phase} (${_c0_plan_id}): the D5 gate ${_cv_how} without emitting a verdict. This is a failure of the GATE, not a finding about the generated EPIC/plan.json — the contract is UNKNOWN, not malformed, and nothing needs editing. Re-run the generation (it resumes; verified phases are not regenerated). Gate stderr: ${_c0_dir}/c0-producer.log; artifact: ${_c0_dir}/contract-validate.json" 5
     fi
-
-    # Read enforcement policy (fail-safe: default to observe)
-    _c0_policy="observe"
-    _c0_policy_file="${SCRIPT_DIR}/../defaults/policies/c0-contract.yaml"
-    if [[ -n "${C0_CONTRACT_POLICY:-}" ]]; then
-      _c0_policy="$C0_CONTRACT_POLICY"
-    elif [[ -f "$_c0_policy_file" ]] && command -v yq &>/dev/null; then
-      # P062 Step 11 — the sixth reader, through the shared per-control
-      # resolver. The C0_CONTRACT_POLICY env override above still wins, so the
-      # existing test/CI seam is untouched.
-      if [[ -f "${SCRIPT_DIR}/lib/aid-control-enforcement.sh" ]]; then
-        # shellcheck source=lib/aid-control-enforcement.sh
-        source "${SCRIPT_DIR}/lib/aid-control-enforcement.sh"
-      fi
-      if declare -F aid_control_enforcement >/dev/null 2>&1; then
-        _c0_policy="$(aid_control_enforcement "$_c0_policy_file" "c0_contract")"
-      else
-        _c0_policy_val="$(yq '.enforcement // "observe"' "$_c0_policy_file" 2>/dev/null)"
-        [[ -n "$_c0_policy_val" && "$_c0_policy_val" != "null" ]] && _c0_policy="$_c0_policy_val"
-      fi
-    fi
-
-    # Run C0 contract producer
-    _c0_contract_exit=0
-    "${SCRIPT_DIR}/aid-c0-contract.sh" contract "$plan_json_path" "$_c0_dir" \
-      2>>"$_c0_dir/c0-producer.log" || _c0_contract_exit=$?
-
-    if [[ $_c0_contract_exit -ne 0 ]]; then
-      _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-      printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_producer_error\",\"plan_id\":\"${_c0_plan_id}\",\"exit\":${_c0_contract_exit}}" \
-        >> "$_c0_dir/c0-observe.jsonl"
-    fi
-
-    # Run C0 review checker
-    _c0_review_exit=0
-    "${SCRIPT_DIR}/aid-c0-contract.sh" review "$plan" "$_c0_dir" \
-      2>>"$_c0_dir/c0-producer.log" || _c0_review_exit=$?
-
-    if [[ $_c0_review_exit -ne 0 ]]; then
-      _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-      printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_review_error\",\"plan_id\":\"${_c0_plan_id}\",\"exit\":${_c0_review_exit}}" \
-        >> "$_c0_dir/c0-observe.jsonl"
-    fi
-
-    # Log c0_would_block if any structural or lens findings
-    _c0_would_block=false
-    if [[ -f "$_c0_dir/plan-review.json" ]]; then
-      _c0_finding_count="$(jq '
-        ((.plan_review.structural_checks // []) | map(select(.status != "pass")) | length) +
-        ((.plan_review.lens_findings // []) | map(select(.verdict == "found")) | length)
-      ' "$_c0_dir/plan-review.json" 2>/dev/null || echo 0)"
-      if [[ "$_c0_finding_count" -gt 0 ]]; then
-        _c0_would_block=true
-        _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-        printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_would_block\",\"plan_id\":\"${_c0_plan_id}\",\"finding_count\":${_c0_finding_count},\"policy\":\"${_c0_policy}\"}" \
-          >> "$_c0_dir/c0-observe.jsonl"
-        echo "[C0] would_block: ${_c0_finding_count} findings (policy=${_c0_policy})" >&2
-      fi
-    fi
-
-    # Enforce policy (blocking mode — E10 / tests only; default is observe)
-    if [[ "$_c0_policy" == "blocking" && "$_c0_would_block" == "true" ]]; then
-      # AID's OWN gate, named in its own message — the not-an-AID-gate note
-      # would flatly contradict it.
-      _gen_aid_owned_failure=true
-      error_exit "C0 Plan Contract Gate: blocking policy activated with ${_c0_finding_count} findings" 2
-    fi
-
-    # NEVER propagate non-zero from C0 block in observe mode
   }
 
   # Stage 1 ends here on the normal path: no run/FSM/queue state exists until

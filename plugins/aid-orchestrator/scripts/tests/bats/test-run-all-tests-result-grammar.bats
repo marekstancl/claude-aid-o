@@ -85,13 +85,12 @@ Results: 5/7 passed, 2 failed"
   [ "$output" = "5 7 2 0 parsed" ]
 }
 
-# ─── The seven suites this step converted ──────────────────────────────────
+# ─── The suites this step converted (test-cp1-grounding.sh left with P093) ──
 
-@test "all seven previously-uncounted suites now emit a canonical Results line" {
+@test "the previously-uncounted suites still in the portfolio emit a canonical Results line" {
   local suites=(test-semantic-review test-instruction-consistency
                 test-control-boundary test-instruction-sweep
-                test-generation-finalize test-cp1-grounding
-                test-plan-quality-enforcement)
+                test-generation-finalize test-plan-quality-enforcement)
   local missing=()
   for s in "${suites[@]}"; do
     grep -qE 'echo "Results: ' "$TESTS_DIR/$s.sh" || missing+=("$s")

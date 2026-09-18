@@ -242,7 +242,7 @@ stop_classes:
 
   TRANSIENT_INFRA:
     description: >-
-      A cross-provider dispatch (C0 plan review, C3 audit) did not produce a
+      A cross-provider dispatch (a C3 audit) did not produce a
       response for an infrastructure reason — provider unavailable, rate
       limited, or the call timed out. Per pipeline.md this is NOT a loop
       iteration and does not consume review budget.
@@ -253,9 +253,6 @@ stop_classes:
       - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
         anchor: 'rate_limited) uo="rate_limited" ;;'
         note: "C3 attempt outcome mapping — unavailable / rate_limited / timeout"
-      - file: plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh
-        anchor: 'rate_limited) uo="rate_limited" ;;'
-        note: "C0 attempt outcome mapping, same vocabulary"
     allowed_actions: [wait_and_resume, retry_once, resume_missing_lenses]
     budget: {attempts: 3, wall_clock_seconds: 3600}
     terminus: [adjudicate, escalation, pm_force]
@@ -290,9 +287,9 @@ stop_classes:
       - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
         anchor: budget_exhausted
         note: "C3 fix loop sets top_outcome=escalated with escalation_reason=budget_exhausted"
-      - file: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
-        anchor: "increment rejected: budget exhausted"
-        note: "CP1/C0 revision ledger refuses to advance past MAX_ATTEMPTS"
+      - file: plugins/aid-orchestrator/scripts/aid-plan-review-round.sh
+        anchor: "exceeds rounds_default"
+        note: "plan review refuses a round beyond rounds_default without the PM's recorded override"
     allowed_actions: []
     budget: {attempts: 0, wall_clock_seconds: 0}
     terminus: [adjudicate, escalation, pm_force]
@@ -369,19 +366,17 @@ existing_loops:
     budget_kind: policy_key
     note: "aid-c3-dispatch.sh reads this key and fails closed to the same 4."
 
-  - id: c0_cp1_revision_ledger
-    what: "C0 cross-provider plan review revision budget (the CP1 ledger)"
+  - id: plan_review_rounds
+    what: "Plan review (CP1) rounds before EPIC generation"
     authority: existing
     governed_by_ladder: false
-    budget_key: MAX_ATTEMPTS
-    budget_value: 5
-    budget_file: plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh
-    budget_kind: shell_constant
+    budget_key: "review_checkpoints.plan_review.rounds_default"
+    budget_value: 2
+    budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
+    budget_kind: policy_key
     note: >-
-      The MECHANICAL authority. review-checkpoints.yaml's
-      `cp1_codex_review.max_rechecks: 4` documents the same shipped budget as
-      "initial review + 4 rechecks" and is read by nobody (P073 Step 1) — do
-      not treat it as a second authority.
+      aid-plan-review-round.sh prepare refuses a round beyond it unless the
+      PM's words are recorded with `override`; the gate refuses such a round too.
 
   - id: gate_retry
     what: "Per-gate retry inside aid-run-gates.sh"

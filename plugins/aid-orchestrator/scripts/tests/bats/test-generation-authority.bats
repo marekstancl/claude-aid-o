@@ -148,7 +148,7 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   # Record 0 — the authority itself records the bypass and every failed condition.
   [ "$(jq -r '.forced_override' "$gen/generation-authority.json")" = "true" ]
   [ "$(jq -r '.force_reason' "$gen/generation-authority.json")" = "$REASON" ]
-  [[ "$(jq -r '.cp1.bypassed_conditions | join(" ")' "$gen/generation-authority.json")" == *"blocking C0 plan review"* ]]
+  [[ "$(jq -r '.cp1.bypassed_conditions | join(" ")' "$gen/generation-authority.json")" == *"no round-2"* ]]
   [ "$(jq -r '.cp1.verdict // "none"' "$gen/generation-authority.json")" = "none" ]
 
   # Record 1 — the HEAD-bound protocol-v2 waiver artifact (authoritative).

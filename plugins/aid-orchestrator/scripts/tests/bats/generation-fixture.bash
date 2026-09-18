@@ -69,18 +69,18 @@ gen_stub() {
 
 # gen_cp1_counting_stub — the CP1 gate stub that COUNTS its invocations, plus
 # the counter file the suites assert on. AID_TEST_CP1_FAIL stands in for any
-# blocking condition the real gate reports (unresolved accepted blockers, a
-# blocking C0 cross-provider plan review, an exhausted CP1 ledger budget) —
-# which of them fired is the real gate's own suite's business, not this one's.
+# forceable condition the real gate reports (a missing or unclosed review
+# round, an open blocker no acceptance criterion quotes) — which of them fired
+# is the real gate's own suite's business, not this one's.
 gen_cp1_counting_stub() {
   gen_stub aid-cp1-gate.sh <<'STUB'
 #!/usr/bin/env bash
 [[ -n "${AID_TEST_CP1_COUNTER:-}" ]] && printf 'call\n' >> "$AID_TEST_CP1_COUNTER"
 if [[ -n "${AID_TEST_CP1_FAIL:-}" ]]; then
-  echo "CP1 GATE FAIL: blocking C0 plan review with surviving blocking findings" >&2
+  echo "CP1-gate FAIL: round-1 left 1 blocker(s) open and there is no round-2" >&2
   exit 1
 fi
-echo "CP1 GATE: low-risk plan, no CP1-deep evidence required"
+echo "CP1-gate: plan PASS — round 1 closed"
 exit 0
 STUB
   CP1_COUNT="$TEST_TMPDIR/cp1.count"; : > "$CP1_COUNT"

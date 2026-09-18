@@ -21,9 +21,7 @@
 #   * identity            — {project_id, plan_id, run_id, epic_id: null, step_id: null}
 #   * EVIDENCE_DIR        — the plan-final run directory, taken from the manifest
 #   * the comparison head — the FROZEN CANDIDATE, not the worktree HEAD
-#   * plan_review         — the plan's OWN C0 review at
-#                           .aid-o/work/evidence/<plan_id>/c0-plan-review.json (the path
-#                           aid-c0-plan-review.sh actually writes), NOT the epic_input.md
+#   * plan_review         — resolved from PLAN_ID directly, NOT through the epic_input.md
 #                           plan_ref hop, which has no meaning without an EPIC input
 #   * reporter/simplifier — MANDATORY at this boundary. The EPIC-mode `ca-review-complete`
 #                           marker does not exist by construction here, so the EPIC branch
@@ -153,7 +151,9 @@ _is_json() {
   [[ -n "$(jq -c . "$f" 2>/dev/null)" ]] && jq -e . "$f" >/dev/null 2>&1
 }
 
-# _artifact_head_match <file> [mode] — echoes the JSON-encoded at-HEAD basis: true | false | "unknown".
+# _artifact_head_match <file> [mode] [sha-path] — echoes the JSON-encoded at-HEAD basis:
+# true | false | "unknown". <sha-path> is the jq path of the recorded sha
+# (default .revision.head_sha).
 # E-060-2_2 Step 8 — the per-input comparison basis (contract 2). An UNCOMPUTABLE basis is ALWAYS
 # the declared string "unknown", NEVER a silent true (the pre-Step-8 default `→true` is the class
 # L1-B3 bug where a stale/unstamped artifact looked usable).
@@ -166,10 +166,10 @@ _is_json() {
 #                            non-ancestor (rebase / foreign branch) → false; no stamp → "unknown".
 # Missing file → false (a required-but-absent artifact is definitively not at-HEAD).
 _artifact_head_match() {
-  local f="$1" mode="${2:-direct}" hs rc=0
+  local f="$1" mode="${2:-direct}" path="${3:-.revision.head_sha}" hs rc=0
   [[ -f "$f" ]] || { echo false; return 0; }
   command -v jq >/dev/null 2>&1 || { echo '"unknown"'; return 0; }   # uncomputable → declared unknown
-  hs="$(jq -r '.revision.head_sha // ""' "$f" 2>/dev/null)" || rc=$?
+  hs="$(jq -r "${path} // \"\"" "$f" 2>/dev/null)" || rc=$?
   { [[ $rc -ne 0 ]] || [[ -z "$hs" ]]; } && { echo '"unknown"'; return 0; }
   # P060 per-plan C+A: validate the stamped sha is a hex object name BEFORE it reaches any
   # git command (mirrors _markdown_head_match). A non-hex value is uncomputable → "unknown",
@@ -890,41 +890,29 @@ main() {
     add_blocker gates_report "blocking" "gates_report.json missing (checked root and gates/ subdir)"
   fi
 
-  # --- plan-review (plan_ref hop via epic_input.md frontmatter) ---
-  local epic_input="${EVIDENCE_DIR}/epic_input.md"
-  local plan_ref plan_review_ok=false plan_review_reason="" plan_review_hm=false
+  # --- plan review (CP1): the plan's sealed generation authority ---
+  # Plan review is decided once per plan, before any EPIC exists, and sealed into
+  # evidence/<plan_id>/generation/generation-authority.json with the gate's verdict
+  # (or the PM's recorded forced bypass) and the target head it was taken at. Both
+  # modes read that one file; EPIC mode finds the plan through epic_input.md.
+  local plan_ref review_id="" plan_review_ok=false plan_review_reason="" plan_review_hm=false
   if [[ "$MODE" == "plan" ]]; then
-    # PLAN mode: there is no epic_input.md, so the plan_ref hop has no meaning. The input
-    # resolves DIRECTLY to the plan's own C0 review at the canonical path
-    # aid-c0-plan-review.sh actually writes (.aid-o/work/evidence/<plan_id>/c0-plan-review.json).
-    # The EPIC-mode path this replaces (<evidence>/c0/plan-review.json) is NOT inherited:
-    # the C0 producer never writes it, so plan mode would have a permanently-missing REQUIRED
-    # input and release_ready could never become true. EPIC mode is untouched.
-    local plan_c0="${PROJECT_ROOT}/.aid-o/work/evidence/${PLAN_ID}/c0-plan-review.json"
-    if _is_json "$plan_c0"; then
-      plan_review_ok=true
-      plan_review_reason="present at .aid-o/work/evidence/${PLAN_ID}/c0-plan-review.json (plan-mode: the plan's OWN C0 review)"
-      plan_review_hm="$(_artifact_head_match "$plan_c0" ancestry)"
-    else
-      plan_review_reason="c0-plan-review.json missing at .aid-o/work/evidence/${PLAN_ID}/ — the plan's own C0 review is a REQUIRED input at the plan-final boundary"
-    fi
-  elif plan_ref="$(_extract_plan_ref "$epic_input")"; [[ -z "$plan_ref" || "$plan_ref" == "null" ]]; then
-    plan_review_reason="cannot resolve plan_ref from epic_input.md frontmatter"
+    review_id="$PLAN_ID"
+  elif plan_ref="$(_extract_plan_ref "${EVIDENCE_DIR}/epic_input.md")"; [[ -n "$plan_ref" && "$plan_ref" != "null" ]]; then
+    review_id="$(awk -F': *' 'NR > 1 && /^---$/ {exit} /^id:/ {gsub(/["\x27]/, "", $2); print $2; exit}' "${PROJECT_ROOT}/${plan_ref}" 2>/dev/null)"
+    [[ -n "$review_id" ]] || { review_id="$(basename "$plan_ref")"; review_id="${review_id%.md}"; }
+  fi
+  if [[ -z "$review_id" ]]; then
+    plan_review_reason="cannot resolve the plan from epic_input.md frontmatter (plan_ref)"
   else
-    local planref_base planref_id plan_review_file
-    planref_base="$(basename "$plan_ref")"
-    planref_id="${planref_base%.md}"
-    plan_review_file="${PROJECT_ROOT}/.aid-o/work/evidence/${planref_id}/c0/plan-review.json"
-    if _is_json "$plan_review_file"; then
+    local auth="${PROJECT_ROOT}/.aid-o/work/evidence/${review_id}/generation/generation-authority.json" cp1
+    cp1="$(jq -r 'if .cp1.verdict == "pass" then "pass" elif .forced_override == true then "forced" else "" end' "$auth" 2>/dev/null)"
+    if [[ -n "$cp1" ]]; then
       plan_review_ok=true
-      plan_review_reason="present at .aid-o/work/evidence/${planref_id}/c0/plan-review.json"
-      # ANCESTRY basis (contract 2): a plan-time artifact is stale by construction, so a direct
-      # equality check would block EVERY EPIC once HEAD moves. Instead its OWN recorded head_sha
-      # must be an ANCESTOR of HEAD (correct lineage). Ancestor → true (stays true through release
-      # commits); non-ancestor (rebase/foreign branch) → false; no stamp → "unknown".
-      plan_review_hm="$(_artifact_head_match "$plan_review_file" ancestry)"
+      plan_review_reason="sealed at .aid-o/work/evidence/${review_id}/generation/generation-authority.json (plan review: $([[ "$cp1" == pass ]] && echo "gate passed" || echo "bypassed by the PM's recorded force"))"
+      plan_review_hm="$(_artifact_head_match "$auth" ancestry .target_head)"
     else
-      plan_review_reason="plan-review.json missing at .aid-o/work/evidence/${planref_id}/c0/"
+      plan_review_reason="no sealed plan review for ${review_id}: .aid-o/work/evidence/${review_id}/generation/generation-authority.json is missing or records neither a pass nor a forced bypass"
     fi
   fi
   if [[ "$plan_review_ok" == "true" ]]; then
@@ -932,13 +920,13 @@ main() {
       # Present but NOT in HEAD's ancestry → stale/foreign lineage. plan_review is out of
       # evidence-verify coverage (contract 1), so this is a NET-NEW blocker (the F1 class the
       # E-059-2_2 merge review actually hit).
-      add_input plan_review "plan-review.json" "blocked" "${plan_review_reason} but STALE: recorded revision.head_sha is not an ancestor of HEAD (rebase/foreign lineage)" false
-      add_blocker plan_review "blocking" "plan-review.json stale (head_match=false): recorded head_sha not in HEAD's ancestry"
+      add_input plan_review "generation-authority.json" "blocked" "${plan_review_reason} but STALE: the recorded target_head is not an ancestor of HEAD (rebase/foreign lineage)" false
+      add_blocker plan_review "blocking" "plan review stale (head_match=false): the authority's target_head is not in HEAD's ancestry"
     else
-      add_input plan_review "plan-review.json" "pass" "$plan_review_reason" "$plan_review_hm"
+      add_input plan_review "generation-authority.json" "pass" "$plan_review_reason" "$plan_review_hm"
     fi
   else
-    add_input plan_review "plan-review.json" "blocked" "$plan_review_reason" false
+    add_input plan_review "generation-authority.json" "blocked" "$plan_review_reason" false
     add_blocker plan_review "blocking" "$plan_review_reason"
   fi
 
@@ -1368,7 +1356,7 @@ main() {
 }
 
 # Run the CLI only when EXECUTED, not when sourced (P062 Step 8). Same guard
-# aid-c0-plan-review.sh and aid-c3-dispatch.sh already use. Without it, sourcing
+# aid-c3-dispatch.sh already uses. Without it, sourcing
 # this file to reach one pure function ran the whole aggregator and exited,
 # which is why its classification logic had never been unit-tested — only
 # observed through a full evidence pack.
