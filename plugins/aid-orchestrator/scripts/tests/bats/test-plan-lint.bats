@@ -39,7 +39,7 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     # fixtures are about the FILES grammar, so the field is present, valid and
     # boring — a search that finds nothing in an empty tmpdir.
     printf '\n**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing exists yet\n'
-    printf '\n**Architecture Context:**\nn/a\n'
+    printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\nn/a\n'
   } > "$f"
 }
 
@@ -266,7 +266,7 @@ _plan_ts() {
     printf '%s\n' "$@"
     printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
     printf -- '- Modify: `src/b.ts` (lines ~1-9) — edit\n'
-    printf '\n**Architecture Context:**\nn/a\n'
+    printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\nn/a\n'
   } > "$f"
 }
 
@@ -284,7 +284,7 @@ _plan_ts() {
     printf '# Plan: P900\n\n## Testing Strategy\n\nNová sada `test-declared.bats` pokryje obě větve.\n'
     printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
     printf -- '- Test: `scripts/tests/bats/test-declared.bats`\n'
-    printf '\n**Architecture Context:**\nn/a\n'
+    printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\nn/a\n'
   } > p.md
   run "$LINT" p.md
   [ "$status" -eq 0 ]
@@ -308,7 +308,7 @@ _plan_ts() {
     printf '\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n'
     printf 'Prozaicka zminka o `test-only-in-a-step.bats`.\n\n**Files:**\n'
     printf -- '- Modify: `src/b.ts` (lines ~1-9) — edit\n'
-    printf '\n**Architecture Context:**\nn/a\n'
+    printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\nn/a\n'
   } > p.md
   run "$LINT" p.md
   [ "$status" -eq 0 ]

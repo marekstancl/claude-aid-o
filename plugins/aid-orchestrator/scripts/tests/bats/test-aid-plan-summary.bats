@@ -102,15 +102,20 @@ EOF
   grep -q 'backend, docs' "$OUT"
 }
 
-@test "the page states the ceremony band and why" {
+@test "a plan not yet reviewed says so on the page" {
   aid_plan_summary_render "$(write_plan P952 'plugins/aid-orchestrator/scripts/aid-fsm.sh')" "$OUT"
-  grep -q 'Pásmo ceremonie: full' "$OUT"
-  grep -q 'full_path:plugins/aid-orchestrator/scripts/aid-fsm.sh' "$OUT"
+  grep -q 'Revize plánu: review: none' "$OUT"
+  grep -q 'Ještě neproběhla' "$OUT"
 }
 
-@test "a light plan says so on the same page" {
-  aid_plan_summary_render "$(write_plan P953 'plugins/aid-orchestrator/commands/aid-help.md')" "$OUT"
-  grep -q 'Pásmo ceremonie: light' "$OUT"
+@test "a reviewed plan shows its rounds and their cost" {
+  local plan; plan="$(write_plan P953 'plugins/aid-orchestrator/commands/aid-help.md')"
+  mkdir -p "$TMP/.aid-o/work/evidence/P953/cp1/round-1"
+  printf '{"reviewers": {"reuse": {"tokens": 1200, "answered": true}}, "degraded": false}\n' \
+    > "$TMP/.aid-o/work/evidence/P953/cp1/round-1/measurement.json"
+  aid_plan_summary_render "$plan" "$OUT"
+  grep -q 'Revize plánu: review: 1 round, 1200 tokens' "$OUT"
+  grep -q '1 kolo' "$OUT"
 }
 
 @test "a plan with no Goal is refused, naming the section — no half-empty page" {

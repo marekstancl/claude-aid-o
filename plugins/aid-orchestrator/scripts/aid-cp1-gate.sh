@@ -4,7 +4,6 @@
 #
 # Usage:
 #   aid-cp1-gate.sh --plan <path> [--project-root <path>] [--json <out>]
-#   aid-cp1-gate.sh --plan <path> --classify-only
 #
 # Reads only the round evidence aid-plan-review-round.sh writes under
 # .aid-o/work/evidence/<plan_id>/cp1/ (cp1/manual/ is never read) and passes
@@ -24,9 +23,6 @@
 # review_checkpoints.enabled or cp1_plan_review set to false passes with a
 # notice; a plan outside any .aid-o/ workspace is not gated.
 #
-# --classify-only prints the plan's ceremony band and decides nothing; it stays
-# until the band classifier is removed.
-#
 # Exit: 0 pass
 #       1 a review condition fails (forceable by the PM through
 #         aid-auto-pipeline.sh --force; every failure is named)
@@ -40,8 +36,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export AID_PLUGIN_PATH="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/common.sh"
-# shellcheck source=lib/aid-plan-band.sh
-source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# shellcheck source=lib/aid-scoping.sh
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # shellcheck source=lib/aid-plan-review-config.sh
@@ -49,14 +47,13 @@ source "${SCRIPT_DIR}/lib/aid-plan-review-config.sh"
 # shellcheck source=lib/aid-ac-extract.sh
 source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"
 
-plan="" project_root="" classify_only=0 json_out=""
+plan="" project_root="" json_out=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plan)          plan="${2:-}";         shift 2 ;;
     --project-root)  project_root="${2:-}"; shift 2 ;;
     --json)          json_out="${2:-}";     shift 2 ;;
-    --classify-only) classify_only=1;       shift ;;
-    --help|-h) sed -n '4,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --help|-h) sed -n '4,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) error_exit "Unknown argument: $1" 2 ;;
   esac
 done
@@ -71,22 +68,7 @@ fi
 plan_id="$(_aid_plan_id_of "$plan")" \
   || error_exit "Plan file missing a usable 'id' in its frontmatter (expected: id: P{NNN}, letters/digits/-/_ only)." 3
 
-# ---------------------------------------------------------------------------
-# The ceremony band, for --classify-only and telemetry only
-# ---------------------------------------------------------------------------
-_cp1_band_line="$(aid_plan_band "$plan" "$project_root")"
-AID_PLAN_RISK_BAND="${_cp1_band_line%%$'\t'*}"
-AID_PLAN_RISK_REASON="${_cp1_band_line#*$'\t'}"
-
 _cp1_log() { aid_plan_log "$plan" "$@"; }
-_cp1_log cp1_band_classified band="$AID_PLAN_RISK_BAND" reason="$AID_PLAN_RISK_REASON" \
-  classify_only="$( [[ "$classify_only" -eq 1 ]] && echo true || echo false )"
-
-if [[ "$classify_only" -eq 1 ]]; then
-  echo "$AID_PLAN_RISK_BAND"
-  echo "CP1-gate: plan ${plan_id} band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON})" >&2
-  exit 0
-fi
 
 if [[ ! -d "${project_root}/.aid-o" ]]; then
   echo "CP1-gate: no .aid-o/ workspace at ${project_root} — not an AID project, not gated." >&2

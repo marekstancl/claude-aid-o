@@ -119,6 +119,7 @@ cmd_prepare() {
   [[ -f "$check" ]] || _die "no plan-check.json for ${PLAN_ID}; run aid-plan-check.sh ${PLAN} --json ${check}"
 
   if (( MANUAL )); then
+    (( ROUND == 1 )) || _die "--manual runs one reviewer on the plan as it is; use --round 1" 2
     dir="${CP1}/manual/$(date -u +%Y%m%dT%H%M%SZ)"
   else
     dir="$(_round_dir "$ROUND")"

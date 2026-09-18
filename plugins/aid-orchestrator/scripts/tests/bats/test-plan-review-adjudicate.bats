@@ -102,3 +102,13 @@ _finding() {
   "$ADJ" "$R2" --project-root "$ROOT" --previous "$R1" >/dev/null
   [ "$(jq -r '.findings[0].status' "$R1/merged.json")" = open ]
 }
+@test "adjudicate: the same finding one line lower next round is not marked fixed; two claims at different lines stay two" {
+  _finding "$R1" reuse '.evidence = "scripts/a.sh:2"'
+  _finding "$R1" reuse '.id = "reuse-2" | .evidence = "scripts/a.sh:3"'
+  "$ADJ" "$R1" --project-root "$ROOT" >/dev/null
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 2 ]
+  _round "$R2" 2 reuse
+  _finding "$R2" reuse '.evidence = "scripts/a.sh:3"'
+  "$ADJ" "$R2" --project-root "$ROOT" --previous "$R1" >/dev/null
+  [ "$(jq '[.findings[] | select(.status == "open")] | length' "$R1/merged.json")" -eq 2 ]
+}

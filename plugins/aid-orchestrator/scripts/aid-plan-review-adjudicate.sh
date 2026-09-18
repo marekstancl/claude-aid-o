@@ -11,8 +11,9 @@
 #   - an evidence path outside the project, under .aid-worktrees/, missing, or a
 #     line beyond the file's end                    → rejected: evidence_not_found
 #   - the same fingerprint twice from one reviewer   → rejected: duplicate
-# What survives is merged by fingerprint (step, first evidence file, first
-# eight words of the claim): the highest severity wins, every reporter is listed.
+# What survives is merged by fingerprint (step, first evidence, first eight
+# words of the claim); the next round matches it by the same key without the
+# evidence line: the highest severity wins, every reporter is listed.
 #
 # Writes <round_dir>/merged.json, rejected.json and yield.json. With --previous,
 # a previous open blocker or major (the findings a confirmation round is shown)
@@ -90,15 +91,17 @@ for role in "${VALID[@]}"; do
     fi
     if [[ -z "$reason" ]]; then
       step="$(jq -r '.step // "plan"' <<< "$f")"
-      # The first evidence FILE, not its line: a fix that shifts lines must not
-      # turn an unresolved finding into a new one.
-      first="$(jq -r '.evidence | split(";")[0] | gsub("^\\s+|\\s+$"; "") | sub(":[0-9]+$"; "")' <<< "$f")"
-      fp="$(fingerprint "$project_id" plan_review "$step" "$first" "$(_claim_key "$(jq -r '.claim' <<< "$f")")")"
+      first="$(jq -r '.evidence | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$f")"
+      key="$(_claim_key "$(jq -r '.claim' <<< "$f")")"
+      fp="$(fingerprint "$project_id" plan_review "$step" "$first" "$key")"
+      # The next round is matched without the line: a fix that shifts lines must
+      # not turn an unresolved finding into a new one.
+      match="$(fingerprint "$project_id" plan_review "$step" "${first%:*}" "$key")"
       if [[ -n "${seen[$fp]:-}" ]]; then
         reason=duplicate
       else
         seen[$fp]=1
-        jq -c --arg r "$role" --arg fp "$fp" '. + {role: $r, fingerprint: $fp}' <<< "$f" >> "${WORK}/accepted.jsonl"
+        jq -c --arg r "$role" --arg fp "$fp" --arg m "$match" '. + {role: $r, fingerprint: $fp, match: $m}' <<< "$f" >> "${WORK}/accepted.jsonl"
       fi
     fi
     [[ -n "$reason" ]] && jq -nc --arg r "$role" --arg id "$id" --arg why "$reason" \
@@ -118,7 +121,7 @@ jq -s --argjson round "$(jq '.round' "${DIR}/round.json")" \
   | map(sort_by(-(.severity | rank)) as $g
         | $g[0] as $top
         | ($old[$top.fingerprint] // {}) as $was
-        | {fingerprint: $top.fingerprint, step: $top.step, severity: $top.severity,
+        | {fingerprint: $top.fingerprint, match: $top.match, step: $top.step, severity: $top.severity,
            severity_reported: (map({(.role): .severity}) | add),
            claim: $top.claim, command: $top.command, evidence: $top.evidence, fix: $top.fix,
            reported_by: (map(.role) | unique), also_reported_by: (map(.role) | unique | length),
@@ -143,10 +146,10 @@ if [[ -n "$PREV" ]]; then
   [[ -r "${PREV}/merged.json" ]] || _fail "cannot read ${PREV}/merged.json"
   tmp="${WORK}/prev-merged.json"
   jq --slurpfile now "${DIR}/merged.json" --argjson answered "$(jq '.valid' "${DIR}/collect.json")" '
-    ($now[0].findings | map(.fingerprint)) as $still
+    ($now[0].findings | map(.match)) as $still
     | .findings |= map(
         if .status == "open" and (.severity == "blocker" or .severity == "major")
-           and (.fingerprint | IN($still[]) | not)
+           and ((.match // .fingerprint) | IN($still[]) | not)
            and (.reported_by - $answered | length) == 0
         then .status = "fixed" else . end)
     | .blockers_open = ([.findings[] | select(.severity == "blocker" and (.status == "open" or .status == "disputed"))] | length)

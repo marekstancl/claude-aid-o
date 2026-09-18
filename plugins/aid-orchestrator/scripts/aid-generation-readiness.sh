@@ -4,11 +4,8 @@
 # generation.  It explains the contract briefly and writes no project state
 # unless --write-provisional is explicitly requested.
 #
-# It owns no rule of its own: it runs aid-plan-lint.sh and the source-plan
-# dependency graph, and reports what they say. Since P084 the lint's findings
-# are BAND-SCOPED (what a plan owes follows the paths it declares), so this
-# check is band-aware by construction — there is no second classification here
-# to drift from the gate's.
+# It owns no rule of its own: it runs aid-plan-lint.sh, aid-plan-check.sh, the
+# parallel check and the source-plan dependency graph, and reports what they say.
 #
 # Usage: aid-generation-readiness.sh <plan.md> [--total N] [--json] [--write-provisional <path>]
 # =============================================================================
@@ -17,8 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
 source "${SCRIPT_DIR}/lib/aid-source-plan-graph.sh"
-# shellcheck source=lib/aid-plan-band.sh
-source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 check_prerequisites
