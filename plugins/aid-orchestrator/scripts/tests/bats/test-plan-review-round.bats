@@ -267,3 +267,13 @@ _round1_closed() {
   run "$ROUND_SH" dispute "$PLAN" --round 1 --fingerprint "$fp" --reason "a reason that is long enough here"
   [ "$status" -eq 0 ]
 }
+@test "prepare: a confirmation-round prompt carries the open findings and the fix diff" {
+  _round1_closed
+  sed -i 's/^text$/text changed by the fix/' "$PLAN"; _check
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  "$ROUND_SH" prepare "$PLAN" --round 2 >/dev/null
+  local p="$CP1/round-2/prompt-reuse.md"
+  grep -q '^## This is a confirmation round$' "$p"
+  grep -q 'step one misses reuse' "$p"
+  grep -q '^+text changed by the fix$' "$p"
+}

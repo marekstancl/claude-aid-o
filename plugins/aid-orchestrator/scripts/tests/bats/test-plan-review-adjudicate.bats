@@ -95,3 +95,10 @@ _finding() {
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found","evidence_not_found","evidence_not_found"]' ]
 }
+@test "adjudicate: a minor finding is not marked fixed by a confirmation round that never saw it" {
+  _finding "$R1" reuse '.severity = "minor"'
+  "$ADJ" "$R1" --project-root "$ROOT" >/dev/null
+  _round "$R2" 2 reuse
+  "$ADJ" "$R2" --project-root "$ROOT" --previous "$R1" >/dev/null
+  [ "$(jq -r '.findings[0].status' "$R1/merged.json")" = open ]
+}

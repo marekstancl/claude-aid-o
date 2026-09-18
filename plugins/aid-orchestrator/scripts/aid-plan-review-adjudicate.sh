@@ -15,8 +15,9 @@
 # eight words of the claim): the highest severity wins, every reporter is listed.
 #
 # Writes <round_dir>/merged.json, rejected.json and yield.json. With --previous,
-# a previous open finding is marked fixed when every reviewer that reported it
-# answered this round and none reported it again.
+# a previous open blocker or major (the findings a confirmation round is shown)
+# is marked fixed when every reviewer that reported it answered this round and
+# none reported it again; minors are not re-checked and stay as they were.
 #
 # Exit: 0 all outputs written (the blocker count is data, not an exit code),
 #       1 unreadable input or a failed write (partial outputs are removed),
@@ -144,7 +145,8 @@ if [[ -n "$PREV" ]]; then
   jq --slurpfile now "${DIR}/merged.json" --argjson answered "$(jq '.valid' "${DIR}/collect.json")" '
     ($now[0].findings | map(.fingerprint)) as $still
     | .findings |= map(
-        if .status == "open" and (.fingerprint | IN($still[]) | not)
+        if .status == "open" and (.severity == "blocker" or .severity == "major")
+           and (.fingerprint | IN($still[]) | not)
            and (.reported_by - $answered | length) == 0
         then .status = "fixed" else . end)
     | .blockers_open = ([.findings[] | select(.severity == "blocker" and (.status == "open" or .status == "disputed"))] | length)

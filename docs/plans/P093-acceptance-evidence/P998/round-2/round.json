@@ -1,0 +1,14 @@
+{
+  "round": 2,
+  "plan_sha256": "b230b9348cc08366a7c054875ef8ead27164f93016e460a1e198083ffc418a62",
+  "reviewers_expected": [
+    "generalist_a",
+    "generalist_b",
+    "behaviour_edges",
+    "reuse"
+  ],
+  "min_answers_effective": 4,
+  "degraded": true,
+  "started_at": "2026-09-18T09:29:50Z",
+  "narrow_from": "round-1/fix-diff.json"
+}

@@ -1,0 +1,8 @@
+{"role": "reuse",
+ "findings": [
+  {"id": "reuse-1", "step": 12, "severity": "major",
+   "claim": "The round-2 fix for the missing-kind crash was appended to plan.md:917 but the same paragraph still prescribes `kind_name = kinds_by_code.get(code).name or \"\"` (which raises on None), and the new fallback folder `<kód>_` contradicts Error Handling at plan.md:920 (`<code>_neznamy_druh/`), so the implementer gets two incompatible instructions for the same case.",
+   "command": "grep -n \"get(code).name\\|neznamy_druh\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "plan.md:917; plan.md:920",
+   "fix": "Replace the step (3) expression with `kind_name = meta.kind_name or (kinds_by_code.get(code).name if code in kinds_by_code else None)` and pick ONE folder name for an unknown code (either `<code>_` or `<code>_neznamy_druh/`) used consistently in Implementation Detail, Error Handling and the AC."}
+ ]}

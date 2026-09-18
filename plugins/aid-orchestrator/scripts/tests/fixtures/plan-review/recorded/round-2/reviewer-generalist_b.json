@@ -1,0 +1,8 @@
+{"role": "generalist_b",
+ "findings": [
+  {"id": "generalist_b-1", "step": 12, "severity": "major",
+   "claim": "The round-1 fix for the missing kind was appended without editing the rule it replaces: rule (3) on the same line still reads kind_name = kinds_by_code.get(code).name (a None dereference for a deleted code), and the folder for a missing code is given two ways, '<kód>_' in the new sentence and AC and '<code>_neznamy_druh/' in Error Handling, so an agent that follows rule (3) or Error Handling still produces the 500 or fails the new AC.",
+   "command": "grep -n \"kinds_by_code.get\\|neznamy_druh\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "plan.md:917; plan.md:920; plan.md:935",
+   "fix": "Rewrite rule (3) itself: kind_name = fields_meta.druh_dokladu.kind_name, then kinds_by_code.get(code) with a None check, and state ONE folder name for a missing code (either '<kód>_' or '<kód>_neznamy_druh') in the rule, in Error Handling and in the AC alike."}
+ ]}

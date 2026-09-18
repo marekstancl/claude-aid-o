@@ -1,0 +1,15 @@
+{
+  "valid": [
+    "generalist_a",
+    "generalist_b",
+    "behaviour_edges",
+    "reuse"
+  ],
+  "invalid": [],
+  "missing": [],
+  "unexpected": [],
+  "answered": 4,
+  "required": 4,
+  "generalist_present": true,
+  "status": "valid"
+}

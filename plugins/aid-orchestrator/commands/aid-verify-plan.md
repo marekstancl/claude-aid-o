@@ -34,13 +34,12 @@ review that counts before EPIC generation.
    bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" prepare <plan> --round 1 --only <role> --manual
    ```
 
-2. Dispatch that reviewer in a fresh context with the prompt file's full
-   content, unchanged; its model is the role's `model` in
-   `review_checkpoints.plan_review`:
+2. Dispatch that reviewer in a fresh context; its model is the role's `model`
+   in `review_checkpoints.plan_review`, and it reads its prompt file itself:
 
    ```
    Agent(subagent_type: "general-purpose", model: <the role's model>,
-         prompt: <content of <manual dir>/prompt-<role>.md>)
+         prompt: "Your complete instructions are in <manual dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
    ```
 
    Only a role whose provider is `claude` runs by hand; a codex role runs

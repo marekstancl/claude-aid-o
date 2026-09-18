@@ -16,11 +16,13 @@ no underscore in `--focus` or `--agent-id`):
      --agent-id aid-orchestrator:plan-review --evidence-dir <round dir>
    ```
 
-2. Dispatch the reviewer with the prompt file's full content, unchanged:
+2. Dispatch the reviewer with this one-line prompt, never the file's content
+   (a plan packet runs to hundreds of kilobytes; six pasted copies would fill
+   the controller's own context):
 
    ```
    Agent(subagent_type: "general-purpose", model: <the role's model from review_checkpoints.plan_review>,
-         prompt: <content of <round dir>/prompt-<role>.md>)
+         prompt: "Your complete instructions are in <round dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
    ```
 
    The reviewer writes `<round dir>/reviewer-<role>.json` itself. Note the

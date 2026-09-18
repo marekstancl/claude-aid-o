@@ -76,6 +76,24 @@ aid_plan_review_prompt_render() {
     echo
     echo "--- PACKET ---"
     echo
+    local prev="${dir%/round-*}/round-$((round - 1))"
+    if (( round >= 2 )) && [[ -f "${prev}/merged.json" ]]; then
+      echo "## This is a confirmation round"
+      echo
+      echo "The author fixed the plan after round $((round - 1)). Your job now:"
+      echo "1. For each finding below, check the current plan: if it is fixed, do not report it; if it is not, report it again (same claim)."
+      echo "2. Report NEW problems only when the changed lines (the diff below) introduced them. Do not review the rest of the plan again."
+      echo
+      echo "### Findings still open after round $((round - 1))"
+      jq -r '.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))
+             | "- [\(.severity)] step \(.step // "plan"): \(.claim) (evidence: \(.evidence); fix asked: \(.fix))"' "${prev}/merged.json"
+      echo
+      echo "### What the author changed (diff of plan.md, round $((round - 1)) → round ${round})"
+      echo '```diff'
+      diff -u "${prev}/packet/plan.md" "${dir}/packet/plan.md" | tail -n +3
+      echo '```'
+      echo
+    fi
     echo "## Deterministic plan check: warnings (already reported, do not repeat)"
     jq -r '.warnings[]? | "- \(.id) \(.location): \(.message)"' "${dir}/packet/plan-check.json"
     echo

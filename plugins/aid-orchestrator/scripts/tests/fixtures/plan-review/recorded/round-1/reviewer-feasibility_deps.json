@@ -1,0 +1,7 @@
+{"role": "feasibility_deps",
+ "findings": [{"id": "feasibility_deps-1", "step": 5,
+   "severity": "minor",
+   "claim": "The plan lists exactly one caller of get_document_defaults (sequences/service.py:243), but backend/scripts/fix_issued_invoices_p018.py:727 also calls it to set druh_dokladu; Step 5 rewires only that script's resolve_acta_number call to resolve_kind_safe, so the script would write the druh from the adapter's default catalog row while taking the series from the resolved (possibly more specific) kind.",
+   "command": "grep -rn \"get_document_defaults(\" backend/acta backend/scripts",
+   "evidence": "backend/scripts/fix_issued_invoices_p018.py:727; backend/acta/sequences/service.py:251; plan.md:84; plan.md:473; plan.md:543",
+   "fix": "List fix_issued_invoices_p018.py:727 among the get_document_defaults callers and in Step 5 switch it to resolve_kind_safe too, so druh and series in the renumbering script come from the same resolved kind."}]}

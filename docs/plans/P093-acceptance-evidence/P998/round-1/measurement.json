@@ -1,0 +1,44 @@
+{
+  "round": 1,
+  "started_at": "2026-09-18T09:18:22Z",
+  "finished_at": "2026-09-18T09:25:17Z",
+  "reviewers": {
+    "generalist_a": {
+      "provider": "claude",
+      "model": "opus",
+      "answered": true,
+      "tokens": 100935
+    },
+    "generalist_b": {
+      "provider": "claude",
+      "model": "opus",
+      "answered": true,
+      "tokens": 108754
+    },
+    "behaviour_edges": {
+      "provider": "claude",
+      "model": "opus",
+      "answered": true,
+      "tokens": 115650
+    },
+    "feasibility_deps": {
+      "provider": "claude",
+      "model": "opus",
+      "answered": true,
+      "tokens": 96406
+    },
+    "reuse": {
+      "provider": "claude",
+      "model": "opus",
+      "answered": true,
+      "tokens": 89151
+    },
+    "enforcement_tests": {
+      "provider": "claude",
+      "model": "opus",
+      "answered": true,
+      "tokens": 99067
+    }
+  },
+  "degraded": true
+}

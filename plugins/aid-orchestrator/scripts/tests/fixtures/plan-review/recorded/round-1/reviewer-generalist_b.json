@@ -1,0 +1,23 @@
+{"role": "generalist_b",
+ "findings": [
+  {"id": "generalist_b-1", "step": 1, "severity": "major",
+   "claim": "Step 1 gives two different parents for migration 0037: Files says down_revision \"0036\", while the Reuse check says it follows on with down_revision \"0035\". An agent that follows the Reuse check creates a second Alembic head next to 0036_vat_category_non_payer.",
+   "command": "grep -n 'down_revision = \"003[56]\"' .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:312; plan.md:321; backend/db/versions/0036_vat_category_non_payer.py:1",
+   "fix": "Change the Reuse check to say down_revision = \"0036\", so that one parent is stated throughout the plan."},
+  {"id": "generalist_b-2", "step": 3, "severity": "major",
+   "claim": "Step 3 deletes backend/acta/docdefaults/models.py. The adapter service imports BUILTIN_DRUH_DOKLADU and DRUH_DOKLADU_UNKNOWN_DIRECTION from that file, but the plan names only the _resolve rewrite. The Step 3 AC also requires that test_derived_fields_all_paths.py and test_direction_change_derived_fields.py pass unchanged, and those tests call docdefaults_service.builtin_druh_dokladu. Nothing in the plan says where those constants and that helper come from after the delete.",
+   "command": "sed -n 18,22p backend/acta/docdefaults/service.py",
+   "evidence": "backend/acta/docdefaults/service.py:18; backend/acta/docdefaults/service.py:48; backend/tests/documents/test_direction_change_derived_fields.py:99; plan.md:408; plan.md:452",
+   "fix": "In Step 3 Files, add: docdefaults/service.py imports BUILTIN_KIND_CODE and KIND_CODE_UNKNOWN_DIRECTION from acta.doctypes.models (or re-exports them under the old names), and builtin_druh_dokladu stays in the adapter."},
+  {"id": "generalist_b-3", "step": 3, "severity": "major",
+   "claim": "backend/tests/documents/test_direction_change_numbering.py imports acta.docdefaults.service and monkeypatches get_document_defaults. Step 3 does not list this file, and the test is modified only in Step 5. If Step 5 moves callers off get_document_defaults, the monkeypatch hits an unused function and the test passes without testing anything.",
+   "command": "grep -n 'docdefaults' backend/tests/documents/test_direction_change_numbering.py",
+   "evidence": "backend/tests/documents/test_direction_change_numbering.py:207; backend/tests/documents/test_direction_change_numbering.py:218; plan.md:548",
+   "fix": "Step 5 Files for test_direction_change_numbering.py must say that the get_document_defaults monkeypatch at lines 207-218 is replaced by a patch on resolve_kind_safe or the catalogue."},
+  {"id": "generalist_b-4", "step": 4, "severity": "minor",
+   "claim": "The plan cites the VAT_CATEGORIES and SUPPLY_KINDS constants at different lines in different places (models.py:59-73 vs 54-67, and SUPPLY_KINDS at :110). In the repository they are at lines 59 and 116.",
+   "command": "grep -n 'VAT_CATEGORIES: \\|SUPPLY_KINDS: ' backend/acta/documents/models.py",
+   "evidence": "backend/acta/documents/models.py:59; backend/acta/documents/models.py:116; plan.md:238; plan.md:490",
+   "fix": "Cite documents/models.py:59 (VAT_CATEGORIES) and :116 (SUPPLY_KINDS) consistently."}
+ ]}
