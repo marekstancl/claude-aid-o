@@ -38,31 +38,14 @@ This plan is type: `{regular | bug-fix | refactor | docs}` (per frontmatter `typ
 
 **Default if missing:** `regular`. Legacy `type: plan` (used by P001-P035) is treated as an alias for `regular`. Validation: invalid value → REVISE_REQUIRED with the valid enum list.
 
-## Ceremony band
+## Plan review
 
-Universal and band-scoped sections are marked below. The band is not written
-here — it is classified from the paths this plan's steps declare:
-
-```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan <this plan> --classify-only
-```
-
-`full` (the machinery that decides what the pipeline does) owes everything;
-`medium` (the DATA those decisions read — policies, schemas, templates,
-machine-read config, CI) owes everything except the C0 cross-provider round;
-`light` (everything else, including documentation, help, commands, skills,
-TESTS and ordinary feature code) owes only the universal sections and, per
-step, only Objective / Files / Acceptance Criteria / Dependencies / Effort /
-AID Role — plus, on a step that founds something new (a `Create:` bullet),
-**Reuse check**, which every band owes because founding a duplicate is exactly
-what a small plan does. A `light` step also carries **Parallel group**, but it
-does not have to write it: an absent field defaults to `---`, "runs alone".
-Full table:
-`skills/plan-writing.md` §"Obligations by ceremony band".
-
-**Every `##` section in this template is universal** — the band changes only
-the per-step fields and the `verification_pattern` blocks under Acceptance
-Criteria, both of which say so where they appear.
+Before EPIC generation this plan is put to six reviewer roles (two for
+`type: docs`): `commands/aid-plan.md` "Plan review (CP1)". Every plan owes
+every section below and, per step, Objective / Files / Architecture Context /
+Error Handling / Edge Cases / Acceptance Criteria / Dependencies / Effort /
+AID Role; a step that founds something new (a `Create:` bullet) also owes
+**Reuse check**. An absent **Parallel group** means `---`, "runs alone".
 
 ## Context
 
@@ -154,7 +137,7 @@ size)*
 ## Acceptance Criteria
 
 *(universal — the AC themselves; the `verification_pattern` blocks below are
-band-scoped: required for `full` and `medium`, not asked of a `light` plan)*
+optional, and aid-plan-check.sh validates each one that is present)*
 
 > Plan-level AC (distinct from per-step AC). Each AC describes a state that
 > must hold in the codebase after EXECUTE+GATES+DONE. Each AC has a

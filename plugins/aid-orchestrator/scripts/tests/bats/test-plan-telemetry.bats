@@ -5,8 +5,8 @@
 # THE FINDING THIS SUITE GUARDS
 #   `.aid-o/work/timeline.jsonl` — the file /aid-init creates at the workspace
 #   root — was 0 lines. Not a broken writer: every caller of log_event passes a
-#   per-RUN path, and plan-time events (band classification, a lint that stopped
-#   a plan) had no home at all because they happen before any run exists. They
+#   per-RUN path, and plan-time events (a gate verdict, a lint that stopped a
+#   plan) had no home at all because they happen before any run exists. They
 #   now land under `evidence/<plan_id>/timeline.jsonl`, next to the plan's other
 #   evidence.
 #
@@ -51,6 +51,12 @@ No new verification — this fixture exercises telemetry.
 **Files:**
 - Modify: \`${path}\` — the subject
 ${extra}
+**Architecture Context:** n/a
+
+**Error Handling:** n/a
+
+**Edge Cases:** n/a
+
 **Effort:** S
 **AID Role:** backend
 EOF
@@ -59,56 +65,34 @@ EOF
 
 timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; }
 
-@test "AC21: the gate writes the band it classified and why" {
-  plan="$(write_plan P960 'plugins/aid-orchestrator/commands/aid-help.md')"
-  # No plan-review round exists, so the gate refuses whatever the band (P093).
-  run bash "$GATE" --plan "$plan" --project-root "$TMP"
-  [ "$status" -eq 1 ]
-  tl="$(timeline_of P960)"
-  [ -s "$tl" ]
-  run jq -r 'select(.event == "cp1_band_classified") | .band + " " + .reason' "$tl"
-  [[ "$output" == light* ]]
-  run jq -r 'select(.event == "cp1_gate_result") | .result' "$tl"
-  [ "$output" = "fail" ]
-}
-
-@test "the classify-only path is recorded as such, not as a gate run" {
-  plan="$(write_plan P961 'plugins/aid-orchestrator/scripts/aid-fsm.sh')"
-  bash "$GATE" --plan "$plan" --project-root "$TMP" --classify-only >/dev/null 2>&1
-  tl="$(timeline_of P961)"
-  run jq -r 'select(.event == "cp1_band_classified") | .classify_only | tostring' "$tl"
-  [ "$output" = "true" ]
-  run jq -r 'select(.event == "cp1_gate_result") | .result' "$tl"
-  [ -z "$output" ]
-}
-
 @test "AC21: the lint records that it stopped a plan, and on what" {
-  # A strict, full-band plan whose step omits the band-scoped fields.
+  # A strict plan whose step omits the per-step fields.
   plan="$(write_plan P962 'plugins/aid-orchestrator/scripts/aid-fsm.sh')"
+  sed -i '/^\*\*\(Architecture Context\|Error Handling\|Edge Cases\):/d' "$plan"
   mkdir -p "$TMP/.aid-o/work/evidence/P962"
   run bash "$LINT" "$plan"
   [ "$status" -eq 1 ]
   tl="$(timeline_of P962)"
-  run jq -r 'select(.event == "plan_lint_result") | "\(.band) \(.blocked) \(.strict)"' "$tl"
-  [ "$output" = "full true 1" ]
+  run jq -r 'select(.event == "plan_lint_result") | "\(.blocked) \(.strict)"' "$tl"
+  [ "$output" = "true 1" ]
 }
 
 @test "a clean plan is recorded as not blocked — the counter needs both outcomes" {
   plan="$(write_plan P963 'plugins/aid-orchestrator/commands/aid-help.md')"
   run bash "$LINT" "$plan"
   [ "$status" -eq 0 ]
-  run jq -r 'select(.event == "plan_lint_result") | "\(.band) \(.blocked)"' "$(timeline_of P963)"
-  [ "$output" = "light false" ]
+  run jq -r 'select(.event == "plan_lint_result") | .blocked' "$(timeline_of P963)"
+  [ "$output" = "false" ]
 }
 
 @test "AC23: two writers appending to one plan timeline do not lose an event" {
   plan_a="$(write_plan P964 'plugins/aid-orchestrator/commands/aid-help.md')"
-  bash "$GATE" --plan "$plan_a" --project-root "$TMP" --classify-only >/dev/null 2>&1 &
+  bash "$GATE" --plan "$plan_a" --project-root "$TMP" >/dev/null 2>&1 &
   bash "$LINT" "$plan_a" >/dev/null 2>&1 &
   wait
   tl="$(timeline_of P964)"
   # Both events present, and every line still parses as JSON.
-  run jq -r 'select(.event == "cp1_band_classified") | .event' "$tl"
+  run jq -r 'select(.event == "cp1_gate_result") | .event' "$tl"
   [ -n "$output" ]
   run jq -r 'select(.event == "plan_lint_result") | .event' "$tl"
   [ -n "$output" ]
@@ -125,7 +109,7 @@ timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; 
   rm -rf "$outside"
 }
 
-@test "AC21: a gate that REFUSES records the outcome, not only the band" {
+@test "AC21: a gate that REFUSES records the outcome" {
   # The outcome comes from an EXIT trap: a line written only on the two happy
   # paths would count exactly the runs nobody needs counted (codex review of
   # EPIC 2, finding 3).

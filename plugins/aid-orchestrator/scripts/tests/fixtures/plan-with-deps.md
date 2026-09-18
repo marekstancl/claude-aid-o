@@ -8,11 +8,8 @@ author: PM + AI
 
 # Plan: Dependencies Test Plan
 
-<!-- The file names here are deliberately neutral. This fixture exists to
-     exercise cross-plan dependency extraction, and a path that looks like auth,
-     a route or a payment classifies the plan into the `full` ceremony band
-     (defaults/policies/risk-paths.yaml), which would make this test about CP1
-     evidence instead. -->
+<!-- The file names here are deliberately neutral: this fixture exercises
+     cross-plan dependency extraction and nothing else. -->
 
 ## Context
 

@@ -35,7 +35,7 @@
 #
 # PER-STEP OBLIGATIONS
 # Every step owes **Architecture Context**, **Error Handling** and **Edge
-# Cases** (skills/plan-writing.md §"Mandatory fields"); every plan owes the same
+# Cases** (skills/plan-writing.md §"Mandatory Fields Per Step"); every plan owes the same
 # obligations, whatever it touches. These findings are STRICT tier: blocking for a lifecycle_strict plan, a loud
 # advisory for a legacy one — the same two-tier treatment the Files grammar
 # gets, and for the same reason.
@@ -666,7 +666,7 @@ blocking=$errors
 
 if [[ "$QUIET" -eq 0 ]]; then
   if [[ "$blocking" -gt 0 ]]; then
-    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; mandatory step fields: skills/plan-writing.md §\"Mandatory fields\"." >&2
+    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; mandatory step fields: skills/plan-writing.md §\"Mandatory Fields Per Step\"." >&2
   elif [[ "$strict_hits" -gt 0 ]]; then
     echo "aid-plan-lint: PASS with ${strict_hits} legacy advisory warning(s) (non-blocking for this legacy plan; would block a lifecycle_strict plan)." >&2
   else

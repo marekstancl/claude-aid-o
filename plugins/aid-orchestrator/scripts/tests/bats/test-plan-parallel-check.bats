@@ -78,19 +78,10 @@ _plan() {
   [ "$status" -eq 0 ]
 }
 
-@test "parallel: a missing field defaults to --- in a light plan and blocks nothing" {
-  _plan low 'NONE|Modify: `src/a.ts` — edit' 'NONE|Modify: `src/a.ts` — edit'
-  band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN" --project-root "$TEST_DIR" --classify-only 2>/dev/null)"
-  [ "$band" = "light" ]
+@test "parallel: a missing field defaults to --- (runs alone) and blocks nothing, whatever the plan touches" {
+  _plan high 'NONE|Modify: `src/a.ts` — edit' 'NONE|Modify: `src/a.ts` — edit'
   run "$CHECK" "$PLAN"
   [ "$status" -eq 0 ]
-}
-
-@test "parallel: a missing field IS a finding in full/medium, where concurrency is declared deliberately" {
-  _plan high 'NONE|Modify: `src/a.ts` — edit'
-  run "$CHECK" "$PLAN"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no **Parallel group:** field"* ]]
 }
 
 # ── shape ───────────────────────────────────────────────────────────────────

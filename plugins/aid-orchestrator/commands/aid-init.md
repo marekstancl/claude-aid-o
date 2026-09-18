@@ -379,7 +379,7 @@ project with no UI at all is not asked: no UI steps, no obligation, and the key 
 
 Detection writes three `documentation.*` facts into `project.yaml` so a plan
 does not have to rediscover them every time it is written — it reads the
-answer, the same way it reads its band. The keys, how each is detected, and the
+answer. The keys, how each is detected, and the
 omit-don't-empty rule are defined once in `skills/setup/project-scan.md`
 §"Project Scan"; ask for them here in the same breath as the standards profile,
 and write what that file specifies.

@@ -212,13 +212,10 @@ _plan() {
   [[ "$output" == *"no **Reuse check:** field"* ]]
 }
 
-# ── the obligation is band-independent ──────────────────────────────────────
-@test "reuse: a light-band plan owes the field too" {
-  # `light` is what a plan touching only ordinary source code classifies as —
-  # and founding a duplicate is exactly what a small plan does.
+# ── the obligation holds for every plan ─────────────────────────────────────
+@test "reuse: a plan touching only ordinary source code owes the field too" {
+  # Founding a duplicate is exactly what a small plan does.
   _plan strict '- Create: `src/new.ts` — new thing'
-  band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN" --project-root "$TEST_DIR" --classify-only 2>/dev/null)"
-  [ "$band" = "light" ]
   run "$LINT" "$PLAN"
   [ "$status" -ne 0 ]
   [[ "$output" == *"no **Reuse check:** field"* ]]
