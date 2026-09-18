@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 503          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 504          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -738,6 +738,17 @@ enforcements:
     verdict: ALIGNED
     test: scripts/tests/bats/test-plan-review-config.bats
     description: "review_checkpoints.plan_review must name exactly the six reviewer roles of the answer schema, once each, with provider claude or codex, no banned model, min_answers 1..6 and rounds_default 1..3; every plan-review round subcommand and the CP1 gate refuse to run on a config that breaks one."
+
+  - id: plan_review_finding_evidence
+    type: out-of-band
+    source: scripts/aid-plan-review-adjudicate.sh
+    instruction: skills/plan-review-roles.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: scripts/tests/bats/test-plan-review-adjudicate.bats
+    description: "A plan-review finding enters merged.json only with a read-only command and a path:line evidence that exists inside the project (not under .aid-worktrees/, no ../, line within the file); every other finding is written to rejected.json with its reason (missing_command, missing_evidence, evidence_not_found, duplicate). The gate reads only merged.json."
 
   # ── E4 C0 Plan Contract Gate — observe mode, blocking promotion E10 ──────────
   - id: c0_contract_producer

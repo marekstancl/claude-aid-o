@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
 # aid-tier: t0
 # test-plan-review-schema.bats — the plan reviewer's answer contract.
-# A valid answer passes; each broken rule is refused with the field named; the
-# example answers in skills/plan-review-roles.md pass; the prompt template
-# renders through the sanctioned renderer.
+# A valid answer passes; each broken shape rule is refused with the field named;
+# each unproven finding gets its rejection reason; the example answers in
+# skills/plan-review-roles.md pass; the prompt template renders through the
+# sanctioned renderer.
 # Origin: P093 Step 1 (plan review rebuild).
 
 setup() {
@@ -26,25 +27,33 @@ _answer() {
   run aid_plan_review_answer_error "$TEST_DIR/a.json"
   [ "$status" -eq 0 ]; [ -z "$output" ]
 }
-@test "answer: a finding without command is refused naming the field" {
-  _answer 'del(.findings[0].command)'
-  run aid_plan_review_answer_error "$TEST_DIR/a.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"missing command"* ]]
+@test "proof: a finding without command is missing_command" {
+  _answer '.findings[0] | del(.command)'
+  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [ "$output" = missing_command ]
 }
-@test "answer: a finding without evidence is refused naming the field" {
-  _answer 'del(.findings[0].evidence)'
-  run aid_plan_review_answer_error "$TEST_DIR/a.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"missing evidence"* ]]
+@test "proof: a finding without evidence is missing_evidence" {
+  _answer '.findings[0] | del(.evidence)'
+  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [ "$output" = missing_evidence ]
 }
-@test "answer: evidence without a line number is refused" {
-  _answer '.findings[0].evidence = "scripts/a.sh"'
-  run aid_plan_review_answer_error "$TEST_DIR/a.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"evidence must be path:line"* ]]
+@test "proof: evidence without a line number is missing_evidence" {
+  _answer '.findings[0] | .evidence = "scripts/a.sh"'
+  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [ "$output" = missing_evidence ]
 }
-@test "answer: a write command is refused" {
-  _answer '.findings[0].command = "sed -i s/a/b/ scripts/a.sh"'
+@test "proof: a write command is missing_command; a read-only one passes" {
+  _answer '.findings[0] | .command = "sed -i s/a/b/ scripts/a.sh"'
+  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]; [ "$output" = missing_command ]
+  _answer '.findings[0]'
+  run aid_plan_review_proof_error "$TEST_DIR/a.json"
+  [ "$status" -eq 0 ]
+}
+@test "answer: a finding without its claim is refused naming the field" {
+  _answer 'del(.findings[0].claim)'
   run aid_plan_review_answer_error "$TEST_DIR/a.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"command is not a read-only command"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing claim"* ]]
 }
 @test "answer: empty findings without a reason is refused" {
   _answer '.findings = []'
@@ -90,4 +99,15 @@ _answer() {
   [ "$status" -eq 0 ]
   ! grep -q '{{' "$TEST_DIR/prompt.md"
   grep -q '^# Plan review, round 1$' "$TEST_DIR/prompt.md"
+}
+@test "adapter: every role's focus and the agent id pass the dispatch wrapper's allowlists" {
+  local emit="$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" role focus
+  grep -q 'aid-emit-dispatch.sh" start --focus <focus>' "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
+  for role in $(jq -r '.properties.role.enum[]' "$AID_PR_SCHEMA"); do
+    focus="cp1-${role//_/-}"
+    bash "$emit" start --focus "$focus" --agent-id aid-orchestrator:plan-review --evidence-dir "$TEST_DIR"
+    echo '{}' > "$TEST_DIR/reviewer-$role.json"
+    bash "$emit" complete --focus "$focus" --output-file "$TEST_DIR/reviewer-$role.json" --evidence-dir "$TEST_DIR"
+  done
+  [ ! -s "$TEST_DIR/pending-dispatches.jsonl" ]
 }

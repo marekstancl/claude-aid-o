@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/plan-review-finding.schema.json",
   "title": "AID plan review — reviewer answer",
-  "$comment": "producer: a plan reviewer (reviewer-<role>.json), consumers: aid-plan-review-round.sh collect, aid-plan-review-adjudicate.sh. collect enforces this file with jq and reads the two patterns below from it, so the patterns have one source.",
+  "$comment": "producer: a plan reviewer (reviewer-<role>.json), consumers: aid-plan-review-round.sh collect, aid-plan-review-adjudicate.sh. collect enforces the answer shape and the adjudicator rejects each finding whose command or evidence breaks its pattern; both read the role enum and the two patterns from this file, so they have one source.",
   "description": "One reviewer's answer for one plan-review round. A finding without a read-only command and a path:line evidence does not exist.",
   "type": "object",
   "additionalProperties": false,

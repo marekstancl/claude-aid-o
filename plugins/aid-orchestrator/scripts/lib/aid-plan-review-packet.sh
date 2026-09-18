@@ -4,10 +4,11 @@
 # Out: the packet every reviewer of a round receives (plan snapshot, the
 # deterministic check's report, the project standards) and the rendered prompt.
 # In: the reviewer's answer file, checked against
-# defaults/schemas/plan-review-finding.schema.json.
+# defaults/schemas/plan-review-finding.schema.json in two halves: the answer's
+# shape (collect), and each finding's proof (the adjudicator).
 #
-# The answer check reads the role list and the two patterns (command, evidence)
-# from the schema file itself, so the schema is the one source of the contract.
+# Both halves read the role list and the two patterns (command, evidence) from
+# the schema file itself, so the schema is the one source of the contract.
 # Sourced by scripts/aid-plan-review-round.sh; tested by
 # scripts/tests/bats/test-plan-review-schema.bats and test-plan-review-round.bats.
 
@@ -93,8 +94,12 @@ aid_plan_review_unfence() {
 }
 
 # aid_plan_review_answer_error <answer.json>
-#   Prints the first rule the answer breaks and returns 1; prints nothing and
-#   returns 0 for a valid answer.
+#   The SHAPE of an answer: an object with a known role, a findings array (or a
+#   no_findings_reason) and findings that carry id, step, severity, claim and
+#   fix. Prints the first rule the answer breaks and returns 1, or returns 0.
+#   Whether each finding has a read-only command and a path:line evidence is
+#   judged per finding by aid_plan_review_proof_error, so one unproven finding
+#   rejects that finding, not the reviewer's whole answer.
 aid_plan_review_answer_error() {
   local file="$1" err
   if ! jq -e . "$file" >/dev/null 2>&1; then
@@ -105,19 +110,19 @@ aid_plan_review_answer_error() {
     | ($schema.properties.role.enum) as $roles
     | ($schema["$defs"].finding.properties) as $f
     | ($schema.properties | keys) as $top_keys
-    | ($schema["$defs"].finding.required) as $fkeys
+    | ($f | keys) as $fkeys
+    | ["id", "step", "severity", "claim", "fix"] as $shape_keys
     | def finding_error:
         if type != "object" then "finding is not an object" else
         . as $x
         | ($x.id // "?") as $id
-        | [$fkeys[] as $k | select($x | has($k) | not) | $k] as $missing
+        | [$shape_keys[] as $k | select($x | has($k) | not) | $k] as $missing
         | if ($missing | length) > 0 then "\($id): missing \($missing | join(", "))"
           elif ((keys - $fkeys) | length) > 0 then "\($id): unknown key \((keys - $fkeys) | join(", "))"
           elif (.step | (type == "null" or (type == "number" and . == floor)) | not) then "\($id): step must be an integer or null"
           elif (.severity | IN($f.severity.enum[]) | not) then "\($id): severity must be blocker, major or minor"
           elif ([.id, .claim, .fix] | map(type == "string" and length > 0) | all | not) then "\($id): id, claim and fix must be non-empty strings"
-          elif ((.command | type) != "string" or (.command | test($f.command.pattern) | not)) then "\($id): command is not a read-only command (\(.command))"
-          elif ((.evidence | type) != "string" or (.evidence | test($f.evidence.pattern) | not)) then "\($id): evidence must be path:line (\(.evidence))"
+          elif ([.command, .evidence] | map(. == null or type == "string") | all | not) then "\($id): command and evidence must be strings"
           else empty end end;
       if type != "object" then "answer is not a JSON object"
       elif ((keys - $top_keys) | length) > 0 then "unknown key \((keys - $top_keys) | join(", "))"
@@ -126,6 +131,28 @@ aid_plan_review_answer_error() {
       elif (.findings | length) == 0 and ((.no_findings_reason // "") == "") then "no_findings_reason is required when findings is empty"
       else first(.findings[] | finding_error) // empty end
   ' "$file" 2>&1)" || { echo "answer check failed: ${err}"; return 1; }
+  [[ -z "$err" ]] && return 0
+  echo "$err"; return 1
+}
+
+# aid_plan_review_proof_jq — a jq definition, `proof_error`, applied to one
+# finding with the schema slurped as $s: "missing_command", "missing_evidence"
+# or empty. The two patterns are read from the schema, never restated here.
+aid_plan_review_proof_jq() {
+  cat <<'JQ'
+def proof_error:
+  ($s[0]["$defs"].finding.properties) as $f
+  | if ((.command // "") | test($f.command.pattern) | not) then "missing_command"
+    elif ((.evidence // "") | test($f.evidence.pattern) | not) then "missing_evidence"
+    else empty end;
+JQ
+}
+
+# aid_plan_review_proof_error <finding.json> — prints the proof defect of one
+# finding (missing_command, missing_evidence) and returns 1, or returns 0.
+aid_plan_review_proof_error() {
+  local err
+  err="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) proof_error" "$1")"
   [[ -z "$err" ]] && return 0
   echo "$err"; return 1
 }

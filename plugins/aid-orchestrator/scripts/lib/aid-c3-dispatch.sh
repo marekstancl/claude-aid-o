@@ -1088,7 +1088,10 @@ _looks_at_capacity() {
 #   returns raw captures via the five output-file parameters. `aid-c0-plan-review.sh`
 #   sources this file (guarded by the BASH_SOURCE!=0 check at the bottom, so
 #   sourcing never runs C3's own CLI dispatcher) and reuses THIS function verbatim
-#   for the C0 plan-review Codex launch. The only knobs it reads are $CODEX_MODEL
+#   for the C0 plan-review Codex launch, and `aid-plan-review-round.sh dispatch`
+#   calls it (in a subshell) for a plan reviewer whose provider is codex, so a
+#   change to its five-argument signature must be checked against both callers.
+#   The only knobs it reads are $CODEX_MODEL
 #   (a plain global, not a C3-only concept — a caller may repoint it before
 #   calling) and the timeout env var below (AID_C3_TIMEOUT_SECONDS is read FIRST,
 #   for exact backward compatibility with existing C3 tests/callers; the generic
