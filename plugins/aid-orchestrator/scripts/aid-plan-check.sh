@@ -34,7 +34,9 @@
 #
 #   --snapshot  the plan as it was BEFORE the revision being checked (C checks)
 #   --fixes     comma-separated step numbers the revision was allowed to touch
-#               (e.g. "3,7,12"); required together with --snapshot
+#               (e.g. "3,7,12"), or `none` when it may touch no step; required
+#               together with --snapshot. The --json report then carries
+#               steps_changed and added_outside_fixes ({step, kind: step|file|ac, text}).
 #   --json      write a machine-readable report (sha256 of the plan, findings)
 #
 # Exit: 0 = no BLOCK findings   1 = BLOCK finding(s)   2 = usage / IO error
@@ -503,14 +505,18 @@ fi
 if [[ -n "$SNAPSHOT" ]]; then
   ADDED="$(diff --unchanged-line-format= --old-line-format= --new-line-format='%dn	%L' "$SNAPSHOT" "$PLAN")"
   REMOVED="$(diff --unchanged-line-format= --new-line-format= --old-line-format='%L' "$SNAPSHOT" "$PLAN")"
-  FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -v '^$')"
-  # C2 — new claims: paths and identifiers on added lines, checked again.
+  # `--fixes none`: the revision may change no step (plan-level findings only).
+  FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -vxE 'none|')"
+  # C2 — new claims: paths and identifiers on added lines, checked again. Plan
+  # review evidence paths (cp1/, round-N/, packet/, evidence/<plan>/) are exempt:
+  # those files exist only while the plan is reviewed, never in the repository.
   added_ids=""
   while IFS=$'\t' read -r ln line; do
     [[ -n "${ln:-}" ]] || continue
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
       _known_path "$p" && continue
+      [[ "$p" =~ (^|/)(cp1|round-[0-9N]+|packet|evidence)/ ]] && continue
       _block "C2" "$PLAN:$ln" "revision added \`${p}\`, which does not exist and no step creates"
     done < <(_aid_backtick_paths "$line")
     if [[ -n "$ROOT" ]]; then
@@ -529,19 +535,31 @@ if [[ -n "$SNAPSHOT" ]]; then
     _warn "C3" "$PLAN" "revision removed a mention of \`${tok}\` but the plan still says it elsewhere ($(grep -nF -- "$t" "$PLAN" | head -1 | cut -d: -f1)) — stale twin?"
   done
   # C4 / C5 — which steps the revision touched, and whether it ADDED behaviour.
+  # OUTSIDE_FIXES collects the C5 additions as "<step>\t<kind>\t<text>" for the
+  # --json report (plan review's fix-check and finalize read it).
   declare -A TOUCHED=()
+  OUTSIDE_FIXES=()
   while IFS=$'\t' read -r ln line; do
     [[ -n "${ln:-}" ]] || continue
     idx="$(_step_index_for_line "$ln")" || continue
     n="${STEP_N[$idx]}"; TOUCHED["$n"]=1
     if ! _in_list "$n" "$FIX_STEPS"; then
       if [[ "$line" =~ ^-\ \[\ \] ]]; then _block "C5" "$PLAN:$ln" "revision added an acceptance criterion to Step ${n}, which is not in the fix list (${FIXES}) — a design change, not a fix: cut it or bring it to the PM"
+        OUTSIDE_FIXES+=("${n}	ac	${line}")
       elif [[ "$line" =~ ^-\ (Create|Modify|Rewrite|Test): ]]; then _block "C5" "$PLAN:$ln" "revision added a Files entry to Step ${n}, outside the fix list (${FIXES})"
+        OUTSIDE_FIXES+=("${n}	file	${line}")
       fi
     fi
   done <<< "$ADDED"
-  new_steps="$(comm -13 <(_aid_blank_fenced < "$SNAPSHOT" | grep -oE '^### Step [0-9]+' | sort -u) <(printf '%s\n' "$BLANKED" | grep -oE '^### Step [0-9]+' | sort -u) | tr '\n' ';')"
-  [[ -n "$new_steps" ]] && _block "C5" "$PLAN" "revision added step(s): ${new_steps} — a fix does not add steps; split or bring it to the PM"
+  # Steps whose heading is new or gone count as changed too.
+  old_heads="$(_aid_blank_fenced < "$SNAPSHOT" | grep -oE '^### Step [0-9]+' | sort -u)"
+  new_heads="$(printf '%s\n' "$BLANKED" | grep -oE '^### Step [0-9]+' | sort -u)"
+  for n in $(comm -3 <(printf '%s\n' "$old_heads") <(printf '%s\n' "$new_heads") | grep -oE '[0-9]+'); do TOUCHED["$n"]=1; done
+  new_steps="$(comm -13 <(printf '%s\n' "$old_heads") <(printf '%s\n' "$new_heads") | tr '\n' ';')"
+  if [[ -n "$new_steps" ]]; then
+    _block "C5" "$PLAN" "revision added step(s): ${new_steps} — a fix does not add steps; split or bring it to the PM"
+    for n in $(grep -oE '[0-9]+' <<< "$new_steps"); do OUTSIDE_FIXES+=("${n}	step	### Step ${n}"); done
+  fi
   for n in "${!TOUCHED[@]}"; do _in_list "$n" "$FIX_STEPS" || _warn "C4" "$PLAN" "revision touched Step ${n}, which is not in the fix list (${FIXES})"; done
 fi
 
@@ -563,6 +581,10 @@ if [[ -n "$JSON_OUT" ]]; then
      --argjson blocks "$(_rows "${BLOCKS[@]}")" --argjson warns "$(_rows "${WARNS[@]}")" --argjson legacy "$(_rows "${LEGACY[@]}")" --arg mode "$MODE" \
      --argjson unknown "$(printf '%s\n' "${UNKNOWN_IDS:-}" | grep -v '^$' | jq -R . | jq -s .)" \
      --argjson revunknown "$(printf '%s\n' "${REV_UNKNOWN_IDS:-}" | grep -v '^$' | sort -u | jq -R . | jq -s .)" \
-     '{plan:$plan, plan_sha256:$sha, project_root:$root, mode:$mode, lint_rc:$lint, steps:$steps, blocking:$blocks, legacy_advisory:$legacy, warnings:$warns, unknown_identifiers:$unknown, revision_unknown_identifiers:$revunknown, pass:($blocks|length==0), checked_at:(now|todate)}' > "$JSON_OUT"
+     --argjson revision "$(if [[ -n "$SNAPSHOT" ]]; then
+         for f in "${OUTSIDE_FIXES[@]}"; do IFS=$'\t' read -r n kind text <<< "$f"; jq -cn --argjson n "$n" --arg k "$kind" --arg t "$text" '{step:$n,kind:$k,text:$t}'; done \
+           | jq -s --argjson changed "$(printf '%s\n' "${!TOUCHED[@]}" | grep -v '^$' | sort -n | jq -R 'tonumber' | jq -s .)" '{steps_changed:$changed, added_outside_fixes:.}'
+       else echo '{}'; fi)" \
+     '{plan:$plan, plan_sha256:$sha, project_root:$root, mode:$mode, lint_rc:$lint, steps:$steps, blocking:$blocks, legacy_advisory:$legacy, warnings:$warns, unknown_identifiers:$unknown, revision_unknown_identifiers:$revunknown, pass:($blocks|length==0), checked_at:(now|todate)} + $revision' > "$JSON_OUT"
 fi
 (( ${#BLOCKS[@]} == 0 )) && exit 0 || exit 1

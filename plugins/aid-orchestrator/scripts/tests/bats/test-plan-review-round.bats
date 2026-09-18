@@ -167,3 +167,79 @@ STUB
   run "$ROUND_SH" retry "$PLAN" --round 1 --role reuse
   [ "$status" -eq 0 ]; [ ! -f "$CP1/round-1/reviewer-reuse.json" ]
 }
+
+# _round1_closed [answer-filter-for-reuse] — round 1 prepared, answered, collected, closed
+_round1_closed() {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _answer_all; _answer reuse "${1:-.findings[0].severity = \"blocker\"}"
+  "$ROUND_SH" collect "$PLAN" --round 1 >/dev/null
+  "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=100 behaviour_edges=100 feasibility_deps=100 reuse=100 enforcement_tests=unknown >/dev/null
+}
+
+@test "close: refused without a value for an expected claude role; unknown is written as the string" {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _answer_all
+  "$ROUND_SH" collect "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=100
+  [ "$status" -eq 1 ]; [[ "$output" == *"no --tokens value for behaviour_edges"* ]]
+  run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=100 behaviour_edges=1 feasibility_deps=1 reuse=1 enforcement_tests=unknown
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.reviewers.enforcement_tests.tokens' "$CP1/round-1/measurement.json")" = unknown ]
+  [ "$(jq -r '.reviewers.generalist_b | "\(.provider) \(.tokens) \(.reason)"' "$CP1/round-1/measurement.json")" = "codex unknown null" ]
+  run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=5
+  [ "$status" -eq 1 ]; [[ "$output" == *"already closed"* ]]
+  run "$ROUND_SH" close "$PLAN" --round 1 --tokens enforcement_tests=77
+  [ "$status" -eq 0 ]; [ "$(jq '.reviewers.enforcement_tests.tokens' "$CP1/round-1/measurement.json")" -eq 77 ]
+}
+@test "fix-check: a fix that adds a Files entry outside the fix list fails, and prepare --round 2 quotes it" {
+  _round1_closed
+  sed -i 's/^text$/text\n\n- Create: `scripts\/new.sh` — more/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 2 (file)"* ]]
+  [ "$(jq -r .pass "$CP1/round-1/fix-diff.json")" = false ]
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -eq 1 ]; [[ "$output" == *"scripts/new.sh"* ]]
+}
+@test "fix-check: only plan-level findings run with --fixes none and pass when nothing changed" {
+  _round1_closed
+  jq '.findings[].step = null' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = none ]
+}
+@test "override: rounds 3 is recorded with six keys and lets round 3 be prepared; a second override is refused" {
+  run "$ROUND_SH" override "$PLAN" --rounds 3 --reason "PM: send a third round, please"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c 'keys' "$CP1/override.json")" = '["at","by","plan_sha256_at_issue","reason","recorded_by","rounds"]' ]
+  run "$ROUND_SH" override "$PLAN" --rounds 1 --reason "PM: actually only one round"
+  [ "$status" -eq 1 ]; [[ "$output" == *"already exists"* ]]
+}
+@test "override: rounds 1 before round 1 is closed, and a short reason, are refused" {
+  run "$ROUND_SH" override "$PLAN" --rounds 1 --reason "PM: one round is enough here"
+  [ "$status" -eq 1 ]; [[ "$output" == *"after round 1 is closed"* ]]
+  run "$ROUND_SH" override "$PLAN" --rounds 3 --reason "short"
+  [ "$status" -eq 2 ]
+}
+@test "close, dispute, finalize in order; finalize accepts AC additions, refuses a new file; dispute after finalize is refused" {
+  _round1_closed
+  fp="$(jq -r '.findings[] | select(.severity == "blocker") | .fingerprint' "$CP1/round-1/merged.json" | head -1)"
+  run "$ROUND_SH" dispute "$PLAN" --round 1 --fingerprint "$fp" --reason "the reviewer misread step one entirely"
+  [ "$status" -eq 0 ]; [[ "$output" == *disputed* ]]
+  [ "$(jq .blockers_open "$CP1/round-1/merged.json")" -ge 1 ]
+  printf '\n**Acceptance Criteria:**\n- [ ] step two quotes the open blocker\n' >> "$PLAN"
+  run "$ROUND_SH" finalize "$PLAN"
+  echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/plan-final.md" ]
+  run "$ROUND_SH" dispute "$PLAN" --round 1 --fingerprint "$fp" --reason "another dispute after finalize"
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan-final.md"* ]]
+  printf -- '- Create: `scripts/other.sh` — x\n' >> "$PLAN"
+  run "$ROUND_SH" finalize "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"outside the fix list"* ]]
+}
+@test "dispute: the PM's accepted answer closes a disputed blocker" {
+  _round1_closed
+  fp="$(jq -r '.findings[] | select(.severity == "blocker") | .fingerprint' "$CP1/round-1/merged.json" | head -1)"
+  "$ROUND_SH" dispute "$PLAN" --round 1 --fingerprint "$fp" --reason "the reviewer misread step one entirely" >/dev/null
+  run "$ROUND_SH" dispute "$PLAN" --round 1 --fingerprint "$fp" --pm accepted --reason "PM: agreed, the finding is wrong"
+  [ "$status" -eq 0 ]
+  jq -e --arg f "$fp" '.findings[] | select(.fingerprint == $f) | .status == "fixed" and .dispute.pm.answer == "accepted"' "$CP1/round-1/merged.json"
+}

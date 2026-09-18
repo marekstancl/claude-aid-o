@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 504          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 506          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -749,6 +749,28 @@ enforcements:
     verdict: ALIGNED
     test: scripts/tests/bats/test-plan-review-adjudicate.bats
     description: "A plan-review finding enters merged.json only with a read-only command and a path:line evidence that exists inside the project (not under .aid-worktrees/, no ../, line within the file); every other finding is written to rejected.json with its reason (missing_command, missing_evidence, evidence_not_found, duplicate). The gate reads only merged.json."
+
+  - id: plan_review_rounds_default
+    type: out-of-band
+    source: scripts/aid-plan-review-round.sh
+    instruction: commands/aid-plan.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: scripts/tests/bats/test-plan-review-round.bats
+    description: "prepare refuses a plan-review round beyond review_checkpoints.plan_review.rounds_default unless cp1/override.json (written only by the override subcommand, with the PM's words of at least 20 characters) allows that many rounds, and refuses a confirmation round when the previous one left nothing open to confirm."
+
+  - id: plan_review_fix_no_new_behaviour
+    type: out-of-band
+    source: scripts/aid-plan-review-round.sh
+    instruction: commands/aid-plan.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: scripts/tests/bats/test-plan-review-round.bats
+    description: "fix-check diffs the author's fix against the round's packet with aid-plan-check.sh --snapshot --fixes (the steps of open blockers and majors); a step, Files entry or acceptance criterion added outside that list fails it and prepare refuses the next round; after the last round finalize allows only acceptance-criteria additions outside the list."
 
   # ── E4 C0 Plan Contract Gate — observe mode, blocking promotion E10 ──────────
   - id: c0_contract_producer

@@ -19,11 +19,12 @@
 #       clear one invalid or missing reviewer so it can answer again
 #   fix-check <plan> --round N
 #       check the author's fix against the round's packet and fix list
-#   dispute <plan> --round N --fingerprint <f> --reason "<text>"
-#       mark a finding disputed; it stays open until the PM answers
+#   dispute <plan> --round N --fingerprint <f> --reason "<why>" [--pm accepted|rejected]
+#       mark a finding disputed (it stays open); with --pm record the PM's answer
+#       in the PM's words: accepted closes the finding, rejected reopens it
 #   finalize <plan>
 #       the one edit after the last round: its fixes plus acceptance criteria
-#   override <plan> --rounds 1|3 --reason "<the PM's words>"
+#   override <plan> --rounds 1|2|3 --reason "<the PM's words>"
 #       record the PM's instruction to run one round, or a third
 #
 # Common options: --project-root <dir> (default: the plan's own workspace).
@@ -42,11 +43,11 @@ source "${SCRIPT_DIR}/lib/aid-plan-review-config.sh"
 # shellcheck source=lib/aid-plan-review-packet.sh
 source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
 
-usage() { sed -n '4,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
-PLAN="" ROUND="" ROOT="" ONLY="" MANUAL=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS=""
+PLAN="" ROUND="" ROOT="" ONLY="" MANUAL=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS="" PM_ANSWER=""
 TOKENS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --fingerprint)  FINGERPRINT="${2:-}"; shift 2 ;;
     --reason)       REASON="${2:-}"; shift 2 ;;
     --rounds)       ROUNDS="${2:-}"; shift 2 ;;
+    --pm)           PM_ANSWER="${2:-}"; shift 2 ;;
     --tokens)       shift; while [[ $# -gt 0 && "$1" != --* ]]; do TOKENS+=("$1"); shift; done ;;
     -*) echo "${CMD}: unknown option $1" >&2; exit 2 ;;
     *)  PLAN="$1"; shift ;;
@@ -283,10 +285,171 @@ cmd_collect() {
   echo "round ${ROUND}: ${#valid[@]} of $(jq '.reviewers_expected | length' "${dir}/round.json") answered, missing: $(jq -r '[.missing[], .invalid[].role] | if length == 0 then "none" else join(", ") end' "${dir}/collect.json"), $(jq '.blockers_open' "${dir}/merged.json") blockers open, $(jq 'length' "${dir}/rejected.json") findings rejected"
 }
 
+# _token_value <role> — the --tokens value given for <role>, or nothing.
+_token_value() {
+  local kv
+  for kv in "${TOKENS[@]}"; do [[ "${kv%%=*}" == "$1" ]] && { printf '%s' "${kv#*=}"; return 0; }; done
+  return 1
+}
+
+cmd_close() {
+  local dir; dir="$(_existing_round)" || exit 1
+  [[ -f "${dir}/collect.json" ]] || _die "round ${ROUND} is not collected; run collect first"
+  local kv
+  for kv in "${TOKENS[@]}"; do
+    [[ "$kv" =~ ^[a-z_]+=([0-9]+|unknown)$ ]] || _die "--tokens takes <role>=<number|unknown>, got '${kv}'" 2
+  done
+  local measurement="${dir}/measurement.json" role i value
+  if [[ -f "$measurement" ]]; then
+    # A closed round only accepts a value for a role still recorded as unknown.
+    local added=0
+    for kv in "${TOKENS[@]}"; do
+      role="${kv%%=*}"; value="${kv#*=}"
+      [[ "$(jq -r --arg r "$role" '.reviewers[$r].tokens // empty' "$measurement")" == unknown && "$value" != unknown ]] || continue
+      jq --arg r "$role" --argjson v "$value" '.reviewers[$r].tokens = $v' "$measurement" > "${measurement}.tmp" \
+        && mv "${measurement}.tmp" "$measurement" && added=1
+    done
+    (( added )) || _die "round ${ROUND} already closed"
+    echo "round ${ROUND}: measurement updated"; return 0
+  fi
+
+  local reviewers='{}' entry usage status reason
+  for role in $(jq -r '.reviewers_expected[]' "${dir}/round.json"); do
+    i="$(aid_plan_review_role_index "$role")"
+    status="$(jq -r --arg r "$role" 'if (.valid | index($r)) then "answered" elif (.missing | index($r)) then "missing" else "invalid" end' "${dir}/collect.json")"
+    if [[ "${PR_PROVIDER[$i]}" == codex ]]; then
+      usage="${dir}/codex-${role}.usage.json"
+      if [[ -f "$usage" ]]; then
+        entry="$(jq -c '{tokens: (if (.tokens_in | type) == "number" and (.tokens_out | type) == "number" then .tokens_in + .tokens_out else "unknown" end)}
+                        + (del(.answered, .reason)) + (if .reason then {reason} else {} end)' "$usage")"
+      else
+        entry='{"tokens":"unknown","reason":"no_file"}'
+      fi
+    else
+      value="$(_token_value "$role")" || _die "no --tokens value for ${role}; pass ${role}=<number> from the Agent result, or ${role}=unknown"
+      entry="$(jq -nc --arg v "$value" '{tokens: (if $v == "unknown" then "unknown" else ($v | tonumber) end)}')"
+    fi
+    reason=""
+    [[ "$status" == missing ]] && reason="$(jq -r '.reason // "no_file"' <<< "$entry")"
+    [[ "$status" == invalid ]] && reason=invalid_answer
+    reviewers="$(jq -c --arg r "$role" --argjson e "$entry" --arg p "${PR_PROVIDER[$i]}" --arg m "${PR_MODEL[$i]}" \
+      --argjson ok "$([[ "$status" == answered ]] && echo true || echo false)" --arg why "$reason" \
+      '.[$r] = ({provider: $p, model: $m, answered: $ok} + ($e | del(.reason)) + (if $why == "" then {} else {reason: $why} end))' <<< "$reviewers")"
+  done
+  jq -n --argjson round "$ROUND" --arg start "$(jq -r .started_at "${dir}/round.json")" --arg finish "$(_now)" \
+        --argjson reviewers "$reviewers" --argjson degraded "$(jq '.degraded' "${dir}/round.json")" \
+    '{round: $round, started_at: $start, finished_at: $finish, reviewers: $reviewers, degraded: $degraded}' > "$measurement"
+  aid_plan_log "$PLAN" plan_review_round_complete round="$ROUND" \
+    status="$(jq -r .status "${dir}/collect.json")" blockers_open="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
+  echo "round ${ROUND} closed: $(jq -r '[.reviewers | to_entries[] | "\(.key)=\(.value.tokens)"] | join(" ")' "$measurement")"
+}
+
+# _open_fix_list <round_dir> — steps of open or disputed blockers and majors,
+# comma-separated, or `none` when only plan-level findings (or none) are open.
+_open_fix_list() {
+  local list
+  list="$(jq -r '[.findings[] | select((.status == "open" or .status == "disputed")
+                   and (.severity == "blocker" or .severity == "major") and .step != null) | .step]
+                 | unique | map(tostring) | join(",")' "$1/merged.json")"
+  printf '%s' "${list:-none}"
+}
+
+# _check_fix <round_dir> <out.json> — aid-plan-check.sh of the current plan
+# against the round's packet and fix list; exits 2 on a usage error.
+_check_fix() {
+  local dir="$1" out="$2" fixes rc=0
+  fixes="$(_open_fix_list "$dir")"
+  "${SCRIPT_DIR}/aid-plan-check.sh" "$PLAN" --project-root "$ROOT" --snapshot "${dir}/packet/plan.md" \
+    --fixes "$fixes" --json "$out" --quiet || rc=$?
+  (( rc == 2 )) && _die "aid-plan-check.sh could not check the fix (usage error)" 2
+  jq --arg f "$fixes" '. + {fix_list: $f}' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
+}
+
+cmd_fix_check() {
+  local dir; dir="$(_existing_round)" || exit 1
+  [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
+  [[ -f "${dir}/measurement.json" ]] || _die "round ${ROUND} is not closed; run close first"
+  local out="${dir}/fix-diff.json"
+  _check_fix "$dir" "$out"
+  jq '.pass = (.added_outside_fixes | length == 0)' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
+  if [[ "$(jq -r .pass "$out")" == true ]]; then
+    echo "fix-check round ${ROUND}: pass; steps changed: $(jq -r '.steps_changed | map(tostring) | join(",") | if . == "" then "none" else . end' "$out")"
+  else
+    echo "fix-check round ${ROUND}: the fix adds what no finding asked for:" >&2
+    jq -r '.added_outside_fixes[] | "  Step \(.step) (\(.kind)): \(.text)"' "$out" >&2
+    exit 1
+  fi
+}
+
+# _last_round — the highest round that is closed, or nothing.
+_last_round() {
+  local d n best=""
+  for d in "${CP1}"/round-*/; do
+    [[ -f "${d}measurement.json" ]] || continue
+    n="${d%/}"; n="${n##*-}"
+    [[ "$n" =~ ^[0-9]+$ ]] && { [[ -z "$best" ]] || (( n > best )); } && best="$n"
+  done
+  printf '%s' "$best"
+}
+
+cmd_finalize() {
+  local last; last="$(_last_round)"
+  [[ -n "$last" ]] || _die "no closed round; finalize comes after the last round"
+  local dir="$(_round_dir "$last")" out
+  out="${dir}/finalize.json"
+  _check_fix "$dir" "$out"
+  local outside
+  outside="$(jq -c '[.added_outside_fixes[] | select(.kind != "ac")]' "$out")"
+  [[ "$outside" == "[]" ]] || _die "after the last round only its fixes and acceptance criteria may change; outside the fix list: ${outside}"
+  cp "$PLAN" "${dir}/plan-final.md"
+  echo "finalized after round ${last}: plan snapshot ${dir}/plan-final.md"
+}
+
+cmd_dispute() {
+  local dir; dir="$(_existing_round)" || exit 1
+  [[ -n "$FINGERPRINT" && ${#REASON} -ge 20 ]] || _die "--fingerprint and a --reason of at least 20 characters required" 2
+  [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
+  compgen -G "${CP1}/round-*/plan-final.md" >/dev/null \
+    && _die "the plan is finalized (plan-final.md exists); a dispute now would change what the acceptance criteria must quote"
+  jq -e --arg f "$FINGERPRINT" '.findings | map(.fingerprint) | index($f) != null' "${dir}/merged.json" >/dev/null \
+    || _die "no finding ${FINGERPRINT} in round ${ROUND}"
+  local filter
+  case "$PM_ANSWER" in
+    "")       filter='.status = "disputed" | .dispute = {reason: $why, at: $at}' ;;
+    accepted) filter='.status = "fixed" | .dispute.pm = {answer: "accepted", words: $why, at: $at}' ;;
+    rejected) filter='.status = "open" | .dispute.pm = {answer: "rejected", words: $why, at: $at}' ;;
+    *) _die "--pm takes accepted or rejected" 2 ;;
+  esac
+  jq --arg f "$FINGERPRINT" --arg why "$REASON" --arg at "$(_now)" "
+    .findings |= map(if .fingerprint == \$f then (${filter}) else . end)
+    | .blockers_open = ([.findings[] | select(.severity == \"blocker\" and (.status == \"open\" or .status == \"disputed\"))] | length)
+  " "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  echo "finding ${FINGERPRINT}: $(jq -r --arg f "$FINGERPRINT" '.findings[] | select(.fingerprint == $f) | .status' "${dir}/merged.json")"
+}
+
+cmd_override() {
+  [[ "$ROUNDS" =~ ^[1-3]$ ]] || _die "--rounds takes 1, 2 or 3" 2
+  (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
+  [[ -f "${CP1}/override.json" ]] && _die "override.json already exists; the PM's instruction is recorded once"
+  if (( ROUNDS == 1 )); then
+    [[ -f "$(_round_dir 1)/measurement.json" ]] || _die "--rounds 1 comes after round 1 is closed"
+  fi
+  mkdir -p "$CP1"
+  jq -n --argjson n "$ROUNDS" --arg at "$(_now)" --arg why "$REASON" --arg sha "$(sha256sum "$PLAN" | cut -d' ' -f1)" \
+    '{rounds: $n, by: "PM", at: $at, reason: $why, plan_sha256_at_issue: $sha, recorded_by: "controller"}' > "${CP1}/override.json"
+  aid_plan_log "$PLAN" plan_review_override rounds="$ROUNDS"
+  echo "recorded the PM's instruction: ${ROUNDS} round(s) (${CP1}/override.json)"
+}
+
 case "$CMD" in
-  prepare)  cmd_prepare ;;
-  dispatch) cmd_dispatch ;;
-  retry)    cmd_retry ;;
-  collect)  cmd_collect ;;
+  prepare)   cmd_prepare ;;
+  dispatch)  cmd_dispatch ;;
+  retry)     cmd_retry ;;
+  collect)   cmd_collect ;;
+  close)     cmd_close ;;
+  fix-check) cmd_fix_check ;;
+  finalize)  cmd_finalize ;;
+  dispute)   cmd_dispute ;;
+  override)  cmd_override ;;
   *) echo "unknown subcommand: ${CMD}" >&2; usage ;;
 esac
