@@ -167,8 +167,11 @@ if [[ ! -d "$(_round_dir 1)" ]]; then
 fi
 
 last=""
+allowed="${override_rounds:-$PR_ROUNDS_DEFAULT}"
 for n in "${rounds[@]}"; do
   d="$(_round_dir "$n")"
+  (( n > PR_ROUNDS_DEFAULT && n > allowed )) \
+    && _fail "round-${n} exists without the PM's override.json allowing ${n} rounds"
   if [[ ! -f "${d}/measurement.json" ]]; then
     _fail "round-${n} is not closed (measurement.json missing): run collect and close for round ${n}"
     continue
@@ -179,9 +182,6 @@ for n in "${rounds[@]}"; do
   [[ -f "${d}/collect.json" && "$(jq -r .status "${d}/collect.json" 2>/dev/null)" == valid ]] \
     || _fail "round-${n} invalid: $(jq -r '.reason // "too few answers"' "${d}/collect.json" 2>/dev/null); retry the missing roles with aid-plan-review-round.sh retry, then collect and close"
   last="$n"
-  allowed="${override_rounds:-$PR_ROUNDS_DEFAULT}"
-  (( n > PR_ROUNDS_DEFAULT && n > allowed )) \
-    && _fail "round-${n} exists without the PM's override.json allowing ${n} rounds"
 done
 (( ${#HARD[@]} )) && _finish
 [[ -n "$last" ]] || _finish

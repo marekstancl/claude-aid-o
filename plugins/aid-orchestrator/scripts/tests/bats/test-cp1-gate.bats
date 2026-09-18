@@ -166,3 +166,9 @@ _quote_blocker() { sed -i 's/^- \[ \] it also works$/- [ ] it also works\n- [ ] 
   run "$GATE" --plan "$PLAN"
   [ "$status" -eq 3 ]; [[ "$output" == *"plan_review config:"* ]]
 }
+@test "gate: an empty round-3 directory without override.json is named as such" {
+  _round 1 "$(_blocker_status fixed)"; _round 2 "$(_blocker_status fixed)"
+  mkdir -p "$CP1/round-3"
+  run "$GATE" --plan "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"round-3 exists without the PM's override.json"* ]]
+}
