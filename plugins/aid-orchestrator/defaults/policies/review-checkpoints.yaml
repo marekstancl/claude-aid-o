@@ -6,7 +6,28 @@ review_checkpoints:
   enabled: true                    # master switch — disables all checkpoints when false
 
   # Per-checkpoint toggles
-  cp1_plan_review: true            # post-brainstorm plan quality (verifier:docs-review)
+  cp1_plan_review: true            # plan review before EPIC generation (plan_review below)
+
+  # Plan review (CP1): six reviewer roles, one round plus a confirmation round.
+  # Read only by scripts/lib/aid-plan-review-config.sh, which refuses a role set
+  # other than the six of skills/plan-review-roles.md, a duplicate, a provider
+  # other than claude/codex and a model listed in banned_models. A project
+  # override is .aid-o/config/policies/review-checkpoints.yaml with its own
+  # plan_review block. Claude models are the Agent tool's model names; the
+  # codex model is passed to `codex exec -m`. When both generalists use the
+  # same model the round is recorded as degraded.
+  plan_review:
+    rounds_default: 2            # a third round, or only one, needs the PM's recorded override
+    min_answers: 4               # a round with fewer valid answers is invalid
+    docs_type_reviewers: [generalist_a, generalist_b]   # plans with frontmatter type: docs
+    banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
+    reviewers:
+      - {role: generalist_a,      provider: claude, model: opus}
+      - {role: generalist_b,      provider: codex,  model: gpt-5.6-terra}
+      - {role: behaviour_edges,   provider: claude, model: opus}
+      - {role: feasibility_deps,  provider: claude, model: opus}
+      - {role: reuse,             provider: claude, model: opus}
+      - {role: enforcement_tests, provider: claude, model: opus}
   cp2_step_review: true            # per-step code review (verifier:code-review)
   cp3_integration_review: true     # pre-GATES integration review (code-review + security)
   cp4_curator_validation: true     # curator proposal validation (verifier:code-review)
