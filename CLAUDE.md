@@ -423,6 +423,22 @@ Pouští se ručně, když je čas rozhodovat (`--dry-run` jen ukáže, co přib
 5. Designové body, které PM schválil odložit, dostanou řádek `IMP-NNN`
    v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu.
 
+## Mapa kódu (Graphify, od 18. 9. 2026)
+
+`graphify-out/graph.json` je mapa volání a importů, postavená jen z kódu
+(nic neodchází k modelu) a obnovovaná git hookem po každém commitu
+a přepnutí větve. Stav = poslední commit, necommitované změny v ní nejsou.
+
+- **Použij ji na závislosti:** `graphify explain "<funkce>"` (kdo ji volá,
+  co volá) a `graphify path "<A>" "<B>"` (jak se z A dostanu do B). Stejné
+  jméno funkce bývá ve víc skriptech (`cmd_init`) — pak
+  `graphify explain "<cesta>::<funkce>"`. Před změnou sdílené funkce
+  v `aid-fsm.sh` a spol. je to rychlejší a úplnější než grep.
+- **Nepoužívej `graphify query` na otázky slovy** — hledá podle podobnosti
+  názvů a 18. 9. 2026 na „jak kontrola plánu rozhoduje o průchodu" vrátil
+  políčka JSON schémat místo rozhodovacího kódu. Na to je grep.
+- Co do mapy nepatří: `.graphifyignore`. Ruční obnova: `graphify update .`.
+
 ## Conventions
 
 ### Test tiers (P081 — AID is the ecosystem pilot)

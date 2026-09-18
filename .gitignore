@@ -119,3 +119,4 @@ CLAUDE.MD
 
 # FSM transition artifact (created by aid-fsm.sh during state transitions; never tracked)
 /transition
+graphify-out/
