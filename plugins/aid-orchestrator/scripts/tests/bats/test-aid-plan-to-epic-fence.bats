@@ -11,7 +11,12 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  FIXTURE="$AID_PLUGIN_PATH/scripts/tests/fixtures/plan-with-fenced-steps.md"
+  # The plan lives in the test project, so generation resolves that workspace,
+  # and it carries the closed plan-review round the CP1 gate requires.
+  FIXTURE="$TEST_PROJECT_ROOT/.aid-o/plans/plan-with-fenced-steps.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/plan-with-fenced-steps.md" "$FIXTURE"
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$FIXTURE"
   EPIC_TEMPLATE="$AID_PLUGIN_PATH/defaults/templates/epic.md"
   OUTPUT_DIR="$TEST_TMPDIR/output"
   COUNTER="$TEST_TMPDIR/epic-counter.yaml"

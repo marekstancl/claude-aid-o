@@ -83,12 +83,14 @@ _seed_plan_unshared() {
   git -C "$WS" add -- .gitignore
   git -C "$WS" commit -q -m "the runtime area is private to this workspace"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
+  aid_fixture_seed_plan_review "$WS" "$WS/.aid-o/plans/plan.md"
 }
 
 _seed_plan() {
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$WS/.aid-o/plans/plan.md"
   git -C "$WS" add -- .aid-o/plans/plan.md
   git -C "$WS" commit -q -m "the source plan, committed — the generator refuses an uncommitted one"
+  aid_fixture_seed_plan_review "$WS" "$WS/.aid-o/plans/plan.md"
 }
 
 # _break_restore <branch> — install a post-checkout hook that deletes <branch>

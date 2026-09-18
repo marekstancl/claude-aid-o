@@ -56,7 +56,7 @@
         "bypassed_conditions": { "type": "array", "items": { "type": "string" } },
         "evidence_refs": {
           "type": "array",
-          "description": "Audit provenance at decision time: the paths of the C0 plan review and the cp1-deep evidence dir with their sha256s. The gate already validated those files; verification re-checks bytes only for the authority itself.",
+          "description": "Audit provenance at decision time: the plan review round index (cp1/rounds.json, with its sha256 when it exists) and the cp1 evidence dir. The gate already read those files; verification re-checks bytes only for the authority itself.",
           "items": {
             "type": "object",
             "required": ["path"],

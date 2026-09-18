@@ -22,6 +22,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SCRIPT_UNDER_TEST="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh"
 PLUGIN_DIR="$REPO_ROOT/plugins/aid-orchestrator"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
+# shellcheck source=lib/aid-test-plan-fixture.sh
+source "$SCRIPT_DIR/lib/aid-test-plan-fixture.sh"
 MULTI_PHASE_PLAN="$FIXTURES_DIR/multi-phase-plan-numeric.md"
 
 # ---------------------------------------------------------------------------
@@ -117,6 +119,8 @@ run_pipeline() {
   local stderr_file="$TMPDIR_ROOT/pipeline_stderr_$$"
 
   local exit_code=0
+  # The CP1 gate needs a closed plan-review round for this plan (P093).
+  [[ -f "$plan_path" ]] && { aid_fixture_seed_plan_review "$workspace" "$plan_path" || return 1; }
   (
     cd "$workspace" || exit 3
     "$SCRIPT_UNDER_TEST" \

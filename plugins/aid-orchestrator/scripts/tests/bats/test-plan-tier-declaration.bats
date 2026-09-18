@@ -62,6 +62,7 @@ _plan() {
 }
 
 _generate() {
+  aid_fixture_seed_plan_review "$ROOT" "$1" || return 1
   run bash "$PLAN_TO_EPIC" --plan "$1" --phase 1 --total 1 \
     --epic-template "$EPIC_TEMPLATE" --output-dir "$ROOT/output" \
     --counter-yaml "$ROOT/epic-counter.yaml" 3>&-

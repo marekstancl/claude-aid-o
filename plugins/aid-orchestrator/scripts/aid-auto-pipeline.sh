@@ -1542,15 +1542,15 @@ if [[ "$_gen_authority_valid" != true ]]; then
     # The bypassed conditions, recorded verbatim from the gate's own output —
     # never a paraphrase, and never a rewrite of the CP1 artifacts on disk.
     _gen_cp1_json="$(jq -n --arg out "$_gen_cp1_out" --argjson rc "$_gen_cp1_rc" \
-      --argjson refs "$(jq -n --arg a "$(aid_state_path ".aid-o/work/evidence/${plan_id}/c0-plan-review.json")" \
-                              --arg b "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1-deep")" \
+      --argjson refs "$(jq -n --arg a "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1/rounds.json")" \
+                              --arg b "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1")" \
         '[{path:$a, sha256:null},{path:$b, sha256:null}]')" \
       '{bypassed_conditions: ($out | split("\n") | map(select(length > 0))), gate_exit: $rc, evidence_refs: $refs}')"
-    # Fill the evidence_refs hashes for whatever actually exists (audit
-    # provenance at decision time; the gate already validated those files).
-    _gen_c0_ref="$(aid_state_path ".aid-o/work/evidence/${plan_id}/c0-plan-review.json")"
-    if [[ -f "$_gen_c0_ref" ]]; then
-      _gen_cp1_json="$(jq -c --arg p "$_gen_c0_ref" --arg h "$(_gen_sha256_file "$_gen_c0_ref")" \
+    # Hash the plan-review round index when it exists (audit provenance at
+    # decision time; the round directories it lists are what the gate read).
+    _gen_rounds_ref="$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1/rounds.json")"
+    if [[ -f "$_gen_rounds_ref" ]]; then
+      _gen_cp1_json="$(jq -c --arg p "$_gen_rounds_ref" --arg h "$(_gen_sha256_file "$_gen_rounds_ref")" \
         '.evidence_refs |= map(if .path == $p then .sha256 = $h else . end)' <<< "$_gen_cp1_json")"
     fi
   elif [[ "$force_generation" == true ]]; then

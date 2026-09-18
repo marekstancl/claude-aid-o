@@ -152,6 +152,9 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   mkdir -p .aid-o/work/plan-state .aid-o/config
   printf 'gates: {}\n' > .aid-o/config/execution.yaml
   export AID_PROJECT_ROOT="$TEST_DIR"
+  # The CP1 gate needs a closed plan-review round (P093).
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
+  aid_fixture_seed_plan_review "$TEST_DIR" "$TEST_DIR/clean.md"
   run "$P2E" --plan clean.md --phase 1 --total 1 \
     --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
     --output-dir out --counter-yaml counter.yaml

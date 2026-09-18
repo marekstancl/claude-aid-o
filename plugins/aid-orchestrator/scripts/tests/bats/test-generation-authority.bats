@@ -171,20 +171,20 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   local ev="$TEST_TMPDIR/p/.aid-o/work/evidence/P099"
-  mkdir -p "$ev/cp1-deep"
-  printf 'stop_rule_blockers:\n- a real blocker\n' > "$ev/cp1-deep/cp1-lens-L1-behavior.md"
-  printf 'verdict: revise\naccepted_blockers:\n- a real blocker\n'  > "$ev/cp1-deep/cp1-adjudicator.md"
-  printf '{"review_status":"verified","blocking_findings":true}\n'  > "$ev/c0-plan-review.json"
-  local before; before="$(find "$ev/cp1-deep" "$ev/c0-plan-review.json" -type f -exec sha256sum {} \; | sort)"
+  # A round that left a blocker open: the evidence a forced run bypasses.
+  jq '.findings = [{fingerprint: "f", step: 1, severity: "blocker", claim: "a real blocker", status: "open", reported_by: ["reuse"]}] | .blockers_open = 1' \
+    "$ev/cp1/round-1/merged.json" > "$ev/m" && mv "$ev/m" "$ev/cp1/round-1/merged.json"
+  local before; before="$(find "$ev/cp1" -type f -exec sha256sum {} \; | sort)"
 
   run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain --force --reason '$REASON'" 3>&-
   [ "$status" -eq 0 ]
 
-  local after; after="$(find "$ev/cp1-deep" "$ev/c0-plan-review.json" -type f -exec sha256sum {} \; | sort)"
+  local after; after="$(find "$ev/cp1" -type f -exec sha256sum {} \; | sort)"
   [ "$before" = "$after" ]
   # The bypass is recorded, and the evidence is referenced with its hash at
   # decision time rather than edited.
-  [[ "$(jq -r '.cp1.evidence_refs[].path' "$(_auth "$TEST_TMPDIR/p")" | tr '\n' ' ')" == *"c0-plan-review.json"* ]]
+  [[ "$(jq -r '.cp1.evidence_refs[].path' "$(_auth "$TEST_TMPDIR/p")" | tr '\n' ' ')" == *"cp1/rounds.json"* ]]
+  [ "$(jq -r '.cp1.evidence_refs[0].sha256' "$(_auth "$TEST_TMPDIR/p")")" != null ]
 }
 
 @test "AUDIT-BEFORE-AUTHORITY: an unwritable audit log aborts the forced run and leaves NO authority behind" {
@@ -246,14 +246,17 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
 
 # ─── the REAL gate, not the stub: the wiring is genuinely live ────────────
 
-@test "with the REAL (unstubbed) gate a high-risk plan missing CP1 evidence is blocked before any EPIC exists" {
+@test "with the REAL (unstubbed) gate a plan without a plan-review round is blocked before any EPIC exists" {
   # The stub proves counting and audit shape; this proves the pipeline really
   # calls the shipped gate and honours its refusal.
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p" high)"
+  # The seeding gives every fixture a closed plan-review round; this case is
+  # about a plan WITHOUT one.
+  rm -rf "$TEST_TMPDIR/p/.aid-o/work/evidence/P099/cp1"
   run bash -c "cd '$TEST_TMPDIR/p' && bash '$REPO_PLUGIN/scripts/aid-auto-pipeline.sh' --plan '$plan' --queue-mode chain" 3>&-
   [ "$status" -ne 0 ]
-  # Missing CP1-deep evidence is the REAL gate's rc-1 condition verdict, so
+  # A missing plan-review round is the REAL gate's rc-1 condition verdict, so
   # P074 Step 18 labels it force-required, not hard-blocked.
   [[ "$output" == *"aid_generation_force_required"* ]]
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]

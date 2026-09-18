@@ -61,13 +61,15 @@ timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; 
 
 @test "AC21: the gate writes the band it classified and why" {
   plan="$(write_plan P960 'plugins/aid-orchestrator/commands/aid-help.md')"
-  bash "$GATE" --plan "$plan" --project-root "$TMP" >/dev/null 2>&1
+  # No plan-review round exists, so the gate refuses whatever the band (P093).
+  run bash "$GATE" --plan "$plan" --project-root "$TMP"
+  [ "$status" -eq 1 ]
   tl="$(timeline_of P960)"
   [ -s "$tl" ]
   run jq -r 'select(.event == "cp1_band_classified") | .band + " " + .reason' "$tl"
   [[ "$output" == light* ]]
   run jq -r 'select(.event == "cp1_gate_result") | .result' "$tl"
-  [ "$output" = "not_applicable" ]
+  [ "$output" = "fail" ]
 }
 
 @test "the classify-only path is recorded as such, not as a gate run" {

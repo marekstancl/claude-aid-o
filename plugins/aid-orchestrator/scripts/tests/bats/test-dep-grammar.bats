@@ -116,6 +116,7 @@ _graph() {
 _to_epic() {
   local out="$TEST_PROJECT_ROOT/epics"
   mkdir -p "$out"
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$PLAN" || return 1
   bash "$PLAN_TO_EPIC" \
     --plan "$PLAN" --phase 1 --total 1 \
     --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \

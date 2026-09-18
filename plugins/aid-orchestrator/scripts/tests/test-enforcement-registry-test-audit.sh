@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # aid-tier: t2
-# test-enforcement-registry-test-audit.sh — P066 Step 19, extended by P072 Step 22.
+# test-enforcement-registry-test-audit.sh — P066 Step 19, extended by P072 Step 22
+# and P093 Step 11 (the plan review rows).
 #
-# Verifies the 3 enforcement rows this plan registers
-# (test_audit_static_command_allowlist, test_audit_catalog_approval_boundary,
-# test_audit_never_auto_invoked): each has the full required field set (not
+# Verifies every row in REQUIRED_IDS below: each has the full required field set (not
 # merely a subset), and each row's `source` citation resolves to real code —
 # the referenced file exists, and every function name named in parentheses
 # actually appears in it. A row whose source can't be resolved is exactly
@@ -26,6 +25,13 @@ REQUIRED_IDS=(
   test_tier_runner_refusal
   test_tier_declared_at_plan_time
   selector_honesty_check
+  plan_review_config_valid
+  plan_review_finding_evidence
+  plan_review_rounds_default
+  plan_review_fix_no_new_behaviour
+  cp1_round_evidence
+  cp1_open_blocker_needs_ac
+  plan_check_internal
 )
 REQUIRED_FIELDS=(id type source description instruction severity surface status verdict test)
 
