@@ -247,9 +247,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # The plan's own workspace decides which map applies, not this file's repo:
     # the same resolution aid-plan-lint.sh uses, so the dispatch and the lint
     # cannot read two different maps for one plan.
-    # shellcheck source=aid-plan-band.sh
-    source "${_AID_SM_DIR}/aid-plan-band.sh"
-    derive_root="$(_aid_band_project_root "$2")" || derive_root="$root"
+    # shellcheck source=aid-roots.sh
+    source "${_AID_SM_DIR}/aid-roots.sh"
+    derive_root="$(_aid_plan_project_root "$2")" || derive_root="$root"
     aid_standards_derive "$2" "$derive_root"; derive_rc=$?
     case "$derive_rc" in
       1) echo "aid-standards-map: no standards map configured for ${derive_root} — this project owes no '## Standards' section." >&2 ;;

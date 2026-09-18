@@ -145,7 +145,7 @@ done
 # telemetry home the same way — a cwd-first default put the same plan's events
 # in two different timelines depending on where the gate happened to be run.
 if [[ -z "$project_root" ]]; then
-  project_root="$(_aid_band_project_root "$plan")" || project_root="$(pwd)"
+  project_root="$(_aid_plan_project_root "$plan")" || project_root="$(pwd)"
 fi
 
 # ---------------------------------------------------------------------------

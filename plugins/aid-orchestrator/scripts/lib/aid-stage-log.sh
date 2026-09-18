@@ -94,15 +94,14 @@ aid_plan_timeline() {
 # check) each hand-rolled this four-step ritual and two of them had already
 # drifted on which root they resolved.
 #
-# Requires lib/aid-plan-band.sh (for `_aid_plan_id_of` / `_aid_band_project_root`);
-# callers that log plan events source it anyway to classify the band.
+# Requires lib/aid-roots.sh (for `_aid_plan_id_of` / `_aid_plan_project_root`).
 aid_plan_log() {
   local plan="${1-}" id root tl
   shift || return 0
   [[ -n "$plan" && $# -gt 0 ]] || return 0
   declare -F _aid_plan_id_of >/dev/null || return 0
   id="$(_aid_plan_id_of "$plan")" || return 0
-  root="$(_aid_band_project_root "$plan")" || return 0
+  root="$(_aid_plan_project_root "$plan")" || return 0
   tl="$(aid_plan_timeline "$root" "$id")" || return 0
   log_event "$tl" "$@" || true
 }

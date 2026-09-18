@@ -34,6 +34,8 @@ _AID_PLAN_BAND_SH_LOADED=1
 _AID_BAND_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-scoping.sh
 source "${_AID_BAND_LIB_DIR}/aid-scoping.sh"
+# shellcheck source=aid-roots.sh
+source "${_AID_BAND_LIB_DIR}/aid-roots.sh"
 
 AID_BAND_RISK_PATHS_DEFAULT="${AID_PLUGIN_PATH:-${_AID_BAND_LIB_DIR}/../..}/defaults/policies/risk-paths.yaml"
 
@@ -98,52 +100,6 @@ _aid_band_re_match() {
   return "$rc"
 }
 
-# _aid_band_project_root <plan> — the project whose policy override applies to
-# this plan: the nearest ancestor of the PLAN that holds a `.aid-o/`. Callers
-# that know their root (the gate) pass it; callers that do not (the lint, run
-# from anywhere) must not fall back to `pwd`, or the two would read different
-# maps for the same plan and the "one classification" promise would be false.
-_aid_band_project_root() {
-  local dir
-  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd)" || return 1
-  while [[ -n "$dir" && "$dir" != "/" ]]; do
-    [[ -d "${dir}/.aid-o" ]] && { printf '%s' "$dir"; return 0; }
-    dir="${dir%/*}"          # parameter expansion, not a `dirname` fork per level
-  done
-  return 1
-}
-# _aid_fm_get <plan> <key> — one scalar from the plan's YAML frontmatter block
-# (first `---` to its closing `---`), trimmed and unquoted. Nothing when the
-# key, or the block, is absent.
-#
-# ONE READER. Four hand-rolled versions of this awk existed across the plan
-# tooling and they disagreed on whether `id: "P084"` keeps its quotes — which
-# is how one plan could get one id in the gate and another in the lint's
-# telemetry path. The key is matched ANCHORED with its colon, so a `risky:`
-# line is not the key `risk`.
-_aid_fm_get() {
-  awk -v key="$2" '
-    NR == 1 && $0 != "---" { exit }
-    NR == 1 { inside = 1; next }
-    inside && $0 == "---" { exit }
-    inside && index($0, key ":") == 1 {
-      sub("^" key ":[[:space:]]*", ""); sub(/[[:space:]]*$/, "")
-      gsub(/^["\x27]|["\x27]$/, "")
-      print; exit
-    }
-  ' "$1" 2>/dev/null
-}
-
-# _aid_plan_id_of <plan> — the plan's frontmatter id, or nothing plus return 1.
-# The result must match ^[A-Za-z0-9_-]+$, because callers turn it into a
-# DIRECTORY name: an unvalidated id is both a wrong path and a traversal shape.
-_aid_plan_id_of() {
-  local id
-  id="$(_aid_fm_get "$1" id)" || return 1
-  [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
-  printf '%s' "$id"
-}
-
 # aid_plan_band <plan> [project_root] — echoes "<band>\t<reason>".
 # The reason names WHY, so telemetry and PM both get more than a verdict.
 # aid_plan_band_name <plan> [project_root] — the band alone, always one of
@@ -163,7 +119,7 @@ aid_plan_band_name() {
 aid_plan_band() {
   local plan="$1" project_root="${2:-}"
   local map="" cand
-  [[ -n "$project_root" ]] || project_root="$(_aid_band_project_root "$plan")" || project_root=""
+  [[ -n "$project_root" ]] || project_root="$(_aid_plan_project_root "$plan")" || project_root=""
   for cand in "${project_root}/.aid-o/config/policies/risk-paths.yaml" "$AID_BAND_RISK_PATHS_DEFAULT"; do
     [[ -f "$cand" ]] && { map="$cand"; break; }
   done

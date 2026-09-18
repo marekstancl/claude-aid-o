@@ -379,7 +379,7 @@ fi
 # claim of `none` over a command that finds something today is a finding. Where
 # the replay's reach ends, and who picks up there, is stated once in
 # skills/review-checkpoint-contracts.md §"Lens: reuse_evidence".
-_project_root="$(_aid_band_project_root "$PLAN")" || _project_root=""
+_project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
 # Every path this plan declares anywhere, once: the N+1 verdict asks whether a
 # conflicting site already lies inside the plan's reach, and that question is
