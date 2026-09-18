@@ -86,3 +86,12 @@ _finding() {
   run "$ADJ" "$ROOT/nowhere" --project-root "$ROOT"
   [ "$status" -eq 1 ]; [[ "$output" == *"cannot read"* ]]
 }
+@test "adjudicate: a symlink out of the project, ./.aid-worktrees and a line past the end are evidence_not_found" {
+  ln -s / "$ROOT/scripts/lnk"
+  _finding "$R1" reuse '.evidence = "scripts/lnk/etc/hostname:1"'
+  _finding "$R1" reuse '.id = "reuse-2" | .evidence = "./.aid-worktrees/x/a.sh:1"'
+  _finding "$R1" reuse '.id = "reuse-3" | .evidence = "scripts/a.sh:4"'
+  run "$ADJ" "$R1" --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found","evidence_not_found","evidence_not_found"]' ]
+}

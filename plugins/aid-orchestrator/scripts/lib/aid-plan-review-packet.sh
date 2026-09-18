@@ -121,7 +121,7 @@ aid_plan_review_answer_error() {
           elif ((keys - $fkeys) | length) > 0 then "\($id): unknown key \((keys - $fkeys) | join(", "))"
           elif (.step | (type == "null" or (type == "number" and . == floor)) | not) then "\($id): step must be an integer or null"
           elif (.severity | IN($f.severity.enum[]) | not) then "\($id): severity must be blocker, major or minor"
-          elif ([.id, .claim, .fix] | map(type == "string" and length > 0) | all | not) then "\($id): id, claim and fix must be non-empty strings"
+          elif ([.id, .claim, .fix] | map(type == "string" and test("\\S")) | all | not) then "\($id): id, claim and fix must be non-empty strings"
           elif ([.command, .evidence] | map(. == null or type == "string") | all | not) then "\($id): command and evidence must be strings"
           else empty end end;
       if type != "object" then "answer is not a JSON object"

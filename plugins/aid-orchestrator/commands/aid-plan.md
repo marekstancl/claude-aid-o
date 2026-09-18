@@ -490,7 +490,8 @@ skipped. The gate then passes with a notice.
    bash "$R" dispatch <plan> --round 1 --provider codex --role generalist_b
    ```
 
-   Without Codex installed it records the role as not answered; continue. Every
+   Without Codex installed it prints that the role is recorded as not
+   answered and exits 0; continue. Every
    role with `provider: claude` follows `scripts/lib/aid-plan-review-adapter-claude.md`,
    quoted here in full:
 
@@ -524,16 +525,19 @@ no underscore in `--focus` or `--agent-id`):
    `subagent_tokens` figure the Agent result reports; when the result shows
    none, the value is `unknown`.
 
-3. Close the dispatch. When the reviewer wrote no file, create the marker
-   `<round dir>/reviewer-<role>.missing` first and pass it as `--output-file`:
+3. Close the dispatch. `<answer>` is `<round dir>/reviewer-<role>.json`; when
+   the reviewer wrote no file, create the empty marker
+   `<round dir>/reviewer-<role>.missing` and use that path instead:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
-     --output-file <round dir>/reviewer-<role>.json --evidence-dir <round dir>
+     --output-file <answer> --evidence-dir <round dir>
    ```
 
 After ALL reviewers of the round (claude and codex) have been dispatched, run
-`collect` once, then `close` once with a token value for every claude role:
+`collect`. Only when `collect` exits 0, run `close` once with a token value for
+every claude role; when it reports the round invalid, retry the roles it names
+first (`close` refuses an invalid round):
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" collect <plan> --round N
@@ -566,7 +570,9 @@ through `retry`, then this procedure for that role alone.
 
    A disputed blocker stays open until the PM accepts the dispute.
 
-6. No blocker open: go to item 9. Otherwise fix the plan — only the steps the
+6. No blocker open: if you changed the plan after the round (fixing majors,
+   say), run `finalize` (item 8) before the gate; otherwise go to item 9.
+   Blockers open: fix the plan — only the steps the
    open blockers and majors name — then check the fix and prepare round 2:
 
    ```bash
@@ -610,7 +616,8 @@ bash "$R" override <plan> --rounds 3 --reason "<the PM's words, quoted>"
 The record states that the PM said it; it cannot prove it, exactly like
 `--force` and every waiver. Never run it on your own judgment. `--rounds 1` is
 accepted once round 1 is closed, and its open blockers still need the
-acceptance criteria of item 8. A third round runs only on what is still open.
+acceptance criteria of item 8; after it only the steps of round 1's open
+findings and acceptance criteria may change before `finalize`. A third round runs only on what is still open.
 
 **Codex unavailable.** The role is recorded as not answered and the round stays
 valid while at least `min_answers` reviewers, one of them a generalist,

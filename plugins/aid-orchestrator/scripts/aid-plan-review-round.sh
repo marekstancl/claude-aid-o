@@ -95,13 +95,13 @@ _expected_roles() {
   if [[ "$type" == docs ]]; then roles="$PR_DOCS_REVIEWERS"; else roles="${PR_ROLE[*]}"; fi
   if (( n >= 2 )); then
     # The confirmation round asks only reviewers whose findings touch a changed
-    # step, plus every reviewer that reported a blocker.
+    # step, plus every reviewer of a blocker or major still open.
     prev="$(_round_dir $((n - 1)))/merged.json"; fix="$(_round_dir $((n - 1)))/fix-diff.json"
     local narrow
     narrow="$(jq -r --slurpfile fd "$fix" '
       ($fd[0].steps_changed // []) as $changed
       | [.findings[] | select(.step != null and (.step | IN($changed[]))
-                              or (.severity == "blocker" and .status != "fixed"))
+                              or ((.severity == "blocker" or .severity == "major") and .status != "fixed"))
          | .reported_by[]] | unique | .[]' "$prev")"
     roles="$(for r in $roles; do grep -qxF "$r" <<<"$narrow" && echo "$r"; done)"
   fi
@@ -139,7 +139,9 @@ cmd_prepare() {
   fi
 
   mkdir -p "$dir" || _die "cannot create ${dir}"
-  aid_plan_review_packet_build "$PLAN" "$ROOT" "$check" "$dir" || { rm -rf "${dir}/packet"; exit 1; }
+  # A half-prepared round is removed whole, so a second prepare can run.
+  trap 'rm -rf "$dir"' EXIT
+  aid_plan_review_packet_build "$PLAN" "$ROOT" "$check" "$dir" || exit 1
 
   local roles=() role
   mapfile -t roles < <(_expected_roles "$ROUND" | grep -v '^$')
@@ -156,6 +158,7 @@ cmd_prepare() {
     aid_plan_review_prompt_render "$role" "$ROUND" "$dir" || exit 1
   done
 
+  trap - EXIT
   if (( ! MANUAL )); then
     index="${CP1}/rounds.json"
     [[ -f "$index" ]] || echo '[]' > "$index"
@@ -188,7 +191,8 @@ cmd_dispatch() {
 
   if ! command -v codex >/dev/null 2>&1; then
     jq -n '{answered: false, reason: "codex_absent"}' > "$usage"
-    _die "codex is not installed; ${ROLE} is recorded as not answered, continue with collect"
+    echo "codex is not installed; ${ROLE} is recorded as not answered — continue with the other reviewers, then collect"
+    return 0
   fi
   local events="${dir}/codex-${ROLE}.events.jsonl" last="${dir}/codex-${ROLE}.last.txt" rc=0
   # In a subshell: the launcher's library sets its own shell options on load.
@@ -295,6 +299,8 @@ _token_value() {
 cmd_close() {
   local dir; dir="$(_existing_round)" || exit 1
   [[ -f "${dir}/collect.json" ]] || _die "round ${ROUND} is not collected; run collect first"
+  [[ "$(jq -r .status "${dir}/collect.json")" == valid ]] \
+    || _die "round ${ROUND} is invalid ($(jq -r '.reason // "too few answers"' "${dir}/collect.json")); retry the roles collect named, then collect again"
   local kv
   for kv in "${TOKENS[@]}"; do
     [[ "$kv" =~ ^[a-z_]+=([0-9]+|unknown)$ ]] || _die "--tokens takes <role>=<number|unknown>, got '${kv}'" 2
@@ -409,8 +415,11 @@ cmd_dispute() {
   local dir; dir="$(_existing_round)" || exit 1
   [[ -n "$FINGERPRINT" && ${#REASON} -ge 20 ]] || _die "--fingerprint and a --reason of at least 20 characters required" 2
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
-  compgen -G "${CP1}/round-*/plan-final.md" >/dev/null \
-    && _die "the plan is finalized (plan-final.md exists); a dispute now would change what the acceptance criteria must quote"
+  local final
+  for final in "${CP1}"/round-*/plan-final.md; do
+    [[ -f "$final" ]] && cmp -s "$PLAN" "$final" \
+      && _die "the plan is finalized (plan-final.md matches it); a dispute now would change what the acceptance criteria must quote — edit the plan and finalize again"
+  done
   jq -e --arg f "$FINGERPRINT" '.findings | map(.fingerprint) | index($f) != null' "${dir}/merged.json" >/dev/null \
     || _die "no finding ${FINGERPRINT} in round ${ROUND}"
   local filter

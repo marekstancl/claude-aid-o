@@ -243,3 +243,27 @@ _round1_closed() {
   [ "$status" -eq 0 ]
   jq -e --arg f "$fp" '.findings[] | select(.fingerprint == $f) | .status == "fixed" and .dispute.pm.answer == "accepted"' "$CP1/round-1/merged.json"
 }
+@test "close: an invalid round is refused, so retry stays possible" {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _answer generalist_a
+  "$ROUND_SH" collect "$PLAN" --round 1 >/dev/null 2>&1 || true
+  run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=1 behaviour_edges=1 feasibility_deps=1 reuse=1 enforcement_tests=1
+  [ "$status" -eq 1 ]; [[ "$output" == *"invalid"* ]]
+  run "$ROUND_SH" retry "$PLAN" --round 1 --role reuse
+  [ "$status" -eq 0 ]
+}
+@test "prepare: the confirmation round asks the reporter of an open major on an unchanged step" {
+  _round1_closed '.findings[0].severity = "major" | .findings[0].step = null'
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -eq 0 ]
+  [ "$(jq '.reviewers_expected | length' "$CP1/round-2/round.json")" -gt 0 ]
+}
+@test "dispute: allowed again once the plan was edited after finalize" {
+  _round1_closed
+  fp="$(jq -r '.findings[0].fingerprint' "$CP1/round-1/merged.json")"
+  "$ROUND_SH" finalize "$PLAN" >/dev/null
+  printf '\nmore\n' >> "$PLAN"
+  run "$ROUND_SH" dispute "$PLAN" --round 1 --fingerprint "$fp" --reason "a reason that is long enough here"
+  [ "$status" -eq 0 ]
+}

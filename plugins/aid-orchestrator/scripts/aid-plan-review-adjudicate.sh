@@ -11,8 +11,8 @@
 #   - an evidence path outside the project, under .aid-worktrees/, missing, or a
 #     line beyond the file's end                    → rejected: evidence_not_found
 #   - the same fingerprint twice from one reviewer   → rejected: duplicate
-# What survives is merged by fingerprint (step, first evidence, first eight
-# words of the claim): the highest severity wins, every reporter is listed.
+# What survives is merged by fingerprint (step, first evidence file, first
+# eight words of the claim): the highest severity wins, every reporter is listed.
 #
 # Writes <round_dir>/merged.json, rejected.json and yield.json. With --previous,
 # a previous open finding is marked fixed when every reviewer that reported it
@@ -62,11 +62,11 @@ _evidence_found() {
     if [[ "$path" == plan.md ]]; then
       (( line <= PLAN_LINES )) || return 1; continue
     fi
-    [[ "$path" == /* ]] && path="${path#"$ROOT"/}"
-    [[ "$path" != /* && "$path" != *..* && "$path" != .aid-worktrees/* ]] || return 1
-    abs="${ROOT}/${path}"
-    [[ -f "$abs" ]] || return 1
-    (( line <= $(wc -l < "$abs") + 1 )) || return 1
+    [[ "$path" == /* ]] || path="${ROOT}/${path}"
+    # Resolved, so neither `..`, `./` nor a symlink can leave the project.
+    abs="$(realpath -e -- "$path" 2>/dev/null)" || return 1
+    [[ "$abs" == "$ROOT"/* && "$abs" != "$ROOT"/.aid-worktrees/* && -f "$abs" ]] || return 1
+    (( line <= $(awk 'END { print NR }' "$abs") )) || return 1
   done
 }
 
@@ -89,7 +89,9 @@ for role in "${VALID[@]}"; do
     fi
     if [[ -z "$reason" ]]; then
       step="$(jq -r '.step // "plan"' <<< "$f")"
-      first="$(jq -r '.evidence | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$f")"
+      # The first evidence FILE, not its line: a fix that shifts lines must not
+      # turn an unresolved finding into a new one.
+      first="$(jq -r '.evidence | split(";")[0] | gsub("^\\s+|\\s+$"; "") | sub(":[0-9]+$"; "")' <<< "$f")"
       fp="$(fingerprint "$project_id" plan_review "$step" "$first" "$(_claim_key "$(jq -r '.claim' <<< "$f")")")"
       if [[ -n "${seen[$fp]:-}" ]]; then
         reason=duplicate

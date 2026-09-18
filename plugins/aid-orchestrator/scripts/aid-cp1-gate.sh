@@ -88,12 +88,6 @@ if [[ "$classify_only" -eq 1 ]]; then
   exit 0
 fi
 
-if [[ "$classify_only" -eq 1 ]]; then
-  echo "$AID_PLAN_RISK_BAND"
-  echo "CP1-gate: plan ${plan_id} band=${AID_PLAN_RISK_BAND} (${AID_PLAN_RISK_REASON})" >&2
-  exit 0
-fi
-
 if [[ ! -d "${project_root}/.aid-o" ]]; then
   echo "CP1-gate: no .aid-o/ workspace at ${project_root} — not an AID project, not gated." >&2
   exit 0
@@ -176,11 +170,14 @@ for n in "${rounds[@]}"; do
     _fail "round-${n} is not closed (measurement.json missing): run collect and close for round ${n}"
     continue
   fi
-  for f in collect.json merged.json round.json; do
+  for f in collect.json round.json; do
     jq -e . "${d}/${f}" >/dev/null 2>&1 || _hard "round ${n} evidence unreadable: ${d}/${f}"
   done
-  [[ -f "${d}/collect.json" && "$(jq -r .status "${d}/collect.json" 2>/dev/null)" == valid ]] \
-    || _fail "round-${n} invalid: $(jq -r '.reason // "too few answers"' "${d}/collect.json" 2>/dev/null); retry the missing roles with aid-plan-review-round.sh retry, then collect and close"
+  if [[ "$(jq -r .status "${d}/collect.json" 2>/dev/null)" == valid ]]; then
+    jq -e . "${d}/merged.json" >/dev/null 2>&1 || _hard "round ${n} evidence unreadable: ${d}/merged.json"
+  else
+    _fail "round-${n} invalid: $(jq -r '.reason // "too few answers"' "${d}/collect.json" 2>/dev/null); retry the missing roles with aid-plan-review-round.sh retry, then collect and close"
+  fi
   last="$n"
 done
 (( ${#HARD[@]} )) && _finish
@@ -200,7 +197,7 @@ if [[ "$plan_sha" != "$reviewed_sha" ]]; then
 fi
 
 # --- a second round when the first left blockers ------------------------------
-if (( last == 1 )) && [[ "$override_rounds" != 1 ]]; then
+if (( last == 1 )) && [[ "$override_rounds" != 1 && -f "$(_round_dir 1)/merged.json" ]]; then
   open1="$(jq '.blockers_open' "$(_round_dir 1)/merged.json")"
   (( open1 > 0 )) && _fail "round-1 left ${open1} blocker(s) open and there is no round-2: fix the plan, run fix-check, then prepare --round 2"
 fi
@@ -223,15 +220,16 @@ _criteria() {
 }
 while IFS=$'\t' read -r n step claim; do
   [[ -n "$n" ]] || continue
+  claim="$(base64 -d <<< "$claim")"
   key="$(cut -d' ' -f1-8 <<< "$(_norm <<< "$claim")")"
   if ! _criteria "$step" | _norm | grep -qF -- "$key"; then
     where="Step ${step}"; [[ "$step" == null ]] && where="## Success Criteria"
     _fail "round-${n} blocker still open is not quoted in an acceptance criterion of ${where}: \"${key}\""
   fi
 done < <(for n in "${rounds[@]}"; do
-           [[ -f "$(_round_dir "$n")/measurement.json" ]] || continue
+           [[ -f "$(_round_dir "$n")/measurement.json" && -f "$(_round_dir "$n")/merged.json" ]] || continue
            jq -r --arg n "$n" '.findings[] | select(.severity == "blocker" and (.status == "open" or .status == "disputed"))
-                               | [$n, (.step | tostring), .claim] | @tsv' "$(_round_dir "$n")/merged.json"
+                               | [$n, (.step | tostring), (.claim | @base64)] | @tsv' "$(_round_dir "$n")/merged.json"
          done)
 
 _finish "round ${last} closed$([[ "$PR_DEGRADED" == 1 ]] && echo ', degraded: both generalists on one model')"

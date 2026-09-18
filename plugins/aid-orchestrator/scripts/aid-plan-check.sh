@@ -532,7 +532,7 @@ if [[ -n "$SNAPSHOT" ]]; then
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
       _known_path "$p" && continue
-      [[ "$p" =~ (^|/)(cp1|round-[0-9N]+|packet|evidence)/ ]] && continue
+      [[ "$p" =~ ^(\.aid-o/work/evidence/|cp1/|round-[0-9N]+/|packet/) ]] && continue
       _block "C2" "$PLAN:$ln" "revision added \`${p}\`, which does not exist and no step creates"
     done < <(_aid_backtick_paths "$line")
     if [[ -n "$ROOT" ]]; then

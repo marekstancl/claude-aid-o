@@ -124,3 +124,8 @@ _answer() {
     grep -qE "aid-plan-review-round.sh\"? ${sub} |\"\\\$R\" ${sub} " <<< "$sec" || { echo "missing: $sub"; return 1; }
   done
 }
+@test "answer: a whitespace-only claim is refused" {
+  _answer '.findings[0].claim = "   "'
+  run aid_plan_review_answer_error "$TEST_DIR/a.json"
+  [ "$status" -eq 1 ]
+}

@@ -172,3 +172,9 @@ _quote_blocker() { sed -i 's/^- \[ \] it also works$/- [ ] it also works\n- [ ] 
   run "$GATE" --plan "$PLAN"
   [ "$status" -eq 1 ]; [[ "$output" == *"round-3 exists without the PM's override.json"* ]]
 }
+@test "gate: a round whose collect was invalid is a forceable FAIL naming retry, not a hard exit" {
+  _round 1 '[]' 1 invalid
+  rm "$CP1/round-1/merged.json"
+  run "$GATE" --plan "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *retry* ]]
+}
