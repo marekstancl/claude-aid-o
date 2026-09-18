@@ -44,6 +44,7 @@ that is absent from a clean checkout.
 | `skills/agent-protocol.md` | `update` | Carries the agent handoff contract with all five boundary messages. |
 | `skills/role-cards.md` | `update` | Auditor, Curator, Simplifier and Reporter cards state the plan-final boundary. |
 | `skills/review-checkpoint-contracts.md` | `update` | Records that CP3 stays per EPIC while the specialist stack moves to plan-final. |
+| `skills/plan-review-roles.md` | `no-scope` | Plan review roles and evidence rule (P093); says nothing about the plan lifecycle. |
 | `skills/run-management.md` | `update` | `active.md` guidance made mode-aware. |
 | `skills/plan-writing.md` | `update` | Documentation-step rule and lifecycle references made mode-aware. |
 | `skills/planner.md` | `verified` | Plans work; does not instruct on release cadence. |
