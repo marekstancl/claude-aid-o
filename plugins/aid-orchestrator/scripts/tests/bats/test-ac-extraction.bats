@@ -141,8 +141,12 @@ _extract() {
 # ─── End-to-end: both aid-plan-to-epic.sh call sites agree ────────────────
 
 @test "both call sites (flattened AC section and per-step ac[] scoping) produce the same criterion set" {
+  # The plan lives in the test project, so generation resolves that workspace.
+  local plan="$TEST_PROJECT_ROOT/.aid-o/plans/plan-with-multiline-ac.md"
+  mkdir -p "$(dirname "$plan")" && cp "$FIXTURE" "$plan"
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$plan"
   run "$PLAN_TO_EPIC" \
-    --plan "$FIXTURE" \
+    --plan "$plan" \
     --phase 1 --total 1 \
     --epic-template "$EPIC_TEMPLATE" \
     --output-dir "$OUTPUT_DIR" \

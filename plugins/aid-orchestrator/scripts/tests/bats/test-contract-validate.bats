@@ -2,10 +2,8 @@
 # aid-tier: t2
 # test-contract-validate.bats — P058 Step 4, D5 canonical behavioral test.
 #
-# Covers the contract-validation gate (aid-contract-validate.sh), its
-# BLOCKING wiring into aid-auto-pipeline.sh, and the C0 review Check 6
-# read-only wiring in aid-c0-contract.sh. One canonical bats file per this
-# step's plan text ("jeden soubor, ne .sh+.bats dispatch").
+# Covers the contract-validation gate (aid-contract-validate.sh) and its
+# BLOCKING wiring into aid-auto-pipeline.sh, in one canonical bats file.
 #
 # All fixtures are built inline (heredoc) in mktemp-isolated subprocess
 # workspaces — no new files added to scripts/tests/fixtures/ (out of this
@@ -19,7 +17,6 @@ setup() {
   export AID_PLUGIN_PATH
   GATE="$AID_PLUGIN_PATH/scripts/gates/aid-contract-validate.sh"
   PIPELINE="$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh"
-  C0_SCRIPT="$AID_PLUGIN_PATH/scripts/aid-c0-contract.sh"
   EPIC_TO_JSON="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
   SCHEMA="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
   FIXTURE_STEP_SCOPING="$AID_PLUGIN_PATH/scripts/tests/fixtures/E-TEST-005-1_1-step-scoping-repro.md"
@@ -327,22 +324,9 @@ PLANMD
   git -C "$TEST_PROJECT_ROOT" add -- plan-nofiles.md
   git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-nofiles.md, committed"
 
-  # P084: a plan that declares NO path at all cannot be classified from its
-  # paths, so the CP1 gate fail-closes it to band `full` (`no_files_declared`)
-  # — which is exactly this fixture's shape, and would stop the run before
-  # generation ever reached D5. This test is about the D5 contract gate, so CP1
-  # is satisfied deliberately and visibly: real lens evidence plus ONE PM
-  # escalation override, which the gate consumes to cover both the C0 review and
-  # the ledger. Nothing here weakens D5; it only gets the run to it.
-  local cp1_dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P900/cp1-deep"
-  mkdir -p "$cp1_dir"
-  local lens
-  for lens in cp1-lens-L1-behavior cp1-lens-L2-feasibility cp1-lens-L3-enforcement; do
-    printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "$cp1_dir/$lens.md"
-  done
-  printf 'accepted_blockers: []\nrejected_blockers: []\nverdict: pass\n' > "$cp1_dir/cp1-adjudicator.md"
-  printf '{"pm_ref":"P084 fixture: CP1 satisfied so the D5 gate can be exercised"}\n' \
-    > "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P900/cp1-pm-escalation-override.json"
+  # This test is about the D5 contract gate; the CP1 gate before it needs a
+  # closed plan-review round, seeded by the real round script (P093).
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$TEST_PROJECT_ROOT/plan-nofiles.md"
 
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-nofiles.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
@@ -464,6 +448,7 @@ PLANMD
   git -C "$TEST_PROJECT_ROOT" add -- plan-clean.md
   git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-clean.md, committed"
 
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$TEST_PROJECT_ROOT/plan-clean.md"
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-clean.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
   [ "$status" -eq 0 ]
@@ -607,6 +592,7 @@ PLANMD
   git -C "$TEST_PROJECT_ROOT" add -- plan-mixed.md
   git -C "$TEST_PROJECT_ROOT" commit -q -m "source plan plan-mixed.md, committed"
 
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$TEST_PROJECT_ROOT/plan-mixed.md"
   cd "$TEST_PROJECT_ROOT"
   run "$PIPELINE" --plan plan-mixed.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
   [ "$status" -ne 0 ]
@@ -627,51 +613,6 @@ PLANMD
   run grep -c "E-901-2_2" "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml"
   [ "$status" -ne 0 ] || [ "$output" -eq 0 ]
 }
-
-# ─── C0 review Check 6: reads (never re-runs) contract-validate.json ───────
-
-@test "aid-c0-contract.sh review: Check 6 reflects a persisted PASS result" {
-  local c0_dir="$TEST_TMPDIR/c0-pass"
-  mkdir -p "$c0_dir"
-  echo '{"result":"pass","checks":[],"violations":[]}' > "$c0_dir/contract-validate.json"
-
-  run bash "$C0_SCRIPT" review "$AID_PLUGIN_PATH/scripts/tests/fixtures/c0/clean-plan/plan.md" "$c0_dir"
-  [ "$status" -eq 0 ]
-
-  run jq -e '.plan_review.structural_checks[] | select(.id == "contract_validation") | .status == "pass"' "$c0_dir/plan-review.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "aid-c0-contract.sh review: Check 6 reflects a persisted FAIL result (does not re-run the gate)" {
-  local c0_dir="$TEST_TMPDIR/c0-fail"
-  mkdir -p "$c0_dir"
-  echo '{"result":"fail","checks":[{"id":"per_step_scoping","status":"fail","detail":"broadcast"}],"violations":["per_step_scoping: broadcast"]}' > "$c0_dir/contract-validate.json"
-
-  run bash "$C0_SCRIPT" review "$AID_PLUGIN_PATH/scripts/tests/fixtures/c0/clean-plan/plan.md" "$c0_dir"
-  [ "$status" -eq 0 ]
-
-  # review itself stays observe-only (exit 0) even though the underlying
-  # contract-validate result is FAIL — blocking already happened upstream in
-  # the pipeline hook, before review ever runs on a genuinely failing phase.
-  run jq -e '.plan_review.structural_checks[] | select(.id == "contract_validation") | .status != "pass"' "$c0_dir/plan-review.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "aid-c0-contract.sh review: Check 6 is 'unverifiable' (never 'pass') when contract-validate.json is absent" {
-  local c0_dir="$TEST_TMPDIR/c0-missing"
-  mkdir -p "$c0_dir"
-
-  run bash "$C0_SCRIPT" review "$AID_PLUGIN_PATH/scripts/tests/fixtures/c0/clean-plan/plan.md" "$c0_dir"
-  [ "$status" -eq 0 ]
-
-  run jq -e '.plan_review.structural_checks[] | select(.id == "contract_validation") | .status == "unverifiable"' "$c0_dir/plan-review.json"
-  [ "$status" -eq 0 ]
-}
-
-# ─── v2.58.0 IMP-232 per_step_scoping precision (R1-R7) ─────────────────────
-# Legitimate same-file sequential refinement must PASS; only a genuine
-# broadcast (both fields identical, no honored per-step blocks) or a
-# generator that ignores/degenerates the authoritative blocks must FAIL.
 
 @test "per_step_scoping R1: same allowed_paths + distinct outputs + per-step blocks -> PASS" {
   local epic="$TEST_TMPDIR/r1.md" pj="$TEST_TMPDIR/r1.json"

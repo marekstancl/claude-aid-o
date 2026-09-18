@@ -4,8 +4,7 @@
 # (P064 "Plan Branch Substrate", EPIC E-064-1_2, Step 1).
 #
 # WHY THIS EXISTS: three call sites already hand-roll the exact same
-# sidecar-flock idiom — `scripts/aid-emit-dispatch.sh:130-140` (twice),
-# `scripts/lib/aid-cp1-ledger.sh:424-428` and
+# sidecar-flock idiom — `scripts/aid-emit-dispatch.sh:130-140` (twice) and
 # `scripts/lib/aid-gate-runtime-baseline.sh:129-131` (twice) — each opening a
 # `<data_file>.lock` sidecar via `exec {fd}>lockfile` and calling
 # `flock -x -w <n> <fd>` inside a subshell scoped to that one critical
@@ -85,10 +84,10 @@
 #     waiting for the lock) — always 3, never a hang.
 #   aid_lock_release: 0 = closed, 1 = bad/missing fd argument or already closed.
 #
-# **Last Updated:** 2026-07-20
+# **Last Updated:** 2026-09-18
 # =============================================================================
 
-# Default wait, matching lib/aid-cp1-ledger.sh:427's established 10s budget.
+# Default wait: 10 s, the budget the hand-rolled flock sites above use.
 AID_LOCK_DEFAULT_TIMEOUT_S=10
 
 # Set by aid_lock_acquire on success; "" otherwise. See the lifetime-model

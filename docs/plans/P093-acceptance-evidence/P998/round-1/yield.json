@@ -1,0 +1,32 @@
+{
+  "generalist_a": {
+    "originated": 2,
+    "survived": 2,
+    "fixed": 2
+  },
+  "generalist_b": {
+    "originated": 4,
+    "survived": 4,
+    "fixed": 4
+  },
+  "behaviour_edges": {
+    "originated": 3,
+    "survived": 3,
+    "fixed": 3
+  },
+  "feasibility_deps": {
+    "originated": 1,
+    "survived": 1,
+    "fixed": 0
+  },
+  "reuse": {
+    "originated": 2,
+    "survived": 2,
+    "fixed": 2
+  },
+  "enforcement_tests": {
+    "originated": 2,
+    "survived": 2,
+    "fixed": 0
+  }
+}

@@ -1,0 +1,13 @@
+{"role": "generalist_a",
+ "findings": [
+  {"id": "generalist_a-1", "step": 4, "severity": "minor",
+   "claim": "The fate of client_document_defaults contradicts itself: Scope and Constraints say migration 0040 deletes the old table, while Step 4, the Migration Plan and AC10 define 0040 as a rename to client_document_defaults_legacy that keeps the data, so an implementer cannot tell whether a drop or a rename is required.",
+   "command": "grep -n \"0040\\|zrušení staré tabulky\\|tabulku po kontrole smaže\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:58; plan.md:1179; plan.md:464; plan.md:1158; plan.md:1325",
+   "fix": "State one behaviour everywhere: 0040 renames the table to client_document_defaults_legacy (the data is kept, the table is not dropped), and change Scope line 58 and Constraints line 1179 to match."},
+  {"id": "generalist_a-2", "step": 12, "severity": "minor",
+   "claim": "AC7 checks that `_navod.txt` appears in export/router.py, but Step 12 puts the file generation in the new export/manifest.py (build_navod), so the AC can pass on just a filename string while the manifest builder is missing or broken.",
+   "command": "grep -n \"manifest.py\\|_navod\\\\\\\\.txt\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:903; plan.md:1301; plan.md:1302",
+   "fix": "Point AC7 at backend/acta/export/manifest.py with regex `def build_navod`, or turn it into a cmd AC that runs backend/tests/export/test_manifest.py."}
+ ]}

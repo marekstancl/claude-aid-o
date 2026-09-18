@@ -64,15 +64,11 @@ _convert() {
   [ "$(jq -r '.pm_ref' "$a")" = "$REASON" ]
 }
 
-@test "P073 Step 10: grant writes the c0 artifact at the EXISTING path and shape its consumers already read" {
+@test "P093: grant c0 is refused and points at the plan review override" {
   run "$FSM" pm-override grant c0 P900 --reason "$REASON" --project-root "$ROOT"
-  [ "$status" -eq 0 ]
-  local a="$ROOT/.aid-o/work/evidence/P900/cp1-pm-escalation-override.json"
-  [ -f "$a" ]
-  # aid-cp1-gate.sh and aid-cp1-ledger.sh both read exactly this field; the
-  # added fields must not disturb it.
-  [ "$(jq -r '.pm_ref' "$a")" = "$REASON" ]
-  [ "$(jq -r '.target' "$a")" = "c0" ]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aid-plan-review-round.sh override"* ]]
+  [ ! -e "$ROOT/.aid-o/work/evidence/P900/cp1-pm-escalation-override.json" ]
 }
 
 @test "P073 Step 10: grant REFUSES to overwrite an unconsumed override" {
@@ -91,7 +87,7 @@ _convert() {
 
   run "$FSM" pm-override grant c9 P900 --reason "$REASON" --project-root "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"must be 'c0' or 'c3'"* ]]
+  [[ "$output" == *"must be 'c3'"* ]]
 
   run "$FSM" pm-override grant c3 NOTAPLAN --reason "$REASON" --project-root "$ROOT"
   [ "$status" -ne 0 ]

@@ -155,6 +155,33 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   printf '\n### Step 3: extra\n\n**Objective:** more.\n\n**Files:**\n- Modify: `src/b.py` — x\n\n**Dependencies:**\n- Depends on: none\n\n**Acceptance Criteria:**\n- [ ] a\n\n**Effort:** S\n**AID Role:** backend\n' >> p.md
   run "$CHECK" p.md --snapshot old.md --fixes 1; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK C5"*"added step"* ]]
 }
+@test "plan-check C: --fixes none is accepted with --snapshot and passes an unchanged plan" {
+  _plan p.md strict; cp p.md old.md
+  run "$CHECK" p.md --snapshot old.md --fixes none --json out.json; [ "$status" -eq 0 ]
+  [ "$(jq -c '.steps_changed' out.json)" = '[]' ]; [ "$(jq -c '.added_outside_fixes' out.json)" = '[]' ]
+}
+@test "plan-check C: --json names steps_changed and an AC added outside the fix list as kind ac" {
+  _plan p.md strict; cp p.md old.md
+  sed -i 's/^- \[ \] three$/- [ ] three\n- [ ] four/' p.md
+  run "$CHECK" p.md --snapshot old.md --fixes 1 --json out.json; [ "$status" -eq 1 ]
+  [ "$(jq -c '.steps_changed' out.json)" = '[2]' ]
+  jq -e '.added_outside_fixes == [{step: 2, kind: "ac", text: "- [ ] four"}]' out.json
+}
+@test "plan-check C2: a plan-review evidence path added by a revision is not a missing file" {
+  _plan p.md strict; cp p.md old.md; sed -i 's/^Make the thing work\.$/Reads `cp1\/round-2\/merged.json`./' p.md
+  run "$CHECK" p.md --snapshot old.md --fixes 1; [[ "$output" != *"BLOCK C2"* ]]
+}
+@test "plan-check A11: a type docs plan declaring only documentation passes A11" {
+  _plan p.md strict '- Depends on: Step 1' '- Modify: `docs/guide.md` — the guide' '- Create: `CHANGELOG.md` — the log'
+  sed -i 's/^type: regular$/type: docs/; s/^- Modify: `src\/new.py` — use it$/- Modify: `README.md` — mention it/' p.md
+  run "$CHECK" p.md; [[ "$output" != *"A11"* ]]
+}
+@test "plan-check A11: a type docs plan declaring a script blocks naming the step and the path" {
+  _plan p.md legacy '- Depends on: Step 1' '- Modify: `docs/guide.md` — the guide' '- Create: `scripts/build-docs.sh` — builds it'
+  sed -i 's/^type: regular$/type: docs/' p.md
+  run "$CHECK" p.md; [ "$status" -eq 1 ]
+  [[ "$output" == *"BLOCK A11"*"step 1 declares code path scripts/build-docs.sh"* ]]
+}
 @test "plan-check --json: report carries sha256, mode, findings and the pass verdict" {
   _plan p.md strict '- Depends on: Step 7'
   run "$CHECK" p.md --json out.json --quiet; [ "$status" -eq 1 ]

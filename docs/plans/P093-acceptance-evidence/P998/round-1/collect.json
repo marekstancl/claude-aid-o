@@ -1,0 +1,17 @@
+{
+  "valid": [
+    "generalist_a",
+    "generalist_b",
+    "behaviour_edges",
+    "feasibility_deps",
+    "reuse",
+    "enforcement_tests"
+  ],
+  "invalid": [],
+  "missing": [],
+  "unexpected": [],
+  "answered": 6,
+  "required": 4,
+  "generalist_present": true,
+  "status": "valid"
+}

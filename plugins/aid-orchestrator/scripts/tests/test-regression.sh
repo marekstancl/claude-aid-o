@@ -29,6 +29,8 @@ SCRIPT_UNDER_TEST="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-auto-pipeline
 PLUGIN_DIR="$REPO_ROOT/plugins/aid-orchestrator"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
 MULTI_PHASE_PLAN="$FIXTURES_DIR/multi-phase-plan-numeric.md"
+# shellcheck source=lib/aid-test-plan-fixture.sh
+source "$SCRIPT_DIR/lib/aid-test-plan-fixture.sh"
 
 # ---------------------------------------------------------------------------
 # Test accounting
@@ -143,6 +145,8 @@ echo ""
 echo "Running pipeline to produce output for structural analysis..."
 
 SHARED_WS="$(make_workspace "shared")"
+# The CP1 gate needs a closed plan-review round for the plan (P093).
+aid_fixture_seed_plan_review "$SHARED_WS" "$MULTI_PHASE_PLAN" || exit 1
 SHARED_STDOUT=""
 SHARED_EXIT=0
 

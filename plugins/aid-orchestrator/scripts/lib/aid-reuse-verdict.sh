@@ -5,9 +5,9 @@
 #
 # ONE file owns the whole notion of "did this step look for what already
 # exists?", because two readers need it and they must not drift: the plan lint
-# (presence + shape + replay, aid-plan-lint.sh) and the `reuse_evidence` C0 lens
-# (quality of the answer, skills/review-checkpoint-contracts.md). The lint is
-# the machine half, the lens the judgement half — and both grade the same four
+# (presence + shape + replay, aid-plan-lint.sh) and the `reuse` plan reviewer
+# (quality of the answer, skills/plan-review-roles.md). The lint is the machine
+# half, the reviewer the judgement half — and both grade the same four
 # results, spelled here once.
 #
 # Sourced, not executed. Callers: aid-plan-lint.sh.

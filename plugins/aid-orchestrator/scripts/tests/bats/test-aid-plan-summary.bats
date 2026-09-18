@@ -12,7 +12,7 @@
 #   The renderer underneath (lib/aid-artifact-render.sh) has its own suite; what
 #   is proved HERE is this caller: that every number on the page is counted from
 #   the plan, that a plan with nothing to say is refused rather than rendered
-#   half-empty, and that the page states the ceremony band.
+#   half-empty, and that the page states the plan review state.
 
 setup() {
   PLUGIN_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -102,15 +102,20 @@ EOF
   grep -q 'backend, docs' "$OUT"
 }
 
-@test "the page states the ceremony band and why" {
+@test "a plan not yet reviewed says so on the page" {
   aid_plan_summary_render "$(write_plan P952 'plugins/aid-orchestrator/scripts/aid-fsm.sh')" "$OUT"
-  grep -q 'Pásmo ceremonie: full' "$OUT"
-  grep -q 'full_path:plugins/aid-orchestrator/scripts/aid-fsm.sh' "$OUT"
+  grep -q 'Revize plánu: review: none' "$OUT"
+  grep -q 'Ještě neproběhla' "$OUT"
 }
 
-@test "a light plan says so on the same page" {
-  aid_plan_summary_render "$(write_plan P953 'plugins/aid-orchestrator/commands/aid-help.md')" "$OUT"
-  grep -q 'Pásmo ceremonie: light' "$OUT"
+@test "a reviewed plan shows its rounds and their cost" {
+  local plan; plan="$(write_plan P953 'plugins/aid-orchestrator/commands/aid-help.md')"
+  mkdir -p "$TMP/.aid-o/work/evidence/P953/cp1/round-1"
+  printf '{"reviewers": {"reuse": {"tokens": 1200, "answered": true}}, "degraded": false}\n' \
+    > "$TMP/.aid-o/work/evidence/P953/cp1/round-1/measurement.json"
+  aid_plan_summary_render "$plan" "$OUT"
+  grep -q 'Revize plánu: review: 1 round, 1200 tokens' "$OUT"
+  grep -q '1 kolo' "$OUT"
 }
 
 @test "a plan with no Goal is refused, naming the section — no half-empty page" {
@@ -207,7 +212,7 @@ EOF
 }
 
 # ── "Co plán dodá" (PM, 2026-08-25) ─────────────────────────────────────────
-# The first real page told the PM a plan's band and risk count and never what
+# The first real page told the PM a plan's ceremony and risk count and never what
 # the plan would DO. These cases pin the block that answers that, and the two
 # defects the same page carried: a path where the standard demands a name, and
 # an arrow that promised navigation nowhere.

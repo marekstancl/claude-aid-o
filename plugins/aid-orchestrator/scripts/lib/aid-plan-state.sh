@@ -123,12 +123,9 @@
 # Every write (state-file init/transition, operation-record append) goes
 # through `aid-lock.sh` (sourced below) on ONE per-plan sidecar lock —
 # `plan-state.yaml.lock` — covering both the state file and the operation
-# log, then `<path>.tmp.$$` + `mv` for the state file (matches
-# `aid-cp1-ledger.sh`'s `_write_ledger_json` convention exactly). Reads
-# (`plan_state_get`, `plan_op_reconcile`) are lock-free, matching this
-# codebase's established read-without-lock convention for state files
-# written atomically (`aid-cp1-ledger.sh`'s `cmd_read`/`cmd_check_budget`) —
-# an in-progress atomic write is invisible to a concurrent reader (the reader
+# log, then `<path>.tmp.$$` + `mv` for the state file (an atomic write).
+# Reads (`plan_state_get`, `plan_op_reconcile`) are lock-free, the codebase's
+# convention for state files written atomically — an in-progress atomic write is invisible to a concurrent reader (the reader
 # either sees the old complete file or the new complete file, never a
 # partial one), and `operations.jsonl` appends are handled defensively (see
 # Error Handling below) precisely because a reader CAN observe a
@@ -321,9 +318,7 @@ _plan_state_project_root() {
 }
 
 # _plan_state_dir <plan_id> — the per-plan runtime directory (not part of
-# the required public API; test suites reconstruct this path independently,
-# matching this codebase's existing convention, e.g. test-cp1-ledger.bats's
-# own `_ledger_file` helper).
+# the required public API; test suites reconstruct this path independently).
 _plan_state_dir() {
   local _psd_root
   _psd_root="$(_plan_state_project_root)" || return 2
@@ -475,8 +470,7 @@ _plan_state_validate_json() {
 # plan_state_init <plan_id> <mode> <plan_branch> <target_branch> [autonomy]
 #
 # Creates a fresh state file at plan_state=OPEN. Refuses to overwrite an
-# existing one (never a silent reset — matches aid-cp1-ledger.sh's `init`
-# convention). Returns the state file path on stdout on success.
+# existing one (never a silent reset). Returns the state file path on stdout on success.
 #
 # Returns: 0 success, 1 bad args or file already exists, 2 missing jq/yq,
 # 3 lock timeout.

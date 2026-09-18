@@ -3,6 +3,37 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.98.0] — 2026-09-18
+
+### ⚠️ Změna chování — přečti před upgradem
+
+Každý plán teď před generováním EPICů potřebuje uzavřené kolo kontroly plánu
+(šest revizorů, `commands/aid-plan.md` „Plan review (CP1)"). Pásma, která malé
+plány pouštěla bez kontroly, už nejsou. Plán, který byl zkontrolovaný starým
+řetězcem (`cp1-deep/`, Codex smyčka), projde novou kontrolou znovu; stará
+evidence zůstává na disku jako historie. Autorita generace zapečetěná starší
+verzí se po upgradu musí zapečetit znovu (`aid-auto-pipeline.sh supersede-generation`),
+protože už nenese pole `band`. Projekt, který kontrolu plánu nechce, ji vypne
+`review_checkpoints.cp1_plan_review: false`.
+
+### Added
+- **Kontrola plánu šesti revizory** — `aid-plan-review-round.sh` vede kola: jeden balík pro všechny (plán, výsledek deterministické kontroly, standardy projektu), šest rolí z jedné šablony (`skills/plan-review-roles.md`), revizor na Claude přes controller a na Codexu přes izolovaný spouštěč, sběr s minimem odpovědí, uzavření s naměřenými tokeny, kontrola opravy proti seznamu nálezů, spor s odpovědí PM, finalizace a zápis pokynu PM k počtu kol (výchozí dvě, třetí nebo jen jedno jen na jeho slova).
+- **Rozhodčí skript nálezů** — `aid-plan-review-adjudicate.sh` bez modelu odmítne každý nález bez čtecího příkazu a existujícího `soubor:řádek` (důvod zapíše do `rejected.json`), stejné nálezy sloučí, spočítá výnos každé role a v dalším kole označí, co bylo opravené.
+- **Potvrzovací kolo s kontextem** — revizoři druhého kola dostanou otevřené nálezy a diff opravy a hlásí jen neopravené a to, co oprava nově rozbila; ptá se jen rolí, kterých se oprava týká.
+- **Cena kontroly v `/aid-status` a na stránce plánu** — řádek s počtem kol, tokeny, neznámými hodnotami a rolemi, které neodpověděly; dlaždice „Revize plánu" místo „Pásma".
+- **Kontrola A11** — plán s `type: docs` (kontrolují ho jen dva revizoři) nesmí deklarovat kód.
+
+### Changed
+- **Brána CP1** — `aid-cp1-gate.sh` čte jen evidenci kol: kolo 1 uzavřené a platné, plán shodný s tím, co se kontrolovalo, druhé kolo při otevřených blokujících nálezech, každý otevřený blokující nález citovaný v kritériu přijetí svého kroku. Poškozená evidence a neplatná konfigurace se `--force` přebít nedají (exit 3).
+- **Instrukce pro agenta** — `/aid-plan` má jednu sekci „Plan review (CP1)", kde je každý krok příkaz; `/aid-verify-plan` spouští jednoho revizora ručně; karta verifikátora, skill pipeline a nápověda odkazují na nový postup.
+- **Hranice uzavření plánu** — vstup `plan_review` politiky vydání čte zapečetěnou autoritu generace místo souboru Codex smyčky.
+- **Kontrola plánu po opravě** — `aid-plan-check.sh --fixes none`, v JSON změněné kroky a přidávky mimo seznam oprav; cesty evidence kontroly nejsou falešně hlášené jako chybějící soubory.
+- **Testovací fixture** — sdílený pomocník zasévá skutečné kolo kontroly plánu, takže noční sady procházejí stejnou cestou jako produkce.
+
+### Removed
+- **Pásma ceremonie** — klasifikátor, mapa rizikových cest, tabulka pásem a `--classify-only`; každý plán má stejné povinnosti.
+- **Starý řetězec kontroly** — ledger pokusů, C0 smlouva, Codex smyčka kontroly plánu, její prompt, politika, dvě schémata, texty devíti čoček, `pm-override grant c0` a jejich testy a fixture (5 601 → 1 847 řádků kódu a dat oblasti; v registru vynucení 12 řádků pryč a 7 nových).
+
 ## [2.97.0] — 2026-09-17
 
 ### Added

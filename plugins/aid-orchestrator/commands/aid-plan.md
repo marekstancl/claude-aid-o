@@ -279,8 +279,9 @@ bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md
 If it exits non-zero (ERROR-tier, or STRICT-tier on a `lifecycle_strict` plan),
 fix the exact Files entries it names — per the grammar in `skills/plan-writing.md`
 — and re-run until it passes, BEFORE proceeding to CP1. Do not hand a plan with
-blocking Files-shape violations to CP1 or to EPIC generation. CP1 (Step 9) then
-INCLUDES the lint's output in its review context but does not replace it.
+blocking Files-shape violations to CP1 or to EPIC generation. The plan review
+(Step 9) hands the reviewers the plan check's warnings; it does not replace
+either check.
 
 **Deterministic plan check (automatic — the same moment, the same rule).** The
 lint is one part of it. Run:
@@ -310,170 +311,9 @@ A revision that adds a step, a Files entry or an acceptance criterion outside
 the fix list is refused: that is a design change, and a design change is the
 PM's to make (cut it out, or bring it as a choice), not a fix to slip in.
 
-### Step 9: Plan Quality Review (CP1)
-Dispatch verifier with `docs-review` focus on the written plan file.
-Present findings to PM with full context (no auto-fix — design decisions).
-Skip if `review_checkpoints.cp1_plan_review: false`.
-
-**Before `Agent()` call — log `verifier_dispatch_start` event:**
-```bash
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-  "$timeline_file" \
-  "verifier_dispatch_start" \
-  agentId="aid-orchestrator:verifier" \
-  focus="cp1" \
-  step_n="null" \
-  evidence_dir="$evidence_dir"
-```
-
-**After `Agent()` returns — log `verifier_dispatch_complete` event:**
-```bash
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-  "$timeline_file" \
-  "verifier_dispatch_complete" \
-  agentId="aid-orchestrator:verifier" \
-  focus="cp1" \
-  step_n="null" \
-  evidence_dir="$evidence_dir" \
-  output_file="$evidence_dir/verifier-output-cp1.md"
-```
-
-`<dispatch-focus>` substitution rule for CP1: `focus="cp1"`, `step_n="null"`.
-If `timeline_file` cannot be resolved (e.g., `fsm-state.yaml` not yet created
-for a brand-new plan), `log_event` is a silent no-op — pipeline continues.
-
-**Codebase grounding pass (mandatory, added v2.17.0).**
-The verifier MUST perform a flat-list extraction + verification step in addition
-to the standard plan-writing.md checks. P032 retrospective showed CP1 has a
-systematic blind spot for *absence* — reviewer can detect when something
-mentioned in the plan looks wrong, but cannot detect that a helper / file /
-port / service the plan presumes exists in fact does not (5 PM-authorized
-resolutions in P032 — C1 through C5 — were all of this kind).
-
-Verifier dispatch prompt MUST include:
-1. Extract a flat list from the plan of every named:
-   - function / helper (e.g., `log_info`, `fsm_check_grandfather`)
-   - file path under Files entries (Create / Modify / Rewrite / Test)
-   - port (e.g., `8818`)
-   - service / container name (e.g., `svc-mcp-tg-bot`)
-   - external command (e.g., `yq`, `bats`)
-   - env var (e.g., `AID_PLUGIN_PATH`)
-   - **backlog ID** (e.g., `T-132`) — extract via regex `\bT-[0-9]+\b` from the
-     entire plan body (whole-plan scan, no specific field — `related_backlog`
-     does not exist in current plan template)
-   - **test path** (e.g., `tests/integration/<file>`) from step Files entries
-   - **DB field reference** (e.g., `Session.validation_warnings`) extracted via
-     regex `[A-Z][a-zA-Z]+\.[a-z_]+` from plan body
-   - **file removal claim** (e.g., "delete X", `must_not_exist: true`) from plan body
-2. For each item, verify against real codebase / running infra:
-   - Functions/helpers: `grep -rn "^<fn>()\|^function <fn>" plugins/`
-   - File paths: `ls <path>` (or note "Create step <N>" if Files entry creates it)
-   - Ports: `docker ps --format '{{.Ports}}' | grep <port>` — flag conflicts
-   - Services: `docker ps --format '{{.Names}}'` — flag collisions
-   - Commands: `command -v <cmd>`
-   - Env vars: `grep -rn "<VAR_NAME>"` for declarations / fallback handling
-   - **Backlog IDs:** `git log --since="24 hours ago" --grep="T-NNN" --all` — flag conflicts
-   - **Test paths:** `find tests/ -type f \( -name "*.py" -o -name "*.ts" -o -name "*.bats" \) -name "*<basename>*"` — flag existing analogs (POSIX `find`, no `fd` dependency)
-   - **DB fields:** `grep "<field>" <project>/db/models.py` — verify stored vs computed semantics
-   - **File removal:** `ls <path>` — verify file currently exists
-3. Mark each: VERIFIED (with path:line or docker output) or ABSENT (with note
-   "to be created in Step N" — must map to a Create step in the plan). Specific
-   semantics for the new categories:
-   - **Backlog ID:** VERIFIED (free) or ABSENT (reserved by commit `<SHA>`)
-   - **Test path:** VERIFIED (no conflict) or ABSENT (analog exists at `<path>`)
-   - **DB field:** VERIFIED (matches claim) or ABSENT (claim mismatch — actual: `<stored|computed>`)
-   - **File removal:** VERIFIED (exists, can be deleted) or ABSENT (file not present)
-4. Plan with ABSENT items NOT mapped to a Create step → REVISE_REQUIRED.
-   Specific REVISE_REQUIRED conditions for the new categories:
-   - **Backlog ID ABSENT** → REVISE_REQUIRED unless plan explicitly states
-     "T-NNN to be allocated at plan-write time" (acceptable for plan-allocation candidates)
-   - **Test path ABSENT (analog exists)** → REVISE_REQUIRED — plan must choose
-     consistent location OR explicit "supersedes <existing path>"
-   - **DB field ABSENT (claim mismatch)** → REVISE_REQUIRED — plan must update
-     claim to match definition (stored → re-validation, computed → automatic)
-   - **File removal ABSENT (file missing)** → REVISE_REQUIRED — claim "delete"
-     is meaningless, file already does not exist
-
-**EVIDENCE REQUIREMENT (added v2.20.0 — addresses CP1 false-memory blind spot):**
-
-Before the reviewer marks ANY item VERIFIED, the review output MUST capture
-concrete evidence in this format:
-
-```yaml
-item: <name>
-verdict: VERIFIED | ABSENT
-command_run: <exact command>
-output_excerpt: <path:line of match, or "0 matches" if grep returned empty>
-```
-
-Examples:
-
-VALID evidence (ABSENT):
-```yaml
-item: setup_test_evidence_dir (function)
-verdict: ABSENT
-command_run: grep -rn "^setup_test_evidence_dir()" plugins/aid-orchestrator/scripts/tests/bats/
-output_excerpt: (0 matches)
-```
-→ ABSENT verdict; must map to a Create step or REVISE_REQUIRED.
-
-VALID evidence (VERIFIED):
-```yaml
-item: cmd_transition (function)
-verdict: VERIFIED
-command_run: grep -n "^cmd_transition()" plugins/aid-orchestrator/scripts/aid-fsm.sh
-output_excerpt: aid-fsm.sh:849:cmd_transition()
-```
-→ VERIFIED at known location.
-
-INVALID evidence (REJECTED, requires retry):
-```yaml
-item: setup_test_evidence_dir (function)
-verdict: VERIFIED
-# (no command_run, no output_excerpt — "from memory")
-```
-→ REJECTED — false-memory pattern. Auto-retry with explicit "EVIDENCE REQUIRED"
-reminder; max 2 retries, then ESCALATION.
-
-Empirical evidence: P035 C3 (2026-05-10) — plan cited
-`setup_test_evidence_dir`, `setup_passing_execution_yaml`,
-`setup_failing_execution_yaml` as "existing helpers"; none existed. CP1
-review would have caught this if the reviewer had dispatched the mandatory
-greps; without the evidence requirement, the reviewer wrote "VERIFIED" from
-memory.
-
-This requirement applies to ALL #17 sub-checks (functions, files, ports,
-services, commands, env vars, CLI invocations) + 17a-d (per P035 Phase 2)
-+ 17e (CLI invocation grounding) + #19 design defeat — Q1/Q2/Q3 answers
-MUST cite plan path:line + codebase path:line as evidence.
-
-Edge cases:
-  • Item cannot be verified with current command (e.g., docker port but
-    docker not running) → mark "PENDING — docker not running"; PM decides
-    accept-as-trust or block.
-  • Expensive command (~10s+) — orchestrator may batch greps into a single
-    multi-pattern command.
-  • Multiple matches per item → output_excerpt is first match + count
-    "+N more matches".
-
-This is in addition to (not replacing) the standard plan-writing.md
-Forbidden Phrase + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21) verification.
-
-Output:
-```
-=== Step 9/9: Review ===
-
-Plan: .aid-o/plans/{plan_id}-{title}.md
-
-Quality: {N} findings (Critical: {n}, High: {n}, Medium: {n})
-
-{findings list with severity, area, recommendation}
-
-Options:
-  (A) Accept as-is → proceed to EPIC generation
-  (B) Fix findings → apply recommendations, re-run review
-  (C) Re-open brainstorming → interim doc preserved, focus on flagged sections
-```
+### Step 9: Plan review (CP1)
+Run "Plan review (CP1)" below, from item 1.
+Output: `=== Step 9/9: Plan review ===`, then the PM card of its item 5.
 
 **Rules (hard failures if violated):**
 1. ONE question at a time — never batch
@@ -522,51 +362,9 @@ Write an exhaustive implementation plan from specification or topic.
     `skills/plan-writing.md`) and re-run until it passes, BEFORE CP1. Early
     feedback only — the hard gate is the deterministic pre-flight in
     `aid-plan-to-epic.sh`, which cannot be skipped.
-9. **Plan Quality Review (CP1)** — dispatch verifier with `docs-review` focus
-   on the written plan file. **Identical to Mode: Brainstorm Step 9** —
-   perform the codebase grounding pass (mandatory), include the EVIDENCE
-   REQUIREMENT for every #17/17a-e/#19 verification, and save the review to
-   `.aid-o/work/cp1-review-{plan_id}.md`. Activate #19 (Design Defeat
-   Detection) when frontmatter `type: bug-fix` (per `skills/plan-writing.md`)
-   or pre-screening heuristic matches.
+9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
 
-   **Before `Agent()` call — log `verifier_dispatch_start` event:**
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_start" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp1" \
-     step_n="null" \
-     evidence_dir="$evidence_dir"
-   ```
-
-   **After `Agent()` returns — log `verifier_dispatch_complete` event:**
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_complete" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp1" \
-     step_n="null" \
-     evidence_dir="$evidence_dir" \
-     output_file="$evidence_dir/verifier-output-cp1.md"
-   ```
-
-   `<dispatch-focus>` substitution rule for CP1: `focus="cp1"`, `step_n="null"`.
-   Same retry semantics as CP2/CP3 — if the verifier is re-dispatched
-   (e.g., PM chose option B "Fix findings"), the start/complete pair is
-   re-emitted; last pair is authoritative.
-
-   Present PM with options:
-     (A) Accept as-is → proceed to EPIC generation
-     (B) Fix findings → apply recommendations, re-run review
-     (C) Re-open spec — return to step 1 with annotated spec
-
-   Skip if `review_checkpoints.cp1_plan_review: false` in
-   `.aid-o/config/policies/review-checkpoints.yaml`.
-
-Output: plan path, step count, quality gate results, CP1 review verdict.
+Output: plan path, step count, quality gate results, plan review verdict.
 
 ## Mode: Generate EPIC
 
@@ -615,8 +413,8 @@ follows it verbatim:
 
 | Label | What it means | What to do |
 |-------|---------------|-----------|
-| `aid_generation_force_required:` | The failure is a CP1 condition verdict — evidence, adjudicator, C0 review or ledger. A PM may deliberately waive it. | Fix the conditions, or run the force command the label prints (it already carries your `--plan` and `--queue-mode`). |
-| `aid_cp1_blocked:` | The failure is one `--force` cannot cover — the gate was mis-invoked, hit an I/O error, or the plan's own identity is broken. The hard condition is named first. | Fix the named condition. `--force` is **refused in the same place** on this class, not merely unadvertised: it seals no authority, writes no waiver, and says so by name. |
+| `aid_generation_force_required:` | The failure is a plan review condition — a missing or unclosed round, open blockers without a second round or an acceptance criterion, a plan changed after its last round. A PM may deliberately waive it. | Fix the conditions, or run the force command the label prints (it already carries your `--plan` and `--queue-mode`). |
+| `aid_cp1_blocked:` | The failure is one `--force` cannot cover — the gate was mis-invoked, the plan's own identity is broken, the plan review configuration is invalid, or the round evidence is unreadable or tampered with. The hard condition is named first. | Fix the named condition. `--force` is **refused in the same place** on this class, not merely unadvertised: it seals no authority, writes no waiver, and says so by name. |
 
 ```bash
 bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode> --force --reason "<at least 20 characters>"
@@ -658,291 +456,182 @@ generation for that plan is running, and archives nothing. It also refuses
 when the supersession cannot be recorded — the audit trail is what makes this
 command accountable, so an unrecordable archive is not performed.
 
-## CP1 Mode Selection
+## Plan review (CP1)
 
-Risk classification runs automatically during CP1 before EPIC generation. It applies to any plan processed by `/aid-plan`.
+Both modes end here, once `aid-plan-check.sh` passes on the written plan. Six
+reviewer roles (`skills/plan-review-roles.md`) answer the same packet in at most
+two rounds by default; `aid-plan-review-round.sh` runs the rounds and
+`aid-cp1-gate.sh` refuses EPIC generation until the evidence is complete. Every
+item below is a command. You never write, edit or complete a reviewer's answer.
 
-### Band classification
+Skip this section when `review_checkpoints.cp1_plan_review` (or `enabled`) is
+`false` in `.aid-o/config/policies/review-checkpoints.yaml`; tell the PM it was
+skipped. The gate then passes with a notice.
 
-The plan's **ceremony band** is classified from the paths its steps DECLARE in
-their `**Files:**` blocks — never from prose anywhere in the document. Ask the
-gate; do not re-derive it:
+`<plan>` is the plan path, `<plan_id>` its frontmatter id, and `R` stands for
+`"$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh"`.
 
-```bash
-band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" \
-        --plan "$PLAN_FILE" --project-root "$PROJECT_ROOT" --classify-only)"
-```
+1. The deterministic check passes and its report matches the plan (a revision
+   makes it stale; rerun it after every edit):
 
-| Band | What the plan declares it touches | What runs |
-|---|---|---|
-| `full` | decision machinery: state machines, gate runner, generation chain, release boundary, `skills/plan-writing.md`, auth, migrations, dependency manifests | CP1-light + CP1-deep (3 lenses + 6 C0 lenses + adjudicator) + the C0 cross-provider loop |
-| `medium` | the DATA those decisions read: policies, schemas, templates, machine-read config, CI | CP1-light + CP1-deep (3 lenses + adjudicator); **no C0 lenses, no cross-provider loop** |
-| `light` | everything else — documentation, help, commands, skills, tests, ordinary feature code | CP1-light only — **dispatch no lens at all** |
-
-Ordinary code being `light` surprises people, so it is worth saying plainly:
-the band measures whose DECISIONS a plan changes, not whether it changes code.
-Code is reviewed where reviewing code works — per step at CP2/CP3, against a
-real diff. A plan-time lens panel earns its cost on the machinery no later
-checkpoint gets a second chance at.
-
-Frontmatter `risk: high` raises a band to `full`. Nothing lowers a band except
-changing what the plan declares it will touch. A plan that declares no file, a
-missing or unparseable path map (`defaults/policies/risk-paths.yaml`) and a host
-without `yq` all classify as `full` — fail-closed, with no prose-guessing
-fallback.
-
-What each band REQUIRES as evidence is a table, not prose:
-`defaults/policies/review-checkpoints.yaml` → `review_checkpoints.ceremony_bands`.
-`aid-cp1-gate.sh` reads that same table, so a band you dispatch for and a band
-the gate checks for can never be two different things.
-
-### CP1-light (every band)
-
-Runs the standard `plan-writing.md` completeness checklist. If no
-`REVISE_REQUIRED` findings, proceed to EPIC generation. For `light` this is the
-whole of CP1.
-
-### CP1-deep (bands `full` and `medium`)
-
-Extends CP1-light with parallel review lenses and an adjudicator: 9 lenses for
-`full` (L1/L2/L3 blocking + 6 C0 observe), the 3 L1/L2/L3 lenses for `medium`.
-The 4 L1/L2/L3+adjudicator evidence files must exist before EPIC generation is
-allowed; the C0 lens FINDINGS are observe-only (E4). One C0 lens file is
-nevertheless required to exist in `full` — `c0-lens-reuse_evidence.md` (P085):
-what it reports stays advisory, that it ran does not.
-
-**Flow:**
-
-```
-Plan input → classify band (--classify-only) → CP1-light OR CP1-deep
-
-CP1-light:
-  → run plan-writing.md checklist
-  → if REVISE_REQUIRED: revise, retry
-  → if pass: generate EPIC
-
-CP1-deep:
-  → run plan-writing.md checklist (same as light)
-  → classify the band from the plan's declared Files (aid-cp1-gate.sh --classify-only)
-  → dispatch the lenses the band owes, in parallel (full: all 9; medium: L1/L2/L3 only;
-    light: none — see review-checkpoint-contracts.md §CP1-deep and §C0 Semantic Lenses):
-      L1 behavior:                  request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
-      L2 feasibility:               touched files, output contracts, parser/producer ordering, implementation feasibility
-      L3 enforcement:               gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
-      C0 reuse_compat:              incompatible component reuse — output to c0-lens-reuse_compat.md
-      C0 reuse_evidence:            was each founding step's reuse search WIDE enough (the half the lint's replay cannot reach) — output to c0-lens-reuse_evidence.md
-      C0 planned_call_feasibility:  calls to outputs/APIs that the plan doesn't clearly produce — output to c0-lens-planned_call_feasibility.md
-      C0 dep_api_grounding:         dependency API mismatch against actual version/interface — output to c0-lens-dep_api_grounding.md
-      C0 idempotency_matrix:        non-idempotent mutations against at-most-once AC — output to c0-lens-idempotency_matrix.md
-      C0 authority_runtime_matrix:  mutations crossing ownership/tenant boundary — output to c0-lens-authority_runtime_matrix.md
-  → L1/L2/L3 each produce: stop_rule_blockers[] (required field), findings[], confidence: high|medium|low
-  → C0 lenses each produce: stop_rule_blockers[] (advisory/observe in E4), findings[], confidence: high|medium|low
-  → the reuse_evidence dispatch is given two inputs the other lenses do not need, both quoted VERBATIM:
-      (a) every founding step's **Reuse check:** field, exactly as written — the lens judges the search, so a paraphrase is not the artifact
-      (b) the standards this plan's paths bind — RUN the derivation and paste its output, do not describe it:
-          bash "$AID_PLUGIN_PATH/scripts/lib/aid-standards-map.sh" --derive "$PLAN_FILE"
-          Exit 1 = the project has no standards map, so this input legitimately does not exist.
-          Exit 2 = a map is configured but unreadable; pass that fact to the lens rather than an empty list.
-      If either input is unavailable, the lens still runs and RECORDS that the input was missing — it never guesses one.
-  → adjudicator reviews all 9 lenses: accepts blocker only if it has command/artifact + file:line evidence (L1/L2/L3 blocking; C0 advisory — see review-checkpoint-contracts.md §C0 Adjudicator Addendum)
-  → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
-  → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
-  → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
-  → if band=full AND verdict=pass: run the C0 cross-provider Codex review loop (below) —
-    MUST complete before EPIC generation, independent of the L1/L2/L3 adjudicator loop above
-  → if verdict=pass AND accepted_blockers=[] AND (band is not full OR the C0 review loop exited clean): generate EPIC
-```
-
-### C0 Cross-Provider Review Loop (band `full` only)
-
-After the L1/L2/L3 adjudicator produces `verdict: pass` for a `full`-band plan, a
-SEPARATE, mandatory cross-provider (Codex) pass over the FINAL plan runs before
-EPIC generation is allowed — see `review-checkpoint-contracts.md` §"C0
-Cross-Provider Plan Review — Adjudicator MUST-Consume Contract" for the full
-contract this loop implements, and `pipeline.md` §6a for the DONE-phase C3
-fix→reverify loop this one mirrors at plan level (same bounded-loop shape,
-same "not a loop iteration" carve-out, same fingerprint-survives vs.
-conflicting-findings escalation split). `medium` and `light` plans skip this
-loop entirely, and with it the ledger the loop initialises; a PM marking a plan
-`risk: high` brings it into scope from that point on.
-
-**First pass:**
-```bash
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh" init --pre-enforcement \
-  --project-root "$PROJECT_ROOT" "$PLAN_ID"   # or plain 'init' for a provably new plan
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" build-manifest \
-  "$PLAN_FILE" "$PLAN_EVIDENCE_ROOT"
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
-```
-`PLAN_EVIDENCE_ROOT` is `.aid-o/work/evidence/<plan_id>/` (one level above
-`cp1-deep/` — the same root `lib/aid-c0-plan-review.sh` and `aid-cp1-gate.sh` both
-read). `init` runs once per plan, before the first C0 dispatch of its
-lifetime.
-
-**The ledger `increment` is now MECHANICAL, not a step the orchestrator
-performs.** `dispatch` itself calls `aid-cp1-ledger.sh increment` internally
-— the orchestrator does NOT need (and should NOT) call `increment`
-separately. The gate is TWO conditions, both required: (1) the dispatch was
-a genuine, well-formed transport-level exchange (`outcome == "dispatched"`
-in `c0/codex/c0-dispatch.json` — Codex's CLI stream itself was valid), AND
-(2) the WRITTEN `c0-plan-review.json`'s own `review_status` is NOT
-`"unverifiable"`. Condition (2) exists because `outcome == "dispatched"`
-alone says nothing about whether the response CONTENT then passed
-validation — a transport-genuine-but-content-invalid response (a hash or
-head mismatch, a malformed/C3-shaped reply, etc.) still reaches
-`outcome == "dispatched"` but must NOT consume a budget slot, matching
-"Not a loop iteration" below exactly (which groups content-invalid
-responses alongside true transport failures for C0, unlike C3's sibling
-EPIC 6 system, which evolved a deliberately different, more nuanced rule
-for its own case). If the ledger increment itself fails (missing/corrupt/
-exhausted) once BOTH conditions hold, `dispatch` fails closed too —
-`c0-plan-review.json` is overwritten to report `status: unverifiable` even
-if Codex's own response was otherwise clean, and `verify` will correctly
-refuse to bless it. This closes a live DONE-review finding (E-065-7_7's own
-2nd audit dispatch, refined across two follow-up rounds after the first fix
-attempt's gate proved too broad): the increment used to be prose-only, so a
-session that didn't perfectly follow this instruction could dispatch
-indefinitely with the ledger never actually advancing.
-
-**Not a loop iteration.** `dispatch` returning `unavailable`/`rate_limited`/
-`timeout`/`invalid_output` (Codex never genuinely dispatched a well-formed,
-raw-bound response) yields `review_status: unverifiable`. This blocks
-EPIC generation for the `full`-band plan pending a PM decision, but it is NOT a
-loop iteration — do NOT call `aid-cp1-ledger.sh increment` for it, and do not
-treat it as consuming one of the 4 rechecks. Retry it freely (transient
-Codex unavailability), exactly like C3's own carve-out.
-
-**A genuine dispatch with blocking findings enters the bounded loop** (while
-blocking AND `cp1-ledger.sh check-budget` reports budget available,
-the shipped budget of 5 sessions, documented in `review-checkpoints.yaml`
-→ `cp1_codex_review.max_rechecks: 4`, whose mechanical authority is
-`MAX_ATTEMPTS` in `scripts/lib/aid-cp1-ledger.sh` — that YAML key is
-documentation only and no consumer reads it).
-**Caution on `check-budget`'s meaning after an override-authorized attempt:**
-once `attempts > max` via a PM-override-claimed increment (see below),
-`check-budget` reports `available` again — but this describes the CURRENT
-tip's attempt as retrospectively authorized (what the gate needs), NOT a
-standing "you may loop again" grant. The override was single-use and is
-already consumed; if THIS attempt is still blocking, do not re-enter the
-loop body below without confirming a FRESH override is present first —
-`aid-cp1-ledger.sh increment` will correctly reject a further attempt with
-no fresh artifact, but check that before spending a real gate-fixer +
-Codex dispatch on an attempt that will fail closed anyway.
-1. Dispatch gate-fixer (S/M effort) or implementer (L effort) to revise the
-   SPECIFIC accepted/blocking finding(s) by `fingerprint` — a targeted plan
-   revision, never a general rewrite — producing a new commit.
-   - Revision fails, or produces no diff (plan file unchanged) → exit to PM
-     escalation immediately (cannot make progress / would re-review the
-     identical plan text).
-2. Re-run the C0 review on the revised plan — a fresh `reviewed_plan_hash`
-   and a genuinely new Codex session, never a reuse of the prior attempt:
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" build-manifest \
-     "$PLAN_FILE" "$PLAN_EVIDENCE_ROOT"        # new reviewed_plan_hash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
+   bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" <plan> --json .aid-o/work/evidence/<plan_id>/plan-check.json
    ```
-   `dispatch` already records this attempt on the ledger internally (see
-   "The ledger `increment` is now MECHANICAL" above) — no separate step
-   needed here. A re-run with an UNCHANGED plan hash is a no-op inside
-   `increment` (the ledger never advances on it) — this is what makes "each
-   recheck = a new plan hash" mechanically enforced, not just documented.
-   Once the ledger is genuinely exhausted (`attempts >= max`), `increment`
-   itself now refuses to advance further on a new hash too — not just
-   `check-budget`'s read-only report.
-3. Re-evaluate the new `c0-plan-review.json`:
-   - Clean (`review_status: pass`, `blocking_findings: false`) → exit the
-     loop, proceed to EPIC generation.
-   - Still blocking AND the SAME finding `fingerprint` survived this
-     recheck (the revision didn't actually fix it) → **PM escalation**
-     immediately — do not spend the remaining budget on a non-converging
-     fix. This is mechanically decidable (fingerprints are deterministic
-     content hashes over the finding); compare this attempt's blocking
-     fingerprints against the immediately-prior dispatched attempt's.
-   - Still blocking AND the findings are mutually conflicting (a judgment
-     call this loop cannot make mechanically) → **PM escalation**
-     immediately; durably record this as the escalation reason (never leave
-     it as unrecorded prose — a later stray revision attempt must not
-     silently reopen the loop).
-   - Still blocking, fingerprint(s) differ, findings don't conflict (the
-     revision introduced a NEW blocking finding — counts against this SAME
-     budget) → loop again if budget remains, else fall through below.
 
-**Exit conditions (exactly one applies):**
-- **Clean** → proceed to EPIC generation as normal.
-- **`aid-cp1-ledger.sh check-budget` reports `exhausted`** (initial review +
-  4 rechecks = 5 Codex runs consumed, still blocking) →
-  **`PM_ESCALATION_REQUIRED`**: execution halts, surfaced to the PM;
-  `aid-cp1-gate.sh` refuses EPIC generation. A 6th review run requires an
-  explicit PM-escalation override artifact (below) — never automatic
-  re-entry into this loop.
-- **Same fingerprint survives a recheck, or conflicting findings** (see step
-  4 above) → **`PM_ESCALATION_REQUIRED`** immediately, regardless of
-  remaining budget.
+2. Prepare round 1. It prints the round directory and one prompt per reviewer:
 
-**PM-escalation override.** When the PM explicitly authorizes proceeding past
-a blocked state (budget exhausted, unverifiable persisting, or a judgment
-call the loop cannot resolve), write:
-`.aid-o/work/evidence/<plan_id>/cp1-pm-escalation-override.json` with a
-non-empty `pm_ref` field (>= 20 characters — same reasoned-override
-convention as this project's other `*_FORCE_*` escalation overrides,
-recording who/what/why). `aid-cp1-gate.sh` checks for this artifact only
-AFTER determining the C0 review and/or ledger budget check actually failed
-— a present override is never touched on a clean pass, so it stays
-available for a run that genuinely needs it. Only once a bypass is
-genuinely required does the gate claim it, renaming it to a
-`.consumed-<epoch>` sibling.
+   ```bash
+   bash "$R" prepare <plan> --round 1
+   ```
 
-**Which loop this override belongs to.** It authorizes exactly one more
-GATE INVOCATION (covering whichever of the two checks failed in that same
-run), never a standing bypass — and during PLAN REVIEW that is exactly the
-ledger/recheck loop described above, unchanged. **EPIC GENERATION is a
-different consumer:** `aid-auto-pipeline.sh` runs the gate once per plan
-and seals the result in `generation-authority.json`, which every phase
-verifies, so one authority covers the whole generation and the
-`.consumed-<epoch>` per-invocation claim only bites on standalone
-`aid-plan-to-epic.sh` calls. At generation time the PM's route is the
-pipeline's own `--force --reason` (see "CP1 blocked the plan." above) —
-audited three ways, invocation-scoped, and recorded in the authority with
-every bypassed condition verbatim. Using either always leaves the
-unresolved findings on record; neither is ever a silent pass.
+3. Dispatch every reviewer of the round. A role with `provider: codex`:
 
-**Gate enforcement.** `aid-cp1-gate.sh` — called once per generation
-transaction by `aid-auto-pipeline.sh`, and per invocation by a standalone
-`aid-plan-to-epic.sh` — is the mechanical backstop for all of the above: it
-independently re-checks `c0-plan-review.json`'s presence/status/blocking_findings,
-re-runs `aid-c0-plan-review.sh verify` itself (never trusting the file's
-fields alone), and re-checks `aid-cp1-ledger.sh check-budget` — EPIC
-generation is blocked if any of these fail, override or no override for
-that specific failure.
+   ```bash
+   bash "$R" dispatch <plan> --round 1 --provider codex --role generalist_b
+   ```
 
-**Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
+   Without Codex installed it prints that the role is recorded as not
+   answered and exits 0; continue. Every
+   role with `provider: claude` follows `scripts/lib/aid-plan-review-adapter-claude.md`,
+   quoted here in full:
 
-| File | Produced by | Required field | Gate |
-|------|-------------|----------------|------|
-| `cp1-lens-L1-behavior.md` | L1 behavior lens agent | `stop_rule_blockers:` at line-start | blocking |
-| `cp1-lens-L2-feasibility.md` | L2 feasibility lens agent | `stop_rule_blockers:` at line-start | blocking |
-| `cp1-lens-L3-enforcement.md` | L3 enforcement lens agent | `stop_rule_blockers:` at line-start | blocking |
-| `cp1-adjudicator.md` | adjudicator agent | `verdict:` at line-start | blocking |
-| `c0-lens-reuse_compat.md` | C0 reuse_compat lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-lens-reuse_evidence.md` | C0 reuse_evidence lens | `stop_rule_blockers:` at line-start | findings observe (E4); the FILE is required by the gate in band `full` |
-| `c0-lens-planned_call_feasibility.md` | C0 planned_call_feasibility lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-lens-dep_api_grounding.md` | C0 dep_api_grounding lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-lens-idempotency_matrix.md` | C0 idempotency_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-lens-authority_runtime_matrix.md` | C0 authority_runtime_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
-| `c0-plan-review.json` | C0 cross-provider (Codex) plan review (`lib/aid-c0-plan-review.sh`) | `review_status`/`blocking_findings` fields + a passing `verify` | **blocking (band `full` only)** |
+<!-- adapter:begin -->
+# Claude reviewers of a plan-review round — controller instruction
 
-Evidence location for L1/L2/L3/adjudicator: `.aid-o/work/evidence/<plan_id>/cp1-deep/`
-Evidence location for C0 lenses: `.aid-o/work/evidence/<plan_id>/c0/`
-Evidence location for the C0 cross-provider plan review: `.aid-o/work/evidence/<plan_id>/c0-plan-review.json` (the canonical, latest-attempt review result, stored at the plan evidence ROOT — one level above `cp1-deep/`). Note: raw Codex evidence (dispatch.json, codex-events.jsonl, codex-last-message.json) is not retained per-attempt; only the final canonical review survives.
-Ledger location (band `full` only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`lib/aid-cp1-ledger.sh`).
+The Agent tool is not callable from bash, so the controller dispatches every
+reviewer whose provider is `claude`. `commands/aid-plan.md` "Plan review (CP1)"
+includes this text verbatim. `<round dir>` is the directory `prepare` printed.
 
-EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L1/L2/L3/adjudicator files, unresolved accepted blockers, a missing/unverifiable/still-blocking C0 review, or an exhausted CP1 ledger budget each cause a non-zero exit — see "C0 Cross-Provider Review Loop" above for the full contract.
+For EACH expected role with `provider: claude` in `<round dir>/round.json`,
+one at a time (`<focus>` is `cp1-` plus the role with `_` replaced by `-`, for
+example `cp1-generalist-a`, `cp1-behaviour-edges`; the dispatch wrapper allows
+no underscore in `--focus` or `--agent-id`):
 
-**Adjudicator acceptance rule:** A `stop_rule_blocker` is accepted ONLY if it has a command/artifact reference (function name, file path, SQL query, config key) AND file:line evidence or an explicit quote from the plan. Vague or hypothetical blockers are rejected with a `rejection_reason`.
+1. Open the dispatch:
 
-**PM escalation:** After 2 auto-revisions with surviving accepted blockers, execution halts and the PM must resolve or waive the blockers before EPIC generation can proceed. For a `full`-band plan, the SAME halt-and-resolve rule applies independently to the C0 cross-provider review loop (see above) once its own budget is exhausted or it hits a mechanically-detected non-convergence.
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus <focus> \
+     --agent-id aid-orchestrator:plan-review --evidence-dir <round dir>
+   ```
+
+2. Dispatch the reviewer with this one-line prompt, never the file's content
+   (a plan packet runs to hundreds of kilobytes; six pasted copies would fill
+   the controller's own context):
+
+   ```
+   Agent(subagent_type: "general-purpose", model: <the role's model from review_checkpoints.plan_review>,
+         prompt: "Your complete instructions are in <round dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
+   ```
+
+   The reviewer writes `<round dir>/reviewer-<role>.json` itself. Note the
+   `subagent_tokens` figure the Agent result reports; when the result shows
+   none, the value is `unknown`.
+
+3. Close the dispatch. `<answer>` is `<round dir>/reviewer-<role>.json`; when
+   the reviewer wrote no file, create the empty marker
+   `<round dir>/reviewer-<role>.missing` and use that path instead:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
+     --output-file <answer> --evidence-dir <round dir>
+   ```
+
+After ALL reviewers of the round (claude and codex) have been dispatched, run
+`collect`. Only when `collect` exits 0, run `close` once with a token value for
+every claude role; when it reports the round invalid, retry the roles it names
+first (`close` refuses an invalid round):
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" collect <plan> --round N
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" close <plan> --round N \
+  --tokens generalist_a=<n|unknown> behaviour_edges=<n|unknown> ...
+```
+
+Never edit a reviewer's file, never write one on a reviewer's behalf, and never
+dispatch a role twice: a role `collect` lists as invalid or missing goes
+through `retry`, then this procedure for that role alone.
+<!-- adapter:end -->
+
+4. When `collect` reports the round invalid, retry only the roles it names,
+   dispatch each of them again (item 3), then `collect` and `close`:
+
+   ```bash
+   bash "$R" retry <plan> --round 1 --role <role>
+   ```
+
+5. Show the PM one information card (`skills/communication.md`): the blockers
+   and majors of `round-1/merged.json` in plain words, how many findings were
+   rejected, and the round's cost from `measurement.json`. When you hold a
+   finding to be wrong, dispute it and make the card a decision card; record the
+   PM's answer in the PM's words:
+
+   ```bash
+   bash "$R" dispute <plan> --round 1 --fingerprint <fingerprint> --reason "<why the finding is wrong>"
+   bash "$R" dispute <plan> --round 1 --fingerprint <fingerprint> --pm accepted --reason "<the PM's words>"
+   ```
+
+   A disputed blocker stays open until the PM accepts the dispute.
+
+6. No blocker open: if you changed the plan after the round (fixing majors,
+   say), run `finalize` (item 8) before the gate; otherwise go to item 9.
+   Blockers open: fix the plan — only the steps the
+   open blockers and majors name — then check the fix and prepare round 2:
+
+   ```bash
+   bash "$R" fix-check <plan> --round 1
+   bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" <plan> --json .aid-o/work/evidence/<plan_id>/plan-check.json
+   bash "$R" prepare <plan> --round 2
+   ```
+
+   `fix-check` refuses a fix that adds a step, a Files entry or an acceptance
+   criterion to a step no finding named: cut it, or bring it to the PM as a
+   design change. Round 2 asks only the reviewers whose findings touch a
+   changed step, plus every reviewer that reported a blocker.
+
+7. Run round 2 exactly as items 3 to 5, with `--round 2`.
+
+8. Blockers still open after the last round: record any dispute first (item
+   5), fix what the last round found, and add to each open blocker's step an
+   acceptance criterion that quotes the finding's claim (at least its first
+   eight words; a plan-level finding goes under `## Success Criteria`). Then
+   snapshot the plan; this is the only edit allowed after the last round, and
+   any later edit needs `finalize` again:
+
+   ```bash
+   bash "$R" finalize <plan>
+   ```
+
+9. Run the gate. Every failure names what is missing, for example
+   `no plan review round-1 for P093; run: aid-plan-review-round.sh prepare …`:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan <plan>
+   ```
+
+**Round count.** Two rounds is the default (`review_checkpoints.plan_review.rounds_default`).
+Only when the PM says so, record one round, or a third:
+
+```bash
+bash "$R" override <plan> --rounds 3 --reason "<the PM's words, quoted>"
+```
+
+The record states that the PM said it; it cannot prove it, exactly like
+`--force` and every waiver. Never run it on your own judgment. `--rounds 1` is
+accepted once round 1 is closed, and its open blockers still need the
+acceptance criteria of item 8; after it only the steps of round 1's open
+findings and acceptance criteria may change before `finalize`. A third round runs only on what is still open.
+
+**Codex unavailable.** The role is recorded as not answered and the round stays
+valid while at least `min_answers` reviewers, one of them a generalist,
+answered. Name the missing role on the PM card; never switch its provider
+yourself — the provider is the project's configuration.
+
+**Evidence.** `.aid-o/work/evidence/<plan_id>/cp1/`: `rounds.json`, one
+`round-N/` per round (`round.json`, `packet/`, `prompt-<role>.md`,
+`reviewer-<role>.json`, `collect.json`, `merged.json`, `rejected.json`,
+`yield.json`, `measurement.json`, `fix-diff.json`, `plan-final.md`),
+`override.json`, and `manual/` from `/aid-verify-plan`, which the gate never
+reads.
 
 ## Plan-final / close boundary
 
@@ -996,14 +685,13 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 - `skills/brainstorming.md` — brainstorm process rules, principles, and context persistence (interim doc) protocol
 - `skills/plan-writing.md` — plan writing quality gates and format
 - `skills/planner.md` — dependency graph and parallel groups
-- `skills/review-checkpoint-contracts.md` — CP1-deep contract
+- `skills/plan-review-roles.md` — the six plan reviewer roles, the evidence rule and the answer shape
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
-- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
-- `{plugin_path}/scripts/lib/aid-c0-plan-review.sh` — C0 cross-provider (Codex) plan review bridge (build-manifest/dispatch/verify)
-- `{plugin_path}/scripts/lib/aid-cp1-ledger.sh` — CP1 revision-limit ledger (init/increment/read/check-budget)
+- `{plugin_path}/scripts/aid-plan-review-round.sh` — plan review rounds (prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override)
+- `{plugin_path}/scripts/aid-plan-review-adjudicate.sh` — merges a round's answers, rejects findings without proof
+- `{plugin_path}/scripts/aid-cp1-gate.sh` — the plan review gate (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a freshly written plan (step 8p)
-- `defaults/policies/review-checkpoints.yaml` — `ceremony_bands` (what each band requires) + `cp1_codex_review` bounded-loop policy (`max_rechecks`)
-- `defaults/policies/risk-paths.yaml` — the curated path map the band is classified from
+- `defaults/policies/review-checkpoints.yaml` — `plan_review`: reviewers, providers, models, rounds
 - `defaults/templates/plan.md` — base plan template
 
 ## Important
@@ -1037,7 +725,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-09-18
 
 ## Plan mode
 

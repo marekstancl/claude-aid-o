@@ -123,28 +123,27 @@ _GEN_LOCK_FD=""
 #
 # WHY THIS CLASSIFICATION IS DECIDABLE (and not guesswork — PM decision 3
 # dropped the host-error detector precisely because it was). It is read from
-# aid-cp1-gate.sh's own documented exit-code contract plus its three literal
-# pre-verdict error strings:
+# aid-cp1-gate.sh's own documented exit-code contract:
 #
-#   rc 1  a genuine CP1 CONDITION verdict — missing/empty/field-less CP1-deep
-#         evidence, an adjudicator `verdict: fail|revise`, surviving accepted
-#         blockers, a structurally broken adjudicator key, a missing/
-#         unverifiable/still-blocking C0 plan review, an exhausted CP1 ledger.
-#         All of these are review evidence a PM may deliberately waive.
-#         -> FORCEABLE.
+#   rc 1  a plan-review CONDITION — no closed or valid round, a plan changed
+#         after its last round, blockers without a second round or without an
+#         acceptance criterion quoting them, a round beyond rounds_default
+#         without the PM's override. Review evidence a PM may deliberately
+#         waive. -> FORCEABLE.
 #   rc 2  usage error ("Unknown argument") — the gate was mis-invoked and never
 #         evaluated a condition. -> HARD.
-#   rc 3  I/O error ("Plan file not found") — same: no verdict was rendered.
-#         -> HARD.
-#   rc 1, but one of the three PLAN-IDENTITY errors the gate raises BEFORE it
-#         ever determines risk: no closing frontmatter `---`, no `id:` field,
-#         or an `id` failing the path-traversal guard. These are not review
-#         evidence at all; forcing past them would seal an authority whose
-#         plan identity is the very thing that is broken. -> HARD.
+#   rc 3  the gate could not trust what it would judge: the plan file or its
+#         id, an invalid plan_review config, unreadable round evidence, a round
+#         the index lists but that is gone, a malformed override.json. -> HARD.
+#   rc 1, but one of three PLAN-IDENTITY strings (no closing frontmatter `---`,
+#         no `id:` field, an `id` failing the path-traversal guard): a stub or
+#         an older gate may still report those with rc 1, and forcing past them
+#         would seal an authority whose plan identity is the very thing that is
+#         broken. -> HARD.
 #
-# The three hard rc-1 strings are matched literally because they are literal in
-# aid-cp1-gate.sh. If that vocabulary changes, this list changes with it — it
-# is a mapping of one script's strings, never an inference about them.
+# The three rc-1 strings are matched literally. If the gate's vocabulary
+# changes, this list changes with it — it is a mapping of one script's strings,
+# never an inference about them.
 AID_GEN_LABEL_BLOCKED="aid_cp1_blocked"
 AID_GEN_LABEL_FORCE_REQUIRED="aid_generation_force_required"
 
@@ -214,7 +213,7 @@ _gen_gate_hard_condition() {
   local rc="$1" out="$2" line=""
   case "$rc" in
     2) printf 'the CP1 gate exited 2 (usage error) — it was mis-invoked and never evaluated a CP1 condition'; return 0 ;;
-    3) printf 'the CP1 gate exited 3 (I/O error) — it could not read what it needed and never evaluated a CP1 condition'; return 0 ;;
+    3) printf 'the CP1 gate exited 3 (hard condition) — its input could not be trusted (unreadable or tampered evidence, invalid configuration, missing tool), so no CP1 condition was evaluated'; return 0 ;;
   esac
   while IFS= read -r line; do
     case "$line" in
@@ -280,10 +279,6 @@ _gen_plan_recorded_mode() {
 # drift between plugin versions at verify time instead of at queue time.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
-# The plan's ceremony band, for the sealed authority receipt. A LIBRARY call —
-# not aid-cp1-gate.sh, whose invocations this pipeline's suites count.
-# shellcheck source=lib/aid-plan-band.sh
-source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 
 _gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 # Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent
@@ -1543,15 +1538,15 @@ if [[ "$_gen_authority_valid" != true ]]; then
     # The bypassed conditions, recorded verbatim from the gate's own output —
     # never a paraphrase, and never a rewrite of the CP1 artifacts on disk.
     _gen_cp1_json="$(jq -n --arg out "$_gen_cp1_out" --argjson rc "$_gen_cp1_rc" \
-      --argjson refs "$(jq -n --arg a "$(aid_state_path ".aid-o/work/evidence/${plan_id}/c0-plan-review.json")" \
-                              --arg b "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1-deep")" \
+      --argjson refs "$(jq -n --arg a "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1/rounds.json")" \
+                              --arg b "$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1")" \
         '[{path:$a, sha256:null},{path:$b, sha256:null}]')" \
       '{bypassed_conditions: ($out | split("\n") | map(select(length > 0))), gate_exit: $rc, evidence_refs: $refs}')"
-    # Fill the evidence_refs hashes for whatever actually exists (audit
-    # provenance at decision time; the gate already validated those files).
-    _gen_c0_ref="$(aid_state_path ".aid-o/work/evidence/${plan_id}/c0-plan-review.json")"
-    if [[ -f "$_gen_c0_ref" ]]; then
-      _gen_cp1_json="$(jq -c --arg p "$_gen_c0_ref" --arg h "$(_gen_sha256_file "$_gen_c0_ref")" \
+    # Hash the plan-review round index when it exists (audit provenance at
+    # decision time; the round directories it lists are what the gate read).
+    _gen_rounds_ref="$(aid_state_path ".aid-o/work/evidence/${plan_id}/cp1/rounds.json")"
+    if [[ -f "$_gen_rounds_ref" ]]; then
+      _gen_cp1_json="$(jq -c --arg p "$_gen_rounds_ref" --arg h "$(_gen_sha256_file "$_gen_rounds_ref")" \
         '.evidence_refs |= map(if .path == $p then .sha256 = $h else . end)' <<< "$_gen_cp1_json")"
     fi
   elif [[ "$force_generation" == true ]]; then
@@ -1559,17 +1554,6 @@ if [[ "$_gen_authority_valid" != true ]]; then
     # nothing was bypassed, so no waiver is written (P073 Step 8 semantics).
     _gen_cp1_json='{"verdict":"pass","force_unused":true}'
   fi
-
-  # The band this plan was classified into, recorded on the sealed decision so a
-  # later reader can see WHICH ceremony was owed, not only that it passed. Asked
-  # of the CLASSIFIER LIBRARY, which is not the gate: "the CP1 gate is consulted
-  # exactly once per plan" is an invariant this pipeline's own suites assert by
-  # COUNTING gate invocations (bats/generation-fixture.bash gen_cp1_calls), and
-  # a pure library call spawns no gate. The earlier version scraped `band=` out
-  # of the gate's human-readable stderr, which quietly made the wording of a
-  # status line a contract.
-  _gen_cp1_json="$(jq -c --arg b "$(aid_plan_band_name "$plan" "$_aid_pipeline_state_root")" \
-    '.band = $b' <<< "$_gen_cp1_json")"
 
   _gen_auth_draft="$(jq -n \
     --arg schema "aid-generation-authority/v1" \
@@ -1786,25 +1770,21 @@ for phase in $(seq 1 "$total_phases"); do
   fi
 
   # -------------------------------------------------------------------------
-  # Phase N.b5: Contract Validation Gate (blocking, D5) + C0 Plan Contract
-  # Gate (observe). Runs after plan.json exists; before FSM init. The
-  # contract-validate sub-block below is the one BLOCKING exception in this
-  # phase — everything else here is plan-level observe-only evidence.
+  # Phase N.b5: Contract Validation Gate (blocking, D5). Runs after plan.json
+  # exists; before FSM init.
   # -------------------------------------------------------------------------
   {
     # Determine plan_id from plan filename
     _c0_plan_id="$(basename "$plan" .md)"
-    # Each generated EPIC owns its own C0 contract graph and validation
-    # evidence. A shared plan-level c0/ directory made phase N overwrite phase
-    # N-1, leaving the last graph to masquerade as evidence for the whole plan.
-    # The plan-global source graph and C0 bridge remain at their own named
-    # generation/ and c0/ paths respectively.
+    # Each generated EPIC owns its own contract validation evidence (the c0/
+    # directory name is historical). A shared plan-level directory made phase N
+    # overwrite phase N-1, leaving the last result to masquerade as evidence for
+    # the whole plan.
     _c0_dir="$(aid_state_path ".aid-o/work/evidence/${_c0_plan_id}/generation/epics/${epic_id}/c0")"
     mkdir -p "$_c0_dir"
 
     # -------------------------------------------------------------------------
-    # D5: Contract Validation Gate (BLOCKING — deliberately NOT part of the
-    # observe-only C0 block below). A malformed generator contract (broadcast
+    # D5: Contract Validation Gate (BLOCKING). A malformed generator contract (broadcast
     # outputs/allowed_paths, `|`-split AC fragments, prose leaking into
     # allowed_paths) is a hard error per plan D5 ("Contract-gate blocking +
     # C0 evidence — malformed = hard-fail před /aid-run") and must stop the
@@ -1863,75 +1843,6 @@ for phase in $(seq 1 "$total_phases"); do
       fi
       error_exit "Contract validation could NOT BE RUN for phase ${phase} (${_c0_plan_id}): the D5 gate ${_cv_how} without emitting a verdict. This is a failure of the GATE, not a finding about the generated EPIC/plan.json — the contract is UNKNOWN, not malformed, and nothing needs editing. Re-run the generation (it resumes; verified phases are not regenerated). Gate stderr: ${_c0_dir}/c0-producer.log; artifact: ${_c0_dir}/contract-validate.json" 5
     fi
-
-    # Read enforcement policy (fail-safe: default to observe)
-    _c0_policy="observe"
-    _c0_policy_file="${SCRIPT_DIR}/../defaults/policies/c0-contract.yaml"
-    if [[ -n "${C0_CONTRACT_POLICY:-}" ]]; then
-      _c0_policy="$C0_CONTRACT_POLICY"
-    elif [[ -f "$_c0_policy_file" ]] && command -v yq &>/dev/null; then
-      # P062 Step 11 — the sixth reader, through the shared per-control
-      # resolver. The C0_CONTRACT_POLICY env override above still wins, so the
-      # existing test/CI seam is untouched.
-      if [[ -f "${SCRIPT_DIR}/lib/aid-control-enforcement.sh" ]]; then
-        # shellcheck source=lib/aid-control-enforcement.sh
-        source "${SCRIPT_DIR}/lib/aid-control-enforcement.sh"
-      fi
-      if declare -F aid_control_enforcement >/dev/null 2>&1; then
-        _c0_policy="$(aid_control_enforcement "$_c0_policy_file" "c0_contract")"
-      else
-        _c0_policy_val="$(yq '.enforcement // "observe"' "$_c0_policy_file" 2>/dev/null)"
-        [[ -n "$_c0_policy_val" && "$_c0_policy_val" != "null" ]] && _c0_policy="$_c0_policy_val"
-      fi
-    fi
-
-    # Run C0 contract producer
-    _c0_contract_exit=0
-    "${SCRIPT_DIR}/aid-c0-contract.sh" contract "$plan_json_path" "$_c0_dir" \
-      2>>"$_c0_dir/c0-producer.log" || _c0_contract_exit=$?
-
-    if [[ $_c0_contract_exit -ne 0 ]]; then
-      _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-      printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_producer_error\",\"plan_id\":\"${_c0_plan_id}\",\"exit\":${_c0_contract_exit}}" \
-        >> "$_c0_dir/c0-observe.jsonl"
-    fi
-
-    # Run C0 review checker
-    _c0_review_exit=0
-    "${SCRIPT_DIR}/aid-c0-contract.sh" review "$plan" "$_c0_dir" \
-      2>>"$_c0_dir/c0-producer.log" || _c0_review_exit=$?
-
-    if [[ $_c0_review_exit -ne 0 ]]; then
-      _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-      printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_review_error\",\"plan_id\":\"${_c0_plan_id}\",\"exit\":${_c0_review_exit}}" \
-        >> "$_c0_dir/c0-observe.jsonl"
-    fi
-
-    # Log c0_would_block if any structural or lens findings
-    _c0_would_block=false
-    if [[ -f "$_c0_dir/plan-review.json" ]]; then
-      _c0_finding_count="$(jq '
-        ((.plan_review.structural_checks // []) | map(select(.status != "pass")) | length) +
-        ((.plan_review.lens_findings // []) | map(select(.verdict == "found")) | length)
-      ' "$_c0_dir/plan-review.json" 2>/dev/null || echo 0)"
-      if [[ "$_c0_finding_count" -gt 0 ]]; then
-        _c0_would_block=true
-        _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-        printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_would_block\",\"plan_id\":\"${_c0_plan_id}\",\"finding_count\":${_c0_finding_count},\"policy\":\"${_c0_policy}\"}" \
-          >> "$_c0_dir/c0-observe.jsonl"
-        echo "[C0] would_block: ${_c0_finding_count} findings (policy=${_c0_policy})" >&2
-      fi
-    fi
-
-    # Enforce policy (blocking mode — E10 / tests only; default is observe)
-    if [[ "$_c0_policy" == "blocking" && "$_c0_would_block" == "true" ]]; then
-      # AID's OWN gate, named in its own message — the not-an-AID-gate note
-      # would flatly contradict it.
-      _gen_aid_owned_failure=true
-      error_exit "C0 Plan Contract Gate: blocking policy activated with ${_c0_finding_count} findings" 2
-    fi
-
-    # NEVER propagate non-zero from C0 block in observe mode
   }
 
   # Stage 1 ends here on the normal path: no run/FSM/queue state exists until

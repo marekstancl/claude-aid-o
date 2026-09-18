@@ -178,3 +178,50 @@ aid_state_path() {
     printf '%s\n' "${root}/${rel}"
   fi
 }
+
+# ---------------------------------------------------------------------------
+# Plan identity: which project a plan belongs to, and its frontmatter id.
+# ---------------------------------------------------------------------------
+# _aid_plan_project_root <plan> — the project a plan belongs to: the nearest
+# ancestor of the PLAN that holds a `.aid-o/`. Never `pwd`: a tool run from
+# anywhere must resolve the same project for the same plan.
+_aid_plan_project_root() {
+  local dir
+  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd)" || return 1
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    [[ -d "${dir}/.aid-o" ]] && { printf '%s' "$dir"; return 0; }
+    dir="${dir%/*}"          # parameter expansion, not a `dirname` fork per level
+  done
+  return 1
+}
+# _aid_fm_get <plan> <key> — one scalar from the plan's YAML frontmatter block
+# (first `---` to its closing `---`), trimmed and unquoted. Nothing when the
+# key, or the block, is absent.
+#
+# ONE READER. Four hand-rolled versions of this awk existed across the plan
+# tooling and they disagreed on whether `id: "P084"` keeps its quotes — which
+# is how one plan could get one id in the gate and another in the lint's
+# telemetry path. The key is matched ANCHORED with its colon, so a `risky:`
+# line is not the key `risk`.
+_aid_fm_get() {
+  awk -v key="$2" '
+    NR == 1 && $0 != "---" { exit }
+    NR == 1 { inside = 1; next }
+    inside && $0 == "---" { exit }
+    inside && index($0, key ":") == 1 {
+      sub("^" key ":[[:space:]]*", ""); sub(/[[:space:]]*$/, "")
+      gsub(/^["\x27]|["\x27]$/, "")
+      print; exit
+    }
+  ' "$1" 2>/dev/null
+}
+
+# _aid_plan_id_of <plan> — the plan's frontmatter id, or nothing plus return 1.
+# The result must match ^[A-Za-z0-9_-]+$, because callers turn it into a
+# DIRECTORY name: an unvalidated id is both a wrong path and a traversal shape.
+_aid_plan_id_of() {
+  local id
+  id="$(_aid_fm_get "$1" id)" || return 1
+  [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  printf '%s' "$id"
+}

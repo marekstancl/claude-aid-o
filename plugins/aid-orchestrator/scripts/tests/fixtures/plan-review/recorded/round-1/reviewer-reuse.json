@@ -1,0 +1,13 @@
+{"role": "reuse",
+ "findings": [
+  {"id": "reuse-1", "step": 16, "severity": "minor",
+   "claim": "The new shared helper frontend/e2e/helpers/pdf.ts is extracted only from vat-category.spec.ts, but identical makePdf copies already live in issued-invoice-fixes.spec.ts and mobile-smoke.spec.ts, so the extraction leaves two duplicates of the helper it creates.",
+   "command": "grep -rn \"function makePdf\" frontend/e2e",
+   "evidence": "plan.md:1093; frontend/e2e/vat-category.spec.ts:42; frontend/e2e/issued-invoice-fixes.spec.ts:67; frontend/e2e/mobile-smoke.spec.ts:44",
+   "fix": "Step 16 must list issued-invoice-fixes.spec.ts and mobile-smoke.spec.ts as Modify (import makePdf from helpers/pdf.ts), or state why their copies differ and stay."},
+  {"id": "reuse-2", "step": 1, "severity": "minor",
+   "claim": "The Step 1 reuse check says the new migration chains to down_revision \"0035\", contradicting the Create bullet (down_revision \"0036\") and the repository head 0036_vat_category_non_payer.py, so the check was written against a stale migration list.",
+   "command": "ls backend/db/versions",
+   "evidence": "plan.md:312; plan.md:321; backend/db/versions/0036_vat_category_non_payer.py:1",
+   "fix": "Reuse check must say down_revision = \"0036\" and re-run the search against the current versions directory."}
+ ]}

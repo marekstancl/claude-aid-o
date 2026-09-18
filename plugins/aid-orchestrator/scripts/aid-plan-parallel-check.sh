@@ -43,8 +43,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-scoping.sh
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
-# shellcheck source=lib/aid-plan-band.sh
-source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
 
 PLAN=""; ADVISORY=0; QUIET=0; ONLY_GROUP=""
 while [[ $# -gt 0 ]]; do
@@ -64,7 +62,6 @@ done
 _AID_PARALLEL_STANDALONE='---'
 _AID_PARALLEL_GROUP_RE='^[A-Za-z0-9_-]+$'
 
-band="$(aid_plan_band_name "$PLAN")"
 findings=0
 
 # _report <severity> <message> — one emitter, so the advisory/blocking split
@@ -115,13 +112,8 @@ while IFS=$'\t' read -r s e head; do
   # annotation.
   group="${group%%[[:space:]]*}"
   if [[ -z "$group" ]]; then
-    if [[ "$band" == "light" ]]; then
-      # The safe default: a step nobody placed runs alone.
-      group="$_AID_PARALLEL_STANDALONE"
-    else
-      _report finding "${head}: no **Parallel group:** field. A ${band}-band plan declares concurrency deliberately — write a wave name, or \`${_AID_PARALLEL_STANDALONE}\` for a step that runs alone."
-      group="$_AID_PARALLEL_STANDALONE"
-    fi
+    # The safe default: a step nobody placed runs alone.
+    group="$_AID_PARALLEL_STANDALONE"
   elif [[ "$group" != "$_AID_PARALLEL_STANDALONE" && ! "$group" =~ $_AID_PARALLEL_GROUP_RE ]]; then
     _report finding "${head}: '**Parallel group:** ${group}' is not a group name — expected a single word ([A-Za-z0-9_-]) or \`${_AID_PARALLEL_STANDALONE}\`."
     group="$_AID_PARALLEL_STANDALONE"

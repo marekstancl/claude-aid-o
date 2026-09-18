@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-08-29
+**Last Updated:** 2026-09-18
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -101,12 +101,12 @@ only the evidence dir and a stray copy in the checkout root counts as "missing")
 
 ## Auto-Dispatch Triggers (Review Checkpoints)
 
-The verifier is dispatched automatically at 6 pipeline milestones. Configuration in
+The verifier is dispatched automatically at 5 pipeline milestones (CP2 to CP6). Configuration in
 `config/policies/review-checkpoints.yaml` controls which checkpoints are active.
 
 | CP | Trigger | Focus | Context | Fix Loop? |
 |----|---------|-------|---------|-----------|
-| CP1 | Plan written (`/aid-plan` Step 9) | `docs-review` | Plan file content | No (PM decides) |
+| CP1 | — not a verifier dispatch: plan review runs six reviewer roles (`skills/plan-review-roles.md`, `commands/aid-plan.md` "Plan review (CP1)") | — | — | — |
 | CP2 | Step completed (`/aid-run` EXECUTE) | `code-review` | Step output + `git diff` for step branch | Yes |
 | CP3 | All steps done (EXECUTE→GATES) | `code-review` + `security` (parallel) | Full `git diff` since run start | Yes |
 | CP4 | After curator + auditor auto-fix (DONE, pre-merge) | `code-review` | The applied curator + auditor changes (§7 steps 7–8) | Yes (revert on fail) |
@@ -122,8 +122,6 @@ finds a match → immediate FAIL without verifier dispatch. If clean + trivial �
 
 ### Checkpoint-Specific Context Assembly
 
-- **CP1:** Read the plan file path from dispatch prompt. Review for completeness, ambiguity,
-  missing acceptance criteria, unrealistic scope.
 - **CP2:** Read `evidence/{id}/{run}/steps/step_{N}_{role}/output.md` + run
   `git diff epic/{id}/main..step_{N}_{role}` to see actual code changes.
 - **CP3:** Run `git diff {base_commit}..HEAD` for full integration diff. Dispatch TWO

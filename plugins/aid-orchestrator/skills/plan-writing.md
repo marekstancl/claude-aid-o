@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-09-18
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -357,11 +357,9 @@ something new (any `Create:` bullet in its `Files:`) MUST carry a
 
 **What the replay does NOT prove.** It proves the declared result matches what
 the command returns — not that the search was wide enough. A narrowly aimed
-`grep` with an honest `none` passes. Width is judged by the `reuse_evidence`
-C0 lens, and only in the `full` band; `medium` and `light` keep the replay
-alone. That is a deliberate boundary: a review costs a dispatch, and on a small
-plan it is not worth one. (The lens's side of that boundary:
-`skills/review-checkpoint-contracts.md` §"Lens: reuse_evidence".)
+`grep` with an honest `none` passes. Width is judged by the `reuse` reviewer of
+plan review (`skills/plan-review-roles.md` §"Role: reuse"), which searches by
+what a step's new thing does rather than by its new name.
 
 **The N+1 rule.** The field is about the thing the step FOUNDS — that is what
 "of the same kind" means below, and it is why the rule can be checked at all: a
@@ -561,8 +559,8 @@ test items to steps ran at roughly 1:1 whatever the plan actually changed
 What the plan owes instead is one `## Testing Strategy` section answering three
 questions in plain sentences:
 
-1. **Which behaviour does this plan verify?** Name it. "The classifier returns
-   `light` for a plan that only touches command texts" is a behaviour; "unit
+1. **Which behaviour does this plan verify?** Name it. "The gate refuses a plan
+   whose open blocker no acceptance criterion quotes" is a behaviour; "unit
    tests for step 3" is a count.
 2. **Why that behaviour and not another?** Usually because the plan CHANGES a
    decision something else depends on. A plan that changes no behaviour says
@@ -577,50 +575,26 @@ MUST declare its tier (`aid-plan-to-epic.sh` refuses without it). Making tests
 optional per step and letting untiered suites in are two different things, and
 only the first is intended here.
 
-### Obligations by ceremony band
+### What every plan owes
 
-A plan's obligations are proportional to what it declares it will touch. The
-**band** is classified from the plan's own `Files:` paths — ask the gate, never
-re-derive it:
+Every plan owes the same, whatever it touches. What differs is only who reviews
+it: a plan with frontmatter `type: docs` is put to the two generalist reviewers,
+every other plan to all six (`skills/plan-review-roles.md`), and check A11 of
+`aid-plan-check.sh` blocks a `type: docs` plan that declares a code path.
 
-```bash
-band="$(bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN_FILE" \
-        --project-root "$PROJECT_ROOT" --classify-only)"   # full | medium | light
-```
-
-Run this FIRST, before revising the plan against anything below.
-`aid-plan-lint.sh` enforces the same split from the SAME classifier — it sources
-`lib/aid-plan-band.sh` directly rather than shelling out to the gate, because
-the gate is consulted exactly once per plan — so the band you write against and
-the band the lint checks are one classification, never two.
-
-| Obligation | `full` | `medium` | `light` |
-|---|---|---|---|
-| `Files:` in the canonical grammar | required | required | required |
-| **Objective** | required | required | required |
-| **Acceptance Criteria** | required | required | required |
-| **Dependencies** | required | required | required |
-| **Effort**, **AID Role** | required | required | required |
-| Tier on a `Test:` bullet naming a NEW suite | required | required | required |
-| `## Testing Strategy` with content | required | required | required |
-| **Reuse check** on a step with a `Create:` bullet | required | required | **required** |
-| `## Standards` naming what the live map binds to these paths | required | required | — |
-| A step naming the help/docs path a behaviour change needs | required | required | — |
-| **Parallel group** per step | required | required | defaults to `---` |
-| **Architecture Context** | required | required | — |
-| **Error Handling** | required | required | — |
-| **Edge Cases** | required | required | **not required at all** |
-| **Implementation Detail** | a paragraph or a code snippet | a paragraph or a code snippet | one sentence is enough |
-| `verification_pattern` on plan-level AC | required | required | — |
-| C0 cross-provider review round | required | — | — |
-
-The three fields marked "—" for `light` are not "nice to have there" — they are
-**not asked for**, and a light plan that omits them is complete. That is the
-whole point of the band: a plan that changes a help text was answering questions
-about failure modes it does not have.
-
-Nothing here lowers a band. A plan that wants the full ceremony says so with
-`risk: high` in its frontmatter; a plan that wants less says so by touching less.
+| Obligation | |
+|---|---|
+| `Files:` in the canonical grammar | required |
+| **Objective**, **Acceptance Criteria**, **Dependencies**, **Effort**, **AID Role** | required |
+| **Architecture Context**, **Error Handling**, **Edge Cases** | required |
+| **Implementation Detail** | a paragraph or a code snippet |
+| Tier on a `Test:` bullet naming a NEW suite | required |
+| `## Testing Strategy` with content | required |
+| **Reuse check** on a step with a `Create:` bullet | required |
+| `## Standards` naming what the live map binds to these paths | required when the project has a standards map |
+| A step naming the help/docs path a behaviour change needs | required when the project records a help or docs surface |
+| **Parallel group** per step | defaults to `---` (runs alone) |
+| `verification_pattern` on plan-level AC | optional; `aid-plan-check.sh` validates each one present |
 
 ### Declaring what can run at the same time
 
@@ -711,9 +685,6 @@ already carries `ui-capture.mjs`, `screeng-capture.mjs` and `ui-compare.mjs`.
 
 ### Mandatory Fields Per Step
 
-Per the table above, "every step" below means every step of a `full` or `medium`
-plan. A `light` plan owes the universal rows only.
-
 Every step MUST have ALL of these fields populated:
 
 | Field | Minimum Requirement |
@@ -721,7 +692,7 @@ Every step MUST have ALL of these fields populated:
 | **Objective** | One clear sentence, no ambiguity |
 | **Files** | At least 1 concrete file path (no placeholders like `src/...`) |
 | **Tier** (`Test:` bullets naming a NEW suite) | `(tier: t0\|t1\|t2)` — chosen from cost and scope, never from importance: **t0** under 2 s per case (the whole tier under 2 min), **t1** under 30 s per case (the whole tier under 10 min, and this is what blocks a merge), **t2** everything else AND anything cross-component. Into **t2 only with a stated reason** in the prose — t2 runs nightly, so a suite parked there is one nobody is waiting on. |
-| **Reuse check** (steps with a `Create:` bullet) | A replayable read-only search command, one of the four results, and why what exists does not suffice. Required in EVERY band — founding a duplicate is exactly what small plans do. |
+| **Reuse check** (steps with a `Create:` bullet) | A replayable read-only search command, one of the four results, and why what exists does not suffice. Required in every plan — founding a duplicate is exactly what small plans do. |
 | **Architecture Context** | At least 2 sentences referencing the Architecture section |
 | **Implementation Detail** | At least 1 paragraph with concrete logic OR 1 code snippet |
 | **Error Handling** | At least 1 failure mode with recovery strategy |
@@ -840,11 +811,6 @@ behaviour). Run it and repair its `BLOCK` lines — "I evaluated the checklist"
 is not an answer the generation gate accepts, because `aid-generation-readiness.sh`
 runs the same script. The checks that remain a judgment (1-3, 10-12, 15, 16,
 17c, 19, 21) are what the model reviewers are for.
-
-**First move: classify the band** (`aid-cp1-gate.sh --classify-only`, see
-"Obligations by ceremony band" above). Eight of the checks below are band-scoped
-and a `light` plan does not owe them; the verdict per check is tabulated after
-the gate.
 
 ```
 COMPLETENESS GATE — evaluate each check:
@@ -1122,8 +1088,6 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
 
 EVALUATION:
   COUNT checks passed out of 28 (24 existing + 20a + 20b + 20c + 21).
-  Band-scoped checks (4, 6, 7, 8, 12, 20a, 20b, 20c) are N/A for a `light`
-  plan and count as PASS — see "Which checks apply to which band" below.
   IF all 28 pass → write plan to disk
   Note: Check #19 activates only for `type: bug-fix` plans or via pre-screening
   heuristic above. For non-applicable plans, mark #19 as N/A (counts as PASS).
@@ -1134,34 +1098,9 @@ EVALUATION:
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
 ```
 
-### Which checks apply to which band
+### Cancellation candidates
 
-Every one of the 28 checks carries a verdict. A check is **universal** (it runs
-whatever the plan touches) or **band-scoped** (it runs for `full` and `medium`,
-and is not asked of a `light` plan). No check is silently "universal by default":
-a check with no verdict here is a defect in this document, not a permission.
-
-| Check | Verdict | Why |
-|---|---|---|
-| 1, 2, 3 — section completeness | universal | an empty or missing section is a hole at any size |
-| 4 — mandatory fields per step | band-scoped | the field SET itself differs by band (table above) |
-| 5 — concrete file paths | universal | the paths are what the band is classified FROM |
-| 6 — ≥3 AC for M/L steps | band-scoped | |
-| 7 — ≥3 edge cases for M/L steps | band-scoped | `light` owes no edge cases at all |
-| 8 — line ranges on Modify entries | band-scoped | *cancellation candidate — see below* |
-| 9 — no forbidden phrases | universal | |
-| 10, 11 — API and data-model completeness | universal | both already activate only when the section exists |
-| 12 — concrete implementation detail | band-scoped | `light` may answer in one sentence |
-| 13, 14, 15 — structural quality | universal | generation reads these; a broken graph breaks at any size |
-| 16 — traceability report | universal | |
-| 17, 17a, 17b, 17c, 17d, 17e — codebase grounding | universal | a plan that names something that does not exist is wrong at any size; this is the anti-fabrication core |
-| 18 — concrete step outputs | universal | |
-| 19 — design-defeat detection | universal | already conditional (`type: bug-fix` or its own pre-screen) |
-| 20a, 20b, 20c — executable plan-level AC | band-scoped | |
-| 21 — critical-path branch coverage | universal | already conditional (handler pre-screen), and advisory |
-
-**Cancellation candidates — PM decides, per item, never the plan author.**
-Check **8** (line ranges on `Modify` entries) has never been mechanically
+PM decides, per item, never the plan author. Check **8** (line ranges on `Modify` entries) has never been mechanically
 enforced and a stale range is worse than none. It is proposed for cancellation
 and stays in force until the PM says otherwise.
 
@@ -1476,7 +1415,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-09-18
 
 ## Plan-boundary note
 

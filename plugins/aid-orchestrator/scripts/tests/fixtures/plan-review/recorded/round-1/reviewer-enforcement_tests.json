@@ -1,0 +1,13 @@
+{"role": "enforcement_tests",
+ "findings": [
+  {"id": "enforcement_tests-1", "step": 6, "severity": "minor",
+   "claim": "Step 6 claims 409/422 errors are shown at the field in the document-kind dialog, but the only named automated test (documentKinds.test.ts) covers legacyCodeFor and local mask preview, and the rest is deferred to 'manual verification in Playwright Step 16', whose scenario list does not name the refusal display; the new test file also carries no tier tag.",
+   "command": "grep -n \"documentKinds.test.ts\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:604; plan.md:640",
+   "fix": "Add a vitest case to documentKinds.test.ts (tier: t0) that mocks a 409 and a 422 response from the document-kinds API and asserts the message renders at the field, or name the Step 16 scenario that checks it."},
+  {"id": "enforcement_tests-2", "step": null, "severity": "minor",
+   "claim": "Success Criterion 2 (accountant imports the ZIP into DUNA folder by folder, copying kind and tax-doc type from the folder name) is not reached by any named test: the e2e spec and test_isdoc_zip.py check the ZIP layout inside ACTA, nothing checks the DUNA side.",
+   "command": "sed -n 1213,1219p .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:1216; plan.md:1092",
+   "fix": "Either rephrase the criterion to what ACTA tests can show (folder names equal the kind code and DUNA tax-doc type code, _navod.txt lists them) or name a manual DUNA import check with its evidence file as the receipt."}
+ ]}

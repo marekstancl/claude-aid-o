@@ -2127,35 +2127,26 @@ _write_review_outputs() {
 #     (P068 Step 4 — the plan-mode C4 decision + the plan-level PM summary)
 # =============================================================================
 
-# _write_plan_c0 [head_override] — the plan's OWN C0 review at the canonical path
-# aid-c0-plan-review.sh writes (.aid-o/work/evidence/<plan_id>/c0-plan-review.json).
-# Stamped at plan_base_commit by default: a plan-time artifact is stale by
-# construction, so the aggregator's basis for it is ANCESTRY, not equality.
-_write_plan_c0() {
-  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${PLAN_ID}"
+# _write_plan_review [head_override] — the plan's sealed generation authority, which
+# carries the plan review (CP1) verdict the aggregator reads. Its target_head is
+# plan_base_commit by default: a plan-time artifact is stale by construction, so
+# the aggregator's basis for it is ANCESTRY, not equality.
+_write_plan_review() {
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${PLAN_ID}/generation"
   mkdir -p "$dir"
   local h="${1:-$(_manifest_field "$PLAN_ID" plan_base_commit)}"
-  jq -n --arg h "$h" --arg p "$PLAN_ID" \
-    '{schema_version:"aid-2.0", artifact_type:"plan_review", producer:"aid-c0-plan-review.sh@1.0",
-      created_at:"2026-07-25T00:00:00Z", control_protocol:"aid-2.0",
-      identity:{project_id:"aid-orchestrator", plan_id:$p, epic_id:null, run_id:"C0-1", step_id:null},
-      subject:{subject_hash:"sha256:c0"},
-      revision:{head_sha:$h, head_is_current:true, freshness:"current"},
-      status:"pass", verdict:{kind:"none", ready:true},
-      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-c0-plan-review.sh"},
-      plan_review:{review_status:"reviewed", blocking_findings:false}}' \
-    > "$dir/c0-plan-review.json"
+  jq -n --arg h "$h" '{cp1: {verdict: "pass"}, target_head: $h}' > "$dir/generation-authority.json"
 }
 
 # _seed_c4_project — a plan that has passed the FULL review boundary, plus the two
-# things C4 reads that the review stage does not produce: the plan's own C0 review
+# things C4 reads that the review stage does not produce: the plan's sealed review
 # and the per-EPIC evidence directories the roll-up checks for on disk.
 _seed_c4_project() {
   _seed_review_project
   _write_review_outputs
   _review
   [ "$status" -eq 0 ]
-  _write_plan_c0
+  _write_plan_review
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-068-1_2/R-E-068-1_2-1"
   # The at-HEAD verifier subprocess is stubbed (double-gated seam) — this suite
   # exercises the plan-mode RESOLUTION layer, not aid-evidence-verify.sh itself,

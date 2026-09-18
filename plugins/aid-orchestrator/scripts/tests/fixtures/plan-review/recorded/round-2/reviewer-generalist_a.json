@@ -1,0 +1,18 @@
+{"role": "generalist_a",
+ "findings": [
+  {"id": "generalist_a-1", "step": 12, "severity": "blocker",
+   "claim": "The round-1 fix was appended but the crashing expression was left in place, and the new fallback folder contradicts Error Handling: rule (3) still reads kind_name = kinds_by_code.get(code).name (None.name -> 500 for a deleted kind), the appended sentence and the new AC say folder `<kód>_`, while Error Handling says `<code>_neznamy_druh/`.",
+   "command": "grep -n \"kinds_by_code.get\\|neznamy_druh\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "plan.md:917; plan.md:920; plan.md:935",
+   "fix": "Rewrite rule (3) itself: kind_name = fields_meta.druh_dokladu.kind_name, else (kinds_by_code.get(code) and its .name), else missing-kind branch; pick ONE folder name for a missing kind (`<code>_neznamy_druh/` or `<code>_`) and use it in Implementation Detail, Error Handling and the AC."},
+  {"id": "generalist_a-2", "step": 14, "severity": "major",
+   "claim": "Step 14 now lets PATCH /tax-profile confirm an archived document with a `proposed` profile, but the Step 8 contract, its implementation detail and its test still require 422 for every archived document, the Step 10 UI keeps all three fields read-only on archived documents, and the Step 11 edge case still says PATCH on archived returns 422; the PATCH contract also always writes `overridden` and requires `reason`, so no 'confirm only' body shape exists.",
+   "command": "grep -n \"archivovan\\|archived\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "plan.md:289; plan.md:737; plan.md:726; plan.md:796; plan.md:840; plan.md:990",
+   "fix": "Define the confirm-on-archived contract once (e.g. body {version, confirm: true, expected_tax_doc_type} -> state `confirmed`, no reason, other fields 422 on archived), update the Step 8 contract/test (`archivovaný 422` only for non-confirm edits), give the Step 10 UI a 'Potvrdit profil' action on archived documents, and correct the Step 11 edge case text."},
+  {"id": "generalist_a-3", "step": 5, "severity": "major",
+   "claim": "The monkeypatch replacement was written into Step 3's docdefaults/service.py bullet, but Step 5's own Files entry for test_direction_change_numbering.py still does not mention replacing the get_document_defaults monkeypatch, so the Step 5 implementer working from Step 5 Files leaves a patch on an unused function.",
+   "command": "grep -n \"test_direction_change_numbering.py\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "plan.md:548; plan.md:408; backend/tests/documents/test_direction_change_numbering.py:207",
+   "fix": "Add to the Step 5 Files bullet at plan.md:548: the get_document_defaults monkeypatch at lines ~207-218 is replaced by a patch on resolve_kind_safe."}
+ ]}

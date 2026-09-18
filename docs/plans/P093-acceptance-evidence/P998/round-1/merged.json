@@ -1,0 +1,245 @@
+{
+  "plan_sha256": "612623f55aa1d7b10dff10c7d3201a3bf9c113895f206791375f4c7c0fda75ec",
+  "round": 1,
+  "findings": [
+    {
+      "fingerprint": "sha256:120dc96d0a6897b88447e66d8d64c3409b1a3bebed934f65740b3f06e5fe269f",
+      "step": 14,
+      "severity": "major",
+      "severity_reported": {
+        "behaviour_edges": "major"
+      },
+      "claim": "A document approved through review-and-archive ends up archived with tax_profile_state 'proposed', so it always lands in _NEIMPORTOVAT/k_rucnimu_posouzeni, while PATCH /tax-profile returns 422 for archived documents; the plan gives the user no way in the UI to confirm it (only the one-off backfill --confirm-approved, run once after deployment).",
+      "command": "grep -n \"review-and-archive\\|u archivovaného dokladu\\|tax_profile_state not in\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:197; plan.md:289; plan.md:758; plan.md:917; backend/acta/documents/vat_category_router.py:78",
+      "fix": "Say what happens to documents archived through the shortcut after deployment: either the shortcut confirms the proposals (with expected_* fields), or the shortcut is refused for documents with an unconfirmed profile/kind, or the tax-profile PATCH is allowed on archived documents. Name the test for the chosen path.",
+      "reported_by": [
+        "behaviour_edges"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:2ede2525e8b159a409302c4cde2a9741106d05363dabefbebb8ad1a5e050d2a4",
+      "step": 1,
+      "severity": "major",
+      "severity_reported": {
+        "generalist_b": "major"
+      },
+      "claim": "Step 1 gives two different parents for migration 0037: Files says down_revision \"0036\", while the Reuse check says it follows on with down_revision \"0035\". An agent that follows the Reuse check creates a second Alembic head next to 0036_vat_category_non_payer.",
+      "command": "grep -n 'down_revision = \"003[56]\"' .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:312; plan.md:321; backend/db/versions/0036_vat_category_non_payer.py:1",
+      "fix": "Change the Reuse check to say down_revision = \"0036\", so that one parent is stated throughout the plan.",
+      "reported_by": [
+        "generalist_b"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:6577366b3b0167ef6c0f288711b0673773f7103ff8a50e9a37675caddf139e92",
+      "step": 4,
+      "severity": "minor",
+      "severity_reported": {
+        "behaviour_edges": "minor"
+      },
+      "claim": "apply-template add_missing and the automatic is_default for the first kind of a direction are check-then-insert; two concurrent calls hit the unique (client_id, code) or the partial is_default index, and the plan only maps the is_default collision to 409 and describes idempotence only for sequential calls.",
+      "command": "grep -n \"existuje kód → \\`skipped\\`\\|partial unique index odmítne\\|při druhém volání\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:497; plan.md:433; plan.md:475",
+      "fix": "Use INSERT … ON CONFLICT DO NOTHING (count those rows as skipped) or lock per client, and state that a concurrent apply-template returns 200/409, never 500.",
+      "reported_by": [
+        "behaviour_edges"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:6745e30640e7f60f2209a92355bf4177d54a99d234488563e05e7d4c65e35b93",
+      "step": 16,
+      "severity": "minor",
+      "severity_reported": {
+        "reuse": "minor"
+      },
+      "claim": "The new shared helper frontend/e2e/helpers/pdf.ts is extracted only from vat-category.spec.ts, but identical makePdf copies already live in issued-invoice-fixes.spec.ts and mobile-smoke.spec.ts, so the extraction leaves two duplicates of the helper it creates.",
+      "command": "grep -rn \"function makePdf\" frontend/e2e",
+      "evidence": "plan.md:1093; frontend/e2e/vat-category.spec.ts:42; frontend/e2e/issued-invoice-fixes.spec.ts:67; frontend/e2e/mobile-smoke.spec.ts:44",
+      "fix": "Step 16 must list issued-invoice-fixes.spec.ts and mobile-smoke.spec.ts as Modify (import makePdf from helpers/pdf.ts), or state why their copies differ and stay.",
+      "reported_by": [
+        "reuse"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:76cb691d87ef2fb0fcd7e681fbb59c79ce5b4a0ea0c94816616bd1f7c5fc4cbb",
+      "step": 4,
+      "severity": "minor",
+      "severity_reported": {
+        "generalist_b": "minor"
+      },
+      "claim": "The plan cites the VAT_CATEGORIES and SUPPLY_KINDS constants at different lines in different places (models.py:59-73 vs 54-67, and SUPPLY_KINDS at :110). In the repository they are at lines 59 and 116.",
+      "command": "grep -n 'VAT_CATEGORIES: \\|SUPPLY_KINDS: ' backend/acta/documents/models.py",
+      "evidence": "backend/acta/documents/models.py:59; backend/acta/documents/models.py:116; plan.md:238; plan.md:490",
+      "fix": "Cite documents/models.py:59 (VAT_CATEGORIES) and :116 (SUPPLY_KINDS) consistently.",
+      "reported_by": [
+        "generalist_b"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:7ad1cff66f0f167185b00458b623bcf0ecc14d9f3075b9edbff09d3be1c43bd2",
+      "step": 12,
+      "severity": "blocker",
+      "severity_reported": {
+        "behaviour_edges": "blocker"
+      },
+      "claim": "The export reads the kind name as kinds_by_code.get(code).name, but a confirmed document can carry a druh code that no longer exists in the catalogue (DELETE, PUT code change and apply-template replace only check to_review documents), so .get returns None and the whole ZIP export fails with a 500.",
+      "command": "grep -n \"kinds_by_code.get(code).name\\|d.status = 'to_review'\\|doklad \\`to_review\\` s\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:917; plan.md:495; plan.md:497",
+      "fix": "Take the folder name from fields_meta.druh_dokladu.kind_name (stored at determination time) with kinds_by_code only as a fallback; handle a missing code explicitly (folder <code>_ and a _navod.txt warning); add a test that exports a reviewed document whose kind was deleted or replaced by a template.",
+      "reported_by": [
+        "behaviour_edges"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:7df076a6ce418d8fbb79b63265acbed7796adbb4350eea7d3ad567a6e4d51687",
+      "step": 3,
+      "severity": "major",
+      "severity_reported": {
+        "generalist_b": "major"
+      },
+      "claim": "Step 3 deletes backend/acta/docdefaults/models.py. The adapter service imports BUILTIN_DRUH_DOKLADU and DRUH_DOKLADU_UNKNOWN_DIRECTION from that file, but the plan names only the _resolve rewrite. The Step 3 AC also requires that test_derived_fields_all_paths.py and test_direction_change_derived_fields.py pass unchanged, and those tests call docdefaults_service.builtin_druh_dokladu. Nothing in the plan says where those constants and that helper come from after the delete.",
+      "command": "sed -n 18,22p backend/acta/docdefaults/service.py",
+      "evidence": "backend/acta/docdefaults/service.py:18; backend/acta/docdefaults/service.py:48; backend/tests/documents/test_direction_change_derived_fields.py:99; plan.md:408; plan.md:452",
+      "fix": "In Step 3 Files, add: docdefaults/service.py imports BUILTIN_KIND_CODE and KIND_CODE_UNKNOWN_DIRECTION from acta.doctypes.models (or re-exports them under the old names), and builtin_druh_dokladu stays in the adapter.",
+      "reported_by": [
+        "generalist_b"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:85d04fcce40525cb1690999a6720f3f82c2df0cf15aec2958c636ad41382af54",
+      "step": 6,
+      "severity": "minor",
+      "severity_reported": {
+        "enforcement_tests": "minor"
+      },
+      "claim": "Step 6 claims 409/422 errors are shown at the field in the document-kind dialog, but the only named automated test (documentKinds.test.ts) covers legacyCodeFor and local mask preview, and the rest is deferred to 'manual verification in Playwright Step 16', whose scenario list does not name the refusal display; the new test file also carries no tier tag.",
+      "command": "grep -n \"documentKinds.test.ts\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:604; plan.md:640",
+      "fix": "Add a vitest case to documentKinds.test.ts (tier: t0) that mocks a 409 and a 422 response from the document-kinds API and asserts the message renders at the field, or name the Step 16 scenario that checks it.",
+      "reported_by": [
+        "enforcement_tests"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:8a91fd14bbb18ee8371b31a0d0de870c415d7eaa6086417105c695dc3c6a9f1a",
+      "step": 5,
+      "severity": "minor",
+      "severity_reported": {
+        "feasibility_deps": "minor"
+      },
+      "claim": "The plan lists exactly one caller of get_document_defaults (sequences/service.py:243), but backend/scripts/fix_issued_invoices_p018.py:727 also calls it to set druh_dokladu; Step 5 rewires only that script's resolve_acta_number call to resolve_kind_safe, so the script would write the druh from the adapter's default catalog row while taking the series from the resolved (possibly more specific) kind.",
+      "command": "grep -rn \"get_document_defaults(\" backend/acta backend/scripts",
+      "evidence": "backend/scripts/fix_issued_invoices_p018.py:727; backend/acta/sequences/service.py:251; plan.md:84; plan.md:473; plan.md:543",
+      "fix": "List fix_issued_invoices_p018.py:727 among the get_document_defaults callers and in Step 5 switch it to resolve_kind_safe too, so druh and series in the renumbering script come from the same resolved kind.",
+      "reported_by": [
+        "feasibility_deps"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:9f74b3bec532eff39a372a17d61bc059da0c407803785cb765dff94eddac255b",
+      "step": null,
+      "severity": "minor",
+      "severity_reported": {
+        "enforcement_tests": "minor"
+      },
+      "claim": "Success Criterion 2 (accountant imports the ZIP into DUNA folder by folder, copying kind and tax-doc type from the folder name) is not reached by any named test: the e2e spec and test_isdoc_zip.py check the ZIP layout inside ACTA, nothing checks the DUNA side.",
+      "command": "sed -n 1213,1219p .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:1216; plan.md:1092",
+      "fix": "Either rephrase the criterion to what ACTA tests can show (folder names equal the kind code and DUNA tax-doc type code, _navod.txt lists them) or name a manual DUNA import check with its evidence file as the receipt.",
+      "reported_by": [
+        "enforcement_tests"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:a3dc7794d3facd1eb3956d87b231d366c52f9a1559ac0895b561d4e33a3e33fe",
+      "step": 12,
+      "severity": "minor",
+      "severity_reported": {
+        "generalist_a": "minor"
+      },
+      "claim": "AC7 checks that `_navod.txt` appears in export/router.py, but Step 12 puts the file generation in the new export/manifest.py (build_navod), so the AC can pass on just a filename string while the manifest builder is missing or broken.",
+      "command": "grep -n \"manifest.py\\|_navod\\\\\\\\.txt\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:903; plan.md:1301; plan.md:1302",
+      "fix": "Point AC7 at backend/acta/export/manifest.py with regex `def build_navod`, or turn it into a cmd AC that runs backend/tests/export/test_manifest.py.",
+      "reported_by": [
+        "generalist_a"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:c68d6791fc97acb4c065addfb1d6fc9f4017e6ce62c441744c3f2f47b774edd6",
+      "step": 3,
+      "severity": "major",
+      "severity_reported": {
+        "generalist_b": "major"
+      },
+      "claim": "backend/tests/documents/test_direction_change_numbering.py imports acta.docdefaults.service and monkeypatches get_document_defaults. Step 3 does not list this file, and the test is modified only in Step 5. If Step 5 moves callers off get_document_defaults, the monkeypatch hits an unused function and the test passes without testing anything.",
+      "command": "grep -n 'docdefaults' backend/tests/documents/test_direction_change_numbering.py",
+      "evidence": "backend/tests/documents/test_direction_change_numbering.py:207; backend/tests/documents/test_direction_change_numbering.py:218; plan.md:548",
+      "fix": "Step 5 Files for test_direction_change_numbering.py must say that the get_document_defaults monkeypatch at lines 207-218 is replaced by a patch on resolve_kind_safe or the catalogue.",
+      "reported_by": [
+        "generalist_b"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:c8922cc2db1fe33069f722ad7e06b70c325c01cc6d950b970d8b24f877c413e6",
+      "step": 4,
+      "severity": "minor",
+      "severity_reported": {
+        "generalist_a": "minor"
+      },
+      "claim": "The fate of client_document_defaults contradicts itself: Scope and Constraints say migration 0040 deletes the old table, while Step 4, the Migration Plan and AC10 define 0040 as a rename to client_document_defaults_legacy that keeps the data, so an implementer cannot tell whether a drop or a rename is required.",
+      "command": "grep -n \"0040\\|zrušení staré tabulky\\|tabulku po kontrole smaže\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+      "evidence": "plan.md:58; plan.md:1179; plan.md:464; plan.md:1158; plan.md:1325",
+      "fix": "State one behaviour everywhere: 0040 renames the table to client_document_defaults_legacy (the data is kept, the table is not dropped), and change Scope line 58 and Constraints line 1179 to match.",
+      "reported_by": [
+        "generalist_a"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    },
+    {
+      "fingerprint": "sha256:d589e8680ecf71a95074fcb720a9eb0e60b05fd57d0bd97a94d503fecde50ad1",
+      "step": 1,
+      "severity": "minor",
+      "severity_reported": {
+        "reuse": "minor"
+      },
+      "claim": "The Step 1 reuse check says the new migration chains to down_revision \"0035\", contradicting the Create bullet (down_revision \"0036\") and the repository head 0036_vat_category_non_payer.py, so the check was written against a stale migration list.",
+      "command": "ls backend/db/versions",
+      "evidence": "plan.md:312; plan.md:321; backend/db/versions/0036_vat_category_non_payer.py:1",
+      "fix": "Reuse check must say down_revision = \"0036\" and re-run the search against the current versions directory.",
+      "reported_by": [
+        "reuse"
+      ],
+      "also_reported_by": 1,
+      "status": "fixed"
+    }
+  ],
+  "blockers_open": 0
+}

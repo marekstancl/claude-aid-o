@@ -148,8 +148,7 @@ fi
 _ready_args=("$plan" --total "$total")
 # Source graph is a real, hashed C0 input when this is an AID project. It is
 # regenerated deterministically from the plan, never hand-authored.  Keep it
-# under generation/: c0/plan-graph.json has a different owner and meaning
-# after an EPIC exists (aid-c0-contract.sh's per-EPIC contract graph).
+# under generation/, the one place generation evidence for the plan lives.
 # A project may keep a valid plan outside `.aid-o/plans/` (fixtures, imported
 # plans and older workspaces do). Evidence ownership is determined by the
 # discovered project root and frontmatter plan id, not by the source path; do
@@ -168,12 +167,11 @@ if [[ -x "$READINESS_SCRIPT" || -f "$READINESS_SCRIPT" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 1b: CP1-deep evidence gate (high-risk plans only)
+# Step 1b: plan review gate (CP1)
 #
-# The gate script exits 0 for low-risk plans (no-op) and exits non-zero for
-# high-risk plans that are missing CP1-deep evidence or have unresolved
-# accepted blockers from the adjudicator. Producer-before-consumer: this
-# check runs after plan_id is known but before any EPIC artifacts are written.
+# aid-cp1-gate.sh passes only on closed plan review rounds whose open blockers
+# are quoted in acceptance criteria. Producer-before-consumer: this check runs
+# after plan_id is known but before any EPIC artifacts are written.
 # ---------------------------------------------------------------------------
 #
 # P074 STEP 14 — AUTHORITY VERIFICATION INSTEAD OF A PER-PHASE GATE.

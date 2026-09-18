@@ -85,13 +85,12 @@ Results: 5/7 passed, 2 failed"
   [ "$output" = "5 7 2 0 parsed" ]
 }
 
-# ─── The seven suites this step converted ──────────────────────────────────
+# ─── The suites this step converted (test-cp1-grounding.sh left with P093) ──
 
-@test "all seven previously-uncounted suites now emit a canonical Results line" {
+@test "the previously-uncounted suites still in the portfolio emit a canonical Results line" {
   local suites=(test-semantic-review test-instruction-consistency
                 test-control-boundary test-instruction-sweep
-                test-generation-finalize test-cp1-grounding
-                test-plan-quality-enforcement)
+                test-generation-finalize test-plan-quality-enforcement)
   local missing=()
   for s in "${suites[@]}"; do
     grep -qE 'echo "Results: ' "$TESTS_DIR/$s.sh" || missing+=("$s")
@@ -204,15 +203,6 @@ SH
   grep -q 'more passes than tests' "$RUNNER"
 }
 
-@test "test-cp1-gate no longer mixes assertions and tests in one fraction" {
-  # It reported 54/28 — assertions over tests — which the aggregate then added
-  # to its totals as if both counted the same thing. The behavioural proof is
-  # the "reports TESTS in the fraction" case below; this pins that the source
-  # no longer contains the mixed-unit expression at all.
-  ! grep -q 'Results: \$TESTS_PASSED/\$TESTS_RUN' "$TESTS_DIR/test-cp1-gate.sh"
-  grep -q 'TESTS_PASSED_UNIQUE' "$TESTS_DIR/test-cp1-gate.sh"
-}
-
 # ─── Behavioural, not grep-based (Codex review) ────────────────────────────
 #
 # Several assertions above prove the SOURCE contains an emitter or a message.
@@ -256,19 +246,6 @@ _run_collector_over() {
 @test "BEHAVIOUR: an implausible count is refused rather than corrupting the totals" {
   run _parse "Results: 99999999 passed, 0 failed"
   [ "$output" = "0 0 0 0 unparsed" ]
-}
-
-@test "BEHAVIOUR: test-cp1-gate reports TESTS in the fraction, assertions on their own line" {
-  run bash "$TESTS_DIR/test-cp1-gate.sh"
-  [ "$status" -eq 0 ]
-  local line; line="$(printf '%s\n' "$output" | grep -E '^Results:' | tail -1)"
-  # tests, not assertions: the numerator must equal the denominator here and
-  # both must be the TEST count, so the aggregate's "Tests" total stays tests.
-  [[ "$line" =~ ^Results:\ ([0-9]+)/([0-9]+)\ passed ]]
-  [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ]
-  [[ "$output" == *"passing assertions"* ]]
-  # and the assertion count really is different from the test count
-  [[ "$output" != *"(${BASH_REMATCH[1]} passing assertions"* ]]
 }
 
 @test "BEHAVIOUR: the emitter preserves a failing exit status through the trap" {

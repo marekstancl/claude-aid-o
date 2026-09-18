@@ -1,0 +1,302 @@
+{
+  "plan": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+  "plan_sha256": "c384292b488a8e26d8aca0d543d1e934ee5ceb761cd6922676d3de2bb239587c",
+  "project_root": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept",
+  "mode": "strict",
+  "lint_rc": 0,
+  "steps": 16,
+  "blocking": [],
+  "legacy_advisory": [],
+  "warnings": [
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:475",
+      "message": "template placeholder left in text: {NNN}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:496",
+      "message": "template placeholder left in text: {YYYY}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:511",
+      "message": "template placeholder left in text: {YY}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:548",
+      "message": "template placeholder left in text: {NNN}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:575",
+      "message": "template placeholder left in text: {NNN}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:585",
+      "message": "template placeholder left in text: {NNN}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:917",
+      "message": "template placeholder left in text: {YY}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:1086",
+      "message": "template placeholder left in text: {YY}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:1169",
+      "message": "template placeholder left in text: {NNN}"
+    },
+    {
+      "id": "A8",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:1355",
+      "message": "template placeholder left in text: {NNN}"
+    },
+    {
+      "id": "A9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "16 steps — plans this size did not converge in the pilots (ACTA P025: 16 steps); consider splitting"
+    },
+    {
+      "id": "A9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "1362 lines — consider splitting (see A9 on steps)"
+    },
+    {
+      "id": "B1",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:1204",
+      "message": "`.aid-o/work/evidence/P025/konvergence/mereni.md` is not in this repository (another repo, or a typo?) — say which"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:414",
+      "message": "`client_document_defaults` is at line 290 of `backend/tests/sequences/test_resolve_acta_number.py`, not near the cited 1-80 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:472",
+      "message": "`backend/acta/sequences/router.py` has 269 lines, the plan cites lines up to 290"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:553",
+      "message": "`TypeError` is at line 356 of `backend/tests/sequences/test_resolve_acta_number.py`, not near the cited 543-556 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:553",
+      "message": "`number_source` is at line 166 of `backend/tests/sequences/test_resolve_acta_number.py`, not near the cited 543-556 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:716",
+      "message": "`patch_tax_inputs` is at line 165 of `backend/acta/documents/fields_router.py`, not near the cited 244-256 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:723",
+      "message": "`to_review` is at line 334 of `backend/acta/clients/service.py`, not near the cited 205-260 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:728",
+      "message": "`supply_kind` is at line 182 of `backend/tests/documents/test_tax_inputs_api.py`, not near the cited 650-696 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:820",
+      "message": "`backend/acta/export/xlsx.py` has 84 lines, the plan cites lines up to 120"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:864",
+      "message": "`backend/tests/export/test_isdoc_schema.py` has 185 lines, the plan cites lines up to 200"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:865",
+      "message": "`LocalReverseChargeFlag` is at line 287 of `backend/tests/extraction/test_isdoc_parser.py`, not near the cited 520-554 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:865",
+      "message": "`isdoc_structured` is at line 299 of `backend/tests/extraction/test_isdoc_parser.py`, not near the cited 520-554 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:865",
+      "message": "`reverse_charge_domestic` is at line 298 of `backend/tests/extraction/test_isdoc_parser.py`, not near the cited 520-554 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:906",
+      "message": "`needs_review` is at line 407 of `backend/tests/export/test_isdoc_zip.py`, not near the cited 480-529 — stale line range?"
+    },
+    {
+      "id": "B2",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md:1001",
+      "message": "`void_sequence_number` is at line 102 of `backend/tests/documents/test_direction_change_numbering.py`, not near the cited 300-364 — stale line range?"
+    },
+    {
+      "id": "B9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "new test file `backend/tests/doctypes/__init__.py` shares its basename with `backend/tests/ares/__init__.py` — pytest rejects duplicate test module names unless both directories are packages"
+    },
+    {
+      "id": "B9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "new test file `backend/tests/doctypes/test_router.py` shares its basename with `backend/tests/sequences/test_router.py` — pytest rejects duplicate test module names unless both directories are packages"
+    },
+    {
+      "id": "B9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "new test file `backend/tests/taxprofile/__init__.py` shares its basename with `backend/tests/ares/__init__.py` — pytest rejects duplicate test module names unless both directories are packages"
+    },
+    {
+      "id": "B9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "new test file `backend/tests/taxprofile/test_router.py` shares its basename with `backend/tests/sequences/test_router.py` — pytest rejects duplicate test module names unless both directories are packages"
+    },
+    {
+      "id": "B9",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "new test file `backend/tests/taxprofile/test_service.py` shares its basename with `backend/tests/registry/test_service.py` — pytest rejects duplicate test module names unless both directories are packages"
+    },
+    {
+      "id": "B10",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "`backend/acta/config.py` is to be removed but `config` is still referenced by: backend/alembic.ini backend/acta/extraction/client.py backend/acta/extraction/segmentation.py backend/acta/storage/minio.py backend/acta/db/engine.py "
+    },
+    {
+      "id": "B10",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "`backend/acta/documents/isdoc.py` is to be removed but `isdoc` is still referenced by: backend/db/versions/0033_document_export_event.py backend/acta/extraction/isdoc_parser.py backend/acta/convert/adapter.py backend/acta/convert/service.py backend/acta/convert/router.py "
+    },
+    {
+      "id": "B10",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "`backend/acta/documents/models.py` is to be removed but `models` is still referenced by: backend/db/versions/0031_vat_category.py backend/acta/extraction/json_schema.py backend/acta/jobs/split.py backend/acta/jobs/vat_liability.py backend/acta/jobs/__init__.py "
+    },
+    {
+      "id": "B10",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "`backend/acta/export/router.py` is to be removed but `router` is still referenced by: backend/tests/export/test_export_event.py "
+    },
+    {
+      "id": "B10",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "`backend/acta/sequences/models.py` is to be removed but `models` is still referenced by: backend/acta/jobs/__init__.py backend/tests/sequences/test_e2e_sequences.py backend/scripts/seed_help_dataset.py "
+    },
+    {
+      "id": "B10",
+      "location": "/tmp/claude-1000/-opt-eco-projects-aid-orchestrator/9f592f01-8da0-4233-bbad-11db241c1d3e/scratchpad/acta-accept/.aid-o/plans/P998-acceptance-acta.md",
+      "message": "`frontend/src/config/helpSections.ts` is to be removed but `helpSections` is still referenced by: frontend/e2e/help.spec.ts frontend/e2e/help-structure.spec.ts frontend/e2e/mobile-smoke.spec.ts frontend/e2e/tablet-flow.spec.ts frontend/src/App.tsx "
+    }
+  ],
+  "unknown_identifiers": [
+    "DUNA_TAX_DOC_TYPES",
+    "FV1",
+    "FV3",
+    "FV4",
+    "KIND_CODE_UNKNOWN_DIRECTION",
+    "SEQUENCE_ASSIGN_AT_APPROVAL",
+    "TAX_PROFILE_STATES",
+    "_NEIMPORTOVAT",
+    "_SAMOVYMERENI",
+    "_assign_deferred_number",
+    "_bez_typu",
+    "_placement",
+    "_run_patch",
+    "abra_flexi",
+    "accounting_system",
+    "add_missing",
+    "apply_kind_tax_doc_type",
+    "apply_template",
+    "assign_now",
+    "cislo_acta",
+    "ck_client_sequences_code_format",
+    "client_changed",
+    "client_document_defaults_legacy",
+    "client_document_kinds",
+    "confirm_proposals_on_approval",
+    "default_mask_for_code",
+    "delete_kind",
+    "direction_changed",
+    "document_kind",
+    "document_kind_confirmed_on_approval",
+    "document_kind_created",
+    "document_kind_deleted",
+    "document_kind_updated",
+    "document_kinds_template_applied",
+    "druh_dokladu_kind_missing",
+    "existing_ui",
+    "expected_kind_code",
+    "expected_tax_doc_type",
+    "is_default",
+    "isdoc_entry_basename",
+    "ix_documents_tax_profile_state",
+    "kind_changed",
+    "kind_code",
+    "kind_id",
+    "kind_name",
+    "kind_taxtype",
+    "kinds_by_code",
+    "legacy_sequence_code",
+    "list_kinds",
+    "refresh_tax_profile",
+    "renumber_if_series_changed",
+    "resolve_document_kind",
+    "resolve_kind_safe",
+    "review_reopened",
+    "same_mask_as",
+    "self_assessment",
+    "sequence_code",
+    "sequences_by_code",
+    "sequences_missing",
+    "stav_danoveho_profilu",
+    "string_pattern_mismatch",
+    "suggested_mask",
+    "supply_kinds",
+    "tax_deduction",
+    "tax_doc_type",
+    "tax_doc_type_sent",
+    "tax_profile_backfilled",
+    "tax_profile_confirmed_by_backfill",
+    "tax_profile_confirmed_on_approval",
+    "tax_profile_overridden",
+    "tax_profile_proposed",
+    "tax_profile_state",
+    "tax_profile_warnings",
+    "ts_e2e_pwa",
+    "typ_danoveho_dokladu",
+    "upsert_kind",
+    "vat_categories",
+    "verification_pattern"
+  ],
+  "revision_unknown_identifiers": [
+    "_NEIMPORTOVAT",
+    "_SAMOVYMERENI",
+    "_bez_typu",
+    "_placement",
+    "isdoc_entry_basename",
+    "kinds_by_code",
+    "resolve_kind_safe",
+    "sequences_by_code",
+    "tax_doc_type",
+    "tax_profile_warnings"
+  ],
+  "pass": true,
+  "checked_at": "2026-09-18T09:34:15Z",
+  "steps_changed": [
+    5,
+    12
+  ],
+  "added_outside_fixes": [],
+  "fix_list": "5,12,14"
+}

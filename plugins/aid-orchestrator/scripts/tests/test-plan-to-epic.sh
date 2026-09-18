@@ -43,6 +43,14 @@ COMPLEX_VALID_PLAN="$TMPDIR_ROOT/complex-valid.md"
 sed -e 's/Step 1, Steps 3-5/Step 1, Steps 3-4/' -e 's/Steps 14-1/Steps 1-5/' \
   "$FIXTURES_DIR/plan-with-complex-deps.md" > "$COMPLEX_VALID_PLAN"
 
+# The generation cases read plans from a temp dir outside any .aid-o workspace:
+# this suite is about the EPIC text the transform writes, and a fixture read
+# from inside the repository would inherit whatever .aid-o the checkout
+# happens to have (and the CP1 gate that comes with it).
+for _fx in minimal-plan.md multi-phase-plan.md plan-with-deps.md; do
+  cp "$FIXTURES_DIR/$_fx" "$TMPDIR_ROOT/$_fx"
+done
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -155,7 +163,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/minimal-plan.md" \
+  --plan "$TMPDIR_ROOT/minimal-plan.md" \
   --phase 1 \
   --total 1 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -238,7 +246,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path_phase1="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/multi-phase-plan.md" \
+  --plan "$TMPDIR_ROOT/multi-phase-plan.md" \
   --phase 1 \
   --total 3 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -271,7 +279,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path_phase3="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/multi-phase-plan.md" \
+  --plan "$TMPDIR_ROOT/multi-phase-plan.md" \
   --phase 3 \
   --total 3 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -298,7 +306,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 "$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/minimal-plan.md" \
+  --plan "$TMPDIR_ROOT/minimal-plan.md" \
   --phase 5 \
   --total 3 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -323,7 +331,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path_deps="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/plan-with-deps.md" \
+  --plan "$TMPDIR_ROOT/plan-with-deps.md" \
   --phase 1 \
   --total 2 \
   --epic-template "$TEMPLATES_DIR/epic.md" \

@@ -6,7 +6,7 @@ user_invocable: false
 
 # Brainstorming — Interactive Design and Planning Skill
 
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-09-18
 
 > **Resolve `$AID_PLUGIN_PATH` before running anything below.** Nothing sets it
 > for you — not the plugin, not the workspace, not your shell. Every command
@@ -173,7 +173,7 @@ decision, it is not quietly absorbed.
 ## Opponent (optional profile, on by default where a second provider is available)
 
 The design is drafted against a second model rather than alone. It runs **during**
-the design, not after it — the C0 plan review already argues with a finished
+the design, not after it — plan review (CP1) already argues with a finished
 plan, which is the expensive place to discover a wrong premise.
 
 Write the draft positions to a brief (one line per position), then:
@@ -688,4 +688,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-09-18

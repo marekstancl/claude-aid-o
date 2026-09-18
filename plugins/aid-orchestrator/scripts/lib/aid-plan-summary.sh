@@ -51,8 +51,12 @@ _AID_PLAN_SUMMARY_SH_LOADED=1
 _AID_PLAN_SUMMARY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-artifact-render.sh
 source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-artifact-render.sh"
-# shellcheck source=aid-plan-band.sh
-source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-plan-band.sh"
+# shellcheck source=aid-scoping.sh
+source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-scoping.sh"
+# shellcheck source=aid-roots.sh
+source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-roots.sh"
+# shellcheck source=aid-plan-review-summary.sh
+source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-plan-review-summary.sh"
 
 # _aps_section <plan> <heading> — the body of one `## <heading>` section, with
 # blank lines and sub-headings dropped. Empty when the section is absent.
@@ -100,10 +104,16 @@ _aps_count_stdin() {
   printf '%s' "${n:-0}"
 }
 
-# _aps_declared_paths <plan> — the same declared paths the band is classified
-# from, de-duplicated. One authority for "what does this plan touch".
+# _aps_declared_paths <plan> — how many distinct paths the plan's Files blocks
+# declare. A bullet whose entry does not parse still counts once, by its first
+# backticked span, so a grammar error never makes the plan look smaller.
 _aps_declared_paths() {
-  _aps_norm "$(_aid_band_declared_paths "$1" | sort -u | grep -c . || true)"
+  local bullet body
+  _aps_norm "$(while IFS= read -r bullet; do
+      [[ -n "$bullet" ]] || continue
+      body="$(_aid_files_bullet_body "$bullet")" || continue
+      _aid_split_path_entry "$body" 2>/dev/null || { body="${body#*\`}"; printf '%s\n' "${body%%\`*}"; }
+    done < <(_aid_extract_files_bullets < "$1") | sort -u | grep -c . || true)"
 }
 
 # _aps_count_risks <plan> — data rows of the `## Risks` table (the header and
@@ -270,12 +280,11 @@ aid_plan_summary_render() {
   fi
   local goal; goal="$(_aps_section "$plan" "Goal")"
 
-  local plan_id status band_line band band_reason
+  local plan_id status review root
   plan_id="$(_aid_fm_get "$plan" id)"; plan_id="${plan_id:-?}"
   status="$(_aid_fm_get "$plan" status)"; status="${status:-draft}"
-  band_line="$(aid_plan_band "$plan")" || band_line=""
-  band="${band_line%%$'\t'*}"; band="${band:-full}"
-  band_reason="${band_line#*$'\t'}"
+  review="review: none"
+  root="$(_aid_plan_project_root "$plan")" && review="$(aid_plan_review_summary "$plan_id" "$root")"
 
   local steps epics files risks roles context standards reuse
   steps="$(_aps_count_steps "$plan")"
@@ -295,12 +304,17 @@ aid_plan_summary_render() {
   standards="$(_aps_standards "$plan")" || standards=""
   reuse="$(_aps_reuse "$plan")" || reuse="0/0"
 
-  # Band decides the ceremony, so it is the headline fact, not a footnote.
-  local band_value band_state
-  case "$band" in
-    full)   band_value="Plná ceremonie";   band_state="warn" ;;
-    medium) band_value="Střední ceremonie"; band_state="ok" ;;
-    *)      band_value="Lehká ceremonie";  band_state="ok" ;;
+  # Whether the plan has been reviewed is the headline fact: generation waits for it.
+  local review_value review_state
+  case "$review" in
+    "review: none") review_value="Ještě neproběhla"; review_state="warn" ;;
+    *)              local n; n="$(grep -oE '^review: [0-9]+' <<< "$review" | grep -oE '[0-9]+')"; review_state="ok"
+                    case "$n" in
+                      "") review_value="Stará evidence"; review_state="warn" ;;
+                      1) review_value="1 kolo" ;;
+                      2|3|4) review_value="${n} kola" ;;
+                      *) review_value="${n} kol" ;;
+                    esac ;;
   esac
 
   local scope_label items_json next_json links_json facts_json prose_json
@@ -317,11 +331,11 @@ aid_plan_summary_render() {
   # artifact standard's ceiling, and a page nobody finishes reading is the
   # thing it exists to prevent.
   items_json="$(jq -n \
-    --arg band "$band" --arg reason "$band_reason" \
+    --arg review "$review" \
     --arg steps "$steps" --arg files "$files" \
     --arg risks "$risks" --arg roles "$roles" --arg status "$status" \
     --arg standards "$standards" --arg reuse "$reuse" --arg bad "$bad_roles" '[
-      "Pásmo ceremonie: " + $band + " (" + $reason + ")",
+      "Revize plánu: " + $review,
       "Rozsah: " + $steps + " kroků, " + $files + " deklarovaných souborů",
       "Rizika pojmenovaná v plánu: " + $risks
     ]
@@ -335,7 +349,7 @@ aid_plan_summary_render() {
 
   next_json="$(jq -n '[
       "Přečíst plán a říct, co v něm chybí",
-      "Nechat ho projít revizí podle pásma",
+      "Nechat ho projít revizí plánu (šest revizorů, dvě kola)",
       "Pustit generaci EPIKŮ"
     ]')"
 
@@ -349,7 +363,7 @@ aid_plan_summary_render() {
   facts_json="$(jq -n \
     --arg plan_id "$plan_id" \
     --arg when "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    --arg bv "$band_value" --arg bs "$band_state" \
+    --arg rv "$review_value" --arg rvs "$review_state" \
     --arg steps "$steps" --arg scope "$scope_label" --arg files "$files" \
     --argjson deliverables "$(_aps_deliverables "$plan")" \
     --arg risks "$risks" \
@@ -363,7 +377,7 @@ aid_plan_summary_render() {
       title: ("Plán " + $plan_id),
       when: $when,
       tiles: {
-        result:     {value: $bv, state: $bs, label: "Pásmo"},
+        result:     {value: $rv, state: $rvs, label: "Revize plánu"},
         duration:   {label: "Kroků", value: $steps},
         scope:      {label: "Souborů", value: $files, state: "ok"},
         unresolved: {label: "Rizik", value: $risks, state: $rs}

@@ -1,0 +1,22 @@
+{
+  "generalist_a": {
+    "originated": 3,
+    "survived": 3,
+    "fixed": 0
+  },
+  "generalist_b": {
+    "originated": 1,
+    "survived": 1,
+    "fixed": 0
+  },
+  "behaviour_edges": {
+    "originated": 2,
+    "survived": 2,
+    "fixed": 0
+  },
+  "reuse": {
+    "originated": 1,
+    "survived": 1,
+    "fixed": 0
+  }
+}

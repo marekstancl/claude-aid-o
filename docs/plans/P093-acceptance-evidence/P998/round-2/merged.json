@@ -1,0 +1,126 @@
+{
+  "plan_sha256": "b230b9348cc08366a7c054875ef8ead27164f93016e460a1e198083ffc418a62",
+  "round": 2,
+  "findings": [
+    {
+      "fingerprint": "sha256:27236433e18bd687ad8b5133b42e81deaa6b6b450febb6e6c94def3e5f886484",
+      "step": 5,
+      "severity": "major",
+      "severity_reported": {
+        "generalist_a": "major"
+      },
+      "claim": "The monkeypatch replacement was written into Step 3's docdefaults/service.py bullet, but Step 5's own Files entry for test_direction_change_numbering.py still does not mention replacing the get_document_defaults monkeypatch, so the Step 5 implementer working from Step 5 Files leaves a patch on an unused function.",
+      "command": "grep -n \"test_direction_change_numbering.py\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "plan.md:548; plan.md:408; backend/tests/documents/test_direction_change_numbering.py:207",
+      "fix": "Add to the Step 5 Files bullet at plan.md:548: the get_document_defaults monkeypatch at lines ~207-218 is replaced by a patch on resolve_kind_safe.",
+      "reported_by": [
+        "generalist_a"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:4525bb6ce59495c195f8c5441f929ea53466fab7f2fdfd24f98b5f2677216fc3",
+      "step": 14,
+      "severity": "major",
+      "severity_reported": {
+        "generalist_a": "major"
+      },
+      "claim": "Step 14 now lets PATCH /tax-profile confirm an archived document with a `proposed` profile, but the Step 8 contract, its implementation detail and its test still require 422 for every archived document, the Step 10 UI keeps all three fields read-only on archived documents, and the Step 11 edge case still says PATCH on archived returns 422; the PATCH contract also always writes `overridden` and requires `reason`, so no 'confirm only' body shape exists.",
+      "command": "grep -n \"archivovan\\|archived\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "plan.md:289; plan.md:737; plan.md:726; plan.md:796; plan.md:840; plan.md:990",
+      "fix": "Define the confirm-on-archived contract once (e.g. body {version, confirm: true, expected_tax_doc_type} -> state `confirmed`, no reason, other fields 422 on archived), update the Step 8 contract/test (`archivovaný 422` only for non-confirm edits), give the Step 10 UI a 'Potvrdit profil' action on archived documents, and correct the Step 11 edge case text.",
+      "reported_by": [
+        "generalist_a"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:48d98fad123a41bb99f1995082fad1c597b83f947b364dc0f87d80d133026927",
+      "step": 12,
+      "severity": "major",
+      "severity_reported": {
+        "reuse": "major"
+      },
+      "claim": "The round-2 fix for the missing-kind crash was appended to plan.md:917 but the same paragraph still prescribes `kind_name = kinds_by_code.get(code).name or \"\"` (which raises on None), and the new fallback folder `<kód>_` contradicts Error Handling at plan.md:920 (`<code>_neznamy_druh/`), so the implementer gets two incompatible instructions for the same case.",
+      "command": "grep -n \"get(code).name\\|neznamy_druh\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "plan.md:917; plan.md:920",
+      "fix": "Replace the step (3) expression with `kind_name = meta.kind_name or (kinds_by_code.get(code).name if code in kinds_by_code else None)` and pick ONE folder name for an unknown code (either `<code>_` or `<code>_neznamy_druh/`) used consistently in Implementation Detail, Error Handling and the AC.",
+      "reported_by": [
+        "reuse"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:5838cad95ab4ef7c1a80ca9a37a977cac34512cd6c118eea21de61ee81c09b69",
+      "step": 12,
+      "severity": "blocker",
+      "severity_reported": {
+        "generalist_a": "blocker"
+      },
+      "claim": "The round-1 fix was appended but the crashing expression was left in place, and the new fallback folder contradicts Error Handling: rule (3) still reads kind_name = kinds_by_code.get(code).name (None.name -> 500 for a deleted kind), the appended sentence and the new AC say folder `<kód>_`, while Error Handling says `<code>_neznamy_druh/`.",
+      "command": "grep -n \"kinds_by_code.get\\|neznamy_druh\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "plan.md:917; plan.md:920; plan.md:935",
+      "fix": "Rewrite rule (3) itself: kind_name = fields_meta.druh_dokladu.kind_name, else (kinds_by_code.get(code) and its .name), else missing-kind branch; pick ONE folder name for a missing kind (`<code>_neznamy_druh/` or `<code>_`) and use it in Implementation Detail, Error Handling and the AC.",
+      "reported_by": [
+        "generalist_a"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:5ad5931de87f0eb6033e31bed0a08336ebcc0a1efcc727d84b63ec9fc7d5e4c5",
+      "step": 5,
+      "severity": "major",
+      "severity_reported": {
+        "behaviour_edges": "major"
+      },
+      "claim": "backend/tests/documents/test_direction_change_numbering.py imports acta.docdefaults.service and monkeypatches get_document_defaults; the Step 5 Files entry for this test still does not say the monkeypatch at lines 207-218 is replaced (only Step 3 prose mentions it), so if Step 5 moves callers off get_document_defaults the monkeypatch hits an unused function and the test passes without testing anything.",
+      "command": "sed -n '548p' .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "backend/tests/documents/test_direction_change_numbering.py:207; backend/tests/documents/test_direction_change_numbering.py:218; plan.md:548; plan.md:408",
+      "fix": "Step 5 Files for test_direction_change_numbering.py must say that the get_document_defaults monkeypatch at lines 207-218 is replaced by a patch on resolve_kind_safe or the catalogue.",
+      "reported_by": [
+        "behaviour_edges"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:dbff62ef9adaa0d57aa711b5159897a08cbf688c4afbeb8c68e41e2f5ca7bc79",
+      "step": 12,
+      "severity": "major",
+      "severity_reported": {
+        "behaviour_edges": "major"
+      },
+      "claim": "The round-1 fix for a deleted kind contradicts itself: Implementation Detail still computes kind_name = kinds_by_code.get(code).name (None.name for a missing code) and appends that the missing code gets folder '<kód>_', while Error Handling says '<code>_neznamy_druh/', so the missing-kind behaviour and the new AC test target are undefined.",
+      "command": "grep -n \"neznamy_druh\\|kinds_by_code.get\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "plan.md:917; plan.md:920; plan.md:935",
+      "fix": "Replace kinds_by_code.get(code).name with the fields_meta.druh_dokladu.kind_name -> kinds_by_code fallback order in the step (3) formula, and state ONE folder name for a missing code in both Implementation Detail, Error Handling and the AC.",
+      "reported_by": [
+        "behaviour_edges"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:f61d305531c2cf68b8b273b10c8e9b2d7ade7064a69bd2f6f6538a67b6131842",
+      "step": 12,
+      "severity": "major",
+      "severity_reported": {
+        "generalist_b": "major"
+      },
+      "claim": "The round-1 fix for the missing kind was appended without editing the rule it replaces: rule (3) on the same line still reads kind_name = kinds_by_code.get(code).name (a None dereference for a deleted code), and the folder for a missing code is given two ways, '<kód>_' in the new sentence and AC and '<code>_neznamy_druh/' in Error Handling, so an agent that follows rule (3) or Error Handling still produces the 500 or fails the new AC.",
+      "command": "grep -n \"kinds_by_code.get\\|neznamy_druh\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+      "evidence": "plan.md:917; plan.md:920; plan.md:935",
+      "fix": "Rewrite rule (3) itself: kind_name = fields_meta.druh_dokladu.kind_name, then kinds_by_code.get(code) with a None check, and state ONE folder name for a missing code (either '<kód>_' or '<kód>_neznamy_druh') in the rule, in Error Handling and in the AC alike.",
+      "reported_by": [
+        "generalist_b"
+      ],
+      "also_reported_by": 1,
+      "status": "open"
+    }
+  ],
+  "blockers_open": 1
+}

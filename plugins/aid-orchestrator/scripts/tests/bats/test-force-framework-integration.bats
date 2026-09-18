@@ -206,14 +206,6 @@ _head() { ( cd "$ROOT" && git rev-parse HEAD ); }
 
 # ─── EPIC 1 and EPIC 2 behaviours on the same fixture ────────────────────
 
-@test "P073 integration: the CP1 review budget is 5, and legacy ledgers keep their cap" {
-  local f="$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh"
-  run grep -c 'MAX_ATTEMPTS=5' "$f"
-  [ "$output" -ge 1 ]
-  run grep -c 'LEGACY_MAX_ATTEMPTS=3' "$f"
-  [ "$output" -ge 1 ]
-}
-
 @test "P073 integration: --force without --force-reason is a usage error" {
   run bash "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" plan-close "$PLAN" --force \
     --project-root "$ROOT"

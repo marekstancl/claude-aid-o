@@ -1,0 +1,18 @@
+{"role": "behaviour_edges",
+ "findings": [
+  {"id": "behaviour_edges-1", "step": 12, "severity": "blocker",
+   "claim": "The export reads the kind name as kinds_by_code.get(code).name, but a confirmed document can carry a druh code that no longer exists in the catalogue (DELETE, PUT code change and apply-template replace only check to_review documents), so .get returns None and the whole ZIP export fails with a 500.",
+   "command": "grep -n \"kinds_by_code.get(code).name\\|d.status = 'to_review'\\|doklad \\`to_review\\` s\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:917; plan.md:495; plan.md:497",
+   "fix": "Take the folder name from fields_meta.druh_dokladu.kind_name (stored at determination time) with kinds_by_code only as a fallback; handle a missing code explicitly (folder <code>_ and a _navod.txt warning); add a test that exports a reviewed document whose kind was deleted or replaced by a template."},
+  {"id": "behaviour_edges-2", "step": 14, "severity": "major",
+   "claim": "A document approved through review-and-archive ends up archived with tax_profile_state 'proposed', so it always lands in _NEIMPORTOVAT/k_rucnimu_posouzeni, while PATCH /tax-profile returns 422 for archived documents; the plan gives the user no way in the UI to confirm it (only the one-off backfill --confirm-approved, run once after deployment).",
+   "command": "grep -n \"review-and-archive\\|u archivovaného dokladu\\|tax_profile_state not in\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:197; plan.md:289; plan.md:758; plan.md:917; backend/acta/documents/vat_category_router.py:78",
+   "fix": "Say what happens to documents archived through the shortcut after deployment: either the shortcut confirms the proposals (with expected_* fields), or the shortcut is refused for documents with an unconfirmed profile/kind, or the tax-profile PATCH is allowed on archived documents. Name the test for the chosen path."},
+  {"id": "behaviour_edges-3", "step": 4, "severity": "minor",
+   "claim": "apply-template add_missing and the automatic is_default for the first kind of a direction are check-then-insert; two concurrent calls hit the unique (client_id, code) or the partial is_default index, and the plan only maps the is_default collision to 409 and describes idempotence only for sequential calls.",
+   "command": "grep -n \"existuje kód → \\`skipped\\`\\|partial unique index odmítne\\|při druhém volání\" .aid-o/work/evidence/P998/cp1/round-1/packet/plan.md",
+   "evidence": "plan.md:497; plan.md:433; plan.md:475",
+   "fix": "Use INSERT … ON CONFLICT DO NOTHING (count those rows as skipped) or lock per client, and state that a concurrent apply-template returns 200/409, never 500."}
+ ]}

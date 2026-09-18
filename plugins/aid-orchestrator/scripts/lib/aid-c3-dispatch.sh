@@ -290,8 +290,8 @@ _c3_convert_env_override() {
 # _c3_claim_pm_override <evidence_root>
 #   Atomically consumes a present, valid override. Echoes
 #   `{reason, consumed_path, consumed_sha256}` on success; fails closed
-#   otherwise. Mirrors aid-cp1-ledger.sh's claim exactly, including the
-#   corroboration fields, so a later audit can verify the claim happened.
+#   otherwise. The corroboration fields (consumed path and its sha256) let a
+#   later audit verify the claim happened.
 _c3_claim_pm_override() {
   local evidence_root="$1" override_file consumed_file reason
   override_file="$(_c3_override_file "$evidence_root")"
@@ -868,7 +868,7 @@ cmd_build_manifest() {
   # | sha256sum` them itself, since they're committed. Evidence-class
   # entries (final_report.md / gates_report.json / gates/gates_report.json /
   # verifier-output-*.md) are NOT git-tracked (runtime evidence, gitignored
-  # by design — see aid-cp1-ledger.sh's identical NOT COMMITTED rationale),
+  # by design: runtime evidence is never committed),
   # so there was previously nothing in the SEALED manifest binding a claimed
   # PASS to an immutable digest: Codex could hash the file itself but had no
   # authoritative value to compare against, i.e. no way to distinguish a
@@ -1085,10 +1085,12 @@ _looks_at_capacity() {
 #
 #   SHARED TRANSPORT (P065 E-065-7_7 Step 18): this helper carries no C3-specific
 #   coupling — it takes only a project root + a pre-rendered prompt file and
-#   returns raw captures via the five output-file parameters. `aid-c0-plan-review.sh`
-#   sources this file (guarded by the BASH_SOURCE!=0 check at the bottom, so
-#   sourcing never runs C3's own CLI dispatcher) and reuses THIS function verbatim
-#   for the C0 plan-review Codex launch. The only knobs it reads are $CODEX_MODEL
+#   returns raw captures via the five output-file parameters. Sourcing this file
+#   never runs C3's own CLI dispatcher (the BASH_SOURCE!=0 check at the bottom).
+#   Callers besides C3: `aid-plan-review-round.sh dispatch` (in a subshell, for
+#   a plan reviewer whose provider is codex) and lib/aid-recovery-adjudicate.sh,
+#   so a change to its five-argument signature must be checked against them.
+#   The only knobs it reads are $CODEX_MODEL
 #   (a plain global, not a C3-only concept — a caller may repoint it before
 #   calling) and the timeout env var below (AID_C3_TIMEOUT_SECONDS is read FIRST,
 #   for exact backward compatibility with existing C3 tests/callers; the generic
@@ -1102,9 +1104,9 @@ _looks_at_capacity() {
 #   output, which HARD-FAILS (HTTP 400 "'if' is not permitted") on any
 #   conditional keyword. Passing it would 400 every dispatch. The trusted gate
 #   is the caller's own explicit jq response validator (_validate_response for
-#   C3, its C0 analogue for aid-c0-plan-review.sh), NOT the backend. We do NOT
-#   strip if/then from either schema to work around this — it is not ours to
-#   change, and the conditional rules are load-bearing for bridge validation.
+#   C3; the answer check of aid-plan-review-round.sh collect for plan review),
+#   NOT the backend. We do NOT strip if/then from the schema to work around this
+#   — the conditional rules are load-bearing for bridge validation.
 #
 #   Returns the codex/timeout exit code (124 = timed out).
 _run_codex_isolated() {
@@ -2184,9 +2186,9 @@ cmd_dispatch() {
         _c3_ovr_sha="$(jq -r '.consumed_sha256' <<<"$_c3_claim")"
         echo "aid-c3-dispatch: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${_c3_ovr_reason}" >&2
         echo "aid-c3-dispatch: override CONSUMED (single-use) — $(basename "$_c3_ovr_path") ${_c3_ovr_sha}" >&2
-        # Recorded in the loop state with the SAME corroboration field names
-        # aid-cp1-ledger.sh uses, so a later audit can verify the claim rather
-        # than trust a message that has already scrolled past.
+        # Recorded in the loop state with its corroboration fields, so a later
+        # audit can verify the claim rather than trust a message that has
+        # already scrolled past.
         C3_OVERRIDE_CONSUMED_PATH="$_c3_ovr_path"
         C3_OVERRIDE_CONSUMED_SHA256="$_c3_ovr_sha"
       fi

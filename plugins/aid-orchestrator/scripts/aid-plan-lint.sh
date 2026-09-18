@@ -33,15 +33,10 @@
 # step measured coverage by counting, which is how a portfolio grows tests
 # nobody asked for. Same STRICT tier as below.
 #
-# BAND-SCOPED STEP OBLIGATIONS (P084 Step 3)
-# The lint also checks the per-step fields the plan's ceremony BAND asks for.
-# The band comes from lib/aid-plan-band.sh — the same single classification
-# aid-cp1-gate.sh enforces on and the plan author writes against (skills/plan-writing.md
-# §"Obligations by ceremony band"), never a second derivation here. `full` and
-# `medium` owe **Architecture Context**, **Error Handling** and **Edge Cases**
-# per step; `light` owes none of them and is checked for none. A band that
-# cannot be classified reads as `full`, matching the gate's own fail-closed.
-# These findings are STRICT tier: blocking for a lifecycle_strict plan, a loud
+# PER-STEP OBLIGATIONS
+# Every step owes **Architecture Context**, **Error Handling** and **Edge
+# Cases** (skills/plan-writing.md §"Mandatory Fields Per Step"); every plan owes the same
+# obligations, whatever it touches. These findings are STRICT tier: blocking for a lifecycle_strict plan, a loud
 # advisory for a legacy one — the same two-tier treatment the Files grammar
 # gets, and for the same reason.
 #
@@ -53,8 +48,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-scoping.sh
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
-# shellcheck source=lib/aid-plan-band.sh
-source "${SCRIPT_DIR}/lib/aid-plan-band.sh"
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # shellcheck source=lib/aid-reuse-verdict.sh
@@ -88,36 +83,6 @@ fi
 errors=0
 strict_hits=0
 advisories=0
-
-# WHICH BANDS OWE WHICH OF THIS PROGRAM'S OBLIGATIONS — one table, read by the
-# four checks below. It used to be four separate `[[ "$band" != "light" ]]`
-# tests scattered through the file, which is four places to edit for the next
-# obligation and four places for them to disagree.
-#
-# The CP1 gate reads its half of the ceremony from
-# defaults/policies/review-checkpoints.yaml; this half is not yet in that file,
-# and moving it there is a real improvement that needs its own schema, reader
-# and tests. Recorded rather than half-done: what is fixed here is that the
-# matrix has ONE authority inside this program.
-_AID_LINT_BAND_OBLIGATIONS=(
-  "step_fields:full medium"          # Architecture Context / Error Handling / Edge Cases
-  "reuse_check:full medium light"    # every band — founding a duplicate is what small plans do
-  "standards:full medium"
-  "documentation:full medium"
-)
-
-# _band_owes <obligation> — does this plan's band owe it?
-_band_owes() {
-  local entry
-  for entry in "${_AID_LINT_BAND_OBLIGATIONS[@]}"; do
-    [[ "${entry%%:*}" == "$1" ]] || continue
-    [[ " ${entry#*:} " == *" ${band} "* ]] && return 0
-    return 1
-  done
-  # An obligation absent from the table is owed by everyone: the fail-closed
-  # direction, matching the gate's own treatment of an unknown band.
-  return 0
-}
 
 # _advisory <location-suffix> <message> — the advisory twin of _strict_finding.
 # One owner of the counter and the --quiet check, so a new advisory cannot
@@ -252,17 +217,9 @@ done < <(_aid_blank_fenced < "$PLAN" | awk '/^\*\*AID Role:?\*\*/ { s=$0; sub(/^
 #   lint accepts is exactly what generation will accept.
 
 # ---------------------------------------------------------------------------
-# Band-scoped per-step obligations
+# Per-step obligations
 # ---------------------------------------------------------------------------
-# The band comes from the LIB (`aid_plan_band_name`, which already defaults an
-# unknown answer to `full`), never from `aid-cp1-gate.sh --classify-only`: this
-# lint runs inside generation's pre-flight, where "the CP1 gate is consulted
-# exactly once per plan" is an invariant the generation suites assert by
-# COUNTING gate invocations. The lib resolves the project root FROM THE PLAN, so
-# a lint run from another directory still reads the policy override that plan's
-# own workspace carries.
-
-# _missing_step_fields — one line per step that is missing band-scoped fields:
+# _missing_step_fields — one line per step that is missing mandatory fields:
 # "<lineno>\t<missing,fields>\t<step heading>". A step's region runs from its
 # own `### Step` heading to the next one or to the next `##` section, which is
 # how the plan format already separates steps.
@@ -273,7 +230,7 @@ _missing_step_fields() {
   #
   # The field list is ONE string. It used to be three literals repeated in three
   # places inside this program (detection, marking, reporting), so adding a
-  # band-scoped field meant four coordinated edits in one awk.
+  # mandatory field meant four coordinated edits in one awk.
   awk -v fields='Architecture Context|Error Handling|Edge Cases' '
     BEGIN { n = split(fields, want, "|") }
     function report(   i, miss) {
@@ -357,29 +314,25 @@ while IFS=: read -r _hline _hsection; do
   _strict_finding ":${_hline}" "'${_hsection}' is written for a human, and the PM page is rendered from the plan instead (lib/aid-plan-summary.sh) — remove the section."
 done < <(grep -n -x -F "${_human_grep_args[@]}" "$PLAN" 2>/dev/null || true)
 
-band="$(aid_plan_band_name "$PLAN")"
-if _band_owes step_fields; then
-  while IFS=$'\t' read -r lineno missing head; do
-    [[ -n "${missing:-}" ]] || continue
-    _strict_finding ":${lineno}" "band=${band} step is missing ${missing}: ${head}"
-  done < <(_missing_step_fields)
-fi
+while IFS=$'\t' read -r lineno missing head; do
+  [[ -n "${missing:-}" ]] || continue
+  _strict_finding ":${lineno}" "step is missing ${missing}: ${head}"
+done < <(_missing_step_fields)
 
 # ---------------------------------------------------------------------------
 # Reuse evidence on steps that found something (P085 Step 2)
 # ---------------------------------------------------------------------------
 # A step whose Files carry a `Create:` bullet owes a `**Reuse check:**` field:
-# the read-only search it ran, and what that search found. The obligation holds
-# in EVERY band, including `light` — founding a duplicate component is exactly
-# what a small plan does, and the price here is one command and its output, not
-# a dispatch.
+# the read-only search it ran, and what that search found — founding a
+# duplicate component is exactly what a small plan does, and the price here is
+# one command and its output, not a dispatch.
 #
 # The field is REPLAYED, not read: lib/aid-reuse-verdict.sh runs the declared
 # command again and compares the number of hits with the declared result, so a
 # claim of `none` over a command that finds something today is a finding. Where
 # the replay's reach ends, and who picks up there, is stated once in
 # skills/review-checkpoint-contracts.md §"Lens: reuse_evidence".
-_project_root="$(_aid_band_project_root "$PLAN")" || _project_root=""
+_project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
 # Every path this plan declares anywhere, once: the N+1 verdict asks whether a
 # conflicting site already lies inside the plan's reach, and that question is
@@ -404,7 +357,7 @@ _plan_declared_paths() {
   _AID_DECLARED_PATHS_DONE=1
 }
 
-while _band_owes reuse_check && IFS=$'\t' read -r _rs _re _rhead; do
+while IFS=$'\t' read -r _rs _re _rhead; do
   [[ -n "${_rs:-}" ]] || continue
   if ! _reuse_value="$(_aid_plan_step_field "$PLAN" "$_rs" "$_re" "Reuse check")"; then
     _strict_finding ":${_rs}" "step founds a new file (a \`Create:\` bullet) with no **Reuse check:** field — say what you searched for and what it returned: ${_rhead}"
@@ -485,10 +438,6 @@ done < <(_aid_plan_founding_steps "$PLAN")
 # unreachable = a broken environment, reported loudly and blocking for a strict
 # plan; a map that binds nothing to these paths = the section is not owed, and
 # that is a correct answer.
-#
-# `light` is exempt: a plan that changes a help text or ordinary feature code is
-# not where standards compliance is decided, and the band exists precisely so
-# that small plans are not asked questions they do not have.
 
 # _deviation_cell <table-row> — the last non-empty cell of a markdown table row.
 _deviation_cell() {
@@ -500,48 +449,46 @@ _deviation_cell() {
   }'
 }
 
-if _band_owes standards; then
-  _std_derived="$(aid_standards_derive "$PLAN" "${_project_root:-}")"; _std_rc=$?
-  case "$_std_rc" in
-    1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] no standards map configured for this project (project.yaml -> standards.map_path), so no '## Standards' section is owed." >&2 ;;
-    2) _strict_finding "" "standards.map_path IS configured but the map cannot be read (missing file, or no yq) — that is a broken environment, not a project without standards; fix the path or unset it." ;;
-    0)
-      _std_section="$(_aid_plan_section "$PLAN" "Standards")"
-      while IFS=$'\t' read -r _std_tag _std_ids; do
-        [[ -n "${_std_tag:-}" ]] || continue
-        _std_named=""
-        IFS=',' read -r -a _std_arr <<< "$_std_ids"
-        for _std_id in "${_std_arr[@]}"; do
-          [[ "$_std_section" == *"$_std_id"* ]] && { _std_named="$_std_id"; break; }
-        done
-        if [[ -z "$_std_named" ]]; then
-          _strict_finding "" "this plan touches the '${_std_tag}' area but its '## Standards' section names none of: ${_std_ids} — name the one you checked, or say which you depart from and why."
-          continue
-        fi
-        # A named standard whose deviation cell is a bare marker states a
-        # deviation without stating a reason, which is the one shape the
-        # section must not have.
-        while IFS= read -r _std_row; do
-          [[ "$_std_row" == \|* ]] || continue
-          [[ "$_std_row" == *"$_std_named"* ]] || continue
-          [[ "$_std_row" == *---* ]] && continue
-          _std_dev="$(_deviation_cell "$_std_row")"
-          case "$_std_dev" in
-            ""|none|None|"n/a"|-|—|žádná|žádný|zadna|zadny) continue ;;
-          esac
-          # The cell IS the reason when there is one; a word is not a reason.
-          [[ "${#_std_dev}" -ge 12 ]] || _strict_finding "" "'${_std_named}' is marked as a deviation ('${_std_dev}') with no reason — a deviation is reported so it can be fixed in the standard or in the map, and neither is possible without the why."
-        done <<< "$_std_section"
-      done <<< "$_std_derived"
-      # A defect of the MAP, reported so it gets fixed. Never blocking: a plan
-      # is not responsible for the map's bookkeeping.
-      while IFS= read -r _std_defect; do
-        [[ -n "${_std_defect:-}" ]] || continue
-        _advisory "" "the standards map uses tag '${_std_defect}', which is missing from its own tag vocabulary — a defect of the map, reported here, not a reason to stop this plan."
-      done < <(aid_standards_map_defects "$PLAN" "${_project_root:-}" 2>/dev/null || true)
-      ;;
-  esac
-fi
+_std_derived="$(aid_standards_derive "$PLAN" "${_project_root:-}")"; _std_rc=$?
+case "$_std_rc" in
+  1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] no standards map configured for this project (project.yaml -> standards.map_path), so no '## Standards' section is owed." >&2 ;;
+  2) _strict_finding "" "standards.map_path IS configured but the map cannot be read (missing file, or no yq) — that is a broken environment, not a project without standards; fix the path or unset it." ;;
+  0)
+    _std_section="$(_aid_plan_section "$PLAN" "Standards")"
+    while IFS=$'\t' read -r _std_tag _std_ids; do
+      [[ -n "${_std_tag:-}" ]] || continue
+      _std_named=""
+      IFS=',' read -r -a _std_arr <<< "$_std_ids"
+      for _std_id in "${_std_arr[@]}"; do
+        [[ "$_std_section" == *"$_std_id"* ]] && { _std_named="$_std_id"; break; }
+      done
+      if [[ -z "$_std_named" ]]; then
+        _strict_finding "" "this plan touches the '${_std_tag}' area but its '## Standards' section names none of: ${_std_ids} — name the one you checked, or say which you depart from and why."
+        continue
+      fi
+      # A named standard whose deviation cell is a bare marker states a
+      # deviation without stating a reason, which is the one shape the
+      # section must not have.
+      while IFS= read -r _std_row; do
+        [[ "$_std_row" == \|* ]] || continue
+        [[ "$_std_row" == *"$_std_named"* ]] || continue
+        [[ "$_std_row" == *---* ]] && continue
+        _std_dev="$(_deviation_cell "$_std_row")"
+        case "$_std_dev" in
+          ""|none|None|"n/a"|-|—|žádná|žádný|zadna|zadny) continue ;;
+        esac
+        # The cell IS the reason when there is one; a word is not a reason.
+        [[ "${#_std_dev}" -ge 12 ]] || _strict_finding "" "'${_std_named}' is marked as a deviation ('${_std_dev}') with no reason — a deviation is reported so it can be fixed in the standard or in the map, and neither is possible without the why."
+      done <<< "$_std_section"
+    done <<< "$_std_derived"
+    # A defect of the MAP, reported so it gets fixed. Never blocking: a plan
+    # is not responsible for the map's bookkeeping.
+    while IFS= read -r _std_defect; do
+      [[ -n "${_std_defect:-}" ]] || continue
+      _advisory "" "the standards map uses tag '${_std_defect}', which is missing from its own tag vocabulary — a defect of the map, reported here, not a reason to stop this plan."
+    done < <(aid_standards_map_defects "$PLAN" "${_project_root:-}" 2>/dev/null || true)
+    ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Declared concurrency (P085 Step 7) — the writing-time half
@@ -584,7 +531,7 @@ fi
 # What the project HAS is not re-discovered at every plan write. /aid-init and
 # /aid-setup record it once in project.yaml (`documentation.in_app_help`,
 # `documentation.docusaurus`, `documentation.screenshot_tool`) and the plan
-# reads the answer — the same relationship the band has to the classifier.
+# reads the answer.
 # A project with neither a help surface nor a docs site owes NOTHING here, and
 # the lint says so, so the silence does not read as an omission.
 #
@@ -608,8 +555,7 @@ _AID_DOC_NON_SURFACE='screenshot_tool'
 
 _doc_surfaces() {
   local raw rc
-  # ONE yq over project.yaml, not one per key: the same pattern _cp1_band_flags
-  # and _aid_band_map_eres already use, and the reason this reader is shared.
+  # ONE yq over project.yaml, not one per key.
   raw="$(_aid_project_yaml "$1" ".documentation // {} | to_entries[] | .key + \"=\" + (.value // \"\")")"; rc=$?
   [[ "$rc" -eq 0 ]] || return "$rc"
   printf '%s\n' "$raw" | awk -F= -v skip="$_AID_DOC_NON_SURFACE" '
@@ -634,10 +580,10 @@ _plan_touches() {
 # Saying nothing there would read as "no documentation is owed", which is the
 # fail-open direction; the run says what it could not determine instead
 # (Codex wiring review, 2026-08-23).
-if _band_owes documentation && [[ -z "${_project_root:-}" ]]; then
+if [[ -z "${_project_root:-}" ]]; then
   _advisory "" "documentation surfaces not checked — no project root resolved from the plan's path, so project.yaml could not be read."
 fi
-if _band_owes documentation && [[ -n "${_project_root:-}" ]]; then
+if [[ -n "${_project_root:-}" ]]; then
   _doc_type="$(_aid_fm_get "$PLAN" type)"
   case "$_doc_type" in
     refactor|docs) : ;;   # by definition not a change a user meets
@@ -720,7 +666,7 @@ blocking=$errors
 
 if [[ "$QUIET" -eq 0 ]]; then
   if [[ "$blocking" -gt 0 ]]; then
-    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; band-scoped step fields: skills/plan-writing.md §\"Obligations by ceremony band\"." >&2
+    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; mandatory step fields: skills/plan-writing.md §\"Mandatory Fields Per Step\"." >&2
   elif [[ "$strict_hits" -gt 0 ]]; then
     echo "aid-plan-lint: PASS with ${strict_hits} legacy advisory warning(s) (non-blocking for this legacy plan; would block a lifecycle_strict plan)." >&2
   else
@@ -743,7 +689,7 @@ if _lint_plan_id="$(_aid_plan_id_of "$PLAN")"; then
     # `|| true`: the promise above is that telemetry never blocks, and a bare
     # call would make any future non-zero from the logger this lint's verdict.
     log_event "$_lint_tl" "plan_lint_result" \
-      band="$band" mode="$mode" errors="$errors" strict="$strict_hits" \
+      mode="$mode" errors="$errors" strict="$strict_hits" \
       advisories="$advisories" blocked="$( [[ "$blocking" -gt 0 ]] && echo true || echo false )" || true
   fi
 fi

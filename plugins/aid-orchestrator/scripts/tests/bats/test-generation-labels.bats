@@ -112,7 +112,7 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
-  export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.\nMissing files in .aid-o/work/evidence/P099/cp1-deep/:\n  - cp1-lens-L1-behavior.md'
+  export AID_TEST_CP1_OUT='CP1-gate FAIL: no plan review round-1 for P099; run: aid-plan-review-round.sh prepare <plan> --round 1'
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
 
@@ -132,7 +132,7 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
-  export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.'
+  export AID_TEST_CP1_OUT='CP1-gate FAIL: no plan review round-1 for P099'
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
 
@@ -154,7 +154,7 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
-  export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.'
+  export AID_TEST_CP1_OUT='CP1-gate FAIL: no plan review round-1 for P099'
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
@@ -181,16 +181,16 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
-  export AID_TEST_CP1_OUT='ERROR: CP1 revision-limit ledger blocks EPIC generation for plan P099.\naid-cp1-ledger.sh check-budget rc=1: attempts 5 >= max 5'
+  export AID_TEST_CP1_OUT='CP1-gate FAIL: round-1 left 2 blocker(s) open and there is no round-2\nCP1-gate FAIL: round-2 is not closed (measurement.json missing)'
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
 
   [[ "$(_first_line)" == "aid_generation_force_required: "* ]]
   # Both of the gate's own lines survive, byte for byte, BELOW the label.
-  grep -qF 'ERROR: CP1 revision-limit ledger blocks EPIC generation for plan P099.' "$ERRFILE"
-  grep -qF 'aid-cp1-ledger.sh check-budget rc=1: attempts 5 >= max 5' "$ERRFILE"
+  grep -qF 'CP1-gate FAIL: round-1 left 2 blocker(s) open and there is no round-2' "$ERRFILE"
+  grep -qF 'CP1-gate FAIL: round-2 is not closed (measurement.json missing)' "$ERRFILE"
   local gate_line
-  gate_line="$(grep -nF 'ERROR: CP1 revision-limit ledger blocks' "$ERRFILE" | head -1 | cut -d: -f1)"
+  gate_line="$(grep -nF 'CP1-gate FAIL: round-1 left' "$ERRFILE" | head -1 | cut -d: -f1)"
   [ "$gate_line" -gt 1 ]
 }
 
@@ -279,7 +279,7 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
-  export AID_TEST_CP1_OUT='ERROR: High-risk plan requires CP1-deep evidence.\nERROR: CP1 revision-limit ledger blocks EPIC generation for plan P099.\nPlan file missing closing '"'"'---'"'"' for frontmatter block.'
+  export AID_TEST_CP1_OUT='CP1-gate FAIL: no plan review round-1 for P099\nCP1-gate FAIL: round-2 is not closed (measurement.json missing)\nPlan file missing closing '"'"'---'"'"' for frontmatter block.'
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
 
@@ -287,7 +287,7 @@ _printed_force_command() {
   local first; first="$(_first_line)"
   [[ "$first" == "aid_cp1_blocked: "* ]]
   [[ "$first" == *"missing closing '---' for frontmatter"* ]]
-  [[ "$first" != *"CP1-deep evidence"* ]]
+  [[ "$first" != *"no plan review round-1"* ]]
   # And it stays hard under --force: the mixed case does not become forceable
   # just because some of its conditions were.
   _run_pipeline "$TEST_TMPDIR/p" "$plan" --force --reason "$REASON"
@@ -317,7 +317,7 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=0
-  export AID_TEST_CP1_OUT='CP1-gate: plan P099 is low-risk — CP1-deep not required. Proceeding.'
+  export AID_TEST_CP1_OUT='CP1-gate: plan P099 PASS — round 1 closed'
   gen_stub aid-epic-to-json.sh <<'STUB'
 #!/usr/bin/env bash
 echo "jq: error (at <stdin>:0): Cannot index number with string \"steps\"" >&2

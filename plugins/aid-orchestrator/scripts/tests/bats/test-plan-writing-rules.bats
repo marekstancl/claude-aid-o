@@ -126,18 +126,15 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Band-scoped obligations (P084 Step 3)
+# Per-step obligations
 #
-# The band split is written in plan-writing.md and ENFORCED by aid-plan-lint.sh,
-# which reads the band from the shared classifier lib/aid-plan-band.sh (NOT by
-# calling the gate — the gate is consulted once per plan and the lint runs
-# inside generation's pre-flight). These cases assert the two halves
-# agree: what the document promises a light plan is not asked for, the lint does
-# not ask for either.
+# Every step owes Architecture Context, Error Handling and Edge Cases
+# (plan-writing.md §"Mandatory Fields Per Step"), enforced by aid-plan-lint.sh whatever
+# the plan touches.
 # ---------------------------------------------------------------------------
 
 # write_step_plan <path> <declared file> — a strict-cohort plan with exactly one
-# step that carries the UNIVERSAL fields and none of the band-scoped ones.
+# step that carries none of the three per-step fields.
 write_step_plan() {
   cat > "$1" <<EOF
 ---
@@ -148,7 +145,7 @@ lifecycle_strict: true
 
 ## Testing Strategy
 
-No new verification — these fixtures exercise the band-scoped step obligations.
+No new verification — these fixtures exercise the per-step obligations.
 
 ## Implementation Steps
 
@@ -168,21 +165,15 @@ No new verification — these fixtures exercise the band-scoped step obligations
 - [ ] AC1 — the thing is done
 
 **Effort:** S
-**AID Role:** docs
+**AID Role:** docs-writer
 EOF
 }
 
-@test "AC10: a light plan passes the lint with no Architecture Context and no Edge Cases" {
-  write_step_plan "${TMPDIR_TEST}/light.md" "plugins/aid-orchestrator/commands/aid-help.md"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/light.md"
-  [ "$status" -eq 0 ]
-}
-
-@test "AC11: the same step in a full plan does not pass — the band-scoped fields are owed" {
-  write_step_plan "${TMPDIR_TEST}/full.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/full.md"
+@test "every plan owes the three step fields, one that touches only texts included" {
+  write_step_plan "${TMPDIR_TEST}/text.md" "plugins/aid-orchestrator/commands/aid-help.md"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/text.md"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"band=full step is missing Architecture Context,Error Handling,Edge Cases"* ]]
+  [[ "$output" == *"step is missing Architecture Context,Error Handling,Edge Cases"* ]]
 }
 
 @test "a legacy plan gets the same finding as an advisory, never a block" {
@@ -190,29 +181,10 @@ EOF
   sed -i '/^lifecycle_strict:/d' "${TMPDIR_TEST}/legacy.md"
   run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/legacy.md"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"[WARN legacy] band=full step is missing"* ]]
+  [[ "$output" == *"[WARN legacy] step is missing"* ]]
 }
 
-@test "AC9: every one of the 28 completeness checks carries a band verdict" {
-  skill="$PLUGIN_ROOT/skills/plan-writing.md"
-  # The verdict table is the answer to "does this check apply to my band" — a
-  # check absent from it would silently read as universal, which is exactly the
-  # ambiguity the table exists to remove.
-  table="$(sed -n '/^### Which checks apply to which band/,/^### Gate Failure Recovery/p' "$skill")"
-  [ -n "$table" ]
-  for check in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 17a 17b 17c 17d 17e 18 19 20a 20b 20c 21; do
-    echo "$table" | grep -qE "^\| [^|]*\b${check}\b" || {
-      echo "check ${check} has no verdict row" >&2
-      return 1
-    }
-  done
-  # And the verdict column uses exactly the two sanctioned words — a third one
-  # ("mostly", "n/a", "see below") would be a verdict nobody can act on.
-  verdicts="$(printf '%s\n' "$table" | grep -oE '\| (universal|band-scoped) \|' | sort -u | wc -l)"
-  [ "$verdicts" -eq 2 ]
-}
-
-@test "an EMPTY band-scoped field label does not satisfy the obligation" {
+@test "an EMPTY step field label does not satisfy the obligation" {
   # Three bare labels used to pass all three checks while saying nothing
   # (codex review of EPIC 1, finding 6).
   write_step_plan "${TMPDIR_TEST}/empty.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
@@ -233,20 +205,9 @@ EOF
   [[ "$output" == *"Testing Strategy"* ]]
 }
 
-@test "a risk: high plan is checked as full even when it declares only texts" {
-  # The escalation lives in the classifier, so the lint cannot forget it
-  # (codex review of EPIC 1, finding 4).
-  write_step_plan "${TMPDIR_TEST}/high.md" "plugins/aid-orchestrator/commands/aid-help.md"
-  sed -i 's/^type: plan$/type: plan\nrisk: high/' "${TMPDIR_TEST}/high.md"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/high.md"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"band=full step is missing"* ]]
-}
-
-
 @test "a step quoted inside a fenced block is not linted as a step" {
   write_step_plan "${TMPDIR_TEST}/fenced.md" "plugins/aid-orchestrator/scripts/aid-fsm.sh"
-  # Give the real step what its band owes, then quote an example step that has
+  # Give the real step what it owes, then quote an example step that has
   # none of it. Only the quoted one is missing fields, and it must not be seen.
   printf '\n**Architecture Context:**\nIt sits in the gate.\n\n**Error Handling:** fail closed.\n\n**Edge Cases:**\n- one\n' \
     >> "${TMPDIR_TEST}/fenced.md"
@@ -349,14 +310,3 @@ _doc_plan() {   # <type> <files-bullets…>
   rm -rf "$DOCDIR"
 }
 
-@test "P085: a light-band plan is not asked" {
-  _doc_setup 'documentation:
-  in_app_help: src/help'
-  { printf -- '---\nid: P903\ntype: regular\nrisk: low\nlifecycle_strict: true\n---\n'
-    printf '# Plan: P903\n\n## Testing Strategy\n\nnone\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly.\n\n**Files:**\n- Modify: `src/feature.ts` — new behaviour\n'
-  } > "$DOCPLAN"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "$DOCPLAN"
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"changes behaviour a user meets"* ]]
-  rm -rf "$DOCDIR"
-}

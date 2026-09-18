@@ -3376,14 +3376,12 @@ EOF
 # existing entry point, and the override is a lifecycle action, not a review
 # internal.
 #
-#   aid-fsm.sh pm-override grant <c0|c3> <plan_id> --reason "<text >=20>"
+#   aid-fsm.sh pm-override grant c3 <plan_id> --reason "<text >=20>"
 #              [--project-root <path>] [--evidence-root <path>]
 #
-# C0 writes .aid-o/work/evidence/<plan_id>/cp1-pm-escalation-override.json —
-# the EXISTING path and the existing `{pm_ref}` shape, extended additively so
-# aid-cp1-gate.sh's and aid-cp1-ledger.sh's `jq -r .pm_ref` reads are
-# untouched. C3 writes c3-pm-escalation-override.json with the identical
-# shape. Both are claimed atomically and exactly once by their consumer.
+# Writes c3-pm-escalation-override.json (`{pm_ref}` shape), claimed atomically
+# and exactly once by the C3 loop. Plan review (CP1) has its own PM record:
+# aid-plan-review-round.sh override.
 #
 # THE ARTIFACT IS NOT WRITTEN BY AGENTS. It is the PM's decision made
 # physical; an agent creating one would be forging the authorisation it is
@@ -3394,7 +3392,7 @@ cmd_pm_override() {
   case "$action" in
     grant) : ;;
     ""|-h|--help)
-      echo "Usage: aid-fsm.sh pm-override grant <c0|c3> <plan_id> --reason '<text>' [--project-root <path>] [--evidence-root <path>]" >&2
+      echo "Usage: aid-fsm.sh pm-override grant c3 <plan_id> --reason '<text>' [--project-root <path>] [--evidence-root <path>]" >&2
       exit 1 ;;
     *)
       echo "ERROR: pm-override: unknown action '${action}' (only 'grant' exists)." >&2
@@ -3404,8 +3402,7 @@ cmd_pm_override() {
   local target="${1:-}"; shift || true
   local plan_id="${1:-}"; shift || true
   # P074 Step 1: the DEFAULT project root is STATE — the grant
-  # artifact must land where its consumer (aid-cp1-gate.sh / aid-cp1-ledger.sh)
-  # looks, i.e. under the PRIMARY .aid-o, not in whatever tree the PM happened
+  # artifact must land where its consumer looks, i.e. under the PRIMARY .aid-o, not in whatever tree the PM happened
   # to stand in. An explicit --project-root still wins verbatim. Legacy "."
   # kept as the last resort for cwds no root can be derived from.
   local reason="" project_root="" evidence_root=""
@@ -3424,8 +3421,9 @@ cmd_pm_override() {
   done
 
   case "$target" in
-    c0|c3) : ;;
-    *) echo "ERROR: pm-override grant: target must be 'c0' or 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
+    c3) : ;;
+    c0) echo "ERROR: pm-override grant: 'c0' is gone with the Codex plan review loop; a PM decision on plan review rounds is recorded with aid-plan-review-round.sh override." >&2; exit 2 ;;
+    *) echo "ERROR: pm-override grant: target must be 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
   esac
   [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || {
     echo "ERROR: pm-override grant: plan_id must match ^P[0-9]{3}\$ (got '${plan_id:-<empty>}')." >&2
@@ -3439,20 +3437,16 @@ cmd_pm_override() {
   fi
   command -v jq >/dev/null 2>&1 || { echo "ERROR: pm-override grant: jq is required." >&2; exit 2; }
 
-  # Resolve where the consumer will look. C0's root is the plan evidence root;
-  # C3's is the run evidence dir recorded in the loop state, which the caller
-  # supplies with --evidence-root when it is not the default.
-  local dir fname
+  # Resolve where the consumer will look: the run evidence dir recorded in the
+  # C3 loop state, which the caller supplies with --evidence-root when it is not
+  # the plan evidence root.
+  local dir
   if [[ -n "$evidence_root" ]]; then
     dir="$evidence_root"
   else
     dir="${project_root}/.aid-o/work/evidence/${plan_id}"
   fi
-  case "$target" in
-    c0) fname="cp1-pm-escalation-override.json" ;;
-    c3) fname="c3-pm-escalation-override.json" ;;
-  esac
-  local out="${dir}/${fname}"
+  local out="${dir}/c3-pm-escalation-override.json"
 
   if [[ ! -d "$dir" ]]; then
     mkdir -p "$dir" 2>/dev/null || {

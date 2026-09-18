@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.96.1** (current) — připomínka otevřeného plánu chodí jednou na projekt, ne do každého okna
-- **v2.96.0** — brány, které nikdy nic nezastavily, konečně zastavují: `required_when` se čte
-- **v2.95.11** — připomínka o plánu se řekne jednou a jen o tvých plánech
+- **v2.98.0** (current) — kontrola plánu šesti revizory ve dvou kolech, jedna cesta bez pásem; starý řetězec C0 a ledger odstraněny
+- **v2.97.0** — deterministická kontrola plánu (`aid-plan-check.sh`) před generováním
+- **v2.96.1** — připomínka otevřeného plánu chodí jednou na projekt, ne do každého okna
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

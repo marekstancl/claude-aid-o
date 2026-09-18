@@ -78,8 +78,7 @@ teardown() {
 # ─── fixtures ────────────────────────────────────────────────────────────
 
 # _state_file <plan_id> — the canonical state file path, reconstructed
-# independently of the library's own (private) path helper, matching this
-# repo's existing convention (e.g. test-cp1-ledger.bats's `_ledger_file`).
+# independently of the library's own (private) path helper.
 _state_file() {
   echo "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${1}/plan-state.yaml"
 }

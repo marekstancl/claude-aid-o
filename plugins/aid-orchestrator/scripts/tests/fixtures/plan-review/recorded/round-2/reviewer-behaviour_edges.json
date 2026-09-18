@@ -1,0 +1,13 @@
+{"role": "behaviour_edges",
+ "findings": [
+  {"id": "behaviour_edges-1", "step": 12, "severity": "major",
+   "claim": "The round-1 fix for a deleted kind contradicts itself: Implementation Detail still computes kind_name = kinds_by_code.get(code).name (None.name for a missing code) and appends that the missing code gets folder '<kód>_', while Error Handling says '<code>_neznamy_druh/', so the missing-kind behaviour and the new AC test target are undefined.",
+   "command": "grep -n \"neznamy_druh\\|kinds_by_code.get\\|<kód>_\" .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "plan.md:917; plan.md:920; plan.md:935",
+   "fix": "Replace kinds_by_code.get(code).name with the fields_meta.druh_dokladu.kind_name -> kinds_by_code fallback order in the step (3) formula, and state ONE folder name for a missing code in both Implementation Detail, Error Handling and the AC."},
+  {"id": "behaviour_edges-2", "step": 5, "severity": "major",
+   "claim": "backend/tests/documents/test_direction_change_numbering.py imports acta.docdefaults.service and monkeypatches get_document_defaults; the Step 5 Files entry for this test still does not say the monkeypatch at lines 207-218 is replaced (only Step 3 prose mentions it), so if Step 5 moves callers off get_document_defaults the monkeypatch hits an unused function and the test passes without testing anything.",
+   "command": "sed -n '548p' .aid-o/work/evidence/P998/cp1/round-2/packet/plan.md",
+   "evidence": "backend/tests/documents/test_direction_change_numbering.py:207; backend/tests/documents/test_direction_change_numbering.py:218; plan.md:548; plan.md:408",
+   "fix": "Step 5 Files for test_direction_change_numbering.py must say that the get_document_defaults monkeypatch at lines 207-218 is replaced by a patch on resolve_kind_safe or the catalogue."}
+ ]}

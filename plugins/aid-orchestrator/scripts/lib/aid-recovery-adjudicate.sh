@@ -117,7 +117,7 @@
 #
 # ── TRANSPORT ───────────────────────────────────────────────────────────────
 # `_run_codex_isolated` from `aid-c3-dispatch.sh` — the SAME isolated transport
-# the C3 bridge and the C0 plan review use, reused by `source`, never
+# the C3 bridge and plan review use, reused by `source`, never
 # reimplemented. That file sets `set -euo pipefail` at top level, which sourcing
 # would otherwise impose on every caller of this lib; the options are saved and
 # restored around the `source` below, so sourcing this file changes no shell

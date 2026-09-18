@@ -1,0 +1,16 @@
+{
+  "round": 1,
+  "plan_sha256": "612623f55aa1d7b10dff10c7d3201a3bf9c113895f206791375f4c7c0fda75ec",
+  "reviewers_expected": [
+    "generalist_a",
+    "generalist_b",
+    "behaviour_edges",
+    "feasibility_deps",
+    "reuse",
+    "enforcement_tests"
+  ],
+  "min_answers_effective": 4,
+  "degraded": true,
+  "started_at": "2026-09-18T09:18:22Z",
+  "narrow_from": null
+}

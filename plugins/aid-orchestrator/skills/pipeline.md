@@ -1037,7 +1037,7 @@ the next step transition via the reconciliation backstop (Component B of P040).
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
-  --focus "<cp1 | cp2-step-N | cp3-code-review | cp3-security | cp4-curator-validation>" \
+  --focus "<cp1-<reviewer role, hyphens> | cp2-step-N | cp3-code-review | cp3-security | cp4-curator-validation>" \
   --agent-id "<subagent_type, e.g., aid-orchestrator:verifier>" \
   --evidence-dir "$evidence_dir"
 ```
@@ -3085,14 +3085,18 @@ and a human had to catch it.
 
 ## §13 Review Checkpoint Protocol
 
-Six automatic review checkpoints dispatch the verifier agent at key pipeline milestones.
+Six automatic review checkpoints run at key pipeline milestones; CP2 to CP6
+dispatch the verifier agent. CP1 is plan review: six reviewer roles in rounds, run
+by `scripts/aid-plan-review-round.sh` as the "Plan review (CP1)" section of
+`commands/aid-plan.md` lists, contract in `skills/plan-review-roles.md`, gated by
+`scripts/aid-cp1-gate.sh`. The verifier card is not used for it.
 Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by `/aid-run`).
 
 ### Checkpoint Summary
 
 | CP | Location | Verifier Focus | Fix Loop | Escalation |
 |----|----------|----------------|----------|------------|
-| CP1 | `/aid-plan` Step 9 | `docs-review` | No (PM decides) | None |
+| CP1 | `/aid-plan` "Plan review (CP1)" | six plan reviewer roles, not the verifier | Rounds: 2 by default, a 3rd or only 1 on the PM's recorded override | PM card after each round |
 | CP2 | EXECUTE after step verify | `code-review` | Yes (max 2) | E7 |
 | CP3 | EXECUTE→GATES transition | `code-review` + `security` | Yes (max 2) | E7 |
 | CP4 | DONE after curator + auditor auto-fix (pre-merge) | `code-review` | Yes (revert on fail) | None |
@@ -3255,7 +3259,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-18
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

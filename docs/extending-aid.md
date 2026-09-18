@@ -186,7 +186,7 @@ the read-only search it ran (`grep`/`rg`/`ls`/`find`/`git grep`, nothing that
 pipes or chains) and which of four results it got. `aid-plan-lint.sh` REPLAYS
 the command and compares the file count with the claim — the difference between
 evidence and a formality. What replay cannot show is whether the search was
-WIDE enough; that is the `reuse_evidence` C0 lens, band `full` only. When you
+WIDE enough; that is the `reuse` reviewer of plan review (CP1). When you
 add a check about duplication, decide which of those two halves it belongs to
 and extend that one; a third place to ask the same question is the very shape
 `plan_reuse_evidence` exists to prevent (see its `N+1 rule`).
@@ -211,10 +211,10 @@ is a property of the step graph. Since P087 the brake is off: the same check,
 scoped to one wave (`--group`), is what the dispatch decision asks before a wave
 runs concurrently, and it judges declared interfaces as well as files.
 
-All three run through band-scoped obligations rather than as new checkers.
-Before adding a *fourth* plan-time authority, check whether what you want is a
-row in the band table (`skills/plan-writing.md` §"Obligations by ceremony band")
-plus a branch in the lint.
+All three run through the plan lint rather than as new checkers. Before adding
+a *fourth* plan-time authority, check whether what you want is a row in the
+obligations table (`skills/plan-writing.md` §"What every plan owes") plus a
+branch in the lint.
 
 ---
 
@@ -336,8 +336,8 @@ When adding a new detection capability, register it in `defaults/enforcement-reg
 - `test_anchor`: path to the bats/sh test that proves it works
 - `deadline`: ISO date after which the TTL guard flags it if not tested
 
-See also **Plan ceremony bands (P084)** at the end of this file for how much
-review a plan owes and how to extend that map.
+See also **Plan review (CP1)** in this file for how a plan is reviewed before
+generation.
 
 ### Plan Boundary Enforcement
 
@@ -364,7 +364,7 @@ AID Control System v2 introduces a shared protocol v2 envelope that all control 
 ### Schema files
 - `defaults/schemas/aid-protocol-v2.schema.json` — canonical envelope schema (JSON Schema draft 2020-12); every field annotated `$comment: enforced` or `$comment: reference`
 - `defaults/schemas/README.md` — enforced-vs-reference table with `aid-protocol-validate.sh`'s exact enforcement scope
-- 14 type-specific schemas: `plan-review.schema.json`, `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `delivery-gate.schema.json`, `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `audit-report.schema.json`, `audit-input-manifest.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`, `curator.schema.json`, `delivery-report.schema.json`
+- 13 type-specific schemas: `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `delivery-gate.schema.json`, `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `audit-report.schema.json`, `audit-input-manifest.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`, `curator.schema.json`, `delivery-report.schema.json`
 - `defaults/schemas/run-control-protocol.schema.json` — per-run protocol lock (E2+ wiring)
 
 ### Validator: `aid-protocol-validate.sh`
@@ -623,102 +623,29 @@ See [`plugins/aid-orchestrator/defaults/enforcement-registry.yaml`](../plugins/a
 
 ---
 
-## C0 Plan Contract Gate (E4)
+## Plan review (CP1)
 
-C0 has two graph inputs with distinct ownership. Before EPIC generation,
-`aid-generation-readiness.sh` derives a plan-global provisional graph directly
-from the source plan and binds it to C0. During generation,
-`aid-epic-to-json.sh` derives a separate, per-EPIC contract graph. C0 receives
-both; neither is allowed to overwrite the other. The provisional graph prevents
-the impossible dependency on an EPIC-derived artifact before EPICs exist.
+Before EPIC generation a plan is put to six reviewer roles in rounds; P093
+replaced the lens chain, the Codex loop, its ledger and the ceremony bands with
+this one path. The pieces, and what to change where:
 
-### Artifacts produced
+| Piece | File | What it owns |
+|---|---|---|
+| the roles and the evidence rule | `skills/plan-review-roles.md` | each role's questions and stop rule; what a finding must carry |
+| the answer shape | `defaults/schemas/plan-review-finding.schema.json` | the role enum and the command/evidence patterns the scripts read |
+| the prompt | `defaults/prompts/plan-review-prompt-v1.md` | the fixed header every reviewer gets |
+| the configuration | `defaults/policies/review-checkpoints.yaml` → `plan_review` | providers, models, rounds, `min_answers` |
+| the rounds | `scripts/aid-plan-review-round.sh` | prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override |
+| the adjudicator | `scripts/aid-plan-review-adjudicate.sh` | proof check, merge, yield, rejection reasons |
+| the gate | `scripts/aid-cp1-gate.sh` | the evidence generation needs |
+| the procedure | `commands/aid-plan.md` "Plan review (CP1)" | what the controller runs, command by command |
 
-| Artifact | Location | Description |
-|----------|----------|-------------|
-| `provisional-graph.json` | `.aid-o/work/evidence/{plan_id}/generation/provisional-graph.json` | Plan-global, source-plan graph used before generation; hash-bound to the reviewed source plan |
-| `plan-graph.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-graph.json` | Per-EPIC contract graph; it is not evidence of the whole multi-phase plan |
-| `contract-manifest.json` | `.aid-o/work/evidence/{plan_id}/c0/contract-manifest.json` | Per-step contract declarations: authority, idempotency class, external calls, reuse candidates |
-| `plan-review.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-review.json` | Aggregated lens findings; `would_block` bool; protocol-v2 envelope |
-
-The C0 contract-manifest and plan-review artifacts are protocol-v2 envelopes
-validated by `aid-protocol-validate.sh`. The provisional graph is deliberately
-a small, hash-bound generation artifact (`aid-source-plan-graph/v1`), validated
-by the shared source-plan graph parser before it is sealed into C0 input.
-
-### Implementation
-
-The producer script `scripts/aid-c0-contract.sh` implements both the `contract` and `review` subcommands. The `contract` subcommand computes the binding hashes and manifest, while the `review` subcommand performs the five structural checks and lens evidence scan.
-
-### The 5 semantic lenses
-
-Each lens is dispatched by the orchestrator in CP1-deep and runs in **observe
-mode** (advisory, never blocking in E4). Findings are appended to
-`plan-review.json`.
-
-| Lens | id | What it checks |
-|------|----|----------------|
-| Reuse compatibility | `c0_lens_reuse_compat` | Planned implementations that duplicate existing helpers or APIs |
-| Planned call feasibility | `c0_lens_planned_call_feasibility` | External/internal calls declared in the plan that don't exist or have incompatible signatures |
-| Dependency API grounding | `c0_lens_dep_api_grounding` | Library/API usage in plan steps where the imported API differs from what the dependency exposes |
-| Idempotency matrix | `c0_lens_idempotency_matrix` | Steps without idempotency class declaration, or classes that conflict with their callers |
-| Authority runtime matrix | `c0_lens_authority_runtime_matrix` | Authority declarations in contract-manifest that conflict with runtime permission model |
-
-Lens contracts (stop rules, stop_rule_blockers count, severity) live in
-`skills/review-checkpoint-contracts.md` §C0 Lenses.
-
-### Policy file
-
-`defaults/policies/c0-contract.yaml` governs the gate:
-
-```yaml
-enforcement: observe        # observe | blocking (promote to blocking in E10)
-promotion_phase: E10
-lenses:
-  - reuse_compat
-  - planned_call_feasibility
-  - dep_api_grounding
-  - idempotency_matrix
-  - authority_runtime_matrix
-```
-
-### Observe log
-
-`c0-observe.jsonl` in the evidence directory records every `c0_would_block`
-event. Each line is a JSON object:
-
-```json
-{"event": "c0_would_block", "plan_id": "P-001", "lens": "reuse_compat",
- "finding_count": 2, "timestamp": "2026-06-28T10:00:00Z"}
-```
-
-The log is append-only. The FSM never reads it — it exists for PM telemetry and
-E10 calibration.
-
-### Promotion to blocking (E10)
-
-To promote C0 from observe to blocking:
-
-1. Set `enforcement: blocking` in `defaults/policies/c0-contract.yaml`
-2. All five lenses must have green baselines on your codebase (zero
-   `would_block` events across ≥5 EPICs)
-3. Update all seven `c0_*` entries in `defaults/enforcement-registry.yaml`
-   from `status: planned` to `status: active`
-4. Wire `c0_would_block` as an FSM precondition in `aid-auto-pipeline.sh`
-
-### Adding a new C0 lens
-
-1. Create `skills/c0-lens-{name}.md` with the lens contract:
-   - `stop_rule_blockers: N` — number of blockers that trigger `would_block`
-   - `severity`: advisory | fail
-   - `probes`: list of questions the lens answers
-2. Add the lens to the `lenses:` list in
-   `defaults/policies/c0-contract.yaml`
-3. Add a `c0_lens_{name}` entry in
-   `plugins/aid-orchestrator/defaults/enforcement-registry.yaml`
-4. Register the lens in `skills/review-checkpoint-contracts.md` §C0 Lenses
-5. Add fixtures in `scripts/tests/fixtures/c0/<scenario>/` and cover in
-   `test-c0-contract.sh`
+**Changing a role's questions** is a text change in the roles skill; the prompt
+picks it up on the next `prepare`. **Adding or removing a role** touches the
+schema enum, the skill and the configuration together: the config validator and
+`test-plan-review-schema.bats` refuse them out of step. **Changing what a
+finding must carry** is a schema pattern change; the answer check and the
+adjudicator read the pattern from the schema, never from a copy.
 
 ---
 
@@ -776,17 +703,15 @@ stdout, exit 0 = pass / exit 1 = fail):
 | `ac_no_fragments` | Each step's `acceptance_criteria` array length must equal the count of source AC bullets attributed to that step (from the D2 per-step block, or the legacy `[role]`-tagged fallback). Independently, a defense-in-depth heuristic flags any AC string that — outside balanced backtick spans — contains a bare `length ==`/`.enforcements` substring or an odd count of `'` characters, the textual signature of a `\|`-split mid-fragment. |
 | `allowed_paths_shape` | Any `allowed_paths` entry containing whitespace, `(`, or `)` — real repo paths never contain these; a hit means a verb prefix or trailing prose leaked through. |
 
-It is wired as the one BLOCKING exception inside the otherwise observe-only
-C0 block of `aid-auto-pipeline.sh`, running for each generated `plan.json`.
+It is wired as a BLOCKING step of `aid-auto-pipeline.sh`, running for each
+generated `plan.json`.
 Each result is persisted under
 `.aid-o/work/evidence/{plan_id}/generation/epics/{epic_id}/c0/contract-validate.json`
 **before** its exit code is inspected, so a later phase can never overwrite an
 earlier phase's evidence. After every phase is generated, the pipeline runs
 `aid-generation-finalize.sh`: it checks the complete phase set against the
 source-plan provisional graph and writes a hash-bound receipt. Only that
-receipt unlocks FSM init, run creation and queue mutation. `aid-c0-contract.sh`'s
-`review` subcommand reads — never re-runs — the persisted result, so the C0
-evidence pack always reflects the real gate outcome.
+receipt unlocks FSM init, run creation and queue mutation.
 
 Registered as `contract_validation_gate` (`type: 4`, Structural-check;
 severity `blocking`) in `defaults/enforcement-registry.yaml`.
@@ -1159,8 +1084,9 @@ content — **content-verdict blocking is deferred to E10**. Fail-closed rules t
 
 - An empty / whitespace-only / unparseable REQUIRED input is treated as absent (jq 1.6 edge
   case) — never a silent pass.
-- The `plan_review` hop follows `epic_input.md`'s `plan_ref` frontmatter to the plan's C0
-  evidence; a wrong `plan_ref` → `plan-review.json` not found → blocked.
+- The `plan_review` input follows `epic_input.md`'s `plan_ref` frontmatter to the plan's
+  sealed `generation/generation-authority.json` (plan review passed, or the PM's recorded
+  force); a wrong `plan_ref` → no authority found → blocked. Plan mode reads it by plan id.
 - Evidence verification runs `aid-evidence-verify.sh --at-head`. A `--at-head` mismatch and a
   git-dirty tree are BOTH classified as a per-check **`fail`** — *not* `unverifiable`. Only a
   genuine tool error (missing harness, exit 2/10/20, unparseable report) degrades to
@@ -2511,93 +2437,6 @@ condemned for containing "p1"). And if you find yourself wanting a tier for a
 reason that is not cost or scope, the answer is no — that is the rule the whole
 standard rests on.
 
-
-## Plan ceremony bands (P084)
-
-Before P084 the CP1 gate decided how much review a plan owed by grepping the
-WHOLE plan document for eight content patterns. Prose matched: measured on six
-live plans (2026-08-16) the hit counts were 33, 31, 30, 13, 9 and 5, so every
-plan was high-risk and the ceremony was proportional to nothing.
-
-It now classifies a **band** from the paths the plan's steps DECLARE:
-
-```bash
-bash plugins/aid-orchestrator/scripts/aid-cp1-gate.sh \
-     --plan .aid-o/plans/P0NN-topic.md --classify-only     # full | medium | light
-```
-
-Three pieces, and it matters which one you are changing:
-
-| Piece | File | What it owns |
-|---|---|---|
-| the classifier | `scripts/lib/aid-plan-band.sh` | how a band is derived from declared paths |
-| the map | `defaults/policies/risk-paths.yaml` | WHICH paths mean what (data, not code) |
-| the requirements | `defaults/policies/review-checkpoints.yaml` → `ceremony_bands` | what each band OWES |
-
-`aid-cp1-gate.sh` reads all three; `aid-plan-lint.sh` sources the classifier
-directly. The lint does NOT shell out to the gate, and that is load-bearing:
-"the CP1 gate is consulted exactly once per plan" is an invariant the generation
-suites assert by COUNTING gate invocations
-(`scripts/tests/bats/generation-fixture.bash`, `gen_cp1_calls`), and the lint
-runs inside generation's own pre-flight.
-
-**Adding a path to the map** is the common change and needs no code: add the
-regex to `full_paths` or `medium_paths`, add a fixture under
-`scripts/tests/fixtures/plan-risk/`, add its row to
-`docs/plans/P084-classification-reference.md`, and
-`scripts/tests/check-classification-reference.sh` (called from
-`test-cp1-gate-risk.bats`) keeps the three honest. Adding one without the others
-fails the suite on purpose.
-
-**How the plan-review shape was chosen** — `docs/plans/P084-q7-experiment.md`
-records the live measurement behind it: three ways of putting a plan in front of
-a reviewer, six runs, scored against the defects the implementation actually
-hit. Reviewing the whole plan twice beat splitting it into parts, which was the
-only variant that produced false findings.
-
-**What the bands mean.** `full` is the machinery that decides what the pipeline
-DOES — state machines, gate runner, generation chain, release boundary,
-`skills/plan-writing.md`, plus money/credentials/migrations/dependency manifests
-in a consumer project. `medium` is the DATA those decisions read: policies,
-schemas, templates, machine-read config, CI. `light` is everything else, and
-that deliberately includes tests and ordinary feature code — the band measures
-whose DECISIONS a plan changes, not whether it changes code. Code is reviewed
-where reviewing code works: per step at CP2/CP3, against a real diff. A plan-time
-lens panel (three agents plus an adjudicator, before a line exists) earns its
-cost only on what no later checkpoint gets a second chance at.
-
-**Every uncertainty is `full`**: no declared path, no map, an unparseable map, no
-`yq`, an unknown band in the requirements table. There is no prose-guessing
-fallback — the scan this replaced answers `light` for a plan that declares
-`aid-run-gates.sh` but says nothing alarming, and that is the one direction that
-must never happen. `risk: high` in the frontmatter raises a band; nothing lowers
-one except changing what the plan declares it will touch.
-
-### Obligations follow the band
-
-`skills/plan-writing.md` splits a plan's obligations into universal and
-band-scoped, and tabulates a verdict for every one of the 28 Completeness Gate
-checks. `aid-plan-lint.sh` enforces the split — `full`/`medium` owe
-**Architecture Context**, **Error Handling** and **Edge Cases** per step;
-`light` owes none of them, and a bare `**Field:**` label with nothing after it
-does not satisfy the obligation. Findings are STRICT tier: blocking for a
-`lifecycle_strict` plan, a loud advisory for a legacy one.
-
-Two related rules landed with it. A step needs no `Test:` bullet — the plan owes
-a `## Testing Strategy` section with content instead (which behaviour, why that
-one, where it goes), because a bullet per step measured coverage by counting. And
-a plan may not carry a summary section written for a human (`## Stakeholder
-Brief` and three siblings): that page is RENDERED from the plan's own facts by
-`scripts/lib/aid-plan-summary.sh` and published by `/aid-plan`, so a hand-written
-one is a second copy nothing checks.
-
-The renderer being an instruction rather than a gate is recorded honestly:
-`plan_artifact_rendered` sits in the enforcement registry with
-`severity: advisory` and `status: planned`, waiting for the hook layer that can
-refuse to close a turn which wrote a plan without rendering its page.
-
-
----
 
 ## Concurrent agents, three hook rules and a gate check, credible UI proposals (P087)
 

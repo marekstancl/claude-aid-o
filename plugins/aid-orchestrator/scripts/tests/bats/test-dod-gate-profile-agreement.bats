@@ -16,7 +16,10 @@ setup() {
   AID_PLUGIN_PATH="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   export AID_PLUGIN_PATH
   PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  FIXTURE="$AID_PLUGIN_PATH/scripts/tests/fixtures/plan-with-fenced-steps.md"
+  # The plan lives in the test project, so generation resolves that workspace.
+  FIXTURE="$TEST_PROJECT_ROOT/.aid-o/plans/plan-with-fenced-steps.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/plan-with-fenced-steps.md" "$FIXTURE"
   EPIC_TEMPLATE="$AID_PLUGIN_PATH/defaults/templates/epic.md"
   OUTPUT_DIR="$TEST_TMPDIR/output"
   COUNTER="$TEST_TMPDIR/epic-counter.yaml"
@@ -28,6 +31,7 @@ setup() {
 teardown() { teardown_test_evidence_dir; }
 
 _generate() {
+  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$FIXTURE" || return 1
   run "$PLAN_TO_EPIC" --plan "$FIXTURE" --phase 1 --total 1 \
     --epic-template "$EPIC_TEMPLATE" --output-dir "$OUTPUT_DIR" \
     --counter-yaml "$COUNTER"
