@@ -109,10 +109,10 @@ _answer() {
 }
 @test "adapter: every role's focus and the agent id pass the dispatch wrapper's allowlists" {
   local emit="$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" role focus
-  grep -q 'aid-emit-dispatch.sh" start --focus <focus>' "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
+  grep -q 'aid-emit-dispatch.sh" start --focus <focus>' "$AID_PLUGIN_PATH/scripts/lib/aid-review-adapter-claude.md"
   for role in $(jq -r '.["$defs"].roles_cp1.enum[]' "$AID_PR_SCHEMA"); do
     focus="cp1-${role//_/-}"
-    bash "$emit" start --focus "$focus" --agent-id aid-orchestrator:plan-review --evidence-dir "$TEST_DIR"
+    bash "$emit" start --focus "$focus" --agent-id aid-orchestrator:review --evidence-dir "$TEST_DIR"
     echo '{}' > "$TEST_DIR/reviewer-$role.json"
     bash "$emit" complete --focus "$focus" --output-file "$TEST_DIR/reviewer-$role.json" --evidence-dir "$TEST_DIR"
   done
@@ -121,14 +121,14 @@ _answer() {
 @test "adapter: commands/aid-plan.md quotes the claude adapter instruction byte for byte" {
   local cmd="$AID_PLUGIN_PATH/commands/aid-plan.md"
   diff <(awk '/^<!-- adapter:end -->$/{on=0} on{print} /^<!-- adapter:begin -->$/{on=1}' "$cmd") \
-       "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
+       "$AID_PLUGIN_PATH/scripts/lib/aid-review-adapter-claude.md"
 }
 @test "command: the CP1 section names every round subcommand inside a fenced block" {
   local sec
   sec="$(awk '/^## Plan review \(CP1\)$/{on=1} on && /^## / && !/Plan review/{exit} on' "$AID_PLUGIN_PATH/commands/aid-plan.md" \
          | awk '/^ *```/{f=!f; next} f')"
   for sub in prepare dispatch collect close fix-check finalize dispute retry override; do
-    grep -qE "aid-plan-review-round.sh\"? ${sub} |\"\\\$R\" ${sub} " <<< "$sec" || { echo "missing: $sub"; return 1; }
+    grep -qE "aid-review-round.sh\"? ${sub} |\"\\\$R\" ${sub} " <<< "$sec" || { echo "missing: $sub"; return 1; }
   done
 }
 @test "answer: a whitespace-only claim is refused" {

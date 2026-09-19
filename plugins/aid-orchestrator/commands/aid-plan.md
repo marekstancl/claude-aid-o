@@ -460,7 +460,7 @@ command accountable, so an unrecordable archive is not performed.
 
 Both modes end here, once `aid-plan-check.sh` passes on the written plan. Six
 reviewer roles (`skills/plan-review-roles.md`) answer the same packet in at most
-two rounds by default; `aid-plan-review-round.sh` runs the rounds and
+two rounds by default; `aid-review-round.sh` runs the rounds and
 `aid-cp1-gate.sh` refuses EPIC generation until the evidence is complete. Every
 item below is a command. You never write, edit or complete a reviewer's answer.
 
@@ -469,7 +469,7 @@ Skip this section when `review_checkpoints.cp1_plan_review` (or `enabled`) is
 skipped. The gate then passes with a notice.
 
 `<plan>` is the plan path, `<plan_id>` its frontmatter id, and `R` stands for
-`"$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh"`.
+`"$AID_PLUGIN_PATH/scripts/aid-review-round.sh"`.
 
 1. The deterministic check passes and its report matches the plan (a revision
    makes it stale; rerun it after every edit):
@@ -496,30 +496,35 @@ skipped. The gate then passes with a notice.
    quoted here in full:
 
 <!-- adapter:begin -->
-# Claude reviewers of a plan-review round — controller instruction
+# Claude reviewers of a review round — controller instruction
 
 The Agent tool is not callable from bash, so the controller dispatches every
-reviewer whose provider is `claude`. `commands/aid-plan.md` "Plan review (CP1)"
-includes this text verbatim. `<round dir>` is the directory `prepare` printed.
+reviewer whose provider is `claude`, at every checkpoint: the plan review
+(`commands/aid-plan.md` "Plan review (CP1)") and the step, EPIC and fast-mode
+reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
+`commands/aid-do.md`) include this text verbatim. `<round dir>` is the
+directory `prepare` printed, and `prepare` prints each role's `<focus>` next
+to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
+`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, the role with `_`
+replaced by `-` (the dispatch wrapper allows no underscore in `--focus` or
+`--agent-id`).
 
 For EACH expected role with `provider: claude` in `<round dir>/round.json`,
-one at a time (`<focus>` is `cp1-` plus the role with `_` replaced by `-`, for
-example `cp1-generalist-a`, `cp1-behaviour-edges`; the dispatch wrapper allows
-no underscore in `--focus` or `--agent-id`):
+one at a time:
 
 1. Open the dispatch:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus <focus> \
-     --agent-id aid-orchestrator:plan-review --evidence-dir <round dir>
+     --agent-id aid-orchestrator:review --evidence-dir <round dir>
    ```
 
 2. Dispatch the reviewer with this one-line prompt, never the file's content
-   (a plan packet runs to hundreds of kilobytes; six pasted copies would fill
-   the controller's own context):
+   (a packet runs to hundreds of kilobytes; pasted copies would fill the
+   controller's own context):
 
    ```
-   Agent(subagent_type: "general-purpose", model: <the role's model from review_checkpoints.plan_review>,
+   Agent(subagent_type: "general-purpose", model: <the role's model from the checkpoint's reviewer block>,
          prompt: "Your complete instructions are in <round dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
    ```
 
@@ -536,16 +541,38 @@ no underscore in `--focus` or `--agent-id`):
      --output-file <answer> --evidence-dir <round dir>
    ```
 
+   A step round's `close` refuses a reviewer file with no such start/complete
+   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`): a file
+   nobody dispatched does not close a round. Only a round prepared with
+   `--stub` by the acceptance suite skips that check, and the FSM refuses to
+   advance on such a round.
+
 After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for
 every claude role; when it reports the round invalid, retry the roles it names
-first (`close` refuses an invalid round):
+first (`close` refuses an invalid round). `<review>` is `--plan <plan>` for
+CP1, `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a step,
+`--checkpoint cp3 --evidence-dir <run dir>` for an EPIC:
 
 ```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" collect <plan> --round N
-bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" close <plan> --round N \
-  --tokens generalist_a=<n|unknown> behaviour_edges=<n|unknown> ...
+bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" collect <review> --round K
+bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
+  --tokens <role>=<n|unknown> ...
 ```
+
+When `close` reports `fail` on a step or EPIC round and a round remains
+(`rounds_default`, or the PM's `override`), the fix is the step's own role's:
+
+```
+Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of the step's role card in skills/role-cards.md>,
+      prompt: "fix_of: <round dir>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding ids you addressed. Touch nothing a finding does not name.")
+```
+
+Then `aid-step-check.sh` again (the range now ends at the fix commit) and
+`prepare --round K+1`: the confirmation round asks only the reporters of what
+stayed open and shows them the open findings and the fix diff. Record the
+fixer's model and tokens on the next `close` with
+`--fixer <role>=<model>:<tokens_in>:<tokens_out>`.
 
 Never edit a reviewer's file, never write one on a reviewer's behalf, and never
 dispatch a role twice: a role `collect` lists as invalid or missing goes
@@ -602,7 +629,7 @@ through `retry`, then this procedure for that role alone.
    ```
 
 9. Run the gate. Every failure names what is missing, for example
-   `no plan review round-1 for P093; run: aid-plan-review-round.sh prepare …`:
+   `no plan review round-1 for P093; run: aid-review-round.sh prepare …`:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan <plan>
@@ -687,7 +714,7 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 - `skills/planner.md` — dependency graph and parallel groups
 - `skills/plan-review-roles.md` — the six plan reviewer roles, the evidence rule and the answer shape
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
-- `{plugin_path}/scripts/aid-plan-review-round.sh` — plan review rounds (prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override)
+- `{plugin_path}/scripts/aid-review-round.sh` — plan review rounds (prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override)
 - `{plugin_path}/scripts/aid-plan-review-adjudicate.sh` — merges a round's answers, rejects findings without proof
 - `{plugin_path}/scripts/aid-cp1-gate.sh` — the plan review gate (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a freshly written plan (step 8p)

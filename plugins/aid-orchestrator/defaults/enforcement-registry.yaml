@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 503          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 508          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -234,6 +234,11 @@ enforcements:
   - {id: step_check_security_rules, type: 5, source: "scripts/aid-step-check.sh (grep: 'matched_rules')", instruction: "skills/step-review-roles.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 3: a fail rule of defaults/pre-filter-rules.yaml matched in the added lines makes the verdict review+security, which enables the security reviewer role; successor of prefilter_fail_rules", test: "scripts/tests/bats/test-step-check.bats"}
   - {id: step_check_skip_event, type: 5, source: "scripts/aid-step-check.sh (grep: 'log_event')", instruction: "commands/aid-run.md (Step review (CP2) and EPIC review (CP3))", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 3: every verdict is bound to a step_check timeline event carrying HEAD and the file sha256, and a skip or no_change verdict writes rounds.json only when no closed round is recorded there; the FSM half (a skip without its event is refused) is fsm_review_round_skip_bound; successor of prefilter_skip_rules and the trivial-skip rule", test: "scripts/tests/bats/test-step-check.bats"}
   - {id: step_check_no_change, type: 5, source: "scripts/aid-step-check.sh (grep: 'no_change')", instruction: "commands/aid-run.md (Step review (CP2) and EPIC review (CP3))", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 3: an empty range is the distinct verdict no_change, never skip; the FSM passes it only when the step declares outputs that exist at HEAD (fsm_review_round_required)", test: "scripts/tests/bats/test-step-check.bats"}
+  - {id: review_round_evidence, type: out-of-band, source: "scripts/aid-review-round.sh (grep: 'cmd_prepare')", instruction: "scripts/lib/aid-review-adapter-claude.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 6: a step, EPIC or fast-mode round exists only as <cp dir>/round-K/ with round.json, the packet built from a step-check.json computed at HEAD, one prompt per expected role, collect.json, merged.json and measurement.json; a round beyond rounds_default needs the PM override record; the FSM reads the round index, nothing else", test: "scripts/tests/bats/test-review-round.bats"}
+  - {id: review_round_head_bound, type: out-of-band, source: "scripts/aid-review-round.sh (grep: 'head moved during round')", instruction: "scripts/lib/aid-review-adapter-claude.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 6: a step round records HEAD at prepare and close refuses when HEAD differs, so a review of a tree that moved never closes; successor of cp3_head_freshness and increment_step_binding for cp2/cp3/cp6 (the FSM half is fsm_review_round_head_bound)", test: "scripts/tests/bats/test-review-round.bats"}
+  - {id: review_round_measurement, type: out-of-band, source: "scripts/aid-review-round.sh (grep: 'no --tokens value')", instruction: "scripts/lib/aid-review-adapter-claude.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 6: close refuses without a token value (a number or the string unknown, never 0) for every expected claude role and writes measurement.json with provider, model, tokens, the fixer when one ran, degraded and dispatch_check; a closed round accepts only a top-up of an unknown value", test: "scripts/tests/bats/test-review-round.bats"}
+  - {id: review_round_override_recorded, type: out-of-band, source: "scripts/aid-review-round.sh (grep: 'cmd_override')", instruction: "scripts/lib/aid-review-adapter-claude.md", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 6: a third round, or only one, needs <cp dir>/override.json with rounds, by, at, the PM words as reason, the head sha at issue and recorded_by; it records the PM instruction the controller typed, like every waiver and --force, and the status tile shows it", test: "scripts/tests/bats/test-review-round.bats"}
+  - {id: review_dispatch_recorded, type: out-of-band, source: "scripts/aid-review-round.sh (grep: 'no_dispatch_record')", instruction: "scripts/lib/aid-review-adapter-claude.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P094 Step 6: close of a step, EPIC or fast-mode round refuses a claude reviewer file with no verifier_dispatch_start/complete bracket carrying the role focus in the round timeline; only a round prepared --stub (recorded as dispatch_check: stubbed in measurement.json and rounds.json) skips the check, and the FSM refuses such a round; successor of verifier_provenance, emit_dispatch_start and dispatch_complete_no_fabricate for cp2/cp3/cp6", test: "scripts/tests/bats/test-review-round.bats"}
   - {id: prefilter_skip_rules,         type: 5, source: "scripts/aid-prefilter.sh:65", instruction: "skills/pipeline.md", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "skip_rules docs/config-only → exit 0 SKIP"}
   - {id: prefilter_rules_registry,     type: 5, source: "defaults/pre-filter-rules.yaml:15", instruction: "defaults/pre-filter-rules.yaml", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "fail_rules pattern registry (injection/secret/deserialize/etc.)"}
   - {id: checkpoint_fail_patterns,     type: 5, source: "defaults/policies/review-checkpoints.yaml:34", instruction: "skills/pipeline.md:1178", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "pre_filter.fail_patterns with per-pattern severity"}
@@ -776,7 +781,7 @@ enforcements:
     description: "P094 Step 5: when the step check reports a handler pattern, a generalist's blocker or major finding without a behaviour_trace is rejected as trace_missing; successor of the behavior_trace_count structural gate for cp2 and cp3 (cp4 keeps fsm_check_verifier_output)."
   - id: plan_review_rounds_default
     type: out-of-band
-    source: scripts/aid-plan-review-round.sh
+    source: scripts/aid-review-round.sh
     instruction: commands/aid-plan.md
     severity: blocking
     surface: internal-guard
@@ -787,7 +792,7 @@ enforcements:
 
   - id: plan_review_fix_no_new_behaviour
     type: out-of-band
-    source: scripts/aid-plan-review-round.sh
+    source: scripts/aid-review-round.sh
     instruction: commands/aid-plan.md
     severity: blocking
     surface: internal-guard

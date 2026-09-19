@@ -121,21 +121,22 @@ aid_plan_review_unfence() {
   sed -e 's/^```json$//' -e 's/^```$//' "$1" > "$2"
 }
 
-# aid_plan_review_answer_error <answer.json>
-#   The SHAPE of an answer: an object with a known role, a findings array (or a
-#   no_findings_reason) and findings that carry id, step, severity, claim and
-#   fix. Prints the first rule the answer breaks and returns 1, or returns 0.
+# aid_plan_review_answer_error <answer.json> [<checkpoint>]
+#   The SHAPE of an answer: an object with a known role (the roles of the
+#   checkpoint: cp1 or absent → $defs.roles_cp1, cp2/cp3/cp6 → $defs.roles_step),
+#   a findings array (or a no_findings_reason) and findings that carry id, step,
+#   severity, claim and fix. Prints the first rule the answer breaks and returns 1, or returns 0.
 #   Whether each finding has a read-only command and a path:line evidence is
 #   judged per finding by the adjudicator (aid_plan_review_proof_jq), so one unproven finding
 #   rejects that finding, not the reviewer's whole answer.
 aid_plan_review_answer_error() {
-  local file="$1" err
+  local file="$1" cp="${2:-cp1}" err
   if ! jq -e . "$file" >/dev/null 2>&1; then
     echo "not valid JSON"; return 1
   fi
-  err="$(jq -r --slurpfile s "$AID_PR_SCHEMA" '
+  err="$(jq -r --slurpfile s "$AID_PR_SCHEMA" --arg cp "$cp" '
     ($s[0]) as $schema
-    | ($schema["$defs"].roles_cp1.enum) as $roles
+    | (if $cp == "cp1" then $schema["$defs"].roles_cp1.enum else $schema["$defs"].roles_step.enum end) as $roles
     | ($schema["$defs"].finding.properties) as $f
     | ($schema.properties | keys) as $top_keys
     | ($f | keys) as $fkeys
