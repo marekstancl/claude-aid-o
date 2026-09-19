@@ -89,22 +89,27 @@ A new suite must also carry a tier tag (`# aid-tier: t0|t1|t2`) matching what
 its plan declared; `aid-test-tier-lint.sh` is the mechanical half, and review
 is where an over-cheap or over-expensive CHOICE gets questioned.
 
-## CP2 Contract
+## CP2, CP3 and CP6 Contracts — Step, EPIC and Fast-Mode Review
 
-Focus: `code-review` (default) or `security`
-Scope: Step diff only (`HEAD~1..HEAD`)
-Required fields: all standard verifier fields + `checkpoint: cp2`
-High-risk gate: if diff matches patterns above, `behavior_trace_count > 0` required
-Test questions: both of the above, on the step's own added tests
+These three checkpoints are one mechanism: reviewer roles from
+`skills/step-review-roles.md` answer from the shared template
+(`defaults/prompts/review-prompt-v1.md`) in the shape of
+`defaults/schemas/review-finding.schema.json`, and the deterministic
+adjudicator keeps only findings with a command and a `path:line` (or
+`<sha>:path:line`) evidence. What differs is the diff each one reviews:
 
-## CP3 Contract
+| Checkpoint | Diff under review | Roles | Blocks |
+|---|---|---|---|
+| CP2 | the step: last `step_commit` → HEAD (else `base_commit` → HEAD) | `step_generalist`, plus `step_security` when the step check reports a security pattern | `increment-step` |
+| CP3 | the EPIC: `base_commit` → HEAD | `epic_generalist`, `epic_behaviour`, `epic_security` | EXECUTE → GATES |
+| CP6 | the `/aid-do` working tree | `step_generalist` (+ `step_security`) | nothing (advisory) |
 
-Focus: `code-review` + `security` (parallel)
-Scope: Full EPIC diff (`base_commit..HEAD`)
-Required fields: all standard verifier fields + `checkpoint: cp3`
-High-risk gate: same as CP2
-Test questions: both of the above, across the EPIC's whole added test surface —
-CP3 is the first point where two steps' suites can be seen to overlap
+The two test questions above are asked by every generalist role; the behaviour
+trace is required from a generalist's blocker or major finding whenever the
+step check reports a handler pattern. The controller's procedure, command by
+command, is the "Step review (CP2) and EPIC review (CP3)" section of
+`commands/aid-run.md`; the round evidence is described there and in
+`skills/step-review-roles.md`.
 
 ## CP4 Contract
 
@@ -122,14 +127,6 @@ Required fields in audit-report: `blocking_findings: true|false` at line-start (
 High-risk gate: NOT a diff gate — evaluates the audit report output, not the code diff
 Note: CP5 is not a verifier dispatch. It is a structured field check inside `done-advance`.
 
-## CP6 Contract (Advisory)
-
-Focus: retrospective quality review
-Scope: merged diff (advisory — not blocking FSM)
-Required fields: standard verifier fields + `checkpoint: cp6`
-High-risk gate: NOT enforced (advisory only)
-Note: CP6 is never promoted to blocking — it is intentionally light.
-
 ## CP1 Contract — Plan Review
 
 Plan review is not a verifier dispatch. Six reviewer roles answer from one
@@ -137,7 +134,7 @@ template, in at most two rounds by default, and a deterministic adjudicator
 merges what survives the evidence rule:
 
 - the roles, their questions, the evidence rule and the answer shape:
-  `skills/plan-review-roles.md` (schema `defaults/schemas/plan-review-finding.schema.json`);
+  `skills/plan-review-roles.md` (schema `defaults/schemas/review-finding.schema.json`, shared with CP2/CP3/CP6);
 - the controller's procedure, command by command: "Plan review (CP1)" in
   `commands/aid-plan.md`;
 - the rounds, the adjudicator and the round evidence under

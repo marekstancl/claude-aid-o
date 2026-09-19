@@ -3,8 +3,8 @@
 #
 # Precedence: the project's .aid-o/config/policies/review-checkpoints.yaml when
 # it carries a plan_review block, otherwise the plugin default. The six role ids
-# come from defaults/schemas/plan-review-finding.schema.json, so the config, the
-# roles skill and the answer check cannot disagree about which roles exist.
+# come from defaults/schemas/review-finding.schema.json ($defs.roles_cp1), so the
+# config, the roles skill and the answer check cannot disagree about which roles exist.
 #
 # aid_plan_review_config_load <project_root>
 #   Exports PR_CONFIG_FILE, PR_ROUNDS_DEFAULT, PR_MIN_ANSWERS, PR_DOCS_REVIEWERS
@@ -102,9 +102,9 @@ aid_plan_review_role_index() {
 _aid_prc_fail() { echo "plan_review config: $1" >&2; }
 
 aid_plan_review_config_validate() {
-  local schema="${_AID_PRC_PLUGIN}/defaults/schemas/plan-review-finding.schema.json"
+  local schema="${_AID_PRC_PLUGIN}/defaults/schemas/review-finding.schema.json"
   local expected role i seen=" "
-  expected="$(jq -r '.properties.role.enum[]' "$schema" | sort | tr '\n' ' ')"
+  expected="$(jq -r '.["$defs"].roles_cp1.enum[]' "$schema" | sort | tr '\n' ' ')"
 
   for i in "${!PR_ROLE[@]}"; do
     role="${PR_ROLE[$i]}"

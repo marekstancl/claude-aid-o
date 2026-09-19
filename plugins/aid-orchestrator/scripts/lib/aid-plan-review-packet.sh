@@ -4,18 +4,24 @@
 # Out: the packet every reviewer of a round receives (plan snapshot, the
 # deterministic check's report, the project standards) and the rendered prompt.
 # In: the reviewer's answer file, checked against
-# defaults/schemas/plan-review-finding.schema.json in two halves: the answer's
-# shape (collect), and each finding's proof (the adjudicator).
+# defaults/schemas/review-finding.schema.json (the answer contract every
+# checkpoint shares since P094) in two halves: the answer's shape (collect),
+# and each finding's proof (the adjudicator).
 #
-# Both halves read the role list and the two patterns (command, evidence) from
-# the schema file itself, so the schema is the one source of the contract.
+# Both halves read the plan-review role list ($defs.roles_cp1) and the two
+# patterns (command, evidence) from the schema file itself, so the schema is
+# the one source of the contract. The prompt is rendered from the shared
+# template defaults/prompts/review-prompt-v1.md with the cp1 variable values.
 # Sourced by scripts/aid-plan-review-round.sh and aid-plan-review-adjudicate.sh; tested by
-# scripts/tests/bats/test-plan-review-schema.bats and test-plan-review-round.bats.
+# scripts/tests/bats/test-plan-review-schema.bats, test-review-finding-schema.bats and
+# test-plan-review-round.bats.
 
 _AID_PR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-AID_PR_SCHEMA="${_AID_PR_PLUGIN}/defaults/schemas/plan-review-finding.schema.json"
-AID_PR_TEMPLATE="${_AID_PR_PLUGIN}/defaults/prompts/plan-review-prompt-v1.md"
+AID_PR_SCHEMA="${_AID_PR_PLUGIN}/defaults/schemas/review-finding.schema.json"
+AID_PR_TEMPLATE="${_AID_PR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_PR_ROLES_SKILL="${_AID_PR_PLUGIN}/skills/plan-review-roles.md"
+# The evidence forms a plan reviewer may cite; the step checkpoints pass their own.
+AID_PR_EVIDENCE_FORMS='`path:line` inside the repository, or `plan.md:line` for the plan itself (the line numbers of the plan in the packet below)'
 
 # shellcheck source=aid-standards-map.sh
 source "${_AID_PR_PLUGIN}/scripts/lib/aid-standards-map.sh"
@@ -67,8 +73,12 @@ aid_plan_review_prompt_render() {
   section="$(aid_plan_review_role_section "$role")"
   [[ -n "$section" ]] || { echo "prepare: role ${role} has no section in ${AID_PR_ROLES_SKILL}" >&2; return 1; }
   vars="${dir}/vars-${role}.json"; out="${dir}/prompt-${role}.md"
+  local note=""
+  (( round >= 2 )) && note="This is a confirmation round: the packet below carries the findings still open and the author's diff."
   jq -n --arg s "$section" --arg r "$round" --arg o "${dir}/reviewer-${role}.json" \
-    '{role_section: $s, round: $r, output_path: $o}' > "$vars"
+        --arg e "$AID_PR_EVIDENCE_FORMS" --arg n "$note" \
+    '{role_section: $s, checkpoint: "cp1", round: $r, output_path: $o, evidence_forms: $e,
+      packet_name: "an implementation plan, reviewed BEFORE any code exists", confirmation_note: $n}' > "$vars"
   bash "${_AID_PR_PLUGIN}/scripts/lib/aid-render-prompt.sh" \
     --template "$AID_PR_TEMPLATE" --vars-json "$vars" --output "$out" >/dev/null || {
       echo "prepare: prompt for ${role} did not render" >&2; rm -f "$out"; return 1; }
@@ -125,7 +135,7 @@ aid_plan_review_answer_error() {
   fi
   err="$(jq -r --slurpfile s "$AID_PR_SCHEMA" '
     ($s[0]) as $schema
-    | ($schema.properties.role.enum) as $roles
+    | ($schema["$defs"].roles_cp1.enum) as $roles
     | ($schema["$defs"].finding.properties) as $f
     | ($schema.properties | keys) as $top_keys
     | ($f | keys) as $fkeys

@@ -96,7 +96,7 @@ _answer() {
   [ "$(grep -c '^### Stop rule$' "$s")" -eq 6 ]
   # the role ids are exactly the schema's enum
   diff <(grep '^## Role: ' "$s" | sed 's/^## Role: //' | sort) \
-       <(jq -r '.properties.role.enum[]' "$AID_PR_SCHEMA" | sort)
+       <(jq -r '.["$defs"].roles_cp1.enum[]' "$AID_PR_SCHEMA" | sort)
 }
 @test "template: renders from three string variables with nothing left unresolved" {
   jq -n '{role_section: "## Role: reuse", round: "1", output_path: "/tmp/x.json"}' > "$TEST_DIR/vars.json"
@@ -110,7 +110,7 @@ _answer() {
 @test "adapter: every role's focus and the agent id pass the dispatch wrapper's allowlists" {
   local emit="$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" role focus
   grep -q 'aid-emit-dispatch.sh" start --focus <focus>' "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
-  for role in $(jq -r '.properties.role.enum[]' "$AID_PR_SCHEMA"); do
+  for role in $(jq -r '.["$defs"].roles_cp1.enum[]' "$AID_PR_SCHEMA"); do
     focus="cp1-${role//_/-}"
     bash "$emit" start --focus "$focus" --agent-id aid-orchestrator:plan-review --evidence-dir "$TEST_DIR"
     echo '{}' > "$TEST_DIR/reviewer-$role.json"

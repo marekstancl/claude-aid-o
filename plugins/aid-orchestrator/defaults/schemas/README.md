@@ -15,7 +15,7 @@ This directory does NOT claim full JSON Schema validation. The JSON Schema files
 | `aid-protocol-v2.schema.json` | Canonical shared envelope schema (JSON Schema draft 2020-12) |
 | `*.schema.json` (14 files) | Type-specific schemas extending the envelope (one per artifact type) |
 | `run-control-protocol.schema.json` | Per-run control protocol lock (legacy vs aid-2.0) |
-| `plan-review-finding.schema.json` | One plan reviewer's answer (not an envelope artifact); producer: a reviewer via `aid-plan-review-round.sh`, enforced by `collect`, consumed by `aid-plan-review-adjudicate.sh` |
+| `review-finding.schema.json` | One reviewer's answer for any review checkpoint (CP1 plan review, CP2 step, CP3 EPIC, CP6 fast mode; not an envelope artifact); the role set follows the answer's `checkpoint` (absent = cp1); producer: a reviewer via the round script, enforced by `collect`, consumed by the adjudicator |
 
 ---
 

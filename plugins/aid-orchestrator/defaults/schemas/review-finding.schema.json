@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/review-finding.schema.json",
+  "title": "AID review — reviewer answer (plan review CP1, step review CP2, EPIC review CP3, fast-mode review CP6)",
+  "$comment": "producer: a reviewer (reviewer-<role>.json), consumers: aid-review-round.sh collect (answer shape) and aid-review-adjudicate.sh (each finding's proof). Both read the role lists and the two patterns from this file, so the contract has one source. The role set depends on the checkpoint: an answer without a checkpoint is a plan-review answer (cp1), which is what every answer recorded before P094 is.",
+  "description": "One reviewer's answer for one review round. A finding without a read-only command (or a reproduction under the round's repro/ directory) and a path:line evidence does not exist.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["role", "findings"],
+  "properties": {
+    "role": { "type": "string" },
+    "checkpoint": { "$ref": "#/$defs/checkpoint" },
+    "provider": { "type": "string" },
+    "model": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "no_findings_reason": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "findings": { "maxItems": 0 } } },
+      "then": { "required": ["no_findings_reason"] }
+    },
+    {
+      "if": { "anyOf": [ { "not": { "required": ["checkpoint"] } }, { "properties": { "checkpoint": { "const": "cp1" } } } ] },
+      "then": { "properties": { "role": { "$ref": "#/$defs/roles_cp1" } } },
+      "else": { "properties": { "role": { "$ref": "#/$defs/roles_step" } } }
+    }
+  ],
+  "$defs": {
+    "checkpoint": { "enum": ["cp1", "cp2", "cp3", "cp6"] },
+    "roles_cp1": {
+      "enum": ["generalist_a", "generalist_b", "behaviour_edges", "feasibility_deps", "reuse", "enforcement_tests"]
+    },
+    "roles_step": {
+      "enum": ["step_generalist", "step_security", "epic_generalist", "epic_behaviour", "epic_security"]
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "step", "severity", "claim", "command", "evidence", "fix"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "checkpoint": { "$ref": "#/$defs/checkpoint" },
+        "step": { "type": ["integer", "null"] },
+        "severity": { "enum": ["blocker", "major", "minor"] },
+        "claim": { "type": "string", "minLength": 1 },
+        "command": {
+          "type": "string",
+          "pattern": "^(grep|rg|ls|find|sed -n|git grep|wc|head|tail|bash [^;|&>]+ --help|bash repro/[a-z0-9_-]+\\.sh)( |$)"
+        },
+        "evidence": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{7,40}:)?[^:;]+:[0-9]+(; *([0-9a-f]{7,40}:)?[^:;]+:[0-9]+)*$"
+        },
+        "fix": { "type": "string", "minLength": 1 },
+        "behaviour_trace": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["request", "path", "sink", "branches"],
+            "properties": {
+              "request": { "type": "string", "minLength": 1 },
+              "path": { "type": "string", "minLength": 1 },
+              "sink": { "type": "string", "minLength": 1 },
+              "branches": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "outcome"],
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "outcome": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
