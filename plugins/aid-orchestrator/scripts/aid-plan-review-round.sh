@@ -286,7 +286,7 @@ cmd_collect() {
   fi
   local prev=()
   (( ROUND >= 2 )) && [[ -f "$(_round_dir $((ROUND - 1)))/merged.json" ]] && prev=(--previous "$(_round_dir $((ROUND - 1)))")
-  "${SCRIPT_DIR}/aid-plan-review-adjudicate.sh" "$dir" --project-root "$ROOT" "${prev[@]}" >/dev/null || exit 1
+  "${SCRIPT_DIR}/aid-review-adjudicate.sh" "$dir" --project-root "$ROOT" --namespace plan_review --plan "${dir}/packet/plan.md" "${prev[@]}" >/dev/null || exit 1
   echo "round ${ROUND}: ${#valid[@]} of $(jq '.reviewers_expected | length' "${dir}/round.json") answered, missing: $(jq -r '[.missing[], .invalid[].role] | if length == 0 then "none" else join(", ") end' "${dir}/collect.json"), $(jq '.blockers_open' "${dir}/merged.json") blockers open, $(jq 'length' "${dir}/rejected.json") findings rejected"
 }
 

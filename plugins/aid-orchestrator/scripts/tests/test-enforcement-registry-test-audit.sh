@@ -26,7 +26,7 @@ REQUIRED_IDS=(
   test_tier_declared_at_plan_time
   selector_honesty_check
   review_config_valid
-  plan_review_finding_evidence
+  review_adjudicator_evidence
   plan_review_rounds_default
   plan_review_fix_no_new_behaviour
   cp1_round_evidence
