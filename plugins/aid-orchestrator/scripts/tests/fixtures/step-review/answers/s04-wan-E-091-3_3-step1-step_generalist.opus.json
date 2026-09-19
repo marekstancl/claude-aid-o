@@ -1,0 +1,25 @@
+{"role": "step_generalist", "checkpoint": "cp2", "findings": [
+{"id": "step_generalist-1", "checkpoint": "cp2", "step": 1, "severity": "blocker",
+ "claim": "Recyklační větev sedí uvnitř `_process_intake_file`, kterým prochází i RE-OCR (`reocr_session` → `run_session_pipeline`), takže vynucené znovupřečtení dávky teď model nezavolá vůbec a vrátí kopii dokladů jiné dávky — přesně to, co si admin re-OCR objednal, se nestane.",
+ "command": "grep -n \"reset_for_reocr(session_id, db)\\|run_session_pipeline\" wan/api/scan.py",
+ "evidence": "wan/api/scan.py:7087; wan/api/scan.py:7088; wan/pipeline/pipeline.py:894; wan/pipeline/pipeline.py:895; wan/services/intake_recycle.py:151",
+ "fix": "Recyklaci vypnout pro běh, který je vynucený re-OCR (např. parametrem `allow_recycle=False` z `run_session_pipeline`/`run_pipeline` při re-OCR dispatch, nebo podmínkou na `session.reocr_generation` / `attempt_count > 0`) a doplnit test, že re-OCR souboru s bytově shodným dvojčetem v jiné dávce model ZAVOLÁ. `najdi_dvojce` vylučuje jen soubor sám (`k.soubor.id != cil.id`), ne cizí dvojče, takže dnes re-OCR po opravě šablony nebo výměně modelu vrátí stará data beze změny."},
+
+{"id": "step_generalist-2", "checkpoint": "cp2", "step": 1, "severity": "major",
+ "claim": "Pojistka „doklad musí mít náhled\" kontroluje počet VŠECH objektů pod prefixem dvojčete, ne existenci `page_0.jpg`, na který ukazuje `minio_key` kopie — když v úložišti zbyde jiný objekt (např. `original.pdf` nebo jen `page_1.jpg`), recyklace projde a vznikne doklad, jehož náhled nejde zobrazit, bez návratu k normálnímu čtení.",
+ "command": "sed -n '118,170p' wan/pipeline/recycle.py",
+ "evidence": "wan/pipeline/recycle.py:98; wan/pipeline/recycle.py:124; wan/pipeline/recycle.py:128; wan/pipeline/recycle.py:164; wan/connectors/minio_storage.py:153; wan/api/scan.py:3947",
+ "fix": "Počítat a kontrolovat jen klíče `page_*.jpg` a vyžadovat přítomnost `page_0` (klíče, který se zapíše do `minio_key`); jinak `RuntimeError` a normální čtení. Stejnou hodnotu pak posílat do metadat `page_count` tracu `recycle`, aby netvrdila počet stránek včetně neobrázkových objektů."},
+
+{"id": "step_generalist-3", "checkpoint": "cp2", "step": 1, "severity": "minor",
+ "claim": "Náhledy se do prefixu cílové dávky nahrají PŘED jediným commitem, takže při selhání uprostřed převzetí `rollback` uklidí jen databázi a v MinIO zůstanou osiřelé objekty cizí dávky — docstring přitom tvrdí, že po neúspěchu „nezůstane půl dávky\".",
+ "command": "sed -n '30,40p;118,170p' wan/pipeline/recycle.py",
+ "evidence": "wan/pipeline/recycle.py:36; wan/pipeline/recycle.py:126; wan/pipeline/pipeline.py:841",
+ "fix": "Po neúspěchu smazat, co se už nahrálo (posbírat nahrané klíče a v `except` je odstranit, případně `minio.delete_prefix` cílových `doc_{ordinal}/`), nebo docstring opravit tak, aby přiznával, že úklid úložiště se neděje, a kdo osiřelé objekty uklidí."},
+
+{"id": "step_generalist-4", "checkpoint": "cp2", "step": 1, "severity": "minor",
+ "claim": "Nový krok `recycle` se dostane do měsíčního rozpadu nákladů (trace nese `total_cost_usd`), ale v číselníku popisků admin stránky pro něj není český název, takže se uživateli ukáže holé `recycle`.",
+ "command": "sed -n '130,146p' ui/src/pages/OcrCostsPage.tsx",
+ "evidence": "ui/src/pages/OcrCostsPage.tsx:132; ui/src/pages/OcrCostsPage.tsx:145; wan/pipeline/recycle.py:201; wan/api/admin.py:1878",
+ "fix": "Doplnit `recycle` do `STEP_LABELS` (např. „Převzetí čtení\"), nebo do tracu `total_cost_usd` vůbec nedávat, aby se krok v nákladovém rozpadu neobjevoval."}
+]}

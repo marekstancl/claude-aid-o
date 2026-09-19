@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "minor",
+               "claim": "The duplicate-version-heading warning is only emitted in --check mode; --json and --release-notes silently return the first-wins entry with no signal that the changelog has a duplicate heading for that version.",
+               "command": "sed -n '219,251p' frontend/scripts/parseChangelog.mjs",
+               "evidence": "frontend/scripts/parseChangelog.mjs:221; frontend/scripts/parseChangelog.mjs:243; frontend/scripts/parseChangelog.mjs:249",
+               "fix": "Emit the same duplicate-heading warning (or at least write it to stderr) for --json and --release-notes too, since the module's own doc comment says it is meant to be reused by the release workflow (Step 9) where a silently-picked wrong entry would ship in a GitHub Release."}],
+ "no_findings_reason": ""}

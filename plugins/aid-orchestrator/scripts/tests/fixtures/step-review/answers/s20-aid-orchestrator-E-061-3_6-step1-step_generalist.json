@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "blocker",
+               "claim": "AC1 (targeted_tests gate definition exists in execution.yaml, findable by aid-run-gates.sh) is not delivered: the diff touches only the bats test file, and .aid-o/config/execution.yaml does not exist anywhere in the reviewed commit's tree, so the gate definition this step's outputs.json declares (`Modify: .aid-o/config/execution.yaml`) was never actually added.",
+               "command": "find .aid-o -type f",
+               "evidence": "4949b9f823cc:.aid-o/config/execution.yaml",
+               "fix": "Actually add the targeted_tests gate definition to a real, committed .aid-o/config/execution.yaml (or correct the step to point at whatever config file genuinely carries gates.* in this repo) so the AC is met in behaviour, not only asserted by a test that depends on a file the diff never created."}],
+ "no_findings_reason": ""}

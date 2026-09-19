@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 0,
+               "severity": "blocker",
+               "claim": "Step's own DoD requires parsing 'with the code: prefix handled', but parse_flexibee never calls _strip_code on any field it extracts, so the acceptance criterion is met only by an isolated unit test of a dead helper, not by the parser's actual behaviour.",
+               "command": "grep -n \"_strip_code\" backend/acta/convert/flexibee.py backend/tests/convert/test_flexibee_parser.py",
+               "evidence": "backend/acta/convert/flexibee.py:21; backend/acta/convert/flexibee.py:215; backend/tests/convert/test_flexibee_parser.py:153",
+               "fix": "Apply _strip_code to every ref-like field parsed from FlexiBee (e.g. typDokl, or any other code:-prefixed value the invoice model is meant to carry), or add such a field to FlexibeeInvoice and wire _strip_code into _parse_invoice, so an end-to-end parse_flexibee test proves the prefix is actually stripped from real parsed data instead of testing the helper function directly."}],
+ "no_findings_reason": ""}

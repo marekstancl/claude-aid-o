@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "blocker",
+               "claim": "The diff removes `confidence` from the `FieldMeta` interface, but `EditableField.tsx` (an existing, unmodified consumer of that type) still reads `meta?.confidence` at line 30 to drive `ConfidenceDot`/`confColor` — this is now a TS error (`Property 'confidence' does not exist on type 'FieldMeta'`), so `tsc --noEmit` cannot be green as the AC requires, and the field-level confidence dot/highlight in the edit view silently loses its type (and, once type-checked, will not compile at all).",
+               "command": "grep -n \"meta?.confidence\\|confidence: Confidence\" frontend/src/components/documents/EditableField.tsx frontend/src/types/document.ts",
+               "evidence": "frontend/src/types/document.ts:43; frontend/src/components/documents/EditableField.tsx:26; frontend/src/components/documents/EditableField.tsx:30",
+               "fix": "Either keep `EditableField.tsx` in this step's scope and update it to stop reading per-field `confidence` (e.g. drop the dot/derive from validation/checker like the rest of P020), or keep `confidence` on `FieldMeta` until the step that migrates `EditableField.tsx` (per the test's own comment that ConfidenceBadge's inline copy is deferred to Step 7) — as written the step cannot satisfy its own `tsc --noEmit` acceptance criterion."}],
+ "no_findings_reason": ""}

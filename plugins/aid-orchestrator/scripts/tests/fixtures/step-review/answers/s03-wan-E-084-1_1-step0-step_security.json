@@ -1,0 +1,9 @@
+{"role": "step_security", "checkpoint": "cp2",
+ "findings": [{"id": "step_security-1", "checkpoint": "cp2",
+               "step": 0,
+               "severity": "major",
+               "claim": "_check_identity_conflicts now returns owner_name and owner_birth_date_or_ico (PII) for a soft-deleted Person, because the new outerjoin to Person deliberately omits the Person.deleted_at filter that _find_om_ownership_conflicts applies, and _build_om_conflict unconditionally reads those fields from the joined owner.",
+               "command": "sed -n '4196,4235p' wan/api/scan.py",
+               "evidence": "wan/api/scan.py:4197; wan/api/scan.py:4203; wan/api/scan.py:4225; wan/api/scan.py:4077; wan/api/scan.py:4086; wan/api/scan.py:4087; tests/integration/test_conflict_contract.py:335",
+               "fix": "Either filter Person.deleted_at.is_(None) in the identity-gate join too, or, if the identity/ownership divergence is intentionally kept (as the test at tests/integration/test_conflict_contract.py:335 asserts), suppress owner_name/owner_birth_date_or_ico (and cap conflicts to []) when the joined owner is soft-deleted before calling _build_om_conflict, so a caller cannot read a deleted person's name/birth-date-or-ICO through the confirm_session 422 payload."}]
+}
