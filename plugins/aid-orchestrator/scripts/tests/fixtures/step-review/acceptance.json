@@ -23,7 +23,7 @@
       "partial": "8 of 20 entries (the 30 USD ceiling); the six failing entries plus s07, s11"
     }
   },
-  "chosen_model": "none by the rule — neither is at or under the baseline USD per step; PM decision recorded in docs/plans/P094-acceptance-run.md",
+  "chosen_model": "sonnet (PM decision 2026-09-19, option A: the pre-stated rule qualified neither model; the PM chose Sonnet and the adjudicator relaxation — one resolving citation is enough, absent:path, git log/show read-only)",
   "notes": [
     "Sonnet: 5 confirmed of 6 accepted; s11 disputed; 3 real findings (s07 blocker, s03 security major, s18 major) rejected by the adjudicator for a citation past the end of the file — the claims were right, the line numbers were not",
     "Opus: 14 confirmed of 18 accepted, 4 minors not verified by the controller, none disputed, no rejections",
@@ -538,5 +538,10 @@
       },
       "opus": null
     }
-  ]
+  ],
+  "pm_decision": {
+    "date": "2026-09-19",
+    "choice": "A",
+    "reason": "the baseline is cheap because it finds nothing; the goal was the defects it misses"
+  }
 }

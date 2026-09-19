@@ -54,9 +54,12 @@ A finding exists only with both:
   `bash <script> --help`; or it is a reproduction `bash repro/<name>.sh` that
   the reviewer wrote under the round's `repro/` directory, the only place a
   reviewer may write besides the output file.
-- `evidence` — `path:line` at the reviewed commit, or `<sha>:path:line` for a
-  line of a file the diff deleted or moved (the pre-image at that commit);
-  several separated by `;`. Every file used must be cited.
+- `evidence` — `path:line` at the reviewed commit, `<sha>:path:line` for a
+  line of a file the diff deleted or moved (the pre-image at that commit), or
+  `absent:path` for a file the step should have produced and did not; several
+  separated by `;`. Every file used must be cited. The finding stands when at
+  least one citation resolves, so cite the exact line: a wrong number wastes
+  that citation.
 
 A finding without both is rejected by `scripts/aid-review-adjudicate.sh` and
 recorded in `rejected.json` with the reason. Report only what would lead to
@@ -207,7 +210,7 @@ sink, a missing authorization check, or a secret in the tree.
 | A finding that says "might be a problem" with no command | the command that shows it, or no finding |
 | Repeating what `step-check.json` already reports | trust the script; review what it cannot see |
 | Answering another role's questions | stay in the role; the others cover the rest |
-| `evidence` pointing at a directory, a whole file or a line of the diff | `path:line` at the reviewed commit, or `<sha>:path:line` for a deleted line |
+| `evidence` pointing at a directory, a whole file or a line of the diff | `path:line` at the reviewed commit, `<sha>:path:line` for a deleted line, `absent:path` for a missing file |
 | "It is probably covered somewhere" as the answer to the test question | the covering test's file and case, or the finding that the test is missing |
 
 **Last Updated:** 2026-09-19

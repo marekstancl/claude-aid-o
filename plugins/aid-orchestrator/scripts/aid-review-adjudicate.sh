@@ -78,36 +78,55 @@ HANDLERS=0; [[ -n "$STEP_CHECK" ]] && HANDLERS="$(jq -r '.handler_patterns // []
 git_() { git -C "$ROOT" "$@"; }
 
 # _evidence_found <evidence> — every [<sha>:]path:line exists inside the project.
-_evidence_found() {
-  local item path line abs sha
+# _evidence_item_ok <item> — one citation resolves: `path:line` at HEAD,
+# `<sha>:path:line` at an ancestor commit, `plan.md:line` (CP1), or
+# `absent:path` for a file the step should have produced and did not.
+_evidence_item_ok() {
+  local item="$1" path line abs sha
+  item="${item#"${item%%[![:space:]]*}"}"
+  if [[ "$item" == absent:* ]]; then
+    path="${item#absent:}"
+    [[ -n "$path" && "$path" != /* && "$path" != *..* ]] || return 1
+    [[ ! -e "${ROOT}/${path}" ]] || return 1
+    return 0
+  fi
+  sha=""
+  if [[ "$item" =~ ^([0-9a-f]{7,40}):(.+):([0-9]+)$ ]]; then
+    sha="${BASH_REMATCH[1]}"; path="${BASH_REMATCH[2]}"; line="${BASH_REMATCH[3]}"
+  else
+    path="${item%:*}"; line="${item##*:}"
+  fi
+  [[ "$line" =~ ^[0-9]+$ ]] || return 1
+  if [[ -z "$sha" && "$path" == plan.md ]]; then
+    [[ -n "$PLAN" ]] || return 1
+    (( line >= 1 && line <= PLAN_LINES )) || return 1; return 0
+  fi
+  [[ "$path" != /* && "$path" != *..* && "$path" != .aid-worktrees/* ]] || return 1
+  if [[ -n "$sha" ]]; then
+    # A pre-image: the sha must be history of this checkout and the path must exist in it.
+    git_ cat-file -e "${sha}^{commit}" 2>/dev/null || return 1
+    git_ merge-base --is-ancestor "$sha" HEAD 2>/dev/null || return 1
+    git_ cat-file -e "${sha}:${path}" 2>/dev/null || return 1
+    (( line <= $(git_ show "${sha}:${path}" 2>/dev/null | awk 'END { print NR }') )) || return 1
+    return 0
+  fi
+  # Resolved, so neither `..`, `./` nor a symlink can leave the project.
+  abs="$(realpath -e -- "${ROOT}/${path}" 2>/dev/null)" || return 1
+  [[ "$abs" == "$ROOT"/* && "$abs" != "$ROOT"/.aid-worktrees/* && -f "$abs" ]] || return 1
+  (( line <= $(awk 'END { print NR }' "$abs") )) || return 1
+}
+
+# _evidence_first_ok <evidence> — prints the first citation that resolves; a
+# finding stands on ONE resolving citation (P094 acceptance run: three real
+# defects were lost to one wrong line number among several right ones). Exit 1
+# when none resolves.
+_evidence_first_ok() {
+  local item
   IFS=';' read -ra items <<< "$1"
   for item in "${items[@]}"; do
-    item="${item#"${item%%[![:space:]]*}"}"
-    sha=""
-    if [[ "$item" =~ ^([0-9a-f]{7,40}):(.+):([0-9]+)$ ]]; then
-      sha="${BASH_REMATCH[1]}"; path="${BASH_REMATCH[2]}"; line="${BASH_REMATCH[3]}"
-    else
-      path="${item%:*}"; line="${item##*:}"
-    fi
-    (( line >= 0 )) || return 1
-    if [[ -z "$sha" && "$path" == plan.md ]]; then
-      [[ -n "$PLAN" ]] || return 1
-      (( line >= 1 && line <= PLAN_LINES )) || return 1; continue
-    fi
-    [[ "$path" != /* && "$path" != *..* && "$path" != .aid-worktrees/* ]] || return 1
-    if [[ -n "$sha" ]]; then
-      # A pre-image: the sha must be history of this checkout and the path must exist in it.
-      git_ cat-file -e "${sha}^{commit}" 2>/dev/null || return 1
-      git_ merge-base --is-ancestor "$sha" HEAD 2>/dev/null || return 1
-      (( line <= $(git_ show "${sha}:${path}" 2>/dev/null | awk 'END { print NR }') )) || return 1
-      git_ cat-file -e "${sha}:${path}" 2>/dev/null || return 1
-      continue
-    fi
-    # Resolved, so neither `..`, `./` nor a symlink can leave the project.
-    abs="$(realpath -e -- "${ROOT}/${path}" 2>/dev/null)" || return 1
-    [[ "$abs" == "$ROOT"/* && "$abs" != "$ROOT"/.aid-worktrees/* && -f "$abs" ]] || return 1
-    (( line <= $(awk 'END { print NR }' "$abs") )) || return 1
+    _evidence_item_ok "$item" && { printf '%s' "${item#"${item%%[![:space:]]*}"}"; return 0; }
   done
+  return 1
 }
 
 # _command_ok <command> — a `bash repro/<x>.sh` must exist under the round's repro/.
@@ -146,7 +165,8 @@ for role in "${VALID[@]}"; do
     if [[ -z "$reason" ]] && ! _command_ok "$(jq -r '.command' <<< "$f")"; then
       reason=missing_command
     fi
-    if [[ -z "$reason" ]] && ! _evidence_found "$(jq -r '.evidence' <<< "$f")"; then
+    local first=""
+    if [[ -z "$reason" ]] && ! first="$(_evidence_first_ok "$(jq -r '.evidence' <<< "$f")")"; then
       reason=evidence_not_found
     fi
     if [[ -z "$reason" && "$HANDLERS" -gt 0 && "$role" == *_generalist ]] \
@@ -155,7 +175,7 @@ for role in "${VALID[@]}"; do
     fi
     if [[ -z "$reason" ]]; then
       step="$(_third "$f")"
-      first="$(jq -r '.evidence | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$f")"
+      # the fingerprint anchors on the first citation that RESOLVES, not the first written
       key="$(_claim_key "$(jq -r '.claim' <<< "$f")")"
       fp="$(fingerprint "$project_id" "$NS" "$step" "$first" "$key")"
       # The next round is matched without the line: a fix that shifts lines must

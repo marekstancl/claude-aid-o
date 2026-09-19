@@ -209,3 +209,26 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   run "$ADJ_BIN" "$R1" --project-root "$ROOT"; [ "$status" -eq 2 ]
   run "$ADJ_BIN" "$R1" --project-root "$ROOT" --namespace cp9; [ "$status" -eq 2 ]
 }
+
+# ── P094 Step 13 follow-up (PM 2026-09-19): one resolving citation is enough ──
+@test "evidence: one resolving citation among several carries the finding and anchors its fingerprint; none resolving is still evidence_not_found" {
+  _finding "$R1" reuse '.evidence = "scripts/a.sh:999; scripts/a.sh:2"'
+  _finding "$R1" reuse '.id = "reuse-2" | .evidence = "scripts/a.sh:999; scripts/a.sh:888" | .claim = "second claim nothing like the first"'
+  run ADJ "$R1" --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found"]' ]
+  [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "scripts/a.sh:999; scripts/a.sh:2" ]
+  # the fingerprint anchors on scripts/a.sh:2, so the same claim cited as scripts/a.sh:2 alone merges with it
+  _round "$R2" 2 reuse
+  _finding "$R2" reuse '.evidence = "scripts/a.sh:2"'
+  ADJ "$R2" --project-root "$ROOT" >/dev/null
+  [ "$(jq -r '.findings[0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
+}
+@test "evidence: absent:path proves a missing file and is refused for a file that exists; git log is a read-only command" {
+  _finding "$R1" reuse '.evidence = "absent:scripts/never-written.sh" | .command = "git log --oneline -3 -- scripts/never-written.sh"'
+  _finding "$R1" reuse '.id = "reuse-2" | .evidence = "absent:scripts/a.sh" | .claim = "claims a present file is absent"'
+  run ADJ "$R1" --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found"]' ]
+  [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "absent:scripts/never-written.sh" ]
+}

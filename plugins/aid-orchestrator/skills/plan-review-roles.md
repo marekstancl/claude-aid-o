@@ -49,7 +49,7 @@ A finding exists only with both:
 - `command` — one read-only command that shows the problem. It must start with
   `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
   `bash <script> --help`.
-- `evidence` — `path:line` inside the repository, or `plan.md:line` for the plan
+- `evidence` — `path:line` inside the repository, `absent:path` for a file the plan presumes and the repository lacks, or `plan.md:line` for the plan
   itself; several separated by `;`. Every file used must be cited.
 
 A finding without both is rejected by `scripts/aid-review-adjudicate.sh`

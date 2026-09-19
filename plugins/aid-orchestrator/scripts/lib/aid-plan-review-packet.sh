@@ -21,7 +21,7 @@ AID_PR_SCHEMA="${_AID_PR_PLUGIN}/defaults/schemas/review-finding.schema.json"
 AID_PR_TEMPLATE="${_AID_PR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_PR_ROLES_SKILL="${_AID_PR_PLUGIN}/skills/plan-review-roles.md"
 # The evidence forms a plan reviewer may cite; the step checkpoints pass their own.
-AID_PR_EVIDENCE_FORMS='`path:line` inside the repository, or `plan.md:line` for the plan itself (the line numbers of the plan in the packet below)'
+AID_PR_EVIDENCE_FORMS='`path:line` inside the repository, `plan.md:line` for the plan itself (the line numbers of the plan in the packet below), or `absent:path` for a file the plan presumes and the repository lacks; one citation that resolves is enough'
 
 # shellcheck source=aid-standards-map.sh
 source "${_AID_PR_PLUGIN}/scripts/lib/aid-standards-map.sh"

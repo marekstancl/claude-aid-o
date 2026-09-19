@@ -773,7 +773,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     test: scripts/tests/bats/test-review-adjudicate.bats
-    description: "A review finding of any checkpoint enters merged.json only with a read-only command (or a repro/ script that exists under the round) and a path:line evidence that exists inside the project at HEAD or, as <sha>:path:line, in the checkout history (resolved inside the project, not under .aid-worktrees/, line within the file; plan.md:line only for CP1); every other finding is written to rejected.json with its reason (missing_command, missing_evidence, evidence_not_found, trace_missing, duplicate). Fingerprints keep the five-argument formula with a per-checkpoint namespace, so CP1 fingerprints recorded before P094 are unchanged. The gate and the FSM read only merged.json."
+    description: "Since the P094 acceptance run (PM decision 2026-09-19): a finding stands on ONE resolving citation among several, `absent:path` proves a missing file, and git log/show/diff/blame are read-only commands. A review finding of any checkpoint enters merged.json only with a read-only command (or a repro/ script that exists under the round) and a path:line evidence that exists inside the project at HEAD or, as <sha>:path:line, in the checkout history (resolved inside the project, not under .aid-worktrees/, line within the file; plan.md:line only for CP1); every other finding is written to rejected.json with its reason (missing_command, missing_evidence, evidence_not_found, trace_missing, duplicate). Fingerprints keep the five-argument formula with a per-checkpoint namespace, so CP1 fingerprints recorded before P094 are unchanged. The gate and the FSM read only merged.json."
 
   - id: review_adjudicator_trace
     type: out-of-band

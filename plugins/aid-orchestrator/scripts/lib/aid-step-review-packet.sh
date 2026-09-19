@@ -22,7 +22,7 @@
 _AID_SR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 AID_SR_TEMPLATE="${_AID_SR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_SR_ROLES_SKILL="${_AID_SR_PLUGIN}/skills/step-review-roles.md"
-AID_SR_EVIDENCE_FORMS='`path:line` at the reviewed commit, or `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit)'
+AID_SR_EVIDENCE_FORMS='`path:line` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation)'
 
 aid_step_review_packet_build() {
   local root="$1" cp="$2" dir="$3/packet" sc="$4" plan_json="$5" step="${6:-}" prev="${7:-}"
