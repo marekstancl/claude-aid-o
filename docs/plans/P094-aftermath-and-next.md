@@ -103,6 +103,17 @@ NEJVYŠŠÍ, protože bez toho kontrola kroku propouští reálné chyby:**
 12. Po opravě znovu pustit pět diffů ze scratch větve: čekáme 1 pass,
     3 fail, 1 skip (dnes 3 pass, 1 fail, 1 skip).
 
+**Pozorování z běhu CP1 plánu P095 (19. 9., dvě kola, 21,03 USD, 42 + 21
+nálezů, 0 zahozeno):** 13. Codex nad limitem účtu zapíše `dispatch`
+jako `no_file` (ne `rate_limited`), takže roli `collect` počítá jako
+`missing` a kolo je neplatné; zástupce CC byl nutný ručně — přesně
+krok 3 P095. 14. Brána CP1 chce v kritériu citovat prvních osm slov
+nálezu i s cestou k neexistujícímu souboru, `aid-plan-check.sh` A5/B1
+takové kritérium blokuje; obě kontroly se vylučují, když nález jmenuje
+soubor, který nemá vzniknout (vyřešeno založením sady, ale pravidlo
+citace potřebuje výjimku pro cesty, nebo A5 výjimku pro citované nálezy).
+Do P095 nezařazeno (plán je po finalize); patří do backlogu jako IMP.
+
 **Nízká priorita, mimo P095:** acta 18 (kdo vyrábí `<plan>-delivery.md`,
 Head proti merge commitu), acta plan_branch vs. kroky vyžadující main
 (odstavec v plan-writing.md + advisory), wan pre-push `chore(release):`
