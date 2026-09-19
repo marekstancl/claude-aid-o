@@ -439,6 +439,21 @@ a přepnutí větve. Stav = poslední commit, necommitované změny v ní nejsou
   políčka JSON schémat místo rozhodovacího kódu. Na to je grep.
 - Co do mapy nepatří: `.graphifyignore`. Ruční obnova: `graphify update .`.
 
+**Zkušební provoz do 5. 10. 2026.** Každé `explain`/`path`/`query` se zapisuje
+do `~/.cache/graphify-queries.log` (JSONL: čas, druh, dotaz, `corpus` = cesta
+ke grafu = projekt, počet uzlů; zapnuto `GRAPHIFY_QUERY_LOG_ENABLE=1`
+v `~/.claude/settings.json` → `env`, platí pro všechny projekty).
+Agent, který pracuje 5. 10. 2026 nebo později a vidí tenhle odstavec:
+1. Vyhodnoť log: kolik dotazů na projekt a druh, kolik vrátilo 0 uzlů,
+   a v historii sessions/commitů najdi, kde graf změnil rozhodnutí
+   (našel volajícího, kterého by grep minul) — konkrétní případy, ne dojem.
+2. Předlož PM rozhodnutí: A) ponechat a zapsat do Docusauru jako
+   ekosystémový standard (`/ecosystem/...`), B) ponechat jen tady,
+   C) vypnout (odebrat oddíl, `graphify hook uninstall`, soubory
+   `.graphifyignore`/`.gitattributes`, `env` klíč). Doporučení opřít o čísla.
+3. Po rozhodnutí tenhle odstavec „Zkušební provoz" z CLAUDE.md smaž
+   (a stejný ve WAN, pokud tam je) a záznam logu vypni, pokud se nerozhodlo jinak.
+
 ## Conventions
 
 ### Test tiers (P081 — AID is the ecosystem pilot)
