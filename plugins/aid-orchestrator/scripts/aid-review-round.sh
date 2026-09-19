@@ -218,6 +218,12 @@ _index_add() {
 
 cmd_prepare() {
   _need_round
+  # The PM's switch (review_checkpoints.enabled / the checkpoint's own key) is
+  # honoured here as well as in the FSM, so fast mode (no FSM) obeys it too.
+  if (( ! RC_ENABLED )); then
+    echo "prepare: the ${CHECKPOINT} review is switched off in ${RC_CONFIG_FILE} (review_checkpoints); nothing prepared" >&2
+    exit 3
+  fi
   local dir sha check
   if [[ "$MODE" == plan ]]; then
     check="${ROOT}/.aid-o/work/evidence/${PLAN_ID}/plan-check.json"

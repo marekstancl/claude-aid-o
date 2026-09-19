@@ -170,6 +170,7 @@ declare -A DECLARED_AMENDMENTS=(
   ["verifier_verdict_contract"]="P094 Step 8 — narrowed to CP4"
   ["proto_v2_head_freshness"]="P094 Step 8 — cp2/cp3 half moved to the round index"
   ["routed_findings_block_done"]="P094 Step 7 — mechanical producer (aid-review-round.sh close) and the closed-cp3 refusal recorded"
+  ["aid_do_prefilter_fixloop"]="P094 Step 9 — retired (removed_scoped); successor aid_do_review_advisory"
 )
 # Codex review: counting `- id:` lines only proved the registry didn't
 # SHRINK below a floor — it never proved that any SPECIFIC prior row

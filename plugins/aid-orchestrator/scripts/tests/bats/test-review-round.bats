@@ -8,6 +8,8 @@
 # flag, the codex-absent degraded path, retry and override, cp6.
 # Origin: P094 Step 6 (step review rebuild); the old suite goes in Step 14.
 
+load test-helpers.bash
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
@@ -566,4 +568,33 @@ _close1() {
   mv "$ROOT/schema.bak" "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"semantic_review.mode"* ]]
   [ ! -f "$f" ]; [ "$(jq -r '.closed_at // "none"' "$E/cp3/round-1/round.json")" = none ]
+}
+
+# ── Step 9: fast mode on the same mechanism ──
+@test "cp6: a second prepare of the same fast-mode id is refused, a re-run of the step check over a closed index too, and a switched-off checkpoint prepares nothing (exit 3)" {
+  _repo; D6="$ROOT/do/20260919T100000Z-abc1234"; mkdir -p "$D6"; : > "$D6/timeline.jsonl"
+  seq 1 60 >> "$R/src/app.py"; echo "Task: tidy" > "$D6/task.md"
+  (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp6 --worktree --evidence-dir "$D6" --dod-file "$D6/task.md") >/dev/null
+  "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1 >/dev/null
+  run "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"already prepared"* ]]
+  # a closed index is never replaced by a re-run of the step check that would skip
+  jq -n '{verdict: "fail", head_sha: "x", rounds: [{round: 1, verdict: "fail"}]}' > "$D6/cp6/rounds.json"
+  git -C "$R" checkout -q -- src/app.py; echo tiny >> "$R/src/app.py"
+  run bash -c "cd '$R' && bash '$AID_PLUGIN_PATH/scripts/aid-step-check.sh' --checkpoint cp6 --worktree --evidence-dir '$D6' --dod-file '$D6/task.md'"
+  [ "$status" -ne 0 ]; [[ "$output" == *"already records a closed round"* ]]
+  # the PM's switch
+  mkdir -p "$R/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp6_fast_mode_review: false\n' > "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  run "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 2
+  [ "$status" -eq 3 ]; [[ "$output" == *"switched off"* ]]
+}
+@test "cp6: a fast-mode round closed with verdict fail leaves the FSM unaffected (no FSM path reads evidence/do)" {
+  [ "$(grep -c 'evidence/do' "$AID_PLUGIN_PATH/scripts/aid-fsm.sh")" -eq 0 ]
+  _repo; D6="$E/../do/20260919T100000Z-abc1234"; mkdir -p "$D6/cp6/round-1"
+  jq -n '{verdict: "fail", head_sha: "x", rounds: [{round: 1, verdict: "fail"}]}' > "$D6/cp6/rounds.json"
+  # the run's own cp2 evidence decides; the fast-mode directory beside it is invisible to the check
+  (cd "$R" && aid_fixture_seed_step_review "$E" cp2 0 pass)
+  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp2 0"
+  [ "$status" -eq 0 ]
 }

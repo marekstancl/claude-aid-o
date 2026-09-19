@@ -117,26 +117,55 @@ After implementation, verify actual scope:
 
 ### Step 5: Review Check (CP6)
 
-Pre-filter (§13) runs first on `git diff` output. If pre-filter clean + trivial → skip.
-If pre-filter match → immediate FAIL. Otherwise dispatch verifier (`code-review`).
+Fast mode is reviewed by the same mechanism as a step of a run (P094): a
+deterministic step check over the working tree, then the reviewer round of
+`skills/step-review-roles.md`, advisory. Skip this step only when
+`review_checkpoints.cp6_fast_mode_review: false` (`prepare` then exits 3 and
+says so).
 
-1. If verifier PASS or PASS_WITH_NOTES → continue to Step 6
-2. If verifier FAIL + `fix_loop_eligible` → dispatch gate-fixer → re-verify (max 2 iterations)
-3. If fix loop fails → warn PM (advisory, no ESCALATION in Fast Mode):
+1. Create this run's evidence directory. The id keeps two fast-mode runs
+   apart: `<UTC timestamp>-<short HEAD sha>`.
+
+   ```bash
+   DO_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
+   DO_DIR="$(git rev-parse --show-toplevel)/.aid-o/work/evidence/do/${DO_ID}"
+   mkdir -p "$DO_DIR"; printf '%s\n' "$ARGUMENTS" > "$DO_DIR/task.md"
+   bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp6 --worktree \
+     --dod-file "$DO_DIR/task.md" --evidence-dir "$DO_DIR"
+   ```
+
+   Inside a plan worktree the range is that checkout's working tree; the
+   evidence directory resolves to the state root. Two runs in the same second
+   on the same HEAD collide on the id: the step check refuses to overwrite a
+   closed index and the command says to wait a second.
+
+2. Read the verdict the step check printed:
+   - `no_change` (clean tree) or `skip` (small, clean, no security pattern):
+     say so in one line and dispatch nothing.
+   - `review` / `review+security`: run the round under `${DO_DIR}/cp6/`
+     exactly as the controller instruction in
+     `scripts/lib/aid-review-adapter-claude.md` says, with
+     `<review>` = `--checkpoint cp6 --evidence-dir "$DO_DIR"`:
+     `prepare --round 1`, one dispatch per expected role (focus
+     `cp6-<role>`), `collect`, `close`.
+
+3. `close` reports the verdict. `pass` → continue to Step 6. `fail` →
+   report to the PM (advisory, no ESCALATION in Fast Mode) and continue:
    ```
    ⚠ Code Review Issues (Advisory)
 
-   Checkpoint CP6 found:
-     - [{severity}] {finding}
-
-   Auto-fix attempted: failed after 2 iterations
+   Checkpoint CP6 found (${DO_DIR}/cp6/round-1/merged.json):
+     - [{severity}] {claim} — {evidence}
 
    Options:
-     • Review: git diff HEAD~1
-     • Evidence: .aid-o/work/quick/Q-{NNN}.md
+     • Fix: say "fix" — the implementer fixes the open findings (fix_of: <round dir>),
+       then a confirmation round (prepare --round 2)
+     • Review: git diff
      • Escalate: /aid-plan "{task}" for full pipeline
    ```
-4. Skip if `review_checkpoints.cp6_fast_mode_review: false` or changes are trivial
+   When the PM says fix, the fix paragraph of the adapter applies with the
+   cp6 round directory. Nothing in the FSM reads `evidence/do/`: a failed
+   fast-mode round blocks no transition.
 
 ### Step 6: Quick Log
 
@@ -220,27 +249,28 @@ Escalation is always a **suggestion** — PM decides whether to act on it.
 
 /aid-do is Fast Mode for sub-2-minute tasks. It is *conceptually* analogous to
 `/aid-run --streamlined` — a single low-overhead path with no per-step CP2
-verifier dispatch — but it bypasses the FSM entirely. Unlike `/aid-run
+review round — but it bypasses the FSM entirely. Unlike `/aid-run
 --streamlined`, /aid-do does NOT write `fsm-state.yaml` or `compliance.json`,
 does NOT set `streamlined_mode` / `coverage_mode`, and is NOT subject to
 `cmd_done_advance` Component D enforcement (streamlined integration-review or
-abandoned-but-shipped checks). Its only artifacts are `.aid-o/work/quick/Q-NNN.md`
-plus one git commit. The `coverage_mode: "streamlined"` accounting and Component D
+abandoned-but-shipped checks). Its artifacts are `.aid-o/work/quick/Q-NNN.md`,
+the review evidence under `.aid-o/work/evidence/do/<id>/` and one git commit. The `coverage_mode: "streamlined"` accounting and Component D
 checks apply only to `/aid-run --streamlined`, which walks the full
 plan→EPIC→run FSM pipeline.
 
 ## Important
 
 - **No FSM** — Fast Mode bypasses the state machine entirely
-- **No EPIC** — no evidence directory, no run file, no plan.json
-- **Quick log only** — `.aid-o/work/quick/Q-NNN.md` is the only artifact
+- **No EPIC** — no run file, no plan.json; the only evidence directory is the
+  review's, `.aid-o/work/evidence/do/<id>/` (Step 5)
+- **Quick log** — `.aid-o/work/quick/Q-NNN.md` plus the review evidence
 - **Auto-increment Q counter** — scan existing files, never overwrite
 - **Git commit is mandatory** — every `/aid-do` produces exactly one commit
 - **Escalation is advisory** — PM always has final say
 - If `$ARGUMENTS` is empty → ask PM: "What task should I implement?"
 
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-09-19
 
 ## Plan mode
 
