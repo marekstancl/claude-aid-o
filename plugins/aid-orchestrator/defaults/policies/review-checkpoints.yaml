@@ -36,6 +36,28 @@ review_checkpoints:
       - {role: reuse,             provider: claude, model: opus}
       - {role: enforcement_tests, provider: claude, model: opus}
 
+  # Step review (CP2), EPIC review (CP3) and fast-mode review (CP6): reviewer
+  # roles of skills/step-review-roles.md, read by scripts/lib/aid-review-config.sh
+  # (P094). `when: review+security` marks a role that runs only when
+  # aid-step-check.sh reports a security pattern. skip_threshold is what the
+  # step check calls small: a diff at or under both limits, inside the step's
+  # scope, with no pattern matched, is `skip` and needs no reviewer. The models
+  # are placeholders until P094 Step 13 chooses them from a measurement.
+  step_review:
+    rounds_default: 2
+    skip_threshold: {max_files: 1, max_lines: 50}
+    banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
+    reviewers:
+      - {role: step_generalist, provider: claude, model: sonnet}
+      - {role: step_security,   provider: claude, model: sonnet, when: review+security}
+  epic_review:
+    rounds_default: 2
+    banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
+    reviewers:
+      - {role: epic_generalist, provider: claude, model: sonnet}
+      - {role: epic_behaviour,  provider: claude, model: sonnet}
+      - {role: epic_security,   provider: codex,  model: gpt-5.6-terra}
+
   # Fix loop settings
   fix_loop:
     max_iterations: 2              # max fix→re-verify cycles before escalation
