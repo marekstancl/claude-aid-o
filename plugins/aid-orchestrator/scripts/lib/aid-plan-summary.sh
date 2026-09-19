@@ -55,7 +55,7 @@ source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-artifact-render.sh"
 source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-scoping.sh"
 # shellcheck source=aid-roots.sh
 source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-roots.sh"
-# shellcheck source=aid-plan-review-summary.sh
+# shellcheck source=aid-review-summary.sh
 source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-review-summary.sh"
 
 # _aps_section <plan> <heading> — the body of one `## <heading>` section, with

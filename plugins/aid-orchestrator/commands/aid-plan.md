@@ -492,7 +492,7 @@ skipped. The gate then passes with a notice.
 
    Without Codex installed it prints that the role is recorded as not
    answered and exits 0; continue. Every
-   role with `provider: claude` follows `scripts/lib/aid-plan-review-adapter-claude.md`,
+   role with `provider: claude` follows `scripts/lib/aid-review-adapter-claude.md`,
    quoted here in full:
 
 <!-- adapter:begin -->
@@ -723,7 +723,7 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 - `skills/plan-review-roles.md` — the six plan reviewer roles, the evidence rule and the answer shape
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
 - `{plugin_path}/scripts/aid-review-round.sh` — plan review rounds (prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override)
-- `{plugin_path}/scripts/aid-plan-review-adjudicate.sh` — merges a round's answers, rejects findings without proof
+- `{plugin_path}/scripts/aid-review-adjudicate.sh` — merges a round's answers, rejects findings without proof
 - `{plugin_path}/scripts/aid-cp1-gate.sh` — the plan review gate (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
 - `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a freshly written plan (step 8p)
 - `defaults/policies/review-checkpoints.yaml` — `plan_review`: reviewers, providers, models, rounds

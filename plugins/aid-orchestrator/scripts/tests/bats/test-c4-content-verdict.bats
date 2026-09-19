@@ -145,7 +145,7 @@ _run_check() {
   local pol="$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
   total="$(grep -c '^[[:space:]]*add_input ' "$pol")"
   classified="$(grep -cE '^[[:space:]]*add_input .*"(missing|stale|invalid|present_but_failing|present_ok)"' "$pol")"
-  [ "$total" -eq 28 ]
+  [ "$total" -eq 26 ]   # P094 Step 14: the two advisory invalidation-map rows are gone
   [ "$classified" -eq 7 ]
 }
 

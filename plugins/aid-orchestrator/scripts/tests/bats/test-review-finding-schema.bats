@@ -138,7 +138,6 @@ _cp2() {  # a valid cp2 answer, then a jq filter applied to it
 @test "adapter: commands/aid-plan.md quotes the claude adapter instruction byte for byte" {
   local cmd="$AID_PLUGIN_PATH/commands/aid-plan.md" adapter
   adapter="$AID_PLUGIN_PATH/scripts/lib/aid-review-adapter-claude.md"
-  [ -f "$adapter" ] || adapter="$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
   diff <(awk '/^<!-- adapter:end -->$/{on=0} on{print} /^<!-- adapter:begin -->$/{on=1}' "$cmd") "$adapter"
 }
 @test "adapter: commands/aid-run.md quotes the same adapter byte for byte" {

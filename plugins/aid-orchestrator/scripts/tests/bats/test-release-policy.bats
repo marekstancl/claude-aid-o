@@ -685,8 +685,6 @@ _divclass() {
 }
 
 @test "dual: divergence_class=unclassified (sole non-category blocker — fail-closed)" {
-  # invalidation_map never blocks in practice, but if it ever were the sole id → unclassified.
-  [ "$(_divclass false false 1 'invalidation_map')" == "unclassified" ]
   [ "$(_divclass false false 1 'some_unknown_id')" == "unclassified" ]
 }
 

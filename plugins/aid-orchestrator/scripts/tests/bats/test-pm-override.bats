@@ -67,7 +67,7 @@ _convert() {
 @test "P093: grant c0 is refused and points at the plan review override" {
   run "$FSM" pm-override grant c0 P900 --reason "$REASON" --project-root "$ROOT"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"aid-plan-review-round.sh override"* ]]
+  [[ "$output" == *"aid-review-round.sh override --plan"* ]]
   [ ! -e "$ROOT/.aid-o/work/evidence/P900/cp1-pm-escalation-override.json" ]
 }
 

@@ -3,20 +3,13 @@
 <!--
   VERIFIER OUTPUT TEMPLATE
   ========================
-  OVERWRITTEN by the verifier subagent after pre-filter dispatch. The pre-filter
-  (aid-prefilter.sh) creates the initial skeleton with `verdict: pending` for
-  RUN / FAIL / FULL_REVIEW classifications; the verifier MUST replace it with
-  `verdict: pass | fail` plus findings, or the FSM rejects the run.
+  Written by the verifier subagent at CP4 (the curator-validation review),
+  the ONE checkpoint that still uses this file since P094: the step (CP2),
+  EPIC (CP3) and fast-mode (CP6) reviews are reviewer rounds whose answers
+  follow defaults/schemas/review-finding.schema.json.
 
-  SAVE LOCATIONS (variant-specific, FSM checks the filename pattern):
+  SAVE LOCATION (FSM checks the filename):
 
-    Variant            Path                                                                 FSM check
-    -----------------  -------------------------------------------------------------------  --------------------------------------
-    CP2 per-step       .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-step-{N}.md  cmd_increment_step → fsm_check_verifier_output
-    CP3 code-review    .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp3-code-review.md
-                                                                                            check_preconditions EXECUTE:GATES → fsm_check_verifier_output
-    CP3 security       .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp3-security.md
-                                                                                            check_preconditions EXECUTE:GATES → fsm_check_verifier_output
     CP4 curator-validation .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp4-curator-validation.md
                                                                                             cmd_done_advance review→release → fsm_check_cp4_curator_validation (FSM-ENFORCED, full mode)
 
@@ -33,17 +26,13 @@
   `grep -q '^_generated_by:'` etc. — anchored to start-of-line.
 
   -----------------------------------------------------------------------------
-  VARIANT SELECTOR (which template body to use)
+  VARIANT
   -----------------------------------------------------------------------------
-  Pick the variant block below that matches your dispatch filename:
-    A. CP2 per-step          → verifier-output-step-{N}.md       (classification: SKIP | RUN | FAIL)
-    B. CP3 code-review       → verifier-output-cp3-code-review.md (classification: FULL_REVIEW)
-    C. CP3 security          → verifier-output-cp3-security.md    (classification: FULL_REVIEW)
     D. CP4 curator-validation → verifier-output-cp4-curator-validation.md (classification: FULL_REVIEW; FSM DOES enforce — fsm_check_cp4_curator_validation in cmd_done_advance, full mode)
 
-  All four share the SAME header block (below). Only the `# {Variant Heading}`,
-  the dispatch_label format inside `_generated_by:`, and the focus of "Findings"
-  differ per variant. The variant-specific guidance is annotated inline.
+  Older variants A–C (CP2 per-step, CP3 code-review, CP3 security) were retired
+  by P094; the guidance below that still names them describes what
+  fsm_check_verifier_output accepts, not a place to write them.
   -----------------------------------------------------------------------------
 -->
 
@@ -55,13 +44,9 @@ _generated_by: aid-orchestrator:verifier@{dispatch_label}
 
      dispatch_label convention (DIFFERS PER VARIANT — empirical from real
      evidence files in .aid-o/work/evidence/E-035-2_2/):
-       A. CP2 per-step:    CP2-step{N}-epic{M}        e.g. CP2-step3-epic2
-       B. CP3 code-review: CP3-code-review-epic{M}    e.g. CP3-code-review-epic2
-       C. CP3 security:    CP3-security-epic{M}       e.g. CP3-security-epic2
        D. CP4 curator:     CP4-curator-epic{M}        e.g. CP4-curator-epic2
 
-     Pre-filter placeholder values (e.g. `aid-pre-filter.sh@v2.18.0`) indicate
-     the verifier was never dispatched and will be REJECTED by the FSM. -->
+     A placeholder value the verifier did not write is REJECTED by the FSM. -->
 
 _generated_at: {ISO 8601 UTC, e.g. 2026-05-31T14:23:45Z}
 <!-- ABSOLUTELY REQUIRED — FSM precondition fails (fsm_check_verifier_output,
@@ -74,15 +59,10 @@ classification: {SKIP|RUN|FAIL|FULL_REVIEW}
 <!-- ABSOLUTELY REQUIRED — FSM precondition fails (fsm_check_verifier_output
      line ~147) if no line starts with `classification:`. Case-sensitive.
 
-     Allowed values, mapped to variant:
-       SKIP         — variant A only. Pre-filter found no diff or only trivial
-                      changes; no verifier ran. `reason:` REQUIRED below.
-       RUN          — variant A only. Pre-filter clean, verifier dispatched
-                      with focus=code-review.
-       FAIL         — variant A only. Pre-filter matched security keyword,
-                      verifier dispatched with focus=security.
-       FULL_REVIEW  — variants B, C, D. Full EPIC diff (no pre-filter); both
-                      code-review and security paths run independently.
+     Allowed values (the FSM still accepts all four; CP4 writes FULL_REVIEW):
+       SKIP         — nothing was reviewed. `reason:` REQUIRED below.
+       RUN / FAIL   — legacy per-step values; no live checkpoint writes them.
+       FULL_REVIEW  — the CP4 review of the applied curator + auditor changes.
 
      Unknown values fail the FSM check; do not invent new classifications. -->
 
@@ -91,15 +71,9 @@ verdict: {pass|fail|skip|pending}
      (fsm_check_verifier_output lines ~155-160) if the line is missing OR if
      `verdict: pending` is left unchanged after dispatch.
 
-     Per-variant rules:
-       Variant A (SKIP):                pre-filter writes `verdict: skip` —
-                                        leave it; no verifier dispatch needed.
-       Variant A (RUN/FAIL):            pre-filter writes `verdict: pending`;
-                                        verifier MUST overwrite with `pass` or `fail`.
-       Variants B, C (FULL_REVIEW):     verifier writes `verdict: pass | fail` directly.
-       Variant D (FULL_REVIEW, CP4):    verifier writes `verdict: pass | fail`;
-                                        FSM-enforced via fsm_check_cp4_curator_validation
-                                        → fsm_check_verifier_output (wired E-046-1_3 Step 2).
+     Variant D (FULL_REVIEW, CP4):    verifier writes `verdict: pass | fail`;
+                                      FSM-enforced via fsm_check_cp4_curator_validation
+                                      → fsm_check_verifier_output (wired E-046-1_3 Step 2).
 
      Allowed values: pass | fail | skip. Convention: lowercase. -->
 
@@ -112,9 +86,8 @@ reason: {free-text justification — REQUIRED ONLY for classification=SKIP}
      For RUN / FAIL / FULL_REVIEW this field is optional; omit it entirely. -->
 
 matched_rules: ["{rule_id_1}", "{rule_id_2}"]
-<!-- Optional. Pre-filter writes this with the rule IDs that triggered
-     RUN/FAIL classification (e.g. `["security_keyword:secret_pattern"]`).
-     The verifier should leave it untouched. Not FSM-checked. -->
+<!-- Optional. The rule ids of defaults/pre-filter-rules.yaml the reviewed diff
+     matched, when known. Not FSM-checked. -->
 
 # Additive Fields (v2.35+) — present only when applicable
 <!-- ADDITIVE ONLY: these fields extend (never replace) the above top-level fields.

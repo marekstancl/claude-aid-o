@@ -132,22 +132,8 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   jq -n '{valid: $ARGS.positional}' --args "$@" > "$dir/collect.json"
   local r; for r in "$@"; do jq -n --arg r "$r" '{role: $r, checkpoint: "cp2", findings: [], no_findings_reason: "none"}' > "$dir/reviewer-$r.json"; done
 }
-@test "cp1: the generic script's fingerprints and rejections are byte-identical to aid-plan-review-adjudicate.sh while it exists" {
-  local old="$AID_PLUGIN_PATH/scripts/aid-plan-review-adjudicate.sh"
-  [ -f "$old" ] || skip "the CP1-only adjudicator is gone (P094 Step 14)"
-  _finding "$R1" reuse '.'
-  _finding "$R1" reuse '.id = "reuse-2" | .step = 2 | .evidence = "scripts/a.sh:3; plan.md:2" | .claim = "a second claim with different words"'
-  _finding "$R1" behaviour_edges '.severity = "major"'
-  _finding "$R1" behaviour_edges '.id = "behaviour_edges-2" | .step = null | .evidence = "plan.md:1" | .claim = "plan level claim"'
-  _finding "$R1" reuse '.id = "reuse-9" | .evidence = "scripts/missing.sh:1"'
-  cp -r "$R1" "$ROOT/round-old"
-  "$old" "$ROOT/round-old" --project-root "$ROOT" >/dev/null
-  ADJ "$R1" --project-root "$ROOT" >/dev/null
-  diff <(jq -S '.findings | map({fingerprint, match, step, severity, reported_by, status})' "$ROOT/round-old/merged.json") \
-       <(jq -S '.findings | map({fingerprint, match, step, severity, reported_by, status})' "$R1/merged.json")
-  diff "$ROOT/round-old/rejected.json" "$R1/rejected.json"
-  diff "$ROOT/round-old/yield.json" "$R1/yield.json"
-}
+# (The byte-identity case against the CP1-only adjudicator was removed with that
+# script, P094 Step 14; its fingerprints are pinned by the cp1 cases above.)
 @test "cp2: a pre-image evidence <sha>:path:line resolves; a sha outside the history and a line past the pre-image end do not" {
   local first; first="$(_git_root)"
   _step_round "$R2" 1 step_generalist

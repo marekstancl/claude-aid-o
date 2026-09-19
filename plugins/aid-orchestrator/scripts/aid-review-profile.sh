@@ -1,33 +1,19 @@
 #!/usr/bin/env bash
-# aid-prefilter.sh — Deterministic pre-filter for classify and profile commands.
-# classify: classifies step git diff as SKIP / RUN / FAIL, writes verifier-output-step-N.md.
-# profile: computes plan-time + candidate-time surfaces, emits review-profile.json.
-#
-# Exit codes (non-conflicting with bash convention):
-#   0  — SKIP (classify) or profile success
-#   10 — RUN   (standard code change; code-review verifier should be dispatched)
-#   20 — FAIL  (security-sensitive pattern detected; security verifier must be dispatched)
-#   22 — range_undetermined (profile: no --range and no base_commit in fsm-state.yaml;
-#          classify cp2: no step_commit in timeline and no base_commit — blocking policy)
-#   1  — error (missing argument, file not found, yq error)
-#   2  — malformed rules file
+# aid-review-profile.sh — the review-profile producer: plan-time + candidate-time
+# risk surfaces over a diff range, emitted as review-profile.json (the C3 gate's
+# arming input and a REQUIRED release-policy input). Split out of the retired
+# pre-filter by P094 Step 14; same arguments, same output, same exit codes.
 #
 # Usage:
-#   aid-prefilter.sh classify <step_n> <evidence_dir> [--checkpoint <cp2|cp3|cp4|cp6>]
-#   aid-prefilter.sh profile <plan_or_epic_path> <evidence_dir> [--out <path>] [--range <base..head>]
+#   aid-review-profile.sh <plan_or_epic_path> <evidence_dir> [--out <path>] [--range <base..head>]
+#   (a leading `profile` word is accepted for the callers written against the old script)
 #
-# --checkpoint flag (v2.35+):
-#   Controls the git diff range used for classification. Default (no flag) = cp2 behavior.
-#   cp2 — step-boundary diff (P060 Step 3, OBS-20260705-01). Range resolution order:
-#          1. last step_commit event in timeline.jsonl → step_commit_sha..HEAD
-#          2. absent → base_commit from evidence_dir/fsm-state.yaml → base_commit..HEAD (wider, fail-safe)
-#          3. neither → exit 22 range_undetermined (blocking), NEVER a silent HEAD~1.
-#          Emergency valve CP2_RANGE_POLICY=observe|blocking (default blocking):
-#          observe = emit cp2_range_fallback event + LOUD stderr, then classify with HEAD~1..HEAD.
-#   cp3 — base_commit..HEAD (full EPIC diff; base_commit read from evidence_dir/fsm-state.yaml if present,
-#          falls back to git merge-base HEAD origin/main)
-#   cp4 — HEAD~1..HEAD (C+A applied changes are always the last commit)
-#   cp6 — HEAD~1..HEAD (fast mode: no fsm-state/timeline by design; advisory, evaluated outside FSM flow)
+# Exit codes:
+#   0  — profile emitted
+#   22 — range_undetermined (no --range and no base_commit in fsm-state.yaml):
+#        an unverifiable profile is emitted and the caller continues
+#   1  — error (missing argument, file not found, yq error)
+#   2  — malformed rules file
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,293 +21,6 @@ RULES_FILE="${AID_PLUGIN_PATH:-${SCRIPT_DIR}/..}/defaults/pre-filter-rules.yaml"
 
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-
-
-main() {
-  local cmd="${1:-}"
-  if [[ -z "$cmd" ]]; then
-    echo "Usage: aid-prefilter.sh <command> [args]" >&2
-    echo "Commands:" >&2
-    echo "  classify <step_n> <evidence_dir> [--checkpoint <cp2|cp3|cp4|cp6>]" >&2
-    echo "  profile <plan_or_epic_path> <evidence_dir> [--out <path>] [--range <base..head>]" >&2
-    exit 1
-  fi
-  shift
-  case "$cmd" in
-    classify) cmd_classify "$@" ;;
-    profile)  cmd_profile "$@" ;;
-    *) die "Unknown command: $cmd. Use: classify, profile" ;;
-  esac
-}
-
-# _classify_say <classification> <step> <reason> <exit_code> — the one line a
-# caller sees; every classification exit goes through here so the branches
-# cannot drift (the result used to be visible only in the file and the exit code).
-_classify_say() {
-  printf 'classify: %s step=%s reason=%s (exit %s)\n' "$1" "$2" "$3" "$4"
-}
-
-cmd_classify() {
-  [[ $# -lt 2 ]] && die "classify requires <step_n> <evidence_dir> [--checkpoint <cp2|cp3|cp4|cp6>]"
-  local step_n=$1 evidence_dir=$2
-  shift 2
-
-  # Parse optional --checkpoint flag (v2.35+)
-  local checkpoint="cp2"  # default: step diff (backward-compatible)
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --checkpoint)
-        [[ $# -lt 2 ]] && die "--checkpoint requires an argument (cp2|cp3|cp4|cp6)"
-        checkpoint="$2"
-        case "$checkpoint" in
-          cp2|cp3|cp4|cp6) ;;
-          *) die "Unknown checkpoint '$checkpoint'. Valid values: cp2 cp3 cp4 cp6" ;;
-        esac
-        shift 2
-        ;;
-      *) die "Unknown argument: $1" ;;
-    esac
-  done
-
-  [[ -d "$evidence_dir" ]] || die "Evidence dir not found: $evidence_dir"
-
-  if ! command -v yq &>/dev/null; then
-    die "yq (mikefarah variant) required — install via:
-  apt install yq         (Debian/Ubuntu, provides mikefarah yq)
-  brew install yq        (macOS)
-  pacman -S go-yq        (Arch)
-  go install github.com/mikefarah/yq/v4@latest
-NOT the Python yq PyPI package (incompatible CLI)."
-  fi
-
-  [[ -f "$RULES_FILE" ]] || die "Rules file not found: $RULES_FILE"
-
-  # Validate rule IDs conform to ^[a-z][a-z0-9_]*$ (prevents shell injection via matched_rules)
-  validate_rule_ids || die "Rules file has invalid rule IDs: $RULES_FILE"
-
-  local timeline="${evidence_dir}/timeline.jsonl"
-  local output_file="${evidence_dir}/verifier-output-step-${step_n}.md"
-
-  # Resolve diff range based on checkpoint.
-  # cp2 (default): step-boundary diff (P060 Step 3, OBS-20260705-01). D6 order below.
-  # cp3: base_commit..HEAD — full EPIC diff since run start
-  #      base_commit is read from evidence_dir/fsm-state.yaml if present; falls back to
-  #      git merge-base HEAD origin/main (approximate when fsm-state unavailable)
-  # cp4: HEAD~1..HEAD — curator/auditor changes are always the last commit
-  # cp6: HEAD~1..HEAD — fast mode: no fsm-state/timeline by design (advisory)
-  local diff_base="HEAD~1"  # cp4, cp6 (fast mode: no fsm-state by design) use this
-  if [[ "$checkpoint" == "cp2" ]]; then
-    # ── P060 Step 3: cp2 classifies from the STEP boundary, not the last commit ──
-    # OBS-20260705-01: a production step with a bookkeeping commit on top was
-    # false-green'd docs_only because HEAD~1..HEAD only saw the last commit.
-    # D6 resolution order (fail-safe WIDER, never a silent HEAD~1):
-    #   1. last step_commit event in timeline → step_commit_sha..HEAD
-    #   2. base_commit in evidence_dir/fsm-state.yaml → base_commit..HEAD
-    #   3. neither → exit 22 (blocking) OR loud HEAD~1 fallback (observe policy)
-    local cp2_policy="${CP2_RANGE_POLICY:-blocking}"
-    local step_commit_sha=""
-    if [[ -f "$timeline" ]] && command -v jq &>/dev/null; then
-      # LAST step_commit event's commit_sha (producer: aid-fsm.sh cmd_increment_step)
-      step_commit_sha=$(jq -r 'select(.event == "step_commit") | .commit_sha' "$timeline" 2>/dev/null | tail -n1 || echo "")
-    fi
-    if [[ -n "$step_commit_sha" && "$step_commit_sha" != "null" && "$step_commit_sha" != "unknown" ]]; then
-      diff_base="$step_commit_sha"
-    else
-      local base_commit=""
-      local fsm_state_file="${evidence_dir}/fsm-state.yaml"
-      if [[ -f "$fsm_state_file" ]] && command -v yq &>/dev/null; then
-        base_commit=$(yq -r '.base_commit // ""' "$fsm_state_file" 2>/dev/null || echo "")
-      fi
-      if [[ -n "$base_commit" && "$base_commit" != "null" ]]; then
-        diff_base="$base_commit"
-      elif [[ "$cp2_policy" == "observe" ]]; then
-        # Emergency valve: loud fallback to HEAD~1..HEAD, still classify (do not block).
-        diff_base="HEAD~1"
-        log_event "$timeline" "cp2_range_fallback" step="$step_n" \
-          reason="range_undetermined" policy="observe" fallback="HEAD~1..HEAD"
-        echo "WARNING [CP2_RANGE_POLICY=observe]: cp2 step $step_n range_undetermined \
-(no step_commit in timeline, no base_commit in fsm-state.yaml) — LOUD FALLBACK to \
-HEAD~1..HEAD. Classification may miss production changes hidden behind bookkeeping \
-commits (OBS-20260705-01). Emit step_commit/base_commit to restore step-boundary range." >&2
-      else
-        # blocking (default): no determinable range — refuse to classify, no SKIP stub.
-        log_event "$timeline" "cp2_range_undetermined" step="$step_n" policy="blocking"
-        echo "range_undetermined: cp2 step $step_n has no step_commit event in timeline.jsonl \
-and no base_commit in fsm-state.yaml. Emit step_commit (FSM increment) or base_commit, or set \
-CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the output file." >&2
-        _classify_say NONE "$step_n" range_undetermined 22
-        exit 22
-      fi
-    fi
-  elif [[ "$checkpoint" == "cp3" ]]; then
-    # Attempt to read base_commit from fsm-state.yaml in the RUN dir (= evidence_dir).
-    # P060 Step 3 fix: fsm-state.yaml lives in evidence_dir, NOT the parent dir.
-    local fsm_state_file="${evidence_dir}/fsm-state.yaml"
-    if [[ -f "$fsm_state_file" ]] && command -v yq &>/dev/null; then
-      local base_commit
-      base_commit=$(yq -r '.base_commit // ""' "$fsm_state_file" 2>/dev/null || echo "")
-      if [[ -n "$base_commit" && "$base_commit" != "null" ]]; then
-        diff_base="$base_commit"
-      else
-        # Fallback: approximate with git merge-base (may differ from EPIC start)
-        diff_base=$(git merge-base HEAD origin/main 2>/dev/null || echo "HEAD~5")
-        log_warn "cp3: base_commit not in fsm-state.yaml; using merge-base approximation ($diff_base)"
-      fi
-    else
-      diff_base=$(git merge-base HEAD origin/main 2>/dev/null || echo "HEAD~5")
-      log_warn "cp3: fsm-state.yaml not found; using merge-base approximation ($diff_base)"
-    fi
-  fi
-  # cp4 and cp6 use HEAD~1 (fast mode: no fsm-state by design)
-
-  # Resolve diff using checkpoint-specific range
-  local diff_files diff_content
-  diff_files=$(git diff --name-only "${diff_base}" HEAD 2>/dev/null || echo "")
-  diff_content=$(git diff "${diff_base}" HEAD 2>/dev/null || echo "")
-
-  if [[ -z "$diff_files" ]]; then
-    log_warn "No diff for step $step_n (empty diff or initial commit) — defaulting to RUN (conservative)"
-    write_output "$output_file" "$step_n" "RUN" "no_diff" "[]" "$checkpoint"
-    log_event "$timeline" "prefilter_classification" step="$step_n" classification="RUN" matched_rules="[]" checkpoint="$checkpoint"
-    _classify_say RUN "$step_n" no_diff 10
-    exit 10
-  fi
-
-  # Apply skip_rules first (all files must match for SKIP to trigger)
-  local skip_ids
-  mapfile -t skip_ids < <(yq -r '.skip_rules[].id' "$RULES_FILE" 2>/dev/null)
-  for rule_id in "${skip_ids[@]}"; do
-    if matches_skip "$rule_id" "$diff_files"; then
-      local matched_json="[\"${rule_id}\"]"
-      write_output "$output_file" "$step_n" "SKIP" "$rule_id" "$matched_json" "$checkpoint"
-      log_event "$timeline" "prefilter_classification" step="$step_n" classification="SKIP" matched_rules="$matched_json" checkpoint="$checkpoint"
-      _classify_say SKIP "$step_n" "$rule_id" 0
-      exit 0
-    fi
-  done
-
-  # Apply fail_rules (conservative bias: any match → FAIL; false positive OK)
-  local fail_ids
-  mapfile -t fail_ids < <(yq -r '.fail_rules[].id' "$RULES_FILE" 2>/dev/null)
-  local matched_fail=()
-  for rule_id in "${fail_ids[@]}"; do
-    if matches_fail "$rule_id" "$diff_content"; then
-      matched_fail+=("$rule_id")
-    fi
-  done
-
-  if (( ${#matched_fail[@]} > 0 )); then
-    local matched_json
-    matched_json=$(printf '%s\n' "${matched_fail[@]}" | jq -R . | jq -sc .)
-    write_output "$output_file" "$step_n" "FAIL" "${matched_fail[*]}" "$matched_json" "$checkpoint"
-    log_event "$timeline" "prefilter_classification" step="$step_n" classification="FAIL" matched_rules="$matched_json" checkpoint="$checkpoint"
-    _classify_say FAIL "$step_n" "${matched_fail[*]// /,}" 20
-    exit 20
-  fi
-
-  # Default: RUN
-  write_output "$output_file" "$step_n" "RUN" "default" "[]" "$checkpoint"
-  log_event "$timeline" "prefilter_classification" step="$step_n" classification="RUN" matched_rules="[]" checkpoint="$checkpoint"
-  _classify_say RUN "$step_n" default 10
-  exit 10
-}
-
-validate_rule_ids() {
-  local all_ids
-  mapfile -t all_ids < <(yq -r '(.skip_rules // [] | .[].id), (.fail_rules // [] | .[].id)' "$RULES_FILE" 2>/dev/null)
-  for id in "${all_ids[@]}"; do
-    [[ "$id" =~ ^[a-z][a-z0-9_]*$ ]] || { log_error "Invalid rule ID: '$id' (must match ^[a-z][a-z0-9_]*$)"; return 1; }
-  done
-  return 0
-}
-
-matches_skip() {
-  local rule_id=$1 diff_files=$2
-  local pattern match_all
-  pattern=$(yq -r ".skip_rules[] | select(.id == \"${rule_id}\") | .pattern" "$RULES_FILE" 2>/dev/null)
-  match_all=$(yq -r ".skip_rules[] | select(.id == \"${rule_id}\") | .match_all_files // false" "$RULES_FILE" 2>/dev/null)
-
-  [[ -z "$pattern" ]] && return 1
-
-  if [[ "$match_all" == "true" ]]; then
-    # ALL files must match the pattern for skip to apply
-    while IFS= read -r f; do
-      [[ -z "$f" ]] && continue
-      if ! [[ "$f" =~ $pattern ]]; then
-        return 1  # at least one file does not match → no skip
-      fi
-    done <<< "$diff_files"
-    return 0  # all files matched
-  else
-    [[ "$diff_files" =~ $pattern ]]
-  fi
-}
-
-matches_fail() {
-  local rule_id=$1 diff_content=$2
-  local pattern
-  pattern=$(yq -r ".fail_rules[] | select(.id == \"${rule_id}\") | .pattern" "$RULES_FILE" 2>/dev/null)
-  [[ -z "$pattern" ]] && return 1
-  # bash ERE via [[ =~ ]] — requires bash 5+ for \b word boundaries (verified in setup)
-  [[ "$diff_content" =~ $pattern ]]
-}
-
-write_output() {
-  local file=$1 step_n=$2 classification=$3 reason=$4 matched_rules=$5 checkpoint=${6:-cp2}
-  local now
-  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  local verdict
-  case "$classification" in
-    SKIP) verdict="skip" ;;
-    *)    verdict="pending" ;;  # RUN/FAIL — verifier dispatch will overwrite with pass/fail
-  esac
-
-  # Emit behavior_trace_required=false for SKIP (trivial diff — no handler tracing needed).
-  # For RUN/FAIL the verifier is responsible for emitting behavior_trace fields based on
-  # whether the diff matches high-risk patterns (see skills/review-checkpoint-contracts.md).
-  local trace_fields=""
-  if [[ "$classification" == "SKIP" ]]; then
-    trace_fields="checkpoint: ${checkpoint}
-behavior_trace_count: 0
-behavior_trace_required: false
-behavior_trace_skip_reason: \"classification SKIP — ${reason}\""
-  else
-    trace_fields="checkpoint: ${checkpoint}"
-  fi
-
-  mkdir -p "$(dirname "$file")"
-  # A COMPLETED report of an earlier iteration (verdict pass|fail, not the
-  # pre-filter's own pending/skip) is archived, not overwritten: the fix loop
-  # re-classifies, and iteration 1's findings used to vanish before anyone
-  # read them (agents #4). Collision-safe name; increment-step still reads
-  # the canonical file.
-  if [[ -f "$file" ]]; then
-    local _old_verdict; _old_verdict="$(grep -m1 -E '^verdict:' "$file" 2>/dev/null | awk '{print tolower($2)}')"
-    if [[ "$_old_verdict" == "pass" || "$_old_verdict" == "fail" || "$_old_verdict" == "skip" ]]; then
-      local _arch
-      _arch="$(mktemp "${file%.md}.iter-$(date -u +%Y%m%dT%H%M%SZ)-XXXX")" \
-        || die "prefilter: cannot create an archive name for the previous report ${file} — refusing to overwrite it"
-      mv -f "$file" "$_arch" || die "prefilter: could not archive the previous report ${file} → ${_arch}; refusing to overwrite it"
-      mv -f "$_arch" "${_arch}.md" 2>/dev/null && _arch="${_arch}.md"
-      echo "prefilter: archived the completed report of the previous iteration as $(basename "$_arch")" >&2
-    fi
-  fi
-  cat > "$file" <<EOF
-# Verifier output step ${step_n}
-
-_generated_by: aid-pre-filter.sh
-_generated_at: ${now}
-classification: ${classification}
-verdict: ${verdict}
-reason: ${reason}
-matched_rules: ${matched_rules}
-${trace_fields}
-
-## Findings
-
-(populated by verifier dispatch — empty if SKIP)
-EOF
-}
 
 path_matches_glob() {
   # Glob matching with ** support via bash case statement (shopt globstar).
@@ -754,6 +453,12 @@ cmd_profile() {
 
   echo "review-profile.json emitted: $out_path (risk_profile=$risk_profile)"
   exit 0
+}
+
+main() {
+  [[ "${1:-}" == profile ]] && shift
+  [[ $# -ge 2 ]] || { echo "Usage: aid-review-profile.sh <plan_or_epic_path> <evidence_dir> [--out <path>] [--range <base..head>]" >&2; exit 1; }
+  cmd_profile "$@"
 }
 
 main "$@"

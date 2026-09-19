@@ -32,7 +32,7 @@
 #       22 range_undetermined (cp2 without a step_commit or base_commit,
 #       cp3 without a base_commit).
 #
-# Successor of aid-prefilter.sh classify (P060 range rule kept; the
+# Successor of the retired pre-filter classify (P060 range rule kept; the
 # verifier-output seed is gone) and of the trivial-skip rule of
 # review-checkpoints.yaml. Tested by scripts/tests/bats/test-step-check.bats.
 # =============================================================================

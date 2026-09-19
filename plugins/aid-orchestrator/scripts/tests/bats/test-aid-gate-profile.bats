@@ -93,7 +93,7 @@ make_paths_file() {
 # ─── (4) ordinary code change -> standard ───────────────────────────────────
 @test "classify: ordinary (non-doc, non-high-risk) code change -> standard" {
   local pf="$WORK/ordinary.txt"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   run bash "$GP" classify-paths "$pf"
   [ "$status" -eq 0 ]; [ "$output" = "standard" ]
   run bash "$GP" resolve "$pf"
@@ -130,7 +130,7 @@ make_paths_file() {
 # ─── (6) release boundary ────────────────────────────────────────────────────
 @test "release boundary: fsm-state.yaml done_phase=release -> release, regardless of ordinary paths" {
   local pf="$WORK/ordinary.txt" state="$WORK/fsm-state.yaml"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   printf 'epic_id: E-x\nrun_id: R-x\nstate: DONE\ndone_phase: release\n' > "$state"
   run bash "$GP" resolve "$pf" "$state"
   [ "$status" -eq 0 ]; [ "$output" = "release" ]
@@ -138,7 +138,7 @@ make_paths_file() {
 
 @test "release boundary: fsm-state.yaml WITHOUT done_phase=release does not force release" {
   local pf="$WORK/ordinary.txt" state="$WORK/fsm-state.yaml"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   printf 'epic_id: E-x\nrun_id: R-x\nstate: EXECUTE\n' > "$state"
   run bash "$GP" resolve "$pf" "$state"
   [ "$status" -eq 0 ]; [ "$output" = "standard" ]
@@ -147,7 +147,7 @@ make_paths_file() {
 # ─── (7) no-fsm-state guard ───────────────────────────────────────────────────
 @test "no-fsm-state guard: nonexistent fsm-state path does not crash, falls back to path classification" {
   local pf="$WORK/ordinary.txt"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   run bash "$GP" resolve "$pf" "$WORK/nonexistent-state.yaml"
   [ "$status" -eq 0 ]
   [ "$output" = "standard" ]
@@ -155,7 +155,7 @@ make_paths_file() {
 
 @test "no-fsm-state guard: fsm-state arg entirely omitted does not crash" {
   local pf="$WORK/ordinary.txt"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   run bash "$GP" resolve "$pf"
   [ "$status" -eq 0 ]
   [ "$output" = "standard" ]
@@ -185,7 +185,7 @@ make_paths_file() {
 
 @test "override: equal-rank override applies trivially" {
   local pf="$WORK/ordinary.txt"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   AID_GATE_PROFILE_OVERRIDE=standard run bash "$GP" resolve "$pf"
   [ "$status" -eq 0 ]
   [ "$output" = "standard" ]
@@ -227,7 +227,7 @@ make_paths_file() {
 # ─── (12) downward override on non-high-risk tier needs no waiver ──────────
 @test "override: downward override on a NON-high-risk computed profile applies without waiver" {
   local pf="$WORK/ordinary.txt"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   AID_GATE_PROFILE_OVERRIDE=targeted run bash "$GP" resolve "$pf"
   [ "$status" -eq 0 ]
   [ "$output" = "targeted" ]
@@ -236,7 +236,7 @@ make_paths_file() {
 # ─── (13) unknown override name is ignored ──────────────────────────────────
 @test "override: unknown profile name in AID_GATE_PROFILE_OVERRIDE is ignored (warns, computed unchanged)" {
   local pf="$WORK/ordinary.txt"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   AID_GATE_PROFILE_OVERRIDE=bogus run bash "$GP" resolve "$pf"
   [ "$status" -eq 0 ]
   [[ "$output" == *"standard"* ]]
@@ -246,7 +246,7 @@ make_paths_file() {
 # ─── (14) review-profile.json floor tightens, never loosens ────────────────
 @test "review-profile floor: risk_profile=high tightens an ordinary (standard) change to full" {
   local pf="$WORK/ordinary.txt" rp="$WORK/rp.json"
-  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+  make_paths_file "$pf" "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
   printf '{"review_profile":{"risk_profile":"high"}}' > "$rp"
   run bash "$GP" resolve "$pf" "" "$rp"
   [ "$status" -eq 0 ]

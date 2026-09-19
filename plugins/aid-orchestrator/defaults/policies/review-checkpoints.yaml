@@ -16,7 +16,7 @@ review_checkpoints:
   delivery_report: true            # plan-boundary Reporter delivery report generation
 
   # Plan review (CP1): six reviewer roles, one round plus a confirmation round.
-  # Read only by scripts/lib/aid-plan-review-config.sh, which refuses a role set
+  # Read only by scripts/lib/aid-review-config.sh, which refuses a role set
   # other than the six of skills/plan-review-roles.md, a duplicate, a provider
   # other than claude/codex and a model listed in banned_models. A project
   # override is .aid-o/config/policies/review-checkpoints.yaml with its own

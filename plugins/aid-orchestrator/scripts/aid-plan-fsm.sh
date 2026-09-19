@@ -10255,7 +10255,7 @@ _pfsm_crash_seam() {
 # than closed.
 #
 # Production is real, not fabrication. The review profile comes from the
-# existing `aid-prefilter.sh profile` producer run over the WHOLE plan range.
+# `aid-review-profile.sh` producer run over the WHOLE plan range.
 # The two aggregates are built from each contributing EPIC's own evidence pack:
 # an EPIC that has an artifact contributes its content hash, and one that does
 # not is recorded as `absent` — visible in the artifact rather than silently
@@ -10313,8 +10313,8 @@ _pfsm_finalize_inputs() {
   # producer below because whether an AC lens is REQUIRED (and therefore
   # whether plan-diff.json may legitimately be "skipped") is read from here.
   local rp="${run_dir_abs}/review-profile.json" rprc=0
-  if [[ -n "$plan_file" && -x "${SCRIPT_DIR}/aid-prefilter.sh" ]]; then
-    bash "${SCRIPT_DIR}/aid-prefilter.sh" profile "$plan_file" "$run_dir_abs" \
+  if [[ -n "$plan_file" && -x "${SCRIPT_DIR}/aid-review-profile.sh" ]]; then
+    bash "${SCRIPT_DIR}/aid-review-profile.sh" "$plan_file" "$run_dir_abs" \
       --range "${base_commit}..${candidate}" --out "$rp" >/dev/null 2>&1 || rprc=$?
   else
     rprc=127

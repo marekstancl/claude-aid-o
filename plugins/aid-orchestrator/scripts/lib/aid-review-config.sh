@@ -34,7 +34,7 @@
 # step_review → cp2_step_review (cp6_fast_mode_review when RC_CHECKPOINT=cp6),
 # epic_review → cp3_integration_review.
 #
-# Successor of aid-plan-review-config.sh (P094 Step 4); registry row
+# One reader for every checkpoint (P094 Step 4); registry row
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
 
 _AID_RC_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"

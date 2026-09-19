@@ -112,7 +112,7 @@ _printed_force_command() {
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   export AID_TEST_CP1_RC=1
-  export AID_TEST_CP1_OUT='CP1-gate FAIL: no plan review round-1 for P099; run: aid-plan-review-round.sh prepare <plan> --round 1'
+  export AID_TEST_CP1_OUT='CP1-gate FAIL: no plan review round-1 for P099; run: aid-review-round.sh prepare --plan <plan> --round 1'
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
 

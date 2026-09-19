@@ -55,4 +55,4 @@ an active id or that literal.
 | streamlined skip of cp2 | kept: increment-step skips the cp2 round in streamlined mode; done-advance needs the cp3 index |
 | routing of open findings (`aid_finding_route`, instruction) | `review_open_findings_routed` (mechanical, in `close`) |
 | carried obligations (`aid_obligation_add`, instruction) | `review_open_findings_routed` (a cp2 finding a later step covers) |
-| `review-profile.json` producer (`aid-prefilter.sh profile`) | `scripts/aid-review-profile.sh` (split out in Step 14; same output) |
+| `review-profile.json` producer (the retired pre-filter's `profile` subcommand) | `scripts/aid-review-profile.sh` (split out in Step 14; same output) |

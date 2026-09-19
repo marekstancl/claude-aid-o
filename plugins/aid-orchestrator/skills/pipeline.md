@@ -911,35 +911,12 @@ the plan-final consumers and routes what stays open (§13). The FSM reads
 `cp3/rounds.json`, bound to HEAD; GATES→DONE and done-advance re-check it
 (the D4 exception with the `CP3-Freshness-Exception:` trailer kept).
 
-### Wiring and Behavior Dispatch (C2 observe, E5)
+### Semantic evidence of a step or an EPIC
 
-Two additional C2 dispatch points run when the review-profile's required_lenses include wiring/behavior surfaces.
-These are **observe-only** in E5 — they emit `semantic-review-{wiring|behavior}.json` but do NOT block EXECUTE progression.
-
-#### Wiring dispatch (`c2_mode: "wiring"`)
-
-**Criterion:** Dispatch when ALL of:
-- At least 2 inter-step contracts (producer→consumer) are visible in the current diff AND
-- Profile includes wiring surface (`wiring` in `review-profile.matched_surfaces[]`) AND
-- At least one wiring lens applies (transaction_boundary, field_lineage, operation_order_resource_bound, ui_lifecycle, false_empty_distinction)
-
-**Output:** `semantic-review-wiring.json` in evidence dir
-**dispatch_observed:** Set `dispatch_observed.modes_dispatched[]` += `"wiring"` in the JSON
-
-#### Behavior dispatch (`c2_mode: "behavior"`)
-
-**Criterion:** Dispatch when ALL of:
-- All core behavior paths for this EPIC are present in the accumulated diff (feature-complete slice) AND
-- Profile includes behavior surface (`behavior` in `review-profile.matched_surfaces[]`) AND
-- At least one behavior lens applies
-
-**Output:** `semantic-review-behavior.json` in evidence dir
-**dispatch_observed:** Set `dispatch_observed.modes_dispatched[]` += `"behavior"` in the JSON
-
-**Both wiring and behavior dispatches:**
-- Log `dispatch_observed` count to timeline.jsonl
-- On failure: log `semantic_wiring_would_block` (observe, does NOT block increment)
-- Gate (aid-fsm.sh) does NOT check these files — they are additive evidence only (D1)
+Since P094 the reviewer round's `merged.json` is the semantic evidence of a step
+and of an EPIC; the cp3 `close` writes the per-EPIC `semantic-review-final.json`.
+The verifier's `c2_mode` dispatches at cp2 (`local`, `wiring`, `behavior`) are
+gone; only the plan-final `final` mode remains (§7, `plan-finalize`).
 
 ### D0 Gate Point — Post-Execute Observe (E2)
 
@@ -1809,13 +1786,12 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
       epic_task_path="$(ls .aid-o/tasks/{epic_id}*.md 2>/dev/null | head -1)"
       [[ -z "$epic_task_path" ]] && epic_task_path="$(ls .aid-o/tasks/archive/{epic_id}*.md 2>/dev/null | head -1)"
       ```
-   2. **If the EPIC file resolves → run the profiler** (`aid-prefilter.sh profile`, i.e.
-      `cmd_profile`). Its `diff_range` is `base_commit..HEAD` read from `fsm-state.yaml`. Exit
+   2. **If the EPIC file resolves → run the profiler** (`aid-review-profile.sh`). Its `diff_range` is `base_commit..HEAD` read from `fsm-state.yaml`. Exit
       `22` (`range_undetermined`) is **NON-FATAL**: an unverifiable profile is emitted and the
       run continues — do NOT abort on it.
       ```bash
       set +e
-      bash "$AID_PLUGIN_PATH/scripts/aid-prefilter.sh" profile "$epic_task_path" "$evidence_dir"
+      bash "$AID_PLUGIN_PATH/scripts/aid-review-profile.sh" "$epic_task_path" "$evidence_dir"
       prof_ec=$?
       set -e
       # exit 0 = profile emitted; exit 22 = unverifiable profile emitted (continue);

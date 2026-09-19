@@ -13,7 +13,7 @@ distinct_models: [generalist_a, generalist_b]
 Plan review (CP1) puts a written plan in front of six reviewers before any EPIC
 is generated. Every reviewer gets the same packet and the same rules; only the
 role section differs. This file is the source of the role sections:
-`scripts/aid-plan-review-round.sh prepare` cuts one `## Role:` section out of
+`scripts/aid-review-round.sh prepare --plan` cuts one `## Role:` section out of
 it per reviewer and renders it into `defaults/prompts/review-prompt-v1.md`, the
 template every review checkpoint shares (the step and EPIC roles live in
 `skills/step-review-roles.md`).
@@ -52,7 +52,7 @@ A finding exists only with both:
 - `evidence` — `path:line` inside the repository, or `plan.md:line` for the plan
   itself; several separated by `;`. Every file used must be cited.
 
-A finding without both is rejected by `scripts/aid-plan-review-adjudicate.sh`
+A finding without both is rejected by `scripts/aid-review-adjudicate.sh`
 and recorded in `rejected.json` with the reason. Report only what would lead to
 different work if fixed: no style remarks, no praise.
 

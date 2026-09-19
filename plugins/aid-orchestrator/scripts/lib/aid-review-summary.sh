@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # aid-review-summary.sh — what a review checkpoint cost, in tokens and USD.
-# One library for every checkpoint (P094 Step 11; generalised from
-# aid-plan-review-summary.sh, which it supersedes).
+# One library for every checkpoint (P094 Step 11).
 #
 #   aid_review_usd <model> <in> <out> <cache_read> <cache_write>
 #       USD (four decimals) from defaults/prices.yaml (a project's

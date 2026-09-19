@@ -159,7 +159,7 @@ for n in "${rounds[@]}"; do
   if [[ "$(jq -r .status "${d}/collect.json" 2>/dev/null)" == valid ]]; then
     jq -e . "${d}/merged.json" >/dev/null 2>&1 || _hard "round ${n} evidence unreadable: ${d}/merged.json"
   else
-    _fail "round-${n} invalid: $(jq -r '.reason // "too few answers"' "${d}/collect.json" 2>/dev/null); retry the missing roles with aid-plan-review-round.sh retry, then collect and close"
+    _fail "round-${n} invalid: $(jq -r '.reason // "too few answers"' "${d}/collect.json" 2>/dev/null); retry the missing roles with aid-review-round.sh retry --plan <plan>, then collect and close"
   fi
   last="$n"
 done
@@ -175,7 +175,7 @@ if [[ "$plan_sha" != "$reviewed_sha" ]]; then
     cmp -s "$plan" "${last_dir}/plan-final.md" \
       || _fail "the plan changed after finalize (sha256 ${plan_sha:0:12} differs from round-${last}/plan-final.md); run finalize again"
   else
-    _fail "the plan changed after round ${last} (sha256 ${plan_sha:0:12}, reviewed ${reviewed_sha:0:12}); fix what the round found and run aid-plan-review-round.sh finalize"
+    _fail "the plan changed after round ${last} (sha256 ${plan_sha:0:12}, reviewed ${reviewed_sha:0:12}); fix what the round found and run aid-review-round.sh finalize --plan <plan>"
   fi
 fi
 

@@ -1,7 +1,7 @@
 {
   "schema_version": "aid-2.0",
   "artifact_type": "review_profile",
-  "producer": "aid-prefilter.sh profile@2.42.0",
+  "producer": "aid-review-profile.sh@2.99.0",
   "created_at": "2026-06-28T00:00:00Z",
   "control_protocol": "aid-2.0",
   "identity": {"project_id": "example-project"},
@@ -9,7 +9,7 @@
   "revision": {"head_sha": "abc123def456abc123def456abc123def456abc1", "head_is_current": true, "freshness": "current"},
   "status": "pass",
   "verdict": {"kind": "none", "ready": false},
-  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-prefilter.sh"},
+  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-review-profile.sh"},
   "review_profile": {
     "matched_surfaces": ["scripts_core", "schemas_and_policies"],
     "plan_time_surfaces": ["scripts_core"],

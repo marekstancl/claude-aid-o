@@ -121,8 +121,8 @@ merges what survives the evidence rule:
 - the controller's procedure, command by command: "Plan review (CP1)" in
   `commands/aid-plan.md`;
 - the rounds, the adjudicator and the round evidence under
-  `.aid-o/work/evidence/<plan_id>/cp1/`: `scripts/aid-plan-review-round.sh`
-  and `scripts/aid-plan-review-adjudicate.sh`;
+  `.aid-o/work/evidence/<plan_id>/cp1/`: `scripts/aid-review-round.sh --plan`
+  and `scripts/aid-review-adjudicate.sh`;
 - the gate before EPIC generation: `scripts/aid-cp1-gate.sh`, which reads only
   that round evidence.
 
@@ -130,17 +130,18 @@ merges what survives the evidence rule:
 
 ## C2 Semantic Review — Lens Catalog
 
-C2 produces auditable semantic evidence alongside the existing `.md` gate output (dual-emit, D1).
-Evidence format: `semantic-review-{mode}.json` wrapping findings via `aid-finding-merge.sh`.
+C2 produces auditable semantic evidence at the plan-final boundary.
+Evidence format: `semantic-review-final.json` wrapping findings via `aid-finding-merge.sh`.
 
-### 4-Mode Dispatch Contract
+### Dispatch contract
 
-| Mode | When dispatched | Typical trigger |
-|------|----------------|-----------------|
-| `local` | CP2 (per-step, contract/high-risk steps) | Pre-filter classification RUN on step diff |
-| `wiring` | First runnable assembly slice | At least 2 inter-step contracts exist in diff + wiring surface detected |
-| `behavior` | Feature-complete assembly point | All core behavior paths present in diff |
-| `final` | CP3 (full EPIC diff) | EXECUTE→GATES transition |
+| Mode | When dispatched | Producer |
+|------|----------------|----------|
+| `final` | the plan-final boundary (`aid-plan-fsm.sh plan-finalize`) | the verifier, filling the generated envelope |
+
+The `local`, `wiring` and `behavior` modes went with P094: a step's or an
+EPIC's semantic evidence is the reviewer round's merged findings, and the cp3
+`close` writes the per-EPIC `semantic-review-final.json` itself.
 
 **No-mega-prompt rule (D2):** Verifier dispatches C2 with a profile-selected subset of lenses, not all 12 at once. The `review-profile.required_lenses[]` field governs which lenses run per dispatch.
 

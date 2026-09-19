@@ -2,7 +2,7 @@
 # =============================================================================
 # aid-review-round.sh — one review round at a time, for every checkpoint:
 # the plan review (CP1), the step review (CP2), the EPIC review (CP3) and the
-# fast-mode review (CP6). P094 Step 6; successor of aid-plan-review-round.sh.
+# fast-mode review (CP6). P094 Step 6; the CP1-only round script is gone.
 #
 # Which review a call is about is the first option group:
 #   --plan <file>                                       CP1: evidence/<plan_id>/cp1/

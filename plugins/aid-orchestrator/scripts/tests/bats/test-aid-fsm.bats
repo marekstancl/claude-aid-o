@@ -2348,3 +2348,90 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   [ "$status" -ne 0 ]
   [[ "$output" == *"file missing"* && "$output" == *"exists at ${TEST_PROJECT_ROOT}/verifier-output-cp3-security.md"* ]]
 }
+
+
+# ─── CP4 behaviour-trace gate of fsm_check_verifier_output (moved from
+# test-behavior-trace.bats by P094 Step 14; the function is CP4-only now) ────
+_write_base_verifier() {
+  local file="$1"
+  cat > "$file" <<EOF
+_generated_by: aid-orchestrator:verifier@test-fixture
+_generated_at: 2026-06-19T00:00:00Z
+classification: RUN
+verdict: pass
+EOF
+}
+# ─── Test 1: behavior_trace_count=0 FAILS ────────────────────────────────
+
+@test "behavior_trace: count=0 with required=true fails (exit code 1)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+behavior_trace_count: 0
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 1 ]
+}
+
+# ─── Test 2: behavior_trace_count=3 PASSES ───────────────────────────────
+
+@test "behavior_trace: count=3 with required=true passes (exit code 0)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+behavior_trace_count: 3
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Test 3: behavior_trace_required=false PASSES regardless of count ────
+
+@test "behavior_trace: required=false, count=0 passes (gate skipped)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: false
+behavior_trace_count: 0
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Test 4: no behavior_trace_required field PASSES (default is no enforcement)
+
+@test "behavior_trace: field absent in file passes (opt-in gate, no field = skip)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  # No behavior_trace_required line at all.
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Test 5: missing behavior_trace_count when required FAILS ─────────────
+
+@test "behavior_trace: required=true but count field absent fails (exit code 1)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+EOF
+  # behavior_trace_count is intentionally omitted — yaml_field returns empty.
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 1 ]
+}
+
+# ─── Test 6: behavior_trace_count=1 with required=true PASSES (boundary) ──
+
+@test "behavior_trace: count=1 with required=true passes (boundary value)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+behavior_trace_count: 1
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}

@@ -3181,7 +3181,7 @@ cmd_pm_override() {
 
   case "$target" in
     c3) : ;;
-    c0) echo "ERROR: pm-override grant: 'c0' is gone with the Codex plan review loop; a PM decision on plan review rounds is recorded with aid-plan-review-round.sh override." >&2; exit 2 ;;
+    c0) echo "ERROR: pm-override grant: 'c0' is gone with the Codex plan review loop; a PM decision on plan review rounds is recorded with aid-review-round.sh override --plan <plan>." >&2; exit 2 ;;
     *) echo "ERROR: pm-override grant: target must be 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
   esac
   [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || {
@@ -5850,7 +5850,7 @@ Fix: revert plan.json to init state; OR, if the PM regenerated the plan on purpo
   # Log the commit sha at THIS step boundary so the cp2 pre-filter can anchor
   # its next-step diff range to the step (step_commit_sha..HEAD), not HEAD~1
   # (which a bookkeeping commit on top would fool into a docs_only false-green).
-  # First introduces the step_commit event; aid-prefilter.sh cp2 consumes it.
+  # First introduces the step_commit event; aid-step-check.sh cp2 consumes it.
   local _step_timeline _step_commit_sha
   _step_timeline=$(derive_timeline "$state_file") || true
   _step_commit_sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -6283,7 +6283,7 @@ _c4_divergence_class() {
       simplifier)          printf 'simplifier_missing'; return 0 ;;
       review_profile|gates_report|plan_review|delivery_gate|semantic_review_final|acceptance_evidence|curator_report|audit_report)
                            printf 'required_input';     return 0 ;;
-      *)                   printf 'unclassified';       return 0 ;;  # e.g. invalidation_map / unknown id
+      *)                   printf 'unclassified';       return 0 ;;  # an unknown id
     esac
   fi
 
@@ -6850,18 +6850,18 @@ cmd_done_advance() {
       #
       # PRECISION (Step 4 CP2 finding 2): what an intermediate plan-branch EPIC
       # stops producing is the C3 PRODUCER HOOK's `review-profile.json` (the
-      # aid-prefilter.sh risk profile over the full base_commit..HEAD diff that
+      # aid-review-profile.sh risk profile over the full base_commit..HEAD diff that
       # feeds the plan-final C3/Curator/Auditor chain) — NOT the CP3 verifier
-      # pair. The CP3 code-review + CP3 security verifiers are still dispatched
-      # per EPIC in plan_branch mode, and under `streamlined_mode: true`
-      # fsm_check_streamlined_integration_review (above the skip guard, retained
-      # in both modes) still hard-`die`s when their two outputs are absent. Only
+      # round. The cp3 review round still runs per EPIC in plan_branch mode, and
+      # under `streamlined_mode: true` fsm_check_streamlined_integration_review
+      # (above the skip guard, retained in both modes) still hard-`die`s without
+      # its closed passing index. Only
       # this presence check and the CP3 FRESHNESS re-check are skipped, so that
       # under enforcement=blocking a plan-branch EPIC is not failed for missing
       # an artifact the mode deliberately stopped producing.
       if [[ "$_pb_plan_branch" != "true" ]]; then
       # review-profile.json is produced in the DONE review sub-phase (pipeline.md,
-      # aid-prefilter.sh profile over the full base_commit..HEAD diff). Its ABSENCE
+      # aid-review-profile.sh over the full base_commit..HEAD diff). Its ABSENCE
       # means the C3 producer wiring did not run for this EPIC. OBSERVE by default:
       # emit review_profile_would_block telemetry but DO NOT block — grandfather-safe
       # for in-flight EPICs (e.g. E-046-3_3) that predate the producer wiring.
@@ -6882,50 +6882,6 @@ cmd_done_advance() {
       fi
       # End C3 activation review-profile presence check (+ plan_branch skip guard)
 
-      # ── C3 activation (IMP-177 / E-059-1_2 Step 2): invalidation-map expectation
-      # check (OBSERVE). Closes the OTHER half of IMP-177: aid-invalidation-map.sh
-      # was registered but never called from the live flow. The pipeline.md post-fix
-      # hook now (a) emits a `gate_fixer_fix_applied` timeline event whenever a
-      # gate-fixer fix lands at an in-scope dispatch site, and (b) calls
-      # aid-invalidation-map.sh, which emits an `invalidation_map_produced` event.
-      # This check compares the COUNTS of these two events (not just presence) to
-      # detect when a fix was applied but its post-fix hook did not run. Multiple
-      # applied fixes without corresponding invalidation_map_produced events
-      # ⇒ emit invalidation_map_expected_missing telemetry.
-      #
-      # OBSERVE by default (transition PASSES). INVALIDATION_MAP_ENFORCEMENT=blocking
-      # (E10 promotion / test seam, mirrors the C3_AUDIT_POLICY override convention)
-      # flips it to a hard precondition so the blocking branch stays live, testable
-      # code rather than decoration. Fail-closed reads: no timeline / no
-      # gate_fixer_fix_applied event ⇒ no fix was applied ⇒ this check is a no-op
-      # (never manufactures a would_block on runs that applied no fixes).
-      local _im_enforcement="${INVALIDATION_MAP_ENFORCEMENT:-observe}"
-      local _im_timeline="${evidence_dir}/timeline.jsonl"
-      if [[ -f "$_im_timeline" ]]; then
-        local _im_applied _im_produced
-        # Count gate_fixer_fix_applied events in the timeline (fail-safe to 0).
-        # Use -Rc (raw input + compact output) so jq outputs one line per matched event,
-        # avoiding pretty-printing inflation that would inflate wc -l count.
-        _im_applied=$(jq -Rc 'fromjson? | select(.event=="gate_fixer_fix_applied")' "$_im_timeline" 2>/dev/null | wc -l)
-        # Count invalidation_map_produced events in the timeline (fail-safe to 0).
-        # Use -Rc (raw input + compact output) so jq outputs one line per matched event.
-        _im_produced=$(jq -Rc 'fromjson? | select(.event=="invalidation_map_produced")' "$_im_timeline" 2>/dev/null | wc -l)
-
-        if [[ $_im_applied -gt 0 && $_im_produced -lt $_im_applied ]]; then
-          # At least one fix was applied but fewer invalidation-map events were produced.
-          log_event "$_im_timeline" "invalidation_map_expected_missing" \
-            check="invalidation_map_expected" enforcement="$_im_enforcement" \
-            reason="gate_fixer_fix_applied events($_im_applied) > invalidation_map_produced($_im_produced)"
-          if [[ "$_im_enforcement" == "blocking" ]]; then
-            echo "PRECONDITION FAIL: gate_fixer_fix_applied events($_im_applied) exceeds invalidation_map_produced events($_im_produced) — the invalidation-map post-fix hook (pipeline.md, search: 'Invalidation-Map Post-Fix Hook') must run after every gate-fixer fix (enforcement=blocking)." >&2
-            log_event "$_im_timeline" "fsm_done_advance_fail" check="invalidation_map_expected" reason="invalidation_map_event_count_mismatch"
-            exit 2
-          else
-            log_warn "invalidation_map_expected would_block (enforcement=observe, non-blocking): gate_fixer_fix_applied($_im_applied) > invalidation_map_produced($_im_produced) in ${evidence_dir}"
-          fi
-        fi
-      fi
-      # End C3 activation invalidation-map expectation check
 
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
@@ -7338,7 +7294,7 @@ EOF
       # profile requires C3, this REPLACES the legacy yaml_field()-based .md/.yaml
       # blocking_findings read — ONE source of truth, not two parallel checks
       # (M2 fix). Risk profile comes from review-profile.json (produced by
-      # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
+      # aid-review-profile.sh / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
       # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
       # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
       # other profile (docs_trivial/low/medium), or a run with no review-profile.json at

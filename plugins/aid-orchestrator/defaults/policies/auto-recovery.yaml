@@ -287,7 +287,7 @@ stop_classes:
       - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
         anchor: budget_exhausted
         note: "C3 fix loop sets top_outcome=escalated with escalation_reason=budget_exhausted"
-      - file: plugins/aid-orchestrator/scripts/aid-plan-review-round.sh
+      - file: plugins/aid-orchestrator/scripts/aid-review-round.sh
         anchor: "exceeds rounds_default"
         note: "plan review refuses a round beyond rounds_default without the PM's recorded override"
     allowed_actions: []
@@ -375,7 +375,7 @@ existing_loops:
     budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
     budget_kind: policy_key
     note: >-
-      aid-plan-review-round.sh prepare refuses a round beyond it unless the
+      aid-review-round.sh prepare refuses a round beyond it unless the
       PM's words are recorded with `override`; the gate refuses such a round too.
 
   - id: gate_retry

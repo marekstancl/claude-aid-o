@@ -50,7 +50,6 @@
 #     acceptance-evidence, gates_report (root, fallback gates/), plan-review (plan_ref hop),
 #     verification-report (aid-evidence-verify.sh --at-head; fail OR unverifiable both block).
 #   PROFILE-GATED (required only when the C3 audit gate is active): curator-report, audit-report.
-#   ADVISORY (missing → advisory, never blocks): invalidation-map.
 #   CONDITIONAL (marker→toggle→file): reporter (.aid-o/reports/<Pnum>-delivery.md, reporter.enabled),
 #     simplifier (<evidence_dir>/simplifier-report.md, simplifier.enabled).
 #   OPTIONAL: waiver-*.json → waivers_applied[] (Waived != pass).
@@ -215,7 +214,7 @@ _markdown_head_match() {
 _is_canonical_input() {
   case "$1" in
     review_profile|delivery_gate|semantic_review_final|acceptance_evidence|gates_report|\
-curator_report|plan_review|verification_report|audit_report|invalidation_map|reporter|simplifier)
+curator_report|plan_review|verification_report|audit_report|reporter|simplifier)
       return 0 ;;
     *) return 1 ;;
   esac
@@ -944,14 +943,6 @@ main() {
   _c3_gate_active "$EVIDENCE_DIR" && C3_ACTIVE=true
   process_profile_gated curator_report "${EVIDENCE_DIR}/curator-report.json"
   process_profile_gated audit_report   "${EVIDENCE_DIR}/audit-report.json"
-
-  # --- invalidation-map (ADVISORY — never blocks) ---
-  local inv_map="${EVIDENCE_DIR}/invalidation-map.json"
-  if _is_json "$inv_map"; then
-    add_input invalidation_map "invalidation-map.json" "advisory" "present (advisory)" "$(_artifact_head_match "$inv_map")"
-  else
-    add_input invalidation_map "invalidation-map.json" "advisory" "advisory-missing (does not block)" true
-  fi
 
   # --- Reporter / Simplifier CONDITIONAL ---
   compute_reporter

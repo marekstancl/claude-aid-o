@@ -301,7 +301,7 @@ _pm_lock_path() {
 # _pm_project_id [root] — best-effort project_id for the envelope's
 # `identity.project_id` (the protocol validator rejects an empty one).
 # Mirrors the established grep-based convention used elsewhere in this
-# plugin (aid-invalidation-map.sh, aid-acceptance-evidence.sh,
+# plugin (aid-acceptance-evidence.sh,
 # aid-consumption-proof.sh) rather than introducing a new lookup path.
 _pm_project_id() {
   local root="${1:-$(_plan_manifest_project_root)}"

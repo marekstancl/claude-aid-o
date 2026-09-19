@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-review-adjudicate.sh — turn a review round's valid answers into one list,
-# for any checkpoint (P094 Step 5; successor of aid-plan-review-adjudicate.sh).
+# for any checkpoint (P094 Step 5; the CP1-only adjudicator is gone).
 #
 #   aid-review-adjudicate.sh <round_dir> --project-root <dir> --namespace <ns>
 #                            [--plan <packet/plan.md>] [--step-check <step-check.json>]
