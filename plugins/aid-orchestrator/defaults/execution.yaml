@@ -357,7 +357,7 @@ acceptable_debt:
   - "placeholder error messages (replaced before release)"
 
 # Review-quality guidance honored by curator/auditor. Enforcement routing (AID-052, 2026-06-03):
-#   HARD-GATED in the pre-filter (defaults/pre-filter-rules.yaml, via aid-prefilter.sh):
+#   HARD-GATED by the step check (defaults/pre-filter-rules.yaml, via aid-step-check.sh):
 #     hardcoded credentials → hardcoded_secret_pattern; disabled security checks →
 #     disabled_security_check; skipped tests → skipped_test; console.log/debugger → debug_leftover
 #     (bare print() intentionally NOT gated — too common in legit code).

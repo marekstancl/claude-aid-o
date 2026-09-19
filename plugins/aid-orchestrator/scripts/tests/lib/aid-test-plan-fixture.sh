@@ -191,7 +191,7 @@ aid_fixture_seed_plan_review() {
   local root="${1:?aid_fixture_seed_plan_review: project root required}"
   local plan="${2:?aid_fixture_seed_plan_review: plan required}"
   local plugin="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-  local round_sh="$plugin/scripts/aid-plan-review-round.sh" id dir role
+  local round_sh="$plugin/scripts/aid-review-round.sh" id dir role
   id="$(awk -F': *' 'NR > 1 && /^---$/ {exit} /^id:/ {gsub(/["\x27]/, "", $2); print $2; exit}' "$plan")"
   [[ -n "$id" ]] || { echo "aid_fixture_seed_plan_review: ${plan} has no frontmatter id" >&2; return 2; }
   dir="$root/.aid-o/work/evidence/${id}/cp1"
@@ -199,14 +199,14 @@ aid_fixture_seed_plan_review() {
   rm -rf "$dir"
   bash "$plugin/scripts/aid-plan-check.sh" "$plan" --project-root "$root" \
     --json "$root/.aid-o/work/evidence/${id}/plan-check.json" --quiet >/dev/null 2>&1 || true
-  bash "$round_sh" prepare "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 || {
+  bash "$round_sh" prepare --plan "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 || {
     echo "aid_fixture_seed_plan_review: prepare failed for ${plan}" >&2; return 1; }
   for role in $(jq -r '.reviewers_expected[]' "$dir/round-1/round.json"); do
     jq -n --arg r "$role" '{role: $r, findings: [], no_findings_reason: "fixture: nothing to review"}' \
       > "$dir/round-1/reviewer-${role}.json"
   done
-  bash "$round_sh" collect "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 \
-    && bash "$round_sh" close "$plan" --round 1 --project-root "$root" \
+  bash "$round_sh" collect --plan "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 \
+    && bash "$round_sh" close --plan "$plan" --round 1 --project-root "$root" \
          --tokens $(jq -r '.reviewers_expected[] | "\(.)=unknown"' "$dir/round-1/round.json") >/dev/null 2>&1 || {
     echo "aid_fixture_seed_plan_review: collect/close failed for ${plan}" >&2; return 1; }
   bash "$plugin/scripts/aid-cp1-gate.sh" --plan "$plan" --project-root "$root" >/dev/null 2>&1 || {

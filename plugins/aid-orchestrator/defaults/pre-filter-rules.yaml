@@ -56,5 +56,28 @@ fail_rules:
     description: "Security check disabled inline (nosec / verify=False / TLS verification off)"
     pattern: '# *nosec|verify *= *False|rejectUnauthorized *: *false|InsecureSkipVerify'
 
+# P094: added lines that add or change a request handler, route, command entry
+# point or job. A match makes the behaviour trace mandatory for a generalist's
+# blocker/major finding (skills/step-review-roles.md); read by aid-step-check.sh.
+handler_patterns:
+  - id: http_route_decorator
+    description: "Flask/FastAPI/Django-style route or endpoint decorators"
+    pattern: '@(app|router|api|bp|blueprint)\.(get|post|put|patch|delete|route|api_route)\s*\('
+  - id: express_route
+    description: "Express/Koa/Hono style route registration"
+    pattern: '\b(app|router)\.(get|post|put|patch|delete|use)\s*\('
+  - id: request_handler_def
+    description: "A function taking a request object"
+    pattern: '\b(def|function|async def)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\b(request|req|ctx)\b'
+  - id: command_entry_point
+    description: "A CLI subcommand dispatcher or main entry"
+    pattern: '\bcmd_[a-z_]+\(\)|argparse\.ArgumentParser\(|@click\.command|@app\.command'
+  - id: background_job
+    description: "A job or task registered with a scheduler/queue"
+    pattern: '@(celery|shared_task|arq|cron|scheduler)[a-z_.]*\(|WorkerSettings|\.functions\s*=|@task\('
+  - id: message_handler
+    description: "A handler for an external message or webhook"
+    pattern: '\b(on_message|webhook|handle_event|handler)\s*\('
+
 run_rules:
   default: true

@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 0,
+               "severity": "blocker",
+               "claim": "Renaming `ordinal` to `payload_ordinal` in the `om_ownership_conflict` conflicts shape breaks the untouched SessionDetailPage.tsx consumer, which still reads `c.ordinal` (via `OmOwnershipConflict` in validationErrors.ts) for form field paths, banner keys and the resolve/dedupe logic.",
+               "command": "grep -n \"ordinal: number\" ui/src/lib/validationErrors.ts; grep -n \"c\\.ordinal\" ui/src/pages/SessionDetailPage.tsx",
+               "evidence": "ui/src/lib/validationErrors.ts:222; ui/src/pages/SessionDetailPage.tsx:1690; ui/src/pages/SessionDetailPage.tsx:1692; ui/src/pages/SessionDetailPage.tsx:466; ui/src/pages/SessionDetailPage.tsx:2365; wan/api/scan.py:4459",
+               "fix": "Either keep the wire key `ordinal` (map internally to `payload_ordinal` only where consumed by validationInbox.ts) or update `ui/src/lib/validationErrors.ts` (OmOwnershipConflict interface) and every SessionDetailPage.tsx usage (`c.ordinal` at omPointNumberPath, banner `key`, `dropOmConflict`, `setError` path, `parseOmOwnershipConflictError`) to `payload_ordinal`, and add a test exercising this consumer path — the step currently only updates the separate validationInbox.ts/useSessions.ts consumer and leaves this one broken."}],
+ "no_findings_reason": ""}

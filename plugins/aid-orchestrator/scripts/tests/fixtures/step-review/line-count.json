@@ -1,0 +1,242 @@
+{
+  "written": "2026-09-19",
+  "before_commit": "033dec6f",
+  "after_commit": "HEAD of feat/p094-step-review after Step 14",
+  "files": [
+    {
+      "group": "removed",
+      "file": "scripts/aid-prefilter.sh",
+      "before": 759,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/aid-invalidation-map.sh",
+      "before": 254,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/aid-plan-review-round.sh",
+      "before": 465,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/aid-plan-review-adjudicate.sh",
+      "before": 166,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/aid-plan-review-config.sh",
+      "before": 131,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/aid-plan-review-summary.sh",
+      "before": 52,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/aid-plan-review-adapter-claude.md",
+      "before": 54,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "defaults/prompts/plan-review-prompt-v1.md",
+      "before": 60,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "defaults/schemas/plan-review-finding.schema.json",
+      "before": 46,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "defaults/schemas/invalidation-map.schema.json",
+      "before": 51,
+      "after": 0
+    },
+    {
+      "group": "generalised",
+      "file": "skills/pipeline.md",
+      "before": 3266,
+      "after": 2894
+    },
+    {
+      "group": "generalised",
+      "file": "agents/verifier.md",
+      "before": 382,
+      "after": 239
+    },
+    {
+      "group": "generalised",
+      "file": "agents/gate-fixer.md",
+      "before": 240,
+      "after": 231
+    },
+    {
+      "group": "generalised",
+      "file": "commands/aid-run.md",
+      "before": 706,
+      "after": 846
+    },
+    {
+      "group": "generalised",
+      "file": "commands/aid-do.md",
+      "before": 255,
+      "after": 285
+    },
+    {
+      "group": "generalised",
+      "file": "commands/aid-plan.md",
+      "before": 740,
+      "after": 775
+    },
+    {
+      "group": "generalised",
+      "file": "defaults/templates/verifier-output-template.md",
+      "before": 222,
+      "after": 195
+    },
+    {
+      "group": "generalised",
+      "file": "scripts/aid-fsm.sh",
+      "before": 9310,
+      "after": 9001
+    },
+    {
+      "group": "generalised",
+      "file": "scripts/aid-release-policy.sh",
+      "before": 1365,
+      "after": 1356
+    },
+    {
+      "group": "generalised",
+      "file": "defaults/policies/review-checkpoints.yaml",
+      "before": 61,
+      "after": 64
+    },
+    {
+      "group": "generalised",
+      "file": "scripts/lib/aid-plan-review-packet.sh",
+      "before": 167,
+      "after": 178
+    },
+    {
+      "group": "generalised",
+      "file": "scripts/aid-emit-dispatch.sh",
+      "before": 240,
+      "after": 247
+    },
+    {
+      "group": "generalised",
+      "file": "skills/review-checkpoint-contracts.md",
+      "before": 208,
+      "after": 189
+    },
+    {
+      "group": "new",
+      "file": "scripts/aid-step-check.sh",
+      "before": 0,
+      "after": 261
+    },
+    {
+      "group": "new",
+      "file": "scripts/aid-review-round.sh",
+      "before": 0,
+      "after": 752
+    },
+    {
+      "group": "new",
+      "file": "scripts/aid-review-adjudicate.sh",
+      "before": 0,
+      "after": 245
+    },
+    {
+      "group": "new",
+      "file": "scripts/aid-review-profile.sh",
+      "before": 0,
+      "after": 464
+    },
+    {
+      "group": "new",
+      "file": "scripts/lib/aid-review-config.sh",
+      "before": 0,
+      "after": 186
+    },
+    {
+      "group": "new",
+      "file": "scripts/lib/aid-step-review-packet.sh",
+      "before": 0,
+      "after": 215
+    },
+    {
+      "group": "new",
+      "file": "scripts/lib/aid-review-summary.sh",
+      "before": 0,
+      "after": 156
+    },
+    {
+      "group": "new",
+      "file": "scripts/lib/aid-review-adapter-claude.md",
+      "before": 0,
+      "after": 89
+    },
+    {
+      "group": "new",
+      "file": "skills/step-review-roles.md",
+      "before": 0,
+      "after": 213
+    },
+    {
+      "group": "new",
+      "file": "defaults/prompts/review-prompt-v1.md",
+      "before": 0,
+      "after": 61
+    },
+    {
+      "group": "new",
+      "file": "defaults/schemas/review-finding.schema.json",
+      "before": 0,
+      "after": 89
+    },
+    {
+      "group": "new",
+      "file": "defaults/prices.yaml",
+      "before": 0,
+      "after": 41
+    },
+    {
+      "group": "new",
+      "file": "reference/review-successors.md",
+      "before": 0,
+      "after": 58
+    }
+  ],
+  "totals": {
+    "before": 19200,
+    "after": 19330,
+    "delta": 130
+  },
+  "fsm_functions": {
+    "before": {
+      "fsm_check_verifier_output": 67,
+      "fsm_check_cp3_freshness": 137,
+      "verify_provenance": 76,
+      "_cp3_freshness_route": 11
+    },
+    "after": {
+      "fsm_check_verifier_output": 67,
+      "fsm_check_review_round": 158
+    }
+  },
+  "branch_diff": "160 files changed, 9618 insertions(+), 5845 deletions(-) (plugins/ + docs/ + testbed-independent); tests and fixtures included",
+  "v9_verdict": "NOT lower after total for the scoped file list"
+}

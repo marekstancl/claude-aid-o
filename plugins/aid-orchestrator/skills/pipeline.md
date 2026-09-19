@@ -712,8 +712,8 @@ For steps with `role: backend` or `role: frontend`:
 
 ### Step numbers: humans count from 1, the FSM from 0
 
-`current_step`, `increment-step`, `classify N`, `step-N-verify.md` and
-`verifier-output-step-N.md` are **0-based**; the plan, the EPIC, the agent's report and
+`current_step`, `increment-step`, `--step N`, `step-N-verify.md` and
+`cp2/step-N/` are **0-based**; the plan, the EPIC, the agent's report and
 every message to the PM are **1-based**. This is deliberate and not going to change —
 renumbering would orphan every existing evidence pack. When you write for a human, say
 "step 3 (evidence `step-2-*`)"; when you look for evidence, subtract one.
@@ -884,307 +884,39 @@ On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
 3. **capture-absent = unverifiable:** If baseline or actual screenshot missing → verdict `unverifiable` → log to step-verify, do NOT PASS or FAIL the visual check; continue to next step with note.
 4. **Skip conditions:** No visual_refs AND no `ui_change_mode: existing_ui` on step → skip visual check entirely.
 
-### Review Checkpoint CP2 (per-step, ENFORCED v2.18.0+)
+### Step review (CP2) — one section, in the run command
 
-After step implementation + step-N-verify.md write, before `aid-fsm.sh increment-step`:
-
-1. **Pre-filter classification** (deterministic bash, no LLM):
-   ```
-   bash $AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify <N> <evidence_dir>
-   ```
-
-   **Run this for EVERY step. There is no step-0 special case** (P079 Step 9,
-   IMP-474 — a live run seeded step 0 by hand and left every other step to
-   classify, which looked like two different rules and was neither). The seed
-   file `verifier-output-step-<N>.md` is always classify's product: a verifier
-   that finds no seed means classify was SKIPPED for that step. Recovery: run
-   classify, then dispatch the verifier — never hand-write the seed.
-   Exit code:
-   - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
-   - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
-   - `20` (FAIL) — caller dispatches verifier subagent with `focus=security` (security keywords detected in diff).
-   - `22` (`range_undetermined`) — cp2 could not determine its diff range (no `step_commit` event in
-     timeline.jsonl AND no `base_commit` in fsm-state.yaml). **No output file is written** (no false SKIP
-     stub). Recovery: let the FSM emit a `step_commit` (it is logged automatically at each
-     `increment-step`) or ensure `base_commit` is set in fsm-state.yaml; or set `CP2_RANGE_POLICY=observe`
-     to fall back to `HEAD~1..HEAD` (emits a loud `cp2_range_fallback` event). **NEVER hand-craft the
-     output file** — that reintroduces the OBS-20260705-01 false-green.
-
-   **Range resolution (cp2, P060 Step 3 — OBS-20260705-01):** cp2 classifies from the STEP boundary,
-   not the last commit, so a production step with a bookkeeping commit on top is no longer false-green'd
-   `docs_only`. Order: (1) last `step_commit` event in timeline → `step_commit_sha..HEAD`; (2) else
-   `base_commit` from `evidence_dir/fsm-state.yaml` → `base_commit..HEAD` (fail-safe WIDER); (3) else
-   exit 22 (blocking) or loud `HEAD~1..HEAD` fallback (`CP2_RANGE_POLICY=observe`).
-
-2. **Verifier dispatch** (only for RUN/FAIL):
-
-   **In `agent_tool` mode (default):** call `Agent()` directly — no `aid-emit-dispatch.sh` wrappers needed.
-
-   **In `subagent` mode only (`dispatch_mode: subagent` in plugin.yaml):** wrap with start/complete:
-
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
-     --focus "cp2-step-<N>" \
-     --agent-id "aid-orchestrator:verifier" \
-     --evidence-dir "$evidence_dir"
-   ```
-
-   ```
-   Agent({
-     subagent_type: "aid-orchestrator:verifier",
-     description: "CP2 step <N>",
-     prompt: <verifier prompt with focus=<derived>, diff, DoD, step.outputs, step.forbidden_paths>
-   })
-   ```
-   Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
-   Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
-
-   After `Agent()` returns (`subagent` mode only):
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
-     --focus "cp2-step-<N>" \
-     --output-file "$evidence_dir/verifier-output-step-<N>.md" \
-     --evidence-dir "$evidence_dir"
-   ```
-
-   `<dispatch-focus>` substitution rule for CP2: `focus="cp2-step-N"`, `step_n=N`
-   (literal step number). The same start/complete pair is re-emitted on every retry
-   in the CP2 fix loop (max 2 iterations) — timeline therefore contains 2× start +
-   2× complete events for retried steps; compliance check treats the last
-   complete event as authoritative provenance.
-
-3. **FSM precondition** (`aid-fsm.sh increment-step`):
-   - Rejects if verifier-output-step-N.md missing, or has empty/missing `_generated_by` or `_generated_at` (anti-fabrication).
-   - Rejects if `verdict: pending` (pre-filter classified RUN/FAIL but verifier never dispatched).
-   - Rejects if plan.json sha256 hash differs from cmd_init-stamped hash (mid-EPIC tampering check).
-   - **Rejects if `checkpoint:` is set and ≠ `cp2`** (P060 Step 3 bypass guard, increment call-site ONLY):
-     a cp3/cp4-produced stub must not satisfy the per-step CP2 precondition. Absent `checkpoint` is
-     backward-compatible. The shared `fsm_check_verifier_output` stays checkpoint-agnostic so the cp3
-     consumers (EXECUTE→GATES) still accept `checkpoint: cp3`.
-   - **Produces a `step_commit` event** at the step-advance tail (`step_n`, `commit_sha=HEAD`) — the
-     boundary marker the next step's cp2 classify consumes for its diff range.
-   - **Validates the IMP-263 step-binding** when present: `step_index` must equal `current_step`,
-     `step_id`/`plan_step_hash` must match the live `plan.json` step, `reviewed_commit` must be
-     current HEAD. A copied/renamed prior verify file is rejected (`binding_*` reasons) before any
-     mutation. Absent binding → `step_binding_absent` observe event (or hard fail under
-     `AID_STEP_BINDING=strict` on a non-grandfathered run).
-   - **Idempotent + crash-safe**: the accepted `idempotency_token` and the `current_step` bump commit
-     together via `step-transition-ledger.jsonl` (ledger append, then state bump). A replayed token
-     returns `status=already_applied` without advancing; a crash between ledger and state is repaired
-     on the next call (`step_transition_recovered`), so the pair is old-valid or new-valid — never a
-     double advance. The controller reads `status=`, never bare stdout.
-
-4. **Repeated-fail telemetry**:
-   - `fsm_precondition_repeated_fail_step` (same step + same precondition × 3) → step is structurally problematic.
-   - `fsm_precondition_repeated_fail_epic` (same precondition across different steps × 3) → systematic bypass.
-
-5. **Verifier deprivation rules** (per `agents/verifier.md`): verifier sees ONLY diff + DoD + step.outputs +
-   step.forbidden_paths. NO Architecture Context, NO Implementation Detail rationale, NO Memory queries.
-   Prompt explicitly says "you do NOT see why, only what changed."
-
-Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verifier. Max 2 iterations. E7 on exhaustion.
-
-A CP2 finding whose file no remaining step may touch is ROUTED before the
-checkpoint closes (§13 *Routing a finding no remaining step may fix*);
-done-advance refuses over one that was never recorded.
-**Invalidation-Map call site 1/5:** after each applied CP2 fix, run the **Invalidation-Map Post-Fix Hook** (§13, observe-only) with `fix_ref=cp2-step-<N>-iter<K>` (capture `pre_fix_ref` before dispatching the fixer).
-
-**Retry telemetry:** Every re-dispatch in the CP2 fix loop re-emits the same
-`verifier_dispatch_start` / `verifier_dispatch_complete` pair documented above
-(focus=`cp2-step-<N>`, step_n=`<N>`). Iteration 2 therefore appends a second
-start/complete pair to `timeline.jsonl`; provenance binding uses the last
-pair (closest to `_generated_at`).
-
-#### C2 Dual-Emit in CP2
-
-When step diff matches a C2 semantic surface (controlled by `review-profile.required_lenses`):
-- Verifier task input includes: `c2_mode: "local"` (for local/contract steps) or omit for trivial steps
-- Verifier writes `semantic-review-local.json` alongside `verifier-output-step-N.md`
-- Gate (aid-fsm.sh) reads ONLY the .md — JSON is additive evidence (D1: gate unchanged)
+After the step's commit and `step-N-verify.md`, before `increment-step`: the
+step check, the reviewer round and `close`, exactly as `commands/aid-run.md`
+"Step review (CP2) and EPIC review (CP3)" lists them (roles in
+`skills/step-review-roles.md`). `increment-step` reads `cp2/step-N/rounds.json`
+and nothing else. This skill does not restate the commands.
 
 ### Dispatch Protocol
 
-**`dispatch_mode` determines whether timeline events are required:**
+> **⛔ Non-negotiable anti-fabrication rule.** Every reviewer of a round is a real,
+> independent agent the controller dispatches inside the `aid-emit-dispatch.sh`
+> start/complete bracket the adapter prescribes; `close` refuses an answer with
+> no dispatch record (`no_dispatch_record`) and the FSM refuses a round prepared
+> `--stub`. The controller never writes, edits or hand-fills a reviewer's file and
+> never records a verdict it did not collect; when a dispatch is impossible, STOP
+> and tell the PM — never synthesize the verdict.
 
-| `dispatch_mode` | Default? | `aid-emit-dispatch.sh` wrappers required? |
-|-----------------|----------|------------------------------------------|
-| `agent_tool` | **Yes (v2.29.1+)** | **No** — CC Agent tool does not write timeline events; FSM bypasses provenance check |
-| `subagent` | No (explicit opt-in in `.aid-o/config/plugin.yaml`) | **Yes** — must wrap every `Agent()` with start/complete pair |
+### EPIC review (CP3) — one section, in the run command
 
-In `agent_tool` mode (default): skip the `aid-emit-dispatch.sh` calls entirely. The provenance check returns `"agent_tool"` (non-blocking) and no orphan events are created.
+After the last step, before `transition EXECUTE GATES`: the same step check
+and round with `--checkpoint cp3` (`commands/aid-run.md` "Step review (CP2)
+and EPIC review (CP3)"). `close` writes `<run>/semantic-review-final.json` for
+the plan-final consumers and routes what stays open (§13). The FSM reads
+`cp3/rounds.json`, bound to HEAD; GATES→DONE and done-advance re-check it
+(the D4 exception with the `CP3-Freshness-Exception:` trailer kept).
 
-In `subagent` mode (explicit `dispatch_mode: subagent` in plugin.yaml): every
-`Agent({subagent_type, prompt})` dispatch MUST be wrapped by paired calls to
-`aid-emit-dispatch.sh start` (before) and `aid-emit-dispatch.sh complete` (after).
-The orchestrator does NOT skip these calls; if it does, `cmd_increment_step` blocks
-the next step transition via the reconciliation backstop (Component B of P040).
+### Semantic evidence of a step or an EPIC
 
-> **⛔ Non-negotiable anti-fabrication rule.** For every review checkpoint the
-> orchestrator MUST dispatch a real, independent verifier via `Agent({subagent_type:
-> "aid-orchestrator:verifier", ...})` and let THAT subagent write its own
-> `verifier-output-*.md`. The orchestrator MUST NOT (a) write, edit, or hand-fill a
-> `verifier-output-*.md` itself, (b) reuse a prior run's verifier output, or (c)
-> "review in its head" and record a verdict without dispatching. Self-written verifier
-> output is a correctness violation, not a shortcut — it destroys the per-step
-> independence guarantee that is AID's core value. This instruction is the REAL defense
-> against fabrication: the provenance check (`verify_provenance`, §7) only flags
-> *accidental* breakage (stale / missing / mismatched dispatch records) and returns
-> `unverifiable` — it cannot, by design, detect a deliberately forged timeline, because
-> the orchestrator controls every input. If a genuine dispatch is impossible (tooling
-> failure), STOP and escalate to PM — never synthesize the verdict.
-
-**Before each Agent() dispatch:**
-
-```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
-  --focus "<cp1-<reviewer role, hyphens> | cp2-step-N | cp3-code-review | cp3-security | cp4-curator-validation>" \
-  --agent-id "<subagent_type, e.g., aid-orchestrator:verifier>" \
-  --evidence-dir "$evidence_dir"
-```
-
-**After each Agent() dispatch returns:**
-
-```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
-  --focus "<same value as start>" \
-  --output-file "$evidence_dir/verifier-output-<focus>.md" \
-  --evidence-dir "$evidence_dir"
-```
-
-If the Agent() call crashes between start and complete, the pending entry remains and
-the next `cmd_increment_step` blocks with `missing_dispatch_complete: <focus>`. PM
-resolves by emitting the complete event (if the agent did run) or
-`--force --reason "<≥20 chars>" --blocked-checks "dispatch_orphan_complete"`.
-
-### Integration Review CP3 (pre-EXECUTE→GATES, ENFORCED v2.18.0+)
-
-After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
-
-1. **Parallel dispatch** (single message with two Agent tool calls — leverages Krok 1 isolation finding T6):
-
-   **In `agent_tool` mode (default):** call both `Agent()` calls in parallel directly — no `aid-emit-dispatch.sh` wrappers needed.
-
-   **In `subagent` mode only:** emit starts before, completes after:
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
-     --focus "cp3-code-review" \
-     --agent-id "aid-orchestrator:verifier" \
-     --evidence-dir "$evidence_dir"
-
-   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
-     --focus "cp3-security" \
-     --agent-id "aid-orchestrator:verifier" \
-     --evidence-dir "$evidence_dir"
-   ```
-
-   ```
-   Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 code-review",
-          prompt: <full diff (run_start..HEAD), DoD list, plan.json overall,
-                  "Write your output to $evidence_dir/verifier-output-cp3-code-review.md (absolute path)">})
-   Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 security",
-          prompt: <full diff, plan.json overall,
-                  "Write your output to $evidence_dir/verifier-output-cp3-security.md (absolute path)">})
-   ```
-
-   The dispatch names each output file by its ABSOLUTE path (`$evidence_dir/verifier-output-cp3-<focus>.md`);
-   a verifier given a bare name writes it where it stands (acta #32). After the return, if an untracked
-   `verifier-output-*.md` sits in the checkout root (`git status --porcelain -- 'verifier-output-*.md'`),
-   move it into `$evidence_dir` before `aid-emit-dispatch.sh complete` — the FSM never reads it from there.
-
-   After both `Agent()` calls return (`subagent` mode only):
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
-     --focus "cp3-code-review" \
-     --output-file "$evidence_dir/verifier-output-cp3-code-review.md" \
-     --evidence-dir "$evidence_dir"
-
-   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
-     --focus "cp3-security" \
-     --output-file "$evidence_dir/verifier-output-cp3-security.md" \
-     --evidence-dir "$evidence_dir"
-   ```
-
-   `<dispatch-focus>` substitution rule for CP3: emit two pairs serially even
-   though the underlying `Agent()` calls run in parallel — focus values are
-   `cp3-code-review` and `cp3-security`, `step_n="null"` for both. Same retry
-   semantics as CP2 (last pair is authoritative).
-
-2. **Outputs** (each verifier writes its dedicated file):
-   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `classification: FULL_REVIEW`, `Reviewed-Head: <sha>`
-   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `classification: FULL_REVIEW`, `Reviewed-Head: <sha>`
-   - `classification: FULL_REVIEW` is written by the VERIFIER at CP3 (at CP2 the pre-filter writes it); `fsm_check_verifier_output` rejects the file without it, so a CP3 report missing the line is "missing or invalid" however good its review was.
-
-   **CP3 dispatch passes/requires `Reviewed-Head` explicitly.** Dispatch each CP3
-   verifier with the sha the full-EPIC diff was generated against, and each verifier
-   MUST record it as a line-start `Reviewed-Head: <sha>` field (see
-   `agents/verifier.md` §Output Format). This is the freshness anchor consumed at
-   GATES→DONE (P060 Step 4 / OBS-20260702-03): if HEAD later moves past that sha
-   outside the narrow D4 exception, the DONE transition is blocked (stale review).
-
-3. **FSM precondition** (`aid-fsm.sh transition EXECUTE GATES`):
-   - Existing Session A check: `gates_report.json._generated_by` present (or grandfather skip).
-   - NEW Session B: both CP3 output files must exist with valid `_generated_by` (file presence is AC target).
-   - P060 Step 4: each CP3 output must carry `Reviewed-Head: <sha>`. `fsm_check_cp3_freshness`
-     re-reads it at **GATES→DONE** (and again at `done-advance review→release`) and refuses a
-     STALE review as DONE evidence unless the D4 exception (test/fixture/evidence-only churn
-     WITH a `CP3-Freshness-Exception:` trailer) holds. Policy `CP3_FRESHNESS_POLICY` (default
-     blocking).
-   - Verdicts are recorded but NOT a target — verdict is verdict (no Goodhart pressure to fake clean reviews).
-
-4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
-   Max 2 iterations per Session A pattern. E7 escalation on exhaustion.
-   **Invalidation-Map call site 2/5:** after each applied CP3 fix, run the **Invalidation-Map Post-Fix Hook**
-   (§13, observe-only) with `fix_ref=cp3-iter<K>` (capture `pre_fix_ref` before dispatching the fixer).
-
-   **Retry telemetry:** Every re-dispatch in the CP3 fix loop re-emits both
-   `verifier_dispatch_start` and both `verifier_dispatch_complete` events
-   documented above (focus=`cp3-code-review` and `cp3-security`,
-   step_n=`null`). Iteration 2 appends 4 additional events to
-   `timeline.jsonl`; provenance binding uses the last pair per focus.
-
-   **Deferring instead of fixing?** A finding you decide NOT to fix here, and
-   which must not be lost at release, is recorded with `aid_obligation_add`
-   (§13 *Carried obligations*) — plan-close refuses while one is open. A finding
-   whose FILE no remaining step may touch is routed instead (§13 *Routing a
-   finding no remaining step may fix*) — done-advance refuses over an
-   unrecorded one.
-
-#### C2 Dual-Emit in CP3
-
-CP3 always dispatches with `c2_mode: "final"` (full EPIC diff):
-- Verifier writes `semantic-review-final.json` to `evidence/{epic_id}/{run_id}/`
-- Verifier writes existing `verifier-output-cp3-code-review.md` / `verifier-output-cp3-security.md` UNCHANGED
-- Gate reads only the .md files (D1 unchanged)
-
-### Wiring and Behavior Dispatch (C2 observe, E5)
-
-Two additional C2 dispatch points run when the review-profile's required_lenses include wiring/behavior surfaces.
-These are **observe-only** in E5 — they emit `semantic-review-{wiring|behavior}.json` but do NOT block EXECUTE progression.
-
-#### Wiring dispatch (`c2_mode: "wiring"`)
-
-**Criterion:** Dispatch when ALL of:
-- At least 2 inter-step contracts (producer→consumer) are visible in the current diff AND
-- Profile includes wiring surface (`wiring` in `review-profile.matched_surfaces[]`) AND
-- At least one wiring lens applies (transaction_boundary, field_lineage, operation_order_resource_bound, ui_lifecycle, false_empty_distinction)
-
-**Output:** `semantic-review-wiring.json` in evidence dir
-**dispatch_observed:** Set `dispatch_observed.modes_dispatched[]` += `"wiring"` in the JSON
-
-#### Behavior dispatch (`c2_mode: "behavior"`)
-
-**Criterion:** Dispatch when ALL of:
-- All core behavior paths for this EPIC are present in the accumulated diff (feature-complete slice) AND
-- Profile includes behavior surface (`behavior` in `review-profile.matched_surfaces[]`) AND
-- At least one behavior lens applies
-
-**Output:** `semantic-review-behavior.json` in evidence dir
-**dispatch_observed:** Set `dispatch_observed.modes_dispatched[]` += `"behavior"` in the JSON
-
-**Both wiring and behavior dispatches:**
-- Log `dispatch_observed` count to timeline.jsonl
-- On failure: log `semantic_wiring_would_block` (observe, does NOT block increment)
-- Gate (aid-fsm.sh) does NOT check these files — they are additive evidence only (D1)
+Since P094 the reviewer round's `merged.json` is the semantic evidence of a step
+and of an EPIC; the cp3 `close` writes the per-EPIC `semantic-review-final.json`.
+The verifier's `c2_mode` dispatches at cp2 (`local`, `wiring`, `behavior`) are
+gone; only the plan-final `final` mode remains (§7, `plan-finalize`).
 
 ### D0 Gate Point — Post-Execute Observe (E2)
 
@@ -1373,17 +1105,14 @@ check a plan-required gate could disappear from a run that still reports `overal
   executor; it does not re-run the excluded gate itself (that would duplicate
   `aid-run-gates.sh`'s job). The fix is to widen the profile's `include[]` in
   `execution.yaml.gate_profiles` and re-run gates via `advance-to-gates`.
-- **Override** — same scoping as the sibling `GATES→DONE` checks (`overall`, CP3 freshness):
+- **Override** — same scoping as the sibling `GATES→DONE` checks (`overall`, cp3 head re-check):
   `aid-fsm.sh transition GATES DONE <state_file> --force --reason '<≥20 chars — PM-authorized
   reason>'`. Logged as `fsm_force_override` per the usual audit trail (§1).
 
 **On gate failure (retries remaining):**
-0. Capture the pre-fix ref BEFORE dispatching the fixer: `pre_fix_ref="$(git rev-parse HEAD)"`.
 1. Dispatch gate-fixer agent with failure details and `gates_report.json`
 2. `aid-fsm.sh transition GATES EXECUTE <state_file>` (re-enters EXECUTE for fix)
 3. After fix: `aid-fsm.sh transition EXECUTE GATES <state_file>`
-4. **Invalidation-Map call site 3/5:** run the **Invalidation-Map Post-Fix Hook** (§13, observe-only)
-   with `fix_ref=gates-<gate>-attempt<K>`.
 
 **Repeated-timeout policy block (P063 Step 3):** step 2 above (`aid-fsm.sh transition GATES
 EXECUTE`) can now be refused. If `aid-run-gates.sh`'s retry loop already saw the gate time out
@@ -1445,7 +1174,7 @@ bash $AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates "$STATE_FILE"
 Semantics:
 
 - **Pre-conditions** validated cheaply: state==EXECUTE, `current_step >= total_steps`,
-  `execution.yaml` exists. CP3 outputs are re-validated by `cmd_transition` after
+  `execution.yaml` exists. The cp3 round index is re-validated by `cmd_transition` after
   gates pass (single source of truth remains `check_preconditions`).
 - **Atomicity:** gates fail → state stays EXECUTE (never modified); gates pass →
   `cmd_transition` validates `_generated_by` from the just-written report
@@ -1535,7 +1264,7 @@ In FIRST AID mode, add option D: "Continue manual".
 | E4 | Gate: {name}, Command: `{cmd}`, Exit: {code}, Retries: {N}/{max}, Output: {truncated} |
 | E5 | Agent: {name}, Step: {N}, Expected: `evidence/.../output.md`, Got: nothing |
 | E6 | Parallel group: wave {N}, Conflicting files: {list}, Branches: {list} |
-| E7 | Checkpoint: {CP2\|CP3}, Focus: {code-review\|security}, Findings: {list}, Fix attempts: {N}/2 |
+| E7 | (retired with P094: an exhausted review round is a PM card, not an escalation state) |
 | E8 | Critical findings: {list from audit report}, Report: `.aid-o/work/evidence/{id}/{run}/audit-report.md` |
 
 **PM response execution:**
@@ -1556,7 +1285,7 @@ set via `set-field`. The decision is automatically cleared after the transition 
 | E4 | Gate fails after max_attempts |
 | E5 | Agent produces no output |
 | E6 | Merge conflict in parallel group |
-| E7 | Verifier review failed after 2 fix-loop iterations |
+| E7 | retired (P094) — a cp2/cp3 round that fails after the last allowed round goes to the PM card |
 | E8 | Auditor critical finding — PM chose ABORT in DONE summary |
 
 ---
@@ -1640,7 +1369,7 @@ the CP3 *freshness re-check* (a re-verification at `review → release`) and the
 security verifiers run for every EPIC in both modes, and under `streamlined_mode: true`
 `fsm_check_streamlined_integration_review` — which runs ABOVE the skip guard and is
 retained in both modes — hard-fails `done-advance` when
-`verifier-output-cp3-code-review.md` or `verifier-output-cp3-security.md` is missing.
+the EPIC review round index `cp3/rounds.json` is missing or did not close with `pass`.
 Skipping the CP3 pair on a `/aid-run --streamlined` plan-branch EPIC leaves no clean
 recovery short of dispatching after the fact or forcing the transition.
 
@@ -1697,9 +1426,6 @@ In `plan_branch` mode this checkpoint is not a controller convention — it is t
    includes the simplifier edits — and reverts on FAIL, the same rail as the per-EPIC
    `review` sub-phase steps 7–9. Runs serially AFTER the C+A fixes so it simplifies the
    final shipped code, not a moving target. Toggle: `review_checkpoints.simplifier_pass`.
-   **Invalidation-Map call site 5/5:** capture `pre_fix_ref` before dispatching the gate-fixer with the
-   `simplifier` proposal source; after the simplifier-approved fixes are applied, run the
-   **Invalidation-Map Post-Fix Hook** (§13, observe-only) with `fix_ref=done-simplifier`.
 6. **Reporter (last, after the Simplifier + CP4).** Dispatch the Reporter agent
    (`agents/reporter.md`) as the final plan-boundary step. It tests the delivery and
    writes `.aid-o/reports/{plan_id}-delivery.md` (from
@@ -2060,13 +1786,12 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
       epic_task_path="$(ls .aid-o/tasks/{epic_id}*.md 2>/dev/null | head -1)"
       [[ -z "$epic_task_path" ]] && epic_task_path="$(ls .aid-o/tasks/archive/{epic_id}*.md 2>/dev/null | head -1)"
       ```
-   2. **If the EPIC file resolves → run the profiler** (`aid-prefilter.sh profile`, i.e.
-      `cmd_profile`). Its `diff_range` is `base_commit..HEAD` read from `fsm-state.yaml`. Exit
+   2. **If the EPIC file resolves → run the profiler** (`aid-review-profile.sh`). Its `diff_range` is `base_commit..HEAD` read from `fsm-state.yaml`. Exit
       `22` (`range_undetermined`) is **NON-FATAL**: an unverifiable profile is emitted and the
       run continues — do NOT abort on it.
       ```bash
       set +e
-      bash "$AID_PLUGIN_PATH/scripts/aid-prefilter.sh" profile "$epic_task_path" "$evidence_dir"
+      bash "$AID_PLUGIN_PATH/scripts/aid-review-profile.sh" "$epic_task_path" "$evidence_dir"
       prof_ec=$?
       set -e
       # exit 0 = profile emitted; exit 22 = unverifiable profile emitted (continue);
@@ -2358,10 +2083,6 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    standards-L) defers.
 9. **Auditor auto-fix:** Gate-fixer applies S/M/L effort items from auditor
    `recommended_fixes` (where `auto_fixable: true`).
-
-   **Invalidation-Map call site 4/5:** capture `pre_fix_ref` before dispatching the gate-fixer in
-   steps 8–9; after the curator/auditor auto-fixes are applied, run the **Invalidation-Map Post-Fix
-   Hook** (§13, observe-only) with `fix_ref=done-curator` / `fix_ref=done-auditor` respectively.
 10. **CP4:** Verifier (`code-review`) reviews the **applied** curator + auditor changes from
    steps 8–9 (it runs AFTER the fixes are applied, so it actually reviews them).
    If FAIL → revert those changes, log reversion.
@@ -2858,7 +2579,6 @@ Initial bootstrap (v2.21.0):
 
 | Check                            | Severity  | Promoted at | Anchor                                                          |
 |----------------------------------|-----------|-------------|-----------------------------------------------------------------|
-| `verifier_provenance`            | blocking  | 2026-05-13  | P037-1 detector + AID-v3-principles.md §1                       |
 | `gates_generated_by`             | blocking  | 2026-05-05  | Session A initial enforcement                                   |
 | `plan_ac_match`                  | blocking  | 2026-05-13  | P037-2 plan-diff gate                                           |
 | `memory_substantive`             | advisory  | —           | Awaiting empirical track record                                 |
@@ -3085,11 +2805,12 @@ and a human had to catch it.
 
 ## §13 Review Checkpoint Protocol
 
-Six automatic review checkpoints run at key pipeline milestones; CP2 to CP6
-dispatch the verifier agent. CP1 is plan review: six reviewer roles in rounds, run
-by `scripts/aid-plan-review-round.sh` as the "Plan review (CP1)" section of
-`commands/aid-plan.md` lists, contract in `skills/plan-review-roles.md`, gated by
-`scripts/aid-cp1-gate.sh`. The verifier card is not used for it.
+Six review checkpoints run at key pipeline milestones. CP1, CP2, CP3 and CP6
+are reviewer rounds run by `scripts/aid-review-round.sh` (CP1: "Plan review
+(CP1)" in `commands/aid-plan.md`, roles in `skills/plan-review-roles.md`, gated
+by `scripts/aid-cp1-gate.sh`; CP2/CP3: "Step review (CP2) and EPIC review
+(CP3)" in `commands/aid-run.md`; CP6: `commands/aid-do.md`; roles in
+`skills/step-review-roles.md`). CP4 and CP5 use the verifier and the auditor.
 Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by `/aid-run`).
 
 ### Checkpoint Summary
@@ -3097,30 +2818,18 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 | CP | Location | Verifier Focus | Fix Loop | Escalation |
 |----|----------|----------------|----------|------------|
 | CP1 | `/aid-plan` "Plan review (CP1)" | six plan reviewer roles, not the verifier | Rounds: 2 by default, a 3rd or only 1 on the PM's recorded override | PM card after each round |
-| CP2 | EXECUTE after step verify | `code-review` | Yes (max 2) | E7 |
-| CP3 | EXECUTE→GATES transition | `code-review` + `security` | Yes (max 2) | E7 |
+| CP2 | `/aid-run` "Step review (CP2) and EPIC review (CP3)" | step reviewer roles, not the verifier | Rounds: 2 by default; the step's role fixes, the next round confirms | PM card after the last round |
+| CP3 | same section, `--checkpoint cp3` | EPIC reviewer roles | same | PM card after the last round |
 | CP4 | DONE after curator + auditor auto-fix (pre-merge) | `code-review` | Yes (revert on fail) | None |
 | CP5 | DONE after auditor (pre-merge) | N/A (auditor flag) | N/A | PM ABORT → E8 |
-| CP6 | `/aid-do` post-implementation | `code-review` | Yes (max 2) | Advisory only |
+| CP6 | `/aid-do` "Review Check (CP6)" | step reviewer roles over the working tree | on the PM's word | Advisory only |
 
 ### Fix Loop Protocol
 
-```
-1. Verifier dispatched → produces canonical verifier output (top-level `_generated_by`/`_generated_at`/`classification`/`verdict`/`findings`)
-2. If PASS or PASS_WITH_NOTES → continue (notes logged, non-blocking)
-3. If FAIL + fix_loop_eligible:
-   a. Dispatch gate-fixer (source: verifier_review) with findings
-   b. Gate-fixer applies minimal fixes
-   c. Re-dispatch verifier (iteration 2)
-   d. If still FAIL → ESCALATION (E7) or warn PM (/aid-do)
-4. If FAIL + NOT fix_loop_eligible → ESCALATION immediately
-5. Max 2 iterations total, then escalate
-```
-
-> The **Fix Loop Protocol block above is descriptive prose** — a generic template describing
-> how *every* fix loop is shaped. It is **NOT a gate-fixer dispatch call site** and MUST NOT
-> carry an Invalidation-Map Post-Fix Hook invocation. The 5 real call sites are enumerated in
-> the hook section immediately below.
+A failed round (cp2/cp3/cp6) is fixed by the step's own role (`fix_of:` in
+`scripts/lib/aid-review-adapter-claude.md`), never by the gate-fixer, and confirmed by
+the next round; the gate-fixer keeps GATES and the CP4 post-apply review only.
+What stays open after the last allowed round, `close` routes or carries (below).
 
 ### Routing a finding no remaining step may fix (P079 Step 7, IMP-473)
 
@@ -3168,98 +2877,17 @@ Two rules, both learned the expensive way:
   it as a backlog IMP and record that —
   `aid_obligation_resolve <plan_id> <index> "registered as IMP-<n>"`.
 
-### Invalidation-Map Post-Fix Hook (C3 activation — E-059-1_2 Step 2, IMP-177)
-
-**Observe-only. NEVER triggers a re-run.** Run this hook immediately AFTER a gate-fixer has
-applied a fix at any of the **5 in-scope gate-fixer dispatch sites** listed at the end of this
-section. It closes the invalidation half of IMP-177: `scripts/lib/aid-invalidation-map.sh`
-existed and was registered but was only ever called from tests — this hook is its live-flow
-caller. The hook emits a `gate_fixer_fix_applied` timeline event (the substrate the FSM
-`invalidation_map_expected` check keys off — nothing emitted it before this step) and then
-runs the observe-only producer with the required 3-arg CLI.
-
-**Sequence — the pre-fix ref MUST be captured BEFORE the gate-fixer runs:**
-
-```bash
-# --- BEFORE dispatching the gate-fixer at an in-scope site ---
-pre_fix_ref="$(git rev-parse HEAD)"          # snapshot the ref PRIOR to the fix
-
-# --- gate-fixer applies its fix (and commits it in the fix loop) ---
-
-# --- AFTER the fix is applied: materialize changed paths + run the hook ---
-evidence_dir=".aid-o/work/evidence/{epic_id}/{run_id}"
-timeline="$evidence_dir/timeline.jsonl"
-changed_paths_file="$(mktemp)"
-# post-fix ref = HEAD (fix committed). If the fixer left the fix UNCOMMITTED, use
-# `git diff --name-only "$pre_fix_ref"` (ref → working tree) instead of the range form.
-git diff --name-only "${pre_fix_ref}..HEAD" > "$changed_paths_file"
-
-# 1) Emit the substrate event FIRST — the FSM invalidation_map_expected check keys off it.
-#    <fix_ref_label> is the site+iteration label from the call-site table below.
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event "$timeline" \
-  gate_fixer_fix_applied fix_ref="<fix_ref_label>"
-
-# 2) Observe-only invalidation-map (3-arg CLI). Records affected C1 checks / C2 modes as a
-#    REQUEST only — it does NOT invoke delivery-gate or semantic-review, no auto-rerun exists.
-bash "$AID_PLUGIN_PATH/scripts/lib/aid-invalidation-map.sh" \
-  --fix-ref "<fix_ref_label>" --evidence-dir "$evidence_dir" --changed-paths "$changed_paths_file"
-```
-
-**Enforcement:** the FSM `done-advance` review→release `invalidation_map_expected` check reads
-these two signals — OBSERVE today (emits `invalidation_map_expected_missing`, does not block),
-promoting to blocking at E10 (`INVALIDATION_MAP_ENFORCEMENT=blocking` seam). See
-AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
-
-**In-scope call sites (5) — each references this hook with a distinct `fix_ref` label:**
-
-| # | Site | `fix_ref` label |
-|---|------|-----------------|
-| 1 | CP2 per-step fix loop (§ EXECUTE) | `cp2-step-<N>-iter<K>` |
-| 2 | CP3 integration fix loop (EXECUTE→GATES) | `cp3-iter<K>` |
-| 3 | GATES gate-fixer (§5) | `gates-<gate>-attempt<K>` |
-| 4 | DONE Curator + Auditor auto-fix (§7 steps 8–9) | `done-curator` / `done-auditor` |
-| 5 | DONE Simplifier-source fix (§7 plan boundary step 5) | `done-simplifier` |
-
-**Explicitly OUT of scope (documented, not silently skipped):**
-- **CP6 / `/aid-do` fast-mode** gate-fixer dispatch (§8) — OUT per **D6**. Fast Mode has no
-  `fsm-state.yaml`, no evidence dir, and no C3/delivery-gate surface, so there is nothing for an
-  invalidation-map to invalidate. Do NOT wire this hook there.
-- The **"Fix Loop Protocol" block above** is descriptive prose, **not a 6th call site** (see note
-  above it).
-
-### Pre-Filter Stage (CP2, CP3, CP6)
-
-Before dispatching verifier LLM, run deterministic bash checks on `git diff` output
-(new/changed lines only — `scan_target: diff_only`):
-
-1. Regex scan via `aid-prefilter.sh`, which reads `defaults/pre-filter-rules.yaml`
-   (`skip_rules` + `fail_rules` — the single source of truth for pre-filter regexes;
-   `review-checkpoints.yaml → pre_filter` only toggles the stage on/off + scan scope)
-2. Decision:
-   - **Pattern match found** → immediate FAIL (skip verifier LLM, enter fix loop directly)
-   - **Clean + trivial** (≤ threshold) → SKIP (no verifier needed)
-   - **Clean + non-trivial** → dispatch verifier (LLM review)
-
-Pre-filter applies to CP2, CP3, and CP6 only. CP1 (docs), CP4 (curator+auditor), CP5 (auditor flag)
-are not pre-filtered.
-
-### Trivial Skip Rule
-
-When `skip_trivial: true` in config:
-- CP2 and CP6 are skipped if the step/task changed ≤ `trivial_threshold.max_files` files
-  with ≤ `trivial_threshold.max_lines` total lines changed
-- CP1, CP3, CP4, CP5 are never skipped by this rule (always run when enabled)
-
 ### Reference Files
 
-- `agents/verifier.md` — auto-dispatch triggers, context assembly, output format
-- `agents/gate-fixer.md` — accepts `verifier_review` source type
+- `skills/step-review-roles.md` — the reviewer roles of cp2/cp3/cp6; `skills/plan-review-roles.md` — of cp1
+- `scripts/lib/aid-review-adapter-claude.md` — how the controller dispatches a round's reviewers and the fix
+- `agents/verifier.md` — CP4 and the plan-final semantic review; `agents/gate-fixer.md` — GATES fixes and the CP4 rail
 - `agents/auditor.md` — `blocking_findings` + `recommended_fixes` for CP5/auto-fix
-- `config/policies/review-checkpoints.yaml` — checkpoint toggles, fix-loop config, pre-filter toggle + scan scope (the pre-filter REGEXES live in `defaults/pre-filter-rules.yaml`)
+- `config/policies/review-checkpoints.yaml` — checkpoint toggles, reviewer blocks, rounds_default
 
 ---
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-19
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

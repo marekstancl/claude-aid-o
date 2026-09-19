@@ -40,7 +40,7 @@ MD
 teardown() { rm -rf "$ROOT"; }
 
 # _round <n> <findings-json> [closed=1] [status=valid] — a round as
-# aid-plan-review-round.sh leaves it, reviewing the plan as it is now.
+# aid-review-round.sh --plan leaves it, reviewing the plan as it is now.
 _round() {
   local n="$1" findings="$2" closed="${3:-1}" status="${4:-valid}" d="$CP1/round-$1"
   mkdir -p "$d/packet"

@@ -201,12 +201,8 @@ YAML
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   jq -n '{overall:"pass", gates:{}, _generated_by:"aid-run-gates.sh@v2.16.0", _generated_at:"2026-05-04T00:00:00Z", _command_log:[]}' \
     > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  # Session B CP3: both verifier-output-cp3-*.md required (file presence check).
-  # _generated_at required since E-046-1_3 Step 2.
-  printf '_generated_by: aid-orchestrator:verifier@abc123\n_generated_at: 2026-06-18T10:00:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  printf '_generated_by: aid-orchestrator:verifier@def456\n_generated_at: 2026-06-18T10:01:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  # P094: a closed passing EPIC review round (cp3/rounds.json) is the precondition.
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 
   run "$FSM" transition EXECUTE GATES "$state_file"
   [ "$status" -eq 0 ]
@@ -248,46 +244,34 @@ N/A — no new entries proposed
 VERIFY
 }
 
-@test "increment-step: missing verifier-output-step-N.md (post-deploy) → hard fail" {
+@test "increment-step: no cp2 round index for the step (post-deploy) → hard fail naming the step check" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # No verifier-output-step-3.md → CP2 precondition fails
+  # No cp2/step-3/rounds.json → CP2 precondition fails (P094)
 
   run "$FSM" increment-step "$state_file"
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "verifier-output-step-3.md missing or invalid" ]]
+  [[ "$output" =~ "no review round index for cp2 step 3" ]]
+  [[ "$output" =~ "aid-step-check.sh --checkpoint cp2 --step 3" ]]
 }
 
-@test "increment-step: verifier-output with verdict:pending (verifier not dispatched) → fail" {
+@test "increment-step: cp2 round closed with verdict fail → hard fail; a bound skip → accept" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # Pre-filter wrote pending; verifier was NOT dispatched
-  printf '_generated_by: aid-pre-filter.sh@v2.18.0\nclassification: RUN\nverdict: pending\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 3 fail
   run "$FSM" increment-step "$state_file"
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "verifier-output-step-3.md missing or invalid" ]]
-}
-
-@test "increment-step: verifier-output with classification:SKIP (docs diff) → accept" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"  # current_step: 3
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # SKIP classification is valid without verdict (pre-filter wrote reason field instead).
-  # _generated_at required since E-046-1_3 Step 2.
-  printf '_generated_by: aid-pre-filter.sh@v2.18.0\n_generated_at: 2026-06-18T10:00:00Z\nclassification: SKIP\nreason: docs_only\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
+  [[ "$output" =~ "verdict fail" ]]
+  rm -rf "$TEST_EVIDENCE_DIR/cp2"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 3 skip
   run "$FSM" increment-step "$state_file"
   [ "$status" -eq 0 ]
 }
 
 # ─── AID-052: frontend Visual Anchoring precondition (E161) ──────────────────
 
-# Helper: 4-step plan.json where steps[3] is a frontend step carrying visual_refs.
 write_plan_with_frontend_visual_step() {
   cat > "$TEST_EVIDENCE_DIR/plan.json" <<'PLAN'
 {"epic_id":"E-test","version":"1.0","steps":[
@@ -325,6 +309,7 @@ PLAN
   # _generated_at required since E-046-1_3 Step 2.
   printf '_generated_by: aid-pre-filter.sh@v2.18.0\n_generated_at: 2026-06-18T10:00:00Z\nclassification: SKIP\nreason: trivial\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+    aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 3 pass   # P094: the round index is the cp2 evidence
 
   run "$FSM" increment-step "$state_file"
   [ "$status" -eq 0 ]
@@ -355,8 +340,7 @@ PLAN
 
 @test "advance-to-gates: success path EXECUTE→GATES via cmd_transition" {
   seed_test_state_files "EXECUTE" "5" "5"
-  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -370,8 +354,7 @@ PLAN
 
 @test "advance-to-gates: failure path leaves state at EXECUTE" {
   seed_test_state_files "EXECUTE" "5" "5"
-  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_failing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -384,9 +367,9 @@ PLAN
   ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
 }
 
-@test "advance-to-gates: missing CP3 outputs → cmd_transition fails after gates pass" {
+@test "advance-to-gates: missing cp3 round index → cmd_transition fails after gates pass" {
   seed_test_state_files "EXECUTE" "5" "5"
-  # NOTE: NO CP3 output files (intentional — gates run, transition rejects)
+  # NOTE: NO cp3/rounds.json (intentional — gates run, transition rejects)
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -394,8 +377,8 @@ PLAN
   [ "$status" -ne 0 ]
   # Gates ran independently of CP3 — runner exits 0
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_runner_complete"
-  # cmd_transition's check_preconditions sees missing CP3 outputs and rejects
-  [[ "$output" == *"verifier-output-cp3-code-review.md missing"* ]]
+  # cmd_transition's check_preconditions sees no cp3 round index and rejects
+  [[ "$output" == *"no review round index for cp3"* ]]
   # State stayed EXECUTE because cmd_transition didn't commit
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
 }
@@ -532,6 +515,7 @@ _p040_seed_increment_preconditions() {
   # _generated_at required since E-046-1_3 Step 2.
   printf '_generated_by: aid-orchestrator:verifier@abc123\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+    aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 3 pass   # P094: the round index is the cp2 evidence
 }
 
 @test "increment-step: clean/empty pending-dispatches → step advances" {
@@ -910,7 +894,7 @@ EOF
   local cj="$TEST_EVIDENCE_DIR/compliance.json"
   [ -f "$cj" ]
   [ "$(jq -r '.coverage_mode' "$cj")" = "streamlined" ]
-  jq -e '.skipped_dimensions == ["verifier_outputs.cp2_per_step","verifier_outputs.cp4_curator_validation"]' "$cj"
+  jq -e '.skipped_dimensions == ["verifier_outputs.cp2_rounds","verifier_outputs.cp4_curator_validation"]' "$cj"
 }
 
 @test "streamlined: abandoned fires on <3 timeline events (NR 12 anchor)" {
@@ -941,26 +925,25 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "streamlined: integration-review missing CP3 code-review blocks" {
+@test "streamlined: integration-review without a passing cp3 round blocks" {
   _streamlined_seed_state true
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
-  # Only cp3-security + gates_report present; cp3-code-review absent.
-  echo "sec" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  # gates_report present; the cp3 round closed with verdict fail.
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" fail
   echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
 
   _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"verifier-output-cp3-code-review.md"* ]]
+  [[ "$output" == *"cp3/rounds.json with verdict pass"* ]]
   grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
-@test "streamlined: integration-review with all three files present passes" {
+@test "streamlined: integration-review with a passing cp3 round and the gates report passes" {
   _streamlined_seed_state true
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
-  echo "code" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  echo "sec"  > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
 
   _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
@@ -980,9 +963,8 @@ EOF
   git commit -q -m "prod change"
   _streamlined_seed_state true "$base"
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  # Integration-review files present (CP4 advisory short-circuit runs first anyway).
-  echo "code" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  echo "sec"  > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  # Integration-review evidence present (CP4 advisory short-circuit runs first anyway).
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
 
   run bash -c '
@@ -1230,46 +1212,6 @@ PLAN
 # ─── E-046-1_3 Step 2: _generated_at required in CP2 verifier output ─────────
 # Regression for the missing check: empty/absent _generated_at was accepted before.
 
-@test "increment-step: verifier-output missing _generated_at → hard fail (post-deploy)" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"  # current_step: 3
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # Valid except no _generated_at line
-  printf '_generated_by: aid-orchestrator:verifier@CP2-step3-epic1\nclassification: RUN\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" =~ "verifier-output-step-3.md missing or invalid" ]]
-}
-
-@test "increment-step: verifier-output with empty _generated_at: (blank value) → hard fail" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"  # current_step: 3
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # _generated_at key present but value is empty string (yaml_field returns "")
-  printf '_generated_by: aid-orchestrator:verifier@CP2-step3-epic1\n_generated_at: \nclassification: RUN\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" =~ "verifier-output-step-3.md missing or invalid" ]]
-}
-
-@test "increment-step: verifier-output with valid _generated_at timestamp → accept" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"  # current_step: 3
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@CP2-step3-epic1\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -eq 0 ]
-}
-
-# ─── E-046-1_3 Step 2: CP4 content-validation (2 assertions) ────────────────
-# Regression for content-blind CP4 route: file existed but was not content-validated.
-
 @test "CP4: curator-validation file present but missing _generated_at → hard fail (content-validation)" {
   local base; base=$(git rev-parse HEAD)
   echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
@@ -1310,103 +1252,6 @@ PLAN
 # empty is non-empty string before quote-stripping fix), and verdict: banana
 # passed because only "pending" and empty were rejected.
 
-@test "verifier-output: _generated_by: \"\" (quoted empty) → hard fail" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: ""\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-}
-
-@test "verifier-output: _generated_at: '' (single-quoted empty) → hard fail" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf "_generated_by: aid-orchestrator:verifier@test\n_generated_at: ''\nclassification: RUN\nverdict: pass\n" \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-}
-
-@test "verifier-output: verdict: banana (invalid scalar) → hard fail" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: banana\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-}
-
-# ─── P079 Step 4 (IMP-472): casing equivalence, not casing pedantry ──────────
-#
-# THE LIVE FAILURE: one function carried two OPPOSITE conventions —
-# classification UPPERCASE, verdict lowercase — and the step-verify template
-# shows `## Result: PASS`. A verifier that carried that casing into the
-# `verdict:` field had its entire review rejected as garbage. Equivalent forms
-# are now accepted; genuinely unknown values still fail loudly (the banana case
-# above, and PASSED below).
-
-@test "P079 Step 4: verdict: PASS (uppercase) is accepted as the same claim as pass" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: PASS\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -eq 0 ]
-}
-
-@test "P079 Step 4: verdict: Fail (mixed case) is accepted — a fail is still a completed verdict" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: Fail\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -eq 0 ]
-}
-
-@test "P079 Step 4: verdict: PASSED is still rejected — normalization covers casing, never near-misses" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: PASSED\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-}
-
-@test "P079 Step 4: verdict: pending is STILL rejected (prefilter placeholder semantics unchanged)" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: PENDING\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -ne 0 ]
-}
-
-@test "P079 Step 4: classification: skip (lowercase) with a reason is accepted" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  write_post_deploy_state_yaml "$state_file"
-  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-prefilter.sh@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: skip\nreason: docs-only change\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
-
-  run "$FSM" increment-step "$state_file"
-  [ "$status" -eq 0 ]
-}
-
 @test "P079 Step 4: '## Result: pass' passes the increment anchor (canonical heading stays uppercase)" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"
@@ -1417,6 +1262,7 @@ PLAN
   grep -q '## Result: pass' "$vf"
   printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+    aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 3 pass   # P094: the round index is the cp2 evidence
 
   run "$FSM" increment-step "$state_file"
   [ "$status" -eq 0 ]
@@ -1430,6 +1276,11 @@ PLAN
 # curator-report + audit-report to vary per test.
 _seed_done_review_state() {
   local state_file="$1"
+  # P094: done-advance re-checks the cp3 round against HEAD; the cases below
+  # move HEAD (an empty amend) after seeding, so the checkpoint is switched
+  # off here — an audited pass — and the C3 hook stays the variable under test.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp3_integration_review: false\n' > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   cat > "$state_file" <<YAML
 epic_id: E-test
 run_id: R-test
@@ -1507,10 +1358,11 @@ gates:
     timeout_seconds: 10
     max_retries: 0
 EOF
-  # Also need CP3 verifier outputs for EXECUTE→GATES precondition
+  # $td is no repository, so the EXECUTE→GATES cp3 round check (bound to HEAD)
+  # is switched off here — an audited pass, never a fabricated round (P094).
   local ev="$td/.aid-o/work/evidence/E-D0/R-D0T"
-  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-code-review.md"
-  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-security.md"
+  mkdir -p "$td/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp3_integration_review: false\n' > "$td/.aid-o/config/policies/review-checkpoints.yaml"
 
   # cmd_transition reads evidence_dir as relative ".aid-o/..." so CWD must be $td
   AID_PROJECT_ROOT="$td" run bash -c "cd '$td' && bash '$FSM' advance-to-gates '$ev/fsm-state.yaml'"
@@ -1529,6 +1381,7 @@ EOF
   # CP2 preconditions: step-3-verify.md + verifier-output-step-3.md (valid, non-pending)
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
   write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 3 pass   # P094: the round index is the cp2 evidence
 
   # Timeline seed (log_event appends to this file)
   echo '{"ts":"2026-06-18T00:00:00Z","event":"run_started"}' > "$TEST_EVIDENCE_DIR/timeline.jsonl"
@@ -1823,12 +1676,11 @@ EOF
 }
 
 # Helper: satisfy the increment-step CP2 preconditions for the given step N
-# (valid step-N-verify.md + valid non-pending verifier-output-step-N.md).
+# (valid step-N-verify.md + a closed passing cp2 round, P094).
 _obs20260708_seed_cp2() {
   local step="$1"
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-${step}-verify.md" "$step"
-  printf '_generated_by: aid-orchestrator:verifier@abc123\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-${step}.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 "$step" pass
 }
 
 @test "increment-step: pending steps[3] becomes completed with a valid ISO 8601 completed_at" {
@@ -2068,11 +1920,10 @@ N/A — none
 VERIFY
 }
 
-# Write a SKIP verifier-output for a step (satisfies the CP2 precondition).
+# A bound skip of the step's cp2 review (satisfies the CP2 precondition, P094).
 _imp263_write_verifier_output() {
   local step="$1"
-  printf '_generated_by: aid-pre-filter.sh@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: SKIP\nreason: docs_only\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-step-${step}.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp2 "$step" skip
 }
 
 # Common setup: post-deploy state at current_step=0 + valid step-0 binding.
@@ -2496,4 +2347,91 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   run bash -c "cd '$TEST_PROJECT_ROOT' && source '$FSM' 2>/dev/null; fsm_check_verifier_output '$td/verifier-output-cp3-security.md'"
   [ "$status" -ne 0 ]
   [[ "$output" == *"file missing"* && "$output" == *"exists at ${TEST_PROJECT_ROOT}/verifier-output-cp3-security.md"* ]]
+}
+
+
+# ─── CP4 behaviour-trace gate of fsm_check_verifier_output (moved from
+# test-behavior-trace.bats by P094 Step 14; the function is CP4-only now) ────
+_write_base_verifier() {
+  local file="$1"
+  cat > "$file" <<EOF
+_generated_by: aid-orchestrator:verifier@test-fixture
+_generated_at: 2026-06-19T00:00:00Z
+classification: RUN
+verdict: pass
+EOF
+}
+# ─── Test 1: behavior_trace_count=0 FAILS ────────────────────────────────
+
+@test "behavior_trace: count=0 with required=true fails (exit code 1)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+behavior_trace_count: 0
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 1 ]
+}
+
+# ─── Test 2: behavior_trace_count=3 PASSES ───────────────────────────────
+
+@test "behavior_trace: count=3 with required=true passes (exit code 0)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+behavior_trace_count: 3
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Test 3: behavior_trace_required=false PASSES regardless of count ────
+
+@test "behavior_trace: required=false, count=0 passes (gate skipped)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: false
+behavior_trace_count: 0
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Test 4: no behavior_trace_required field PASSES (default is no enforcement)
+
+@test "behavior_trace: field absent in file passes (opt-in gate, no field = skip)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  # No behavior_trace_required line at all.
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Test 5: missing behavior_trace_count when required FAILS ─────────────
+
+@test "behavior_trace: required=true but count field absent fails (exit code 1)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+EOF
+  # behavior_trace_count is intentionally omitted — yaml_field returns empty.
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 1 ]
+}
+
+# ─── Test 6: behavior_trace_count=1 with required=true PASSES (boundary) ──
+
+@test "behavior_trace: count=1 with required=true passes (boundary value)" {
+  local vo="$TEST_TMPDIR/verifier-output.md"
+  _write_base_verifier "$vo"
+  cat >> "$vo" <<EOF
+behavior_trace_required: true
+behavior_trace_count: 1
+EOF
+  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
+  [ "$status" -eq 0 ]
 }

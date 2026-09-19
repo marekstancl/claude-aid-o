@@ -283,3 +283,39 @@ refute_grep() {
       ;;
   esac
 }
+
+# aid_fixture_seed_step_review <evidence_dir> <cp2|cp3> <step|""> <verdict> [<head_sha>]
+#   P094: seeds the review-round evidence the FSM reads for a step (cp2) or an
+#   EPIC (cp3): <cp dir>/rounds.json with the verdict, and for pass|fail one
+#   closed round (round.json with head_sha and closed_at, measurement.json,
+#   merged.json); for skip|no_change a step-check.json plus the step_check
+#   timeline event that binds it. <head_sha> defaults to HEAD of the cwd.
+aid_fixture_seed_step_review() {
+  local evid="$1" cp="$2" step="${3:-}" verdict="$4" head="${5:-$(git rev-parse HEAD)}"
+  local dir
+  case "$cp" in cp2) dir="$evid/cp2/step-$step" ;; cp3) dir="$evid/cp3" ;; *) return 2 ;; esac
+  mkdir -p "$dir"
+  case "$verdict" in
+    skip|no_change)
+      jq -n --arg cp "$cp" --argjson s "${step:-null}" --arg h "$head" --arg v "$verdict" \
+        '{checkpoint: $cp, step: $s, head_sha: $h, range: "x..y", verdict: $v, reason: "fixture", files: {in_scope: [], outside_files: [], forbidden_touched: []}, security: {matched_rules: []}, handler_patterns: [], size: {files: 1, lines: 3}}' > "$dir/step-check.json"
+      local sha; sha="$(sha256sum "$dir/step-check.json" | cut -d' ' -f1)"
+      jq --arg s "$sha" '. + {sha256: $s}' "$dir/step-check.json" > "$dir/sc.tmp" && mv "$dir/sc.tmp" "$dir/step-check.json"
+      printf '{"ts":"2026-09-19T00:00:00Z","event":"step_check","checkpoint":"%s","step":%s,"head_sha":"%s","verdict":"%s","sha256":"%s"}\n' \
+        "$cp" "${step:-null}" "$head" "$verdict" "$sha" >> "$evid/timeline.jsonl"
+      jq -n --arg v "$verdict" --arg h "$head" '{verdict: $v, reason: "fixture", head_sha: $h, rounds: []}' > "$dir/rounds.json"
+      ;;
+    pass|fail)
+      mkdir -p "$dir/round-1"
+      jq -n --arg cp "$cp" --argjson s "${step:-null}" --arg h "$head" --arg v "$verdict" \
+        '{checkpoint: $cp, step: $s, round: 1, head_sha: $h, reviewers_expected: ["step_generalist"], started_at: "2026-09-19T00:00:00Z", closed_at: "2026-09-19T00:01:00Z", routed_at: "2026-09-19T00:01:00Z", verdict: $v}' > "$dir/round-1/round.json"
+      jq -n --arg v "$verdict" '{round: 1, reviewers: {step_generalist: {provider: "claude", model: "fixture", answered: true, tokens: 1}}, degraded: false, dispatch_check: "recorded", verdict: $v}' > "$dir/round-1/measurement.json"
+      jq -n --arg v "$verdict" '{round: 1, findings: (if $v == "fail" then [{fingerprint: "sha256:0000000000000000000000000000000000000000000000000000000000000000", severity: "blocker", status: "open", claim: "fixture", evidence: "x:1", reported_by: ["step_generalist"]}] else [] end), blockers_open: (if $v == "fail" then 1 else 0 end)}' > "$dir/round-1/merged.json"
+      jq -n --arg v "$verdict" --arg h "$head" '{verdict: $v, head_sha: $h, rounds: [{round: 1, head_sha: $h, prepared_at: "2026-09-19T00:00:00Z", verdict: $v}]}' > "$dir/rounds.json"
+      if [[ "$cp" == cp3 ]]; then
+        jq -n --arg h "$head" '{artifact_type: "semantic_review", revision: {head_sha: $h, base_sha: "x"}, semantic_review: {mode: "final", range: "x..y", lenses_run: ["epic_generalist"], findings: []}}' > "$evid/semantic-review-final.json"
+      fi
+      ;;
+    *) return 2 ;;
+  esac
+}

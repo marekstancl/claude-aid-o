@@ -3,6 +3,48 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.99.0] — 2026-09-19
+
+### ⚠️ Změna chování — přečti před upgradem
+
+Každý krok běhu (`/aid-run`) a každý EPIC před branami teď prochází stejnou
+kontrolou, jakou má od 2.98.0 plán: deterministická kontrola kroku
+(`aid-step-check.sh`), pak kolo nezávislých revizorů (`aid-review-round.sh`,
+role v `skills/step-review-roles.md`) a rozhodčí, který přijme jen nález
+s čtecím příkazem a existujícím `soubor:řádek`. FSM čte jen index kola
+(`cp2/step-N/rounds.json`, `cp3/rounds.json`) vázaný na HEAD: krok bez kola se
+neuzavře, EPIC bez uzavřeného kola nejde do bran, ručně napsaný „skip" se
+odmítne. Soubory `verifier-output-step-N.md` a `verifier-output-cp3-*.md` už
+nic nečte; rozběhnutý EPIC ze starší verze dokončí své kroky až po doběhnutí
+kontroly kroku pro aktuální krok (jeden příkaz, FSM ho vypíše). Opravy nálezů
+dělá role, která krok psala, ne gate-fixer; po posledním povoleném kole `close`
+otevřené nálezy zapíše do deníků (routované nebo nesené), takže se nic neztratí.
+Projekt, který kontrolu nechce, ji vypne `review_checkpoints.cp2_step_review`,
+`cp3_integration_review` nebo `cp6_fast_mode_review: false`.
+
+### Added
+- **Kontrola kroku bez modelu** — `aid-step-check.sh` spočítá rozsah diffu od hranice kroku, soubory mimo rozsah a zakázané cesty, bezpečnostní a handlerové vzory, testy a jejich patra, a rozhodne `skip` / `no_change` / `review` / `review+security`; verdikt zapíše do `step-check.json` s otiskem a událostí v timeline, na kterou se FSM váže.
+- **Jeden motor kol pro všechny kontroly** — `aid-review-round.sh` obsluhuje plán (`--plan`), krok, EPIC i fast mode (`--checkpoint cp2|cp3|cp6`): balík (diff, DoD, deklarovaný rozsah, kontrola kroku), jeden prompt na roli ze sdílené šablony, dispatch Codexu, sběr, uzavření s tokeny a USD, potvrzovací kolo jen pro reportéry otevřených nálezů, pokyn PM k počtu kol. Odpověď revizora platí jen uvnitř zaznamenané závorky dispatchu.
+- **Sdílený rozhodčí a jedna smlouva odpovědi** — `aid-review-adjudicate.sh` a `defaults/schemas/review-finding.schema.json` pro všechny checkpointy; nález na handlerovém vzoru bez stopy chování se odmítne; nálezy skriptu kontroly kroku vstupují do sloučeného seznamu.
+- **Routování a nesení otevřených nálezů** — po posledním kole `close` sám zapíše nález mimo rozsah zbylých kroků do deníku routovaných nálezů (EPIC se bez rozhodnutí PM neuzavře) a nález, který pokryje pozdější krok, jako nesenou povinnost; cp3 uzavření píše `semantic-review-final.json` pro plánové spotřebitele.
+- **Fast mode na tomtéž mechanismu** — `/aid-do` zakládá `evidence/do/<id>/`, kontroluje pracovní strom a vede kolo, poradně.
+- **Ceník a cena kontroly** — `defaults/prices.yaml` (sazby s citovaným zdrojem a datem), `aid-review-summary.sh` počítá USD z tokenů pro `/aid-status` (dlaždice „Revize plánu" a „Revize kroků") i do `measurement.json`.
+- **Tabulka nástupců a její test** — `reference/review-successors.md` a `test-review-successors.sh`: každé vyřazené vynucení má zapsaného nástupce.
+- **Producent profilu jako vlastní skript** — `aid-review-profile.sh` (dřív podpříkaz pre-filtru), stejné argumenty a výstup.
+- **Sabotážní kontroly v testbedu** — zakomitovaný secret, dotčená zakázaná cesta a čistá docs změna; první z nich odhalila dvě chyby kontroly kroku ještě před vydáním.
+
+### Changed
+- **FSM** — jedna precondition `fsm_check_review_round` pro cp2 i cp3 (index kola, HEAD, událost kontroly kroku, D4 výjimka pro testovací churn s trailerem zachována); compliance hlásí `cp2_rounds` / `cp3_round` místo provenance verifikátoru.
+- **Instrukce** — `/aid-run` má jednu sekci „Step review (CP2) and EPIC review (CP3)" s doslovně citovanou instrukcí pro controller; skill pipeline, karta verifikátora (jen CP4 a plánový `final`), gate-fixer (`model: sonnet`, jen CP4), nápověda a smlouvy checkpointů ukazují na ni.
+- **Registr vynucení** — 12 řádků vyřazeno s nástupci, 13 nových; klíč `verifier_provenance` vyřazen ze `check-severity.yaml`.
+- **Akceptační sada kroku** — `test-step-review-acceptance.sh --mode new` vede 20 zaznamenaných diffů novým tokem; zaznamenané odpovědi se přehrávají bez modelu.
+
+### Fixed
+- **Bezpečnostní pravidla se nikdy neshodla s mezerou** — pravidla z `pre-filter-rules.yaml` používají `\s`, které bash `=~` nezná, a `@tsv` jim escapoval zpětná lomítka; aplikují se přes `grep -iE`, tedy i na `AWS_SECRET_ACCESS_KEY = "…"`.
+
+### Removed
+- **Starý řetězec kontroly kroku** — pre-filter (`aid-prefilter.sh classify`, trivial skip), soubory `verifier-output-step-N.md` a `verifier-output-cp3-*.md`, `Reviewed-Head`, `verify_provenance` a `provenance_aggregate`, smyčka oprav gate-fixerem a E7, wrappery `dispatch_mode: subagent` pro cp2/cp3, C2 emit `local|wiring|behavior`, invalidační mapa (`aid-invalidation-map.sh`, schéma, hook, FSM kontrola — rozhodnutí PM 7A, bez náhrady), skripty jen pro CP1 (`aid-plan-review-round.sh`, `-adjudicate.sh`, `-config.sh`, `-summary.sh`, adaptér, prompt, schéma) a jejich sady (`test-aid-prefilter`, `test-invalidation-map`, `test-behavior-trace`, `test-anti-fabrication`, `test-cp3-freshness`, pět `test-plan-review-*`).
+
 ## [2.98.0] — 2026-09-18
 
 ### ⚠️ Změna chování — přečti před upgradem

@@ -16,7 +16,7 @@ review_checkpoints:
   delivery_report: true            # plan-boundary Reporter delivery report generation
 
   # Plan review (CP1): six reviewer roles, one round plus a confirmation round.
-  # Read only by scripts/lib/aid-plan-review-config.sh, which refuses a role set
+  # Read only by scripts/lib/aid-review-config.sh, which refuses a role set
   # other than the six of skills/plan-review-roles.md, a duplicate, a provider
   # other than claude/codex and a model listed in banned_models. A project
   # override is .aid-o/config/policies/review-checkpoints.yaml with its own
@@ -36,26 +36,29 @@ review_checkpoints:
       - {role: reuse,             provider: claude, model: opus}
       - {role: enforcement_tests, provider: claude, model: opus}
 
-  # Fix loop settings
-  fix_loop:
-    max_iterations: 2              # max fix→re-verify cycles before escalation
-    auto_fix_severities:           # severities that trigger gate-fixer dispatch
-      - critical
-      - high
+  # Step review (CP2), EPIC review (CP3) and fast-mode review (CP6): reviewer
+  # roles of skills/step-review-roles.md, read by scripts/lib/aid-review-config.sh
+  # (P094). `when: review+security` marks a role that runs only when
+  # aid-step-check.sh reports a security pattern. skip_threshold is what the
+  # step check calls small: a diff at or under both limits, inside the step's
+  # scope, with no pattern matched, is `skip` and needs no reviewer. The models
+  # are placeholders until P094 Step 13 chooses them from a measurement.
+  step_review:
+    rounds_default: 2
+    skip_threshold: {max_files: 1, max_lines: 50}
+    banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
+    reviewers:
+      - {role: step_generalist, provider: claude, model: sonnet}
+      - {role: step_security,   provider: claude, model: sonnet, when: review+security}
+  epic_review:
+    rounds_default: 2
+    banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
+    reviewers:
+      - {role: epic_generalist, provider: claude, model: sonnet}
+      - {role: epic_behaviour,  provider: claude, model: sonnet}
+      - {role: epic_security,   provider: codex,  model: gpt-5.6-terra}
 
-  # Trivial skip — skip CP2/CP6 for small changes
-  skip_trivial: true
-  trivial_threshold:
-    max_files: 1                   # skip if changed files <= this
-    max_lines: 50                  # skip if total changed lines <= this
-
-  # Pre-filter — deterministic bash regex checks before LLM dispatch (CP2/CP3/CP6)
-  # Runs on git diff output (new/changed lines only)
-  pre_filter:
-    enabled: true
-    scan_target: diff_only         # only scan new/changed lines from git diff
-    # NOTE (AID-052): the pre-filter REGEX RULES are NOT defined here. aid-prefilter.sh reads
-    # `defaults/pre-filter-rules.yaml` (skip_rules + fail_rules) as the single source of truth.
-    # A former `fail_patterns:` list in this block was an UNREAD duplicate that drifted from the
-    # operative file (e.g. it failed on bare `print(`, which the operative file deliberately omits)
-    # — removed 2026-06-03 to single-source it. This block only toggles the pre-filter and its scope.
+  # The fix loop, the trivial-skip thresholds and the pre-filter left with
+  # P094: a step is skipped by aid-step-check.sh (size, scope, no pattern), the
+  # security rules of defaults/pre-filter-rules.yaml add the security reviewer,
+  # and a failed round is fixed by the step's role within rounds_default.

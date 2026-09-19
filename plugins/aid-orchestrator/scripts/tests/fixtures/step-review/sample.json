@@ -1,0 +1,1203 @@
+{
+ "generated": "2026-09-19",
+ "selection_rule": "6 recorded failing verdicts (2 ACTA, 2 WAN, 2 aid-orchestrator) + 14 clean (7 ACTA, 7 aid-orchestrator); commits resolvable on 2026-09-19 and the range base an ancestor of the reviewed head (two first-pick entries, acta E-016-2_4 step 1 and aid-orchestrator E-080-1_3 step 0, were replaced for a non-ancestor base recorded in their timelines); WAN clean diffs absent (task branches pruned)",
+ "entries": [
+  {
+   "id": "s01-acta-E-018-2_2-step0",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-018-2_2",
+   "run": "R-E018-2",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-018-2_2/R-E018-2/verifier-output-step-0.md",
+   "head_sha": "41713838bc4403c824831d95c3042a606c040590",
+   "range": "44035c2e17ecbe5260670a9f0885a9b51a3b2e69..41713838bc4403c824831d95c3042a606c040590",
+   "range_source": "base_commit",
+   "size": {
+    "files": 4,
+    "lines": 154
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `frontend/src/config/helpSections.ts` (lines ~94-110 a ~146-161) — doplnit nové sekce do registru a posunout `REVIEW` na `P018` / `2026-08-22`",
+     "Modify: `frontend/src/pages/help/VydaneFakturyPage.tsx` (lines ~100-200) — nová sekce o výchozích hodnotách, úprava sekce o číslování",
+     "Modify: `frontend/src/pages/help/CiselneRadyPage.tsx` (lines ~30-120) — nová sekce o odvození čísla z faktury a o pevné šířce masky",
+     "Test: `frontend/src/config/__tests__/helpSections.test.ts` (lines ~1-40) — kontrola, že nové sekce mají neprázdné `id`, `label` i klíčová slova"
+    ],
+    "allowed_paths": [
+     "frontend/src/config/helpSections.ts",
+     "frontend/src/pages/help/VydaneFakturyPage.tsx",
+     "frontend/src/pages/help/CiselneRadyPage.tsx",
+     "frontend/src/config/__tests__/helpSections.test.ts"
+    ],
+    "forbidden_paths": [
+     "Změna build_isdoc (backend/acta/documents/isdoc.py) — ISDOC je symetrický",
+     "Přečíslování přijatých faktur nebo změna masky přijatých řad.",
+     "Rozbalování vnořených ZIPů (ZIP uvnitř ZIPu) — zůstává nepodporované.",
+     "Rozpoznání jiných archivů (RAR, 7z, tar).",
+     "Automatické schvalování vydaných faktur — stav to_review zůstává, jak je.",
+     "**Deduplikace dokladů přijatých e-mailem.** E-mailová cesta dnes doklady",
+     "Změna cenové politiky nebo modelů v LiteLLM.",
+     "Odvození Čísla ACTA z čísla faktury u **přijatých** faktur — u nich je číslo"
+    ]
+   },
+   "dod": {
+    "objective": "Uvést stránky o vydaných fakturách a číselných řadách do souladu s novým chováním, aby si účetní ...",
+    "acceptance_criteria": [
+     "`helpSections.ts` obsahuje sekce `vychozi-hodnoty` a `cislo-z-faktury`",
+     "Obě sekce mají odpovídající `<HelpSection>` na svých stránkách",
+     "`REVIEW` v `helpSections.ts` má `lastReviewedPlan: 'P018'`",
+     "`frontend/e2e/help-structure.spec.ts` prochází"
+    ]
+   },
+   "original_verdict": "fail",
+   "original_findings": [
+    {
+     "claim": "### F1 — BLOCKING — `frontend/src/pages/help/VydaneFakturyPage.tsx:196-197`",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F2 — NON-BLOCKING — `frontend/src/pages/help/VydaneFakturyPage.tsx:210-214`",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F3 — NOTE — `frontend/src/pages/help/__tests__/content-coverage.test.ts`",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F4 — NOTE — `frontend/src/pages/help/VydaneFakturyPage.tsx:207`",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s02-acta-E-024-1_4-step1",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-024-1_4",
+   "run": "R-E024-1",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-024-1_4/R-E024-1/verifier-output-step-1.iter-20260901T141432Z-7vR5.md",
+   "head_sha": "2ba535a1efde61e043bd38fff602f30a2e9dee5b",
+   "range": "45410de2a7b0f2bfdec05cbae11bb3398529d994..2ba535a1efde61e043bd38fff602f30a2e9dee5b",
+   "range_source": "step_commit",
+   "size": {
+    "files": 3,
+    "lines": 444
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `backend/acta/registry/scheduler.py` (lines ~205-260) — nová funkce `_select_rotation_candidates(session, limit)`: dnešní ADIS a ISIR výběr vytažený z `select_candidates` do vlastního helperu, aby šel omezit vlastní kvótou",
+     "Modify: `backend/acta/registry/scheduler.py` (lines ~285-330) — `process_candidates` a `select_candidates` řežou per zdroj, ne jedním řezem přes celý seznam",
+     "Modify: `backend/acta/registry/scheduler.py` (lines ~262-280) — `count_pending` počítá nad sjednocenou populací; Step 1 dodává `count_unseeded`, tento krok ho zapojuje",
+     "Modify: `backend/acta/config.py` (lines ~55-62) — `REGISTRY_SEED_WINDOW_SHARE`",
+     "Test: `backend/tests/registry/test_scheduler.py` — 2000 nových kandidátů nevytlačí ADIS rotaci z okna"
+    ],
+    "allowed_paths": [
+     "backend/acta/registry/scheduler.py",
+     "backend/acta/config.py",
+     "backend/tests/registry/test_scheduler.py"
+    ],
+    "forbidden_paths": [
+     "Prometheus instrumentace. ACTA ji nemá (grep -rn \"Counter(\" backend/acta vrací jen",
+     "Rozlišení „registr neodpověděl\" vs. „subjekt tam není\" v UI. Do logu a alertu ano,",
+     "Změna prahu zastarávání (REGISTRY_STALE_AFTER_DAYS = 30) a sémantiky snapshotu.",
+     "Plný eventový ISIR (ISIR_WS) s detailem insolvenčního řízení. Badge stačí.",
+     "Blokující chování. Badge i varování o účtu zůstávají poradní.",
+     "Změna deterministické klasifikace DPH režimu (P016 Step 14)."
+    ]
+   },
+   "dod": {
+    "objective": "Nové subjekty dostanou vyhrazenou část okna, takže při velkém backfillu nevytlačí obnovu plátcovs...",
+    "acceptance_criteria": [
+     "Test s 2000 nezasnímkovanými protistranami a `limit=1600`: ve výběru je nejvýš 800 nových a zbytek jsou rotační kandidáti.",
+     "Test s `REGISTRY_SEED_WINDOW_SHARE=0`: výběr obsahuje jen rotační kandidáty.",
+     "Test `count_pending`: při 212 protistranách bez snapshotu a 1 řádku v registru vrátí 212, ne 1 a ne 213.",
+     "Start aplikace s `REGISTRY_SEED_WINDOW_SHARE=1.5` selže s pojmenovanou chybou."
+    ]
+   },
+   "original_verdict": "fail",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F1 — high — nevyužitá seed kvóta trvale ubírá polovinu okna rotaci",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F2 — medium — `select_candidates` může vrátit víc než `adis_limit` položek",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F3 — low — `count_unseeded` je mrtvý produkční kód (GEN-001)",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F4 — low — AC3 test nechrání nic, co tenhle krok přidal",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F5 — info — validátor `REGISTRY_SEED_WINDOW_SHARE` lze obejít přiřazením",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s03-wan-E-084-1_1-step0",
+   "project": "wan",
+   "repo_path": "/opt/eco/projects/wan",
+   "checkpoint": "cp2",
+   "epic": "E-084-1_1",
+   "run": "R-E084-1",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-084-1_1/R-E084-1/verifier-output-step-0.md",
+   "head_sha": "991b697eb8982ce7449640a0648e1107a8cf9af1",
+   "range": "a6979c878c3ce18f1c708ccc01d5a48c2a0a37f5..991b697eb8982ce7449640a0648e1107a8cf9af1",
+   "range_source": "base_commit",
+   "size": {
+    "files": 10,
+    "lines": 413
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `wan/api/scan.py` (lines ~4058-4180) — `_check_identity_conflicts` vrátí konflikt",
+     "Test: `tests/integration/test_conflict_contract.py` — nový soubor, srovnává tvar obou bran.",
+     "Modify: `tests/unit/test_om_ownership_conflict.py` — test dnes asertuje klíč `ordinal`;",
+     "Modify: `ui/src/lib/validationInbox.ts` (lines ~125-150) — `precheckGatesToInbox` čte",
+     "Modify: `ui/src/hooks/useSessions.ts` (lines ~188-200) — `PrecheckResult.gates[].conflicts[]`",
+     "Modify: `ui/src/lib/validationInbox.test.ts` — fixture testy nesou starý klíč `ordinal`",
+     "Modify: `.aid-o/config/execution.yaml` — zapsat nový test do seznamu brány"
+    ],
+    "allowed_paths": [
+     "wan/api/scan.py",
+     "tests/integration/test_conflict_contract.py",
+     "tests/unit/test_om_ownership_conflict.py",
+     "ui/src/lib/validationInbox.ts",
+     "ui/src/hooks/useSessions.ts",
+     "ui/src/lib/validationInbox.test.ts",
+     ".aid-o/config/execution.yaml"
+    ],
+    "forbidden_paths": [
+     "**Přehazování pořadí bran.** _check_identity_conflicts vznikla po incidentu (jedno",
+     "Legacy (WANIS) kolizní krok v rychlém modálu — zůstává odkaz na plný průvodce.",
+     "Migrace dat: dřívější přepisy s prázdným důvodem se nedohledávají ani neopravují.",
+     "Změna endpointu POST /persons/{id}/om-transfers nad rámec validace důvodu."
+    ]
+   },
+   "dod": {
+    "objective": "Obě brány vrátí konflikt v jednom a témž tvaru (pole `conflicts[]` se stejnými klíči), aby FE nem...",
+    "acceptance_criteria": [
+     "AC1 — obě brány vrátí pro tentýž konflikt shodné hodnoty všech sedmi klíčů; test je",
+     "AC2 — konflikt pocházející jen ze syrových dat (bez odpovídajícího OM v payloadu) má",
+     "AC3 — nový test je zapsaný v kurátorovaném seznamu brány, takže se opravdu spouští",
+     "AC4 — jmenované existující testy identity brány procházejí beze změny."
+    ]
+   },
+   "original_verdict": "fail",
+   "original_findings": [
+    {
+     "claim": "## findings",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "- severity: high",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "- severity: low",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F1 (HIGH) — confirm-path banner reads a field the backend stopped sending",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### F2 (LOW) — new PII disclosure for soft-deleted (archived) owners",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s04-wan-E-091-3_3-step1",
+   "project": "wan",
+   "repo_path": "/opt/eco/projects/wan",
+   "checkpoint": "cp2",
+   "epic": "E-091-3_3",
+   "run": "R-E091-3",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-091-3_3/R-E091-3/verifier-output-step-1.md",
+   "head_sha": "4cad57beaab17a3a375d01bd137ee50d8829abf7",
+   "range": "5ff923fc0e201c2116265f69c200718f6a8ed907..4cad57beaab17a3a375d01bd137ee50d8829abf7",
+   "range_source": "step_commit",
+   "size": {
+    "files": 6,
+    "lines": 1036
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `wan/pipeline/pipeline.py` (lines ~3214-3300) — vyčlenit ze `_apply_result` čistou funkci `slouc_do_dat_davky(session, document_type, fields, warning_sink)`, volanou beze změny chování i ze `_apply_result`",
+     "Modify: `wan/pipeline/pipeline.py` (lines ~805-870) — větev recyklace na začátku `_process_intake_file`, PŘED `_run_steps`",
+     "Modify: `wan/db/enums.py` (lines ~100-105) — hodnota `recycle` v `PipelineStep`",
+     "Create: `wan/pipeline/recycle.py` — `prevezmi_z_dvojcete(db, session, intake_file, twin, ordinal_offset) -> FileResult`",
+     "Test: `tests/integration/test_intake_recycle_pipeline.py` — druhý shodný soubor nevolá klasifikátor ani extraktor, `session.{typ}_data` je naplněná, stránky dostupné, formulář má z čeho číst"
+    ],
+    "allowed_paths": [
+     "wan/pipeline/pipeline.py",
+     "wan/db/enums.py",
+     "wan/pipeline/recycle.py",
+     "tests/integration/test_intake_recycle_pipeline.py"
+    ],
+    "forbidden_paths": [
+     "**V2 — soupis osob a rolí („kdo je kdo\" u přepisu).** Patří do téže dávky",
+     "**V4** — oprava typu dokladu zahodí rozepsaný formulář. Poctivá oprava",
+     "**Označení polí, která nový doklad změnil** (rozhodnutí PM, volba 1) — táž",
+     "**Oprava existujících duplicit v produkci** — vyřeší ostrá migrace",
+     "**Změna overlap_exists_sql** — jiná sémantika a jiní konzumenti.",
+     "**V8/V9/V10** (tělo e-mailu, GDPR a faktury per OM) — spustí je až slučování",
+     "**Z1–Z6** — obálka, fronta po klientech, šablona e-mailu; vlastní plány.",
+     "Zvyšování MAX_OM ani počtu OM slotů v šablonách.",
+     "Ruční průvodce mimo scan pipeline (manual_group_service.py)."
+    ]
+   },
+   "dod": {
+    "objective": "Soubor se shodným otiskem projde bez jediného volání modelu a dávka skončí ve stejném stavu, jako...",
+    "acceptance_criteria": [
+     "Druhý bytově shodný soubor nezavolá klasifikátor ani extraktor (mock).",
+     "`session.{typ}_data` je po recyklaci naplněná stejně jako po čtení.",
+     "Doklady nesou `source_intake_file_id` CÍLOVÉHO souboru, `person_id` cílové dávky a `minio_key` v prefixu NOVÉ dávky.",
+     "Doklady NEnesou `delivery_point_id`, `supply_contract_id`, `contract_group_id`.",
+     "`ocr_model_used` je `\"recycled\"`, náklad 0, žádný shadow běh.",
+     "Varování jsou přenesená a „OCR opraveno\" se neobjeví dvakrát.",
+     "V `pipeline_traces` je krok `recycle`.",
+     "Soubor bez dvojčete se zpracuje přesně jako dnes."
+    ]
+   },
+   "original_verdict": "fail",
+   "original_findings": [
+    {
+     "claim": "## Verdict: FAIL",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "## MAJOR-1 — recyklace umí položit celou dávku, i když má být fail-safe",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s05-aid-orchestrator-E-065-4_7-step1",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-065-4_7",
+   "run": "R-E065-4",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-065-4_7/R-E065-4/verifier-output-step-1.md",
+   "head_sha": "ea54dba71711d1399e90fc2ff4c419f4764a3f30",
+   "range": "66ac24d6c7ec2b48e5ca9e4fe5d8190f692c239b..ea54dba71711d1399e90fc2ff4c419f4764a3f30",
+   "range_source": "step_commit",
+   "size": {
+    "files": 9,
+    "lines": 189
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` — add the row +",
+     "Modify: `docs/extending-aid.md` — a C3 dispatch bridge subsection.",
+     "Modify: `CHANGELOG.md` — new entry, identical to the plugin copy.",
+     "Modify: `plugins/aid-orchestrator/CHANGELOG.md` — identical to the root copy.",
+     "Modify: `.claude-plugin/marketplace.json` — bump both version fields.",
+     "Modify: `plugins/aid-orchestrator/.claude-plugin/plugin.json` — bump version.",
+     "Modify: `plugins/aid-orchestrator/README.md` — bump the Plugin line.",
+     "Modify: `README.md` — roadmap plus license line.",
+     "Test: `plugins/aid-orchestrator/scripts/tests/test-registry-ttl.sh` — extend to check the new `c3_cross_provider_dispatch` row exists with all required keys; there is NO `test-enforcement-registry.bats` per the CP1-deep finding, so do NOT reference one."
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/defaults/enforcement-registry.yaml",
+     "docs/extending-aid.md",
+     "CHANGELOG.md",
+     "plugins/aid-orchestrator/CHANGELOG.md",
+     ".claude-plugin/marketplace.json",
+     "plugins/aid-orchestrator/.claude-plugin/plugin.json",
+     "plugins/aid-orchestrator/README.md",
+     "README.md",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-registry-ttl.bats"
+    ],
+    "forbidden_paths": [
+     "Running the advisory fallback FROM the bash bridge (claude -p subprocess) — the",
+     "A filesystem read-jail / OS sandbox for Codex — deliberately NOT done: independence is",
+     "Removing/repurposing aid-audit-independence.sh detection or its D7 ban.",
+     "P064 \"plan-final C3\" (P065 is its precondition).",
+     "Changing the legacy_health A–J audit; multi-provider fan-out."
+    ]
+   },
+   "dod": {
+    "objective": "Register the enforcement, document it, and do the release bookkeeping.",
+    "acceptance_criteria": [
+     "`enforcement-registry.yaml` has a `c3_cross_provider_dispatch` row with all keys;",
+     "All 8 version locations show the same new version.",
+     "Root and plugin CHANGELOG entries are identical."
+    ]
+   },
+   "original_verdict": "fail",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s06-aid-orchestrator-E-080-1_3-step2",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-080-1_3",
+   "run": "R-E080-1",
+   "step": 2,
+   "source_file": ".aid-o/work/evidence/E-080-1_3/R-E080-1/verifier-output-step-2.md",
+   "head_sha": "8e65ed101be8346fa711878bdf4da6c9056caf62",
+   "range": "4c65b59022189dcbd8c4615dd766ac00078f6c85..8e65ed101be8346fa711878bdf4da6c9056caf62",
+   "range_source": "step_commit",
+   "size": {
+    "files": 3,
+    "lines": 411
+   },
+   "step_files": {
+    "outputs": [
+     "Rewrite: `plugins/aid-orchestrator/commands/aid-help.md` — new topic structure, all public surfaces routed, grounded defects fixed.",
+     "Modify: `plugins/aid-orchestrator/defaults/help-index.yaml` — flip the four `index_only` rows to `current` with their new topics.",
+     "Modify: `plugins/aid-orchestrator/scripts/tests/test-skill-lint.sh` — remove `commands/aid-help.md` from the GRANDFATHERED list (it already lints clean, so delisting is free) per the plan-level grandfathering decision below."
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/commands/aid-help.md",
+     "plugins/aid-orchestrator/defaults/help-index.yaml",
+     "plugins/aid-orchestrator/scripts/tests/test-skill-lint.sh"
+    ],
+    "forbidden_paths": [
+     "Evidence-write registry, retention/pruning rules, and visual-verification reconciliation (§14 D18, §15 D19–D21) — split into the follow-up plan agreed with the PM on 2026-08-09, sequenced after the parallelism-removal work lands.",
+     "Implementing the versioned all-project settings schema (IMP-261) — this plan discharges only its analysis portion via the ownership/disposition inventory; the schema is its own future plan per source doc §4.",
+     "Merging /aid-init and /aid-setup into one command (source doc §6 non-goal).",
+     "Any automatic audit after EPICs/plans, any generic LLM tone/prose gate (source doc §2/§6).",
+     "Editing historical plans, changelog archives, or transcripts — only live instruction surfaces are swept.",
+     "Changing any FSM state semantics, evidence filename, or protocol JSON shape — current_step, verify-state JSON and evidence filenames remain frozen compatibility surfaces.",
+     "An external-audience artifact specification (ecosystem standard explicitly defers it)."
+    ]
+   },
+   "dod": {
+    "objective": "Rewrite `commands/aid-help.md` as an outcome-oriented index that routes every public surface, fix...",
+    "acceptance_criteria": [
+     "`test-help-index-coverage.bats` passes on the rewritten file.",
+     "`grep -c '^### Topic:' commands/aid-help.md` equals the router-table row count.",
+     "`grep -n 'execution.yaml.*lazy-created' commands/aid-help.md` returns nothing — narrowed deliberately: :263 (execution.yaml) is the stale claim, but :264 (queue.yaml, genuinely created by `aid-queue-add.sh`) is TRUE and a blanket ban on the phrase would delete a correct line.",
+     "The plan-lifecycle topic contains both mode names verbatim (`plan_branch`, `legacy_epic_release_mode`).",
+     "P076's landed text survives the move: a distinctive P076 literal (`awaiting_host_resume`) appears exactly once in the rewritten file.",
+     "`bash scripts/aid-lint-skill.sh commands/aid-help.md` reports zero findings, and the file no longer appears in the GRANDFATHERED list inside `scripts/tests/test-skill-lint.sh`."
+    ]
+   },
+   "original_verdict": "fail",
+   "original_findings": [
+    {
+     "claim": "## findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s07-acta-E-013-1_1-step0",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-013-1_1",
+   "run": "R-E013-1",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-013-1_1/R-E013-1/verifier-output-step-0.md",
+   "head_sha": "15d56d40edf17f44f789f161e33cbf58c905c37b",
+   "range": "ffeaeea0898ff7ded1f244ab2806ba29c2d0ce4b..15d56d40edf17f44f789f161e33cbf58c905c37b",
+   "range_source": "base_commit",
+   "size": {
+    "files": 5,
+    "lines": 431
+   },
+   "step_files": {
+    "outputs": [
+     "Create: `backend/acta/convert/__init__.py` — prázdný package marker.",
+     "Create: `backend/acta/convert/models.py` — dataclasses `FlexibeeInvoice`,",
+     "Create: `backend/acta/convert/flexibee.py` — `parse_flexibee(xml_bytes: bytes) -> list[FlexibeeInvoice]`.",
+     "Create: `backend/tests/convert/__init__.py` — package marker (konvence: všechny",
+     "Create: `backend/tests/convert/test_flexibee_parser.py` — parsování fixture, root guard, měna z `showAs`."
+    ],
+    "allowed_paths": [
+     "backend/acta/convert/__init__.py",
+     "backend/acta/convert/models.py",
+     "backend/acta/convert/flexibee.py",
+     "backend/tests/convert/__init__.py",
+     "backend/tests/convert/test_flexibee_parser.py"
+    ],
+    "forbidden_paths": [
+     "Přijaté faktury (faktura-prijata), dobropisy, zálohové faktury — jiné root",
+     "Perzistence převedených faktur do DB (rozhodnutí D2: stateless).",
+     "Adaptéry pro jiné účetní systémy (Pohoda, Money) — přístup C zamítnut (YAGNI).",
+     "Extrakce jednotlivých řádkových položek z FlexiBee — v exportu nejsou přítomné",
+     "Změna build_isdoc / _emit_party / tvaru ISDOC (rozhodnutí D5: tvar 1:1)."
+    ]
+   },
+   "dod": {
+    "objective": "Zparsovat FlexiBee XML na `list[FlexibeeInvoice]` s ošetřeným `code:` prefixem.",
+    "acceptance_criteria": [
+     "`parse_flexibee` na fixture vrátí správný počet faktur.",
+     "`mena` z expandovaného `<mena showAs=\"CZK: Česká koruna\">` je „CZK\" (čteno z `showAs`, ne z `.text`).",
+     "Root jiný než `<winstrom source=\"FlexiBee\">` vyhodí `FlexibeeFormatError`.",
+     "Prázdné `<dic>` → None; „790.08\" → `Decimal(\"790.08\")`; „2026-01-09\" → `date(2026,1,9)`."
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s08-acta-E-014-1_1-step1",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-014-1_1",
+   "run": "R-E014-1",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-014-1_1/R-E014-1/verifier-output-step-1.md",
+   "head_sha": "6c9314190588758be4f59ca7dd1c3aea284becfc",
+   "range": "06229378982243c0ad5296768253ee0debc42410..6c9314190588758be4f59ca7dd1c3aea284becfc",
+   "range_source": "step_commit",
+   "size": {
+    "files": 2,
+    "lines": 355
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `backend/acta/convert/adapter.py` — `is_reverse_charge(inv) -> bool`",
+     "Modify: `backend/tests/convert/test_adapter.py` — testy mapování rolí,"
+    ],
+    "allowed_paths": [
+     "backend/acta/convert/adapter.py",
+     "backend/tests/convert/test_adapter.py"
+    ],
+    "forbidden_paths": [
+     "Dobropisy (faktura-prijata se záporným celkem) — existující skip pravidlo",
+     "Bankovní účet dodavatele — CELÝ mimo rozsah (rozhodnutí C0-F2):",
+     "Změna build_isdoc / _emit_party / tvaru ISDOC (D5 z P013 platí dál).",
+     "Perzistence do DB (D2 z P013 platí dál — stateless).",
+     "Jiné agendy FlexiBee (pokladna, banka, objednávky)."
+    ]
+   },
+   "dod": {
+    "objective": "`to_isdoc_document` mapuje přijaté s dodavatelem z XML a odběratelem z klienta; `should_skip` zvl...",
+    "acceptance_criteria": [
+     "Přijatá faktura: `fields[\"supplier_name\"]==inv.nazev_firmy`,",
+     "`f_invoice_number` přijaté == `cis_dosle`; bez cis_dosle → `kod`.",
+     "RC faktura přijatá (celkem==základ, dph>0): NENÍ skipnutá; řádek má",
+     "VYDANÁ faktura se stejnou signaturou (celkem==základ, dph>0) je DÁL",
+     "RC přijatá s osv≠0: osv řádek zachován, součet `amount_total` všech",
+     "Non-RC nekonzistentní faktura je dál skipnutá (pravidlo nezměkčeno).",
+     "`typ_dokl==\"ZÁLOHA\"` → skip s důvodem obsahujícím „zálohová\".",
+     "uuid5 přijaté ≠ uuid5 vydané pro stejné `(client_id, kod)`; vydaná seed"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s09-acta-E-018-2_2-step2",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-018-2_2",
+   "run": "R-E018-2",
+   "step": 2,
+   "source_file": ".aid-o/work/evidence/E-018-2_2/R-E018-2/verifier-output-step-2.md",
+   "head_sha": "4e00c720c453a61815247dbf3183ea19e4c0d597",
+   "range": "33602252f23d96edba4a5bbb949f218c0479f129..4e00c720c453a61815247dbf3183ea19e4c0d597",
+   "range_source": "step_commit",
+   "size": {
+    "files": 2,
+    "lines": 319
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `frontend/e2e/help-structure.spec.ts` (lines ~1-60) — rozšířit o kontrolu nových sekcí",
+     "Create: `frontend/e2e/p018-regression.spec.ts` — regresní scénáře přes UI",
+     "Test: `backend/tests/e2e/test_p018_full.py` — souhrnný backendový E2E běh, označený `@pytest.mark.stack` stejně jako `test_issued_pipeline_p018.py` ze Step 12; bez markeru by ho posbírala brána, která nemá MinIO, Redis ani worker"
+    ],
+    "allowed_paths": [
+     "frontend/e2e/help-structure.spec.ts",
+     "frontend/e2e/p018-regression.spec.ts",
+     "backend/tests/e2e/test_p018_full.py"
+    ],
+    "forbidden_paths": [
+     "Změna build_isdoc (backend/acta/documents/isdoc.py) — ISDOC je symetrický",
+     "Přečíslování přijatých faktur nebo změna masky přijatých řad.",
+     "Rozbalování vnořených ZIPů (ZIP uvnitř ZIPu) — zůstává nepodporované.",
+     "Rozpoznání jiných archivů (RAR, 7z, tar).",
+     "Automatické schvalování vydaných faktur — stav to_review zůstává, jak je.",
+     "**Deduplikace dokladů přijatých e-mailem.** E-mailová cesta dnes doklady",
+     "Změna cenové politiky nebo modelů v LiteLLM.",
+     "Odvození Čísla ACTA z čísla faktury u **přijatých** faktur — u nich je číslo"
+    ]
+   },
+   "dod": {
+    "objective": "Ověřit kompletní funkci napříč všemi vrstvami — opravenou pipeline vydaných faktur i aktualizovan...",
+    "acceptance_criteria": [
+     "Všech pět scénářů projde na jeden úplný běh s 0 selháními",
+     "Alespoň jeden scénář je negativní (scénář 5) a jeden regresní (scénář 4)",
+     "Infrastruktura nastartovaná a zdravá před spuštěním testů",
+     "Gate běh projde: `bash backend/scripts/run_py_test_gate.sh -q` (vlastní dočasná PostgreSQL, DB testy se nesmí přeskočit), `docker exec -w /app/backend acta-api ruff check .`, `docker exec -w /app acta-ui npm run build` (na hostu padá na právech k `node_modules`) a `cd frontend && npx tsc --noEmit`",
+     "Opravná smyčka: každé selhání opraveno a znovu ověřeno, maximálně 3 cykly na kontrolu"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": []
+  },
+  {
+   "id": "s10-acta-E-019-3_3-step1",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-019-3_3",
+   "run": "R-E019-3",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-019-3_3/R-E019-3/verifier-output-step-1.md",
+   "head_sha": "dc0d0af4bc8efa317de2297868a0685f19e597e0",
+   "range": "d91c3a34d8413ea7bc3620eeb1aff9ed58cf2c51..dc0d0af4bc8efa317de2297868a0685f19e597e0",
+   "range_source": "step_commit",
+   "size": {
+    "files": 8,
+    "lines": 198
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `frontend/src/pages/help/ZakladyPage.tsx` — nová sekce `id=\"mobil-a-tablet\"` „Mobil a tablet\": jak přidat na plochu (Chrome Android: menu → Přidat na plochu; iOS Safari: Sdílet → Přidat na plochu), co jde na telefonu (kontrola, schválení, vyfocení dokladu), co ne (hromadné úpravy, export - na počítači), lišta „Nová verze\" a „Bez připojení\"; psaní podle `/opt/eco/docs/docs/acta/help-profile.md`",
+     "Modify: `frontend/src/config/helpSections.ts` (lines ~40-60) — do `zaklady.sections` přidat `{ id: 'mobil-a-tablet', label: 'Mobil a tablet', keywords: ['pwa', 'instalace', 'telefon', 'tablet', 'plocha', 'offline'] }`",
+     "Test: `frontend/e2e/help-structure.spec.ts` — existující test kotev registry vs. stránka pokryje novou sekci automaticky; ověřit, že projde",
+     "Modify: `/opt/eco/docs/docs/acta/deploy.md` (lines ~81-110) — sekce „Produkce\": odstavec „PWA a cache hlavičky\" (co nginx posílá pro `sw.js`, `index.html`, `/assets/`; proč `no-cache`; jak ověřit `curl -I https://<acta-domain>/sw.js`; že po deployi uživatel vidí toast Obnovit); sekce „Dev workflow\": poznámka, že SW v `npm run dev` neběží",
+     "Modify: `/opt/eco/docs/docs/acta/overview.md` — odstavec „Zařízení\": desktop = práce, tablet = práce, telefon = kontrola; breakpointy md/lg",
+     "Modify: `package.json` (lines ~3) — kořenový `package.json` je kotva verze (`.aid-o/config/project.yaml` → `versioning.source: package.json`) a drží `0.9.0`, přestože vydaná verze je `0.10.0` (`CHANGELOG.md:7`, commit `d80aca4`); srovnat na `0.10.0` PŘED release skriptem, jinak by skript spočítal `0.10.0` a přepsal vydaný záznam (přesně chyba popsaná v `.aid-o/config/project.yaml:19-38`); chybějící tag `v0.10.0` doplnit `git tag v0.10.0 d80aca4` (git operace v EPIC, zapsat do evidence)",
+     "Modify: `CHANGELOG.md` (lines ~6-8) — nová hlavička `## [0.11.0] — YYYY-MM-DD` s KONKRÉTNÍM datem dne, kdy se krok implementuje (release skript `aid-release.sh:491-494` pre-written hlavičku nechává být a datum NEDOPLNÍ) s `### Added` (PWA, mobilní menu, karty na telefonu, záložky v detailu, Vyfotit, tablet/mobile e2e) a `### Changed` (rozsouvátko v přehledech faktur zrušeno, klik na řádek otevírá detail; Ke kontrole bez inline editace)",
+     "Modify: `docs/plans/BACKLOG.md` — nová položka „Offline upload fronta + push notifikace (mimo P019, rozhodnutí PM 2026-08-25)\""
+    ],
+    "allowed_paths": [
+     "frontend/src/pages/help/ZakladyPage.tsx",
+     "frontend/src/config/helpSections.ts",
+     "frontend/e2e/help-structure.spec.ts",
+     "/opt/eco/docs/docs/acta/deploy.md",
+     "/opt/eco/docs/docs/acta/overview.md",
+     "package.json",
+     "CHANGELOG.md",
+     "docs/plans/BACKLOG.md",
+     "frontend/src/pages/help/PrijateFakturyPage.tsx",
+     "frontend/src/pages/help/HelpIndexPage.tsx",
+     "frontend/src/config/__tests__/helpSections.test.ts"
+    ],
+    "forbidden_paths": [
+     "Offline práce s daty, fronta uploadu offline, push notifikace (samostatný plán).",
+     "Kartové zobrazení pro Uživatele, Kurzy ČNB, Číselné řady, matice v Nápovědě.",
+     "Jakákoli změna desktopového vzhledu nebo chování mimo odstranění ExpandedRow.",
+     "Nativní aplikace, App Store, biometrické přihlášení.",
+     "Změny backendu a API (žádné nejsou potřeba).",
+     "Container queries, vlastní breakpointy mimo Tailwind default.",
+     "Spouštění Playwright v per-EPIC bráně (full profil) - EPIC worktree nemá"
+    ]
+   },
+   "dod": {
+    "objective": "Uživatel se v Nápovědě dozví, jak ACTA nainstalovat na telefon a co tam jde dělat; správce se v d...",
+    "acceptance_criteria": [
+     "`npx playwright test --project=chromium e2e/help-structure.spec.ts e2e/help.spec.ts` projde",
+     "`grep -n \"mobil-a-tablet\" frontend/src/config/helpSections.ts frontend/src/pages/help/ZakladyPage.tsx` vrátí ≥ 2 řádky",
+     "`grep -n \"sw.js\" /opt/eco/docs/docs/acta/deploy.md` vrátí ≥ 1 řádek",
+     "`grep -Eq '^## \\[0\\.11\\.0\\] — 20[0-9]{2}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md` skončí 0 (hlavička s konkrétním datem, ne placeholder)",
+     "`grep -n '\"version\": \"0.10.0\"' package.json` vrátí 1 řádek a `git tag -l v0.10.0` vypíše `v0.10.0`"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Iterace 1 — FAIL na `5c89245`",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### Pět majors",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "## Iterace 2 — FAIL na `dc0d0af`",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "### Major — táž vymyšlená funkce ve druhém souboru",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "## Iterace 3 — PASS na dc0d0af4bc8efa317de2297868a0685f19e597e0",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s11-acta-E-020-2_3-step1",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-020-2_3",
+   "run": "R-E020-2",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-020-2_3/R-E020-2/verifier-output-step-1.md",
+   "head_sha": "0a6d2fbced97696ee1bfb026e69222349454a3ee",
+   "range": "e128354bf8d41615ac096375bd67f2451eb29602..0a6d2fbced97696ee1bfb026e69222349454a3ee",
+   "range_source": "step_commit",
+   "size": {
+    "files": 8,
+    "lines": 136
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `frontend/src/lib/format.ts` (lines ~46-55) — smazat `calcConfidencePct`",
+     "Modify: `frontend/src/components/client/ClientDocuments.tsx` (lines ~195-225) — sloupec ukáže `review_field_count` („—\" při nule), import z `ConfidenceBadge` pryč",
+     "Modify: `frontend/src/components/client/ClientDocuments.tsx` (lines ~308-316) — `rowClassName` čte `doc.min_confidence`; přepnout na `review_field_count` (blocker C3 — bez tohohle chyba překladu, protože typ pole mizí)",
+     "Modify: `frontend/src/components/client/ClientArchive.tsx` (lines ~136-168) — sloupec i tečka; `rowClassName` tu NEEXISTUJE, takže „totéž jako ClientDocuments\" neplatí (nález RC-6)",
+     "Modify: `frontend/src/pages/Dashboard.tsx` (lines ~226-233) — sloupec podle `review_field_count`",
+     "Modify: `frontend/src/pages/Dashboard.tsx` (lines ~250-306) — tečka i `rowClassName` podle `review_field_count`",
+     "Modify: `frontend/src/types/document.ts` (lines ~83-96) — `min_confidence` pryč, `review_field_count` a `review_reasons` přibývají",
+     "Modify: `frontend/src/types/document.ts` (lines ~42-44) — `FieldMeta.confidence` je dnes POVINNÝ; po 8 klíč neexistuje, odstranit z rozhraní",
+     "Modify: `frontend/src/components/documents/ExportButton.tsx` (lines ~9, ~33) — `filters.confidence` se posílá do `/api/export`; parametr po 4 neexistuje",
+     "Test: `frontend/src/lib/__tests__/format.test.ts` — aserce, že `calcConfidencePct` z modulu zmizel"
+    ],
+    "allowed_paths": [
+     "frontend/src/components/client/ClientArchive.tsx",
+     "frontend/src/components/client/ClientDocuments.tsx",
+     "frontend/src/components/documents/ConfidenceBadge.tsx",
+     "frontend/src/components/documents/ExportButton.tsx",
+     "frontend/src/lib/__tests__/format.test.ts",
+     "frontend/src/lib/format.ts",
+     "frontend/src/pages/Dashboard.tsx",
+     "frontend/src/types/document.ts"
+    ],
+    "forbidden_paths": [
+     "Zavedení field-yield nebo jiné náhrady eskalačního signálu — ACTA má checker",
+     "Odstranění DB sloupce documents.min_confidence — drop je nevratný, hodnota",
+     "Přejmenování min_confidence na validation_level — kosmetika, samostatná věc",
+     "Trvalé sledování kvality extrakce (metriky, dashboardy, alerty) — samostatná",
+     "Jakákoli změna eskalace, checkeru nebo deterministických validací",
+     "Dashboard v desktopové navigaci — uděláno mimo plán, commit 396332f na větvi",
+     "Popover kdekoli jinde než na poli dokladu",
+     "backend/acta/extraction/segmentation.py (řádky 153, 168, 251, 364) má vlastní",
+     "Úprava DUNA pozičního mapování na straně příjemce — plán ji NEMŮŽE vlastnit"
+    ]
+   },
+   "dod": {
+    "objective": "Procento a tečka pryč; místo nich počet polí k revizi z backendu.",
+    "acceptance_criteria": [
+     "Ani jeden seznam nezobrazuje procento ani barevnou tečku ze self-confidence",
+     "Doklad bez nálezu má ve sloupci „—\", doklad s nálezem počet",
+     "`grep -rn --exclude-dir=__tests__ \"calcConfidencePct\" frontend/src` nevrací nic (test na její nepřítomnost je jediné místo, kde jméno smí zůstat)",
+     "`components/shared/ConfidenceDot.tsx` a jeho volání zůstávají nedotčené",
+     "`tsc --noEmit` je zelený"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s12-acta-E-021-2_3-step1",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-021-2_3",
+   "run": "R-E021-2",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-021-2_3/R-E021-2/verifier-output-step-1.md",
+   "head_sha": "aa0d8c611710584bfd5e7e77c1b794f3c314763d",
+   "range": "f6f1409028a5799ce0f98257ffdbc159ba7364f1..aa0d8c611710584bfd5e7e77c1b794f3c314763d",
+   "range_source": "step_commit",
+   "size": {
+    "files": 3,
+    "lines": 402
+   },
+   "step_files": {
+    "outputs": [
+     "Create: `frontend/scripts/parseChangelog.mjs` — parser changelogu s režimy `--check` a `--json`",
+     "Create: `frontend/scripts/parseChangelog.d.mts` — typová deklarace k modulu, bez ní neprojde `tsc --noEmit`",
+     "Test: `frontend/src/lib/__tests__/parseChangelog.test.ts` (tier: t0) — ověří rozpad záznamu na uživatelskou a technickou sekci a odmítnutí prázdné uživatelské sekce"
+    ],
+    "allowed_paths": [
+     "frontend/scripts/parseChangelog.mjs",
+     "frontend/scripts/parseChangelog.d.mts",
+     "frontend/src/lib/__tests__/parseChangelog.test.ts"
+    ],
+    "forbidden_paths": [
+     "Tvrdé blokování mergu na GitHubu (branch protection). Na privátním",
+     "Automatický deploy na eco-prod. Nasazení zůstává ruční přes SSH podle",
+     "Generování obsahu changelogu z commit messages. Standard to zakazuje",
+     "Převod starších záznamů changelogu (0.1.0 až 0.8.0) na dvousekční tvar.",
+     "Testovací patra T0/T1/T2 a zobrazení changelogu v aplikaci. Obojí je",
+     "Propsání uživatelské sekce changelogu do aplikace **při sestavení** a hlasitý"
+    ]
+   },
+   "dod": {
+    "objective": "Jeden modul, který rozumí tvaru `CHANGELOG.md` a umí vrátit záznam konkrétní verze i ověřit, že j...",
+    "acceptance_criteria": [
+     "Nad fixturou s jedinou verzí ve dvousekčním tvaru (`printf '## [9.9.9] — 2026-01-01\\n\\nShrnutí.\\n\\n### Pro uživatele\\n\\n- Odrážka.\\n' > /tmp/cl.md`) skončí `CHANGELOG_PATH=/tmp/cl.md node frontend/scripts/parseChangelog.mjs --check 9.9.9` kódem 0",
+     "Táž fixtura s odrážkou nahrazenou za `- ` (samotná mezera) dá kódu 1",
+     "`node frontend/scripts/parseChangelog.mjs --check 0.8.0` skončí kódem 1 nad skutečným `CHANGELOG.md`, protože 0.8.0 je ve starém tvaru bez sekce `### Pro uživatele`",
+     "`CHANGELOG_PATH=/tmp/cl.md node frontend/scripts/parseChangelog.mjs --json 9.9.9 | jq -e '.user | length > 0'` skončí kódem 0",
+     "`cd frontend && npm test -- parseChangelog` projde a sada obsahuje případ s prázdnou odrážkou",
+     "`cd frontend && npm run typecheck` skončí kódem 0 (bez `parseChangelog.d.mts` skončí `TS7016`)"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "- severity: low",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "- severity: low",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "- severity: info",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "- severity: info",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s13-acta-E-024-4_4-step0",
+   "project": "acta",
+   "repo_path": "/opt/eco/projects/acta",
+   "checkpoint": "cp2",
+   "epic": "E-024-4_4",
+   "run": "R-E024-4",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-024-4_4/R-E024-4/verifier-output-step-0.md",
+   "head_sha": "94a5a9b604c2c226dcee480b98967616fba063e3",
+   "range": "31880428d30fe5c13a8d9e0d226db086d55f6e3e..94a5a9b604c2c226dcee480b98967616fba063e3",
+   "range_source": "base_commit",
+   "size": {
+    "files": 4,
+    "lines": 199
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `frontend/src/pages/help/ProtistranyPage.tsx` (lines ~138-205) — rozšíření sekce o kontrolu účtu a periodu obnovy",
+     "Modify: `frontend/src/config/helpSections.ts` (lines ~128-150) — nové kotvy a `lastReviewedPlan`",
+     "Modify: `frontend/src/pages/help/__tests__/content-coverage.test.ts` (lines ~65-75) — povinné fráze podle nového textu",
+     "Test: `frontend/e2e/help-structure.spec.ts` — nové kotvy existují v DOM"
+    ],
+    "allowed_paths": [
+     "frontend/e2e/help-structure.spec.ts",
+     "frontend/src/config/__tests__/helpSections.test.ts",
+     "frontend/src/config/helpSections.ts",
+     "frontend/src/pages/help/ProtistranyPage.tsx",
+     "frontend/src/pages/help/__tests__/content-coverage.test.ts"
+    ],
+    "forbidden_paths": [
+     "Prometheus instrumentace. ACTA ji nemá (grep -rn \"Counter(\" backend/acta vrací jen",
+     "Rozlišení „registr neodpověděl\" vs. „subjekt tam není\" v UI. Do logu a alertu ano,",
+     "Změna prahu zastarávání (REGISTRY_STALE_AFTER_DAYS = 30) a sémantiky snapshotu.",
+     "Plný eventový ISIR (ISIR_WS) s detailem insolvenčního řízení. Badge stačí.",
+     "Blokující chování. Badge i varování o účtu zůstávají poradní.",
+     "Změna deterministické klasifikace DPH režimu (P016 Step 14)."
+    ]
+   },
+   "dod": {
+    "objective": "Účetní si v aplikaci přečte, kdy se registry kontrolují a co znamená varování o účtu.",
+    "acceptance_criteria": [
+     "`npm test -- content-coverage` prochází.",
+     "`helpSections.ts` obsahuje kotvy `kdy-se-kontroluje` a `kontrola-uctu` a `ProtistranyPage.tsx` má pro obě `id=`.",
+     "Stránka protistran má `lastReviewedPlan: 'P024'`.",
+     "Text sekce vysvětluje periodu obnovy, ruční vynucení i význam varování o účtu.",
+     "Fráze „Insolvence nezjištěna\" v textu zůstává."
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s14-aid-orchestrator-E-063-1_1-step1",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-063-1_1",
+   "run": "R-E063-1",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-063-1_1/R-E063-1/verifier-output-step-1.md",
+   "head_sha": "0bea5bc1b4672a02de74c8699cb6f0d4df4515a8",
+   "range": "ae1f7e4260ba6e4467365492b93b71e7818382db..0bea5bc1b4672a02de74c8699cb6f0d4df4515a8",
+   "range_source": "step_commit",
+   "size": {
+    "files": 7,
+    "lines": 593
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `plugins/aid-orchestrator/scripts/aid-run-gates.sh` — retry loop",
+     "Modify: `plugins/aid-orchestrator/defaults/.gitignore` — add",
+     "Create: `plugins/aid-orchestrator/scripts/lib/aid-gitignore-backfill.sh` —",
+     "Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — clean-tree-guard",
+     "Create: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-gitignore-backfill.bats`"
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/scripts/aid-run-gates.sh",
+     "plugins/aid-orchestrator/defaults/.gitignore",
+     "plugins/aid-orchestrator/scripts/lib/aid-gitignore-backfill.sh",
+     "plugins/aid-orchestrator/scripts/aid-fsm.sh",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-aid-gitignore-backfill.bats",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates.bats"
+    ],
+    "forbidden_paths": [
+     "Speeding up the tests/gates themselves.",
+     "Changing gate profiles (P061) or gate selection logic.",
+     "Any NEW threshold/timing-based FSM precondition derived from baseline data",
+     "A UI.",
+     "Backfilling baselines from historical runs — the baseline starts empty and"
+    ]
+   },
+   "dod": {
+    "objective": "Wire Step 1's library into the real per-attempt execution path, add the additive `gates_report.js...",
+    "acceptance_criteria": [
+     "AC7: `.aid-o/metrics/gate-runtime-baselines.yaml` (and its `.lock`",
+     "AC8: `gates_report.json` gains only additive fields for the new",
+     "AC9: An existing (already-initialized) project's local clone gets"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s15-aid-orchestrator-E-064-1_2-step1",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-064-1_2",
+   "run": "R-E064-1",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-064-1_2/R-E064-1/verifier-output-step-1.md",
+   "head_sha": "7ada49beab081b73bb86f7bc23c585eae9973d5a",
+   "range": "8bed76b2663de835c88c44885f2157eaa826485c..7ada49beab081b73bb86f7bc23c585eae9973d5a",
+   "range_source": "step_commit",
+   "size": {
+    "files": 5,
+    "lines": 269
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `plugins/aid-orchestrator/scripts/aid-protocol-validate.sh` (lines ~157-176) — add `plan_boundary_manifest` to `VALID_ARTIFACT_TYPES`.",
+     "Modify: `plugins/aid-orchestrator/scripts/aid-protocol-validate.sh` (lines ~357-375) — add the `TYPE_PAYLOAD_MAP` entry mapping the type to payload key `plan_boundary_manifest`.",
+     "Modify: `plugins/aid-orchestrator/defaults/schemas/aid-protocol-v2.schema.json` — add the same value to `properties.artifact_type.enum`.",
+     "Create: `plugins/aid-orchestrator/defaults/schemas/plan-boundary-manifest.schema.json` — the type-specific schema for the payload described in `## Data Model`.",
+     "Create: `plugins/aid-orchestrator/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest/valid.json` — a complete, schema-passing example manifest.",
+     "Create: `plugins/aid-orchestrator/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest/invalid-missing-payload.json` — envelope without the payload key, expected exit 12."
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/scripts/aid-protocol-validate.sh",
+     "plugins/aid-orchestrator/defaults/schemas/aid-protocol-v2.schema.json",
+     "plugins/aid-orchestrator/defaults/schemas/plan-boundary-manifest.schema.json",
+     "plugins/aid-orchestrator/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest/valid.json",
+     "plugins/aid-orchestrator/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest/invalid-missing-payload.json"
+    ],
+    "forbidden_paths": []
+   },
+   "dod": {
+    "objective": "Make `plan-boundary-manifest.json` a first-class protocol-v2 artifact so that identity, freshness...",
+    "acceptance_criteria": [
+     "`bash plugins/aid-orchestrator/scripts/tests/test-protocol-validate.sh --consistency` exits 0 with the new type present in both the schema enum and `VALID_ARTIFACT_TYPES`. (Precondition, already satisfied before this plan runs: that test was red on `main` because `c3_dispatch` was in `VALID_ARTIFACT_TYPES` and `TYPE_PAYLOAD_MAP` but missing from the schema enum. Fixed separately by adding it to the schema — the type is live, produced at `lib/aid-c3-dispatch.sh:690` — so the suite now reports 58/58.)",
+     "The `valid.json` fixture passes `aid-protocol-validate.sh` with exit 0.",
+     "The `invalid-missing-payload.json` fixture exits 12."
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "## Informational note (non-blocking, not part of this diff)",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s16-aid-orchestrator-E-065-2_7-step0",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-065-2_7",
+   "run": "R-E065-2",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-065-2_7/R-E065-2/verifier-output-step-0.md",
+   "head_sha": "317657b54483a766addeea65a366b4e2d6528e6c",
+   "range": "c17b7e9f806ed509e91a6aec9ed59037801ec2e0..317657b54483a766addeea65a366b4e2d6528e6c",
+   "range_source": "base_commit",
+   "size": {
+    "files": 2,
+    "lines": 638
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `aid-c3-dispatch.sh` (`dispatch` + `_run_codex_isolated` seam + stream parser per Step 1).",
+     "Modify: `test-aid-c3-dispatch.bats` — executor-first + capture + unavailable/timeout/"
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-aid-c3-dispatch.bats"
+    ],
+    "forbidden_paths": [
+     "Running the advisory fallback FROM the bash bridge (claude -p subprocess) — the",
+     "A filesystem read-jail / OS sandbox for Codex — deliberately NOT done: independence is",
+     "Removing/repurposing aid-audit-independence.sh detection or its D7 ban.",
+     "P064 \"plan-final C3\" (P065 is its precondition).",
+     "Changing the legacy_health A–J audit; multi-provider fan-out."
+    ]
+   },
+   "dod": {
+    "objective": "Add `dispatch` — select Codex first, probe as `cross_provider`, always attempt the real Codex CLI...",
+    "acceptance_criteria": [
+     "For a `high` profile, `dispatch` invokes `detect --required cross_provider` (spy/log),",
+     "With the fixture `valid`, `dispatch` launches codex `--cd <repo> --sandbox read-only` and",
+     "**Non-sticky:** two consecutive `rate_limited` runs BOTH invoke codex (spy/log); the"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings — the specific questions asked",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "## Additional findings (code quality, non-blocking)",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s17-aid-orchestrator-E-065-6_7-step0",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-065-6_7",
+   "run": "R-E065-6",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-065-6_7/R-E065-6/verifier-output-step-0.md",
+   "head_sha": "cb8c89cdc8fbc5a71da4ea2097816eff6656aa85",
+   "range": "bfb06cb6c2c80c4dfa6a831712c25eb090c9749f..cb8c89cdc8fbc5a71da4ea2097816eff6656aa85",
+   "range_source": "base_commit",
+   "size": {
+    "files": 3,
+    "lines": 125
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `plugins/aid-orchestrator/skills/pipeline.md` (DONE §6, after the C3 dispatch/verify",
+     "Modify: `plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml` — add a `c3_fix_loop`",
+     "Modify: `plugins/aid-orchestrator/scripts/aid-fsm.sh` — the C3 hook consumes the CANONICAL"
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/skills/pipeline.md",
+     "plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml",
+     "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+    ],
+    "forbidden_paths": [
+     "Running the advisory fallback FROM the bash bridge (claude -p subprocess) — the",
+     "A filesystem read-jail / OS sandbox for Codex — deliberately NOT done: independence is",
+     "Removing/repurposing aid-audit-independence.sh detection or its D7 ban.",
+     "P064 \"plan-final C3\" (P065 is its precondition).",
+     "Changing the legacy_health A–J audit; multi-provider fan-out."
+    ]
+   },
+   "dod": {
+    "objective": "After a dispatched C3 report with blocking (critical/high) findings, run a bounded fix→reverify l...",
+    "acceptance_criteria": [
+     "`c3-audit-policy.yaml` has `c3_fix_loop.max_rechecks: 2` and",
+     "A blocking critical/high C3 finding drives a gate-fixer/implementer fix, a new HEAD, a",
+     "After 2 rechecks still blocking (or the same fingerprint repeats / findings conflict) →"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## 2. c3-audit-policy.yaml — new `c3_fix_loop` block",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s18-aid-orchestrator-E-076-1_3-step0",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-076-1_3",
+   "run": "R-E076-1",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-076-1_3/R-E076-1/verifier-output-step-0.md",
+   "head_sha": "a9d2da432a9a968d9b5b6c7ac257affaa0b29dd8",
+   "range": "d822957c2a469057c85a0ae0a0e9969274744ef4..a9d2da432a9a968d9b5b6c7ac257affaa0b29dd8",
+   "range_source": "base_commit",
+   "size": {
+    "files": 4,
+    "lines": 203
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `plugins/aid-orchestrator/defaults/execution.yaml` (per-gate key documentation in the live gate entries, lines ~13-77 — NOT the commented gates_python language example further down) — document the new optional per-gate key `run_mode: foreground|background` (default `foreground`; background = supervised by `aid-job.sh`, re-attachable after a crash) next to the existing `timeout_seconds`/`max_retries` documentation; no template gate sets it (nothing auto-flips for consumer projects).",
+     "Modify: `.aid-o/config/execution.yaml` (gate blocks: `bats_all` starting line ~9, `bats_boundary` starting line ~42 — the boundary block extends past line 87 with its comments) — add `run_mode: background` to both, with a comment citing the measured p95 rationale and P076.",
+     "Modify: `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` (baseline-advice entry, lines ~1108-1115) — the sentence \"never changes orchestrator behavior by itself (a human ... edits execution.yaml's timeout_seconds/run_mode by hand)\" is rewritten: the recommendation now has a defined landing field and a named observe-only advisory event (Step 3); flipping remains a human/controller edit.",
+     "Test: `plugins/aid-orchestrator/scripts/tests/bats/test-run-mode-field.bats` — a gate without `run_mode` resolves foreground; explicit foreground and background parse; an invalid value fails loudly naming the two accepted forms; the shipped template contains the documentation block and zero template gates with `run_mode` set."
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/defaults/execution.yaml",
+     ".aid-o/config/execution.yaml",
+     "plugins/aid-orchestrator/defaults/enforcement-registry.yaml",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-run-mode-field.bats"
+    ],
+    "forbidden_paths": []
+   },
+   "dod": {
+    "objective": "execution.yaml understands `run_mode: foreground|background` per gate — documented in the templat...",
+    "acceptance_criteria": [
+     "All four bats cases pass, including the loud invalid-value failure.",
+     "`yq '.gates.bats_all.run_mode' .aid-o/config/execution.yaml` prints `background`; `grep -c 'run_mode' plugins/aid-orchestrator/defaults/execution.yaml` shows documentation only (no template gate sets it).",
+     "The registry advisory-entry text names the field and the advisory event instead of the by-hand-only claim."
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s19-aid-orchestrator-E-076-3_3-step0",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-076-3_3",
+   "run": "R-E076-3",
+   "step": 0,
+   "source_file": ".aid-o/work/evidence/E-076-3_3/R-E076-3/verifier-output-step-0.md",
+   "head_sha": "28dce7b9df97a498b7a6bdcfa5ec20f18a6a3ff4",
+   "range": "e90d5f44754ed74d19c14f1824a705a9535896ec..28dce7b9df97a498b7a6bdcfa5ec20f18a6a3ff4",
+   "range_source": "base_commit",
+   "size": {
+    "files": 3,
+    "lines": 364
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `docs/plans/2026-06-29-BACKLOG.md` (IMP table) — five new entries with the next free IMP numbers: fire-and-return ASYNC gates (runner returns before completion; supervised-synchronous shipped by P076 Step 2); services-to-resource-map classifier integration (observe-only JSONL shipped by Step 10); foreground-gate `timeout -k` hardening (option 1B, foreground kept byte-identical); visual-companion server migration onto lib/aid-service.sh; host push-continuation adapter (task-notification behaviour as a verified mechanism rather than instruction-only guidance). Each entry: what shipped instead, why deferred, where the hook point is (file:line of the P076 mechanism it would extend).",
+     "Modify: `docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md` (§16 STILL OPEN block) — each still-open line gains its allocated IMP number (verification that the promise \"each registered as an IMP backlog entry\" is literally true).",
+     "Test: `plugins/aid-orchestrator/scripts/tests/bats/test-p076-backlog-closure.bats` — greps: every §16 STILL OPEN line carries an IMP-number token; every named IMP number exists in the backlog file; the five entries name their hook points."
+    ],
+    "allowed_paths": [
+     "docs/plans/2026-06-29-BACKLOG.md",
+     "docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-p076-backlog-closure.bats"
+    ],
+    "forbidden_paths": []
+   },
+   "dod": {
+    "objective": "Every consciously deferred item from this plan exists as a numbered IMP entry in the project back...",
+    "acceptance_criteria": [
+     "Five IMP entries exist with hook points; §16 lines cross-reference them; bats closure test passes.",
+     "The bats closure test enumerates exactly five IMP tokens in the §16 STILL OPEN block and finds each in the backlog (a count assertion — executable, no gitignored input; the interim cross-check is an implementation-review activity, not an acceptance criterion)."
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  },
+  {
+   "id": "s20-aid-orchestrator-E-061-3_6-step1",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-061-3_6",
+   "run": "R-E061-3",
+   "step": 1,
+   "source_file": ".aid-o/work/evidence/E-061-3_6/R-E061-3/verifier-output-step-1.md",
+   "head_sha": "4949b9f823cc8c6fcf21c2ec5c342ed9ecaed679",
+   "range": "ab985f6ac6167425c06bbf036b36b8c2b21686b1..4949b9f823cc8c6fcf21c2ec5c342ed9ecaed679",
+   "range_source": "step_commit",
+   "size": {
+    "files": 1,
+    "lines": 145
+   },
+   "step_files": {
+    "outputs": [
+     "Modify: `.aid-o/config/execution.yaml` — přidat `gates.targeted_tests` definici (command:",
+     "Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates.bats` — integrační"
+    ],
+    "allowed_paths": [
+     ".aid-o/config/execution.yaml",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates.bats"
+    ],
+    "forbidden_paths": []
+   },
+   "dod": {
+    "objective": "Zaregistrovat `targeted_tests` jako platnou gate definici, BEZ aktivace v self-host `gate_profile...",
+    "acceptance_criteria": [
+     "`targeted_tests` gate definice existuje v `execution.yaml` a `aid-run-gates.sh` ji najde a",
+     "`targeted_tests` NENÍ součástí žádného aktivního self-host `gate_profiles.*.include[]`",
+     "Integrační test ověří, že `aid-run-gates.sh` volání gate `targeted_tests` propaguje",
+     "CHECKPOINT 3 end-to-end (přes `aid-run-gates.sh`, ne jen přímé volání selectoru): fixture"
+    ]
+   },
+   "original_verdict": "pass",
+   "original_findings": [
+    {
+     "claim": "## Code-review notes (quality, non-blocking)",
+     "evidence": "see source_file"
+    },
+    {
+     "claim": "## Findings",
+     "evidence": "see source_file"
+    }
+   ]
+  }
+ ]
+}

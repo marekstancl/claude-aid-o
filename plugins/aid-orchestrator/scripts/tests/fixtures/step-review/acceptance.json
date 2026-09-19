@@ -1,0 +1,547 @@
+{
+  "written": "2026-09-19",
+  "ceiling_usd_two_new_runs": 30,
+  "spent_usd_two_new_runs": 28.61,
+  "prices": "defaults/prices.yaml (sonnet blended 6.56 estimated, opus blended 16.4 measured); the baseline USD is recomputed here at the P094-baseline rate of 4.2 USD/M for comparability",
+  "rule": {
+    "stated": "2026-09-19, before the run (docs/plans/P094-acceptance-run.md)",
+    "qualifies_when": "usd_per_step <= baseline.usd_per_step and usd_per_confirmed < baseline.usd_per_confirmed",
+    "winner": "most confirmed findings among qualifying, tie: cheaper per step",
+    "none_qualifies": "back to Step 3 or Step 6, never a relaxed rule",
+    "v1": "confirmed on the six failing entries >= baseline (2)"
+  },
+  "verdict": {
+    "sonnet": {
+      "usd_per_step_ok": false,
+      "usd_per_confirmed_ok": false,
+      "v1_ok": true
+    },
+    "opus": {
+      "usd_per_step_ok": false,
+      "usd_per_confirmed_ok": true,
+      "v1_ok": true,
+      "partial": "8 of 20 entries (the 30 USD ceiling); the six failing entries plus s07, s11"
+    }
+  },
+  "chosen_model": "sonnet (PM decision 2026-09-19, option A: the pre-stated rule qualified neither model; the PM chose Sonnet and the adjudicator relaxation — one resolving citation is enough, absent:path, git log/show read-only)",
+  "notes": [
+    "Sonnet: 5 confirmed of 6 accepted; s11 disputed; 3 real findings (s07 blocker, s03 security major, s18 major) rejected by the adjudicator for a citation past the end of the file — the claims were right, the line numbers were not",
+    "Opus: 14 confirmed of 18 accepted, 4 minors not verified by the controller, none disputed, no rejections",
+    "baseline found 0 of the 8 real defects of the original reviews; Sonnet found 3 of them (s02, s03, s04) plus 3 more rejected on evidence; Opus found defects on all six failing entries"
+  ],
+  "totals": {
+    "baseline": {
+      "entries": 20,
+      "reported": 16,
+      "confirmed": 6,
+      "confirmed_on_failing": 2,
+      "tokens": 1738149,
+      "usd": 7.3002,
+      "usd_per_step": 0.365,
+      "usd_per_confirmed": 1.2167
+    },
+    "sonnet": {
+      "entries": 20,
+      "reported": 6,
+      "confirmed": 5,
+      "confirmed_on_failing": 3,
+      "tokens": 2003200,
+      "usd": 13.1409,
+      "usd_per_step": 0.657,
+      "usd_per_confirmed": 2.6282
+    },
+    "opus": {
+      "entries": 8,
+      "reported": 18,
+      "confirmed": 14,
+      "confirmed_on_failing": 10,
+      "tokens": 943291,
+      "usd": 15.47,
+      "usd_per_step": 1.9338,
+      "usd_per_confirmed": 1.105
+    }
+  },
+  "entries": [
+    {
+      "id": "s01-acta-E-018-2_2-step0",
+      "original_verdict": "fail",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 82996,
+        "usd": 0.3486
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 87183,
+        "usd": 0.5719
+      },
+      "opus": {
+        "verdict": "pass",
+        "reported": 1,
+        "confirmed": 1,
+        "unverified_minors": 0,
+        "tokens": 103757,
+        "usd": 1.7016
+      }
+    },
+    {
+      "id": "s02-acta-E-024-1_4-step1",
+      "original_verdict": "fail",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 87210,
+        "usd": 0.3663
+      },
+      "sonnet": {
+        "verdict": "fail",
+        "reported": 1,
+        "confirmed": 1,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 101138,
+        "usd": 0.6635
+      },
+      "opus": {
+        "verdict": "fail",
+        "reported": 3,
+        "confirmed": 1,
+        "unverified_minors": 2,
+        "tokens": 109163,
+        "usd": 1.7903
+      }
+    },
+    {
+      "id": "s03-wan-E-084-1_1-step0",
+      "original_verdict": "fail",
+      "baseline": {
+        "verdict": "fail",
+        "reported": 8,
+        "confirmed": 2,
+        "tokens": 87363,
+        "usd": 0.3669
+      },
+      "sonnet": {
+        "verdict": "fail",
+        "reported": 1,
+        "confirmed": 1,
+        "disputed": null,
+        "rejected_real": "security major: PII of a soft-deleted Person in the 422 (one of seven citations past EOF)",
+        "tokens": 187752,
+        "usd": 1.2317
+      },
+      "opus": {
+        "verdict": "fail",
+        "reported": 4,
+        "confirmed": 4,
+        "unverified_minors": 0,
+        "tokens": 206009,
+        "usd": 3.3785
+      }
+    },
+    {
+      "id": "s04-wan-E-091-3_3-step1",
+      "original_verdict": "fail",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 99237,
+        "usd": 0.4168
+      },
+      "sonnet": {
+        "verdict": "fail",
+        "reported": 1,
+        "confirmed": 1,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 127737,
+        "usd": 0.838
+      },
+      "opus": {
+        "verdict": "fail",
+        "reported": 4,
+        "confirmed": 2,
+        "unverified_minors": 2,
+        "tokens": 164872,
+        "usd": 2.7039
+      }
+    },
+    {
+      "id": "s05-aid-orchestrator-E-065-4_7-step1",
+      "original_verdict": "fail",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 85788,
+        "usd": 0.3603
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 84377,
+        "usd": 0.5535
+      },
+      "opus": {
+        "verdict": "fail",
+        "reported": 1,
+        "confirmed": 1,
+        "unverified_minors": 0,
+        "tokens": 91401,
+        "usd": 1.499
+      }
+    },
+    {
+      "id": "s06-aid-orchestrator-E-080-1_3-step2",
+      "original_verdict": "fail",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 88059,
+        "usd": 0.3698
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 93618,
+        "usd": 0.6141
+      },
+      "opus": {
+        "verdict": "pass",
+        "reported": 1,
+        "confirmed": 1,
+        "unverified_minors": 0,
+        "tokens": 90533,
+        "usd": 1.4847
+      }
+    },
+    {
+      "id": "s07-acta-E-013-1_1-step0",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 1,
+        "confirmed": 1,
+        "tokens": 78971,
+        "usd": 0.3317
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": "blocker: _strip_code never called (line 215 cited in a 155-line file)",
+        "tokens": 77931,
+        "usd": 0.5112
+      },
+      "opus": {
+        "verdict": "fail",
+        "reported": 2,
+        "confirmed": 2,
+        "unverified_minors": 0,
+        "tokens": 83174,
+        "usd": 1.3641
+      }
+    },
+    {
+      "id": "s08-acta-E-014-1_1-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 89067,
+        "usd": 0.3741
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 96190,
+        "usd": 0.631
+      },
+      "opus": null
+    },
+    {
+      "id": "s09-acta-E-018-2_2-step2",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 2,
+        "confirmed": 1,
+        "tokens": 83153,
+        "usd": 0.3492
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 102898,
+        "usd": 0.675
+      },
+      "opus": null
+    },
+    {
+      "id": "s10-acta-E-019-3_3-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 84023,
+        "usd": 0.3529
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 87364,
+        "usd": 0.5731
+      },
+      "opus": null
+    },
+    {
+      "id": "s11-acta-E-020-2_3-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 87584,
+        "usd": 0.3679
+      },
+      "sonnet": {
+        "verdict": "fail",
+        "reported": 1,
+        "confirmed": 0,
+        "disputed": "claims tsc fails; fields_meta is Record<string, any>, it compiles",
+        "rejected_real": null,
+        "tokens": 84234,
+        "usd": 0.5526
+      },
+      "opus": {
+        "verdict": "pass",
+        "reported": 2,
+        "confirmed": 2,
+        "unverified_minors": 0,
+        "tokens": 94382,
+        "usd": 1.5479
+      }
+    },
+    {
+      "id": "s12-acta-E-021-2_3-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 86074,
+        "usd": 0.3615
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 1,
+        "confirmed": 1,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 165759,
+        "usd": 1.0873
+      },
+      "opus": null
+    },
+    {
+      "id": "s13-acta-E-024-4_4-step0",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 81671,
+        "usd": 0.343
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 89578,
+        "usd": 0.5876
+      },
+      "opus": null
+    },
+    {
+      "id": "s14-aid-orchestrator-E-063-1_1-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 95377,
+        "usd": 0.4006
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 1,
+        "confirmed": 1,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 104172,
+        "usd": 0.6834
+      },
+      "opus": null
+    },
+    {
+      "id": "s15-aid-orchestrator-E-064-1_2-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 83124,
+        "usd": 0.3491
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 82275,
+        "usd": 0.5397
+      },
+      "opus": null
+    },
+    {
+      "id": "s16-aid-orchestrator-E-065-2_7-step0",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 1,
+        "confirmed": 0,
+        "tokens": 98457,
+        "usd": 0.4135
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 103557,
+        "usd": 0.6793
+      },
+      "opus": null
+    },
+    {
+      "id": "s17-aid-orchestrator-E-065-6_7-step0",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 89776,
+        "usd": 0.3771
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 84717,
+        "usd": 0.5557
+      },
+      "opus": null
+    },
+    {
+      "id": "s18-aid-orchestrator-E-076-1_3-step0",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "fail",
+        "reported": 1,
+        "confirmed": 1,
+        "tokens": 87578,
+        "usd": 0.3678
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": "major: registry claims run_mode is read by aid-run-gates.sh (citation :206 in a 151-line file)",
+        "tokens": 81015,
+        "usd": 0.5315
+      },
+      "opus": null
+    },
+    {
+      "id": "s19-aid-orchestrator-E-076-3_3-step0",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "tokens": 83205,
+        "usd": 0.3495
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 85947,
+        "usd": 0.5638
+      },
+      "opus": null
+    },
+    {
+      "id": "s20-aid-orchestrator-E-061-3_6-step1",
+      "original_verdict": "pass",
+      "baseline": {
+        "verdict": "fail",
+        "reported": 3,
+        "confirmed": 1,
+        "tokens": 79436,
+        "usd": 0.3336
+      },
+      "sonnet": {
+        "verdict": "pass",
+        "reported": 0,
+        "confirmed": 0,
+        "disputed": null,
+        "rejected_real": null,
+        "tokens": 75758,
+        "usd": 0.497
+      },
+      "opus": null
+    }
+  ],
+  "pm_decision": {
+    "date": "2026-09-19",
+    "choice": "A",
+    "reason": "the baseline is cheap because it finds nothing; the goal was the defects it misses"
+  }
+}

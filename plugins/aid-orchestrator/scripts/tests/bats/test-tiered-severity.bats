@@ -16,14 +16,13 @@
 # they invoke … via bash aid-fsm.sh done-advance ... subprocess, which gives
 # faster + isolated test execution.").
 #
-# Why TZ=UTC: verify_provenance() inside aid-fsm.sh compares jq's
-# fromdateiso8601 (which silently honours local TZ on jq <1.7) against UTC
-# epochs from `date -d`. On CEST hosts this disagrees by 3600s and the
-# interval-bracket provenance check misfires. See test-anti-fabrication.bats:14-20
-# for the canonical write-up.
+# P094 Step 8: the verifier-provenance dimension (verify_provenance,
+# provenance_aggregate) went with the verifier files; the blocking failure
+# these fixtures manufacture is gates_generated_by (gates_report.json without
+# its _generated_by), and the cp3 precondition is a seeded passing round.
 #
-# Helpers used: shared `mktemp -d` pattern; no additions to test-helpers.bash
-# (each fixture is self-contained).
+# Helpers used: aid_fixture_seed_step_review from test-helpers.bash.
+load test-helpers.bash
 
 setup() {
   export TZ=UTC
@@ -44,14 +43,12 @@ setup() {
   mkdir -p "$EVIDENCE_DIR" "$CONFIG_DIR" "$(dirname "$AUDIT_LOG")"
   mkdir -p "${PROJECT_ROOT}/.aid-o/tasks"           # cmd_done_advance does `find .aid-o/tasks/`; missing dir → set -e crash
   mkdir -p "${EVIDENCE_DIR}/gates"
-
-  # Explicit subagent dispatch_mode so fixtures 1-3 (provenance blocking / verified /
-  # force override) keep testing interval-bracket provenance — not affected by the
-  # agent_tool default change (P043). Fixture 2b removes this file to test the default;
-  # fixtures that don't test provenance are unaffected either way.
+  # done-advance re-checks the cp3 round against HEAD, so the fixture is a repository.
+  git -C "$PROJECT_ROOT" init -q -b main 2>/dev/null || git -C "$PROJECT_ROOT" init -q
+  git -C "$PROJECT_ROOT" config user.email t@t; git -C "$PROJECT_ROOT" config user.name t
+  echo seed > "$PROJECT_ROOT/README.md"; git -C "$PROJECT_ROOT" add README.md; git -C "$PROJECT_ROOT" commit -qm seed
   cat > "${CONFIG_DIR}/plugin.yaml" <<EOF
 plugin_path: "${PROJECT_ROOT}"
-dispatch_mode: subagent
 EOF
 
   # Minimal fsm-state.yaml in DONE state, done_phase=review, branch matches task/E-* regex
@@ -68,16 +65,12 @@ pm_decision: merge
 EOF
 
   # Default check-severity.yaml: mirrors plugin defaults/check-severity.yaml
-  # for the 3 dimensions exercised here (verifier_provenance + gates_generated_by
+  # for the dimensions exercised here (gates_generated_by + plan_ac_match
   # blocking, memory_substantive advisory). Other registry rows omitted — not
   # under test in this file.
   cat > "$SEVERITY_YAML" <<EOF
 version: 1
 checks:
-  verifier_provenance:
-    severity: blocking
-    promoted_at: "2026-05-13"
-    promoted_reason: "test fixture default"
   gates_generated_by:
     severity: blocking
     promoted_at: "2026-05-05"
@@ -96,13 +89,14 @@ checks:
     promoted_reason: null
 EOF
 
-  # Satisfy non-provenance compliance dimensions so an unverifiable provenance
-  # is the ONLY blocking failure in fixture 1 and there are NO blocking
-  # failures in fixture 2:
+  # Satisfy the compliance dimensions so there are NO blocking failures unless
+  # a fixture removes one (fixtures 1 and 3 drop gates_report.json's _generated_by):
   #   - execution_yaml_present requires .aid-o/config/execution.yaml
   #   - gates_generated_by requires evidence_dir/gates/gates_report.json with ._generated_by
+  #   - the cp3 review round precondition needs a closed passing round at HEAD
   touch "${CONFIG_DIR}/execution.yaml"
   printf '{"_generated_by":"aid-run-gates.sh@test-fixture"}\n' > "${EVIDENCE_DIR}/gates/gates_report.json"
+  aid_fixture_seed_step_review "$EVIDENCE_DIR" cp3 "" pass "$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 
   # Minimal curator + auditor reports so the remaining cmd_done_advance
   # preconditions (curator-report, audit-report, CP5 blocking_findings) all pass.
@@ -127,58 +121,25 @@ teardown() {
 }
 
 # ─── Fixture 1 ──────────────────────────────────────────────────────────
-# Blocking compliance failure (unverifiable verifier provenance) MUST block
-# done-advance review→release with exit 2 and a structured error message
+# Blocking compliance failure (a gates report with no runner provenance) MUST
+# block done-advance review→release with exit 2 and a structured error message
 # naming the offending check.
 @test "fixture 1: blocking compliance failure blocks done-advance" {
-  # Manufacture an unverifiable provenance: step-1-verify.md present (drives the
-  # CP2 loop) + verifier-output-step-1.md present (validates the per-step
-  # outputs schema check) + EMPTY timeline.jsonl (verify_provenance returns
-  # "unverifiable" because no verifier_dispatch_start/_complete events match).
-  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
-classification: RUN
-EOF
-  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
-_generated_by: aid-orchestrator:verifier@cp2-step-1
-_generated_at: 2025-01-01T00:00:00Z
-classification: RUN
-verdict: pass
-EOF
-  # Timeline already truncated in setup() → no dispatch events.
+  # Manufacture the blocking failure: gates_report.json without _generated_by.
+  printf '{"overall":"pass"}\n' > "${EVIDENCE_DIR}/gates/gates_report.json"
 
   cd "$PROJECT_ROOT"
   run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
   [ "$status" -eq 2 ]
   [[ "$output" == *"blocking compliance failure"* ]]
-  [[ "$output" == *"verifier_provenance"* ]]
+  [[ "$output" == *"gates_generated_by"* ]]
 }
 
 # ─── Fixture 2 ──────────────────────────────────────────────────────────
-# Verified provenance + no blocking failures → release proceeds (exit 0).
-# Inversion of fixture 1: manufacture matching timeline events for the
-# verifier output so provenance_aggregate becomes "all_verified" and no
-# synthetic verifier_provenance failure is generated. Advisory dimensions
+# No blocking failures → release proceeds (exit 0). Inversion of fixture 1:
+# the setup's gates report carries its provenance. Advisory dimensions
 # (memory_substantive, dod_present) report null and never reach failures[].
-@test "fixture 2: advisory failure does NOT block done-advance (verified provenance)" {
-  local GEN_AT="2026-05-13T12:00:00Z"
-  local GEN_AT_MIN30="2026-05-13T11:59:30Z"
-  local GEN_AT_PLUS30="2026-05-13T12:00:30Z"
-
-  # Real timeline.jsonl with verifier_dispatch events INSIDE the ±60s window.
-  cat > "${EVIDENCE_DIR}/timeline.jsonl" <<EOF
-{"ts":"${GEN_AT_MIN30}","event":"verifier_dispatch_start","focus":"cp2-step-1","agentId":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"${EVIDENCE_DIR}"}
-{"ts":"${GEN_AT_PLUS30}","event":"verifier_dispatch_complete","focus":"cp2-step-1","agentId":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"${EVIDENCE_DIR}","output_file":"${EVIDENCE_DIR}/verifier-output-step-1.md"}
-EOF
-  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
-classification: RUN
-EOF
-  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
-_generated_by: aid-orchestrator:verifier@cp2-step-1
-_generated_at: ${GEN_AT}
-classification: RUN
-verdict: pass
-EOF
-
+@test "fixture 2: advisory failure does NOT block done-advance (no blocking failure)" {
   cd "$PROJECT_ROOT"
   run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
   [ "$status" -eq 0 ]
@@ -191,64 +152,20 @@ EOF
 }
 
 # ─── Fixture 2b ─────────────────────────────────────────────────────────
-# agent_tool dispatch_mode + no timeline events → verifier_provenance must NOT block.
-# (P043: default dispatch_mode changed from subagent to agent_tool so CC Agent tool
-# users are no longer blocked on every EPIC.)
-@test "fixture 2b: agent_tool dispatch_mode skips provenance check (no timeline events)" {
-  # Remove setup's plugin.yaml entirely — exercises the true P043 default path
-  # (CC Agent tool user with no dispatch_mode config at all).
-  rm -f "${CONFIG_DIR}/plugin.yaml"
-
-  # Same unverifiable setup as fixture 1: verifier output present, timeline empty.
-  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
-classification: RUN
-EOF
-  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
-_generated_by: aid-orchestrator:verifier@cp2-step-1
-_generated_at: 2025-01-01T00:00:00Z
-classification: RUN
-verdict: pass
-EOF
-  # Timeline remains empty (no dispatch events) — agent_tool must not block.
-
-  cd "$PROJECT_ROOT"
-  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
-  [ "$status" -eq 0 ]
-
-  # compliance.json must have zero blocking failures (verifier_provenance not in blocking list)
-  [ -f "${EVIDENCE_DIR}/compliance.json" ]
-  local blocking_count
-  blocking_count=$(jq '.failures | map(select(.severity=="blocking")) | length' "${EVIDENCE_DIR}/compliance.json")
-  [ "$blocking_count" -eq 0 ]
-
-  # Aggregate must report the mode-level sentinel, not a misleading "mixed".
-  local prov_agg
-  prov_agg=$(jq -r '.checks.verifier_outputs.provenance_aggregate' "${EVIDENCE_DIR}/compliance.json")
-  [ "$prov_agg" = "agent_tool" ]
-}
-
 # ─── Fixture 3 ──────────────────────────────────────────────────────────
 # --force --reason ≥20 chars --blocked-checks "a,b" bypasses the blocking
 # precondition AND appends an fsm_force_override event to audit-log.jsonl
 # with a structured `blocked_checks` JSON array (not a comma string).
 @test "fixture 3: --force --reason --blocked-checks proceeds and writes audit-log JSON array" {
   # Manufacture a blocking failure so the override has something to override
-  # (same unverifiable-provenance setup as fixture 1).
-  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
-classification: RUN
-EOF
-  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
-_generated_by: aid-orchestrator:verifier@cp2-step-1
-_generated_at: 2025-01-01T00:00:00Z
-classification: RUN
-verdict: pass
-EOF
+  # (same setup as fixture 1).
+  printf '{"overall":"pass"}\n' > "${EVIDENCE_DIR}/gates/gates_report.json"
 
   cd "$PROJECT_ROOT"
   run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE" \
     --force \
     --reason "fixture-test override reason ≥20 chars OK" \
-    --blocked-checks "verifier_provenance,gates_generated_by"
+    --blocked-checks "gates_generated_by,plan_ac_match"
   [ "$status" -eq 0 ]
 
   # Audit-log must contain an fsm_force_override entry with the JSON array.
@@ -262,8 +179,8 @@ EOF
     .blocked_checks
     | (type == "array")
       and (length == 2)
-      and (.[0] == "verifier_provenance")
-      and (.[1] == "gates_generated_by")
+      and (.[0] == "gates_generated_by")
+      and (.[1] == "plan_ac_match")
   '
 }
 
@@ -278,7 +195,7 @@ EOF
   run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE" \
     --force \
     --reason "too short" \
-    --blocked-checks "verifier_provenance"
+    --blocked-checks "gates_generated_by"
   [ "$status" -eq 1 ]
   [[ "$output" == *"min 20 characters"* ]]
 
@@ -354,39 +271,22 @@ EOF
 }
 
 # ─── Recovery alert fixtures (P042) ─────────────────────────────────────────
-# These fixtures reuse the fixture-2 clean-done-advance harness (verified
-# provenance + no blocking failures). The observable signal is the
+# These fixtures reuse the fixture-2 clean-done-advance harness (no blocking
+# failures). The observable signal is the
 # fsm_done_advance_recovered event in timeline.jsonl — NOT the Telegram alert
 # text (AID_TEST_MODE=1 suppresses try_telegram_alert unconditionally).
 
-# Shared helper: write fixture-2-style verified-provenance files so done-advance
-# exits 0. Caller must cd "$PROJECT_ROOT" first.
-_setup_clean_done_advance() {
-  local GEN_AT="2026-05-13T12:00:00Z"
-  local GEN_AT_MIN30="2026-05-13T11:59:30Z"
-  local GEN_AT_PLUS30="2026-05-13T12:00:30Z"
-
-  cat >> "${EVIDENCE_DIR}/timeline.jsonl" <<EOF
-{"ts":"${GEN_AT_MIN30}","event":"verifier_dispatch_start","focus":"cp2-step-1","agentId":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"${EVIDENCE_DIR}"}
-{"ts":"${GEN_AT_PLUS30}","event":"verifier_dispatch_complete","focus":"cp2-step-1","agentId":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"${EVIDENCE_DIR}","output_file":"${EVIDENCE_DIR}/verifier-output-step-1.md"}
-EOF
-  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
-classification: RUN
-EOF
-  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
-_generated_by: aid-orchestrator:verifier@cp2-step-1
-_generated_at: ${GEN_AT}
-classification: RUN
-verdict: pass
-EOF
-}
+# Shared helper: the setup already carries everything a clean done-advance
+# needs; kept as the named seam the recovery fixtures call. Caller must
+# cd "$PROJECT_ROOT" first.
+_setup_clean_done_advance() { :; }
 
 # ─── Fixture 7a ─────────────────────────────────────────────────────────────
 # blocked-then-cleared: prior fsm_done_advance_blocked in timeline + clean run
 # → exactly ONE fsm_done_advance_recovered event written to timeline.
 @test "fixture 7a: recovery: blocked-then-cleared writes exactly one recovered event" {
   # Seed a prior blocking event (simulates a previous blocked done-advance).
-  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"gates_generated_by"}\n' \
     >> "${EVIDENCE_DIR}/timeline.jsonl"
 
   _setup_clean_done_advance
@@ -405,7 +305,7 @@ EOF
   local recovered_checks
   recovered_checks=$(jq -rs '[.[] | select(.event=="fsm_done_advance_recovered")] | last | .recovered_checks' \
     "${EVIDENCE_DIR}/timeline.jsonl")
-  [ "$recovered_checks" = "verifier_provenance" ]
+  [ "$recovered_checks" = "gates_generated_by" ]
 }
 
 # ─── Fixture 7b ─────────────────────────────────────────────────────────────
@@ -431,9 +331,9 @@ EOF
 # must NOT write an additional fsm_done_advance_recovered event.
 @test "fixture 7c: recovery: dedup — second clean run after recovery writes no new recovered event" {
   # Seed a blocked event followed immediately by a recovered event (already cleared).
-  printf '{"ts":"2026-05-13T09:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+  printf '{"ts":"2026-05-13T09:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"gates_generated_by"}\n' \
     >> "${EVIDENCE_DIR}/timeline.jsonl"
-  printf '{"ts":"2026-05-13T09:30:00Z","event":"fsm_done_advance_recovered","recovered_checks":"verifier_provenance"}\n' \
+  printf '{"ts":"2026-05-13T09:30:00Z","event":"fsm_done_advance_recovered","recovered_checks":"gates_generated_by"}\n' \
     >> "${EVIDENCE_DIR}/timeline.jsonl"
 
   _setup_clean_done_advance
@@ -456,7 +356,7 @@ EOF
 # cleared the block (clean re-run vs PM force-override).
 @test "fixture 7e: recovery: force override after block writes exactly one recovered event" {
   # Seed a prior blocking event (simulates a previous blocked done-advance).
-  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"gates_generated_by"}\n' \
     >> "${EVIDENCE_DIR}/timeline.jsonl"
 
   cd "$PROJECT_ROOT"
@@ -476,7 +376,7 @@ EOF
   local recovered_checks
   recovered_checks=$(jq -rs '[.[] | select(.event=="fsm_done_advance_recovered")] | last | .recovered_checks' \
     "${EVIDENCE_DIR}/timeline.jsonl")
-  [ "$recovered_checks" = "verifier_provenance" ]
+  [ "$recovered_checks" = "gates_generated_by" ]
 }
 
 # ─── Fixture 7f ─────────────────────────────────────────────────────────────
@@ -502,7 +402,7 @@ EOF
 # is unconditional; only try_telegram_alert is gated).
 @test "fixture 7d: recovery: gate disabled suppresses alert but still writes recovered event" {
   # Seed a prior blocking event.
-  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"gates_generated_by"}\n' \
     >> "${EVIDENCE_DIR}/timeline.jsonl"
 
   # Disable the alert gate in execution.yaml (4-space indent, under notifications.telegram).

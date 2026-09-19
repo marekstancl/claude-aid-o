@@ -25,7 +25,7 @@ log_event() {
     key="${kv%%=*}"
     val="${kv#*=}"
     # Raw JSON array/object detected BEFORE escaping — pass through as-is.
-    # Used by aid-prefilter.sh for matched_rules (e.g. ["exec_keyword"]).
+    # Used by aid-step-check.sh for matched_rules (e.g. ["exec_keyword"]).
     if [[ "${val:0:1}" == "[" || "${val:0:1}" == "{" ]]; then
       json+=",\"${key}\":${val}"
       continue

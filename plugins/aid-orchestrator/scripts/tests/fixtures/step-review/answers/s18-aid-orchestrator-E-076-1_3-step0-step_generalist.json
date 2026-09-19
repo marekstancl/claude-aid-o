@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 0,
+               "severity": "major",
+               "claim": "The enforcement-registry rewrite asserts, in the present tense, that the new run_mode key is already \"read by aid-run-gates.sh\", but at this commit aid-run-gates.sh has no resolver/validator for run_mode at all — Step 1 (this step) only creates the config field/docs, and the read/consumption is explicitly deferred to Step 2 per the new test file's own header comment.",
+               "command": "grep -n 'run_mode' plugins/aid-orchestrator/scripts/aid-run-gates.sh",
+               "evidence": "plugins/aid-orchestrator/defaults/enforcement-registry.yaml:1112; plugins/aid-orchestrator/scripts/tests/bats/test-run-mode-field.bats:206",
+               "fix": "Word the registry sentence in future/planned tense for the read path (e.g. \"execution.yaml now carries the field; Step 2 wires aid-run-gates.sh to read it\") instead of asserting present-tense behaviour that does not exist yet in this repository at this commit."}],
+ "no_findings_reason": ""}

@@ -2,15 +2,19 @@
   "written": "2026-09-18, before the acceptance run",
   "max_rounds": 2,
   "max_usd_per_round": 20,
-  "price_table": {
-    "note": "USD per million tokens, blended over input, cache and output. Claude: the P093 hand-run measured 2.14 M subagent tokens for about 35 USD at API prices (cache reads dominate), so 16.4. Codex: no measured blend exists; it is priced at the Claude figure, which over-states it rather than under-states it.",
-    "claude": 16.4,
-    "codex": 16.4
-  },
   "min_findings_with_evidence_ratio": 1.0,
-  "archived_files_per_round": ["round.json", "packet/manifest.json", "collect.json", "merged.json", "rejected.json", "yield.json", "measurement.json"],
+  "archived_files_per_round": [
+    "round.json",
+    "packet/manifest.json",
+    "collect.json",
+    "merged.json",
+    "rejected.json",
+    "yield.json",
+    "measurement.json"
+  ],
   "baseline": {
     "pilot_2026_09_17": "ACTA P025 and Agents P005 under the old chain: rounds of 26, 3, 11 and 10 blockers, never converged, about 43 USD per round",
     "p093_hand_run_round_1": "six reviewers, 787 k subagent tokens"
-  }
+  },
+  "usd_source": "measurement.json .reviewers[].usd, computed by aid-review-round.sh close from defaults/prices.yaml (P094 Step 11); the fixture keeps only its ceiling"
 }

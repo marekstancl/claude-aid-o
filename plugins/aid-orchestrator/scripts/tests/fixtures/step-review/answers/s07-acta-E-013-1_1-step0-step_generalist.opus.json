@@ -1,0 +1,12 @@
+{"role": "step_generalist", "checkpoint": "cp2", "findings": [
+ {"id": "step_generalist-1", "checkpoint": "cp2", "step": 0, "severity": "major",
+  "claim": "The step's objective (\"s ošetřeným code: prefixem\") is met only by a helper that no production path calls: _strip_code is used nowhere in flexibee.py except its own definition and a unit test, and the simple-form <mena> branch the plan names (mena without showAs, text like \"code:CZK\") returns \"\" because _mena never reads the element's .text at all.",
+  "command": "grep -rn \"_strip_code\" backend/acta/convert/ backend/tests/convert/",
+  "evidence": "backend/acta/convert/flexibee.py:21; backend/acta/convert/flexibee.py:76; backend/acta/convert/flexibee.py:96; backend/acta/convert/models.py:22; backend/tests/convert/test_flexibee_parser.py:155",
+  "fix": "Wire _strip_code into the real read path: in _mena, after the showAs and mena/mena/kod branches, fall back to _strip_code(mena_el.text) (and apply _strip_code to the inner kod text), so a simple-form <mena>code:CZK</mena> without showAs yields \"CZK\" instead of \"\" — with a test for that shape. Otherwise drop the helper and the claim \"hodnoty už bez code: prefixu\" from models.py:22."},
+ {"id": "step_generalist-2", "checkpoint": "cp2", "step": 0, "severity": "major",
+  "claim": "parse_flexibee catches only ET.ParseError, so the defusedxml guards it advertises (EntitiesForbidden / DTDForbidden / ExternalReferenceForbidden — not ParseError subclasses) escape as raw exceptions instead of FlexibeeFormatError, which the plan maps to a 400; the new test file has no XXE/billion-laughs case, unlike the ISDOC parser tests this module cites as its precedent.",
+  "command": "grep -n \"ParseError\\|except\\|fromstring\" backend/acta/convert/flexibee.py backend/tests/extraction/test_isdoc_parser.py",
+  "evidence": "backend/acta/convert/flexibee.py:143; backend/acta/convert/flexibee.py:144; backend/acta/convert/flexibee.py:5; backend/tests/extraction/test_isdoc_parser.py:123",
+  "fix": "Catch the defusedxml exception family as well (e.g. `except (ET.ParseError, defusedxml.DefusedXmlException) as exc` or a broad ValueError/Exception mapped to FlexibeeFormatError) and add one test asserting an entity-bearing payload raises FlexibeeFormatError, mirroring test_isdoc_parser's XXE case."}
+]}

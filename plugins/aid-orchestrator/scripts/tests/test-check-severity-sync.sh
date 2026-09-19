@@ -45,6 +45,11 @@ export AID_TEST_MODE=1
 EV="$TMP/.aid-o/work/evidence/E-SYNC-1/R-SYNC-1"
 CFG="$TMP/.aid-o/config"
 mkdir -p "$EV/gates" "$CFG" "$TMP/.aid-o/tasks" "$TMP/.aid-o/work"
+# P094: done-advance re-checks the EPIC review round against git HEAD before the
+# compliance write; this fixture is no repository and tests the check names, so
+# the checkpoint is switched off (an audited pass, never a fabricated round).
+mkdir -p "$CFG/policies"
+printf 'review_checkpoints:\n  cp3_integration_review: false\n' > "$CFG/policies/review-checkpoints.yaml"
 cat > "$EV/fsm-state.yaml" <<EOF
 epic_id: E-SYNC-1
 run_id: R-SYNC-1
@@ -83,16 +88,15 @@ else
   fi
 fi
 
-echo "TEST: synthetic failure check names are registered"
-# Names injected by fsm_build_failures outside the checks template. Keep this list
-# in sync with synthetic {check: "<name>"} entries in aid-fsm.sh.
-for synth in verifier_provenance; do
-  if grep -qxF "$synth" <<<"$registry_keys"; then
-    pass_msg "synthetic '${synth}' registered"
-  else
-    fail_msg "synthetic check '${synth}' missing from registry"
-  fi
-done
+echo "TEST: no synthetic failure check name is emitted outside the checks template"
+# P094 Step 8: verifier_provenance, the one synthetic {check: "<name>"} entry
+# fsm_build_failures used to inject, went with verify_provenance. A new
+# synthetic name must be registered in check-severity.yaml and listed here.
+if grep -q 'check: "verifier_provenance"\|"verifier_provenance"' "$AID_FSM"; then
+  fail_msg "aid-fsm.sh still emits the retired synthetic check verifier_provenance"
+else
+  pass_msg "no retired synthetic check emitted"
+fi
 
 echo "----------------------------------------------------------------------"
 total=$(( pass + fail ))

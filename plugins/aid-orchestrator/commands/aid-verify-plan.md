@@ -31,7 +31,7 @@ review that counts before EPIC generation.
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" <plan> --json .aid-o/work/evidence/<plan_id>/plan-check.json
-   bash "$AID_PLUGIN_PATH/scripts/aid-plan-review-round.sh" prepare <plan> --round 1 --only <role> --manual
+   bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" prepare --plan <plan> --round 1 --only <role> --manual
    ```
 
 2. Dispatch that reviewer in a fresh context; its model is the role's `model`
@@ -43,7 +43,7 @@ review that counts before EPIC generation.
    ```
 
    Only a role whose provider is `claude` runs by hand; a codex role runs
-   inside a real round (`aid-plan-review-round.sh dispatch`).
+   inside a real round (`aid-review-round.sh dispatch --plan <plan>`).
 
 3. Relay the answer in `<manual dir>/reviewer-<role>.json` as one information
    card (`skills/communication.md`): each finding in plain words with its step,

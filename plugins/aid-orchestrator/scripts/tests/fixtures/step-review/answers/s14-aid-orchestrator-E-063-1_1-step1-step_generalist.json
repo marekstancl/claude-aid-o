@@ -1,0 +1,8 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "minor",
+               "claim": "The new .gitignore comment and aid-fsm.sh comment both point to a function 'gate_baseline_ensure_gitignored' inside aid-gate-runtime-baseline.sh, but the actual function shipped by this diff is named 'aid_gate_baseline_ensure_gitignored' and lives in aid-run-gates.sh, not in the library file — a future grep for the name the comment gives will find nothing there.",
+               "command": "grep -n \"gate_baseline_ensure_gitignored\" plugins/aid-orchestrator/defaults/.gitignore plugins/aid-orchestrator/scripts/aid-run-gates.sh",
+               "evidence": "plugins/aid-orchestrator/defaults/.gitignore:27; plugins/aid-orchestrator/scripts/aid-run-gates.sh:76; plugins/aid-orchestrator/scripts/lib/aid-gate-runtime-baseline.sh:298",
+               "fix": "Update the .gitignore comment (and any other cross-reference) to name the actual symbol and file: aid-run-gates.sh's aid_gate_baseline_ensure_gitignored."}]}

@@ -1,0 +1,8 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 0,
+               "severity": "minor",
+               "claim": "Posun sdílené konstanty REVIEW na P018 orazítkuje všech 10 stránek nápovědy jako revidované v P018 k 2026-08-22, ačkoli obsah se upravil jen u dvou; u přijatých faktur a Nezařazeno tím stránka tvrdí revizi P018, přestože o novém chování (výchozí Druh dokladu 44 pro přijaté i pro neurčený směr) mlčí.",
+               "command": "grep -n \"\\.\\.\\.REVIEW\\|const REVIEW\" frontend/src/config/helpSections.ts; grep -rn \"Druh dokladu\" frontend/src/pages/help/",
+               "evidence": "frontend/src/config/helpSections.ts:38; frontend/src/config/helpSections.ts:56; frontend/src/config/helpSections.ts:126; frontend/src/pages/help/VydaneFakturyPage.tsx:202; backend/acta/docdefaults/models.py:19; backend/acta/docdefaults/models.py:22",
+               "fix": "Buď doplnit odpovídající zmínku o výchozím Druhu dokladu (44) na stránky přijatých faktur a Nezařazeno, nebo nechat lastReviewedPlan per stránku a na P018 posunout jen ty stránky, jejichž obsah se v tomto kroku skutečně prověřil."}]}

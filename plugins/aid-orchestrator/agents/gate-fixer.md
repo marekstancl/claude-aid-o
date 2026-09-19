@@ -1,6 +1,6 @@
 ---
 name: gate-fixer
-model: haiku
+model: sonnet
 ---
 
 # Gate Fixer Agent
@@ -30,8 +30,10 @@ to fix the issue.
 
 ## Capabilities
 
-### Review Finding Fixes (`verifier_review` source)
-- Read verifier findings from review checkpoint dispatch (CP2, CP3, CP4, CP6)
+### Review Finding Fixes (`verifier_review` source — CP4 only)
+- Read verifier findings from the CP4 curator-validation dispatch. The step, EPIC
+  and fast-mode reviews (CP2/CP3/CP6) are fixed by the step's own role
+  (`fix_of:` in `scripts/lib/aid-review-adapter-claude.md`), never by you.
 - Fix code issues identified by verifier: logic errors, security concerns, style violations
 - Input includes top-level `findings:[]` with severity, area (file:line), and recommendation (canonical verifier format, `agents/verifier.md`)
 - Apply minimal fixes following the verifier's recommendation
@@ -179,7 +181,7 @@ The `gate` field accepts both gate names and verifier review sources:
 | Source | Dispatched by | Context |
 |--------|--------------|---------|
 | `tests_pass`, `lint_pass`, `build_pass`, `security_scan_pass`, `docs_updated`, `type_check` | Gate failure (GATES state) | Gate error output |
-| `verifier_review` | Review checkpoint (CP2/CP3/CP4/CP6) | Verifier `review_result.findings[]` |
+| `verifier_review` | Review checkpoint CP4 | Verifier `review_result.findings[]` |
 | `curator` | Curator-approved proposal (DONE state §7 step 7) | Curator `proposals[]` (S/M/L effort) |
 | `auditor` | Auditor `recommended_fixes` (DONE state §7 step 8) | Auditor `recommended_fixes[]` (`auto_fixable: true`) |
 | `simplifier` | Simplifier-approved proposal (plan boundary, §7 step 5) | Simplifier `proposals[]` (`recommended_disposition: approve`, S/M effort) |
@@ -226,15 +228,4 @@ The `gate` field accepts both gate names and verifier review sources:
 
 ---
 
-## Note: Post-Fix Invalidation Map (orchestrator-owned, not your responsibility)
-
-After you apply a fix at any in-scope dispatch site (CP2, CP3, GATES, DONE curator/auditor
-auto-fix, DONE simplifier), the **orchestrator** — not you — runs the observe-only
-Invalidation-Map Post-Fix Hook (`skills/pipeline.md §13`): it emits a `gate_fixer_fix_applied`
-timeline event and calls `scripts/lib/aid-invalidation-map.sh` over your changed paths. This is
-passive telemetry (it records which C1 checks / C2 modes a fix *might* invalidate; it never
-triggers a re-run). **You do NOT call `aid-invalidation-map.sh` yourself and you do not emit that
-event** — just apply your minimal fix and output the `gate_fix_result` block as usual.
-
-
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-09-19

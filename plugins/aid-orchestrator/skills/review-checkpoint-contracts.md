@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-19
 
 ## False-Green Guardrails
 
@@ -30,43 +30,26 @@ per-checkpoint rules below:
 
 ## High-Risk Pattern Detection
 
-A diff is "high-risk" if it matches ANY of these patterns:
-
-| Pattern | Regex | Category |
-|---------|-------|----------|
-| Auth handlers | `@app\.<method>\(\|@router\.<method>\(\|add_route\(\|def \w+\(.*request\|async def \w+\(.*request` | routes |
-| Auth logic | `authenticate\|authorize\|verify_token\|check_permission\|require_auth` | auth |
-| Schema/validation | `Schema\|Validator\|validate(\|marshmallow\|pydantic\|BaseModel` | validation |
-| Migrations | `migrate\|alembic\|revision\|upgrade\|downgrade` | migrations |
-| FSM/state | `fsm-state\|state_machine\|cmd_transition\|aid-fsm\.sh` | fsm |
-| Security sinks | `exec(\|subprocess\|eval(\|pickle\|yaml\.load` | security |
-| Payment | `stripe\|payment\|charge\|billing\|invoice` | payment |
-| Dependency manifests | `requirements\.txt\|pyproject\.toml\|package\.json\|Gemfile` | deps |
+Since P094 the patterns live in one place: `aid-step-check.sh` scans the diff
+and records `security.matched_rules` (the rules of `defaults/pre-filter-rules.yaml`,
+which add the security reviewer to the round) and `handler_patterns` (routes,
+auth, schema/validation, migrations, FSM, security sinks, payment, dependency
+manifests) in `step-check.json`. The reviewer prompt shows both; a reviewer
+never re-derives them.
 
 ## Per-Checkpoint Diff Scope
 
-| Checkpoint | Diff Range | When dispatched |
-|-----------|-----------|-----------------|
-| CP2 | `HEAD~1..HEAD` (step diff) | After each EXECUTE step |
-| CP3 | `base_commit..HEAD` (full EPIC) | After all steps, before GATES |
-| CP4 | Applied curator/auditor diff | After C+A auto-fix in DONE review |
-| CP6 | Advisory, separate from FSM | Post-merge retrospective (advisory only) |
+`step-check.json.range` (and `range_source`) is the diff a round reviews:
+`<previous step commit>..HEAD` for cp2, `base_commit..HEAD` for cp3, the
+working tree for cp6; CP4 reviews the applied curator/auditor diff.
 
-## Structural Gate: behavior_trace_count
+## Structural Gate: behaviour trace
 
-When the checkpoint's diff matches a high-risk pattern:
-- `behavior_trace_count` MUST be > 0
-- `behavior_trace_required: true` (must be set explicitly — gate only fires when this field is literally `"true"`; omitting it means no enforcement)
-- Each traced path must name: request, path (handler→service→sink), sink, branches with outcomes
-
-When diff is trivial (no high-risk patterns) or `classification: SKIP`:
-- `behavior_trace_required: false`
-- `behavior_trace_skip_reason: "<why no trace needed>"`
-- `behavior_trace_count: 0` is acceptable
-
-**Gate is structural and non-emptiness only.** It does NOT evaluate trace quality.
-FSM enforcement: `fsm_check_verifier_output` validates `behavior_trace_count > 0`
-when `behavior_trace_required: true` in the verifier output.
+When `step-check.json.handler_patterns` is non-empty, a generalist's blocker or
+major finding must carry a `behaviour_trace` (request → handler → service →
+sink, branches with outcomes) as `skills/step-review-roles.md` requires; the
+adjudicator rejects such a finding without one (`trace_missing`). The gate is
+structural: it checks presence, never trace quality.
 
 ## The Two Test Questions (CP2 and CP3, both mandatory)
 
@@ -89,22 +72,27 @@ A new suite must also carry a tier tag (`# aid-tier: t0|t1|t2`) matching what
 its plan declared; `aid-test-tier-lint.sh` is the mechanical half, and review
 is where an over-cheap or over-expensive CHOICE gets questioned.
 
-## CP2 Contract
+## CP2, CP3 and CP6 Contracts — Step, EPIC and Fast-Mode Review
 
-Focus: `code-review` (default) or `security`
-Scope: Step diff only (`HEAD~1..HEAD`)
-Required fields: all standard verifier fields + `checkpoint: cp2`
-High-risk gate: if diff matches patterns above, `behavior_trace_count > 0` required
-Test questions: both of the above, on the step's own added tests
+These three checkpoints are one mechanism: reviewer roles from
+`skills/step-review-roles.md` answer from the shared template
+(`defaults/prompts/review-prompt-v1.md`) in the shape of
+`defaults/schemas/review-finding.schema.json`, and the deterministic
+adjudicator keeps only findings with a command and a `path:line` (or
+`<sha>:path:line`) evidence. What differs is the diff each one reviews:
 
-## CP3 Contract
+| Checkpoint | Diff under review | Roles | Blocks |
+|---|---|---|---|
+| CP2 | the step: last `step_commit` → HEAD (else `base_commit` → HEAD) | `step_generalist`, plus `step_security` when the step check reports a security pattern | `increment-step` |
+| CP3 | the EPIC: `base_commit` → HEAD | `epic_generalist`, `epic_behaviour`, `epic_security` | EXECUTE → GATES |
+| CP6 | the `/aid-do` working tree | `step_generalist` (+ `step_security`) | nothing (advisory) |
 
-Focus: `code-review` + `security` (parallel)
-Scope: Full EPIC diff (`base_commit..HEAD`)
-Required fields: all standard verifier fields + `checkpoint: cp3`
-High-risk gate: same as CP2
-Test questions: both of the above, across the EPIC's whole added test surface —
-CP3 is the first point where two steps' suites can be seen to overlap
+The two test questions above are asked by every generalist role; the behaviour
+trace is required from a generalist's blocker or major finding whenever the
+step check reports a handler pattern. The controller's procedure, command by
+command, is the "Step review (CP2) and EPIC review (CP3)" section of
+`commands/aid-run.md`; the round evidence is described there and in
+`skills/step-review-roles.md`.
 
 ## CP4 Contract
 
@@ -122,14 +110,6 @@ Required fields in audit-report: `blocking_findings: true|false` at line-start (
 High-risk gate: NOT a diff gate — evaluates the audit report output, not the code diff
 Note: CP5 is not a verifier dispatch. It is a structured field check inside `done-advance`.
 
-## CP6 Contract (Advisory)
-
-Focus: retrospective quality review
-Scope: merged diff (advisory — not blocking FSM)
-Required fields: standard verifier fields + `checkpoint: cp6`
-High-risk gate: NOT enforced (advisory only)
-Note: CP6 is never promoted to blocking — it is intentionally light.
-
 ## CP1 Contract — Plan Review
 
 Plan review is not a verifier dispatch. Six reviewer roles answer from one
@@ -137,12 +117,12 @@ template, in at most two rounds by default, and a deterministic adjudicator
 merges what survives the evidence rule:
 
 - the roles, their questions, the evidence rule and the answer shape:
-  `skills/plan-review-roles.md` (schema `defaults/schemas/plan-review-finding.schema.json`);
+  `skills/plan-review-roles.md` (schema `defaults/schemas/review-finding.schema.json`, shared with CP2/CP3/CP6);
 - the controller's procedure, command by command: "Plan review (CP1)" in
   `commands/aid-plan.md`;
 - the rounds, the adjudicator and the round evidence under
-  `.aid-o/work/evidence/<plan_id>/cp1/`: `scripts/aid-plan-review-round.sh`
-  and `scripts/aid-plan-review-adjudicate.sh`;
+  `.aid-o/work/evidence/<plan_id>/cp1/`: `scripts/aid-review-round.sh --plan`
+  and `scripts/aid-review-adjudicate.sh`;
 - the gate before EPIC generation: `scripts/aid-cp1-gate.sh`, which reads only
   that round evidence.
 
@@ -150,17 +130,18 @@ merges what survives the evidence rule:
 
 ## C2 Semantic Review — Lens Catalog
 
-C2 produces auditable semantic evidence alongside the existing `.md` gate output (dual-emit, D1).
-Evidence format: `semantic-review-{mode}.json` wrapping findings via `aid-finding-merge.sh`.
+C2 produces auditable semantic evidence at the plan-final boundary.
+Evidence format: `semantic-review-final.json` wrapping findings via `aid-finding-merge.sh`.
 
-### 4-Mode Dispatch Contract
+### Dispatch contract
 
-| Mode | When dispatched | Typical trigger |
-|------|----------------|-----------------|
-| `local` | CP2 (per-step, contract/high-risk steps) | Pre-filter classification RUN on step diff |
-| `wiring` | First runnable assembly slice | At least 2 inter-step contracts exist in diff + wiring surface detected |
-| `behavior` | Feature-complete assembly point | All core behavior paths present in diff |
-| `final` | CP3 (full EPIC diff) | EXECUTE→GATES transition |
+| Mode | When dispatched | Producer |
+|------|----------------|----------|
+| `final` | the plan-final boundary (`aid-plan-fsm.sh plan-finalize`) | the verifier, filling the generated envelope |
+
+The `local`, `wiring` and `behavior` modes went with P094: a step's or an
+EPIC's semantic evidence is the reviewer round's merged findings, and the cp3
+`close` writes the per-EPIC `semantic-review-final.json` itself.
 
 **No-mega-prompt rule (D2):** Verifier dispatches C2 with a profile-selected subset of lenses, not all 12 at once. The `review-profile.required_lenses[]` field governs which lenses run per dispatch.
 

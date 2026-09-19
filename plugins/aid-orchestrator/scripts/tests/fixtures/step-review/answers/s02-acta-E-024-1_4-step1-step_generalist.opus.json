@@ -1,0 +1,17 @@
+{"role": "step_generalist", "checkpoint": "cp2", "findings": [
+{"id": "step_generalist-1", "checkpoint": "cp2", "step": 1, "severity": "major",
+ "claim": "Výběr může vrátit až `adis_limit + isir_limit` kandidátů, takže dokumentovaný slib „nejvýš adis_limit\" a „limit v process_candidates je jen poslední pojistka, seznam se do něj vejde sám\" neplatí: ISIR větev rotace má vlastní limit NAVÍC k window_limit (řádky s IČO bez DIČ se s ADIS větví nededupují), a jediný řez v `process_candidates` pak odřízne ocas ADIS rotace — tedy přesně ten průřezový řez, který krok ruší.",
+ "command": "sed -n '571,584p;502,512p;661,667p' backend/acta/registry/scheduler.py",
+ "evidence": "backend/acta/registry/scheduler.py:571; backend/acta/registry/scheduler.py:576; backend/acta/registry/scheduler.py:582; backend/acta/registry/scheduler.py:502; backend/acta/registry/scheduler.py:663; backend/acta/registry/scheduler.py:706",
+ "fix": "Buď ISIR kvótu odečíst z okna (`rotation_limit = window_limit - seed_limit - min(isir_limit, ...)`, resp. adis větev dostane zbytek po ISIR), nebo docstringy opravit tak, aby přiznaly, že strop výběru je `adis_limit + isir_limit` a že řez v `process_candidates` dál kroutí ADIS rotací. Doplnit test s `isir_limit > 0` a disjunktními ISIR řádky — všechny nové testy volají `isir_limit=0`, takže přetečení žádný z nich nechytí."},
+{"id": "step_generalist-2", "checkpoint": "cp2", "step": 1, "severity": "minor",
+ "claim": "`REGISTRY_SEED_WINDOW_SHARE = 0` seeding nevypne, jen zahodí jeho výsledek: `select_candidates` volá `_unseeded_or_empty(limit=0)` i pro nulovou kvótu, takže se každé okno stejně provede UNION přes celé `suppliers`/`customers`, normalizace v Pythonu a IN dotaz `_existing_identities` — a fail-safe větev navíc může session rollbacknout.",
+ "command": "sed -n '574,584p' backend/acta/registry/scheduler.py",
+ "evidence": "backend/acta/registry/scheduler.py:576; backend/acta/registry/scheduler.py:584; backend/acta/registry/scheduler.py:319; backend/acta/registry/scheduler.py:376",
+ "fix": "Při `seed_limit == 0` seed větev přeskočit (`seeds, malformed = ([], 0)`), aby nouzová brzda opravdu odstranila zátěž, a v docstringu `select_candidates` to popsat."},
+{"id": "step_generalist-3", "checkpoint": "cp2", "step": 1, "severity": "minor",
+ "claim": "Upravený regresní test okna si očekávanou hodnotu počítá z téže produkční konfigurace, kterou testuje (`5 - int(5 * scheduler.settings.REGISTRY_SEED_WINDOW_SHARE)`), takže projde při jakémkoli podílu a přestal pinovat dělení okna.",
+ "command": "sed -n '498,520p' backend/tests/registry/test_scheduler.py",
+ "evidence": "backend/tests/registry/test_scheduler.py:519",
+ "fix": "Podíl v testu monkeypatchnout na pevnou hodnotu a očekávat konstantu (jako to dělá AC1 test svým `assert seed_quota == 800`)."}
+]}

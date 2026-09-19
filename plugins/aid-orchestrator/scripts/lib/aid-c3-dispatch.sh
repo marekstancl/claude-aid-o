@@ -1087,7 +1087,7 @@ _looks_at_capacity() {
 #   coupling — it takes only a project root + a pre-rendered prompt file and
 #   returns raw captures via the five output-file parameters. Sourcing this file
 #   never runs C3's own CLI dispatcher (the BASH_SOURCE!=0 check at the bottom).
-#   Callers besides C3: `aid-plan-review-round.sh dispatch` (in a subshell, for
+#   Callers besides C3: `aid-review-round.sh dispatch` (in a subshell, for
 #   a plan reviewer whose provider is codex) and lib/aid-recovery-adjudicate.sh,
 #   so a change to its five-argument signature must be checked against them.
 #   The only knobs it reads are $CODEX_MODEL
@@ -1104,7 +1104,7 @@ _looks_at_capacity() {
 #   output, which HARD-FAILS (HTTP 400 "'if' is not permitted") on any
 #   conditional keyword. Passing it would 400 every dispatch. The trusted gate
 #   is the caller's own explicit jq response validator (_validate_response for
-#   C3; the answer check of aid-plan-review-round.sh collect for plan review),
+#   C3; the answer check of aid-review-round.sh collect for plan review),
 #   NOT the backend. We do NOT strip if/then from the schema to work around this
 #   — the conditional rules are load-bearing for bridge validation.
 #

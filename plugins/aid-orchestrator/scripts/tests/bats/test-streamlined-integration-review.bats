@@ -30,8 +30,7 @@ EOF
 }
 
 _write_cp3_evidence() {
-  echo "code" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  echo "sec"  > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 }
 
 _run_check() {

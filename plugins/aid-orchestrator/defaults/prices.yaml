@@ -1,0 +1,41 @@
+# prices.yaml — what a token costs, USD per million, for the models the review
+# checkpoints name (defaults/policies/review-checkpoints.yaml). Read by
+# scripts/lib/aid-review-summary.sh (aid_review_usd, aid_review_usd_blended).
+# A project may override it with .aid-o/config/prices.yaml (the project file
+# wins, and the status tile names it). An unlisted model costs "unknown", never
+# zero. Every row says where its price came from and when it was read.
+#
+# `blended` is for a figure the Agent tool reports as ONE total (input, output
+# and cache reads together): the measured blend of a real run, or an estimate
+# scaled from the measured one — `blended_basis` says which. Codex reports
+# input / cached input / output separately, so it needs no blend.
+version: 1
+models:
+  opus:
+    vendor_name: "Claude Opus 5 (the Agent tool's `opus`)"
+    input: 5.00
+    output: 25.00
+    cache_read: 0.50
+    cache_write: 6.25
+    blended: 16.4
+    blended_basis: "measured: P093 hand run 2026-09-18, 2.14 M subagent tokens for about 35 USD (cache reads dominate)"
+    source: "https://platform.claude.com/docs/en/about-claude/pricing"
+    as_of: "2026-09-19"
+  sonnet:
+    vendor_name: "Claude Sonnet 5 (the Agent tool's `sonnet`)"
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write: 2.50
+    blended: 6.56
+    blended_basis: "estimated: the opus blend scaled by the input-price ratio 2/5; replace with a measured figure after the P094 acceptance run"
+    source: "https://platform.claude.com/docs/en/about-claude/pricing"
+    as_of: "2026-09-19"
+  gpt-5.6-terra:
+    vendor_name: "gpt-5.6-terra (codex exec -m)"
+    input: 2.00
+    output: 12.00
+    cache_read: 0.20
+    cache_write: 0
+    source: "https://developers.openai.com/api/docs/pricing"
+    as_of: "2026-09-19"

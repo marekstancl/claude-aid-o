@@ -239,8 +239,8 @@ map_path_to_tests() {
     "${PLUGIN_PREFIX}/scripts/aid-fsm.sh")
       printf 'bats\t%s/scripts/tests/bats/test-aid-fsm.bats\n' "$PLUGIN_PREFIX"
       ;;
-    "${PLUGIN_PREFIX}/scripts/aid-prefilter.sh")
-      printf 'bats\t%s/scripts/tests/bats/test-aid-prefilter.bats\n' "$PLUGIN_PREFIX"
+    "${PLUGIN_PREFIX}/scripts/aid-review-profile.sh")
+      printf 'bash\t%s/scripts/tests/test-review-profile.sh\n' "$PLUGIN_PREFIX"
       ;;
     "${PLUGIN_PREFIX}/scripts/aid-evidence-verify.sh")
       printf 'bash\t%s/scripts/tests/test-evidence-verify.sh\n' "$PLUGIN_PREFIX"

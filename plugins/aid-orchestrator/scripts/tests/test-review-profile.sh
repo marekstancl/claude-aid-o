@@ -2,7 +2,7 @@
 # aid-tier: t2
 # test-review-profile.sh — E3 Adaptive Review Profile resolver test harness
 #
-# Tests aid-prefilter.sh profile, aid-profile-hash.sh, review-profile-check.sh
+# Tests aid-review-profile.sh, aid-profile-hash.sh, review-profile-check.sh
 # Exit: 0 if all pass, 1 if any fail
 # Output: Results: X/Y passed, Z failed
 #
@@ -25,7 +25,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
-PREFILTER="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+PREFILTER="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/aid-review-profile.sh"
 CHECK_SCRIPT="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/lib/review-profile-check.sh"
 HASH_LIB="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/lib/aid-profile-hash.sh"
 PROFILES_FILE="${PLUGIN_ROOT}/plugins/aid-orchestrator/defaults/policies/review-profiles.yaml"
@@ -108,7 +108,7 @@ add_and_commit() {
 }
 
 # ---------------------------------------------------------------------------
-# run_profile: invoke aid-prefilter.sh profile; returns exit code via stdout
+# run_profile: invoke aid-review-profile.sh; returns exit code via stdout
 # Stdout from prefilter is suppressed (only exit code is echoed).
 # ---------------------------------------------------------------------------
 run_profile() {

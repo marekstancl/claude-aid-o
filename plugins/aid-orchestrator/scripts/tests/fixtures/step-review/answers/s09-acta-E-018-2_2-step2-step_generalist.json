@@ -1,0 +1,8 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 2,
+               "severity": "minor",
+               "claim": "Declared output `frontend/e2e/help-structure.spec.ts` (files.json: \"rozšířit o kontrolu nových sekcí\") was not touched by this diff — the diff only adds two new files and leaves this file at its pre-step content, unchanged since commit f591673.",
+               "command": "git log --oneline -3 -- frontend/e2e/help-structure.spec.ts",
+               "evidence": "frontend/e2e/help-structure.spec.ts:1-40",
+               "fix": "Either extend help-structure.spec.ts as declared, or correct files.json to drop that output since frontend/e2e/p018-regression.spec.ts already supplies the content checks it would have added."}]}

@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "major",
+               "claim": "Recycled page blobs are uploaded with the default content-type `application/octet-stream` instead of the image mime type, unlike the normal read path — the presigned-URL page endpoint then serves recycled previews with the wrong Content-Type header, so a recycled document's page does not open/render the same as a normally-read one.",
+               "command": "sed -n '120,130p' wan/pipeline/recycle.py; sed -n '45,50p' wan/connectors/minio_storage.py; sed -n '2795,2800p' wan/pipeline/pipeline.py",
+               "evidence": "wan/pipeline/recycle.py:127; wan/connectors/minio_storage.py:48; wan/pipeline/pipeline.py:2798; wan/api/scan.py:3854; wan/api/documents.py:514",
+               "fix": "In `_zkopiruj_stranky` (wan/pipeline/recycle.py), pass the page's real content-type to `minio.upload` (e.g. `image/jpeg`, matching the mime type the normal path uses at pipeline.py:2798) instead of relying on `minio.upload`'s `application/octet-stream` default, so `GET /sessions/{id}/documents/{id}/url`'s presigned URL serves the same Content-Type for recycled and normally-read pages."}],
+ "no_findings_reason": ""}

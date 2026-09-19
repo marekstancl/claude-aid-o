@@ -1,0 +1,9 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "major",
+               "claim": "The new `unsupported_country` branch and its regression test are built on a false premise — `GBR` IS in `ALPHA3_TO_ALPHA2`, so the test never exercises the ValueError/unsupported_country path it claims to cover.",
+               "command": "grep -n '\"GBR\"' backend/acta/common/country.py",
+               "evidence": "backend/acta/common/country.py:43; backend/acta/registry/scheduler.py:335; backend/acta/registry/scheduler.py:340; backend/tests/registry/test_scheduler.py:1241; backend/tests/registry/test_scheduler.py:1248",
+               "fix": "Either use a country code genuinely absent from ALPHA3_TO_ALPHA2 (so `normalize_identity(country_raw)` raises ValueError and `unsupported_country` actually increments) in the test, or correct the comment/docstring claim that 'GBR v alpha-3 mapě záměrně není' since it demonstrably is present — as written, the test passes only because GBR normalizes to 'GB' and is filtered by the pre-existing `country != DOMESTIC_COUNTRY` check, leaving the new unsupported_country counting branch completely untested."}],
+ "no_findings_reason": ""}

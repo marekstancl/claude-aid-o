@@ -26,6 +26,9 @@ EOF
   exit 1
 }
 
+# The one focus allowlist (the start check and its error text read this).
+AID_DISPATCH_FOCUS_RE='^(cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp4(-[a-z][a-z0-9-]*)?|cp6-[a-z][a-z0-9-]*|reporter|simplifier)$'
+
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
   local focus="$1"
@@ -34,6 +37,7 @@ default_duration_for_focus() {
     cp2-*) echo 600 ;;
     cp3-*) echo 900 ;;
     cp4-*) echo 600 ;;
+    cp6-*) echo 600 ;;
     *)     echo 600 ;;
   esac
 }
@@ -76,18 +80,21 @@ cmd_start() {
   # jq's last-key-wins resolved to event="complete" — making fsm_check_orphan_dispatches
   # skip a real expired orphan. The jq -nc construction below already neutralizes
   # injection, but we reject malformed focuses outright so they never enter the ledger.
-  # Allowlist covers: cp1, cp2-step-N, cp3-code-review, cp3-security, cp4-curator-validation, reporter, simplifier.
-  if [[ ! "$focus" =~ ^(cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?|reporter|simplifier)$ ]]; then
-    echo "ERROR: --focus does not match allowed pattern ^(cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?|reporter|simplifier)\$ (got: $focus)" >&2
+  # Allowlist (one variable, used by the check and the error text): cp1-<role>,
+  # cp2-step-N-<role> (P094: the role suffix is mandatory, the bare cp2-step-N
+  # form is refused so the ledger never mixes two shapes), cp3-<role>,
+  # cp4[-curator-validation], cp6-<role>, reporter, simplifier.
+  if [[ ! "$focus" =~ $AID_DISPATCH_FOCUS_RE ]]; then
+    echo "ERROR: --focus does not match allowed pattern ${AID_DISPATCH_FOCUS_RE} (got: $focus)" >&2
     exit 1
   fi
 
   [[ -z "$exp_dur" ]] && exp_dur=$(default_duration_for_focus "$focus")
   exp_dur=$(clamp_duration "$exp_dur")
 
-  # Parse step_n from focus
+  # Parse step_n from focus (cp2-step-<N>-<role>)
   local step_n="null"
-  if [[ "$focus" =~ ^cp2-step-([0-9]+)$ ]]; then
+  if [[ "$focus" =~ ^cp2-step-([0-9]+)- ]]; then
     step_n="${BASH_REMATCH[1]}"
   fi
 

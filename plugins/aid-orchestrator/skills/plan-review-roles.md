@@ -2,17 +2,21 @@
 name: plan-review-roles
 description: Reviewer contract for plan review (CP1) — the packet, the six reviewer roles with their questions and stop rules, the evidence rule and the output file shape
 user_invocable: false
+required_roles: all
+distinct_models: [generalist_a, generalist_b]
 ---
 
 # Plan Review Roles
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-19
 
 Plan review (CP1) puts a written plan in front of six reviewers before any EPIC
 is generated. Every reviewer gets the same packet and the same rules; only the
 role section differs. This file is the source of the role sections:
-`scripts/aid-plan-review-round.sh prepare` cuts one `## Role:` section out of
-it per reviewer and renders it into `defaults/prompts/plan-review-prompt-v1.md`.
+`scripts/aid-review-round.sh prepare --plan` cuts one `## Role:` section out of
+it per reviewer and renders it into `defaults/prompts/review-prompt-v1.md`, the
+template every review checkpoint shares (the step and EPIC roles live in
+`skills/step-review-roles.md`).
 
 ## When to Invoke
 
@@ -45,10 +49,10 @@ A finding exists only with both:
 - `command` — one read-only command that shows the problem. It must start with
   `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
   `bash <script> --help`.
-- `evidence` — `path:line` inside the repository, or `plan.md:line` for the plan
+- `evidence` — `path:line` inside the repository, `absent:path` for a file the plan presumes and the repository lacks, or `plan.md:line` for the plan
   itself; several separated by `;`. Every file used must be cited.
 
-A finding without both is rejected by `scripts/aid-plan-review-adjudicate.sh`
+A finding without both is rejected by `scripts/aid-review-adjudicate.sh`
 and recorded in `rejected.json` with the reason. Report only what would lead to
 different work if fixed: no style remarks, no praise.
 
@@ -65,7 +69,8 @@ Each role's stop rule below narrows what counts as `blocker` for that role.
 ## The Output File
 
 One JSON object, written to the path named at the end of the prompt, nothing
-else. The shape is `defaults/schemas/plan-review-finding.schema.json`:
+else. The shape is `defaults/schemas/review-finding.schema.json` (an answer
+without a `checkpoint` is a plan-review answer):
 
 ```json
 {"role": "reuse",
@@ -209,4 +214,4 @@ plan says it runs, or an artifact the enforcement needs but cannot see.
 | Answering another role's questions | stay in the role; the others cover the rest |
 | `evidence` pointing at a directory or a whole file | `path:line` of the line that shows it |
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-19

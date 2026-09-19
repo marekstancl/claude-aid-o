@@ -1225,11 +1225,191 @@ fsm_count_recent_fails_epic() {
   fsm_count_fails_matching '.reason==$r' --arg r "$1"
 }
 
-# Validate a verifier-output-step-N.md or verifier-output-cp3-{focus}.md file.
+# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]]
+#   P094 Step 8: the one precondition of the step review (cp2) and the EPIC
+#   review (cp3). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
+#   skip or no_change verdict) or by aid-review-round.sh close (pass or fail):
+#     skip       passes only with a step_check timeline event whose head_sha and
+#                sha256 match the step check, computed at HEAD (skip_unbound,
+#                step_check_stale otherwise)
+#     no_change  passes only when the step declares at least one `outputs` path
+#                and every declared path exists at HEAD (no_change_without_outputs)
+#     pass       the last round is closed (measurement.json, closed_at), was not
+#                stubbed (stubbed_round), and its head_sha is HEAD; with
+#                --freshness HEAD may be ahead by the D4 exception only: test,
+#                fixture or evidence churn with a CP3-Freshness-Exception trailer
+#                on every commit past the reviewed head (P060 Step 4, kept)
+#     fail       blocks naming the index
+#   cp3 additionally requires <evidence_dir>/semantic-review-final.json when a
+#   round ran (the routed-findings reconciliation reads it).
+#   A disabled checkpoint (review_checkpoints.enabled or its own toggle false)
+#   passes with a review_checkpoint_disabled audit line.
+#   Registry: fsm_review_round_required, fsm_review_round_head_bound,
+#   fsm_review_round_skip_bound. Tested by test-review-round-fsm.bats.
+fsm_check_review_round() {
+  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD"
+  shift 3 2>/dev/null || shift $#
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --freshness) freshness=1; [[ -n "${2:-}" && "${2:-}" != --* ]] && { tree_root="$2"; shift; }; shift ;;
+      *) shift ;;
+    esac
+  done
+  local cpdir index timeline="${evidence_dir}/timeline.jsonl" toggle
+  case "$cp" in
+    cp2) cpdir="${evidence_dir}/cp2/step-${step}"; toggle=cp2_step_review ;;
+    cp3) cpdir="${evidence_dir}/cp3"; toggle=cp3_integration_review ;;
+    *) echo "PRECONDITION FAIL: fsm_check_review_round: unknown checkpoint ${cp}" >&2; return 1 ;;
+  esac
+  index="${cpdir}/rounds.json"
+
+  # The two switches, read where the PM sets them (project file first).
+  local flag file value
+  for flag in enabled "$toggle"; do
+    value=""
+    for file in "${AID_PROJECT_ROOT:-$tree_root}/.aid-o/config/policies/review-checkpoints.yaml" "${SCRIPT_DIR}/../defaults/policies/review-checkpoints.yaml"; do
+      [[ -f "$file" ]] || continue
+      value="$(yq -r ".review_checkpoints.${flag}" "$file" 2>/dev/null)"
+      [[ "$value" == true || "$value" == false ]] && break
+    done
+    if [[ "$value" == false ]]; then
+      fsm_emit_audit_log "review_checkpoint_disabled" --evidence-dir "$evidence_dir" --reason "${flag}: false" 2>/dev/null || true
+      return 0
+    fi
+  done
+
+  local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2) and EPIC review (CP3)\")"
+  if [[ ! -f "$index" ]]; then
+    _PRECONDITION_FAIL_REASON="review_round_missing"
+    echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing). ${how_to}" >&2
+    return 1
+  fi
+  local verdict head_sha
+  verdict="$(jq -r '.verdict // ""' "$index" 2>/dev/null)" || { echo "PRECONDITION FAIL: ${index} does not parse" >&2; return 1; }
+  head_sha="$(jq -r '.head_sha // ""' "$index" 2>/dev/null)"
+  local current_head; current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
+
+  case "$verdict" in
+    skip|no_change)
+      local sc="${cpdir}/step-check.json" sc_sha
+      [[ -f "$sc" ]] || { _PRECONDITION_FAIL_REASON="skip_unbound"; echo "PRECONDITION FAIL: ${index} says ${verdict} but there is no step-check.json beside it (skip_unbound). ${how_to}" >&2; return 1; }
+      sc_sha="$(jq -r '.sha256 // ""' "$sc")"
+      if ! jq -c --arg cp "$cp" --arg s "${step:-null}" --arg h "$head_sha" --arg sha "$sc_sha" \
+           'select(.event == "step_check" and .checkpoint == $cp and ((.step // "null") | tostring) == $s and .head_sha == $h and .sha256 == $sha)' \
+           "$timeline" 2>/dev/null | grep -q .; then
+        _PRECONDITION_FAIL_REASON="skip_unbound"
+        echo "PRECONDITION FAIL: ${index} says ${verdict} but no step_check event in ${timeline} carries its head ${head_sha:0:12} and sha256 ${sc_sha:0:12} (skip_unbound: a hand-written skip). ${how_to}" >&2
+        return 1
+      fi
+      if [[ "$head_sha" != "$current_head" ]]; then
+        _PRECONDITION_FAIL_REASON="step_check_stale"
+        echo "PRECONDITION FAIL: the ${verdict} of ${cp}${step:+ step $step} was computed at ${head_sha:0:12}, HEAD is ${current_head:0:12} (step_check_stale): later work was never checked. ${how_to}" >&2
+        return 1
+      fi
+      if [[ "$verdict" == no_change && "$cp" == cp2 ]]; then
+        local outs n_out=0 missing_out=""
+        outs="$(jq -r --argjson i "$step" '.steps[$i].outputs[]? // empty' "${evidence_dir}/plan.json" 2>/dev/null | grep -oE '`[^`]+`' | tr -d '`' || true)"
+        while IFS= read -r o; do
+          [[ -n "$o" ]] || continue; n_out=$((n_out + 1))
+          [[ -e "${tree_root}/${o}" ]] || missing_out="$o"
+        done <<< "$outs"
+        if (( n_out == 0 )) || [[ -n "$missing_out" ]]; then
+          _PRECONDITION_FAIL_REASON="no_change_without_outputs"
+          echo "PRECONDITION FAIL: step ${step} committed nothing and $([[ $n_out -eq 0 ]] && echo "declares no outputs" || echo "its declared output ${missing_out} does not exist") (no_change_without_outputs): an empty step is not a reviewed step. Commit the step's work, or record a PM waiver with --force --reason." >&2
+          return 1
+        fi
+      fi
+      return 0 ;;
+    pass) ;;
+    fail)
+      _PRECONDITION_FAIL_REASON="review_round_failed"
+      echo "PRECONDITION FAIL: the last ${cp}${step:+ step $step} review round closed with verdict fail (${index}). Fix the open findings (the step's role, then a confirmation round), or the PM records aid-review-round.sh override." >&2
+      return 1 ;;
+    *)
+      _PRECONDITION_FAIL_REASON="review_round_missing"
+      echo "PRECONDITION FAIL: ${index} carries no verdict (a round was prepared but never closed). ${how_to}" >&2
+      return 1 ;;
+  esac
+
+  # pass: the last round must be closed, unstubbed, at HEAD (or D4-fresh).
+  local last dir
+  last="$(jq -r '[.rounds[]?.round] | max // empty' "$index")"
+  dir="${cpdir}/round-${last}"
+  if [[ -z "$last" || ! -f "${dir}/measurement.json" || "$(jq -r '.closed_at // ""' "${dir}/round.json" 2>/dev/null)" == "" ]]; then
+    _PRECONDITION_FAIL_REASON="round_not_closed"
+    echo "PRECONDITION FAIL: ${index} says pass but round ${last:-?} is not closed (no measurement.json or closed_at): round not closed. ${how_to}" >&2
+    return 1
+  fi
+  if [[ "$(jq -r '.dispatch_check // ""' "$index")" == stubbed || "$(jq -r '.dispatch_check // ""' "${dir}/measurement.json")" == stubbed ]]; then
+    _PRECONDITION_FAIL_REASON="stubbed_round"
+    echo "PRECONDITION FAIL: round ${last} of ${cp}${step:+ step $step} was prepared --stub (no dispatch check); a stubbed round is for the acceptance suite, never for a run (stubbed_round)." >&2
+    return 1
+  fi
+  local reviewed_head; reviewed_head="$(jq -r '.head_sha // ""' "${dir}/round.json")"
+  if [[ "$cp" == cp3 && ! -f "${evidence_dir}/semantic-review-final.json" ]]; then
+    _PRECONDITION_FAIL_REASON="semantic_review_missing"
+    echo "PRECONDITION FAIL: the cp3 round closed but ${evidence_dir}/semantic-review-final.json is missing (the cp3 close writes it for the routed-findings reconciliation); run aid-review-round.sh close again." >&2
+    return 1
+  fi
+  [[ "$reviewed_head" == "$current_head" ]] && return 0
+  if (( ! freshness )); then
+    _PRECONDITION_FAIL_REASON="review_round_stale"
+    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree. ${how_to}" >&2
+    return 1
+  fi
+
+  # --freshness (GATES→DONE, done-advance): the D4 narrow exception (P060 Step 4).
+  local policy="${CP3_FRESHNESS_POLICY:-blocking}"
+  _fresh_fail() {
+    [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" reason="$1" enforcement="$policy"
+    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; return 1; fi
+    return 0
+  }
+  if ! git -C "$tree_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
+     || ! git -C "$tree_root" merge-base --is-ancestor "$reviewed_head" "$current_head" 2>/dev/null; then
+    _fresh_fail reviewed_head_not_ancestor "PRECONDITION FAIL: the cp3 round's head ${reviewed_head} is not an ancestor of HEAD ${current_head}." "Fix: run the cp3 review again against the current HEAD."
+    return $?
+  fi
+  local changed_files=() pth
+  while IFS= read -r -d '' pth; do changed_files+=("$pth"); done < <(git -C "$tree_root" diff --name-only -z "${reviewed_head}..${current_head}" 2>/dev/null)
+  local violating="" base
+  for pth in "${changed_files[@]}"; do
+    base="${pth##*/}"
+    case "$base" in
+      verifier-output-*.md|gates_report.json|fsm-state.yaml|rounds.json|round.json|measurement.json|step-check.json)
+        violating="$pth (verdict-bearing)"; break ;;
+    esac
+    case "$pth" in
+      */tests/*|tests/*|*/fixtures/*|fixtures/*) : ;;
+      "$evidence_dir"/*) : ;;
+      *) violating="$pth (out-of-scope)"; break ;;
+    esac
+  done
+  if [[ -n "$violating" ]]; then
+    _fresh_fail path_out_of_scope "PRECONDITION FAIL: commit(s) past the reviewed cp3 head touch a non-exempt path: ${violating}." "Reason: the D4 exception permits only test/fixture/evidence churn; verdict-bearing files never qualify. A production change past the reviewed head means the review never saw it." "Fix: run the cp3 review again against HEAD, re-run gates, then retry. OR (PM-authorized, audited): --force --reason '<≥20 chars>'."
+    return $?
+  fi
+  local c missing_trailer="" tr
+  while IFS= read -r c; do
+    [[ -z "$c" ]] && continue
+    tr=$(git -C "$tree_root" log -1 --format='%(trailers:key=CP3-Freshness-Exception,valueonly)' "$c" 2>/dev/null)
+    [[ -z "$tr" ]] && { missing_trailer="$c"; break; }
+  done < <(git -C "$tree_root" rev-list "${reviewed_head}..${current_head}" 2>/dev/null)
+  if [[ -n "$missing_trailer" ]]; then
+    _fresh_fail missing_exception_trailer "PRECONDITION FAIL: commit ${missing_trailer} past the reviewed cp3 head lacks a 'CP3-Freshness-Exception: <reason>' git trailer (D4 condition b)." "Fix: annotate the commit(s) with the trailer, OR run the cp3 review again against HEAD."
+    return $?
+  fi
+  local files_csv=""
+  (( ${#changed_files[@]} )) && { files_csv=$(printf '%s,' "${changed_files[@]}"); files_csv="${files_csv%,}"; }
+  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_exception" reviewed_head="$reviewed_head" head="$current_head" changed_file_count="${#changed_files[@]}" changed_files="$files_csv"
+  return 0
+}
+
+# Validate a verifier-output-cp4-curator-validation.md file (its only caller since P094 is CP4 in fsm_check_orphan_dispatches; cp2/cp3 are fsm_check_review_round).
 # Returns 0 (pass) if file exists + has non-empty _generated_by + _generated_at
 # + valid classification. For RUN/FAIL/FULL_REVIEW also requires non-empty
-# verdict != "pending" (verifier ran). Aligned with agents/verifier.md canonical
-# output contract (E-046-1_3 Step 2 producer→consumer migration).
+# verdict != "pending" (verifier ran). Aligned with agents/verifier.md CP4
+# output contract.
 # Structural gate (v2.35+): behavior_trace_count > 0 when behavior_trace_required: true.
 # Gate is opt-in (only fires when behavior_trace_required is explicitly "true").
 # CP6 is advisory and never reaches this check via the FSM flow.
@@ -1363,6 +1543,20 @@ _fsm_routed_findings_check() {
   # ── Producer reconciliation against the canonical CP3 artifact ────────────
   local review_json="${evidence_dir}/semantic-review-final.json"
   local plan_json="${evidence_dir}/plan.json"
+  # P094 Step 7: the cp3 close writes the file, so its absence is no longer
+  # "nothing to reconcile" once a cp3 round closed (verdict pass or fail). A
+  # skipped or no_change cp3 ran no reviewer and passes with an audit line;
+  # a run with no cp3 index at all keeps the legacy zero-cost path.
+  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]]; then
+    local cp3_verdict; cp3_verdict="$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)"
+    case "$cp3_verdict" in
+      pass|fail)
+        echo "PRECONDITION FAIL: the cp3 review round of ${epic_id} closed (verdict ${cp3_verdict}) but ${review_json} is missing, so its findings cannot be reconciled against the steps' scope; run aid-review-round.sh close --checkpoint cp3 again (it writes the file)." >&2
+        return 1 ;;
+      skip|no_change)
+        fsm_emit_audit_log "cp3_reconciliation_skipped" --evidence-dir "$evidence_dir" --reason "cp3 verdict ${cp3_verdict}: no reviewer ran, no semantic file to reconcile" 2>/dev/null || true ;;
+    esac
+  fi
   [[ -f "$review_json" && -f "$plan_json" ]] || { [[ "$failed" -eq 1 ]] && return 1; return 0; }
 
   # The scope union is the same one the pre-commit hook computes for GATES and
@@ -1415,184 +1609,6 @@ _fsm_routed_findings_check() {
 # observe → return 0 (logged, non-blocking). Sets _PRECONDITION_FAIL_REASON so
 # cmd_transition can group the failure in the timeline (like other preconditions).
 # Args: $1 timeline  $2 policy  $3 reason  $4.. stderr recovery lines.
-_cp3_freshness_route() {
-  local timeline="$1" policy="$2" reason="$3"; shift 3
-  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" \
-    reason="$reason" enforcement="$policy"
-  if [[ "$policy" == "blocking" ]]; then
-    _PRECONDITION_FAIL_REASON="cp3_stale_review"
-    printf '%s\n' "$@" >&2
-    return 1
-  fi
-  return 0
-}
-
-# fsm_check_cp3_freshness — P060 Step 4 (OBS-20260702-03), head-side twin of B-008.
-# Refuses a STALE CP3 review as DONE evidence. Each CP3 verifier-output records
-# `Reviewed-Head: <sha>` = the sha its diff was generated against (see
-# agents/verifier.md §Output Format producer contract). If HEAD has moved past
-# that sha, the review did not see the current tree — UNLESS the D4 narrow
-# exception holds:
-#   (a) path scope — every changed path is under */tests/*, */fixtures/*, or the
-#       CURRENT run's evidence dir, with verdict-bearing files EXCLUDED
-#       (verifier-output-*.md / gates_report.json / fsm-state.yaml are NEVER
-#       "bookkeeping", even under tests/); AND
-#   (b) explicit marking — every commit past the reviewed head carries a
-#       `CP3-Freshness-Exception: <reason>` git trailer.
-# On PASS-with-exception the disclosure event `cp3_freshness_exception` carries the
-# FULL changed-file list (E10 measures exception abuse; the residual "weakened test
-# slips through" risk is deliberate and MEASURED, not hidden).
-#
-# Policy CP3_FRESHNESS_POLICY (observe|blocking, default BLOCKING per D9 —
-# deliberately stricter than sibling observe defaults). observe → emit
-# cp3_freshness_would_block, do NOT block. Grandfather is keyed on
-# fsm_check_grandfather (run created_at < DEPLOY_DATE), NEVER a self-reported
-# _generated_at — a backdated file on a post-deploy run still fails.
-# Separate from the shared fsm_check_verifier_output (cp2/cp3/cp4). Enforcement
-# principle: AID-v3-principles.md §1.
-#
-# Args: <evidence_dir> <state_file> [project_root]. state_file is assigned to a
-# local so the fsm_check_grandfather call below reads it via dynamic scope.
-# Returns 0 (fresh / exception / observe / grandfathered / no-CP3-files),
-# 1 (blocking violation).
-fsm_check_cp3_freshness() {
-  local evidence_dir="$1"
-  local state_file="$2"
-  local project_root="${3:-$PWD}"
-  local timeline="${evidence_dir}/timeline.jsonl"
-
-  # Grandfather: pre-deploy runs are exempt (keyed on run created_at, not file).
-  if fsm_check_grandfather; then
-    return 0
-  fi
-
-  local policy="${CP3_FRESHNESS_POLICY:-blocking}"
-
-  # Collect existing CP3 verifier-output files. Absent files are the domain of
-  # the presence check (fsm_check_verifier_output at EXECUTE:GATES), not here.
-  local cp3_files=() f
-  for f in verifier-output-cp3-code-review.md verifier-output-cp3-security.md; do
-    [[ -f "${evidence_dir}/${f}" ]] && cp3_files+=("${evidence_dir}/${f}")
-  done
-  [[ ${#cp3_files[@]} -eq 0 ]] && return 0
-
-  # Read Reviewed-Head from each CP3 file; missing on any → fail (F4g).
-  # P060 per-plan C+A: validate EACH file independently, not last-wins. If two CP3 files
-  # disagree on Reviewed-Head (e.g. a stale code-review + a fresh security output), the
-  # freshness verdict must NOT be driven by whichever was iterated last — an inconsistent
-  # review base is itself stale evidence → fail conservatively.
-  local reviewed_head="" rh
-  for f in "${cp3_files[@]}"; do
-    rh=$(yaml_field "$f" "Reviewed-Head")
-    if [[ -z "$rh" ]]; then
-      _cp3_freshness_route "$timeline" "$policy" "missing_reviewed_head" \
-        "PRECONDITION FAIL: ${f##*/} has no 'Reviewed-Head:' line." \
-        "" \
-        "Reason: a CP3 verifier output must record the sha its diff was generated" \
-        "        against (agents/verifier.md §Output Format). Without it the FSM" \
-        "        cannot prove the review saw the current tree (OBS-20260702-03)." \
-        "Fix: re-dispatch CP3 (both verifiers) so each writes 'Reviewed-Head: <sha>'." \
-        "OR (PM-authorized, audited): rerun the transition with --force --reason '<why>'."
-      return $?
-    fi
-    if [[ -n "$reviewed_head" && "$rh" != "$reviewed_head" ]]; then
-      _cp3_freshness_route "$timeline" "$policy" "inconsistent_reviewed_head" \
-        "PRECONDITION FAIL: CP3 files disagree on Reviewed-Head (${reviewed_head} vs ${rh})." \
-        "Reason: the CP3 verifiers reviewed different HEADs — the review base is inconsistent," \
-        "        so the freshness verdict cannot be trusted (one output is stale)." \
-        "Fix: re-dispatch BOTH CP3 verifiers against the same current HEAD."
-      return $?
-    fi
-    reviewed_head="$rh"
-  done
-
-  local current_head
-  current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
-  if [[ -z "$current_head" ]]; then
-    _cp3_freshness_route "$timeline" "$policy" "head_unresolved" \
-      "PRECONDITION FAIL: cannot resolve current git HEAD to verify CP3 freshness."
-    return $?
-  fi
-
-  # Fresh: reviewed head == current head.
-  [[ "$reviewed_head" == "$current_head" ]] && return 0
-
-  # reviewed_head must be a real, ancestor commit of HEAD; otherwise stale/diverged.
-  if ! git -C "$project_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
-     || ! git -C "$project_root" merge-base --is-ancestor "$reviewed_head" "$current_head" 2>/dev/null; then
-    _cp3_freshness_route "$timeline" "$policy" "reviewed_head_not_ancestor" \
-      "PRECONDITION FAIL: CP3 Reviewed-Head ${reviewed_head} is not an ancestor of HEAD ${current_head}." \
-      "Fix: re-dispatch CP3 (both verifiers) against the current HEAD."
-    return $?
-  fi
-
-  # HEAD is ahead — apply the D4 narrow exception. -z + while-read handles
-  # spaces-in-names safely.
-  local changed_files=() p
-  while IFS= read -r -d '' p; do
-    changed_files+=("$p")
-  done < <(git -C "$project_root" diff --name-only -z "${reviewed_head}..${current_head}" 2>/dev/null)
-
-  # (a) path scope + verdict-bearing exclusion.
-  local violating="" base
-  if [[ ${#changed_files[@]} -gt 0 ]]; then
-    for p in "${changed_files[@]}"; do
-      base="${p##*/}"
-      # Verdict-bearing files are NEVER bookkeeping, even under tests/.
-      case "$base" in
-        verifier-output-*.md|gates_report.json|fsm-state.yaml)
-          violating="$p (verdict-bearing)"; break ;;
-      esac
-      case "$p" in
-        */tests/*|tests/*|*/fixtures/*|fixtures/*) : ;;   # test/fixture churn OK
-        "$evidence_dir"/*) : ;;                           # current run evidence OK
-        *) violating="$p (out-of-scope)"; break ;;
-      esac
-    done
-  fi
-
-  if [[ -n "$violating" ]]; then
-    _cp3_freshness_route "$timeline" "$policy" "path_out_of_scope" \
-      "PRECONDITION FAIL: commit(s) past reviewed CP3 head touch a non-exempt path: ${violating}." \
-      "" \
-      "Reason: the D4 CP3-freshness exception permits ONLY test/fixture/evidence" \
-      "        churn, and verdict-bearing files (verifier-output-*.md," \
-      "        gates_report.json, fsm-state.yaml) never qualify. A production" \
-      "        change past the reviewed head means CP3 never saw it (stale review)." \
-      "Fix: re-dispatch CP3 (both verifiers) against current HEAD, re-run gates," \
-      "     then retry the transition." \
-      "OR (PM-authorized override, audited): rerun with --force --reason '<≥20 chars>'."
-    return $?
-  fi
-
-  # (b) require the CP3-Freshness-Exception trailer on EVERY post-review commit.
-  local c missing_trailer="" tr
-  while IFS= read -r c; do
-    [[ -z "$c" ]] && continue
-    tr=$(git -C "$project_root" log -1 \
-      --format='%(trailers:key=CP3-Freshness-Exception,valueonly)' "$c" 2>/dev/null)
-    [[ -z "$tr" ]] && { missing_trailer="$c"; break; }
-  done < <(git -C "$project_root" rev-list "${reviewed_head}..${current_head}" 2>/dev/null)
-
-  if [[ -n "$missing_trailer" ]]; then
-    _cp3_freshness_route "$timeline" "$policy" "missing_exception_trailer" \
-      "PRECONDITION FAIL: commit ${missing_trailer} past the reviewed CP3 head lacks a" \
-      "        'CP3-Freshness-Exception: <reason>' git trailer (D4 condition b)." \
-      "Fix: annotate the commit(s) with the trailer, OR re-dispatch CP3 against HEAD."
-    return $?
-  fi
-
-  # PASS-with-exception: both D4 conditions hold. Disclose the FULL file list.
-  local files_csv=""
-  if [[ ${#changed_files[@]} -gt 0 ]]; then
-    files_csv=$(printf '%s,' "${changed_files[@]}"); files_csv="${files_csv%,}"
-  fi
-  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_exception" \
-    reviewed_head="$reviewed_head" head="$current_head" \
-    changed_file_count="${#changed_files[@]}" changed_files="$files_csv"
-  return 0
-}
-
 # fsm_check_orphan_dispatches — Component B of P040 (Dispatch Lifecycle Enforcement Bundle).
 # Reads <evidence_dir>/pending-dispatches.jsonl and refuses transition if any
 # start event lacks matching complete within expected_duration_max (default 600s
@@ -1831,8 +1847,6 @@ fsm_check_streamlined_integration_review() {
   local streamlined
   streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
   [[ "$streamlined" != "true" ]] && return 0
-  local cp3_code="${evidence_dir}/verifier-output-cp3-code-review.md"
-  local cp3_sec="${evidence_dir}/verifier-output-cp3-security.md"
   # P083 Step 1: the EPIC-stage gate writer (aid-run-gates.sh) and every
   # other reader use ${evidence_dir}/gates/gates_report.json; the plan-final
   # gate stage (aid-plan-fsm.sh) writes the flat sibling instead. Both are
@@ -1853,18 +1867,17 @@ fsm_check_streamlined_integration_review() {
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
   local missing=()
-  [[ -f "$cp3_code" ]] || missing+=("verifier-output-cp3-code-review.md")
-  [[ -f "$cp3_sec" ]]  || missing+=("verifier-output-cp3-security.md")
+  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
   [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
     joined=$(IFS=', '; echo "${missing[*]}")
     echo "ERROR: Streamlined run missing required integration-review evidence: ${joined}" >&2
-    echo "The streamlined contract requires verifier-output-cp3-code-review.md +" >&2
-    echo "verifier-output-cp3-security.md + gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
+    echo "The streamlined contract requires a closed passing EPIC review round (cp3/rounds.json)" >&2
+    echo "+ gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
     echo "  ${evidence_dir}" >&2
     echo "" >&2
-    echo "Fix: dispatch CP3 code-review + CP3 security verifiers and run gates, then retry done-advance." >&2
+    echo "Fix: run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh) and the gates, then retry done-advance." >&2
     echo "" >&2
     echo "OR (PM-authorized override, audited):" >&2
     echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
@@ -2082,9 +2095,6 @@ fsm_emit_audit_log() {
 #   $2 — severity_yaml (absolute path to .aid-o/config/check-severity.yaml)
 #
 # Behavior:
-#   - When checks_json has a .verifier_outputs.provenance_aggregate == "unverifiable"
-#     marker, a synthetic verifier_provenance failure entry is prepended (fail-closed
-#     at severity: blocking when the registry can't be read — see below).
 #   - Each boolean-false top-level scalar in checks_json yields one entry.
 #   - severity + promoted_at are enriched from the registry; missing keys
 #     default to {severity: "advisory", promoted_at: null}.
@@ -2092,7 +2102,6 @@ fsm_emit_audit_log() {
 fsm_build_failures() {
   local checks_json="$1" severity_yaml="$2"
   local registry_json='{}'
-  local prov_agg_value
   local failures_json='[]'
 
   # Step A: load registry into a JSON object (best-effort).
@@ -2109,21 +2118,10 @@ fsm_build_failures() {
     fi
   fi
 
-  # Extract provenance_aggregate marker (synthetic verifier_provenance failure trigger).
-  prov_agg_value=$(echo "$checks_json" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
-
-  # Fail-closed notice: if provenance is unverifiable AND the registry could not be
-  # read, the synthetic entry below floors at severity: blocking (never advisory).
-  if [[ "$prov_agg_value" == "unverifiable" && "$registry_json" == "{}" ]]; then
-    log_warn "verifier_provenance unverifiable with no readable severity registry — treating as BLOCKING (fail-closed, AID-046)"
-  fi
-
-  # Step B: build failures[] from boolean-false top-level checks +
-  # provenance_aggregate unverifiable marker; enrich each entry's severity +
-  # promoted_at from the registry, defaulting to advisory when absent.
+  # Step B: build failures[] from boolean-false top-level checks; enrich each
+  # entry's severity + promoted_at from the registry, defaulting to advisory when absent.
   failures_json=$(echo "$checks_json" | jq -c \
     --argjson reg "$registry_json" \
-    --arg prov_agg "$prov_agg_value" \
     '
     def enrich(entry):
       ($reg[entry.check] // null) as $r |
@@ -2138,19 +2136,7 @@ fsm_build_failures() {
            severity: "advisory",
            evidence: ("\(.key) returned false"),
            promoted_at: null}
-        | enrich(.)),
-      (if $prov_agg == "unverifiable" then
-        # Integrity check — fail-closed. Default severity is "blocking" (NOT advisory)
-        # so an unreadable severity registry (e.g. yq absent → $reg == {}) cannot
-        # silently disarm the provenance block. A PM may keep it blocking via the
-        # registry, but a MISSING registry entry floors at "blocking", never advisory.
-        {check: "verifier_provenance",
-         evidence: "provenance_aggregate=unverifiable (1+ verifier outputs could not be verified against the dispatch timeline; integrity signal, not proof of fraud)",
-         promoted_at: null}
-        | (($reg["verifier_provenance"] // null) as $r
-           | .severity    = (if $r then ($r.severity // "blocking") else "blocking" end)
-           | .promoted_at = (if $r then ($r.promoted_at // null)    else null       end))
-       else empty end)
+        | enrich(.))
     ]
     ' 2>/dev/null || echo '[]')
 
@@ -2277,99 +2263,6 @@ try_telegram_alert() {
 # write_compliance_json wraps it with run metadata + overall verdict + writes
 # the per-EPIC compliance.json + emits the `compliance_written` timeline event.
 
-# ─── P037 Step 3: Provenance Verification Helper ──────────────────────────
-# verify_provenance cross-references a verifier output's _generated_by/_generated_at
-# metadata against the actual dispatch evidence:
-#   - agent_tool mode (default, P043): CC Agent tool writes no timeline events —
-#     returns the non-blocking "agent_tool" sentinel without checking.
-#   - subagent mode: timeline.jsonl must show verifier_dispatch_start +
-#     verifier_dispatch_complete events for this focus within ±window_s of
-#     the claimed _generated_at timestamp.
-#   - inline mode: _generated_by must match main-context@<sha>, and the SHA
-#     must resolve in the project's git object database.
-# Returns one of: "verified", "inline", "agent_tool", "unverifiable", "unknown".
-# NOTE: "unverifiable" means the output's provenance could not be confirmed against
-# the dispatch timeline (stale / missing / mismatched dispatch records). It is an
-# integrity signal, NOT proof of deliberate fraud — a determined main-context
-# fabricator could forge the timeline too. The real anti-fabrication defenses are the
-# orchestrator's MUST-dispatch / MUST-NOT-self-review instruction (pipeline.md), the
-# independent auditor, and the orphan-dispatch check.
-verify_provenance() {
-  # IMP-103 (v2.20.2): $3 (step_n) is intentionally unused — kept in signature for
-  # API stability and future per-step forensics (e.g. error-path attribution by
-  # step index). Renamed to _step_n to mark unused without shifting positional args
-  # at the 3 call sites (CP2 loop + CP3 code-review + CP3 security).
-  local verifier_output_file=$1 focus=$2 _step_n=$3 dispatch_mode=$4 timeline_file=$5 window_s=$6
-
-  local generated_by generated_at
-  generated_by=$(yaml_field "$verifier_output_file" _generated_by)
-  generated_at=$(yaml_field "$verifier_output_file" _generated_at)
-
-  [[ -z "$generated_by" || -z "$generated_at" ]] && { echo "unverifiable"; return; }
-
-  case "$dispatch_mode" in
-    subagent)
-      # Interval-bracket provenance (AID-046). The output must have been generated
-      # DURING a real dispatch interval for this focus — at/after the earliest
-      # verifier_dispatch_start and at/before the latest verifier_dispatch_complete,
-      # with a small clock-skew tolerance (window_s) on each side. This is robust to
-      # the verification DURATION (minutes). The previous logic required BOTH the start
-      # AND the complete event to fall within ±window_s of _generated_at, which flagged
-      # any honest run longer than window_s as unverifiable (the start event sits a full
-      # verification-duration before _generated_at). That false-positive bit P040's own
-      # ship. We now bracket by the real start..complete interval.
-      [[ ! -f "$timeline_file" ]] && { echo "unverifiable"; return; }
-      local gen_epoch
-      gen_epoch=$(date -d "$generated_at" +%s 2>/dev/null || echo "0")
-      [[ "$gen_epoch" == "0" ]] && { echo "unverifiable"; return; }
-
-      # TZ=UTC required: jq <1.7 fromdateiso8601 silently honors local TZ even with Z
-      # suffix, producing 1-3600s offset on non-UTC hosts (CEST/PST/etc). Discovered
-      # during P037 Step 5 bats smoke test (jq 1.6 on CEST host). $gen_epoch is a UTC
-      # epoch from `date -d`; force jq to match.
-      local start_ts complete_ts
-      start_ts=$(TZ=UTC jq -s --arg f "$focus" '
-        [.[] | select(.event == "verifier_dispatch_start" and .focus == $f) | (.ts | fromdateiso8601)] | min // empty' "$timeline_file" 2>/dev/null || echo "")
-      complete_ts=$(TZ=UTC jq -s --arg f "$focus" '
-        [.[] | select(.event == "verifier_dispatch_complete" and .focus == $f) | (.ts | fromdateiso8601)] | max // empty' "$timeline_file" 2>/dev/null || echo "")
-
-      # Require a matched start AND complete pair for this focus.
-      if [[ -z "$start_ts" || -z "$complete_ts" ]]; then
-        echo "unverifiable"; return
-      fi
-      local lo=$((start_ts - window_s))
-      local hi=$((complete_ts + window_s))
-      if (( start_ts <= complete_ts && gen_epoch >= lo && gen_epoch <= hi )); then
-        echo "verified"
-      else
-        echo "unverifiable"
-      fi
-      ;;
-    agent_tool)
-      # CC Agent tool writes no timeline events → interval-bracket provenance is
-      # structurally unavailable. Non-blocking sentinel; integrity contract is
-      # upheld by pipeline.md dispatch rules + independent auditor (rationale in
-      # evaluate_compliance_checks below).
-      echo "agent_tool"
-      ;;
-    inline)
-      # Validate main-context@<sha> format + SHA exists in repo
-      if [[ "$generated_by" =~ ^main-context@([a-f0-9]{7,40})$ ]]; then
-        local sha="${BASH_REMATCH[1]}"
-        if command -v git >/dev/null 2>&1 && git -C "$project_root" cat-file -e "$sha" 2>/dev/null; then
-          echo "inline"
-        else
-          echo "unverifiable"
-        fi
-      else
-        echo "unverifiable"
-      fi
-      ;;
-    *)
-      echo "unverifiable"
-      ;;
-  esac
-}
 
 # ─── P045: delivery_report_present (plan-boundary structural presence check) ──
 # Echoes a JSON literal — null | true | false — for the delivery report at the
@@ -2453,19 +2346,6 @@ fsm_eval_simplifier_present() {
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
-  # P037 Step 3 / P043: dispatch_mode resolution (used by verify_provenance below).
-  # Precedence: project .aid-o/config/plugin.yaml `dispatch_mode:` → plugin
-  # defaults/orchestration.yaml `dispatch.mode` (single source of the default)
-  # → hard fallback "agent_tool" (yq missing / defaults unreadable).
-  local dispatch_mode timeline_window_s
-  dispatch_mode=$(yq -r '.dispatch_mode' "${project_root}/.aid-o/config/plugin.yaml" 2>/dev/null) || dispatch_mode=""
-  if [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]]; then
-    dispatch_mode=$(yq -r '.dispatch.mode' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null) || dispatch_mode=""
-  fi
-  [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]] && dispatch_mode="agent_tool"
-  timeline_window_s=$(yq -r '.dispatch.timeline_window_seconds // 60' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null || echo "60")
-  [[ -z "$timeline_window_s" || "$timeline_window_s" == "null" ]] && timeline_window_s=60
-
   # branch_correct: fsm-state.yaml.branch matches Session A naming convention
   # (^task/E-...). Cross-prefix EPICs (B-051, etc.) report false here — out of
   # Session A scope; Sessions B/C may relax the regex.
@@ -2496,117 +2376,42 @@ evaluate_compliance_checks() {
     gates_genby=false
   fi
 
-  # Session B: verifier_outputs object schema (CP2 per-step + CP3 code-review + security)
-  local cp2_dispatched cp2_verdict cp3_cr_d cp3_cr_v cp3_sec_d cp3_sec_v aggregate
-
-  # P037 Step 3: per-step provenance tracking (parallel to dispatched/verdict).
-  local -a cp2_provenances=()
-  local cp3_cr_provenance="unknown" cp3_sec_provenance="unknown"
-
-  # CP2 per-step: ALL step-*-verify.md must have a valid verifier-output-step-N.md
-  local total_steps cp2_passed cp2_failed
-  total_steps=$(find "$evidence_dir" -maxdepth 1 -name "step-*-verify.md" 2>/dev/null | wc -l)
-  cp2_passed=0; cp2_failed=0
+  # P094: verifier_outputs from the review round indexes (cp2 per step, cp3 once).
+  # A step's index says skip, no_change, pass or fail; aggregate is true when
+  # every step with a step-*-verify.md has a passing (or skipped) index and the
+  # cp3 index passes, null when the run has no steps yet, false otherwise.
+  local cp2_rounds_json cp2_dispatched cp2_verdict cp3_round_json cp3_d cp3_v aggregate
+  cp2_rounds_json='[]'
+  local v step_n idx
   for v in "$evidence_dir"/step-*-verify.md; do
     [[ -f "$v" ]] || continue
-    local step_n
-    step_n=$(basename "$v" | grep -oP '\d+' || true)
-    [[ -z "$step_n" ]] && continue
-    local vo="${evidence_dir}/verifier-output-step-${step_n}.md"
-    if [[ -f "$vo" ]] && grep -q '^_generated_by:' "$vo" 2>/dev/null && grep -q '^classification:' "$vo" 2>/dev/null; then
-      cp2_passed=$((cp2_passed + 1))
-      local _v_status
-      _v_status=$(yaml_field "$vo" verdict)
-      [[ "$_v_status" == "fail" ]] && cp2_failed=$((cp2_failed + 1))
-      # P037 Step 3: provenance cross-reference for this verifier output
-      local _prov
-      _prov=$(verify_provenance "$vo" "cp2-step-${step_n}" "$step_n" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")
-      cp2_provenances+=("$_prov")
+    step_n=$(basename "$v" | grep -oP '\d+' || true); [[ -z "$step_n" ]] && continue
+    idx="${evidence_dir}/cp2/step-${step_n}/rounds.json"
+    if [[ -f "$idx" ]]; then
+      cp2_rounds_json="$(jq -c --argjson s "$step_n" --slurpfile r "$idx" '. + [{step: $s, verdict: ($r[0].verdict // null), rounds: (($r[0].rounds // []) | length)}]' <<<"$cp2_rounds_json")"
     else
-      # Missing or incomplete verifier output → unknown provenance for this step
-      cp2_provenances+=("unknown")
+      cp2_rounds_json="$(jq -c --argjson s "$step_n" '. + [{step: $s, verdict: null, rounds: 0}]' <<<"$cp2_rounds_json")"
     fi
   done
-
+  local total_steps; total_steps="$(jq 'length' <<<"$cp2_rounds_json")"
   if (( total_steps == 0 )); then
     cp2_dispatched=null; cp2_verdict=null
-  elif (( cp2_passed == total_steps )); then
+  elif [[ "$(jq '[.[] | select(.verdict == null)] | length' <<<"$cp2_rounds_json")" -eq 0 ]]; then
     cp2_dispatched=true
-    if   (( cp2_failed == 0 ));           then cp2_verdict='"pass"'
-    elif (( cp2_failed == total_steps )); then cp2_verdict='"fail"'
-    else                                       cp2_verdict='"mixed"'; fi
+    cp2_verdict="$(jq -c 'map(.verdict) | if any(. == "fail") then (if all(. == "fail") then "fail" else "mixed" end) else "pass" end' <<<"$cp2_rounds_json")"
   else
     cp2_dispatched=false; cp2_verdict=null
   fi
-
-  # CP3 verifier outputs (code-review + security) — identical evaluation, two
-  # focuses. Echoes "dispatched|verdict_json|provenance" (P037 Step 3 provenance
-  # cross-reference included). Reads dispatch_mode/evidence_dir/timeline_window_s
-  # from caller scope (file convention, see fsm_count_fails_matching).
-  _cp3_check() {
-    local file="${evidence_dir}/verifier-output-cp3-${1}.md" focus="cp3-${1}"
-    if [[ -f "$file" ]] && grep -q '^_generated_by:' "$file" 2>/dev/null; then
-      local v
-      v=$(yaml_field "$file" verdict)
-      printf 'true|"%s"|%s\n' "${v:-unknown}" \
-        "$(verify_provenance "$file" "$focus" "null" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")"
-    else
-      printf 'false|null|unknown\n'
-    fi
-  }
-  IFS='|' read -r cp3_cr_d cp3_cr_v cp3_cr_provenance < <(_cp3_check "code-review")
-  IFS='|' read -r cp3_sec_d cp3_sec_v cp3_sec_provenance < <(_cp3_check "security")
-
-  # aggregate: all three dispatched = true; null if CP2 is N/A (0 steps)
-  if [[ "$cp2_dispatched" == "true" && "$cp3_cr_d" == "true" && "$cp3_sec_d" == "true" ]]; then
-    aggregate=true
-  elif [[ "$cp2_dispatched" == "null" ]]; then
-    aggregate=null
+  idx="${evidence_dir}/cp3/rounds.json"
+  if [[ -f "$idx" ]]; then
+    cp3_round_json="$(jq -c '{verdict: (.verdict // null), rounds: ((.rounds // []) | length)}' "$idx")"
+    cp3_d=true; cp3_v="$(jq -c '.verdict' <<<"$cp3_round_json")"
   else
-    aggregate=false
+    cp3_round_json='{"verdict":null,"rounds":0}'; cp3_d=false; cp3_v=null
   fi
-
-  # P037 Step 3: per-step CP2 provenance as a JSON array (auditable per step).
-  local cp2_prov_array_json
-  if (( ${#cp2_provenances[@]} == 0 )); then
-    cp2_prov_array_json='[]'
-  else
-    cp2_prov_array_json=$(printf '%s\n' "${cp2_provenances[@]}" | jq -R . | jq -sc .)
-  fi
-
-  # P037 Step 3: provenance_aggregate — worst-of summary across all dispatches.
-  #   unverifiable > mixed > all_inline > all_verified (unknown if no data at all)
-  # Semantics: if any single provenance is "unverifiable", aggregate is "unverifiable".
-  # Else if all non-unknown are "verified" → "all_verified".
-  # Else if all non-unknown are "inline" → "all_inline".
-  # Else "mixed". If everything is unknown → "unknown".
-  # agent_tool mode short-circuits to "agent_tool": every per-output value is the
-  # agent_tool sentinel (mode is uniform per run), which would otherwise misreport
-  # as "mixed" (neither all_verified nor all_inline).
-  local all_verified=true all_inline=true any_unverifiable=false any_known=false
-  local p
-  for p in "${cp2_provenances[@]}" "$cp3_cr_provenance" "$cp3_sec_provenance"; do
-    [[ -z "$p" || "$p" == "unknown" ]] && continue
-    any_known=true
-    [[ "$p" == "unverifiable" ]] && any_unverifiable=true
-    [[ "$p" != "verified" ]] && all_verified=false
-    [[ "$p" != "inline" ]] && all_inline=false
-  done
-
-  local prov_agg
-  if [[ "$dispatch_mode" == "agent_tool" ]]; then
-    prov_agg='"agent_tool"'
-  elif $any_unverifiable; then
-    prov_agg='"unverifiable"'
-  elif ! $any_known; then
-    prov_agg='"unknown"'
-  elif $all_verified; then
-    prov_agg='"all_verified"'
-  elif $all_inline; then
-    prov_agg='"all_inline"'
-  else
-    prov_agg='"mixed"'
-  fi
+  if [[ "$cp2_dispatched" == null ]]; then aggregate=null
+  elif [[ "$cp2_dispatched" == true && "$cp3_d" == true && "$cp3_v" == '"pass"' && "$cp2_verdict" == '"pass"' ]]; then aggregate=true
+  else aggregate=false; fi
 
   # Phase 2 (P037) — plan_ac_match dimension
   local plan_ac_match
@@ -2648,15 +2453,11 @@ evaluate_compliance_checks() {
     --argjson pam         "$plan_ac_match" \
     --argjson cp2_d       "$cp2_dispatched" \
     --argjson cp2_v       "$cp2_verdict" \
-    --argjson cp2_prov    "$cp2_prov_array_json" \
-    --argjson cp3crd      "$cp3_cr_d" \
-    --argjson cp3crv      "$cp3_cr_v" \
-    --arg     cp3cr_prov  "$cp3_cr_provenance" \
-    --argjson cp3secd     "$cp3_sec_d" \
-    --argjson cp3secv     "$cp3_sec_v" \
-    --arg     cp3sec_prov "$cp3_sec_provenance" \
+    --argjson cp2_rounds  "$cp2_rounds_json" \
+    --argjson cp3d        "$cp3_d" \
+    --argjson cp3v        "$cp3_v" \
+    --argjson cp3_round   "$cp3_round_json" \
     --argjson agg         "$aggregate" \
-    --argjson prov_agg    "$prov_agg" \
     --argjson drp         "$delivery_report_present" \
     --argjson srp         "$simplifier_report_present" \
     '{
@@ -2668,15 +2469,11 @@ evaluate_compliance_checks() {
       verifier_outputs: {
         cp2_per_step_dispatched:    $cp2_d,
         cp2_per_step_verdict:       $cp2_v,
-        cp2_per_step_provenance:    $cp2_prov,
-        cp3_code_review_dispatched: $cp3crd,
-        cp3_code_review_verdict:    $cp3crv,
-        cp3_code_review_provenance: $cp3cr_prov,
-        cp3_security_dispatched:    $cp3secd,
-        cp3_security_verdict:       $cp3secv,
-        cp3_security_provenance:    $cp3sec_prov,
-        aggregate:                  $agg,
-        provenance_aggregate:       $prov_agg
+        cp2_rounds:                 $cp2_rounds,
+        cp3_dispatched:             $cp3d,
+        cp3_verdict:                $cp3v,
+        cp3_round:                  $cp3_round,
+        aggregate:                  $agg
       },
       dod_present: null,
       delivery_report_present: $drp,
@@ -2764,15 +2561,6 @@ write_compliance_json() {
     | if . then "pass" else "fail" end' 2>/dev/null || echo "fail")
   notes_json='[]'
 
-  # P037 Step 3: provenance_aggregate unverifiable override — if any verifier output's
-  # provenance can't be verified against the dispatch timeline, force overall=fail.
-  local prov_agg_value
-  prov_agg_value=$(echo "$checks" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
-  if [[ "$prov_agg_value" == "unverifiable" ]]; then
-    overall_pre="fail"
-    notes_json=$(jq -nc --arg n "provenance_aggregate: unverifiable — at least one verifier output could not be verified against the dispatch timeline (integrity signal, not proof of fraud)" '[$n]')
-  fi
-
   # P038 Step 3: failures[] is built by the shared fsm_build_failures helper
   # so the cmd_done_advance precondition and write_compliance_json share one
   # implementation. Helper is defensive against missing yq / missing registry /
@@ -2792,7 +2580,7 @@ write_compliance_json() {
   # overall_pre=fail + a note above and is re-asserted here).
   local _blocking_failures
   _blocking_failures=$(echo "$failures_json" | jq '[.[] | select(.severity != "advisory")] | length' 2>/dev/null || echo 0)
-  if [[ "${_blocking_failures:-0}" -gt 0 || "$prov_agg_value" == "unverifiable" ]]; then
+  if [[ "${_blocking_failures:-0}" -gt 0 ]]; then
     overall_pre="fail"
   else
     overall_pre="pass"
@@ -2805,7 +2593,7 @@ write_compliance_json() {
   streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
   if [[ "$streamlined" == "true" ]]; then
     mode_value="streamlined"
-    skipped_dims='["verifier_outputs.cp2_per_step","verifier_outputs.cp4_curator_validation"]'
+    skipped_dims='["verifier_outputs.cp2_rounds","verifier_outputs.cp4_curator_validation"]'
   else
     mode_value="full"
     skipped_dims='[]'
@@ -2992,38 +2780,9 @@ EOF
           fi
         fi
 
-        # Session B CP3: verifier-output-cp3 preconditions (file presence + valid _generated_by)
-        local cp3_code_review="${evidence_dir}/verifier-output-cp3-code-review.md"
-        local cp3_security="${evidence_dir}/verifier-output-cp3-security.md"
-
-        if ! fsm_check_verifier_output "$cp3_code_review"; then
-          _PRECONDITION_FAIL_REASON="missing_cp3_code_review"
-          cat <<EOF >&2
-PRECONDITION FAIL: verifier-output-cp3-code-review.md missing or invalid (the verifier_output_invalid line above names what).
-
-Reason: AID v3 Session B requires CP3 integration review before EXECUTE→GATES.
-        Both verifiers (code-review + security) must review the full EPIC diff.
-
-Fix: Dispatch TWO verifiers in parallel (single message, two Agent tool calls):
-     a. subagent_type: aid-orchestrator:verifier, focus: code-review
-     b. subagent_type: aid-orchestrator:verifier, focus: security
-     Each writes its verifier-output-cp3-{focus}.md with _generated_by, _generated_at,
-     classification: FULL_REVIEW and verdict: pass|fail (the validator requires all four;
-     CP2 gets classification from the pre-filter, CP3 does not — the verifier writes it).
-Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
-EOF
-          return 1
-        fi
-
-        if ! fsm_check_verifier_output "$cp3_security"; then
-          _PRECONDITION_FAIL_REASON="missing_cp3_security"
-          cat <<EOF >&2
-PRECONDITION FAIL: verifier-output-cp3-security.md missing or invalid.
-
-Reason: CP3 requires BOTH code-review AND security verifier outputs.
-        Security verifier must also be dispatched (mandatory).
-Fix: dispatch security verifier (see code-review error above for full instructions).
-EOF
+        # P094: the EPIC review (cp3) is one closed passing round at HEAD.
+        if ! fsm_check_review_round "$evidence_dir" cp3 ""; then
+          _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_review_round}"
           return 1
         fi
       fi
@@ -3299,7 +3058,7 @@ EOF
       # (GATES:DONE) — a stale CP3 review (HEAD moved past its Reviewed-Head) must
       # not pass as DONE evidence unless the D4 narrow exception holds. Grandfather
       # + policy handled inside; default BLOCKING (D9).
-      if ! fsm_check_cp3_freshness "$evidence_dir" "$state_file" "$PWD"; then
+      if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$PWD"; then
         _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
         return 1
       fi
@@ -3381,7 +3140,7 @@ EOF
 #
 # Writes c3-pm-escalation-override.json (`{pm_ref}` shape), claimed atomically
 # and exactly once by the C3 loop. Plan review (CP1) has its own PM record:
-# aid-plan-review-round.sh override.
+# aid-review-round.sh override.
 #
 # THE ARTIFACT IS NOT WRITTEN BY AGENTS. It is the PM's decision made
 # physical; an agent creating one would be forging the authorisation it is
@@ -3422,7 +3181,7 @@ cmd_pm_override() {
 
   case "$target" in
     c3) : ;;
-    c0) echo "ERROR: pm-override grant: 'c0' is gone with the Codex plan review loop; a PM decision on plan review rounds is recorded with aid-plan-review-round.sh override." >&2; exit 2 ;;
+    c0) echo "ERROR: pm-override grant: 'c0' is gone with the Codex plan review loop; a PM decision on plan review rounds is recorded with aid-review-round.sh override --plan <plan>." >&2; exit 2 ;;
     *) echo "ERROR: pm-override grant: target must be 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
   esac
   [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || {
@@ -5819,71 +5578,47 @@ cmd_increment_step() {
       fi
     fi
 
-    # Session B CP2: verifier-output-step-N.md precondition
-    # P040 Component D: streamlined mode skips per-step CP2 (covered by
-    # integration-review enforcement at done-advance instead).
+    # P094: the step review (cp2) is a round index bound to HEAD and to the
+    # step check's timeline event. Streamlined runs skip it (their integration
+    # review covers them, and the step check records skip: streamlined anyway).
     if [[ "$streamlined" != "true" ]] && ! fsm_check_grandfather; then
-      local verifier_output="${evidence_dir}/verifier-output-step-${step}.md"
-
-      if ! fsm_check_verifier_output "$verifier_output"; then
+      if ! fsm_check_review_round "$evidence_dir" cp2 "$step"; then
         local timeline
         timeline=$(derive_timeline "$state_file") || true
+        local _why="${_PRECONDITION_FAIL_REASON:-missing_review_round}"
 
         # Repeated-fail telemetry (step-level and epic-level)
         local attempt_step attempt_epic
-        attempt_step=$(fsm_count_recent_fails_step "$step" "missing_verifier_output")
-        attempt_epic=$(fsm_count_recent_fails_epic "missing_verifier_output")
-
+        attempt_step=$(fsm_count_recent_fails_step "$step" "$_why")
+        attempt_epic=$(fsm_count_recent_fails_epic "$_why")
         if (( attempt_step >= 3 )); then
           [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_step" \
-            step="$step" precondition="missing_verifier_output" attempt_count="$attempt_step"
+            step="$step" precondition="$_why" attempt_count="$attempt_step"
           aid_alert_run warning plan-precondition-fail "$epic_id" \
-            "krok ${step} selhal ${attempt_step}× na téže precondition (missing_verifier_output)." \
+            "krok ${step} selhal ${attempt_step}× na téže precondition (${_why})." \
             "Do konce dneška rozhodni, jestli ten krok přepsat, nebo běh ukončit." \
-            "epic=${epic_id} step=${step} precondition=missing_verifier_output" || true
+            "epic=${epic_id} step=${step} precondition=${_why}" || true
         fi
         if (( attempt_epic >= 3 )); then
           [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_epic" \
-            precondition="missing_verifier_output" attempt_count="$attempt_epic"
+            precondition="$_why" attempt_count="$attempt_epic"
           aid_alert_run critical plan-precondition-bypass "$epic_id" \
             "tatáž precondition je obcházena napříč kroky (${attempt_epic}× v tomto EPICu) — to už není jeden špatný krok, ale vzorec." \
             "Do zítřejšího poledne rozhodni, jestli EPIC pokračuje. Dokud to platí, jeho důkazům nevěř." \
-            "epic=${epic_id} precondition=missing_verifier_output" || true
+            "epic=${epic_id} precondition=${_why}" || true
         fi
+        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" step="$step" reason="$_why"
+        die "ERROR: step ${step} has no passing review round (${_why}).
 
-        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" \
-          step="$step" reason="missing_verifier_output"
-
-        die "ERROR: verifier-output-step-${step}.md missing or invalid.
-
-Reason: AID v3 Session B requires per-step verifier dispatch (CP2). The pre-filter
-        classifies the step diff as SKIP/RUN/FAIL; for RUN/FAIL a verifier subagent
-        must run and update the output file before this increment.
+Reason: every step is reviewed before it is closed (P094): aid-step-check.sh computes the
+        diff's facts and either skips it (small, clean, in scope) or a reviewer round runs;
+        increment-step advances only on that evidence, bound to HEAD.
 
 Fix:
-  1. bash \$AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify ${step} ${evidence_dir}
-  2. Based on exit code: 0=skip (already done), 10=run code-review verifier, 20=run security verifier,
-     22=range_undetermined (emit step_commit/base_commit, or set CP2_RANGE_POLICY=observe)
-  3. If RUN/FAIL, dispatch: subagent_type=aid-orchestrator:verifier with appropriate focus
-     Verifier writes verdict + findings to ${verifier_output}
-  4. Retry: aid-fsm.sh increment-step ${state_file}"
-      fi
-
-      # ── P060 Step 3: cp2 bypass guard (increment call-site ONLY) ──────────
-      # The shared fsm_check_verifier_output accepts ANY valid checkpoint
-      # (cp3/cp4 consumers at :409/:1566/:1583 legitimately carry checkpoint:
-      # cp3|cp4 per agents/verifier.md). Here — and ONLY here — the per-step CP2
-      # precondition must be satisfied by a cp2 output: a cp4-produced stub
-      # (checkpoint: cp4) or cp3 output must NOT count. Absent checkpoint =
-      # backward-compatible (older pre-filter outputs without the field).
-      local _cp2_checkpoint
-      _cp2_checkpoint=$(yaml_field "$verifier_output" checkpoint)
-      if [[ -n "$_cp2_checkpoint" && "$_cp2_checkpoint" != "cp2" ]]; then
-        _increment_fail wrong_checkpoint_stub \
-          "PRECONDITION FAIL: verifier-output-step-${step}.md carries checkpoint '${_cp2_checkpoint}', expected cp2." \
-          "File: ${verifier_output}" \
-          "A cp3/cp4-produced output must not satisfy the per-step CP2 increment precondition." \
-          "Fix: regenerate the step output via cp2: aid-prefilter.sh classify ${step} ${evidence_dir}"
+  1. bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint cp2 --step ${step} --evidence-dir ${evidence_dir}
+  2. verdict review|review+security: aid-review-round.sh prepare/collect/close (commands/aid-run.md
+     \"Step review (CP2) and EPIC review (CP3)\"); fail → the step's role fixes, then a confirmation round
+  3. Retry: aid-fsm.sh increment-step ${state_file}"
       fi
     fi
 
@@ -6115,7 +5850,7 @@ Fix: revert plan.json to init state; OR, if the PM regenerated the plan on purpo
   # Log the commit sha at THIS step boundary so the cp2 pre-filter can anchor
   # its next-step diff range to the step (step_commit_sha..HEAD), not HEAD~1
   # (which a bookkeeping commit on top would fool into a docs_only false-green).
-  # First introduces the step_commit event; aid-prefilter.sh cp2 consumes it.
+  # First introduces the step_commit event; aid-step-check.sh cp2 consumes it.
   local _step_timeline _step_commit_sha
   _step_timeline=$(derive_timeline "$state_file") || true
   _step_commit_sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -6548,7 +6283,7 @@ _c4_divergence_class() {
       simplifier)          printf 'simplifier_missing'; return 0 ;;
       review_profile|gates_report|plan_review|delivery_gate|semantic_review_final|acceptance_evidence|curator_report|audit_report)
                            printf 'required_input';     return 0 ;;
-      *)                   printf 'unclassified';       return 0 ;;  # e.g. invalidation_map / unknown id
+      *)                   printf 'unclassified';       return 0 ;;  # an unknown id
     esac
   fi
 
@@ -7115,18 +6850,18 @@ cmd_done_advance() {
       #
       # PRECISION (Step 4 CP2 finding 2): what an intermediate plan-branch EPIC
       # stops producing is the C3 PRODUCER HOOK's `review-profile.json` (the
-      # aid-prefilter.sh risk profile over the full base_commit..HEAD diff that
+      # aid-review-profile.sh risk profile over the full base_commit..HEAD diff that
       # feeds the plan-final C3/Curator/Auditor chain) — NOT the CP3 verifier
-      # pair. The CP3 code-review + CP3 security verifiers are still dispatched
-      # per EPIC in plan_branch mode, and under `streamlined_mode: true`
-      # fsm_check_streamlined_integration_review (above the skip guard, retained
-      # in both modes) still hard-`die`s when their two outputs are absent. Only
+      # round. The cp3 review round still runs per EPIC in plan_branch mode, and
+      # under `streamlined_mode: true` fsm_check_streamlined_integration_review
+      # (above the skip guard, retained in both modes) still hard-`die`s without
+      # its closed passing index. Only
       # this presence check and the CP3 FRESHNESS re-check are skipped, so that
       # under enforcement=blocking a plan-branch EPIC is not failed for missing
       # an artifact the mode deliberately stopped producing.
       if [[ "$_pb_plan_branch" != "true" ]]; then
       # review-profile.json is produced in the DONE review sub-phase (pipeline.md,
-      # aid-prefilter.sh profile over the full base_commit..HEAD diff). Its ABSENCE
+      # aid-review-profile.sh over the full base_commit..HEAD diff). Its ABSENCE
       # means the C3 producer wiring did not run for this EPIC. OBSERVE by default:
       # emit review_profile_would_block telemetry but DO NOT block — grandfather-safe
       # for in-flight EPICs (e.g. E-046-3_3) that predate the producer wiring.
@@ -7147,50 +6882,6 @@ cmd_done_advance() {
       fi
       # End C3 activation review-profile presence check (+ plan_branch skip guard)
 
-      # ── C3 activation (IMP-177 / E-059-1_2 Step 2): invalidation-map expectation
-      # check (OBSERVE). Closes the OTHER half of IMP-177: aid-invalidation-map.sh
-      # was registered but never called from the live flow. The pipeline.md post-fix
-      # hook now (a) emits a `gate_fixer_fix_applied` timeline event whenever a
-      # gate-fixer fix lands at an in-scope dispatch site, and (b) calls
-      # aid-invalidation-map.sh, which emits an `invalidation_map_produced` event.
-      # This check compares the COUNTS of these two events (not just presence) to
-      # detect when a fix was applied but its post-fix hook did not run. Multiple
-      # applied fixes without corresponding invalidation_map_produced events
-      # ⇒ emit invalidation_map_expected_missing telemetry.
-      #
-      # OBSERVE by default (transition PASSES). INVALIDATION_MAP_ENFORCEMENT=blocking
-      # (E10 promotion / test seam, mirrors the C3_AUDIT_POLICY override convention)
-      # flips it to a hard precondition so the blocking branch stays live, testable
-      # code rather than decoration. Fail-closed reads: no timeline / no
-      # gate_fixer_fix_applied event ⇒ no fix was applied ⇒ this check is a no-op
-      # (never manufactures a would_block on runs that applied no fixes).
-      local _im_enforcement="${INVALIDATION_MAP_ENFORCEMENT:-observe}"
-      local _im_timeline="${evidence_dir}/timeline.jsonl"
-      if [[ -f "$_im_timeline" ]]; then
-        local _im_applied _im_produced
-        # Count gate_fixer_fix_applied events in the timeline (fail-safe to 0).
-        # Use -Rc (raw input + compact output) so jq outputs one line per matched event,
-        # avoiding pretty-printing inflation that would inflate wc -l count.
-        _im_applied=$(jq -Rc 'fromjson? | select(.event=="gate_fixer_fix_applied")' "$_im_timeline" 2>/dev/null | wc -l)
-        # Count invalidation_map_produced events in the timeline (fail-safe to 0).
-        # Use -Rc (raw input + compact output) so jq outputs one line per matched event.
-        _im_produced=$(jq -Rc 'fromjson? | select(.event=="invalidation_map_produced")' "$_im_timeline" 2>/dev/null | wc -l)
-
-        if [[ $_im_applied -gt 0 && $_im_produced -lt $_im_applied ]]; then
-          # At least one fix was applied but fewer invalidation-map events were produced.
-          log_event "$_im_timeline" "invalidation_map_expected_missing" \
-            check="invalidation_map_expected" enforcement="$_im_enforcement" \
-            reason="gate_fixer_fix_applied events($_im_applied) > invalidation_map_produced($_im_produced)"
-          if [[ "$_im_enforcement" == "blocking" ]]; then
-            echo "PRECONDITION FAIL: gate_fixer_fix_applied events($_im_applied) exceeds invalidation_map_produced events($_im_produced) — the invalidation-map post-fix hook (pipeline.md, search: 'Invalidation-Map Post-Fix Hook') must run after every gate-fixer fix (enforcement=blocking)." >&2
-            log_event "$_im_timeline" "fsm_done_advance_fail" check="invalidation_map_expected" reason="invalidation_map_event_count_mismatch"
-            exit 2
-          else
-            log_warn "invalidation_map_expected would_block (enforcement=observe, non-blocking): gate_fixer_fix_applied($_im_applied) > invalidation_map_produced($_im_produced) in ${evidence_dir}"
-          fi
-        fi
-      fi
-      # End C3 activation invalidation-map expectation check
 
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
@@ -7410,7 +7101,7 @@ EOF
       # Grandfather + policy (default BLOCKING, D9) handled inside.
       # PURE TREE consumer (every use of its third arg is a git probe against
       # the reviewed HEAD) — it gets the invoking tree, not the state root.
-      if ! fsm_check_cp3_freshness "$evidence_dir" "$state_file" "$_tree_root"; then
+      if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$_tree_root"; then
         log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
           check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
         return 1
@@ -7603,7 +7294,7 @@ EOF
       # profile requires C3, this REPLACES the legacy yaml_field()-based .md/.yaml
       # blocking_findings read — ONE source of truth, not two parallel checks
       # (M2 fix). Risk profile comes from review-profile.json (produced by
-      # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
+      # aid-review-profile.sh / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
       # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
       # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
       # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
@@ -9242,7 +8933,7 @@ epic: 0
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
 # (`source aid-fsm.sh`), skip the case so test fixtures (e.g. test-anti-
-# fabrication.bats `_load_aid_fsm` shim) can pull in cmd_* + verify_provenance
+# fabrication.bats `_load_aid_fsm` shim) can pull in cmd_* + fsm_check_review_round
 # functions without the unknown-arg exit 1 killing the test process.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # P074 Step 8: captured BEFORE the dispatch shift so the worktree redirect

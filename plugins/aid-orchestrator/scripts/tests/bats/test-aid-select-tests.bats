@@ -131,14 +131,14 @@ commit_change() {
   [ "$selected" = '["plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats"]' ]
 }
 
-@test "aid-prefilter.sh change selects test-aid-prefilter.bats" {
-  stub_bats "scripts/tests/bats/test-aid-prefilter.bats" pass
-  commit_change "plugins/aid-orchestrator/scripts/aid-prefilter.sh"
+@test "aid-review-profile.sh change selects test-review-profile.sh" {
+  stub_bash "scripts/tests/test-review-profile.sh" 0
+  commit_change "plugins/aid-orchestrator/scripts/aid-review-profile.sh"
 
   run "$SELECTOR" --base "$BASE_SHA"
   [ "$status" -eq 0 ]
   selected="$(jq -c '.selected_tests' <<< "$output")"
-  [ "$selected" = '["plugins/aid-orchestrator/scripts/tests/bats/test-aid-prefilter.bats"]' ]
+  [ "$selected" = '["plugins/aid-orchestrator/scripts/tests/test-review-profile.sh"]' ]
 }
 
 @test "aid-evidence-verify.sh change selects test-evidence-verify.sh" {

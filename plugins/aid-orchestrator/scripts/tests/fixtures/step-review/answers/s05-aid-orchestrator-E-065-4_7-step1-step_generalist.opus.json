@@ -1,0 +1,8 @@
+{"role": "step_generalist", "checkpoint": "cp2",
+ "findings": [{"id": "step_generalist-1", "checkpoint": "cp2",
+               "step": 1,
+               "severity": "major",
+               "claim": "The new docs/extending-aid.md section names the bridge script at `scripts/aid-c3-dispatch.sh`, but at this commit the script lives at `scripts/lib/aid-c3-dispatch.sh` — the path a reader is told to open does not exist.",
+               "command": "grep -rn \"aid-c3-dispatch.sh\" docs/extending-aid.md plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml plugins/aid-orchestrator/scripts/aid-fsm.sh",
+               "evidence": "docs/extending-aid.md:916; plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh:1; plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml:41; plugins/aid-orchestrator/scripts/aid-fsm.sh:3964",
+               "fix": "Write `scripts/lib/aid-c3-dispatch.sh` in docs/extending-aid.md (matching the policy's `dispatch_script:` value and the FSM default bin path, and the `scripts/lib/...` convention used by the other entries in the same document)."}]}
