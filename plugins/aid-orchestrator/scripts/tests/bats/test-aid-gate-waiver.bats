@@ -14,6 +14,8 @@
 # idempotent. Plus: expired, forged (hand-edited bound field), unknown gate at
 # issue, reason <20 refused, unconsumed-overwrite refused.
 
+load test-helpers.bash
+
 setup() {
   export AID_TEST_MODE=1
   export AID_DEPLOY_DATE=2000-01-01
@@ -69,6 +71,8 @@ _fsm_to_gates() {
   local sf="$EV/fsm-state.yaml"
   "$FSM" init E-1 R-1 1 manual main "$HEAD_SHA" "$sf" >/dev/null 2>&1
   sed -i 's/^state: .*/state: GATES/' "$sf"
+  # P094: GATES→DONE reads the EPIC review round index at HEAD.
+  aid_fixture_seed_step_review "$EV" cp3 "" pass "$HEAD_SHA"
   echo "$sf"
 }
 

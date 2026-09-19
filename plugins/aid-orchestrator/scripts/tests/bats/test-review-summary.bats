@@ -95,5 +95,6 @@ _measure() {
     [ -n "$(yq -r ".models[\"$m\"].source // \"\"" "$AID_PLUGIN_PATH/defaults/prices.yaml")" ]
     [ -n "$(yq -r ".models[\"$m\"].as_of // \"\"" "$AID_PLUGIN_PATH/defaults/prices.yaml")" ]
   done
-  [ "$(grep -c '^@test' "$BATS_TEST_DIRNAME/test-plan-review-summary.bats")" -le "$(grep -c '^@test' "$BATS_TEST_FILENAME")" ]
+  # while the CP1-only suite existed, this one had to carry at least its cases (P094 Step 14 removed it)
+  [ ! -f "$BATS_TEST_DIRNAME/test-plan-review-summary.bats" ] || [ "$(grep -c '^@test' "$BATS_TEST_DIRNAME/test-plan-review-summary.bats")" -le "$(grep -c '^@test' "$BATS_TEST_FILENAME")" ]
 }
