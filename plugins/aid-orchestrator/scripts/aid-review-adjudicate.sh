@@ -227,7 +227,7 @@ if [[ -n "$PREV" ]]; then
   jq --slurpfile now "${DIR}/merged.json" --argjson answered "$(jq '.valid' "${DIR}/collect.json")" '
     ($now[0].findings | map(.match)) as $still
     | .findings |= map(
-        if .status == "open" and (.severity == "blocker" or .severity == "major")
+        if (.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major")
            and ((.match // .fingerprint) | IN($still[]) | not)
            and (.reported_by - $answered | length) == 0
         then .status = "fixed" else . end)

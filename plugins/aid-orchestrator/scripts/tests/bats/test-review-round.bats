@@ -450,3 +450,120 @@ _bracket() {
   run "$ROUND_SH" fix-check --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1
   [ "$status" -eq 2 ]; [[ "$output" == *"plan-review (CP1) subcommand"* ]]
 }
+
+# ── Step 7: what stays open after the last round, and the cp3 semantic file ──
+# _erepo — like _repo, but the run lives under evidence/E-900-1_2/R-1 so the
+# round knows its EPIC and plan (P900); a second step covers src/later.py.
+_erepo() {
+  _repo
+  E="$ROOT/ev/E-900-1_2/R-1"; mkdir -p "$E"
+  printf 'base_commit: %s\nstreamlined_mode: false\n' "$(git -C "$R" rev-parse HEAD~1)" > "$E/fsm-state.yaml"
+  jq -n '{steps: [{id: "s0", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], allowed_paths: ["src/app.py", "src/new.py"]},
+                  {id: "s1", role: "backend", objective: "later", outputs: ["Modify: `src/new.py` — z"], allowed_paths: ["src/new.py"]}]}' > "$E/plan.json"
+  : > "$E/timeline.jsonl"
+  # cp3 with one claude role and one round, so the last round is round 1 and no codex launcher is needed
+  mkdir -p "$R/.aid-o/config/policies"
+  yq '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
+     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
+}
+_J() { printf '%s/.aid-o/work/plan-state/P900/%s' "$R" "$1"; }
+# _close1 <checkpoint> [answer jq] — one round: prepare, one generalist answer, bracket, collect, close
+_close1() {
+  local cp="$1" role=step_generalist f="cp2-step-0-step-generalist"; [[ "$cp" == cp3 ]] && { role=epic_generalist; f="cp3-epic-generalist"; }
+  local args=(--checkpoint "$cp" --evidence-dir "$E" --project-root "$R"); [[ "$cp" == cp2 ]] && args+=(--step 0)
+  "$ROUND_SH" prepare "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
+  local d="$E/${cp}$([[ "$cp" == cp2 ]] && echo /step-0)/round-${ROUND_N:-1}"
+  jq -n --arg r "$role" --arg cp "$cp" '{role: $r, checkpoint: $cp, findings: [
+      {id: "g-1", checkpoint: $cp, step: 0, severity: "blocker", claim: "app never imports new", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it"},
+      {id: "g-2", checkpoint: $cp, step: 0, severity: "major", claim: "new.py contract unmet", command: "grep -n new src/new.py", evidence: "src/new.py:1", fix: "finish it"},
+      {id: "g-3", checkpoint: $cp, step: 0, severity: "minor", claim: "naming", command: "grep -n x src/new.py", evidence: "src/new.py:1", fix: "rename"}]}' \
+    | jq "${2:-.}" > "$d/reviewer-${role}.json"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "$f" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "$f" --output-file "$d/reviewer-${role}.json" --evidence-dir "$d" >/dev/null
+  "$ROUND_SH" collect "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
+  "$ROUND_SH" close "${args[@]}" --round "${ROUND_N:-1}" --tokens ${role}=5
+}
+@test "routing: close of the last cp2 round routes the uncovered blocker, carries the major a later step covers, and a second close adds nothing" {
+  _erepo; _sc
+  # round 1 of rounds_default 2: nothing is written yet
+  run _close1 cp2; echo "$output"; [ "$status" -eq 0 ]
+  [ ! -f "$(_J routed-findings.jsonl)" ]
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): partial"; _sc
+  ROUND_N=2 run _close1 cp2; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"1 carried, 1 routed"* ]]
+  local fp_a fp_b
+  fp_a="$(jq -r '.findings[] | select(.claim | startswith("app never")) | .fingerprint' "$(D 2)/merged.json")"
+  fp_b="$(jq -r '.findings[] | select(.claim | startswith("new.py")) | .fingerprint' "$(D 2)/merged.json")"
+  [ "$(jq -r --arg f "$fp_a" '.findings[] | select(.fingerprint == $f) | .status' "$(D 2)/merged.json")" = routed ]
+  [ "$(jq -r --arg f "$fp_b" '.findings[] | select(.fingerprint == $f) | .status' "$(D 2)/merged.json")" = carried ]
+  # the journal reader sees the route to this EPIC; the obligation is a followup
+  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh' && aid_finding_open_for_epic P900 E-900-1_2"
+  [ "$status" -eq 0 ]; [[ "$output" == "${fp_a}"$'\t'"cp2"$'\t'"epic:E-900-1_2" ]]
+  [ "$(jq -r 'select(.op == "add") | .severity' "$(_J carried-obligations.jsonl)")" = followup ]
+  grep -qF "$fp_b" "$(_J carried-obligations.jsonl)"
+  [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 1 ]
+  # an interrupted close (no measurement.json, no closed_at) is run again: no second entry
+  jq 'del(.closed_at, .routed_at)' "$(D 2)/round.json" > "$(D 2)/r.tmp" && mv "$(D 2)/r.tmp" "$(D 2)/round.json"; rm "$(D 2)/measurement.json"
+  run "$ROUND_SH" close --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 2 --tokens step_generalist=5
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 1 ]
+  [ "$(grep -c '"op":"add"' "$(_J carried-obligations.jsonl)")" -eq 1 ]
+}
+@test "routing: the last cp3 round routes every open blocker or major to the EPIC; a run of no plan and fast mode leave them open and say so" {
+  _erepo; _sc cp3 ""
+  run _close1 cp3; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"2 routed"* ]]
+  [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 2 ]
+  [ "$(jq -r '.source_checkpoint' "$(_J routed-findings.jsonl)" | sort -u)" = cp3 ]
+  [ "$(jq -r '.findings[] | select(.severity == "minor") | .status' "$E/cp3/round-1/merged.json")" = open ]
+  # an EPIC that belongs to no plan
+  _repo; E="$ROOT/ev/adhoc/R-1"; mkdir -p "$E"; : > "$E/timeline.jsonl"
+  jq -n '{steps: [{id: "s0", role: "backend", objective: "x", outputs: ["Modify: `src/app.py` — x"]}]}' > "$E/plan.json"
+  printf 'base_commit: %s\n' "$(git -C "$R" rev-parse HEAD~1)" > "$E/fsm-state.yaml"
+  _sc cp3 ""
+  run _close1 cp3; [ "$status" -eq 0 ]; [[ "$output" == *"belongs to no plan"* ]]
+  [ "$(jq -r '.findings[0].status' "$E/cp3/round-1/merged.json")" = open ]
+}
+@test "cp3 close writes <run>/semantic-review-final.json in the protocol shape, valid against its schema, and refuses to close when it cannot" {
+  _erepo; _sc cp3 ""
+  run _close1 cp3; [ "$status" -eq 0 ]
+  local f="$E/semantic-review-final.json"; [ -f "$f" ]
+  [ "$(jq -r .artifact_type "$f")" = semantic_review ]
+  [ "$(jq -r .revision.base_sha "$f")" = "$(git -C "$R" rev-parse HEAD~1)" ]
+  [ "$(jq -r .revision.head_sha "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
+  [ "$(jq -r .semantic_review.mode "$f")" = final ]
+  [ "$(jq -r .semantic_review.range "$f")" = "$(jq -r .range "$E/cp3/step-check.json")" ]
+  [ "$(jq -c .semantic_review.lenses_run "$f")" = '["epic_generalist"]' ]
+  [ "$(jq -r '.semantic_review.findings | map(.severity) | sort | join(",")' "$f")" = "critical,low,medium" ]
+  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "critical") | .target_path' "$f")" = src/app.py ]
+  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "low") | .status' "$f")" = open ]
+  jq -e '.semantic_review.findings | all(.fingerprint | test("^sha256:[0-9a-f]{64}$"))' "$f" >/dev/null
+  # every finding carries the schema's required keys
+  jq -e --slurpfile s "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
+    '($s[0].properties.semantic_review.properties.findings.items.required) as $req | .semantic_review.findings | all(. as $x | $req | all(. as $k | $x | has($k)))' "$f" >/dev/null
+  # round 2 (PM override) after a fix: the fixed finding is resolved, the routed one open, the file rewritten
+  "$ROUND_SH" override --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --rounds 2 --reason "PM: confirm the fix in a second round" >/dev/null
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc cp3 ""
+  ROUND_N=2 run _close1 cp3 '.findings |= map(select(.id != "g-1"))'; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "critical") | .status' "$f")" = resolved ]
+  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .status' "$f")" = open ]
+  # the fixed finding's route is resolved in the journal; the still-open major keeps its route
+  local fp_fixed; fp_fixed="$(jq -r '.findings[] | select(.severity == "blocker") | .fingerprint' "$E/cp3/round-1/merged.json")"
+  [ "$(jq -r --arg fp "$fp_fixed" 'select(.op == "resolve" and .fingerprint == $fp) | .resolution' "$(_J routed-findings.jsonl)" | head -c 6)" = "fixed:" ]
+  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh' && aid_finding_open_for_epic P900 E-900-1_2 | wc -l"
+  [ "${output##* }" -eq 1 ]
+  [ "$(jq -r '.revision.head_sha' "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
+  # a write that cannot satisfy the schema fails close before closed_at
+  rm -rf "$E/cp3" "$f"; _sc cp3 ""
+  "$ROUND_SH" prepare --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
+  jq -n '{role: "epic_generalist", checkpoint: "cp3", findings: [], no_findings_reason: "none"}' > "$E/cp3/round-1/reviewer-epic_generalist.json"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$E/cp3/round-1" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$E/cp3/round-1/reviewer-epic_generalist.json" --evidence-dir "$E/cp3/round-1" >/dev/null
+  "$ROUND_SH" collect --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
+  mv "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" "$ROOT/schema.bak"
+  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$ROOT/schema.bak" > "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
+  run "$ROUND_SH" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
+  mv "$ROOT/schema.bak" "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"semantic_review.mode"* ]]
+  [ ! -f "$f" ]; [ "$(jq -r '.closed_at // "none"' "$E/cp3/round-1/round.json")" = none ]
+}

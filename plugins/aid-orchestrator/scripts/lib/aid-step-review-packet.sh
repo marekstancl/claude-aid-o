@@ -13,9 +13,9 @@
 #   skills/step-review-roles.md through aid-render-prompt.sh, then appends the
 #   packet. The diff is appended, never passed as a variable: the renderer
 #   refuses a value containing `{{`, and a diff may legitimately contain one.
-# aid_step_review_route_open <round_dir> <round>
+# aid_step_review_route_open <root> <evidence_dir> <checkpoint> <step> <round_dir> <last>
 #   After the last allowed round, routes or carries what stays open (P094
-#   Step 7 fills this in); returns 0 when nothing is open.
+#   Step 7); returns 0 when nothing is open.
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 
@@ -51,7 +51,7 @@ aid_step_review_packet_build() {
     fi
   fi
   if [[ -n "$prev" && -f "$prev/merged.json" ]]; then
-    jq '{findings: [.findings[] | select((.status == "open" or .status == "disputed") and (.severity == "blocker" or .severity == "major"))]}' "$prev/merged.json" > "$dir/open-findings.json"
+    jq '{findings: [.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major"))]}' "$prev/merged.json" > "$dir/open-findings.json"
     git -C "$root" diff "$(jq -r .head_sha "$prev/round.json")..HEAD" > "$dir/fix.patch" || return 1
   fi
   (cd "$dir" && for f in *; do
@@ -120,6 +120,96 @@ aid_step_review_prompt_render() {
   } >> "$out"
 }
 
-# The routing of findings that stay open after the last round is P094 Step 7;
-# until then a round closes with its findings recorded as open in merged.json.
-aid_step_review_route_open() { return 0; }
+# _aid_sr_finding_file <evidence> — the file a finding's first evidence names:
+# `<sha>:path:line; path:line` → `path`.
+_aid_sr_finding_file() {
+  local e="${1%%;*}"
+  e="$(sed -E 's/^[0-9a-f]{7,40}://' <<< "$e")"
+  printf '%s' "${e%%:*}"
+}
+
+# _aid_sr_later_step_covers <plan_json> <step> <file> — 0 when a step after
+# <step> declares the file in outputs or allowed_paths (the same glob rule the
+# FSM's reconciliation applies, lib/aid-ancillary.sh); a covered finding is
+# carried to that step, an uncovered one is routed.
+_aid_sr_later_step_covers() {
+  local plan_json="$1" step="$2" file="$3" pat
+  while IFS= read -r pat; do
+    [[ -n "$pat" ]] || continue
+    _aid_ancillary_glob_match "$file" "$pat" && return 0
+  done < <(jq -r --argjson s "$step" '.steps | to_entries[] | select(.key > $s) | .value
+             | ((.allowed_paths // [])[]), ((.outputs // [])[] | capture("`(?<p>[^`]+)`") | .p)' "$plan_json" 2>/dev/null)
+  return 1
+}
+
+# aid_step_review_route_open <root> <evidence_dir> <checkpoint> <step> <round_dir> <last>
+#   After the LAST allowed round (<last> = 1) every blocker or major still open
+#   or disputed is accounted for, so nothing a reviewer proved is lost:
+#     cp2, a later step of the plan covers the file → aid_obligation_add
+#          (release_blocker for a blocker, followup for a major); merged status
+#          `carried`
+#     cp2 otherwise, and always cp3                → aid_finding_route to
+#          epic:<this EPIC>, keyed by fingerprint (aid_finding_recorded first,
+#          so a re-run adds no second entry); merged status `routed`; the FSM's
+#          done-advance then blocks until the PM resolves or backlogs it
+#     cp6, or an EPIC of no plan                   → nothing to write to: the
+#          findings stay `open` in merged.json and the close says so
+#   Before the last round the next round confirms; nothing is written.
+#   A journal write failure returns 1 BEFORE merged.json is touched, so close
+#   fails without closed_at and can be run again.
+aid_step_review_route_open() {
+  local root="$1" evid="$2" cp="$3" step="${4:-}" dir="$5" last="${6:-0}"
+  local epic plan_id=""
+  epic="$(basename "$(dirname "$evid")")"
+  [[ "${epic%%_*}" =~ ^E-([0-9]+) ]] && plan_id="P${BASH_REMATCH[1]}"
+  # The journals live in the STATE root of the reviewed checkout (a worktree
+  # canonicalises to its primary), never in cwd's.
+  export AID_PLAN_STATE_PROJECT_ROOT="${AID_PLAN_STATE_PROJECT_ROOT:-$root}"
+  # A finding routed after an earlier last round and confirmed fixed by a
+  # PM-overridden later round: its route is resolved, or done-advance would
+  # block on a finding nobody owes any more.
+  if [[ "$cp" != cp6 && -n "$plan_id" ]]; then
+    local fixed_fp jf
+    jf="$(_aid_rf_file "$plan_id" 2>/dev/null)" || jf=""
+    if [[ -n "$jf" && -s "$jf" ]]; then
+      while IFS= read -r fixed_fp; do
+        [[ -n "$fixed_fp" ]] || continue
+        jq -e --arg fp "$fixed_fp" -s 'any(.[]; .op == "route" and .fingerprint == $fp) and (any(.[]; .op == "resolve" and .fingerprint == $fp) | not)' "$jf" >/dev/null 2>&1 || continue
+        aid_finding_resolve "$plan_id" "$fixed_fp" "fixed: confirmed by ${cp}${step:+ step $step} $(basename "$dir") at $(git -C "$root" rev-parse --short HEAD)" || return 1
+      done < <(jq -r '.findings[] | select(.status == "fixed") | .fingerprint' "${dir%/*}"/round-*/merged.json 2>/dev/null | sort -u)
+    fi
+  fi
+  local open
+  open="$(jq -c '[.findings[] | select((.status == "open" or .status == "disputed") and (.severity == "blocker" or .severity == "major"))]' "${dir}/merged.json")"
+  [[ "$(jq 'length' <<< "$open")" -gt 0 ]] || return 0
+  (( last )) || return 0
+  if [[ "$cp" == cp6 || -z "$plan_id" ]]; then
+    echo "close: $(jq 'length' <<< "$open") finding(s) stay open in ${dir}/merged.json ($([[ "$cp" == cp6 ]] && echo "fast mode has no plan journal" || echo "${epic} belongs to no plan")); the PM decides on them" >&2
+    return 0
+  fi
+  local n i fp sev ev file status statuses="{}" total_steps
+  n="$(jq 'length' <<< "$open")"
+  total_steps="$(jq '.steps | length' "${evid}/plan.json" 2>/dev/null || echo "")"
+  for (( i = 0; i < n; i++ )); do
+    fp="$(jq -r ".[$i].fingerprint" <<< "$open")"; sev="$(jq -r ".[$i].severity" <<< "$open")"; ev="$(jq -r ".[$i].evidence // \"\"" <<< "$open")"
+    file="$(_aid_sr_finding_file "$ev")"
+    if [[ "$cp" == cp2 && -n "$file" ]] && _aid_sr_later_step_covers "${evid}/plan.json" "$step" "$file"; then
+      status=carried
+      local ref="${cp} step ${step} round $(basename "$dir") ${fp}" ofile
+      ofile="$(_aid_obligation_file "$plan_id" 2>/dev/null)" || return 1
+      if ! { [[ -f "$ofile" ]] && grep -qF "$fp" "$ofile"; }; then
+        aid_obligation_add "$plan_id" "$([[ "$sev" == blocker ]] && echo release_blocker || echo followup)" \
+          "$(jq -r ".[$i].claim" <<< "$open") (${file}; fix: $(jq -r ".[$i].fix" <<< "$open"))" "$ref" 2>/dev/null || return 1
+      fi
+    else
+      status=routed
+      if ! aid_finding_recorded "$plan_id" "$fp"; then
+        aid_finding_route "$plan_id" "$fp" "$cp" "epic:${epic}" "$epic" "$total_steps" || return 1
+      fi
+    fi
+    statuses="$(jq -c --arg fp "$fp" --arg s "$status" '.[$fp] = $s' <<< "$statuses")"
+  done
+  jq --argjson st "$statuses" '.findings |= map(if $st[.fingerprint] then .status = $st[.fingerprint] else . end)' \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json" || return 1
+  echo "close: $(jq -r '[to_entries[] | .value] | group_by(.) | map("\(length) \(.[0])") | join(", ")' <<< "$statuses") after the last round (${plan_id}, ${epic})" >&2
+}

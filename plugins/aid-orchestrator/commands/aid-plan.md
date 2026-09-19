@@ -565,7 +565,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 
 ```
 Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding ids you addressed. Touch nothing a finding does not name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. Touch nothing a finding does not name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
@@ -573,6 +573,14 @@ Then `aid-step-check.sh` again (the range now ends at the fix commit) and
 stayed open and shows them the open findings and the fix diff. Record the
 fixer's model and tokens on the next `close` with
 `--fixer <role>=<model>:<tokens_in>:<tokens_out>`.
+
+When `close` reports `fail` on the LAST allowed round, it has already written
+what stays open where the plan-final boundary reads it: a blocker or major a
+later step's declared files cover becomes a carried obligation
+(`carried` in merged.json); any other, and every one at cp3, is routed to the
+EPIC (`routed`) and done-advance refuses until the PM resolves or backlogs it
+(`skills/pipeline.md` §13). Say so on the PM card; do not route by hand what
+`close` routed.
 
 Never edit a reviewer's file, never write one on a reviewer's behalf, and never
 dispatch a role twice: a role `collect` lists as invalid or missing goes

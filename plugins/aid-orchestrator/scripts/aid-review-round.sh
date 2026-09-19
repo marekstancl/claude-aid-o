@@ -48,6 +48,13 @@ source "${SCRIPT_DIR}/lib/aid-review-config.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
 # shellcheck source=lib/aid-step-review-packet.sh
 source "${SCRIPT_DIR}/lib/aid-step-review-packet.sh"
+# The three consumers a step round writes to after its last round (Step 7):
+# shellcheck source=lib/aid-routed-findings.sh
+source "${SCRIPT_DIR}/lib/aid-routed-findings.sh"
+# shellcheck source=lib/aid-obligations.sh
+source "${SCRIPT_DIR}/lib/aid-obligations.sh"
+# shellcheck source=lib/aid-ancillary.sh
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 
 usage() { sed -n '4,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
@@ -180,7 +187,9 @@ _expected_roles() {
     if (( n >= 2 )); then
       # The confirmation round asks the reporters of what is still open.
       prev="$(_round_dir $((n - 1)))/merged.json"
-      narrow="$(jq -r '[.findings[] | select((.status == "open" or .status == "disputed")
+      # (routed and carried findings are still open to the reviewer: a PM
+      # override after the last round asks about them again)
+      narrow="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried"))
                         and (.severity == "blocker" or .severity == "major")) | .reported_by[]] | unique | .[]' "$prev")"
       roles="$(for r in $roles; do grep -qxF "$r" <<<"$narrow" && echo "$r"; done)"
     fi
@@ -442,6 +451,61 @@ _dispatch_recorded() {
   jq -c --arg f "$focus" --arg r "$2" 'select(.event == "verifier_dispatch_complete" and .focus == $f and ((.output_file // "") | test("reviewer-" + $r + "\\.(json|missing)$")))' "$tl" 2>/dev/null | grep -q .
 }
 
+# ── the CP3 semantic file ──────────────────────────────────────────────────────
+# _semantic_final_write <verdict> — <run>/semantic-review-final.json, the
+# EPIC-scoped artifact three plan-final consumers keep reading where it always
+# was (aid-fsm.sh routed-findings reconciliation, aid-release-policy.sh input
+# row, aid-plan-fsm.sh plan-finalize): the union of every cp3 round's
+# merged.json by fingerprint (the later round's status wins), mapped to the
+# protocol shape and checked against defaults/schemas/semantic-review.schema.json
+# before it is moved into place. lib/aid-finding-merge.sh merges artifacts of
+# that shape, not rounds, so the union is a jq expression here and the file
+# says so in merge_meta.merged_from.
+#   severity  blocker → critical, major → medium, minor → low
+#   status    fixed → resolved, carried → deferred, everything else → open
+#   base_sha  the EPIC's base_commit (fsm-state.yaml), range from step-check.json
+_semantic_final_write() {
+  local verdict="$1" out="${EVID}/semantic-review-final.json" tmp base range schema="${AID_PLUGIN_PATH}/defaults/schemas/semantic-review.schema.json"
+  base="$(yq -r '.base_commit // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
+  range="$(jq -r '.range // ""' "$STEPCHECK")"
+  tmp="${out}.tmp"
+  local rounds=() r
+  for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
+  (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
+  jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" \
+        --argjson roles "$(printf '%s\n' "${RC_ROLE[@]}" | jq -R . | jq -s .)" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
+    def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
+    def st: {"fixed": "resolved", "carried": "deferred"}[.] // "open";
+    def file: (split(";")[0] | sub("^[0-9a-f]{7,40}:"; "") | split(":")[0]);
+    (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)) as $f
+    | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close cp3",
+       revision: {base_sha: $base, head_sha: $head},
+       semantic_review: {mode: "final", range: $range, verdict: $v, lenses_run: $roles,
+         merge_meta: {merged_from: $from, conflicts: []},
+         findings: ($f | map({fingerprint, severity: (.severity | sev), lens: (.reported_by[0] // "step_check"),
+                              check_id: (.fingerprint[7:23]), target_path: (.evidence | file), finding_class: (.reported_by[0] // "step_check"),
+                              status: (.status | st), detail: "\(.claim) (\(.severity), reported \(.status); evidence \(.evidence); fix: \(.fix))"}))}}' \
+    "${rounds[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
+  local err
+  err="$(jq -r --slurpfile s "$schema" '
+    ($s[0]) as $sc | ($sc.properties.semantic_review.properties.findings.items) as $fi
+    | if .artifact_type != $sc.properties.artifact_type.const then "artifact_type"
+      elif (.semantic_review | type) != "object" then "semantic_review"
+      elif (.semantic_review.mode | IN($sc.properties.semantic_review.properties.mode.enum[]) | not) then "semantic_review.mode"
+      else (first(.semantic_review.findings[] | . as $x
+              | ($fi.required - (keys)) as $missing
+              | if ($missing | length) > 0 then "finding \($x.fingerprint): missing \($missing | join(", "))"
+                elif ($x.fingerprint | test($fi.properties.fingerprint.pattern) | not) then "finding fingerprint \($x.fingerprint)"
+                elif ($x.severity | IN($fi.properties.severity.enum[]) | not) then "finding \($x.fingerprint): severity"
+                elif ($x.status | IN($fi.properties.status.enum[]) | not) then "finding \($x.fingerprint): status"
+                elif ($x.target_path == "") then "finding \($x.fingerprint): target_path"
+                else empty end) // "") end' "$tmp" 2>&1)"
+  if [[ -n "$err" ]]; then
+    echo "close: semantic-review-final.json does not satisfy ${schema}: ${err}" >&2; rm -f "$tmp"; return 1
+  fi
+  mv "$tmp" "$out"
+}
+
 cmd_close() {
   local dir; dir="$(_existing_round)" || exit 1
   [[ -f "${dir}/collect.json" ]] || _die "round ${ROUND} is not collected; run collect first"
@@ -516,10 +580,16 @@ cmd_close() {
   local verdict=pass
   if [[ "$MODE" == step ]]; then
     # The verdict: pass without an open blocker or major, fail otherwise.
-    [[ "$(jq '[.findings[] | select((.status == "open" or .status == "disputed") and (.severity == "blocker" or .severity == "major"))] | length' "${dir}/merged.json")" -eq 0 ]] || verdict=fail
-    # routed_at before routing (Step 7 routes what stays open after the last round), closed_at last.
+    [[ "$(jq '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major"))] | length' "${dir}/merged.json")" -eq 0 ]] || verdict=fail
+    # What stays open after the LAST allowed round is routed or carried before
+    # the round is marked closed, so an interrupted close is run again, not lost.
+    local last_allowed; last_allowed="$(_override_rounds)"; [[ -n "$last_allowed" ]] || last_allowed="$RC_ROUNDS_DEFAULT"
+    aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
+      || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
-    aid_step_review_route_open "$dir" "$ROUND" || _die "routing the open findings failed; close can be run again"
+    if [[ "$CHECKPOINT" == cp3 ]]; then
+      _semantic_final_write "$verdict" || _die "the cp3 round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
+    fi
   fi
 
   jq -n --argjson round "$ROUND" --arg start "$(jq -r .started_at "${dir}/round.json")" --arg finish "$(_now)" \
