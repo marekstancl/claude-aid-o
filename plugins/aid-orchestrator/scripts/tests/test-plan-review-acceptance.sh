@@ -11,7 +11,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export AID_PLUGIN_PATH="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FX="${SCRIPT_DIR}/fixtures/plan-review"
-ROUND="${AID_PLUGIN_PATH}/scripts/aid-plan-review-round.sh"
+ROUND="${AID_PLUGIN_PATH}/scripts/aid-review-round.sh"   # P094: the one engine, --plan for CP1
 ACTA="${AID_ACCEPTANCE_ACTA:-/opt/eco/projects/acta}"
 ACTA_COMMIT="9b68f91c98a0"
 pass=0; fail=0
@@ -35,21 +35,21 @@ _check() { bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$PLAN" --json .aid
 # _round <n> — prepare, drop in the recorded answers, collect, close with the recorded tokens
 _round() {
   local n="$1" rec="$FX/recorded/round-$1"
-  bash "$ROUND" prepare "$PLAN" --round "$n" >/dev/null 2>&1 || return 1
+  bash "$ROUND" prepare --plan "$PLAN" --round "$n" >/dev/null 2>&1 || return 1
   cp "$rec"/reviewer-*.json "$CP1/round-$n/"
-  bash "$ROUND" collect "$PLAN" --round "$n" >/dev/null 2>&1 || return 1
-  bash "$ROUND" close "$PLAN" --round "$n" --tokens $(jq -r 'to_entries[] | "\(.key)=\(.value)"' "$rec/tokens.json") >/dev/null 2>&1
+  bash "$ROUND" collect --plan "$PLAN" --round "$n" >/dev/null 2>&1 || return 1
+  bash "$ROUND" close --plan "$PLAN" --round "$n" --tokens $(jq -r 'to_entries[] | "\(.key)=\(.value)"' "$rec/tokens.json") >/dev/null 2>&1
 }
 
 echo "TEST: the recorded flow replays to a gate PASS"
 cp "$FX/acta-p025.md" "$PLAN"; _check
 _round 1 && ok "round 1 replayed" || bad "round 1 did not replay"
 cp "$FX/recorded/plan-round-2.md" "$PLAN"
-bash "$ROUND" fix-check "$PLAN" --round 1 >/dev/null 2>&1 && ok "the round-1 fix passes fix-check" || bad "fix-check refused the recorded fix"
+bash "$ROUND" fix-check --plan "$PLAN" --round 1 >/dev/null 2>&1 && ok "the round-1 fix passes fix-check" || bad "fix-check refused the recorded fix"
 _check
 _round 2 && ok "round 2 replayed" || bad "round 2 did not replay"
 cp "$FX/recorded/plan-final.md" "$PLAN"
-bash "$ROUND" finalize "$PLAN" >/dev/null 2>&1 && ok "finalize accepts the last edit" || bad "finalize refused the last edit"
+bash "$ROUND" finalize --plan "$PLAN" >/dev/null 2>&1 && ok "finalize accepts the last edit" || bad "finalize refused the last edit"
 bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN" >/dev/null 2>&1 && ok "the gate passes" || bad "the gate refused"
 
 echo "TEST: the targets written before the run"
@@ -57,8 +57,8 @@ T="$FX/targets.json"
 rounds="$(jq length "$CP1/rounds.json")"
 (( rounds <= $(jq .max_rounds "$T") )) && ok "${rounds} rounds within max_rounds" || bad "${rounds} rounds exceed max_rounds"
 for n in $(seq 1 "$rounds"); do
-  usd="$(jq --slurpfile t "$T" '[.reviewers[] | .tokens] as $k
-          | if any($k[]; type != "number") then "unknown" else (($k | add) * $t[0].price_table.claude / 1000000) end' "$CP1/round-$n/measurement.json")"
+  # USD through the one price source (defaults/prices.yaml, aid_review_usd_blended per role).
+  usd="$(jq -r '[.reviewers[] | .usd] | if any(.[]; type != "number") then "\"unknown\"" else (add | tostring) end' "$CP1/round-$n/measurement.json")"
   if [[ "$usd" != '"unknown"' ]] && awk -v u="$usd" -v m="$(jq .max_usd_per_round "$T")" 'BEGIN { exit !(u < m) }'; then
     ok "round ${n}: ${usd} USD under the ceiling"
   else

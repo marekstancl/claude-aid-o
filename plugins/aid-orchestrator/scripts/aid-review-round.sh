@@ -48,6 +48,8 @@ source "${SCRIPT_DIR}/lib/aid-review-config.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
 # shellcheck source=lib/aid-step-review-packet.sh
 source "${SCRIPT_DIR}/lib/aid-step-review-packet.sh"
+# shellcheck source=lib/aid-review-summary.sh
+source "${SCRIPT_DIR}/lib/aid-review-summary.sh"
 # The three consumers a step round writes to after its last round (Step 7):
 # shellcheck source=lib/aid-routed-findings.sh
 source "${SCRIPT_DIR}/lib/aid-routed-findings.sh"
@@ -570,6 +572,15 @@ cmd_close() {
     [[ "$status" == missing ]] && reason="$(jq -r '.reason // "no_file"' <<< "$entry")"
     [[ "$status" == provider_absent ]] && reason="$(jq -r '.reason // "codex_absent"' <<< "$entry")"
     [[ "$status" == invalid ]] && reason=invalid_answer
+    # USD from the tracked price table (Step 11): codex reports input, cached
+    # input and output apart; a claude figure is one total, priced at the blend.
+    local usd
+    if [[ "${RC_PROVIDER[$i]}" == codex ]]; then
+      usd="$(aid_review_usd "${RC_MODEL[$i]}" "$(jq -r '.tokens_in // "unknown"' <<< "$entry")" "$(jq -r '.tokens_out // "unknown"' <<< "$entry")" "$(jq -r '.cache_read // 0' <<< "$entry")" 0)"
+    else
+      usd="$(aid_review_usd_blended "${RC_MODEL[$i]}" "$(jq -r '.tokens' <<< "$entry")")"
+    fi
+    entry="$(jq -c --arg u "$usd" '. + {usd: ($u | tonumber? // $u)}' <<< "$entry")"
     reviewers="$(jq -c --arg r "$role" --argjson e "$entry" --arg p "${RC_PROVIDER[$i]}" --arg m "${RC_MODEL[$i]}" \
       --argjson ok "$([[ "$status" == answered ]] && echo true || echo false)" --arg why "$reason" \
       '.[$r] = ({provider: $p, model: $m, answered: $ok} + ($e | del(.reason)) + (if $why == "" then {} else {reason: $why} end))' <<< "$reviewers")"
@@ -577,8 +588,10 @@ cmd_close() {
   local fixer=null
   if [[ -n "$FIXER" ]]; then
     [[ "$FIXER" =~ ^([a-z_-]+)=([^:]+):([0-9]+|unknown):([0-9]+|unknown)$ ]] || _die "--fixer takes <role>=<model>:<tokens_in>:<tokens_out>" 2
-    fixer="$(jq -nc --arg r "${BASH_REMATCH[1]}" --arg m "${BASH_REMATCH[2]}" --arg i "${BASH_REMATCH[3]}" --arg o "${BASH_REMATCH[4]}" \
-      '{role: $r, model: $m, tokens_in: ($i | tonumber? // $i), tokens_out: ($o | tonumber? // $o)}')"
+    local fusd; fusd="$(aid_review_usd "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" 0 0)"
+    fixer="$(jq -nc --arg r "${BASH_REMATCH[1]}" --arg m "${BASH_REMATCH[2]}" --arg i "${BASH_REMATCH[3]}" --arg o "${BASH_REMATCH[4]}" --arg u "$fusd" \
+      '{role: $r, model: $m, tokens_in: ($i | tonumber? // $i), tokens_out: ($o | tonumber? // $o),
+        tokens: (if ($i | tonumber?) and ($o | tonumber?) then ($i | tonumber) + ($o | tonumber) else "unknown" end), usd: ($u | tonumber? // $u)}')"
   fi
   local degraded; degraded="$(jq '.degraded' "${dir}/round.json")"
   [[ "$(jq '(.provider_absent // []) | length' "${dir}/collect.json")" -gt 0 ]] && degraded=true

@@ -56,7 +56,7 @@ source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-scoping.sh"
 # shellcheck source=aid-roots.sh
 source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-roots.sh"
 # shellcheck source=aid-plan-review-summary.sh
-source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-plan-review-summary.sh"
+source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-review-summary.sh"
 
 # _aps_section <plan> <heading> — the body of one `## <heading>` section, with
 # blank lines and sub-headings dropped. Empty when the section is absent.
@@ -284,7 +284,16 @@ aid_plan_summary_render() {
   plan_id="$(_aid_fm_get "$plan" id)"; plan_id="${plan_id:-?}"
   status="$(_aid_fm_get "$plan" status)"; status="${status:-draft}"
   review="review: none"
-  root="$(_aid_plan_project_root "$plan")" && review="$(aid_plan_review_summary "$plan_id" "$root")"
+  root="$(_aid_plan_project_root "$plan")" && review="$(aid_review_summary "${root}/.aid-o/work/evidence/${plan_id}/cp1")"
+  # Every active run of this plan, reviewed step by step (P094 Step 11).
+  local step_reviews="" _runs _e _r
+  if [[ -n "${root:-}" && -f "${root}/.aid-o/work/active-runs.json" ]]; then
+    _runs="$(jq -r --arg p "$plan_id" 'to_entries[] | select((.value.plan_id // "") == $p) | "\(.key)\t\(.value.run_id // "")"' "${root}/.aid-o/work/active-runs.json" 2>/dev/null)"
+    while IFS=$'\t' read -r _e _r; do
+      [[ -n "$_e" && -n "$_r" && -d "${root}/.aid-o/work/evidence/${_e}/${_r}" ]] || continue
+      step_reviews+="${step_reviews:+; }${_e}: $(aid_epic_review_summary "${root}/.aid-o/work/evidence/${_e}/${_r}")"
+    done <<< "$_runs"
+  fi
 
   local steps epics files risks roles context standards reuse
   steps="$(_aps_count_steps "$plan")"
@@ -331,11 +340,13 @@ aid_plan_summary_render() {
   # artifact standard's ceiling, and a page nobody finishes reading is the
   # thing it exists to prevent.
   items_json="$(jq -n \
-    --arg review "$review" \
+    --arg review "$review" --arg step_reviews "$step_reviews" \
     --arg steps "$steps" --arg files "$files" \
     --arg risks "$risks" --arg roles "$roles" --arg status "$status" \
     --arg standards "$standards" --arg reuse "$reuse" --arg bad "$bad_roles" '[
-      "Revize plánu: " + $review,
+      "Revize plánu: " + $review]
+    + (if $step_reviews == "" then [] else ["Revize kroků: " + $step_reviews] end)
+    + [
       "Rozsah: " + $steps + " kroků, " + $files + " deklarovaných souborů",
       "Rizika pojmenovaná v plánu: " + $risks
     ]

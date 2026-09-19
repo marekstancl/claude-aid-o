@@ -462,16 +462,29 @@ example renders below — whose fixtures have no artifact — are unchanged.
 
 ```bash
 # recipe: review-line — defines review_line <plan_id>: what the plan's review
-# rounds cost, from scripts/lib/aid-plan-review-summary.sh. A plan with no
+# rounds cost, in tokens and USD, from scripts/lib/aid-review-summary.sh. A plan with no
 # plan-review evidence renders NOTHING, so the example renders below stay as
 # they are.
 review_line() {
   local _root _line
   _root="$(aid_state_root)" || return 0
   # shellcheck source=/dev/null
-  source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-summary.sh" 2>/dev/null || return 0
-  _line="$(aid_plan_review_summary "${1:?review_line: plan id required}" "$_root")"
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-review-summary.sh" 2>/dev/null || return 0
+  _line="$(AID_PROJECT_ROOT="$_root" aid_review_summary "$_root/.aid-o/work/evidence/${1:?review_line: plan id required}/cp1")"
   [ "$_line" = "review: none" ] || printf '  %s\n' "$_line"
+}
+
+# recipe: epic-review-line — defines epic_review_line <epic_id> <run_id>: what
+# the run's step reviews (cp2) and EPIC review (cp3) cost, in tokens and USD
+# from defaults/prices.yaml (a project's .aid-o/config/prices.yaml wins), from
+# the same library. A run with no review evidence renders NOTHING.
+epic_review_line() {
+  local _root _line
+  _root="$(aid_state_root)" || return 0
+  # shellcheck source=/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-review-summary.sh" 2>/dev/null || return 0
+  _line="$(AID_PROJECT_ROOT="$_root" aid_epic_review_summary "$_root/.aid-o/work/evidence/${1:?epic id}/${2:?run id}")"
+  [ "$_line" = "steps: none reviewed" ] || printf '      %s\n' "$_line"
 }
 ```
 
@@ -861,6 +874,7 @@ plan_epics() {
        (if .value.governs_main then "governs-main" else "-" end)] | @tsv' \
     "$_map" 2>/dev/null | sort | while IFS="$(printf '\t')" read -r _epic _state _run _branch _gm; do
       epic_row "    " "$_epic" "$_state" "$_run" "$_branch" "$_gm" "$_facts"
+      epic_review_line "$_epic" "$_run"
     done
 }
 ```
