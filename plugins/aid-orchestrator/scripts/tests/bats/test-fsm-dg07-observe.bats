@@ -82,6 +82,8 @@ YAML
   # setup_test_evidence_dir, so CP4 skips — but provide it defensively).
   printf '_generated_by: aid-orchestrator:verifier@cp4-dg07-test\n_generated_at: 2026-06-18T00:00:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-cp4-curator-validation.md"
+  # P094: done-advance re-checks the EPIC review round at HEAD.
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 }
 
 # ---------------------------------------------------------------------------

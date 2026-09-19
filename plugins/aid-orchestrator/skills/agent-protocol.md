@@ -246,13 +246,14 @@ remediate blocking failures before reaching DONE rather than relying on PM force
 | `blocking` | `cmd_done_advance review→release` exits 2; PM must provide `--force --reason --blocked-checks` override |
 | `advisory` | Logged in `compliance.json failures[]` but does not block release |
 
-Initial v2.21.0 blocking checks: `verifier_provenance`, `gates_generated_by`, `plan_ac_match`.
-`verifier_provenance` blocks when `provenance_aggregate == unverifiable` — i.e. a verifier
-output could not be matched to a real dispatch interval in `timeline.jsonl` (stale / missing /
-mismatched records). It is an integrity signal, NOT proof of fraud, and it fails closed:
-a missing severity registry (e.g. no `yq`) keeps it blocking, never silently advisory (AID-046).
-The orchestrator's MUST-dispatch / MUST-NOT-self-review rule (`pipeline.md` Dispatch Protocol) is
-the actual anti-fabrication defense; this check only catches accidental provenance breakage.
+Blocking checks: `gates_generated_by`, `plan_ac_match`. The former `verifier_provenance`
+check (a verifier file matched against a dispatch interval in `timeline.jsonl`) went with
+the verifier files in P094: a step, EPIC or fast-mode reviewer's answer counts only when
+`aid-review-round.sh close` finds its dispatch bracket in the round's `timeline.jsonl`
+(`no_dispatch_record` otherwise), and the FSM refuses a round prepared `--stub`. A missing
+severity registry (e.g. no `yq`) keeps blocking checks blocking, never silently advisory
+(AID-046). The orchestrator's MUST-dispatch / MUST-NOT-self-review rule (`pipeline.md`
+Dispatch Protocol) is the actual anti-fabrication defense.
 Initial advisory checks: `memory_substantive`, `dod_present`, `epic_compliance_coverage_ratio`,
 `ai_mechanics_friction_ratio`, `iteration_density_per_step`.
 
@@ -383,7 +384,7 @@ about that path is available to a dispatched agent.
 
 ---
 
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-19
 
 ## Agent handoff contract at the plan boundary
 

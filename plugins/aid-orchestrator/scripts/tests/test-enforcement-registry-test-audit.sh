@@ -158,6 +158,18 @@ declare -A DECLARED_AMENDMENTS=(
   # token: the row cited `plan-writing.md` with no directory, so it resolved under
   # none of the three bases while naming a file that is right there.
   ["cp1_critical_path_flow_trace"]="P080 CP3 — bare cite plan-writing.md qualified to skills/plan-writing.md"
+  # P094 Step 8 retired the verifier-file checks of cp2/cp3 (the round index
+  # replaced them) and narrowed the verifier-output rows to CP4.
+  ["cp3_integration_precond"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_required"
+  ["cp2_verifier_output"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_required"
+  ["verifier_provenance"]="P094 Step 8 — retired (removed_scoped); successors review_dispatch_recorded + fsm_review_round_head_bound"
+  ["provenance_aggregate_fabricated"]="P094 Step 8 — retired (removed_scoped) with verifier_provenance"
+  ["cp3_generated_by"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_required"
+  ["cp3_head_freshness"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_head_bound keeps D4"
+  ["verifier_output_template"]="P094 Step 8 — narrowed to CP4"
+  ["verifier_verdict_contract"]="P094 Step 8 — narrowed to CP4"
+  ["proto_v2_head_freshness"]="P094 Step 8 — cp2/cp3 half moved to the round index"
+  ["routed_findings_block_done"]="P094 Step 7 — mechanical producer (aid-review-round.sh close) and the closed-cp3 refusal recorded"
 )
 # Codex review: counting `- id:` lines only proved the registry didn't
 # SHRINK below a floor — it never proved that any SPECIFIC prior row

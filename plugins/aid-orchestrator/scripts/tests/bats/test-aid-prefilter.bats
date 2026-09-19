@@ -260,11 +260,12 @@ EOF
   [[ "$output" =~ range_undetermined ]]
 }
 
-@test "F4f bypass guard: cp4-produced stub does NOT satisfy CP2 increment precondition" {
+@test "F4f bypass guard: a pre-filter stub does NOT satisfy the CP2 increment precondition" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"        # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # A cp4 stub: valid frontmatter but checkpoint: cp4 (must be rejected at the increment call-site).
+  # A stub verifier file (any checkpoint) is not evidence since P094: the
+  # increment reads cp2/step-3/rounds.json, which only aid-step-check.sh writes.
   cat > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md" <<EOF
 _generated_by: aid-pre-filter.sh@v3
 _generated_at: 2026-07-10T00:00:00Z
@@ -274,7 +275,7 @@ checkpoint: cp4
 EOF
   run "$FSM" increment-step "$state_file"
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "checkpoint 'cp4'" ]]
+  [[ "$output" == *"no review round index for cp2 step 3"* ]]
   # current_step NOT incremented (still 3)
   [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
 }
@@ -291,9 +292,8 @@ EOF
 @test "F4h cp3 regression: checkpoint:cp3 on cp3 consumers still PASSES (guard is increment-only)" {
   seed_test_state_files "EXECUTE" "5" "5"
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  # cp3 outputs carrying checkpoint: cp3 — the increment-only guard must NOT reject these.
-  write_cp3_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  write_cp3_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  # a closed passing EPIC review round — the increment-only guard must NOT reject cp3 evidence.
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$state_file"

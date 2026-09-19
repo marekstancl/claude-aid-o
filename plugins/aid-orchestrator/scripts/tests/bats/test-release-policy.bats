@@ -60,6 +60,8 @@
 #   5. rows 13-16 (profile/IR/lens cadence)   → N/A: C2/E3 review-profile hooks; blocking promotion → E10
 # ═══════════════════════════════════════════════════════════════════════════════
 
+load test-helpers.bash
+
 setup() {
   export TZ=UTC
   export AID_TEST_MODE=1
@@ -748,6 +750,8 @@ EOF
   git -C "$PROJ" add .gitignore README.md
   git -C "$PROJ" commit -q -m init
   cd "$PROJ"
+  # P094: done-advance re-checks the EPIC review round at HEAD.
+  aid_fixture_seed_step_review "$EVID" cp3 "" pass "$(git -C "$PROJ" rev-parse HEAD)"
 }
 
 @test "dual: done-advance emits release_policy_dual_run (observe → advances) with head_sha + non-empty divergence_class" {
@@ -842,31 +846,23 @@ EOF
 # ─── release_policy_preempted (hard-exits that never reach the C4 slot) ────────
 
 @test "preempted: tiered_compliance blocking failure → release_policy_preempted gate=tiered_compliance (before exit 2)" {
-  # Blocking verifier_provenance (subagent + verifier output + EMPTY timeline → unverifiable).
+  # Blocking gates_generated_by: a gates report with no runner provenance
+  # (P094 retired the verifier_provenance dimension this case used to trip).
   mkdir -p "$EVID/gates" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work"
   touch "$PROJ/.aid-o/work/audit-log.jsonl"
   cat > "$CFG/plugin.yaml" <<EOF
 plugin_path: "$PLUGIN_ROOT"
-dispatch_mode: subagent
 EOF
   touch "$CFG/execution.yaml"
   cat > "$CFG/check-severity.yaml" <<EOF
 version: 1
 checks:
-  verifier_provenance: {severity: blocking, promoted_at: "2026-05-13", promoted_reason: "test"}
+  gates_generated_by: {severity: blocking, promoted_at: "2026-05-05", promoted_reason: "test"}
 EOF
-  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-07-09T00:00:00Z","_command_log":[]}\n' \
-    > "$EVID/gates/gates_report.json"
+  printf '{"overall":"pass"}\n' > "$EVID/gates/gates_report.json"
   echo "curator ran" > "$EVID/curator-report.md"
   printf 'blocking_findings: false\n' > "$EVID/audit-report.md"
   : > "$EVID/timeline.jsonl"
-  printf 'classification: RUN\n' > "$EVID/step-1-verify.md"
-  cat > "$EVID/verifier-output-step-1.md" <<EOF
-_generated_by: aid-orchestrator:verifier@cp2-step-1
-_generated_at: 2025-01-01T00:00:00Z
-classification: RUN
-verdict: pass
-EOF
   cat > "$EVID/fsm-state.yaml" <<EOF
 epic_id: ${EPIC}
 run_id: ${RUN}

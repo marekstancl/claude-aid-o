@@ -132,6 +132,8 @@ YAML
   echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
   printf '_generated_by: aid-orchestrator:verifier@cp4-c3act-test\n_generated_at: 2026-06-18T00:00:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-cp4-curator-validation.md"
+  # P094: done-advance re-checks the EPIC review round at HEAD.
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 }
 
 # ─── Scenario (a): producer over the full diff → real risk_profile ──────────

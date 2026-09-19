@@ -14,10 +14,6 @@
 
 version: 1
 checks:
-  verifier_provenance:
-    severity: blocking
-    promoted_at: "2026-05-13"
-    promoted_reason: "P037-1 detector + AID-v3-principles.md §1 anchor (P038 initial bootstrap)"
   gates_generated_by:
     severity: blocking
     promoted_at: "2026-05-05"

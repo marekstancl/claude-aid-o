@@ -12,7 +12,7 @@
 # patterns (command, evidence) from the schema file itself, so the schema is
 # the one source of the contract. The prompt is rendered from the shared
 # template defaults/prompts/review-prompt-v1.md with the cp1 variable values.
-# Sourced by scripts/aid-plan-review-round.sh and aid-plan-review-adjudicate.sh; tested by
+# Sourced by scripts/aid-review-round.sh and aid-review-adjudicate.sh; tested by
 # scripts/tests/bats/test-plan-review-schema.bats, test-review-finding-schema.bats and
 # test-plan-review-round.bats.
 

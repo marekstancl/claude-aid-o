@@ -595,14 +595,13 @@ Dispatch mode — how does the orchestrator run verifiers/implementers?
 `.aid-o/config/plugin.yaml` field `dispatch_mode` controls verifier dispatch enforcement:
 
 - `agent_tool` (default since v2.29.1, P043) — orchestrator dispatches verifiers via the
-  CC Agent tool, which writes no timeline events; the provenance check returns the
-  non-blocking `agent_tool` sentinel. Matches how pipeline.md actually dispatches —
-  writing `subagent` here while dispatching via Agent tool produces guaranteed
-  `verifier_provenance` false-positive blocks (P043/P044 incident class).
+  CC Agent tool. Since P094 the reviewers of every checkpoint are dispatched the same
+  way and their answers are bound to a dispatch bracket the controller records with
+  `aid-emit-dispatch.sh` around each Agent call (`scripts/lib/aid-review-adapter-claude.md`);
+  the old `verifier_provenance` compliance check and its `agent_tool` sentinel are gone.
 - `subagent` — only for projects with an FSM-aware dispatcher that emits
   `verifier_dispatch_start`/`verifier_dispatch_complete` timeline events
-  (`aid-emit-dispatch.sh`); compliance check cross-references _generated_by metadata
-  against those events.
+  (`aid-emit-dispatch.sh`) itself.
 - `inline` — for projects with no-subagent policy (e.g., WAN). LLM writes
   verifier-output-*.md directly in main context with _generated_by format
   `main-context@<git-HEAD-sha>`; compliance check validates format + verifies SHA
@@ -973,4 +972,4 @@ creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
 
 
-**Last Updated:** 2026-08-27
+**Last Updated:** 2026-09-19

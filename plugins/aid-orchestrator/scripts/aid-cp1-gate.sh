@@ -5,7 +5,7 @@
 # Usage:
 #   aid-cp1-gate.sh --plan <path> [--project-root <path>] [--json <out>]
 #
-# Reads only the round evidence aid-plan-review-round.sh writes under
+# Reads only the round evidence aid-review-round.sh --plan writes under
 # .aid-o/work/evidence/<plan_id>/cp1/ (cp1/manual/ is never read) and passes
 # when all of these hold:
 #   - review_checkpoints.plan_review is valid (lib/aid-review-config.sh);
@@ -114,7 +114,7 @@ if [[ "$RC_ENABLED" != 1 ]]; then
 fi
 
 _round_dir() { printf '%s/round-%s' "$CP1" "$1"; }
-_prepare_hint="run: aid-plan-review-round.sh prepare ${plan} --round 1 (commands/aid-plan.md, Plan review (CP1))"
+_prepare_hint="run: aid-review-round.sh prepare --plan ${plan} --round 1 (commands/aid-plan.md, Plan review (CP1))"
 
 # --- the round index and the round directories -----------------------------
 if [[ -f "${CP1}/rounds.json" ]]; then

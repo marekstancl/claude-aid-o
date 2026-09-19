@@ -450,9 +450,8 @@ gates:
     timeout_seconds: 10
     max_retries: 0
 EOF
-  # CP3 verifier outputs for the EXECUTE→GATES precondition (post-deploy mode).
-  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-code-review.md"
-  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-security.md"
+  # A closed passing EPIC review round for the EXECUTE→GATES precondition (post-deploy mode).
+  aid_fixture_seed_step_review "$ev" cp3 "" pass "$(git -C "$primary" rev-parse HEAD)"
 
   run bash -c "cd '$TEST_TMPDIR/wt' && AID_DEPLOY_DATE='2026-04-01T00:00:00Z' '$FSM' advance-to-gates '$ev/fsm-state.yaml'" 3>&-
   [ "$status" -eq 0 ]
@@ -663,8 +662,7 @@ gates:
     timeout_seconds: 30
     max_retries: 0
 EOF
-  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-code-review.md"
-  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-security.md"
+  aid_fixture_seed_step_review "$ev" cp3 "" pass "$(git -C "$primary" rev-parse HEAD)"
   printf '%s' "$ev"
 }
 

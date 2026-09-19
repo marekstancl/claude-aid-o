@@ -2858,7 +2858,6 @@ Initial bootstrap (v2.21.0):
 
 | Check                            | Severity  | Promoted at | Anchor                                                          |
 |----------------------------------|-----------|-------------|-----------------------------------------------------------------|
-| `verifier_provenance`            | blocking  | 2026-05-13  | P037-1 detector + AID-v3-principles.md §1                       |
 | `gates_generated_by`             | blocking  | 2026-05-05  | Session A initial enforcement                                   |
 | `plan_ac_match`                  | blocking  | 2026-05-13  | P037-2 plan-diff gate                                           |
 | `memory_substantive`             | advisory  | —           | Awaiting empirical track record                                 |
@@ -3259,7 +3258,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-19
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
