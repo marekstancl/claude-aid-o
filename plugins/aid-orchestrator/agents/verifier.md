@@ -214,7 +214,7 @@ ac_coverage:
     evidence: "<brief: what in the diff satisfies this AC>"
     deviation: none|missing|changed
 ```
-This section is read by `aid-acceptance-evidence.sh reconstruct` to build acceptance-evidence.json.
+This section was meant for `aid-acceptance-evidence.sh reconstruct` (acceptance-evidence.json); that script has no live caller and reads per-step files that no longer exist — IMP-612 decides its producer.
 
 **Note:** Coverage is a SEMANTIC judgment (LLM). `aid-acceptance-evidence.sh` only
 aggregates — it does not re-evaluate coverage (D3).
