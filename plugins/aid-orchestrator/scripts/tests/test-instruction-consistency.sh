@@ -263,6 +263,31 @@ for cmd in $OLD_COMMANDS; do
   fi
 done
 
+# ─── 10. Retired review mechanisms (P094) ─────────────────────────────────
+# The per-step verifier file, the pre-filter classify, the gate-fixer fix loop
+# of cp2/cp3 and the invalidation hook were replaced by the review round (one
+# section in commands/aid-run.md). A live instruction surface that still
+# teaches one of them would send a controller to files the FSM no longer reads.
+
+echo ""
+echo "=== 10. Retired review mechanisms (P094) ==="
+
+for pat in 'verifier-output-step-' 'aid-prefilter.sh classify' 'verifier-output-cp3-' 'Invalidation-Map Post-Fix Hook' 'aid-invalidation-map.sh'; do
+  HITS=$(grep -rlF -- "$pat" "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" "$PLUGIN_DIR/agents/" 2>/dev/null || true)
+  if [[ -n "$HITS" ]]; then
+    for hit in $HITS; do fail "retired mechanism '${pat}' still taught in $(basename "$hit")"; done
+  else
+    pass "no live surface teaches '${pat}'"
+  fi
+done
+
+SECTION_LINES=$(awk '/^## Step review \(CP2\) and EPIC review \(CP3\)$/{on=1; next} on && /^### State: READY$/{exit} on' "$PLUGIN_DIR/commands/aid-run.md" | wc -l)
+if [[ "$SECTION_LINES" -gt 0 && "$SECTION_LINES" -le 150 ]]; then
+  pass "aid-run.md review section is ${SECTION_LINES} lines (≤ 150, adapter included)"
+else
+  fail "aid-run.md review section is ${SECTION_LINES} lines (must exist and be ≤ 150)"
+fi
+
 # ─── Summary ───────────────────────────────────────────────────────────────
 
 # AUTO liveness and role ownership

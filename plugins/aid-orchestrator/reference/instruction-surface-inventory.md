@@ -23,11 +23,11 @@ that is absent from a clean checkout.
 
 | Surface | Disposition | Note |
 |---------|-------------|------|
-| `commands/aid-run.md` | `update` | PM options now fork on mode; the pre-merge review note states Curator/Auditor are plan-final roles under `plan_branch`. |
+| `commands/aid-run.md` | `update` | PM options now fork on mode; the pre-merge review note states Curator/Auditor are plan-final roles under `plan_branch`. P094: the section "Step review (CP2) and EPIC review (CP3)" (adapter quoted between `adapter:begin`/`adapter:end`) replaced the CP2/CP3 items of the EXECUTE list, the E7 fix loop and every `verifier-output-*` passage. |
 | `commands/aid-plan.md` | `update` | States the plan-mode declaration and the plan-final boundary where it describes plan lifecycle. |
 | `commands/aid-init.md` | `update` | Documents the lifecycle `mode` field and the hook reinstall requirement. |
 | `commands/aid-status.md` | `update` | Surfaces plan state, mode and candidate SHA alongside EPIC state. |
-| `commands/aid-do.md` | `update` | States that Fast Mode neither creates nor releases a plan branch. |
+| `commands/aid-do.md` | `update` | States that Fast Mode neither creates nor releases a plan branch. P094: "Review Check (CP6)" runs the step check and the reviewer round under `evidence/do/<id>/cp6/`, advisory. |
 | `commands/aid-verify-plan.md` | `verified` | CP1 is a plan-level review already; no per-EPIC release instruction. |
 | `commands/aid-verify-implementation.md` | `verified` | Reviews an implementation, not a release cadence. |
 | `commands/aid-audit.md` | `verified` | Health audit; no lifecycle instruction. |
@@ -40,11 +40,12 @@ that is absent from a clean checkout.
 
 | Surface | Disposition | Note |
 |---------|-------------|------|
-| `skills/pipeline.md` | `update` | Defines both modes. The legacy ritual now opens by stating it is not the default. |
+| `skills/pipeline.md` | `update` | Defines both modes. The legacy ritual now opens by stating it is not the default. P094: "Review Checkpoint CP2", "Integration Review CP3", the subagent half of "Dispatch Protocol", "Invalidation-Map Post-Fix Hook", "Pre-Filter Stage" and "Trivial Skip Rule" are gone; each is a pointer to the run command's section, the anti-fabrication rule stays as three lines. |
 | `skills/agent-protocol.md` | `update` | Carries the agent handoff contract with all five boundary messages. |
 | `skills/role-cards.md` | `update` | Auditor, Curator, Simplifier and Reporter cards state the plan-final boundary. |
 | `skills/review-checkpoint-contracts.md` | `update` | Records that CP3 stays per EPIC while the specialist stack moves to plan-final. |
 | `skills/plan-review-roles.md` | `no-scope` | Plan review roles and evidence rule (P093); says nothing about the plan lifecycle. |
+| `skills/step-review-roles.md` | `no-scope` | Step, EPIC and fast-mode reviewer roles (P094); says nothing about the plan lifecycle. |
 | `skills/run-management.md` | `update` | `active.md` guidance made mode-aware. |
 | `skills/plan-writing.md` | `update` | Documentation-step rule and lifecycle references made mode-aware. |
 | `skills/planner.md` | `verified` | Plans work; does not instruct on release cadence. |
@@ -61,9 +62,9 @@ that is absent from a clean checkout.
 | `agents/curator.md` | `update` | Dispatch is plan-final, once per plan. |
 | `agents/simplifier.md` | `update` | Plan-final boundary confirmed. |
 | `agents/reporter.md` | `update` | Plan-final boundary and the protocol-v2 delivery artifact. |
-| `agents/verifier.md` | `verified` | CP2/CP3 are per-EPIC and stay so. |
+| `agents/verifier.md` | `update` | P094: CP2/CP3/CP6 are reviewer rounds, not verifier dispatches; the card keeps CP4, `section-review`, `cross-section-review` and the plan-final `c2_mode: final` producer. |
 | `agents/implementer.md` | `verified` | Implements a step; no release cadence. |
-| `agents/gate-fixer.md` | `verified` | Fixes gate failures; no release cadence. |
+| `agents/gate-fixer.md` | `verified` | Fixes gate failures; no release cadence. P094: `model: sonnet`; `verifier_review` is CP4 only; the invalidation-map note is gone. |
 | `agents/project-scanner.md` | `verified` | Scans a project; no lifecycle instruction. |
 | `agents/test-portfolio-analyst.md` | `verified` | Analyzes test-portfolio wave shards; no lifecycle/release-cadence instruction. |
 

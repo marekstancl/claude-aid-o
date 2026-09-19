@@ -234,10 +234,18 @@ A plan owns a git worktree and a branch, and declares how it releases.
 Before EPIC generation a plan goes through plan review (CP1): six reviewer
 roles answer the same packet, each finding needs a command and a file:line or
 it is rejected, two rounds by default, a third or only one only on the PM's
-recorded override (`aid-plan-review-round.sh override`). `/aid-verify-plan`
+recorded override (`aid-review-round.sh override`). `/aid-verify-plan`
 runs one of those reviewers by hand, outside the rounds; `/aid-verify-implementation`
 reviews a result that claims to be done. Both dispatch an independent agent in a
 fresh context, so neither is grading its own homework.
+
+Inside a run the same mechanism reviews every step (CP2) and the whole EPIC
+(CP3): a deterministic step check first (small, clean, in-scope diffs skip the
+round; a security pattern adds the security reviewer), then a round of
+independent reviewers whose answers need a command and a file:line, merged by
+fingerprint. A failed round is fixed by the step's own role and confirmed by
+the next round; the FSM advances only on a closed passing round at HEAD. Fast
+mode (`/aid-do`) runs the same review over the working tree, advisory.
 
 **Release model.** A plan declares its mode in its committed lifecycle manifest
 (`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`):
@@ -589,4 +597,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-19

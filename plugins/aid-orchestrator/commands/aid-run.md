@@ -328,6 +328,151 @@ FSM initialized: READY
    ERROR (terminal) ◄── hard failure from any of READY / EXECUTE / GATES / ESCALATION
 ```
 
+## Step review (CP2) and EPIC review (CP3)
+
+Every step is reviewed before it is closed, and every EPIC before it goes to
+GATES, by ONE mechanism (P094): a deterministic step check, then a round of
+independent reviewers (`skills/step-review-roles.md`) whose answers the
+adjudicator turns into one merged list. The FSM reads the round index and
+nothing else: `increment-step` refuses without `cp2/step-N/rounds.json` at
+HEAD, `EXECUTE→GATES` without `cp3/rounds.json`, and GATES→DONE / done-advance
+refuse a cp3 round behind HEAD (the D4 test-churn exception with the
+`CP3-Freshness-Exception:` trailer excepted). A hand-written skip is refused
+too: the index has to come from the step check's own timeline event.
+
+**When.** cp2: after `step-N-verify.md` is written and the step's commit is on
+the branch, before `increment-step`. cp3: after the last step, before
+`transition EXECUTE GATES`. Skip only when `review_checkpoints.enabled` or the
+checkpoint's key is `false` (`prepare` then exits 3; the FSM passes with an
+audit line).
+
+1. The step check (deterministic, no model). It writes `<cp dir>/step-check.json`
+   and, for `skip` or `no_change`, the round index itself — nothing to dispatch:
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp2 --step <N> --evidence-dir <run dir>
+   bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp3 --evidence-dir <run dir>
+   ```
+2. For `review` or `review+security`, prepare the round. It prints one prompt
+   per expected role and its dispatch focus (`cp2-step-N-<role>`, `cp3-<role>`):
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" prepare <review> --round 1
+   ```
+   `<review>` is `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a
+   step, `--checkpoint cp3 --evidence-dir <run dir>` for an EPIC.
+3. Dispatch every reviewer, then `collect` and `close`, exactly as the
+   controller instruction quoted below says (codex roles: `aid-review-round.sh
+   dispatch <review> --round K --provider codex --role <role>`; an absent codex
+   is `provider_absent` and the round closes degraded, never faked).
+4. `close` prints the verdict. `pass` → `increment-step` / `transition`.
+   `fail` with a round left (`rounds_default`, 2) → the step's own role fixes
+   (the `fix_of:` dispatch in the instruction below), a new step check, then
+   `prepare --round 2`: the confirmation round asks only the reporters of what
+   stayed open. `fail` after the last round → the PM card.
+5. The PM card after an exhausted round is the **Decision required** card of
+   `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
+   what stayed open (from `merged.json`, blockers first), and the options —
+   fix and confirm in a PM-granted round, or accept. `close` has already
+   routed the open findings (`routed`) or carried them (`carried`), so nothing
+   is lost whichever the PM picks. A third round, or only one, exists only as
+   the PM's recorded words:
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" override <review> --rounds 3 --reason "<the PM's words, ≥20 chars>"
+   ```
+   The override records the PM's words, the head sha and the time; it never
+   changes a verdict.
+
+<!-- adapter:begin -->
+# Claude reviewers of a review round — controller instruction
+
+The Agent tool is not callable from bash, so the controller dispatches every
+reviewer whose provider is `claude`, at every checkpoint: the plan review
+(`commands/aid-plan.md` "Plan review (CP1)") and the step, EPIC and fast-mode
+reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
+`commands/aid-do.md`) include this text verbatim. `<round dir>` is the
+directory `prepare` printed, and `prepare` prints each role's `<focus>` next
+to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
+`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, the role with `_`
+replaced by `-` (the dispatch wrapper allows no underscore in `--focus` or
+`--agent-id`).
+
+For EACH expected role with `provider: claude` in `<round dir>/round.json`,
+one at a time:
+
+1. Open the dispatch:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus <focus> \
+     --agent-id aid-orchestrator:review --evidence-dir <round dir>
+   ```
+
+2. Dispatch the reviewer with this one-line prompt, never the file's content
+   (a packet runs to hundreds of kilobytes; pasted copies would fill the
+   controller's own context):
+
+   ```
+   Agent(subagent_type: "general-purpose", model: <the role's model from the checkpoint's reviewer block>,
+         prompt: "Your complete instructions are in <round dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
+   ```
+
+   The reviewer writes `<round dir>/reviewer-<role>.json` itself. Note the
+   `subagent_tokens` figure the Agent result reports; when the result shows
+   none, the value is `unknown`.
+
+3. Close the dispatch. `<answer>` is `<round dir>/reviewer-<role>.json`; when
+   the reviewer wrote no file, create the empty marker
+   `<round dir>/reviewer-<role>.missing` and use that path instead:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
+     --output-file <answer> --evidence-dir <round dir>
+   ```
+
+   A step round's `close` refuses a reviewer file with no such start/complete
+   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`): a file
+   nobody dispatched does not close a round. Only a round prepared with
+   `--stub` by the acceptance suite skips that check, and the FSM refuses to
+   advance on such a round.
+
+After ALL reviewers of the round (claude and codex) have been dispatched, run
+`collect`. Only when `collect` exits 0, run `close` once with a token value for
+every claude role; when it reports the round invalid, retry the roles it names
+first (`close` refuses an invalid round). `<review>` is `--plan <plan>` for
+CP1, `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a step,
+`--checkpoint cp3 --evidence-dir <run dir>` for an EPIC:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" collect <review> --round K
+bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
+  --tokens <role>=<n|unknown> ...
+```
+
+When `close` reports `fail` on a step or EPIC round and a round remains
+(`rounds_default`, or the PM's `override`), the fix is the step's own role's:
+
+```
+Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of the step's role card in skills/role-cards.md>,
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. Touch nothing a finding does not name.")
+```
+
+Then `aid-step-check.sh` again (the range now ends at the fix commit) and
+`prepare --round K+1`: the confirmation round asks only the reporters of what
+stayed open and shows them the open findings and the fix diff. Record the
+fixer's model and tokens on the next `close` with
+`--fixer <role>=<model>:<tokens_in>:<tokens_out>`.
+
+When `close` reports `fail` on the LAST allowed round, it has already written
+what stays open where the plan-final boundary reads it: a blocker or major a
+later step's declared files cover becomes a carried obligation
+(`carried` in merged.json); any other, and every one at cp3, is routed to the
+EPIC (`routed`) and done-advance refuses until the PM resolves or backlogs it
+(`skills/pipeline.md` §13). Say so on the PM card; do not route by hand what
+`close` routed.
+
+Never edit a reviewer's file, never write one on a reviewer's behalf, and never
+dispatch a role twice: a role `collect` lists as invalid or missing goes
+through `retry`, then this procedure for that role alone.
+<!-- adapter:end -->
+
 ### State: READY
 
 **Entry:** PRE-FLIGHT completed, `fsm-state.yaml` initialized.
@@ -373,21 +518,17 @@ FSM initialized: READY
    - Dispatch agent via Task tool
    - Collect output → save to `work/evidence/{epic_id}/{run_id}/steps/{step_id}/`; validate the `aid-return` block
 4. Verify outputs: present? scope respected? acceptance criteria met?
-5. **Review Checkpoint CP2** — dispatch verifier (`code-review` focus) with step output + branch diff
-   - If verifier PASS → continue
-   - If verifier FAIL + `fix_loop_eligible` → dispatch gate-fixer with findings → re-dispatch verifier (max 2 iterations)
-   - If fix loop exhausts or `fix_loop_eligible: false` → ESCALATION (E7)
-   - Skip if `review_checkpoints.cp2_step_review: false` or step is trivial (see `skip_trivial` config)
+5. **Step review (CP2)** — the section "Step review (CP2) and EPIC review (CP3)"
+   above: step check, round, `close`; `increment-step` refuses without the
+   step's round index at HEAD
 6. Log to `timeline.jsonl`
 
-**Integration Review (CP3):** When all steps are done, before transitioning to GATES:
-- Dispatch verifier with `code-review` + `security` focuses in parallel (full diff since run start)
-- Fix loop same as CP2 (gate-fixer → verifier, max 2 iterations)
-- Skip if `review_checkpoints.cp3_integration_review: false`
+**EPIC review (CP3):** when all steps are done, before transitioning to GATES —
+the same section, `--checkpoint cp3`.
 
 **Transition:**
-- All steps done + CP3 pass → GATES
-- CP3 fix loop exhausts → ESCALATION (E7)
+- All steps done + cp3 round `pass` → GATES
+- cp3 round `fail` after the last allowed round → the PM card (fix in a PM-granted round, or accept); never a silent advance
 - Hard failure → ESCALATION
 - Next step available → EXECUTE (self-loop, increment `current_step`)
 
@@ -528,7 +669,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
     mode the Auditor/Curator/Simplifier/Reporter lines describe the PLAN-FINAL
     review, not a per-EPIC one — those roles run once per plan, at the boundary,
     against the frozen candidate. An EPIC completing in `plan_branch` mode owes
-    its CP3 pair and its own evidence, not a specialist stack.
+    its cp3 review round and its own evidence, not a specialist stack.
 12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
 13. **Advance sub-phase:** PM chose MERGE →
     ```
@@ -537,10 +678,10 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
     ```
     Preconditions enforced in `legacy_epic_release_mode`: `curator-report` exists,
     `audit-report` exists, `pm_decision=merge`. In `plan_branch` mode the FSM skips the
-    Curator/Auditor/CP4/C3/C4 stack plus the **CP3 freshness re-check** and the
-    **review-profile presence** check. It does **not** skip CP3 itself — the CP3
-    code-review + CP3 security verifiers are still dispatched per EPIC, and under
-    `--streamlined` their two outputs remain a hard precondition of `done-advance`.
+    Curator/Auditor/CP4/C3/C4 stack plus the **cp3 head re-check** and the
+    **review-profile presence** check. It does **not** skip CP3 itself — the EPIC
+    review round still runs per EPIC, and under `--streamlined` its closed passing
+    index (`cp3/rounds.json`) remains a hard precondition of `done-advance`.
     `pm_decision=merge`, the archived-task-file check, the auditor's `blocking_findings`
     verdict whenever an `audit-report` exists at all, and the other EPIC-local checks
     (streamlined integration review, abandoned check, DG-07, tiered compliance) still apply.
@@ -596,6 +737,7 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 ## Reference Files
 
 - `skills/pipeline.md` — §4 EXECUTE dispatch protocol, §5 GATES protocol
+- `scripts/lib/aid-review-adapter-claude.md` — the controller instruction quoted in "Step review (CP2) and EPIC review (CP3)"; `skills/step-review-roles.md` — the reviewer roles of cp2/cp3/cp6
 - `scripts/aid-fsm.sh` — FSM transition validation
 - `scripts/aid-run-gates.sh` — gate execution
 - `scripts/lib/aid-stage-log.sh` — timeline.jsonl logging
@@ -609,9 +751,9 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 
 ## Important
 
-- **Review Checkpoints** — CP2-CP5 dispatched automatically per `config/policies/review-checkpoints.yaml`; individually toggleable
-- **Pre-merge review** — mode-dependent. In `legacy_epic_release_mode` Curator + Auditor run in parallel before the EPIC merge. In `plan_branch` they do not run per EPIC at all: they are plan-final roles, dispatched once per plan against the frozen candidate, and the EPIC owes its CP3 code-review + security pair instead. PM approves via MERGE/FIX/ABORT in both modes
-- **Escalation E7** — verifier review failed after 2 fix-loop iterations
+- **Review Checkpoints** — CP2/CP3 are review rounds (the section above), CP4/CP5 the verifier and auditor at DONE; every checkpoint toggles in `config/policies/review-checkpoints.yaml`
+- **Pre-merge review** — mode-dependent. In `legacy_epic_release_mode` Curator + Auditor run in parallel before the EPIC merge. In `plan_branch` they do not run per EPIC at all: they are plan-final roles, dispatched once per plan against the frozen candidate, and the EPIC owes its cp3 review round instead. PM approves via MERGE/FIX/ABORT in both modes
+- **Exhausted review round** — a cp2/cp3 round that fails after the last allowed round is a PM decision (fix in a granted round, or accept with the findings routed), not an escalation state
 - **Escalation E8** — PM chose ABORT in DONE summary due to critical auditor findings
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
 - **DONE sub-phases** — `review → release`, managed by `done-advance` (not `transition`); `set-field` rejects writes to `done_phase`
@@ -673,17 +815,15 @@ trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
 
 - **`cmd_init` writes `streamlined_mode: true`** into `fsm-state.yaml`. All
   downstream FSM checks read this field via `yq`.
-- **`cmd_increment_step` skips per-step CP2** — the per-step
-  `verifier-output-step-N.md` (CP2) precondition is bypassed. All other step
+- **`cmd_increment_step` skips per-step CP2** — the step's review round
+  (`cp2/step-N/rounds.json`) precondition is bypassed. All other step
   preconditions (step-verify presence, `## Result: PASS`, AC checklist, commit
   ref, Memory Used/Written) and the Component B orphan-dispatch check still run
   in both modes.
 - **`done-advance review → release` requires integration review only** — instead
-  of accumulated per-step CP2 evidence, the transition refuses to advance unless
-  all three integration-review files exist in the run's evidence dir:
-  `verifier-output-cp3-code-review.md`, `verifier-output-cp3-security.md` (each with
-  `_generated_by`, `_generated_at`, `classification: FULL_REVIEW`, `verdict`), and
-  `gates_report.json`. Missing any one hard-fails with `streamlined_integration_review`.
+  of accumulated per-step cp2 evidence, the transition refuses to advance unless
+  the EPIC review round closed with verdict `pass` (`cp3/rounds.json`) and
+  `gates_report.json` exists. Missing either hard-fails with `streamlined_integration_review`.
 - **CP4 validation is advisory** — when the §7 curator/auditor auto-fix touched
   production code, full mode hard-fails without `verifier-output-cp4-curator-validation.md`;
   streamlined mode emits a `cp4_skipped_streamlined_advisory` audit event and
@@ -693,7 +833,7 @@ trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
   least one step/phase event) is treated as claimed-but-never-executed and
   hard-fails with `streamlined_abandoned` (NR 12 SOUSTO P009 anchor).
 - **`compliance.json` emits `coverage_mode: "streamlined"`** plus
-  `skipped_dimensions: ["verifier_outputs.cp2_per_step", "verifier_outputs.cp4_curator_validation"]`
+  `skipped_dimensions: ["verifier_outputs.cp2_rounds", "verifier_outputs.cp4_curator_validation"]`
   so the cross-EPIC aggregator distinguishes a legitimate streamlined run from a
   full run that is missing that evidence. Full mode emits
   `coverage_mode: "full"` and an empty `skipped_dimensions` array.
@@ -703,4 +843,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-19

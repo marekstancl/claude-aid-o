@@ -141,9 +141,9 @@ _cp2() {  # a valid cp2 answer, then a jq filter applied to it
   [ -f "$adapter" ] || adapter="$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-adapter-claude.md"
   diff <(awk '/^<!-- adapter:end -->$/{on=0} on{print} /^<!-- adapter:begin -->$/{on=1}' "$cmd") "$adapter"
 }
-@test "adapter: commands/aid-run.md quotes the same adapter byte for byte (skipped until P094 Step 10 writes the section)" {
+@test "adapter: commands/aid-run.md quotes the same adapter byte for byte" {
   local cmd="$AID_PLUGIN_PATH/commands/aid-run.md"
-  grep -q '^<!-- adapter:begin -->$' "$cmd" || skip "aid-run.md has no adapter quote yet (P094 Step 10)"
+  grep -q '^<!-- adapter:begin -->$' "$cmd"   # P094 Step 10 wrote the section; no skip any more
   diff <(awk '/^<!-- adapter:end -->$/{on=0} on{print} /^<!-- adapter:begin -->$/{on=1}' "$cmd") \
        "$AID_PLUGIN_PATH/scripts/lib/aid-review-adapter-claude.md"
 }
