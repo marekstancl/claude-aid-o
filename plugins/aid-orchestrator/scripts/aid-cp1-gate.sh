@@ -8,7 +8,7 @@
 # Reads only the round evidence aid-plan-review-round.sh writes under
 # .aid-o/work/evidence/<plan_id>/cp1/ (cp1/manual/ is never read) and passes
 # when all of these hold:
-#   - review_checkpoints.plan_review is valid (aid-plan-review-config.sh);
+#   - review_checkpoints.plan_review is valid (lib/aid-review-config.sh);
 #   - every round cp1/rounds.json lists has its directory;
 #   - round 1 exists, is closed (measurement.json) and was valid (collect.json);
 #   - every round that exists is closed and valid;
@@ -42,8 +42,9 @@ source "${SCRIPT_DIR}/lib/aid-roots.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-# shellcheck source=lib/aid-plan-review-config.sh
-source "${SCRIPT_DIR}/lib/aid-plan-review-config.sh"
+# shellcheck source=lib/aid-review-config.sh
+source "${SCRIPT_DIR}/lib/aid-review-config.sh"
+_roles_skill="${SCRIPT_DIR}/../skills/plan-review-roles.md"
 # shellcheck source=lib/aid-ac-extract.sh
 source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"
 
@@ -105,10 +106,10 @@ _finish() {
 for tool in jq yq; do
   command -v "$tool" >/dev/null 2>&1 || { _hard "${tool} not installed"; _finish; }
 done
-_cfg_err="$(aid_plan_review_config_load "$project_root" 2>&1 && aid_plan_review_config_validate 2>&1)" \
+_cfg_err="$(aid_review_config_load "$project_root" plan_review "$_roles_skill" 2>&1 && aid_review_config_validate 2>&1)" \
   || { _hard "$(grep 'plan_review config:' <<< "$_cfg_err" | tail -1)"; _finish; }
-aid_plan_review_config_load "$project_root" 2>/dev/null
-if [[ "$PR_ENABLED" != 1 ]]; then
+aid_review_config_load "$project_root" plan_review "$_roles_skill" 2>/dev/null
+if [[ "$RC_ENABLED" != 1 ]]; then
   _finish "plan review is switched off (review_checkpoints.enabled or cp1_plan_review is false)"
 fi
 
@@ -143,10 +144,10 @@ if [[ ! -d "$(_round_dir 1)" ]]; then
 fi
 
 last=""
-allowed="${override_rounds:-$PR_ROUNDS_DEFAULT}"
+allowed="${override_rounds:-$RC_ROUNDS_DEFAULT}"
 for n in "${rounds[@]}"; do
   d="$(_round_dir "$n")"
-  (( n > PR_ROUNDS_DEFAULT && n > allowed )) \
+  (( n > RC_ROUNDS_DEFAULT && n > allowed )) \
     && _fail "round-${n} exists without the PM's override.json allowing ${n} rounds"
   if [[ ! -f "${d}/measurement.json" ]]; then
     _fail "round-${n} is not closed (measurement.json missing): run collect and close for round ${n}"
@@ -214,4 +215,4 @@ done < <(for n in "${rounds[@]}"; do
                                | [$n, (.step | tostring), (.claim | @base64)] | @tsv' "$(_round_dir "$n")/merged.json"
          done)
 
-_finish "round ${last} closed$([[ "$PR_DEGRADED" == 1 ]] && echo ', degraded: both generalists on one model')"
+_finish "round ${last} closed$([[ "$RC_DEGRADED" == 1 ]] && echo ', degraded: both generalists on one model')"

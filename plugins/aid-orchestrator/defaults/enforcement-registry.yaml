@@ -742,15 +742,15 @@ enforcements:
     test: scripts/tests/bats/test-plan-writing-rules.bats
     description: "Every plan step owes **Architecture Context**, **Error Handling** and **Edge Cases**; a bare label with nothing after it does not count. Enforced where the plan is checked (aid-plan-lint.sh, reached by generation through aid-generation-readiness.sh). STRICT tier: blocking for a lifecycle_strict plan, a loud advisory for a legacy one. Until P093 the obligation followed a ceremony band; it now holds for every plan."
 
-  - id: plan_review_config_valid
+  - id: review_config_valid
     type: out-of-band
-    source: scripts/lib/aid-plan-review-config.sh
+    source: scripts/lib/aid-review-config.sh
     instruction: skills/plan-review-roles.md
     severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    test: scripts/tests/bats/test-plan-review-config.bats
+    test: scripts/tests/bats/test-review-config.bats
     description: "review_checkpoints.plan_review must name exactly the six reviewer roles of the answer schema, once each, with provider claude or codex, no banned model, min_answers 1..6 and rounds_default 1..3; every plan-review round subcommand and the CP1 gate refuse to run on a config that breaks one."
 
   - id: plan_review_finding_evidence

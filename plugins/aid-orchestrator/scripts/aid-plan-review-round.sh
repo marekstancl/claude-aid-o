@@ -38,8 +38,8 @@ export AID_PLUGIN_PATH="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-# shellcheck source=lib/aid-plan-review-config.sh
-source "${SCRIPT_DIR}/lib/aid-plan-review-config.sh"
+# shellcheck source=lib/aid-review-config.sh
+source "${SCRIPT_DIR}/lib/aid-review-config.sh"
 # shellcheck source=lib/aid-plan-review-packet.sh
 source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
 
@@ -78,8 +78,8 @@ PLAN="$(realpath "$PLAN")"
 PLAN_ID="$(_aid_plan_id_of "$PLAN")" || _die "the plan has no valid frontmatter id" 2
 CP1="${ROOT}/.aid-o/work/evidence/${PLAN_ID}/cp1"
 
-aid_plan_review_config_load "$ROOT" || exit 2
-aid_plan_review_config_validate || exit 1
+aid_review_config_load "$ROOT" plan_review "${SCRIPT_DIR}/../skills/plan-review-roles.md" || exit 2
+aid_review_config_validate || exit 1
 
 _need_round() { [[ "$ROUND" =~ ^[1-9][0-9]*$ ]] || _die "--round N required" 2; }
 _round_dir() { printf '%s/round-%s' "$CP1" "$1"; }
@@ -92,7 +92,7 @@ _override_rounds() { [[ -f "${CP1}/override.json" ]] && jq -r '.rounds // empty'
 _expected_roles() {
   local n="$1" roles prev fix type
   type="$(_aid_fm_get "$PLAN" type)"
-  if [[ "$type" == docs ]]; then roles="$PR_DOCS_REVIEWERS"; else roles="${PR_ROLE[*]}"; fi
+  if [[ "$type" == docs ]]; then roles="$RC_EXTRA_DOCS_TYPE_REVIEWERS"; else roles="${RC_ROLE[*]}"; fi
   if (( n >= 2 )); then
     # The confirmation round asks only reviewers whose findings touch a changed
     # step, plus every reviewer of a blocker or major still open.
@@ -124,10 +124,10 @@ cmd_prepare() {
   else
     dir="$(_round_dir "$ROUND")"
     [[ -d "${dir}/packet" ]] && _die "round ${ROUND} already prepared; a retry goes through 'retry', a fresh round through the next number"
-    if (( ROUND > PR_ROUNDS_DEFAULT )); then
+    if (( ROUND > RC_ROUNDS_DEFAULT )); then
       local allowed; allowed="$(_override_rounds)"
       [[ -n "$allowed" && "$allowed" -ge "$ROUND" ]] \
-        || _die "round ${ROUND} exceeds rounds_default ${PR_ROUNDS_DEFAULT}; it needs the PM's override.json (aid-plan-review-round.sh override)"
+        || _die "round ${ROUND} exceeds rounds_default ${RC_ROUNDS_DEFAULT}; it needs the PM's override.json (aid-plan-review-round.sh override)"
     fi
     if (( ROUND >= 2 )); then
       local prev; prev="$(_round_dir $((ROUND - 1)))"
@@ -146,9 +146,9 @@ cmd_prepare() {
 
   local roles=() role
   mapfile -t roles < <(_expected_roles "$ROUND" | grep -v '^$')
-  local min=$(( PR_MIN_ANSWERS < ${#roles[@]} ? PR_MIN_ANSWERS : ${#roles[@]} ))
+  local min; min="$(aid_review_config_floor "${#roles[@]}")"
   jq -n --argjson round "$ROUND" --arg sha "$(jq -r .plan_sha256 "${dir}/packet/manifest.json")" \
-    --argjson min "$min" --arg at "$(_now)" --argjson degraded "$([[ "$PR_DEGRADED" == 1 ]] && echo true || echo false)" \
+    --argjson min "$min" --arg at "$(_now)" --argjson degraded "$([[ "$RC_DEGRADED" == 1 ]] && echo true || echo false)" \
     '{round: $round, plan_sha256: $sha, reviewers_expected: $ARGS.positional,
       min_answers_effective: $min, degraded: $degraded, started_at: $at}' \
     --args "${roles[@]}" > "${dir}/round.json"
@@ -184,8 +184,8 @@ cmd_dispatch() {
   [[ "$PROVIDER" == codex ]] || _die "--provider codex required; claude reviewers are dispatched by the controller (scripts/lib/aid-plan-review-adapter-claude.md)" 2
   [[ -n "$ROLE" ]] || _die "--role required" 2
   _expects "$ROLE" "$dir" || _die "role ${ROLE} is not expected in round ${ROUND}"
-  local i; i="$(aid_plan_review_role_index "$ROLE")"
-  [[ "${PR_PROVIDER[$i]}" == codex ]] \
+  local i; i="$(aid_review_role_index "$ROLE")"
+  [[ "${RC_PROVIDER[$i]}" == codex ]] \
     || _die "role ${ROLE} is dispatched by the controller (see scripts/lib/aid-plan-review-adapter-claude.md)"
   local answer="${dir}/reviewer-${ROLE}.json" usage="${dir}/codex-${ROLE}.usage.json"
   [[ -e "$answer" ]] && _die "${answer} already exists; a reviewer is never paid twice (use retry after collect lists it as invalid)"
@@ -199,7 +199,7 @@ cmd_dispatch() {
   # In a subshell: the launcher's library sets its own shell options on load.
   ( # shellcheck source=lib/aid-c3-dispatch.sh
     source "${SCRIPT_DIR}/lib/aid-c3-dispatch.sh"
-    CODEX_MODEL="${PR_MODEL[$i]}"
+    CODEX_MODEL="${RC_MODEL[$i]}"
     _run_codex_isolated "$ROOT" "${dir}/prompt-${ROLE}.md" "$events" "${dir}/codex-${ROLE}.stderr.txt" "$last"
   ) || rc=$?
 
@@ -211,7 +211,7 @@ cmd_dispatch() {
            | {answered: true, tokens_in: (.input_tokens // "unknown"), cache_read: (.cached_input_tokens // "unknown"),
               tokens_out: (.output_tokens // "unknown")}' "$events" > "$usage" 2>/dev/null \
       || jq -n '{answered: true, tokens_in: "unknown", tokens_out: "unknown"}' > "$usage"
-    echo "dispatched ${ROLE} (codex ${PR_MODEL[$i]}): answer in ${answer}"
+    echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
   else
     rm -f "$answer"
     jq -n --arg why "$([[ "$rc" == 124 ]] && echo timeout || echo no_file)" '{answered: false, reason: $why}' > "$usage"
@@ -322,9 +322,9 @@ cmd_close() {
 
   local reviewers='{}' entry usage status reason
   for role in $(jq -r '.reviewers_expected[]' "${dir}/round.json"); do
-    i="$(aid_plan_review_role_index "$role")"
+    i="$(aid_review_role_index "$role")"
     status="$(jq -r --arg r "$role" 'if (.valid | index($r)) then "answered" elif (.missing | index($r)) then "missing" else "invalid" end' "${dir}/collect.json")"
-    if [[ "${PR_PROVIDER[$i]}" == codex ]]; then
+    if [[ "${RC_PROVIDER[$i]}" == codex ]]; then
       usage="${dir}/codex-${role}.usage.json"
       if [[ -f "$usage" ]]; then
         entry="$(jq -c '{tokens: (if (.tokens_in | type) == "number" and (.tokens_out | type) == "number" then .tokens_in + .tokens_out else "unknown" end)}
@@ -339,7 +339,7 @@ cmd_close() {
     reason=""
     [[ "$status" == missing ]] && reason="$(jq -r '.reason // "no_file"' <<< "$entry")"
     [[ "$status" == invalid ]] && reason=invalid_answer
-    reviewers="$(jq -c --arg r "$role" --argjson e "$entry" --arg p "${PR_PROVIDER[$i]}" --arg m "${PR_MODEL[$i]}" \
+    reviewers="$(jq -c --arg r "$role" --argjson e "$entry" --arg p "${RC_PROVIDER[$i]}" --arg m "${RC_MODEL[$i]}" \
       --argjson ok "$([[ "$status" == answered ]] && echo true || echo false)" --arg why "$reason" \
       '.[$r] = ({provider: $p, model: $m, answered: $ok} + ($e | del(.reason)) + (if $why == "" then {} else {reason: $why} end))' <<< "$reviewers")"
   done
