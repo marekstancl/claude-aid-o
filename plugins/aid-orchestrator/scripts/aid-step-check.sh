@@ -160,20 +160,25 @@ for f in "${FILES[@]}"; do
 done
 
 # ── 3. security and handler patterns over ADDED lines ───────────────────────
+# The rules are written for grep -E (they use \s); bash's =~ is POSIX and would
+# read \s as a literal s, so a rule with a space in it never matched. Matched
+# case-insensitively: a secret is as much a secret as AWS_SECRET_ACCESS_KEY as
+# it is as api_key (both found by the testbed's sabotaged diff, P094 Step 12).
 ADDED="$(grep -E '^\+' <<<"$DIFF" | grep -vE '^\+\+\+ ' | cut -c2- || true)"
+_matches() { [[ -n "$ADDED" ]] && grep -qiE -- "$1" <<<"$ADDED"; }
 matched_rules=() matched_lines=()
 while IFS=$'\t' read -r id pattern; do
   [[ -n "$id" && "$id" =~ ^[a-z][a-z0-9_]*$ ]] || continue
-  if [[ -n "$ADDED" && "$ADDED" =~ $pattern ]]; then
+  if _matches "$pattern"; then
     matched_rules+=("$id")
-    while IFS= read -r l; do [[ "$l" =~ $pattern ]] && matched_lines+=("$id: ${l:0:200}") && (( ${#matched_lines[@]} >= 20 )) && break; done <<<"$ADDED"
+    while IFS= read -r l; do matched_lines+=("$id: ${l:0:200}"); (( ${#matched_lines[@]} >= 20 )) && break; done < <(grep -iE -- "$pattern" <<<"$ADDED")
   fi
-done < <(yq -r '.fail_rules[] | [.id, .pattern] | @tsv' "$RULES_FILE")
+done < <(yq -r '.fail_rules[] | [.id, .pattern] | join("\t")' "$RULES_FILE")   # not @tsv: it escapes the backslashes of \s
 handler_ids=()
 while IFS=$'\t' read -r id pattern; do
   [[ -n "$id" ]] || continue
-  [[ -n "$ADDED" && "$ADDED" =~ $pattern ]] && handler_ids+=("$id")
-done < <(yq -r '.handler_patterns[]? | [.id, .pattern] | @tsv' "$RULES_FILE")
+  _matches "$pattern" && handler_ids+=("$id")
+done < <(yq -r '.handler_patterns[]? | [.id, .pattern] | join("\t")' "$RULES_FILE")
 
 # ── 4. tests and their tiers ────────────────────────────────────────────────
 _is_test() { [[ "$1" =~ (^|/)tests?/ || "$1" =~ (^|/)test[-_][^/]*$ || "$1" =~ \.(test|spec)\.[a-z]+$ || "$1" =~ _test\.[a-z]+$ || "$1" =~ \.bats$ ]]; }

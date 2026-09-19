@@ -566,6 +566,7 @@ cmd_close() {
       fi
     else
       value="$(_token_value "$role")" || _die "no --tokens value for ${role}; pass ${role}=<number> from the Agent result, or ${role}=unknown"
+      [[ "$value" =~ ^([0-9]+|unknown)$ ]] || _die "--tokens value for ${role} must be a number or unknown (got '${value}')" 2
       entry="$(jq -nc --arg v "$value" '{tokens: (if $v == "unknown" then "unknown" else ($v | tonumber) end)}')"
     fi
     reason=""

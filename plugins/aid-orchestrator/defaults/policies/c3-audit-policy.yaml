@@ -58,7 +58,7 @@ c3_executor:
 
 # c3_fix_loop (P065 Step 16) — bounded fix→reverify loop after a dispatched (real Codex,
 # never degraded_advisory) C3 report comes back with a blocking finding. Mirrors
-# review-checkpoints.yaml's `fix_loop.max_iterations: 2` for CP2/CP3: gate-fixer/implementer
+# review-checkpoints.yaml's `step_review.rounds_default: 2` for CP2/CP3: the step's role
 # fixes the SPECIFIC finding by `fingerprint`, a new HEAD + manifest are built, a NEW isolated
 # `codex exec` reverifies — capped at max_rechecks, then ESCALATION (a further recheck is
 # PM-approved only, never automatic). See pipeline.md DONE §6, step "6a" for the full

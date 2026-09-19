@@ -58,26 +58,7 @@ review_checkpoints:
       - {role: epic_behaviour,  provider: claude, model: sonnet}
       - {role: epic_security,   provider: codex,  model: gpt-5.6-terra}
 
-  # Fix loop settings
-  fix_loop:
-    max_iterations: 2              # max fix→re-verify cycles before escalation
-    auto_fix_severities:           # severities that trigger gate-fixer dispatch
-      - critical
-      - high
-
-  # Trivial skip — skip CP2/CP6 for small changes
-  skip_trivial: true
-  trivial_threshold:
-    max_files: 1                   # skip if changed files <= this
-    max_lines: 50                  # skip if total changed lines <= this
-
-  # Pre-filter — deterministic bash regex checks before LLM dispatch (CP2/CP3/CP6)
-  # Runs on git diff output (new/changed lines only)
-  pre_filter:
-    enabled: true
-    scan_target: diff_only         # only scan new/changed lines from git diff
-    # NOTE (AID-052): the pre-filter REGEX RULES are NOT defined here. aid-prefilter.sh reads
-    # `defaults/pre-filter-rules.yaml` (skip_rules + fail_rules) as the single source of truth.
-    # A former `fail_patterns:` list in this block was an UNREAD duplicate that drifted from the
-    # operative file (e.g. it failed on bare `print(`, which the operative file deliberately omits)
-    # — removed 2026-06-03 to single-source it. This block only toggles the pre-filter and its scope.
+  # The fix loop, the trivial-skip thresholds and the pre-filter left with
+  # P094: a step is skipped by aid-step-check.sh (size, scope, no pattern), the
+  # security rules of defaults/pre-filter-rules.yaml add the security reviewer,
+  # and a failed round is fixed by the step's role within rounds_default.

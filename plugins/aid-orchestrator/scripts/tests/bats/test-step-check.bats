@@ -91,6 +91,13 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$(_json '.security.matched_rules[0]' cp2/step-0)" = subprocess_shell_true ]
   [ "$(_json '.security.lines|length' cp2/step-0)" -ge 1 ]
 }
+@test "an upper-case secret assignment with spaces matches the secret rule (rules use \\s and are matched case-insensitively, testbed 2026-09-19)" {
+  printf 'AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLEKEY0123456789"\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [[ "$output" == "verdict: review+security"* ]]
+  [ "$(_json '.security.matched_rules[0]' cp2/step-0)" = hardcoded_secret_pattern ]
+}
+
 @test "an added route decorator fills handler_patterns" {
   printf '@app.post("/x")\ndef create(request):\n    pass\n' > "$R/src/api/handler.py"
   echo "s0" >> "$R/src/app.py"; c0="$(_commit s0)"; _event 0 "$c0"
