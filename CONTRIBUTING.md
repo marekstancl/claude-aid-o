@@ -123,10 +123,13 @@ added here must be added to the script by hand or it goes unchecked. There is no
 one that does not exist).
 
 **What `aid-release.sh` covers, and what stays manual.** In *this* repository the
-script bumps location 1 (root `CHANGELOG.md`) and, through its no-config fallback,
-any other `CHANGELOG.md` it finds — which is location 2. Its `versioning.files[]`
-loop never runs here, because that list lives in `.aid-o/config/project.yaml` and
-this repo has none. **Locations 3-8 are edited by hand every release.**
+script bumps its version source, `plugin.json` (location 5), writes the entry into
+root `CHANGELOG.md` (location 1), and then walks `versioning.files[]` in the tracked
+`.aid-o/config/project.yaml`, which as of 2026-09-20 lists locations 2, 3 and 4
+(plugin `CHANGELOG.md`, both `marketplace.json` fields). **Locations 6-8 — the two
+README lines and the licence line — are edited by hand every release**, and the
+checker below is what catches a hand that forgot. (An earlier version of this text
+claimed the repo had no `project.yaml`; it does, and it has since P089.)
 
 **Pre-push check (release boundary):** Before pushing a release, run the checker —
 not a set of eyeball greps:
@@ -188,7 +191,6 @@ The force-refresh command resets the cached clone to match the remote.
 
 **Verification:** After restart, run `/aid-help` and check the version matches.
 
-<!-- AID-O START -->
 ## The testbed — `/opt/eco/projects/aid-testbed`
 
 A separate, permanent project whose only reason to exist is to ask: **does AID
