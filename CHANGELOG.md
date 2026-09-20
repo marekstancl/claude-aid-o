@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [2.101.2] — 2026-09-20
 
 ### Changed
 - **Kokpit má vlastní složku** — celý node workspace (`packages/`, `package.json` + lock, `tsconfig`, `vitest`, `Dockerfile`, `docker-compose.yml`) se přestěhoval z kořene do `cockpit/`; CI joby a kalibrační skript ukazují na novou cestu, jméno compose projektu je připnuté, takže běžící kontejner zůstává tentýž.
