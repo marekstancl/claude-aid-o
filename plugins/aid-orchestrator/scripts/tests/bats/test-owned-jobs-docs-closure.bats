@@ -55,6 +55,9 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../../../.." && pwd)"; export REPO_ROOT
   ROOT_CL="$REPO_ROOT/CHANGELOG.md"; export ROOT_CL
   PLUGIN_CL="$REPO_ROOT/plugins/aid-orchestrator/CHANGELOG.md"; export PLUGIN_CL
+  # Since 2026-09-20 entries before 2.90.0 live in CHANGELOG-archive.md, and
+  # P076 shipped as 2.80.0 — so the entry this suite reads is in the archive.
+  ARCHIVE_CL="$REPO_ROOT/CHANGELOG-archive.md"; export ARCHIVE_CL
   EXTENDING="$REPO_ROOT/docs/extending-aid.md"; export EXTENDING
   SOURCE_DOC="$REPO_ROOT/docs/plans/2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md"
   export SOURCE_DOC
@@ -108,7 +111,7 @@ _h3='### The recovery policy, and how a consumer changes it'
 
 @test "1: every target document exists and is non-empty (never skip — a skip is green)" {
   local f
-  for f in "$ROOT_CL" "$PLUGIN_CL" "$EXTENDING" "$SOURCE_DOC"; do
+  for f in "$ROOT_CL" "$PLUGIN_CL" "$ARCHIVE_CL" "$EXTENDING" "$SOURCE_DOC"; do
     [ -f "$f" ] || _fail "missing target document '$f' — every one of these is tracked in this repository, so its absence is a defect, not a reason to skip"
     [ -s "$f" ] || _fail "target document '$f' is empty"
   done
@@ -134,9 +137,9 @@ _h3='### The recovery policy, and how a consumer changes it'
 
 @test "4: THIS plan's CHANGELOG entry carries the three sections and describes what it shipped" {
   local entry="$BATS_TEST_TMPDIR/entry.md"
-  _p076_entry "$ROOT_CL" > "$entry"
+  _p076_entry "$ARCHIVE_CL" > "$entry"
   [ -s "$entry" ] \
-    || _fail "no '## [' section in $ROOT_CL names 'auto_resume_required.json' — P076's CHANGELOG entry is gone or no longer describes the plan"
+    || _fail "no '## [' section in $ARCHIVE_CL names 'auto_resume_required.json' — P076's CHANGELOG entry is gone or no longer describes the plan"
 
   local h
   for h in '### Added' '### Changed' '### Fixed'; do
@@ -257,7 +260,7 @@ ${stale}"
   # was the stronger, unprovable one. A retraction is only a retraction when
   # every copy goes.
   local claim='it writes no gate row, changes no gate verdict and no exit code'
-  grep -qF -- "$claim" "$ROOT_CL" \
+  grep -qF -- "$claim" "$ARCHIVE_CL" \
     || _fail "the CHANGELOG no longer states what the four shipped cases prove about gate_run_mode_advice ('$claim')"
   grep -qF -- "$claim" "$EXTENDING" \
     || _fail "docs/extending-aid.md does not state the CHANGELOG's proven wording for gate_run_mode_advice ('$claim') — the two closure surfaces disagree about what is proven"
@@ -265,7 +268,7 @@ ${stale}"
   # The retracted claim may not survive in EITHER file, in any phrasing that
   # asserts report identity.
   local f offender
-  for f in "$ROOT_CL" "$PLUGIN_CL" "$EXTENDING"; do
+  for f in "$ROOT_CL" "$PLUGIN_CL" "$ARCHIVE_CL" "$EXTENDING"; do
     offender="$(grep -niE 'byte-identical (with and without|report)|report is byte-identical' "$f" || true)"
     [ -z "$offender" ] || _fail "'$f' still asserts the gate report is byte-identical with and without the advice event — that claim was retracted because no shipped test proves it:
 $offender"
