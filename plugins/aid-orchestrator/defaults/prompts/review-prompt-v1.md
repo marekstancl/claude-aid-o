@@ -24,7 +24,11 @@ roles; answer only the questions of your role below.
 - A finding exists ONLY with a `command` and an `evidence`:
   - `command` is one read-only command that shows the problem and starts with
     `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
-    `bash <script> --help`, or a reproduction `bash repro/<name>.sh`;
+    `bash <script> --help`, or a reproduction `bash repro/<name>.sh`, or an
+    inline `bash -c '<pipeline>'` whose every segment starts with one of
+    `grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo
+    export jq yq test [[ [ for do done if then else fi`, with no redirection to
+    a file, no command substitution, no `source`, no nested `bash`, no `eval`;
   - `evidence` is {{evidence_forms}}; several are separated by `;`.
   A finding without both is rejected and counts against you.
 - Report only what would lead to DIFFERENT work if fixed. No style remarks, no

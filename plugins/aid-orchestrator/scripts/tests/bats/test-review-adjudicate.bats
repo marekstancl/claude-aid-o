@@ -232,3 +232,37 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found"]' ]
   [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "absent:scripts/never-written.sh" ]
 }
+@test "evidence: a range resolves on its first line and anchors the fingerprint; a range past the end or reversed does not" {
+  _finding "$R1" reuse '.evidence = "scripts/a.sh:2-3"'
+  _finding "$R1" reuse '.id = "reuse-2" | .evidence = "scripts/a.sh:9-12" | .claim = "second claim nothing like the first"'
+  _finding "$R1" reuse '.id = "reuse-3" | .evidence = "scripts/a.sh:14-9" | .claim = "third claim nothing like the others"'
+  run ADJ "$R1" --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found","evidence_not_found"]' ]
+  # the range anchors on line 2, so the same claim cited as scripts/a.sh:2 has the same fingerprint
+  _round "$R2" 2 reuse
+  _finding "$R2" reuse '.evidence = "scripts/a.sh:2"'
+  ADJ "$R2" --project-root "$ROOT" >/dev/null
+  [ "$(jq -r '.findings[0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
+}
+@test "command: an inline read-only reproduction is accepted, one that writes or runs another file is not" {
+  # the first is the inline command a reviewer wrote on 2026-09-19, verbatim
+  _finding "$R1" reuse '.command = "bash -c '"'"'mkdir -p /tmp/wan-check && cd /tmp/wan-check && touch P075-foo.md && [[ -f \"P075\"*.md ]] && echo MATCH || echo NOMATCH'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-2" | .claim = "claim two of its own" | .command = "bash -c '"'"'grep -n two scripts/a.sh | wc -l'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-3" | .claim = "claim three of its own" | .command = "bash -c '"'"'git log --oneline | head -3'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-4" | .claim = "claim four of its own" | .command = "bash -c '"'"'for f in a b; do echo $f; done'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-5" | .claim = "claim five of its own" | .command = "bash -c '"'"'rm -rf scripts'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-6" | .claim = "claim six of its own" | .command = "bash -c '"'"'echo 1 > f'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-7" | .claim = "claim seven of its own" | .command = "bash -c '"'"'source scripts/a.sh; echo hi'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-8" | .claim = "claim eight of its own" | .command = "bash -c '"'"'bash scripts/a.sh'"'"'"'
+  run ADJ "$R1" --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '[.[] | .id]' "$R1/rejected.json")" = '["reuse-5","reuse-6","reuse-7","reuse-8"]' ]
+  [ "$(jq -c '[.[] | .reason] | unique' "$R1/rejected.json")" = '["command_not_read_only"]' ]
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 4 ]
+}
+@test "adjudicate: a collected round is judged with nothing on stderr" {
+  _finding "$R1" reuse '.'
+  ADJ "$R1" --project-root "$ROOT" >/dev/null 2>"$ROOT/err.txt"
+  [ ! -s "$ROOT/err.txt" ]
+}

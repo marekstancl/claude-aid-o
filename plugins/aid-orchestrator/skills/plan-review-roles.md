@@ -8,7 +8,7 @@ distinct_models: [generalist_a, generalist_b]
 
 # Plan Review Roles
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
 
 Plan review (CP1) puts a written plan in front of six reviewers before any EPIC
 is generated. Every reviewer gets the same packet and the same rules; only the
@@ -48,9 +48,17 @@ A finding exists only with both:
 
 - `command` — one read-only command that shows the problem. It must start with
   `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
-  `bash <script> --help`.
-- `evidence` — `path:line` inside the repository, `absent:path` for a file the plan presumes and the repository lacks, or `plan.md:line` for the plan
-  itself; several separated by `;`. Every file used must be cited.
+  `bash <script> --help`; or it is a reproduction, either `bash repro/<name>.sh`
+  under the round's `repro/` directory or inline as `bash -c '<pipeline>'` whose
+  every segment starts with one of `grep rg ls find sed git wc head tail cat cd
+  mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else
+  fi` (`git` only with `grep|log|show|diff|blame|rev-parse|status`), with no
+  redirection to a file, no command substitution, no `source`, no nested `bash`
+  and no `eval`.
+- `evidence` — `path:line` or `path:first-last` inside the repository,
+  `absent:path` for a file the plan presumes and the repository lacks, or
+  `plan.md:line` for the plan itself; several separated by `;`. Every file used
+  must be cited. A range stands on its first line.
 
 A finding without both is rejected by `scripts/aid-review-adjudicate.sh`
 and recorded in `rejected.json` with the reason. Report only what would lead to
@@ -212,6 +220,6 @@ plan says it runs, or an artifact the enforcement needs but cannot see.
 | A finding that says "might be a problem" with no command | the command that shows it, or no finding |
 | Repeating a `plan-check.json` warning | trust the script; review what it cannot see |
 | Answering another role's questions | stay in the role; the others cover the rest |
-| `evidence` pointing at a directory or a whole file | `path:line` of the line that shows it |
+| `evidence` pointing at a directory or a whole file | `path:line` or `path:first-last` of the lines that show it |
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
