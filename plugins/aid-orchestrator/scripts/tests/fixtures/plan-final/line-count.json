@@ -1,0 +1,176 @@
+{
+  "written": "2026-09-20",
+  "before_commit": "main (bdb2602d)",
+  "after_commit": "HEAD of feat/p096-plan-final-rebuild after Step 12",
+  "totals": {
+    "before": 24119,
+    "after": 15074,
+    "delta": -9045
+  },
+  "branch_diff": "304 files changed, 5800 insertions(+), 45469 deletions(-) (whole repository; tests and fixtures included)",
+  "note": "The area is the file list of baseline.json plus the one library the removal founded. No threshold (V8, by the PM's decision).",
+  "files": [
+    {
+      "group": "kept",
+      "file": "scripts/aid-plan-fsm.sh",
+      "before": 11552,
+      "after": 10460
+    },
+    {
+      "group": "kept",
+      "file": "scripts/aid-release-policy.sh",
+      "before": 1384,
+      "after": 1124
+    },
+    {
+      "group": "kept",
+      "file": "scripts/aid-evidence-verify.sh",
+      "before": 1092,
+      "after": 1040
+    },
+    {
+      "group": "kept",
+      "file": "scripts/aid-plan-close-check.sh",
+      "before": 1215,
+      "after": 832
+    },
+    {
+      "group": "removed",
+      "file": "scripts/aid-delivery-gate.sh",
+      "before": 940,
+      "after": 0
+    },
+    {
+      "group": "kept",
+      "file": "scripts/aid-pm-brief.sh",
+      "before": 486,
+      "after": 483
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/aid-c3-dispatch.sh",
+      "before": 3222,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg01-dependency-consistency.sh",
+      "before": 161,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg02-build.sh",
+      "before": 66,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg03-typecheck.sh",
+      "before": 59,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg04-test.sh",
+      "before": 132,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg05-consumer-compile.sh",
+      "before": 94,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg06-removed-dep.sh",
+      "before": 182,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg07-state-consistency.sh",
+      "before": 161,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg08-runtime-env.sh",
+      "before": 180,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg09-static-coverage.sh",
+      "before": 107,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg10-startup-smoke.sh",
+      "before": 120,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg11-build-config.sh",
+      "before": 216,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg12-authority.sh",
+      "before": 165,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg15-route-resolve.sh",
+      "before": 273,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg17-independent-oracle-nodrop.sh",
+      "before": 172,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "scripts/lib/delivery-checks/dg18-acceptance-struct.sh",
+      "before": 103,
+      "after": 0
+    },
+    {
+      "group": "removed",
+      "file": "agents/reporter.md",
+      "before": 208,
+      "after": 0
+    },
+    {
+      "group": "kept",
+      "file": "agents/simplifier.md",
+      "before": 150,
+      "after": 129
+    },
+    {
+      "group": "removed",
+      "file": "agents/curator.md",
+      "before": 364,
+      "after": 0
+    },
+    {
+      "group": "kept",
+      "file": "agents/auditor.md",
+      "before": 1315,
+      "after": 880
+    },
+    {
+      "group": "new",
+      "file": "scripts/lib/aid-codex-transport.sh",
+      "before": 0,
+      "after": 126
+    }
+  ]
+}

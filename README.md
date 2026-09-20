@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.100.0** (current) — když Codex chybí, odpoví Claude se stejným zadáním; rozhodčí bere rozsah řádků i inline reprodukci; doklad o akceptačních kritériích z brány, která je ověřila
+- **v2.101.0** (current) — konec plánu má čtyři kroky a jedno kolo tří revizorů nad celým dodáním; oprava platí znovu jen to, čeho se dotkla; reportér, kurátor, smlouva auditora pro konec plánu, CP4, CP5 a brána dodávky C1 jsou pryč
+- **v2.100.0** — když Codex chybí, odpoví Claude se stejným zadáním; rozhodčí bere rozsah řádků i inline reprodukci; doklad o akceptačních kritériích z brány, která je ověřila
 - **v2.99.0** — kontrola kroku, EPICu a fast mode na jednom motoru kol; pre-filter, soubory verifikátora a invalidační mapa odstraněny
-- **v2.98.0** — kontrola plánu šesti revizory ve dvou kolech, jedna cesta bez pásem; starý řetězec C0 a ledger odstraněny
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
