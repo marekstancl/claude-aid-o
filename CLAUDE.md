@@ -95,7 +95,7 @@ ai-orchestrator/
     marketplace.json            # Marketplace manifest
   plugins/aid-orchestrator/     # The plugin
     .claude-plugin/plugin.json  # Plugin manifest
-    agents/                     # 9 controller agents (incl. simplifier + reporter plan-boundary specialists)
+    agents/                     # 7 agents (implementer, verifier, gate-fixer, auditor, simplifier, project-scanner, test-portfolio-analyst)
     commands/                   # 8 slash commands
     skills/                     # 8 core skills (+ extras outside manifest)
     scripts/                    # Bash controller layer

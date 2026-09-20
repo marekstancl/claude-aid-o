@@ -1689,12 +1689,6 @@ fsm_check_streamlined_integration_review() {
     echo "      --blocked-checks 'streamlined_integration_review'" >&2
     fsm_emit_audit_log "streamlined_integration_review_fail" \
       --evidence-dir "$evidence_dir" --missing "${joined}"
-    # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
-    # (the caller's `return 1` is unreachable — this helper dies internally). Observe
-    # telemetry (sampling-bias fix) before the hard-exit; no gate behavior change.
-    log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
-      gate="streamlined_integration" \
-      head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_integration_review"
   fi
   log_event "${evidence_dir}/timeline.jsonl" "streamlined_integration_review_gates_source" \
@@ -1729,12 +1723,6 @@ fsm_check_streamlined_abandoned() {
     echo "      --blocked-checks 'streamlined_abandoned'" >&2
     fsm_emit_audit_log "streamlined_abandoned_fail" \
       --evidence-dir "$evidence_dir" --event-count "$event_count"
-    # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
-    # (caller `return 1` unreachable — helper dies internally). Observe telemetry
-    # (sampling-bias fix) before the hard-exit; no gate behavior change.
-    log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
-      gate="streamlined_abandoned" \
-      head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_abandoned"
   fi
   return 0
@@ -6417,11 +6405,6 @@ EOF
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
 
-          # E-059-2_2 Step 5: this hard-exit preempts the C4 dual-run slot below.
-          # Observe telemetry (sampling-bias fix) — no gate behavior change.
-          log_event "$_timeline" "release_policy_preempted" \
-            gate="tiered_compliance" \
-            head_sha="$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo unknown)"
 
           exit 2
         fi

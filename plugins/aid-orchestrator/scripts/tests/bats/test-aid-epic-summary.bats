@@ -63,3 +63,13 @@ teardown() {
   grep -q 'Force override' "$out"
   grep -q 'force override' "$out"
 }
+
+@test "generate: what the EPIC review left open is listed; a fixed finding is not" {
+  mkdir -p "$TEST_EVIDENCE_DIR/cp3/round-1"
+  jq -n '{findings: [{severity: "major", status: "open", claim: "the retry has no test"},
+                     {severity: "minor", status: "fixed", claim: "a typo"}]}' > "$TEST_EVIDENCE_DIR/cp3/round-1/merged.json"
+  run "$SUMMARY" generate "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  grep -q "major: the retry has no test" "$TEST_EVIDENCE_DIR/epic-summary.md"
+  ! grep -q "a typo" "$TEST_EVIDENCE_DIR/epic-summary.md"
+}

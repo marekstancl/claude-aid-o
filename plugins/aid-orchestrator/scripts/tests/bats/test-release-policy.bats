@@ -524,68 +524,6 @@ EOF
 
 # ─── release_policy_preempted (hard-exits that never reach the C4 slot) ────────
 
-@test "preempted: tiered_compliance blocking failure → release_policy_preempted gate=tiered_compliance (before exit 2)" {
-  # Blocking gates_generated_by: a gates report with no runner provenance
-  # (P094 retired the verifier_provenance dimension this case used to trip).
-  mkdir -p "$EVID/gates" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work"
-  touch "$PROJ/.aid-o/work/audit-log.jsonl"
-  cat > "$CFG/plugin.yaml" <<EOF
-plugin_path: "$PLUGIN_ROOT"
-EOF
-  touch "$CFG/execution.yaml"
-  cat > "$CFG/check-severity.yaml" <<EOF
-version: 1
-checks:
-  gates_generated_by: {severity: blocking, promoted_at: "2026-05-05", promoted_reason: "test"}
-EOF
-  printf '{"overall":"pass"}\n' > "$EVID/gates/gates_report.json"
-  : > "$EVID/timeline.jsonl"
-  cat > "$EVID/fsm-state.yaml" <<EOF
-epic_id: ${EPIC}
-run_id: ${RUN}
-branch: task/${EPIC}/main
-state: DONE
-done_phase: review
-created_at: 2026-07-09T10:00:00Z
-total_steps: 3
-current_step: 3
-pm_decision: merge
-EOF
-  cd "$PROJ"
-  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
-  [ "$status" -eq 2 ]                                    # tiered-compliance exit 2 (before the C4 slot)
-  ! grep -q '"event":"release_decision"' "$EVID/timeline.jsonl"
-  local ev; ev="$(grep '"event":"release_policy_preempted"' "$EVID/timeline.jsonl" | tail -1)"
-  [ -n "$ev" ]
-  [ "$(echo "$ev" | jq -r '.gate')" == "tiered_compliance" ]
-}
-
-@test "preempted: streamlined missing integration evidence → release_policy_preempted gate=streamlined_integration" {
-  mkdir -p "$EVID" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work"
-  touch "$PROJ/.aid-o/work/audit-log.jsonl"
-  : > "$EVID/timeline.jsonl"
-  # streamlined_mode true + none of the 3 integration-review files → integration check dies first.
-  cat > "$EVID/fsm-state.yaml" <<EOF
-epic_id: ${EPIC}
-run_id: ${RUN}
-branch: task/${EPIC}/main
-state: DONE
-done_phase: review
-created_at: 2026-07-09T10:00:00Z
-total_steps: 3
-current_step: 3
-pm_decision: merge
-streamlined_mode: true
-EOF
-  cd "$PROJ"
-  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
-  [ "$status" -ne 0 ]
-  ! grep -q '"event":"release_decision"' "$EVID/timeline.jsonl"
-  local ev; ev="$(grep '"event":"release_policy_preempted"' "$EVID/timeline.jsonl" | tail -1)"
-  [ -n "$ev" ]
-  [ "$(echo "$ev" | jq -r '.gate')" == "streamlined_integration" ]
-}
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # E-059-2_2 Step 7 — Doc-1 §13.2 D11 negative fixtures (rows 18-27).
 #

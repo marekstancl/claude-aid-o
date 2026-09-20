@@ -1669,8 +1669,8 @@ Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
 |---------|--------|
 | `✅ Co bylo dodáno` | `git log <base_commit>..HEAD --oneline` |
 | `⚠️ Varování a přeskočené kroky` | `timeline.jsonl` — branch events, force_override, gate retries |
-| `❌ Co se nestihlo` | `audit-report.md` blocking/L-effort findings, `curator-report.md` deferred |
-| `📋 Co dělat dál (PM akce)` | curator deferred proposals (always-defer rules: architecture, standards-L), escalations, force override audit reminder |
+| `❌ Co se nestihlo` | what the EPIC review left open (`cp3/round-N/merged.json`) |
+| `📋 Co dělat dál (PM akce)` | escalations, force override audit reminder |
 | `🔍 Honest signal — PM trust level` | `compliance.json` + heuristics → HIGH / MEDIUM / LOW |
 
 **Trust level heuristics:**
@@ -1810,7 +1810,7 @@ Designed for quick tasks that don't warrant a full EPIC.
    Skip per `review-checkpoints.yaml` (`cp6_fast_mode_review`, `skip_trivial`).
 5. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)
 
-**No fsm-state.yaml.** No branch. No gates. No Curator. Quick log only.
+**No fsm-state.yaml.** No branch. No gates. Quick log only.
 
 If task complexity grows (3+ files, multi-step) → suggest `/aid-plan --epic` instead.
 

@@ -172,40 +172,19 @@ emit_deferred() {
 
   local found_any=false
 
-  # Audit report — blocking/deferred findings
-  local audit_report=""
-  for f in "${evidence_dir}/audit-report.md" "${evidence_dir}/audit-report.yaml"; do
-    [[ -f "$f" ]] && { audit_report="$f"; break; }
-  done
-  if [[ -n "$audit_report" ]]; then
-    local blocking
-    blocking=$(grep -i -E '(blocking|effort.*L\b|CRITICAL|L-effort)' "$audit_report" 2>/dev/null \
-      | grep -v '^#' | head -5 || true)
-    if [[ -n "$blocking" ]]; then
-      printf 'Z audit reportu — blokující nebo L-effort nálezy:\n'
-      while IFS= read -r line; do printf -- '- %s\n' "$line"; done <<< "$blocking"
-      found_any=true
-    fi
-  fi
-
-  # Curator report — deferred/L-effort proposals
-  local curator_report=""
-  for f in "${evidence_dir}/curator-report.md" "${evidence_dir}/curator-report.yaml"; do
-    [[ -f "$f" ]] && { curator_report="$f"; break; }
-  done
-  if [[ -n "$curator_report" ]]; then
-    local deferred
-    deferred=$(grep -i -E '(defer|deferred|not.applied|L.effort)' "$curator_report" 2>/dev/null \
-      | grep -v '^#' | head -5 || true)
-    if [[ -n "$deferred" ]]; then
-      printf 'Z curator reportu — odložené návrhy:\n'
-      while IFS= read -r line; do printf -- '- %s\n' "$line"; done <<< "$deferred"
-      found_any=true
-    fi
+  # What the EPIC review left open (the last round's merged.json).
+  local last_round open
+  last_round="$(ls -d "${evidence_dir}"/cp3/round-* 2>/dev/null | sort -V | tail -1)"
+  open="$(jq -r '.findings[] | select(.status == "open" or .status == "disputed") | "\(.severity): \(.claim)"' \
+    "${last_round}/merged.json" 2>/dev/null | head -5 || true)"
+  if [[ -n "$open" ]]; then
+    printf 'Z revize EPICu — otevřené nálezy:\n'
+    while IFS= read -r line; do printf -- '- %s\n' "$line"; done <<< "$open"
+    found_any=true
   fi
 
   if ! $found_any; then
-    printf -- '- Curator a auditor nehlásí žádné blokující nebo odložené položky.\n'
+    printf -- '- Revize EPICu nenechala žádný otevřený nález.\n'
   fi
   printf '\n'
 }
@@ -234,22 +213,6 @@ emit_pm_actions() {
     fc=$(jq -s '[.[] | select(.event=="fsm_force_override")] | length' "$timeline" 2>/dev/null || echo 0)
     if (( ${fc:-0} > 0 )); then
       printf -- '- Zkontroluj audit-log.jsonl — %d force override(s) vyžaduje ruční review před dalším EPIC.\n' "$fc"
-      found_any=true
-    fi
-  fi
-
-  # Curator L-effort proposals
-  local curator_report=""
-  for f in "${evidence_dir}/curator-report.md" "${evidence_dir}/curator-report.yaml"; do
-    [[ -f "$f" ]] && { curator_report="$f"; break; }
-  done
-  if [[ -n "$curator_report" ]]; then
-    local l_effort
-    l_effort=$(grep -i -E '\bL-effort\b|effort.*:\s*L\b' "$curator_report" 2>/dev/null \
-      | grep -v '^#' | head -3 || true)
-    if [[ -n "$l_effort" ]]; then
-      printf -- '- L-effort návrhy z curatoru (vyžadují vlastní EPIC nebo PM rozhodnutí):\n'
-      while IFS= read -r line; do printf '  - %s\n' "$line"; done <<< "$l_effort"
       found_any=true
     fi
   fi

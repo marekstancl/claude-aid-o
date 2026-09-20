@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 537          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 538          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -114,11 +114,11 @@ totals:
 
 enforcements:
   - {id: plan_final_gate_required, type: 1, source: "scripts/aid-plan-fsm.sh:cmd_plan_finalize --stage gates", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 E-068-1_2 Step 2: the plan-final gate profile runs EXACTLY once, against the frozen candidate, and its report is recorded in the RUNTIME plan-boundary manifest bound to candidate_sha. A quarantined gate is never reported as pass; an excluded gate is recorded profile_excluded, never silently dropped. plan-close (Check 5.3) refuses to close without that report, so the gate is a precondition rather than a recommendation.", test: "scripts/tests/bats/test-aid-plan-final-boundary.bats"}
-  - {id: plan_final_specialist_review, type: 1, source: "scripts/aid-plan-fsm.sh:cmd_plan_finalize --stage review", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 E-068-1_2 Step 3: the Auditor/Curator/Simplifier/Reporter review is a PLAN-FINAL event, dispatched once per plan against the frozen candidate, and each output is recorded with its sha256 in plan_final_review.outputs. plan-close (Check 5.4) re-hashes every recorded output and refuses on a missing or altered one, so the review cannot be asserted after the fact.", test: "scripts/tests/bats/test-aid-plan-final-boundary.bats"}
-  - {id: epic_specialist_review_exception, type: 1, source: "scripts/aid-fsm.sh:cmd_plan_close", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 E-068-1_2 Step 6 + CP3: under plan_branch the per-EPIC specialist stack is NOT run — those roles moved to the plan-final boundary — but the EPIC still owes its own CP3 pair, and cmd_plan_close verifies the EPIC required reports BEFORE invoking the irreversible plan-layer close. The exception relocates the review; it does not waive it."}
+  - {id: plan_final_specialist_review, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: internal-guard, status: removed_scoped, replacement_guard: "final_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: the whole-plan round reads what the four specialists read."}
+  - {id: epic_specialist_review_exception, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: internal-guard, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: no specialist is left to dispatch mid-plan; the EPIC owes its cp3 round."}
   - {id: plan_candidate_identity_binding, type: 1, source: "scripts/lib/aid-plan-manifest.sh:plan_manifest_freeze_candidate", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 E-068-1_2 Steps 1+4: candidate_sha and candidate_frozen_at are paired-nullable — neither can exist without the other — and every downstream artifact (gate report, review outputs, C4 decision, PM decision) is bound to that candidate. A decision whose decided_at precedes candidate_frozen_at is refused before any Git action, and every degenerate freeze time (missing, empty, non-RFC3339) fails closed rather than being assumed old enough.", test: "scripts/tests/bats/test-aid-plan-final-boundary.bats"}
   - {id: plan_merge_cas, type: 1, source: "scripts/aid-plan-fsm.sh:cmd_plan_merge_to_main", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 E-068-1_2 Step 5: the plan merge is published with a compare-and-swap `git update-ref <ref> <new> <expected-old>` against the head the PM approved, and the merge commit exists only as a dangling object until that call succeeds — a rejected swap leaves the target branch byte-identical. The stale-authorization guard is disarmed only when the operation's OWN published merge explains where the target head is (CP2 M1), and the operation key names the candidate so a new candidate is a new operation (CP2 M2).", test: "scripts/tests/bats/test-aid-plan-final-boundary.bats"}
-  - {id: plan_finalize_c4_inputs_producer, type: 1, source: "scripts/aid-plan-fsm.sh:plan-finalize --stage inputs", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "P068 follow-up 2026-07-27, closing plan_finalize_c4_reader_gap: the three C4-required inputs now have a PRODUCER. review-profile.json is derived by aid-review-profile.sh over plan_base_commit..candidate_sha (so the C3 gate is armed for the whole plan range, not one EPIC); delivery-gate.json and acceptance-evidence.json are aggregated from every contributing EPIC evidence pack with identity.epic_id null, identity.plan_id set, a reproducible subject_hash over the ordered source list, and each source recorded aggregated-or-absent so a missing EPIC artifact is visible rather than dropped. The stage refuses before the candidate is frozen and refuses when no EPIC has merged into the plan. What it writes is accepted by the validating review stage — asserted end-to-end.", test: "scripts/tests/bats/test-aid-plan-final-boundary.bats"}
+  - {id: plan_finalize_c4_inputs_producer, type: 1, source: "scripts/aid-plan-fsm.sh:_pfsm_finalize_produce (plan-finalize --stage produce)", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "The inputs the release decision requires have a PRODUCER. review-profile.json is derived by aid-review-profile.sh over plan_base_commit..candidate_sha; acceptance-evidence.json is aggregated from every contributing EPIC evidence pack with identity.epic_id null, identity.plan_id set, a reproducible subject_hash over the ordered source list, and each source recorded aggregated-or-absent so a missing EPIC artifact is visible rather than dropped. The stage refuses before the gates of the frozen candidate passed and refuses when no EPIC has merged into the plan.", test: "scripts/tests/bats/test-plan-final-decide.bats"}
 
   # ── Type 1: FSM-precondition (orchestrator) ────────────────────────────────
   - {id: fsm_valid_transitions,        type: 1, source: "scripts/aid-fsm.sh:23",   instruction: "skills/pipeline.md:53", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "VALID_TRANSITIONS whitelist of FROM:TO state pairs"}
@@ -132,7 +132,7 @@ enforcements:
   - {id: force_reason_min20,           type: 1, source: "scripts/aid-fsm.sh:440",  instruction: "skills/pipeline.md:66",  severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "--force requires --reason >=20 chars"}
   - {id: set_field_done_phase_reserved, type: 1, source: "scripts/aid-fsm.sh:1893", instruction: "commands/aid-run.md:343", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "set-field rejects done_phase (use done-advance)"}
   - {id: done_advance_phase_guard,     type: 1, source: "scripts/aid-fsm.sh:1929", instruction: "skills/pipeline.md:747", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance from-phase guard + VALID_DONE_PHASES"}
-  - {id: done_advance_blocking_findings, type: 1, source: "scripts/aid-fsm.sh:2302", instruction: "agents/auditor.md:740", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release on auditor structured blocking_findings verdict (true/positive); replaced prose critical.*security grep that false-positived on negations + meta-text"}
+  - {id: done_advance_blocking_findings, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: the EPIC round verdict replaced the auditor flag (CP5)."}
   - {id: gate_required_when, type: 2, source: "scripts/lib/aid-gate-applicability.sh:aid_gate_required", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "2026-09-02: execution.yaml's `required_when` is READ. It was written into all 14 gates of all 5 shipped stack templates and into every project /aid-init ever created, and the runner never read it — so a failing pytest/ruff/mypy/eslint/tsc left overall: pass in every AID project that had not hand-edited its config. Precedence: explicit `required:` (tag-checked !!bool) wins; else required_when decides; else the legacy false. The grammar is closed (`always`, or `<glob> exists` clauses joined by the literal ' OR ') and validated for EVERY gate before any command runs — a malformed expression refuses the run rather than defaulting to non-required. Applicability is one NUL-safe snapshot of tracked-plus-unignored files at the directory the gate commands themselves execute in. Every report row carries `required` and `required_source`, including the branches that never run a command and the checkpoint-restore path. KNOWN LIMITS, deliberate: a gate that GENERATES an applicability-driving file cannot wake a gate already resolved as non-applicable; submodule contents do not activate a superproject gate.", test: "scripts/tests/bats/test-gate-required-when.bats"}
   - {id: dod_gate_profile_agreement, type: 2, source: "scripts/aid-plan-to-epic.sh:DoD gate selection", instruction: "n/a", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "2026-09-02: the DoD gate is chosen from execution.yaml `gates:` and written into plan.json, while GATES->DONE judges the run against `gate_profiles:`. Nothing checked the two maps agreed, so a project with hand-authored profiles passed its whole gate run and was then refused at the transition (plan_gate_profile_excluded). Generation now refuses to inject a gate that an auto-resolvable profile (quick/targeted/standard — the resolver caps an EPIC boundary at standard) defines and excludes. The FSM precondition remains the authority for an explicit --profile.", test: "scripts/tests/bats/test-dod-gate-profile-agreement.bats"}
   - {id: json_to_run_base_commit,      type: 1, source: "scripts/aid-json-to-run.sh:635", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "Step-18 empty HEAD SHA → error_exit (companion to detached-HEAD)"}
@@ -145,11 +145,11 @@ enforcements:
   - {id: orphan_waiver_force_coupling, type: 1, source: "scripts/aid-fsm.sh:1867", instruction: "skills/agent-protocol.md:269", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "orphan waiver needs BOTH --force AND --blocked-checks (HIGH-2)"}
   - {id: set_field_state_reserved,     type: 1, source: "scripts/aid-fsm.sh:1892", instruction: "commands/aid-run.md:53", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "set-field rejects state (use transition)"}
   - {id: stop_pause_progress_save,     type: 1, source: "commands/aid-stop.md:53", instruction: "commands/aid-stop.md:53", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "/aid-stop sets mode:paused first + resumable:true progress guarantee"}
-  - {id: run_closure_done_invariant,   type: 1, source: "skills/run-management.md:149", instruction: "skills/run-management.md:149", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "Run Closure ordered checklist (state:DONE, timeline, curator, archive)"}
+  - {id: run_closure_done_invariant,   type: 1, source: "skills/run-management.md:165", instruction: "skills/run-management.md:165", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "Run Closure ordered checklist (state:DONE, timeline, EPIC review, archive)"}
   - {id: frontend_visual_fidelity_block, type: 1, source: "scripts/aid-fsm.sh:2206", instruction: "skills/pipeline.md §4 Context Assembly — UI CHANGE CONTRACT block (item 9)", severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "step-local EXECUTE guard: existing_ui step needs ui/verdict.json result=pass; delivery-gate/C4 aggregation = E9 (NOT delivered in E7)"}
-  - {id: c3_blocking_high_or_critical, type: 1, source: "scripts/aid-fsm.sh cmd_done_advance() C3 hook (search: 'C3 independent-audit hook')", instruction: "agents/auditor.md:90", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json .audit_report.blocking_findings==true (critical/high finding); risk-gated via c3-audit-policy.yaml c3_required per profile (E-057-1_2 M2 fix); Finding 1 fix: yq has() presence check prevents false-pass on absent profile; all jq/yq reads in this hook guarded against set -e crash on malformed input (CP4 rounds 2-3). Anchored by search text, not line number — this block drifted 3x across fix rounds within one EPIC."}
-  - {id: c3_independence_unverifiable, type: 1, source: "scripts/aid-fsm.sh cmd_done_advance() C3 hook (search: 'C3 independent-audit hook')", instruction: "agents/auditor.md:104", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json .status==\"unverifiable\" (required independence level could not be confirmed); risk-gated via c3-audit-policy.yaml c3_required per profile"}
-  - {id: c3_provenance_required, type: 1, source: "scripts/aid-fsm.sh cmd_done_advance() C3 hook (search: 'C3 independent-audit hook')", instruction: "agents/auditor.md:117", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json is missing/unparseable, missing .audit_report.input_manifest_hash (presence/format check), or .revision.head_sha is stale vs current HEAD (fail-closed, no // false fallback); risk-gated via c3-audit-policy.yaml c3_required per profile"}
+  - {id: c3_blocking_high_or_critical, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "final_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: an open blocker of the whole-plan round blocks the decision."}
+  - {id: c3_independence_unverifiable, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "codex_stand_in_recorded", verdict: ALIGNED, description: "RETIRED by P096 Step 12: the second provider is the generalist role; a stand-in is recorded, never silent."}
+  - {id: c3_provenance_required, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "final_review_head_bound", verdict: ALIGNED, description: "RETIRED by P096 Step 12: the round is bound to the candidate and to a dispatch bracket."}
   - {id: plan_boundary_manifest, type: 1, source: "scripts/aid-fsm.sh:2175", instruction: "n/a", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "P064 E-064-1_2 Step 5: cmd_init refuses a plan_branch-mode EPIC whose task branch/base does not match its plan-boundary-manifest.json epic_runs[] entry (reasons: plan_manifest_unavailable/plan_manifest_missing/plan_manifest_corrupt/epic_abandoned/epic_lineage_unproven/plan_branch_mismatch/plan_mode_unavailable/epic_id_invalid_format); no-op for legacy_epic_release_mode or an EPIC with no lifecycle manifest; runs before the duplicate-state guard (fires on resume + inside a worktree); --force --reason overridable, recorded in the timeline", test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"}
   - {id: invalidation_map_observe, type: 11, source: "removed (reference/review-successors.md)", instruction: "skills/pipeline.md (grep: 'Invalidation-Map Post-Fix Hook') — 5 in-scope gate-fixer dispatch call sites (CP2 / CP3 / GATES / DONE curator+auditor auto-fix / DONE simplifier); CP6 fast-mode OUT per D6", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "none (PM 2026-09-19 7A)", verdict: ALIGNED, test: "removed with the mechanism (P094 Step 14)", description: "RETIRED by P094 Step 12 (the invalidation map is removed entirely, no replacement). Was: E8 D3 invalidation-map observe: derives affected_c1_checks from delivery-gate.yaml changed_paths_match globs (deterministic subset) + affected_c2_modes conservatively (any C2-relevant surface touched → all of local/wiring/behavior/final) from an applied fix's changed paths; emits invalidation-map.json + timeline log_event invalidation_map_produced; require_rerun is a flag/request only — this script never invokes delivery-gate or semantic-review itself, no auto-rerun exists (promotion of an actual rerun trigger is a future phase, tracked in BACKLOG); live-flow caller wired E-059-1_2 Step 2 (IMP-177) via the pipeline.md Invalidation-Map Post-Fix Hook — was test-only before"}
 
@@ -179,8 +179,8 @@ enforcements:
 
   # ── Type 4: Structural-check ───────────────────────────────────────────────
   - {id: scope_check,                  type: 4, source: "scripts/gates/scope-check.sh:30", instruction: "skills/agent-protocol.md:186", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "diff vs allowed_paths globs, exit 1 on violation", test: "scripts/tests/test-scope-check.sh"}
-  - {id: cp4_curator_validation,       type: 4, source: "scripts/aid-fsm.sh:292",  instruction: "skills/agent-protocol.md:272", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "fsm_check_cp4 requires cp4-curator-validation.md with valid _generated_by/_generated_at/classification (content-validated since E-046-1_3 Step 2)"}
-  - {id: cp4_glob_invalid,             type: 4, source: "scripts/aid-fsm.sh:310",  instruction: "skills/agent-protocol.md:273", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "malformed cp4_production_paths ERE → die (fail closed)"}
+  - {id: cp4_curator_validation, type: 4, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: no self-applied fix remains; a fix is confirmed by the next round."}
+  - {id: cp4_glob_invalid, type: 4, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: same."}
   - {id: plan_ac_match,                type: 4, source: "scripts/aid-plan-diff.sh:12", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "plan_ac_match: >=1 AC absent → exit 1", test: "scripts/tests/bats/test-plan-ac-diff.bats"}
   - {id: contract_validation_gate,     type: 4, source: "scripts/gates/aid-contract-validate.sh:90", instruction: "docs/extending-aid.md:Contract Validation Gate (D5)", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "D5: plan.json per-step-scoping broadcast, AC pipe-split fragments, and prose-shaped allowed_paths -> hard fail before FSM init (wired in aid-auto-pipeline.sh, P058 Step 4)", test: "scripts/tests/bats/test-contract-validate.bats"}
   - {id: compliance_aggregation,       type: 4, source: "scripts/aid-fsm.sh:707",  instruction: "skills/pipeline.md:783", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "evaluate/write_compliance_json aggregates check dimensions"}
@@ -249,7 +249,7 @@ enforcements:
   - {id: checkpoint_fail_patterns,     type: 5, source: "defaults/policies/review-checkpoints.yaml:34", instruction: "skills/pipeline.md:1178", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "pre_filter.fail_patterns with per-pattern severity"}
   - {id: prefilter_conservative_default, type: 5, source: "removed (reference/review-successors.md)", instruction: "skills/pipeline.md", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "step_check_range", verdict: unmapped, description: "RETIRED by P094 Step 12 (an undeterminable range is a refusal of the step check, never a guess). Was: defaults to RUN on empty/ambiguous diff (fail-toward-review)", test: "removed with the mechanism (P094 Step 14)"}
   - {id: docs_updated_gate,            type: 5, source: "defaults/execution.yaml:26", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "API-path change without docs change → exit 1"}
-  - {id: cp4_production_paths_ere,     type: 5, source: "defaults/execution.yaml:238", instruction: "skills/agent-protocol.md:272", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "cp4_production_paths ERE decides CP4 trigger"}
+  - {id: cp4_production_paths_ere, type: 5, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: unmapped, description: "RETIRED by P096 Step 12: same; the config key is gone."}
 
   # ── Type 6: Schema-validator ───────────────────────────────────────────────
   - {id: epic_to_json_schema,          type: 6, source: "scripts/aid-epic-to-json.sh:711", instruction: "skills/plan-writing.md", severity: blocking, surface: llm-facing, status: active, verdict: GAP, description: "Step-14 structural jq validation; constraints not surfaced to plan author"}
@@ -293,13 +293,13 @@ enforcements:
   - {id: quality_thresholds,           type: 9, source: "defaults/execution.yaml:135", instruction: "agents/auditor.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "todo:0, security_high:0, coverage:80, review:7"}
   - {id: escalation_triggers,          type: 9, source: "defaults/execution.yaml:158", instruction: "skills/pipeline.md:682", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "HARD STOP set (security CRITICAL, budget, conflicting outputs)"}
   - {id: not_acceptable_list,          type: 9, source: "defaults/execution.yaml:209", instruction: "agents/auditor.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "rejection criteria (hardcoded creds, disabled security, forbidden-path)"}
-  - {id: curator_auto_rules,           type: 9, source: "defaults/execution.yaml:219", instruction: "agents/curator.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "always_defer architecture; always_approve dx/security-high/docs"}
+  - {id: curator_auto_rules, type: 9, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "none (P096: a finding is fixed by the role that wrote the code; no proposals exist)", verdict: unmapped, description: "RETIRED by P096 Step 12: the auto-resolution rules had no other reader."}
   - {id: retry_max_escalate,           type: 9, source: "defaults/execution.yaml:106", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "retry max 3 then on_failure:escalate"}
   - {id: memory_search_min_score,      type: 9, source: "defaults/integrations.yaml:67", instruction: "skills/memory-mcp.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "search.min_score:0.4 floor; below dropped"}
   - {id: knowledge_dedup_threshold,    type: 9, source: "defaults/integrations.yaml:101", instruction: "commands/aid-research.md", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "knowledge dedup:0.85 / merge:0.70 thresholds (P080 Step 4: DEAD — the integrations `knowledge:` block that held these thresholds was removed with the knowledge layer (defaults/integrations.yaml no longer contains the word `knowledge`), so the values this row governs no longer exist.)"}
   - {id: scanner_budgets,              type: 9, source: "defaults/integrations.yaml:40", instruction: "agents/project-scanner.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "scanner per-scan entry budgets (150/50/100)"}
   - {id: yellow_tools_not_whitelisted, type: 9, source: "defaults/policies/permissions.yaml:107", instruction: "defaults/policies/permissions.yaml", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "YELLOW eco-admin tools require out-of-band Telegram approval"}
-  - {id: streamlined_cp4_advisory,     type: 9, source: "scripts/aid-fsm.sh:496",  instruction: "skills/agent-protocol.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "streamlined CP4 advisory short-circuit (no fail-closed)", test: "scripts/tests/bats/test-aid-fsm.bats:496"}
+  - {id: streamlined_cp4_advisory, type: 9, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: unmapped, description: "RETIRED by P096 Step 12: same."}
   - {id: promote_not_in_registry,      type: 9, source: "scripts/aid-fsm.sh:2179", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "promote-check refuses check not in registry"}
   # — UNREACHABLE: registered + documented but no evaluator —
   - {id: epic_compliance_coverage_ratio, type: 9, source: "defaults/check-severity.yaml:45", instruction: "skills/pipeline.md:845", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "registered advisory check with NO evaluator code anywhere"}
@@ -307,17 +307,17 @@ enforcements:
   - {id: iteration_density_per_step,   type: 9, source: "defaults/check-severity.yaml:53", instruction: "skills/pipeline.md:847", severity: advisory, surface: llm-facing, status: dead, verdict: UNREACHABLE, description: "registered advisory check with NO evaluator code anywhere"}
 
   # ── Type 10: Template-shaped ───────────────────────────────────────────────
-  - {id: verifier_output_template,     type: 10, source: "defaults/templates/verifier-output-template.md:30", instruction: "agents/verifier.md:71", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP4 only since P094 (cp2/cp3/cp6 answers follow defaults/schemas/review-finding.schema.json). _generated_by/classification/verdict line-start format (grep-anchored)"}
+  - {id: verifier_output_template, type: 10, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: CP4 was its last user; round answers follow review-finding.schema.json."}
   - {id: step_verify_template,         type: 10, source: "defaults/templates/step-verify-template.md:44", instruction: "skills/pipeline.md:348", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "AC checklist format consumed by plan_ac_match"}
   - {id: plan_run_templates,           type: 10, source: "defaults/templates/plan.md", instruction: "skills/plan-writing.md", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "plan + run templates shape generator-expected structure"}
   - {id: epic_template_contract,       type: 10, source: "defaults/templates/epic.md:31", instruction: "skills/plan-writing.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "EPIC scope (allowed/forbidden paths) + DoD gates block"}
   - {id: run_completion_contracts,     type: 10, source: "defaults/templates/run-new-feature.md:187", instruction: "skills/run-management.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "run-* completion contracts (no TODO, conventions, handoff, testing proposal)"}
   - {id: design_sections_e2e,          type: 10, source: "defaults/templates/design-sections.md:113", instruction: "skills/plan-writing.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "E2E verification: >=1 happy + >=1 negative scenario"}
   - {id: stack_detect_threshold,       type: 10, source: "scripts/lib/aid-init-execution-yaml.sh:66", instruction: "skills/pipeline.md", severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "bash stack gated on strict >5 .sh files (noise filter)", test: "scripts/tests/bats/test-aid-init.bats:51"}
-  - {id: cp4_paths_layout_aware,       type: 10, source: "scripts/lib/aid-init-execution-yaml.sh", instruction: "skills/pipeline.md", severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "cp4_production_paths layout-aware generated (not hardcoded)", test: "scripts/tests/bats/test-aid-fsm.bats:521"}
+  - {id: cp4_paths_layout_aware, type: 10, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: unmapped, description: "RETIRED by P096 Step 12: same; /aid-init no longer derives the glob."}
   - {id: inputs_readonly_cap,          type: 10, source: "defaults/templates/inputs-readme.md:19", instruction: "defaults/templates/inputs-readme.md:19", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "inputs dir read-only + max 10 files per run"}
-  - {id: cp4_glob_evaluated,           type: 11, source: "scripts/aid-fsm.sh:349", instruction: "skills/agent-protocol.md:278", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "cp4_glob_evaluated audit event emitted before production-touch check (wired E-046-1_3 Step 4)"}
-  - {id: cp4_template_stale_name,      type: 10, source: "scripts/aid-fsm.sh:283", instruction: "defaults/templates/verifier-output-template.md:42", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "template uses verifier-output-cp4-curator-validation.md + correctly states FSM DOES enforce (resolved)"}
+  - {id: cp4_glob_evaluated, type: 11, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: same."}
+  - {id: cp4_template_stale_name, type: 10, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: same."}
 
   # ── Type 11: Audit-log invariant ───────────────────────────────────────────
   - {id: audit_log_append,             type: 11, source: "scripts/aid-audit-log.sh:26", instruction: "skills/agent-protocol.md:253", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "atomic append; failure non-fatal (never aborts FSM)"}
@@ -346,9 +346,9 @@ enforcements:
   - {id: run_management_must_rules,    type: 12, source: "skills/run-management.md:14", instruction: "skills/run-management.md:14", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "12 MUST rules (read active.md, update after commit, archive)"}
 
   # ── Type 13: Agent-contract ────────────────────────────────────────────────
-  - {id: verifier_verdict_contract,    type: 13, source: "agents/verifier.md:22",  instruction: "agents/verifier.md:22", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP4 only since P094 (cp2/cp3/cp6 answers follow defaults/schemas/review-finding.schema.json). verdict PASS|FAIL|PASS_WITH_NOTES, always include evidence"}
+  - {id: verifier_verdict_contract, type: 13, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: ALIGNED, description: "RETIRED by P096 Step 12: same."}
   - {id: gatefixer_forbidden_paths,    type: 13, source: "agents/gate-fixer.md:89", instruction: "agents/gate-fixer.md:89", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "NEVER modify forbidden_paths; MUST NOT circumvent gate"}
-  - {id: agent_output_format,          type: 13, source: "agents/curator.md:121",  instruction: "skills/agent-protocol.md:65", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "curator/implementer output-format contracts"}
+  - {id: agent_output_format,          type: 13, source: "agents/implementer.md:11",  instruction: "skills/agent-protocol.md:65", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "implementer output-format contract"}
   - {id: scanner_qdrant_dedup,         type: 13, source: "agents/project-scanner.md:186", instruction: "agents/project-scanner.md:186", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "MUST qdrant-find before store; summary >=20 words"}
   - {id: auditor_assertion_rules,      type: 13, source: "agents/auditor.md:196",  instruction: "agents/auditor.md:196", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "file description first 5 lines, no dev markers, refs resolve"}
   - {id: role_overrides_capability,    type: 13, source: "defaults/policies/permissions.yaml:133", instruction: "skills/role-cards.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "role capability scoping (only release git push/tag; only security audit tools)"}
@@ -365,7 +365,7 @@ enforcements:
   - {id: preflight_branch_matrix,      type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:26", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "locks PRE-FLIGHT branch matrix (auto-create, foreign-branch fail, dirty reject)"}
   - {id: grandfather_clause,           type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:103", instruction: "skills/pipeline.md:159", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "locks _generated_by bypass when created_at < AID_DEPLOY_DATE"}
   - {id: orphan_tz_utc_margin,         type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:346", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "locks orphan deadline math pinned to TZ=UTC"}
-  - {id: cp4_full_range_scan,          type: 14, source: "scripts/tests/bats/test-aid-fsm.bats:434", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "locks CP4 production-touch scans full base..HEAD range"}
+  - {id: cp4_full_range_scan, type: 14, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: internal-guard, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: unmapped, description: "RETIRED by P096 Step 12: same."}
   - {id: gate_runner_state_binding,    type: 15, source: "scripts/aid-run-gates.sh:158", instruction: "skills/pipeline.md:587", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "gate-runner rejects unless FSM==GATES", test: "scripts/tests/bats/test-aid-fsm.bats:537"}
 
   # ── Type 15: Stack-gate-binding ────────────────────────────────────────────
@@ -378,13 +378,13 @@ enforcements:
   # These rows carry deadline fields so aid-registry-ttl-guard.sh can enforce
   # promotion accountability. Deferral example:
   #   deferred_until: 2026-09-30, deferred_by: marek, deferred_reason: Q3 roadmap
-  - {id: delivery_report_present,       type: 4,  source: "scripts/aid-fsm.sh (fsm_eval_delivery_report_present)", instruction: "skills/pipeline.md §7 / commands/aid-run.md", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "plan-boundary structural presence: .aid-o/reports/{plan}-delivery.md exists"}
-  - {id: delivery_report_test_evidence, type: 4,  source: "scripts/aid-fsm.sh (_test_evidence on-disk check)", instruction: "agents/reporter.md", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "delivery report _test_evidence[] references >=1 artifact under evidence dir"}
-  - {id: simplifier_pass,               type: 9,  source: "defaults/policies/review-checkpoints.yaml", instruction: "skills/pipeline.md §7 step 5", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "plan-boundary Simplifier proposal pass toggle; gate-fixer applies S/M, defers L"}
-  - {id: delivery_report,               type: 9,  source: "defaults/policies/review-checkpoints.yaml", instruction: "skills/pipeline.md §7 step 6", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "plan-boundary Reporter delivery-report generation toggle"}
-  - {id: reporter_focus_allowlist,      type: 4,  source: "scripts/aid-emit-dispatch.sh:80", instruction: "skills/pipeline.md §4", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "--focus allowlist accepts reporter|simplifier (subagent-mode dispatch ledger)"}
-  - {id: reports_scope_allowed,         type: 9,  source: "defaults/templates/epic.md (Allowed files/paths)", instruction: "skills/pipeline.md §7", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: ".aid-o/reports/ default allowed path so committed delivery reports pass scope-check"}
-  - {id: delivery_report_template,      type: 10, source: "defaults/templates/delivery-report.md", instruction: "agents/reporter.md", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "fixed 7-section delivery-report template + machine-read frontmatter contract"}
+  - {id: delivery_report_present, type: 4, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: "none (P096: the PM page is computed from the release decision)", verdict: unmapped, description: "RETIRED by P096 Step 12: reporter removed."}
+  - {id: delivery_report_test_evidence, type: 4, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: "none (P096: the PM page is computed from the release decision)", verdict: unmapped, description: "RETIRED by P096 Step 12: reporter removed."}
+  - {id: simplifier_pass, type: 9, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "step_review_needless_complexity", verdict: unmapped, description: "RETIRED by P096 Step 12: question 7 of the step reviewers, asked on every step."}
+  - {id: delivery_report, type: 9, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "none (P096: the PM page is computed from the release decision)", verdict: unmapped, description: "RETIRED by P096 Step 12: toggle removed with the reporter."}
+  - {id: reporter_focus_allowlist, type: 4, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: "none (P096: the PM page is computed from the release decision)", verdict: unmapped, description: "RETIRED by P096 Step 12: the two foci left the dispatch allowlist."}
+  - {id: reports_scope_allowed, type: 9, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "none (P096: the PM page is computed from the release decision)", verdict: unmapped, description: "RETIRED by P096 Step 12: nothing writes .aid-o/reports any more."}
+  - {id: delivery_report_template, type: 10, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "none (P096: the PM page is computed from the release decision)", verdict: unmapped, description: "RETIRED by P096 Step 12: template removed with the reporter."}
   - {id: ttl_guard_date_override_test_only, type: 4, source: "scripts/aid-registry-ttl-guard.sh (AID_TTL_TODAY)", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, test: "scripts/tests/bats/test-registry-ttl.bats", description: "the guard date override AID_TTL_TODAY is honoured only with AID_TEST_MODE=1; without it the override is ignored with a warning, and a value that is not an ISO date exits 2, so the evidence verifier cannot be handed a past date in production"}
   - {id: plan_final_refusal_names_next_step, type: 4, source: "scripts/aid-plan-fsm.sh (_pfsm_refusal_next, called by cmd_plan_finalize on every non-zero stage exit)", instruction: "commands/aid-run.md (Closing a plan)", severity: advisory, surface: internal-guard, status: active, verdict: unmapped, test: "scripts/tests/bats/test-plan-final-decide.bats (case: 'every refusal of a stage ends by naming the next command or the escalation')", description: "every refusal of plan-finalize freeze, gates, produce or decide ends with one line starting `next:` that names the command to run and, where a role cannot resolve it, `escalate:` with the card to show the PM; a former stage name exits 2 naming the stage that replaced it"}
   - {id: role_card_least_code_ladder, type: 9, source: "skills/role-cards.md (Write the least code that works)", instruction: "skills/role-cards.md; agents/implementer.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, test: "scripts/tests/test-instruction-consistency.sh (section 11)", description: "every step role card references one shared ladder: does it need to exist, is it already in the codebase, does the standard library do it, an installed dependency before a new one, the shortest correct diff, a deliberate shortcut names its ceiling; enforced at review time by step_review_needless_complexity"}
@@ -415,16 +415,15 @@ enforcements:
 
   - id: behavior_trace_high_risk_gate
     type: 1
-    source: aid-fsm.sh
-    instruction: "fsm_check_verifier_output (CP4 only since P094 Step 12): when behavior_trace_required=true, behavior_trace_count must be >0; at cp2/cp3 the successor is review_adjudicator_trace (a generalist blocker/major on a handler pattern needs a behaviour_trace)"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: high
     surface: cp4
-    status: active
+    status: removed_scoped
+    replacement_guard: "review_adjudicator_trace"
     verdict: ALIGNED
-    enforcement_mechanism: fsm_precondition
-    test_anchor: "bats/test-aid-fsm.bats (grep: 'behavior_trace')"
-    deadline: "2026-09-01"
-    notes: "Opt-in: only fires when verifier output explicitly sets behavior_trace_required: true. Contracts defined in skills/review-checkpoint-contracts.md"
+    description: "RETIRED by P096 Step 12: the trace rule lives in the adjudicator of the rounds."
+
 
   # ── E-049-1_1: AID Control System v2 — Protocol v2 validator invariants ─────
   # These entries cover the blocking invariants enforced by aid-protocol-validate.sh.
@@ -759,14 +758,14 @@ enforcements:
 
   - id: c3_verify_mismatch_unverifiable
     type: out-of-band
-    source: "scripts/lib/aid-c3-dispatch.sh (grep: '_vmismatch')"
-    instruction: skills/pipeline.md
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: "final_review_head_bound"
     verdict: ALIGNED
-    test: "scripts/tests/bats/test-c3-audit.bats (cases: 'P095: a report that contradicts the raw verdict', 'P095: --read-only reports the same mismatch', 'P095: a consistent report is untouched') — a t2 suite, so it is proven nightly and once by hand before a release, and this row says so"
-    description: "P095 (ACTA P024 — three findings, two HIGH, and audit-report.json on disk said none): `verify` already exited non-zero when the report contradicted the raw Codex verdict, but it left the FALSE report in place, and the release policy reads that file, never the raw message. The two raw-vs-report assertions now go through _vmismatch, which sets the report aside as audit-report.rejected.json and writes an audit-report.json with status: unverifiable carrying the raw verdict verbatim; the exit stays 2, the fail-closed code every other NOT-verified condition uses. Both files land inside the evidence pack, so the next aid-evidence-verify.sh enumerates the rejected copy alongside the replacement and the pack fails — which is the wanted outcome after a mismatch, but it is a consequence worth knowing before it is discovered at C4. Every other _vfail — a missing jq or sha256sum, an evidence_dir that is not a directory, an unknown flag — keeps its immediate exit and writes nothing. Under --reference/--read-only (the FSM hook at aid-fsm.sh passes it) the mismatch is reported and nothing is written: a hook asks a question, it does not repair evidence. A second verify, or a report already replaced with the same reason, touches neither file."
+    description: "RETIRED by P096 Step 12: no transformed report exists any more; answers are read as written."
 
   - id: acceptance_evidence_from_plan_diff
     type: out-of-band
@@ -997,35 +996,29 @@ enforcements:
   # that was missing from the registry since E-057-2_2 Step 2 (backfill).
   # review_profile_presence + c3_gate_enforcement_toggle are staged OBSERVE and
   # promote to blocking at E10 (mirrors the DG-07 observe rows above).
-  - {id: curator_content_ref_guard, type: 1, source: "scripts/aid-fsm.sh (grep: 'Curator content-ref sequencing guard')", instruction: "skills/pipeline.md §7 Sub-phase review step 6 (Serial dispatch) / agents/curator.md C3.5 dual-emit", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "curator-report.json .curator.audit_report_ref must equal sha256 of audit-report.json content (proves Curator ran AFTER Auditor and consumed that exact output); missing file on a C3-required run, missing/unreadable ref, or hash mismatch all block done-advance", test: "scripts/tests/bats/test-c3-audit.bats"}
+  - {id: curator_content_ref_guard, type: 1, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "none (P096: a finding is fixed by the role that wrote the code; no proposals exist)", verdict: ALIGNED, description: "RETIRED by P096 Step 12: the curator and its sequencing are gone."}
 
   - id: review_profile_presence
     type: 1
-    source: "scripts/aid-fsm.sh (grep: 'review-profile.json presence check')"
-    instruction: "skills/pipeline.md §7 Sub-phase review step 4a"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: advisory
     surface: internal-guard
-    enforcement: observe
-    status: planned
-    deadline: "2026-12-31"
-    promotion_phase: E10
-    deferred_until: "2026-12-31"
-    description: "done-advance review→release checks review-profile.json exists in the evidence dir; observe-only (emits review_profile_would_block, does not block — grandfather-safe for in-flight EPICs that predate the DONE-review producer wiring); blocking promotion E10"
-    test: "scripts/tests/bats/test-c3-activation.bats"
+    status: removed_scoped
+    replacement_guard: "release_decision_input_row_shape"
+    verdict: ALIGNED
+    description: "RETIRED by P096 Step 12: review-profile is a required input of the decision."
 
   - id: c3_gate_enforcement_toggle
     type: 1
-    source: "scripts/aid-fsm.sh (grep: 'c3_gate_would_block')"
-    instruction: "defaults/policies/c3-audit-policy.yaml (enforcement key)"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: advisory
     surface: internal-guard
-    enforcement: observe
-    status: planned
-    deadline: "2026-12-31"
-    promotion_phase: E10
-    deferred_until: "2026-12-31"
-    description: "the C3 independent-audit done-advance hook reads the enforcement toggle from c3-audit-policy.yaml (observe → c3_gate_would_block telemetry + transition continues; blocking → fail-closed block); C3_AUDIT_POLICY env override is the test seam; the toggle key existed since E8 but was ignored until IMP-177; blocking promotion E10"
-    test: "scripts/tests/bats/test-c3-activation.bats"
+    status: removed_scoped
+    replacement_guard: "final_review_round_required"
+    verdict: ALIGNED
+    description: "RETIRED by P096 Step 12: the round is required unless the PM waives it for the candidate."
 
   - id: invalidation_map_expected
     type: 1
@@ -1051,31 +1044,25 @@ enforcements:
   # row's description, NOT as separate rows (else the AC7 enforcement count drifts).
   - id: release_policy_dual_run
     type: 1
-    source: "scripts/aid-fsm.sh (grep: 'C4 release-decision dual-run hook')"
-    instruction: "defaults/policies/release-decision-policy.yaml (enforcement key)"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: advisory
     surface: internal-guard
-    enforcement: observe
-    status: planned
-    deadline: "2026-12-31"
-    promotion_phase: E10
-    deferred_until: "2026-12-31"
-    description: "done-advance review→release runs the C4 aggregator (aid-release-policy.sh) just before the final legacy tally and logs release_policy_dual_run {match, divergence_class (7-class TOTAL taxonomy, never null), head_sha anchor} comparing C4 release_ready to the COMPLETE legacy verdict; observe by default (transition follows the legacy verdict, unaffected); RELEASE_DECISION_POLICY=blocking seam makes a C4 release_ready=false additionally block; crash-guarded (aggregator crash → result=crash, NEVER aborts done-advance); --force structurally skips the hook (whole gauntlet bypassed); blocking promotion E10"
-    test: "scripts/tests/bats/test-release-policy.bats"
+    status: removed_scoped
+    replacement_guard: "none (P096: the legacy verdict it compared against is gone)"
+    verdict: ALIGNED
+    description: "RETIRED by P096 Step 12: the decision is logged as release_decision."
 
   - id: release_policy_preempted
     type: 1
-    source: "scripts/aid-fsm.sh (grep: 'release_policy_preempted')"
-    instruction: "n/a"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: advisory
     surface: internal-guard
-    enforcement: observe
-    status: planned
-    deadline: "2026-12-31"
-    promotion_phase: E10
-    deferred_until: "2026-12-31"
-    description: "observe telemetry emitted before the four UNCONDITIONAL hard-exits that preempt the C4 dual-run slot (gate=streamlined_integration|streamlined_abandoned|tiered_compliance|cp4_curator) so E10 can correct the dual-run for sampling bias (runs that die before reaching the C4 slot are otherwise invisible); the other 4 hard-exits (DG-07/E3/C3-presence/invalidation) are observe-by-default and do not exit in shipped E9, so they carry no preempted event — that is an E10 handoff item; no gate behavior change; blocking promotion E10 (P080 Step 4: REPOINTED to n/a — the instruction cited the directory docs/plans/AID-audit-2026-06, which no longer exists at that path (its content now lives under docs/plans/archive/ — a repo-level design record outside plugins/aid-orchestrator/, so it is not part of what /aid-init installs into a project and is not a durable instruction home (the marketplace cache does clone the whole repo, so the file is reachable there — reachable is not the same as being where a rule is read); the archive itself is tracked, so tracking is not the reason). This is observe-only internal telemetry with no human-facing rule, so `n/a (internal guard)` is what this file's own schema calls for; the E10 handoff it named is stated above in this description.)"
-    test: "scripts/tests/bats/test-release-policy.bats"
+    status: removed_scoped
+    replacement_guard: "none (P096: it corrected the dual run for sampling bias)"
+    verdict: ALIGNED
+    description: "RETIRED by P096 Step 12: telemetry removed."
 
   - {id: force_writes_waiver, type: 4, source: "scripts/aid-fsm.sh (grep: 'every --force writes a visible protocol-v2 waiver')", instruction: "defaults/schemas/waiver.schema.json", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "fsm_handle_force_override writes a protocol-v2 waiver-<transition>-<ts>.json (payload waived_check/reason>=20/waived_by/waived_at/scope/visible:true) on EVERY --force across all 4 call sites (init plan-gate, transition, increment-step, done-advance); mkdir -p empty-guards the plan-gate site where the evidence dir may not be materialized yet; the C4 aggregator surfaces it in waivers_applied[] (Waived != pass); immediate structural guarantee — active, no TTL", test: "scripts/tests/bats/test-release-policy.bats"}
 
@@ -1149,7 +1136,7 @@ enforcements:
   - id: c4_head_match_policy
     type: 9
     source: "scripts/aid-release-policy.sh (grep: 'head_match')"
-    instruction: "scripts/aid-fsm.sh dual-run hook (grep: 'c4_head_match_divergence')"
+    instruction: n/a
     severity: blocking
     surface: "C4-release-decision"
     enforcement: observe
@@ -1157,7 +1144,7 @@ enforcements:
     deadline: "2026-12-31"
     promotion_phase: E10
     deferred_until: "2026-12-31"
-    description: "the C4 aggregator makes head_match consequential: an out-of-pack required input with head_match==false is classified blocking (release_ready=false) once head_match_policy is promoted from observe; until E10 it stays observe and emits c4_head_match_divergence (input not at pack head) and c4_head_match_unknown (revision.head_sha absent, cannot verify) without gating; blocking promotion E10"
+    description: "the release decision makes head_match consequential: an out-of-pack required input with head_match==false is classified blocking (release_ready=false) once head_match_policy is promoted from observe; until then it stays observe and the input row carries the verdict without gating"
   - id: profile_selection
     type: 4
     source: "scripts/aid-run-gates.sh (grep: 'Gate profile resolution')"
@@ -1253,8 +1240,8 @@ enforcements:
     severity: blocking
     surface: "plan-close precondition"
     status: active
-    description: "Plan-close-consistency wiring: aid-plan-close-check.sh (stale/untracked report tracking, Head-freshness, fsm-state DONE-but-pending, queue/active revalidation) was previously a standalone tool the PM had to run by hand; cmd_plan_close now invokes it UNCONDITIONALLY (with --auto-annotate, which only lets its own Check 2 fix the safe docs-only-stale-report case) after the curator/audit/simplifier/delivery report presence checks and BEFORE writing ca-review-complete — a non-zero exit blocks the marker exactly like a missing report. reporter.enabled:false narrows rather than skips: the script has no concept of that toggle and its Check 1 unconditionally requires the delivery report to exist, so cmd_plan_close passes --skip-delivery-report in that case (relaxes ONLY the delivery-report existence requirement in Check 1) while Checks 2-4 (Head freshness, fsm-state DONE-pending, queue/active revalidation) keep running and blocking exactly as with reporter enabled — an earlier version of this wiring skipped the whole script on reporter.enabled:false, which silently let a DONE-but-pending fsm-state or stale queue.yaml through; PM caught this in review before merge (verified via manual repro: plan-close created ca-review-complete despite pending steps). --force is not a bypass path for this check (no --force forwarding into aid-plan-close-check.sh); the only way past a failure is to actually fix the underlying report/fsm-state/queue drift the script names in its FAIL lines."
-    test: "scripts/tests/bats/test-plan-close.bats (grep: 'aid-plan-close-check.sh|skip-delivery-report')"
+    description: "Plan-close-consistency wiring: aid-plan-close-check.sh (fsm-state DONE-but-pending, queue/active revalidation, carried obligations) was a standalone tool the PM had to run by hand; cmd_plan_close invokes it UNCONDITIONALLY before writing ca-review-complete — a non-zero exit refuses the marker."
+    test: "scripts/tests/bats/test-plan-close.bats (grep: 'aid-plan-close-check.sh')"
   - id: gate_timeout_policy_block
     type: 1
     source: "scripts/aid-fsm.sh (grep: 'timeout_policy_block' inside check_preconditions GATES:EXECUTE)"
@@ -1357,28 +1344,28 @@ enforcements:
   # ── v2.59.0: P065 C3 cross-provider dispatch bridge (real codex audit) ──────
   - id: c3_cross_provider_dispatch
     type: 1
-    source: "scripts/aid-fsm.sh (cmd_done_advance C3 dispatch hook)"
-    instruction: "skills/pipeline.md (DONE C3 dispatch) + agents/auditor.md C3.1a"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    enforcement: observe
-    status: active
+    status: removed_scoped
+    replacement_guard: "final_review_round_required"
     verdict: ALIGNED
-    description: "C3-required run must prove a real, faithfully-transformed codex audit at HEAD before release."
-    test: "scripts/tests/bats/test-c3-audit.bats"
+    description: "RETIRED by P096 Step 12: the Codex transport now serves the review rounds."
+
 
   # ── IMP-269: bind C3 AC lenses + test evidence to an explicit recorded source ─
   - id: c3_ac_source_binding
     type: 4
-    source: "scripts/lib/aid-c3-dispatch.sh cmd_build_manifest (ac_source classification + AC-lens fail-closed gate + AID_TEST_RECEIPT_FILE validation)"
-    instruction: "n/a"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    enforcement: fail-closed
-    status: active
+    status: removed_scoped
+    replacement_guard: "final_review_round_required"
     verdict: ALIGNED
-    description: "IMP-269: build-manifest records audit_input_manifest.ac_source (plan|final_report_fallback|stub) from which source authored c3/bundle-plan-ac.md, and preserves it through to audit-report.json. Half 1 (out-of-band hard fail): when the run's review-profile.json required_lenses[] includes an AC lens (ac_to_test_identity/requirement_test_drift) and ac_source != plan, build-manifest exits 1 (no manifest emitted) rather than run the AC lenses over an implementation-authored fallback bundle — closes E-064-1_2's silent final_report.md fallback; a non-plan source with no AC lens required only warns. Half 2 (same source-binding principle for test evidence): an optional AID_TEST_RECEIPT_FILE typed targeted-run receipt (command/command_sha256/head_sha==reviewed HEAD/exit_code/passed/failed/log_sha256) is validated and sealed into evidence_hashes[]+allowlist[] as hash-bound evidence at the reviewed HEAD; a wrong-HEAD, out-of-tree or malformed receipt is rejected at build time (never sealed) — closes E-064-2_2's false 'unverifiable' where a real receipt existed but had no C3 channel. Does not weaken the unverifiable-vs-fail distinction; C3 enforcement stays observe. Fail-closed hardening (PM review 2026-07-24): ac_source=plan is earned ONLY by a file under the canonical .aid-o/plans or .aid-o/tasks tree — any other readable in-repo file (a source file, scratch note, the impl's own output) downgrades to final_report_fallback (so the AC-lens gate rejects it rather than trusting an arbitrary file); when the canonical plan is git-tracked at head_sha the bundle is read from that revision via `git show`; a gitignored .aid-o plan (untracked at head) is a canonical worktree artifact sealed into the bundle. The receipt's log_sha256 is now checked for consistency against a named log: the receipt must name its run log via .log (in-repo, next to the receipt) and log_sha256 must equal that file's recomputed sha256 (command_sha256 must likewise equal sha256(.command)) — an absent/out-of-tree log or hash mismatch fails closed, so the receipt is consistent with its named command, reviewed HEAD, and named log rather than carrying a free 64-hex string. This is consistency-checking within the LOCAL AID trust model, NOT cryptographic provenance against an actor who can directly edit the evidence files (plan.json, verify files, the log, the receipt) — such an actor is out of scope here."
-    test: "scripts/tests/bats/test-c3-audit.bats"
+    description: "RETIRED by P096 Step 12: the final_criteria role reads the plan criteria from the frozen plan file."
+
 
   # ── P064 E-064-2_2 Step 2 (plan Step 7): plan-aware queue ──────────────────
   # THREE rows, deliberately split by what is actually WIRED today (CP2
@@ -1955,19 +1942,18 @@ enforcements:
     verdict: ALIGNED
     description: "P073 Step 9 — an unrecognised flag is rejected rather than ignored. A silently ignored flag is a request the operator believes was honoured; combined with --force it means a release proceeding under an option nobody applied. The release --force additionally requires a reason, so no forced release is anonymous."
     recovery: "The rejection names the unrecognised flag and prints the accepted set."
-    test: "scripts/tests/bats/test-pm-override.bats"
+    test: "scripts/tests/bats/test-force-anomalies.bats"
 
   - id: pm_override_single_use_claim
     type: 1
-    source: "scripts/aid-fsm.sh (C3 PM-override grant producer and single-use claim)"
-    instruction: "docs/extending-aid.md — PM force backdoor and lifecycle preflights (P073)"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: "none (P096: the C3 loop it overrode is gone)"
     verdict: ALIGNED
-    description: "P073 Step 10 — a PM override is claimed exactly once, via `mv -n` PLUS a mandatory source-gone post-check. The post-check is not belt-and-braces: coreutils 9.1 exits 0 when `mv -n` SKIPS the move, so the claim would otherwise report success while the grant stayed on disk and authorised a second consumer. One PM decision authorises one action."
-    recovery: "A refused claim names the grant path; a fresh PM decision produces a fresh grant."
-    test: "scripts/tests/bats/test-pm-override.bats"
+    description: "RETIRED by P096 Step 12: plan review keeps its own override record."
 
   - id: ancillary_path_classifier
     type: 1
@@ -3141,16 +3127,14 @@ enforcements:
 
   - id: review_signal_toggle_fail_closed
     type: 4
-    source: "scripts/lib/aid-review-signals.sh (_aid_read_toggle)"
-    instruction: "n/a"
+    source: "removed (reference/review-successors.md)"
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: "none (P096: the reporter and simplifier toggles are gone)"
     verdict: ALIGNED
-    tier: t1
-    description: "P083 Step 6 — `_aid_read_toggle` used `grep -qP` twice; on any grep without PCRE support, both calls exit 2 (error), the surrounding `if` reads that as false, and the function fell through to 'enabled' — a fail-open on production library code (aid-fsm.sh's plan-boundary checks, aid-release-policy.sh's C4 aggregator), invisible to the repository's own no-`grep -oP` guard because that guard never scanned this file. Rewritten in bash's own `[[ =~ ]]` with POSIX bracket classes only (no `\\s`/`\\b` PCRE shorthand, which bash's ERE genuinely rejects) — no external grep dependency for this check at all. The function now returns a THIRD state (rc=2, unreadable/malformed) distinct from both enabled(0) and disabled(1), and every call site was audited to make sure the distinction survives: aid-fsm.sh's two call sites fail CLOSED to enabled (rc=2 does not disable a plan-boundary check), and aid-release-policy.sh's two call sites report a distinct `toggle_unreadable` status rather than being flattened into `disabled`."
-    recovery: "The refusal names the config file and the section. Fix the file's permissions (unreadable) or its `enabled:` value (malformed — must be exactly true or false)."
-    test: "scripts/tests/bats/test-review-signal-toggle.bats"
+    description: "RETIRED by P096 Step 12: library removed."
 
   - id: gate_baseline_sequential_only
     type: 4
@@ -3795,3 +3779,16 @@ enforcements:
     description: "P090 Step 5 — the net under the mechanism. On `Stop` it names every autonomous plan that still has work; on `SessionStart` it reads back the continuation guidance an interrupted run left, which after a dead controller is the only reader that guidance has. It asks through `peek`, never `claim`: a reminder that consumed the queue would create the very orphan it exists to warn about."
     recovery: "The notice names the plan, what the queue has next, and what the last continuation left in flight. `aid-plan-continue.sh <plan_id> <finished EPIC>` picks it up."
     test: "scripts/tests/bats/test-queue-continuation.bats"
+
+  - id: codex_transport_read_only
+    type: 1
+    source: "scripts/lib/aid-codex-transport.sh:_run_codex_isolated"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P096 Step 12 — every Codex call of AID (review rounds, the brainstorm opponent, the recovery adjudicator) goes through one function: a fresh process with --sandbox read-only, rooted in the project, stdin closed, no --output-schema, the CLI's exit code returned. Sourcing the file sets no shell option and no variable of the caller."
+    recovery: "n/a — a property of the transport, not a refusal."
+    test: "scripts/tests/bats/test-codex-transport.bats"

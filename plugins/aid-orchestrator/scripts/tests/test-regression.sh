@@ -910,22 +910,19 @@ else
 fi
 
 # ===========================================================================
-# TEST F5: pipeline.md §7 DONE Curator dispatch references both
-#          curator.md and auditor.md agents (defense-in-depth: two
-#          parallel observers — Curator proposes fixes, Auditor flags
-#          issues independently). The previously-checked
-#          `lessons-extractor.md` agent never existed in agents/ — the
-#          dual-observer pattern has always been Curator + Auditor.
+# TEST F5: pipeline.md §7 DONE hands a plan's close to the one section that
+#          describes it (commands/aid-run.md "Closing a plan"), and names no
+#          retired specialist.
 # ===========================================================================
-run_test "F5: pipeline.md §7 DONE references both curator.md + auditor.md agents"
+run_test "F5: pipeline.md §7 DONE points at the close section and names no retired specialist"
 
 if [[ -f "$PIPELINE_MD" ]]; then
-  if grep -q 'curator.md' "$PIPELINE_MD" 2>/dev/null &&
-     grep -q 'auditor.md' "$PIPELINE_MD" 2>/dev/null; then
-    pass "F5: pipeline.md references both curator.md + auditor.md"
+  if grep -q 'Closing a plan (plan-final)' "$PIPELINE_MD" 2>/dev/null &&
+     ! grep -qiE 'curator\.md|reporter\.md|CP4|CP5' "$PIPELINE_MD" 2>/dev/null; then
+    pass "F5: pipeline.md points at the close section"
   else
-    fail "F5: Curator + Auditor dispatch" \
-      "pipeline.md missing curator.md or auditor.md reference"
+    fail "F5: close section pointer" \
+      "pipeline.md does not name 'Closing a plan (plan-final)' or still names curator.md/reporter.md/CP4/CP5"
   fi
 else
   fail "F5: pipeline.md exists" "not found: $PIPELINE_MD"

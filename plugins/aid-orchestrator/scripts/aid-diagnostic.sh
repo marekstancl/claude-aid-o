@@ -32,7 +32,7 @@ Options:
 
 Reported sections (markdown mode):
   - File counts (fsm-state.yaml, timeline.jsonl, gates_report.json, compliance.json,
-    curator-report, audit-report, step-N-verify.md)
+    cp3/rounds.json, step-N-verify.md)
   - Branch hygiene distribution (task/E-* vs main vs other)
   - Gate authenticity (_generated_by present vs hand-written/missing)
   - Compliance overall verdict distribution
@@ -48,7 +48,7 @@ EOF
 # Per-run collector — emits one compact JSON object on stdout.
 collect_run() {
   local run_dir=$1
-  local epic_id run_id state_file timeline gates_report compliance curator audit
+  local epic_id run_id state_file timeline gates_report compliance
   epic_id=$(basename "$(dirname "$run_dir")")
   run_id=$(basename "$run_dir")
   state_file="${run_dir}/fsm-state.yaml"
@@ -56,8 +56,6 @@ collect_run() {
   timeline="${run_dir}/timeline.jsonl"
   gates_report="${run_dir}/gates/gates_report.json"
   compliance="${run_dir}/compliance.json"
-  curator="${run_dir}/curator-report.md"
-  audit="${run_dir}/audit-report.md"
 
   local branch="" branch_kind="missing"
   local fsm_state="${run_dir}/fsm-state.yaml"
@@ -74,13 +72,12 @@ collect_run() {
     fi
   fi
 
-  local has_state has_timeline has_gates has_compliance has_curator has_audit verify_count
+  local has_state has_timeline has_gates has_compliance has_review verify_count
   has_state=$([[ -f "$state_file" ]] && echo true || echo false)
   has_timeline=$([[ -f "$timeline" ]] && echo true || echo false)
   has_gates=$([[ -f "$gates_report" ]] && echo true || echo false)
   has_compliance=$([[ -f "$compliance" ]] && echo true || echo false)
-  has_curator=$([[ -f "$curator" || -f "${run_dir}/curator-report.yaml" ]] && echo true || echo false)
-  has_audit=$([[ -f "$audit" || -f "${run_dir}/audit-report.yaml" ]] && echo true || echo false)
+  has_review=$([[ -f "${run_dir}/cp3/rounds.json" ]] && echo true || echo false)
   verify_count=$(find "$run_dir" -maxdepth 1 -name 'step-*-verify.md' 2>/dev/null | wc -l)
 
   local gates_genby=false gates_overall="missing"
@@ -101,7 +98,7 @@ collect_run() {
     --arg epic "$epic_id" --arg run "$run_id" \
     --arg branch "$branch" --arg bk "$branch_kind" \
     --argjson hs "$has_state" --argjson ht "$has_timeline" --argjson hg "$has_gates" \
-    --argjson hc "$has_compliance" --argjson hcu "$has_curator" --argjson ha "$has_audit" \
+    --argjson hc "$has_compliance" --argjson hr "$has_review" \
     --argjson vc "$verify_count" \
     --argjson ggb "$gates_genby" --arg go "$gates_overall" \
     --arg co "$compliance_overall" --arg ce "$compliance_era" \
@@ -109,7 +106,7 @@ collect_run() {
       epic_id: $epic, run_id: $run,
       branch: $branch, branch_kind: $bk,
       has_state_yaml: $hs, has_timeline: $ht, has_gates_report: $hg,
-      has_compliance: $hc, has_curator_report: $hcu, has_audit_report: $ha,
+      has_compliance: $hc, has_epic_review: $hr,
       verify_files_count: $vc,
       gates_generated_by: $ggb, gates_overall: $go,
       compliance_overall: $co, compliance_deploy_era: $ce
@@ -207,7 +204,7 @@ Runs analyzed: ${processed}
 |----------|------:|----------:|
 EOF
   local field
-  for field in has_state_yaml has_timeline has_gates_report has_compliance has_curator_report has_audit_report; do
+  for field in has_state_yaml has_timeline has_gates_report has_compliance has_epic_review; do
     local n pct
     n=$(jq -r --arg f "$field" 'select(.[$f] == true) | .epic_id' "$tmp" | wc -l)
     pct=$(( n * 100 / processed ))

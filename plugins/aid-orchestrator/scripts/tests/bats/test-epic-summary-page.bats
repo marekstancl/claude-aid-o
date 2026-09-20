@@ -27,8 +27,7 @@ setup() {
   export TEST_TMPDIR
   EV="$TEST_TMPDIR/evidence"
   OUT="$TEST_TMPDIR/epic-summary-artifact.html"
-  BACKLOG="$TEST_TMPDIR/backlog.md"
-  export EV OUT BACKLOG
+  export EV OUT
   mkdir -p "$EV"
   unset AID_PROJECT_ROOT
   # shellcheck disable=SC1090
@@ -69,87 +68,74 @@ YAML
 MD
 }
 
-_audit() {
-  jq -nc --argjson blocking "${1:-0}" --argjson other "${2:-0}" '
-    {audit_report: {findings:
-      ([range($blocking) | {severity: "high"}] + [range($other) | {severity: "low"}])}}' \
-    > "$EV/audit-report.json"
+# _review <verdict> <open blockers> <open majors> — a closed EPIC review round
+_review() {
+  mkdir -p "$EV/cp3/round-1"
+  jq -nc --arg v "$1" '{checkpoint: "cp3", verdict: $v, rounds: [{round: 1, verdict: $v}]}' > "$EV/cp3/rounds.json"
+  jq -nc --argjson b "${2:-0}" --argjson m "${3:-0}" '
+    {findings: ([range($b) | {severity: "blocker", status: "open", claim: "b"}]
+              + [range($m) | {severity: "major", status: "open", claim: "m"}]
+              + [{severity: "minor", status: "fixed", claim: "done"}])}' > "$EV/cp3/round-1/merged.json"
 }
 
-_curator() {
-  local ids="$1"
-  jq -nc --argjson ids "$ids" '{curator: {proposals: [$ids[] | {id: ., recommended_disposition: "approve"}]}}' \
-    > "$EV/curator-report.json"
-}
+# ─── what the review left open is on the page ───────────────────────────────
 
-_backlog() {
-  cat > "$BACKLOG" <<'MD'
-## Active Proposals
-
-| ID | Type | Area | Suggestion | Priority | Source | Status |
-|----|------|------|------------|----------|--------|--------|
-| IMP-601 | refactoring | scripts/lib | **Dvě kopie téhož mapování důvodů.** Rozejdou se. Effort S. | low | curator (E-089-1_3) | pending |
-| IMP-602 | bug | docs | **Registr neuvádí anti-drift bránu.** Effort S. | medium | curator (E-089-1_3) | pending |
-MD
-}
-
-# ─── the page names the backlog items AND why they exist ────────────────────
-
-@test "the page names each backlog item with the reason it was filed" {
-  _state; _audit 0 2; _curator '["IMP-601","IMP-602"]'; _backlog
-  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
+@test "a passed review with open findings says how many stay open" {
+  _state; _review pass 0 2
+  run aid_epic_summary_page_render "$EV" "$OUT"
   [ "$status" -eq 0 ]
 
-  grep -qF 'IMP-601 — Dvě kopie téhož mapování důvodů.' "$OUT"
-  grep -qF 'IMP-602 — Registr neuvádí anti-drift bránu.' "$OUT"
+  grep -qF 'Revize EPICu prošla, otevřených nálezů zůstává 2' "$OUT"
   grep -qF '<span class="k">Kroků</span><span class="v">4</span>' "$OUT"
   grep -qF '<span class="k">Blokující</span><span class="v">0</span>' "$OUT"
-  grep -qF 'Hotovo, s otevřenými návrhy' "$OUT"
+  grep -qF 'Hotovo, s otevřenými nálezy' "$OUT"
   # The duration is COMPUTED from the state file, never asserted.
   grep -qF '<span class="k">Trvalo</span><span class="v">2 h 30 min</span>' "$OUT"
 }
 
-@test "an item the backlog does not carry says so instead of inventing a reason" {
-  _state; _audit 0 0; _curator '["IMP-999"]'; _backlog
-  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
-  [ "$status" -eq 0 ]
-  grep -qF 'IMP-999 — důvod vzniku není v backlogu dohledatelný' "$OUT"
-}
-
 # ─── an incomplete review is NAMED, never implied away ──────────────────────
 
-@test "a missing curator report is named on the page and changes the verdict" {
-  _state; _audit 0 1
-  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
+@test "a missing review record is named on the page and changes the verdict" {
+  _state
+  run aid_epic_summary_page_render "$EV" "$OUT"
   [ "$status" -eq 0 ]
 
-  grep -qF 'CHYBÍ report kurátora' "$OUT"
+  grep -qF 'CHYBÍ záznam revize EPICu' "$OUT"
   grep -qF 'Revize neúplná' "$OUT"
   # And the decision it forces is a real decision, with a recommendation.
   grep -qF 'Doporučuju dokončit' "$OUT"
   grep -qF '<h2>Jak pokračovat</h2>' "$OUT"
 }
 
-@test "blocking findings make the verdict critical and the decision explicit" {
-  _state; _audit 2 3; _curator '[]'
-  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
+@test "open blockers make the verdict critical and the decision explicit" {
+  _state; _review fail 2 3
+  run aid_epic_summary_page_render "$EV" "$OUT"
   [ "$status" -eq 0 ]
 
   grep -qF 'Blokující nálezy' "$OUT"
   grep -qF 'state-critical' "$OUT"
   grep -qF '<span class="k">Blokující</span><span class="v">2</span>' "$OUT"
-  grep -qF 'Audit: 5 nálezů, z toho 2 blokujících' "$OUT"
+  grep -qF 'Revize EPICu neprošla: otevřených nálezů 5, z toho 2 blokujících' "$OUT"
   grep -qF 'Doporučuju vrátit' "$OUT"
 }
 
-@test "a clean EPIC with no proposals asks for nothing, and no command stands beside that" {
-  _state; _audit 0 0; _curator '[]'
-  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
+@test "a clean EPIC asks for nothing, and no command stands beside that" {
+  _state; _review pass 0 0
+  run aid_epic_summary_page_render "$EV" "$OUT"
   [ "$status" -eq 0 ]
 
   grep -qF 'Hotovo, bez nálezů' "$OUT"
   grep -qF 'Nic — ozvu se, až bude hotovo' "$OUT"
   refute_grep -qF '<h2>Jak pokračovat</h2>' "$OUT"
+}
+
+@test "a round index with no verdict is named, not read as clean" {
+  _state; _review pass 0 0
+  echo '{"checkpoint": "cp3"}' > "$EV/cp3/rounds.json"
+  run aid_epic_summary_page_render "$EV" "$OUT"
+  [ "$status" -eq 0 ]
+  grep -qF 'CHYBÍ záznam revize EPICu' "$OUT"
+  grep -qF 'Revize neúplná' "$OUT"
 }
 
 @test "a run whose state file is unreadable is refused, not guessed at" {
@@ -198,25 +184,7 @@ MD
   # And newer than the EPIC's last commit, which is what freshness means here.
   [ "$page" -nt "$d/.git/HEAD" ] || [ "$page" -nt "$d/README.md" ]
   grep -qF 'EPIC E-901-1_1' "$page"
-  grep -qF 'CHYBÍ report auditu' "$page"
-}
-
-@test "an audit report whose verdict cannot be read is named, not read as clean (Codex, P089)" {
-  _state
-  # The .yaml form with findings but no `blocking_findings:` line — a report
-  # this page cannot vouch for.
-  cat > "$EV/audit-report.yaml" <<'YAML'
-audit_report:
-  findings:
-    - severity: high
-      title: Production regression
-YAML
-  _curator '[]'
-  run aid_epic_summary_page_render "$EV" "$OUT" "$BACKLOG"
-  [ "$status" -eq 0 ]
-  grep -qF 'CHYBÍ čitelný verdikt auditu' "$OUT"
-  grep -qF 'Revize neúplná' "$OUT"
-  refute_grep -qF 'Audit doběhl a blokující nálezy nehlásí' "$OUT"
+  grep -qF 'CHYBÍ záznam revize EPICu' "$page"
 }
 
 # --- the page must say what the EPIC produced -----------------------------

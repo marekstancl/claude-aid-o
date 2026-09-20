@@ -76,12 +76,6 @@ _run_check() {
   [ "$(jq -r 'length' <<<"$blockers")" -eq 1 ]
 }
 
-@test "an audit report with blocking findings is failing content" {
-  printf '{"status":"pass","blocking_findings":true}' > "$TEST_TMPDIR/audit-report.json"
-  out="$(_run_check audit_report "$TEST_TMPDIR/audit-report.json")"
-  [ "$(jq -r '.[0].input_state' <<<"${out%%$'\t'*}")" = "present_but_failing" ]
-}
-
 @test "an id with no known content contract gets no opinion, not a guess" {
   printf '{"anything":"at all"}' > "$TEST_TMPDIR/unknown-artifact.json"
   out="$(_run_check some_unknown_id "$TEST_TMPDIR/unknown-artifact.json")"
@@ -135,7 +129,7 @@ _run_check() {
 }
 
 @test "the input_state coverage gap is PINNED, so it cannot widen unnoticed" {
-  # 7 of 28 add_input call sites classify their state; the rest pass null,
+  # 11 of 33 add_input call sites classify their state; the rest pass null,
   # meaning "not classified yet". That is deliberate — guessing a state from a
   # call site's reason string would put a confident wrong value on rows nobody
   # has examined — but it must not be read as five-state classification
@@ -145,8 +139,8 @@ _run_check() {
   local pol="$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
   total="$(grep -c '^[[:space:]]*add_input ' "$pol")"
   classified="$(grep -cE '^[[:space:]]*add_input .*"(missing|stale|invalid|present_but_failing|present_ok)"' "$pol")"
-  [ "$total" -eq 28 ]   # P095 Step 6: two acceptance-evidence rows (partial, prose_only), both classified
-  [ "$classified" -eq 9 ]
+  [ "$total" -eq 33 ]   # P096: final_review and obligations rows added, the specialist rows removed
+  [ "$classified" -eq 11 ]
 }
 
 @test "the validator refuses a release decision with NO inputs at all" {
