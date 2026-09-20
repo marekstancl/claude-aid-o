@@ -13,8 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Removed
 - **Zbytky v kořeni veřejného repa** — dva obrázky produktizace (1 MB) bez jediného čtenáře a `audit-watchdog.sh` (pojistka pro `/aid-audit-tests`, který se od 5. 8. 2026 nespouští) jsou smazané; záznamy vlastních běhů (`.aid-o/work/evidence/`, 174 souborů, a pět `interim-*.md`) už nejsou v gitu — repo tím začalo dodržovat pravidlo, které `/aid-init` dává každému projektu (běhové artefakty se neverzují); na disku zůstávají.
-- **CHANGELOG je zase čitelný** — záznamy verzí 0.1.0 až 2.89.2 (530 kB z 610) jsou přesunuté beze změny do `CHANGELOG-archive.md`, živý soubor nese 2.90.0 a novější; obě kopie (kořen i plugin) stejně.
-- **Soukromý kontext už není v public repu** — `CLAUDE.md` a `.claude/settings.json` (interní hosty, cesty, oprávnění) přestaly být sledované; `.gitignore` je jako soukromé označoval už dřív, jen se to nedodržovalo. Historie gitu je má dál, čištění historie PM odmítl.
+- **CHANGELOG je zase čitelný** — záznamy verzí 0.1.0 až 2.89.3 (530 kB z 610) jsou přesunuté beze změny do `CHANGELOG-archive.md`, živý soubor nese 2.90.0 a novější; obě kopie (kořen i plugin) stejně.
+- **Soukromý kontext už není v public repu** — `CLAUDE.md` a `.claude/settings.json` (interní hosty, cesty, oprávnění) přestaly být sledované; `.gitignore` je jako soukromé označoval už dřív, jen se to nedodržovalo. Pravidla pro přispěvatele, která v `CLAUDE.md` bydlela (co aktualizovat při změně pluginu, registr osmi míst s verzí, postup vydání, testbed, patra testů, problémy z projektů), se přestěhovala do sledovaného `CONTRIBUTING.md`, na který teď ukazují tři řádky registru a oba skilly psaní. Historie gitu má vše dál, čištění historie PM odmítl.
 
 ## [2.101.1] — 2026-09-20
 
@@ -550,4 +550,4 @@ Konfigurace projektů se nepřepisuje automaticky. Report u každé brány nově
 - **A scope list before the plan is written** — what the plan will deliver and, more importantly, what it deliberately leaves out. Registered as `planned`/degree 4: it is a chat checkpoint with no file to check afterwards, and inventing a receipt whose only purpose is to be checked would be the decoration P086 spent eleven steps removing.
 - **`/aid-help brainstorm`** — the mode, its five question kinds, its two exceptions, and what it does not buy you.
 
-Older entries (0.1.0 – 2.89.2) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
+Older entries (0.1.0 – 2.89.3) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).

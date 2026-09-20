@@ -1,6 +1,6 @@
 # Changelog archive
 
-Entries for versions 0.1.0 through 2.89.2, moved out of CHANGELOG.md on 2026-09-20 so the live file stays readable. Same format, nothing edited.
+Entries for versions 0.1.0 through 2.89.3, moved out of CHANGELOG.md on 2026-09-20 so the live file stays readable. Same format, nothing edited.
 
 ## [2.89.3] — 2026-08-24
 

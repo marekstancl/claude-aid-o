@@ -222,7 +222,7 @@ doesn't exist; `Option 6a` doesn't exist; `state.yaml` is the legacy name.
 - `docs/plans/archive/AID-audit-2026-06/03-governance-recommendation.md` — enforcement registry + type→home convention
 - `plugins/aid-orchestrator/scripts/aid-fsm.sh` — canonical state-file (`fsm-state.yaml`), transitions, preconditions
 - `plugins/aid-orchestrator/scripts/aid-emit-dispatch.sh` — the required dispatch wrapper
-- `plugins/aid-orchestrator/CLAUDE.md §On Plugin Changes` — footer + CHANGELOG conventions
+- `CONTRIBUTING.md §On Plugin Changes` (repo root) — footer + CHANGELOG conventions
 
 ---
 

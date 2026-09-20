@@ -508,7 +508,7 @@ will reach for `--force` because no path forward is documented.
   enforcements; observed lower length bound (~286 lines)
 - `plugins/aid-orchestrator/skills/plan-writing.md` — canonical home for type-6
   enforcements; Completeness Gate pattern reference
-- `plugins/aid-orchestrator/CLAUDE.md §On Plugin Changes` — Last Updated footer
+- `CONTRIBUTING.md §On Plugin Changes` (repo root) — Last Updated footer
   convention, CHANGELOG update rules
 
 ---

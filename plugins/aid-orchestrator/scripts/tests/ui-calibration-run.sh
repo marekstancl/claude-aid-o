@@ -19,7 +19,7 @@ COMPARE_MJS="$(realpath "$SCRIPT_DIR/../../lib/ui-fidelity/ui-compare.mjs")"
 SCREENG_CAPTURE_MJS="$(realpath "$SCRIPT_DIR/../../lib/ui-fidelity/screeng-capture.mjs")"
 AID_GUI_DIR="$(realpath "$SCRIPT_DIR/../../../../cockpit/packages/aid-gui")"
 # Workspace root for hoisted node_modules (npm workspaces)
-AID_WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../../")"
+AID_WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../../cockpit")"
 AID_GUI_PORT=3911
 VITE_PID=""
 VITE_STARTED_BY_SCRIPT=false
