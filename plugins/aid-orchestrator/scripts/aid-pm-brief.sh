@@ -284,13 +284,11 @@ build_brief_md() {
                       + ($qs | map(((.gate_id // .) | tostring)) | join(", ")) ]
                end)
           + [ "",
-              "## Specialist review summary",
+              "## Whole-plan review record",
               "" ]
           + (( $ps.specialist_review ) as $sv
              | if $sv == null then [ "_No plan-final review recorded in the manifest._" ]
-               else [ "- **Review range:** " + orn($sv.review_range),
-                      "- **Dispatches:** " + (($sv.dispatch_counts // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join(", ")),
-                      "- **Utilities run:** " + (( $sv.utilities_run // [] ) | map(((.id // .) | tostring) + "=" + ((.count // 1) | tostring)) | join(", ")) ]
+               else [ "- **Review range:** " + orn($sv.review_range) ]
                end)
           + [ "",
               "## Remaining backlog",

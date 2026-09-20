@@ -146,8 +146,10 @@ aid_epic_summary_page_render() {
   last_round="$(ls -d "${ev}"/cp3/round-* 2>/dev/null | sort -V | tail -1)"
   if [[ -f "$rounds" ]] && jq -e '.verdict' "$rounds" >/dev/null 2>&1; then
     if [[ -f "${last_round}/merged.json" ]]; then
-      n_open="$(aid_artifact_number "$(jq -r '[.findings[] | select(.status | IN("open", "disputed", "routed", "carried"))] | length' "${last_round}/merged.json" 2>/dev/null)")"
-      n_blocking="$(aid_artifact_number "$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and .severity == "blocker")] | length' "${last_round}/merged.json" 2>/dev/null)")"
+      local _counts   # "<unresolved> <of them blockers>", the four statuses the round's own verdict counts
+      _counts="$(jq -r '[.findings[] | select(.status | IN("open", "disputed", "routed", "carried"))]
+                        | "\(length) \([.[] | select(.severity == "blocker")] | length)"' "${last_round}/merged.json" 2>/dev/null)"
+      n_open="$(aid_artifact_number "${_counts%% *}")"; n_blocking="$(aid_artifact_number "${_counts##* }")"
     fi
     case "$(jq -r '.verdict' "$rounds")" in
       pass|skip|no_change) findings+=("Revize EPICu prošla$( (( n_open > 0 )) && printf ', otevřených nálezů zůstává %s' "$n_open")") ;;

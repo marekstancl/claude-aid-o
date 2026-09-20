@@ -998,7 +998,6 @@ main() {
           remaining_backlog: ($b.plan_final_backlog // []),
           close: $close
         }')" || plan_summary_json="null"
-    [[ -z "$plan_summary_json" ]] && plan_summary_json="null"
   fi
 
   # --- envelope-derived fields ---

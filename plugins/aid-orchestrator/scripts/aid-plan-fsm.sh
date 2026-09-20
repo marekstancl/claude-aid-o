@@ -5003,6 +5003,7 @@ _pfsm_finalize_gates_body() {
     effective_include="$(_pfsm_profile_include "$execution_yaml" "$effective_profile")"
     # shellcheck disable=SC2086  # gate ids, one per word
     reuse="$(_pfsm_gate_reuse_rows "$troot" "$run_dir_abs" "$execution_yaml" "$candidate" $effective_include)"
+    local reuse_from; reuse_from="$(jq -r .from <<<"$reuse")"
     local -a to_run=()
     while IFS= read -r g; do
       [[ -n "$g" ]] && ! jq -e --arg g "$g" '.rows | has($g)' <<<"$reuse" >/dev/null && to_run+=("$g")
@@ -5033,7 +5034,7 @@ _pfsm_finalize_gates_body() {
       fi
     else
       # Nothing to execute: this attempt's report is the previous one, re-bound.
-      jq --arg h "$candidate" '.revision.head_sha = $h' "$(dirname "$run_dir_abs")/$(jq -r .from <<<"$reuse")/gates_report.json" > "$report_file" || return 1
+      jq --arg h "$candidate" '.revision.head_sha = $h' "$(dirname "$run_dir_abs")/${reuse_from}/gates_report.json" > "$report_file" || return 1
     fi
     # Every row says which definition it ran under (what the next attempt
     # compares), and a copied row says where it came from.
@@ -5048,7 +5049,7 @@ _pfsm_finalize_gates_body() {
         | .gates |= with_entries(if $defs[.key] then .value.definition_sha256 = $defs[.key] else . end)' \
       "$report_file" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file" || { rm -f "${report_file}.tmp"; return 1; }
     while IFS= read -r g; do
-      log_event "$timeline_file" gate_reused gate="$g" reused_from="$(jq -r .from <<<"$reuse")" 2>/dev/null || true
+      log_event "$timeline_file" gate_reused gate="$g" reused_from="${reuse_from}" 2>/dev/null || true
     done < <(jq -r '.rows | keys[]' <<<"$reuse")
   fi
 
@@ -8977,7 +8978,7 @@ _pfsm_recover_plan_final_receipt() {
     ".plan_boundary_manifest.plan_final_evidence_dir=\"${dir}\""
     ".plan_boundary_manifest.plan_final_evidence_ref=${esc_ref}"
     ".plan_boundary_manifest.plan_final_evidence_receipt_sha256=${esc_hash}"
-    ".plan_boundary_manifest.plan_final_review={candidate_sha:${esc_c},run_id:${esc_r},outputs:$(jq -c '.outputs' <<<"$receipt"),dispatch_counts:{},utilities_run:[]}"
+    ".plan_boundary_manifest.plan_final_review={candidate_sha:${esc_c},run_id:${esc_r},outputs:$(jq -c '.outputs' <<<"$receipt")}"
     ".plan_boundary_manifest.plan_state=${esc_state}"
   )
 
@@ -9433,9 +9434,8 @@ _pfsm_finalize_produce() {
 
   # ── What the whole-plan round (cp7) reads: the deterministic check of the
   #    range, the plan's criteria and what each EPIC's own review left open ───
-  local _pr_troot; _pr_troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   bash "${SCRIPT_DIR}/aid-step-check.sh" --checkpoint cp7 --base "$base_commit" \
-    --evidence-dir "$run_dir_abs" --project-root "$_pr_troot" >/dev/null || {
+    --evidence-dir "$run_dir_abs" --project-root "$_in_troot" >/dev/null || {
       echo "PRECONDITION FAIL: plan-finalize --stage produce: the deterministic check of ${base_commit:0:8}..${candidate:0:8} did not run (aid-step-check.sh --checkpoint cp7)." >&2
       return 1; }
   ( source "${SCRIPT_DIR}/lib/aid-step-review-packet.sh" && aid_final_review_inputs_build "$root" "$run_dir_abs" "$plan_file" "$plan_id" ) || return 1
@@ -9443,7 +9443,7 @@ _pfsm_finalize_produce() {
     cp7/step-check.json cp7/criteria.md cp7/epic-findings.json
 
   echo "PRODUCED: ${plan_id} — review profile, plan-diff, acceptance evidence and the whole-plan round's inputs over ${base_commit:0:8}..${candidate:0:8} in ${run_dir_rel}/." >&2
-  echo "next: bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_abs} --project-root ${_pr_troot} --round 1 — dispatch the prompts it prints, then collect and close (commands/aid-plan.md, \"Plan close\"); then: plan-finalize ${plan_id} --stage decide" >&2
+  echo "next: bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_abs} --project-root ${_in_troot} --round 1 — dispatch the prompts it prints, then collect and close (commands/aid-plan.md, \"Plan close\"); then: plan-finalize ${plan_id} --stage decide" >&2
   return 0
 }
 

@@ -340,7 +340,7 @@ $helpentry"
   local f offender
   for f in "$runmd" "$helpmd"; do
     offender="$(grep -niE '(nothing|nobody|no one) (else )?(writes|sets|stamps) it( yet)?' "$f" \
-                 | grep -viE 'awaiting_host_resume|derived' || true)"
+                 | grep -viE 'awaiting_host_resume|derived|AID_PLUGIN_PATH' || true)"   # the path notice says "Nothing sets it" about a variable, not a state
     [ -z "$offender" ] || _fail "'$(basename "$f")' claims a state value is written by nothing, but lib/aid-recovery-ladder.sh writes blocked_for_pm:
 $offender"
   done

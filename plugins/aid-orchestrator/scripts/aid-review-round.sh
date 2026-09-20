@@ -226,10 +226,16 @@ _index_add() {
 # nothing to report in the previous attempt. Its answer is copied into this
 # round; prints {role: source path}. A role that reported anything is asked
 # again, because its evidence was checked against another commit.
+# _prev_attempt_rounds — the cp7 rounds of the previous attempt (a sibling run
+# directory), newest first; nothing when this is the first attempt.
+_prev_attempt_rounds() {
+  local fc="${EVID}/fix-class.json"
+  [[ -f "$fc" ]] || return 0
+  ls -d "$(dirname "$EVID")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")"/cp7/round-* 2>/dev/null | sort -t- -k2 -n -r
+}
 _carried_roles() {
-  local dir="$1" fc="${EVID}/fix-class.json" role feeds src prev out='{}'; shift
+  local dir="$1" fc="${EVID}/fix-class.json" role feeds src out='{}'; shift
   [[ -f "$fc" ]] || { echo '{}'; return 0; }
-  prev="$(dirname "$EVID")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")/cp7"   # attempts are siblings
   for role in "$@"; do
     case "$role" in
       final_criteria)   feeds='["criteria","diff"]' ;;
@@ -237,7 +243,7 @@ _carried_roles() {
       *)                feeds='["diff"]' ;;
     esac
     jq -e --argjson f "$feeds" '(.invalidated_feeds - $f) == .invalidated_feeds' "$fc" >/dev/null || continue
-    src="$(for d in $(ls -d "$prev"/round-* 2>/dev/null | sort -t- -k2 -n -r); do
+    src="$(for d in $(_prev_attempt_rounds); do
              [[ -f "$d/measurement.json" ]] && jq -e --arg r "$role" '.valid | index($r)' "$d/collect.json" >/dev/null 2>&1 \
                && { echo "$d/reviewer-${role}.json"; break; }
            done)"
@@ -253,9 +259,8 @@ _carried_roles() {
 # so the confirmation happens in the NEXT attempt's first round: its packet shows
 # the reviewers what stayed open and what the fix changed.
 _previous_attempt_round() {
-  local fc="${EVID}/fix-class.json" d
-  [[ -f "$fc" ]] || return 0
-  for d in $(ls -d "$(dirname "$EVID")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")"/cp7/round-* 2>/dev/null | sort -t- -k2 -n -r); do
+  local d
+  for d in $(_prev_attempt_rounds); do
     [[ -f "$d/measurement.json" ]] || continue
     jq -e '[.findings[] | select((.status | IN("open", "disputed")) and (.severity == "blocker" or .severity == "major"))] | length > 0' "$d/merged.json" >/dev/null 2>&1 && echo "$d"
     return 0

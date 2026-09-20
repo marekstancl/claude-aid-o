@@ -272,6 +272,9 @@ final_rounds() {
          | ["\(.project)-\(.plan)-\(.candidate_sha[0:8])", .project, .plan, .run, .base_sha, .candidate_sha] | @tsv' "$FINAL_SAMPLE"
 }
 
+# _final_ev <out> <key> <plan> — the replay run's evidence directory inside the clone
+_final_ev() { printf '%s/%s/repo/.aid-o/work/evidence/%s/R-%s-final-replay' "$1" "$2" "$3" "$3"; }
+
 # cmd_final_prepare <out> [<only key>] [<key>=<role>[,<role>…] …] — a round may be
 # limited to the roles its findings belong to (a paid run need not ask all three).
 cmd_final_prepare() {
@@ -284,7 +287,7 @@ cmd_final_prepare() {
     local src="/opt/eco/projects/${project}" clone="$out/$key/repo"
     git -C "$src" cat-file -e "${cand}^{commit}" 2>/dev/null || die "$key: candidate $cand does not resolve in $src"
     [[ -d "$clone" ]] || { git clone -q --shared --no-checkout "$src" "$clone" && git -C "$clone" checkout -q --detach "$cand"; } || die "$key: cannot materialise $cand"
-    local ev="$clone/.aid-o/work/evidence/${plan}/R-${plan}-final-replay" rec="$src/.aid-o/work/evidence/${plan}/${run}" planfile
+    local ev; ev="$(_final_ev "$out" "$key" "$plan")"; local rec="$src/.aid-o/work/evidence/${plan}/${run}" planfile
     mkdir -p "$ev" "$clone/.aid-o/config/policies"
     cp "$rec/gates_report.json" "$rec/plan-diff.json" "$ev/" || die "$key: the recorded run has no gates_report.json or plan-diff.json"
     : > "$ev/timeline.jsonl"
@@ -307,7 +310,7 @@ cmd_final_collect() {
   declare -A TOK; local kv; for kv in "$@"; do TOK["${kv%%=*}"]="${kv#*=}"; done
   local key project plan run base cand
   while IFS=$'\t' read -r key project plan run base cand; do
-    local clone="$out/$key/repo" ev r; ev="$clone/.aid-o/work/evidence/${plan}/R-${plan}-final-replay"
+    local clone="$out/$key/repo" ev r; ev="$(_final_ev "$out" "$key" "$plan")"
     [[ -d "$ev/cp7/round-1" && ! -f "$ev/cp7/round-1/measurement.json" ]] || continue
     local roles=(); for r in $(jq -r '.reviewers_expected[]' "$ev/cp7/round-1/round.json"); do roles+=("$r=${TOK["$key:$r"]:-unknown}"); done
     bash "$PLUGIN_DIR/scripts/aid-review-round.sh" collect --checkpoint cp7 --evidence-dir "$ev" --project-root "$clone" --round 1 >/dev/null 2>&1 || true
@@ -317,7 +320,7 @@ cmd_final_collect() {
   jq -c '.entries[]' "$FINAL_SAMPLE" | while read -r e; do
     local id key merged; id="$(jq -r .id <<<"$e")"
     key="$(jq -r '"\(.project)-\(.plan)-\(.candidate_sha[0:8])"' <<<"$e")"
-    merged="$out/$key/repo/.aid-o/work/evidence/$(jq -r .plan <<<"$e")/R-$(jq -r .plan <<<"$e")-final-replay/cp7/round-1"
+    merged="$(_final_ev "$out" "$key" "$(jq -r .plan <<<"$e")")/cp7/round-1"
     jq -n --arg id "$id" --arg key "$key" --slurpfile acc "$FINAL_FIX/acceptance.json" \
        --slurpfile m <(cat "$merged/merged.json" 2>/dev/null || echo '{"findings": []}') \
        --slurpfile rej <(cat "$merged/rejected.json" 2>/dev/null || echo '[]') \
@@ -343,7 +346,7 @@ cmd_final_stub() {
   while IFS=$'\t' read -r key project plan run base cand; do
     for a in "$FINAL_FIX/answers/$key"-*.json; do
       [[ -f "$a" ]] || continue
-      cp "$a" "$out/$key/repo/.aid-o/work/evidence/${plan}/R-${plan}-final-replay/cp7/round-1/reviewer-$(basename "$a" .json | sed "s/^$key-//").json"
+      cp "$a" "$(_final_ev "$out" "$key" "$plan")/cp7/round-1/reviewer-$(basename "$a" .json | sed "s/^$key-//").json"
     done
   done < <(final_rounds)
   local results want; results="$(cmd_final_collect "$out")"
