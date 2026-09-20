@@ -49,6 +49,10 @@ set -uo pipefail
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/aid-session-store.sh
 source "${PLUGIN_ROOT}/scripts/lib/aid-session-store.sh"
+# aid_codex_binary: the highest-version codex on PATH, not the first one — two
+# installs coexist on the dev host and `command -v` picks the older.
+# shellcheck source=lib/aid-c3-dispatch.sh
+source "${PLUGIN_ROOT}/scripts/lib/aid-c3-dispatch.sh"
 
 REGISTRY="${AID_HOOK_REGISTRY:-${PLUGIN_ROOT}/defaults/hook-registry.yaml}"
 CANARY_RULE="hook_canary"
@@ -94,7 +98,7 @@ detect_tool() {
     claude-code|codex) printf '%s' "$AID_HOOK_TOOL"; return 0 ;;
   esac
   command -v claude >/dev/null 2>&1 && { printf 'claude-code'; return 0; }
-  command -v codex  >/dev/null 2>&1 && { printf 'codex'; return 0; }
+  aid_codex_binary >/dev/null 2>&1 && { printf 'codex'; return 0; }
   printf 'none'
 }
 
@@ -270,7 +274,7 @@ cmd_status() {
 }
 
 cmd_seed_trust() {
-  if ! command -v codex >/dev/null 2>&1; then
+  if ! aid_codex_binary >/dev/null 2>&1; then
     echo "ERROR: --seed-trust is a Codex operation and 'codex' is not on PATH." >&2
     return 2
   fi

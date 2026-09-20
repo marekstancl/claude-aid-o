@@ -316,6 +316,15 @@ _existing_round() {
 _json_strings() { jq -nc '$ARGS.positional' --args "$@"; }
 _expects() { jq -e --arg r "$1" '.reviewers_expected | index($r) != null' "$2/round.json" >/dev/null; }
 _closed() { [[ -f "$1/measurement.json" ]]; }
+# _stand_in <round_dir> <role> — the codex role's record says a claude stand-in
+# was asked for, because the probe could not reach a codex.
+_stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/null 2>&1; }
+# _codex_probe — {available, binary, version, reason} from the shared probe.
+_codex_probe() { ( source "${SCRIPT_DIR}/lib/aid-c3-dispatch.sh"; aid_codex_probe ); }
+# _stand_in_line <dir> <role> — what the controller must do instead of paying codex.
+_stand_in_line() {
+  echo "STAND-IN: codex is unavailable ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
+}
 
 cmd_dispatch() {
   local dir; dir="$(_existing_round)" || exit 1
@@ -328,9 +337,12 @@ cmd_dispatch() {
   local answer="${dir}/reviewer-${ROLE}.json" usage="${dir}/codex-${ROLE}.usage.json"
   [[ -e "$answer" ]] && _die "${answer} already exists; a reviewer is never paid twice (use retry after collect lists it as invalid)"
 
-  if ! command -v codex >/dev/null 2>&1; then
-    jq -n '{answered: false, reason: "codex_absent"}' > "$usage"
-    echo "codex is not installed; ${ROLE} is recorded as provider_absent — continue with the other reviewers, then collect"
+  local probe why
+  probe="$(_codex_probe)"
+  if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
+    why="$(jq -r '.reason' <<< "$probe")"
+    jq -n --arg r "$why" '{answered: false, reason: $r, fallback: "claude"}' > "$usage"
+    _stand_in_line "$dir" "$ROLE" "$why"
     return 0
   fi
   local events="${dir}/codex-${ROLE}.events.jsonl" last="${dir}/codex-${ROLE}.last.txt" rc=0
@@ -352,6 +364,13 @@ cmd_dispatch() {
     rm -f "$answer"
     local why=no_file; (( rc == 124 )) && why=timeout
     grep -qiE 'usage limit|rate.?limit|429' "${dir}/codex-${ROLE}.stderr.txt" 2>/dev/null && why=rate_limited
+    # A codex that answered the probe and then hit its limit mid-run falls back
+    # like an absent one; a codex that simply wrote nothing is a failure.
+    if [[ "$why" == rate_limited || "$why" == timeout ]]; then
+      jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
+      _stand_in_line "$dir" "$ROLE" "$why"
+      return 0
+    fi
     jq -n --arg why "$why" '{answered: false, reason: $why}' > "$usage"
     _die "codex returned no answer for ${ROLE} (exit ${rc}); recorded as ${why}, see ${dir}/codex-${ROLE}.stderr.txt"
   fi
@@ -365,8 +384,22 @@ cmd_retry() {
     || _die "role ${ROLE} answered validly in round ${ROUND}; a valid answer is never paid for twice"
   _closed "$dir" && _die "round ${ROUND} is closed"
   [[ "$(jq -r '.routed_at // empty' "${dir}/round.json")" == "" ]] || _die "round ${ROUND} has routed its findings; it cannot be reopened"
-  rm -f "${dir}/reviewer-${ROLE}.json" "${dir}/reviewer-${ROLE}.invalid.txt" "${dir}/reviewer-${ROLE}.missing" \
-        "${dir}/codex-${ROLE}".*
+  rm -f "${dir}/reviewer-${ROLE}.json" "${dir}/reviewer-${ROLE}.invalid.txt" "${dir}/reviewer-${ROLE}.missing"
+  if _stand_in "$dir" "$ROLE"; then
+    # The stand-in record is the role's provenance, not a spent answer: it is
+    # re-probed and rewritten, never dropped, or the retried answer would look
+    # like a claude file nobody asked for (unexpected_provider).
+    local probe why; probe="$(_codex_probe)"; why="$(jq -r '.reason' <<< "$probe")"
+    if [[ "$(jq -r '.available' <<< "$probe")" == true ]]; then
+      rm -f "${dir}/codex-${ROLE}".*
+      echo "retry ${ROLE}: codex answers again; dispatch ${dir}/prompt-${ROLE}.md, then collect"
+    else
+      jq -n --arg r "$why" '{answered: false, reason: $r, fallback: "claude"}' > "${dir}/codex-${ROLE}.usage.json"
+      _stand_in_line "$dir" "$ROLE" "$why"
+    fi
+    return 0
+  fi
+  rm -f "${dir}/codex-${ROLE}".*
   echo "retry ${ROLE}: dispatch ${dir}/prompt-${ROLE}.md again, then collect"
 }
 
@@ -377,11 +410,15 @@ cmd_collect() {
   tmp="$(mktemp)"
   for role in $(jq -r '.reviewers_expected[]' "${dir}/round.json"); do
     local answer="${dir}/reviewer-${role}.json"
+    i="$(aid_review_role_index "$role")"
     if [[ ! -s "$answer" ]]; then
-      i="$(aid_review_role_index "$role")"
-      # A codex role whose launcher could not be reached counts as answered-absent
-      # (the round is degraded, not invalid); a claude role that wrote nothing is missing.
-      if [[ "${RC_PROVIDER[$i]}" == codex ]] \
+      # A stand-in that was asked for and never dispatched is MISSING, not
+      # absent: the round is invalid, so nobody closes a round on a second
+      # opinion that was only ever printed as an instruction.
+      # A codex role whose launcher could not be reached and has no stand-in
+      # counts as answered-absent (degraded, not invalid); a claude role that
+      # wrote nothing is missing.
+      if [[ "${RC_PROVIDER[$i]}" == codex ]] && ! _stand_in "$dir" "$role" \
          && jq -e '.answered == false and (.reason | IN("codex_absent", "rate_limited", "timeout"))' "${dir}/codex-${role}.usage.json" >/dev/null 2>&1; then
         absent+=("$role")
       else
@@ -394,6 +431,10 @@ cmd_collect() {
       if [[ "$(jq -r '.role' "$tmp")" != "$role" ]]; then
         err="role_mismatch: the file names role $(jq -r '.role' "$tmp")"
       fi
+    fi
+    if [[ -z "$err" && "${RC_PROVIDER[$i]}" == codex && "$(jq -r '.provider // ""' "$tmp")" == claude ]] \
+       && ! _stand_in "$dir" "$role"; then
+      err="unexpected_provider: ${role} is a codex role and no stand-in was recorded in codex-${role}.usage.json"
     fi
     if [[ -n "$err" ]]; then
       echo "$err" > "${dir}/reviewer-${role}.invalid.txt"
@@ -546,7 +587,9 @@ cmd_close() {
     else
       for role in $(jq -r '.valid[]' "${dir}/collect.json"); do
         i="$(aid_review_role_index "$role")"
-        [[ "${RC_PROVIDER[$i]}" == claude ]] || continue
+        # A stand-in is dispatched by the controller like any claude reviewer,
+        # so it owes the same bracket: a stand-in nobody dispatched never closes.
+        [[ "${RC_PROVIDER[$i]}" == claude ]] || _stand_in "$dir" "$role" || continue
         _dispatch_recorded "$dir" "$role" || _die "no_dispatch_record: no start/complete bracket with focus $(_focus "$role") naming reviewer-${role}.json in ${dir}/timeline.jsonl; a reviewer file nobody dispatched does not close a round"
       done
     fi
@@ -555,8 +598,12 @@ cmd_close() {
   local reviewers='{}' entry usage status reason
   for role in $(jq -r '.reviewers_expected[]' "${dir}/round.json"); do
     i="$(aid_review_role_index "$role")"
+    local prov="${RC_PROVIDER[$i]}" model="${RC_MODEL[$i]}"
+    # A codex role a claude agent stood in for is priced and recorded as what
+    # actually answered, at the checkpoint's stand-in model.
+    if [[ "$prov" == codex ]] && _stand_in "$dir" "$role"; then prov=claude; model="$RC_STAND_IN_MODEL"; fi
     status="$(jq -r --arg r "$role" 'if (.valid | index($r)) then "answered" elif (.missing | index($r)) then "missing" elif ((.provider_absent // []) | index($r)) then "provider_absent" else "invalid" end' "${dir}/collect.json")"
-    if [[ "${RC_PROVIDER[$i]}" == codex ]]; then
+    if [[ "$prov" == codex ]]; then
       usage="${dir}/codex-${role}.usage.json"
       if [[ -f "$usage" ]]; then
         entry="$(jq -c '{tokens: (if (.tokens_in | type) == "number" and (.tokens_out | type) == "number" then .tokens_in + .tokens_out else "unknown" end)}
@@ -576,13 +623,17 @@ cmd_close() {
     # USD from the tracked price table (Step 11): codex reports input, cached
     # input and output apart; a claude figure is one total, priced at the blend.
     local usd
-    if [[ "${RC_PROVIDER[$i]}" == codex ]]; then
-      usd="$(aid_review_usd "${RC_MODEL[$i]}" "$(jq -r '.tokens_in // "unknown"' <<< "$entry")" "$(jq -r '.tokens_out // "unknown"' <<< "$entry")" "$(jq -r '.cache_read // 0' <<< "$entry")" 0)"
+    if [[ "$prov" == codex ]]; then
+      usd="$(aid_review_usd "$model" "$(jq -r '.tokens_in // "unknown"' <<< "$entry")" "$(jq -r '.tokens_out // "unknown"' <<< "$entry")" "$(jq -r '.cache_read // 0' <<< "$entry")" 0)"
     else
-      usd="$(aid_review_usd_blended "${RC_MODEL[$i]}" "$(jq -r '.tokens' <<< "$entry")")"
+      usd="$(aid_review_usd_blended "$model" "$(jq -r '.tokens' <<< "$entry")")"
+      if [[ "${RC_PROVIDER[$i]}" == codex ]]; then
+        entry="$(jq -c --arg fr "$(jq -r '.reason // "unknown"' "${dir}/codex-${role}.usage.json")" \
+          '. + {fallback_reason: $fr}' <<< "$entry")"
+      fi
     fi
     entry="$(jq -c --arg u "$usd" '. + {usd: ($u | tonumber? // $u)}' <<< "$entry")"
-    reviewers="$(jq -c --arg r "$role" --argjson e "$entry" --arg p "${RC_PROVIDER[$i]}" --arg m "${RC_MODEL[$i]}" \
+    reviewers="$(jq -c --arg r "$role" --argjson e "$entry" --arg p "$prov" --arg m "$model" \
       --argjson ok "$([[ "$status" == answered ]] && echo true || echo false)" --arg why "$reason" \
       '.[$r] = ({provider: $p, model: $m, answered: $ok} + ($e | del(.reason)) + (if $why == "" then {} else {reason: $why} end))' <<< "$reviewers")"
   done

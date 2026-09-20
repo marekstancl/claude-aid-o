@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 515          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 517          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -785,6 +785,28 @@ enforcements:
     verdict: ALIGNED
     test: "scripts/tests/bats/test-review-adjudicate.bats (case: 'command: an inline read-only reproduction is accepted, one that writes or runs another file is not')"
     description: "P095: a reviewer may carry the reproduction inline as `bash -c '<pipeline>'` instead of a file under repro/, because Sonnet wrote the inline form in three of four P094 acceptance rounds with the file rule in its prompt. The body is bounded: every segment (split on ;, |, && and ||) must start with one of grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else fi, `git` only with grep|log|show|diff|blame|rev-parse|status; a redirection to a file, a command substitution, `source`, a nested `bash` and `eval` refuse. A refused body is rejected with the reason command_not_read_only, distinct from missing_command."
+
+  - id: codex_stand_in_recorded
+    type: out-of-band
+    source: "scripts/aid-review-round.sh (grep: '_stand_in')"
+    instruction: scripts/lib/aid-review-adapter-claude.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-review-round.bats (cases: 'stand-in')"
+    description: "P095 (PM instruction 2026-09-19: the stand-in is automatic and reported, never asked): when aid_codex_probe cannot reach a codex (absent, outdated, over its usage limit), `dispatch --provider codex` records {answered: false, reason, fallback: claude} and prints a STAND-IN line instead of leaving the role as provider_absent. `collect` then accepts an answer with provider: claude for that codex role ONLY with that record (otherwise unexpected_provider), and counts a stand-in that was asked for and never dispatched as MISSING, which makes the round invalid — so a second opinion nobody dispatched never closes a round. `close` requires the same start/complete dispatch bracket it requires of any claude reviewer, records provider claude with the checkpoint's stand_in_model and a fallback_reason, and leaves degraded false. `retry` re-probes and rewrites the record instead of dropping it."
+
+  - id: opponent_stand_in
+    type: out-of-band
+    source: "scripts/lib/aid-brainstorm-opponent.sh (grep: 'STAND-IN')"
+    instruction: skills/brainstorming.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-brainstorm-opponent.bats (cases: 'stood in for', 'stand-in')"
+    description: "P095: the brainstorm opponent no longer stops on a missing codex. With no codex reachable it writes the prompt and a stand-in record and exits 4 with a STAND-IN line; the controller dispatches a claude agent with the same brief and hands the answer back through --answer, which records provider: claude and fallback_reason in dispute.json. The PM is told which provider answered and why, and is never asked to choose. The exit-3 monologue path, its three-attempt cap and ask_pm remain for the narrower case: a codex that answered the probe and then gave nothing or an unreadable shape."
 
   - id: review_adjudicator_trace
     type: out-of-band

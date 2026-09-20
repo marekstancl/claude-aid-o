@@ -49,6 +49,19 @@ one at a time:
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
 
+## Stand-in for a Codex role
+
+When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex
+could be reached (absent, outdated, or over its usage limit) and the round
+records `fallback: "claude"` for that role. Dispatch it exactly as above — the
+same prompt file, the same start/complete bracket — at the model the STAND-IN
+line names (`stand_in_model` of the checkpoint's block), and tell the reviewer
+to write `"provider": "claude"` in its answer. `collect` accepts a claude answer
+for a codex role ONLY with that record, and counts a stand-in nobody dispatched
+as missing, which makes the round invalid. Pass its token figure to `close` like
+any claude role. The PM card names the stand-in and the reason in one line; the
+PM is told, not asked.
+
 After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for
 every claude role; when it reports the round invalid, retry the roles it names
